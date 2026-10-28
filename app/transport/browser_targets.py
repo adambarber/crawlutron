@@ -8,9 +8,10 @@ from collections.abc import (
     Awaitable,
     Callable,
 )
-from typing import Any
+from typing import Any, cast
 
 from app.models.host_policy import HostPolicy
+from app.models.intercepted_xhr_record import InterceptedXhrRecord
 from app.models.normalized_url import NormalizedUrl
 from app.safety.json_safe import json_default
 from app.transport.pinned_transport import (
@@ -176,7 +177,7 @@ def make_ssrf_websocket_handler(*, policy: HostPolicy, timeout_seconds: float | 
     return _ws_handler
 
 
-def make_response_handler(collected: list[dict[str, Any]]) -> Callable[[Any], Awaitable[None]]:
+def make_response_handler(collected: list[InterceptedXhrRecord]) -> Callable[[Any], Awaitable[None]]:
     """Collect bounded JSON XHR payloads into the shared list."""
     # XHR bounds: 10 entries x 8KB payload; URLs are page-controlled too.
     max_entries = 10
@@ -196,10 +197,13 @@ def make_response_handler(collected: list[dict[str, Any]]) -> Callable[[Any], Aw
         if "application/json" not in content_type:
             return
         url = str(getattr(response, "url", ""))
-        entry: dict[str, Any] = {
+        status_value = getattr(response, "status", None)
+        entry: InterceptedXhrRecord = {
             "url": url[:max_url_chars],
             "content_type": content_type,
-            "status": getattr(response, "status", None),
+            # The playwright response status is an int; a double may report anything,
+            # so the record only admits what the real producer sends.
+            "status": cast(int, status_value),
             "payload": None,
         }
         if len(url) > max_url_chars:

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import cast
+
+from app.models.browser_profile_record import BrowserProfileRecord
 
 
 @dataclass(frozen=True)
@@ -13,4 +15,4 @@ class RenderOptions:
     respect_robots: bool = True
     include_html: bool = True
     include_text: bool = True
-    browser_profile: dict[str, Any] = field(default_factory=dict)
+    browser_profile: BrowserProfileRecord = field(default_factory=lambda: cast(BrowserProfileRecord, {}))

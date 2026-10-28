@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, cast
 
 from app.extraction.llm_format import (
     PageMetadata as ExtractedPageMetadata,
@@ -10,7 +10,7 @@ from app.extraction.llm_format import (
 from app.extraction.llm_format import (
     extract_carried_metadata,
 )
-from app.models.classification_evidence import ClassificationEvidence
+from app.models.classification_evidence import ClassificationEvidence, ClassificationEvidenceRecord
 from app.models.content_validators import ContentValidators
 from app.models.crawl_result import CrawlResult, EngineCrawlResult
 from app.models.crawl_status import CrawlStatus
@@ -18,7 +18,9 @@ from app.models.crawl_strategy import CrawlStrategy
 from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
 from app.models.discovered_link import DiscoveredLink
 from app.models.discovered_link_response import DiscoveredLinkResponse as WireDiscoveredLink
+from app.models.json_value import JsonValue
 from app.models.page_metadata_response import PageMetadataResponse
+from app.models.serialization import to_dict as _result_to_dict
 from app.models.strategy_attempt import StrategyAttempt
 from app.models.taxonomy import CrawlStrategyName
 from app.models.unified_crawl_result import UnifiedCrawlResult
@@ -85,7 +87,7 @@ def _link_models(links: list[DiscoveredLink]) -> list[WireDiscoveredLink]:
     return [WireDiscoveredLink.model_validate(link, from_attributes=True) for link in links]
 
 
-def _evidence_models(evidence: list[dict[str, Any]]) -> list[ClassificationEvidence]:
+def _evidence_models(evidence: list[ClassificationEvidenceRecord]) -> list[ClassificationEvidence]:
     """The classification-evidence models.
     The one conversion still taking a raw dict -- the producer still builds
     evidence as plain JSON -- and the honest place to point a future wave.
@@ -142,7 +144,7 @@ def build_unified_result(item: EngineCrawlResult) -> UnifiedCrawlResult:
         headers=item.headers,
         content_type=item.content_type,
         extraction_method=item.extraction_method,
-        diagnostics=dict(item.diagnostics),
+        diagnostics=cast(dict[str, JsonValue], _result_to_dict(item).get("diagnostics", {})),
         discovered_link_count=item.discovered_link_count,
         discovered_links_truncated=item.discovered_links_truncated,
         discovered_links=_link_models(item.discovered_links),
@@ -157,6 +159,11 @@ _RENDER_METADATA_AS_MODEL_FIELD = frozenset({"title"})
 
 
 _RENDER_METADATA_AS_TOP_LEVEL = frozenset({"extraction_method"})
+
+
+def _json_str(value: JsonValue | None) -> str | None:
+    """A JSON value narrowed to the string the wire field declares; else None."""
+    return value if isinstance(value, str) else None
 
 
 def _render_diagnostics(metadata: Mapping[str, Any]) -> dict[str, Any]:
@@ -203,11 +210,11 @@ def render_result_to_unified(item: CrawlResult) -> UnifiedCrawlResult:
             )
         ],
         error=item.error,
-        metadata=PageMetadataResponse(title=metadata.get("title"), source_url=item.url.raw),
+        metadata=PageMetadataResponse(title=_json_str(metadata.get("title")), source_url=item.url.raw),
         html=item.html,
         text=item.text,
         quality_score=1.0 if item.status == "success" else 0.0,
-        extraction_method=metadata.get("extraction_method"),
+        extraction_method=_json_str(metadata.get("extraction_method")),
         diagnostics=_render_diagnostics(metadata),
         # The browser worker surfaces no origin validators: the field is typed
         # ``ContentValidators | None``, so the adapter constructs the model.

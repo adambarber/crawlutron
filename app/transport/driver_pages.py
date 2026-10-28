@@ -7,6 +7,7 @@ import contextlib
 from collections.abc import Callable
 from typing import Any
 
+from app.models.screenshot_diagnostics import ScreenshotDiagnostics
 from app.transport.driver_config import async_sleep
 
 
@@ -141,9 +142,9 @@ async def auto_accept_cookie_consent(page: Any, enabled: bool, sleep: Callable[[
         return False
 
 
-async def capture_element_screenshots(page: Any, selectors: list[str]) -> list[dict[str, Any]]:
+async def capture_element_screenshots(page: Any, selectors: list[str]) -> list[ScreenshotDiagnostics]:
     """Capture targeted element screenshots as base64."""
-    shots: list[dict[str, Any]] = []
+    shots: list[ScreenshotDiagnostics] = []
     for selector in selectors:
         with contextlib.suppress(Exception):  # best-effort per-element capture
             element = await page.query_selector(selector)

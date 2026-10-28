@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, cast, get_args
 
+from app.models.cooldown_diagnostics import CooldownDiagnostics
 from app.models.crawl_strategy import CrawlStrategy
 from app.models.taxonomy import CrawlStrategyName
 from app.transport.browser_result import browser_strategy_result
@@ -210,9 +211,9 @@ class _ChainRun:
             state.cffi_was_blocked = True
         if result.classification != "rate_limited" or self.context.scheduler is None:
             return
-        cooldown = result.diagnostics.get("cooldown") or {}
+        cooldown: CooldownDiagnostics | dict[str, object] = result.diagnostics.get("cooldown") or {}
         retry_after = cooldown.get("retry_after_seconds")
-        if retry_after is not None:
+        if isinstance(retry_after, (int, float)):
             self.context.scheduler.set_domain_cooldown(self.context.domain, float(retry_after))
 
     async def retry_cookies(

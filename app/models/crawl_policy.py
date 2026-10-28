@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from typing import Annotated, Any, ClassVar, Final
+from typing import Annotated, Any, ClassVar, Final, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+from pydantic.json_schema import JsonDict
 
+from app.models.browser_profile_record import BrowserProfileRecord
 from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.crawl_policy_limits import CrawlPolicyLimits
 from app.models.crawl_policy_vocabulary import (
@@ -16,6 +18,7 @@ from app.models.crawl_policy_vocabulary import (
 from app.models.crawl_strategy import CrawlStrategy
 from app.models.credential import Credential
 from app.models.discovery_config import DiscoveryConfig
+from app.models.request_profile_record import RequestProfileRecord
 from app.safety.header_values import reject_injectable_header_name, reject_injectable_header_values
 from app.vocabulary.limits import MAX_HEADER_VALUE_BYTES
 
@@ -106,8 +109,8 @@ class CrawlPolicy(BaseModel):
         "keyed by canonical origin (scheme://host[:port], no path). Applied as the Authorization header only "
         "for requests to that exact origin, and stripped by the redirect chokepoint on any cross-host hop.",
     )
-    request_profile: dict[str, Any] = Field(
-        default_factory=dict,
+    request_profile: RequestProfileRecord = Field(
+        default_factory=lambda: cast(RequestProfileRecord, {}),
         description="Optional direct HTTP compatibility profile for HTTP_CFFI_IMPERSONATE. Supported keys: "
         "user_agent_family (for example desktop_chrome), user_agents, accept_languages, "
         "fingerprint_seed, fingerprint_rotation, cookie_jar, cookie_namespace, and cookies. "
@@ -116,10 +119,10 @@ class CrawlPolicy(BaseModel):
         "persistent jar; it is not a caller-facing knob -- keyed crawls are pinned to their key "
         "id (#226) and an anonymous crawl that declares one is refused with 422 (#559). "
         "Applied only to direct HTTP strategies and echoed in diagnostics.",
-        json_schema_extra=REQUEST_PROFILE_KEYS_JSON,
+        json_schema_extra=cast(JsonDict, REQUEST_PROFILE_KEYS_JSON),
     )
-    browser_profile: dict[str, Any] = Field(
-        default_factory=dict,
+    browser_profile: BrowserProfileRecord = Field(
+        default_factory=lambda: cast(BrowserProfileRecord, {}),
         description="Browser interaction profile for browser strategies. Supported keys: viewport "
         "(desktop or mobile), resource_mode (full or reduced), storage_state, actions, include_html, "
         "include_screenshot, screenshot_selectors, auto_accept_cookie_consent (default false; when "
@@ -192,13 +195,13 @@ class CrawlPolicy(BaseModel):
 
     @field_validator("browser_profile")
     @classmethod
-    def _close_the_browser_profile_vocabulary(cls, profile: dict[str, Any]) -> dict[str, Any]:
-        return close_browser_profile_vocabulary(profile)
+    def _close_the_browser_profile_vocabulary(cls, profile: BrowserProfileRecord) -> BrowserProfileRecord:
+        return cast(BrowserProfileRecord, close_browser_profile_vocabulary(profile))
 
     @field_validator("request_profile")
     @classmethod
-    def _close_the_request_profile_vocabulary(cls, profile: dict[str, Any]) -> dict[str, Any]:
-        return close_request_profile_vocabulary(profile)
+    def _close_the_request_profile_vocabulary(cls, profile: RequestProfileRecord) -> RequestProfileRecord:
+        return cast(RequestProfileRecord, close_request_profile_vocabulary(profile))
 
     @field_validator("credentials", mode="before")
     @classmethod
@@ -211,7 +214,7 @@ class CrawlPolicy(BaseModel):
             return value
         from app.admission.credentials import origin_of
 
-        canonical: dict[str, Any] = {}
+        canonical: dict[str, Credential] = {}
         spelling: dict[str, str] = {}
         for key, credential in value.items():
             if not isinstance(key, str) or narrows_credential_scope(key):

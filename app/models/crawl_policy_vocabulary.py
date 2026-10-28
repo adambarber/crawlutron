@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
 from urllib.parse import urlsplit
 
-from app.models.json_value import JsonValue
 from app.safety.header_values import reject_injectable_header_value
 from app.vocabulary.limits import MAX_HEADER_VALUE_BYTES
 from app.vocabulary.request_profiles import REQUEST_PROFILE_KEYS
@@ -17,7 +16,7 @@ __all__ = [
 ]
 
 
-def close_browser_profile_vocabulary(profile: dict[str, JsonValue]) -> dict[str, JsonValue]:
+def close_browser_profile_vocabulary(profile: Mapping[str, object]) -> Mapping[str, object]:
     """Refuse inert keys and actions in browser_profile (a misspelled action used to
     be silently skipped). Vocabulary comes from app.vocabulary so this and the
     renderer read one set; refusals are ValueError (a 422), not a TypeError's 500.
@@ -55,7 +54,7 @@ def close_browser_profile_vocabulary(profile: dict[str, JsonValue]) -> dict[str,
     return profile
 
 
-def _refuse_over_ceiling_knobs(profile: dict[str, JsonValue]) -> None:
+def _refuse_over_ceiling_knobs(profile: Mapping[str, object]) -> None:
     """Refuse a closed key whose value is larger than the work it buys is worth.
     The closed vocabulary bounds which keys exist, not how large their values may
     be, and the consumers only clamp -- so this is the tell, not a silent early-finish render.
@@ -85,7 +84,7 @@ def _refuse_over_ceiling_knobs(profile: dict[str, JsonValue]) -> None:
 
 
 def refuse_oversized_profile_strings(
-    profile: dict[str, JsonValue], ceiling: int = MAX_HEADER_VALUE_BYTES
+    profile: Mapping[str, object], ceiling: int = MAX_HEADER_VALUE_BYTES
 ) -> None:
     """Refuse any string in a ``browser_profile`` over ``ceiling`` (#444).
 
@@ -96,7 +95,7 @@ def refuse_oversized_profile_strings(
         _refuse_oversized_value(key, value, ceiling)
 
 
-def _refuse_oversized_value(key: str, value: JsonValue, ceiling: int) -> None:
+def _refuse_oversized_value(key: str, value: object, ceiling: int) -> None:
     """One profile value against the string ceiling, nested shapes included."""
     if isinstance(value, dict):
         for nested in value.values():
@@ -108,7 +107,7 @@ def _refuse_oversized_value(key: str, value: JsonValue, ceiling: int) -> None:
         raise ValueError(f"browser_profile {key} may carry at most {ceiling} characters, got {len(value)}")
 
 
-def _refuse_unusable_action(action: Any, index: int, allowed: str) -> None:
+def _refuse_unusable_action(action: object, index: int, allowed: str) -> None:
     """Refuse one action the renderer would accept and then do nothing about.
     Split out so the refusals read as distinct failures; ``allowed`` is passed in
     so this checks one action instead of reading the vocabulary a second time.
@@ -148,7 +147,7 @@ def _refuse_unusable_action(action: Any, index: int, allowed: str) -> None:
         )
 
 
-def close_request_profile_vocabulary(profile: dict[str, JsonValue]) -> dict[str, JsonValue]:
+def close_request_profile_vocabulary(profile: Mapping[str, object]) -> Mapping[str, object]:
     """Refuse inert keys and malformed values in request_profile: a misspelled key
     used to do nothing while reporting success, and a malformed value raised a 500
     inside the header builder. Refusals are ValueError (a 422), never a TypeError.
@@ -167,7 +166,7 @@ def close_request_profile_vocabulary(profile: dict[str, JsonValue]) -> dict[str,
     return profile
 
 
-def _refuse_malformed_profile_values(profile: dict[str, JsonValue]) -> None:
+def _refuse_malformed_profile_values(profile: Mapping[str, object]) -> None:
     """Refuse a value of the wrong shape behind a permitted key.
     Split from the vocabulary check: "key exists" and "value is the thing the
     key means" are different questions, and the latter used to raise inside the header builder.
@@ -210,7 +209,7 @@ def _refuse_malformed_profile_values(profile: dict[str, JsonValue]) -> None:
         _refuse_malformed_cookie_map(profile, MAX_PROFILE_COOKIE_HOSTS, MAX_PROFILE_COOKIE_PAIRS)
 
 
-def _refuse_malformed_pool(profile: dict[str, JsonValue], key: str, ceiling: int) -> None:
+def _refuse_malformed_pool(profile: Mapping[str, object], key: str, ceiling: int) -> None:
     """Refuse a header pool that is not a bounded list of bounded strings.
     Split so the wrong-container and wrong-contents failures read separately; a
     ``[None]`` used to reach the header builder and raise from inside it.
@@ -233,7 +232,7 @@ def _refuse_malformed_pool(profile: dict[str, JsonValue], key: str, ceiling: int
             )
 
 
-def _refuse_malformed_cookie_map(profile: dict[str, JsonValue], host_ceiling: int, pair_ceiling: int) -> None:
+def _refuse_malformed_cookie_map(profile: Mapping[str, object], host_ceiling: int, pair_ceiling: int) -> None:
     """Refuse a static cookie map that is unbounded or malformed.
     Without the bounds, a huge map became distinct cache slots (content_cache_key
     serialises the whole header map); the no-namespace single-tenant path stays allowed.
@@ -281,4 +280,4 @@ MAX_BROWSER_ACTIONS = 64
 MAX_HEADERS_PER_REQUEST = 64
 
 
-REQUEST_PROFILE_KEYS_JSON: dict[str, Any] = {"keys": sorted(REQUEST_PROFILE_KEYS)}
+REQUEST_PROFILE_KEYS_JSON: dict[str, object] = {"keys": sorted(REQUEST_PROFILE_KEYS)}

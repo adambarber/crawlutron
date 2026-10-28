@@ -9,6 +9,7 @@ from app.models.crawl_diagnostics import CrawlDiagnostics
 from app.models.crawl_job import CrawlJob
 from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
+from app.models.json_value import JsonValue
 from app.models.result_factory import build_engine_result
 from app.models.taxonomy import CrawlStrategyName
 from app.runtime.worker_dispatch import call_worker
@@ -42,7 +43,9 @@ def _browser_options(policy: CrawlPolicy) -> RenderOptions:
             "respect_robots": True,
             "include_html": True,
             "include_text": True,
-            "browser_profile": policy.browser_profile,
+            # The policy side holds the record; the resolver's wire edge takes
+            # the JsonValue mapping view of it (record values are JsonValue).
+            "browser_profile": cast("dict[str, JsonValue]", dict(policy.browser_profile)),
         },
     )
 

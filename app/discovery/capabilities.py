@@ -4,9 +4,13 @@ from fastapi import APIRouter, Depends
 
 from app.api.dependencies import get_settings
 from app.config.settings import CrawlerSettings
+from app.models.auth_capabilities_record import AuthCapabilitiesRecord
 from app.models.capabilities_response import CapabilitiesPayload, CapabilitiesResponse
 from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.crawl_strategy import CrawlStrategy
+from app.models.crawl_timing_record import CrawlTimingRecord
+from app.models.mcp_capabilities_record import McpCapabilitiesRecord
+from app.models.search_capabilities_record import SearchCapabilitiesRecord
 from app.models.service_identity import SERVICE_IDENTITY
 from app.search import active_search_provider_name, configured_search_providers
 from app.vocabulary.limits import (
@@ -62,7 +66,7 @@ def capabilities_payload(settings: CrawlerSettings) -> CapabilitiesPayload:
     }
 
 
-def _default_limit_fields(settings: CrawlerSettings) -> dict[str, object]:
+def _default_limit_fields(settings: CrawlerSettings) -> dict[str, int | float]:
     """The limits a caller must plan around, from settings and the vocabulary."""
     return {
         "batch_size": settings.max_batch_size,
@@ -122,7 +126,7 @@ def _feature_flag_fields() -> dict[str, bool]:
     }
 
 
-def _auth_fields() -> dict[str, object]:
+def _auth_fields() -> AuthCapabilitiesRecord:
     """How a caller identifies, and who can mint keys."""
     return {
         "caller_credential": "X-API-Key or Authorization: Bearer",
@@ -131,7 +135,7 @@ def _auth_fields() -> dict[str, object]:
     }
 
 
-def _search_fields(settings: CrawlerSettings) -> dict[str, object]:
+def _search_fields(settings: CrawlerSettings) -> SearchCapabilitiesRecord:
     """The search front-end's provider picture and its selection rule."""
     return {
         "active_provider": active_search_provider_name(settings),
@@ -142,7 +146,7 @@ def _search_fields(settings: CrawlerSettings) -> dict[str, object]:
     }
 
 
-def _mcp_fields() -> dict[str, object]:
+def _mcp_fields() -> McpCapabilitiesRecord:
     """The MCP surface's endpoint and the protocol versions it speaks."""
     return {
         "endpoint": "/mcp",
@@ -150,7 +154,7 @@ def _mcp_fields() -> dict[str, object]:
     }
 
 
-def _crawl_timing_fields() -> dict[str, object]:
+def _crawl_timing_fields() -> CrawlTimingRecord:
     """Per-URL budget facts and the large-crawl guidance text."""
     return {
         "per_url_budget_seconds": DEFAULT_TOTAL_URL_BUDGET_SECONDS,

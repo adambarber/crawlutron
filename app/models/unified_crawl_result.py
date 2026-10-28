@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated
 
 from pydantic import BaseModel, Field
 
@@ -9,6 +9,7 @@ from app.models.content_validators import ContentValidators
 from app.models.crawl_status import CrawlStatus
 from app.models.crawl_strategy import CrawlStrategy
 from app.models.discovered_link_response import DiscoveredLinkResponse
+from app.models.json_value import JsonValue
 from app.models.normalized_url import NormalizedUrl
 from app.models.page_metadata_response import PageMetadataResponse
 from app.models.strategy_attempt import StrategyAttempt
@@ -86,8 +87,9 @@ class UnifiedCrawlResult(BaseModel):
             description="http_html, dom_text, pdf_text, trafilatura_extract, etc.",
         ),
     ] = None
-    # 6. Discovery & Diagnostics
-    diagnostics: dict[str, Any] = Field(
+    # Open by design: browser worker metadata passes through; the internal
+    # record (CrawlDiagnostics) carries the typed read surface.
+    diagnostics: dict[str, JsonValue] = Field(
         default_factory=dict,
         description="robots, sitemaps, frames, forms, js_endpoints, intercepted_xhr, etc.",
     )

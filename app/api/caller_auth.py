@@ -19,7 +19,6 @@ from app.config.settings import CrawlerSettings
 from app.models.caller_identity import CallerIdentity
 from app.models.caller_key import CallerKey
 from app.models.error_response import ErrorResponse
-from app.models.json_value import JsonValue
 from app.transport.cookie_jar import COOKIE_NAMESPACE
 from app.transport.request_profile import cookie_namespace_for
 
@@ -184,7 +183,7 @@ def is_operator(request: Request) -> bool:
     return bool(admin_token) and _constant_time_eq(secret, admin_token)
 
 
-def refuse_anonymous_cookie_namespace(caller: CallerIdentity, profile: Mapping[str, JsonValue]) -> None:
+def refuse_anonymous_cookie_namespace(caller: CallerIdentity, profile: Mapping[str, object]) -> None:
     """422 when an anonymous caller declares a cookie namespace (#559).
 
     Anonymous is ONE bounded shared identity (M1 #206), so a declared namespace is not a
@@ -201,7 +200,7 @@ def refuse_anonymous_cookie_namespace(caller: CallerIdentity, profile: Mapping[s
     )
 
 
-def effective_cookie_namespace(profile: Mapping[str, JsonValue], caller: CallerIdentity) -> str:
+def effective_cookie_namespace(profile: Mapping[str, object], caller: CallerIdentity) -> str:
     """The cookie namespace for one crawl: a keyed caller is pinned to its key id (#226);
     an anonymous caller gets the shared default -- ANY declaration is refused (#559,
     extending #537 to every namespace). Doors return 422; this scrub covers bypass seams.

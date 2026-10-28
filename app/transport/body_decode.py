@@ -10,6 +10,8 @@ import re
 from collections.abc import Callable
 from typing import Any
 
+from app.models.content_metrics import ContentMetrics
+
 # Declared before the import so the ImportError fallback below is the same type
 # as the symbol it stands in for; an unannotated None assignment is a type error.
 _charset_from_bytes: Callable[[bytes], Any] | None
@@ -58,15 +60,17 @@ def quality_score(
     html: str | None,
     http_status: int | None,
     *,
-    content_metrics: dict | None = None,
+    content_metrics: ContentMetrics | None = None,
 ) -> float:
     if status != "success" or classification != "rendered":
         return 0.0
     # Reuse the caller's measured html/text lengths instead of re-stripping; the
     # frameset predicate is deliberately not taken from the metrics dict.
     if content_metrics is not None:
-        text_length = content_metrics["visible_text_length"]
-        html_length = content_metrics["html_length"]
+        # Both keys are the producer's core contract; a body that measured
+        # nothing falls back to the same strip the None arm does.
+        text_length = content_metrics.get("visible_text_length", len((text or "").strip()))
+        html_length = content_metrics.get("html_length", len((html or "").strip()))
     else:
         text_length = len((text or "").strip())
         html_length = len((html or "").strip())
@@ -91,7 +95,7 @@ def quality_score(
 _CONTENT_TAG_RE = re.compile(r"<(a|iframe|frame|frameset|form)\b", re.IGNORECASE)
 
 
-def content_metrics(text: str | None, html: str | None) -> dict[str, int | float | bool]:
+def content_metrics(text: str | None, html: str | None) -> ContentMetrics:
     visible_text_length = len((text or "").strip())
     html_length = len((html or "").strip())
     counts = {"a": 0, "iframe": 0, "frame": 0, "frameset": 0, "form": 0}

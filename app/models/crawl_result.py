@@ -7,14 +7,20 @@ error vocabularies, so they are declared together here and each stays findable.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
 
+from app.models.classification_evidence import ClassificationEvidenceRecord
 from app.models.crawl_diagnostics import CrawlDiagnostics
 from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
 from app.models.discovered_link import DiscoveredLink
+from app.models.json_value import JsonValue
 from app.models.literal_checked import LiteralChecked
 from app.models.normalized_url import NormalizedUrl
-from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
+from app.models.page_metadata import PageMetadata
+from app.models.taxonomy import (
+    Classification,
+    CrawlError,
+    CrawlStrategyName,
+)
 from app.vocabulary.taxonomy import ResultStatus
 
 
@@ -27,7 +33,9 @@ class CrawlResult(LiteralChecked):
     text: str | None
     attempts: int
     domain: str
-    metadata: dict[str, Any] = field(default_factory=dict)
+    # Two producers write this record (the engine's diagnostics passthrough, the
+    # browser worker's metadata disclosure), so its key set is open JSON by design.
+    metadata: dict[str, JsonValue] = field(default_factory=dict)
     # The caller's submitted text, as the engine record names it; None until a
     # request funnel stamps it, and consumers fall back to the canonical text.
     original_url: str | None = None
@@ -77,7 +85,7 @@ class EngineCrawlResult(LiteralChecked):
     text: str | None
     extraction_method: str | None
     quality_score: float
-    classification_evidence: list[dict[str, Any]] = field(default_factory=list)
+    classification_evidence: list[ClassificationEvidenceRecord] = field(default_factory=list)
     diagnostics: CrawlDiagnostics = field(default_factory=CrawlDiagnostics)
     discovered_link_count: int = 0
     discovered_links_truncated: bool = False
@@ -90,7 +98,7 @@ class EngineCrawlResult(LiteralChecked):
     validators: dict[str, str] = field(default_factory=dict)
     # Page metadata from the engine's discovery tree; None when no tree existed.
     # Persisted in the spill, never on the wire (shaping maps it).
-    llm_metadata: dict[str, Any] | None = None
+    llm_metadata: PageMetadata | None = None
 
     @property
     def elapsed_ms(self) -> int:

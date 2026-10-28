@@ -3,8 +3,10 @@
 from fastapi import APIRouter
 
 from app.api.policy_defaults import BROWSER_FALLBACK_POLICY, DOCUMENT_EXTRACTION_POLICY
-from app.models.agent_hints_response import AgentHintsPayload, AgentHintsResponse
+from app.models.agent_hints_payload import AgentHintsPayload
+from app.models.agent_hints_response import AgentHintsResponse
 from app.models.crawl_strategy import CrawlStrategy
+from app.models.example_policy import ExamplePolicy
 from app.vocabulary.extraction import EXTRACTION_DESCRIPTIONS, EXTRACTION_TRAFILATURA
 from app.vocabulary.identity import SERVICE_ID
 from app.vocabulary.limits import LARGE_CRAWL_GUIDANCE
@@ -82,7 +84,7 @@ GUIDANCE = [
     "Keep Chonkie downstream of extracted text rather than part of retrieval strategy selection.",
 ]
 
-EXAMPLE_POLICIES: dict[str, object] = {
+EXAMPLE_POLICIES: dict[str, ExamplePolicy] = {
     "browser_fallback": BROWSER_FALLBACK_POLICY,
     "document_extraction": DOCUMENT_EXTRACTION_POLICY,
     "trafilatura_only": {

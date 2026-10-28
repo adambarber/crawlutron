@@ -5,7 +5,7 @@ on the crawl path, payload is the caller's ``include_html`` via :func:`policy_wa
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, TypedDict, cast
 
 from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_policy_vocabulary import refuse_oversized_profile_strings
@@ -16,20 +16,22 @@ from app.vocabulary.limits import MAX_HTTP_TIMEOUT_SECONDS, MAX_RETRIES
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from app.models.browser_profile_record import BrowserProfileRecord
+
 __all__ = ["RenderOptionsWire", "policy_wants_html", "resolve_render_options"]
 
 
 class RenderOptionsWire(TypedDict, total=False):
-    """The render knobs a caller may send; open-keyed on the wire so a stale
-    client's removed knob is ignored and unknown keys never reach RenderOptions
-    -- the constructor names the field set, so a new wire key is declared."""
+    """The render knobs a caller may send; open-keyed so unknown keys never reach RenderOptions.
+
+    ``browser_profile`` travels separately: the resolver validates and types it.
+    """
 
     timeout_seconds: int
     max_retries: int
     respect_robots: bool
     include_html: bool
     include_text: bool
-    browser_profile: dict[str, JsonValue]
 
 
 def _pick(
@@ -78,8 +80,9 @@ def resolve_render_options(
     raw_profile = _pick(request, base, "browser_profile")
     profile = dict(raw_profile) if isinstance(raw_profile, dict) else {}
     refuse_oversized_profile_strings(profile)
-    kwargs["browser_profile"] = profile
-    return RenderOptions(**kwargs)
+    # This resolver is the validation boundary: sizes refused above, the
+    # vocabulary closed the key set — the raw wire dict crosses as the record.
+    return RenderOptions(**kwargs, browser_profile=cast("BrowserProfileRecord", profile))
 
 
 def policy_wants_html(policy: CrawlPolicy) -> bool:

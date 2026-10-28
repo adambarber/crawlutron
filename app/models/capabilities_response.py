@@ -4,11 +4,15 @@ from typing import TypedDict
 
 from pydantic import BaseModel
 
+from app.models.auth_capabilities_record import AuthCapabilitiesRecord
 from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.crawl_strategy import CrawlStrategy
 from app.models.crawl_timing import CrawlTiming
+from app.models.crawl_timing_record import CrawlTimingRecord
 from app.models.mcp_capabilities import McpCapabilities
+from app.models.mcp_capabilities_record import McpCapabilitiesRecord
 from app.models.search_capabilities import SearchCapabilities
+from app.models.search_capabilities_record import SearchCapabilitiesRecord
 from app.vocabulary.taxonomy import CrawlClassification
 
 
@@ -26,12 +30,12 @@ class CapabilitiesPayload(TypedDict):
     supported_extractions: list[str]
     supported_classifications: list[str]
     output_fields: list[str]
-    default_limits: dict[str, object]
+    default_limits: dict[str, int | float]
     features: dict[str, bool]
-    auth: dict[str, object]
-    search: dict[str, object]
-    mcp: dict[str, object]
-    crawl_timing: dict[str, object]
+    auth: AuthCapabilitiesRecord
+    search: SearchCapabilitiesRecord
+    mcp: McpCapabilitiesRecord
+    crawl_timing: CrawlTimingRecord
     openapi_url: str
     swagger_ui_url: str
 

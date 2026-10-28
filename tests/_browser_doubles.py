@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from app.models.intercepted_xhr_record import InterceptedXhrRecord
 from app.transport.browser import BrowserRenderer
 from app.transport.browser_driver import BrowserDriver
 from app.transport.browser_targets import make_response_handler
@@ -357,7 +358,7 @@ def blocking_pinned_request(thread_ids: list[int], delay: float = 0.05):
 
 def response_handler_double(url: str, payload=None, error=None):
 
-    collected: list[dict[str, object]] = []
+    collected: list[InterceptedXhrRecord] = []
     handler = make_response_handler(collected)
     response_url = url
 
