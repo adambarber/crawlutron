@@ -236,99 +236,160 @@ class MetricsStore:
         return _exposition(self.snapshot(), self, caller_detail=caller_detail)
 
 
-def _caller_lines(record: CountersSnapshot) -> list[str]:
-    """Per-caller crawl request counts, sorted by caller id."""
-    return [
-        f'crawler_crawl_requests_by_caller_total{{caller="{caller}"}} {count}'
-        for caller, count in sorted(record.caller_counts.items())
-    ]
+@dataclass(frozen=True)
+class _Family:
+    """One declared exposition family (#485): its name, help, kind, label and
+    source are stated once here; a new counter is one table row plus its write.
+    """
+
+    name: str
+    help_text: str = ""
+    kind: str = "counter"  # "counter" or "gauge"
+    label: str | None = None  # label key; None for a bare series
+    field: str = ""  # attribute on the snapshot (or the store, when store=True)
+    store: bool = False  # gauges read the process-local store, never the record
+    elapsed_ms: bool = False  # a millisecond field rendered as seconds
+    caller_detail: bool = False  # gated behind the operator token
+    header: bool = True  # False: legacy labelled families emitted bare (no HELP/TYPE)
+    fmt: str = ""  # explicit float format; bare counters render str(value)
 
 
-def _search_caller_lines(record: CountersSnapshot) -> list[str]:
-    """Per-caller search request counts, sorted by caller id."""
-    return [
-        f'crawler_search_requests_by_caller_total{{caller="{caller}"}} {count}'
-        for caller, count in sorted(record.search_caller_counts.items())
-    ]
+_FAMILIES: tuple[_Family, ...] = (
+    _Family("crawler_crawl_requests_total", "Total crawl requests received.", field="crawl_requests_total"),
+    _Family(
+        "crawler_crawl_requests_accepted_total",
+        "Total crawl requests accepted via webhook callback (HTTP 202).",
+        field="crawl_requests_accepted_total",
+    ),
+    _Family("crawler_crawl_results_total", "Total crawl results produced.", field="crawl_results_total"),
+    _Family("crawler_crawl_success_total", "Total successful crawl results.", field="crawl_success_total"),
+    _Family("crawler_crawl_failure_total", "Total failed crawl results.", field="crawl_failure_total"),
+    _Family(
+        "crawler_crawl_errors_total", "Total rejected/invalid crawl requests.", field="crawl_errors_total"
+    ),
+    _Family(
+        "crawler_search_requests_total", "Total web search requests received.", field="search_requests_total"
+    ),
+    _Family(
+        "crawler_search_results_total", "Total web search results returned.", field="search_results_total"
+    ),
+    _Family("crawler_search_errors_total", "Total failed web search requests.", field="search_errors_total"),
+    _Family(
+        "crawler_extraction_doc_pool_unavailable_total",
+        "Document-extraction acquisitions degraded: no pool worker was available within the budget.",
+        field="extraction_doc_pool_unavailable_total",
+    ),
+    _Family(
+        "crawler_search_results_by_provider_total",
+        "Total web search results returned, per provider.",
+        label="provider",
+        field="search_provider_counts",
+    ),
+    _Family(
+        "crawler_crawl_requests_by_caller_total",
+        "Crawl requests received, per caller id.",
+        label="caller",
+        field="caller_counts",
+        caller_detail=True,
+    ),
+    _Family(
+        "crawler_search_requests_by_caller_total",
+        "Search requests received, per caller id.",
+        label="caller",
+        field="search_caller_counts",
+        caller_detail=True,
+    ),
+    _Family(
+        "crawler_search_seconds_total",
+        "Total wall-clock time spent on web searches (seconds).",
+        field="search_total_elapsed_ms",
+        elapsed_ms=True,
+    ),
+    _Family(
+        "crawler_crawl_seconds_total",
+        "Total wall-clock time spent crawling (seconds).",
+        field="total_elapsed_ms",
+        elapsed_ms=True,
+    ),
+    _Family(
+        "crawler_strategy_results_total",
+        label="strategy",
+        field="strategy_counts",
+        header=False,
+    ),
+    _Family(
+        "crawler_result_classification_total",
+        label="classification",
+        field="classification_counts",
+        header=False,
+    ),
+    _Family(
+        "crawler_resource_memory_utilization",
+        "Current memory usage as a fraction of the cgroup memory limit (or host RAM)."
+        " >1 means over the hard ceiling.",
+        kind="gauge",
+        field="resource_memory_utilization",
+        store=True,
+        fmt=".4f",
+    ),
+    _Family(
+        "crawler_resource_cpu_utilization",
+        "Current CPU utilization as a fraction of the cgroup CPU quota (or manual budget)."
+        " >1 means over budget / being throttled.",
+        kind="gauge",
+        field="resource_cpu_utilization",
+        store=True,
+        fmt=".4f",
+    ),
+    _Family(
+        "crawler_resource_throttle_batches_total",
+        "Crawl batches shrunk by resource admission control (memory and/or CPU pressure).",
+        field="resource_throttle_batches_total",
+    ),
+)
+
+# The bare counter families, in exposition order -- the declaration the golden
+# test reads; public on purpose so the suite pins it without a private reach.
+COUNTER_FAMILIES = tuple(f for f in _FAMILIES if f.kind == "counter" and f.label is None and f.header)
 
 
-def _by_provider_lines(record: CountersSnapshot) -> list[str]:
-    """The per-provider search-results family (own name, one label set)."""
-    lines = [
-        "# HELP crawler_search_results_by_provider_total Total web search results returned, per provider.",
-        "# TYPE crawler_search_results_by_provider_total counter",
-    ]
-    lines.extend(
-        f'crawler_search_results_by_provider_total{{provider="{provider}"}} {count}'
-        for provider, count in sorted(record.search_provider_counts.items())
-    )
-    return lines
+def _family_value(family: _Family, record: CountersSnapshot, store: MetricsStore) -> str:
+    """One family's rendered value."""
+    source: MetricsStore | CountersSnapshot = store if family.store else record
+    value = getattr(source, family.field)
+    if family.elapsed_ms:
+        return f"{value / 1000.0:.3f}"
+    if family.fmt:
+        return f"{value:{family.fmt}}"
+    return f"{value}"
 
 
-def _by_caller_lines(record: CountersSnapshot) -> list[str]:
-    """The gated per-caller families (own names, one label set each)."""
-    lines = [
-        "# HELP crawler_crawl_requests_by_caller_total Crawl requests received, per caller id.",
-        "# TYPE crawler_crawl_requests_by_caller_total counter",
-    ]
-    lines.extend(_caller_lines(record))
-    lines.append("# HELP crawler_search_requests_by_caller_total Search requests received, per caller id.")
-    lines.append("# TYPE crawler_search_requests_by_caller_total counter")
-    lines.extend(_search_caller_lines(record))
+def _family_lines(family: _Family, record: CountersSnapshot, store: MetricsStore) -> list[str]:
+    """One family's exposition block: HELP, TYPE, then its series."""
+    lines: list[str] = []
+    if family.header:
+        lines = [f"# HELP {family.name} {family.help_text}", f"# TYPE {family.name} {family.kind}"]
+    if family.label is None:
+        lines.append(f"{family.name} {_family_value(family, record, store)}")
+    else:
+        counts: dict[str, float] = getattr(record, family.field)
+        lines.extend(
+            f'{family.name}{{{family.label}="{key}"}} {value}' for key, value in sorted(counts.items())
+        )
     return lines
 
 
 def _exposition(record: CountersSnapshot, store: MetricsStore, *, caller_detail: bool) -> str:
     """Render the Prometheus text exposition for one counters record.
 
-    A module function rather than a method: pure formatting over the record,
-    which it reads as its single source -- one backing-store read per scrape.
+    Pure formatting over the declared family table (#485): one backing-store
+    read per scrape, and the line contract lives in _FAMILIES, not here.
     """
     lines: list[str] = []
-
-    def counter(name: str, value: float, help_text: str) -> None:
-        lines.append(f"# HELP {name} {help_text}")
-        lines.append(f"# TYPE {name} counter")
-        lines.append(f"{name} {value}")
-
-    counter("crawler_crawl_requests_total", record.crawl_requests_total, "Total crawl requests received.")
-    counter(
-        "crawler_crawl_requests_accepted_total",
-        record.crawl_requests_accepted_total,
-        "Total crawl requests accepted via webhook callback (HTTP 202).",
-    )
-    counter("crawler_crawl_results_total", record.crawl_results_total, "Total crawl results produced.")
-    counter("crawler_crawl_success_total", record.crawl_success_total, "Total successful crawl results.")
-    counter("crawler_crawl_failure_total", record.crawl_failure_total, "Total failed crawl results.")
-    counter("crawler_crawl_errors_total", record.crawl_errors_total, "Total rejected/invalid crawl requests.")
-    counter(
-        "crawler_search_requests_total", record.search_requests_total, "Total web search requests received."
-    )
-    counter("crawler_search_results_total", record.search_results_total, "Total web search results returned.")
-    counter("crawler_search_errors_total", record.search_errors_total, "Total failed web search requests.")
-    counter(
-        "crawler_extraction_doc_pool_unavailable_total",
-        record.extraction_doc_pool_unavailable_total,
-        "Document-extraction acquisitions degraded: no pool worker was available within the budget.",
-    )
-    lines.extend(_by_provider_lines(record))
-    if caller_detail:
-        lines.extend(_by_caller_lines(record))
-    lines.append("# HELP crawler_search_seconds_total Total wall-clock time spent on web searches (seconds).")
-    lines.append("# TYPE crawler_search_seconds_total counter")
-    lines.append(f"crawler_search_seconds_total {record.search_total_elapsed_ms / 1000.0:.3f}")
-    lines.append("# HELP crawler_crawl_seconds_total Total wall-clock time spent crawling (seconds).")
-    lines.append("# TYPE crawler_crawl_seconds_total counter")
-    lines.append(f"crawler_crawl_seconds_total {record.total_elapsed_ms / 1000.0:.3f}")
-    lines.extend(
-        f'crawler_strategy_results_total{{strategy="{strategy}"}} {count}'
-        for strategy, count in sorted(record.strategy_counts.items())
-    )
-    lines.extend(
-        f'crawler_result_classification_total{{classification="{classification}"}} {count}'
-        for classification, count in sorted(record.classification_counts.items())
-    )
-    lines.extend(_gauge_and_throttle_lines(record, store))
+    for family in _FAMILIES:
+        if family.caller_detail and not caller_detail:
+            continue
+        lines.extend(_family_lines(family, record, store))
     return "\n".join(lines) + "\n"
 
 

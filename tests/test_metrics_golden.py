@@ -145,3 +145,29 @@ def test_the_full_exposition_matches_the_golden():
     store = _observed_store()
     assert store.as_prometheus(caller_detail=True) == _GOLDEN_CALLER_DETAIL
     assert store.as_prometheus(caller_detail=False) == _GOLDEN_WITHOUT_CALLER_DETAIL
+
+
+# -- the declared line contract (#485): the golden pins the exact bytes;
+# this section pins the declaration itself, so an undeclared family fails.
+
+
+def test_every_plain_counter_family_is_declared_in_the_registry():
+    """Each bare counter series in the golden is a registry entry, in golden order."""
+    from app.runtime.metrics import COUNTER_FAMILIES
+
+    expected = [
+        "crawler_crawl_requests_total",
+        "crawler_crawl_requests_accepted_total",
+        "crawler_crawl_results_total",
+        "crawler_crawl_success_total",
+        "crawler_crawl_failure_total",
+        "crawler_crawl_errors_total",
+        "crawler_search_requests_total",
+        "crawler_search_results_total",
+        "crawler_search_errors_total",
+        "crawler_extraction_doc_pool_unavailable_total",
+        "crawler_search_seconds_total",
+        "crawler_crawl_seconds_total",
+        "crawler_resource_throttle_batches_total",
+    ]
+    assert [family.name for family in COUNTER_FAMILIES] == expected
