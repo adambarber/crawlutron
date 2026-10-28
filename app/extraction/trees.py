@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 from html import unescape
-from typing import Any, TypedDict
+from typing import TypedDict
 
 from lxml import etree
 from lxml.etree import ParserError
@@ -78,11 +78,11 @@ def parse_html_tree(html: str | None):
         return None
 
 
-def _diagnostic_tree(html: str | None, tree: Any | None) -> Any | None:
+def _diagnostic_tree(html: str | None, tree: etree._Element | None) -> etree._Element | None:
     return tree if tree is not None else (parse_html_tree(html) if html else None)
 
 
-def _diagnostic_inputs(html: str | None, tree: Any | None) -> Any | None:
+def _diagnostic_inputs(html: str | None, tree: etree._Element | None) -> etree._Element | None:
     return _diagnostic_tree(html, tree) if html else None
 
 
@@ -91,10 +91,12 @@ class _Walkable:
     """A source URL and the tree to walk, both known good."""
 
     source_url: NormalizedUrl
-    tree: Any
+    tree: etree._Element
 
 
-def walkable(html: str | None, source_url: NormalizedUrl | None, tree: Any | None) -> _Walkable | None:
+def walkable(
+    html: str | None, source_url: NormalizedUrl | None, tree: etree._Element | None
+) -> _Walkable | None:
     """What a diagnostic extractor needs before it can look at anything, or None --
     the shared preconditions, so the ``tree is None`` guard is never dropped. A
     record, not a bare tree, so the caller gets the narrowed URL back.
@@ -213,7 +215,7 @@ def html_diagnostics(
     html: str | None,
     source_url: NormalizedUrl | None,
     *,
-    tree: Any | None = None,
+    tree: etree._Element | None = None,
 ) -> HtmlDiagnostics:
     diagnostics: HtmlDiagnostics = {}
     # One parse, one guard: the walkable-tree precondition (empty diagnostic,

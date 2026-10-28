@@ -13,11 +13,11 @@ import re as _re
 from bisect import bisect_right as _bisect_right
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any, NamedTuple
+from typing import NamedTuple, cast
 
 from app.models.host_policy import HostPolicy
-from app.models.http_fetch_result import HttpFetchResult
-from app.models.http_fetcher import HttpFetcher
+from app.models.http_fetch_result import HttpFetchResult as HttpFetchResult
+from app.models.http_fetcher import HttpFetcher as HttpFetcher
 from app.models.normalized_url import NormalizedUrl
 from app.safety.bounded_ttl import BoundedTTLCache
 from app.transport.body_decode import decode_body
@@ -95,10 +95,12 @@ async def _call_fetcher(
     # ``_RequestHeaders`` promises a mapping the fetch only reads; the
     # protocol promises a dict. The copy is the whole bridge between the two.
     sent = {} if headers is None else dict(headers)
-    resp: Any = fetcher(url, sent, timeout_seconds)
+    resp = fetcher(url, sent, timeout_seconds)
     if inspect.iscoroutine(resp):
+        # Validated boundary: the async protocol's return is a coroutine whose
+        # awaited value is the HttpFetchResult it spells.
         resp = await resp
-    return resp
+    return cast(HttpFetchResult, resp)
 
 
 async def fetch_decode_discovery(

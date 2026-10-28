@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import cast
 
 from app.storage.sqlite_store import table_columns, table_indexes
 
@@ -285,7 +286,7 @@ def _actual_columns(conn: sqlite3.Connection, table_name: str) -> tuple[ColumnSc
             name=column.name,
             sqlite_type=column.sqlite_type,
             not_null=bool(column.not_null),
-            default=column.default,
+            default=cast("str | None", column.default),
             primary_key_position=column.primary_key_position,
         )
         for column in table_columns(conn, table_name)

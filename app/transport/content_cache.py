@@ -13,7 +13,6 @@ import threading
 from collections import OrderedDict
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 from app.models.cache_envelope import CacheEnvelope
 from app.models.json_value import JsonValue
@@ -113,13 +112,13 @@ class ContentCache:
         # directory on the hot path; disk stays the source of truth for values.
         self._index: OrderedDict[str, Path] = OrderedDict()
         # Small-value RAM mirror (bounded LRU, shallow < 1MB) for hot reads.
-        self._memory_cache: OrderedDict[str, tuple[float | None, Any]] = OrderedDict()
+        self._memory_cache: OrderedDict[str, tuple[float | None, JsonValue]] = OrderedDict()
         self._MEMORY_CACHE_MAX = MEMORY_CACHE_MAX
         self._MEMORY_CACHE_MAX_SIZE = MEMORY_CACHE_MAX_SIZE
 
     # -- key handling -------------------------------------------------------
     @staticmethod
-    def make_key(*parts: Any) -> str:
+    def make_key(*parts: JsonValue) -> str:
         """Build a stable cache key from arbitrary parts."""
         return "|".join(json.dumps(p, sort_keys=True, separators=(",", ":")) for p in parts)
 
@@ -232,7 +231,7 @@ class ContentCache:
         finally:
             self._unlink_doomed(doomed)
 
-    def _memory_hit_locked(self, key: str) -> Any | None:
+    def _memory_hit_locked(self, key: str) -> JsonValue | None:
         """RAM-mirror probe: value on a fresh hit (bumping recency), else ``None``."""
         if key not in self._memory_cache:
             return None
@@ -247,7 +246,7 @@ class ContentCache:
             self._index.move_to_end(key)
         return value
 
-    def _remember_memory_locked(self, key: str, value: Any, expires: float | None, size: int) -> None:
+    def _remember_memory_locked(self, key: str, value: JsonValue, expires: float | None, size: int) -> None:
         """Store into the RAM mirror under the size gate and count cap."""
         if value is None or size >= self._MEMORY_CACHE_MAX_SIZE:
             # A large value must not linger in the small-value cache.
@@ -258,12 +257,12 @@ class ContentCache:
         if len(self._memory_cache) > self._MEMORY_CACHE_MAX:
             self._memory_cache.popitem(last=False)
 
-    def _memory_probe(self, key: str) -> Any | None:
+    def _memory_probe(self, key: str) -> JsonValue | None:
         """The RAM-mirror probe with ``self._lock`` taken."""
         with self._lock:
             return self._memory_hit_locked(key)
 
-    def get(self, key: str) -> Any | None:
+    def get(self, key: str) -> JsonValue | None:
         """The cached value if present and unexpired, else ``None``.
 
         Memory first, then the on-disk envelope."""
@@ -297,7 +296,7 @@ class ContentCache:
         expires = expiry_for(now, float(effective_ttl))
         return {"expires": expires, "value": value, "cached_at": now}, expires
 
-    def set(self, key: str, value: Any, ttl: int | None = None) -> None:
+    def set(self, key: str, value: JsonValue, ttl: int | None = None) -> None:
         """Store ``value`` (JSON-serializable) with a TTL in seconds; ``ttl <= 0`` stores nothing (#394)."""
         if not stores_for_ttl(self.default_ttl if ttl is None else ttl):
             # The OFF convention: a non-positive TTL refuses the store, so the
@@ -322,7 +321,7 @@ class ContentCache:
             self._remember_memory_locked(key, value, expires, len(data))
         self._enforce_limits()
 
-    async def aget(self, key: str) -> Any | None:
+    async def aget(self, key: str) -> JsonValue | None:
         """Async ``get``: the envelope read + parse go off the loop and off the lock."""
         hit = self._memory_probe(key)
         if hit is not None:
@@ -331,7 +330,7 @@ class ContentCache:
         envelope = await asyncio.to_thread(self._read_envelope, key)
         return None if envelope is None else envelope.get("value")
 
-    async def aset(self, key: str, value: Any, ttl: int | None = None) -> None:
+    async def aset(self, key: str, value: JsonValue, ttl: int | None = None) -> None:
         """Async ``set`` with the same byte-budget and OFF-convention contract."""
         if not stores_for_ttl(self.default_ttl if ttl is None else ttl):
             return  # ttl <= 0 stores nothing (#394), like the sync path.

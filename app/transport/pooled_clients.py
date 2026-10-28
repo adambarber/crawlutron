@@ -5,10 +5,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from http.cookiejar import CookieJar as _StdlibCookieJar
-from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Protocol, TypeVar, cast
 
 import httpx
 
@@ -18,8 +18,23 @@ from app.vocabulary.identity import DEFAULT_USER_AGENT
 if TYPE_CHECKING:
     from app.config.settings import CrawlerSettings
 
+
+class PooledClient(Protocol):
+    """What the pooled-client lifecycle actually asks of a pooled object: a close
+    handle and the loop-stamp this module installs. Both real kinds (httpx,
+    curl_cffi) satisfy it structurally; the closed predicate stays per-descriptor.
+    """
+
+    def close(self) -> Awaitable[object]: ...
+    async def aclose(self) -> object: ...
+
+
+PooledClientBuilder = Callable[["CrawlerSettings | None"], PooledClient]
+
 __all__ = [
     "LoopBoundPooledClient",
+    "PooledClient",
+    "PooledClientBuilder",
     "T",
     "bind_to_running_loop",
     "close_async_http_client",
@@ -63,7 +78,7 @@ def _build_async_client(settings: CrawlerSettings | None = None) -> httpx.AsyncC
 
 # Superseded loop-bound pooled clients awaiting a loop to close on -- one bounded
 # backlog and reaper cover both httpx and curl_cffi kinds.
-_PENDING_CLIENT_CLOSE: list[object] = []
+_PENDING_CLIENT_CLOSE: list[PooledClient] = []
 
 
 _PENDING_CLIENT_CLOSE_MAX = 32
@@ -77,12 +92,12 @@ _PENDING_CLIENT_CLOSE_LOCK = threading.Lock()
 _INFLIGHT_CLIENT_CLOSES: set[asyncio.Future] = set()
 
 
-def _queue_superseded_close(old_client: Any) -> Any | None:
+def _queue_superseded_close(old_client: PooledClient) -> PooledClient | None:
     """Track one superseded pooled client; return whatever the cap displaced.
     The dedupe check lives inside the cap branch so a re-entrant append+pop
     race cannot pop two distinct entries. The caller releases the displaced object *outside* the lock.
     """
-    stale_to_release: Any | None = None
+    stale_to_release: PooledClient | None = None
     with _PENDING_CLIENT_CLOSE_LOCK:
         already_queued = old_client in _PENDING_CLIENT_CLOSE
         if not already_queued:
@@ -92,7 +107,11 @@ def _queue_superseded_close(old_client: Any) -> Any | None:
     return stale_to_release
 
 
-def _release_dropped_client(stale_to_release: Any, *, is_closed: Callable[[Any], bool] | None = None) -> None:
+def _release_dropped_client(
+    stale_to_release: PooledClient | None,
+    *,
+    is_closed: Callable[[PooledClient], bool] | None = None,
+) -> None:
     """Best-effort release of a client the cap displaced, run outside the close lock.
     Sync close() is called directly when present; otherwise the coroutine
     teardown is scheduled on the running loop, or the reference dropped if none runs.
@@ -124,7 +143,7 @@ async def drain_pending_client_closes() -> None:
         await _safe_aclose(client)
 
 
-def _client_is_closed(client: Any) -> bool:
+def _client_is_closed(client: PooledClient) -> bool:
     """Whether a pooled client reports itself closed, when it can say so -- a
     defensive fallback for callers with no descriptor. An absent is_closed means
     "cannot say", which is NOT closed; this returns False and lets the caller's predicate decide.
@@ -132,7 +151,7 @@ def _client_is_closed(client: Any) -> bool:
     return bool(getattr(client, "is_closed", False))
 
 
-def _schedule_client_close(client, *, is_closed: Callable[[Any], bool]) -> None:
+def _schedule_client_close(client: PooledClient | None, *, is_closed: Callable[[PooledClient], bool]) -> None:
     """Best-effort asynchronous close of a superseded pooled client: schedule the
     async aclose on the running loop (never block), so sockets don't leak when
     the loop changes. is_closed is required, not inferred -- only the owner knows how a kind reports closed.
@@ -168,11 +187,11 @@ class LoopBoundPooledClient:
         self,
         *,
         slot: str,
-        build: Callable[[CrawlerSettings | None], Any],
-        is_closed: Callable[[Any], bool],
+        build: PooledClientBuilder,
+        is_closed: Callable[[PooledClient], bool],
         lock: threading.Lock,
         consults_settings: bool,
-        namespace: dict[str, Any] | None = None,
+        namespace: dict[str, PooledClient | None] | None = None,
     ) -> None:
         self.slot = slot
         self.build = build
@@ -186,14 +205,14 @@ class LoopBoundPooledClient:
     # -- pooled instance: the module global named by ``slot`` ----------------
 
     @property
-    def current(self) -> Any:
+    def current(self) -> PooledClient | None:
         """The pooled client as the module global holds it (late-bound)."""
-        return self.namespace[self.slot]
+        return cast(PooledClient | None, self.namespace[self.slot])
 
-    def _set_current(self, value: Any) -> None:
+    def _set_current(self, value: PooledClient | None) -> None:
         self.namespace[self.slot] = value
 
-    def _supersede(self, superseded: Any) -> None:
+    def _supersede(self, superseded: PooledClient) -> None:
         """Track and best-effort-close a client that is being replaced."""
         _release_dropped_client(_queue_superseded_close(superseded), is_closed=self.is_closed)
         # The descriptor decides reuse-safety for its own kind: a shared probe with
@@ -201,7 +220,7 @@ class LoopBoundPooledClient:
         if not self.is_closed(superseded):
             _schedule_client_close(superseded, is_closed=self.is_closed)
 
-    def _rebuild(self, settings: CrawlerSettings | None, superseded: Any) -> Any:
+    def _rebuild(self, settings: CrawlerSettings | None, superseded: PooledClient | None) -> PooledClient:
         """Build the replacement, then release the old client. Lock held; a failed build
         propagates. Both kinds are declared deps, so there is no "unavailable" state
         to recover from, and the superseded client is still released on the failing path.
@@ -222,7 +241,7 @@ class LoopBoundPooledClient:
             self._supersede(superseded)
         return built
 
-    def get(self, settings: CrawlerSettings | None = None) -> Any:
+    def get(self, settings: CrawlerSettings | None = None) -> PooledClient:
         """Return the pooled client bound to the current event loop."""
         try:
             loop = asyncio.get_running_loop()
@@ -252,8 +271,8 @@ class LoopBoundPooledClient:
 # The two pooled clients, described once and managed by the code above.
 _HTTP_CLIENT_SINGLETON = LoopBoundPooledClient(
     slot="_DEFAULT_HTTP_CLIENT",
-    build=_build_async_client,
-    is_closed=lambda client: bool(client.is_closed),
+    build=cast(PooledClientBuilder, _build_async_client),
+    is_closed=lambda client: bool(getattr(client, "is_closed", False)),
     lock=_HTTP_CLIENT_INIT_LOCK,
     consults_settings=True,
 )
@@ -264,7 +283,10 @@ def get_async_http_client(settings: CrawlerSettings | None = None) -> httpx.Asyn
     The client is reused while the running loop is unchanged (HTTP/2 connection
     pooling) and rebuilt if the loop changes (e.g. test harness ``asyncio.run`` sequences).
     """
-    return _HTTP_CLIENT_SINGLETON.get(settings)
+    pooled = _HTTP_CLIENT_SINGLETON.get(settings)
+    # Validated boundary: this descriptor's builder is _build_async_client, so the
+    # pooled object is always the httpx client the cast names.
+    return cast(httpx.AsyncClient, pooled)
 
 
 async def close_async_http_client() -> None:
@@ -311,7 +333,7 @@ def bind_to_running_loop[T](client: T) -> T:
     return client
 
 
-def _loop_bound_to(client: Any) -> asyncio.AbstractEventLoop | None:
+def _loop_bound_to(client: PooledClient) -> asyncio.AbstractEventLoop | None:
     """The loop a pooled client was built on, or None if never bound. Read with a
     default because the reader must tolerate objects this module didn't build (a
     test double, or a pre-attribute client), yet typed so the comparison is a loop-identity check.
@@ -319,20 +341,24 @@ def _loop_bound_to(client: Any) -> asyncio.AbstractEventLoop | None:
     return getattr(client, "_bound_loop", None)
 
 
-async def _safe_aclose(client):
+async def _safe_aclose(client: PooledClient) -> None:
     """Await a pooled client's async close, swallowing failures -- the client is
     being replaced (its loop changed), so any close error is irrelevant during
     shutdown. Shared by every kind: httpx ``aclose`` and curl_cffi ``close`` are both coroutines.
     """
     with contextlib.suppress(Exception):
-        close = getattr(client, "aclose", None) or client.close
+        # curl_cffi's AsyncSession closes through ``close()`` (a coroutine),
+        # httpx through ``aclose()``; either handle satisfies the await here.
+        close = client.aclose if hasattr(client, "aclose") else client.close
         await close()
 
 
 T = TypeVar("T")
 
 
-def discard_if_unowned_loop(close: Callable[[], Any], slot: str, namespace: dict[str, Any]) -> None:
+def discard_if_unowned_loop(
+    close: Callable[[], Awaitable[object] | object], slot: str, namespace: dict[str, PooledClient | None]
+) -> None:
     """Release ``slot``'s object, closing it only when no loop owns it.
 
     ``namespace`` is the module holding the pooled object, so one helper serves
@@ -348,7 +374,7 @@ def discard_if_unowned_loop(close: Callable[[], Any], slot: str, namespace: dict
     if loop.is_running():
         namespace[slot] = None
     else:
-        loop.run_until_complete(close())
+        loop.run_until_complete(cast(Awaitable[object], close()))
 
 
 def reset_process_state() -> None:
@@ -373,7 +399,7 @@ def has_process_state() -> bool:
 
 
 @contextmanager
-def swap_pooled_builders(swaps: list[tuple[Any, Callable[[CrawlerSettings | None], Any]]]) -> Iterator[None]:
+def swap_pooled_builders(swaps: list[tuple[LoopBoundPooledClient, PooledClientBuilder]]) -> Iterator[None]:
     """Rebind the given pooled singletons' builders, restored on the way out.
 
     The builders are the one part of the pools a caller can legitimately

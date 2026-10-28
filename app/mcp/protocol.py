@@ -64,22 +64,20 @@ def error_response(
     code: int,
     message: str,
     data: JsonValue = None,
-) -> dict[str, Any]:
+) -> dict[str, JsonValue]:
     """Build a JSON-RPC error response (``id`` omitted for malformed requests)."""
-    payload: dict[str, Any] = {
-        "jsonrpc": "2.0",
-        "error": {"code": code, "message": message},
-    }
+    error: dict[str, JsonValue] = {"code": code, "message": message}
+    if data is not None:
+        error["data"] = data
+    payload: dict[str, JsonValue] = {"jsonrpc": "2.0", "error": error}
     if request_id is not None:
         payload["id"] = request_id
-    if data is not None:
-        payload["error"]["data"] = data
     return payload
 
 
 def _require_meta_key(
     meta: dict[str, JsonValue], key: str, expected: type[Any], label: str, request_id: int | str
-) -> Any:
+) -> object:
     """Return ``meta[key]``, or reject naming what was wrong -- absent vs
     wrong-typed are distinct corrections, so one function keeps the reasons
     agreeing. ``label`` is the spec's name for the type, shown on the wire.

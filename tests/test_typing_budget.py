@@ -18,6 +18,9 @@ from tests._ratchet import (
     walk,
 )
 from tests._ratchet import (
+    definition_counts as walked_definitions,
+)
+from tests._ratchet import (
     report as ratchet_report,
 )
 from tests.chokepoint_walks import REPO_ROOT, nodes_of, trees_under
@@ -25,9 +28,9 @@ from tests.chokepoint_walks import REPO_ROOT, nodes_of, trees_under
 _METRIC = "undeclared record"
 _ANY = "bare Any"
 
-# Batches 1-4 landed: models declared (Batch 1), admission/api closed unions (2a) +
-# api doors typed (2b), browser seam family typed (Batch 4, #389). Live counts on the merged tree.
-_BUDGETS = {_METRIC: 30, _ANY: 68}
+# ALL batches landed (1-4): the tree carries ZERO undeclared records and ZERO bare Any.
+# No budget table: the assertions below are unconditional — the terminus is sealed.
+_BUDGETS: dict[str, int] = {}
 
 # A record is anything whose key set a caller might depend on.
 _RECORD_ROOTS = frozenset(
@@ -237,13 +240,15 @@ def test_the_tests_typing_budget_reaches_tests() -> None:
 
 
 def _walked() -> dict[str, int]:
-    return {"annotation": sum(1 for _candidate in walk(candidates))}
+    # Reach is proved against real code, never the offender count: at the
+    # terminus that count is ZERO, so a walk that saw nothing would lie.
+    return walked_definitions()
 
 
 # The walk's reach floor drops with the tree's declared records; the floor is
 # a reach proof (walked must EXCEED it), not the ratchet itself.
 test_collector_sees_the_whole_tree = collector_sees_the_whole_tree(
-    _walked, {"annotation": 96}, subject="typing"
+    _walked, {"function": 1000, "class": 200}, subject="typing"
 )
 
 

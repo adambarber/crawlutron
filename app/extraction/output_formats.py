@@ -9,7 +9,10 @@ from __future__ import annotations
 import csv
 import io
 import json
-from typing import Any, Literal, get_args
+from collections.abc import Mapping
+from typing import Literal, get_args
+
+from app.models.json_value import JsonValue
 
 #: The formats a caller may name. ``Literal`` needs literal members, and this
 #: module dispatches on them; everything else derives from this set.
@@ -20,20 +23,22 @@ OutputFormat = Literal["json", "jsonl", "ndjson", "markdown", "csv"]
 SUPPORTED_OUTPUT_FORMATS: tuple[str, ...] = get_args(OutputFormat)
 
 
-def jsonify(obj: Any) -> Any:
+def jsonify(obj: object) -> object:
     """Output fallback -- now the shared app.safety.json_safe chokepoint."""
     from app.safety.json_safe import json_default
 
     return json_default(obj)
 
 
-def safe_value(val: Any) -> str:
-    if isinstance(val, (dict, list)):
+def safe_value(val: object) -> str:
+    if isinstance(val, Mapping):
+        return json.dumps(val, ensure_ascii=False, default=jsonify)
+    if isinstance(val, list):
         return json.dumps(val, ensure_ascii=False, default=jsonify)
     return "" if val is None else str(val)
 
 
-def serialize_results(results: list[dict[str, Any]], fmt: str | None) -> tuple[str, str]:
+def serialize_results(results: list[dict[str, JsonValue]], fmt: str | None) -> tuple[str, str]:
     """Return ``(body, media_type)`` for ``results`` in the requested ``fmt``.
 
     Raises ``ValueError("unsupported_output_format")`` for unknown formats.
@@ -56,7 +61,7 @@ def serialize_results(results: list[dict[str, Any]], fmt: str | None) -> tuple[s
     raise ValueError(f"unsupported_output_format: {fmt}")  # pragma: no cover
 
 
-def _to_markdown(results: list[dict[str, Any]]) -> str:
+def _to_markdown(results: list[dict[str, JsonValue]]) -> str:
     sections: list[str] = []
     for r in results:
         url = r.get("final_url") or r.get("normalized_url") or r.get("original_url") or "unknown"
@@ -116,7 +121,7 @@ def csv_neutralize(value: str, column: str) -> str:
     return value
 
 
-def _to_csv(results: list[dict[str, Any]]) -> str:
+def _to_csv(results: list[dict[str, JsonValue]]) -> str:
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=_CSV_COLUMNS, extrasaction="ignore")
     writer.writeheader()

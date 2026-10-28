@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, TypedDict
 
 from app.admission.policy import discovery_flags
 from app.config.settings import CrawlerSettings
@@ -22,6 +22,8 @@ from app.extraction.content import (
 )
 from app.extraction.documents import adocument_extract
 from app.models.classification_evidence import ClassificationEvidenceRecord
+from app.models.discovered_link import DiscoveredLink
+from app.models.page_metadata import PageMetadata
 from app.safety.validation import filter_js_endpoints
 from app.vocabulary.extraction import (
     EXTRACTION_DOCUMENT,
@@ -118,11 +120,22 @@ async def discover_after_fetch(
     )
 
 
+class DiscoveryResultFields(TypedDict):
+    """The result fields both strategies take from one envelope, spread into
+    ``build_engine_result`` so the key-to-field mapping is one decision."""
+
+    classification_evidence: list[ClassificationEvidenceRecord]
+    discovered_link_count: int
+    discovered_links_truncated: bool
+    discovered_links: list[DiscoveredLink]
+    llm_metadata: PageMetadata | None
+
+
 def discovery_result_fields(
     post_fetch: PostFetchDiscovery,
     *,
     classification_evidence: list[ClassificationEvidenceRecord],
-) -> dict[str, Any]:
+) -> DiscoveryResultFields:
     """The result fields both strategies take from one envelope. Spreads into
 
     ``build_engine_result`` so the key-to-field mapping is one decision; a

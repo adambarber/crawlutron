@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import replace
-from typing import Any, NamedTuple, cast
+from typing import NamedTuple, cast
 
 from app.admission.policy import discovery_flags
 from app.config.settings import CrawlerSettings
@@ -15,6 +15,7 @@ from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
 from app.models.discovery_diagnostics import DiscoveryDiagnostics
 from app.models.fetch_envelope import RetryDiagnostics
 from app.models.http_fetch_result import HttpFetchResult
+from app.models.http_fetcher import HttpFetcher
 from app.models.result_factory import binary_no_text_result, build_engine_result
 from app.models.taxonomy import Classification
 from app.transport import body_decode, fetch_policy
@@ -102,7 +103,7 @@ async def _construct_http_result(
         "decompression_failed": extracted.strategy_decompression_failed or resp.decompression_failed,
         "request_profile": request_profile_diagnostics(ctx.profile),
         "retry": ctx.retry_diagnostics,
-        "runtime": {"elapsed_ms": resp.elapsed_ms, "final_url": resp.final_url},
+        "runtime": {"elapsed_ms": resp.elapsed_ms, "final_url": resp.final_url.raw},
         "content_metrics": extracted.content_metrics,
     }
     post_fetch = await discover_after_fetch(
@@ -256,7 +257,7 @@ def _http_error_result(ctx: HttpStrategyContext, error: Exception) -> EngineCraw
 async def http_strategy_result(
     *,
     request: StrategyRequest,
-    http_fetcher: Any,
+    http_fetcher: HttpFetcher,
     cache: HttpCache | None = None,
     content_cache: ContentCache | None = None,
     caller_validators: dict[str, str] | None = None,
@@ -286,7 +287,8 @@ async def http_strategy_result(
     try:
         if ctx.response is None:
             ctx.response, ctx.retry_diagnostics = await _fetch_http_phase(ctx)
-        resp = FetchedResponse.of(ctx.response)
+        fetched = ctx.response
+        resp = FetchedResponse.of(fetched)
         not_modified = not_modified_result(ctx, resp)
         if not_modified is not None:
             return not_modified

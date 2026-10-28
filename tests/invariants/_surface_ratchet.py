@@ -57,5 +57,5 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/orchestration/spill_sink.py": (2, 2),
     "app/transport/http_cache.py": (4, 4),
     "app/transport/http_classify.py": (3, 3),
-    "app/transport/pooled_clients.py": (11, 10),
+    "app/transport/pooled_clients.py": (13, 11),
 }

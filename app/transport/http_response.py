@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import base64
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Protocol, TypedDict, cast
 
 from app.config.settings import CrawlerSettings
 from app.models.content_metrics import ContentMetrics
@@ -15,6 +16,7 @@ from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
 from app.models.fetch_envelope import RetryDiagnostics, SerializedResponse
 from app.models.host_policy import HostPolicy
 from app.models.http_fetch_result import HttpFetchResult
+from app.models.http_fetcher import HttpFetcher
 from app.models.normalized_url import NormalizedUrl
 from app.models.request_profile_record import RequestProfileRecord
 from app.models.taxonomy import CrawlStrategyName
@@ -32,7 +34,7 @@ class HttpStrategyContext:
     strategy: CrawlStrategyName
     policy: CrawlPolicy
     host_policy: HostPolicy
-    http_fetcher: Any
+    http_fetcher: HttpFetcher
     cache: HttpCache | None
     content_cache: ContentCache | None
     caller_validators: dict[str, str] | None
@@ -52,7 +54,7 @@ class HttpStrategyContext:
     ckey: str | None = None
     content_hit: bool = False
     revalidated_304: bool = False
-    response: Any = None
+    response: HttpFetchResult | None = None
     limits: CrawlPolicyLimits = field(default_factory=CrawlPolicyLimits)
     retry_diagnostics: RetryDiagnostics = field(default_factory=lambda: _DEFAULT_RETRY)
     # The crawl's resolved settings, carried so extraction never re-reads the
@@ -77,20 +79,36 @@ class ExtractedHttpContent:
 class FetchedResponse:
     """One fetched response bound to its lowercased header view, so a phase cannot
     read a content_type that its headers lack; built once per fetch, other
-    attributes falling through to the raw response.
+    attributes falling through to the raw response typed by the protocol it satisfies.
     """
 
-    raw: Any
+    raw: FetchResponseLike
     headers: dict[str, str]
     content_type: str | None
 
     @classmethod
-    def of(cls, response: Any) -> FetchedResponse:
+    def of(cls, response: FetchResponseLike) -> FetchedResponse:
         """Bind ``response`` to its headers, keyed for lookup."""
         headers = {key.lower(): value for key, value in response.headers.items()}
         return cls(response, headers, headers.get("content-type"))
 
-    def __getattr__(self, name: str) -> Any:
+    @property
+    def status_code(self) -> int:
+        return self.raw.status_code
+
+    @property
+    def body(self) -> bytes:
+        return self.raw.body
+
+    @property
+    def final_url(self) -> NormalizedUrl:
+        return self.raw.final_url
+
+    @property
+    def elapsed_ms(self) -> int:
+        return self.raw.elapsed_ms
+
+    def __getattr__(self, name: str) -> object:
         # Only reached for names the three fields above do not claim;
         # ``object.__getattribute__`` keeps a missing ``raw`` from recursing here.
         return getattr(object.__getattribute__(self, "raw"), name)
@@ -131,7 +149,7 @@ def _body_b64(body: bytes) -> str:
     return encoded
 
 
-def serialize_response(resp: Any) -> SerializedResponse:
+def serialize_response(resp: FetchResponseLike) -> SerializedResponse:
     """Capture a fetcher response into a JSON-serializable envelope."""
     return {
         "status_code": int(resp.status_code),
@@ -157,9 +175,20 @@ def rebuild_response(data: SerializedResponse, ctx: HttpStrategyContext) -> Http
     )
 
 
+class ResponseResultFields(TypedDict):
+    """The key set ``response_result_fields`` returns, so a consumer spreading it
+    into ``build_engine_result`` is checked key by key."""
+
+    original_url: str
+    normalized_url: NormalizedUrl
+    final_url: NormalizedUrl
+    attempt: CrawlStrategyAttempt
+    headers: dict[str, str]
+
+
 def response_result_fields(
     ctx: HttpStrategyContext, resp: FetchedResponse, attempt: CrawlStrategyAttempt
-) -> dict[str, Any]:
+) -> ResponseResultFields:
     """The result fields every response-derived engine result repeats -- the URLs,
     the landed URL, the attempt, and the headers -- whatever verdict was reached.
     Stated here once so the two builders cannot carry different bases.
@@ -171,3 +200,28 @@ def response_result_fields(
         "attempt": attempt,
         "headers": resp.headers,
     }
+
+
+class FetchResponseLike(Protocol):
+    """What the code actually reads off a fetched response; HttpFetchResult is the
+    reference implementation, and test doubles satisfy this structurally.
+    """
+
+    @property
+    def status_code(self) -> int: ...
+
+    @property
+    def headers(self) -> Mapping[str, str]: ...
+
+    @property
+    def body(self) -> bytes: ...
+
+    @property
+    def final_url(self) -> NormalizedUrl: ...
+
+    @property
+    def elapsed_ms(self) -> int: ...
+
+
+#: The boundary name at call sites that take either kind of response.
+FetchResponse = FetchResponseLike

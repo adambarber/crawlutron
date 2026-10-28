@@ -6,8 +6,8 @@ and SSRF screening live in the base. The registry stays in ``providers.py``.
 from __future__ import annotations
 
 import abc
-from typing import Any
 
+from app.config.settings import CrawlerSettings
 from app.models.host_policy import HostPolicy
 from app.models.json_value import JsonValue
 from app.search import providers as _providers
@@ -155,7 +155,7 @@ class SerperProvider(ApiKeyProvider):
         )
 
 
-def get_search_provider(settings: Any) -> BaseProvider:
+def get_search_provider(settings: CrawlerSettings) -> BaseProvider:
     """Resolve the configured search provider; raise
     :class:`SearchProviderUnavailable` when an explicit provider was selected
     but its API key is missing. Lives here: it constructs this family."""

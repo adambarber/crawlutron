@@ -7,27 +7,33 @@ descriptors and bounded close queue live in :mod:`app.transport.pooled_clients`.
 from __future__ import annotations
 
 import threading
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, cast
 
 import curl_cffi.requests as cffi_requests
 
 from app.transport.pooled_clients import (
     LoopBoundPooledClient,
+    PooledClientBuilder,
     bind_to_running_loop,
     discard_if_unowned_loop,
 )
 
 if TYPE_CHECKING:
     from app.config.settings import CrawlerSettings
+
 from app.vocabulary.strategies import CFFI_IMPERSONATE_TARGET
 
-_DEFAULT_CFFI_SESSION: Any | None = None
+#: Runtime alias: annotations name the session type, and tests import this
+#: module directly, so the alias must exist at runtime too.
+CffiSession = cffi_requests.AsyncSession
+
+_DEFAULT_CFFI_SESSION: CffiSession | None = None
 
 
 _CFFI_SESSION_INIT_LOCK = threading.Lock()
 
 
-def _build_cffi_session(settings: CrawlerSettings | None = None) -> Any:
+def _build_cffi_session(settings: CrawlerSettings | None = None) -> CffiSession:
     """Build a shared curl_cffi AsyncSession (impersonation fixed, no timeout --
     the timeout rides each ``get()`` so one session serves every budget); ``settings``
     is accepted and ignored to match the shared ``build(settings)`` contract.
@@ -42,7 +48,9 @@ def _build_cffi_session(settings: CrawlerSettings | None = None) -> Any:
 
 _CFFI_SESSION_SINGLETON = LoopBoundPooledClient(
     slot="_DEFAULT_CFFI_SESSION",
-    build=_build_cffi_session,
+    # The session type structurally satisfies PooledClient (close/aclose); the
+    # cast is the validated boundary naming the curl_cffi kind.
+    build=cast(PooledClientBuilder, _build_cffi_session),
     # AsyncSession publishes no is_closed flag and nothing else closes it in
     # process, so only the loop identity decides whether it is reusable.
     is_closed=lambda session: False,
@@ -56,12 +64,12 @@ _CFFI_SESSION_SINGLETON = LoopBoundPooledClient(
 )
 
 
-def get_cffi_session() -> Any:
+def get_cffi_session() -> CffiSession:
     """Return the shared curl_cffi session bound to the current event loop: reused
     while the loop is unchanged, rebuilt when it changes, and a failed build raises
-    (curl_cffi is declared). ``Any`` because the session type is not expressible.
+    (curl_cffi is declared).
     """
-    return _CFFI_SESSION_SINGLETON.get()
+    return cast(CffiSession, _CFFI_SESSION_SINGLETON.get())
 
 
 async def close_cffi_session() -> None:
@@ -69,7 +77,7 @@ async def close_cffi_session() -> None:
     await _CFFI_SESSION_SINGLETON.shutdown()
 
 
-def own_session() -> Any:
+def own_session() -> CffiSession | None:
     """The pooled session, for the shared pool's process-state decisions."""
     return _DEFAULT_CFFI_SESSION
 

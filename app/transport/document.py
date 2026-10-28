@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import io
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pdfplumber
 
@@ -16,28 +16,29 @@ from app.models.normalized_url import NormalizedUrl
 from app.transport.timeouts import Timeouts
 
 if TYPE_CHECKING:
+    from pdfplumber.pdf import PDF
+
     from app.transport import pinned_transport
 
 
-def format_table(rows: list[list[Any]]) -> str:
+def format_table(rows: list[list[str | None]]) -> str:
     """Render a single extracted table (list of rows) as a Markdown table."""
     if not rows:
         return ""
-    cleaned = []
-    for row in rows:
-        cells = ["" if cell is None else str(cell).replace("\n", " ").strip() for cell in row]
-        cleaned.append(cells)
+    cleaned: list[list[str]] = [
+        ["" if cell is None else str(cell).replace("\n", " ").strip() for cell in row] for row in rows
+    ]
     out: list[str] = []
-    header = cleaned[0]
+    header: list[str] = cleaned[0]
     out.append("| " + " | ".join(header) + " |")
     out.append("| " + " | ".join("---" for _ in header) + " |")
     for row in cleaned[1:]:
-        padded = (row + [""] * len(header))[: len(header)]
+        padded: list[str] = (row + [""] * len(header))[: len(header)]
         out.append("| " + " | ".join(padded) + " |")
     return "\n".join(out)
 
 
-def _extract_pdf_tables_as_markdown(pdf: Any) -> str:
+def _extract_pdf_tables_as_markdown(pdf: PDF) -> str:
     """Extract every table across all pages as concatenated Markdown tables."""
     tables: list[str] = []
     for page in getattr(pdf, "pages", []) or []:
@@ -48,7 +49,7 @@ def _extract_pdf_tables_as_markdown(pdf: Any) -> str:
     return "\n\n".join(tables)
 
 
-def _pdf_to_markdown(pdf: Any) -> str:
+def _pdf_to_markdown(pdf: PDF) -> str:
     """Convert an already-opened pdfplumber PDF object to Markdown.
 
     Page text is concatenated first, then any detected tables are appended as

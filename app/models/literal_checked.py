@@ -5,8 +5,6 @@ adding ``__post_init__`` must call ``super().__post_init__()``.
 
 from __future__ import annotations
 
-from typing import Any
-
 from app.models.taxonomy import (
     Classification,
     CrawlError,
@@ -26,7 +24,7 @@ LITERAL_FIELDS = {
 }
 
 
-def check_literal_fields(obj: Any) -> None:
+def check_literal_fields(obj: object) -> None:
     """Reject a non-member value on any Literal field of a result dataclass --
     the construction-time chokepoint, so a result built anywhere cannot carry an
     out-of-taxonomy value; provenance stays with the AST detector.
@@ -42,7 +40,7 @@ def check_literal_fields(obj: Any) -> None:
             )
 
 
-def check_taxonomy_agreement(obj: Any) -> None:
+def check_taxonomy_agreement(obj: object) -> None:
     """Reject a ``(status, classification)`` pair the taxonomy does not allow --
     the per-field check alone would accept a real member beside a disagreeing
     classification. Raising makes the disagreeing pair unrepresentable.

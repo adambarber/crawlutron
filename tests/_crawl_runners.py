@@ -330,7 +330,7 @@ def clocked_cache(
 def make_seeded_cache(
     directory: str,
     *keys: str,
-    value: object = None,
+    value: JsonValue | None = None,
     default_ttl: float = 1,
     max_entries: int = 10000,
     max_total_bytes: int | None = CONTENT_CACHE_MAX_TOTAL_BYTES,

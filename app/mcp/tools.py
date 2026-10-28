@@ -10,7 +10,7 @@ import logging
 from collections.abc import Awaitable, Callable, Collection, Mapping
 from dataclasses import dataclass
 from enum import StrEnum, auto
-from typing import Any
+from typing import cast
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ValidationError
@@ -25,6 +25,7 @@ from app.models.caller_identity import CallerIdentity
 from app.models.crawl_and_extract_response import CrawlAndExtractResponse
 from app.models.crawl_request import CrawlRequest
 from app.models.extracted_page import ExtractedPage
+from app.models.json_value import JsonValue
 from app.models.map_request import MapRequest
 from app.models.render_request import RenderRequest
 from app.models.search_request import SearchRequest
@@ -49,7 +50,7 @@ class ToolResult:
     """A ``tools/call`` outcome: text content plus optional structured data."""
 
     text: str
-    structured: Any = None
+    structured: JsonValue | None = None
     is_error: bool = False
 
 
@@ -63,13 +64,13 @@ class ToolSpec:
     name: str
     description: str
     request_model: type[BaseModel]
-    output_schema: dict[str, Any] | None
+    output_schema: dict[str, JsonValue] | None
     handler: Handler
     title: str = ""
     unsupported_fields: Collection[str] = ()
 
     @property
-    def input_schema(self) -> dict[str, Any]:
+    def input_schema(self) -> dict[str, JsonValue]:
         """The request model's own JSON schema, less the unsupported fields."""
         schema = self.request_model.model_json_schema()
         properties = {
@@ -110,7 +111,9 @@ def _tool_error(error: HTTPException | ValueError) -> ToolResult:
 
 
 def _tool_success(value: BaseModel | Mapping[str, object]) -> ToolResult:
-    dump = value.model_dump() if isinstance(value, BaseModel) else value
+    # Validated boundary: a model dump is JSON by construction; a caller's mapping
+    # crossing the wire is the JSON values it carries.
+    dump = value.model_dump() if isinstance(value, BaseModel) else cast("JsonValue", dict(value))
     return ToolResult(text=json.dumps(dump, default=json_default), structured=dump)
 
 
@@ -320,7 +323,7 @@ async def handle_search(
     )
 
 
-def _schema(model: type[BaseModel]) -> dict[str, Any]:
+def _schema(model: type[BaseModel]) -> dict[str, JsonValue]:
     return model.model_json_schema()
 
 

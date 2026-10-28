@@ -5,11 +5,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
+from typing import cast
 
 from app.admission.render_options import policy_wants_html
 from app.models.crawl_diagnostics import CrawlDiagnostics
 from app.models.crawl_result import EngineCrawlResult
 from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
+from app.models.fetch_envelope import SerializedResponse
+from app.models.json_value import JsonValue
 from app.models.result_factory import build_engine_result
 from app.models.taxonomy import Classification
 from app.transport import content_cache_key, fetch_policy, request_profile
@@ -75,6 +78,16 @@ async def resolve_http_limits(ctx: HttpStrategyContext) -> None:
     ctx.include_html = policy_wants_html(ctx.policy)
 
 
+def _cached_headers_or_none(cached: JsonValue | None) -> dict[str, str] | None:
+    """The stored header map, when the cached payload carries one.
+
+    The writer (aset) stores a {"headers": ...} envelope; only the dict form
+    carries validators. Any other JSON shape is not replayable."""
+    if isinstance(cached, dict) and isinstance(cached.get("headers"), dict):
+        return cast("dict[str, str]", cached["headers"])
+    return None
+
+
 async def revalidate_content_cache(ctx: HttpStrategyContext) -> None:
     """Serve or revalidate a disk content-cache entry when one is available."""
     if ctx.content_cache is None:
@@ -89,18 +102,18 @@ async def revalidate_content_cache(ctx: HttpStrategyContext) -> None:
         cookie_namespace=cookie_namespace_for(ctx.policy.request_profile),
     )
     ctx.ckey = ckey
-    cached = await ctx.content_cache.aget(ckey)
-    if cached is None:
+    cached_headers = _cached_headers_or_none(await ctx.content_cache.aget(ckey))
+    if cached_headers is None:
         return
 
-    must_revalidate = requires_revalidation(cached["headers"])
+    must_revalidate = requires_revalidation(cached_headers)
     validator = ctx.cache.conditional_headers(ctx.normalized_url) if ctx.cache is not None else {}
     if not validator and ctx.caller_conditional:
         validator = dict(ctx.caller_conditional)
     if must_revalidate and not validator:
         # no-cache/must-revalidate may be stored but never replayed stale: source a
         # validator from the stored body, else re-fetch below rather than serve it (#247).
-        lowered = {str(k).lower(): v for k, v in cached["headers"].items()}
+        lowered = {str(k).lower(): v for k, v in cached_headers.items()}
         if lowered.get("etag"):
             validator["If-None-Match"] = lowered["etag"]
         if lowered.get("last-modified"):
@@ -108,11 +121,21 @@ async def revalidate_content_cache(ctx: HttpStrategyContext) -> None:
     if not validator:
         if must_revalidate:
             return  # no validator to revalidate with: never serve stale, re-fetch.
-        ctx.response = rebuild_response(cached, ctx)
-        ctx.content_hit = True
-        ctx.retry_diagnostics = {"attempts": 0, "transient_errors": [], "content_cache": "hit"}
+        await _replay_cached_body(ctx, ckey)
         return
+    await _revalidate_with_validator(ctx, ckey, validator)
 
+
+async def _replay_cached_body(ctx: HttpStrategyContext, ckey: str) -> None:
+    """Serve the cached body outright; the envelope re-admits as written."""
+    cached = cast(SerializedResponse, await ctx.content_cache.aget(ckey) if ctx.content_cache else None)
+    ctx.response = rebuild_response(cached, ctx)
+    ctx.content_hit = True
+    ctx.retry_diagnostics = {"attempts": 0, "transient_errors": [], "content_cache": "hit"}
+
+
+async def _revalidate_with_validator(ctx: HttpStrategyContext, ckey: str, validator: dict[str, str]) -> None:
+    """Conditional re-fetch against the origin; a 304 replays the cached body."""
     revalidation_headers = dict(ctx.base_headers)
     revalidation_headers.update(validator)
     revalidation_headers.update(ctx.caller_conditional)
@@ -124,6 +147,7 @@ async def revalidate_content_cache(ctx: HttpStrategyContext) -> None:
         ctx.max_retries,
         ctx.max_content_length,
     )
+    cached = cast(SerializedResponse, await ctx.content_cache.aget(ckey) if ctx.content_cache else None)
     if ctx.response.status_code == 304:
         ctx.response = rebuild_response(cached, ctx)
         ctx.retry_diagnostics = {**ctx.retry_diagnostics, "content_cache": "hit_revalidated"}
@@ -199,4 +223,6 @@ async def store_http_caches(ctx: HttpStrategyContext, resp: FetchedResponse) -> 
             # The full-body base64 is part of the offloaded write, never argument
             # construction: encoding a multi-MB body on the loop stalls it (#535).
             payload = await asyncio.to_thread(serialize_response, resp.raw)
-            await ctx.content_cache.aset(ctx.ckey, payload, ttl=ttl)
+            # Validated boundary: serialize_response is the only writer here, so
+            # the envelope is the JsonValue its TypedDict spellings carry.
+            await ctx.content_cache.aset(ctx.ckey, cast("JsonValue", payload), ttl=ttl)

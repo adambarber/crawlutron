@@ -7,9 +7,9 @@ in ``app.transport.pooled_clients``; this re-exports them so callers depend on a
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from app.transport import pooled_cffi as _leaf
 from app.transport import pooled_clients as _core
@@ -19,6 +19,8 @@ from app.transport.pooled_cffi import (
     get_cffi_session,
 )
 from app.transport.pooled_clients import (
+    LoopBoundPooledClient,
+    PooledClientBuilder,
     close_async_http_client,
     get_async_http_client,
     has_process_state,
@@ -29,11 +31,11 @@ from app.transport.pooled_clients import (
 from app.vocabulary.strategies import CFFI_IMPERSONATE_TARGET
 
 if TYPE_CHECKING:
-    from app.config.settings import CrawlerSettings
+    pass
 
 
 @contextmanager
-def _swap_cffi_builder(builder: Callable[[CrawlerSettings | None], Any]) -> Iterator[None]:
+def _swap_cffi_builder(builder: PooledClientBuilder) -> Iterator[None]:
     """Swap the cffi leaf's builder; restore it on the way out."""
     singleton = _leaf.session_singleton()
     original = singleton.build
@@ -53,11 +55,11 @@ def reset_process_state() -> None:
 @contextmanager
 def pooled_client_builders(
     *,
-    http: Callable[[CrawlerSettings | None], Any] | None = None,
-    cffi: Callable[[CrawlerSettings | None], Any] | None = None,
+    http: PooledClientBuilder | None = None,
+    cffi: PooledClientBuilder | None = None,
 ) -> Iterator[None]:
     """Swap a pooled client's builder for the duration of a block."""
-    swaps: list[tuple[Any, Callable[[CrawlerSettings | None], Any]]] = []
+    swaps: list[tuple[LoopBoundPooledClient, PooledClientBuilder]] = []
     if http is not None:
         swaps.append((_core.http_singleton(), http))
     if cffi is not None:
