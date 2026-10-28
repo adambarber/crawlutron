@@ -7,19 +7,26 @@ import logging
 import re
 from collections.abc import Awaitable, Callable, Iterable, Iterator, MutableSequence
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import TypeVar
 
 from app.admission.scope_match import scope_allows
+from app.models.discovered_link import DiscoveredLink
 from app.models.host_policy import HostPolicy
+from app.models.json_value import JsonValue as JsonValue
 from app.models.normalized_url import NormalizedUrl, admit_or_none
 from app.safety.safe_regex import BoundedPattern, UnsafePattern, compile_untrusted
 from app.storage.job_store import FrontierEntry
 from app.vocabulary.hosts import is_analytics_host, is_document_url
 
+#: The candidate shapes link admission accepts: the extraction record itself, a
+#: wire mapping, or raw text -- the three forms the stream flattens to one type.
+LinkCandidate = DiscoveredLink | dict[str, JsonValue] | str
+
 __all__ = [
     "AdmissionOutcome",
     "AdmittedLink",
     "CommitCrawlDelay",
+    "LinkCandidate",
     "RobotsAllows",
     "RobotsCrawlDelay",
     "T",
@@ -75,7 +82,7 @@ class AdmissionOutcome:
     known_delta: frozenset[NormalizedUrl] = frozenset()
 
 
-def _link_values(link: Any) -> tuple[str, str] | None:
+def _link_values(link: LinkCandidate) -> tuple[str, str] | None:
     """The ``(normalized text, original text)`` an extraction record carries.
 
     The host is deliberately not read: ``DiscoveredLink.host`` is the extractor's
@@ -231,7 +238,7 @@ async def _admission_loop[T](
 
 
 async def admit_discovered_links[T](
-    links: Iterable[Any],
+    links: Iterable[LinkCandidate],
     *,
     source_depth: int,
     max_depth: int,
@@ -303,7 +310,7 @@ def remaining_page_capacity(admitted_count: int, max_pages: int) -> int | None:
     return max(0, max_pages - max(0, admitted_count))
 
 
-def compile_scope_pattern(scope_regex: Any) -> BoundedPattern | None:
+def compile_scope_pattern(scope_regex: str | JsonValue | None) -> BoundedPattern | None:
     """Compile a user-supplied scope regex: ``None`` means no restriction declared.
 
     A declared pattern that fails to compile raises -- consumers read ``None`` as
@@ -401,20 +408,18 @@ async def gather_robots_decisions(
     return decisions
 
 
-def _is_url_text(value: Any) -> bool:
+def _is_url_text(value: JsonValue) -> bool:
     """True for raw text or an admitted URL: the two shapes a frontier holds."""
     return isinstance(value, (str, NormalizedUrl)) and bool(value)
 
 
-def frontier_identity(value: Any, *, host_policy: HostPolicy) -> NormalizedUrl | None:
-    raw_url: Any
+def frontier_identity(
+    value: LinkCandidate | FrontierEntry, *, host_policy: HostPolicy
+) -> NormalizedUrl | None:
+    raw_url: JsonValue
     if isinstance(value, FrontierEntry):
         return value.url
-    elif isinstance(value, tuple) and len(value) > 1:
-        raw_url = getattr(value[1], "normalized_url", None)
-        if not _is_url_text(raw_url) and isinstance(value[0], str):
-            raw_url = value[0]
-    elif isinstance(value, dict):
+    if isinstance(value, dict):
         raw_url = value.get("url")
     elif isinstance(value, str):
         raw_url = value
@@ -432,7 +437,7 @@ def frontier_identity(value: Any, *, host_policy: HostPolicy) -> NormalizedUrl |
 
 
 def _candidate_stream[T](
-    links: Iterable[Any],
+    links: Iterable[LinkCandidate],
     *,
     next_depth: int,
     known: set[NormalizedUrl],

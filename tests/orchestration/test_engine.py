@@ -170,10 +170,10 @@ class TestEngineChainEdges:
         )
         assert d["url"] == "http://x/"
 
-    def test_payload_policy_invalid_strategy(self):
-        # A real tier: the only production caller builds one from the active settings, so ``None`` was never a
-        # value this entry point accepts.
-        with pytest.raises(ValueError):
+    def test_payload_policy_rejects_wire_dict(self):
+        # The typed funnel takes a validated CrawlRequest only; a raw wire dict
+        # is refused so callers cannot bypass the request-model validation edge.
+        with pytest.raises(TypeError):
             payload_policy({"policy": {"strategies": ["BOGUS"]}}, PolicyTier.model_defaults())
 
     async def test_browser_strategy_document_extraction(self, base_url):

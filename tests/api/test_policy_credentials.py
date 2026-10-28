@@ -6,12 +6,20 @@ origin, and origin-keyed fields use the existing cross-host scrub.
 import pytest
 
 from app.admission.credentials import origin_of
+from app.admission.policy import validate_wire_policy
+from app.models.crawl_request import CrawlRequest
 from app.models.credential import Credential
 from app.transport.request_profile import apply_credentials
 from tests._policy_factories import CrawlPolicy, PolicyTier, canonical, payload_policy, read_policy
 
 #: The settings a payload-policy test runs against: the defaults with nothing overridden.
 MODEL_DEFAULTS_TIER = PolicyTier.model_defaults()
+
+
+def _wire_policy(policy: dict[str, object]) -> CrawlPolicy:
+    """The wire path a caller's policy takes: the model coerces, the funnel absorbs the tier."""
+    request = CrawlRequest.model_validate({"url": "https://a.example/", "policy": policy})
+    return payload_policy(request, MODEL_DEFAULTS_TIER)
 
 
 class TestWireModel:
@@ -82,18 +90,15 @@ class TestApplyCredentials:
 
 class TestPayloadPolicy:
     def test_keys_canonicalize_to_origin_form(self):
-        policy = payload_policy(
-            {"policy": {"credentials": {"HTTPS://Private.Example:443/": {"kind": "bearer", "token": "t"}}}},
-            MODEL_DEFAULTS_TIER,
+        policy = _wire_policy(
+            {"credentials": {"HTTPS://Private.Example:443/": {"kind": "bearer", "token": "t"}}}
         )
         assert list(policy.credentials) == ["https://private.example"]
         assert policy.credentials["https://private.example"].token.get_secret_value() == "t"
 
     def test_malformed_credential_is_rejected_not_dropped(self):
         with pytest.raises(ValueError, match="credentials"):
-            payload_policy(
-                {"policy": {"credentials": {"https://a.example": {"kind": "carrier"}}}}, MODEL_DEFAULTS_TIER
-            )
+            _wire_policy({"credentials": {"https://a.example": {"kind": "carrier"}}})
 
     def test_two_keys_collapsing_to_one_origin_are_rejected(self):
         """Two spellings of one origin must not silently become one credential: the
@@ -117,13 +122,11 @@ class TestPayloadPolicy:
         one credential and validate -- the original bug with an extra step.
         """
         with pytest.raises(ValueError, match="invalid_policy_credentials"):
-            payload_policy(
+            validate_wire_policy(
                 {
-                    "policy": {
-                        "credentials": {
-                            "HTTPS://a.example": {"kind": "bearer", "token": "first"},
-                            "https://a.example:443": {"kind": "bearer", "token": "second"},
-                        }
+                    "credentials": {
+                        "HTTPS://a.example": {"kind": "bearer", "token": "first"},
+                        "https://a.example:443": {"kind": "bearer", "token": "second"},
                     }
                 },
                 MODEL_DEFAULTS_TIER,
@@ -131,17 +134,14 @@ class TestPayloadPolicy:
 
     def test_distinct_origins_still_validate(self):
         """The collision check must not reject a policy that merely looks similar."""
-        policy = payload_policy(
+        policy = _wire_policy(
             {
-                "policy": {
-                    "credentials": {
-                        "https://a.example": {"kind": "bearer", "token": "one"},
-                        "https://b.example": {"kind": "bearer", "token": "two"},
-                        "https://a.example:8443": {"kind": "bearer", "token": "three"},
-                    }
+                "credentials": {
+                    "https://a.example": {"kind": "bearer", "token": "one"},
+                    "https://b.example": {"kind": "bearer", "token": "two"},
+                    "https://a.example:8443": {"kind": "bearer", "token": "three"},
                 }
-            },
-            MODEL_DEFAULTS_TIER,
+            }
         )
         assert set(policy.credentials) == {
             "https://a.example",
@@ -154,11 +154,8 @@ class TestPayloadPolicy:
         check comparing keys rather than canonical forms would report an already-
         canonical policy as colliding with itself on every reload.
         """
-        once = payload_policy(
-            {"policy": {"credentials": {"https://a.example": {"kind": "bearer", "token": "t"}}}},
-            MODEL_DEFAULTS_TIER,
-        )
-        twice = payload_policy({"policy": {"credentials": dict(once.credentials)}}, MODEL_DEFAULTS_TIER)
+        once = _wire_policy({"credentials": {"https://a.example": {"kind": "bearer", "token": "t"}}})
+        twice = _wire_policy({"credentials": dict(once.credentials)})
         assert dict(twice.credentials) == dict(once.credentials)
 
 
@@ -219,12 +216,11 @@ class TestIpv6AndTrailingDotOrigins:
         """The wire path writes origin_of's spelling into the policy; the read
         edge re-runs the canonicalizer on every load, so one spelling must
         survive its own round trip."""
-        policy = payload_policy(
-            {"policy": {"credentials": {"https://[2001:0db8::1]:8080": {"kind": "bearer", "token": "t"}}}},
-            MODEL_DEFAULTS_TIER,
+        policy = _wire_policy(
+            {"credentials": {"https://[2001:0db8::1]:8080": {"kind": "bearer", "token": "t"}}}
         )
         assert list(policy.credentials) == ["https://[2001:0db8::1]:8080"]
-        again = payload_policy({"policy": {"credentials": dict(policy.credentials)}}, MODEL_DEFAULTS_TIER)
+        again = _wire_policy({"credentials": dict(policy.credentials)})
         assert dict(again.credentials) == dict(policy.credentials)
 
     def test_an_ipv6_credential_row_loads_from_the_job_store(self, tmp_path):
@@ -235,9 +231,8 @@ class TestIpv6AndTrailingDotOrigins:
         from tests._policy_factories import job_store
 
         store = job_store(tmp_path / "jobs.db", policy=unrestricted)
-        policy = payload_policy(
-            {"policy": {"credentials": {"https://[2001:0db8::1]:8080": {"kind": "bearer", "token": "t"}}}},
-            MODEL_DEFAULTS_TIER,
+        policy = _wire_policy(
+            {"credentials": {"https://[2001:0db8::1]:8080": {"kind": "bearer", "token": "t"}}}
         )
         job = store.create("https://[2001:0db8::1]:8080/", policy)
         loaded = store.load(job.job_id)

@@ -11,6 +11,7 @@ from app.admission.payload_helpers import payload_policy
 from app.admission.policy import PolicyTier, read_policy
 from app.config.settings import CrawlerSettings
 from app.models.crawl_policy import CrawlPolicy
+from app.models.json_value import JsonValue
 from app.models.normalized_url import NormalizedUrl
 from app.safety.validation import HostPolicy
 from app.storage.job_store import CrawlJobState, JobStore
@@ -72,7 +73,7 @@ def _policy(extra=None) -> CrawlPolicy:
 
     Carries no ``strategies`` on purpose: strategy tests want the default
     ladder to climb, not a pinned step."""
-    policy: dict[str, object] = {
+    policy: dict[str, JsonValue] = {
         "request_profile": {},
         "headers": {},
         "limits": dict(_STRATEGY_LIMITS),
@@ -156,12 +157,12 @@ __all__ = [
 ]
 
 
-def crawl_limits(*, respect_robots: bool | None = None, **over: object) -> dict[str, object]:
+def crawl_limits(*, respect_robots: bool | None = None, **over: JsonValue) -> dict[str, JsonValue]:
     """The limits block a crawl fixture needs, with overrides merged over it.
 
     ``timeout_seconds: 10`` is the live-server profile -- a too-tight fixture
     reports a transport problem. ``respect_robots`` is a keyword tests flip."""
-    limits: dict[str, object] = {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10}
+    limits: dict[str, JsonValue] = {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10}
     if respect_robots is not None:
         limits["respect_robots"] = respect_robots
     limits.update(over)
@@ -171,11 +172,11 @@ def crawl_limits(*, respect_robots: bool | None = None, **over: object) -> dict[
 def crawl_policy(
     strategies=None,
     *,
-    limits: dict[str, object] | None = None,
-    discovery: dict[str, object] | None = None,
+    limits: dict[str, JsonValue] | None = None,
+    discovery: dict[str, JsonValue] | None = None,
     scope_regex: str | None = None,
     extraction: str | None = None,
-) -> dict[str, object]:
+) -> dict[str, JsonValue]:
     """A crawl policy carrying strategies, limits, and the named extra blocks.
 
     Each extra block is a named keyword, so a typo'd name is a ``TypeError``;
@@ -183,7 +184,7 @@ def crawl_policy(
     limits_block = crawl_limits()
     if limits is not None:
         limits_block.update(limits)
-    policy: dict[str, object] = {
+    policy: dict[str, JsonValue] = {
         "strategies": list(strategies) if strategies is not None else [HTTP_DECLARED_CRAWLER],
         "limits": limits_block,
     }

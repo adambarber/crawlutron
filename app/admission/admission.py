@@ -5,15 +5,16 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from app.admission.admission_links import (
     AdmissionOutcome,
+    LinkCandidate,
     admit_discovered_links,
     compile_scope_pattern,
     remaining_page_capacity,
 )
-from app.admission.policy import PolicyTier, discovery_flags, read_policy
+from app.admission.policy import PolicyLike, PolicyTier, discovery_flags, read_policy
 from app.admission.scope_match import scope_allows
 from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.host_policy import HostPolicy
@@ -25,7 +26,8 @@ from app.transport.fetchers import default_http_fetcher
 from app.transport.robots import FetchAndDecode, RobotsRules, load_robots_rules, robots_allows
 from app.transport.scheduler import DomainScheduler
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # pragma: no cover - import cycle guard
+    from app.config.settings import CrawlerSettings
     from app.models.crawl_policy import CrawlPolicy
 
 _logger = logging.getLogger(__name__)
@@ -82,9 +84,9 @@ class JobAdmissionContext:
     @classmethod
     def create(
         cls,
-        policy: Any,
+        policy: PolicyLike | None,
         tier: PolicyTier,
-        settings: Any,
+        settings: CrawlerSettings | None,
         fetch_and_decode: FetchAndDecode | None = None,
     ) -> JobAdmissionContext:
         """The admission gate's own view of a policy: ``tier`` and ``settings``
@@ -93,11 +95,12 @@ class JobAdmissionContext:
         """
         normalized = read_policy(policy, tier)
         limits = normalized.limits
-        host_policy = HostPolicy.from_settings(settings)
+        active_settings = settings or CrawlerSettings.from_mapping()
+        host_policy = HostPolicy.from_settings(active_settings)
         robots = RobotsGate(normalized, host_policy, fetch_and_decode)
         scheduler = DomainScheduler.from_settings(
-            settings,
-            global_limit=settings.global_concurrency,
+            active_settings,
+            global_limit=active_settings.global_concurrency,
             max_rps=limits.max_rps,
         )
         discovery = discovery_flags(normalized)
@@ -181,7 +184,7 @@ def record_cap_overcommitted(job: CrawlJobState) -> None:
 
 async def admit_job_links(
     job: CrawlJobState,
-    links: Iterable[Any],
+    links: Iterable[LinkCandidate],
     *,
     source_depth: int,
     context: JobAdmissionContext,

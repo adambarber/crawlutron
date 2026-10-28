@@ -10,6 +10,7 @@ import pytest
 from app.admission.policy import CrawlPolicy
 from app.models.http_fetch_result import HttpFetchResult
 from app.models.http_fetcher import HttpFetcher
+from app.models.json_value import JsonValue
 from tests._browser_doubles import _fake_browser
 
 if TYPE_CHECKING:
@@ -62,7 +63,7 @@ from tests._policy_factories import canonical
 async def invoke_http_strategy(
     monkeypatch: pytest.MonkeyPatch,
     *,
-    policy: CrawlPolicy | dict[str, object],
+    policy: CrawlPolicy | dict[str, JsonValue],
     resp: Callable[[object], HttpFetchResult],
     dedupe_patch: bool = False,
     global_concurrency: int | None = None,
@@ -93,7 +94,7 @@ async def invoke_http_strategy(
 async def invoke_browser_strategy(
     monkeypatch: pytest.MonkeyPatch,
     *,
-    policy: CrawlPolicy | dict[str, object],
+    policy: CrawlPolicy | dict[str, JsonValue],
     html: str,
     text: str = "Hello world",
 ) -> EngineCrawlResult:

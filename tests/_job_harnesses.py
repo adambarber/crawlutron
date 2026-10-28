@@ -11,6 +11,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.admission.policy import PolicyLike
 from app.models.crawl_result import EngineCrawlResult
+from app.models.json_value import JsonValue
 from app.models.normalized_url import NormalizedUrl
 from app.models.result_record import ProducerEnvelope
 from app.models.taxonomy import Classification
@@ -218,12 +219,14 @@ async def _wait_until(job_store, job_id: str, predicate):
 
 def _execution_policy(policy: PolicyLike | None) -> PolicyLike:
     effective = dict(policy or {})
-    limits = dict(effective.get("limits") or {})
+    limits_raw = effective.get("limits")
+    limits: dict[str, JsonValue] = limits_raw if isinstance(limits_raw, dict) else {}
     limits.setdefault("max_depth", 1)
     limits.setdefault("max_pages", 0)
     limits.setdefault("respect_robots", False)
     effective["limits"] = limits
-    discovery = dict(effective.get("discovery") or {})
+    discovery_raw = effective.get("discovery")
+    discovery: dict[str, JsonValue] = discovery_raw if isinstance(discovery_raw, dict) else {}
     discovery.setdefault("sitemaps", False)
     effective["discovery"] = discovery
     return effective

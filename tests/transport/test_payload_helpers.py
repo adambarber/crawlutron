@@ -4,21 +4,18 @@ import pytest
 from pydantic import ValidationError
 
 from app.admission.payload_helpers import payload_policy
-from app.admission.policy import PolicyTier
+from app.admission.policy import PolicyTier, validate_wire_policy
 from app.config.settings import CrawlerSettings
 from app.models.crawl_policy import CrawlPolicy
 
 
 def _normalized_policy(**policy: object) -> CrawlPolicy:
-    """``payload_policy`` over a bare crawl payload, with default settings.
+    """The wire policy a caller sends, resolved at the admission edge.
 
-    Every test here is about one policy field, so the envelope and empty
-    settings are written once; rejections still raise from the real entry point.
+    Every test here is about one policy field, so the wire mapping is written
+    once; rejections still raise from the real entry point.
     """
-    return payload_policy(
-        {"url": "https://example.com/", "policy": policy},
-        PolicyTier.model_defaults(),
-    )
+    return validate_wire_policy(dict(policy), PolicyTier.model_defaults())
 
 
 class TestPayloadPolicyCarriesAdvertisedLimits:
@@ -93,10 +90,7 @@ class TestPydanticDefaultPreservesRamScaling:
             url="https://example.com/",
             policy={"limits": CrawlPolicyLimits(max_content_length_bytes=4096)},
         )
-        policy = payload_policy(
-            request.model_dump(exclude_none=True),
-            PolicyTier.model_defaults(),
-        )
+        policy = payload_policy(request, PolicyTier.model_defaults())
         assert policy.limits.max_content_length_bytes == 4096
 
 
@@ -128,13 +122,13 @@ class TestPayloadHelpersEdges:
     """Cover remaining branches in payload_helpers.py"""
 
     def test_payload_policy_invalid_limits(self):
-        from app.admission.payload_helpers import payload_policy
+        from app.admission.policy import validate_wire_policy
 
         with pytest.raises(ValueError) as cm:
-            payload_policy({"policy": {"limits": "not a dict"}}, PolicyTier.model_defaults())
+            validate_wire_policy({"limits": "not a dict"}, PolicyTier.model_defaults())
         assert str(cm.value) == "invalid_policy_limits"
         with pytest.raises(ValueError) as cm:
-            payload_policy({"policy": {"limits": {"max_depth": "not an int"}}}, PolicyTier.model_defaults())
+            validate_wire_policy({"limits": {"max_depth": "not an int"}}, PolicyTier.model_defaults())
         assert str(cm.value) == "invalid_policy_limits"
 
 
