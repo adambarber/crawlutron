@@ -13,8 +13,6 @@ from collections.abc import Callable
 from contextlib import suppress
 from typing import TYPE_CHECKING, TypedDict
 
-from markitdown import MarkItDown
-
 from app.runtime.metrics import get_metrics
 from app.runtime.pool import SyncPool
 
@@ -136,8 +134,10 @@ def configure_doc_worker_logging() -> None:
 def _markitdown_extract(body: bytes) -> str | None:
     """Convert document bytes with markitdown (worker-side real path only). Test
     hooks are NOT read here: the parent ships them per task, and the worker
-    honors the shipped message.
+    honors the shipped message; the parent never imports markitdown (#484).
     """
+    from markitdown import MarkItDown
+
     res = MarkItDown().convert_stream(io.BytesIO(body))
     return res.text_content if res is not None else None
 
@@ -150,6 +150,10 @@ def doc_worker_main(conn) -> None:
     try:
         configure_doc_worker_runtime()
         configure_doc_worker_logging()
+        # Warm import inside the readiness handshake (#6693/#484): the worker
+        # pays markitdown's cost here, inside the acquisition budget.
+        import markitdown  # noqa: F401  imported for its cost, in the worker only
+
         # Readiness is signalled here, after the child's imports: the parent's
         # conversion budget must not pay for this worker's start-up.
         conn.send(("ready", None))

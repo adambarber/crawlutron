@@ -112,12 +112,12 @@ async def shutdown_doc_extraction_executor() -> None:
     global _EXTRACTION_EXECUTOR, _DOC_EXECUTOR
     executor, _EXTRACTION_EXECUTOR = _EXTRACTION_EXECUTOR, None
     if executor is not None:
-        # cancel_futures drains queued-but-unstarted work so no orphaned future
-        # spawns a thread after this returns; threads never outlive the shutdown.
-        executor.shutdown(wait=False, cancel_futures=True)
+        # Refuse queued-but-unstarted work, then await every running future:
+        # no extraction thread outlives the shutdown (#560).
+        executor.shutdown(wait=True, cancel_futures=True)
     doc_executor, _DOC_EXECUTOR = _DOC_EXECUTOR, None
     if doc_executor is not None:
-        doc_executor.shutdown(wait=False, cancel_futures=True)
+        doc_executor.shutdown(wait=True, cancel_futures=True)
 
 
 # Extraction deadlines live in CrawlerSettings (env-mapped, operator-tunable).
