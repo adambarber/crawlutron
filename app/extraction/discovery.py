@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from html import unescape
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
 
 from app.extraction.documents import ExtractedContent
 from app.extraction.llm_format import (
@@ -14,7 +14,9 @@ from app.extraction.llm_format import llm_metadata_from_tree
 from app.extraction.trees import html_diagnostics, parse_html_tree
 from app.models.discovered_link import DiscoveredLink
 from app.models.host_policy import HostPolicy
-from app.models.normalized_url import NormalizedUrl, admit_or_none
+from app.models.json_value import JsonValue
+from app.models.normalized_url import NormalizedUrl as NormalizedUrl
+from app.models.normalized_url import admit_or_none
 from app.safety.validation import filter_js_endpoints
 
 
@@ -24,7 +26,7 @@ class PostFetchDiscovery(TypedDict):
     selecting is now a type error, not a silent None.
     """
 
-    diagnostics: dict[str, Any]
+    diagnostics: dict[str, JsonValue]
     discovered_links: list[DiscoveredLink]
     discovered_link_count: int
     discovered_links_truncated: bool
@@ -119,7 +121,11 @@ def extract_post_fetch_discovery(
         "llm_metadata": {},
     }
     if include_diagnostics:
-        envelope["diagnostics"] = dict(html_diagnostics(html, final_url, tree=tree))
+        # HtmlDiagnostics' values are the JSON spellings, so the envelope's
+        # diagnostics row admits it directly.
+        envelope["diagnostics"] = cast(
+            "dict[str, JsonValue]", dict(html_diagnostics(html, final_url, tree=tree))
+        )
     if include_links:
         links, count, truncated = extract_discovered_links(html, final_url, max_links=max_links, tree=tree)
         envelope["discovered_links"] = links

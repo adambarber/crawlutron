@@ -216,7 +216,7 @@ async def call_tool(
         job_store=job_store,
         caller=caller,
     )
-    success: dict[str, Any] = {
+    success: dict[str, JsonValue] = {
         "resultType": "complete",
         "content": [{"type": "text", "text": result.text}],
         "isError": result.is_error,

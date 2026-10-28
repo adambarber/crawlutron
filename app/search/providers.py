@@ -9,7 +9,7 @@ import abc
 import json
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import httpx
 
@@ -98,8 +98,8 @@ async def provider_http(
     method: str,
     url: str,
     *,
-    params: dict[str, Any] | None = None,
-    json_body: dict[str, Any] | None = None,
+    params: dict[str, JsonValue] | None = None,
+    json_body: dict[str, JsonValue] | None = None,
     data: dict[str, str] | None = None,
     headers: dict[str, str] | None = None,
     timeout_seconds: float,
@@ -112,7 +112,11 @@ async def provider_http(
     timeout = Timeouts.for_request(timeout_seconds).as_httpx()
     request_url = httpx.URL(url)
     if params:
-        request_url = request_url.copy_merge_params(params)
+        # httpx's param grammar accepts str/int/float/bool/None and lists thereof;
+        # build QueryParams from the JSON scalars so a nested value dies here loudly.
+        request_url = request_url.copy_merge_params(
+            {k: v for k, v in params.items() if isinstance(v, (str, int, float, bool)) or v is None}
+        )
     pinned_url, hop_headers, extensions = await _pinned_provider_request(
         request_url, headers, timeout_seconds
     )
@@ -232,8 +236,8 @@ class ProviderCall:
 
     method: str
     url: str
-    params: dict[str, Any] | None = None
-    json_body: dict[str, Any] | None = None
+    params: dict[str, JsonValue] | None = None
+    json_body: dict[str, JsonValue] | None = None
     headers: dict[str, str] | None = None
 
 

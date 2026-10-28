@@ -6,7 +6,9 @@ import contextlib
 import json
 import re
 from html import unescape
-from typing import Any, cast, get_args, get_type_hints
+from typing import cast, get_args, get_type_hints
+
+from lxml import etree
 
 from app.extraction.classify import strip_html_noise
 from app.extraction.trees import parse_html_tree
@@ -32,7 +34,7 @@ for _field, _hint in get_type_hints(PageMetadata).items():
     _FIELD_TYPES[_field] = _live[0] if len(_live) == 1 else _live
 
 
-def extract_carried_metadata(value: Any) -> PageMetadata:
+def extract_carried_metadata(value: object) -> PageMetadata:
     """The one place unproven page metadata becomes :class:`PageMetadata`: the JSON
     from the engine spill is admitted field by field (a junk field drops, the rest
     survives) -- the only line standing between the typed return and the untyped dict.
@@ -68,11 +70,13 @@ def extract_llm_metadata(html: str, url: NormalizedUrl | None) -> PageMetadata:
     return llm_metadata_from_tree(tree, url)
 
 
-def llm_metadata_from_tree(tree: Any, url: NormalizedUrl | None) -> PageMetadata:
+def llm_metadata_from_tree(tree: etree._Element | None, url: NormalizedUrl | None) -> PageMetadata:
     """Read the page-metadata fields from an ALREADY-parsed lxml tree, shared by the
     fallback and the engine's discovery stage so the two cannot drift into different
     dialects; returns plain JSON data, the tree never escaping the caller.
     """
+    if tree is None:
+        return {}
     source = url.raw if url is not None else ""
     metadata: PageMetadata = {"source_url": source}
     _carry_meta_tags(metadata, tree)
@@ -113,13 +117,13 @@ def llm_metadata_from_tree(tree: Any, url: NormalizedUrl | None) -> PageMetadata
     lang = tree.xpath("//html/@lang")
     if lang:
         metadata["language"] = lang[0].strip()
-    elif tree.tag == "html" and tree.get("lang"):
-        metadata["language"] = tree.get("lang").strip()
+    elif tree.tag == "html" and (tree_lang := tree.get("lang")):
+        metadata["language"] = tree_lang.strip()
 
     return metadata
 
 
-def _carry_meta_tags(metadata: PageMetadata, tree: Any) -> None:
+def _carry_meta_tags(metadata: PageMetadata, tree: etree._Element) -> None:
     """Carry the ``<meta>`` tags that name a declared field into ``metadata``: one
     literal-key assignment per tag, not a rename table -- checkers reject a computed
     key into a TypedDict, making a mistyped field a build error, not a lost value.

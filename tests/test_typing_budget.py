@@ -25,9 +25,8 @@ from tests.chokepoint_walks import REPO_ROOT, nodes_of, trees_under
 _METRIC = "undeclared record"
 _ANY = "bare Any"
 
-# Batches 1+2 fully landed (models, admission/api); 3a+3b: transport pool, fetch and
-# cache seams (non-browser transport at zero).
-_BUDGETS = {_METRIC: 18, _ANY: 71}
+# Batches 1-3a landed; remaining are Batch 4's browser_ files (2 driver records).
+_BUDGETS = {_METRIC: 2, _ANY: 39}
 
 # A record is anything whose key set a caller might depend on.
 _RECORD_ROOTS = frozenset(
@@ -243,7 +242,7 @@ def _walked() -> dict[str, int]:
 # The walk's reach floor drops with the tree's declared records: the 89 #135
 # leaves is the count itself, so the floor is a reach proof, not the ratchet.
 test_collector_sees_the_whole_tree = collector_sees_the_whole_tree(
-    _walked, {"annotation": 80}, subject="typing"
+    _walked, {"annotation": 40}, subject="typing"
 )
 
 

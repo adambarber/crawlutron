@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Any, ClassVar, Final, cast
+from typing import Annotated, ClassVar, Final, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 from pydantic.json_schema import JsonDict
@@ -205,7 +205,7 @@ class CrawlPolicy(BaseModel):
 
     @field_validator("credentials", mode="before")
     @classmethod
-    def _canonicalize_credential_origins(cls, value: Any) -> Any:
+    def _canonicalize_credential_origins(cls, value: object) -> object:
         """Key every credential by its canonical origin, at the read edge; the rule lives
         in ``app.admission.credentials.origin_of`` (the same function every lookup uses), so one
         rule at one site. A path-scoped or duplicate-canonical key is rejected, never narrowed.
