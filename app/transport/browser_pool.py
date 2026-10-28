@@ -10,10 +10,11 @@ import asyncio
 import logging
 import time
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from app.config.settings import CrawlerSettings
 from app.models.browser_pool_exhausted import BrowserPoolExhaustedError
+from app.models.crawl_job import CrawlJob
 from app.models.crawl_result import CrawlResult
 from app.models.taxonomy import CrawlStrategyName
 from app.runtime.pool import AsyncPool
@@ -50,7 +51,7 @@ class BrowserPool:
         *,
         pool_size: int | None = None,
         settings: CrawlerSettings | None = None,
-        **renderer_kwargs: Any,
+        **renderer_kwargs: object,
     ) -> None:
         self._pool_size = pool_size or derive_browser_pool_size()
         self._settings = settings
@@ -71,7 +72,11 @@ class BrowserPool:
             if self._initialized:
                 return
             for i in range(self._pool_size):
-                renderer = BrowserRenderer(settings=self._settings, **self._renderer_kwargs)
+                # The kwargs bag passes through to BrowserRenderer unopened; Any is
+                # the honest unpack type at this construction boundary.
+                renderer = BrowserRenderer(
+                    settings=self._settings, **cast("dict[str, Any]", self._renderer_kwargs)
+                )
                 self._renderers.append(renderer)
                 await self._available.put(renderer)
                 logger.info("browser_pool_renderer_created", extra={"index": i})
@@ -194,7 +199,7 @@ class PooledBrowserWorker:
         # so the returned value is a declared member and nothing needs narrowing.
         return self._pool.browser_strategy
 
-    async def __call__(self, job: Any) -> CrawlResult:
+    async def __call__(self, job: CrawlJob) -> CrawlResult:
         started = time.monotonic()
         # The browser mode this pool actually renders with, resolved before any
         # attempt so the success and failure paths label the result identically.

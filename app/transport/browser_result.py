@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 from app.admission.render_options import resolve_render_options
 from app.models.crawl_diagnostics import CrawlDiagnostics
@@ -27,11 +27,13 @@ from app.vocabulary.extraction import EXTRACTION_METHOD_DOM_TEXT
 
 if TYPE_CHECKING:
     from app.config.settings import CrawlerSettings
-    from app.models.crawl_result import EngineCrawlResult
+    from app.models.crawl_result import CrawlResult, EngineCrawlResult
     from app.models.crawl_worker import CrawlWorker
     from app.models.host_policy import HostPolicy
+    from app.models.intercepted_xhr_record import InterceptedXhrRecord
     from app.models.normalized_url import NormalizedUrl
     from app.models.render_options import RenderOptions
+    from app.models.screenshot_diagnostics import ScreenshotDiagnostics
 
 
 def _browser_options(policy: CrawlPolicy) -> RenderOptions:
@@ -59,9 +61,15 @@ def _browser_job(url: NormalizedUrl, options: RenderOptions, host_policy: HostPo
     )
 
 
+def _render_extraction_method(result: CrawlResult) -> str:
+    """The method the render's own worker reported; the pipeline cannot label this branch."""
+    raw = result.metadata.get("extraction_method")
+    return raw if isinstance(raw, str) else EXTRACTION_METHOD_DOM_TEXT
+
+
 async def _extract_browser_content(
     content: str | None,
-    result: Any,
+    result: CrawlResult,
     policy: CrawlPolicy,
     settings: CrawlerSettings | None = None,
 ) -> ExtractedContent:
@@ -69,7 +77,7 @@ async def _extract_browser_content(
         return ExtractedContent(
             text="",
             markdown=None,
-            extraction_method=result.metadata.get("extraction_method") or EXTRACTION_METHOD_DOM_TEXT,
+            extraction_method=_render_extraction_method(result),
         )
     return await run_extraction(
         extraction=policy.extraction,
@@ -78,16 +86,14 @@ async def _extract_browser_content(
         content_type=None,
         final_url=result.final_url,
         policy=policy,
-        # A render reports the method its own worker used; the pipeline cannot
-        # label that branch for us.
-        default_method=result.metadata.get("extraction_method") or EXTRACTION_METHOD_DOM_TEXT,
+        default_method=_render_extraction_method(result),
         html=True,
         settings=settings,
     )
 
 
 async def _discover_browser_content(
-    result: Any,
+    result: CrawlResult,
     policy: CrawlPolicy,
     host_policy: HostPolicy,
 ) -> PostFetchDiscovery:
@@ -102,7 +108,7 @@ async def _discover_browser_content(
 
 
 def _browser_diagnostics(
-    result: Any,
+    result: CrawlResult,
     content: ExtractedContent,
     policy: CrawlPolicy,
     host_policy: HostPolicy,
@@ -110,7 +116,10 @@ def _browser_diagnostics(
 ) -> CrawlDiagnostics:
     diagnostics: CrawlDiagnostics = {
         "browser_profile": policy.browser_profile,
-        "runtime": {"elapsed_ms": result.elapsed_ms, "final_url": result.final_url},
+        "runtime": {
+            "elapsed_ms": result.elapsed_ms,
+            "final_url": result.final_url.raw if result.final_url else "",
+        },
         "content_metrics": {
             "visible_text_length": len(content.text.strip()),
             "html_length": len((result.html or "").strip()),
@@ -119,10 +128,14 @@ def _browser_diagnostics(
     # Two disclosure bags by design (parse's, result's); the fold is the
     # boundary. TypedDict.update refuses the cross-bag shape, so cast names it.
     diagnostics.update(cast(CrawlDiagnostics, post_fetch["diagnostics"]))
-    for key in ("intercepted_xhr", "screenshot"):
-        value = result.metadata.get(key)
-        if value:
-            diagnostics[key] = value
+    # The render worker built these lists as the records named; the metadata bag
+    # holds them as JsonValue, so the record view is a producer-boundary cast.
+    xhr = result.metadata.get("intercepted_xhr")
+    if isinstance(xhr, list):
+        diagnostics["intercepted_xhr"] = cast("list[InterceptedXhrRecord]", xhr)
+    shots = result.metadata.get("screenshot")
+    if isinstance(shots, list):
+        diagnostics["screenshot"] = cast("list[ScreenshotDiagnostics]", shots)
     diagnostics.update(post_fetch_diagnostics(post_fetch, result.final_url, host_policy))
     return diagnostics
 
@@ -132,7 +145,7 @@ def _build_browser_result(
     original_url: str,
     normalized_url: NormalizedUrl,
     strategy: CrawlStrategyName,
-    result: Any,
+    result: CrawlResult,
     content: ExtractedContent,
     diagnostics: CrawlDiagnostics,
     post_fetch: PostFetchDiscovery,

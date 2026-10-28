@@ -25,9 +25,9 @@ from tests.chokepoint_walks import REPO_ROOT, nodes_of, trees_under
 _METRIC = "undeclared record"
 _ANY = "bare Any"
 
-# Batches 1+2 fully landed: models declared (Batch 1), admission/api closed unions (2a) +
-# api doors typed (2b). Live counts on the merged tree.
-_BUDGETS = {_METRIC: 38, _ANY: 108}
+# Batches 1-4 landed: models declared (Batch 1), admission/api closed unions (2a) +
+# api doors typed (2b), browser seam family typed (Batch 4, #389). Live counts on the merged tree.
+_BUDGETS = {_METRIC: 30, _ANY: 68}
 
 # A record is anything whose key set a caller might depend on.
 _RECORD_ROOTS = frozenset(
@@ -199,9 +199,9 @@ def test_the_scripts_typing_budget_reaches_scripts() -> None:
     _assert_undeclared_record_fires()
 
 
-#: Tests/ baseline: 157/65 -> 99/39 -> 3/0 (#389). The 3 are
-#: browser_blocking handler's list[dict[str, Any]] matching production.
-_TESTS_BUDGETS = {_METRIC: 3, _ANY: 0}
+#: Tests/ sealed at zero (#389): the last 3 were browser_blocking handler's
+#: list[dict[str, Any]], now typed against the production InterceptedXhrRecord.
+_TEST_BUDGETS = {_METRIC: 0, _ANY: 0}
 
 suite_offenders, suite_measurement = _gate(REPO_ROOT / "tests")
 
@@ -214,16 +214,16 @@ _TESTS_REMEDY = (
 
 
 test_tests_budget_is_not_exceeded = budget_not_exceeded(
-    _TESTS_BUDGETS,
+    _TEST_BUDGETS,
     (suite_measurement, suite_offenders),
     subject="tests typing",
     remedy=_TESTS_REMEDY,
 )
 test_tests_budget_is_tight = budget_is_tight(
-    _TESTS_BUDGETS, (suite_measurement, suite_offenders), subject="tests typing"
+    _TEST_BUDGETS, (suite_measurement, suite_offenders), subject="tests typing"
 )
 test_tests_collection_is_deterministic = collection_is_deterministic(
-    _TESTS_BUDGETS, (suite_measurement, suite_offenders), subject="tests typing"
+    _TEST_BUDGETS, (suite_measurement, suite_offenders), subject="tests typing"
 )
 
 
@@ -231,7 +231,7 @@ def test_the_tests_typing_budget_reaches_tests() -> None:
     """The H1 reach: the typing budget now sweeps tests/, which had none. The real
     tree shows it, and the shared classifier fires on a synthetic undeclared
     record, so one in tests/ fires."""
-    assert suite_measurement(_METRIC) == 3, "the tests typing budget stopped reaching the real tree"
+    assert suite_measurement(_METRIC) == 0, "the tests typing budget stopped reaching the real tree"
     assert suite_measurement(_ANY) == 0, "the bare-Any budget stopped reaching the real tree"
     _assert_undeclared_record_fires()
 
@@ -240,10 +240,10 @@ def _walked() -> dict[str, int]:
     return {"annotation": sum(1 for _candidate in walk(candidates))}
 
 
-# The walk's reach floor drops with the tree's declared records: the 137 #135
+# The walk's reach floor drops with the tree's declared records: the 96 #389
 # leaves is the count itself, so the floor is a reach proof, not the ratchet.
 test_collector_sees_the_whole_tree = collector_sees_the_whole_tree(
-    _walked, {"annotation": 130}, subject="typing"
+    _walked, {"annotation": 96}, subject="typing"
 )
 
 

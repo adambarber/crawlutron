@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from app.models.normalized_url import NormalizedUrl
 from app.transport.cookie_jar import COOKIE_NAMESPACE
 from app.transport.cookie_store import InMemoryCookieStore
+from app.transport.render_page import RenderPage
 
 logger = logging.getLogger(__name__)
 
@@ -101,14 +101,14 @@ def get_browser_cookies_for(domain: str, *, namespace: str | None = None) -> str
     return BROWSER_COOKIES_BY_DOMAIN.touch_get(domain, _running_namespace(namespace))
 
 
-async def harvest_session_cookies(page: Any, url: NormalizedUrl, *, namespace: str | None = None) -> None:
+async def harvest_session_cookies(
+    page: RenderPage, url: NormalizedUrl, *, namespace: str | None = None
+) -> None:
     """Capture the page's cookies before the context closes.
 
     Runs synchronously: the retry reads the store right after the render."""
     try:
-        context = getattr(page, "context", None)
-        if context is None:
-            return
+        context = page.context
         cookies = await context.cookies(url.raw)
         header = "; ".join(f"{c['name']}={c['value']}" for c in cookies if c.get("name"))
         if header:

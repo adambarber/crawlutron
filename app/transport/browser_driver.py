@@ -12,7 +12,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple, Protocol, cast
 
 from app.config.env import get_env_int
 from app.models.browser_profile_record import BrowserProfileRecord
@@ -37,6 +37,7 @@ from app.transport.driver_pages import (
     flatten_shadow_dom,
     safe_close_page,
 )
+from app.transport.render_page import RenderPage
 from app.vocabulary.browser import ACTIONS_REQUIRING_SELECTOR, BROWSER_ACTION_TYPES, BrowserAction
 from app.vocabulary.limits import DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS, DEFAULT_MAX_BROWSER_RENDERS
 
@@ -47,43 +48,63 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-async def _click_verb(driver: BrowserDriver, page: Any, action: BrowserAction) -> None:
+class BrowserHandle(Protocol):
+    """What the driver does with a launched browser: open pages. Closure is
+    probed duck-typed (:func:`_browser_closed`), because the real Playwright
+    ``Browser`` publishes no ``is_closed`` and a double may."""
+
+    async def new_page(self, **kwargs: object) -> RenderPage: ...
+
+
+class BrowserContextManager(Protocol):
+    """The ``async with`` wrapper a browser factory hands back.
+
+    AsyncCamoufox yields ``Browser | BrowserContext``; the driver only calls
+    ``new_page`` on it, so the handle is the protocol member, not the class.
+    """
+
+    async def __aenter__(self) -> object: ...
+
+    async def __aexit__(self, *exc: object) -> object: ...
+
+
+async def _click_verb(driver: BrowserDriver, page: RenderPage, action: BrowserAction) -> None:
     await page.click(str(action.get("selector", "")))
 
 
-async def _fill_verb(driver: BrowserDriver, page: Any, action: BrowserAction) -> None:
+async def _fill_verb(driver: BrowserDriver, page: RenderPage, action: BrowserAction) -> None:
     await page.fill(str(action.get("selector", "")), str(action.get("value", "")))
 
 
-async def _hover_verb(driver: BrowserDriver, page: Any, action: BrowserAction) -> None:
+async def _hover_verb(driver: BrowserDriver, page: RenderPage, action: BrowserAction) -> None:
     await page.hover(str(action.get("selector", "")))
 
 
-async def _scroll_verb(driver: BrowserDriver, page: Any, action: BrowserAction) -> None:
+async def _scroll_verb(driver: BrowserDriver, page: RenderPage, action: BrowserAction) -> None:
     element = await page.query_selector(str(action.get("selector", "")))
     if element is not None:
         await element.scroll_into_view_if_needed()
 
 
-async def _scroll_bottom_verb(driver: BrowserDriver, page: Any, action: BrowserAction) -> None:
+async def _scroll_bottom_verb(driver: BrowserDriver, page: RenderPage, action: BrowserAction) -> None:
     await page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
 
 
-async def _wait_verb(driver: BrowserDriver, page: Any, action: BrowserAction) -> None:
+async def _wait_verb(driver: BrowserDriver, page: RenderPage, action: BrowserAction) -> None:
     await page.wait_for_selector(str(action.get("selector", "")), timeout=ACTION_WAIT_MS(action))
 
 
-async def _wait_seconds_verb(driver: BrowserDriver, page: Any, action: BrowserAction) -> None:
+async def _wait_seconds_verb(driver: BrowserDriver, page: RenderPage, action: BrowserAction) -> None:
     await driver._async_sleep(min(float(action.get("seconds", 1)), MAX_ACTION_WAIT_SECONDS))
 
 
-async def _refuse_execute_js(driver: BrowserDriver, page: Any, action: BrowserAction) -> None:
+async def _refuse_execute_js(driver: BrowserDriver, page: RenderPage, action: BrowserAction) -> None:
     """Refuse arbitrary JS execution (RCE-class risk)."""
     return None
 
 
 class _ActionStep(NamedTuple):
-    handler: Callable[[BrowserDriver, Any, BrowserAction], Awaitable[None]]
+    handler: Callable[[BrowserDriver, RenderPage, BrowserAction], Awaitable[None]]
     needs_selector: bool
 
 
@@ -113,7 +134,7 @@ class BrowserDriver:
     def __init__(
         self,
         *,
-        browser_factory: Callable[[], Any] | None = None,
+        browser_factory: Callable[..., Any] | None = None,
         sleep: Callable[[float], None] = time.sleep,
         max_browser_renders: int | None = None,
         cache_dir: str | Path | None = None,
@@ -152,12 +173,12 @@ class BrowserDriver:
             if settings is None
             else float(settings.browser_cookie_harvest_timeout_seconds)
         )
-        self._browser_cm: Any = None
-        self._browser: Any = None
+        self._browser_cm: BrowserContextManager | None = None
+        self._browser: BrowserHandle | None = None
         self._browser_reused = False
         self._render_count = 0
 
-    async def open_page(self, browser_profile: BrowserProfileRecord | None) -> Any:
+    async def open_page(self, browser_profile: BrowserProfileRecord | None) -> RenderPage:
         """Return a page on a (possibly reused) browser, with profile kwargs applied.
         One call rather than acquire-then-new_page, so a test substituting this
         driver does not have to supply a fake browser whose only job is ``new_page``.
@@ -179,7 +200,7 @@ class BrowserDriver:
         return self._cache_dir
 
     @property
-    def browser(self) -> Any:
+    def browser(self) -> BrowserHandle | None:
         """The live browser, or None while the driver holds none.
         Public because releasing it is a driver contract: after ``close()`` the driver
         must hold nothing, and a test asserting that reads a public property.
@@ -194,7 +215,7 @@ class BrowserDriver:
         """Drop the cached browser. Best-effort, and safe to call more than once."""
         await self._release_browser()
 
-    def create_camoufox_browser(self, **kwargs: Any):
+    def create_camoufox_browser(self, **kwargs: object):
         """Factory for AsyncCamoufox browser."""
         return create_camoufox_browser(**kwargs)
 
@@ -205,15 +226,15 @@ class BrowserDriver:
         """A storage_state path under the cache dir, or None."""
         return validate_storage_state_path(storage_state, self._cache_dir)
 
-    def browser_kwargs(self, browser_profile: BrowserProfileRecord | None) -> dict[str, Any]:
+    def browser_kwargs(self, browser_profile: BrowserProfileRecord | None) -> dict[str, object]:
         """Launch-only kwargs for the Camoufox/Playwright browser factory."""
         return browser_kwargs(browser_profile, self._cache_dir)
 
-    def page_kwargs(self, browser_profile: BrowserProfileRecord | None) -> dict[str, Any]:
+    def page_kwargs(self, browser_profile: BrowserProfileRecord | None) -> dict[str, object]:
         """Page/context kwargs, applied at ``browser.new_page`` time."""
         return page_kwargs(browser_profile)
 
-    async def _acquire_browser(self, browser_profile: BrowserProfileRecord | None) -> Any:
+    async def _acquire_browser(self, browser_profile: BrowserProfileRecord | None) -> BrowserHandle:
         """Return a reused browser instance, launching one on first use.
 
         Recycles the browser once it has served ``_max_browser_renders`` to
@@ -228,13 +249,19 @@ class BrowserDriver:
                 await self._release_browser()
             launch_kwargs = self.browser_kwargs(browser_profile)
             cm = self._browser_factory(**launch_kwargs)
-            self._browser = await cm.__aenter__()
+            # The yielded handle is object-typed in the wild (Browser|BrowserContext);
+            # the driver only calls new_page on it, so cast to the handle here.
+            browser = cast(BrowserHandle, await cm.__aenter__())
+            self._browser = browser
             self._browser_cm = cm
             self._browser_reused = False
             self._render_count = 0
         else:
             self._browser_reused = True
-        return self._browser
+        browser = self._browser
+        if browser is None:  # unreachable: both arms above assign it
+            raise AssertionError("_acquire_browser left no browser")
+        return browser
 
     async def _release_browser(self) -> None:
         """Take the cached context manager and tear it down, best-effort.
@@ -249,23 +276,23 @@ class BrowserDriver:
             with contextlib.suppress(Exception):  # best-effort teardown
                 await cm.__aexit__(None, None, None)
 
-    async def wait_for_ready_state(self, page: Any) -> None:
+    async def wait_for_ready_state(self, page: RenderPage) -> None:
         for _ in range(10):
             state = await page.evaluate("() => document.readyState")
             if state in {"interactive", "complete"}:
                 return
             await self._async_sleep(0.1)
 
-    async def flatten_shadow_dom(self, page: Any) -> None:
+    async def flatten_shadow_dom(self, page: RenderPage) -> None:
         await flatten_shadow_dom(page)
 
-    async def auto_accept_cookie_consent(self, page: Any, enabled: bool) -> bool:
+    async def auto_accept_cookie_consent(self, page: RenderPage, enabled: bool) -> bool:
         """Auto-click cookie consent buttons when the caller opts in."""
         return await auto_accept_cookie_consent(page, enabled, self._sleep)
 
     async def run_action_chain(
         self,
-        page: Any,
+        page: RenderPage,
         actions: list[BrowserAction],
         *,
         url: str = "",
@@ -292,7 +319,9 @@ class BrowserDriver:
                 },
             )
 
-    async def _perform_action_chain(self, page: Any, actions: list[BrowserAction], *, url: str) -> None:
+    async def _perform_action_chain(
+        self, page: RenderPage, actions: list[BrowserAction], *, url: str
+    ) -> None:
         """Execute a sequence of browser actions before extraction: click, fill, hover,
         scroll, scroll_bottom, wait, wait_seconds. ``execute_js`` is refused (RCE-class
         risk); actions are best-effort but not silent -- a wait that never resolves is a real quality loss.
@@ -324,7 +353,7 @@ class BrowserDriver:
                     },
                 )
 
-    async def _dispatch_action(self, page: Any, action: BrowserAction, action_type: str) -> None:
+    async def _dispatch_action(self, page: RenderPage, action: BrowserAction, action_type: str) -> None:
         """Perform ONE recognised action via :data:`_ACTION_STEPS`.
         ``execute_js`` is recognised and refused here as at the model, because this
         is the chokepoint a policy arriving by any route cannot run script through.
@@ -340,16 +369,18 @@ class BrowserDriver:
         await step.handler(self, page, action)
 
     async def capture_element_screenshots(
-        self, page: Any, selectors: list[str]
+        self, page: RenderPage, selectors: list[str]
     ) -> list[ScreenshotDiagnostics]:
         """Capture targeted element screenshots as base64."""
         return await capture_element_screenshots(page, selectors)
 
-    async def safe_close_page(self, page: Any) -> None:
+    async def safe_close_page(self, page: RenderPage) -> None:
         """Best-effort page teardown."""
         await safe_close_page(page)
 
-    async def lazy_load_scroll(self, page: Any, browser_profile: dict[str, Any] | None = None) -> None:
+    async def lazy_load_scroll(
+        self, page: RenderPage, browser_profile: BrowserProfileRecord | None = None
+    ) -> None:
         """Scroll to the bottom repeatedly to trigger lazy-loaded content.
 
         The scroll evaluate returns the page height; two stable polls stop the
@@ -375,7 +406,7 @@ class BrowserDriver:
         """Cookie-harvest wait bound: policy profile beats settings."""
         return harvest_timeout_for(browser_profile, self._harvest_timeout_seconds)
 
-    def scroll_config_for(self, browser_profile: dict[str, Any] | None) -> tuple[int, float]:
+    def scroll_config_for(self, browser_profile: BrowserProfileRecord | None) -> tuple[int, float]:
         """Lazy-scroll steps/delay: policy profile beats settings."""
         return scroll_config_for(browser_profile, self._lazy_scroll_steps, self._lazy_scroll_delay_seconds)
 

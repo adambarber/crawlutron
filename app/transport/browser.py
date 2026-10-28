@@ -10,7 +10,7 @@ from collections.abc import (
     Awaitable,
     Callable,
 )
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from app.config.env import get_env_float, get_env_int
 from app.config.settings import CrawlerSettings
@@ -29,7 +29,6 @@ from app.transport.browser_driver import BrowserDriver
 from app.transport.browser_render_phases import (
     ReleasePlan,
     RenderCollaborators,
-    RenderPage,
     WireGuard,
     guarded_render,
     release_page,
@@ -43,6 +42,7 @@ from app.transport.browser_targets import (
 from app.transport.classification import classify_error_code
 from app.transport.driver_config import async_sleep
 from app.transport.pinned_transport import ResolverBudgetExceeded
+from app.transport.render_page import RenderPage
 
 if TYPE_CHECKING:
     from app.models.host_policy import HostPolicy
@@ -110,7 +110,7 @@ class BrowserRenderer:
         challenge_wait_seconds: float | None = None,
         pdf_text_extractor: Callable[[NormalizedUrl], str] | None = None,
         extract: Callable[
-            [Any, RenderOptions], Awaitable[tuple[str | None, str | None, Classification, bool]]
+            [RenderPage, RenderOptions], Awaitable[tuple[str | None, str | None, Classification, bool]]
         ]
         | None = None,
         looks_like_pdf: Callable[[str], bool] | None = None,
@@ -229,7 +229,7 @@ class BrowserRenderer:
         """Release the reused browser instance at service shutdown."""
         await self._driver.close()
 
-    async def _navigate_and_settle(self, page: Any, pinned_url: str) -> None:
+    async def _navigate_and_settle(self, page: RenderPage, pinned_url: str) -> None:
         """Goto the pinned URL and wait for a settled ready state."""
         await page.goto(pinned_url, wait_until="domcontentloaded")
         await self._driver.wait_for_ready_state(page)
@@ -293,11 +293,12 @@ class BrowserRenderer:
         return self._driver.run_action_chain(page, actions, url=url, budget_seconds=budget_seconds)
 
     async def extract_with_challenge_wait(
-        self, page: Any, options: RenderOptions
+        self, page: RenderPage, options: RenderOptions
     ) -> tuple[str | None, str | None, Classification, bool]:
         html = await self.extract_html(page) if options.include_html else None
         text = await self.extract_text(page) if options.include_text else None
-        title = await page.evaluate("() => document.title")
+        raw_title = await page.evaluate("() => document.title")
+        title = raw_title if isinstance(raw_title, str) else None
         classification = classify_page(html, text, title=title)
 
         if classification != "bot_challenge_detected":
@@ -310,7 +311,8 @@ class BrowserRenderer:
             await self._driver.wait_for_ready_state(page)
             next_html = await self.extract_html(page) if options.include_html else None
             next_text = await self.extract_text(page) if options.include_text else None
-            next_title = await page.evaluate("() => document.title")
+            raw_next_title = await page.evaluate("() => document.title")
+            next_title = raw_next_title if isinstance(raw_next_title, str) else None
             next_classification = classify_page(next_html, next_text, title=next_title)
             if next_classification != "bot_challenge_detected":
                 return next_html, next_text, next_classification, True
@@ -319,7 +321,7 @@ class BrowserRenderer:
         return html, text, classification, False
 
     @staticmethod
-    async def extract_html(page: Any) -> str:
+    async def extract_html(page: RenderPage) -> str:
         """The page's serialized HTML, or empty string if the page will not say."""
         try:
             return await page.content()
@@ -327,15 +329,16 @@ class BrowserRenderer:
             return ""
 
     @staticmethod
-    async def extract_text(page: Any) -> str:
+    async def extract_text(page: RenderPage) -> str:
         """The rendered visible text, or empty string if the page will not say --
         static and public for the same reason ``extract_html`` is: neither reads
         renderer state, so a test substituting the step needs these stand-alone.
         """
         try:
-            return await page.evaluate("() => document.body ? document.body.innerText: ''")
+            text = await page.evaluate("() => document.body ? document.body.innerText: ''")
         except Exception:
             return ""
+        return text if isinstance(text, str) else ""
 
     def _failure_result(
         self,

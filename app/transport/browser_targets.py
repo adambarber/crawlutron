@@ -8,10 +8,11 @@ from collections.abc import (
     Awaitable,
     Callable,
 )
-from typing import Any, cast
+from typing import Protocol, cast
 
 from app.models.host_policy import HostPolicy
 from app.models.intercepted_xhr_record import InterceptedXhrRecord
+from app.models.json_value import JsonValue
 from app.models.normalized_url import NormalizedUrl
 from app.safety.json_safe import json_default
 from app.transport.pinned_transport import (
@@ -22,6 +23,16 @@ from app.vocabulary.hosts import is_analytics_host as _is_analytics_url
 
 # The resolve bound is the pinned transport's own (#383/#405): one implementation for both families.
 _BOUNDED = bounded_thread_resolve
+
+
+class RouteResponse(Protocol):
+    """The XHR response surface the capture handler reads; a double needs exactly this."""
+
+    url: str
+    status: int
+    headers: dict[str, str]
+
+    async def json(self) -> object: ...
 
 
 async def resolve_browser_target(
@@ -177,14 +188,16 @@ def make_ssrf_websocket_handler(*, policy: HostPolicy, timeout_seconds: float | 
     return _ws_handler
 
 
-def make_response_handler(collected: list[InterceptedXhrRecord]) -> Callable[[Any], Awaitable[None]]:
+def make_response_handler(
+    collected: list[InterceptedXhrRecord],
+) -> Callable[[RouteResponse], Awaitable[None]]:
     """Collect bounded JSON XHR payloads into the shared list."""
     # XHR bounds: 10 entries x 8KB payload; URLs are page-controlled too.
     max_entries = 10
     max_payload_chars = 8192
     max_url_chars = 2048
 
-    async def on_response(response: Any) -> None:
+    async def on_response(response: RouteResponse) -> None:
         if len(collected) >= max_entries:
             return  # hostile pages can fire thousands of JSON responses
         headers = response.headers or {}
@@ -196,14 +209,11 @@ def make_response_handler(collected: list[InterceptedXhrRecord]) -> Callable[[An
                     break
         if "application/json" not in content_type:
             return
-        url = str(getattr(response, "url", ""))
-        status_value = getattr(response, "status", None)
+        url = response.url
         entry: InterceptedXhrRecord = {
             "url": url[:max_url_chars],
             "content_type": content_type,
-            # The playwright response status is an int; a double may report anything,
-            # so the record only admits what the real producer sends.
-            "status": cast(int, status_value),
+            "status": response.status,
             "payload": None,
         }
         if len(url) > max_url_chars:
@@ -216,7 +226,8 @@ def make_response_handler(collected: list[InterceptedXhrRecord]) -> Callable[[An
         if payload is not None and len(json.dumps(payload, default=json_default)) > max_payload_chars:
             entry["payload_truncated"] = True
         else:
-            entry["payload"] = payload
+            # Parsed JSON is a JsonValue by construction; the record says so.
+            entry["payload"] = cast(JsonValue, payload)
         collected.append(entry)
 
     return on_response
