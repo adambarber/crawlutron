@@ -7,11 +7,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TypeVar
+from typing import TypeVar, cast
 
 from app.models.crawl_diagnostics import CrawlDiagnostics
 from app.models.crawl_result import CrawlResult, EngineCrawlResult
 from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
+from app.models.json_value import JsonValue
 from app.models.normalized_url import NormalizedUrl
 from app.models.result_factory import (
     build_engine_result,
@@ -202,7 +203,7 @@ def crawl_result_from_engine_result(engine: EngineCrawlResult, *, url: Normalize
         text=engine.text,
         attempts=len(engine.attempted_strategies),
         domain="",
-        metadata=dict(engine.diagnostics) or {},
+        metadata=cast(dict[str, JsonValue], dict(engine.diagnostics)) or {},
     )
 
 

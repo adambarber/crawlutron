@@ -6,13 +6,14 @@ import asyncio
 import contextlib
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, TypeVar
 
 from camoufox.async_api import AsyncCamoufox
 
 from app.config.env import parse_bool_value
+from app.models.browser_profile_record import BrowserProfileRecord
 from app.vocabulary.browser import BrowserAction
 from app.vocabulary.limits import DEFAULT_LAZY_SCROLL_DELAY_SECONDS, DEFAULT_LAZY_SCROLL_STEPS
 
@@ -20,37 +21,45 @@ from app.vocabulary.limits import DEFAULT_LAZY_SCROLL_DELAY_SECONDS, DEFAULT_LAZ
 # validator moved here without moving its surface.
 logger = logging.getLogger("app.transport.browser_driver")
 
+#: The numeric knobs a profile carries. Constrained rather than ``float``
+#: so ``_clamp_knob`` returns an int for int readers, not a widened float.
+_Knob = TypeVar("_Knob", int, float)
 
-def _profile_int(profile: dict[str, Any], key: str, default: int, ceiling: int | None = None) -> int:
-    """Read a non-negative int knob from a browser_profile, never raising.
+
+def _profile_knob[Knob: (int, float)](
+    profile: Mapping[str, object],
+    key: str,
+    default: Knob,
+    ceiling: Knob | None,
+    coerce: Callable[[int | float | str], Knob],
+) -> Knob:
+    """Read a non-negative numeric knob from a browser_profile, never raising.
 
     ``ceiling`` clamps on the way (else ``max(0, value)``). Clamping matters here
     because a profile reaches a renderer as a plain dict, validator long gone.
     """
     try:
-        value = int(profile.get(key, default))
+        raw = profile.get(key, default)
+        if not isinstance(raw, (int, float, str)):
+            return default
+        value = coerce(raw)
+        if value != value:  # NaN: keep the default rather than poisoning waits
+            return default
     except (TypeError, ValueError):
         return default
-    return _clamp_knob(max(0, value), ceiling)
+    return _clamp_knob(type(default)(max(0, value)), ceiling)
 
 
-def _profile_float(profile: dict[str, Any], key: str, default: float, ceiling: float | None = None) -> float:
-    """Read a non-negative float knob from a browser_profile, never raising; the
-    float sibling of ``_profile_int``, bounded for the same reason -- a timeout
-    knob became the ``wait_for`` holding a pooled renderer.
-    """
-    try:
-        value = float(profile.get(key, default))
-    except (TypeError, ValueError):
-        return default
-    if value != value:  # NaN: keep the default rather than poisoning waits
-        return default
-    return _clamp_knob(max(0.0, value), ceiling)
+def _profile_int(profile: Mapping[str, object], key: str, default: int, ceiling: int | None = None) -> int:
+    """Read a non-negative int knob from a browser_profile, never raising."""
+    return _profile_knob(profile, key, default, ceiling, lambda raw: int(raw))
 
 
-#: The numeric knobs a profile carries. Constrained rather than ``float``
-#: so ``_clamp_knob`` returns an int for int readers, not a widened float.
-_Knob = TypeVar("_Knob", int, float)
+def _profile_float(
+    profile: Mapping[str, object], key: str, default: float, ceiling: float | None = None
+) -> float:
+    """Read a non-negative float knob; the float sibling of ``_profile_int``."""
+    return _profile_knob(profile, key, default, ceiling, lambda raw: float(raw))
 
 
 def _clamp_knob[Knob: (int, float)](value: Knob, ceiling: Knob | None) -> Knob:
@@ -141,7 +150,9 @@ def validate_storage_state_path(storage_state: str, cache_dir: str | Path | None
     return None
 
 
-def browser_kwargs(browser_profile: dict[str, Any] | None, cache_dir: str | Path | None) -> dict[str, Any]:
+def browser_kwargs(
+    browser_profile: BrowserProfileRecord | None, cache_dir: str | Path | None
+) -> dict[str, Any]:
     """Launch-only kwargs for the Camoufox/Playwright browser factory."""
     kwargs: dict[str, Any] = {
         "headless": headless_enabled(),
@@ -164,7 +175,7 @@ def browser_kwargs(browser_profile: dict[str, Any] | None, cache_dir: str | Path
     return kwargs
 
 
-def page_kwargs(browser_profile: dict[str, Any] | None) -> dict[str, Any]:
+def page_kwargs(browser_profile: BrowserProfileRecord | None) -> dict[str, Any]:
     """Page/context kwargs, applied at ``browser.new_page`` time."""
     profile = browser_profile or {}
     viewport = profile.get("viewport")
@@ -175,7 +186,7 @@ def page_kwargs(browser_profile: dict[str, Any] | None) -> dict[str, Any]:
     return {"service_workers": "block", "viewport": {"width": 1365, "height": 768}}
 
 
-def harvest_timeout_for(browser_profile: dict[str, Any] | None, default_seconds: float) -> float:
+def harvest_timeout_for(browser_profile: BrowserProfileRecord | None, default_seconds: float) -> float:
     """Cookie-harvest wait bound: policy profile beats settings, ceilinged."""
     from app.vocabulary.limits import MAX_COOKIE_HARVEST_TIMEOUT_SECONDS
 

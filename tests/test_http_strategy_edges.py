@@ -170,37 +170,9 @@ async def test_http_strategy_rejects_non_mapping_request_profile():
 
 
 async def test_stateful_request_profile_is_resolved_once_for_headers_and_diagnostics():
-    from collections.abc import Mapping
+    from tests._profile_doubles import StatefulRequestProfile
 
-    class StatefulProfile(Mapping[str, object]):
-        def __init__(self):
-            self.snapshot = 0
-
-        def __iter__(self):
-            self.snapshot += 1
-            yield "user_agent_family"
-            yield "cookie_jar"
-            yield "cookies"
-
-        def __len__(self):
-            return 3
-
-        def __getitem__(self, key):
-            if self.snapshot == 1:
-                values = {
-                    "user_agent_family": "desktop_chrome",
-                    "cookie_jar": "none",
-                    "cookies": {},
-                }
-            else:
-                values = {
-                    "user_agent_family": "generic_crawler",
-                    "cookie_jar": "per_host",
-                    "cookies": {"profile.example": {"session": "second"}},
-                }
-            return values[key]
-
-    profile = StatefulProfile()
+    profile = StatefulRequestProfile()
     captured_headers: dict[str, str] = {}
 
     def respond(url, headers):
@@ -216,11 +188,16 @@ async def test_stateful_request_profile_is_resolved_once_for_headers_and_diagnos
         http_fetcher=fetcher,
     )
 
-    # One snapshot, taken at the read edge.
+    # One snapshot at the validation boundary: the model copies the caller's
+    # mapping once, so headers and diagnostics can never disagree.
     assert result.diagnostics["request_profile"] == {
         "user_agent_family": "desktop_chrome",
         "cookie_jar": "none",
     }
     assert "generic_crawler" not in captured_headers["User-Agent"]
     assert "Cookie" not in captured_headers
-    assert profile.snapshot == 1
+    assert policy.request_profile == {
+        "user_agent_family": "desktop_chrome",
+        "cookie_jar": "none",
+        "cookies": {},
+    }

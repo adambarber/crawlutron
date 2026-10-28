@@ -5,14 +5,16 @@ both layers import one owner instead of ``app.transport`` reaching into orchestr
 
 from __future__ import annotations
 
-from typing import Any
-
+from app.models.classification_evidence import ClassificationEvidenceRecord
 from app.models.crawl_diagnostics import CrawlDiagnostics
 from app.models.crawl_result import CrawlResult, EngineCrawlResult
 
 # The terminal funnels build the attempt and the wire result from these records.
 from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
+from app.models.discovered_link import DiscoveredLink
+from app.models.json_value import JsonValue
 from app.models.normalized_url import NormalizedUrl
+from app.models.page_metadata import PageMetadata
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
 from app.vocabulary.taxonomy import ResultStatus
 
@@ -39,14 +41,14 @@ def build_engine_result(
     markdown: str | None = None,
     extraction_method: str | None = None,
     quality_score: float = 0.0,
-    classification_evidence: list | None = None,
+    classification_evidence: list[ClassificationEvidenceRecord] | None = None,
     diagnostics: CrawlDiagnostics | None = None,
     discovered_link_count: int = 0,
     discovered_links_truncated: bool = False,
-    discovered_links: list | None = None,
+    discovered_links: list[DiscoveredLink] | None = None,
     next_page_url: NormalizedUrl | None = None,
     validators: dict[str, str] | None = None,
-    llm_metadata: dict[str, Any] | None = None,
+    llm_metadata: PageMetadata | None = None,
 ) -> EngineCrawlResult:
     """Construct an EngineCrawlResult from a pre-built attempt; status and
     classification are read off ``attempt``, never re-stated by the caller."""
@@ -117,7 +119,7 @@ def terminal_crawl_result(
     elapsed_ms: int,
     domain: str,
     error: CrawlError | None,
-    metadata: dict[str, Any] | None = None,
+    metadata: dict[str, JsonValue] | None = None,
     selected_strategy: CrawlStrategyName | None = None,
 ) -> CrawlResult:
     """Construct a terminal ``CrawlResult`` (no payload) with a stable error code.

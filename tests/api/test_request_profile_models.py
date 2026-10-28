@@ -34,7 +34,9 @@ class TestRequestProfileVocabularyIsClosed:
     def test_an_unknown_key_is_refused(self):
         from app.models.crawl_policy import CrawlPolicy
 
-        with pytest.raises(ValidationError, match="request_profile keys not permitted"):
+        # The TypedDict itself closes the key set now: pydantic refuses an extra
+        # input (extra_forbidden) before the vocabulary closer ever runs.
+        with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
             CrawlPolicy(request_profile={"totally_bogus": 1})
 
     def test_a_misspelled_key_is_refused_rather_than_ignored(self):
@@ -42,7 +44,7 @@ class TestRequestProfileVocabularyIsClosed:
         from app.models.crawl_policy import CrawlPolicy
 
         for typo in ("cookie_jarr", "fingerprint_rotatoin", "accept_language"):
-            with pytest.raises(ValidationError, match="request_profile keys not permitted"):
+            with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
                 CrawlPolicy(request_profile={typo: "per_host"})
 
     def test_every_allowed_key_has_a_reader_in_app(self):

@@ -4,10 +4,11 @@ Centralizes the default strategy chains and limit configurations
 used by both agent_hints.py and main.py documentation/examples.
 """
 
+from app.models.example_policy import ExamplePolicy
 from app.vocabulary.extraction import EXTRACTION_DOCUMENT
 from app.vocabulary.strategies import BROWSER_HEADLESS, HTTP_CFFI_IMPERSONATE, HTTP_DECLARED_CRAWLER
 
-BROWSER_FALLBACK_POLICY = {
+BROWSER_FALLBACK_POLICY: ExamplePolicy = {
     "strategies": [HTTP_DECLARED_CRAWLER, HTTP_CFFI_IMPERSONATE, BROWSER_HEADLESS],
     "limits": {
         "timeout_seconds": 30,
@@ -16,7 +17,7 @@ BROWSER_FALLBACK_POLICY = {
     },
 }
 
-DOCUMENT_EXTRACTION_POLICY = {
+DOCUMENT_EXTRACTION_POLICY: ExamplePolicy = {
     "strategies": [HTTP_DECLARED_CRAWLER],
     "extraction": EXTRACTION_DOCUMENT,
     "limits": {

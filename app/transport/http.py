@@ -12,6 +12,7 @@ from app.models.classification_evidence import ClassificationEvidenceRecord
 from app.models.crawl_diagnostics import CrawlDiagnostics
 from app.models.crawl_result import EngineCrawlResult
 from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
+from app.models.discovery_diagnostics import DiscoveryDiagnostics
 from app.models.fetch_envelope import RetryDiagnostics
 from app.models.http_fetch_result import HttpFetchResult
 from app.models.result_factory import binary_no_text_result, build_engine_result
@@ -200,8 +201,12 @@ async def _merge_discovery_diagnostics(
     if ctx.policy.limits.max_depth > 0:
         discovery_diag = diagnostics.get("discovery")
         if discovery_diag:
-            discovery_diag.pop("sitemap_urls", None)
-            discovery_diag.pop("feeds", None)
+            # The bulk sitemap/feeds lists stop at the crawl edge: stripping here
+            # keeps them out of every response built over these diagnostics.
+            diagnostics["discovery"] = cast(
+                DiscoveryDiagnostics,
+                {key: value for key, value in discovery_diag.items() if key not in ("sitemap_urls", "feeds")},
+            )
 
 
 def _http_quality_score(
@@ -224,7 +229,7 @@ def _http_quality_score(
     if (
         status == "success"
         and not extracted.strategy_decompression_failed
-        and extracted.content_metrics["visible_text_length"] >= 40
+        and extracted.content_metrics.get("visible_text_length", 0) >= 40
     ):
         quality = max(quality, 0.95)
     return quality
@@ -233,17 +238,18 @@ def _http_quality_score(
 def _http_error_result(ctx: HttpStrategyContext, error: Exception) -> EngineCrawlResult:
     """Build the redacted terminal result for a strategy exception."""
     elapsed_ms = int((time.monotonic() - ctx.started) * 1000)
+    extra_diagnostics: CrawlDiagnostics = {
+        "retry": ctx.retry_diagnostics,
+        "runtime": {"elapsed_ms": elapsed_ms},
+        "request_profile": request_profile_diagnostics(ctx.profile),
+    }
     return engine_result_from_exception(
         error=error,
         original_url=ctx.original_url,
         normalized_url=ctx.normalized_url,
         strategy=ctx.strategy,
         elapsed_ms=elapsed_ms,
-        extra_diagnostics={
-            "retry": ctx.retry_diagnostics,
-            "runtime": {"elapsed_ms": elapsed_ms},
-            "request_profile": request_profile_diagnostics(ctx.profile),
-        },
+        extra_diagnostics=extra_diagnostics,
     )
 
 

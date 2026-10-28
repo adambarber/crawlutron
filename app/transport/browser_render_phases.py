@@ -10,14 +10,18 @@ import asyncio
 import base64
 import time
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, NamedTuple, Protocol
+from typing import TYPE_CHECKING, NamedTuple, Protocol, cast
 
 from app.extraction.classify import classify_page
+from app.models.browser_profile_record import BrowserProfileRecord
 from app.models.crawl_result import CrawlResult
 
 # Page identity: re-normalized against the policy at the result boundary.
+from app.models.intercepted_xhr_record import InterceptedXhrRecord
+from app.models.json_value import JsonValue
 from app.models.normalized_url import NormalizedUrl
 from app.models.result_factory import terminal_attempt
+from app.models.screenshot_diagnostics import ScreenshotDiagnostics
 from app.transport.browser_cookies import harvest_session_cookies
 from app.transport.browser_driver import BrowserDriver
 from app.transport.browser_targets import (
@@ -86,27 +90,27 @@ class ReleasePlan(NamedTuple):
 
     page: RenderPage
     url: NormalizedUrl
-    profile: dict[str, object]
+    profile: BrowserProfileRecord
 
 
-def _profile_str(profile: dict[str, object] | None, key: str) -> str | None:
+def _profile_str(profile: BrowserProfileRecord | None, key: str) -> str | None:
     """The profile entry as the string the caller expects, or None."""
     value = (profile or {}).get(key)
     return value if isinstance(value, str) else None
 
 
-def _profile_bool(profile: dict[str, object] | None, key: str) -> bool:
+def _profile_bool(profile: BrowserProfileRecord | None, key: str) -> bool:
     """The profile entry truth-tested, exactly as the inline ``bool(...)`` read it."""
     return bool((profile or {}).get(key))
 
 
-def _profile_actions(profile: dict[str, object] | None) -> list[BrowserAction]:
+def _profile_actions(profile: BrowserProfileRecord | None) -> list[BrowserAction]:
     """The profile's action chain, or an empty one."""
     value = (profile or {}).get("actions")
-    return value if isinstance(value, list) else []
+    return cast(list[BrowserAction], value) if isinstance(value, list) else []
 
 
-def _profile_selectors(profile: dict[str, object] | None) -> list[str]:
+def _profile_selectors(profile: BrowserProfileRecord | None) -> list[str]:
     """The profile's targeted-screenshot selectors, or none."""
     value = (profile or {}).get("screenshot_selectors")
     return value if isinstance(value, list) else []
@@ -116,8 +120,8 @@ async def wire_ssrf_guards(
     page: RenderPage,
     *,
     wire: WireGuard,
-    profile: dict[str, object] | None,
-    on_response: list[dict[str, object]],
+    profile: BrowserProfileRecord | None,
+    on_response: list[InterceptedXhrRecord],
 ) -> None:
     """Route-level SSRF guards plus XHR interception, before navigation."""
     # Install at the page's context: every page/worker the context spawns is
@@ -196,7 +200,7 @@ async def run_pre_extraction_chain(
     lazy_scroll: Callable[[RenderPage], Awaitable[None]],
     flatten_shadow_dom: Callable[[RenderPage], Awaitable[None]],
     accept_cookies: Callable[[RenderPage, bool], Awaitable[bool]],
-    profile: dict[str, object] | None,
+    profile: BrowserProfileRecord | None,
     url: str,
     budget_seconds: float,
 ) -> None:
@@ -243,10 +247,10 @@ async def extract_with_pdf_fallback(
 
 async def attach_screenshots(
     page: RenderPage,
-    metadata: dict[str, object],
+    metadata: dict[str, JsonValue],
     *,
-    capture_element_shots: Callable[[RenderPage, list[str]], Awaitable[list[dict[str, object]]]],
-    profile: dict[str, object] | None,
+    capture_element_shots: Callable[[RenderPage, list[str]], Awaitable[list[ScreenshotDiagnostics]]],
+    profile: BrowserProfileRecord | None,
 ) -> None:
     """Optional full-page screenshot plus targeted element screenshots."""
     if _profile_bool(profile, "include_screenshot"):
@@ -254,7 +258,8 @@ async def attach_screenshots(
         metadata["screenshot"] = base64.b64encode(screenshot_bytes).decode("ascii")
     element_shots = _profile_selectors(profile)
     if element_shots:
-        metadata["element_screenshots"] = await capture_element_shots(page, element_shots)
+        # The shots are bounded JSON records (selector + base64 string).
+        metadata["element_screenshots"] = cast(JsonValue, await capture_element_shots(page, element_shots))
 
 
 async def release_page(
@@ -305,7 +310,7 @@ async def guarded_render(
     collaborators: RenderCollaborators,
 ) -> CrawlResult:
     """The guarded render setup: wire guards, warm up, navigate to the pin."""
-    intercepted_xhr: list[dict[str, object]] = []
+    intercepted_xhr: list[InterceptedXhrRecord] = []
     await wire_ssrf_guards(
         page, wire=collaborators.wire, profile=options.browser_profile, on_response=intercepted_xhr
     )
@@ -340,7 +345,7 @@ async def render_and_extract(
     *,
     started: float,
     collaborators: RenderCollaborators,
-    intercepted_xhr: list[dict[str, object]],
+    intercepted_xhr: list[InterceptedXhrRecord],
 ) -> CrawlResult:
     """The interaction chain, extraction, PDF fallback, and result shaping."""
     driver, policy = collaborators.driver, collaborators.policy
@@ -389,21 +394,22 @@ async def shape_render_result(
     policy: HostPolicy,
     outcome: PdfOutcome,
     challenge_resolved: bool,
-    intercepted_xhr: list[dict[str, object]],
+    intercepted_xhr: list[InterceptedXhrRecord],
     started: float,
     status_for: Callable[[str], ResultStatus],
     driver_reused: bool,
-    capture_element_screenshots: Callable[[RenderPage, list[str]], Awaitable[list[dict[str, object]]]],
+    capture_element_screenshots: Callable[[RenderPage, list[str]], Awaitable[list[ScreenshotDiagnostics]]],
 ) -> CrawlResult:
     """Terminal status, metadata, screenshots, and the CrawlResult envelope."""
     status = status_for(outcome.classification)
-    metadata: dict[str, object] = {
-        "title": await page.evaluate("() => document.title"),
+    metadata: dict[str, JsonValue] = {
+        "title": cast(JsonValue, await page.evaluate("() => document.title")),
         "content_length": len(outcome.html or ""),
         "browser_reused": driver_reused,
         "challenge_resolved": challenge_resolved,
         "extraction_method": outcome.method,
-        "intercepted_xhr": intercepted_xhr,
+        # The handler's records are JSON by construction (bounded keys, JSON payload).
+        "intercepted_xhr": cast(JsonValue, intercepted_xhr),
     }
     await attach_screenshots(
         page,

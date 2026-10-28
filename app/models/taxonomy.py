@@ -6,7 +6,7 @@ set and mapping below are DERIVED from these aliases, one declaration read three
 from __future__ import annotations
 
 import types
-from typing import Any, Literal, Union, get_args, get_origin
+from typing import Literal, Union, get_args, get_origin
 
 # ``X | Y`` and ``Union[X, Y]`` are the same type with two spellings and two
 # origins; a taxonomy alias written either way has to read the same here.
@@ -87,7 +87,7 @@ CrawlStrategyName = Literal[
 ]
 
 
-def literal_members(alias: Any) -> frozenset[str]:
+def literal_members(alias: object) -> frozenset[str]:
     """The string members of a declared type, total by origin: a ``Literal``
     yields its args, a union the union of what it holds, and anything else
     nothing -- the clause that makes a field sweep safe to point it at.

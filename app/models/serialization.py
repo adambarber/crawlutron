@@ -8,28 +8,27 @@ from __future__ import annotations
 import types
 from collections.abc import Callable, Mapping
 from dataclasses import MISSING, fields, is_dataclass
-from typing import Any, TypeVar, Union, cast, get_args, get_origin, get_type_hints
+from typing import Union, cast, get_args, get_origin, get_type_hints
 
 from app.models.crawl_result import CrawlResult, EngineCrawlResult
 from app.models.host_policy import HostPolicy
+from app.models.json_value import JsonValue
 from app.models.normalized_url import NormalizedUrl
 
-_ResultT = TypeVar("_ResultT", bound=Any)
 
-
-def to_dict(result: EngineCrawlResult | CrawlResult) -> dict[str, Any]:
+def to_dict(result: EngineCrawlResult | CrawlResult) -> dict[str, JsonValue]:
     """Return a JSON-serializable dict for any frozen-dataclass crawl result, WITHOUT
     deepcopying leaf values (heavy fields are shared by reference; only nested
     dataclasses become dicts). elapsed_ms is a property, so fields() -- this walk -- omits it.
     """
-    return _to_jsonable(result)
+    return cast(dict[str, JsonValue], _to_jsonable(result))
 
 
-def _to_jsonable(value: Any) -> Any:
+def _to_jsonable(value: object) -> JsonValue:
     return _to_jsonable_impl(value, set())
 
 
-def _entered(value: Any, seen: set[int]) -> set[int] | None:
+def _entered(value: object, seen: set[int]) -> set[int] | None:
     """The seen-set to recurse into ``value`` with, or None if it is already on the
     path. Only mutable containers can cycle, so primitives skip it; this is the
     shared path every ``_to_jsonable_impl`` arm descends through.
@@ -40,7 +39,9 @@ def _entered(value: Any, seen: set[int]) -> set[int] | None:
     return seen | {oid}
 
 
-def _build_guarded(value: Any, seen: set[int], build: Callable[[Any, set[int]], Any]) -> Any:
+def _build_guarded(
+    value: object, seen: set[int], build: Callable[[object, set[int]], JsonValue]
+) -> JsonValue | None:
     """Register ``value`` on the path, then let ``build`` render its children.
     ``build`` is never called for a value already on the path -- that call returns
     None instead, breaking a cyclic reference rather than following it.
@@ -51,29 +52,43 @@ def _build_guarded(value: Any, seen: set[int], build: Callable[[Any, set[int]], 
     return build(value, entered)
 
 
-def _to_jsonable_impl(value: Any, seen: set[int]) -> Any:
+def _render_dataclass(node: object, path: set[int]) -> JsonValue:
+    """One dataclass rendered field-by-field, the dataclass arm of the walk."""
+    if is_dataclass(node) and not isinstance(node, type):
+        return {f.name: _to_jsonable_impl(getattr(node, f.name), path) for f in fields(node)}
+    # Unreachable from the dispatch that guards the arm; a non-dataclass here is
+    # a caller bug, and returning it unchanged would hide the shape break.
+    raise TypeError(f"_render_dataclass received a non-dataclass: {type(node).__name__}")
+
+
+def _to_jsonable_impl(value: object, seen: set[int]) -> JsonValue:
     # Every arm below descends through _build_guarded, so the cycle check cannot be
     # forgotten by a new one; primitives skip it, since they cannot cycle.
     if isinstance(value, NormalizedUrl):
         return value.raw
     if is_dataclass(value) and not isinstance(value, type):
+        return _build_guarded(value, seen, _render_dataclass)
+    if isinstance(value, dict):
         return _build_guarded(
             value,
             seen,
-            lambda node, path: {f.name: _to_jsonable_impl(getattr(node, f.name), path) for f in fields(node)},
-        )
-    if isinstance(value, dict):
-        return _build_guarded(
-            value, seen, lambda node, path: {key: _to_jsonable_impl(item, path) for key, item in node.items()}
+            lambda node, path: {
+                key: _to_jsonable_impl(item, path) for key, item in cast(dict[str, JsonValue], node).items()
+            },
         )
     if isinstance(value, (list, tuple)):
         return _build_guarded(
-            value, seen, lambda node, path: [_to_jsonable_impl(item, path) for item in node]
+            value,
+            seen,
+            lambda node, path: [_to_jsonable_impl(item, path) for item in cast(list[JsonValue], node)],
         )
-    return value
+    # Leaf value: it is JSON by construction (all dataclass fields are JSON-serializable).
+    return cast(JsonValue, value)
 
 
-def from_wire[ResultT: Any](cls: type[ResultT], payload: Mapping[str, Any], *, policy: HostPolicy) -> ResultT:
+def from_wire[ResultT: object](
+    cls: type[ResultT], payload: Mapping[str, object], *, policy: HostPolicy
+) -> ResultT:
     """Rebuild a result dataclass from the record :func:`to_dict` wrote, the inverse
     of one declaration. ``policy`` re-admits every NormalizedUrl, so a row written
     under one SSRF posture can't come back under another. A missing required field raises.
@@ -83,19 +98,20 @@ def from_wire[ResultT: Any](cls: type[ResultT], payload: Mapping[str, Any], *, p
     return cast(ResultT, _rebuild_dataclass(cls, payload, policy=policy))
 
 
-def _rebuild_value(annotation: Any, value: Any, *, policy: HostPolicy) -> Any:
+def _rebuild_value(annotation: object, value: object, *, policy: HostPolicy) -> object:
     """One value from a serialized record, put back to its declared shape -- only
     structure is rebuilt (nested dataclasses, lists of them). Taxonomy members
     are NOT re-checked here: the real constructor does that in LiteralChecked.
     """
     if annotation is NormalizedUrl:
-        return NormalizedUrl(value, policy=policy)
-    if is_dataclass(annotation):
+        # The wire value for a NormalizedUrl is its raw string.
+        return NormalizedUrl(cast(str, value), policy=policy)
+    if is_dataclass(annotation) and isinstance(annotation, type):
         return _rebuild_dataclass(annotation, value, policy=policy) if isinstance(value, Mapping) else value
     origin = get_origin(annotation)
     if origin is list and isinstance(value, list):
         args = get_args(annotation)
-        (item,) = args if len(args) == 1 else (Any,)
+        (item,) = args if len(args) == 1 else (object,)
         return [_rebuild_value(item, element, policy=policy) for element in value]
     if origin in (Union, types.UnionType) and value is not None:
         members = [member for member in get_args(annotation) if member is not type(None)]
@@ -104,13 +120,13 @@ def _rebuild_value(annotation: Any, value: Any, *, policy: HostPolicy) -> Any:
     return value
 
 
-def _rebuild_dataclass(cls: Any, payload: Mapping[str, Any], *, policy: HostPolicy) -> Any:
+def _rebuild_dataclass(cls: type, payload: Mapping[str, object], *, policy: HostPolicy) -> object:
     """The walk itself, untyped because the recursion cannot be.
     from_wire is the typed door; ``is_dataclass`` narrows to a class object
     without a type argument, so the recursive arm calls back into here.
     """
     annotations = get_type_hints(cls)
-    values: dict[str, Any] = {}
+    values: dict[str, object] = {}
     for declared in fields(cls):
         if declared.name not in payload:
             if declared.default is MISSING and declared.default_factory is MISSING:

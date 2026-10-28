@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
 
 from app.extraction.classify import classify_page_with_evidence
 from app.extraction.content import is_html
 from app.extraction.document_text import format_extracted_document_text
 from app.models.classification_evidence import ClassificationEvidenceRecord
+from app.models.request_profile_diagnostics import RequestProfileDiagnostics
 from app.models.taxonomy import Classification
 from app.transport import body_decode
 from app.transport.content_pipeline import run_extraction
@@ -73,7 +74,7 @@ async def extract_http_phase(ctx: HttpStrategyContext, resp: FetchedResponse) ->
     )
 
 
-def request_profile_diagnostics(profile: dict[str, Any]) -> dict[str, str]:
+def request_profile_diagnostics(profile: Mapping[str, object]) -> RequestProfileDiagnostics:
     """The request-profile frame a crawl result carries in its diagnostics."""
     return {
         "user_agent_family": str(profile.get("user_agent_family", "generic_crawler")),

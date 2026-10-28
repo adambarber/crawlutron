@@ -25,8 +25,9 @@ from tests.chokepoint_walks import REPO_ROOT, nodes_of, trees_under
 _METRIC = "undeclared record"
 _ANY = "bare Any"
 
-# 129 -> 122 (#482: PostFetchDiscovery removed 8, its diagnostics bag adds 1).
-_BUDGETS = {_METRIC: 122, _ANY: 143}
+# 122 -> 71, 143 -> 129, 71 -> 70 (#389 Terminus Batch 1: app/models records
+# declared; the app tail is for later batches).
+_BUDGETS = {_METRIC: 70, _ANY: 129}
 
 # A record is anything whose key set a caller might depend on.
 _RECORD_ROOTS = frozenset(

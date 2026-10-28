@@ -130,10 +130,26 @@ class TestBrowserProfileVocabularyIsClosed:
         """Parametrised over the constant, not over a hand-kept list of keys.
 
         The list replaced included ``state``, which nothing in ``app/`` reads;
-        a key added to the constant must therefore earn a reader."""
+        a key added to the constant must therefore earn a reader. Values are
+        typed now (BrowserProfileRecord), so each key carries a value its
+        declared type admits.
+        """
         from app.models.crawl_policy import CrawlPolicy
 
-        value: object = [] if key == "actions" else "desktop"
+        typed_values: dict[str, object] = {
+            "actions": [],
+            "auto_accept_cookie_consent": True,
+            "cookie_harvest_timeout_seconds": 5,
+            "include_html": True,
+            "include_screenshot": True,
+            "lazy_scroll_delay_seconds": 1,
+            "lazy_scroll_steps": 3,
+            "resource_mode": "reduced",
+            "screenshot_selectors": ["#x"],
+            "storage_state": "s.json",
+            "viewport": "mobile",
+        }
+        value = typed_values[key]
         assert CrawlPolicy(browser_profile={key: value}).browser_profile[key] == value
 
     def test_no_allowed_profile_key_is_inert(self):

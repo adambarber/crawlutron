@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import base64
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from app.config.settings import CrawlerSettings
+from app.models.content_metrics import ContentMetrics
 from app.models.crawl_extraction_method import CrawlExtractionMethod
 from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_policy_limits import CrawlPolicyLimits
@@ -15,6 +16,7 @@ from app.models.fetch_envelope import RetryDiagnostics, SerializedResponse
 from app.models.host_policy import HostPolicy
 from app.models.http_fetch_result import HttpFetchResult
 from app.models.normalized_url import NormalizedUrl
+from app.models.request_profile_record import RequestProfileRecord
 from app.models.taxonomy import CrawlStrategyName
 from app.transport.cache import HttpCache
 from app.transport.content_cache import ContentCache
@@ -38,7 +40,7 @@ class HttpStrategyContext:
     global_concurrency: int | None
     started: float
     caller_conditional: dict[str, str] = field(default_factory=dict)
-    profile: dict[str, Any] = field(default_factory=dict)
+    profile: RequestProfileRecord = field(default_factory=lambda: cast(RequestProfileRecord, {}))
     timeout_seconds: int = 10
     max_retries: int = 0
     max_content_length: int = 0
@@ -68,7 +70,7 @@ class ExtractedHttpContent:
     markdown: str | None
     extraction_method: str
     strategy_decompression_failed: bool
-    content_metrics: dict[str, int | float | bool]
+    content_metrics: ContentMetrics
 
 
 @dataclass(frozen=True)

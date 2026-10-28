@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from app.config.env import get_env_int
+from app.models.browser_profile_record import BrowserProfileRecord
+from app.models.screenshot_diagnostics import ScreenshotDiagnostics
 from app.transport.driver_config import (
     ACTION_WAIT_MS,
     LAZY_SCROLL_DELAY_SECONDS,
@@ -155,7 +157,7 @@ class BrowserDriver:
         self._browser_reused = False
         self._render_count = 0
 
-    async def open_page(self, browser_profile: dict[str, Any] | None) -> Any:
+    async def open_page(self, browser_profile: BrowserProfileRecord | None) -> Any:
         """Return a page on a (possibly reused) browser, with profile kwargs applied.
         One call rather than acquire-then-new_page, so a test substituting this
         driver does not have to supply a fake browser whose only job is ``new_page``.
@@ -203,15 +205,15 @@ class BrowserDriver:
         """A storage_state path under the cache dir, or None."""
         return validate_storage_state_path(storage_state, self._cache_dir)
 
-    def browser_kwargs(self, browser_profile: dict[str, Any] | None) -> dict[str, Any]:
+    def browser_kwargs(self, browser_profile: BrowserProfileRecord | None) -> dict[str, Any]:
         """Launch-only kwargs for the Camoufox/Playwright browser factory."""
         return browser_kwargs(browser_profile, self._cache_dir)
 
-    def page_kwargs(self, browser_profile: dict[str, Any] | None) -> dict[str, Any]:
+    def page_kwargs(self, browser_profile: BrowserProfileRecord | None) -> dict[str, Any]:
         """Page/context kwargs, applied at ``browser.new_page`` time."""
         return page_kwargs(browser_profile)
 
-    async def _acquire_browser(self, browser_profile: dict[str, Any] | None) -> Any:
+    async def _acquire_browser(self, browser_profile: BrowserProfileRecord | None) -> Any:
         """Return a reused browser instance, launching one on first use.
 
         Recycles the browser once it has served ``_max_browser_renders`` to
@@ -337,7 +339,9 @@ class BrowserDriver:
             return
         await step.handler(self, page, action)
 
-    async def capture_element_screenshots(self, page: Any, selectors: list[str]) -> list[dict[str, Any]]:
+    async def capture_element_screenshots(
+        self, page: Any, selectors: list[str]
+    ) -> list[ScreenshotDiagnostics]:
         """Capture targeted element screenshots as base64."""
         return await capture_element_screenshots(page, selectors)
 
@@ -367,7 +371,7 @@ class BrowserDriver:
                     return
             await self._async_sleep(delay)
 
-    def harvest_timeout_for(self, browser_profile: dict[str, Any] | None) -> float:
+    def harvest_timeout_for(self, browser_profile: BrowserProfileRecord | None) -> float:
         """Cookie-harvest wait bound: policy profile beats settings."""
         return harvest_timeout_for(browser_profile, self._harvest_timeout_seconds)
 

@@ -2,6 +2,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import NoReturn
 
+from app.models.browser_profile_record import BrowserProfileRecord
 from app.transport.browser import BrowserRenderer
 from app.transport.browser_driver import BrowserDriver
 from app.transport.browser_pool import (
@@ -59,7 +60,7 @@ class _MockDriver(BrowserDriver):
     def note_render(self) -> None:
         pass
 
-    def harvest_timeout_for(self, browser_profile: dict[str, object] | None) -> float:
+    def harvest_timeout_for(self, browser_profile: BrowserProfileRecord | None) -> float:
         return 1.0
 
     async def safe_close_page(self, page: object) -> None:
@@ -78,7 +79,7 @@ class _MockDriver(BrowserDriver):
     async def wait_for_ready_state(self, page: object) -> None:
         pass
 
-    async def open_page(self, browser_profile: dict[str, object] | None) -> NoReturn:
+    async def open_page(self, browser_profile: BrowserProfileRecord | None) -> NoReturn:
         raise AssertionError("RaisingRenderer should never open a page")
 
 
