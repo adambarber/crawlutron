@@ -8,7 +8,7 @@ import logging
 import os
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import TypeVar
 
 from camoufox.async_api import AsyncCamoufox
 
@@ -120,7 +120,7 @@ async def async_sleep(sleep: Callable[[float], None], seconds: float) -> None:
     await asyncio.to_thread(sleep, seconds)
 
 
-def create_camoufox_browser(**kwargs: Any):
+def create_camoufox_browser(**kwargs: object):
     """Factory for AsyncCamoufox browser."""
     return AsyncCamoufox(**kwargs)
 
@@ -152,9 +152,9 @@ def validate_storage_state_path(storage_state: str, cache_dir: str | Path | None
 
 def browser_kwargs(
     browser_profile: BrowserProfileRecord | None, cache_dir: str | Path | None
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Launch-only kwargs for the Camoufox/Playwright browser factory."""
-    kwargs: dict[str, Any] = {
+    kwargs: dict[str, object] = {
         "headless": headless_enabled(),
         "humanize": True,
     }
@@ -175,7 +175,7 @@ def browser_kwargs(
     return kwargs
 
 
-def page_kwargs(browser_profile: BrowserProfileRecord | None) -> dict[str, Any]:
+def page_kwargs(browser_profile: BrowserProfileRecord | None) -> dict[str, object]:
     """Page/context kwargs, applied at ``browser.new_page`` time."""
     profile = browser_profile or {}
     viewport = profile.get("viewport")
@@ -200,7 +200,7 @@ def harvest_timeout_for(browser_profile: BrowserProfileRecord | None, default_se
 
 
 def scroll_config_for(
-    browser_profile: dict[str, Any] | None, default_steps: int, default_delay: float
+    browser_profile: BrowserProfileRecord | None, default_steps: int, default_delay: float
 ) -> tuple[int, float]:
     """Lazy-scroll steps/delay: policy profile beats settings, ceilinged."""
     from app.vocabulary.limits import MAX_LAZY_SCROLL_DELAY_SECONDS, MAX_LAZY_SCROLL_STEPS

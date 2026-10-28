@@ -28,7 +28,7 @@ from app.transport.timeouts import Timeouts
 from app.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 
 if TYPE_CHECKING:
-    pass
+    from curl_cffi.requests.models import Response as CffiResponse
 
 logger = logging.getLogger(__name__)
 
@@ -405,7 +405,7 @@ def http_413(url: NormalizedUrl, final_url: NormalizedUrl, started: float) -> Ht
 
 
 def _cffi_too_large_result(
-    url: NormalizedUrl, current_url: NormalizedUrl, response: Any, elapsed_ms: int
+    url: NormalizedUrl, current_url: NormalizedUrl, response: CffiResponse, elapsed_ms: int
 ) -> HttpFetchResult:
     # Synthetic headers, never echoed (#137): echoing content-encoding turned the
     # empty refusal body into a decompression fault instead of the size verdict.
@@ -419,7 +419,7 @@ def _cffi_too_large_result(
     )
 
 
-def _release_stream_noblock(response: Any) -> None:
+def _release_stream_noblock(response: CffiResponse) -> None:
     """Schedule a best-effort stream close without awaiting it -- the caller is
     abandoning a live or wedged producer, and awaiting ``aclose`` would join that
     task and hang. The done callback swallows a failed close.

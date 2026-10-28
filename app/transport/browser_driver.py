@@ -349,7 +349,7 @@ class BrowserDriver:
         """Best-effort page teardown."""
         await safe_close_page(page)
 
-    async def lazy_load_scroll(self, page: Any, browser_profile: dict[str, Any] | None = None) -> None:
+    async def lazy_load_scroll(self, page: Any, browser_profile: BrowserProfileRecord | None = None) -> None:
         """Scroll to the bottom repeatedly to trigger lazy-loaded content.
 
         The scroll evaluate returns the page height; two stable polls stop the
@@ -375,7 +375,7 @@ class BrowserDriver:
         """Cookie-harvest wait bound: policy profile beats settings."""
         return harvest_timeout_for(browser_profile, self._harvest_timeout_seconds)
 
-    def scroll_config_for(self, browser_profile: dict[str, Any] | None) -> tuple[int, float]:
+    def scroll_config_for(self, browser_profile: BrowserProfileRecord | None) -> tuple[int, float]:
         """Lazy-scroll steps/delay: policy profile beats settings."""
         return scroll_config_for(browser_profile, self._lazy_scroll_steps, self._lazy_scroll_delay_seconds)
 

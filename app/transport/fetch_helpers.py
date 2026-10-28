@@ -16,8 +16,8 @@ from dataclasses import dataclass, field
 from typing import Any, NamedTuple
 
 from app.models.host_policy import HostPolicy
-from app.models.http_fetch_result import HttpFetchResult
-from app.models.http_fetcher import HttpFetcher
+from app.models.http_fetch_result import HttpFetchResult as HttpFetchResult
+from app.models.http_fetcher import HttpFetcher as HttpFetcher
 from app.models.normalized_url import NormalizedUrl
 from app.safety.bounded_ttl import BoundedTTLCache
 from app.transport.body_decode import decode_body
