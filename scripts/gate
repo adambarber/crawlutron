@@ -20,6 +20,19 @@ else
 fi
 cd "$service_root"
 
+# The pyright gate resolves its Node binary through PATH; pre-commit's sanitized
+# PATH makes it fall back to a network nodeenv install that hangs past the wall.
+if ! command -v node >/dev/null 2>&1; then
+    gate_home=${HOME:-$(eval echo ~)}
+    for candidate in /opt/homebrew/bin/node /usr/local/bin/node \
+        "$gate_home"/.local/share/mise/installs/node/*/bin/node; do
+        if [ -x "$candidate" ]; then
+            export PATH="$(dirname "$candidate"):$PATH"
+            break
+        fi
+    done
+fi
+
 # Gate commands name the service's own pinned interpreter themselves, and this
 # hands them through; check it exists so a missing venv blames the right thing.
 if [ ! -x .venv/bin/python ]; then

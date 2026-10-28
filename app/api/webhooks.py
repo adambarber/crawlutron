@@ -15,7 +15,6 @@ import logging
 import os
 import time
 from collections.abc import Mapping
-from typing import Any
 
 import httpx
 
@@ -253,7 +252,7 @@ def _serialize_webhook_payload(payload: Mapping[str, object], cap: int) -> bytes
 
 async def post_webhook(
     webhook_url: str,
-    payload: Mapping[str, Any],
+    payload: Mapping[str, object],
     *,
     host_policy: HostPolicy,
 ) -> None:

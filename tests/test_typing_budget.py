@@ -25,8 +25,9 @@ from tests.chokepoint_walks import REPO_ROOT, nodes_of, trees_under
 _METRIC = "undeclared record"
 _ANY = "bare Any"
 
-# 129 -> 122 (#482: PostFetchDiscovery removed 8, its diagnostics bag adds 1).
-_BUDGETS = {_METRIC: 102, _ANY: 127}
+# Records 129 -> 122 (#482) -> 89 and bare Any 127 -> 122 (#389 batch 2b: the
+# app/api doors declare their shapes).
+_BUDGETS = {_METRIC: 89, _ANY: 122}
 
 # A record is anything whose key set a caller might depend on.
 _RECORD_ROOTS = frozenset(

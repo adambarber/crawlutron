@@ -10,7 +10,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from app.api.caller_auth import Tracking, admit, anonymous_caller, identity_for_key
 from app.api.crawl_executor import execute_crawl
@@ -18,7 +18,9 @@ from app.api.webhooks import start_webhook_delivery
 from app.config.settings import CrawlerSettings
 from app.models.caller_identity import CallerIdentity
 from app.models.crawl_policy import CrawlPolicy
+from app.models.crawl_policy_limits import CrawlPolicyLimits
 from app.models.crawl_request import CrawlRequest
+from app.models.crawl_strategy import CrawlStrategy
 from app.models.fetch_validators import FetchValidators
 from app.models.host_policy import HostPolicy
 from app.models.watch_announcement import WatchAnnouncement
@@ -54,10 +56,11 @@ def _check_policy(owner: str = "") -> CrawlPolicy:
     cookie namespace so a keyed watch inherits that caller's cookies; the model
     constructor is the boundary, and ``execute_crawl`` resolves it from there.
     """
-    policy: dict[str, Any] = {"strategies": [HTTP_DECLARED_CRAWLER], "limits": {}}
-    if owner:
-        policy["request_profile"] = {"cookie_namespace": owner}
-    return CrawlPolicy.model_validate(policy)
+    return CrawlPolicy(
+        strategies=[CrawlStrategy(HTTP_DECLARED_CRAWLER)],
+        limits=CrawlPolicyLimits(),
+        request_profile={"cookie_namespace": owner} if owner else {},
+    )
 
 
 def _announcement(watch: WatchState, *, outcome: CrawlClassification, checked_at: float) -> WatchAnnouncement:

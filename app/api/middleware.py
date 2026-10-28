@@ -6,11 +6,9 @@ refuses a present non-loopback browser Origin on every surface.
 
 from __future__ import annotations
 
-from collections.abc import MutableMapping
-from typing import Any
-
 from fastapi import Request
 from fastapi.responses import JSONResponse
+from starlette.types import Message, Receive
 
 from app.api.exceptions import error_envelope
 from app.mcp.constants import INVALID_REQUEST
@@ -40,7 +38,7 @@ async def reject_hostile_origin(request: Request, call_next):
     return await call_next(request)
 
 
-async def _drain_declared_body(original_receive, *, max_bytes: int) -> None:
+async def _drain_declared_body(original_receive: Receive, *, max_bytes: int) -> None:
     """Discard a refused declared body up to ``max_bytes`` -- never unbounded.
 
     Past the cap the client is streaming forever or lying; the 413's
@@ -78,7 +76,7 @@ async def limit_request_body(request: Request, call_next, *, max_bytes: int = MA
     bytes_delivered = 0
     truncated = False
 
-    async def _capped_receive() -> MutableMapping[str, Any]:
+    async def _capped_receive() -> Message:
         nonlocal bytes_delivered, truncated
         message = await original_receive()
         if message.get("type") != "http.request":

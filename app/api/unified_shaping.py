@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
-from typing import Any
 
 from app.extraction.llm_format import (
     PageMetadata as ExtractedPageMetadata,
@@ -18,6 +17,7 @@ from app.models.crawl_strategy import CrawlStrategy
 from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
 from app.models.discovered_link import DiscoveredLink
 from app.models.discovered_link_response import DiscoveredLinkResponse as WireDiscoveredLink
+from app.models.json_value import JsonValue
 from app.models.page_metadata_response import PageMetadataResponse
 from app.models.strategy_attempt import StrategyAttempt
 from app.models.taxonomy import CrawlStrategyName
@@ -85,7 +85,7 @@ def _link_models(links: list[DiscoveredLink]) -> list[WireDiscoveredLink]:
     return [WireDiscoveredLink.model_validate(link, from_attributes=True) for link in links]
 
 
-def _evidence_models(evidence: list[dict[str, Any]]) -> list[ClassificationEvidence]:
+def _evidence_models(evidence: list[dict[str, JsonValue]]) -> list[ClassificationEvidence]:
     """The classification-evidence models.
     The one conversion still taking a raw dict -- the producer still builds
     evidence as plain JSON -- and the honest place to point a future wave.
@@ -159,12 +159,12 @@ _RENDER_METADATA_AS_MODEL_FIELD = frozenset({"title"})
 _RENDER_METADATA_AS_TOP_LEVEL = frozenset({"extraction_method"})
 
 
-def _render_diagnostics(metadata: Mapping[str, Any]) -> dict[str, Any]:
+def _render_diagnostics(metadata: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
     """What the browser worker's ``metadata`` becomes on the render wire.
     Every key survives: the two carried in a declared field are read out, the rest
     pass through unchanged, so a new worker key lands in diagnostics by default.
     """
-    diagnostics: dict[str, Any] = {
+    diagnostics: dict[str, JsonValue] = {
         key: value
         for key, value in metadata.items()
         if key not in _RENDER_METADATA_AS_MODEL_FIELD | _RENDER_METADATA_AS_TOP_LEVEL

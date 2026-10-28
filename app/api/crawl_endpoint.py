@@ -6,7 +6,6 @@ import asyncio
 import logging
 import time
 from collections.abc import Awaitable
-from typing import Any
 
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, Response
@@ -38,7 +37,9 @@ from app.storage.result_store import CrawlResultStore
 _logger = logging.getLogger(__name__)
 
 
-async def await_or_client_gone(work: Awaitable[Any], request: Request, *, poll_interval: float = 0.25) -> Any:
+async def await_or_client_gone[Work](
+    work: Awaitable[Work], request: Request, *, poll_interval: float = 0.25
+) -> Work:
     """Await the sync crawl but cancel it if the client disconnects first:
     Starlette does not cancel a handler on disconnect, so poll ``is_disconnected``
     and cancel (freeing the slot/browser); a finished crawl returns untouched.
@@ -64,7 +65,7 @@ def _crawl_rejection(error: ValueError) -> HTTPException:
     return validation_http_error(error)
 
 
-def _serialize_or_reject(items: list[dict[str, Any]], output_format: str) -> tuple[str, str]:
+def _serialize_or_reject(items: list[dict[str, JsonValue]], output_format: str) -> tuple[str, str]:
     """Serialize ``items`` for ``output_format``, or refuse as the 422 the
     contract names -- the one edge a refused format surfaces. Callers that only
     want the format checked pass no items; the validation is the point, not bytes.
