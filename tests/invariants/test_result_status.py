@@ -20,7 +20,7 @@ from tests.rules import Bites, Rule, Silent
 _RESULT_CONSTRUCTORS = frozenset({"CrawlStrategyAttempt", "EngineCrawlResult"})
 
 
-_RESULT_CHOKEPOINT_MODULES = frozenset({"app/orchestration/results.py", "app/models/result_factory.py"})
+_RESULT_CHOKEPOINT_MODULES = frozenset({"app/transport/results.py", "app/models/result_factory.py"})
 
 
 def _literal_status_classification_pairs(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -82,7 +82,7 @@ RESULTS_DERIVE_THEIR_STATUS_FROM_THE_TAXONOMY = Rule(
         # The same spelled pair inside the chokepoint module is the definition.
         Silent(
             "CrawlStrategyAttempt(strategy=s, status='failed', classification=label)\n",
-            at=REPO_ROOT / "app/orchestration/results.py",
+            at=REPO_ROOT / "app/transport/results.py",
         ),
     ),
 )

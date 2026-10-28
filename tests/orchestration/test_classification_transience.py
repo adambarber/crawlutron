@@ -9,7 +9,7 @@ import socket
 import httpx
 import pytest
 
-from app.orchestration.classification import classify_error_code
+from app.transport.classification import classify_error_code
 from app.vocabulary.taxonomy import (
     CLASSIFICATION_STATUS_BY_LABEL,
     NON_TRANSIENT_CLASSIFICATIONS,

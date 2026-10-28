@@ -16,7 +16,6 @@ from app.models.fetch_envelope import RetryDiagnostics
 from app.models.http_fetch_result import HttpFetchResult
 from app.models.result_factory import binary_no_text_result, build_engine_result
 from app.models.taxonomy import Classification
-from app.orchestration.results import engine_result_from_exception
 from app.transport import body_decode, fetch_policy
 from app.transport.cache import HttpCache
 from app.transport.content_cache import ContentCache
@@ -42,6 +41,7 @@ from app.transport.http_response import (
     HttpStrategyContext,
     response_result_fields,
 )
+from app.transport.results import engine_result_from_exception
 from app.transport.strategy_request import StrategyRequest
 from app.vocabulary.extraction import EXTRACTION_DOCUMENT
 from app.vocabulary.taxonomy import status_for_classification

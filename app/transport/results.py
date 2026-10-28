@@ -19,7 +19,7 @@ from app.models.result_factory import (
     terminal_crawl_result,
 )
 from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
-from app.orchestration.classification import classify_and_log
+from app.transport.classification import classify_and_log
 from app.vocabulary.taxonomy import ResultStatus
 
 _JobT = TypeVar("_JobT")

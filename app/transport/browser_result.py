@@ -10,7 +10,7 @@ from app.models.crawl_policy import CrawlPolicy
 from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
 from app.models.result_factory import build_engine_result
 from app.models.taxonomy import CrawlStrategyName
-from app.orchestration.worker import call_worker
+from app.runtime.worker_dispatch import call_worker
 from app.transport.body_decode import quality_score
 from app.transport.content_pipeline import (
     ExtractedContent,

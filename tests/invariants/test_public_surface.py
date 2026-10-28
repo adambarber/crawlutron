@@ -49,10 +49,10 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/admission/payload_helpers.py": (2, 2),
     # RAISED to (10, 9): terminal_attempt became public when CrawlResult stopped copying four axes out of the
     # attempt it holds.
-    "app/orchestration/classification.py": (3, 2),
+    "app/transport/classification.py": (3, 2),
     # Designed RAISE: engine and render result funnels were merged per #324; LOWERED
     # to (8, 7) when the pure constructors moved to app/models/result_factory.py (#160).
-    "app/orchestration/results.py": (8, 7),
+    "app/transport/results.py": (8, 7),
     "app/transport/fetch_policy.py": (5, 5),
     "app/models/host_policy.py": (6, 5),
     # The two latest surface modules: the gate must not silently drop a module
@@ -116,7 +116,7 @@ _SURFACE_DECLARING_EXEMPT = frozenset(
         "app/orchestration/request_pipeline.py",
         "app/transport/robots_parse.py",
         "app/orchestration/strategy_chain.py",
-        "app/orchestration/worker.py",
+        "app/runtime/worker_dispatch.py",
         "app/runtime/logging_config.py",
         "app/runtime/resource_pressure.py",
         "app/search/endpoint.py",
