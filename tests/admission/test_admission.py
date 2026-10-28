@@ -1,13 +1,12 @@
 """Admission control: CPU and memory gates, weighted strategy admission and page-budget bounds."""
 
-import asyncio
-
 import pytest
 
 from app.health.readiness import ReadinessState
 from app.runtime.memory_pressure import MemoryGate, MemoryStats, read_memory_stats
 from app.runtime.metrics import get_metrics
 from app.runtime.resource_pressure import CpuGate, ResourceGate, read_cpu_quota, read_cpu_usage_seconds
+from tests._admission_doubles import pinned_resource_gate as _pinned_resource_gate
 from tests._timing_harnesses import recorder
 
 
@@ -210,32 +209,6 @@ async def test_gate_returns_immediately_under_target(monkeypatch, kind, make_gat
 
 
 # --- combined ResourceGate ---
-
-
-def _pinned_resource_gate(monkeypatch, *, cpu_ratio, memory_ratio, max_wait_seconds=0.05):
-    """A ResourceGate with both sampler ratios pinned, an injected clock, and recorded waits.
-
-    The recorded sleep advances the clock by the interval it was asked to wait,
-    so the wait ends on the gate's OWN bound rather than a real one.
-    """
-    now = [0.0]
-    gate = ResourceGate(
-        clock=lambda: now[0],
-        cpu_ratio=lambda: cpu_ratio,
-        memory_ratio=lambda: memory_ratio,
-    )
-    gate.memory.max_wait_seconds = max_wait_seconds
-    gate.cpu.max_wait_seconds = max_wait_seconds
-    waited = []
-    yield_to_loop = asyncio.sleep
-
-    async def recording_sleep(seconds):
-        waited.append(seconds)
-        now[0] += seconds
-        await yield_to_loop(0)
-
-    monkeypatch.setattr(asyncio, "sleep", recording_sleep)
-    return gate, waited
 
 
 async def test_resource_gate_waits_while_either_saturated(monkeypatch):

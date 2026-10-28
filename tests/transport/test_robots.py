@@ -26,9 +26,9 @@ from app.transport.robots_parse import (
 )
 from app.vocabulary.identity import SERVICE_ID
 from tests._fetcher_factories import routed_fetcher
+from tests._http_fetch_doubles import fake_fetcher as _fake_fetcher
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, crawl_policy
 from tests._timing_harnesses import cpu_seconds
-from tests.transport.test_robots_crawler import _fake_fetcher
 
 
 def robots_entry_key(origin: str) -> tuple[str, HostPolicy]:

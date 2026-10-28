@@ -5,22 +5,22 @@ from __future__ import annotations
 import ast
 
 from tests.chokepoint_walks import REPO_ROOT, nodes_of
-from tests.invariants._shared import assert_property_detector_bites
-from tests.invariants.test_registry import (
+from tests.invariants._registry_machinery import (
     _owner_definition_ids,
     _property,
     _property_owner,
     _property_owner_failures,
 )
-from tests.invariants.test_registry_bool_env import _bool_env_offenders
-from tests.invariants.test_registry_robots import _robots_policy_offenders
-from tests.invariants.test_registry_targets import _public_target_offenders
+from tests.invariants._shared import assert_property_detector_bites
+from tests.invariants.test_registry_bool_env import bool_env_offenders
+from tests.invariants.test_registry_robots import robots_policy_offenders
+from tests.invariants.test_registry_targets import public_target_offenders
 
 
 def test_public_target_detector_resolves_imported_helpers():
     assert_property_detector_bites(
         _property("public-target"),
-        _public_target_offenders,
+        public_target_offenders,
         caught={
             "imported verdict helper": (
                 {
@@ -53,7 +53,7 @@ def test_public_target_detector_resolves_imported_helpers():
 def test_bool_env_detector_resolves_imported_helpers():
     assert_property_detector_bites(
         _property("bool-env"),
-        _bool_env_offenders,
+        bool_env_offenders,
         caught={
             "imported normalization helper": (
                 {
@@ -82,7 +82,7 @@ def test_bool_env_detector_resolves_imported_helpers():
 def test_robots_policy_detector_resolves_imported_helpers():
     assert_property_detector_bites(
         _property("robots-policy"),
-        _robots_policy_offenders,
+        robots_policy_offenders,
         caught={
             "imported policy helper": (
                 {
@@ -147,6 +147,9 @@ def test_property_owner_duplicate_is_not_sanctioned():
     path = REPO_ROOT / "app" / "config" / "env.py"
     owner_ids = _owner_definition_ids(tree, path, prop)
     duplicate = _duplicate_def_nodes(tree)[1]
-    assert len(owner_ids) == 1
+    assert len(owner_ids) == 1, (
+        "a duplicate def must not register a second owner id; the owner set is "
+        f"identity-keyed, so both nodes of one shape collapse to one: got {len(owner_ids)}"
+    )
     assert not _property_owner(path, prop, tree=tree, node=duplicate)
-    assert _bool_env_offenders(tree, path, prop)
+    assert bool_env_offenders(tree, path, prop)

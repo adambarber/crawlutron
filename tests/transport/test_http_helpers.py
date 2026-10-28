@@ -18,7 +18,6 @@ from app.transport.fetch_policy import (
     retry_after_seconds,
     retry_backoff_seconds,
 )
-from app.transport.http import http_strategy_result
 from app.transport.request_profile import cookie_header_for_url, headers_for_strategy
 from app.vocabulary.extraction import (
     EXTRACTION_DOCUMENT,
@@ -34,9 +33,9 @@ from tests._fetcher_factories import (
     raise_fetcher,
     routed_fetcher,
     run_chain,
-    scripted_fetcher,
-    strategy_request,
 )
+from tests._http_fetch_doubles import diagnostics_for_failed_probes as _diagnostics_for_failed_probes
+from tests._http_fetch_doubles import run_http_result as _run_http_result
 from tests._policy_factories import canonical, make_base_policy
 
 
@@ -253,57 +252,6 @@ FEED_ADVERTISING_PAGE = (
 # The URL the default single-page drive fetches, and therefore the one a caller has to differ from for
 # ``final_url`` to mean anything.
 _PAGE_URL = "http://example.com/"
-
-
-async def _run_http_result(
-    status=200,
-    strategy=HTTP_DECLARED_CRAWLER,
-    fetcher=None,
-    ctype="text/html; charset=utf-8",
-    body=b"<html><body>hello</body></html>",
-    final_url=_PAGE_URL,
-    policy=None,
-):
-    """Drive the real ``http_strategy_result`` over a default single-page policy.
-
-    Module-level so the discovery tests share it, not another class's harness;
-    ``final_url`` is honoured now -- it used to be accepted and dropped.
-    """
-    if fetcher is None:
-        fetcher = (
-            scripted_fetcher(status=status, ctype=ctype, body=body)
-            if final_url == _PAGE_URL
-            else routed_fetcher(
-                default=make_fetch(status=status, body=body, ctype=ctype, final_url=final_url),
-            )
-        )
-
-    # A policy partial merges as a raw dict and is read once, the way the wire merges it.
-    base = make_base_policy()
-    pol = read_policy({**base.model_dump(), **policy}) if policy else base
-    return await http_strategy_result(
-        request=strategy_request("http://example.com/", pol, strategy),
-        http_fetcher=fetcher,
-    )
-
-
-async def _diagnostics_for_failed_probes(fetcher, **policy):
-    """Full discovery whose probes fail: the ``(result, diagnostics)`` pair.
-
-    Discovery probes fail; the page fetch does not. The point is a failed probe
-    is recorded as diagnostics and does not fail the crawl.
-    """
-    result = await _run_http_result(
-        fetcher=fetcher,
-        policy={
-            "limits": {"timeout_seconds": 5, "max_retries": 0},
-            "discovery": DISCOVERY_ALL_ON,
-            **policy,
-        },
-    )
-    assert result.status == "success"
-    assert "robots" in result.diagnostics
-    return result, result.diagnostics
 
 
 class TestHttpStrategyResult:

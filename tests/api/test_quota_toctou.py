@@ -5,7 +5,7 @@ The count->insert window let two concurrent posts pass a quota of one.
 
 import asyncio
 
-from tests.api.test_caller_quota_binding import _keyedquota_client
+from tests._api_harnesses import keyed_quota_client as _keyedquota_client
 
 
 async def test_two_concurrent_async_posts_cannot_both_pass_a_quota_of_one(tmp_path, monkeypatch):

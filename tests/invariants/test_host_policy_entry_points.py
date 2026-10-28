@@ -3,7 +3,6 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from app.models.host_policy import HOST_POLICY_ENTRY_POINTS
 from tests.chokepoint_walks import REPO_ROOT, app_trees, local_nodes, nodes_of, resolved_call_name
 from tests.invariants._shared import DefinitionNode, _module_definition_index
 
@@ -147,7 +146,9 @@ def _app_modules() -> tuple[tuple[pathlib.Path, ast.Module], ...]:
 
 
 def _table_entries() -> set[str]:
-    return set(HOST_POLICY_ENTRY_POINTS)
+    from tests._host_policy_entry_table import host_policy_entry_table
+
+    return host_policy_entry_table()
 
 
 def test_host_policy_entry_table_matches_ast_discovery():

@@ -64,7 +64,7 @@ def test_a_real_two_line_logic_fragment_classifies_as_logic() -> None:
 
 def test_the_gate_is_a_precommit_hook() -> None:
     """The 2/30 sweep is wired into the gate stack, not an orphan script."""
-    from tests.test_precommit_ci_contract import CONFIG_PATH, _hook_blocks
+    from tests._ci_contract import CONFIG_PATH, _hook_blocks
 
     hooks = _hook_blocks(CONFIG_PATH.read_text(encoding="utf-8"))
     ids = {hook_id for hook_id, _ in hooks}

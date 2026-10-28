@@ -4,82 +4,28 @@ Fake closures/scheduler/spill drive :func:`run_recursive_crawl` so the
 batch-sizing and admission-gate logic are covered without the full engine."""
 
 import asyncio
-from collections import deque
 
 import pytest
 
 from app.models.crawl_task import CrawlTask
-from app.models.discovered_link import DiscoveredLink
-from app.models.host_policy import HostPolicy
 from app.orchestration.admission_stall import AdmissionStallGuard
-from app.orchestration.recursive import RecursiveRunState, admit_recursive_batch
+from app.orchestration.recursive import admit_recursive_batch
 from app.runtime.metrics import get_metrics
 from app.transport.scheduler import DomainScheduler
 from app.vocabulary.strategies import BROWSER_HEADLESS
+from tests._admission_runs import link as _link
+from tests._admission_runs import minimum_admission_run as _minimum_admission_run
+from tests._admission_runs import run as _run
+from tests._admission_runs import task as _task
 from tests._policy_factories import canonical
 from tests._recursive_harnesses import ContentionFreeGate, drive_recursive_crawl, make_crawl_task
+from tests._recursive_harnesses import _allowed_result as _allows
 from tests._result_builders import engine_result, make_engine_result
 
 # The root seed as written, and the value the engine actually holds for it. These are not the same string:
 # normalization strips that trailing slash. Naming both makes the distinction something a test can see.
 _ROOT = "http://a/"
 _ROOT_CANONICAL = canonical(_ROOT)
-
-
-def _task(url: str, *, index: int = 0) -> CrawlTask:
-    """A crawl task whose ``normalized_url`` is the production canonical form."""
-    return CrawlTask(
-        index=index,
-        original_url=url,
-        normalized_url=canonical(url),
-    )
-
-
-def _link(url: str) -> DiscoveredLink:
-    return DiscoveredLink(
-        url=url,
-        normalized_url=canonical(url),
-        text="",
-        rel=[],
-        source_url=canonical("http://a/"),
-        host="a",
-        is_same_host=True,
-    )
-
-
-async def _allows(url):
-    return True
-
-
-async def _run(
-    jobs,
-    worker,
-    gate=None,
-    *,
-    respect_robots=False,
-    max_depth=2,
-    max_pages=10,
-    global_concurrency=4,
-    seed_sitemaps=False,
-    robots_allows=None,
-    scheduler=None,
-):
-    """These tests default to ``max_depth=2``; the harness default is 0.
-
-    The bound under test is passed explicitly, so the depth default is the
-    only reason this wrapper exists."""
-    return await drive_recursive_crawl(
-        jobs,
-        worker,
-        allows=robots_allows if robots_allows is not None else _allows,
-        gate=gate,
-        scheduler=scheduler,
-        respect_robots=respect_robots,
-        max_depth=max_depth,
-        max_pages=max_pages,
-        global_concurrency=global_concurrency,
-        seed_sitemaps=seed_sitemaps,
-    )
 
 
 def _expanding_worker():
@@ -404,63 +350,6 @@ async def test_saturated_admission_loop_terminates_within_bounded_interval():
         1: "browser_pool_exhausted",
     }
     assert {i: r.status for i, r in result.spill.writes.items()} == {0: "failed", 1: "failed"}
-
-
-def _minimum_admission_run(frontier, *, http_quota, browser_quota, batch_pages=10, browser_domains=()):
-    """A minimal run/state for ``admit_recursive_batch``: only the admission
-    path is exercised, with ``respect_robots=False`` short-circuiting robots.
-    """
-    from app.vocabulary.limits import ENGINE_BATCH_CONCURRENCY_MULTIPLIER
-
-    class FixedAdmission:
-        def __init__(self, h, b):
-            self.h, self.b = h, b
-            self.last_want = None
-
-        async def admit(self, want_http, want_browser):
-            self.last_want = (want_http, want_browser)
-            return min(want_http, self.h), min(want_browser, self.b)
-
-    admission = FixedAdmission(http_quota, browser_quota)
-    scheduler = DomainScheduler(global_limit=8, per_domain_limit=8, delay_seconds=0.0)
-    for domain in browser_domains:
-        scheduler.set_pinned_strategy(domain, BROWSER_HEADLESS)
-    run = RecursiveRunState(
-        scheduler=scheduler,
-        worker=None,
-        robots_allows=None,
-        robots_crawl_delay=None,
-        robots_disallowed=None,
-        sitemap_seeds=None,
-        spill=None,
-        max_depth=0,
-        max_pages=batch_pages,
-        respect_robots=False,
-        include_html=True,
-        want_document_bodies=False,
-        scope_pattern=None,
-        global_concurrency=4,
-        seed_sitemaps=False,
-        resource_gate=ContentionFreeGate(1.0),
-        admission=admission,
-        host_policy=HostPolicy.unrestricted(),
-        ramp_max=128,
-        http_heavy_lookahead=128 * ENGINE_BATCH_CONCURRENCY_MULTIPLIER,
-        spill_write=None,
-    )
-    state = type(
-        "State",
-        (),
-        {
-            # The frontier carries ``(depth, task)`` pairs, like the dispatch loop
-            # builds; ``_take_and_bucket`` subscriptable-addresses ``item[1]``.
-            "frontier": deque((0, task) for task in frontier),
-            "visited": set(),
-            "ramp": 4.0,
-            "page_count": 0,
-        },
-    )()
-    return run, state, admission
 
 
 async def test_under_throttling_the_full_admitted_http_quota_is_used_across_a_browser_heavy_head():

@@ -12,7 +12,7 @@ from app.api.async_crawl_runner import run_async_crawl
 from app.models.crawl_request import CrawlRequest
 from app.storage.job_store import JobStatus
 from app.storage.result_store import CrawlResultStore
-from tests.api.test_webhook_delivery import _run_with_webhook
+from tests._api_harnesses import run_with_webhook as _run_with_webhook
 
 
 def _quick_crawl_result(request_id: str) -> dict[str, object]:

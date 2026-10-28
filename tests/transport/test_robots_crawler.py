@@ -83,21 +83,6 @@ class TestRobotsDenialSaysWhy:
         assert item.diagnostics["robots"]["evaluation"] == "refused"
 
 
-def _fake_fetcher(calls):
-    return routed_fetcher(
-        {
-            "/robots.txt": (200, "User-agent: *\nDisallow: /secret\n", "text/plain"),
-            "sitemap": (
-                200,
-                "<urlset><loc>https://x.test/p1</loc><lastmod>2024-05-05</lastmod></urlset>",
-                "application/xml",
-            ),
-        },
-        calls=calls,
-        default=(200, b"<html></html>", "text/html"),
-    )
-
-
 class TestEmptyDisallowDoesNotEraseItsGroup:
     """RFC 9309 2.2.2: an empty ``Disallow`` value is a rule to ignore, not a verdict."""
 

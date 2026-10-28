@@ -14,10 +14,7 @@ from app.models.crawl_request import CrawlRequest
 from app.models.json_value import JsonValue
 from app.models.render_request import RenderRequest
 from tests.chokepoint_walks import REPO_ROOT, parsed
-from tests.invariants.test_knob_contracts import (
-    _KNOB_PATTERN,
-    _consumed_knobs,
-)
+from tests.invariants._env_knobs import _KNOB_PATTERN, _consumed_knobs
 from tests.rules import Rule
 
 _DOC_REFERENCE_EXCLUSIONS = {
@@ -348,7 +345,10 @@ def test_doc_example_gate_bites(tmp_path):
         encoding="utf-8",
     )
     offenders = _doc_example_offenders(root=tmp_path, documents=["doc_ghost.md"])
-    assert len(offenders) == 1, offenders
+    assert len(offenders) == 1, (
+        "a request example a model rejects must produce exactly one offender "
+        f"(one doc, one fence): got {offenders}"
+    )
     assert "rejected by CrawlRequest" in offenders[0], offenders
 
 

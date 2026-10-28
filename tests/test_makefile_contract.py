@@ -8,24 +8,22 @@ import subprocess
 import pytest
 
 from scripts.executables import BASH, require_executable
-from tests.test_ci_enforcement import (
+from tests._ci_contract import (
+    CONFIG_PATH,
+    ERREXIT_SHELL,
+    MAKEFILE_PATH,
+    WORKFLOW_PATH,
     _assert_failure_propagation,
+    _hook_blocks,
     _render_results,
+    _require_exactly_one_jscpd_gate,
     _required_gate_script,
     _required_gate_shell,
     _required_needs,
     _result_assertion,
     _run_script,
 )
-from tests.test_precommit_ci_contract import (
-    CONFIG_PATH,
-    ERREXIT_SHELL,
-    MAKEFILE_PATH,
-    QUOTED_SECOND_JSCPD_HOOK,
-    WORKFLOW_PATH,
-    _hook_blocks,
-    _require_exactly_one_jscpd_gate,
-)
+from tests.test_precommit_ci_contract import QUOTED_SECOND_JSCPD_HOOK
 
 # How a gate tool may be spelled in a Makefile recipe, as a pattern rather than a literal string. `pytest` is
 # absent on purpose.

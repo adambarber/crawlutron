@@ -4,40 +4,13 @@ import ast
 import pathlib
 from collections.abc import Iterator
 
-from tests.chokepoint_walks import (
-    APP_ROOT,
-    TESTS_DIR,
-    from_imports,
-    offender_at,
-    plain_imports,
-)
-from tests.invariants.test_tree_immutability import _tests_tree
+from tests.chokepoint_walks import from_imports, offender_at, plain_imports
 from tests.rules import Bites, Registry, Rule
+from tests.trees import test_tree_module_names as _test_tree_module_names
+from tests.trees import tree_under_tests as _tests_tree
 
 # Measured on tests/invariants/ alone: 37.7s of a 49.4s file, led by
 # test_property_registry_fingerprints_are_observed 8.06s, test_documented_browser_knobs_have_consumers
-
-
-def _app_reads(monkeypatch) -> list[pathlib.Path]:
-    """Record every `read_text` of a file under app/ for the rest of this test."""
-    original = pathlib.Path.read_text
-    seen: list[pathlib.Path] = []
-
-    def counting(self: pathlib.Path, *args, **kwargs) -> str:
-        if self.is_relative_to(APP_ROOT):
-            seen.append(self)
-        return original(self, *args, **kwargs)
-
-    monkeypatch.setattr(pathlib.Path, "read_text", counting)
-    return seen
-
-
-def _test_tree_module_names() -> frozenset[str]:
-    """The bare module names that name a file in the test tree.
-
-    Cached because the sweep asks once per import and the set does not change
-    within a run -- what keeps this affordable at every call site."""
-    return frozenset(candidate.stem for candidate in TESTS_DIR.rglob("*.py"))
 
 
 def _imported_modules(tree: ast.AST) -> Iterator[tuple[ast.AST, str]]:

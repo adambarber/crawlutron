@@ -6,14 +6,14 @@ import ast
 import pathlib
 
 from tests.chokepoint_walks import app_trees, has_method_call, local_subtree, nodes_of, offender
-from tests.invariants._shared import _relative_app_path
-from tests.invariants.test_registry import (
+from tests.invariants._registry_machinery import (
     _PROPERTY_MODULES,
     _module_aware,
     _observed_property_count,
     _owner_definition_ids,
     _property,
     _property_nodes,
+    _relative_app_path,
     _resolvedlocal_nodes,
 )
 from tests.property_registry import Property
@@ -142,7 +142,7 @@ def _bool_env_observations(tree: ast.AST, path: pathlib.Path, prop: Property) ->
 
 
 @_module_aware
-def _bool_env_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[str]:
+def bool_env_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[str]:
     tree_sets = _bool_env_tree_sets(tree, _PROPERTY_MODULES.get())
     excluded = _owner_definition_ids(tree, path, prop)
     return [
@@ -158,10 +158,17 @@ def test_bool_env_has_one_implementation():
     prop = _property("bool-env")
     offenders: list[str] = []
     for path, tree in app_trees(exclude=frozenset()):
-        offenders.extend(_bool_env_offenders(tree, path, prop))
+        offenders.extend(bool_env_offenders(tree, path, prop))
     assert _observed_property_count(prop), "bool-env detector observed no fingerprint occurrences"
     assert not offenders, "boolean environment policy has a second implementation: " + ", ".join(offenders)
 
 
 def test_bool_env_registry_is_not_empty():
     assert _property("bool-env").fingerprints
+
+
+# The registry's observation dispatch: this module owns the bool-env walk, the
+# machinery owns the lookup; registering keeps the import graph one-directional.
+from tests.invariants._registry_machinery import _OBSERVERS  # noqa: E402
+
+_OBSERVERS["bool-env"] = _bool_env_observations

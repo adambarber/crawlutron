@@ -6,8 +6,6 @@ omitted/zero ``limits`` block, and (2) the sync door must count toward concurren
 from __future__ import annotations
 
 import asyncio
-import contextlib
-from collections.abc import AsyncIterator
 
 import pytest
 
@@ -15,10 +13,12 @@ from app.api.caller_auth import identity_for_key
 from app.api.caller_concurrency import CallerConcurrencyTracker
 from app.config.settings import CrawlerSettings
 from app.storage.caller_key_store import CallerKeyStore
+from tests._api_harnesses import keyed_quota_client as _keyedquota_client
+from tests._api_harnesses import mount_tracker as _mount_tracker
+from tests._api_harnesses import stored_request as _stored_request
 from tests._async_harnesses import expect_quota_refused
 from tests._http_test_helpers import minimal_request
 from tests._policy_factories import job_store as make_store
-from tests.api.test_caller_isolation import _stored_request
 from tests.factories.client import post_crawl, quota_client
 
 
@@ -27,26 +27,10 @@ def _keyed_headers(key: str) -> dict[str, str]:
     return {"X-API-Key": key}
 
 
-def _mount_tracker(client) -> CallerConcurrencyTracker:
-    """Attach the sync-door register to the test client's app and return it."""
-    tracker = CallerConcurrencyTracker()
-    client._transport.app.state.concurrency_tracker = tracker
-    return tracker
-
-
 async def _stored_crawl(client, store, *, key: str, max_pages: int = 0):
     """POST one async crawl for ``key`` and return the stored job and response."""
     response = await post_crawl(client, max_pages=max_pages, key=key)
     return _stored_request(store, response), response
-
-
-@contextlib.asynccontextmanager
-async def _keyedquota_client(tmp_path, *, max_concurrency: int = 1) -> AsyncIterator:
-    """A quota client with a mounted tracker and one keyed caller."""
-    async with quota_client(tmp_path) as (client, store, results, keys):
-        tracker = _mount_tracker(client)
-        issued = keys.issue_key("agent-a", max_concurrency=max_concurrency)
-        yield client, store, tracker, issued
 
 
 async def test_keyed_crawl_stores_the_key_bound_when_limits_omitted(tmp_path):

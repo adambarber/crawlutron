@@ -9,10 +9,10 @@ import pytest
 
 from app.api import job_runner
 from app.config.settings import CrawlerSettings
+from tests._api_harnesses import spy_on_history_reads
 from tests._job_drivers import _seed_job
 from tests._job_harnesses import ScriptedExecute
 from tests._result_builders import _canned_result
-from tests.api.test_startup_offload import spy_on_history_reads
 
 _BATCH = 8
 

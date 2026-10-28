@@ -26,6 +26,8 @@ from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from app.vocabulary.taxonomy import status_for_classification
 from tests._extraction_helpers import extract_discovered_links
 from tests._fetcher_factories import ok_fetcher, routed_fetcher
+from tests._http_fetch_doubles import FEED_ADVERTISING_PAGE
+from tests._http_fetch_doubles import diagnostics_for_failed_probes as _diagnostics_for_failed_probes
 from tests._http_test_helpers import (
     HTTP_CFFI_IMPERSONATE,
     decode_body,
@@ -37,7 +39,6 @@ from tests._worker_doubles import (
     assert_coroutine_worker_is_awaited_directly,
     assert_sync_worker_runs_once_in_a_thread,
 )
-from tests.transport.test_http_helpers import FEED_ADVERTISING_PAGE, _diagnostics_for_failed_probes
 
 
 class TestCrawlRequest:

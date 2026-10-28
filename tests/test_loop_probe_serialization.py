@@ -10,7 +10,7 @@ from app.config.settings import CrawlerSettings
 from app.models.crawl_policy import CrawlPolicy
 from app.orchestration.engine import ResultSpill
 from app.transport.content_cache import ContentCache
-from tests.test_event_loop_non_blocking import _LoopLiveness
+from tests._loop_liveness import LoopLiveness as _LoopLiveness
 
 
 class TestContentCacheStoreSerializationOffTheEventLoop:

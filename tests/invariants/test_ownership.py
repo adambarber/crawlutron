@@ -80,9 +80,6 @@ _OWNER_PATH = REPO_ROOT / "app" / "transport" / "browser.py"
 _OWNER_MODULE = "app/transport/browser.py"
 
 
-_ELSEWHERE = REPO_ROOT / "app" / "crawl" / "content_cache.py"
-
-
 LOCK_HELD_ACROSS_AN_AWAIT = Rule(
     name="lock-held-across-an-await",
     find=_lock_bodies_with_awaits,

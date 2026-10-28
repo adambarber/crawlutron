@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import ast
 import pathlib
-import re
 
 from tests.chokepoint_walks import (
     SANCTIONED,
@@ -434,26 +433,3 @@ RULES = Registry(
 
 def test_no_rule_violations():
     RULES.check_all_clean()
-
-
-# --------------------------------------------------------------------------- Advertise only the encodings
-# this process can decode ---------------------------------------------------------------------------
-_ALWAYS_DECODABLE_ENCODINGS = {"gzip", "deflate", "identity"}
-
-
-_ENCODING_TOKEN = re.compile(r"^[a-z0-9\-_+.]+$")
-
-
-# A comma-joined list is only an encoding list if it MENTIONS a real encoding.
-_KNOWN_ENCODINGS = {
-    "gzip",
-    "x-gzip",
-    "deflate",
-    "x-deflate",
-    "br",
-    "zstd",
-    "compress",
-    "x-compress",
-    "identity",
-    "*",
-}

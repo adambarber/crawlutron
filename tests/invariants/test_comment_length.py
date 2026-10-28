@@ -262,5 +262,9 @@ def test_no_comment_block_ends_mid_clause() -> None:
     for root in ("app", "tests", "scripts"):
         for name, found in _root_all_blocks(root).items():
             for start, _end, text in found:
-                offenders.append(f"{name}:{start}: {text}")
-    assert not offenders, "\n".join(offenders)
+                offenders.append(f"{name}:{start}: comment block ends mid-clause ({text})")
+    assert not offenders, (
+        "a comment block closes mid-clause; finish the thought or split the block -- "
+        "the rule is that every block ends on a complete clause, not a dangling "
+        "connective or comma:\n" + "\n".join(offenders)
+    )

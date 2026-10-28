@@ -19,16 +19,6 @@ from tests._extraction_helpers import (
 from tests._policy_factories import canonical
 
 
-def assert_extraction_empty(result) -> None:
-    """A failed document extraction yields nothing at all, in both fields.
-
-    A timeout, crash or parse failure all claim "no text and no markdown";
-    asserting one would let a half-filled result through as a success.
-    """
-    assert result.text is None
-    assert result.markdown is None
-
-
 def test_document_test_hooks_follow_the_injected_seam():
     for hooks in ({"die": True, "hang": True}, None):
         install_doc_pool_hooks(hooks)

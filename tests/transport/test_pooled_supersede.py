@@ -10,6 +10,7 @@ from app.transport.fetchers import cffi_fetch
 from tests._async_harnesses import run_loop_rebind_scenario
 from tests._policy_factories import canonical
 from tests._pool_harnesses import builder_for as _builder_for
+from tests._pool_ws_doubles import bind_to_running_loop as _bind_to_running_loop
 
 
 @pytest.fixture(autouse=True)
@@ -76,17 +77,6 @@ class _BrokenStream:
 
     async def aiter_raw(self):
         raise OSError("no origin for a pooled-fake pump")
-
-
-def _bind_to_running_loop(client) -> None:
-    """Bind a fake client to the running loop, or leave it unbound if there is none.
-
-    An unbound fake is how the pool's "closed from the loop it was made on"
-    question gets answered honestly."""
-    try:
-        client._bound_loop = asyncio.get_running_loop()
-    except RuntimeError:
-        client._bound_loop = None
 
 
 def _build_httpx_fake(settings=None) -> _PooledFake:

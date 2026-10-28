@@ -18,9 +18,10 @@ from app.runtime.resource_pressure import (
     build_admission_policy,
 )
 from app.storage.job_store import FrontierEntry
+from tests._admission_doubles import PinnedGate
+from tests._admission_doubles import no_crawl_delay as _no_crawl_delay
 from tests._fetcher_factories import crawled_results
 from tests._policy_factories import admit, canonical
-from tests.admission.test_admission_scaling import PinnedGate
 
 
 @pytest.mark.parametrize(
@@ -256,11 +257,6 @@ class TestHTTPTaskRamEstimate:
 
 async def _allowed() -> bool:
     return True
-
-
-async def _no_crawl_delay(url: str) -> float | None:
-    """A host that states no Crawl-delay, so a scenario about capacity can pass one."""
-    return None
 
 
 class _RequeueJob:

@@ -21,6 +21,7 @@ from app.models.crawl_request import CrawlRequest
 from app.safety.validation import HostPolicy
 from app.storage.job_store import JobStatus, JobStore
 from app.storage.result_store import CrawlResultStore
+from tests._api_harnesses import run_with_webhook as _run_with_webhook
 from tests._assertions import block_private_targets, host_resolves_to
 from tests._webhook_doubles import record_webhook_delivery
 
@@ -69,22 +70,6 @@ def _spy_resolver_threads(monkeypatch: pytest.MonkeyPatch) -> list[threading.Thr
 
     monkeypatch.setattr(socket, "getaddrinfo", spy_getaddrinfo)
     return resolver_threads
-
-
-async def _run_with_webhook(request_id, execute_fn, webhook_url, job_store, result_store):
-    """One async crawl with a scripted executor and a captured webhook post."""
-    with patch("app.api.async_crawl_runner.execute_crawl", new=execute_fn):
-        with patch("app.api.webhooks.post_webhook", new_callable=AsyncMock) as post_webhook:
-            await run_async_crawl(
-                request_id,
-                CrawlRequest.model_validate({"url": "http://example.com/"}),
-                webhook_url,
-                MagicMock(),
-                job_store,
-                result_store,
-                asyncio.Event(),
-            )
-    return post_webhook
 
 
 class TestAsyncCrawlFailureWebhookDelivery:
