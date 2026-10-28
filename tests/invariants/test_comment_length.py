@@ -216,12 +216,12 @@ def _zero_everywhere[T](collect: Callable[[str], list[T]]) -> list[tuple[str, T]
 
 
 def _format_long_comment_run(name: str, item: tuple[int, int]) -> str:
-    return f"{name}:{item[0]}: {item[-1]}"
+    return f"{name}:{item[0]}: comment run exceeds the 2-line limit"
 
 
 def _format_overlong_docstring(name: str, item: tuple[int, int, str]) -> str:
     lineno, _end, kind = item
-    return f"{name}:{lineno}: {kind} exceeds three lines"
+    return f"{name}:{lineno}: {kind} exceeds the 3-line docstring limit"
 
 
 def test_zero_long_comment_runs_everywhere() -> None:
