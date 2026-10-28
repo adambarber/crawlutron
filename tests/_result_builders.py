@@ -145,7 +145,7 @@ def skipped_result(
 
     All five arguments must agree, because ``error`` and ``strategy`` once
     drifted from what the production builder emits for a classification."""
-    from app.orchestration.results import (
+    from app.transport.results import (
         TerminalResult,
         skipped_engine_result,
     )

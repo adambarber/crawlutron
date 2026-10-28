@@ -1,4 +1,7 @@
-"""Worker dispatch for the crawl strategy pipeline."""
+"""Worker dispatch for the crawl strategy pipeline: process execution mechanics
+(sync workers run in a thread, awaitables are closed, never double-invoked). Process-wide,
+so layers consult them, never own them -- orchestration decides *what* to dispatch.
+"""
 
 from __future__ import annotations
 

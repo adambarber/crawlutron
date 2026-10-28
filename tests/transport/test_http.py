@@ -1,11 +1,11 @@
 """HTTP fetch strategy behavior against a real local server (no mocks)."""
 
 from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
-from app.orchestration.results import crawl_result_from_engine_result
 from app.transport.cache import HttpCache
 from app.transport.fetch_policy import looks_like_binary_body
 from app.transport.fetchers import default_http_fetcher
 from app.transport.http import http_strategy_result
+from app.transport.results import crawl_result_from_engine_result
 from app.vocabulary.extraction import EXTRACTION_FULL
 from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._assertions import assert_result_success

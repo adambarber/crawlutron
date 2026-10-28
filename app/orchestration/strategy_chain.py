@@ -8,13 +8,13 @@ from typing import TYPE_CHECKING, Any, cast, get_args
 
 from app.models.crawl_strategy import CrawlStrategy
 from app.models.taxonomy import CrawlStrategyName
-from app.orchestration.results import (
+from app.transport.browser_result import browser_strategy_result
+from app.transport.http import http_strategy_result
+from app.transport.results import (
     TerminalResult,
     engine_result_from_exception,
     failed_engine_result,
 )
-from app.transport.browser_result import browser_strategy_result
-from app.transport.http import http_strategy_result
 from app.transport.strategy_request import StrategyRequest
 from app.vocabulary.strategies import BROWSER_STRATEGIES, HTTP_CFFI_IMPERSONATE, HTTP_STRATEGIES
 

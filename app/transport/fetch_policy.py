@@ -22,8 +22,8 @@ from app.models.http_fetch_result import HttpFetchResult as _HttpFetchResult
 from app.models.http_fetcher import HttpFetcher
 from app.models.normalized_url import NormalizedUrl
 from app.models.robots_diagnostics import RobotsDiagnostics
-from app.orchestration.classification import classify_error_code
 from app.transport.body_decode import decode_body
+from app.transport.classification import classify_error_code
 from app.transport.decompression import decompress_body as _decompress_body
 from app.transport.robots_parse import parse_robots_crawl_delay, parse_robots_sitemaps
 from app.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES, DISCOVERY_BODY_MAX_BYTES

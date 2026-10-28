@@ -2,17 +2,19 @@
 
 Orchestration decides *what to do*; extraction, admission and transport are the
 layers it calls. A lower layer importing orchestration inverts the dependency
-(the engine imports extraction and admission; they must not import the engine's
-home package). Ownership moves fix violations; this gate refuses new ones.
-#163 sealed the extraction band, #162 the admission band; the transport band
-(browser/browser_pool/browser_result/fetch_policy/http) is tracked in #564.
+(the engine imports extraction, admission and transport; they must not import
+the engine's home package). Ownership moves fix violations; this gate refuses
+new ones.
+#163 sealed the extraction band, #162 the admission band, #564 the transport
+band (classification/results/worker_dispatch primitives moved to their owning
+layers).
 """
 
 from __future__ import annotations
 
 from scripts.module_graph import build_graph
 
-_LOWERS = ("app.extraction", "app.admission")
+_LOWERS = ("app.extraction", "app.admission", "app.transport")
 
 
 def _orchestration_imports() -> list[str]:
@@ -39,15 +41,16 @@ def test_lower_layers_import_nothing_from_orchestration() -> None:
 
 
 def test_gate_bites_on_a_planted_upward_import() -> None:
-    planted = {
-        "app.extraction.planted_up": {"app.orchestration.engine"},
-        "app.orchestration.engine": set(),
-    }
-    found = sorted(
-        f"{src} -> {dst}"
-        for src, deps in planted.items()
-        if src.startswith(_LOWERS)
-        for dst in deps
-        if dst.startswith("app.orchestration")
-    )
-    assert found == ["app.extraction.planted_up -> app.orchestration.engine"]
+    for lower in _LOWERS:
+        planted = {
+            f"{lower}.planted_up": {"app.orchestration.engine"},
+            "app.orchestration.engine": set(),
+        }
+        found = sorted(
+            f"{src} -> {dst}"
+            for src, deps in planted.items()
+            if src.startswith(_LOWERS)
+            for dst in deps
+            if dst.startswith("app.orchestration")
+        )
+        assert found == [f"{lower}.planted_up -> app.orchestration.engine"], (lower, found)

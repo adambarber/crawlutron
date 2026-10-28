@@ -13,9 +13,9 @@ import ssl
 import httpx
 
 from app.models.serialization import to_dict
-from app.orchestration.classification import classify_error_code
-from app.orchestration.results import crawl_result_from_exception, engine_result_from_exception
+from app.transport.classification import classify_error_code
 from app.transport.decompression import DecompressionTooLargeError
+from app.transport.results import crawl_result_from_exception, engine_result_from_exception
 from tests._fetcher_factories import invoke_http_strategy, run_http_strategy
 from tests._policy_factories import http_strategy_policy
 

@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple, cast
 from app.models.crawl_result import EngineCrawlResult
 from app.models.crawl_task import CrawlTask
 from app.models.taxonomy import Classification, CrawlError
-from app.orchestration.results import TerminalResult, failed_engine_result
+from app.transport.results import TerminalResult, failed_engine_result
 from app.vocabulary.taxonomy import CrawlClassification
 
 if TYPE_CHECKING:

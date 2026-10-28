@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 import pytest
 
-from app.orchestration.classification import classify_error_code
+from app.transport.classification import classify_error_code
 from app.transport.pinned_transport import (
     DNS_WAIT_SECONDS,
     apinned_hops,

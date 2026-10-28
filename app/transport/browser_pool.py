@@ -16,7 +16,6 @@ from app.config.settings import CrawlerSettings
 from app.models.browser_pool_exhausted import BrowserPoolExhaustedError
 from app.models.crawl_result import CrawlResult
 from app.models.taxonomy import CrawlStrategyName
-from app.orchestration.results import crawl_result_from_exception
 from app.runtime.pool import AsyncPool
 from app.runtime.resource_pressure import (
     BROWSER_RAM_FRACTION,
@@ -25,6 +24,7 @@ from app.runtime.resource_pressure import (
     derive_browser_pool_size as derive_browser_pool_size,
 )
 from app.transport.browser import BrowserRenderer
+from app.transport.results import crawl_result_from_exception
 from app.vocabulary.strategies import BROWSER_HEADED_WARMED, BROWSER_HEADLESS
 
 logger = logging.getLogger(__name__)

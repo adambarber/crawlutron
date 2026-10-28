@@ -239,7 +239,7 @@ def _constructor_keywords(tree: ast.Module, function_name: str, callee: str) -> 
 # they now live in two modules -- terminal_attempt below transport, the engine funnel here.
 _FUNNEL_ATTEMPT_FIELDS = (
     "app/models/result_factory.py:terminal_attempt",
-    "app/orchestration/results.py:terminal_engine_result",
+    "app/transport/results.py:terminal_engine_result",
 )
 
 

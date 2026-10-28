@@ -18,7 +18,6 @@ from app.extraction.classify import classify_page
 from app.models.crawl_result import CrawlResult
 from app.models.normalized_url import NormalizedUrl
 from app.models.result_factory import terminal_crawl_result
-from app.orchestration.classification import classify_error_code
 from app.transport.browser_cookies import (
     BROWSER_COOKIES_MAX,
     get_browser_cookies_for,
@@ -41,6 +40,7 @@ from app.transport.browser_targets import (
     make_ssrf_websocket_handler,
     resolve_browser_target,
 )
+from app.transport.classification import classify_error_code
 from app.transport.driver_config import async_sleep
 from app.transport.pinned_transport import ResolverBudgetExceeded
 

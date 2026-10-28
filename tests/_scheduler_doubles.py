@@ -8,7 +8,7 @@ from typing import TypeVar
 from app.models.crawl_job import CrawlJob
 from app.models.crawl_result import EngineCrawlResult
 from app.models.crawl_task import CrawlTask
-from app.orchestration.results import failed_result_for
+from app.transport.results import failed_result_for
 from app.transport.scheduler import DomainScheduler
 from tests._result_builders import make_result
 

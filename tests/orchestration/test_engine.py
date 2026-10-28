@@ -316,7 +316,7 @@ class TestEngineScopeEdges:
     """Cover remaining branches in engine.py"""
 
     def test_crawl_chain_robots_disallowed(self):
-        from app.orchestration.results import (
+        from app.transport.results import (
             TerminalResult,
             skipped_engine_result,
         )

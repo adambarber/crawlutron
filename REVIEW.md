@@ -432,7 +432,7 @@ Task A finishes → its callback is scheduled via `call_soon` → before it runs
 - **Per-result full-set copy of `known`** — `recursive.py:336-337` re-copies the occupied set after every expanded result: O(results × links). Have admission mutate the loop-owned set in place or return a delta.
 - **Spill write still walks the result on the loop** — `engine.py:269`: the dict literal + `to_dict` (multi-MB HTML walk) runs before `to_thread`; wrap the whole lambda. And **spill GC is a synchronous tempdir scan inside async code** (`:228-235`) on attacker-seedable file counts — `to_thread` it.
 - **Stall fallback mislabels resource stalls as `browser_pool_exhausted`** — `app/orchestration/admission_stall.py:57-58`: dashboards will blame the renderer pool for CPU/memory stalls. Pass the actual gate.
-- **Unknown exceptions default to transient `network_error`** — `app/orchestration/classification.py:68`: a strategy bug is retried 3× per URL as if the host were flaky. Consider a distinct `internal_error` classification (taxonomy-gated).
+- **Unknown exceptions default to transient `network_error`** — `app/transport/classification.py:68`: a strategy bug is retried 3× per URL as if the host were flaky. Consider a distinct `internal_error` classification (taxonomy-gated).
 
 ### 3.15 Checked clean — the hard parts
 

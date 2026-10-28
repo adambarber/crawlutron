@@ -46,7 +46,7 @@ def _table_shadowing_offenders(rows) -> list[str]:
 
 
 def test_the_classification_table_has_no_shadowed_or_mid_table_catch_all_rows():
-    from app.orchestration.classification import CLASSIFICATION_BY_EXCEPTION
+    from app.transport.classification import CLASSIFICATION_BY_EXCEPTION
 
     offenders = _table_shadowing_offenders(CLASSIFICATION_BY_EXCEPTION)
     assert not offenders, (

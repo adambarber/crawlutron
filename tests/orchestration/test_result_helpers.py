@@ -77,7 +77,7 @@ class TestTerminalResultContract:
         }
 
     def test_failed_engine_result_fields(self):
-        from app.orchestration.results import (
+        from app.transport.results import (
             TerminalResult,
             failed_engine_result,
         )
