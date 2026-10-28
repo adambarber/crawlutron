@@ -128,7 +128,7 @@ Values increment after crawl/render calls.
 `GET /v1/agent-hints` → `200`. Body has `strategies` (4), `extractions` (4), `guidance`, `example_policies`.
 
 ### TC-WK-01 — Well-known discovery
-`GET /.well-known/crawler-service` → `200`. Body `links` include `openapi`, `swagger_ui`, `liveness`, `readiness`, `capabilities`, `agent_hints`; `recommended_endpoints` lists the 6 primary endpoints.
+`GET /.well-known/crawler-service` → `200`. Body `links` include `openapi`, `swagger_ui`, `liveness`, `readiness`, `capabilities`, `agent_hints`; `recommended_endpoints` lists the primary endpoints (26 entries, from health to MCP).
 
 ### TC-OPENAPI-01 — OpenAPI/Swagger
 `GET /openapi.json` → `200` valid JSON schema; `GET /docs` → `200` HTML (Swagger UI).
@@ -283,7 +283,7 @@ A keyed provider returning non-200 → `502 search_provider_error` with the prov
 `POST /mcp` with a JSON-RPC `server/discover` request plus `MCP-Protocol-Version` / `Mcp-Method` headers → `200`, `result.resultType == "complete"`, `supportedVersions` contains `2026-07-28`, `capabilities.tools`, and `_meta.serverInfo`.
 
 ### TC-MCP-02 — tools/list and tools/call
-`tools/list` → tools `search, crawl, map, render` (each with `description` + `inputSchema`). `tools/call` for each primitive returns `resultType: "complete"` with `content` and (for crawl/map/search) `structuredContent`. The crawl tool accepts the full default strategy chain (all four strategies) and the engine picks the first working one.
+`tools/list` → tools `search, crawl, crawl_and_extract, map, render` (each with `description` + `inputSchema`). `tools/call` for each primitive returns `resultType: "complete"` with `content` and (for crawl/map/search) `structuredContent`. The crawl tool accepts the full default strategy chain (all four strategies) and the engine picks the first working one.
 
 ### TC-MCP-03 — Request metadata validation
 Missing/mismatched `MCP-Protocol-Version`, `Mcp-Method`, or `Mcp-Name` → `400` with `-32020` (`HeaderMismatch`) or `-32022` (`UnsupportedProtocolVersion`); missing `_meta` → `400 -32602`; unknown method → `404 -32601`; non-loopback `Origin` → `403`.
