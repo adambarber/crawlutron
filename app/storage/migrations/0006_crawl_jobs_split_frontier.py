@@ -1,4 +1,4 @@
-"""Move the frontier queue off the job row into a delta-appended table (#547).
+"""Move the frontier queue off the job row into a delta-appended table.
 
 The ``frontier`` column re-serialized the whole queue per batch persist; as a
 keyed table a batch costs one INSERT per admitted entry, one DELETE per pop.

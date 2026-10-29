@@ -15,7 +15,7 @@ from pathlib import Path
 def atomic_write_text(path: str | Path, data: str, *, encoding: str = "utf-8", durable: bool = True) -> None:
     """Write ``data`` to ``path`` atomically (temp + fsync + replace); ``durable=False``
     skips the fsyncs for best-effort stores (caches, exports): the replace can be lost
-    whole to power loss, never half-written (#357).
+    whole to power loss, never half-written.
     """
     target = Path(path)
     parent = target.parent
@@ -25,7 +25,7 @@ def atomic_write_text(path: str | Path, data: str, *, encoding: str = "utf-8", d
     fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=f".{target.name}.", suffix=".tmp")
     try:
         # Hold an advisory lock on the temp file so a concurrent sweep can tell
-        # a live write from a SIGKILL orphan (age alone is not ownership, #241).
+        # a live write from a SIGKILL orphan (age alone is not ownership).
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         with os.fdopen(fd, "w", encoding=encoding) as fh:
             fh.write(data)
@@ -46,7 +46,7 @@ def atomic_write_text(path: str | Path, data: str, *, encoding: str = "utf-8", d
 def _fsync_parent(parent: Path) -> None:
     """Fsync the parent directory so a rename survives power loss.
     The replace alone is not durable: the rename lands in the directory's
-    journal, so the directory itself must be fsynced to flush it (#241)."""
+    journal, so the directory itself must be fsynced to flush it."""
     dir_fd = os.open(str(parent or "."), os.O_RDONLY)
     try:
         os.fsync(dir_fd)

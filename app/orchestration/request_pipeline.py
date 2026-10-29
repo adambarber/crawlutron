@@ -106,16 +106,16 @@ def compute_ram_derived_concurrency(state: PipelineState) -> int:
     """The RAM-derived HTTP concurrency ceiling this process may sustain, the
     value weighted admission and the scheduler's connection ceiling both honor."""
     limit = read_memory_stats().total_bytes or 0
-    # #367: reserve the doc pool too, exactly as build_admission_policy does, so
+    # Reserve the doc pool too, exactly as build_admission_policy does, so
     # the scheduler ceiling and admission's max_http_concurrency cannot diverge.
     return max(1, max_http_concurrency_for(limit, derive_browser_pool_size(), doc_workers=doc_worker_count()))
 
 
 def _build_scheduler(state: PipelineState) -> DomainScheduler:
     """Delegates to the single construction path; this layer only supplies the
-    RAM-derived connection ceiling (#350) and the policy's RPS cap."""
+    RAM-derived connection ceiling and the policy's RPS cap."""
     # The scheduler's own connection ceiling is the RAM-derived admission
-    # ceiling, not a hardcoded constant: the two cannot diverge (#350).
+    # ceiling, not a hardcoded constant: the two cannot diverge.
     return DomainScheduler.from_settings(
         state.settings,
         global_limit=compute_ram_derived_concurrency(state),
@@ -407,7 +407,7 @@ async def _run(state: PipelineState) -> ProducerEnvelope:
         response = await _response(state)
     finally:
         # The spill must release its lock on the WHOLE body, not only response
-        # assembly (#221); #337 had covered just the _response arm.
+        # assembly; the earlier fix had covered just the _response arm.
         if state.spill is not None:
             state.spill.close()
     return response

@@ -56,7 +56,7 @@ class SharedCookieStore(CoordinationStore):
     def merge(self, namespace: str, host: str, cookies: Mapping[str, str]) -> None:
         """Union ``cookies`` into the slot, then evict past the per-namespace cap.
         Eviction scopes to the slot being written, so one tenant's crawl cannot
-        evict another tenant's sessions (#234). The union stays transactional.
+        evict another tenant's sessions. The union stays transactional.
         """
         now = time.time()
         key = (namespace or "", host)
@@ -110,7 +110,7 @@ class SharedCookieStore(CoordinationStore):
         return {(str(namespace), str(host)): self._decode(payload) for namespace, host, payload in rows}
 
     def put(self, namespace: str, host: str, value: Mapping[str, str]) -> None:
-        """Replace one slot's payload wholesale (the prune path, #393).
+        """Replace one slot's payload wholesale (the prune path).
 
         Scoped to exactly this (namespace, host); only removes records, so a
         prune cannot resurrect a deleted cookie.

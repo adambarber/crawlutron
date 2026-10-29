@@ -99,7 +99,7 @@ class CrawlJobState:
     status: JobStatus = JobStatus.PENDING
     # Whole-site fields (used when kind == WHOLE_SITE)
     frontier: list[FrontierEntry] = field(default_factory=list)
-    # The live-only frontier sync (#547): ``frontier_mark`` is the persisted prefix and
+    # The live-only frontier sync: ``frontier_mark`` is the persisted prefix and
     # ``frontier_removed`` names the rows the next persist deletes (loads re-derive both).
     frontier_mark: int = 0
     frontier_removed: list[NormalizedUrl] = field(default_factory=list)
@@ -107,7 +107,7 @@ class CrawlJobState:
     # stable order makes that sound (see OrderedUrlSet).
     visited: OrderedUrlSet = field(default_factory=OrderedUrlSet)
     # High-water of what this process already sent: 0 on create, len on load
-    # -- never the table's count, which a sibling's inserts make lie (#140).
+    # -- never the table's count, which a sibling's inserts make lie.
     visited_mark: int = 0
     in_flight: list[FrontierEntry] = field(default_factory=list)
     transient_retries: dict[NormalizedUrl, int] = field(default_factory=dict)  # admitted url -> retry count
@@ -137,7 +137,7 @@ class CrawlJobState:
         admitted_root = admit_or_none(root_url, policy=host_policy)
         root_url = admitted_root.raw if admitted_root is not None else ""
         # The queue's rows are url-keyed, so a duplicate identity in the stored
-        # entries leaves a row the merged list no longer holds (#547).
+        # entries leaves a row the merged list no longer holds.
         frontier, deduped = normalize_frontier(
             data.get("frontier", []),
             root_url=root_url,
@@ -173,8 +173,8 @@ class CrawlJobState:
         # A load's visited set IS the persisted set: this process starts its
         # delta at the end of it (a create starts at 0 -- the default).
         job.visited_mark = len(job.visited)
-        # The queue is the same story (#547): every loaded entry has its row,
-        # except the identities the normalize deduped away (#547).
+        # The queue is the same story: every loaded entry has its row,
+        # except the identities the normalize deduped away.
         job.frontier_mark = len(job.frontier)
         job.frontier_removed.extend(NormalizedUrl(raw, policy=host_policy) for raw in deduped)
         return job
@@ -305,7 +305,7 @@ class JobAccumulators:
         return row["visited"], row["results"]
 
     def _reconcile_frontier(self, job: CrawlJobState) -> None:
-        """Reconcile the live queue against its table rows (#547).
+        """Reconcile the live queue against its table rows.
 
         ``frontier_removed`` names rows to delete, ``frontier_mark`` splits the
         persisted prefix from the appended tail: a batch is O(removed+appended).
@@ -332,7 +332,7 @@ class JobAccumulators:
         start = 0 if high is None else high + 1
         self._conn.executemany(
             # OR REPLACE, not OR IGNORE: a re-inserted identity carries its new
-            # depth and position (#547) -- the write edge's decision, not the table's.
+            # depth and position -- the write edge's decision, not the table's.
             'INSERT OR REPLACE INTO "crawl_job_frontier" (job_id, url, pos, depth) VALUES (?, ?, ?, ?)',
             (
                 (job_id, entry.url.raw, pos, entry.depth)
@@ -369,7 +369,7 @@ class JobAccumulators:
         """
         job_id = job.job_id
         # A set that shrank below the mark (retry-requeue discard) resyncs, and
-        # INSERT OR IGNORE stays: the ignore is the #140 cross-process guard.
+        # INSERT OR IGNORE stays: the ignore is the cross-process guard.
         if job.visited_mark > len(job.visited):
             self._conn.execute('DELETE FROM "crawl_job_visited" WHERE job_id = ?', (job_id,))
             job.visited_mark = 0
@@ -421,7 +421,7 @@ __all__ = [
 
 _CAS_STATUS_SQL = """
       -- json_each keeps the expected set a BOUND parameter; COALESCE keeps the
-      -- stored error on an error-less CAS (the stamp rides the CAS, #365).
+      -- stored error on an error-less CAS (the stamp rides the CAS).
       UPDATE crawl_jobs SET status = ?, updated_at = ?,
                              error = COALESCE(?, error)
       WHERE job_id = ? AND deleted_at IS NULL

@@ -55,7 +55,7 @@ class Credential(BaseModel):
     ) -> SecretStr | str | None:
         """A credential is a header VALUE at one remove: a bearer token rides
         Authorization verbatim, so the wire law applies to every secret field,
-        at the read edge (#441).
+        at the read edge.
         """
         if value is not None and info.field_name is not None:
             secret = value.get_secret_value() if isinstance(value, SecretStr) else value

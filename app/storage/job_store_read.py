@@ -87,7 +87,7 @@ def normalize_job_state(job: CrawlJobState) -> CrawlJobState:
     job.root_url = root_url
     job.policy = policy
     job.visited = visited
-    # The merge drops entries visited or in_flight already covers (#547): those
+    # The merge drops entries visited or in_flight already covers: those
     # drops are the queue's deletions, logged so the next persist deletes them.
     job.frontier_removed.extend(entry.url for entry in dropped)
     job.frontier_mark = len(frontier)

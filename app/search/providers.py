@@ -38,7 +38,7 @@ DUCKDUCKGO_URL = "https://html.duckduckgo.com/html/"
 DUCKDUCKGO_REDIRECT = "//duckduckgo.com/l/"
 
 #: The whole provider endpoint registry: every URL a provider fetch may target.
-#: Read by the #386 trust-boundary test (no caller input reaches this set).
+#: Read by the trust-boundary test (no caller input reaches this set).
 PROVIDER_ENDPOINTS = frozenset((TAVILY_URL, BRAVE_URL, SERPER_URL, DUCKDUCKGO_URL))
 
 # Result text from a search engine is untrusted; truncate titles/snippets so a
@@ -149,7 +149,7 @@ async def _pinned_provider_request(
     headers: dict[str, str] | None,
     timeout_seconds: float,
 ) -> tuple[str, dict[str, str], dict[str, str] | None]:
-    """The pinned provider request (#386): the merged URL admitted, the connect
+    """The pinned provider request: the merged URL admitted, the connect
     pinned to the freshly validated IP, SNI on the hostname. Fixed endpoint
     registry, no caller input in the URL (pinned by test)."""
     admitted = NormalizedUrl(str(request_url), policy=HostPolicy.unrestricted())
@@ -263,7 +263,7 @@ def active_search_provider_name(settings: CrawlerSettings) -> str:
     return providers[0] if providers else "duckduckgo"
 
 
-# get_search_provider moved to providers_api (#542): the factory constructs
+# get_search_provider moved to providers_api: the factory constructs
 # this family's implementations; this contract module imports nothing back.
 
 

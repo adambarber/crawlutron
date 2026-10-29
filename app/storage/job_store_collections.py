@@ -21,7 +21,7 @@ from app.models.normalized_url import NormalizedUrl, admit_or_none
 class OrderedUrlSet(dict[NormalizedUrl, None]):
     """A set of admitted URLs that remembers insertion order.
 
-    The persist delta (#539) slices the collection by a high-water position,
+    The persist delta slices the collection by a high-water position,
     which only a stable order makes sound; reads behave like the set replaced.
     """
 
@@ -104,7 +104,7 @@ def job_max_pages(policy: CrawlPolicy | dict[str, JsonValue] | None, tier: Polic
 
 @lru_cache(maxsize=4096)
 def _admit_cached(raw: str, policy: HostPolicy) -> NormalizedUrl | None:
-    """Admit ``raw`` once per (raw, policy) pair; repeats read the cache (#519).
+    """Admit ``raw`` once per (raw, policy) pair; repeats read the cache.
 
     Stored values were admitted at write, so re-admitting on every load is pure
     re-work; refusals are cached too, so a hostile raw stays refused on each read.
@@ -155,7 +155,7 @@ def normalize_frontier(
     """Coerce a persisted frontier's entry records into ``FrontierEntry``s.
 
     Canonicalize: coerce shape, keep the shallowest depth, drop the unusable.
-    Returns the dropped records' raw urls too, so rows can be deleted (#547)."""
+    Returns the dropped records' raw urls too, so rows can be deleted."""
     if not isinstance(values, list):
         return [], []
     canonical_root = (

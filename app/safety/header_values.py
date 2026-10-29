@@ -1,4 +1,4 @@
-"""The one law for headers on the wire (#441, #544/S3): CR, LF, and NUL can end
+"""The one law for headers on the wire: CR, LF, and NUL can end
 one header and start another, and curl_cffi transmits embedded CRLF verbatim,
 so every edge handing a name or value to a transport refuses these bytes.
 """

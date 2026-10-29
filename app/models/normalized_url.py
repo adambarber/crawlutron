@@ -59,7 +59,7 @@ def _canonical_parts(url: str, *, policy: HostPolicy) -> tuple[str, str, str, st
 
     scheme = parsed.scheme
     host = parsed.hostname.lower().rstrip(".")
-    # #494: a bracketed host that is not an IPv6 literal is IPvFuture (RFC 3986);
+    # A bracketed host that is not an IPv6 literal is IPvFuture (RFC 3986);
     # nothing here dials one, so refuse rather than de-bracket it into a hostname.
     if parsed.netloc.startswith("[") and ":" not in host:
         raise ValueError("ipvfuture_refused")
@@ -73,7 +73,7 @@ def _canonical_parts(url: str, *, policy: HostPolicy) -> tuple[str, str, str, st
         port = None
     netloc = _bracketed_netloc(host, port)
     # Path and query are identity: a trailing colon or slash in them can name a
-    # distinct resource (#520), so only the authority segment is normalized here.
+    # distinct resource, so only the authority segment is normalized here.
     path = parsed.path or ""
     query = parsed.query
     if query:

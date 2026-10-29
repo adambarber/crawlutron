@@ -1,4 +1,4 @@
-"""Shared DDL step builders for the migration files (#331).
+"""Shared DDL step builders for the migration files.
 
 These helpers bind each manifest-rendered statement to its matching rollback, so
 a migration file declares *which* schema it creates, never re-spells the SQL.
@@ -30,7 +30,7 @@ def table_steps(schema: TableSchema) -> Iterable:
 
 
 def add_column_step(table_name: str, column_ddl: str) -> Iterable:
-    """The add/drop-column pair guarded by ``table_has_column`` (#331): a legacy
+    """The add/drop-column pair guarded by ``table_has_column``: a legacy
     database already carrying the column no-ops the upgrade, and the rollback
     drops it only when the migration added it (the guard was re-spelled 3x)."""
 

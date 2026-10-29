@@ -297,7 +297,7 @@ async def handle_render(
             is_error=True,
         )
     requested = len(payload.urls) if payload.urls is not None else 1
-    # #483: the namespace binds around the whole admit, so the gate and the work
+    # The namespace binds around the whole admit, so the gate and the work
     # both run under it; an MCP render's harvest keys by the caller's key id.
     async with bound_render_cookie_namespace(_caller_for(caller)):
         return await _admit_tool(
@@ -311,7 +311,7 @@ async def handle_render(
 async def handle_search(
     payload: SearchRequest, settings, shutdown_event, concurrency_tracker=None, caller=None, job_store=None
 ) -> ToolResult:
-    # #298 / #205 / #320: the search door is caller-bound through the one
+    # The search door is caller-bound through the one
     # concurrency register every sync door uses; a keyed caller keeps its identity.
     return await _admit_tool(
         caller,

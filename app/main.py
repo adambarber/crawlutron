@@ -278,7 +278,7 @@ else:
 
 
 def install_default_executor(loop: asyncio.AbstractEventLoop) -> None:
-    """Size the loop's shared asyncio.to_thread executor once (#360).
+    """Size the loop's shared asyncio.to_thread executor once.
 
     Python's implicit default is min(32, cpu+4) with an unbounded queue; the
     explicit install makes the bound derived, named and operator-tunable.

@@ -48,7 +48,7 @@ DEFAULT_HTTP_TIMEOUT_SECONDS: int = 30
 # deployment default's bound are one number (the pair that used to drift).
 MAX_HTTP_TIMEOUT_SECONDS: int = 120
 
-# Longest header VALUE a caller may set (#441): at the common 8 KB interop
+# Longest header VALUE a caller may set: at the common 8 KB interop
 # ceiling origins accept, it also bounds one policy's total header size.
 MAX_HEADER_VALUE_BYTES: Final[int] = 8 * 1024
 

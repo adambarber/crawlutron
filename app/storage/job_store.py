@@ -100,7 +100,7 @@ class JobStore:
     def _row_to_job(self, row: sqlite3.Row, *, with_accumulators: bool = True) -> CrawlJobState:
         """One row, read through the declared record (the walk lives beside it).
 
-        The frontier always loads (#547): the runner's state-only reload owns
+        The frontier always loads: the runner's state-only reload owns
         the queue, so only results/visited are with-accumulators collections."""
         return row_to_state(
             row,
@@ -159,8 +159,8 @@ class JobStore:
         self, job_id: str, new: JobStatus, *, expected: Expected, error: str | None = None
     ) -> bool:
         """Atomic compare-and-set on the row's status (the control plane).
-        A tombstoned row is never CASed (#363); ``error`` rides the same UPDATE
-        as the status (#365), so the stamp lands only when the CAS does.
+        A tombstoned row is never CASed; ``error`` rides the same UPDATE
+        as the status, so the stamp lands only when the CAS does.
         """
         wanted = {expected} if isinstance(expected, JobStatus) else set(expected)
         with self._lock:
@@ -226,7 +226,7 @@ class JobStore:
     def load_for_caller(self, job_id: str, caller_id: str) -> CrawlJobState | None:
         """The job iff ``caller_id`` owns it; foreign/missing read the same miss.
         The owner is filtered in SQL before deserialization, so a foreign job_id is
-        a cheap miss, not a full load then an owner compare (#196)."""
+        a cheap miss, not a full load then an owner compare."""
         return self._read_row(job_id, with_accumulators=True, owner=caller_id)
 
     def delete(self, job_id: str) -> bool:
@@ -275,7 +275,7 @@ class JobStore:
     ) -> list[JobStatusView]:
         """The caller's own jobs, newest first; foreign rows are not listed. An
         optional ``limit``/``offset`` slices the page at the SQL level so a
-        caller with many rows never re-materializes the whole set (##384)."""
+        caller with many rows never re-materializes the whole set."""
         return self._read_job_list(caller_id, limit=limit, offset=offset)
 
     def _read_job_list(self, owner: str | None, *, limit: int | None, offset: int = 0) -> list[JobStatusView]:

@@ -13,7 +13,7 @@ from app.models.json_value import JsonValue
 from app.storage.coordination_store import CoordinationStore, atwin
 from app.storage.migrations import StoreSchema
 
-# The write-edge byte cap (#443): one retained row is a whole crawl response, so
+# The write-edge byte cap: one retained row is a whole crawl response, so
 # without a byte bound the entry cap bounds rows, never retained bytes.
 _MAX_PAYLOAD_BYTES = 4 * 1024 * 1024
 

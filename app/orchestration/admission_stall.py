@@ -1,4 +1,4 @@
-"""Bounded no-progress guard for the recursive admission loop (#306).
+"""Bounded no-progress guard for the recursive admission loop.
 
 A saturated admission yields (0,0) forever; this owns the deadline that
 stops and reports that stall instead of spinning.

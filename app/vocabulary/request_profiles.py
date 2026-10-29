@@ -27,7 +27,7 @@ REQUEST_PROFILE_KEYS: Final[frozenset[str]] = frozenset(
 REQUEST_PROFILE_FLAG_KEYS: Final[frozenset[str]] = frozenset({"fingerprint_rotation"})
 
 #: The closed ``cookie_jar`` vocabulary; anything else silently disables
-#: cookies, so it is refused at the wire edge (#245).
+#: cookies, so it is refused at the wire edge.
 COOKIE_JAR_VALUES: Final[frozenset[str]] = frozenset({"per_host", "session", "none"})
 
 #: Profile keys read as a single string. ``cookie_namespace`` and ``cookie_jar``

@@ -33,8 +33,8 @@ class FetchValidators(BaseModel):
     @classmethod
     def _reject_injectable_validator_values(cls, value: str | None, info: ValidationInfo) -> str | None:
         """A cached validator is a header VALUE at one remove: it rides
-        If-None-Match/If-Modified-Since verbatim, so the #441 wire law applies
-        at the model edge (#525 SEC-08).
+        If-None-Match/If-Modified-Since verbatim, so the wire law applies
+        at the model edge.
         """
         if value is not None and info.field_name is not None:
             reject_injectable_header_value(info.field_name, value)

@@ -86,10 +86,10 @@ def _refuse_over_ceiling_knobs(profile: Mapping[str, object]) -> None:
 def refuse_oversized_profile_strings(
     profile: Mapping[str, object], ceiling: int = MAX_HEADER_VALUE_BYTES
 ) -> None:
-    """Refuse any string in a ``browser_profile`` over ``ceiling`` (#444).
+    """Refuse any string in a ``browser_profile`` over ``ceiling``.
 
     An unsized selector or header-like value is per-request memory a pooled
-    renderer holds; the ceiling is #441's header-value interop number.
+    renderer holds; the ceiling is the header-value interop number.
     """
     for key, value in profile.items():
         _refuse_oversized_value(key, value, ceiling)
@@ -223,7 +223,7 @@ def _refuse_malformed_pool(profile: Mapping[str, object], key: str, ceiling: int
         if not isinstance(entry, str):
             raise ValueError(f"request_profile {key} entries must be strings, got {type(entry).__name__}")
         # The pool entry lands in User-Agent/Accept-Language verbatim, so it is a
-        # header value here too: the #441 law and ceiling apply at this edge (#454).
+        # header value here too: the header-value law and ceiling apply at this edge.
         reject_injectable_header_value(key, entry)
         if len(entry) > MAX_HEADER_VALUE_BYTES:
             raise ValueError(

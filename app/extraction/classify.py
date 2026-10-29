@@ -276,7 +276,7 @@ def _evidence(
 
 
 def _strip_remaining_tags(text: str) -> str:
-    """Replace every ``<[^>]+>`` match with a space, linearly (#440): the regex
+    """Replace every ``<[^>]+>`` match with a space, linearly: the regex
     form backtracked to end-of-string at each ``<`` when no ``>`` existed
     anywhere, and a page of bare ``<`` tokens made that O(k*n).
     """
@@ -309,7 +309,7 @@ _NOISE_OPENERS: Final = ("<script", "<style", "<!--")
 def _refresh_opener_positions(lower: str, next_at: dict[str, int], pos: int) -> dict[str, int]:
     """Carry each opener's next occurrence past ``pos``: an absent (-1) opener
     stays absent forever, and a stale position is found again from ``pos`` --
-    forward-only finds, so the whole scan stays linear (#440).
+    forward-only finds, so the whole scan stays linear.
     """
     for opener, at in next_at.items():
         if at != -1 and at < pos:
@@ -327,7 +327,7 @@ def strip_html_noise(html: str | None) -> str:
     out: list[str] = []
     pos = 0
     lower = body.lower()
-    # Each opener's next occurrence rides the loop (#440): re-finding from pos every
+    # Each opener's next occurrence rides the loop: re-finding from pos every
     # iteration made a page of many closed regions rescan the remainder per region.
     next_at: dict[str, int] = {opener: lower.find(opener) for opener in _NOISE_OPENERS}
     while pos < len(body):
