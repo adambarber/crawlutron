@@ -19,6 +19,9 @@ from tests.rules import Rule
 
 _DOC_REFERENCE_EXCLUSIONS = {
     "CHANGELOG.md": "a record of what shipped; its citations name modules that were refactored away",
+    # Renamed from CHANGELOG.md in #561; same nature -- a historical record
+    # quoting the tree as it stood when each release shipped.
+    "CHANGELOG-legacy.md": "a historical record quoting the tree it shipped",
     "docs/reviews/ADVERSARIAL_REVIEW_BROWSER_CRAWLER.md": "a dated review quoting the tree it reviewed",
     "docs/review-and-refactoring-plan.md": "stamped ARCHIVED; describes a topology that no longer exists",
     "docs/2026-09-15-performance-review.md": "a dated performance review quoting the tree it measured",
