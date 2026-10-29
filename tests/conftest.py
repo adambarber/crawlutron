@@ -12,7 +12,6 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-import httpx
 import pytest
 
 from tests._app_factory import service_app
@@ -22,6 +21,18 @@ pytest_plugins = (
     "tests.fixtures.stub_builder",
     "tests.fixtures.factory",
     "tests.fixtures.four_worker_selector_pool",
+    "tests.fixtures.test_server_fixture",
+    "tests.fixtures.base_url",
+    "tests.fixtures.async_client",
+    "tests.fixtures.override_settings",
+    "tests.fixtures.ssrf_guard_required",
+    "tests.fixtures.fake_provider_http",
+    "tests.fixtures.recording_worker",
+    "tests.fixtures.base_policy",
+    "tests.fixtures.job_store",
+    "tests.fixtures.watch_store",
+    "tests.fixtures.client",
+    "tests.fixtures.real_http_servers",
     "tests.network_guard",
 )
 
@@ -107,45 +118,6 @@ os.environ["CRAWLUTRON_CACHE_TTL_SECONDS"] = os.environ.get("CRAWLUTRON_CACHE_TT
 os.environ["CRAWLUTRON_CONTENT_CACHE_ENABLED"] = os.environ.get("CRAWLUTRON_CONTENT_CACHE_ENABLED", "false")
 
 
-@pytest.fixture
-def ssrf_guard_required(monkeypatch):
-    """Mark a test that exercises an SSRF guard and assert it opted out of
-    the test default CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1; otherwise the guard
-    short-circuits before the real path runs."""
-    called: list[str] = []
-    from app.transport import pinned_transport as pinned_mod
-
-    def _track(name: str, fn):
-        def wrapper(*args, **kwargs):
-            called.append(name)
-            # That is the silent false-positive this fixture exists to prevent.
-            if os.environ.get("CRAWLUTRON_ALLOW_PRIVATE_TARGETS") != "0":
-                pytest.fail(
-                    f"{name} was called but CRAWLUTRON_ALLOW_PRIVATE_TARGETS "
-                    f"is still enabled (value={os.environ.get('CRAWLUTRON_ALLOW_PRIVATE_TARGETS')!r}). "
-                    f"This test exercises the SSRF guard and must opt out via "
-                    f"_assertions.block_private_targets(monkeypatch) or "
-                    f"monkeypatch.setenv('CRAWLUTRON_ALLOW_PRIVATE_TARGETS', '0') "
-                    f"BEFORE invoking the SSRF helper."
-                )
-            return fn(*args, **kwargs)
-
-        return wrapper
-
-    monkeypatch.setattr(
-        pinned_mod,
-        "check_ssrf_protection",
-        _track("check_ssrf_protection", pinned_mod.check_ssrf_protection),
-    )
-    monkeypatch.setattr(
-        pinned_mod, "resolve_and_pin_host", _track("resolve_and_pin_host", pinned_mod.resolve_and_pin_host)
-    )
-    yield
-    # Sanity check in setup phase (not teardown) so the failure surfaces as a clean FAILED test, not an ERROR
-    # from the fixture finalizer.
-    _ = called  # silence unused warning if a future check is added
-
-
 def pytest_collection_modifyitems(config, items):
     """Auto-skip browser-marked tests when no real browser is installed."""
     from tests._assertions import browser_available
@@ -220,75 +192,6 @@ def stub_cffi_fetcher(request, monkeypatch):
     monkeypatch.setattr(fetchers_module, "impersonating_fetcher", lambda: _stub_cffi_fetcher)
 
 
-@pytest.fixture(scope="session")
-def test_server():
-    """Start a real in-process HTTP server once per test session."""
-    from tests.helpers.server import spawn_server
-
-    server = spawn_server()
-    yield server
-    server.stop()
-
-
-@pytest.fixture
-def base_url(test_server):
-    """The base URL of the session-scoped test server."""
-    return test_server.base_url
-
-
-@pytest.fixture
-async def async_client():
-    """Async HTTP client using ASGI transport for FastAPI app."""
-    async with httpx.ASGITransport(app=service_app()) as transport:
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-            yield client
-
-
-@pytest.fixture
-def override_settings():
-    """Point ``app.state.crawler_settings`` at a fresh instance for a test.
-
-    The suite's only spelling of "env plus overrides becomes settings";
-    test files used to carry private module-level copies of the same lines."""
-    from app.config.settings import CrawlerSettings
-    from tests._app_factory import service_app
-
-    app = service_app()
-
-    original = app.state.crawler_settings
-
-    def _apply(**overrides) -> CrawlerSettings:
-        merged = dict(os.environ)
-        for key, value in overrides.items():
-            merged[f"CRAWLUTRON_{key.upper()}"] = str(value)
-        settings = CrawlerSettings.from_mapping(merged)
-        app.state.crawler_settings = settings
-        return settings
-
-    yield _apply
-    app.state.crawler_settings = original
-
-
-@pytest.fixture
-def fake_provider_http(monkeypatch):
-    """Patch ``app.search.providers.provider_http`` with a scripted response.
-
-    Returns a callable that installs ``(status, body)`` and optionally records
-    the kwargs of every provider HTTP call into ``capture``.
-    """
-
-    def _patch(status: int = 200, body: str = "{}", capture: list[dict[str, object]] | None = None):
-        async def _fake(method, url, **kwargs):
-            if capture is not None:
-                capture.append({"method": method, "url": url, **kwargs})
-            return status, body
-
-        monkeypatch.setattr("app.search.providers.provider_http", _fake)
-        return _fake
-
-    return _patch
-
-
 @pytest.fixture(autouse=True, scope="session")
 def _cleanup_extraction_executors():
     """Shutdown the document extraction process pool at end of test session."""
@@ -319,24 +222,6 @@ def _document_pool_per_test(monkeypatch):
 
 
 @pytest.fixture
-def recording_worker():
-    """``(seen, worker)``: a recursive-crawl worker that records its job URLs.
-
-    Several dispatch and robots tests assert *which* jobs reached the worker;
-    a copy that drops the ``seen.append`` turns that into a vacuous truth."""
-    from app.models.normalized_url import NormalizedUrl
-    from tests._result_builders import make_engine_result
-
-    seen: list[NormalizedUrl] = []
-
-    async def worker(job):
-        seen.append(job.normalized_url)
-        return make_engine_result(job.normalized_url)
-
-    return seen, worker
-
-
-@pytest.fixture
 def base_policy():
     """Fresh minimal crawl policy; tests may mutate their copy freely."""
     from tests._policy_factories import make_base_policy
@@ -350,62 +235,6 @@ def job_store(tmp_path):
     from tests._job_harnesses import make_job_store
 
     return make_job_store(str(tmp_path))
-
-
-@pytest.fixture
-def watch_store(tmp_path):
-    """WatchStore backed by a per-test SQLite db under ``tmp_path``."""
-    from app.storage.watch_store import WatchStore
-
-    return WatchStore(tmp_path / "watches.db")
-
-
-@pytest.fixture
-def client(job_store):
-    """An AsyncClient over the jobs app, backed by this test's own ``job_store``.
-
-    Lives here rather than in either test module because both need it; the
-    local copy that shadowed the fixture only rewrapped tmp_path."""
-    from httpx import ASGITransport, AsyncClient
-
-    from tests._job_harnesses import _make_app
-
-    return AsyncClient(transport=ASGITransport(app=_make_app(job_store)), base_url="http://test")
-
-
-def _served(handler_cls):
-    """Serve one handler class on an ephemeral port, then tear it down.
-
-    The teardown is written once: a leaked handler thread outlives the test
-    that started it."""
-    from tests.helpers.server import spawn_threaded_server
-
-    server = spawn_threaded_server(handler_cls)
-    try:
-        yield server
-    finally:
-        server.shutdown()
-        server.server_close()
-
-
-@pytest.fixture
-def counting_server():
-    """Real HTTP server serving one cacheable page; counts hits on ``server.hits``."""
-    from tests.helpers.server import CountingHandler
-
-    yield from _served(CountingHandler)
-
-
-@pytest.fixture
-def etag_server():
-    """Real HTTP server honoring If-None-Match; counts hits on ``server.hits``.
-
-    Mutate ``helpers.server.EtagHandler.etag`` / ``.body`` to simulate an
-    upstream content change.
-    """
-    from tests.helpers.server import EtagHandler
-
-    yield from _served(EtagHandler)
 
 
 def _clear_sitemap_cache() -> None:
