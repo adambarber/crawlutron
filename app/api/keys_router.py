@@ -1,7 +1,7 @@
 """``/v1/keys`` inbound caller-key issuance and inventory.
 
 Keys authenticate callers; ownership of jobs and results is what isolates
-them. The operator token is the only credential these routes accept (#436).
+them. The operator token is the only credential these routes accept.
 """
 
 from __future__ import annotations

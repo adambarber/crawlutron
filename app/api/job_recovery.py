@@ -51,7 +51,7 @@ async def recover_orphaned_running_jobs(job_store: JobStore) -> int:
 
 
 def recovery_start_limit(settings: CrawlerSettings) -> int:
-    """Boot recovery's runner cap: one runner per global slot (#523 COR-09, #142)."""
+    """Boot recovery's runner cap: one runner per global slot."""
     return max(1, int(settings.global_concurrency))
 
 
@@ -85,7 +85,7 @@ async def recover_and_start_pending_jobs(
     """Lifespan startup: retire crash orphans, then run every PENDING job.
 
     ``start_runner`` is injected by the caller (usually ``job_runner.start_job``)
-    so recovery never imports the runner; bounded per #523 COR-09.
+    so recovery never imports the runner; the bound is the runner-cap rule.
     """
     await recover_orphaned_running_jobs(job_store)
     limit = recovery_start_limit(settings)
@@ -95,10 +95,10 @@ async def recover_and_start_pending_jobs(
     for summary in await job_store.alist_jobs():
         if summary.get("status") != JobStatus.PENDING.value:
             continue
-        # #461: a PENDING row of an unresumable kind can never be picked up by
+        # A PENDING row of an unresumable kind can never be picked up by
         # anything else -- retire it terminal instead of leaving it pending forever.
         if not _is_resumable_kind(summary["kind"]):
-            # #461: retire terminal via CAS; a lost CAS means it moved meanwhile.
+            # Retire terminal via CAS; a lost CAS means it moved meanwhile.
             claimed = await job_store.aset_status(
                 summary["job_id"], JobStatus.FAILED, expected=JobStatus.PENDING
             )
@@ -116,8 +116,8 @@ async def recover_and_start_pending_jobs(
         live.add(start_runner(summary["job_id"], job_store, settings, shutdown_event))
         started += 1
     if backlog:
-        # #523 COR-09: queued rows wait for a slot instead of each spawning a
-        # runner at boot; the drain rides the #448 registry so shutdown drains it.
+        # Queued rows wait for a slot instead of each spawning a
+        # runner at boot; the drain rides the task registry so shutdown drains it.
         start_tracked_task(
             _DRAIN_TASK_ID,
             lambda: _drain_backlog(backlog, live, limit, job_store, settings, shutdown_event, start_runner),

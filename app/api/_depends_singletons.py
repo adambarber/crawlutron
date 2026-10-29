@@ -1,6 +1,6 @@
 """The two pre-wired DI singletons shared by every thin router.
 
-A module-level ``Depends`` singleton is the idiomatic #322 router-plane shape; caller
+A module-level ``Depends`` singleton is the idiomatic router-plane shape; caller
 identity lives in ``app.api.caller_auth`` and ``app.api.dependencies``.
 """
 

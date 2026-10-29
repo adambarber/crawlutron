@@ -110,7 +110,7 @@ def quota_denials() -> dict[int | str, dict[str, object]]:
 
 
 def _key_admin_token(request: Request) -> str:
-    """The configured operator token, or '' when unset (#142: via the settings home)."""
+    """The configured operator token, or '' when unset (via the settings home)."""
     state = getattr(request, "app", None)
     state = getattr(state, "state", None) if state is not None else None
     if state is not None:
@@ -129,7 +129,7 @@ def _constant_time_eq(secret: str, token: str) -> bool:
     """Constant-time compare that tolerates non-ASCII str.
 
     ``secrets.compare_digest`` raises TypeError on non-ASCII str, which would
-    500 a keys-door denial; encoding both sides to bytes fixes it (#199).
+    500 a keys-door denial; encoding both sides to bytes fixes it.
     """
     return (
         bool(secret) and bool(token) and secrets.compare_digest(secret.encode("utf-8"), token.encode("utf-8"))
@@ -137,7 +137,7 @@ def _constant_time_eq(secret: str, token: str) -> bool:
 
 
 async def get_keys_caller(request: Request) -> CallerIdentity:
-    """FastAPI dependency: the operator token is the only /v1/keys caller (#436).
+    """FastAPI dependency: the operator token is the only /v1/keys caller.
 
     A caller key never enters, valid or not; no store lookup, so the door is
     not a key-validity oracle, and an unconfigured token seals it (fail closed).
@@ -185,10 +185,10 @@ def is_operator(request: Request) -> bool:
 
 
 def refuse_anonymous_cookie_namespace(caller: CallerIdentity, profile: RequestProfileRecord) -> None:
-    """422 when an anonymous caller declares a cookie namespace (#559).
+    """422 when an anonymous caller declares a cookie namespace.
 
-    Anonymous is ONE bounded shared identity (M1 #206), so a declared namespace is not a
-    tenant boundary; the door refuses the declaration instead of downgrading (#537).
+    Anonymous is ONE bounded shared identity (milestone M1), so a declared namespace is not a
+    tenant boundary; the door refuses the declaration instead of downgrading.
     """
     if (caller.authenticated and caller.caller_id) or not cookie_namespace_for(profile):
         return
@@ -202,9 +202,9 @@ def refuse_anonymous_cookie_namespace(caller: CallerIdentity, profile: RequestPr
 
 
 def effective_cookie_namespace(profile: Mapping[str, object], caller: CallerIdentity) -> str:
-    """The cookie namespace for one crawl: a keyed caller is pinned to its key id (#226);
-    an anonymous caller gets the shared default -- ANY declaration is refused (#559,
-    extending #537 to every namespace). Doors return 422; this scrub covers bypass seams.
+    """The cookie namespace for one crawl: a keyed caller is pinned to its key id;
+    an anonymous caller gets the shared default -- ANY declaration is refused.
+    Doors return 422; this scrub covers bypass seams.
     """
     if caller.authenticated and caller.caller_id:
         return caller.caller_id
@@ -213,7 +213,7 @@ def effective_cookie_namespace(profile: Mapping[str, object], caller: CallerIden
 
 @asynccontextmanager
 async def bound_render_cookie_namespace(caller: CallerIdentity | None):
-    """Bind the render door's cookie namespace for the caller (#483).
+    """Bind the render door's cookie namespace for the caller.
 
     /v1/render has no policy carrier, so a keyed caller's browser harvest is
     pinned to the key id here; an anonymous render keeps the shared default.
@@ -230,7 +230,7 @@ def resolve_page_limit(caller: CallerIdentity, requested_max_pages: int) -> int:
     """Resolve an omitted (zero) page limit to the caller's bound.
 
     One path for every admission edge: a positive request stands; an omitted
-    request takes the caller's bound, else stays unbounded. ``#194`` extends.
+    request takes the caller's bound, else stays unbounded; every door shares this.
     """
     if requested_max_pages > 0:
         return requested_max_pages
@@ -268,20 +268,20 @@ async def admit(
 ) -> AsyncIterator[str]:
     """Admit one request: resolve the page bound, the quotas, the cookie namespace.
 
-    #464: the caller's admit lock spans count->check->insert for async doors
+    The caller's admit lock spans count->check->insert for async doors
     (``reserve_slot=False``) and count->check->reserve for sync doors.
     """
     active = caller if caller is not None else anonymous_caller()
     resolved = resolve_page_limit(active, requested_pages)
     if payload is not None:
-        # #559: an anonymous namespace declaration is refused at the door (422),
+        # An anonymous namespace declaration is refused at the door (422),
         # not silently downgraded; the declared profile is the caller's claim.
         refuse_anonymous_cookie_namespace(active, payload.policy.request_profile)
         policy = payload.policy.model_copy(
             update={"limits": payload.policy.limits.model_copy(update={"max_pages": resolved})}
         )
         namespace = effective_cookie_namespace(policy.request_profile, active)
-        # #537/#559: scrub a refused declaration so the engine cannot re-derive it.
+        # Scrub a refused declaration so the engine cannot re-derive it.
         if namespace != cookie_namespace_for(policy.request_profile):
             profile = dict(policy.request_profile)
             profile["cookie_namespace"] = namespace
@@ -297,7 +297,7 @@ async def admit(
         check_concurrency_quota(active, active_count)
         yield active.caller_id
         return
-    # #464: one admit at a time per caller, so no two requests read the same
+    # One admit at a time per caller, so no two requests read the same
     # count before either has inserted its row or reserved its slot.
     async with concurrency_tracker.slot_lock(active.caller_id):
         active_count = (

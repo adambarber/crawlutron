@@ -1,4 +1,4 @@
-"""Per-caller in-flight register for the sync door (#194): sync crawls create no
+"""Per-caller in-flight register for the sync door: sync crawls create no
 job row to count concurrency with, so this in-memory per-caller counter is summed
 with the async job-row count so one limit binds both doors."""
 
@@ -11,7 +11,7 @@ from collections import defaultdict
 class CallerConcurrencyTracker:
     """Per-caller count of in-flight sync crawls, released to zero on completion.
 
-    Also owns the per-caller admit lock that serializes the count->insert window (#464).
+    Also owns the per-caller admit lock that serializes the count->insert window.
     """
 
     def __init__(self) -> None:
@@ -32,7 +32,7 @@ class CallerConcurrencyTracker:
         if count <= 0:
             self._in_flight.pop(caller_id, None)
             lock = self._slot_locks.get(caller_id)
-            # #511: evict a fully idle lock (not held, no waiters).
+            # Evict a fully idle lock (not held, no waiters).
             if lock is not None and not lock.locked() and not getattr(lock, "_waiters", ()):
                 del self._slot_locks[caller_id]
         else:

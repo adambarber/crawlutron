@@ -69,7 +69,7 @@ async def create_watch(
         url = NormalizedUrl(payload.url, policy=host_policy)
         if payload.webhook_url is not None:
             # An undeliverable URL is a configuration error the caller fixes now; delivery
-            # validates again regardless. ensure_https_webhook_url is the #499 scheme law.
+            # validates again regardless. ensure_https_webhook_url is the scheme law.
             ensure_https_webhook_url(payload.webhook_url)
             await validate_webhook_url_async(payload.webhook_url, host_policy=host_policy)
     except ValueError as error:

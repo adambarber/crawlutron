@@ -81,17 +81,17 @@ async def create_job(
             host_policy=host_policy,
         )
         resolved_policy = read_policy(payload.policy, job_store.tier)
-        # #194: resolve the page bound for every caller (keyed and anonymous) and
+        # Resolve the page bound for every caller (keyed and anonymous) and
         # write it back so the durable row records the bound, not an unbounded 0.
         bound = resolve_page_limit(caller, resolved_policy.limits.max_pages)
         resolved_policy = resolved_policy.model_copy(
             update={"limits": resolved_policy.limits.model_copy(update={"max_pages": bound})}
         )
-        # #195/#226: persist the caller's effective cookie namespace so a keyed whole-site job
-        # crawls under its own jar partition; #559 refuses an anonymous declaration here first.
+        # Persist the caller's effective cookie namespace so a keyed whole-site job
+        # crawls under its own jar partition; an anonymous declaration is refused first.
         refuse_anonymous_cookie_namespace(caller, resolved_policy.request_profile)
         namespace = effective_cookie_namespace(resolved_policy.request_profile, caller)
-        # #537: a refused key id must not survive in the durable row for the engine to re-derive.
+        # A refused key id must not survive in the durable row for the engine to re-derive.
         if namespace or namespace != cookie_namespace_for(resolved_policy.request_profile):
             profile = dict(resolved_policy.request_profile)
             profile["cookie_namespace"] = namespace

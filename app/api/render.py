@@ -161,7 +161,7 @@ def _admitted_jobs(
     options: RenderOptions,
     host_policy: HostPolicy,
 ) -> list[CrawlJob]:
-    """Jobs for the robots-admitted slots; refusals never reach the worker (#244)."""
+    """Jobs for the robots-admitted slots; refusals never reach the worker."""
     return [
         CrawlJob(index=index, url=url, options=options, host_policy=host_policy)
         for index, url in enumerate(urls)
@@ -194,7 +194,7 @@ def _terminal_robot_refusals(
 
 
 def render_scheduler(settings: CrawlerSettings) -> DomainScheduler:
-    """The render batch's per-domain scheduler, built through from_settings (#142).
+    """The render batch's per-domain scheduler, built through from_settings.
 
     Every knob reads its settings home (adaptive throttling honored, RPS the
     0.0 service posture -- render carries no policy carrier).

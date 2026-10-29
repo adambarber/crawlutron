@@ -37,7 +37,7 @@ async def policy_suggestions_endpoint(
     settings=Depends(get_settings),
 ) -> PolicySuggestionsResponse:
     # Anonymity is refused and the rollup is per-tenant: the cross-tenant view is
-    # the operator's, mirroring the /metrics caller-detail gate (#514, #209).
+    # the operator's, mirroring the /metrics caller-detail gate.
     if not caller.authenticated:
         raise http_error(401, "invalid_api_key", "Unauthenticated: an API key is required")
     owner = None if is_operator(request) else caller.caller_id
