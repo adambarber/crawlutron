@@ -100,7 +100,7 @@ These require explicit review from a maintainer before merge:
 - `app/safety/validation.py` — egress filter for scraped JS-endpoint URLs
   (`filter_js_endpoints`), resolved-address public check
   (`is_public_ip_value`).
-- `app/runtime/resource_pressure.py` and `app/transport/browser_pool.py` —
+- `app/runtime/pressure_sizing.py` and `app/transport/browser_pool.py` —
   browser-pool sizing from cgroup memory limits; `BROWSER_RAM_FRACTION`.
 - `app/main.py` — middleware order, body-size limits, error envelopes.
 - `app/api/webhooks.py` — webhook delivery (`deliver_pinned_webhook`).

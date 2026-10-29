@@ -7,7 +7,7 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
-from app.runtime.memory_pressure import MemoryGate, ResourceGauge
+from app.runtime.pressure_memory import MemoryGate, ResourceGauge
 from app.runtime.pressure_probes import (
     DEFAULT_CPU_BUDGET,
     DEFAULT_CPU_HARD,

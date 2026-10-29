@@ -24,7 +24,7 @@ from app.orchestration.admission_stall import AdmissionStallGuard, BatchStages, 
 from app.orchestration.spill_sink import SpillSink, write_spill
 from app.runtime.metrics import MetricsStore, get_metrics
 from app.runtime.pressure_gates import ResourceGate
-from app.runtime.resource_pressure import (
+from app.runtime.pressure_sizing import (
     WeightedAdmission,
     default_admission_policy,
 )

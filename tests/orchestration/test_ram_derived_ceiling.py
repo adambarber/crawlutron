@@ -1,8 +1,8 @@
 """The scheduler's RAM-derived HTTP ceiling matches admission's (#367)."""
 
 from app.orchestration.request_pipeline import compute_ram_derived_concurrency
-from app.runtime.memory_pressure import read_memory_stats
-from app.runtime.resource_pressure import (
+from app.runtime.pressure_memory import read_memory_stats
+from app.runtime.pressure_sizing import (
     TaskRamBudget,
     build_admission_policy,
     doc_worker_count,

@@ -30,7 +30,7 @@ services:
     # _build_admission_policy size the browser pool and HTTP concurrency from a
     # ceiling the container does not actually have -- admitting more in-flight
     # work than 3 GiB can hold. Keep this in sync with the defaults documented
-    # in resource_pressure.py.
+    # in pressure_sizing.py.
     mem_limit: 3g
     ports:
       # Bind to loopback only; the service has no caller authentication by

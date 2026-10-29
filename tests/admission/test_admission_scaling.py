@@ -6,8 +6,8 @@ import time
 import pytest
 
 from app.orchestration.recursive import batch_is_http_heavy
-from app.runtime.memory_pressure import batch_scale
-from app.runtime.resource_pressure import ResourceGate
+from app.runtime.pressure_memory import batch_scale
+from app.runtime.pressure_sizing import ResourceGate
 from app.vocabulary.strategies import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
 from tests._admission_doubles import PinnedGate
 from tests._admission_doubles import pinned_resource_gate as _pinned_resource_gate
@@ -67,7 +67,7 @@ def test_direct_reads_do_not_perturb_slope(monkeypatch):
     """The usage sensor is read by readiness/metrics/waits between dispatch
     scale computations. Those reads must not mutate the slope series, or a
     single stray sample invents a climb that is not there."""
-    import app.runtime.memory_pressure as mp
+    import app.runtime.pressure_memory as mp
 
     # The clock and the sensor keep going: the event loop and the framework's
     # teardown read the global clock too, and a finite sequence ran out.

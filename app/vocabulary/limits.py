@@ -126,4 +126,4 @@ DEFAULT_EXTRACTION_DOC_ACQUIRE_TIMEOUT: float = 90.0
 DEFAULT_EXTRACTION_MAX_MARKDOWN: int = 5 * 1024 * 1024
 
 # Persistent browsers per worker fallback lives in derive_browser_pool_size
-# (resource_pressure.py): sizing is RAM-derived, not a fixed constant.
+# (pressure_sizing.py): sizing is RAM-derived, not a fixed constant.

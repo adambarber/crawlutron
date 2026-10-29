@@ -12,7 +12,7 @@ from app.admission.policy import PolicyTier, validate_wire_policy
 from app.models.crawl_request import CrawlRequest
 from app.models.host_policy import HostPolicy
 from app.models.normalized_url import NormalizedUrl
-from app.runtime.resource_pressure import (
+from app.runtime.pressure_sizing import (
     BROWSER_RAM_FRACTION,
     TaskRamBudget,
     WeightedAdmission,

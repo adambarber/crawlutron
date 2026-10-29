@@ -11,7 +11,7 @@ import json
 from app.config.env import get_env_int
 from app.models.crawl_policy_limits import CrawlPolicyLimits
 from app.models.normalized_url import NormalizedUrl
-from app.runtime.resource_pressure import worker_count
+from app.runtime.pressure_sizing import worker_count
 from app.transport.content_cache import ContentCache
 from app.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 

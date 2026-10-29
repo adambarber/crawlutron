@@ -25,9 +25,9 @@ from app.models.result_record import ProducerEnvelope
 from app.orchestration.recursive import run_recursive_crawl
 from app.orchestration.spill_sink import SpillSink, write_spill
 from app.orchestration.strategy_chain import execute_crawl_chain
-from app.runtime.memory_pressure import read_memory_stats
 from app.runtime.pressure_gates import ResourceGate
-from app.runtime.resource_pressure import (
+from app.runtime.pressure_memory import read_memory_stats
+from app.runtime.pressure_sizing import (
     TaskRamBudget,
     WeightedAdmission,
     build_admission_policy,

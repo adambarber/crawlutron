@@ -18,10 +18,10 @@ from app.models.crawl_job import CrawlJob
 from app.models.crawl_result import CrawlResult
 from app.models.taxonomy import CrawlStrategyName
 from app.runtime.pool import AsyncPool
-from app.runtime.resource_pressure import (
+from app.runtime.pressure_sizing import (
     BROWSER_RAM_FRACTION,
 )
-from app.runtime.resource_pressure import (
+from app.runtime.pressure_sizing import (
     derive_browser_pool_size as derive_browser_pool_size,
 )
 from app.transport.browser import BrowserRenderer

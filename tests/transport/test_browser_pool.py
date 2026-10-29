@@ -5,7 +5,7 @@ import inspect
 import pytest
 
 import app.transport.browser_pool as bp
-from app.runtime import resource_pressure as rp
+from app.runtime import pressure_sizing as rp
 from app.transport.browser_driver import BrowserDriver
 from app.transport.browser_pool import (
     BROWSER_POOL_ACQUIRE_TIMEOUT_SECONDS,

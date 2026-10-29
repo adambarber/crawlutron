@@ -6,8 +6,8 @@ import asyncio
 from dataclasses import dataclass
 
 from app.config.env import get_env_float, get_env_int
-from app.runtime.memory_pressure import read_memory_stats
 from app.runtime.pressure_gates import CpuGate, ResourceGate
+from app.runtime.pressure_memory import read_memory_stats
 from app.runtime.pressure_probes import LoopLagProbe, read_cpu_quota, read_cpu_usage_seconds
 
 __all__ = [
