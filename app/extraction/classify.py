@@ -103,8 +103,8 @@ def classify_page(html: str | None, text: str | None, *, title: str | None = Non
     return classification
 
 
-# Structural markers that are unforgeable by accident (no municipal page carries
-# Cloudflare/captcha plumbing); one hit suffices. NOTICE carries the MIT lines.
+# Structural markers that are unforgeable by accident (legitimate pages do not
+# carry Cloudflare/captcha plumbing); one hit suffices. NOTICE carries the MIT lines.
 STRONG_CLASSIFICATION_MARKERS: tuple[tuple[Classification, tuple[str, ...]], ...] = (
     (
         "bot_challenge_detected",

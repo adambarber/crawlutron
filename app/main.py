@@ -142,7 +142,7 @@ def _build_app(
         title="Crawlutron Execution Service",
         lifespan=lifespan,
         description=(
-            "Localhost-only policy-driven crawler execution service for municipal script tools. "
+            "Localhost-only policy-driven crawler execution service for automated script callers. "
             "GET /health is lightweight liveness for Docker healthchecks; GET /ready reports active crawl "
             "saturation without implying process death. "
             "Blocking direct HTTP, document extraction, Trafilatura, "

@@ -257,7 +257,7 @@ exhausted.
 | `HTTP_DECLARED_CRAWLER` | Transparent direct HTTP fetch with a declared-crawler identity (lightweight, fast). |
 | `HTTP_CFFI_IMPERSONATE` | TLS-fingerprint-impersonated HTTP via `curl_cffi` with browser-shaped headers, for sites that reject non-browser clients. |
 | `BROWSER_HEADLESS` | Firefox rendering in headless mode using Camoufox for JavaScript-dependent pages. |
-| `BROWSER_HEADED_WARMED` | Headed Firefox with configured warmup URLs for challenge-prone municipal systems. |
+| `BROWSER_HEADED_WARMED` | Headed Firefox with configured warmup URLs for challenge-prone sites. |
 
 ### Extraction methods (`policy.extraction`)
 
