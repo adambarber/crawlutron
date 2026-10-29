@@ -10,7 +10,7 @@ import pathlib
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 
-from tests.chokepoint_walks import REPO_ROOT, SANCTIONED, app_trees, relative_posix
+from tests.chokepoint_walks import REPO_ROOT, app_trees, relative_posix
 
 #: Where a bite proof's synthetic module is pretended to live.
 _SYNTHETIC = REPO_ROOT / "app" / "_synthetic.py"
@@ -90,7 +90,9 @@ class Rule:
     find: Detector
     bite: Callable[[], Proof | Sequence[Proof]]
     summary: str = ""
-    excludes: frozenset[str] = field(default=SANCTIONED)
+    # No walk-level exemption: a rule that needs one declares it, so a rule can
+    # never inherit another rule's sanctioned file by default.
+    excludes: frozenset[str] = field(default=frozenset())
     clean: Callable[[], Sequence[str | Silent]] | None = None
     premise: Callable[[], None] | None = None
     skip: frozenset[str] = frozenset()

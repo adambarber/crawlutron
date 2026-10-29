@@ -5,7 +5,17 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from tests.chokepoint_walks import TESTS_DIR, app_python_files, app_trees, nodes_of, trees_under
+import tests._walk_trees as _walk_trees
+from tests.chokepoint_walks import (
+    APP_ROOT,
+    TESTS_DIR,
+    app_offenders,
+    app_python_files,
+    app_trees,
+    nodes_of,
+    trees_under,
+)
+from tests.membership_gate import aliased_sanctioned_func_offenders
 from tests.trees import app_reads as _app_reads
 
 
@@ -127,3 +137,25 @@ def test_a_narrowed_walk_is_shared_too():
         f"only {checked} narrowed walks were checked across the tree; the assertion "
         "has to span the snapshot to be evidence about the snapshot"
     )
+
+
+def test_a_non_regex_detector_sees_safe_regex_scope(monkeypatch):
+    """The sanctioned exclude is the regex rules', not every detector's: a planted
+    banned-primitive use in safe_regex scope must be caught through the default walk."""
+    planted = ast.parse(
+        "from app.transport.decompression import decompress_body as dec\n"
+        "def f(raw, enc):\n    return dec(raw, enc)\n"
+    )
+    path = APP_ROOT / "safety" / "safe_regex.py"
+    real_trees = _walk_trees._app_trees
+
+    def trees_with_plant(exclude):
+        # Mirror the walk contract: names in the exclude set never reach a detector.
+        if path.name in exclude:
+            return real_trees(exclude)
+        return (*real_trees(exclude), (path, planted))
+
+    monkeypatch.setattr(_walk_trees, "_app_trees", trees_with_plant)
+    offenders = app_offenders(aliased_sanctioned_func_offenders)
+    assert offenders, "a planted decompress alias in safe_regex scope went unseen"
+    assert any("dec" in hit for hit in offenders), offenders

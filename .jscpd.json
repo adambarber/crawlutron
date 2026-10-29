@@ -2,10 +2,8 @@
   "ignore": [
     "**/__pycache__/**",
     "**/.pytest_cache/**",
-    "**/tmp/**",
     "**/node_modules/**",
     "**/.git/**",
-    "**/fixtures/**",
     "**/app/storage/migrations/**"
   ]
 }

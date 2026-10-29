@@ -57,9 +57,6 @@ def test_the_classification_table_has_no_shadowed_or_mid_table_catch_all_rows():
 
 # --------------------------------------------------------------------------- Classification transience: one
 # verdict, owned by the taxonomy ---------------------------------------------------------------------------
-_TRANSIENCE_HOME_SANCTIONED = frozenset({"constants.py"})
-
-
 _TRANSIENCE_VERDICT_SUFFIXES = ("CLASSIFICATIONS", "CODES", "SET", "LABELS", "STATUSES")
 
 
@@ -128,7 +125,7 @@ TRANSIENCE_VERDICT_HAS_ONE_HOME = Rule(
         "app.vocabulary.taxonomy.is_transient_classification is the single answer for "
         "'is this failure worth another pass'"
     ),
-    excludes=SANCTIONED | _TRANSIENCE_HOME_SANCTIONED,
+    excludes=SANCTIONED,
     bite=lambda: Bites(
         'TRANSIENT_CLASSIFICATIONS = {"dns_error", "network_error"}\n',
         "re-answers the taxonomy's transience verdict",
