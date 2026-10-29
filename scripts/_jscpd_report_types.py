@@ -8,11 +8,7 @@ from typing import NotRequired, TypedDict
 
 
 class JscpdLocation(TypedDict):
-    """One side of a clone: the file jscpd named (root-relative) and its span.
-
-    ``tree`` is absent from jscpd's own report; the frontier sweep adds it when
-    it tags each pair with the root it was scanned under.
-    """
+    """One side of a clone: the file jscpd named (root-relative) and its span."""
 
     name: str
     start: int

@@ -6,9 +6,9 @@ sweep runs, surfaces a clone, and reads the enforced floor, not a stale number.
 
 from __future__ import annotations
 
-from app.models.jscpd_report import JscpdDuplicate
 from scripts import jscpd_gate as gate
 from scripts import jscpd_sweep as sweep
+from scripts._jscpd_report_types import JscpdDuplicate
 
 
 def _clone() -> JscpdDuplicate:

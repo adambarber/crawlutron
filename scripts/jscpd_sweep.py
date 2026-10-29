@@ -13,8 +13,8 @@ import json
 import textwrap
 from pathlib import Path
 
-from app.models.jscpd_report import JscpdDuplicate
 from scripts import jscpd_gate as gate
+from scripts._jscpd_report_types import JscpdDuplicate
 from scripts.ast_scopes import SCOPE_OPENING_NODES
 
 

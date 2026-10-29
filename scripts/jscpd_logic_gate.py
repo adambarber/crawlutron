@@ -9,8 +9,8 @@ from __future__ import annotations
 import argparse
 import sys
 
-from app.models.jscpd_report import JscpdDuplicate, JscpdReport
 from scripts import _jscpd_pair_resolution as resolver
+from scripts._jscpd_report_types import JscpdDuplicate, JscpdReport
 from scripts.jscpd_sweep import classify
 
 FLOOR = (2, 30)
