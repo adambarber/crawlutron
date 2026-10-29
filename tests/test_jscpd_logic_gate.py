@@ -6,9 +6,9 @@ gate fails on cross-file clones whose fragment is LOGIC.
 
 from __future__ import annotations
 
-from app.models.jscpd_report import JscpdDuplicate
 from scripts import _jscpd_pair_resolution as resolver
 from scripts import jscpd_logic_gate as gate
+from scripts._jscpd_report_types import JscpdDuplicate
 
 
 def _duplicate(first: str, second: str, fragment: str) -> JscpdDuplicate:

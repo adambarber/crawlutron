@@ -6,10 +6,10 @@ import argparse
 import json
 from pathlib import Path
 
-from app.models.jscpd_report import JscpdDuplicate, JscpdLocation
 from scripts import _jscpd_pair_resolution as res
 from scripts import executables as ex
 from scripts import jscpd_gate as gate
+from scripts._jscpd_report_types import JscpdDuplicate, JscpdLocation
 
 
 def stub_resolver_probe(monkeypatch) -> None:

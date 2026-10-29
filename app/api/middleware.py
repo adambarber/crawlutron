@@ -81,8 +81,8 @@ async def limit_request_body(request: Request, call_next, *, max_bytes: int = MA
         message = await original_receive()
         if message.get("type") != "http.request":
             return message
-            # The truncating chunk is not charged to bytes_delivered, so a later
-            # receive must not read a positive budget from it and admit more.
+        # The truncating chunk is not charged to bytes_delivered, so a later
+        # receive must not read a positive budget from it and admit more.
         if truncated:
             return {**message, "body": b"", "more_body": False}
         body = message.get("body", b"") or b""

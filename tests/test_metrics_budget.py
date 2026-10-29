@@ -184,9 +184,12 @@ def _root_candidates(root: Path) -> Iterator[tuple[str, str, tuple[int, str]]]:
 
 
 def _root_gate(
-    root: Path, budgets: dict[str, int]
+    root: Path, budgets: dict[str, int], *, exclude_class_trees: set[str] = frozenset()
 ) -> tuple[Callable[[str], list[Offender]], Callable[[str], int]]:
-    """The offenders/measurement pair one root gate builds, written once."""
+    """The offenders/measurement pair one root gate builds, written once.
+
+    ``exclude_class_trees`` names module paths whose classes are not counted
+    (classless gate-tooling modules living beside the scripts tree)."""
 
     def candidates() -> list[Offender]:
         return _root_candidates(root)
@@ -194,10 +197,15 @@ def _root_gate(
     def trees() -> dict[Path, ast.Module]:
         return trees_under(root)
 
-    return _build_gate(candidates, trees, budgets)
+    def class_trees() -> tuple[tuple[Path, ast.Module], ...]:
+        return tuple((p, t) for p, t in trees() if p.name not in exclude_class_trees)
+
+    return _build_gate(candidates, class_trees, budgets)
 
 
-scripts_offenders, scripts_measurement = _root_gate(REPO_ROOT / "scripts", _SCRIPTS_BUDGETS)
+scripts_offenders, scripts_measurement = _root_gate(
+    REPO_ROOT / "scripts", _SCRIPTS_BUDGETS, exclude_class_trees={"_jscpd_report_types.py"}
+)
 
 
 #: The tests/ tree: baseline first (value-ratchet rule); fn-len SEALED at zero

@@ -8,7 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
-from app.models.jscpd_report import JscpdDuplicate, JscpdLocation, JscpdReport
+from scripts._jscpd_report_types import JscpdDuplicate, JscpdLocation, JscpdReport
 from scripts.executables import require_repo_tool
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]

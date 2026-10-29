@@ -270,7 +270,6 @@ _COHESIVE_MODULES = frozenset(
         "crawl_result.py",  # CrawlResult + EngineCrawlResult: the shared result family
         "crawl_worker.py",  # CrawlWorker = SyncCrawlWorker | AsyncCrawlWorker
         "fetch_envelope.py",  # SerializedResponse + its RetryDiagnostics
-        "jscpd_report.py",  # the jscpd report family: Report, Statistics, Duplicate, Location
         "host_policy_suggestion.py",  # HostPolicySuggestion + CandidateRule
         "result_record.py",  # AnyResult union + Producer/RenderEnvelope
         "watch_state.py",  # WatchState + IntervalSeconds field helper

@@ -171,7 +171,7 @@ test_collection_is_deterministic = collection_is_deterministic(
 
 _SCRIPTS_SEALED = (
     "undeclared record: the scripts tree is sealed at zero (#389) -- declare the "
-    "record (TypedDict/model, see scripts/jscpd_report_types.py) or name the "
+    "record (TypedDict/model, see scripts/_jscpd_report_types.py) or name the "
     "system type it honestly is: "
 )
 

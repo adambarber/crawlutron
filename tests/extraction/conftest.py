@@ -1,4 +1,8 @@
-"""Extraction-package fixtures shared by the doc-pool suites."""
+"""Extraction-package fixtures shared by the doc-pool suites.
+
+The autouse root ``_document_pool_per_test`` owns real per-test pool creation;
+these are the seeded/stub variants the pool's own unit tests arrange by hand.
+"""
 
 from __future__ import annotations
 
