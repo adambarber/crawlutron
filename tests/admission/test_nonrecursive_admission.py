@@ -4,8 +4,8 @@ against a 256-connection hardcode (#350)."""
 
 from app.orchestration import request_pipeline
 from app.orchestration.engine import crawl_request
-from app.runtime.memory_pressure import MemoryStats
-from app.runtime.resource_pressure import WeightedAdmission
+from app.runtime.pressure_memory import MemoryStats
+from app.runtime.pressure_sizing import WeightedAdmission
 from tests._fetch_doubles import FetcherDouble
 
 

@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from app.models.crawl_result import EngineCrawlResult
     from app.models.host_policy import HostPolicy
     from app.models.normalized_url import NormalizedUrl
-    from app.runtime.resource_pressure import WeightedAdmission
+    from app.runtime.pressure_sizing import WeightedAdmission
 
 __all__ = ["ContentionFreeGate", "RecursiveRun", "drive_recursive_crawl", "make_crawl_task"]
 

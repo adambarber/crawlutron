@@ -27,7 +27,7 @@ from tests.invariants._store_receivers import (
 )
 from tests.rules import Bites, Registry, Rule, Trips
 
-# The weights are now one frozen ``resource_pressure.TaskRamBudget`` that the caller builds and the policy
+# The weights are now one frozen ``pressure_sizing.TaskRamBudget`` that the caller builds and the policy
 # function hands on unchanged. The drift this guards is a caller going back to the flat list.
 _ADMISSION_POLICY = "build_admission_policy"
 
@@ -45,7 +45,7 @@ def _admission_budget_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
                     path,
                     node,
                     f"{_ADMISSION_POLICY}(..., {keyword.arg}={ast.unparse(keyword.value)}, ...) "
-                    f"spells a sizing weight directly; pass a resource_pressure.TaskRamBudget "
+                    f"spells a sizing weight directly; pass a pressure_sizing.TaskRamBudget "
                     f"so the policy is built from the same weights it reports",
                 )
             )
@@ -54,7 +54,7 @@ def _admission_budget_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 
 def _task_ram_budget():
     """The budget dataclass, imported late so the module docstring stays the first prose."""
-    from app.runtime.resource_pressure import TaskRamBudget
+    from app.runtime.pressure_sizing import TaskRamBudget
 
     return TaskRamBudget
 
@@ -69,7 +69,7 @@ def _admission_weights_are_known() -> None:
 
 
 ADMISSION_WEIGHTS_ARE_KEYWORDS = (
-    "from app.runtime.resource_pressure import build_admission_policy\n"
+    "from app.runtime.pressure_sizing import build_admission_policy\n"
     "def build(limit, pool_size):\n"
     "    return build_admission_policy(limit, pool_size=pool_size,"
     " max_concurrent_pages=3, doc_workers=2)\n"
@@ -86,15 +86,15 @@ ADMISSION_BUDGET_ARRIVES_AS_A_BUDGET = Rule(
     premise=_admission_weights_are_known,
     bite=lambda: Bites(ADMISSION_WEIGHTS_ARE_KEYWORDS, marker="doc_workers=2"),
     clean=lambda: (
-        "from app.runtime.resource_pressure import TaskRamBudget, build_admission_policy\n"
+        "from app.runtime.pressure_sizing import TaskRamBudget, build_admission_policy\n"
         "def build(limit, pool_size):\n"
         "    return build_admission_policy(limit, pool_size=pool_size,"
         " max_concurrent_pages=3, budget=TaskRamBudget(doc_workers=2))\n",
         # The computation itself is not this guard's subject.
-        "from app.runtime.resource_pressure import max_http_concurrency_for\n"
+        "from app.runtime.pressure_sizing import max_http_concurrency_for\n"
         "def ceiling(limit, pool_size):\n"
         "    return max_http_concurrency_for(limit, pool_size, doc_workers=2)\n",
-        "from app.runtime.resource_pressure import build_admission_policy\n"
+        "from app.runtime.pressure_sizing import build_admission_policy\n"
         "def build(limit, pool_size):\n"
         "    return build_admission_policy(limit, pool_size=pool_size, max_concurrent_pages=3)\n",
     ),

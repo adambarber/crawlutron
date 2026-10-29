@@ -288,8 +288,8 @@ graph LR
     api_webhooks --> transport_pinned_transport
     api_webhooks --> transport_timeouts
     config_settings --> config_env
-    config_settings --> runtime_memory_pressure
-    config_settings --> runtime_resource_pressure
+    config_settings --> runtime_pressure_memory
+    config_settings --> runtime_pressure_sizing
     config_settings --> vocabulary_limits
     discovery_agent_hints --> api_policy_defaults
     discovery_agent_hints --> models_agent_hints_response
@@ -332,7 +332,7 @@ graph LR
     extraction_documents --> extraction_llm_format
     extraction_documents --> extraction_trees
     extraction_documents --> models_normalized_url
-    extraction_documents --> runtime_resource_pressure
+    extraction_documents --> runtime_pressure_sizing
     extraction_llm_format --> extraction_classify
     extraction_llm_format --> extraction_trees
     extraction_llm_format --> models_json_value
@@ -353,7 +353,7 @@ graph LR
     main --> models_address_class
     main --> models_host_policy
     main --> runtime_logging_config
-    main --> runtime_resource_pressure
+    main --> runtime_pressure_sizing
     main --> storage_coordination_cookies
     main --> storage_coordination_counters
     main --> transport_cookie_jar
@@ -556,7 +556,7 @@ graph LR
     orchestration_recursive --> orchestration_spill_sink
     orchestration_recursive --> runtime_metrics
     orchestration_recursive --> runtime_pressure_gates
-    orchestration_recursive --> runtime_resource_pressure
+    orchestration_recursive --> runtime_pressure_sizing
     orchestration_recursive --> safety_safe_regex
     orchestration_recursive --> transport_scheduler
     orchestration_recursive --> vocabulary_limits
@@ -580,9 +580,9 @@ graph LR
     orchestration_request_pipeline --> orchestration_results
     orchestration_request_pipeline --> orchestration_spill_sink
     orchestration_request_pipeline --> orchestration_strategy_chain
-    orchestration_request_pipeline --> runtime_memory_pressure
+    orchestration_request_pipeline --> runtime_pressure_memory
     orchestration_request_pipeline --> runtime_pressure_gates
-    orchestration_request_pipeline --> runtime_resource_pressure
+    orchestration_request_pipeline --> runtime_pressure_sizing
     orchestration_request_pipeline --> safety_safe_regex
     orchestration_request_pipeline --> storage_ids
     orchestration_request_pipeline --> transport_cache
@@ -614,15 +614,15 @@ graph LR
     orchestration_worker --> models_crawl_job
     orchestration_worker --> models_crawl_result
     orchestration_worker --> models_crawl_worker
-    runtime_memory_pressure --> runtime_cgroup_sense
+    runtime_pressure_memory --> runtime_cgroup_sense
     runtime_metrics --> models_crawl_result
-    runtime_pressure_gates --> runtime_memory_pressure
+    runtime_pressure_gates --> runtime_pressure_memory
     runtime_pressure_gates --> runtime_pressure_probes
     runtime_pressure_probes --> runtime_cgroup_sense
-    runtime_resource_pressure --> config_env
-    runtime_resource_pressure --> runtime_memory_pressure
-    runtime_resource_pressure --> runtime_pressure_gates
-    runtime_resource_pressure --> runtime_pressure_probes
+    runtime_pressure_sizing --> config_env
+    runtime_pressure_sizing --> runtime_pressure_memory
+    runtime_pressure_sizing --> runtime_pressure_gates
+    runtime_pressure_sizing --> runtime_pressure_probes
     safety_validation --> models_address_class
     safety_validation --> models_host_policy
     safety_validation --> models_normalized_url
@@ -755,7 +755,7 @@ graph LR
     transport_browser_pool --> models_taxonomy
     transport_browser_pool --> orchestration_results
     transport_browser_pool --> runtime_pool
-    transport_browser_pool --> runtime_resource_pressure
+    transport_browser_pool --> runtime_pressure_sizing
     transport_browser_pool --> transport_browser
     transport_browser_pool --> vocabulary_strategies
     transport_browser_render_phases --> extraction_classify
@@ -799,7 +799,7 @@ graph LR
     transport_content_cache_key --> config_settings
     transport_content_cache_key --> models_crawl_policy_limits
     transport_content_cache_key --> models_normalized_url
-    transport_content_cache_key --> runtime_resource_pressure
+    transport_content_cache_key --> runtime_pressure_sizing
     transport_content_cache_key --> transport_content_cache
     transport_content_cache_key --> vocabulary_limits
     transport_content_pipeline --> admission_policy

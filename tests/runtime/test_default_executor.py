@@ -5,7 +5,7 @@ import concurrent.futures
 
 import pytest
 
-from app.runtime.resource_pressure import default_executor_workers
+from app.runtime.pressure_sizing import default_executor_workers
 
 
 def test_default_executor_workers_is_derived_and_capped():

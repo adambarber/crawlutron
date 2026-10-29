@@ -101,7 +101,7 @@ DECLARED_SURFACE_RATCHET = {
     "app/orchestration/strategy_chain.py": (4, 2),
     "app/runtime/worker_dispatch.py": (1, 1),
     "app/runtime/logging_config.py": (1, 1),
-    "app/runtime/resource_pressure.py": (12, 8),
+    "app/runtime/pressure_sizing.py": (12, 8),
     "app/search/endpoint.py": (2, 1),
     "app/search/providers.py": (21, 9),
     "app/search/providers_api.py": (5, 5),

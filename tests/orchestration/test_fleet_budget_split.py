@@ -6,7 +6,7 @@ so the division belongs where the budget is DERIVED (hence ``doc_worker_count``)
 
 import pytest
 
-from app.runtime import resource_pressure as rp
+from app.runtime import pressure_sizing as rp
 
 
 @pytest.fixture(autouse=True)

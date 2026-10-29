@@ -16,7 +16,7 @@ from app.config.env import get_env_float, get_env_int
 from app.models.address_class import is_loopback_bind
 from app.models.host_policy import HostPolicy
 from app.runtime.logging_config import configure_service_logging
-from app.runtime.resource_pressure import default_executor_workers
+from app.runtime.pressure_sizing import default_executor_workers
 from app.vocabulary.identity import SERVICE_ID, SERVICE_VERSION
 
 from .config.settings import CrawlerSettings

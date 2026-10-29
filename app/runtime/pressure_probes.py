@@ -9,7 +9,7 @@ from collections.abc import Awaitable, Callable
 
 from app.runtime.cgroup_sense import read_int, read_text
 
-# Self-managed, no operator knob (mirrors app/runtime/memory_pressure.py): the gate
+# Self-managed, no operator knob (mirrors app/runtime/pressure_memory.py): the gate
 # rides at TARGET and pauses at HARD against the cgroup quota it discovers.
 DEFAULT_CPU_TARGET = 0.90
 

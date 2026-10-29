@@ -6,8 +6,8 @@ from dataclasses import dataclass, field
 from typing import TypedDict
 
 from app.config.env import get_mapping_float, get_mapping_int, in_range, parse_bool_value
-from app.runtime.memory_pressure import read_memory_stats
-from app.runtime.resource_pressure import derive_browser_pool_size, max_http_concurrency_for
+from app.runtime.pressure_memory import read_memory_stats
+from app.runtime.pressure_sizing import derive_browser_pool_size, max_http_concurrency_for
 from app.vocabulary.limits import (
     DEFAULT_CHALLENGE_WAIT_SECONDS,
     DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS,

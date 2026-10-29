@@ -3,9 +3,9 @@
 import pytest
 
 from app.health.readiness import ReadinessState
-from app.runtime.memory_pressure import MemoryGate, MemoryStats, read_memory_stats
 from app.runtime.metrics import get_metrics
-from app.runtime.resource_pressure import CpuGate, ResourceGate, read_cpu_quota, read_cpu_usage_seconds
+from app.runtime.pressure_memory import MemoryGate, MemoryStats, read_memory_stats
+from app.runtime.pressure_sizing import CpuGate, ResourceGate, read_cpu_quota, read_cpu_usage_seconds
 from tests._admission_doubles import pinned_resource_gate as _pinned_resource_gate
 from tests._timing_harnesses import recorder
 
