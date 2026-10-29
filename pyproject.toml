@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs>=0.4"]
 build-backend = "hatchling.build"
 
 [project]
 name = "crawlutron"
-version = "0.3.0"
+dynamic = ["version"]
 description = "Policy-driven, self-hosted web crawler and content-extraction service built around FastAPI"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -127,6 +127,15 @@ Homepage = "https://github.com/adambarber/crawlutron"
 Issues = "https://github.com/adambarber/crawlutron/issues"
 Changelog = "https://github.com/adambarber/crawlutron/blob/main/CHANGELOG.md"
 Security = "https://github.com/adambarber/crawlutron/blob/main/SECURITY.md"
+
+[tool.hatch.version]
+# The single source of the version: the most recent git tag (SemVer, 0.x per
+# #561). Untagged or dirty checkouts get a dev suffix; no hand-edited number.
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+# Written at build/editable-install time; regenerated, never committed.
+version-file = "crawlutron/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["crawlutron"]
