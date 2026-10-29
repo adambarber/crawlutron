@@ -13,8 +13,8 @@ import unittest.mock as mock
 
 import pytest
 
-from app.api import webhooks
-from app.models.host_policy import HostPolicy
+from crawlutron.api import webhooks
+from crawlutron.models.host_policy import HostPolicy
 
 
 def _payload(n_results: int) -> dict[str, object]:

@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import asyncio
 
-from app.api.watch_sweep import WatchSweeper
-from app.config.settings import CrawlerSettings
+from crawlutron.api.watch_sweep import WatchSweeper
+from crawlutron.config.settings import CrawlerSettings
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 from tests._result_builders import engine_result
 
@@ -32,7 +32,7 @@ def _sweeper(watch_store) -> WatchSweeper:
 async def test_two_concurrent_sweeps_deliver_one_webhook_not_two(watch_store, etag_server, monkeypatch):
     """Two sweeper processes over one due watch must fire the webhook once: the
     second sweeper's claim CAS loses and the row is skipped, not re-delivered."""
-    from app.api import watch_sweep
+    from crawlutron.api import watch_sweep
 
     watch = watch_store.create(
         canonical(origin_url(etag_server)),
@@ -86,8 +86,8 @@ async def test_two_concurrent_sweeps_deliver_one_webhook_not_two(watch_store, et
 async def test_a_hanging_webhook_does_not_stall_the_sweep_pass(watch_store, etag_server, monkeypatch):
     """A webhook that never answers must not hold the sweep pass: delivery is a
     tracked background task, so sweep_once returns while it runs (#528)."""
-    from app.api import watch_sweep
-    from app.api.webhooks import drain_webhook_deliveries
+    from crawlutron.api import watch_sweep
+    from crawlutron.api.webhooks import drain_webhook_deliveries
 
     watch = watch_store.create(
         canonical(origin_url(etag_server)),

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.mcp.protocol import ProtocolValidationError
+from crawlutron.mcp.protocol import ProtocolValidationError
 
 
 def test_non_dict_payload_does_not_crash():

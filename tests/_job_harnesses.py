@@ -9,13 +9,13 @@ from collections.abc import Collection
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from app.admission.policy import PolicyLike
-from app.models.crawl_result import EngineCrawlResult
-from app.models.json_value import JsonValue
-from app.models.normalized_url import NormalizedUrl
-from app.models.result_record import ProducerEnvelope
-from app.models.taxonomy import Classification
-from app.storage.job_store import TERMINAL_STATUSES, JobStatus, JobStore
+from crawlutron.admission.policy import PolicyLike
+from crawlutron.models.crawl_result import EngineCrawlResult
+from crawlutron.models.json_value import JsonValue
+from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.models.result_record import ProducerEnvelope
+from crawlutron.models.taxonomy import Classification
+from crawlutron.storage.job_store import TERMINAL_STATUSES, JobStatus, JobStore
 from tests._dependency_overrides import bind_base_overrides
 from tests._job_drivers import (
     _create_api_job,
@@ -131,7 +131,7 @@ class ScriptedExecute:
 
 
 def _make_app(job_store):
-    from app.api.jobs_router import router as jobs_router
+    from crawlutron.api.jobs_router import router as jobs_router
 
     app = FastAPI()
     app.include_router(jobs_router)
@@ -145,7 +145,7 @@ async def _join_runner_task(job_id: str) -> bool:
 
     For a terminal wait this is the exact event the caller waits on, with no
     deadline to race; ``asyncio.wait`` resolves however the task finished."""
-    from app.api import job_lifecycle
+    from crawlutron.api import job_lifecycle
 
     task = job_lifecycle.tracked_task(job_id)
     if task is None or task.done():

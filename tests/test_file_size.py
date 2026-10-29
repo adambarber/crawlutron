@@ -15,7 +15,7 @@ from tests.chokepoint_walks import REPO_ROOT
 MAX_FILE_LINES = 500
 
 #: All three trees, so neither the suite nor the gates grow past the ceiling.
-ROOTS = ("app", "tests", "scripts")
+ROOTS = ("crawlutron", "tests", "scripts")
 
 
 def file_lines(text: str) -> int:

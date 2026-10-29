@@ -10,8 +10,8 @@ from urllib.parse import urlparse
 
 import httpx
 
-import app.transport.http_client_pool as _http_pool_mod
-from app.transport.document import (
+import crawlutron.transport.http_client_pool as _http_pool_mod
+from crawlutron.transport.document import (
     default_document_text_extractor,
     extract_pdf_bytes_to_markdown,
     format_table,
@@ -75,7 +75,7 @@ class TestDocumentRedirectSsrf:
     def _install_fakes(self, monkeypatch, pdf_bytes, redirects):
         from urllib.parse import urlparse
 
-        import app.transport.http_client_pool as pool_mod
+        import crawlutron.transport.http_client_pool as pool_mod
         from tests._transport_doubles import MockResponse, dispatching_transport_client
 
         table = {"evil.test": "169.254.169.254"}
@@ -265,7 +265,7 @@ class TestDocumentExtractionEdges:
 
     def test_oversized_pdf_body_yields_empty_text(self, base_url):
         # The read itself is capped.
-        import app.extraction.content as extraction_mod
+        import crawlutron.extraction.content as extraction_mod
 
         original_cap = extraction_mod.EXTRACTION_DOC_MAX_INPUT_BYTES
         extraction_mod.EXTRACTION_DOC_MAX_INPUT_BYTES = 64
@@ -410,8 +410,8 @@ class TestDocumentFetchHonorsRequestBudget:
 
     async def test_document_bytes_use_caller_budget_not_fixed_30s(self, monkeypatch):
 
-        import app.transport.document as doc_mod
-        import app.transport.pinned_transport as pinned_mod
+        import crawlutron.transport.document as doc_mod
+        import crawlutron.transport.pinned_transport as pinned_mod
         from tests._transport_doubles import MockResponse, dispatching_transport_client
 
         seen_timeouts: list[httpx.Timeout] = []

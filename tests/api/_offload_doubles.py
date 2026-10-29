@@ -3,11 +3,11 @@
 import asyncio
 import functools
 
-from app.storage.coordination_cookies import SharedCookieStore
-from app.storage.job_store import JobStore
-from app.storage.job_store_state import JobStatus
-from app.storage.result_store import CrawlResultStore
-from app.storage.watch_store import WatchStore
+from crawlutron.storage.coordination_cookies import SharedCookieStore
+from crawlutron.storage.job_store import JobStore
+from crawlutron.storage.job_store_state import JobStatus
+from crawlutron.storage.result_store import CrawlResultStore
+from crawlutron.storage.watch_store import WatchStore
 
 
 class LoopGuardJobStore(JobStore):

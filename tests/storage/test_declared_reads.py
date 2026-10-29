@@ -8,9 +8,9 @@ import json
 
 import pytest
 
-from app.models.serialization import to_dict
-from app.orchestration.engine import ResultSpill
-from app.transport.content_cache import ContentCache
+from crawlutron.models.serialization import to_dict
+from crawlutron.orchestration.engine import ResultSpill
+from crawlutron.transport.content_cache import ContentCache
 from tests._job_drivers import raw_job_row
 from tests._job_harnesses import make_job_store
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY

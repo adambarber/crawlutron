@@ -25,7 +25,7 @@ _PROBE_OUTPUT = os.environ.get("CRAWLUTRON_PROBE_OUTPUT", str(_REPO_ROOT / "tmp"
 
 async def _run() -> None:
     out = []
-    from app.transport.browser_driver import BrowserDriver
+    from crawlutron.transport.browser_driver import BrowserDriver
 
     driver = BrowserDriver()
     try:

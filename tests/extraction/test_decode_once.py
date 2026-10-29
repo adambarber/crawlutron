@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.extraction import content as extraction
+from crawlutron.extraction import content as extraction
 
 _HTML_CASES = [
     (

@@ -8,18 +8,18 @@ from typing import cast
 
 import pytest
 
-from app.api.caller_auth import (
+from crawlutron.api.caller_auth import (
     check_page_quota,
     effective_cookie_namespace,
     identity_for_key,
 )
-from app.api.crawl_endpoint import get_crawl_result
-from app.models.caller_identity import CallerIdentity
-from app.models.json_value import JsonValue
-from app.runtime.metrics import MetricsStore
-from app.storage.caller_key_store import CallerKeyStore
-from app.storage.job_store import JobStatus, JobStore
-from app.storage.result_store import CrawlResultStore
+from crawlutron.api.crawl_endpoint import get_crawl_result
+from crawlutron.models.caller_identity import CallerIdentity
+from crawlutron.models.json_value import JsonValue
+from crawlutron.runtime.metrics import MetricsStore
+from crawlutron.storage.caller_key_store import CallerKeyStore
+from crawlutron.storage.job_store import JobStatus, JobStore
+from crawlutron.storage.result_store import CrawlResultStore
 from tests._api_harnesses import stored_request as _stored_request
 from tests._async_harnesses import expect_quota_refused
 from tests.factories.client import isolation_client, post_crawl, quota_client
@@ -210,9 +210,9 @@ def test_effective_cookie_namespace_defaults_to_caller(tmp_path):
 def test_anonymous_crawl_cannot_read_keyed_callers_jar(tmp_path):
     """#537, subsumed by #559: an anonymous key_*-shaped cookie_namespace declaration
     gets the shared default, never the keyed jar: two tenants (keyed, anonymous), same domain."""
-    from app.models.caller_identity import CallerIdentity
-    from app.storage.coordination_cookies import SharedCookieStore
-    from app.transport.cookie_jar import CookieJar
+    from crawlutron.models.caller_identity import CallerIdentity
+    from crawlutron.storage.coordination_cookies import SharedCookieStore
+    from crawlutron.transport.cookie_jar import CookieJar
     from tests._policy_factories import canonical
 
     jar = CookieJar(SharedCookieStore(tmp_path / "coordination.db"))
@@ -364,7 +364,7 @@ def test_concurrency_quota_rejects_a_full_caller():
     import pytest
     from fastapi import HTTPException
 
-    from app.api.caller_auth import check_concurrency_quota
+    from crawlutron.api.caller_auth import check_concurrency_quota
 
     caller = CallerIdentity(caller_id="key_a", authenticated=True, max_concurrency=1)
 
@@ -394,7 +394,7 @@ async def test_http_concurrency_quota_rejects_a_full_caller(tmp_path):
 
 def _caller_metrics(tmp_path: Path) -> MetricsStore:
     """A metrics store backed by one isolated coordination counters file."""
-    from app.storage.coordination_counters import CoordinationCounters
+    from crawlutron.storage.coordination_counters import CoordinationCounters
 
     return MetricsStore(counters=CoordinationCounters(tmp_path / "counters.db"))
 

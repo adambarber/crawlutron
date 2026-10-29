@@ -6,8 +6,8 @@ the wire shape and the reply length the parent observes.
 
 import pytest
 
-from app.extraction.content import extract_document
-from app.extraction.doc_pool import DocWorker
+from crawlutron.extraction.content import extract_document
+from crawlutron.extraction.doc_pool import DocWorker
 from tests._doc_pool_fixtures import fresh_doc_pool
 from tests._extraction_helpers import settings_with
 from tests._process_doubles import StubProc
@@ -51,7 +51,7 @@ def _piped_worker(monkeypatch, reply_len: int):
             pass
 
     worker = DocWorker(StubProc(1), Conn())
-    monkeypatch.setattr("app.extraction.documents.DOC_POOL", _OneWorkerPool(worker))
+    monkeypatch.setattr("crawlutron.extraction.documents.DOC_POOL", _OneWorkerPool(worker))
     return worker, seen
 
 

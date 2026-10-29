@@ -8,7 +8,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from app.storage.caller_key_store import CallerKeyStore
+from crawlutron.storage.caller_key_store import CallerKeyStore
 from tests._watch_harnesses import (
     ASGITransport,
     AsyncClient,

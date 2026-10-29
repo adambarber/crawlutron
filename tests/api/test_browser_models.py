@@ -4,9 +4,9 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
-from app.models.crawl_policy_vocabulary import MAX_BROWSER_ACTIONS
-from app.models.crawl_request import CrawlRequest
-from app.vocabulary.browser import (
+from crawlutron.models.crawl_policy_vocabulary import MAX_BROWSER_ACTIONS
+from crawlutron.models.crawl_request import CrawlRequest
+from crawlutron.vocabulary.browser import (
     ACTIONS_REQUIRING_SELECTOR,
     ALLOWED_BROWSER_ACTION_TYPES,
     BROWSER_ACTION_TYPES,
@@ -74,27 +74,27 @@ class TestBrowserProfileVocabularyIsClosed:
         A type in the model but not the renderer is the worst pairing: accepted
         at the boundary, then silently skipped at the point of use.
         """
-        from app.vocabulary.browser import ALLOWED_BROWSER_ACTION_TYPES
+        from crawlutron.vocabulary.browser import ALLOWED_BROWSER_ACTION_TYPES
 
         assert set(self.ALLOWED) == set(ALLOWED_BROWSER_ACTION_TYPES)
 
     @pytest.mark.parametrize("action_type", ALLOWED)
     def test_each_allowed_action_validates(self, action_type):
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         profile = CrawlPolicy(browser_profile={"actions": [{"type": action_type, "selector": "#x"}]})
         assert profile.browser_profile["actions"][0]["type"] == action_type
 
     def test_execute_js_stays_refused_with_its_reasoning_intact(self):
         """The RCE refusal must survive, and must still be about execute_js."""
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError, match="execute_js"):
             CrawlPolicy(browser_profile={"actions": [{"type": "execute_js", "value": "fetch('x')"}]})
 
     @pytest.mark.parametrize("typo", ["clik", "Execute_JS", "fill_text", "", "CLICK_ALL"])
     def test_an_unrecognised_action_type_is_refused(self, typo):
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError) as exc:
             CrawlPolicy(browser_profile={"actions": [{"type": typo, "selector": "#x"}]})
@@ -107,7 +107,7 @@ class TestBrowserProfileVocabularyIsClosed:
         The message must list the accepted types, so a caller can correct the
         call without reading this service's source.
         """
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError) as exc:
             CrawlPolicy(browser_profile={"actions": [{"type": "clik"}]})
@@ -121,7 +121,7 @@ class TestBrowserProfileVocabularyIsClosed:
         Rejecting ``CLICK`` while ``click`` passes would refuse something the
         consumer handles. The rule is the vocabulary, not the spelling.
         """
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         assert CrawlPolicy(browser_profile={"actions": [{"type": "CLICK", "selector": "#x"}]})
 
@@ -134,7 +134,7 @@ class TestBrowserProfileVocabularyIsClosed:
         typed now (BrowserProfileRecord), so each key carries a value its
         declared type admits.
         """
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         typed_values: dict[str, object] = {
             "actions": [],
@@ -156,11 +156,11 @@ class TestBrowserProfileVocabularyIsClosed:
         """Every allowed key must have a reader, or allowing it is a lie.
 
         ``state`` was allowed and read nowhere; each key must appear as a
-        literal read somewhere in ``app/``, asserted directly."""
+        literal read somewhere in ``crawlutron/``, asserted directly."""
         import ast
         import pathlib
 
-        app_root = pathlib.Path(__file__).resolve().parents[2] / "app"
+        app_root = pathlib.Path(__file__).resolve().parents[2] / "crawlutron"
         reads: set[str] = set()
         for path in app_root.rglob("*.py"):
             tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -183,7 +183,7 @@ class TestBrowserProfileVocabularyIsClosed:
     @pytest.mark.parametrize("typo", ["viewports", "resourceMode", "user_agent_family", "exec_js"])
     def test_an_unknown_profile_key_is_refused(self, typo):
         """A misspelled profile key is inert, so it must not pass silently."""
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError):
             CrawlPolicy(browser_profile={typo: "x"})
@@ -197,27 +197,27 @@ class TestBrowserProfileActionsAreWellFormed:
 
     def test_actions_must_be_a_list(self):
         """A non-list is a caller mistake to report, not a crash to propagate."""
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError):
             CrawlPolicy(browser_profile={"actions": 5})
 
     def test_a_bare_string_is_not_a_list_of_actions(self):
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError):
             CrawlPolicy(browser_profile={"actions": "click"})
 
     @pytest.mark.parametrize("action_type", sorted(ACTIONS_REQUIRING_SELECTOR))
     def test_an_action_that_names_a_target_must_carry_one(self, action_type):
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError):
             CrawlPolicy(browser_profile={"actions": [{"type": action_type}]})
 
     @pytest.mark.parametrize("action_type", sorted(ALLOWED_BROWSER_ACTION_TYPES - ACTIONS_REQUIRING_SELECTOR))
     def test_an_action_needing_no_target_still_validates(self, action_type):
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         assert CrawlPolicy(browser_profile={"actions": [{"type": action_type}]})
 
@@ -226,7 +226,7 @@ class TestBrowserProfileActionsAreWellFormed:
 
         Execution is render-budget-bounded, so this is a parse and memory cost;
         a caller could still hand the model a 200,000-element action list."""
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         one = {"type": "click", "selector": "#a"}
         assert CrawlPolicy(browser_profile={"actions": [one] * MAX_BROWSER_ACTIONS})
@@ -254,7 +254,7 @@ class TestTheRendererAgreesWithTheVocabulary:
     @staticmethod
     def _chain() -> tuple[set[str], set[str]]:
         """The dispatch table's recognised and selector-requiring sets."""
-        from app.transport.browser_driver import ACTION_STEPS
+        from crawlutron.transport.browser_driver import ACTION_STEPS
 
         recognised = set(ACTION_STEPS)
         requiring = {name for name, step in ACTION_STEPS.items() if step.needs_selector}
@@ -284,7 +284,9 @@ class TestTheRendererAgreesWithTheVocabulary:
 
         from tests.chokepoint_walks import REPO_ROOT
 
-        tree = ast.parse((REPO_ROOT / "app" / "transport" / "browser_driver.py").read_text(encoding="utf-8"))
+        tree = ast.parse(
+            (REPO_ROOT / "crawlutron" / "transport" / "browser_driver.py").read_text(encoding="utf-8")
+        )
         action_class = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "_ActionStep")
         annotation = next(
             stmt.annotation

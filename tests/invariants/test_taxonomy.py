@@ -46,7 +46,7 @@ def _table_shadowing_offenders(rows) -> list[str]:
 
 
 def test_the_classification_table_has_no_shadowed_or_mid_table_catch_all_rows():
-    from app.transport.classification import CLASSIFICATION_BY_EXCEPTION
+    from crawlutron.transport.classification import CLASSIFICATION_BY_EXCEPTION
 
     offenders = _table_shadowing_offenders(CLASSIFICATION_BY_EXCEPTION)
     assert not offenders, (
@@ -122,7 +122,7 @@ TRANSIENCE_VERDICT_HAS_ONE_HOME = Rule(
     name="transience-verdict-has-one-home",
     find=_ad_hoc_transience_offenders,
     summary=(
-        "app.vocabulary.taxonomy.is_transient_classification is the single answer for "
+        "crawlutron.vocabulary.taxonomy.is_transient_classification is the single answer for "
         "'is this failure worth another pass'"
     ),
     excludes=SANCTIONED,
@@ -134,8 +134,8 @@ TRANSIENCE_VERDICT_HAS_ONE_HOME = Rule(
         "RETRYABLE_CLASSIFICATIONS = frozenset()\n",
         # A named alias to the taxonomy's own set is a re-export, not a second opinion: that is the one
         # legitimate spelling here.
-        "from app.vocabulary.taxonomy import TRANSIENT_CLASSIFICATIONS\n",
-        "from app.vocabulary.taxonomy import is_transient_classification as is_transient\n",
+        "from crawlutron.vocabulary.taxonomy import TRANSIENT_CLASSIFICATIONS\n",
+        "from crawlutron.vocabulary.taxonomy import is_transient_classification as is_transient\n",
         "TRANSIENT_CLASSIFICATIONS = TRANSIENT_CLASSIFICATIONS\n",
         # A local *budget* is not a local *answer*: MAX_TRANSIENT_REQUEUES caps how many times the recursive
         # loop may re-try, which is legitimately the caller's own number.
@@ -303,8 +303,8 @@ def test_scheduler_reads_the_taxonomy_domain_health_table():
     """
     import typing
 
-    import app.transport.scheduler as scheduler
-    from app.vocabulary import taxonomy
+    import crawlutron.transport.scheduler as scheduler
+    from crawlutron.vocabulary import taxonomy
 
     members = set(typing.get_args(taxonomy.ResultStatus))
     assert scheduler.DOMAIN_HEALTH_BY_STATUS is taxonomy.DOMAIN_HEALTH_BY_STATUS, (

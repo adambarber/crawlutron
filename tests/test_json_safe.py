@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime
 import json
 
-from app.safety.json_safe import json_default
+from crawlutron.safety.json_safe import json_default
 
 
 class TestJsonDefault:

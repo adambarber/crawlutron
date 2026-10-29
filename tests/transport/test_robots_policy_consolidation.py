@@ -4,17 +4,17 @@ import asyncio
 
 import pytest
 
-from app.admission.admission import RobotsGate
-from app.models.crawl_policy import CrawlPolicy
-from app.models.host_policy import HostPolicy
-from app.orchestration.engine import crawl_request
-from app.transport.robots import (
+from crawlutron.admission.admission import RobotsGate
+from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.models.host_policy import HostPolicy
+from crawlutron.orchestration.engine import crawl_request
+from crawlutron.transport.robots import (
     ROBOTS_FAILURE_TTL_SECONDS,
     FetchAndDecode,
     load_robots_rules,
     robots_cache,
 )
-from app.vocabulary.robots import RobotsSource
+from crawlutron.vocabulary.robots import RobotsSource
 from tests._fetcher_factories import make_html_fetcher
 from tests._policy_factories import canonical, crawl_policy
 
@@ -112,7 +112,7 @@ async def test_engine_and_job_single_flight_each_collapse_same_origin_misses():
 
 async def test_owner_preserves_4xx_and_5xx_ttl_semantics():
 
-    import app.transport.robots as owner
+    import crawlutron.transport.robots as owner
 
     robots_cache.clear()
     statuses = iter((404, 500))

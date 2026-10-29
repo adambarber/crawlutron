@@ -70,7 +70,7 @@ TEST_HELPERS_IMPORTED_BY_PACKAGE_PATH = Rule(
         "import pytest\n"
         "from tests._policy_factories import _policy\n"
         "from tests._chain_policies import chain_policy\n"
-        "from app.admission.policy import read_policy\n",
+        "from crawlutron.admission.policy import read_policy\n",
     ),
 )
 

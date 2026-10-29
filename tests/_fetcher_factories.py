@@ -7,14 +7,14 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from app.admission.policy import CrawlPolicy
-from app.models.http_fetch_result import HttpFetchResult
-from app.models.http_fetcher import HttpFetcher
-from app.models.json_value import JsonValue
+from crawlutron.admission.policy import CrawlPolicy
+from crawlutron.models.http_fetch_result import HttpFetchResult
+from crawlutron.models.http_fetcher import HttpFetcher
+from crawlutron.models.json_value import JsonValue
 from tests._browser_doubles import _fake_browser
 
 if TYPE_CHECKING:
-    from app.models.crawl_result import EngineCrawlResult
+    from crawlutron.models.crawl_result import EngineCrawlResult
 from tests._crawl_runners import (
     LINKED_PAIR_LIMITS,
     LLM_FORMAT_TEST_HTML,
@@ -98,7 +98,7 @@ async def invoke_browser_strategy(
     html: str,
     text: str = "Hello world",
 ) -> EngineCrawlResult:
-    from app.transport.browser_result import browser_strategy_result
+    from crawlutron.transport.browser_result import browser_strategy_result
 
     return await browser_strategy_result(
         request=strategy_request("http://example.com/", policy, "BROWSER_HEADLESS"),
@@ -116,7 +116,7 @@ async def run_default_http_fetcher(url: str, headers=None, *, pin=None):
     fetcher's own seam, forwarded rather than rebound over the transport module's
     private builder, because a redirect test needs a pin that is not a resolver.
     """
-    from app.transport.fetchers import default_http_fetcher
+    from crawlutron.transport.fetchers import default_http_fetcher
 
     return await default_http_fetcher(
         canonical(url),

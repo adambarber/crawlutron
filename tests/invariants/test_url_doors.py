@@ -106,7 +106,7 @@ EVERY_HTTP_BODY_READ_IS_CAPPED = Rule(
     find=_bare_body_reads,
     summary=(
         "A response.read() with no size arg, or response.content, pulls the whole "
-        "body into RAM; use app.safety.bounded_io.read_capped_async instead"
+        "body into RAM; use crawlutron.safety.bounded_io.read_capped_async instead"
     ),
     excludes=SANCTIONED | {"bounded_io.py"},
     bite=lambda: (
@@ -139,7 +139,7 @@ def test_scope_matcher_has_exactly_one_definition():
     """
     defs = _scope_matcher_definitions()
     assert len(defs) == 1, f"scope matcher duplicated again: {defs}"
-    assert "app/admission/scope_match.py" in defs[0], defs
+    assert "crawlutron/admission/scope_match.py" in defs[0], defs
 
 
 def test_no_pinned_url_leaks_into_final_url():

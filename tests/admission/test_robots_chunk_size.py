@@ -2,7 +2,7 @@
 
 import asyncio
 
-from app.admission.admission_links import gather_robots_decisions
+from crawlutron.admission.admission_links import gather_robots_decisions
 from tests._policy_factories import canonical
 
 

@@ -4,23 +4,23 @@ import asyncio
 
 import pytest
 
-import app.extraction.content as ext_mod
-import app.extraction.content as extraction
-from app.config.env import parse_bool_env
-from app.extraction.content import (
+import crawlutron.extraction.content as ext_mod
+import crawlutron.extraction.content as extraction
+from crawlutron.config.env import parse_bool_env
+from crawlutron.extraction.content import (
     ExtractedContent,
     Selectors,
     extract_document,
     extract_selected,
     parse_html_tree,
 )
-from app.extraction.doc_pool import (
+from crawlutron.extraction.doc_pool import (
     DocExtractionPool,
     install_doc_pool_hooks,
     spawn_doc_worker,
     terminate_doc_process,
 )
-from app.vocabulary.limits import DEFAULT_EXTRACTION_MAX_MARKDOWN
+from crawlutron.vocabulary.limits import DEFAULT_EXTRACTION_MAX_MARKDOWN
 from tests._assertions import set_optional_env
 from tests._extraction_harnesses import assert_extraction_empty
 from tests._extraction_helpers import doc_worker_acquisitions, extract_discovered_links, settings_with
@@ -69,7 +69,7 @@ def test_a_spawned_worker_is_ready_before_it_is_handed_out():
 
 async def test_extract_document_kill_switch(monkeypatch):
     """Env kill-switch lets deployments disable subprocess doc extraction."""
-    import app.extraction.content as ex
+    import crawlutron.extraction.content as ex
 
     acquisitions = doc_worker_acquisitions(monkeypatch)
     monkeypatch.setenv("CRAWLUTRON_EXTRACTION_DOC_ENABLED", "0")
@@ -240,7 +240,7 @@ async def test_extract_document_process_pool_isolation(monkeypatch):
 
 async def test_extract_document_process_pool_normal_works():
     """Normal document extraction still works with process isolation."""
-    from app.extraction.content import extract_document
+    from crawlutron.extraction.content import extract_document
 
     # No hooks installed - normal operation.
     result = extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")

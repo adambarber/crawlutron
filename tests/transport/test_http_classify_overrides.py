@@ -10,7 +10,7 @@ import dataclasses
 
 import pytest
 
-from app.transport.http_classify import classify_extracted_content
+from crawlutron.transport.http_classify import classify_extracted_content
 
 
 @dataclasses.dataclass

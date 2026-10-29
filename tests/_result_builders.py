@@ -3,18 +3,18 @@ from dataclasses import replace
 from typing import TypedDict, Unpack
 from urllib.parse import urljoin
 
-from app.models.crawl_job import CrawlJob
-from app.models.crawl_result import CrawlResult, EngineCrawlResult
-from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
-from app.models.discovered_link import DiscoveredLink
-from app.models.host_policy import HostPolicy
-from app.models.normalized_url import NormalizedUrl, admit_or_none
-from app.models.registrable_domain import registrable_domain
-from app.models.render_options import RenderOptions
-from app.models.result_factory import terminal_attempt
-from app.models.taxonomy import Classification, CrawlError, CrawlStrategyName
-from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
-from app.vocabulary.taxonomy import ResultStatus
+from crawlutron.models.crawl_job import CrawlJob
+from crawlutron.models.crawl_result import CrawlResult, EngineCrawlResult
+from crawlutron.models.crawl_strategy_attempt import CrawlStrategyAttempt
+from crawlutron.models.discovered_link import DiscoveredLink
+from crawlutron.models.host_policy import HostPolicy
+from crawlutron.models.normalized_url import NormalizedUrl, admit_or_none
+from crawlutron.models.registrable_domain import registrable_domain
+from crawlutron.models.render_options import RenderOptions
+from crawlutron.models.result_factory import terminal_attempt
+from crawlutron.models.taxonomy import Classification, CrawlError, CrawlStrategyName
+from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
+from crawlutron.vocabulary.taxonomy import ResultStatus
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
 
@@ -80,7 +80,7 @@ def engine_result(
     The absent baseline is a result that never got a response; named
     arguments, not a dict splat, so the type checker keeps the field names.
     """
-    from app.vocabulary.taxonomy import status_for_classification
+    from crawlutron.vocabulary.taxonomy import status_for_classification
 
     if "discovered_link_count" in overrides:
         raise TypeError("discovered_link_count is derived from discovered_links; pass only the links")
@@ -132,7 +132,7 @@ def skipped_result(
 
     All five arguments must agree, because ``error`` and ``strategy`` once
     drifted from what the production builder emits for a classification."""
-    from app.transport.results import (
+    from crawlutron.transport.results import (
         TerminalResult,
         skipped_engine_result,
     )

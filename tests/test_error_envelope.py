@@ -10,7 +10,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from app.api.exceptions import error_envelope, http_error
+from crawlutron.api.exceptions import error_envelope, http_error
 
 
 def _bare_request() -> Request:
@@ -46,7 +46,7 @@ class TestErrorEnvelope:
         }
 
     def test_handler_unwraps_to_same_wire_shape(self):
-        from app.api.exceptions import http_exception_handler
+        from crawlutron.api.exceptions import http_exception_handler
 
         exc = http_error(503, "browser_pool_unavailable", "pool is down")
         response = asyncio.run(http_exception_handler(_bare_request(), exc))
@@ -61,7 +61,7 @@ class TestErrorEnvelope:
         assert http_error(status, "c", "m").status_code == status
 
     def test_pool_down_factory_shares_canonical_message(self):
-        from app.api.exceptions import BROWSER_POOL_MESSAGE, browser_pool_unavailable
+        from crawlutron.api.exceptions import BROWSER_POOL_MESSAGE, browser_pool_unavailable
 
         default = browser_pool_unavailable()
         assert default.detail == {
@@ -83,7 +83,7 @@ class TestEnvelopeFromDetail:
     """The funnel is the only way an HTTPException detail becomes a wire body."""
 
     def test_conforming_detail_unwraps_one_to_one(self):
-        from app.api.exceptions import error_envelope_from_detail
+        from crawlutron.api.exceptions import error_envelope_from_detail
 
         exc = http_error(404, "not_found", "Unknown job_id: x")
         assert error_envelope_from_detail(exc.detail, 404) == exc.detail
@@ -92,9 +92,9 @@ class TestEnvelopeFromDetail:
         """A string detail is logged loudly, not laundered into http_<status>."""
         import logging
 
-        from app.api.exceptions import MALFORMED_DETAIL_CODE, error_envelope_from_detail
+        from crawlutron.api.exceptions import MALFORMED_DETAIL_CODE, error_envelope_from_detail
 
-        with caplog.at_level(logging.WARNING, logger="app.api.exceptions"):
+        with caplog.at_level(logging.WARNING, logger="crawlutron.api.exceptions"):
             body = error_envelope_from_detail("Not Found", 404)
         assert body == {
             "code": MALFORMED_DETAIL_CODE,
@@ -105,7 +105,7 @@ class TestEnvelopeFromDetail:
         assert not any(r.message.startswith("http_") for r in caplog.records)
 
     def test_none_detail_takes_the_same_path(self):
-        from app.api.exceptions import MALFORMED_DETAIL_CODE, error_envelope_from_detail
+        from crawlutron.api.exceptions import MALFORMED_DETAIL_CODE, error_envelope_from_detail
 
         body = error_envelope_from_detail(None, 500)
         assert body["code"] == MALFORMED_DETAIL_CODE
@@ -113,7 +113,7 @@ class TestEnvelopeFromDetail:
 
     def test_handler_keeps_wire_status_for_non_conforming_detail(self):
         """The numeric status survives; only the fabricated code dies."""
-        from app.api.exceptions import MALFORMED_DETAIL_CODE, http_exception_handler
+        from crawlutron.api.exceptions import MALFORMED_DETAIL_CODE, http_exception_handler
 
         exc = HTTPException(status_code=418, detail="I'm a teapot")
         response = asyncio.run(http_exception_handler(_bare_request(), exc))
@@ -149,7 +149,7 @@ class TestEnvelopeFromDetail:
     async def test_unknown_route_404_reports_the_malformed_synthetic_code(self, async_client):
         """Starlette's route-miss detail is the opaque string 'Not Found', so it takes
         the declared synthetic code, never a laundered http_404."""
-        from app.api.exceptions import MALFORMED_DETAIL_CODE
+        from crawlutron.api.exceptions import MALFORMED_DETAIL_CODE
 
         resp = await async_client.get("/v1/definitely-not-a-route")
         assert resp.json()["code"] == MALFORMED_DETAIL_CODE

@@ -10,7 +10,7 @@ import dataclasses
 import httpx
 import pytest
 
-from app.transport.timeouts import Timeouts
+from crawlutron.transport.timeouts import Timeouts
 
 
 class TestTimeoutsChokepoint:
@@ -45,7 +45,7 @@ class TestRenderPhaseBudgetPin:
     returned before the action chain starts, so the bound is sequential."""
 
     def test_render_phase_seconds_floors_and_preserves(self):
-        from app.transport.timeouts import render_phase_seconds
+        from crawlutron.transport.timeouts import render_phase_seconds
 
         assert render_phase_seconds(30) == 30.0
         assert render_phase_seconds(0.2) == 1.0

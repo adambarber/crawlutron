@@ -5,8 +5,8 @@ import threading
 from collections.abc import Callable
 from contextlib import contextmanager
 
-from app.models.crawl_policy import CrawlPolicy
-from app.storage.job_store import CrawlJobState, FrontierEntry, JobStatus, JobStore, OrderedUrlSet
+from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.storage.job_store import CrawlJobState, FrontierEntry, JobStatus, JobStore, OrderedUrlSet
 from tests._policy_factories import canonical, job_store
 
 

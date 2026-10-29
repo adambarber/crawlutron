@@ -74,10 +74,10 @@ def _threading_lock_bindings(tree: ast.AST) -> set[str]:
     return names
 
 
-_OWNER_PATH = REPO_ROOT / "app" / "transport" / "browser.py"
+_OWNER_PATH = REPO_ROOT / "crawlutron" / "transport" / "browser.py"
 
 
-_OWNER_MODULE = "app/transport/browser.py"
+_OWNER_MODULE = "crawlutron/transport/browser.py"
 
 
 LOCK_HELD_ACROSS_AN_AWAIT = Rule(

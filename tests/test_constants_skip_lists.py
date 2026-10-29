@@ -3,7 +3,7 @@
 domain there is data poisoning -- tracking stays skipped, content never enters.
 """
 
-from app.vocabulary.hosts import ANALYTICS_HOST_SUFFIXES, is_analytics_host
+from crawlutron.vocabulary.hosts import ANALYTICS_HOST_SUFFIXES, is_analytics_host
 from tests._policy_factories import canonical
 
 

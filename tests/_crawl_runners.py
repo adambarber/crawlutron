@@ -6,29 +6,29 @@ from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, TypedDict, Unpack
 from urllib.parse import urlparse
 
-from app.admission.policy import read_policy
-from app.models.host_policy import HostPolicy
-from app.models.http_fetch_result import HttpFetchResult
-from app.models.json_value import JsonValue
-from app.orchestration.engine import crawl_request
-from app.transport.cache import HttpCache
-from app.transport.content_cache import CONTENT_CACHE_MAX_TOTAL_BYTES, ContentCache
-from app.transport.fetchers import default_http_fetcher
-from app.transport.strategy_request import StrategyRequest
-from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
+from crawlutron.admission.policy import read_policy
+from crawlutron.models.host_policy import HostPolicy
+from crawlutron.models.http_fetch_result import HttpFetchResult
+from crawlutron.models.json_value import JsonValue
+from crawlutron.orchestration.engine import crawl_request
+from crawlutron.transport.cache import HttpCache
+from crawlutron.transport.content_cache import CONTENT_CACHE_MAX_TOTAL_BYTES, ContentCache
+from crawlutron.transport.fetchers import default_http_fetcher
+from crawlutron.transport.strategy_request import StrategyRequest
+from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._fetch_doubles import PageData, PageMap, site_fetcher
 from tests._fetch_scripted import tap_fetcher
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
 if TYPE_CHECKING:
-    from app.admission.policy import CrawlPolicy
-    from app.models.crawl_result import EngineCrawlResult
-    from app.models.crawl_worker import CrawlWorker
-    from app.models.http_fetcher import HttpFetcher
-    from app.models.result_record import ProducerEnvelope
-    from app.models.taxonomy import CrawlStrategyName
-    from app.runtime.pressure_gates import ResourceGate
-    from app.transport.scheduler import DomainScheduler
+    from crawlutron.admission.policy import CrawlPolicy
+    from crawlutron.models.crawl_result import EngineCrawlResult
+    from crawlutron.models.crawl_worker import CrawlWorker
+    from crawlutron.models.http_fetcher import HttpFetcher
+    from crawlutron.models.result_record import ProducerEnvelope
+    from crawlutron.models.taxonomy import CrawlStrategyName
+    from crawlutron.runtime.pressure_gates import ResourceGate
+    from crawlutron.transport.scheduler import DomainScheduler
 
 #: The policy limits a scripted crawl is run under, in wire shape.
 Limits = dict[str, JsonValue]
@@ -265,8 +265,8 @@ async def run_chain(
 
     Fetcher slots, host policy and scheduler set once (``scheduler`` stays a
     parameter); omitting ``cffi_fetcher`` means it behaves like the http step."""
-    from app.orchestration.strategy_chain import execute_crawl_chain
-    from app.transport.scheduler import DomainScheduler
+    from crawlutron.orchestration.strategy_chain import execute_crawl_chain
+    from crawlutron.transport.scheduler import DomainScheduler
 
     if scheduler is None:
         scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0)
@@ -389,7 +389,7 @@ async def run_http_strategy(
     http_fetcher: HttpFetcher,
     **kwargs: Unpack[_CrawlHttpKwargs],
 ) -> EngineCrawlResult:
-    from app.transport.http import http_strategy_result
+    from crawlutron.transport.http import http_strategy_result
 
     return await http_strategy_result(
         request=strategy_request(url, policy, HTTP_DECLARED_CRAWLER), http_fetcher=http_fetcher, **kwargs

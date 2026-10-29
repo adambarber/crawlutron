@@ -6,7 +6,7 @@ anti-brute-force policy must govern request handles too -- 12-hex was 48 bits.
 
 import re
 
-from app.storage.ids import new_job_id, new_request_id
+from crawlutron.storage.ids import new_job_id, new_request_id
 
 HEX32 = re.compile(r"^[0-9a-f]{32}$")
 

@@ -1,6 +1,6 @@
 """Shared pytest fixtures and path setup, putting the service root on ``sys.path``
 once so ``app`` and ``tests.helpers`` resolve; the monorepo's ``shared/python`` is
-no longer referenced -- the logging helper lives at :mod:`app.runtime.logging_config`.
+no longer referenced -- the logging helper lives at :mod:`crawlutron.runtime.logging_config`.
 """
 
 import asyncio
@@ -57,11 +57,11 @@ ROOT = HERE.parent  # the repository root, which is now the service root
 if ROOT.exists() and str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-# The ``app/safety/validation.py`` production default for ``CRAWLUTRON_ALLOW_PRIVATE_TARGETS`` is ``False``
+# The ``crawlutron/safety/validation.py`` default for ``CRAWLUTRON_ALLOW_PRIVATE_TARGETS`` is ``False``
 # (the secure default).
 os.environ.setdefault("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
 
-# `app.main` binds `DATABASE_PATH = settings.cache_dir + "/crawler.db"` at import time and hands every test
+# `crawlutron.main` binds `DATABASE_PATH = settings.cache_dir + "/crawler.db"` at import; every test
 # the same process-wide `JobStore` built on it.
 _SCRATCH_CACHE_DIR = (
     Path(tempfile.gettempdir())
@@ -184,7 +184,7 @@ def stub_cffi_fetcher(request, monkeypatch):
     runs only in subprocess-isolated and ``real_cffi``-marked tests."""
     if request.node.get_closest_marker("real_cffi"):
         return
-    import app.transport.fetchers as fetchers_module
+    import crawlutron.transport.fetchers as fetchers_module
 
     async def _stub_cffi_fetcher(url, headers, timeout_seconds, max_content_length=0):
         raise ConnectionError("curl_cffi stubbed in tests (mark test with real_cffi to opt in)")
@@ -198,7 +198,7 @@ def _cleanup_extraction_executors():
     yield
     import asyncio
 
-    from app.extraction.content import shutdown_doc_extraction_executor
+    from crawlutron.extraction.content import shutdown_doc_extraction_executor
 
     asyncio.run(shutdown_doc_extraction_executor())
 
@@ -210,8 +210,8 @@ def _document_pool_per_test(monkeypatch):
     The pool is a process global whose teardown is terminal: a test that ran
     the lifespan closed it for every later test in the same worker.
     """
-    import app.extraction.content as ext_mod
-    import app.extraction.documents as docex
+    import crawlutron.extraction.content as ext_mod
+    import crawlutron.extraction.documents as docex
 
     pool = docex.build_doc_pool()
     monkeypatch.setattr(docex, "DOC_POOL", pool)
@@ -243,7 +243,7 @@ def _clear_sitemap_cache() -> None:
     Tests inject fake fetchers serving different content for the same
     sitemap URLs; without this the shared cache leaks across tests.
     """
-    import app.transport.fetch_helpers as fh
+    import crawlutron.transport.fetch_helpers as fh
 
     fh.reset_process_state()
 
@@ -253,7 +253,7 @@ def _clear_metrics() -> None:
 
     Without it, metric assertions become order-dependent: a later test could
     observe utilization left by an earlier crawl."""
-    from app.runtime.metrics import get_metrics
+    from crawlutron.runtime.metrics import get_metrics
 
     get_metrics().reset()
 
@@ -265,16 +265,16 @@ def _clear_global_http_state() -> None:
     tests; the close is loop-aware (drop for GC) to avoid running a second loop."""
     import asyncio
 
-    from app.orchestration import engine as _engine_mod
-    from app.runtime.cgroup_sense import reset_process_state as _reset_cgroup
-    from app.transport import cookie_jar as cookie_mod
-    from app.transport import http_client_pool as pool_mod
-    from app.transport import pinned_transport as pinned_mod
+    from crawlutron.orchestration import engine as _engine_mod
+    from crawlutron.runtime.cgroup_sense import reset_process_state as _reset_cgroup
+    from crawlutron.transport import cookie_jar as cookie_mod
+    from crawlutron.transport import http_client_pool as pool_mod
+    from crawlutron.transport import pinned_transport as pinned_mod
 
     cookie_mod.reset_process_state()
     # The renderer's per-domain cookie store is module-global and bounded, not cleared, so a test that
     # harvests once leaves its domain's cookies for the next test to assert against.
-    from app.transport import browser as browser_mod
+    from crawlutron.transport import browser as browser_mod
 
     browser_mod.reset_process_state()
     # The pool decides per client whether it may be closed or must simply be dropped: a client owned by an
@@ -318,7 +318,7 @@ async def owned_job_runtime():
 
     The task registry and shutdown event are module-global: a crawl from one
     test stayed visible to the next. Teardown is where the reset belongs."""
-    from app.api import job_runner
+    from crawlutron.api import job_runner
     from tests._app_factory import service_app
 
     app = service_app()

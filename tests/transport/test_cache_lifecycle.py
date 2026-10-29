@@ -7,7 +7,7 @@ import threading
 
 import pytest
 
-import app.transport.content_cache as cc
+import crawlutron.transport.content_cache as cc
 from tests._cache_fixtures import (
     counting_entry_reads,
     entry_replaced_by_directory,

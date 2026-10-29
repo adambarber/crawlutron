@@ -4,7 +4,7 @@ stale callback evict a replacement task's registration."""
 import asyncio
 from collections.abc import Callable
 
-from app.api import job_runner
+from crawlutron.api import job_runner
 
 
 def _finishable_and_blocked_factories() -> tuple[Callable, Callable, asyncio.Event]:
@@ -38,7 +38,7 @@ async def _reap(job_lifecycle, job_id: str, b_release: asyncio.Event) -> None:
 
 async def test_a_task_that_never_gets_registered_is_still_awaitable_by_the_caller():
     """An early failure must be surfaced to the caller, never swallowed."""
-    from app.api import job_lifecycle
+    from crawlutron.api import job_lifecycle
 
     job_runner.reset_job_runner()
     job_id = "escape-job"
@@ -57,7 +57,7 @@ async def test_a_task_that_never_gets_registered_is_still_awaitable_by_the_calle
 
 async def test_a_failed_task_is_never_reported_as_running():
     """After an early failure the registry must not claim the job is running."""
-    from app.api import job_lifecycle
+    from crawlutron.api import job_lifecycle
 
     job_runner.reset_job_runner()
     job_id = "failed-owner-job"
@@ -78,7 +78,7 @@ async def test_a_failed_task_is_never_reported_as_running():
 
 async def test_replacement_task_registration_survives_the_predecessors_callback():
     """#448: A's queued done-callback pops the slot and evicts the live B."""
-    from app.api import job_lifecycle
+    from crawlutron.api import job_lifecycle
 
     job_runner.reset_job_runner()
     job_id = "evict-job"
@@ -105,7 +105,7 @@ async def test_replacement_task_registration_survives_the_predecessors_callback(
 
 async def test_the_registry_slot_is_only_reclaimed_by_its_own_task():
     """Companion invariant: only the registered task's own completion reclaims."""
-    from app.api import job_lifecycle
+    from crawlutron.api import job_lifecycle
 
     job_runner.reset_job_runner()
     job_id = "slot-owner-job"

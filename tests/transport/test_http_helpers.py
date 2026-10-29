@@ -5,28 +5,28 @@ import asyncio
 import pytest
 from pydantic import ValidationError
 
-from app.admission.payload_helpers import checked_payload_urls
-from app.admission.policy import PolicyTier, read_policy
-from app.api.render import render_options_for
-from app.config.settings import CrawlerSettings
-from app.extraction.document_text import format_extracted_document_text
-from app.extraction.trees import FrameCollector, frames_from, walkable
-from app.models.crawl_request import CrawlRequest
-from app.models.render_request import RenderRequest
-from app.safety.validation import HostPolicy
-from app.transport.fetch_policy import (
+from crawlutron.admission.payload_helpers import checked_payload_urls
+from crawlutron.admission.policy import PolicyTier, read_policy
+from crawlutron.api.render import render_options_for
+from crawlutron.config.settings import CrawlerSettings
+from crawlutron.extraction.document_text import format_extracted_document_text
+from crawlutron.extraction.trees import FrameCollector, frames_from, walkable
+from crawlutron.models.crawl_request import CrawlRequest
+from crawlutron.models.render_request import RenderRequest
+from crawlutron.safety.validation import HostPolicy
+from crawlutron.transport.fetch_policy import (
     fetch_with_retries,
     looks_like_binary_body,
     retry_after_seconds,
     retry_backoff_seconds,
 )
-from app.transport.request_profile import cookie_header_for_url, headers_for_strategy
-from app.vocabulary.extraction import (
+from crawlutron.transport.request_profile import cookie_header_for_url, headers_for_strategy
+from crawlutron.vocabulary.extraction import (
     EXTRACTION_DOCUMENT,
     EXTRACTION_METHOD_BINARY_NO_TEXT,
     EXTRACTION_TRAFILATURA,
 )
-from app.vocabulary.strategies import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
+from crawlutron.vocabulary.strategies import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
 from tests._assertions import assert_result_failed, assert_result_success
 from tests._extraction_helpers import extract_discovered_links
 from tests._fetcher_factories import (
@@ -90,7 +90,7 @@ class TestValidationHelpers:
             )
 
     def test_payload_policy_errors(self) -> None:
-        from app.admission.policy import validate_wire_policy
+        from crawlutron.admission.policy import validate_wire_policy
 
         tier = PolicyTier.model_defaults()
         cases: list[tuple[dict[str, object], str]] = [

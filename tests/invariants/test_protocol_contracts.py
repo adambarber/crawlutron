@@ -19,7 +19,7 @@ from tests.chokepoint_walks import (
 from tests.invariants._shared import _declared_public_symbols, _enclosing_calls, _enclosing_nodes
 from tests.rules import Bites, Rule
 
-_PROTOCOL_CONSTANTS_MODULE = "app/mcp/constants.py"
+_PROTOCOL_CONSTANTS_MODULE = "crawlutron/mcp/constants.py"
 
 
 def _module_level_assignment_lines(tree: ast.Module, names: Iterable[str]) -> dict[str, int]:
@@ -79,7 +79,7 @@ def _unproduced_protocol_constants(
 
 
 def test_every_protocol_constant_is_produced():
-    """app/mcp/constants.py declares only codes and keys the server can reach."""
+    """crawlutron/mcp/constants.py declares only codes and keys the server can reach."""
     _, owner_tree = file_tree(_PROTOCOL_CONSTANTS_MODULE)
     offenders = _unproduced_protocol_constants(owner_tree, app_trees())
     assert not offenders, "protocol constants with no production reader: " + ", ".join(offenders)
@@ -110,11 +110,11 @@ CYCLE_GUARD_IS_CONSULTED_IN_EXACTLY_ONE_PLACE = Rule(
     name="cycle-guard-is-consulted-in-exactly-one-place",
     find=_cycle_guard_offenders,
     summary=(
-        "app/models/taxonomy.py consults the cycle guard in one function; a call from "
+        "crawlutron/models/taxonomy.py consults the cycle guard in one function; a call from "
         "an arm re-inlines the 'descend, give up if already on the path' pair it "
         "was deduped away from, so route every arm through the owner"
     ),
-    proof_path=REPO_ROOT / "app" / "models.py",
+    proof_path=REPO_ROOT / "crawlutron" / "models.py",
     bite=lambda: (
         Bites(
             "def arm(value, seen):\n    entered = _entered(value, seen)\n    return entered\n",
@@ -131,7 +131,7 @@ CYCLE_GUARD_IS_CONSULTED_IN_EXACTLY_ONE_PLACE = Rule(
 
 
 def test_the_cycle_guard_is_applied_in_exactly_one_place():
-    """app/models/taxonomy.py consults the cycle guard in one function, not once per container arm."""
+    """crawlutron/models/taxonomy.py consults the cycle guard in one function, not once per container arm."""
     CYCLE_GUARD_IS_CONSULTED_IN_EXACTLY_ONE_PLACE.scan()
 
 
@@ -140,7 +140,7 @@ def test_cycle_guard_detector_respects_the_owner_parameter():
     # rather than about a literal spelling.
     assert _cycle_guard_offenders(
         ast.parse("def other(value, seen):\n    return _entered(value, seen)\n"),
-        REPO_ROOT / "app" / "models.py",
+        REPO_ROOT / "crawlutron" / "models.py",
         owner="different_owner",
     ), "a guard call must fire when the sanctioned owner is renamed"
 
@@ -200,10 +200,10 @@ THE_META_KEY_REJECTION_REASON_IS_AUTHORED_ONCE = Rule(
         'def validate_meta(meta):\n    raise ProtocolValidationError("Missing _meta block")\n',
         'def validate_meta(meta):\n    reason = f"Missing required _meta key: {key}"\n',
     ),
-    proof_path=REPO_ROOT / "app" / "mcp" / "protocol.py",
+    proof_path=REPO_ROOT / "crawlutron" / "mcp" / "protocol.py",
 )
 
 
 def test_the_meta_key_rejection_reason_is_authored_once():
-    """app/mcp/protocol.py spells the wrong-type _meta reason in one function."""
+    """crawlutron/mcp/protocol.py spells the wrong-type _meta reason in one function."""
     THE_META_KEY_REJECTION_REASON_IS_AUTHORED_ONCE.scan()

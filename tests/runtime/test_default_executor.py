@@ -5,7 +5,7 @@ import concurrent.futures
 
 import pytest
 
-from app.runtime.pressure_sizing import default_executor_workers
+from crawlutron.runtime.pressure_sizing import default_executor_workers
 
 
 def test_default_executor_workers_is_derived_and_capped():
@@ -27,7 +27,7 @@ def test_default_executor_workers_override(monkeypatch):
 async def test_lifespan_installs_a_sized_default_executor():
     """Startup sizes the shared asyncio.to_thread pool: a bare loop has no
     default executor installed, so this is red until the lifespan sets one."""
-    from app.main import install_default_executor
+    from crawlutron.main import install_default_executor
 
     loop = asyncio.get_running_loop()
     try:
@@ -46,7 +46,7 @@ async def test_lifespan_installs_a_sized_default_executor():
 async def test_lifespan_executor_failure_is_survivable(monkeypatch, bad):
     """A sizing failure must not take down startup: the loop falls back to
     Python's implicit default rather than refusing to start."""
-    from app import main as app_main
+    from crawlutron import main as app_main
 
     monkeypatch.setattr(app_main, "default_executor_workers", lambda: (_ for _ in ()).throw(bad()))
     app_main.install_default_executor(asyncio.get_running_loop())

@@ -20,11 +20,13 @@ def test_no_runtime_import_cycles() -> None:
 def test_gate_bites_on_a_planted_cycle() -> None:
     """The gate is not vacuous: a planted two-module runtime cycle goes red."""
     planted = {
-        "app.api.planted_a": {"app.api.planted_b", "app.vocabulary.taxonomy"},
-        "app.api.planted_b": {"app.api.planted_a"},
-        "app.vocabulary.taxonomy": set(),
+        "crawlutron.api.planted_a": {"crawlutron.api.planted_b", "crawlutron.vocabulary.taxonomy"},
+        "crawlutron.api.planted_b": {"crawlutron.api.planted_a"},
+        "crawlutron.vocabulary.taxonomy": set(),
     }
     found = cycles(planted)
     offenders = "\n".join(" -> ".join(cycle) for cycle in found)
     assert found, "expected the planted cycle to be detected"
-    assert any("app.api.planted_a" in cycle and "app.api.planted_b" in cycle for cycle in found), offenders
+    assert any(
+        "crawlutron.api.planted_a" in cycle and "crawlutron.api.planted_b" in cycle for cycle in found
+    ), offenders

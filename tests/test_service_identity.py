@@ -3,10 +3,10 @@ version and the agent hints drifted from the API version and the actual
 impersonation target, and both now derive from shared constants.
 """
 
-from app.discovery.agent_hints import STRATEGY_DESCRIPTIONS
-from app.models.crawl_strategy import CrawlStrategy
-from app.vocabulary.identity import DEFAULT_USER_AGENT, SERVICE_VERSION
-from app.vocabulary.strategies import CFFI_IMPERSONATE_TARGET
+from crawlutron.discovery.agent_hints import STRATEGY_DESCRIPTIONS
+from crawlutron.models.crawl_strategy import CrawlStrategy
+from crawlutron.vocabulary.identity import DEFAULT_USER_AGENT, SERVICE_VERSION
+from crawlutron.vocabulary.strategies import CFFI_IMPERSONATE_TARGET
 
 
 def test_user_agent_tracks_api_version():

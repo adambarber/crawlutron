@@ -6,7 +6,7 @@ workers ``/metrics`` served one worker's numbers, not a shared total.
 
 import pytest
 
-from app.storage.coordination_counters import CoordinationCounters
+from crawlutron.storage.coordination_counters import CoordinationCounters
 
 
 def test_increments_from_independent_connections_sum(tmp_path):

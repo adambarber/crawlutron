@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from app.extraction.output_formats import (
+from crawlutron.extraction.output_formats import (
     SUPPORTED_OUTPUT_FORMATS,
     csv_neutralize,
     serialize_results,
@@ -108,7 +108,7 @@ def test_unsupported_format_raises():
 
 class TestOutputFormatDefaults:
     def test_output_formats_default_with_dict(self):
-        from app.extraction.output_formats import jsonify
+        from crawlutron.extraction.output_formats import jsonify
 
         # Object with model_dump method
         class FakeObj:
@@ -119,7 +119,7 @@ class TestOutputFormatDefaults:
         assert result == {"serialized": "true"}
 
     def test_output_formats_default_dict_method(self):
-        from app.extraction.output_formats import jsonify
+        from crawlutron.extraction.output_formats import jsonify
 
         class DictObj:
             def dict(self):
@@ -129,7 +129,7 @@ class TestOutputFormatDefaults:
         assert result == {"from_dict": "value"}
 
     def test_output_formats_default_str_fallback(self):
-        from app.extraction.output_formats import jsonify
+        from crawlutron.extraction.output_formats import jsonify
 
         result = jsonify(42)
         assert result == "42"
@@ -137,7 +137,7 @@ class TestOutputFormatDefaults:
 
 class TestOutputFormatSerialization:
     def test_output_formats_serialize_unknown_format(self):
-        from app.extraction.output_formats import serialize_results
+        from crawlutron.extraction.output_formats import serialize_results
 
         results = [{"original_url": "http://x/"}]
         with pytest.raises(ValueError):
@@ -146,26 +146,26 @@ class TestOutputFormatSerialization:
 
 class TestOutputFormatSafeCoercion:
     def test_output_formats_safe_json(self):
-        from app.extraction.output_formats import safe_value
+        from crawlutron.extraction.output_formats import safe_value
 
         val = {"nested": [1, 2, 3]}
         result = safe_value(val)
         assert isinstance(result, str)
 
     def test_output_formats_safe_none(self):
-        from app.extraction.output_formats import safe_value
+        from crawlutron.extraction.output_formats import safe_value
 
         result = safe_value(None)
         assert result == ""
 
     def test_output_formats_safe_string(self):
-        from app.extraction.output_formats import safe_value
+        from crawlutron.extraction.output_formats import safe_value
 
         result = safe_value("hello")
         assert result == "hello"
 
     def test_output_formats_safe_int(self):
-        from app.extraction.output_formats import safe_value
+        from crawlutron.extraction.output_formats import safe_value
 
         result = safe_value(42)
         assert result == "42"
@@ -228,7 +228,7 @@ class TestOutputFormatsEdges:
     """Cover remaining branches in output_formats.py"""
 
     def test_serialize_default_fallback(self):
-        from app.extraction.output_formats import jsonify
+        from crawlutron.extraction.output_formats import jsonify
 
         class CustomObj:
             def __init__(self):
@@ -253,14 +253,14 @@ class TestOutputFormatsEdges:
         the name and media type the caller passes -- data, not behaviour -- so one table
         is one place a format rename has to land.
         """
-        from app.extraction.output_formats import serialize_results
+        from crawlutron.extraction.output_formats import serialize_results
 
         output, out_media_type = serialize_results(results, fmt)
         assert needle in output
         assert out_media_type == media_type
 
     def test_serialize_results_csv(self):
-        from app.extraction.output_formats import serialize_results
+        from crawlutron.extraction.output_formats import serialize_results
 
         results = [
             {
@@ -281,7 +281,7 @@ class TestOutputFormatsEdges:
         assert media_type == "text/csv; charset=utf-8"
 
     def test_serialize_results_unknown_format(self):
-        from app.extraction.output_formats import serialize_results
+        from crawlutron.extraction.output_formats import serialize_results
 
         results = [{"url": "http://x/", "text": "content"}]
         with pytest.raises(ValueError):

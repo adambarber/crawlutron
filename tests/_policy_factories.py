@@ -6,16 +6,16 @@ change lands in only one test. Factories return the MODEL, not the wire mapping.
 import pathlib
 from collections.abc import Callable
 
-from app.admission.admission_links import admit_discovered_links
-from app.admission.payload_helpers import payload_policy
-from app.admission.policy import PolicyTier, read_policy
-from app.config.settings import CrawlerSettings
-from app.models.crawl_policy import CrawlPolicy
-from app.models.json_value import JsonValue
-from app.models.normalized_url import NormalizedUrl
-from app.safety.validation import HostPolicy
-from app.storage.job_store import CrawlJobState, JobStore
-from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
+from crawlutron.admission.admission_links import admit_discovered_links
+from crawlutron.admission.payload_helpers import payload_policy
+from crawlutron.admission.policy import PolicyTier, read_policy
+from crawlutron.config.settings import CrawlerSettings
+from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.models.json_value import JsonValue
+from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.safety.validation import HostPolicy
+from crawlutron.storage.job_store import CrawlJobState, JobStore
+from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 
 UNRESTRICTED_HOST_POLICY = HostPolicy.unrestricted()
 

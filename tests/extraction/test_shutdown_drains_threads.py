@@ -7,8 +7,8 @@ import time
 import bs4
 import pytest
 
-from app.extraction import content as ext_content
-from app.extraction.content import Selectors, extract_selected
+from crawlutron.extraction import content as ext_content
+from crawlutron.extraction.content import Selectors, extract_selected
 from tests._extraction_helpers import settings_with
 
 pytestmark = pytest.mark.usefixtures("four_worker_selector_pool")

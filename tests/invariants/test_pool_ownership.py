@@ -110,15 +110,15 @@ DOC_POOL_ACQUIRER_REAPS_RETIRED_SLOTS = Rule(
 # These two rules are the enforcement half: the jar has exactly one write door, and that door is the shared
 # tail.
 
-_COOKIE_TAIL = "app/transport/fetchers.py"
+_COOKIE_TAIL = "crawlutron/transport/fetchers.py"
 
 
-_COOKIE_HELPER = "app/transport/request_profile.py"
+_COOKIE_HELPER = "crawlutron/transport/request_profile.py"
 
 
 # The door's own implementation module: the jar's methods are the write door,
 # including its RFC 6265 send matching, which shares the stdlib method name.
-_COOKIE_DOOR = "app/transport/cookie_jar.py"
+_COOKIE_DOOR = "crawlutron/transport/cookie_jar.py"
 
 
 _COOKIE_TAIL_FN = "_finish_fetch"
@@ -173,7 +173,7 @@ RESPONSE_COOKIES_ENTER_VIA_THE_FETCH_TAIL = Rule(
         # The half that makes it a PATH-keyed rule: that very same fetch-tail source still fires anywhere
         # else.
         Bites(
-            "from app.transport.request_profile import store_set_cookies\n"
+            "from crawlutron.transport.request_profile import store_set_cookies\n"
             "def _finish_fetch(**kwargs):\n"
             "    return store_set_cookies(kwargs)\n",
             "store_set_cookies() outside _finish_fetch()",
@@ -183,7 +183,7 @@ RESPONSE_COOKIES_ENTER_VIA_THE_FETCH_TAIL = Rule(
     clean=lambda: (
         # The sanctioned two-hop chain, spared at the paths that own it.
         Silent(
-            "from app.transport.request_profile import store_set_cookies\n"
+            "from crawlutron.transport.request_profile import store_set_cookies\n"
             "def _finish_fetch(**kwargs):\n"
             "    return store_set_cookies(kwargs)\n",
             at=REPO_ROOT / _COOKIE_TAIL,

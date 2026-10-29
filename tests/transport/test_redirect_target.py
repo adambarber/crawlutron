@@ -3,7 +3,7 @@
 import httpx
 import pytest
 
-from app.transport.pinned_transport import MAX_REDIRECT_HOPS, redirect_target
+from crawlutron.transport.pinned_transport import MAX_REDIRECT_HOPS, redirect_target
 from tests._policy_factories import canonical
 
 

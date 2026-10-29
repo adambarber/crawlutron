@@ -77,7 +77,7 @@ def test_admitted_raw_is_the_durable_identity():
     Stated as behavior, not the AST shape, because the two are independent and
     a refactor that changed identity could pass the gate and re-key everything.
     """
-    from app.models.normalized_url import NormalizedUrl
+    from crawlutron.models.normalized_url import NormalizedUrl
     from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
     # The canonical public form, with the noise the normalizer strips (default port,

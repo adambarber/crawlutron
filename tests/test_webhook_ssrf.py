@@ -5,16 +5,16 @@ pinned IP (DNS-rebinding safe) while preserving the original Host header.
 
 import pytest
 
-from app.api.webhooks import (
+from crawlutron.api.webhooks import (
     ensure_https_webhook_url,
 )
-from app.api.webhooks import (
+from crawlutron.api.webhooks import (
     post_webhook as _post_webhook,
 )
-from app.api.webhooks import (
+from crawlutron.api.webhooks import (
     validate_webhook_url as _validate_webhook_url,
 )
-from app.safety.validation import HostPolicy
+from crawlutron.safety.validation import HostPolicy
 from tests._assertions import (
     block_private_targets,
     host_resolves_to,
@@ -77,7 +77,7 @@ class TestPlaintextWebhookRefusal:
         ensure_https_webhook_url("https://receiver.example/hook")
 
     def test_the_operator_opt_in_admits_plaintext(self, monkeypatch):
-        from app.api.webhooks import reset_plaintext_webhook_memo
+        from crawlutron.api.webhooks import reset_plaintext_webhook_memo
 
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK", "1")
         try:
@@ -90,11 +90,11 @@ class TestPlaintextWebhookRefusal:
         change (or removal) lands on the very next call (#499 residual)."""
         import logging
 
-        from app.api import webhooks
+        from crawlutron.api import webhooks
 
         webhooks.reset_plaintext_webhook_memo()
         try:
-            with caplog.at_level(logging.WARNING, logger="app.api.webhooks"):
+            with caplog.at_level(logging.WARNING, logger="crawlutron.api.webhooks"):
                 monkeypatch.setenv("CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK", "1")
                 assert webhooks.allow_plaintext_webhooks() is True
                 assert webhooks.allow_plaintext_webhooks() is True
@@ -134,7 +134,7 @@ class TestWebhookDeliveryPinning:
     async def test_https_delivery_connects_to_the_validated_ip(self, monkeypatch):
         """HTTPS webhooks now connect to the validated pinned IP like HTTP (DNS-rebinding
         safe); the logical hostname is preserved for TLS SNI via the request extension."""
-        from app.api.webhooks import deliver_pinned_webhook
+        from crawlutron.api.webhooks import deliver_pinned_webhook
 
         delivered = record_webhook_delivery(monkeypatch)
         with host_resolves_to(monkeypatch, "8.8.8.8"):
@@ -152,14 +152,14 @@ class TestWebhookDeliveryPinning:
         bounded_io cap and survive an oversized body without raising."""
         import logging
 
-        from app.api.webhooks import deliver_pinned_webhook, max_webhook_size
+        from crawlutron.api.webhooks import deliver_pinned_webhook, max_webhook_size
 
         # ``host_resolves_to`` also stands the private-target escape hatch down, so the rejection this test
         # wants is the policy's answer and not an accident of what the machine's resolver returned.
         big_body = b"x" * (max_webhook_size() + 1)
         delivered = record_webhook_delivery(monkeypatch, body=big_body)
         with host_resolves_to(monkeypatch, "8.8.8.8"):
-            with caplog.at_level(logging.WARNING, logger="app.api.webhooks"):
+            with caplog.at_level(logging.WARNING, logger="crawlutron.api.webhooks"):
                 await deliver_pinned_webhook(
                     "http://webhook.example.com/cb",
                     b"{}",
@@ -175,7 +175,7 @@ def test_webhook_size_cap_honors_a_live_env_override(monkeypatch):
     once per distinct value while an override -- operator env, or a test -- is still
     picked up on the very next call.
     """
-    from app.api import webhooks
+    from crawlutron.api import webhooks
 
     monkeypatch.setenv("CRAWLUTRON_MAX_WEBHOOK_SIZE", "1234")
     assert webhooks.max_webhook_size() == 1234, "the override was not honored"
@@ -192,7 +192,7 @@ def test_webhook_size_cap_honors_a_live_env_override(monkeypatch):
 def test_webhook_size_cap_keeps_the_unit_floor(monkeypatch):
     """The ``lo=1`` floor survives the caching path: a zero/negative cap would
     cap every delivery at nothing and silently drop all webhooks."""
-    from app.api import webhooks
+    from crawlutron.api import webhooks
 
     monkeypatch.setenv("CRAWLUTRON_MAX_WEBHOOK_SIZE", "0")
     assert webhooks.max_webhook_size() == 1

@@ -4,7 +4,7 @@ The historical bug used a duplicated ``b"PK"`` and a single-byte ``0xE3`` that
 false-positived on CJK/UTF-8; the correct magic bytes are the zip and gzip ones.
 """
 
-from app.transport.fetch_policy import looks_like_binary_body
+from crawlutron.transport.fetch_policy import looks_like_binary_body
 from tests._policy_factories import canonical
 
 

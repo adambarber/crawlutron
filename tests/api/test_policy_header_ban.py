@@ -25,7 +25,7 @@ BANNED = (
 @pytest.mark.parametrize("header", BANNED)
 @pytest.mark.parametrize("spelling", ["Cookie", "COOKIE", "cookie ", "cookie"])
 def test_banned_headers_rejected_in_any_spelling(header, spelling):
-    from app.models.crawl_request import CrawlRequest
+    from crawlutron.models.crawl_request import CrawlRequest
 
     with pytest.raises(ValidationError):
         CrawlRequest(url="http://example.com/", policy={"headers": {spelling: "x"}})
@@ -34,9 +34,9 @@ def test_banned_headers_rejected_in_any_spelling(header, spelling):
 @pytest.mark.parametrize(
     ("module_name", "model_name"),
     [
-        ("app.models.crawl_request", "CrawlRequest"),
-        ("app.models.map_request", "MapRequest"),
-        ("app.models.job_create_request", "JobCreateRequest"),
+        ("crawlutron.models.crawl_request", "CrawlRequest"),
+        ("crawlutron.models.map_request", "MapRequest"),
+        ("crawlutron.models.job_create_request", "JobCreateRequest"),
     ],
 )
 def test_the_ban_travels_with_the_shared_policy(module_name, model_name):
@@ -57,7 +57,7 @@ def test_render_request_has_no_header_smuggling_surface():
     If a ``headers`` field is ever added to RenderOptionsRequest, this fails
     and forces the ban to cover it -- immunity must be re-earned, not assumed.
     """
-    from app.models.render_options_request import RenderOptionsRequest
+    from crawlutron.models.render_options_request import RenderOptionsRequest
 
     assert "headers" not in RenderOptionsRequest.model_fields
 
@@ -66,14 +66,14 @@ def test_authorization_is_refused_at_the_policy_credential_door():
     """A raw-header Authorization bypasses origin-scoped credentials, so it is
     banned from ``headers`` and must be sent through ``policy.credentials``.
     """
-    from app.models.crawl_request import CrawlRequest
+    from crawlutron.models.crawl_request import CrawlRequest
 
     with pytest.raises(ValidationError, match="credentials"):
         CrawlRequest(url="http://example.com/", policy={"headers": {"Authorization": "Bearer t"}})
 
 
 def test_benign_headers_are_unaffected():
-    from app.models.crawl_request import CrawlRequest
+    from crawlutron.models.crawl_request import CrawlRequest
 
     headers = {
         "Accept": "text/html",
@@ -87,7 +87,7 @@ def test_benign_headers_are_unaffected():
 
 def test_conditional_headers_keep_their_specific_reason():
     """The reason survives the consolidation: conditionals point at validators."""
-    from app.models.crawl_request import CrawlRequest
+    from crawlutron.models.crawl_request import CrawlRequest
 
     with pytest.raises(ValidationError, match="validators"):
         CrawlRequest(url="http://example.com/", policy={"headers": {"If-None-Match": '"v1"'}})
@@ -112,7 +112,7 @@ def test_framing_headers_rejected_at_the_policy_chokepoint(header):
 
     A silent strip leaves the caller believing the header was sent; the whole
     point of the chokepoint is that the refusal names the header and why."""
-    from app.models.crawl_policy import CrawlPolicy
+    from crawlutron.models.crawl_policy import CrawlPolicy
 
     with pytest.raises(ValidationError):
         CrawlPolicy(headers={header: "whatever"})
@@ -124,7 +124,7 @@ def test_framing_refusal_names_the_header_and_the_reason(header):
 
     "header not permitted" alone leaves a caller with a forty-header policy to
     bisect; the reason string turns the refusal into an explanation."""
-    from app.models.crawl_policy import CrawlPolicy
+    from crawlutron.models.crawl_policy import CrawlPolicy
 
     with pytest.raises(ValidationError) as exc:
         CrawlPolicy(headers={header: "whatever"})
@@ -137,7 +137,7 @@ def test_a_smuggling_attempt_is_refused_whole():
 
     Sent together, Content-Length and Transfer-Encoding are the classic desync
     pair; the single cases prove each is refused."""
-    from app.models.crawl_policy import CrawlPolicy
+    from crawlutron.models.crawl_policy import CrawlPolicy
 
     with pytest.raises(ValidationError):
         CrawlPolicy(headers={"content-length": "10", "transfer-encoding": "chunked"})
@@ -153,9 +153,9 @@ def test_hop_by_hop_headers_are_refused_through_every_model_embedding_the_policy
 
     del _pytest
 
-    from app.models.crawl_request import CrawlRequest
-    from app.models.job_create_request import JobCreateRequest
-    from app.models.map_request import MapRequest
+    from crawlutron.models.crawl_request import CrawlRequest
+    from crawlutron.models.job_create_request import JobCreateRequest
+    from crawlutron.models.map_request import MapRequest
 
     for model, payload in (
         (CrawlRequest, {"url": "http://example.com/"}),
@@ -184,7 +184,7 @@ class TestHeaderValueInjection:
 
     @pytest.mark.parametrize("value", INJECTABLE_VALUES)
     def test_injectable_values_are_refused_at_the_policy_edge(self, value):
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError) as exc:
             CrawlPolicy(headers={"X-Tenant": value})
@@ -192,7 +192,7 @@ class TestHeaderValueInjection:
         assert "X-Tenant" in str(exc.value)
 
     def test_the_value_refusal_travels_to_the_wire_models(self):
-        from app.models.job_create_request import JobCreateRequest
+        from crawlutron.models.job_create_request import JobCreateRequest
 
         with pytest.raises(ValidationError):
             JobCreateRequest(
@@ -201,15 +201,15 @@ class TestHeaderValueInjection:
             )
 
     def test_oversize_values_are_refused(self):
-        from app.models.crawl_policy import CrawlPolicy
-        from app.vocabulary.limits import MAX_HEADER_VALUE_BYTES
+        from crawlutron.models.crawl_policy import CrawlPolicy
+        from crawlutron.vocabulary.limits import MAX_HEADER_VALUE_BYTES
 
         with pytest.raises(ValidationError) as exc:
             CrawlPolicy(headers={"X-Big": "a" * (MAX_HEADER_VALUE_BYTES + 1)})
         assert "X-Big" in str(exc.value)
 
     def test_plain_multibyte_values_are_unaffected(self):
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         # Non-ASCII text is a legal header value; only wire delimiters are refused.
         assert CrawlPolicy(headers={"X-Tenant": "Café"}).headers == {"X-Tenant": "Café"}

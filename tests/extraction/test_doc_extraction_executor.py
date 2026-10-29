@@ -7,10 +7,10 @@ it must run on its own pool, never crowding the store control plane's threads.
 import threading
 from typing import cast
 
-from app.extraction import documents as docex
-from app.models.crawl_extraction_method import CrawlExtractionMethod
-from app.transport import content_pipeline as pipeline
-from app.vocabulary.extraction import EXTRACTION_DOCUMENT
+from crawlutron.extraction import documents as docex
+from crawlutron.models.crawl_extraction_method import CrawlExtractionMethod
+from crawlutron.transport import content_pipeline as pipeline
+from crawlutron.vocabulary.extraction import EXTRACTION_DOCUMENT
 from tests._policy_factories import http_strategy_policy
 
 _DOC_EXECUTOR_PREFIX = "doc-extract"

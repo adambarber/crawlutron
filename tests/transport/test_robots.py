@@ -7,24 +7,24 @@ from unittest.mock import patch
 
 import pytest
 
-from app.admission.policy import read_policy
-from app.config.settings import CrawlerSettings
-from app.models.host_policy import HostPolicy
-from app.models.normalized_url import NormalizedUrl
-from app.orchestration import engine as engine_mod
-from app.orchestration.engine import crawl_request
-from app.safety.bounded_ttl import BoundedTTLCache
-from app.transport.cache import HttpCache
-from app.transport.fetch_policy import discovery_diagnostics
-from app.transport.robots import robots_allows, robots_pattern_to_regex
-from app.transport.robots_parse import (
+from crawlutron.admission.policy import read_policy
+from crawlutron.config.settings import CrawlerSettings
+from crawlutron.models.host_policy import HostPolicy
+from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.orchestration import engine as engine_mod
+from crawlutron.orchestration.engine import crawl_request
+from crawlutron.safety.bounded_ttl import BoundedTTLCache
+from crawlutron.transport.cache import HttpCache
+from crawlutron.transport.fetch_policy import discovery_diagnostics
+from crawlutron.transport.robots import robots_allows, robots_pattern_to_regex
+from crawlutron.transport.robots_parse import (
     iter_robots_fields,
     parse_robots_crawl_delay,
     parse_robots_rules,
     parse_robots_sitemaps,
     select_robots_values,
 )
-from app.vocabulary.identity import SERVICE_ID
+from crawlutron.vocabulary.identity import SERVICE_ID
 from tests._fetcher_factories import routed_fetcher
 from tests._http_fetch_doubles import fake_fetcher as _fake_fetcher
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, crawl_policy
@@ -46,7 +46,7 @@ class TestRobotsCacheLocking:
 
         # The chokepoint moved the lock INSIDE the cache: the module no longer carries a bare dict + lock pair
         # that callers must compose correctly. The shared cache is that audited type.
-        from app.safety.bounded_ttl import BoundedTTLCache
+        from crawlutron.safety.bounded_ttl import BoundedTTLCache
 
         cache = engine_mod.robots_cache
         assert isinstance(cache, BoundedTTLCache)
@@ -173,14 +173,14 @@ class TestSitemapParser:
     def test_uses_the_shared_tokenizer(self):
         # A regression that re-rolls its own splitlines() scan would still pass the value assertions above;
         # this pins the consolidation itself.
-        from app.transport import robots_parse
+        from crawlutron.transport import robots_parse
 
         src = _module_source(robots_parse)
         assert src.count("splitlines()") == 1
 
 
 def _groups(text, accepts):
-    from app.transport.robots_parse import robots_groups
+    from crawlutron.transport.robots_parse import robots_groups
 
     return robots_groups(text, accepts)
 
@@ -312,8 +312,8 @@ def test_identical_patterns_on_different_hosts_are_isolated():
 def test_purge_removes_only_expired_production_tuples():
     import time
 
-    import app.orchestration.engine as em
-    from app.orchestration.engine import purge_robots_cache
+    import crawlutron.orchestration.engine as em
+    from crawlutron.orchestration.engine import purge_robots_cache
 
     assert isinstance(em.robots_cache, BoundedTTLCache)
     em.robots_cache.clear()
@@ -335,9 +335,9 @@ async def test_purge_handles_production_shaped_entries():
     Production stores the 3-tuple under a (origin, policy) key; both halves
     of that shape used to be wrong here at once, raising on purge."""
 
-    import app.orchestration.engine as em
-    from app.orchestration.engine import crawl_request
-    from app.transport.robots import ROBOTS_CACHE_MAX_ENTRIES
+    import crawlutron.orchestration.engine as em
+    from crawlutron.orchestration.engine import crawl_request
+    from crawlutron.transport.robots import ROBOTS_CACHE_MAX_ENTRIES
 
     em.robots_cache.clear()
     try:
@@ -370,7 +370,7 @@ async def test_purge_handles_production_shaped_entries():
 def test_failure_ttl_is_60s_not_600s():
     """G3 pin: robots transport failure writes ttl=60s, not the 600s default."""
 
-    import app.orchestration.engine as em
+    import crawlutron.orchestration.engine as em
 
     em.robots_cache.clear()
     try:
@@ -388,7 +388,7 @@ def test_failure_ttl_is_60s_not_600s():
 
 
 async def test_robots_cache_shared_across_requests():
-    import app.orchestration.engine as em
+    import crawlutron.orchestration.engine as em
 
     # Reset any module-level robots cache so the test is deterministic.
     cache = getattr(em, "robots_cache", None)

@@ -6,7 +6,7 @@ its settle semantic, so the field is removed everywhere and sending it is now RE
 import pytest
 from pydantic import ValidationError
 
-from app.models.render_options import RenderOptions
+from crawlutron.models.render_options import RenderOptions
 
 
 class TestWaitUntilKnobRemoved:
@@ -14,7 +14,7 @@ class TestWaitUntilKnobRemoved:
         assert "wait_until" not in RenderOptions.__dataclass_fields__
 
     def test_render_request_refuses_wait_until_by_name(self):
-        from app.models.render_request import RenderRequest
+        from crawlutron.models.render_request import RenderRequest
 
         with pytest.raises(ValidationError) as exc:
             RenderRequest(url="http://example.com/", wait_until="load")

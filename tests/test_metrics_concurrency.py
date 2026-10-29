@@ -8,8 +8,8 @@ from __future__ import annotations
 import sys
 import threading
 
-from app.runtime.metrics import MetricsStore
-from app.storage.coordination_counters import CoordinationCounters
+from crawlutron.runtime.metrics import MetricsStore
+from crawlutron.storage.coordination_counters import CoordinationCounters
 
 THREADS = 10
 INCREMENT_EACH = 100

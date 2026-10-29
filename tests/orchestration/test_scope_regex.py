@@ -8,11 +8,11 @@ import contextlib
 
 import pytest
 
-from app.admission.admission_links import compile_scope_pattern as compile_scope_pattern
+from crawlutron.admission.admission_links import compile_scope_pattern as compile_scope_pattern
 
 
 def test_nested_quantifiers_compile_and_match_bounded():
-    from app.safety.safe_regex import RegexTimeout, match_bounded
+    from crawlutron.safety.safe_regex import RegexTimeout, match_bounded
 
     for evil in ["(a+)+$", "(a|a)+$", "(a*)*", "(?:a+)+b", "(a+)+c"]:
         pat = compile_scope_pattern(evil)

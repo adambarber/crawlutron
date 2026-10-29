@@ -7,12 +7,12 @@ import asyncio
 
 import pytest
 
-from app.models.crawl_task import CrawlTask
-from app.orchestration.admission_stall import AdmissionStallGuard
-from app.orchestration.recursive import admit_recursive_batch
-from app.runtime.metrics import get_metrics
-from app.transport.scheduler import DomainScheduler
-from app.vocabulary.strategies import BROWSER_HEADLESS
+from crawlutron.models.crawl_task import CrawlTask
+from crawlutron.orchestration.admission_stall import AdmissionStallGuard
+from crawlutron.orchestration.recursive import admit_recursive_batch
+from crawlutron.runtime.metrics import get_metrics
+from crawlutron.transport.scheduler import DomainScheduler
+from crawlutron.vocabulary.strategies import BROWSER_HEADLESS
 from tests._admission_runs import link as _link
 from tests._admission_runs import minimum_admission_run as _minimum_admission_run
 from tests._admission_runs import run as _run
@@ -247,7 +247,7 @@ async def test_pool_exhaustion_requeue_does_not_consume_a_max_pages_slot():
     The seed exhausts the pool and is re-queued to the cap; its final permanent
     failure releases one real page, which must still fit the budget.
     """
-    from app.orchestration.recursive import MAX_TRANSIENT_REQUEUES
+    from crawlutron.orchestration.recursive import MAX_TRANSIENT_REQUEUES
 
     total_attempts = 1 + MAX_TRANSIENT_REQUEUES
 

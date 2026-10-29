@@ -16,11 +16,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from httpx import Request
 
-from app.api.async_crawl_runner import run_async_crawl
-from app.models.crawl_request import CrawlRequest
-from app.safety.validation import HostPolicy
-from app.storage.job_store import JobStatus, JobStore
-from app.storage.result_store import CrawlResultStore
+from crawlutron.api.async_crawl_runner import run_async_crawl
+from crawlutron.models.crawl_request import CrawlRequest
+from crawlutron.safety.validation import HostPolicy
+from crawlutron.storage.job_store import JobStatus, JobStore
+from crawlutron.storage.result_store import CrawlResultStore
 from tests._api_harnesses import run_with_webhook as _run_with_webhook
 from tests._assertions import block_private_targets, host_resolves_to
 from tests._webhook_doubles import record_webhook_delivery
@@ -46,7 +46,7 @@ async def _run_webhook_crawl(job_store, result_store, request_id) -> None:
 
 async def _post_webhook(monkeypatch, *, status_code: int = 200) -> list[Request]:
     """POST the canonical webhook payload and return the delivered requests."""
-    from app.api import webhooks
+    from crawlutron.api import webhooks
 
     delivered = record_webhook_delivery(monkeypatch, status_code=status_code)
     await webhooks.post_webhook(
@@ -175,7 +175,7 @@ class TestWebhookValidationRunsOffLoop:
         """Every DNS work ``post_webhook`` does (the per-attempt delivery pin, #450)
         must leave the event loop; a blackholed resolver would otherwise stall the
         FastAPI loop. Pin as crawl targets do; delivery re-pins each attempt."""
-        from app.api.webhooks import post_webhook
+        from crawlutron.api.webhooks import post_webhook
 
         block_private_targets(monkeypatch)
         resolver_threads = _spy_resolver_threads(monkeypatch)
@@ -204,7 +204,7 @@ class TestWebhookValidationRunsOffLoop:
 
         ``deliver_pinned_webhook`` reaches ``build_pinned_request_async`` itself
         (only the POST is stubbed), so a pin left inline resolves on the loop."""
-        from app.api.webhooks import deliver_pinned_webhook
+        from crawlutron.api.webhooks import deliver_pinned_webhook
 
         block_private_targets(monkeypatch)
         resolver_threads = _spy_resolver_threads(monkeypatch)
@@ -232,7 +232,7 @@ class TestWebhookValidationRunsOffLoop:
             )
 
     async def test_validate_webhook_url_async_rejects_private(self, monkeypatch):
-        from app.api.webhooks import validate_webhook_url_async
+        from crawlutron.api.webhooks import validate_webhook_url_async
 
         with host_resolves_to(monkeypatch, "127.0.0.1"), pytest.raises(ValueError):
             await validate_webhook_url_async(
@@ -248,7 +248,7 @@ class TestDeliveryTimeValidationFailureStaysBestEffort:
     async def test_a_resolver_failure_at_delivery_time_does_not_raise_out_of_post_webhook(self, monkeypatch):
         """A DNS blip during delivery is a lost callback, never a raised error: the
         best-effort contract belongs to the whole delivery, pre-loop check included."""
-        from app.api import webhooks
+        from crawlutron.api import webhooks
 
         async def resolver_blip(url, *, host_policy):
             raise OSError("resolver timeout")
@@ -280,8 +280,8 @@ class TestErrorBranchTerminalCasGatesPublish:
             await job_store.aset_status(request_id, JobStatus.PAUSED, expected=JobStatus.RUNNING)
             raise RuntimeError("crawl blew up")
 
-        with patch("app.api.async_crawl_runner.execute_crawl", side_effect=explode_then_pause):
-            with patch("app.api.webhooks.post_webhook", new_callable=AsyncMock) as post_webhook:
+        with patch("crawlutron.api.async_crawl_runner.execute_crawl", side_effect=explode_then_pause):
+            with patch("crawlutron.api.webhooks.post_webhook", new_callable=AsyncMock) as post_webhook:
                 await _run_webhook_crawl(job_store, result_store, request_id)
 
         assert post_webhook.await_count == 0, (
@@ -366,7 +366,7 @@ class TestWebhookRetryBackoff:
 
     async def test_retry_sleeps_with_exponential_backoff(self, monkeypatch):
         """The gap between retries grows; a flat immediate re-fire is not a backoff."""
-        from app.api import webhooks
+        from crawlutron.api import webhooks
 
         monkeypatch.setenv("CRAWLUTRON_WEBHOOK_BACKOFF_BASE_MS", "100")
         waited: list[float] = []
@@ -388,7 +388,7 @@ class TestShutdownDrainsInFlightWebhookDelivery:
     shutdown drains in-flight deliveries before the store closes."""
 
     async def test_shutdown_drain_awaits_an_in_flight_webhook(self, monkeypatch):
-        from app.api import webhooks
+        from crawlutron.api import webhooks
 
         started = asyncio.Event()
         completed = asyncio.Event()
@@ -426,7 +426,7 @@ class TestShutdownDrainIsBounded:
     and logs what it abandoned (#364)."""
 
     async def test_a_hanging_delivery_abandons_within_the_deadline(self, monkeypatch, caplog):
-        from app.api import webhooks
+        from crawlutron.api import webhooks
 
         started = asyncio.Event()
         never = asyncio.Event()
@@ -460,7 +460,7 @@ class TestShutdownDrainIsBounded:
 
 def test_drain_deadline_is_the_retry_budget():
     """The drain deadline is one delivery's worst path from the retry budget (#364)."""
-    from app.api import webhooks
+    from crawlutron.api import webhooks
 
     attempts = webhooks.webhook_max_attempts()
     base_s = webhooks.webhook_backoff_base_ms() / 1000.0

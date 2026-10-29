@@ -7,7 +7,7 @@ from here, not from another test's internals.
 
 from __future__ import annotations
 
-from app.extraction.doc_pool import DocExtractionPool
+from crawlutron.extraction.doc_pool import DocExtractionPool
 from tests._process_doubles import StubSpawner, stub_worker
 
 __all__ = ["acquire_the_replacement", "assert_extraction_empty"]

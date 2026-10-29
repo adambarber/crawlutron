@@ -7,7 +7,7 @@ import ipaddress
 
 import pytest
 
-from app.models.address_class import AddressClass, classify, is_loopback_bind
+from crawlutron.models.address_class import AddressClass, classify, is_loopback_bind
 
 # One representative per class. Order matters: the classifier returns the first match, so this table doubles
 # as the precedence document.

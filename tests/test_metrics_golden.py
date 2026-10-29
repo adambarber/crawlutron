@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from app.runtime.metrics import MetricsStore
-from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
+from crawlutron.runtime.metrics import MetricsStore
+from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._result_builders import engine_result
 
 _CALLER_DETAIL_BLOCK = """\
@@ -153,7 +153,7 @@ def test_the_full_exposition_matches_the_golden():
 
 def test_every_plain_counter_family_is_declared_in_the_registry():
     """Each bare counter series in the golden is a registry entry, in golden order."""
-    from app.runtime.metrics import COUNTER_FAMILIES
+    from crawlutron.runtime.metrics import COUNTER_FAMILIES
 
     expected = [
         "crawler_crawl_requests_total",

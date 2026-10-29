@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.models.crawl_policy import CrawlPolicy
+from crawlutron.models.crawl_policy import CrawlPolicy
 
 
 @pytest.mark.parametrize("name", ["X-Evil\r\nX-Injected: yes", "X-Bad\n", "X-Nul\x00"])

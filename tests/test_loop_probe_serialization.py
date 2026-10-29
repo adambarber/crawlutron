@@ -6,10 +6,10 @@ inside the offloaded call, not handed to it from the loop (#535, #536).
 
 from __future__ import annotations
 
-from app.config.settings import CrawlerSettings
-from app.models.crawl_policy import CrawlPolicy
-from app.orchestration.engine import ResultSpill
-from app.transport.content_cache import ContentCache
+from crawlutron.config.settings import CrawlerSettings
+from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.orchestration.engine import ResultSpill
+from crawlutron.transport.content_cache import ContentCache
 from tests._loop_liveness import LoopLiveness as _LoopLiveness
 
 
@@ -19,11 +19,11 @@ class TestContentCacheStoreSerializationOffTheEventLoop:
     offloaded boundary, not on the event loop while a >1 MiB body is encoded (#535)."""
 
     async def test_large_body_store_does_not_block_the_event_loop(self, tmp_path, monkeypatch) -> None:
-        import app.transport.http_cache as hc
-        from app.models.host_policy import HostPolicy
-        from app.models.normalized_url import NormalizedUrl
-        from app.transport.http_cache import store_http_caches
-        from app.transport.http_response import FetchedResponse, HttpStrategyContext
+        import crawlutron.transport.http_cache as hc
+        from crawlutron.models.host_policy import HostPolicy
+        from crawlutron.models.normalized_url import NormalizedUrl
+        from crawlutron.transport.http_cache import store_http_caches
+        from crawlutron.transport.http_response import FetchedResponse, HttpStrategyContext
         from tests._fetch_doubles import make_fetch
 
         liveness = _LoopLiveness()
@@ -78,11 +78,11 @@ class TestSpillWriteDictOffTheEventLoop:
     async def test_large_result_spill_write_does_not_block_the_event_loop(
         self, tmp_path, monkeypatch
     ) -> None:
-        import app.orchestration.engine as engine
-        from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
-        from app.models.host_policy import HostPolicy
-        from app.models.normalized_url import NormalizedUrl
-        from app.models.result_factory import build_engine_result
+        import crawlutron.orchestration.engine as engine
+        from crawlutron.models.crawl_strategy_attempt import CrawlStrategyAttempt
+        from crawlutron.models.host_policy import HostPolicy
+        from crawlutron.models.normalized_url import NormalizedUrl
+        from crawlutron.models.result_factory import build_engine_result
 
         liveness = _LoopLiveness()
         observed: list[int] = [-1]  # loop progress seen by the to_dict walk

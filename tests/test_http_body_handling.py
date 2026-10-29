@@ -2,8 +2,8 @@
 
 import pytest
 
-from app.orchestration.engine import crawl_request
-from app.transport.cache import HttpCache
+from crawlutron.orchestration.engine import crawl_request
+from crawlutron.transport.cache import HttpCache
 from tests._extraction_helpers import default_http_fetcher
 from tests._fetcher_factories import run_http_strategy
 from tests._policy_factories import _policy, canonical

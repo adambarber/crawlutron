@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 import httpx
 import pytest
 
-from app.transport.fetchers import default_http_fetcher
+from crawlutron.transport.fetchers import default_http_fetcher
 from tests._assertions import (
     assert_dns_pinning_uses_first_resolution,
     block_private_targets,
@@ -26,7 +26,7 @@ class TestDNSRebindingProtection:
         path (#387, mixed refused). One verdict per hostname: refuse."""
         import socket
 
-        from app.transport.pinned_transport import resolve_and_pin_host
+        from crawlutron.transport.pinned_transport import resolve_and_pin_host
 
         def mixed_getaddrinfo(host, *args, **kwargs):
             return [
@@ -59,7 +59,7 @@ class TestDNSRebindingProtection:
 
         with (
             host_resolves_to(monkeypatch, "1.2.3.4"),
-            patch("app.transport.http_client_pool.get_async_http_client", return_value=client),
+            patch("crawlutron.transport.http_client_pool.get_async_http_client", return_value=client),
         ):
             result = await default_http_fetcher(
                 canonical("http://example.com/page"),

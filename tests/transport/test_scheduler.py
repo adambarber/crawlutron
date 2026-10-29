@@ -4,10 +4,10 @@ import time
 
 import pytest
 
-from app.models.crawl_job import CrawlJob
-from app.models.crawl_result import EngineCrawlResult
-from app.models.crawl_task import CrawlTask
-from app.transport.scheduler import DomainScheduler, jittered_delay
+from crawlutron.models.crawl_job import CrawlJob
+from crawlutron.models.crawl_result import EngineCrawlResult
+from crawlutron.models.crawl_task import CrawlTask
+from crawlutron.transport.scheduler import DomainScheduler, jittered_delay
 from tests._policy_factories import canonical
 from tests._result_builders import make_job, make_result
 from tests._scheduler_doubles import engine_envelope, make_scheduler, ok_worker, trip_circuit
@@ -148,8 +148,8 @@ class TestObservedLatencyCrossesPipelines:
 
     @staticmethod
     def _rendered_result(elapsed_ms: int):
-        from app.models.crawl_result import CrawlResult
-        from app.models.result_factory import terminal_attempt
+        from crawlutron.models.crawl_result import CrawlResult
+        from crawlutron.models.result_factory import terminal_attempt
 
         return CrawlResult(
             url="https://example.com/x",
@@ -169,8 +169,8 @@ class TestObservedLatencyCrossesPipelines:
 
     @staticmethod
     def _crawled_result(elapsed_ms: int):
-        from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
-        from app.models.result_factory import build_engine_result
+        from crawlutron.models.crawl_strategy_attempt import CrawlStrategyAttempt
+        from crawlutron.models.result_factory import build_engine_result
 
         return build_engine_result(
             original_url="https://example.com/x",

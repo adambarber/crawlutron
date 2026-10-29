@@ -6,8 +6,8 @@ Drives the renderer over a fake Playwright-compatible page, no mocks; no
 
 import base64
 
-from app.models.render_options import RenderOptions
-from app.transport.browser_driver import BrowserDriver
+from crawlutron.models.render_options import RenderOptions
+from crawlutron.transport.browser_driver import BrowserDriver
 from tests._browser_doubles import BrowserFakeContextManager, ScriptedPage, scripted_renderer
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 

@@ -1,14 +1,14 @@
 """The scheduler's RAM-derived HTTP ceiling matches admission's (#367)."""
 
-from app.orchestration.request_pipeline import compute_ram_derived_concurrency
-from app.runtime.pressure_memory import read_memory_stats
-from app.runtime.pressure_sizing import (
+from crawlutron.orchestration.request_pipeline import compute_ram_derived_concurrency
+from crawlutron.runtime.pressure_memory import read_memory_stats
+from crawlutron.runtime.pressure_sizing import (
     TaskRamBudget,
     build_admission_policy,
     doc_worker_count,
     max_http_concurrency_for,
 )
-from app.transport.browser_pool import derive_browser_pool_size
+from crawlutron.transport.browser_pool import derive_browser_pool_size
 
 
 def test_ram_derived_scheduler_ceiling_accounts_for_doc_workers():

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from app.models.json_value import JsonValue
-from app.storage.job_store import JobStatus, JobStore
+from crawlutron.models.json_value import JsonValue
+from crawlutron.storage.job_store import JobStatus, JobStore
 from tests._job_store_doubles import (
     InstrumentedJobStore,
     frontier,

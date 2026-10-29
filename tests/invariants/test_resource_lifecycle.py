@@ -6,7 +6,7 @@ shape; the protocol names it, and this gate keeps the implementers conforming.
 
 import ast
 
-from app.runtime.resource_lifecycle import ResourceLifecycle
+from crawlutron.runtime.resource_lifecycle import ResourceLifecycle
 from tests.chokepoint_walks import app_trees, offender_at
 
 

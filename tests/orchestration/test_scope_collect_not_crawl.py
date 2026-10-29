@@ -10,16 +10,16 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from app.models.result_record import ProducerEnvelope
-from app.orchestration.engine import crawl_request
-from app.transport.cache import HttpCache
+from crawlutron.models.result_record import ProducerEnvelope
+from crawlutron.orchestration.engine import crawl_request
+from crawlutron.transport.cache import HttpCache
 from tests._fetch_doubles import FetcherDouble, PageMap
 from tests._fetcher_factories import site_fetcher, tap_fetcher
 
 if TYPE_CHECKING:
-    from app.models.host_policy import HostPolicy
-    from app.models.http_fetcher import HttpFetcher
-    from app.models.normalized_url import NormalizedUrl
+    from crawlutron.models.host_policy import HostPolicy
+    from crawlutron.models.http_fetcher import HttpFetcher
+    from crawlutron.models.normalized_url import NormalizedUrl
 
 
 def _recording_fetcher(pages: PageMap) -> FetcherDouble:
@@ -145,7 +145,7 @@ class TestSitemapCandidateBuilderUsesTheCanonicalOrigin:
 
     async def _sitemap_url_for(self, root_url: str) -> str | None:
         """Run the builder with the sitemap fetch stubbed, returning the URL asked for."""
-        import app.admission.admission as admission
+        import crawlutron.admission.admission as admission
 
         seen: list[str] = []
 
@@ -163,10 +163,10 @@ class TestSitemapCandidateBuilderUsesTheCanonicalOrigin:
             seen.append(sitemap_url.raw)
             return set()
 
-        from app.admission.admission import JobAdmissionContext
-        from app.admission.policy import PolicyTier
-        from app.config.settings import CrawlerSettings
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.admission.admission import JobAdmissionContext
+        from crawlutron.admission.policy import PolicyTier
+        from crawlutron.config.settings import CrawlerSettings
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         context = JobAdmissionContext.create(
             CrawlPolicy(), PolicyTier.model_defaults(), CrawlerSettings.from_mapping({})
@@ -189,8 +189,8 @@ class TestSitemapCandidateBuilderUsesTheCanonicalOrigin:
         ],
     )
     async def test_the_origin_is_canonical_regardless_of_how_the_root_was_spelled(self, root_url):
-        from app.models.host_policy import HostPolicy
-        from app.models.normalized_url import NormalizedUrl
+        from crawlutron.models.host_policy import HostPolicy
+        from crawlutron.models.normalized_url import NormalizedUrl
 
         canonical = NormalizedUrl(root_url, policy=HostPolicy.unrestricted())
         expected = f"{canonical.origin}/sitemap.xml"

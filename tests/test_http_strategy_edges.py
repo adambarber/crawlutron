@@ -1,10 +1,10 @@
 import httpx
 import pytest
 
-from app.admission.policy import PolicyTier, read_policy, validate_wire_policy
-from app.models.host_policy import HostPolicy
-from app.models.http_fetch_result import HttpFetchResult
-from app.models.normalized_url import NormalizedUrl
+from crawlutron.admission.policy import PolicyTier, read_policy, validate_wire_policy
+from crawlutron.models.host_policy import HostPolicy
+from crawlutron.models.http_fetch_result import HttpFetchResult
+from crawlutron.models.normalized_url import NormalizedUrl
 from tests._fetcher_factories import failing_fetcher, request_fetcher, run_http_strategy, scripted_fetcher
 from tests._policy_factories import http_strategy_policy
 from tests._transport_doubles import (
@@ -21,20 +21,20 @@ class TestHttpStrategyEdges:
     """Cover remaining branches in http.py"""
 
     def test_charset_from_bytes_import_error(self):
-        from app.transport.body_decode import decode_body
+        from crawlutron.transport.body_decode import decode_body
 
         body = b"test content"
         result = decode_body(body, "text/plain; charset=utf-8")
         assert result == "test content"
 
     async def test_close_async_http_client_error(self):
-        from app.transport.http_client_pool import close_async_http_client
+        from crawlutron.transport.http_client_pool import close_async_http_client
 
         await close_async_http_client()
         await close_async_http_client()
 
     def test_is_private_or_loopback_ip_invalid(self):
-        from app.transport.pinned_transport import is_private_or_loopback_ip
+        from crawlutron.transport.pinned_transport import is_private_or_loopback_ip
 
         assert is_private_or_loopback_ip("127.0.0.1")
         assert is_private_or_loopback_ip("192.168.1.1")
@@ -84,7 +84,7 @@ class TestHttpStrategyEdges:
         )
 
     async def test_http_strategy_result_httpx_request_error(self):
-        from app.transport.cache import HttpCache
+        from crawlutron.transport.cache import HttpCache
 
         cache = HttpCache()
 
@@ -101,7 +101,7 @@ class TestHttpStrategyEdges:
         assert result.classification == "http_error"
 
     async def test_http_strategy_result_httpx_http_status_error(self):
-        from app.transport.cache import HttpCache
+        from crawlutron.transport.cache import HttpCache
 
         cache = HttpCache()
 
@@ -125,15 +125,15 @@ class TestHttpStrategyEdges:
         assert result.classification == "http_status_error"
 
     def test_decode_body_unicode_decode_error(self):
-        from app.transport.body_decode import decode_body
+        from crawlutron.transport.body_decode import decode_body
 
         body = b"\xff\xfe"
         result = decode_body(body, "text/html")
         assert isinstance(result, str)
 
     async def test_http_strategy_result_binary_classification(self):
-        from app.transport.cache import HttpCache
-        from app.vocabulary.extraction import EXTRACTION_METHOD_BINARY_NO_TEXT
+        from crawlutron.transport.cache import HttpCache
+        from crawlutron.vocabulary.extraction import EXTRACTION_METHOD_BINARY_NO_TEXT
 
         cache = HttpCache()
 

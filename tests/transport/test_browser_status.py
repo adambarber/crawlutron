@@ -1,6 +1,6 @@
 """Tests for browser.py module."""
 
-from app.transport.browser import BrowserRenderer, looks_like_pdf
+from crawlutron.transport.browser import BrowserRenderer, looks_like_pdf
 
 
 class TestBrowserRendererStatus:

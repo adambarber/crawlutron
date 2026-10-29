@@ -5,8 +5,8 @@ from typing import Protocol
 
 import pytest
 
-import app.transport.http_client_pool as http_mod
-from app.transport.fetchers import cffi_fetch
+import crawlutron.transport.http_client_pool as http_mod
+from crawlutron.transport.fetchers import cffi_fetch
 from tests._async_harnesses import run_loop_rebind_scenario
 from tests._policy_factories import canonical
 from tests._pool_harnesses import builder_for as _builder_for

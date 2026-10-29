@@ -4,7 +4,7 @@
 specific variants and corroborated hits still classify.
 """
 
-from app.extraction.classify import classify_page
+from crawlutron.extraction.classify import classify_page
 
 
 def test_prose_only_not_found_phrase_stays_rendered():

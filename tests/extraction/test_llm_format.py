@@ -3,10 +3,10 @@
 import html
 import time
 
-from app.extraction.llm_format import extract_llm_metadata, text_from_html
-from app.models.json_value import JsonValue
-from app.models.page_metadata import PageMetadata
-from app.models.page_metadata_response import PageMetadataResponse
+from crawlutron.extraction.llm_format import extract_llm_metadata, text_from_html
+from crawlutron.models.json_value import JsonValue
+from crawlutron.models.page_metadata import PageMetadata
+from crawlutron.models.page_metadata_response import PageMetadataResponse
 from tests._extraction_helpers import extract_content
 from tests._fetcher_factories import LLM_FORMAT_TEST_HTML
 from tests._parse_budget import ParseBudget

@@ -2,7 +2,7 @@
 
 import os
 
-from app.extraction.documents import extraction_thread_count
+from crawlutron.extraction.documents import extraction_thread_count
 
 
 def test_default_derives_from_cpu_with_floor_of_4(monkeypatch):

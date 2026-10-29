@@ -7,16 +7,16 @@ an arrangement a test can build is one production can reach.
 import threading
 import time
 
-import app.extraction.content as ext_mod
-import app.extraction.documents as docex
-from app.extraction.content import ExtractedContent
-from app.extraction.doc_pool import (
+import crawlutron.extraction.content as ext_mod
+import crawlutron.extraction.documents as docex
+from crawlutron.extraction.content import ExtractedContent
+from crawlutron.extraction.doc_pool import (
     DocExtractionPool,
     DocWorker,
     DocWorkerSpawnError,
     terminate_doc_process,
 )
-from app.runtime.metrics import MetricsStore
+from crawlutron.runtime.metrics import MetricsStore
 from tests._doc_pool_fixtures import _seeded
 from tests._extraction_harnesses import acquire_the_replacement as _acquire_the_replacement
 from tests._extraction_helpers import settings_with
@@ -331,7 +331,7 @@ def test_a_starved_acquire_increments_the_doc_pool_unavailable_counter(fake_pool
     pool, _spawner = _seeded(fake_pool, stuck)
     stuck.busy = True
     store = MetricsStore()
-    monkeypatch.setattr("app.runtime.metrics.metrics", store)
+    monkeypatch.setattr("crawlutron.runtime.metrics.metrics", store)
 
     assert pool.acquire(0.05) is None, "the acquisition did not degrade on the busy pool"
     assert store.snapshot().extraction_doc_pool_unavailable_total == 1.0
@@ -347,7 +347,7 @@ def test_a_failed_spawn_increments_the_doc_pool_unavailable_counter(monkeypatch)
 
     pool = DocExtractionPool(spawn=failing_spawn, worker_count=lambda: 1, enabled=lambda: True)
     store = MetricsStore()
-    monkeypatch.setattr("app.runtime.metrics.metrics", store)
+    monkeypatch.setattr("crawlutron.runtime.metrics.metrics", store)
 
     assert pool.acquire(0.05) is None, "the acquisition did not degrade on the failed spawn"
     assert store.snapshot().extraction_doc_pool_unavailable_total == 1.0

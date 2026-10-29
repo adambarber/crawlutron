@@ -143,7 +143,7 @@ def test_a_non_regex_detector_sees_safe_regex_scope(monkeypatch):
     """The sanctioned exclude is the regex rules', not every detector's: a planted
     banned-primitive use in safe_regex scope must be caught through the default walk."""
     planted = ast.parse(
-        "from app.transport.decompression import decompress_body as dec\n"
+        "from crawlutron.transport.decompression import decompress_body as dec\n"
         "def f(raw, enc):\n    return dec(raw, enc)\n"
     )
     path = APP_ROOT / "safety" / "safe_regex.py"

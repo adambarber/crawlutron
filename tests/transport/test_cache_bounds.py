@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from app.transport.content_cache import ContentCache
+from crawlutron.transport.content_cache import ContentCache
 from tests._cache_fixtures import _make_cache, entry_path, entry_replaced_by_directory, scoped_cache
 from tests._fetcher_factories import make_seeded_cache
 
@@ -65,7 +65,7 @@ class TestContentCacheOverwrite:
 
 class TestSharedContentCache:
     def test_engine_shared_content_cache(self):
-        from app.orchestration.engine import get_shared_content_cache
+        from crawlutron.orchestration.engine import get_shared_content_cache
 
         cache = get_shared_content_cache()
         assert isinstance(cache, ContentCache)

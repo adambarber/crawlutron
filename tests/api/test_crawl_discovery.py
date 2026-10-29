@@ -22,9 +22,9 @@ class TestDiscoveryAndRenderApi:
         assert resp.json()["status"] == "ok"
 
     async def test_health_response_model_is_homed_under_models(self):
-        # The /health wire model must live at its findable home in app/models
+        # The /health wire model must live at its findable home in crawlutron/models
         # (memory #4740), not inline in the router module (#305).
-        from app.health.readiness import create_health_router
+        from crawlutron.health.readiness import create_health_router
         from tests.model_index import resolve_declared_type
 
         router, _ = create_health_router()
@@ -32,7 +32,7 @@ class TestDiscoveryAndRenderApi:
         model = health_route.response_model
         homed = resolve_declared_type("HealthResponse")
         assert model is homed, f"/health uses {model}, but the homed wire model is {homed}"
-        assert homed.__module__ == "app.models.health_response"
+        assert homed.__module__ == "crawlutron.models.health_response"
 
     async def test_readiness_reports_capacity(self):
         resp = await self.client.get("/ready")
@@ -44,7 +44,7 @@ class TestDiscoveryAndRenderApi:
     async def test_readiness_uses_live_gate_not_stale_gauges(self):
         # Saturation must come from the live resource gate. No crawl has run here, so the metrics gauges are
         # stale zeros -- a sampler reporting saturation must still yield 503.
-        from app.health.readiness import READINESS_STATE
+        from crawlutron.health.readiness import READINESS_STATE
 
         READINESS_STATE.set_utilization_sampler(lambda: (0.99, 0.0))
         try:
@@ -61,7 +61,7 @@ class TestDiscoveryAndRenderApi:
             assert resp.json()
 
     async def test_build_unified_response(self):
-        from app.api.response_shaping import build_unified_crawl_response
+        from crawlutron.api.response_shaping import build_unified_crawl_response
 
         resp = build_unified_crawl_response(
             [
@@ -84,10 +84,10 @@ class TestDiscoveryAndRenderApi:
 
     async def test_v1_render_exhausted_pool_returns_503(self, monkeypatch):
         # When every renderer is wedged, the request surfaces as 503, not a hang or a 500.
-        import app.api.render_endpoint as render_endpoint
-        from app.transport.browser_pool import BrowserPoolExhaustedError
-        from app.transport.results import crawl_result_from_exception
-        from app.vocabulary.strategies import BROWSER_HEADLESS
+        import crawlutron.api.render_endpoint as render_endpoint
+        from crawlutron.transport.browser_pool import BrowserPoolExhaustedError
+        from crawlutron.transport.results import crawl_result_from_exception
+        from crawlutron.vocabulary.strategies import BROWSER_HEADLESS
 
         class _ExhaustedWorker:
             def __init__(self, pool):
@@ -111,7 +111,7 @@ class TestDiscoveryAndRenderApi:
     async def test_v1_render_worker_exception_returns_shaped_failure_not_500(self, monkeypatch):
         # The render pipeline normalizes the shape at its single receive point and routes the endpoint through
         # the same per-item shaping guard /v1/crawl has, so the failure degrades to a correctly-shaped
-        import app.api.render_endpoint as render_endpoint
+        import crawlutron.api.render_endpoint as render_endpoint
 
         secret = "SECRET_TOKEN_ABC123_INTERNAL_PATH=/etc"
 
@@ -136,8 +136,8 @@ class TestDiscoveryAndRenderApi:
         assert secret not in resp.text, f"raw exception text leaked into the response: {resp.text!r}"
 
     async def test_v1_render_reports_the_real_failure_for_a_worker_exception(self, monkeypatch):
-        import app.api.render_endpoint as render_endpoint
-        from app.transport.browser_pool import PooledBrowserWorker
+        import crawlutron.api.render_endpoint as render_endpoint
+        from crawlutron.transport.browser_pool import PooledBrowserWorker
 
         monkeypatch.setattr(render_endpoint, "PooledBrowserWorker", lambda pool: PooledBrowserWorker(pool))
         resp = await post_render_with_pool(self.client, RaisingRendererPool(), "http://127.0.0.1:1/x")
@@ -160,9 +160,9 @@ class TestDiscoveryAndRenderApi:
         the browser is faked (no binary in CI), so a key the adapter emits but
         the wire model drops never reaches the assertion.
         """
-        from app.models.crawl_result import CrawlResult
-        from app.models.result_factory import terminal_attempt
-        from app.transport.browser_pool import BrowserPool
+        from crawlutron.models.crawl_result import CrawlResult
+        from crawlutron.models.result_factory import terminal_attempt
+        from crawlutron.transport.browser_pool import BrowserPool
 
         class _FakeRenderer:
             async def render(self, url, options, *, policy=None):
@@ -207,7 +207,7 @@ class TestDiscoveryAndRenderApi:
         once hard-coded ``BROWSER_HEADLESS`` while a warmed pool served
         ``BROWSER_HEADED_WARMED``, so two endpoints disagreed on the provenance.
         """
-        from app.vocabulary.strategies import BROWSER_HEADED_WARMED
+        from crawlutron.vocabulary.strategies import BROWSER_HEADED_WARMED
 
         item = await self._render_result(monkeypatch, ["https://warmup.example/"])
         assert item["selected_strategy"] == BROWSER_HEADED_WARMED, item
@@ -216,7 +216,7 @@ class TestDiscoveryAndRenderApi:
     async def test_v1_render_reports_headless_without_warmup(self, monkeypatch):
         """Inverse case: a plain headless pool still labels its own mode, not the
         warmed member."""
-        from app.vocabulary.strategies import BROWSER_HEADLESS
+        from crawlutron.vocabulary.strategies import BROWSER_HEADLESS
 
         item = await self._render_result(monkeypatch, [])
         assert item["selected_strategy"] == BROWSER_HEADLESS, item
@@ -230,7 +230,7 @@ class TestDiscoveryAndRenderApi:
 
     async def test_validation_exception_handler_returns_422(self):
         # The handler itself, not the one in the app's registry.
-        from app.api.exceptions import validation_exception_handler
+        from crawlutron.api.exceptions import validation_exception_handler
 
         scope = {"type": "http", "method": "POST", "path": "/v1/crawl", "headers": [], "query_string": b""}
         request = Request(scope)

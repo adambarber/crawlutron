@@ -52,7 +52,7 @@ ROBOTS_LINE_SCANNER_LIVES_IN_ONE_PLACE = Rule(
     name="robots-line-scanner-lives-in-one-place",
     find=_robots_scanner_offenders,
     summary=(
-        "app/transport/robots_parse.iter_robots_fields is the single scanner for robots"
+        "crawlutron/transport/robots_parse.iter_robots_fields is the single scanner for robots"
         " consumers, so the shared line-walk cannot drift on the empty-value gate"
     ),
     bite=lambda: Bites(
@@ -66,7 +66,7 @@ ROBOTS_LINE_SCANNER_LIVES_IN_ONE_PLACE = Rule(
         "    for raw in text.lstrip('\\ufeff').splitlines():\n"
         "        yield raw.strip()\n",
     ),
-    proof_path=REPO_ROOT / "app" / "crawl" / "_synthetic.py",
+    proof_path=REPO_ROOT / "crawlutron" / "crawl" / "_synthetic.py",
 )
 
 
@@ -222,7 +222,7 @@ ASDICT_IS_NEVER_UNPACKED_INTO_A_CONSTRUCTOR = Rule(
         "import dataclasses\ndef f(s):\n    data = dataclasses.asdict(s)\n    data['x'] = 1\n    "
         "return data\n",
     ),
-    proof_path=REPO_ROOT / "app" / "_synthetic.py",
+    proof_path=REPO_ROOT / "crawlutron" / "_synthetic.py",
 )
 
 

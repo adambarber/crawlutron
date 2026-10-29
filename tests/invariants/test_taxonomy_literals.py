@@ -16,7 +16,7 @@ def _literal_check_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Any call to ``check_literal_fields`` outside its one owning ``__post_init__``."""
     offenders: list[str] = []
     for node in call_nodes(tree):
-        if resolved_call_name(tree, node) != "app.models.literal_checked.check_literal_fields":
+        if resolved_call_name(tree, node) != "crawlutron.models.literal_checked.check_literal_fields":
             continue
         owner = _enclosing_class(tree, node)
         if owner is not None and owner.name == "LiteralChecked":
@@ -56,7 +56,7 @@ THE_LITERAL_FIELD_CHECK_IS_CALLED_BY_ONE_OWNER = Rule(
     ),
     excludes=SANCTIONED,
     bite=lambda: Bites(
-        "from app.models.literal_checked import check_literal_fields\n"
+        "from crawlutron.models.literal_checked import check_literal_fields\n"
         "@dataclass(frozen=True)\n"
         "class CrawlResult:\n"
         "    status: str\n"
@@ -66,12 +66,12 @@ THE_LITERAL_FIELD_CHECK_IS_CALLED_BY_ONE_OWNER = Rule(
     ),
     clean=lambda: (
         # The class that is allowed to call it: the owning base class itself.
-        "from app.models.literal_checked import check_literal_fields\n"
+        "from crawlutron.models.literal_checked import check_literal_fields\n"
         "class LiteralChecked:\n"
         "    def __post_init__(self) -> None:\n"
         "        check_literal_fields(self)\n",
         # A module that never mentions the check is nobody else's business.
-        "from app.models.crawl_result import CrawlResult\n"
+        "from crawlutron.models.crawl_result import CrawlResult\n"
         "def build() -> CrawlResult:\n    return CrawlResult()\n",
     ),
 )
@@ -95,8 +95,8 @@ def test_every_taxonomy_literal_dataclass_inherits_the_construction_check():
     import typing
     from dataclasses import is_dataclass
 
-    from app.models.literal_checked import LITERAL_FIELDS, LiteralChecked
-    from app.models.taxonomy import literal_members
+    from crawlutron.models.literal_checked import LITERAL_FIELDS, LiteralChecked
+    from crawlutron.models.taxonomy import literal_members
     from tests.model_index import declared_types
 
     checked: dict[str, list[str]] = {}

@@ -8,7 +8,7 @@ from scripts.module_graph import _imports
 
 # Real modules of this tree, so _resolve's on-disk check accepts them: they stand
 # in for any two modules whose only mutual reference is a type-checking one.
-A, B = "app.api.crawl_endpoint", "app.api.caller_auth"
+A, B = "crawlutron.api.crawl_endpoint", "crawlutron.api.caller_auth"
 
 _ALPHA = (
     "from __future__ import annotations\n"

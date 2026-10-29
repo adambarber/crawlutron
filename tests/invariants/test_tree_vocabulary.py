@@ -156,12 +156,12 @@ VOCABULARY_PRIMITIVES_ARE_REFERENCED = Rule(
 
 
 # =========================================================================== The retired vocabulary bucket
-_RETIRED_VOCABULARY = "app.constants"
+_RETIRED_VOCABULARY = "crawlutron.constants"
 
 
 _RETIRED_VOCABULARY_IMPORTED = (
-    "imports app.constants, the topic bucket whose vocabulary lives in per-topic modules now: "
-    "name the topic (app.vocabulary.taxonomy, app.vocabulary.limits, app.vocabulary.identity, ...)"
+    "imports crawlutron.constants, the topic bucket whose vocabulary lives in per-topic modules now: "
+    "name the topic (crawlutron.vocabulary.taxonomy, .limits, .identity, ...)"
 )
 
 
@@ -185,24 +185,24 @@ RETIRED_VOCABULARY_IS_NOT_IMPORTABLE = Rule(
     name="vocabulary-imports-name-a-topic",
     find=_retired_vocabulary_offenders,
     summary=(
-        "app/constants.py was one topic bucket -- taxonomy, strategies, limits, browser vocabulary, "
+        "crawlutron/constants.py was one topic bucket -- taxonomy, strategies, limits, browser vocabulary, "
         "request profiles, host classifiers and identity in a single file, so a reader could not "
         "answer 'where does X live' from the mental model. It is retired: the vocabulary lives one "
-        "topic per module under app.vocabulary, so name the topic instead"
+        "topic per module under crawlutron.vocabulary, so name the topic instead"
     ),
     scope=lambda *, exclude: trees_under(APP_ROOT),
     bite=lambda: Bites(
-        # Both spellings, because a fix that repoints `from app.constants import X` and leaves `import
-        # app.constants` is a site that still reads as the old layout.
-        "from app.constants import UNSORTED_TOPIC_NAME\nimport app.constants as bucket\n",
+        # Both spellings, because a fix that repoints `from crawlutron.constants import X` and leaves `import
+        # crawlutron.constants` is a site that still reads as the old layout.
+        "from crawlutron.constants import UNSORTED_TOPIC_NAME\nimport crawlutron.constants as bucket\n",
         marker="name the topic",
         count=2,
     ),
     clean=lambda: (
         # A name that merely ENDS in constants is not the retired module, and neither is a stdlib or
         # third-party import of the same shape.
-        "from app.vocabulary.taxonomy import CrawlClassification\n"
-        "from app.constants_helpers import helper\n"
+        "from crawlutron.vocabulary.taxonomy import CrawlClassification\n"
+        "from crawlutron.constants_helpers import helper\n"
         "import constants\nfrom constants import value\n",
     ),
 )

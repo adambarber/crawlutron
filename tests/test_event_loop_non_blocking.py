@@ -13,14 +13,14 @@ from pathlib import Path
 
 import pytest
 
-import app.transport.content_cache as cc
-from app.api.job_runner import run_job
-from app.config.settings import CrawlerSettings
-from app.models.crawl_policy import CrawlPolicy
-from app.models.result_record import ProducerEnvelope
-from app.orchestration.engine import ResultSpill
-from app.storage.job_store import JobStatus
-from app.transport.content_cache import ContentCache
+import crawlutron.transport.content_cache as cc
+from crawlutron.api.job_runner import run_job
+from crawlutron.config.settings import CrawlerSettings
+from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.models.result_record import ProducerEnvelope
+from crawlutron.orchestration.engine import ResultSpill
+from crawlutron.storage.job_store import JobStatus
+from crawlutron.transport.content_cache import ContentCache
 from tests._cache_fixtures import (
     counting_entry_reads,
     entry_path,
@@ -254,9 +254,9 @@ class TestAsyncCrawlRunnerSavesOffTheEventLoop:
     """
 
     async def test_run_async_crawl_save_does_not_block_the_event_loop(self, monkeypatch, tmp_path) -> None:
-        from app.api.async_crawl_runner import run_async_crawl
-        from app.config.settings import CrawlerSettings
-        from app.storage.result_store import CrawlResultStore
+        from crawlutron.api.async_crawl_runner import run_async_crawl
+        from crawlutron.config.settings import CrawlerSettings
+        from crawlutron.storage.result_store import CrawlResultStore
         from tests._job_harnesses import make_job_store
 
         store = make_job_store(str(tmp_path))
@@ -281,7 +281,7 @@ class TestAsyncCrawlRunnerSavesOffTheEventLoop:
             # network work.
             return {"results": [], "submitted_count": 0}
 
-        monkeypatch.setattr("app.api.async_crawl_runner.execute_crawl", _fake_execute)
+        monkeypatch.setattr("crawlutron.api.async_crawl_runner.execute_crawl", _fake_execute)
 
         async def scenario() -> int:
             await asyncio.wait_for(
@@ -364,7 +364,7 @@ class TestSpillAssemblyOffTheEventLoop:
         """A corrupt spill row that makes ``_response`` raise must still close
         the spill and release its lock before the error propagates.
         """
-        from app.orchestration.engine import ResultSpill
+        from crawlutron.orchestration.engine import ResultSpill
 
         spill_path = str(tmp_path / "crawl.spill.ndjson")
         raised: list[BaseException] = []
@@ -401,8 +401,8 @@ class TestSpillAssemblyOffTheEventLoop:
         """A raise in the crawl BODY (after the spill is created) must still close the
         spill and release its lock; the old guard only wrapped ``_response`` (#221).
         """
-        import app.orchestration.engine as engine
-        import app.orchestration.request_pipeline as pipeline
+        import crawlutron.orchestration.engine as engine
+        import crawlutron.orchestration.request_pipeline as pipeline
 
         # GC releasing the lock is not the contract -- an explicit close() is. Track the call.
         closed: list[bool] = []

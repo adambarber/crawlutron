@@ -1,8 +1,8 @@
 """The three cookie paths round-trip through one per-namespace cookie-store concept (#123)."""
 
-from app.storage.coordination_cookies import SharedCookieStore
-from app.transport.cookie_jar import CookieJar
-from app.transport.cookie_store import CookieStore, InMemoryCookieStore
+from crawlutron.storage.coordination_cookies import SharedCookieStore
+from crawlutron.transport.cookie_jar import CookieJar
+from crawlutron.transport.cookie_store import CookieStore, InMemoryCookieStore
 from tests._policy_factories import canonical
 
 
@@ -15,7 +15,7 @@ def test_cookie_store_protocol_is_declared():
 
 def test_inmemory_medium_is_the_jar_and_the_browser_backing():
     """Both process-local paths share the one in-memory medium, observable by behavior."""
-    from app.transport import browser_cookies
+    from crawlutron.transport import browser_cookies
 
     # The browser path stores and reads through the same per-namespace LRU medium the jar
     # uses: behaviorally it must round-trip and evict on the shared cap, not a bespoke mapping.
@@ -38,7 +38,7 @@ def test_jar_browser_and_shared_store_round_trip_through_the_concept():
     assert jar.cookie_header_for(canonical("http://a.example/")) == "k=v"
     assert jar.cookie_header_for(canonical("http://a.example/")) == "k=v"
 
-    from app.transport import browser_cookies
+    from crawlutron.transport import browser_cookies
 
     browser_cookies.store_browser_cookies("b.example", "s=1")
     assert browser_cookies.get_browser_cookies_for("b.example") == "s=1"

@@ -8,8 +8,8 @@ import threading
 from collections.abc import Iterator
 from typing import Any
 
-import app.transport.content_cache as cc
-from app.transport.content_cache import ContentCache
+import crawlutron.transport.content_cache as cc
+from crawlutron.transport.content_cache import ContentCache
 
 
 @contextlib.contextmanager

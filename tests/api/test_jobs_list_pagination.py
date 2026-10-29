@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.vocabulary.limits import DEFAULT_JOB_LIST_LIMIT, MAX_JOB_LIST_LIMIT
+from crawlutron.vocabulary.limits import DEFAULT_JOB_LIST_LIMIT, MAX_JOB_LIST_LIMIT
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 

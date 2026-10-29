@@ -3,7 +3,7 @@ bind is 127.0.0.1, and only an explicit ``CRAWLUTRON_HOST=0.0.0.0`` (as the comp
 file sets, where the loopback port mapping is the external control) exposes it.
 """
 
-from app.config.settings import CrawlerSettings
+from crawlutron.config.settings import CrawlerSettings
 
 
 def test_default_bind_is_loopback():

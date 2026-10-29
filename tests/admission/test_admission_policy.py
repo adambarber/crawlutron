@@ -6,19 +6,19 @@ from unittest.mock import patch
 
 import pytest
 
-from app.admission.admission import requeue_admitted_pages
-from app.admission.payload_helpers import payload_policy
-from app.admission.policy import PolicyTier, validate_wire_policy
-from app.models.crawl_request import CrawlRequest
-from app.models.host_policy import HostPolicy
-from app.models.normalized_url import NormalizedUrl
-from app.runtime.pressure_sizing import (
+from crawlutron.admission.admission import requeue_admitted_pages
+from crawlutron.admission.payload_helpers import payload_policy
+from crawlutron.admission.policy import PolicyTier, validate_wire_policy
+from crawlutron.models.crawl_request import CrawlRequest
+from crawlutron.models.host_policy import HostPolicy
+from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.runtime.pressure_sizing import (
     BROWSER_RAM_FRACTION,
     TaskRamBudget,
     WeightedAdmission,
     build_admission_policy,
 )
-from app.storage.job_store import FrontierEntry
+from crawlutron.storage.job_store import FrontierEntry
 from tests._admission_doubles import PinnedGate
 from tests._admission_doubles import no_crawl_delay as _no_crawl_delay
 from tests._fetcher_factories import crawled_results
@@ -282,7 +282,7 @@ def test_requeue_honors_the_threaded_known_set():
     known = {canonical("https://near.test/")}
 
     with patch(
-        "app.admission.admission.admitted_page_identities",
+        "crawlutron.admission.admission.admitted_page_identities",
         side_effect=AssertionError("threaded set re-derived"),
     ):
         outcome = requeue_admitted_pages(

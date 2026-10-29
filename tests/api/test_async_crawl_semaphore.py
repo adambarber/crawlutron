@@ -8,10 +8,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.api.async_crawl_runner import run_async_crawl
-from app.models.crawl_request import CrawlRequest
-from app.storage.job_store import JobStatus
-from app.storage.result_store import CrawlResultStore
+from crawlutron.api.async_crawl_runner import run_async_crawl
+from crawlutron.models.crawl_request import CrawlRequest
+from crawlutron.storage.job_store import JobStatus
+from crawlutron.storage.result_store import CrawlResultStore
 from tests._api_harnesses import run_with_webhook as _run_with_webhook
 
 
@@ -37,7 +37,7 @@ class TestSemaphoreHoldsTheCrawlOnly:
     def _width_one(self, monkeypatch):
         """Pin the semaphore to width 1 so one held slot blocks the next crawl."""
         monkeypatch.setenv("CRAWLUTRON_MAX_WEBHOOK_CONCURRENCY", "1")
-        from app.api.async_crawl_runner import reset_process_state
+        from crawlutron.api.async_crawl_runner import reset_process_state
 
         reset_process_state()
         yield
@@ -45,7 +45,7 @@ class TestSemaphoreHoldsTheCrawlOnly:
 
     async def test_a_queued_job_is_not_claimed_running_while_waiting_for_the_slot(self, job_store, tmp_path):
         """While the semaphore is held by another crawl, the queued row stays PENDING."""
-        from app.api.async_crawl_runner import async_crawl_semaphore
+        from crawlutron.api.async_crawl_runner import async_crawl_semaphore
 
         request_id = "crawl_queued_pending"
         _seed_single_shot(job_store, request_id)
@@ -74,7 +74,7 @@ class TestSemaphoreHoldsTheCrawlOnly:
 
     async def test_the_webhook_delivery_runs_outside_the_crawl_semaphore(self, job_store, tmp_path):
         """A retrying webhook must not hold the crawl slot (#463)."""
-        from app.api.async_crawl_runner import async_crawl_semaphore
+        from crawlutron.api.async_crawl_runner import async_crawl_semaphore
 
         request_id = "crawl_delivery_outside"
         _seed_single_shot(job_store, request_id)
@@ -90,8 +90,8 @@ class TestSemaphoreHoldsTheCrawlOnly:
             nonlocal delivery_seen_inside
             delivery_seen_inside = async_crawl_semaphore().locked()
 
-        with patch("app.api.async_crawl_runner.execute_crawl", new=quick_crawl):
-            with patch("app.api.webhooks.post_webhook_guarded", new=watching_delivery):
+        with patch("crawlutron.api.async_crawl_runner.execute_crawl", new=quick_crawl):
+            with patch("crawlutron.api.webhooks.post_webhook_guarded", new=watching_delivery):
                 await run_async_crawl(
                     request_id,
                     CrawlRequest.model_validate({"url": "http://example.com/"}),

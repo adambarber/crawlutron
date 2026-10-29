@@ -6,7 +6,7 @@ PRAGMA statements confined to it (PRAGMAs are connection-scoped)."""
 import ast
 import sqlite3
 
-from app.storage.result_store import CrawlResultStore
+from crawlutron.storage.result_store import CrawlResultStore
 from tests._job_harnesses import make_job_store
 from tests.chokepoint_walks import (
     app_trees,

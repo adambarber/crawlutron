@@ -9,7 +9,7 @@ import threading
 import time
 from contextlib import contextmanager
 
-from app.storage.sqlite_store import configure_store_connection
+from crawlutron.storage.sqlite_store import configure_store_connection
 
 
 def _delete_mode_database(path: str) -> None:

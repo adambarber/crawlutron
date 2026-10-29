@@ -48,8 +48,8 @@ class TestRecursiveCrawl:
         Two layers read 0 as unbounded, so the API edge substitutes a default --
         without this pin, the dispatch loop would quietly crawl nothing.
         """
-        from app.admission.policy import validate_wire_policy
-        from app.models.crawl_policy import CrawlPolicy as PolicyModel
+        from crawlutron.admission.policy import validate_wire_policy
+        from crawlutron.models.crawl_policy import CrawlPolicy as PolicyModel
 
         assert PolicyModel.model_fields["limits"].annotation.model_fields["max_pages"].default == 0, (
             "the model default is the 'unbounded' sentinel this edge substitutes"

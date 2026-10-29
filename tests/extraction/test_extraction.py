@@ -2,14 +2,14 @@
 
 import asyncio
 
-from app.extraction.content import (
+from crawlutron.extraction.content import (
     ExtractedContent,
     extract_html,
     is_html,
     looks_like_document,
     text_from_html,
 )
-from app.extraction.doc_pool import doc_task_hooks, install_doc_pool_hooks
+from crawlutron.extraction.doc_pool import doc_task_hooks, install_doc_pool_hooks
 from tests._extraction_helpers import (
     detect_pagination,
     doc_worker_acquisitions,
@@ -186,8 +186,8 @@ class TestKatanaDiscovery:
 
 async def test_extract_document_skips_oversized_input(monkeypatch):
     """#mem-guard: markitdown workers must never receive unbounded input."""
-    import app.extraction.content as ex
-    import app.extraction.documents as docex
+    import crawlutron.extraction.content as ex
+    import crawlutron.extraction.documents as docex
 
     acquisitions = doc_worker_acquisitions(monkeypatch)
     monkeypatch.setattr(docex, "EXTRACTION_DOC_MAX_INPUT_BYTES", 100)

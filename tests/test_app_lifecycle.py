@@ -27,7 +27,7 @@ def _booted_app(monkeypatch, *, workers: str | None = None):
 
     The fleet boot and shared database need a RUNNING service; written twice,
     the two setups drifted into being different."""
-    from app import main as main_mod
+    from crawlutron import main as main_mod
 
     if workers is not None:
         monkeypatch.setenv("CRAWLUTRON_WORKERS", workers)
@@ -56,7 +56,7 @@ class TestMultiWorkerInvariants:
 
         A source read cannot see a reintroduced guard and does not prove the
         service starts; driving the real lifespan asserts what startup built."""
-        from app.storage.coordination_cookies import SharedCookieStore
+        from crawlutron.storage.coordination_cookies import SharedCookieStore
 
         app = _booted_app(monkeypatch, workers="4")
 
@@ -70,7 +70,7 @@ class TestMultiWorkerInvariants:
         A correct `derive_browser_pool_size` that production never calls is an
         unused function and an over-subscribed fleet.
         """
-        from app.runtime.pressure_sizing import derive_browser_pool_size
+        from crawlutron.runtime.pressure_sizing import derive_browser_pool_size
 
         monkeypatch.setenv("CRAWLUTRON_WORKERS", "4")
         monkeypatch.setenv("CRAWLUTRON_BROWSER_POOL_SIZE", "")
@@ -81,11 +81,11 @@ class TestMultiWorkerInvariants:
 
         A per-process path would pass each store's own test; the path is read
         from each live connection's ``PRAGMA database_list``, not the argument."""
-        from app.main import DATABASE_PATH, job_store, result_store
-        from app.runtime.metrics import get_metrics
-        from app.storage.coordination_cookies import SharedCookieStore
-        from app.storage.coordination_counters import CoordinationCounters
-        from app.transport.cookie_jar import CookieJar
+        from crawlutron.main import DATABASE_PATH, job_store, result_store
+        from crawlutron.runtime.metrics import get_metrics
+        from crawlutron.storage.coordination_cookies import SharedCookieStore
+        from crawlutron.storage.coordination_counters import CoordinationCounters
+        from crawlutron.transport.cookie_jar import CookieJar
 
         app = _booted_app(monkeypatch)
 
@@ -114,9 +114,9 @@ class TestAppLifecycleEdges:
     """Cover remaining branches in main.py"""
 
     def test_main_import_error_handling(self):
-        import app.main
+        import crawlutron.main
 
-        assert (app.main) is not None
+        assert (crawlutron.main) is not None
 
     async def test_render_endpoint_value_error(self, async_client):
         # Own the premise explicitly: ordering must never decide it.
@@ -133,7 +133,7 @@ class TestAppLifecycleEdges:
     async def test_crawl_endpoint_webhook_error(self, async_client, caplog, monkeypatch):
         # Crawl a valid URL whose webhook is undeliverable: best-effort delivery
         # must not crash the request, and the loss must be recorded.
-        from app.api import async_crawl_runner
+        from crawlutron.api import async_crawl_runner
 
         async def _failing_crawl(*args, **kwargs):
             raise RuntimeError("scripted crawl failure (#513)")
@@ -141,7 +141,7 @@ class TestAppLifecycleEdges:
         # #513: the crawl is stubbed at the runner's execute seam so the failure path
         # runs without real robots/DNS I/O -- the #513 flake was this I/O exceeding the window.
         monkeypatch.setattr(async_crawl_runner, "execute_crawl", _failing_crawl)
-        with caplog.at_level(logging.WARNING, logger="app.api.webhooks"):
+        with caplog.at_level(logging.WARNING, logger="crawlutron.api.webhooks"):
             resp = await async_client.post(
                 "/v1/crawl", json={"url": "http://example.com/", "webhook_url": "http://unreachable.invalid/"}
             )
@@ -152,8 +152,8 @@ class TestAppLifecycleEdges:
 
         # #513: await the runner task itself (the 202 body carries its request_id) --
         # the failure webhook posts inline inside it, so no dispatch race is possible.
-        from app.api.job_lifecycle import tracked_task
-        from app.api.webhooks import drain_webhook_deliveries
+        from crawlutron.api.job_lifecycle import tracked_task
+        from crawlutron.api.webhooks import drain_webhook_deliveries
 
         def _delivery_failed() -> bool:
             return any(
@@ -190,7 +190,7 @@ class TestLifespanContextManager:
 
         The ``_lifespan(None)`` shape wrote the event to ``_app.state``, so
         ``None`` raised at startup; the decorator cannot see that."""
-        from app.main import app
+        from crawlutron.main import app
 
         async with app.router.lifespan_context(app):
             assert isinstance(app.state.shutdown_event, asyncio.Event)

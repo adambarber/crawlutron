@@ -4,9 +4,9 @@ import time
 
 import pytest
 
-import app.transport.document as doc_mod
-from app.transport.browser import make_ssrf_route_handler, resolve_browser_target
-from app.transport.pinned_transport import build_pinned_request, build_pinned_request_async
+import crawlutron.transport.document as doc_mod
+from crawlutron.transport.browser import make_ssrf_route_handler, resolve_browser_target
+from crawlutron.transport.pinned_transport import build_pinned_request, build_pinned_request_async
 from tests._assertions import block_private_targets
 from tests._browser_doubles import (
     BrowserFakePage,
@@ -52,7 +52,7 @@ async def test_document_extractor_invokes_ssrf_check(monkeypatch):
     monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     monkeypatch.setattr(socket, "getaddrinfo", fake_resolve)
     with patch(
-        "app.transport.http_client_pool.get_async_http_client",
+        "crawlutron.transport.http_client_pool.get_async_http_client",
         return_value=scripted_transport_client([MockResponse(200, {"content-type": "application/pdf"}, b"")]),
     ):
         doc_mod.default_document_text_extractor(canonical("http://example.com/x.pdf"))
@@ -212,7 +212,7 @@ async def test_route_handler_resolve_is_bounded_by_the_dns_posture(monkeypatch):
     """A resolver that outlasts the DNS posture must not hold the route handler
     open (#405): the handler aborts fail-closed within the posture, not when the
     pin's own hang ends."""
-    from app.transport import pinned_transport
+    from crawlutron.transport import pinned_transport
 
     monkeypatch.setattr(pinned_transport, "DNS_WAIT_SECONDS", 0.2)
     handler = make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY, pin=_hanging_pin())
@@ -233,8 +233,8 @@ async def test_route_handler_resolve_honors_the_render_budget_parameter(monkeypa
 async def test_websocket_handler_resolve_is_bounded_by_the_dns_posture(monkeypatch):
     """The websocket guard's resolve carries the same bound: a hung resolver
     closes the socket within the posture instead of stalling the upgrade."""
-    from app.transport import pinned_transport
-    from app.transport.browser_targets import make_ssrf_websocket_handler
+    from crawlutron.transport import pinned_transport
+    from crawlutron.transport.browser_targets import make_ssrf_websocket_handler
 
     monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     monkeypatch.setattr(pinned_transport, "DNS_WAIT_SECONDS", 0.2)
@@ -263,7 +263,7 @@ async def test_websocket_handler_resolve_is_bounded_by_the_dns_posture(monkeypat
 async def test_resolver_budget_timeout_is_a_resolution_failure_not_a_navigation_timeout(monkeypatch):
     """#405: when the bounded resolve outlasts the render budget, the caller gets
     the classifiable resolution failure (dns_error), not navigation_timeout."""
-    from app.models.render_options import RenderOptions
+    from crawlutron.models.render_options import RenderOptions
 
     block_private_targets(monkeypatch)
     monkeypatch.setattr(socket, "getaddrinfo", _hanging_resolver(7.0))

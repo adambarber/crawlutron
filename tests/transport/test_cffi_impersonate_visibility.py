@@ -5,8 +5,8 @@ import ssl
 import pytest
 from curl_cffi.requests.exceptions import SSLError as CffiSSLError
 
-import app.transport.http_client_pool as http_mod
-from app.transport.fetchers import default_http_fetcher
+import crawlutron.transport.http_client_pool as http_mod
+from crawlutron.transport.fetchers import default_http_fetcher
 from tests._policy_factories import canonical
 
 
@@ -41,7 +41,7 @@ async def test_tls_handshake_failure_is_not_silently_served_by_httpx(monkeypatch
 async def test_cffi_ssl_error_classifies_as_tls_error():
     """The classification table owns the verdict: curl_cffi TLS failures are
     tls_error, so the ladder reports them instead of misreading the wire."""
-    from app.transport.classification import classify_error_code
+    from crawlutron.transport.classification import classify_error_code
 
     assert classify_error_code(CffiSSLError("handshake failure")) == "tls_error"
     assert classify_error_code(ssl.SSLError("x")) == "tls_error"

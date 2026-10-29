@@ -2,8 +2,8 @@
 
 import asyncio
 
-from app.config.settings import CrawlerSettings
-from app.transport.scheduler import DomainScheduler
+from crawlutron.config.settings import CrawlerSettings
+from crawlutron.transport.scheduler import DomainScheduler
 
 
 def test_scheduler_instances_have_independent_state():

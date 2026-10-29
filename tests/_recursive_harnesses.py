@@ -10,8 +10,8 @@ import inspect
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, NamedTuple
 
-from app.models.crawl_task import CrawlTask
-from app.orchestration.recursive import run_recursive_crawl
+from crawlutron.models.crawl_task import CrawlTask
+from crawlutron.orchestration.recursive import run_recursive_crawl
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 from tests._result_builders import Spill, make_engine_result
 from tests._scheduler_doubles import FakeScheduler
@@ -19,10 +19,10 @@ from tests._scheduler_doubles import FakeScheduler
 if TYPE_CHECKING:
     # The types the harness only names, not the ones it builds: kept out of the
     # runtime imports so this file does not restate the module's own import block.
-    from app.models.crawl_result import EngineCrawlResult
-    from app.models.host_policy import HostPolicy
-    from app.models.normalized_url import NormalizedUrl
-    from app.runtime.pressure_sizing import WeightedAdmission
+    from crawlutron.models.crawl_result import EngineCrawlResult
+    from crawlutron.models.host_policy import HostPolicy
+    from crawlutron.models.normalized_url import NormalizedUrl
+    from crawlutron.runtime.pressure_sizing import WeightedAdmission
 
 __all__ = ["ContentionFreeGate", "RecursiveRun", "drive_recursive_crawl", "make_crawl_task"]
 

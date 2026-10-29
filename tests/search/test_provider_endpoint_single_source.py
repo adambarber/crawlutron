@@ -6,12 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from app.search.providers import PROVIDER_ENDPOINTS
+from crawlutron.search.providers import PROVIDER_ENDPOINTS
 
 _MODULES = [
-    Path("app/search/providers.py"),
-    Path("app/search/providers_api.py"),
-    Path("app/search/providers_html.py"),
+    Path("crawlutron/search/providers.py"),
+    Path("crawlutron/search/providers_api.py"),
+    Path("crawlutron/search/providers_html.py"),
 ]
 
 # Anything that looks like a URL literal, including the scheme-relative DDG
@@ -26,7 +26,7 @@ def _url_literals(path: Path) -> set[str]:
 def test_registry_matches_declared_urls() -> None:
     root = Path(__file__).resolve().parents[2]
     for url in PROVIDER_ENDPOINTS:
-        assert url in _url_literals(root / "app/search/providers.py"), url
+        assert url in _url_literals(root / "crawlutron/search/providers.py"), url
 
 
 @pytest.mark.parametrize("module", _MODULES[1:], ids=lambda p: p.name)

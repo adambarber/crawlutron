@@ -37,7 +37,7 @@ def _undecodable_encoding_offenders(tree, path, *, decodable: set[str] | None = 
             return
         for token in sorted(tokens - decodable):
             seen[(node.lineno, token)] = (
-                f"{path.name}:{node.lineno} advertises {token!r}, which app/transport/decompression "
+                f"{path.name}:{node.lineno} advertises {token!r}, which crawlutron/transport/decompression "
                 f"cannot decode here (decodable: {', '.join(sorted(decodable))})"
             )
 

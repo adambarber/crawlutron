@@ -4,8 +4,8 @@ The pre-fix ``max(1, ...)`` clamped an unbounded (0) crawl to one page/pass;
 the fix reads the cap through ``remaining_page_capacity`` (no term when 0).
 """
 
-from app.orchestration.recursive import admit_recursive_batch
-from app.runtime.metrics import get_metrics
+from crawlutron.orchestration.recursive import admit_recursive_batch
+from crawlutron.runtime.metrics import get_metrics
 from tests._admission_runs import minimum_admission_run as _minimum_admission_run
 from tests._recursive_harnesses import make_crawl_task
 

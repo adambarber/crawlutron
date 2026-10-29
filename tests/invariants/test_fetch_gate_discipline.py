@@ -26,25 +26,25 @@ from tests.rules import Bites, Rule
 # The four fetch executors a door (HTTP or MCP) must reach through request_gate.
 _GATED_FETCH_EXECUTORS = frozenset(
     {
-        "app.api.crawl_executor.execute_crawl",
-        "app.api.map_endpoint.map_site",
-        "app.api.render_endpoint.render",
-        "app.search.endpoint.search",
+        "crawlutron.api.crawl_executor.execute_crawl",
+        "crawlutron.api.map_endpoint.map_site",
+        "crawlutron.api.render_endpoint.render",
+        "crawlutron.search.endpoint.search",
     }
 )
 
 # The one executor-calling executor (map_site -> execute_crawl); resolved
 # structurally from map_endpoint.py's own tree, not by exempting a name.
-_INNER_EXECUTOR_EDGE = ("app.api.map_endpoint.map_site", "app.api.crawl_executor.execute_crawl")
-_MAP_ENDPOINT = REPO_ROOT / "app" / "api" / "map_endpoint.py"
+_INNER_EXECUTOR_EDGE = ("crawlutron.api.map_endpoint.map_site", "crawlutron.api.crawl_executor.execute_crawl")
+_MAP_ENDPOINT = REPO_ROOT / "crawlutron" / "api" / "map_endpoint.py"
 
 # Background workers run the same executor off the readiness path, holding a durable
 # job row rather than a slot; they are not doors and need no request_gate.
 _GATED_FETCH_BACKGROUND = frozenset(
     {
-        "app/api/async_crawl_runner.py",
-        "app/api/job_runner.py",
-        "app/api/watch_sweep.py",
+        "crawlutron/api/async_crawl_runner.py",
+        "crawlutron/api/job_runner.py",
+        "crawlutron/api/watch_sweep.py",
     }
 )
 
@@ -139,7 +139,7 @@ def _inner_edge_callers() -> frozenset[str]:
 
 
 def _module_of(path: pathlib.Path) -> str:
-    """``app/api/map_endpoint.py`` -> ``app.api.map_endpoint``: the scanned file's own module."""
+    """``crawlutron/api/map_endpoint.py`` -> ``crawlutron.api.map_endpoint``: the file's own module."""
     return path.relative_to(REPO_ROOT).with_suffix("").as_posix().replace("/", ".")
 
 
@@ -183,18 +183,18 @@ FETCH_EXECUTORS_REACH_WORK_ONLY_THROUGH_THE_GATE = Rule(
     find=_ungated_fetch_executor_offenders,
     summary=(
         "a fetch executor (crawl/map/render/search) must be reached only under "
-        "app.api.main_helpers.request_gate, so /ready counts the work and the cap refuses it"
+        "crawlutron.api.main_helpers.request_gate, so /ready counts the work and the cap refuses it"
     ),
     skip=_GATED_FETCH_BACKGROUND,
     bite=lambda: Bites(
-        "from app.api.map_endpoint import map_site\n"
+        "from crawlutron.api.map_endpoint import map_site\n"
         "async def handle_map(payload, settings, shutdown_event):\n"
         "    return await map_site(payload, settings=settings, shutdown_event=shutdown_event)\n",
         "map_site",
     ),
     clean=lambda: (
-        "from app.api.map_endpoint import map_site\n"
-        "from app.api.main_helpers import request_gate\n"
+        "from crawlutron.api.map_endpoint import map_site\n"
+        "from crawlutron.api.main_helpers import request_gate\n"
         "async def handle_map(payload, settings):\n"
         '    with request_gate("map_request_rejected", logger=logger):\n'
         "        return await map_site(payload, settings=settings)\n",

@@ -1,8 +1,8 @@
 from http.server import BaseHTTPRequestHandler
 
-from app.transport import cookie_jar
-from app.transport.cookie_jar import CookieJar
-from app.transport.request_profile import store_set_cookies
+from crawlutron.transport import cookie_jar
+from crawlutron.transport.cookie_jar import CookieJar
+from crawlutron.transport.request_profile import store_set_cookies
 from tests._fetcher_factories import run_default_http_fetcher
 from tests._policy_factories import canonical
 from tests._transport_doubles import MockResponse, patch_http_fetcher_transport

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.models.http_fetch_result import HttpFetchResult
+from crawlutron.models.http_fetch_result import HttpFetchResult
 
 
 @dataclass(frozen=True, slots=True)

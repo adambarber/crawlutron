@@ -6,10 +6,10 @@ describes; the interesting failure is a projection drifting from the shape.
 import pytest
 from fastapi import HTTPException
 
-from app.api.crawl_endpoint import get_crawl_trace
-from app.storage.job_store import JobStatus
-from app.storage.result_store import CrawlResultStore
-from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
+from crawlutron.api.crawl_endpoint import get_crawl_trace
+from crawlutron.storage.job_store import JobStatus
+from crawlutron.storage.result_store import CrawlResultStore
+from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._assertions import completed_crawl
 from tests._fetcher_factories import make_crawl_payload
 from tests._policy_factories import canonical

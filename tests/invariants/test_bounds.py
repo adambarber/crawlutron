@@ -92,7 +92,7 @@ HTML_INPUT_CAP = Rule(
     find=_local_html_input_caps,
     summary=(
         "declares a second HTML input byte cap; import MAX_HTML_INPUT_BYTES from "
-        "app/safety/bounded_io.py and call truncate_html_input instead"
+        "crawlutron/safety/bounded_io.py and call truncate_html_input instead"
     ),
     # owner: bounded_io.py is the cap itself
     excludes=SANCTIONED | {"bounded_io.py"},
@@ -107,7 +107,7 @@ HTML_INPUT_CAP = Rule(
     ),
     clean=lambda: (
         # The sanctioned import-and-delegate shape.
-        "from app.safety.bounded_io import MAX_HTML_INPUT_BYTES, truncate_html_input\n",
+        "from crawlutron.safety.bounded_io import MAX_HTML_INPUT_BYTES, truncate_html_input\n",
         "body = truncate_html_input(html)\n",
         # Unrelated byte budgets: the sink has its own, and it is not HTML input.
         "MAX_WEBHOOK_RESPONSE_BYTES = 10_485_760\n",
@@ -153,22 +153,22 @@ def _decompress_cap_proofs() -> tuple[Bites, ...]:
     return (
         Bites("def f(raw, enc):\n" + calls.format(call="decompress_body"), "without max_output_bytes"),
         Bites(
-            "import app.transport.decompression as compression\ndef f(raw, enc):\n"
+            "import crawlutron.transport.decompression as compression\ndef f(raw, enc):\n"
             + calls.format(call="compression.decompress_body"),
             "without max_output_bytes",
         ),
         Bites(
-            "from app.transport.decompression import decompress_body as decode\ndef f(raw, enc):\n"
+            "from crawlutron.transport.decompression import decompress_body as decode\ndef f(raw, enc):\n"
             + calls.format(call="decode"),
             "without max_output_bytes",
         ),
         Bites(
-            "from app.transport.decompression import decompress_body\ndecode = decompress_body\n"
+            "from crawlutron.transport.decompression import decompress_body\ndecode = decompress_body\n"
             "def f(raw, enc):\n" + calls.format(call="decode"),
             "without max_output_bytes",
         ),
         Bites(
-            "import app.transport.decompression as compression\ndef f(raw, enc):\n"
+            "import crawlutron.transport.decompression as compression\ndef f(raw, enc):\n"
             + calls.format(call="getattr(compression, 'decompress_body')"),
             "without max_output_bytes",
         ),
@@ -251,7 +251,7 @@ DECOMPRESS_BYPASS = Rule(
         ),
     ),
     clean=lambda: (
-        "from app.transport.decompression import decompress_body\n"
+        "from crawlutron.transport.decompression import decompress_body\n"
         "def f(raw, hdr):\n"
         "    return decompress_body(raw, hdr.get('content-encoding', ''), max_output_bytes=1024)\n",
     ),
@@ -264,7 +264,7 @@ _DISCOVERY_FETCH = "fetch_decode_discovery"
 
 
 # The chokepoint module that legitimately owns what it bans.
-_DISCOVERY_CHOKEPOINT = "app/transport/fetch_helpers.py"
+_DISCOVERY_CHOKEPOINT = "crawlutron/transport/fetch_helpers.py"
 
 
 def _is_discovery_fetch(value: ast.AST | None) -> bool:

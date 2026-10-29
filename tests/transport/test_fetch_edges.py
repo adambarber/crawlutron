@@ -5,25 +5,25 @@ import gzip
 import brotli
 import pytest
 
-from app.admission.payload_helpers import checked_payload_urls
-from app.admission.policy import read_policy
-from app.config.settings import CrawlerSettings
-from app.extraction.content import forms_from
-from app.extraction.document_text import format_extracted_document_text
-from app.extraction.trees import walkable
-from app.models.crawl_request import CrawlRequest
-from app.models.normalized_url import NormalizedUrl
-from app.orchestration.engine import crawl_request
-from app.safety.validation import HostPolicy
-from app.transport.cache import HttpCache
-from app.transport.fetch_policy import looks_like_binary_body
-from app.transport.request_profile import (
+from crawlutron.admission.payload_helpers import checked_payload_urls
+from crawlutron.admission.policy import read_policy
+from crawlutron.config.settings import CrawlerSettings
+from crawlutron.extraction.content import forms_from
+from crawlutron.extraction.document_text import format_extracted_document_text
+from crawlutron.extraction.trees import walkable
+from crawlutron.models.crawl_request import CrawlRequest
+from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.orchestration.engine import crawl_request
+from crawlutron.safety.validation import HostPolicy
+from crawlutron.transport.cache import HttpCache
+from crawlutron.transport.fetch_policy import looks_like_binary_body
+from crawlutron.transport.request_profile import (
     cookie_header_for_url,
     headers_for_strategy,
     select_fingerprint,
 )
-from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
-from app.vocabulary.taxonomy import status_for_classification
+from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
+from crawlutron.vocabulary.taxonomy import status_for_classification
 from tests._extraction_helpers import extract_discovered_links
 from tests._fetcher_factories import ok_fetcher, routed_fetcher
 from tests._http_fetch_doubles import FEED_ADVERTISING_PAGE
@@ -251,13 +251,13 @@ class TestFingerprintInjectionRotation:
 
 class TestQualityScore:
     def test_http_quality_score_failed(self):
-        from app.transport.body_decode import quality_score
+        from crawlutron.transport.body_decode import quality_score
 
         score = quality_score("failed", "network_error", None, None, None)
         assert score == 0.0
 
     def test_http_quality_score_empty_text(self):
-        from app.transport.body_decode import quality_score
+        from crawlutron.transport.body_decode import quality_score
 
         score = quality_score("success", "rendered", "", None, 200)
         assert score > 0.0
@@ -310,7 +310,7 @@ class TestFetchHelpersEdges:
     )
     def test_quality_score_reuses_precomputed_metrics(self, text, html):
         """Dup8: threading the diagnostics metrics in must not change the score."""
-        from app.transport.body_decode import content_metrics
+        from crawlutron.transport.body_decode import content_metrics
 
         metrics = content_metrics(text, html)
         direct = quality_score("success", "rendered", text, html, 200)
@@ -346,7 +346,7 @@ class TestAcceptEncodingAdvertisesOnlyWhatWeCanDecode:
         import gzip
         import zlib
 
-        from app.transport.decompression import decompress_body
+        from crawlutron.transport.decompression import decompress_body
 
         payload = b"<html>hello</html>"
         for encoding, compressed in (
@@ -359,7 +359,7 @@ class TestAcceptEncodingAdvertisesOnlyWhatWeCanDecode:
     def test_the_header_advertises_only_decodable_encodings(self):
         # The negative direction: the list is not merely "includes br", it names nothing outside the decoder
         # set, so a future token cannot slip in.
-        from app.transport.decompression import DECODABLE_ENCODINGS
+        from crawlutron.transport.decompression import DECODABLE_ENCODINGS
 
         headers = headers_for_strategy(
             HTTP_DECLARED_CRAWLER, read_policy({"headers": {}}), canonical("http://e.com/")

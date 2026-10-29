@@ -7,14 +7,14 @@ capture is the pipeline's on the crawl path, payload is the caller's include_htm
 import pytest
 from pydantic import ValidationError
 
-from app.admission.policy import read_policy
-from app.admission.render_options import policy_wants_html, resolve_render_options
-from app.api.render import render_options_for
-from app.config.settings import CrawlerSettings
-from app.models.render_options import RenderOptions
-from app.models.render_request import RenderRequest
-from app.transport.browser_result import browser_strategy_result
-from app.vocabulary.limits import MAX_HEADER_VALUE_BYTES, MAX_HTTP_TIMEOUT_SECONDS, MAX_RETRIES
+from crawlutron.admission.policy import read_policy
+from crawlutron.admission.render_options import policy_wants_html, resolve_render_options
+from crawlutron.api.render import render_options_for
+from crawlutron.config.settings import CrawlerSettings
+from crawlutron.models.render_options import RenderOptions
+from crawlutron.models.render_request import RenderRequest
+from crawlutron.transport.browser_result import browser_strategy_result
+from crawlutron.vocabulary.limits import MAX_HEADER_VALUE_BYTES, MAX_HTTP_TIMEOUT_SECONDS, MAX_RETRIES
 from tests._browser_doubles import _fake_browser
 from tests._fetcher_factories import strategy_request
 

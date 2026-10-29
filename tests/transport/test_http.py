@@ -1,13 +1,13 @@
 """HTTP fetch strategy behavior against a real local server (no mocks)."""
 
-from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
-from app.transport.cache import HttpCache
-from app.transport.fetch_policy import looks_like_binary_body
-from app.transport.fetchers import default_http_fetcher
-from app.transport.http import http_strategy_result
-from app.transport.results import crawl_result_from_engine_result
-from app.vocabulary.extraction import EXTRACTION_FULL
-from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
+from crawlutron.models.crawl_strategy_attempt import CrawlStrategyAttempt
+from crawlutron.transport.cache import HttpCache
+from crawlutron.transport.fetch_policy import looks_like_binary_body
+from crawlutron.transport.fetchers import default_http_fetcher
+from crawlutron.transport.http import http_strategy_result
+from crawlutron.transport.results import crawl_result_from_engine_result
+from crawlutron.vocabulary.extraction import EXTRACTION_FULL
+from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._assertions import assert_result_success
 from tests._fetcher_factories import (
     request_fetcher,
@@ -252,7 +252,7 @@ class TestHttpStrategy:
 async def test_recursive_crawl_drops_sitewide_lists_from_page_diagnostics(monkeypatch):
     # During recursive crawls, site-wide sitemap/feed URL lists are frontier seeds, not per-page payload --
     # returning them on every page's diagnostics wastes memory across thousands of pages.
-    import app.transport.fetch_policy as http_mod
+    import crawlutron.transport.fetch_policy as http_mod
 
     async def fake_diag(**kwargs):
         return {
@@ -281,7 +281,7 @@ async def test_recursive_crawl_drops_sitewide_lists_from_page_diagnostics(monkey
 
 class TestHttpStrategyRetry:
     async def test_http_strategy_with_cffi_retry(self):
-        from app.transport.cache import HttpCache
+        from crawlutron.transport.cache import HttpCache
 
         # The cffi retry is the second step, so the sequence is the fixture: attempt one fails, attempt two
         # succeeds.
