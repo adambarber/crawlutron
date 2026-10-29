@@ -1,0 +1,15 @@
+# Triggered by the google-github-actions/release-please-action on main (#561).
+# CI configs stay non-invasive per the #489 ruling: this file is inert until the
+# repo goes public and Actions are restored -- it must not run against anything.
+on:
+  push:
+    branches: [main]
+name: release-please
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google-github-actions/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
