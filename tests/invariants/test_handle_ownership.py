@@ -47,7 +47,7 @@ HANDLE_MINTING_IS_SINGLE_SOURCED = Rule(
         "so a re-inlined mint is where a shorter slice silently regresses to 48 "
         "bits; mint through app/storage/ids.py"
     ),
-    skip=frozenset({"app/storage/ids.py"}),
+    skip=frozenset({"app/storage/ids.py"}),  # owner: the single mint (entropy policy, 48-bit floor)
     bite=lambda: Trips(
         "import uuid\n\ndef f():\n    return uuid.uuid4().hex[:12]\n",
         count=2,

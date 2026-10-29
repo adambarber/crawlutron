@@ -19,7 +19,7 @@ from tests.rules import Bites, Registry, Rule
 # --------------------------------------------------------------------------- robots.txt scanning
 # ---------------------------------------------------------------------------
 
-_ROBOTS_SCANNER_SANCTIONED = "iter_robots_fields"
+_ROBOTS_SCANNER_SANCTIONED = "iter_robots_fields"  # the sanctioned scanner itself, in robots_parse.py
 
 
 def _robots_scanner_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -70,9 +70,8 @@ ROBOTS_LINE_SCANNER_LIVES_IN_ONE_PLACE = Rule(
 )
 
 
-# --------------------------------------------------------------------------- Test-fake construction:
-# sanctioned builders over hand-built fakes
-
+# Test-fake construction: sanctioned builders over hand-built fakes
+# owners: the sanctioned builder modules themselves
 _FAKE_BUILDER_SANCTIONED = frozenset({"_fetcher_factories.py", "_fetch_doubles.py"})
 
 

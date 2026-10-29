@@ -49,7 +49,7 @@ EXTRACTION_TEXT_NORMALIZATION = Rule(
     name="extraction-text-normalization",
     find=_inline_extraction_normalizations,
     summary="normalizes extraction text inline instead of through extraction.normalized_extraction",
-    excludes=SANCTIONED | {"discovery.py"},  # the module that OWNS normalized_extraction
+    excludes=SANCTIONED | {"discovery.py"},  # owner: discovery.py owns normalized_extraction
     bite=lambda: Bites('def f(e):\n    return e.text or ""\n', "extraction-text-normalization"),
     clean=lambda: ('def f(d):\n    return d.label or ""\n',),
 )
@@ -94,8 +94,7 @@ HTML_INPUT_CAP = Rule(
         "declares a second HTML input byte cap; import MAX_HTML_INPUT_BYTES from "
         "app/safety/bounded_io.py and call truncate_html_input instead"
     ),
-    # app/safety/bounded_io.py is exempt because it IS the chokepoint that owns the cap alongside the stream
-    # caps.
+    # owner: bounded_io.py is the cap itself
     excludes=SANCTIONED | {"bounded_io.py"},
     bite=lambda: (
         # The two historical spellings, verbatim.
@@ -124,7 +123,7 @@ HTML_INPUT_CAP = Rule(
 _DECOMPRESS_FUNCS = frozenset({"decompress_body", "_decompress_body"})
 
 
-_DECOMPRESS_SANCTIONED = frozenset({"decompression.py"})
+_DECOMPRESS_SANCTIONED = frozenset({"decompression.py"})  # owner: the codec chokepoint itself
 
 
 def _decompress_cap_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -307,7 +306,7 @@ DISCOVERY_RESPONSE = Rule(
     name="discovery-response",
     find=_discovery_response_offenders,
     summary="reads a discovery response off the tuple instead of through _Discovery accessors",
-    skip=frozenset({_DISCOVERY_CHOKEPOINT}),
+    skip=frozenset({_DISCOVERY_CHOKEPOINT}),  # owner: builds the Discovery tuple it guards
     bite=lambda: (
         Bites(
             "async def f(fetcher):\n"

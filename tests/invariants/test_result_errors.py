@@ -15,7 +15,7 @@ from tests.chokepoint_walks import (
 from tests.rules import Bites, Registry, Rule, Trips
 
 # --------------------------------------------------------------------------- Error-envelope shape
-ENVELOPE_SANCTIONED = SANCTIONED | {"exceptions.py"}
+ENVELOPE_SANCTIONED = SANCTIONED | {"exceptions.py"}  # owner: builds the factory envelopes itself
 
 
 def _dict_keys(node: ast.Dict) -> set[str]:
@@ -76,6 +76,7 @@ _HAND_ROLLED_ERROR_ENVELOPES_FORBIDDEN = Rule(
 
 # --------------------------------------------------------------------------- Raw exception text never
 
+# owners: build/classify the terminal sinks themselves
 _TERMINAL_RESULT_SANCTIONED = frozenset({"results.py", "classification.py"})
 
 

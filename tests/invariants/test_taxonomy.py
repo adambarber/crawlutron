@@ -57,9 +57,6 @@ def test_the_classification_table_has_no_shadowed_or_mid_table_catch_all_rows():
 
 # --------------------------------------------------------------------------- Classification transience: one
 # verdict, owned by the taxonomy ---------------------------------------------------------------------------
-_TRANSIENCE_HOME_SANCTIONED = frozenset({"constants.py"})
-
-
 _TRANSIENCE_VERDICT_SUFFIXES = ("CLASSIFICATIONS", "CODES", "SET", "LABELS", "STATUSES")
 
 
@@ -128,7 +125,7 @@ TRANSIENCE_VERDICT_HAS_ONE_HOME = Rule(
         "app.vocabulary.taxonomy.is_transient_classification is the single answer for "
         "'is this failure worth another pass'"
     ),
-    excludes=SANCTIONED | _TRANSIENCE_HOME_SANCTIONED,
+    excludes=SANCTIONED,
     bite=lambda: Bites(
         'TRANSIENT_CLASSIFICATIONS = {"dns_error", "network_error"}\n',
         "re-answers the taxonomy's transience verdict",
@@ -150,7 +147,7 @@ TRANSIENCE_VERDICT_HAS_ONE_HOME = Rule(
 
 # --------------------------------------------------------------------------- Classification transience: one
 # verdict, owned by the taxonomy ---------------------------------------------------------------------------
-_ERROR_CHOKEPOINT_SANCTIONED = frozenset({"classification.py"})
+_ERROR_CHOKEPOINT_SANCTIONED = frozenset({"classification.py"})  # owner: defines classify_error_code
 
 
 _NON_EXCEPTION_CLASSIFICATIONS = frozenset(
@@ -211,7 +208,9 @@ HAND_ROLLED_FAILED_RESULTS_GO_THROUGH_THE_CHOKEPOINT = Rule(
 )
 
 
-_POOL_EXHAUSTION_CATCH_SANCTIONED = frozenset({"render.py", "render_endpoint.py", "browser_pool.py"})
+_POOL_EXHAUSTION_CATCH_SANCTIONED = frozenset(
+    {"render.py", "render_endpoint.py", "browser_pool.py"}  # raise the error / serve the 503
+)
 
 
 def _unsanctioned_pool_exhaustion_catch_offenders(tree, path):

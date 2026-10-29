@@ -46,7 +46,7 @@ CACHE_ENVELOPE_IS_BUILT_BY_ONE_OWNER = Rule(
     name="cache-envelope-is-built-by-one-owner",
     find=_cache_envelope_literals,
     summary="the content-cache envelope is built outside its owner",
-    excludes=SANCTIONED | {"content_cache.py"},
+    excludes=SANCTIONED | {"content_cache.py"},  # owner: builds the envelope it stores
     bite=lambda: Bites(
         "def write(self, key, value, expires):\n"
         '    return {"expires": expires, "value": value, "cached_at": expires}\n',
@@ -106,9 +106,9 @@ _ENVELOPE_OWNER_FUNCTION = "_response_envelope"
 _ENVELOPE_BUILDERS = ("abuild_unified_crawl_response", "build_unified_crawl_response")
 
 
-# The only callers permitted to skip the owner's envelope read, each named with the reason it is not the same
-# shape as a wire endpoint's: app/api/async_crawl_runner.py -- the detached background runner.
-_ENVELOPE_ADAPTER_EXEMPT = frozenset({"app/api/async_crawl_runner.py", "app/mcp/tools.py"})
+_ENVELOPE_ADAPTER_EXEMPT = frozenset(
+    {"app/api/async_crawl_runner.py", "app/mcp/tools.py"}  # adapters, not wire endpoints
+)
 
 
 # Derived from the model, not transcribed: the rule is "every field the wire model requires is passed by one
