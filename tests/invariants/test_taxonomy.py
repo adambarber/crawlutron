@@ -147,7 +147,7 @@ TRANSIENCE_VERDICT_HAS_ONE_HOME = Rule(
 
 # --------------------------------------------------------------------------- Classification transience: one
 # verdict, owned by the taxonomy ---------------------------------------------------------------------------
-_ERROR_CHOKEPOINT_SANCTIONED = frozenset({"classification.py"})
+_ERROR_CHOKEPOINT_SANCTIONED = frozenset({"classification.py"})  # owner: defines classify_error_code
 
 
 _NON_EXCEPTION_CLASSIFICATIONS = frozenset(
@@ -208,7 +208,9 @@ HAND_ROLLED_FAILED_RESULTS_GO_THROUGH_THE_CHOKEPOINT = Rule(
 )
 
 
-_POOL_EXHAUSTION_CATCH_SANCTIONED = frozenset({"render.py", "render_endpoint.py", "browser_pool.py"})
+_POOL_EXHAUSTION_CATCH_SANCTIONED = frozenset(
+    {"render.py", "render_endpoint.py", "browser_pool.py"}  # raise the error / serve the 503
+)
 
 
 def _unsanctioned_pool_exhaustion_catch_offenders(tree, path):
