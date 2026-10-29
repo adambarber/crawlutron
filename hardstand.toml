@@ -33,6 +33,10 @@ provider = "env.namespace"
 name = "link-venv"
 run = "ln -sfn ../../.venv .venv"
 
+[[setup]]
+name = "regen-version"
+run = ".venv/bin/python -m pip install -e . --no-deps --quiet"
+
 # Setup, part 2 (#488): bind the WORKSPACE tree into the shared venv's sys.path.
 #
 # The shared venv carries hatchling editable installs whose .pth files point at
