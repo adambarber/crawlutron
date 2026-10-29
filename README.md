@@ -9,8 +9,8 @@ FastAPI. It exposes a single, machine-readable crawl contract that supports:
   for JavaScript-dependent pages.
 - **Document extraction** — PDF/DOCX/PPTX/XLSX/TXT via markitdown, plus main-text
   extraction via trafilatura.
-- **Content classification** — 36 crawl classifications (success, blocked,
-  network_error, robots_disallowed, challenge_detected, etc.) so callers can branch
+- **Content classification** — 36 crawl classifications (rendered, blocked,
+  network_error, robots_disallowed, waf_challenge_detected, etc.) so callers can branch
   on outcome rather than guessing.
 - **Discovery endpoints** — capabilities, agent hints, and a `.well-known` service
   descriptor so agents/bots can discover the contract without prior knowledge.
@@ -167,13 +167,16 @@ $EDITOR app/storage/migrations/0001_crawl_jobs_initial.py
 | `POST` | `/v1/search` | Discover public URLs from a query via the configured search provider. |
 | `POST` | `/v1/map` | Crawl a site's link graph and return the discovered URL set (no content extraction). |
 | `GET` | `/v1/crawl/{request_id}` | Fetch the result of an async crawl submission. |
+| `GET` | `/v1/crawl/{request_id}/trace` | Per-URL strategy attempt trace (statuses, classifications, timings; no page bodies). |
+| `POST`/`GET`/`DELETE` | `/v1/watches` | Revalidation watches: register, list, get, delete; sweeps recheck due watches and POST webhooks on change. |
 | `GET`/`POST` | `/v1/jobs` | Whole-site resumable jobs: create (with frontier), list, inspect, pause/resume/cancel. |
 | `POST` | `/mcp` | MCP 2026-07-28 endpoint exposing search/crawl/map/render as tools. |
 | `GET`  | `/v1/capabilities` | Declares supported strategies, classifications, extraction methods, profiles. |
 | `GET`  | `/v1/agent-hints` | Machine-readable guidance for agents/bots (request shapes, caveats). |
 | `GET`  | `/.well-known/crawler-service` | Service discovery descriptor (links to OpenAPI, agent hints, capabilities). |
 | `POST`/`GET`/`DELETE` | `/v1/keys` | Caller API keys: issue, list, revoke (operator token required). Callers present the key as `X-API-Key`. |
-| `GET`  | `/metrics` | Prometheus-format metrics. |
+| `GET` | `/metrics` | Prometheus-format metrics. |
+| `GET` | `/v1/policy-suggestions` | Candidate host policy rules rolled up from blocked-attempt evidence (proposal only; never applied). |
 
 ---
 
@@ -268,11 +271,13 @@ exhausted.
 ## Classifications
 
 Every crawl result carries a `classification` from a fixed enum of **36 values**
-(returned by `GET /v1/capabilities` under `supported_classifications`). Examples:
-`success`, `rendered`, `not_modified`, `network_error`, `http_error`,
-`robots_disallowed`, `challenge_detected`, `ssrf_blocked`, `hard_error`,
-`timed_out`, `payload_too_large`. Callers should branch on `classification`
-(and the boolean `is_blocked` / `is_success`) rather than on transport status.
+(defined in `app/vocabulary/taxonomy.py`, returned by `GET /v1/capabilities` under
+`supported_classifications`). Examples: `rendered`, `not_modified`, `captcha_detected`,
+`waf_challenge_detected`, `robots_disallowed`, `navigation_timeout`,
+`private_network_target`, `network_error`, `http_error`, `url_budget_exceeded`,
+`payload_too_large`. Callers should branch on `classification` (whose
+`status: success | blocked | disallowed | retry_exhausted | failed | skipped`
+the taxonomy maps onto) rather than on transport status.
 
 ---
 
@@ -406,38 +411,39 @@ with `422`.
 ├── docker-compose.yml    # Standalone local stack (loopback-only)
 ├── pyproject.toml        # Package metadata + ruff config
 ├── requirements.txt      # Runtime deps (camoufox, fastapi, trafilatura, markitdown, ...)
-├── requirements-dev.txt  # Dev/test deps
+├── requirements-dev.txt  # Dev/test deps (also installed by the Dockerfile test stage)
+├── Makefile              # Gates + convenience targets mirroring scripts/run-tests.sh
 ├── app/
-│   ├── main.py           # Thin FastAPI factory (≈218 lines) — lifespan + app.state + router wiring only
-│   ├── api/              # Router/endpoint split (one file per concern)
-│   │   ├── crawl_endpoint.py / crawl_router.py   # POST /v1/crawl + GET /v1/crawl/{id}
-│   │   ├── render.py / render_endpoint.py / render_router.py  # POST /v1/render
-│   │   ├── map_endpoint.py / map_router.py       # POST /v1/map
-│   │   ├── jobs_router.py                        # POST/GET /v1/jobs*
-│   │   ├── metrics_router.py                     # GET /metrics
+│   ├── main.py           # FastAPI factory (≈441 lines) — lifespan, app.state, router wiring
+│   ├── api/              # Door plane: one router per concern, mounted in main.py
+│   │   ├── crawl_router.py      # POST /v1/crawl, GET /v1/crawl/{id}, GET .../{id}/trace
+│   │   ├── identity_router.py   # POST /v1/map, POST /v1/render, POST /v1/search
+│   │   ├── jobs_router.py       # POST/GET/DELETE /v1/jobs*
+│   │   ├── watch_router.py      # POST/GET/DELETE /v1/watches*
+│   │   ├── policy_router.py     # GET /v1/policy-suggestions
+│   │   ├── keys_router.py       # POST/GET/DELETE /v1/keys
+│   │   ├── metrics_router.py    # GET /metrics
+│   │   ├── crawl_endpoint.py / render_endpoint.py / map_endpoint.py  # Handler bodies
 │   │   ├── crawl_executor.py / async_crawl_runner.py / response_shaping.py
-│   │   ├── middleware.py / exceptions.py / dependencies.py
-│   │   └── webhooks.py                           # SSRF-safe webhook delivery
-│   ├── crawl/            # Strategy implementations (http, browser, document, dom)
-│   │   ├── engine.py     # Orchestration + fallback-chain scheduling (1142 lines)
-│   │   ├── strategies/http.py / browser.py / document.py / browser_pool.py
-│   │   ├── extraction.py / decompression.py / llm_format.py / ...
-│   │   └── job_store.py / result_store.py / cache.py / content_cache.py
-│   ├── health/           # /health, /ready (READINESS_STATE singleton)
+│   │   └── middleware.py / exceptions.py / dependencies.py / webhooks.py
+│   ├── orchestration/    # engine.py — orchestration + fallback-chain scheduling
+│   ├── transport/        # Strategy implementations: http.py, browser.py, document.py,
+│   │   │                 #   browser_pool.py, content_cache.py, scheduler.py, robots.py, ...
+│   ├── admission/        # Caller admission, policy, scope matching
+│   ├── config/           # env.py + settings.py (CRAWLUTRON_* environment surface)
 │   ├── discovery/        # /v1/capabilities, /v1/agent-hints, /.well-known
-│   ├── search/           # /v1/search provider abstraction + endpoint
-│   │   ├── providers.py  # Tavily / Brave / Serper / DuckDuckGo + selection
-│   │   └── endpoint.py / router.py
-│   ├── mcp/              # MCP 2026-07-28 endpoint (POST /mcp)
-│   │   ├── protocol.py   # JSON-RPC helpers + request-metadata validation
-│   │   ├── tools.py      # search/crawl/map/render tool registry
-│   │   └── server.py / router.py
-│   ├── classify.py / constants.py / models/ / validation.py
-│   ├── scheduler.py / settings.py / metrics.py / output_formats.py / logging_config.py
-│   └── ...
+│   ├── extraction/       # classify.py, content.py, document_text.py, output_formats.py
+│   ├── health/           # /health, /ready (READINESS_STATE singleton)
+│   ├── mcp/              # MCP 2026-07-28 endpoint (POST /mcp): protocol, tools, server
+│   ├── models/           # Pydantic/dataclass wire + domain models
+│   ├── runtime/          # metrics, memory pressure, worker dispatch, resource lifecycle
+│   ├── safety/           # validation, bounded I/O, safe regex, SSRF helpers
+│   ├── search/           # /v1/search provider abstraction (Tavily/Brave/Serper/DuckDuckGo)
+│   ├── storage/          # job_store.py, result_store.py, watch_store.py, sqlite_store.py
+│   └── vocabulary/       # taxonomy.py (the 36-value classification enum), strategy names
 ├── tests/                # Behavior tests (no mocks; real HTTP + real Camoufox)
-├── docs/references/      # Manual test plan + agent contract
-├── scripts/run-tests.sh  # `make test` entrypoint
+├── docs/                 # Reviews, testing guide, agent contract (docs/references/)
+├── scripts/run-tests.sh  # Full battery entrypoint (mirrored by make targets)
 └── .github/workflows/ci.yml  # ruff + pytest (fast)
 ```
 
