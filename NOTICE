@@ -34,7 +34,7 @@ each distribution's own metadata.
   MIT
     beautifulsoup4, brotli, brotli-stubs, camoufox, charset-normalizer,
     curl_cffi, fastapi, h2, jscpd, markdownify, markitdown, mypy, pdfplumber,
-    pre-commit, pydantic, pyright, pytest, pytest-httpx, pytest-randomly,
+    pre-commit, pydantic, pyright, pytest, pytest-randomly,
     pytest-xdist, pyyaml, ruff
 
   BSD-3-Clause

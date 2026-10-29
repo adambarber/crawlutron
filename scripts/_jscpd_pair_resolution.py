@@ -60,17 +60,6 @@ SANCTIONED_IGNORE_GLOBS = (
 )
 
 
-def _tree_of(path: str) -> str:
-    """Which tree a reported path belongs to, derived from the path -- so a file cannot
-    choose the floor it is judged by; anything outside the known roots is production
-    (the tighter floor, so an unrecognised file cannot slip through).
-    """
-    for tree, roots in TREE_ROOTS.items():
-        if any(path == root or path.startswith(root + "/") for root in roots):
-            return tree
-    return "production"
-
-
 def _reject_source_masking(ignore: list[str]) -> None:
     """A glob that hides source is never a sanctioned exception.
 

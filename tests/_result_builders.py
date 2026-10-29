@@ -47,19 +47,6 @@ class _EngineResultOverrides(TypedDict, total=False):
     markdown: str | None
 
 
-class _CrawlResultOverrides(TypedDict, total=False):
-    """The subset of CrawlResult fields tests may override."""
-
-    url: NormalizedUrl
-    attempt: CrawlStrategyAttempt
-    final_url: NormalizedUrl
-    html: str
-    text: str
-    attempts: int
-    domain: str
-    metadata: dict[str, str]
-
-
 def make_job(index: int, url: str, *, options: RenderOptions | None = None):
     """A ``CrawlJob`` carrying the default render options.
 

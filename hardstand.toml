@@ -112,6 +112,13 @@ timeout = 60s
 run = ".venv/bin/make typecheck"
 
 [[actions]]
+name = "pyright"
+kind = "exec"
+env = ["PATH"]
+timeout = 60s
+run = ".venv/bin/pyright app"
+
+[[actions]]
 name = "shell"
 kind = "exec"
 run = "bash"
