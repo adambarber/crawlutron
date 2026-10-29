@@ -197,7 +197,7 @@ The crawl path bounds the identical knob through `CrawlPolicyLimits` (`ge=1, le=
 **Fix:** bound both knobs at `resolve_render_options` using the constants the tree already owns:
 
 ```python
-_MAX_RENDER_TIMEOUT = MAX_HTTP_TIMEOUT_SECONDS        # crawlutron/vocabulary/limits
+_MAX_RENDER_TIMEOUT = MAX_HTTP_TIMEOUT_SECONDS  # app/vocabulary/limits
 _MAX_RENDER_RETRIES = MAX_RETRIES
 kwargs["timeout_seconds"] = min(int(timeout), _MAX_RENDER_TIMEOUT)
 kwargs["max_retries"] = min(int(retries), _MAX_RENDER_RETRIES)
