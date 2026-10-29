@@ -11,7 +11,12 @@ import re
 
 from tests.chokepoint_walks import REPO_ROOT, assignment_targets, parsed, relative_posix
 from tests.invariants._shared import _declared_public_symbols
-from tests.invariants._surface_ratchet import OWNER_PUBLIC_SURFACE_RATCHET as _OWNER_PUBLIC_SURFACE_RATCHET
+from tests.invariants._surface_ratchet import (
+    DECLARED_SURFACE_RATCHET as _DECLARED_SURFACE_RATCHET,
+)
+from tests.invariants._surface_ratchet import (
+    OWNER_PUBLIC_SURFACE_RATCHET as _OWNER_PUBLIC_SURFACE_RATCHET,
+)
 from tests.property_registry import Property
 
 _PUBLIC_SURFACE_PROPERTY = Property(
@@ -23,73 +28,6 @@ _PUBLIC_SURFACE_PROPERTY = Property(
     fingerprints=("public_surface",),
     reason="A property owner declares one public surface and cannot add another entry point.",
 )
-
-# lives in tests/invariants/_surface_ratchet.py (#476).
-# exemption: an entry must still declare ``__all__``, closing the unenumerated-module hole (#215).
-_SURFACE_DECLARING_EXEMPT = frozenset(
-    {
-        "app/admission/policy.py",
-        "app/api/_depends_singletons.py",
-        "app/api/async_crawl_runner.py",
-        "app/api/caller_auth.py",
-        "app/api/caller_concurrency.py",
-        "app/api/crawl_executor.py",
-        "app/api/crawl_router.py",
-        "app/api/dependencies.py",
-        "app/api/exceptions.py",
-        "app/api/identity_router.py",
-        "app/api/job_runner.py",
-        "app/api/jobs_router.py",
-        "app/api/main_helpers.py",
-        "app/api/map_endpoint.py",
-        "app/api/metrics_router.py",
-        "app/api/middleware.py",
-        "app/api/policy_defaults.py",
-        "app/api/policy_router.py",
-        "app/api/policy_suggestions.py",
-        "app/api/render.py",
-        "app/api/render_endpoint.py",
-        "app/api/watch_sweep.py",
-        "app/api/webhooks.py",
-        "app/extraction/content.py",
-        "app/extraction/llm_format.py",
-        "app/mcp/constants.py",
-        "app/mcp/protocol.py",
-        "app/mcp/router.py",
-        "app/mcp/server.py",
-        "app/mcp/tools.py",
-        "app/orchestration/admission_stall.py",
-        "app/orchestration/recursive.py",
-        "app/orchestration/request_pipeline.py",
-        "app/transport/robots_parse.py",
-        "app/orchestration/strategy_chain.py",
-        "app/runtime/worker_dispatch.py",
-        "app/runtime/logging_config.py",
-        "app/runtime/resource_pressure.py",
-        "app/search/endpoint.py",
-        "app/search/providers.py",
-        "app/search/providers_api.py",
-        "app/search/providers_html.py",
-        "app/storage/coordination_cookies.py",
-        "app/storage/coordination_counters.py",
-        "app/storage/coordination_store.py",
-        "app/storage/job_store.py",
-        "app/storage/job_store_collections.py",
-        "app/storage/job_store_read.py",
-        "app/storage/job_store_state.py",
-        "app/runtime/resource_lifecycle.py",
-        "app/storage/migrations/runner.py",
-        "app/storage/migrations/ddl.py",
-        "app/storage/watch_store.py",
-        "app/transport/browser.py",
-        "app/transport/browser_cookies.py",
-        "app/transport/browser_result.py",
-        "app/transport/content_pipeline.py",
-        "app/transport/http_client_pool.py",
-        "app/transport/strategy_request.py",
-    }
-)
-
 
 # Dynamic-pattern re.* calls: a non-literal first arg is a pattern built from attacker-influenced text (the
 # ReDoS shape). `re.search(LITERAL, text)` is safe -- only a dynamic PATTERN is the hazard.
@@ -169,23 +107,16 @@ def _all_surface_modules(root: pathlib.Path = REPO_ROOT / "app") -> set[str]:
     return found
 
 
-def test_public_surface_gate_covers_or_exempts_every_all_module():
-    """The hand-pinned enumeration must not silently drop a surface module added
-    since it was written: every module with ``__all__`` is either ratchet'd (budgeted)
-    or explicitly exempted, so a new module in neither fails this gate (#215)."""
-    covered = set(_OWNER_PUBLIC_SURFACE_RATCHET) | _SURFACE_DECLARING_EXEMPT
+def test_public_surface_gate_covers_every_all_module():
+    """Every module declaring ``__all__`` is ratchet-budgeted, unconditionally: a new
+    surface module not in a ratchet fails this gate (#215). Both ratchets live
+    in tests/invariants/_surface_ratchet.py (#476)."""
+    covered = set(_OWNER_PUBLIC_SURFACE_RATCHET) | set(_DECLARED_SURFACE_RATCHET)
     uncovered = sorted(_all_surface_modules() - covered)
     assert not uncovered, (
-        "module(s) declare a public surface via __all__ but are not in the ratchet or the "
-        "exemption list: " + ", ".join(uncovered)
+        "module(s) declare a public surface via __all__ but have no ratchet budget row: "
+        + ", ".join(uncovered)
     )
-
-
-def test_surface_exemptions_are_self_validating():
-    """An exemption must still declare ``__all__`` to stay exempt; a removed or renamed
-    module leaves a stale entry that silently exempts nothing and this test fails it."""
-    stale = sorted(_SURFACE_DECLARING_EXEMPT - _all_surface_modules())
-    assert not stale, "exempted modules no longer declare __all__ (or no longer exist): " + ", ".join(stale)
 
 
 def _surface_budget_offenders(*, grown: bool) -> list[str]:
@@ -194,16 +125,17 @@ def _surface_budget_offenders(*, grown: bool) -> list[str]:
     Both directions read the same counts against the same budgets, so they
     share this walk: too-loose is as much a defect as too-tight."""
     offenders: list[str] = []
-    for relative, (surface_budget, entry_budget) in _OWNER_PUBLIC_SURFACE_RATCHET.items():
-        path = REPO_ROOT / relative
-        surface_count, entry_count = _owner_surface_counts(parsed(path))
-        over = surface_count > surface_budget or entry_count > entry_budget
-        under = surface_count < surface_budget or entry_count < entry_budget
-        if over if grown else under:
-            offenders.append(
-                f"{relative}: surface {surface_count}/{surface_budget}, "
-                f"entry points {entry_count}/{entry_budget}"
-            )
+    for ratchet in (_OWNER_PUBLIC_SURFACE_RATCHET, _DECLARED_SURFACE_RATCHET):
+        for relative, (surface_budget, entry_budget) in ratchet.items():
+            path = REPO_ROOT / relative
+            surface_count, entry_count = _owner_surface_counts(parsed(path))
+            over = surface_count > surface_budget or entry_count > entry_budget
+            under = surface_count < surface_budget or entry_count < entry_budget
+            if over if grown else under:
+                offenders.append(
+                    f"{relative}: surface {surface_count}/{surface_budget}, "
+                    f"entry points {entry_count}/{entry_budget}"
+                )
     return offenders
 
 
