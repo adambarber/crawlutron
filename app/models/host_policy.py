@@ -71,31 +71,6 @@ class HostPolicy:
         )
 
 
-HOST_POLICY_ENTRY_POINTS = (
-    "app/api/crawl_endpoint.py:crawl",
-    "app/api/crawl_executor.py:execute_crawl",
-    "app/api/job_runner.py:run_job",
-    "app/api/jobs_router.py:create_job",
-    "app/api/map_endpoint.py:map_site",
-    "app/api/render.py:render_request",
-    "app/api/async_crawl_runner.py:run_async_crawl",
-    "app/api/response_shaping.py:frontier_link_url",
-    "app/api/watch_router.py:create_watch",
-    "app/api/policy_suggestions.py:policy_suggestions",
-    "app/api/site_map.py:build_site_map",
-    "app/api/policy_suggestions.py:build_policy_suggestions",
-    "app/api/webhooks.py:post_webhook",
-    "app/api/webhooks.py:post_webhook_guarded",
-    "app/api/webhooks.py:start_webhook_delivery",
-    "app/api/webhooks.py:deliver_pinned_webhook",
-    "app/mcp/tools.py:handle_crawl",
-    "app/mcp/tools.py:handle_crawl_and_extract",
-    "app/mcp/tools.py:handle_map",
-    "app/mcp/tools.py:handle_render",
-    "app/mcp/tools.py:handle_search",
-)
-
-
 def host_policy_reason(host: str, *, policy: HostPolicy) -> str | None:
     """Why this host is refused, or None when the policy admits it."""
     normalized = _normalize_policy_host(host)
@@ -183,7 +158,6 @@ def host_egress_reason(host: str) -> str | None:
 
 
 __all__ = [
-    "HOST_POLICY_ENTRY_POINTS",
     "HostPolicy",
     "allow_private_targets",
     "host_egress_reason",

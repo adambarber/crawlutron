@@ -38,7 +38,8 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     # to (8, 7) when the pure constructors moved to app/models/result_factory.py (#160).
     "app/transport/results.py": (8, 7),
     "app/transport/fetch_policy.py": (5, 5),
-    "app/models/host_policy.py": (6, 5),
+    # LOWERED to (5, 5): HOST_POLICY_ENTRY_POINTS moved into the test helper.
+    "app/models/host_policy.py": (5, 5),
     # The two latest surface modules: the gate must not silently drop a module
     # added since the list was pinned (these prune handlers/helpers via __all__).
     "app/api/keys_router.py": (4, 3),
