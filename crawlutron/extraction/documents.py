@@ -82,6 +82,12 @@ def _extraction_executor() -> concurrent.futures.ThreadPoolExecutor:
     return _EXTRACTION_EXECUTOR
 
 
+def extraction_executor() -> concurrent.futures.ThreadPoolExecutor:
+    """Public door for the shared selector-extraction pool: submit access
+    without reaching the private on-demand constructor."""
+    return _extraction_executor()
+
+
 def _document_extraction_enabled() -> bool:
     return parse_bool_env("CRAWLUTRON_EXTRACTION_DOC_ENABLED", default=True)
 

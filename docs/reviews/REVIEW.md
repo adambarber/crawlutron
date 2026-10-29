@@ -81,9 +81,11 @@ async def get_keys_caller(request: Request) -> CallerIdentity:
 
 ```python
 def store(self, domain: str, header: str) -> None:
-    self._store.put("", domain, _split_header(header))   # namespace is hard-coded ""
+    self._store.put("", domain, _split_header(header))  # namespace is hard-coded ""
+
+
 ...
-store_browser_cookies(url.site, header)   # keyed by registrable domain, no caller identity
+store_browser_cookies(url.site, header)  # keyed by registrable domain, no caller identity
 ```
 
 The codebase is otherwise scrupulous about cookie partitioning — the namespaced jar pins keyed callers to `key_id` namespaces, and `effective_cookie_namespace` (`caller_auth.py:139-146`) exists precisely so one caller can't claim another's jar. **This store bypasses all of it.** A browser render that solves a challenge, runs a `fill`-based login, or merely receives `Set-Cookie: session=…` harvests *every* cookie (HttpOnly included) into a process-global LRU keyed only by registrable domain. The next job against the same site — different caller, different namespace — has that header injected into its cffi retry. Concretely: job B fetches origin A's *authenticated* content and returns it as B's result body.
@@ -93,6 +95,8 @@ The codebase is otherwise scrupulous about cookie partitioning — the namespace
 ```python
 def store(self, namespace: str, domain: str, header: str) -> None:
     self._store.put(namespace, domain, _split_header(header))
+
+
 # harvest: store_browser_cookies(COOKIE_NAMESPACE.get(), url.site, header)
 ```
 
@@ -109,10 +113,10 @@ A crawled page can answer with `Set-Cookie: sid=x; Domain=com`. `_domain_matches
 ```python
 def _cookie_domain(host: str, attr: str) -> str | None:
     domain = attr.lstrip(".").lower()
-    if "." not in domain:                 # blocks "com", "org", "localhost"
+    if "." not in domain:  # blocks "com", "org", "localhost"
         return None
     if registrable_domain(host) != registrable_domain(host) or registrable_domain(domain) != domain:
-        return None                        # Domain= must be a registrable site itself
+        return None  # Domain= must be a registrable site itself
     ...
 ```
 
@@ -132,9 +136,11 @@ def _cookie_domain(host: str, attr: str) -> str | None:
 ```python
 # crawlutron/models/crawl_policy.py — value validator alongside the name ban
 _BAD_HEADER_VALUE = re.compile(r"[\r\n\x00]|\S{512,}")
+
+
 @field_validator("headers")
 @classmethod
-def _check_header_values(cls, headers):        # names already banned at :205
+def _check_header_values(cls, headers):  # names already banned at :205
     for name, value in headers.items():
         if _BAD_HEADER_VALUE.search(value):
             raise ValueError("invalid_policy_headers")
@@ -153,10 +159,12 @@ The httpx path compensates for the IP-hosted connect URL with the `sni_hostname`
 
 ```python
 response = await client.get(
-    str(url.raw),                       # logical host in URL → SNI + cert identity correct
+    str(url.raw),  # logical host in URL → SNI + cert identity correct
     headers=hop_headers,
-    resolve=[f"{url.host}:{url.port or (443 if url.scheme=='https' else 80)}:{pinned_ip}"],
-    allow_redirects=False, stream=True, timeout=float(timeout_seconds),
+    resolve=[f"{url.host}:{url.port or (443 if url.scheme == 'https' else 80)}:{pinned_ip}"],
+    allow_redirects=False,
+    stream=True,
+    timeout=float(timeout_seconds),
 )
 ```
 
@@ -176,7 +184,7 @@ For every literal `<script` occurrence with no matching `</script>`, the lazy `.
 
 ```python
 def text_from_html(html: str) -> str:
-    text = html_unescape(strip_html_noise(html))   # linear, shared, capped
+    text = html_unescape(strip_html_noise(html))  # linear, shared, capped
     return _WHITESPACE_RE.sub(" ", text).strip()
 ```
 
@@ -189,10 +197,10 @@ The crawl path bounds the identical knob through `CrawlPolicyLimits` (`ge=1, le=
 **Fix:** bound both knobs at `resolve_render_options` using the constants the tree already owns:
 
 ```python
-_MAX_RENDER_TIMEOUT = MAX_HTTP_TIMEOUT_SECONDS        # crawlutron/vocabulary/limits
+_MAX_RENDER_TIMEOUT = MAX_HTTP_TIMEOUT_SECONDS  # app/vocabulary/limits
 _MAX_RENDER_RETRIES = MAX_RETRIES
 kwargs["timeout_seconds"] = min(int(timeout), _MAX_RENDER_TIMEOUT)
-kwargs["max_retries"]   = min(int(retries),  _MAX_RENDER_RETRIES)
+kwargs["max_retries"] = min(int(retries), _MAX_RENDER_RETRIES)
 ```
 
 This is a safety bound, not a wire change: sane requests behave identically.
@@ -207,12 +215,16 @@ Rows are capped at 1000 *entries*, never *bytes*; payloads are full crawl respon
 
 ```python
 _MAX_PAYLOAD_BYTES = 4 * 1024 * 1024
+
+
 async def aput(self, request_id, payload, *, owner, stored_at):
     blob = json.dumps(payload)
     if len(blob) > _MAX_PAYLOAD_BYTES:
-        payload = truncated_payload(payload)     # or store a stub record
+        payload = truncated_payload(payload)  # or store a stub record
         blob = json.dumps(payload)
     ...
+
+
 # payloads(): SELECT with LIMIT/batch cursor, and move validation off the loop
 ```
 
@@ -223,7 +235,7 @@ async def aput(self, request_id, payload, *, owner, stored_at):
 `_host_is_public` returns True whenever `classify(host)` is `NOT_AN_ADDRESS` ("it's a name"). Two hostile families are not names either: **IPv6 zone ids** (`http://[fe80::1%25eth0]/` — the `%25` form defeats `ip_address()` at admission, while curl/httpx happily dial the zone-scoped link-local) and **control characters** (`urlsplit` strips only `\t\r\n`; a NUL or interior space survives into `host`, is classified NOT_AN_ADDRESS, and admitted — the canonical URL then carries it). The transport pin (`crawlutron/safety/validation.py:16566` re-judges the *resolved* address) is the net that catches these at fetch time, so this is defense-in-depth, not an open SSRF: the fix is cheap at the chokepoint whose docstring claims "constructing one IS admission":
 
 ```python
-if "%" in host or not _HOST_OK_RE.fullmatch(host):   # [A-Za-z0-9.\-_:] minus zone percent
+if "%" in host or not _HOST_OK_RE.fullmatch(host):  # [A-Za-z0-9.\-_:] minus zone percent
     raise ValueError("invalid_host")
 ```
 
@@ -312,11 +324,11 @@ One edit heals sitemap seeding, robots, credentials, and `origin_of` idempotence
 **Where:** `crawlutron/orchestration/fetch_helpers.py:255-268` (`fetch_sitemap_urls`), `:220-221` (`_recurse_sitemap` early-returns on `text is None`), `:93` (`fetch_decode_discovery` suppresses *every* exception), `:193-196` (45 s fanout timeout returns partial sets).
 
 ```python
-    try:
-        root_etag, root_lm = await _recurse_sitemap(walk, sitemap_url, 0, conditional)
-    except Exception:
-        root_etag, root_lm = (stale[1] if stale else None), (stale[2] if stale else None)
-    SITEMAP_CACHE.put(cache_key, (list(page_urls), root_etag, root_lm))   # unconditional
+try:
+    root_etag, root_lm = await _recurse_sitemap(walk, sitemap_url, 0, conditional)
+except Exception:
+    root_etag, root_lm = (stale[1] if stale else None), (stale[2] if stale else None)
+SITEMAP_CACHE.put(cache_key, (list(page_urls), root_etag, root_lm))  # unconditional
 ```
 
 An empty result is not `None`, so it's served as *fresh*; the `put` runs even when the walk raised, stalled, hit a decompression cap, or produced a partial fanout. `SITEMAP_CACHE_TTL_SECONDS = 3600`. One transient network blip — or a hostile origin that stalls its first sitemap response, or a gzip bomb → `DecompressionTooLargeError` → `text is None` — silently disables sitemap seeding for that origin for an hour. Contrast the robots module next door, which has a 60 s failure TTL *and* single-flight; sitemaps have neither.
@@ -327,7 +339,7 @@ An empty result is not `None`, so it's served as *fresh*; the `put` runs even wh
 if not page_urls:
     SITEMAP_CACHE.put(cache_key, ([], None, None), ttl=ROBOTS_FAILURE_TTL_SECONDS)  # 60 s
 else:
-    SITEMAP_CACHE.put(cache_key, (list(page_urls), root_etag, root_lm))             # normal TTL
+    SITEMAP_CACHE.put(cache_key, (list(page_urls), root_etag, root_lm))  # normal TTL
 ```
 
 ### 3.3 [P1] The scheduler keys two entry paths by different identities — politeness split-brain
@@ -343,11 +355,11 @@ The scheduler keys **everything** on `job.domain`: per-domain semaphore, token b
 **Where:** `crawlutron/mcp/protocol.py:22-29`.
 
 ```python
-    def __init__(self, status_code: int, payload: JsonValue) -> None:
-        if isinstance(payload, dict):
-            ...
-            message = error.get("message", "validation error")
-        super().__init__(str(message))     # message unbound when payload isn't a dict
+def __init__(self, status_code: int, payload: JsonValue) -> None:
+    if isinstance(payload, dict):
+        ...
+        message = error.get("message", "validation error")
+    super().__init__(str(message))  # message unbound when payload isn't a dict
 ```
 
 `payload: JsonValue` explicitly allows non-dicts; the router's 400 path depends on this exception carrying a message. Latent today (all current callers pass error dicts) but it is one caller away from masking a real protocol error with a confusing crash. One line: `message = "validation error"` before the branch. (`result_response` at `:36-41` also mutates the caller's dict via `setdefault("_meta", ...)` — copy first.)
@@ -365,9 +377,9 @@ The scheduler keys **everything** on `job.domain`: per-domain semaphore, token b
 **Where:** `crawlutron/api/job_lifecycle.py:51-54`.
 
 ```python
-    task = asyncio.create_task(factory())
-    _tasks[job_id] = task
-    task.add_done_callback(lambda t: _tasks.pop(job_id, None))   # pops whatever is there now
+task = asyncio.create_task(factory())
+_tasks[job_id] = task
+task.add_done_callback(lambda t: _tasks.pop(job_id, None))  # pops whatever is there now
 ```
 
 Task A finishes → its callback is scheduled via `call_soon` → before it runs, `resume_job` registers task B for the same job_id → A's callback deletes **B's** registration. B now runs untracked: shutdown won't cancel it, `is_running` can't see it, and the next boot treats its RUNNING row as orphaned and starts a second runner. Reachable via pause→quick-resume of a whole-site job.

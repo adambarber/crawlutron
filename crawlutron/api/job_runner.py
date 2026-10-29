@@ -92,12 +92,10 @@ def reset_execute_crawl() -> None:
 
 def pop_frontier(job: CrawlJobState) -> list[FrontierEntry]:
     normalize_job_state(job)
-    # Normalization's drops are already logged by the merge;
-    # only the pops this function performs need logging here.
+    # Normalization's drops are already logged by the merge, only the pops here need logging.
     max_pages = job_max_pages(job.policy, job.tier)
     if job.in_flight:
-        # Cap arithmetic without the whole-set copy: a live URL sits in exactly
-        # one collection, so the union's size is this sum; visited len is O(1).
+        # Cap arithmetic without the whole-set copy: the union's size is this sum.
         if max_pages > 0:
             fixed_count = len(job.visited) + sum(1 for entry in job.in_flight if entry.url not in job.visited)
             if fixed_count > max_pages:
@@ -107,8 +105,7 @@ def pop_frontier(job: CrawlJobState) -> list[FrontierEntry]:
     if capacity is not None and capacity <= 0:
         if job.frontier:
             record_cap_truncated(job)
-        # The whole queue is dropped: log every entry so the persist
-        # deletes exactly their rows.
+        # The whole queue is dropped: log every entry so the persist deletes exactly their rows.
         job.frontier_removed.extend(entry.url for entry in job.frontier)
         del job.frontier[:]
         return []
@@ -430,8 +427,7 @@ def start_job(
 ) -> asyncio.Task:
     """Spawn (or return) the runner task; preclaimed rows were flipped by caller.
 
-    Lives here because it spawns ``run_job``; the registry module never
-    imports back into this one.
+    Lives here so the registry never imports back into this one.
     """
     return start_tracked_task(
         job_id, lambda: run_job(job_id, job_store, settings, shutdown_event, preclaimed=preclaimed)
@@ -444,7 +440,11 @@ async def pause_job(job_id: str, job_store: JobStore) -> str:
 
 
 async def resume_job(
-    job_id: str, job_store: JobStore, settings: CrawlerSettings, shutdown_event: asyncio.Event
+    job_id: str,
+    job_store: JobStore,
+    settings: CrawlerSettings,
+    shutdown_event: asyncio.Event,
+    wedge_grace_seconds: float = 5.0,
 ) -> str:
     """Resume a paused job by respawning its runner task."""
     # A stale predecessor owning the slot must not leave a RUNNING row with no runner:
@@ -455,7 +455,7 @@ async def resume_job(
         old = tracked_task(job_id)
         if old is not None:
             try:
-                await asyncio.wait_for(asyncio.shield(old), timeout=5.0)
+                await asyncio.wait_for(asyncio.shield(old), timeout=wedge_grace_seconds)
             except TimeoutError:
                 # Still wedged past the grace period: cancel and join it so the
                 # spawn below actually claims the freed slot.

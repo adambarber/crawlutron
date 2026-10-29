@@ -8,13 +8,48 @@ import bs4
 import pytest
 
 from crawlutron.extraction import content as ext_content
+from crawlutron.extraction import documents as docex
 from crawlutron.extraction.content import Selectors, extract_selected
 from tests._extraction_helpers import settings_with
 
 pytestmark = pytest.mark.usefixtures("four_worker_selector_pool")
 
+_HTML = "<html><body><p class='x'>hi</p></body></html>"
 
-@pytest.mark.real_sleeps
+
+def _spawn(count, flavour, settings):
+    """Caller threads driving extract_selected, so each lands a pool future."""
+    return [
+        threading.Thread(
+            target=extract_selected,
+            args=(_HTML, "http://example.com/"),
+            kwargs={"selectors": Selectors(css=".x"), "settings": settings},
+            name=f"{flavour}-{i}",
+        )
+        for i in range(count)
+    ]
+
+
+def _await_all(futs, seconds):
+    """Poll cancellations without concurrent.futures.wait, which keeps
+    waiting on CANCELLED-but-unnotified futures for the whole timeout."""
+    deadline = time.monotonic() + seconds
+    while not all(f.cancelled() for f in futs) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    return all(f.cancelled() for f in futs)
+
+
+def _run_shutdown_when_held(shutdown_done):
+    """Shutdown in a side thread; the caller decides when to unblock workers."""
+    threading.Thread(
+        target=lambda: (
+            asyncio.run(ext_content.shutdown_doc_extraction_executor()),
+            shutdown_done.set(),
+        ),
+        name="shutdown",
+    ).start()
+
+
 def test_shutdown_refuses_queued_work_instead_of_orphaning_it(monkeypatch):
     """Queued-but-unstarted futures must be refused by shutdown, not completed
     later as orphans that keep worker threads alive past the teardown.
@@ -22,9 +57,11 @@ def test_shutdown_refuses_queued_work_instead_of_orphaning_it(monkeypatch):
     executed: list[int] = []
     lock = threading.Lock()
     release = threading.Event()
+    saturated = threading.Barrier(5)  # 4 parked workers + this thread
 
     def parked_select(self, selector):
-        release.wait(timeout=15)
+        saturated.wait(timeout=5)
+        release.wait()
 
     def counted_select(self, selector):
         with lock:
@@ -32,36 +69,35 @@ def test_shutdown_refuses_queued_work_instead_of_orphaning_it(monkeypatch):
         return []
 
     monkeypatch.setattr(bs4.BeautifulSoup, "select", parked_select)
-    html = "<html><body><p class='x'>hi</p></body></html>"
     settings = settings_with(extraction_selector_timeout=30.0)
-
-    def spawn(count, flavour):
-        return [
-            threading.Thread(
-                target=extract_selected,
-                args=(html, "http://example.com/"),
-                kwargs={"selectors": Selectors(css=".x"), "settings": settings},
-                name=f"{flavour}-{i}",
-            )
-            for i in range(count)
-        ]
-
-    threads = spawn(4, "parked")  # saturate the 4 workers
+    threads = _spawn(4, "parked", settings)  # saturate the 4 workers
     for t in threads:
         t.start()
-    time.sleep(0.3)  # let the parked selects take all four workers
+    assert saturated.wait(timeout=5), "workers never saturated the pool"
 
-    monkeypatch.setattr(bs4.BeautifulSoup, "select", counted_select)
-    queued = spawn(4, "queued")  # these land queued behind the parked ones
-    for t in queued:
-        t.start()
-    time.sleep(0.3)  # let the submissions queue
+    def queued_work():
+        with lock:
+            executed.append(1)
+        return []
 
-    asyncio.run(ext_content.shutdown_doc_extraction_executor())
-    monkeypatch.setattr(bs4.BeautifulSoup, "select", counted_select)
-    release.set()  # unpark; orphaned queued work would now run
-    time.sleep(1.0)
-    for t in threads + queued:
+    executor = docex.extraction_executor()
+    queued_futs = [executor.submit(queued_work) for _ in range(4)]
+    shutdown_done = threading.Event()
+    _run_shutdown_when_held(shutdown_done)
+    refused_now = _await_all(queued_futs, 5) and not shutdown_done.is_set()
+    if not refused_now:
+        release.set()  # orphan watchdog: never leave the fixture parked on a bug
+        shutdown_done.wait(timeout=10)
+        for t in threads:
+            t.join(timeout=5)
+    assert refused_now, (
+        "shutdown did not cancel queued-but-unstarted futures while running "
+        "workers were still held; queued work was allowed to survive shutdown"
+    )
+
+    release.set()  # unpark the held workers only after refusal is proven
+    assert shutdown_done.wait(timeout=10), "shutdown never finished after unparking"
+    for t in threads:
         t.join(timeout=5)
     assert executed == [], (
         f"{len(executed)} queued futures ran after shutdown: shutdown must "
