@@ -1,12 +1,12 @@
-"""The owner public-surface ratchet the public-surface gates read.
+"""The public-surface ratchets the public-surface gates read.
 
-Declared support surface (#476): the budget table lives here so the surface
-detector and its arming premise import it from one declared home.
+Declared support surface (#476): the budget tables live here so the surface
+detector and its arming premise import them from one declared home.
 """
 
 from __future__ import annotations
 
-__all__ = ["OWNER_PUBLIC_SURFACE_RATCHET"]
+__all__ = ["OWNER_PUBLIC_SURFACE_RATCHET", "DECLARED_SURFACE_RATCHET"]
 
 # Values are (declared public symbols, executable entry points).
 OWNER_PUBLIC_SURFACE_RATCHET = {
@@ -58,4 +58,68 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/transport/http_cache.py": (4, 4),
     "app/transport/http_classify.py": (3, 3),
     "app/transport/pooled_clients.py": (13, 11),
+}
+
+# Former #215 exemptions: their __all__ deliberately does not enumerate every public
+# symbol, so these are counts-only rows pinned at measured counts; only-down from here.
+DECLARED_SURFACE_RATCHET = {
+    "app/admission/policy.py": (10, 5),
+    "app/api/_depends_singletons.py": (2, 0),
+    "app/api/async_crawl_runner.py": (4, 3),
+    "app/api/caller_auth.py": (17, 14),
+    "app/api/caller_concurrency.py": (1, 1),
+    "app/api/crawl_executor.py": (1, 1),
+    "app/api/crawl_router.py": (4, 3),
+    "app/api/dependencies.py": (16, 7),
+    "app/api/exceptions.py": (10, 7),
+    "app/api/identity_router.py": (5, 3),
+    "app/api/job_runner.py": (16, 13),
+    "app/api/jobs_router.py": (6, 5),
+    "app/api/main_helpers.py": (3, 3),
+    "app/api/map_endpoint.py": (2, 1),
+    "app/api/metrics_router.py": (2, 1),
+    "app/api/middleware.py": (3, 2),
+    "app/api/policy_defaults.py": (2, 0),
+    "app/api/policy_router.py": (2, 1),
+    "app/api/policy_suggestions.py": (3, 2),
+    "app/api/render.py": (3, 3),
+    "app/api/render_endpoint.py": (3, 2),
+    "app/api/watch_sweep.py": (4, 2),
+    "app/api/webhooks.py": (17, 16),
+    "app/extraction/content.py": (4, 4),
+    "app/extraction/llm_format.py": (4, 4),
+    "app/mcp/constants.py": (18, 0),
+    "app/mcp/protocol.py": (6, 6),
+    "app/mcp/router.py": (2, 1),
+    "app/mcp/server.py": (6, 5),
+    "app/mcp/tools.py": (13, 8),
+    "app/orchestration/admission_stall.py": (5, 3),
+    "app/orchestration/recursive.py": (11, 7),
+    "app/orchestration/request_pipeline.py": (5, 3),
+    "app/transport/robots_parse.py": (6, 6),
+    "app/orchestration/strategy_chain.py": (4, 2),
+    "app/runtime/worker_dispatch.py": (1, 1),
+    "app/runtime/logging_config.py": (1, 1),
+    "app/runtime/resource_pressure.py": (12, 8),
+    "app/search/endpoint.py": (2, 1),
+    "app/search/providers.py": (21, 9),
+    "app/search/providers_api.py": (5, 5),
+    "app/search/providers_html.py": (1, 1),
+    "app/storage/coordination_cookies.py": (2, 1),
+    "app/storage/coordination_counters.py": (1, 1),
+    "app/storage/coordination_store.py": (4, 2),
+    "app/storage/job_store.py": (2, 1),
+    "app/storage/job_store_collections.py": (11, 6),
+    "app/storage/job_store_read.py": (3, 2),
+    "app/storage/job_store_state.py": (3, 2),
+    "app/runtime/resource_lifecycle.py": (1, 1),
+    "app/storage/migrations/runner.py": (5, 4),
+    "app/storage/migrations/ddl.py": (2, 2),
+    "app/storage/watch_store.py": (1, 1),
+    "app/transport/browser.py": (3, 2),
+    "app/transport/browser_cookies.py": (8, 5),
+    "app/transport/browser_result.py": (1, 1),
+    "app/transport/content_pipeline.py": (6, 4),
+    "app/transport/http_client_pool.py": (2, 2),
+    "app/transport/strategy_request.py": (1, 0),
 }
