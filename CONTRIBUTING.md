@@ -112,4 +112,4 @@ These require explicit review from a maintainer before merge:
   default is a security decision.
 
 If your PR modifies any of these, please call it out in the description
-and link the relevant section of `ADVERSARIAL_REVIEW_BROWSER_CRAWLER.md`.
+and link the relevant section of `docs/reviews/ADVERSARIAL_REVIEW_BROWSER_CRAWLER.md`.

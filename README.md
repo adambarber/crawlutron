@@ -55,7 +55,7 @@ What the SSRF defenses cover:
   are isolated in the shared cookie jar.
 
 See `SECURITY.md` for the threat model and reporting process, and
-`ADVERSARIAL_REVIEW_BROWSER_CRAWLER.md` for the dated adversarial review of
+`docs/reviews/ADVERSARIAL_REVIEW_BROWSER_CRAWLER.md` for the dated adversarial review of
 the crawler.
 
 

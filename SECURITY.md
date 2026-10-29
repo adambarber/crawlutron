@@ -27,7 +27,7 @@ The crawlutron is designed for **localhost or trusted-network** operation.
 It is a powerful SSRF-enabled service that:
 
 - Resolves and **pins** the IP of every URL it fetches to defeat DNS
-  rebinding (finding F9 in `ADVERSARIAL_REVIEW_BROWSER_CRAWLER.md`).
+  rebinding (finding F9 in `docs/reviews/ADVERSARIAL_REVIEW_BROWSER_CRAWLER.md`).
 - Validates every redirect hop manually so a `302 -> 169.254.169.254/`
   cannot be followed.
 - Pins the browser navigation IP and re-validates post-redirect URLs.
@@ -65,5 +65,5 @@ It is a powerful SSRF-enabled service that:
 
 ## Audit Trail
 
-- `ADVERSARIAL_REVIEW_BROWSER_CRAWLER.md` tracks the findings and
+- `docs/reviews/ADVERSARIAL_REVIEW_BROWSER_CRAWLER.md` tracks the findings and
   remediation of past adversarial reviews (last updated 2026-08-21).
