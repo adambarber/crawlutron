@@ -1,4 +1,4 @@
-"""A Request-shaped header carrier that is never opened (#544: zero noqa).
+"""A Request-shaped header carrier that is never opened.
 The stdlib cookiejar's send rules match a Request duck-type whose annotation
 is over-narrow; the opener family Request belongs to is lint-audited (S310)."""
 

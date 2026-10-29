@@ -39,7 +39,7 @@ MEMORY_CACHE_MAX = 100
 def _tmp_is_owned(path: Path) -> bool:
     """Whether a live ``atomic_write_text`` holds the temp's advisory lock.
     Taking the lock IS the ownership test: a held or unopenable path reports
-    owned, so a live write is never unlinked by age alone (#241)."""
+    owned, so a live write is never unlinked by age alone."""
     import fcntl
 
     try:
@@ -58,7 +58,7 @@ def _tmp_is_owned(path: Path) -> bool:
 
 def _sweep_orphan_tmps(cache_dir: Path, namespace: str, now: float) -> int:
     """Remove ``.tmp`` leftovers from a crashed atomic_write; age spares a live
-    write, since neither the value glob nor budget ever sees the file (#241)."""
+    write, since neither the value glob nor budget ever sees the file."""
     cutoff = now - TMP_ORPHAN_MAX_AGE_SECONDS
     removed = 0
     for path in cache_dir.glob(f".{namespace}.*.tmp"):
@@ -297,7 +297,7 @@ class ContentCache:
         return {"expires": expires, "value": value, "cached_at": now}, expires
 
     def set(self, key: str, value: JsonValue, ttl: int | None = None) -> None:
-        """Store ``value`` (JSON-serializable) with a TTL in seconds; ``ttl <= 0`` stores nothing (#394)."""
+        """Store ``value`` (JSON-serializable) with a TTL in seconds; ``ttl <= 0`` stores nothing."""
         if not stores_for_ttl(self.default_ttl if ttl is None else ttl):
             # The OFF convention: a non-positive TTL refuses the store, so the
             # knob's 0 can never invert into a permanent entry.
@@ -333,7 +333,7 @@ class ContentCache:
     async def aset(self, key: str, value: JsonValue, ttl: int | None = None) -> None:
         """Async ``set`` with the same byte-budget and OFF-convention contract."""
         if not stores_for_ttl(self.default_ttl if ttl is None else ttl):
-            return  # ttl <= 0 stores nothing (#394), like the sync path.
+            return  # ttl <= 0 stores nothing, like the sync path.
         # Serialize off the loop: pure, and the sync path's own contract.
         envelope, expires = await asyncio.to_thread(self._entry_to_store, value, ttl)
         path = self._path_for(key)

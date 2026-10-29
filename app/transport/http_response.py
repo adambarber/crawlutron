@@ -58,7 +58,7 @@ class HttpStrategyContext:
     limits: CrawlPolicyLimits = field(default_factory=CrawlPolicyLimits)
     retry_diagnostics: RetryDiagnostics = field(default_factory=lambda: _DEFAULT_RETRY)
     # The crawl's resolved settings, carried so extraction never re-reads the
-    # env or the cgroup per document (#509); None keeps direct callers whole.
+    # env or the cgroup per document; None keeps direct callers whole.
     settings: CrawlerSettings | None = None
 
 
@@ -142,7 +142,7 @@ _B64_CHUNK = 3 * 64 * 1024  # a multiple of 3: no chunk carries padding, so the 
 
 def _body_b64(body: bytes) -> str:
     """The body as base64, encoded in chunks so the peak stays near body + output:
-    the one-shot encode held the b64 bytes and the ascii str alongside the body (#355)."""
+    the one-shot encode held the b64 bytes and the ascii str alongside the body."""
     encoded = ""
     for start in range(0, len(body), _B64_CHUNK):
         encoded += base64.b64encode(body[start : start + _B64_CHUNK]).decode("ascii")

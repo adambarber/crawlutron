@@ -15,7 +15,7 @@ RENDER_PHASE_FLOOR_SECONDS = 1.0
 
 
 def render_phase_seconds(timeout_seconds: float) -> float:
-    """The one render-phase budget, floored at 1s (#482). Navigation has
+    """The one render-phase budget, floored at 1s. Navigation has
     RETURNED before actions start, so the two grants are sequential, not
     additive -- both call sites read this declaration instead of re-deriving."""
     return max(RENDER_PHASE_FLOOR_SECONDS, float(timeout_seconds))

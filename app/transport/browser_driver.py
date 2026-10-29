@@ -155,7 +155,7 @@ class BrowserDriver:
             )
         )
         # An explicit ``cache_dir=`` beats the settings default, so passing it
-        # alongside ``settings`` honors the caller's path instead (#222).
+        # alongside ``settings`` honors the caller's path instead.
         self._cache_dir = (
             cache_dir if cache_dir is not None else (settings.cache_dir if settings is not None else None)
         )
@@ -384,7 +384,7 @@ class BrowserDriver:
         """Scroll to the bottom repeatedly to trigger lazy-loaded content.
 
         The scroll evaluate returns the page height; two stable polls stop the
-        pass early so a static page pays no fixed-delay tax (#356)."""
+        pass early so a static page pays no fixed-delay tax."""
         steps, delay = self.scroll_config_for(browser_profile)
         previous_height: float | None = None
         stable_polls = 0

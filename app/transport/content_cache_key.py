@@ -26,7 +26,7 @@ def build_content_cache_key(
     cookie_namespace: str = "",
 ) -> str:
     """Stable content-cache key mirroring what http.py stores under -- a shared
-    helper reconstructing a future fetch's exact key (#544/S5: the cookie
+    helper reconstructing a future fetch's exact key (the cookie
     namespace partitions callers whose header sets collide).
     """
     # pre-flip key was built from, so every entry already on disk stays addressable after

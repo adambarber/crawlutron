@@ -77,7 +77,7 @@ logger = logging.getLogger(__name__)
 
 def _render_classification(error: BaseException) -> Classification:
     """The attempt verdict for a failed render. A bounded-resolver timeout is a
-    resolution failure (dns_error), never a navigation one (#405): the request
+    resolution failure (dns_error), never a navigation one: the request
     never got to navigate."""
     if isinstance(error, ResolverBudgetExceeded):
         return "dns_error"
@@ -251,7 +251,7 @@ class BrowserRenderer:
 
         page = await self._driver.open_page(options.browser_profile)
         # The guarded body starts here, not after route wiring: an early raise
-        # still recycles via the finally's note_render (#223).
+        # still recycles via the finally's note_render.
         try:
             result = await guarded_render(
                 page,
