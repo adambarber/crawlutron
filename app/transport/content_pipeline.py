@@ -67,7 +67,7 @@ async def run_extraction(
 ) -> ExtractedContent:
     """Run the configured extractor once, off the loop: a fourth mode is one
     change here, not a branch per caller. ``settings`` is the crawl's resolved
-    settings, so extraction never re-reads the env (#509)."""
+    settings, so extraction never re-reads the env."""
     selectors = Selectors(css=policy.css_selector, xpath=policy.xpath)
     if extraction == EXTRACTION_DOCUMENT:
         # The document extractor is typed for bytes; a browser render has text.

@@ -83,7 +83,7 @@ def allow_plaintext_webhooks() -> bool:
 
 
 def ensure_https_webhook_url(webhook_url: str) -> None:
-    """The one scheme law for both webhook doors (#499): plaintext http:// is
+    """The one scheme law for both webhook doors: plaintext http:// is
     refused unless CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK=1; raises ValueError."""
     if not webhook_url.lower().startswith("http://"):
         return
@@ -107,7 +107,7 @@ def webhook_backoff_base_ms() -> int:
 
 
 def webhook_drain_deadline_seconds() -> float:
-    """The total shutdown-drain budget (#364): one delivery's worst path --
+    """The total shutdown-drain budget: one delivery's worst path --
     every attempt, plus its backoffs -- from the existing retry budget."""
     attempts = webhook_max_attempts()
     base_s = webhook_backoff_base_ms() / 1000.0
@@ -186,7 +186,7 @@ async def _backoff_sleep(attempt: int, base_ms: int) -> None:
 async def drain_webhook_deliveries() -> None:
     """Await every in-flight delivery once (shutdown), so a cancelled runner's
     callback is delivered before the stores close -- under a total deadline:
-    one hung receiver must not wedge shutdown past the delivery budget (#364).
+    one hung receiver must not wedge shutdown past the delivery budget.
     """
     tasks = list(_DELIVERIES)
     if not tasks:
@@ -241,7 +241,7 @@ def max_webhook_size() -> int:
 def _serialize_webhook_payload(payload: Mapping[str, object], cap: int) -> bytes | None:
     """The webhook body as bytes, or ``None`` once it passes ``cap`` -- the
     running buffer is the only whole-payload copy, so a capped payload never
-    holds the full str and the full bytes at once (#342)."""
+    holds the full str and the full bytes at once."""
     buffer = io.BytesIO()
     for chunk in json.JSONEncoder().iterencode(payload):
         buffer.write(chunk.encode("utf-8"))
@@ -258,7 +258,7 @@ async def post_webhook(
 ) -> None:
     """POST a webhook (SSRF/IP pinned, HMAC-signed, size-capped) with backoff retries.
     Best-effort: nothing raises -- a lost callback is logged, so it cannot corrupt
-    an already-recorded outcome (#450); validation lives in the pin per attempt.
+    an already-recorded outcome; validation lives in the pin per attempt.
     """
     cap = max_webhook_size()
     payload_bytes = _serialize_webhook_payload(payload, cap)
@@ -321,7 +321,7 @@ def start_webhook_delivery(
 ) -> asyncio.Task:
     """Spawn the delivery as a tracked background task and return at once.
 
-    The sweep pass must not stall on a slow receiver (#528); the task joins the
+    The sweep pass must not stall on a slow receiver; the task joins the
     same ``_DELIVERIES`` set, so shutdown drains it like any other callback."""
     return _tracked_delivery(webhook_url, payload, host_policy=host_policy)
 

@@ -8,7 +8,7 @@ from app.models.normalized_url import NormalizedUrl
 
 
 def scheduler_domain_key(url: NormalizedUrl) -> str:
-    """The one canonical scheduler key: the registrable site (#445).
+    """The one canonical scheduler key: the registrable site.
 
     Host-keyed writers split one site's state in two; every writer and reader
     of scheduler state goes through this function."""

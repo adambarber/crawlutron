@@ -35,7 +35,7 @@ needs.
 
 _DENY_RULE: CandidateRule = "denied_hosts"
 
-# The read bounds of one rollup request (#443/#449): pages keep peak memory at
+# The read bounds of one rollup request: pages keep peak memory at
 # one bounded page, and the window caps the rows read so one GET is bounded work.
 _PAGE_SIZE = 50
 _MAX_RECORDS = 500
@@ -178,7 +178,7 @@ async def policy_suggestions(
         cursor = page[-1][0]
         read += len(page)
         # Validation is per-row pydantic work; running it (and the rollup below)
-        # on the loop is what stalled every concurrent request (#449).
+        # on the loop is what stalled every concurrent request.
         page_records, page_skipped = await asyncio.to_thread(_valid_traces, [payload for _, payload in page])
         records.extend(page_records)
         skipped += page_skipped

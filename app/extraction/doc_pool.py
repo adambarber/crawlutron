@@ -29,7 +29,7 @@ def configure_doc_worker_runtime() -> None:
         logging.getLogger(__name__).debug("onnxruntime telemetry disable unavailable")
 
 
-# The doc-pool death-simulation seam (#359): tests install a hooks payload here
+# The doc-pool death-simulation seam: tests install a hooks payload here
 # (a per-process holder, never env) and the worker honors what the parent ships.
 class DocPoolHooks(TypedDict):
     """The child-simulation hooks one task may carry: die/hang/output."""
@@ -134,7 +134,7 @@ def configure_doc_worker_logging() -> None:
 def _markitdown_extract(body: bytes) -> str | None:
     """Convert document bytes with markitdown (worker-side real path only). Test
     hooks are NOT read here: the parent ships them per task, and the worker
-    honors the shipped message; the parent never imports markitdown (#484).
+    honors the shipped message; the parent never imports markitdown.
     """
     from markitdown import MarkItDown
 
@@ -150,7 +150,7 @@ def doc_worker_main(conn) -> None:
     try:
         configure_doc_worker_runtime()
         configure_doc_worker_logging()
-        # Warm import inside the readiness handshake (#6693/#484): the worker
+        # Warm import inside the readiness handshake: the worker
         # pays markitdown's cost here, inside the acquisition budget.
         import markitdown  # noqa: F401  imported for its cost, in the worker only
 
@@ -183,7 +183,7 @@ def doc_worker_main(conn) -> None:
         with suppress(Exception):
             conn.close()
         # Clean pipe-EOF exit skips native teardown (os._exit), so onnxruntime's telemetry
-        # WorkerThread never races module finalization into the recursive-mutex abort (#510).
+        # WorkerThread never races module finalization into the recursive-mutex abort.
         os._exit(0)
 
 
@@ -244,7 +244,7 @@ class DocExtractionPool:
         """A worker ready to serve, or the failure that ends the acquisition.
 
         A spawn failure is transient (cgroup ceiling) and distinct from a
-        teardown (#269); it ends this acquisition rather than being waited out."""
+        teardown; it ends this acquisition rather than being waited out."""
         try:
             return self._spawn(ready_timeout)
         except (OSError, DocWorkerSpawnError) as exc:

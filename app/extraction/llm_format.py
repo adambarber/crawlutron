@@ -164,7 +164,7 @@ def _carry_meta_tags(metadata: PageMetadata, tree: etree._Element) -> None:
 
 
 def text_from_html(html: str) -> str:
-    # The linear, input-capped noise scanner classify owns (#440): the lazy-quantifier
+    # The linear, input-capped noise scanner classify owns: the lazy-quantifier
     # regexes this replaced went quadratic on unterminated <script floods.
     return _WHITESPACE_RE.sub(" ", unescape(strip_html_noise(html))).strip()
 

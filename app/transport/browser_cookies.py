@@ -90,14 +90,14 @@ def has_process_state() -> bool:
 def store_browser_cookies(domain: str, header: str, *, namespace: str | None = None) -> None:
     """Record a harvested cookie header, evicting the LRU entry past the cap.
 
-    Keyed by the caller's namespace (#437): one caller's harvested session
+    Keyed by the caller's namespace: one caller's harvested session
     never surfaces to another caller's jar.
     """
     BROWSER_COOKIES_BY_DOMAIN.store(domain, header, _running_namespace(namespace))
 
 
 def get_browser_cookies_for(domain: str, *, namespace: str | None = None) -> str | None:
-    """The harvested header for ``domain`` in the caller's namespace (#437)."""
+    """The harvested header for ``domain`` in the caller's namespace."""
     return BROWSER_COOKIES_BY_DOMAIN.touch_get(domain, _running_namespace(namespace))
 
 

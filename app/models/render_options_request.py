@@ -19,7 +19,7 @@ class RenderOptionsRequest(BaseModel):
         Field(
             description=(
                 "Per-render navigation timeout in seconds; values above "
-                f"{MAX_HTTP_TIMEOUT_SECONDS} are clamped to it (#444)."
+                f"{MAX_HTTP_TIMEOUT_SECONDS} are clamped to it."
             ),
         ),
     ] = None
@@ -28,7 +28,7 @@ class RenderOptionsRequest(BaseModel):
         Field(
             description=(
                 "Maximum retries for a transient render failure; values above "
-                f"{MAX_RETRIES} are clamped to it (#444)."
+                f"{MAX_RETRIES} are clamped to it."
             ),
         ),
     ] = None

@@ -191,7 +191,7 @@ async def admit_job_links(
     known: set[NormalizedUrl] | None = None,
 ) -> AdmissionOutcome:
     """Admit ``links`` for ``job``; pass ``known`` to thread the occupied set by
-    value (#381) -- ``None`` derives it from job state (the first admission)."""
+    value -- ``None`` derives it from job state (the first admission)."""
     if known is None:
         known = admitted_page_identities(job, host_policy=context.host_policy)
     outcome = await admit_discovered_links(
@@ -247,7 +247,7 @@ def requeue_admitted_pages(
 ) -> AdmissionOutcome:
     """Re-admit already-admitted identities onto the frontier.
 
-    ``known`` threads the caller's occupied set (#548); ``None`` derives it from
+    ``known`` threads the caller's occupied set; ``None`` derives it from
     job state, the shape the first admission used."""
     if known is None:
         known = admitted_page_identities(job, host_policy=context.host_policy)

@@ -77,7 +77,7 @@ def install_execute_crawl(fn: ExecuteCrawl) -> None:
 async def arecord_terminal_failure(job_store: JobStore, job_id: str, error: str) -> bool:
     """Flip a RUNNING job to FAILED with ``error`` in the same CAS write; True iff
     it landed. A job past RUNNING is left as-is and reports False: no partial
-    stamp, so a lost CAS cannot leave the error on a non-FAILED row (#365).
+    stamp, so a lost CAS cannot leave the error on a non-FAILED row.
     """
     job = await job_store.aload(job_id)
     if job is None or job.status is not JobStatus.RUNNING:
@@ -92,11 +92,11 @@ def reset_execute_crawl() -> None:
 
 def pop_frontier(job: CrawlJobState) -> list[FrontierEntry]:
     normalize_job_state(job)
-    # Normalization's drops are already logged (the merge records them, #547);
+    # Normalization's drops are already logged by the merge;
     # only the pops this function performs need logging here.
     max_pages = job_max_pages(job.policy, job.tier)
     if job.in_flight:
-        # Cap arithmetic without the whole-set copy (#548): a live URL sits in exactly
+        # Cap arithmetic without the whole-set copy: a live URL sits in exactly
         # one collection, so the union's size is this sum; visited len is O(1).
         if max_pages > 0:
             fixed_count = len(job.visited) + sum(1 for entry in job.in_flight if entry.url not in job.visited)
@@ -107,7 +107,7 @@ def pop_frontier(job: CrawlJobState) -> list[FrontierEntry]:
     if capacity is not None and capacity <= 0:
         if job.frontier:
             record_cap_truncated(job)
-        # The whole queue is dropped (#547): log every entry so the persist
+        # The whole queue is dropped: log every entry so the persist
         # deletes exactly their rows.
         job.frontier_removed.extend(entry.url for entry in job.frontier)
         del job.frontier[:]
@@ -120,7 +120,7 @@ def pop_frontier(job: CrawlJobState) -> list[FrontierEntry]:
         job.frontier_removed.extend(entry.url for entry in job.frontier[count:])
         del job.frontier[count:]
     batch = list(job.frontier[:count])
-    # The popped prefix's rows are deleted by the next persist (#547).
+    # The popped prefix's rows are deleted by the next persist.
     job.frontier_removed.extend(entry.url for entry in batch)
     job.frontier_mark = max(0, job.frontier_mark - count)
     del job.frontier[:count]
@@ -149,7 +149,7 @@ async def pace_delayed_batch(
     tasks: list[CrawlTask] = []
     for index, entry in enumerate(batch):
         # The membership test uses the same canonical key commit_crawl_delay
-        # recorded (#445/#497): a host must never miss its own site's delay.
+        # recorded: a host must never miss its own site's delay.
         if entry.url.site in context.delayed_hosts:
             tasks.append(
                 CrawlTask(
@@ -229,7 +229,7 @@ async def _entry_result(
 ) -> int:
     """Record one entry's result into ``job``; returns ``1`` if it failed.
 
-    ``known`` is the batch's threaded occupied set (#381): admission folds its
+    ``known`` is the batch's threaded occupied set: admission folds its
     ``known_delta`` back in, so the next entry dedupes against the value.
     """
     if item is None:
@@ -258,7 +258,7 @@ async def _entry_result(
         url_attr = item.normalized_url.raw if item.normalized_url else "<unknown>"
         logger.warning("link_admission_failed", extra={"url": url_attr})
         admitted = AdmissionOutcome()
-    known |= admitted.known_delta  # unioning the delta copies nothing whole (#519)
+    known |= admitted.known_delta  # unioning the delta copies nothing whole
     job.stats["total_discovered"] = job.stats.get("total_discovered", 0) + admitted.accepted
     return failed
 
@@ -293,13 +293,13 @@ async def absorb_batch(
     context: JobAdmissionContext,
     known: set[NormalizedUrl],
 ) -> int:
-    """Fold one resolved batch into ``job`` under the threaded known set (#548)."""
+    """Fold one resolved batch into ``job`` under the threaded known set."""
     failed = 0
     for entry in batch:
         identity = entry.url
         job.in_flight = [pending for pending in job.in_flight if pending.url != identity]
         # The identity leaves in_flight here; the threaded set must forget it too,
-        # or the requeue below would dedupe against its own URL (#548).
+        # or the requeue below would dedupe against its own URL.
         known.discard(identity)
         item = resolved.get(identity)
         transient = item is None or is_transient_classification(item.classification)
@@ -353,10 +353,10 @@ async def run_job(
     try:
         context = JobAdmissionContext.create(job.policy, job.tier, settings, fetch_and_decode)
         await _seed_sitemaps(job, context, job_store)
-        # The occupied set is threaded across the loop (#548): one derivation here.
+        # The occupied set is threaded across the loop: one derivation here.
         known = admitted_page_identities(job, host_policy=context.host_policy)
         while True:
-            # State-only reload (#538): a full read re-decodes the page history per batch only to discard it.
+            # State-only reload: a full read re-decodes the page history per batch only to discard it.
             state = await job_store.areload_state(job_id)
             if state is None:
                 return
@@ -378,7 +378,7 @@ async def run_job(
             if reloaded is None:
                 return
             job = replace(reloaded, results=job.results, visited=job.visited, visited_mark=job.visited_mark)
-            # ``original_url`` wins the identity; redirects fill the gaps (#519).
+            # ``original_url`` wins the identity; redirects fill the gaps.
             resolved: dict[NormalizedUrl, EngineCrawlResult] = {}
             for produced in items:
                 admitted_original = admit_or_none(produced.original_url, policy=job.host_policy)
@@ -447,7 +447,7 @@ async def resume_job(
     job_id: str, job_store: JobStore, settings: CrawlerSettings, shutdown_event: asyncio.Event
 ) -> str:
     """Resume a paused job by respawning its runner task."""
-    # A stale predecessor owning the slot must not leave a RUNNING row with no runner (#523):
+    # A stale predecessor owning the slot must not leave a RUNNING row with no runner:
     outcome = await _transition(job_store, job_id, JobStatus.RUNNING, expected=JobStatus.PAUSED)
     if outcome == "ok":
         # The flip above is this process's claim, so the runner is told not to

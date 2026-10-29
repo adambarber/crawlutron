@@ -29,14 +29,14 @@ def is_private_or_loopback_ip(ip: str) -> bool:
 
 
 class ResolverBudgetExceeded(TimeoutError):
-    """A DNS resolve outlasted the budget derived from the request it serves
-    (#383, #405): classifiable as a resolution failure (dns_error), never as a
+    """A DNS resolve outlasted the budget derived from the request it serves:
+    classifiable as a resolution failure (dns_error), never as a
     navigation one -- the request never got to navigate."""
 
 
 async def bounded_thread_resolve[T](work: Callable[[], T], *, timeout_seconds: float | None) -> T:
     """Run one blocking resolve off the loop, bounded by the DNS posture tightened
-    by the caller's own budget (#383). A resolver that outlasts the wait raises
+    by the caller's own budget. A resolver that outlasts the wait raises
     the classifiable resolution failure; the future is cancelled first."""
     wait_for = dns_wait_for(timeout_seconds)
     loop = asyncio.get_running_loop()
@@ -56,7 +56,7 @@ _DNS_CACHE: BoundedTTLCache[str, list[str]] = BoundedTTLCache(max_entries=_DNS_C
 
 
 def _bounded_addrinfo(hostname: str) -> list[str]:
-    """One getaddrinfo on the shared DNS executor, bounded by the DNS posture (#383):
+    """One getaddrinfo on the shared DNS executor, bounded by the DNS posture:
     a resolve that outlasts the budget raises the classifiable ResolverBudgetExceeded
     instead of waiting unbounded on the caller's thread."""
     wait_for = dns_wait_for(None)
@@ -88,7 +88,7 @@ def _resolve_ips(hostname: str, *, use_cache: bool = True) -> list[str]:
 
 
 # Pass ``use_cache=False`` where the caller cannot pin its connect (the browser
-# re-resolves at connect), so validation is contemporaneous with that connect (#387).
+# re-resolves at connect), so validation is contemporaneous with that connect.
 def _public_verdict(hostname: str, ips: list[str]) -> None:
     """The one public-only law over a resolved answer: any private member
     raises the shared refusal. Both check verdicts and the pin read this."""
@@ -129,7 +129,7 @@ def check_ssrf_protection(url: NormalizedUrl, *, use_cache: bool = True) -> None
 
 
 def check_ssrf_protection_stable(url: NormalizedUrl) -> None:
-    """The browser-family verdict (#540): TWO fresh resolves must agree.
+    """The browser-family verdict: TWO fresh resolves must agree.
 
     Last verifiable moment without dial ownership: a changed answer is the
     rebinding signature (residual documented on the ticket).
@@ -148,7 +148,7 @@ def check_ssrf_protection_stable(url: NormalizedUrl) -> None:
 def resolve_and_pin_host(url: NormalizedUrl) -> tuple[str, str]:
     """Resolve the host once and pin the resulting IP, connecting to that exact IP
     to defeat DNS-rebinding TOCTOU SSRF. Fails closed; ONE verdict per hostname --
-    a mixed public/private answer set is refused, matching the browser ruling (#387)."""
+    a mixed public/private answer set is refused, matching the browser ruling."""
 
     hostname = url.host
     if allow_private_targets():
@@ -190,7 +190,7 @@ def declared_length_exceeds(header_value: str | None, limit: int) -> bool:
 def build_pinned_request(url: NormalizedUrl, headers: dict[str, str]) -> tuple[str, dict[str, str]]:
     """Build the pinned request for an admitted URL -- the sole owner of the
     composition (IP blocklist, fresh pin, exact-IP connect with Host preserved).
-    Both schemes pin the connect to the validated IP; one resolution per hop (#383).
+    Both schemes pin the connect to the validated IP; one resolution per hop.
     """
     _, pinned = resolve_and_pin_host(url)
     port = f":{url.port}" if url.port else ""
@@ -247,13 +247,13 @@ class PinRule(Protocol):
 # event loop or contend with the default executor used for extraction.
 DNS_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=32, thread_name_prefix="dns-resolve")
 
-# The DNS wait posture (#383): the ceiling on the resolver wait, derived from
+# The DNS wait posture: the ceiling on the resolver wait, derived from
 # the request's budget by ``dns_wait_for`` so a tight request tightens it.
 DNS_WAIT_SECONDS = 5.0
 
 
 def dns_wait_for(timeout_seconds: float | None) -> float:
-    """The resolver wait for a request with ``timeout_seconds`` of budget (#383):
+    """The resolver wait for a request with ``timeout_seconds`` of budget:
     the request's own budget when it is the tighter one, else the DNS posture."""
     if timeout_seconds is None:
         return DNS_WAIT_SECONDS
@@ -269,7 +269,7 @@ async def build_pinned_request_async(
     """Off-loop entry to the pin rule: SSRF-safe build, getaddrinfo included, on a
     worker thread so a resolver lookup never stalls the event loop.
     """
-    # The resolver wait is derived from the request's budget (#383): no budget in
+    # The resolver wait is derived from the request's budget: no budget in
     # hand means the DNS posture; a tighter budget tightens the wait.
     return await bounded_thread_resolve(
         lambda: build_pinned_request(url, headers), timeout_seconds=timeout_seconds
@@ -295,7 +295,7 @@ async def redirect_target(
     """Decide the next hop of a manual redirect loop (shared by both fetchers).
 
     On an in-budget redirect returns ``(new_url, updated_headers)``; hop exhaustion
-    raises rather than reading the redirect body as a page. Awaited (#141).
+    raises rather than reading the redirect body as a page. Awaited.
     """
     if status_code in _REDIRECT_STATUSES and hops >= MAX_REDIRECT_HOPS:
         # Distinguish hop exhaustion from a terminal answer: the response is still
@@ -318,7 +318,7 @@ async def _stripped_credentials(headers: dict[str, str], new_url: NormalizedUrl)
     """Drop caller credentials, then attach the new origin's own jar cookies.
 
     Caller-supplied credentials never cross origins; the jar read is SQLite
-    under the store lock, so this is awaited, never on the loop (#141).
+    under the store lock, so this is awaited, never on the loop.
     """
     stripped = {k: v for k, v in headers.items() if k.lower() not in _CREDENTIAL_HEADERS}
     jar_cookie = await global_cookie_jar().acookie_header_for(new_url, namespace=COOKIE_NAMESPACE.get())
@@ -357,7 +357,7 @@ class _RedirectChain:
         # the mapping, and the caller's dict must not be rewritten underneath it.
         self.headers = dict(headers)
         self.hops = 0
-        # The request's own budget bounds the resolver wait (#383): a slow
+        # The request's own budget bounds the resolver wait: a slow
         # getaddrinfo surfaces a classifiable timeout, not an indefinite hang.
         self.timeout_seconds = timeout_seconds
         # The rule travels whole; the bounded off-loop resolve wraps it at pin
@@ -375,7 +375,7 @@ class _RedirectChain:
         """Step to the next hop; return True when the caller should re-request.
 
         False means terminal - read the body. Awaited: a cross-origin hop reads
-        the persistent jar off the loop (#141).
+        the persistent jar off the loop.
         """
         target = await redirect_target(
             self.url,
@@ -403,8 +403,8 @@ async def apinned_hops(
     The body receives ``(chain, pinned_url, hop_headers)``, sends, then leaves;
     ``continue`` after ``chain.advance(response)`` asks for the next hop.
     """
-    # timeout_seconds is the request budget; it bounds the resolver wait (#383).
-    # The shared wire edge (#441): a value that can start another header is refused here.
+    # timeout_seconds is the request budget; it bounds the resolver wait.
+    # The shared wire edge: a value that can start another header is refused here.
     reject_injectable_header_values(headers)
     chain = _RedirectChain(url, headers, pin=pin or build_pinned_request, timeout_seconds=timeout_seconds)
     while True:

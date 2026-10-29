@@ -26,7 +26,7 @@ class CrawlDiagnostics(TypedDict, total=False):
     """The result's diagnostics bag: every top-level key a consumer reads.
 
     Producers may add keys; each added key a consumer reads must be declared
-    here, so the bag's read surface is typed end to end (memory #4666).
+    here, so the bag's read surface is typed end to end.
     """
 
     retryable: bool

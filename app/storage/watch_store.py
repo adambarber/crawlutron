@@ -149,7 +149,7 @@ class WatchStore(CoordinationStore):
     def claim_due(self, now: float, token: str, *, claim_seconds: float) -> list[WatchState]:
         """Atomically claim the due watches for one sweep pass: an UPDATE stamps
         ``token``/``claimed_at`` on every due, unclaimed (or stale-claimed) row and
-        the claimed rows are returned; a second sweeper's CAS loses and skips (#528).
+        the claimed rows are returned; a second sweeper's CAS loses and skips.
         """
         with self._lock:
             self._conn.execute(
@@ -183,7 +183,7 @@ class WatchStore(CoordinationStore):
     ) -> None:
         """Persist a completed check's result and reschedule. ``etag``/``last_modified``
         are stored only on a delivered change; other verdicts keep the stored set.
-        A ``skipped`` (robots refusal) is a non-attempt, not an error (#335).
+        A ``skipped`` (robots refusal) is a non-attempt, not an error.
         """
         status = status_for_classification(outcome)
         modified = status == "success" and outcome != CrawlClassification.not_modified
@@ -233,7 +233,7 @@ class WatchStore(CoordinationStore):
         reason: CrawlClassification = CrawlClassification.site_error,
     ) -> None:
         """Stop a watch being checked: terminal status plus a reschedule far out.
-        ``reason`` carries the terminal classification to the row (#368); the
+        ``reason`` carries the terminal classification to the row; the
         row and its history stay for the operator to read.
         """
         with self._lock:

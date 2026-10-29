@@ -42,7 +42,7 @@ COOKIE_NAMESPACE: contextvars.ContextVar[str] = contextvars.ContextVar(
 # budget is independent, so one crawl cannot evict another's. Kept on the store.
 COOKIE_JAR_MAX_HOSTS_PER_NAMESPACE = DEFAULT_MAX_HOSTS_PER_NAMESPACE
 
-# The tombstone reap window (#393): deletions propagate for this long, then
+# The tombstone reap window: deletions propagate for this long, then
 # their own writer prunes them. Same order as the DNS cache's 60s union window.
 TOMBSTONE_WINDOW_SECONDS = 60.0
 
@@ -80,7 +80,7 @@ _RECORD_KEYS = frozenset(CookieRecord.__annotations__)
 
 class RecordingSendPolicy(DefaultCookiePolicy):
     """The send policy (RFC 6265, DomainStrict host-only pin, rfc2965 off) with a
-    memory of what it accepted (#414): ``return_ok`` is the final send gate stdlib
+    memory of what it accepted: ``return_ok`` is the final send gate stdlib
     matching applies, so its acceptances are what the request carried.
     """
 
@@ -107,7 +107,7 @@ class CookieJar:
         # jar holds no lock of its own (one thread-safe guard, never two).
         self._inmemory = InMemoryCookieStore(max_hosts_per_namespace=COOKIE_JAR_MAX_HOSTS_PER_NAMESPACE)
         # (namespace, slot host) -> {name: deleted_at epoch}: the tombstones
-        # this jar wrote, pruned after the union window (#393).
+        # this jar wrote, pruned after the union window.
         self._deleted: dict[tuple[str, str], dict[str, float]] = {}
 
     @property
@@ -159,7 +159,7 @@ class CookieJar:
         slots = self._store.all_slots() if self._store is not None else self._inmemory.snapshot()
         return list(_live_records(slots, namespace))
 
-    # One async twin for the one door async crawl frames await (#141), derived
+    # One async twin for the one door async crawl frames await, derived
     # from the sync method: the fetch tails' Set-Cookie path never holds the loop.
     aadd_cookie_header = atwin(add_cookie_header)
 
@@ -168,7 +168,7 @@ class CookieJar:
     acookie_header_for = atwin(cookie_header_for)
 
     def _prune_deleted(self, *, now: float | None = None) -> None:
-        """Reap this jar's tombstones older than TOMBSTONE_WINDOW_SECONDS (#393).
+        """Reap this jar's tombstones older than TOMBSTONE_WINDOW_SECONDS.
 
         The tombstone's own writer rewrites its slot minus dead records, scoped
         to the (namespace, host) slots holding them -- never another namespace.
@@ -214,7 +214,7 @@ class CookieJar:
         """
         from app.safety.atomic_write import atomic_write_text
 
-        atomic_write_text(path, json.dumps(self._legacy_slots()), durable=False)  # best-effort (#357)
+        atomic_write_text(path, json.dumps(self._legacy_slots()), durable=False)  # best-effort
 
     def import_file_into(self, path: str) -> None:
         """Merge a legacy JSON jar's shared namespace into this jar; the file format
@@ -311,7 +311,7 @@ def _cookie_domain(attrs: dict[str, str | None], url: NormalizedUrl) -> tuple[st
     if not domain_attr:
         return url.host.lower(), True
     domain = domain_attr.lstrip(".").lower()
-    if is_public_suffix(domain):  # 6265bis 5.3: only the request host stays, host-only (#438)
+    if is_public_suffix(domain):  # 6265bis 5.3: only the request host stays, host-only
         return (domain, True) if domain == url.host.lower() else None
     return (domain, False) if _domain_matches(url.host, domain) else None
 
@@ -341,7 +341,7 @@ def _default_path(url: NormalizedUrl) -> str:
 def _expiry(attrs: dict[str, str | None]) -> float | None:
     """RFC 6265 5.2.1/5.2.2: max-age wins; zero or a past date means now.
     A malformed max-age is ignored (the attribute does not apply), so a remote
-    server cannot fail our fetch with a bad header value (#395)."""
+    server cannot fail our fetch with a bad header value."""
     max_age = attrs.get("max-age")
     if isinstance(max_age, str):
         seconds = _max_age_seconds(max_age)
@@ -353,7 +353,7 @@ def _expiry(attrs: dict[str, str | None]) -> float | None:
     return None
 
 
-# RFC 6265bis 4.1.2.2/5.5 (#399): no cookie outlives this, whichever attribute set it.
+# RFC 6265bis 4.1.2.2/5.5: no cookie outlives this, whichever attribute set it.
 MAX_COOKIE_LIFETIME_SECONDS = 400 * 24 * 60 * 60
 
 
@@ -361,14 +361,14 @@ def _capped_expiry(expiry: float) -> float:
     """The expiry the RFC allows: never past now + MAX_COOKIE_LIFETIME_SECONDS.
 
     A 40-digit Max-Age otherwise parses fine (Python integers are unbounded) and
-    pins a cookie in the caller's jar for ever (#399)."""
+    pins a cookie in the caller's jar for ever."""
     return min(expiry, time.time() + MAX_COOKIE_LIFETIME_SECONDS)
 
 
 def _max_age_seconds(raw: str) -> int | None:
     """RFC 6265 5.2.2: the first character must be a DIGIT or '-'; anything else
     is non-conformant and ignored. Python integers are unbounded, so any digit
-    string parses; the lifetime cap lives on ``_capped_expiry`` (#399)."""
+    string parses; the lifetime cap lives on ``_capped_expiry``."""
     text = raw.strip()
     if not text or text[0] not in "-0123456789":
         return None
@@ -425,7 +425,7 @@ def sendable_cookie_header(
 ) -> tuple[str, set[str]]:
     """The Cookie header RFC 6265 5.4 allows for ``url``, longest path first.
 
-    Matching and ordering delegate to stdlib http.cookiejar; contributors (#414)
+    Matching and ordering delegate to stdlib http.cookiejar; contributors
     come back as the policy's acceptances, not header-carried names.
     """
     policy = RecordingSendPolicy()

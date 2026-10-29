@@ -164,7 +164,7 @@ def _host_is_public(host: str) -> bool:
         return False
     if "%" in host:
         # A zone id is never a routable target: Python 3.12 ipaddress parses scoped
-        # literals as PUBLIC, so refusal must be unconditional (#442, #496).
+        # literals as PUBLIC, so refusal must be unconditional.
         return False
     # A host that is not an address is a name, judged against ``is_public_ip_value``
     # once the resolver answers; only a literal IP in a rejected range is refused.

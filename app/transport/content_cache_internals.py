@@ -20,7 +20,7 @@ from app.transport.freshness import is_expired
 UNPARSEABLE_EXPIRY = float("-inf")
 
 #: A ``.tmp`` orphan older than this is swept: atomic_write's crash window
-#: (mkstemp -> os.replace) leaves it behind, invisible to glob and budget (#241).
+#: (mkstemp -> os.replace) leaves it behind, invisible to glob and budget.
 TMP_ORPHAN_MAX_AGE_SECONDS = 3600
 
 
@@ -56,7 +56,7 @@ def decode_envelope(raw: bytes) -> CacheEnvelope | None:
 
 def atomic_write(path: Path, data: str) -> None:
     """Persist a pre-serialized envelope atomically (the default disk writer)."""
-    # A cache entry is reproducible from the origin, so it writes best-effort (#357).
+    # A cache entry is reproducible from the origin, so it writes best-effort.
     atomic_write_text(path, data, durable=False)
 
 

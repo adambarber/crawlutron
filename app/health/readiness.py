@@ -43,7 +43,7 @@ def _read_max_active_cap() -> int | None:
 
 class ReadinessState:
     """Thread-safe readiness tracker: saturation from the resource guard,
-    active-request count as visibility plus an optional fixed cap (#299).
+    active-request count as visibility plus an optional fixed cap.
     """
 
     def __init__(self, max_active_requests: int | None = None) -> None:

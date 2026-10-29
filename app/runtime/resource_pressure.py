@@ -46,7 +46,7 @@ _DEFAULT_EXECUTOR_CAP = 32
 
 
 def default_executor_workers() -> int:
-    """Thread count for the loop's shared default executor (#360), env-overridable."""
+    """Thread count for the loop's shared default executor, env-overridable."""
     cpus = read_cpu_quota()
     if cpus is None:
         import os

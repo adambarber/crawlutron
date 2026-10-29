@@ -223,7 +223,7 @@ class _SpillLine(TypedDict):
 def _spill_encode(index: int, result: EngineCrawlResult) -> str:
     """Build one spill line -- ``to_dict`` plus ``json.dumps`` -- as ONE offloaded
     unit: the worker lambda runs both, so neither the multi-MB dict walk nor the
-    dump lands on the event loop (#536)."""
+    dump lands on the event loop."""
     return json.dumps({"i": index, "r": to_dict(result)})
 
 
@@ -323,7 +323,7 @@ class ResultSpill:
 
     async def write(self, index: int, result: EngineCrawlResult) -> None:
         # Offload the WHOLE line build -- to_dict walking a multi-MB result plus
-        # json.dumps of it -- so neither step ever runs on the event loop (#536).
+        # json.dumps of it -- so neither step ever runs on the event loop.
         line = await asyncio.to_thread(_spill_encode, index, result)
         async with self._write_lock:
             self._fh.write(line + "\n")
@@ -395,7 +395,7 @@ async def crawl_request(
     active_settings = settings or CrawlerSettings.from_mapping()
     host_policy = HostPolicy.from_settings(active_settings)
     # One batch cap -- the same gate the async endpoint uses before accepting, so
-    # sync and async cannot drift. Pairs keep the one admitted NormalizedUrl (#351).
+    # sync and async cannot drift. Pairs keep the one admitted NormalizedUrl.
     url_pairs = checked_payload_urls(
         payload, active_settings.max_batch_size, url_pairs=url_pairs, host_policy=host_policy
     )

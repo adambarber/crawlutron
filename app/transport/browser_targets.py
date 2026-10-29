@@ -21,7 +21,7 @@ from app.transport.pinned_transport import (
 )
 from app.vocabulary.hosts import is_analytics_host as _is_analytics_url
 
-# The resolve bound is the pinned transport's own (#383/#405): one implementation for both families.
+# The resolve bound is the pinned transport's own: one implementation for both families.
 _BOUNDED = bounded_thread_resolve
 
 
@@ -126,12 +126,12 @@ async def _resolve_ssrf_pinned_url(
 ) -> tuple[str, dict[str, str]] | None:
     """Pin the request URL per scheme; None after aborting (fail closed).
 
-    HTTPS validates fresh and stable (#387, #540); plain HTTP re-pins through
+    HTTPS validates fresh and stable; plain HTTP re-pins through
     the caller's rule.
     """
     try:
         if request_scheme == "https":
-            # Two fresh resolves must agree (#540): the browser dials after this check
+            # Two fresh resolves must agree: the browser dials after this check
             # with no dial ownership, so a changed answer is the rebinding signature.
             await _BOUNDED(
                 lambda: check_ssrf_protection_stable(admitted),
@@ -166,8 +166,8 @@ def make_ssrf_websocket_handler(*, policy: HostPolicy, timeout_seconds: float | 
             normalized = await _BOUNDED(
                 lambda: NormalizedUrl(http_equivalent, policy=policy), timeout_seconds=timeout_seconds
             )
-            # Fresh and stable, never TTL-cached (#387); a changed answer between
-            # immediate repeats is the rebinding signature (#540).
+            # Fresh and stable, never TTL-cached; a changed answer between
+            # immediate repeats is the rebinding signature.
             await _BOUNDED(
                 lambda: check_ssrf_protection_stable(normalized),
                 timeout_seconds=timeout_seconds,

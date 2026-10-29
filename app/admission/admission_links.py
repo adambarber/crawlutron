@@ -44,13 +44,13 @@ RobotsCrawlDelay = Callable[[NormalizedUrl], Awaitable[float | None]]
 CommitCrawlDelay = Callable[[str, float], None]
 T = TypeVar("T")
 _MAX_SCOPE_PATTERN_LEN = 256
-# One chunk carries a whole default batch (#354): the chunk is a fan-out bound,
+# One chunk carries a whole default batch: the chunk is a fan-out bound,
 # not politeness -- same-origin fetches coalesce in the robots cache below.
 _ROBOTS_ADMISSION_CHUNK_SIZE = 50
-# Chunk groups gathered concurrently (#544/P10): 4 x 50 = up to 200 origins in flight.
+# Chunk groups gathered concurrently: 4 x 50 = up to 200 origins in flight.
 _ROBOTS_CHUNKS_IN_FLIGHT = 4
 # How long a chunk may gather robots decisions past the per-check timeout before
-# the whole chunk fails closed: a slow origin must not cost chunks × timeout (#343).
+# the whole chunk fails closed: a slow origin must not cost chunks × timeout.
 _ROBOTS_CHUNK_DEADLINE_SLACK_SECONDS = 5.0
 
 
@@ -75,9 +75,9 @@ class AdmissionOutcome:
     # counted apart from cap_blocked so a cap report never hides a dedupe.
     duplicates_skipped: int = 0
     # Candidates dropped for failing URL admission itself (malformed, unsafe,
-    # or off-policy) -- counted apart from the other refusals (#134).
+    # or off-policy) -- counted apart from the other refusals.
     invalid_skipped: int = 0
-    # The identities this pass newly reserved (#519): callers union the delta;
+    # The identities this pass newly reserved: callers union the delta;
     # the old whole-set ``known_after`` is gone, its last consumer threads this.
     known_delta: frozenset[NormalizedUrl] = frozenset()
 
@@ -116,7 +116,7 @@ class _AdmissionPass[T]:
     """The policy, dedupe sets, and output frontier one admission run carries.
 
     ``known`` is the caller's occupied set, read-only; ``added`` is the run's own
-    growth, so dedupe checks both and neither set is copied (#159, #519).
+    growth, so dedupe checks both and neither set is copied.
     """
 
     robots_allows: RobotsAllows
@@ -128,10 +128,10 @@ class _AdmissionPass[T]:
     added: set[NormalizedUrl]
     frontier: MutableSequence[T]
     make_entry: Callable[[AdmittedLink], T]
-    # Per-check robots timeout feeding the chunk deadline (#366): the bound the
+    # Per-check robots timeout feeding the chunk deadline: the bound the
     # gather would hang past, None (the legacy gather) only when unstated.
     robots_timeout_seconds: float | None = None
-    # Slack past that timeout before the chunk deadline fires (#343).
+    # Slack past that timeout before the chunk deadline fires.
     robots_deadline_slack_seconds: float = _ROBOTS_CHUNK_DEADLINE_SLACK_SECONDS
     # Candidates dropped by the candidate stream for failing URL admission
     # (malformed, unsafe, off-policy) -- written by the stream, read at the end.
@@ -168,7 +168,7 @@ async def _admit_chunk[T](
         if not chunk:
             return _ChunkOutcome(accepted, robots_blocked, duplicates_skipped, False, False, 0)
     if pass_.respect_robots:
-        # One fan-out law (#544 N3): the pass uses the chunked decision path, so
+        # One fan-out law: the pass uses the chunked decision path, so
         # no robots gather ever fans out past the chunk bound.
         allowed_values = [
             allowed
@@ -195,7 +195,7 @@ async def _admit_chunk[T](
             if delay is not None and delay > 0:
                 pass_.commit_crawl_delay(candidate.normalized_url.site, delay)
         if candidate.normalized_url in known or candidate.normalized_url in added:
-            # The await above let another writer claim it: count, then drop (#522).
+            # The await above let another writer claim it: count, then drop.
             duplicates_skipped += 1
             continue
         capacity = remaining_page_capacity(current_occupied + occupied_delta, pass_.max_pages)
@@ -257,8 +257,8 @@ async def admit_discovered_links[T](
     robots_deadline_slack_seconds: float = _ROBOTS_CHUNK_DEADLINE_SLACK_SECONDS,
 ) -> AdmissionOutcome:
     """Admit ``links`` against the occupied set ``known`` (full: visited, in-flight,
-    frontier -- #381). The run never mutates or copies it; the outcome carries
-    the DELTA it added, which callers union into their own set (#159, #519)."""
+    frontier). The run never mutates or copies it; the outcome carries
+    the DELTA it added, which callers union into their own set."""
     if source_depth >= max_depth:
         return AdmissionOutcome()
     added: set[NormalizedUrl] = set()
@@ -332,7 +332,7 @@ async def _gather_chunk_deadline[T](
     timeout_seconds: float | None,
     deadline_slack_seconds: float = _ROBOTS_CHUNK_DEADLINE_SLACK_SECONDS,
 ) -> list[T]:
-    """Run one chunk's robots checks under the #343 wall-clock deadline.
+    """Run one chunk's robots checks under the wall-clock deadline.
 
     No timeout is the legacy unbounded gather; past the deadline the chunk
     fails closed so a stalled origin costs the slack, not chunks × timeout.
@@ -393,7 +393,7 @@ async def gather_robots_decisions(
         urls[o : o + _ROBOTS_ADMISSION_CHUNK_SIZE] for o in range(0, len(urls), _ROBOTS_ADMISSION_CHUNK_SIZE)
     ]
     # Bounded-concurrent chunks: each is independently deadline-bounded, so a
-    # 200-cold-origin page costs ceil(chunks/4) deadlines, not chunks (#544/P10).
+    # 200-cold-origin page costs ceil(chunks/4) deadlines, not chunks.
     for group in (
         chunks[i : i + _ROBOTS_CHUNKS_IN_FLIGHT] for i in range(0, len(chunks), _ROBOTS_CHUNKS_IN_FLIGHT)
     ):

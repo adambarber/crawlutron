@@ -61,7 +61,7 @@ def configure_store_connection(
 
     ``busy_timeout_ms`` and ``wal_retry_seconds`` bound the WAL-conversion
     retry a caller tunes for a contended or already-configured store."""
-    # `synchronous` stays at SQLite's FULL default (#382): under 0.05ms/commit
+    # `synchronous` stays at SQLite's FULL default: under 0.05ms/commit
     # here, so the fsync tax is immaterial (measured directly against this store).
     _set_busy_timeout(conn, busy_timeout_ms)
     _ensure_wal(conn, busy_timeout_ms=busy_timeout_ms, wal_retry_seconds=wal_retry_seconds)

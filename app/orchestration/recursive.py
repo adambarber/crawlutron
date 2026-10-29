@@ -206,7 +206,7 @@ async def _resource_admitted_batch(ctx: _BatchContext) -> list[_Admitted]:
         state.ramp = max(float(run.global_concurrency), state.ramp * scale)
     base = max(1, int(state.ramp))
     # The cap reads through the one remaining-capacity helper so the unbounded
-    # sentinel (max_pages<=0) means "no term", never a clamped one-page budget (#515).
+    # sentinel (max_pages<=0) means "no term", never a clamped one-page budget.
     bounds = [len(state.frontier), max(1, base * concurrency_multiplier)]
     remaining = remaining_page_capacity(state.page_count, run.max_pages)
     if remaining is not None:
@@ -280,7 +280,7 @@ class RecursiveState:
     visited: set[NormalizedUrl]
     next_index: int
     ramp: float
-    # The threaded occupied set (#381): each admission's ``known_delta`` unioned
+    # The threaded occupied set: each admission's ``known_delta`` unioned
     # in, so each expansion dedupes against the value without re-deriving it.
     known: set[NormalizedUrl]
     page_count: int = 0
@@ -375,7 +375,7 @@ async def _expand_recursive_result(
         host_policy=run.host_policy,
         robots_timeout_seconds=run.robots_timeout_seconds,
     )
-    # The delta is the primary path: unioning it copies nothing whole (#519).
+    # The delta is the primary path: unioning it copies nothing whole.
     # The max-depth early return yields an empty delta, a no-op here.
     state.known |= outcome.known_delta
 

@@ -73,7 +73,7 @@ def checked_payload_urls(
 def payload_policy(payload: CrawlRequest, tier: PolicyTier) -> CrawlPolicy:
     """The validated crawl policy the request model carries, tier defaults absorbed.
 
-    The #425 typed funnel keeps the wire path: the unverified wire ``policy`` is
+    The typed funnel keeps the wire path: the unverified wire ``policy`` is
     validated here (not after coercion), and only the model crosses downstream.
     """
     if isinstance(payload, CrawlRequest):

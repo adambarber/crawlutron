@@ -43,7 +43,7 @@ from app.vocabulary.taxonomy import (
 BLOCKED_CLASSIFICATIONS = HTTP_BLOCKED_CLASSIFICATIONS | BROWSER_BLOCKED_CLASSIFICATIONS
 
 # Failures that mean the pinned strategy is no longer viable, so the chain must
-# unpin and fall back to the base ladder instead of looping on a dead pin (#303).
+# unpin and fall back to the base ladder instead of looping on a dead pin.
 PIN_INVALIDATING_CLASSIFICATIONS = frozenset(
     (
         CrawlClassification.browser_pool_exhausted.value,
@@ -239,7 +239,7 @@ class _ChainRun:
         from app.transport.request_profile import cookie_namespace_for
 
         # The crawl's own namespace, from the policy ``crawl_request`` bound
-        # it from (#437): another caller's session never rides this retry.
+        # it from: another caller's session never rides this retry.
         namespace = cookie_namespace_for(self.context.policy.request_profile)
         cookie_header = get_browser_cookies_for(self.context.normalized_url.site, namespace=namespace)
         if not cookie_header:
@@ -339,7 +339,7 @@ async def _walk_ladder(
 ) -> EngineCrawlResult:
     """One escalation walk of the full ladder, starting at ``start``. A pin that
     truncates the ladder may be cleared on a capacity failure so the domain falls
-    back below the pin instead of looping on a dead strategy (#303).
+    back below the pin instead of looping on a dead strategy.
     """
     index = start
     fell_back = False

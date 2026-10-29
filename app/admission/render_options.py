@@ -59,7 +59,7 @@ def resolve_render_options(
     request: Mapping[str, JsonValue] = request_options or {}
     base: Mapping[str, JsonValue] = defaults or {}
     kwargs: RenderOptionsWire = {}
-    # #444: the clamp binds the CALLER's side only -- the defaults side is
+    # The clamp binds the CALLER's side only -- the defaults side is
     # operator/policy-owned and ceilinged by its own validators already.
     timeout = request.get("timeout_seconds")
     if isinstance(timeout, (int, float, str)):
@@ -75,7 +75,7 @@ def resolve_render_options(
         value = _pick(request, base, key)
         if value is not None:
             kwargs[key] = bool(value)
-    # #444: an unsized profile string is per-request memory a pooled renderer
+    # An unsized profile string is per-request memory a pooled renderer
     # holds; the crawl boundary already refused it, so this is the render edge.
     raw_profile = _pick(request, base, "browser_profile")
     profile = dict(raw_profile) if isinstance(raw_profile, dict) else {}

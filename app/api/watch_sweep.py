@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 WATCH_SWEEP_INTERVAL_SECONDS = 60.0
 
 # How long a sweep's claim on a due watch stays fresh: a sweeper that died
-# mid-check releases the row to the next pass after this (#528).
+# mid-check releases the row to the next pass after this.
 _CLAIM_SECONDS = 300.0
 """How often the process sweeps the registry.
 
@@ -103,11 +103,11 @@ class WatchSweeper:
     async def sweep_once(self, now: float) -> list[CrawlClassification]:
         """Recheck every watch due at ``now``; one conclusion per due watch, in
         registry order. A raising watch is isolated per-watch so it cannot starve
-        the watches sorted after it in the due list (#228).
+        the watches sorted after it in the due list.
         """
         outcomes: list[CrawlClassification] = []
         # One claim per pass: a second sweeper's CAS on these rows loses and
-        # skips them, so two sweeps never double-fire a webhook (#528).
+        # skips them, so two sweeps never double-fire a webhook.
         due = await self._store.aclaim_due(now, self._claim_token, claim_seconds=_CLAIM_SECONDS)
         for watch in due:
             revoked = (
@@ -117,7 +117,7 @@ class WatchSweeper:
             )
             if revoked:
                 # A revoked owner's watch must not issue checks under a dead
-                # identity: deactivate it, terminal, and move on (#207).
+                # identity: deactivate it, terminal, and move on.
                 logger.warning(
                     "watch_owner_revoked_deactivated",
                     extra={"watch_id": watch.watch_id, "owner": watch.owner},
@@ -181,7 +181,7 @@ class WatchSweeper:
             last_modified=last_modified,
         )
         # A robots-txt refusal is terminal: stop sweeping it rather than re-checking
-        # a host that declined us forever (same lifecycle as a revoked owner, #207).
+        # a host that declined us forever (same lifecycle as a revoked owner).
         if status_for_classification(classification) == "skipped":
             await self._store.adeactivate(
                 watch.watch_id,
@@ -198,8 +198,8 @@ class WatchSweeper:
             and classification != CrawlClassification.not_modified
             and webhook_url is not None
         ):
-            # Backgrounded, not awaited: a slow receiver must not stall the pass
-            # (#528). The delivery rides the tracked set; shutdown drains it.
+            # Backgrounded, not awaited: a slow receiver must not stall the pass;
+            # the delivery rides the tracked set and shutdown drains it.
             start_webhook_delivery(
                 webhook_url,
                 _announcement(watch, outcome=classification, checked_at=now),
@@ -255,7 +255,7 @@ async def sweep_watches_forever(
 ) -> None:
     """Sweep the registry until told to stop; the wait rides the shutdown event
     so a stopping process leaves at once. ``key_store`` answers revoked-owner
-    liveness (#207); the tracker/store meter checks against the owner (#325).
+    liveness; the tracker/store meter checks against the owner.
     """
     sweeper = WatchSweeper(
         store,

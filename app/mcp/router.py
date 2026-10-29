@@ -47,7 +47,7 @@ async def mcp_endpoint(
     shutdown_event=Depends(get_shutdown_event),
 ):
     # The disallowed-Origin gate is the middleware's (one gate, per-surface shape).
-    # #205: an invalid credential must be a 401, never a benign 200 (no key stays anonymous).
+    # An invalid credential must be a 401, never a benign 200 (no key stays anonymous).
     try:
         caller: CallerIdentity = await get_caller_identity(request)
     except HTTPException as error:

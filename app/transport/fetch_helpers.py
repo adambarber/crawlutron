@@ -199,7 +199,7 @@ SITEMAP_CACHE: BoundedTTLCache[tuple[str, HostPolicy], tuple[list, str | None, s
 _LOC_PATTERN = _re.compile(r"<loc>\s*([^<\s]+)\s*</loc>", _re.IGNORECASE)
 _LASTMOD_PATTERN = _re.compile(r"<lastmod>\s*([^<]+)\s*</lastmod>", _re.IGNORECASE)
 
-# Body size past which the lastmod association runs in a worker thread (#526).
+# Body size past which the lastmod association runs in a worker thread.
 _COLLECT_OFFLOAD_MIN_BYTES = 262_144
 
 
@@ -211,7 +211,7 @@ def _collect_page_entries(
     """Associate each page ``<loc>`` with its neighboring ``<lastmod>``.
 
     Matched by byte offsets so wrapped and bare entry shapes both parse; the
-    ascending lastmod offsets bisect in, keeping large sitemaps linear (#526)."""
+    ascending lastmod offsets bisect in, keeping large sitemaps linear."""
     loc_items = [(m.start(), m.group(1)) for m in _LOC_PATTERN.finditer(text)]
     lastmod_items = [(m.start(), m.group(1).strip()) for m in _LASTMOD_PATTERN.finditer(text)]
     # finditer yields ascending offsets, so these positions are already sorted.
@@ -280,7 +280,7 @@ async def _recurse_sitemap(
         return etag, last_modified
     if len(text) >= _COLLECT_OFFLOAD_MIN_BYTES:
         # Large bodies run their whole scan in a worker thread -- findall on a
-        # 10MB sitemapindex holds the loop just like the page path (#544/P6).
+        # 10MB sitemapindex holds the loop just like the page path.
         locs, lowered = await asyncio.to_thread(_scan_sitemap_text, text)
     else:
         locs, lowered = _scan_sitemap_text(text)
@@ -295,14 +295,14 @@ async def _recurse_sitemap(
     return etag, last_modified
 
 
-# In-flight cold walks, keyed like the cache (#498): parallel callers of one
+# In-flight cold walks, keyed like the cache: parallel callers of one
 # cold sitemap share one upstream walk instead of each walking it.
 _INFLIGHT_SITEMAP: dict[tuple[str, HostPolicy], asyncio.Task[set]] = {}
 
 
 def _scan_sitemap_text(text: str) -> tuple[list[str], str]:
     """(locs, lowered) for one sitemap body -- the loop-blocking scan that
-    large bodies offload (#526, #544/P6)."""
+    large bodies offload."""
     return _LOC_PATTERN.findall(text), text.lower()
 
 

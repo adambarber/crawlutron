@@ -56,7 +56,7 @@ async def map(
     settings=settings_dep,
     shutdown_event=shutdown_event_dep,
 ) -> SiteMapPayload:
-    # #205/#320/#328: request_gate OUTER (the readiness count includes quota-
+    # Request_gate OUTER (the readiness count includes quota-
     # rejected requests), admit INNER -- the one order every door shares.
     with request_gate("map_request_rejected", logger=logger):
         async with admit(
@@ -87,7 +87,7 @@ async def render(
     requested = len(payload.urls) if payload.urls is not None else 1
     with request_gate("render_request_rejected", logger=logger, reject=render_rejection):
         async with admit(caller, requested, tracking=tracking):
-            # #483: the render door has no policy carrier, so the caller's cookie
+            # The render door has no policy carrier, so the caller's cookie
             # namespace is bound here -- a keyed harvest never lands in the shared slot.
             async with bound_render_cookie_namespace(caller):
                 return await render_handler(payload, settings=settings)

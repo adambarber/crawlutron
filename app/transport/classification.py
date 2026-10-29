@@ -39,7 +39,7 @@ CLASSIFICATION_BY_EXCEPTION: tuple[tuple[tuple[type[BaseException], ...], Classi
     # Name resolution never got off the host; without this row it read as
     # "connection_error" and the declared dns_error member had no producer.
     ((socket.gaierror, socket.herror), "dns_error"),
-    # The bounded resolver's own verdict (#383/#405): the resolve outlasted the
+    # The bounded resolver's own verdict: the resolve outlasted the
     # request's budget -- a resolution failure, not a navigation or connection one.
     ((ResolverBudgetExceeded,), "dns_error"),
     (
@@ -64,7 +64,7 @@ CLASSIFICATION_BY_EXCEPTION: tuple[tuple[tuple[type[BaseException], ...], Classi
     ),
     ((httpx.HTTPStatusError,), "http_status_error"),
     ((httpx.HTTPError,), "http_error"),
-    # #439: curl_cffi's TLS failures are classified tls_error too -- they share
+    # curl_cffi's TLS failures are classified tls_error too -- they share
     # the row below; it must precede the OSError row (SSLError's base IS OSError).
     ((ssl.SSLError, CffiSSLError, CertificateVerifyError), "tls_error"),
     ((ValueError,), "value_error"),

@@ -65,7 +65,7 @@ def apply_credentials(
 ) -> dict[str, str]:
     """Attach the Authorization header iff ``url``'s origin holds one, by exact
     canonical-origin equality: a credential for origin A can never attach to origin B.
-    The built value is wire-law-checked too (#441), even past model validation.
+    The built value is wire-law-checked too, even past model validation.
     """
     if not credentials:
         return headers

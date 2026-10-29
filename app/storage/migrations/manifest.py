@@ -55,7 +55,7 @@ CRAWL_JOBS_SCHEMA = TableSchema(
         ColumnSchema("root_url", "TEXT", True, "''"),
         ColumnSchema("policy", "TEXT", True, "'{}'"),
         ColumnSchema("status", "TEXT", True, None),
-        # The outstanding queue lives in its own delta-appended table (#547);
+        # The outstanding queue lives in its own delta-appended table;
         # nothing queue-shaped remains on the row.
         ColumnSchema("in_flight", "TEXT", True, "'[]'"),
         ColumnSchema("transient_retries", "TEXT", True, "'{}'"),
@@ -90,7 +90,7 @@ CRAWL_JOB_VISITED_SCHEMA = TableSchema(
     ),
 )
 
-# The frontier queue (#547): one row per outstanding entry, keyed by URL with
+# The frontier queue: one row per outstanding entry, keyed by URL with
 # an ordinal position; the writer reconciles delta-only past a high-water mark.
 CRAWL_JOB_FRONTIER_SCHEMA = TableSchema(
     name="crawl_job_frontier",
@@ -173,7 +173,7 @@ WATCHES_SCHEMA = TableSchema(
         # Registration, list, read, delete are owner-scoped; the due read stays global.
         ColumnSchema("owner", "TEXT", True, "''"),
         # The sweep-pass claim pair: one sweeper's CAS marks them; another skips
-        # the row until the stamp goes stale, so two sweeps never double-fire (#528).
+        # the row until the stamp goes stale, so two sweeps never double-fire.
         ColumnSchema("claimed_at", "REAL", False, None),
         ColumnSchema("claimed_by", "TEXT", False, None),
     ),
@@ -213,7 +213,7 @@ LEGACY_COLUMNS = {
         # stamping path brings it forward instead of refusing to start.
         ColumnSchema("visited", "TEXT", True, "'[]'"),
         ColumnSchema("results", "TEXT", True, "'[]'"),
-        # Present only on a database that has not run 0006 yet (#547).
+        # Present only on a database that has not run 0006 yet.
         ColumnSchema("frontier", "TEXT", True, "'[]'"),
     ),
     StoreSchema.RESULTS: (),
@@ -364,7 +364,7 @@ def _companion_drift(conn: sqlite3.Connection, store_schema: StoreSchema) -> tup
     """Check the tables a store schema owns beyond its primary table.
 
     An absent companion is drift too: its creating migration cannot be marked
-    applied without the tables present (#233)."""
+    applied without the tables present."""
     drift: list[str] = []
     for companion in COMPANION_SCHEMAS.get(store_schema, ()):
         if not _table_named(conn, companion.name):

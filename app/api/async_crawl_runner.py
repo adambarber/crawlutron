@@ -64,7 +64,7 @@ def async_crawl_semaphore() -> asyncio.Semaphore:
         loop = None
     holder = _SEMAPHORE_HOLDER
     # Check-then-set is safe because asyncio is cooperative: one loop per thread
-    # runs this to completion between awaits -- nothing can interleave (#347).
+    # runs this to completion between awaits -- nothing can interleave.
     if holder is None or holder.loop is not loop:
         holder = _SemaphoreHolder(_build_async_crawl_semaphore(), loop)
         _SEMAPHORE_HOLDER = holder
@@ -96,7 +96,7 @@ async def run_async_crawl(
     is set. ``url_pairs`` carries the gate's admitted batch, never rebuilt."""
     webhook_policy = HostPolicy.from_settings(crawl_settings)
     try:
-        # #462: claim RUNNING only after the semaphore is ours; a queued job must
+        # Claim RUNNING only after the semaphore is ours; a queued job must
         # not read RUNNING nor count in aactive_count_for_caller while it waits.
         async with async_crawl_semaphore():
             job = await _claim_running(request_id, job_store)
@@ -105,7 +105,7 @@ async def run_async_crawl(
             response_payload = await _crawl_and_build_response(
                 request_id, payload, crawl_settings, shutdown_event, url_pairs, job, job_store
             )
-        # #463: deliver outside the semaphore -- a retrying webhook (up to 60s
+        # Deliver outside the semaphore -- a retrying webhook (up to 60s
         # of backoff) must not gate another caller's crawl capacity.
         await _publish_success(
             request_id,
@@ -122,7 +122,7 @@ async def run_async_crawl(
 
 async def _claim_running(request_id: str, job_store) -> CrawlJobState | None:
     """Load the job and claim RUNNING via CAS; a lost claim means the row was
-    deleted or already transitioned (post-semaphore-acquire, per #462)."""
+    deleted or already transitioned (post-semaphore-acquire)."""
     job = await job_store.aload(request_id)
     if job is None:
         logger.error("async_crawl_job_missing", extra={"request_id": request_id})

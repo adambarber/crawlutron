@@ -103,7 +103,7 @@ _STATUS_OVERRIDES: tuple[tuple[int, Classification, str], ...] = (
     (404, "not_found", "404"),
     (410, "gone", "410"),
     (429, "rate_limited", "429"),
-    # A 413 is a size refusal, not a body verdict (#137): both transports emit
+    # A 413 is a size refusal, not a body verdict: both transports emit
     # the synthetic octet-stream shape, so it must not read as binary_no_text.
     (413, "payload_too_large", "413"),
 )

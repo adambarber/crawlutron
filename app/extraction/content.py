@@ -114,7 +114,7 @@ def extract_content(
     means nothing to a non-DOM body, so the full content is extracted and the fallback logged.
     """
     # ONE decision, read twice (drop report + dispatch): the predicate decodes the whole
-    # body, so one decode per request shares its text with the HTML branch (#348).
+    # body, so one decode per request shares its text with the HTML branch.
     decoded = content if isinstance(content, str) else decode_body(content)
     html_body = is_html(content_type, content, decoded=decoded)
     if selectors and not html_body:

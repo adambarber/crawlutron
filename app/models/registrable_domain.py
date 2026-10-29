@@ -60,7 +60,7 @@ def registrable_domain(host: str, *, psl: _PublicSuffixDataset | None = None) ->
     if psl is None:
         psl = _public_suffix_list()
     # An IP literal has no registrable site: the PSL '*' default would map it to
-    # its last two octets, colliding unrelated hosts on one site key (#527).
+    # its last two octets, colliding unrelated hosts on one site key.
     if classify(ascii_host) is not AddressClass.NOT_AN_ADDRESS:
         return host
     if psl is not None:
@@ -74,7 +74,7 @@ def registrable_domain(host: str, *, psl: _PublicSuffixDataset | None = None) ->
 def is_public_suffix(host: str, *, psl: _PublicSuffixDataset | None = None) -> bool:
     """Whether ``host`` is itself a public suffix, with no registrable site under it.
 
-    The cookie admission edge refuses a ``Domain=`` naming one of these (#438):
+    The cookie admission edge refuses a ``Domain=`` naming one of these:
     ``com`` or ``co.uk`` would otherwise domain-match every host under the suffix.
     """
     host = host.lower().rstrip(".")

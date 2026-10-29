@@ -101,7 +101,7 @@ async def wire_ssrf_guards(
 ) -> None:
     """Route-level SSRF guards plus XHR interception, before navigation."""
     # Install at the page's context: every page/worker the context spawns is
-    # covered, including ones created after the install (CRLN-SEC-02 gap 2).
+    # covered, including ones created after the install.
     context = page.context
     await context.route(
         "**/*",
@@ -137,8 +137,8 @@ async def warmup_pages(
 ) -> None:
     """Visit the warmup URLs (no Host header needed) before the real navigation.
 
-    Every warmup goto carries the one render-phase budget (#482): before #532
-    the navigation was unbounded (Playwright's default).
+    Every warmup goto carries the one render-phase budget; before the
+    budget existed the navigation was unbounded (Playwright's default).
     """
     warmup_budget = render_phase_seconds(timeout_seconds)
     for warmup_url in warmup_urls:

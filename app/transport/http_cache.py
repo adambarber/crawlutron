@@ -112,7 +112,7 @@ async def revalidate_content_cache(ctx: HttpStrategyContext) -> None:
         validator = dict(ctx.caller_conditional)
     if must_revalidate and not validator:
         # no-cache/must-revalidate may be stored but never replayed stale: source a
-        # validator from the stored body, else re-fetch below rather than serve it (#247).
+        # validator from the stored body, else re-fetch below rather than serve it.
         lowered = {str(k).lower(): v for k, v in cached_headers.items()}
         if lowered.get("etag"):
             validator["If-None-Match"] = lowered["etag"]
@@ -217,11 +217,11 @@ async def store_http_caches(ctx: HttpStrategyContext, resp: FetchedResponse) -> 
         ttl = int(min(ctx.content_cache.default_ttl, origin_ttl)) if origin_ttl is not None else None
         if ttl is not None and ttl <= 0:
             # Already stale at write time (max-age=0 or a past Expires): the
-            # OFF convention (#394) stores nothing rather than inverting it.
+            # OFF convention stores nothing rather than inverting it.
             return
         with contextlib.suppress(Exception):
             # The full-body base64 is part of the offloaded write, never argument
-            # construction: encoding a multi-MB body on the loop stalls it (#535).
+            # construction: encoding a multi-MB body on the loop stalls it.
             payload = await asyncio.to_thread(serialize_response, resp.raw)
             # Validated boundary: serialize_response is the only writer here, so
             # the envelope is the JsonValue its TypedDict spellings carry.

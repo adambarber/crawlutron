@@ -27,7 +27,7 @@ _JITTER = SystemRandom()
 _JITTER_LOW, _JITTER_HIGH = 0.8, 1.2
 
 #: How long a successful strategy pin stays authoritative before the domain
-#: re-evaluates the whole ladder (#303); a browser-only page cannot pin forever.
+#: re-evaluates the whole ladder; a browser-only page cannot pin forever.
 _STRATEGY_PIN_TTL_SECONDS = 300.0
 
 
@@ -129,7 +129,7 @@ async def _skip_if_breaker_open[Job: ScheduledJob, Result: SchedulerResult](
 ) -> bool:
     """Park an open breaker (cooldown path), report whether the job is handled;
     past the cap the envelope is terminal. Shared by the pre-run check and the
-    post-nap re-check (#541), so a nap cannot skip a peer's trip.
+    post-nap re-check, so a nap cannot skip a peer's trip.
     """
     if not scheduler.is_circuit_open(job.domain):
         return False
@@ -266,7 +266,7 @@ class DomainScheduler:
         """Increment the failure counter; escalate the circuit-breaker cooldown
         exponentially with each threshold-crossing batch of failures."""
         # The threshold counts TOTAL observations, not distinct URLs: a requeued
-        # retry (requeue_transient, up to 3) charges the breaker again (#347).
+        # retry (requeue_transient, up to 3) charges the breaker again.
         self._domain_failures[domain] += 1
         # Each ``threshold`` failures escalates one step (base, base*2, ...,
         # capped); forty consecutive failures park a domain for the max cooldown.
@@ -328,7 +328,7 @@ class DomainScheduler:
 
     def clear_pinned_strategy(self, domain: str) -> None:
         """Drop the pin for ``domain``; used when the pinned strategy is no longer
-        viable (e.g. the browser pool is exhausted) so the fallback is tried (#303).
+        viable (e.g. the browser pool is exhausted) so the fallback is tried.
         """
         self._domain_strategy_pins.pop(domain, None)
 
@@ -358,7 +358,7 @@ class DomainScheduler:
             self._domain_min_delay[domain] = max(self._domain_min_delay.get(domain, 0.0), clamped)
 
     def purge_expired(self) -> None:
-        """Drop cooldown/circuit/pin entries elapsed, plus idle rate state (#544/P9)."""
+        """Drop cooldown/circuit/pin entries elapsed, plus idle rate state."""
         maps = (
             self._domain_cooldowns,
             self._circuit_open_until,
@@ -461,7 +461,7 @@ class DomainScheduler:
                 # and the next caller's consume sees the negative balance.
                 await asyncio.sleep(wait_seconds)
 
-        # The per-domain delay is a per-fire wait, never a gate hold (#541):
+        # The per-domain delay is a per-fire wait, never a gate hold:
         # compute inside the gate, RELEASE for the sleep; no gate sees a sleep.
         async with domain_gates[job.domain]:
             delay_sleep = jittered_delay(self.current_delay(job.domain))

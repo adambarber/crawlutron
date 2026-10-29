@@ -65,7 +65,7 @@ async def default_http_fetcher(
         url, headers, pin=pin, timeout_seconds=timeout_seconds
     ):
         # The previous hop's Set-Cookie flushes here: reaching this iteration
-        # means THIS hop's pin admitted the walk (#525 SEC-06).
+        # means THIS hop's pin admitted the walk.
         await _flush_deferred_hop_cookies(pending)
         pending = None
         terminal, pending = await _stream_terminal_hop(
@@ -96,7 +96,7 @@ async def _stream_terminal_hop(
 ) -> tuple[HttpFetchResult | None, tuple[NormalizedUrl, TransportHeaders] | None]:
     """Send one SSRF-pinned hop; ``(None, pending_cookie_hop)`` when the hop is
     a redirect asking for another (re-pinned) request -- the pending tuple is
-    stored only once the next hop's pin admits the walk (#525 SEC-06)."""
+    stored only once the next hop's pin admits the walk."""
     async with pinned_transport.apinned_stream(client, chain, pinned_url, hop_headers, timeout) as response:
         content_length = response.headers.get("content-length")
         if pinned_transport.declared_length_exceeds(content_length, max_content_length):
@@ -105,7 +105,7 @@ async def _stream_terminal_hop(
         hop_url = chain.url
         if await chain.advance(response):
             # A real cookie (RFC 6265 5.3), but persistence is DEFERRED: stored
-            # only after the next hop's pin admits the walk (#525 SEC-06).
+            # only after the next hop's pin admits the walk.
             return None, (hop_url, response.headers)
         raw = bytearray()
         async for chunk in response.aiter_raw():
@@ -136,7 +136,7 @@ async def _flush_deferred_hop_cookies(
     deferred: tuple[NormalizedUrl, TransportHeaders] | None,
 ) -> None:
     """Store the previous hop's Set-Cookie exactly once: reaching a fresh loop
-    iteration means this hop's pin admitted the walk (#525 SEC-06)."""
+    iteration means this hop's pin admitted the walk."""
     if deferred is not None:
         await _store_hop_cookies(*deferred)
 
@@ -205,7 +205,7 @@ async def cffi_fetch(
             url, headers, pin=pin, timeout_seconds=timeout_seconds
         ):
             # Same door as the httpx twin: the previous hop's Set-Cookie
-            # flushes only after THIS hop's pin admitted the walk (#525 SEC-06).
+            # flushes only after THIS hop's pin admitted the walk.
             await _flush_deferred_hop_cookies(pending)
             pending = None
             handled, pending = await _handle_cffi_hop(
@@ -226,7 +226,7 @@ async def cffi_fetch(
         raise
     except SSLError:
         # A TLS-handshake failure means impersonation never completed: serving
-        # the page via plain httpx would be a silent capability lie (#439).
+        # the page via plain httpx would be a silent capability lie.
         raise
     except Exception as error:  # other cffi failures fall back, but visibly
         logger.warning(
@@ -260,7 +260,7 @@ async def _handle_cffi_hop(
         )
     except SSLError:
         # A TLS-handshake failure means impersonation never completed: serving
-        # the page via plain httpx would be a silent capability lie (#439).
+        # the page via plain httpx would be a silent capability lie.
         raise
     except Exception:
         # Fall back to plain httpx for this request on transport errors.
@@ -407,7 +407,7 @@ def http_413(url: NormalizedUrl, final_url: NormalizedUrl, started: float) -> Ht
 def _cffi_too_large_result(
     url: NormalizedUrl, current_url: NormalizedUrl, response: CffiResponse, elapsed_ms: int
 ) -> HttpFetchResult:
-    # Synthetic headers, never echoed (#137): echoing content-encoding turned the
+    # Synthetic headers, never echoed: echoing content-encoding turned the
     # empty refusal body into a decompression fault instead of the size verdict.
     return HttpFetchResult(
         url=url,

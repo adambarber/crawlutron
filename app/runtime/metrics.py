@@ -66,7 +66,7 @@ class MetricsStore:
         # is added in one place whether or not a store is attached.
         self._local: dict[str, float] = {}
         # One write lock: the local RMW and the caller-series check-then-insert
-        # are read-modify-writes two threads can interleave (#524).
+        # are read-modify-writes two threads can interleave.
         self._write_lock = threading.RLock()
         # Gauges: instantaneous readings of shared state, never summed.
         self.resource_memory_utilization: float = 0.0
@@ -138,7 +138,7 @@ class MetricsStore:
         self._add("crawl_requests_total", 1)
         if caller_id:
             # Decision and insert under one lock: a check-then-insert split
-            # across them races past the series cap (#524).
+            # across them races past the series cap.
             with self._write_lock:
                 series = self._caller_series(self._source(), _CALLER_PREFIX, caller_id)
                 self._add(_CALLER_PREFIX + series, 1)
@@ -190,7 +190,7 @@ class MetricsStore:
     def record_doc_pool_unavailable(self) -> None:
         """Count one document acquisition that degraded: no worker within the
         budget (a wedged or retired slot), or a spawn that never became ready.
-        The doc-pool wedge alert (#346) -- a warning log alone is invisible.
+        The doc-pool wedge alert -- a warning log alone is invisible.
         """
         self._add("extraction_doc_pool_unavailable_total", 1)
 
@@ -238,7 +238,7 @@ class MetricsStore:
 
 @dataclass(frozen=True)
 class _Family:
-    """One declared exposition family (#485): its name, help, kind, label and
+    """One declared exposition family: its name, help, kind, label and
     source are stated once here; a new counter is one table row plus its write.
     """
 
@@ -382,7 +382,7 @@ def _family_lines(family: _Family, record: CountersSnapshot, store: MetricsStore
 def _exposition(record: CountersSnapshot, store: MetricsStore, *, caller_detail: bool) -> str:
     """Render the Prometheus text exposition for one counters record.
 
-    Pure formatting over the declared family table (#485): one backing-store
+    Pure formatting over the declared family table: one backing-store
     read per scrape, and the line contract lives in _FAMILIES, not here.
     """
     lines: list[str] = []

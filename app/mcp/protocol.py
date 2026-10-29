@@ -32,7 +32,7 @@ class ProtocolValidationError(Exception):
             error = payload.get("error")
             if isinstance(error, dict):
                 payload_message = error.get("message")
-            # A present-but-None message must not render as str(None) (#493).
+            # A present-but-None message must not render as str(None).
             message = (
                 payload_message
                 if isinstance(payload_message, str) and payload_message

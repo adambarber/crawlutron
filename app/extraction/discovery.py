@@ -21,7 +21,7 @@ from app.safety.validation import filter_js_endpoints
 
 
 class PostFetchDiscovery(TypedDict):
-    """The post-fetch discovery envelope (#482): one parse's products, declared
+    """The post-fetch discovery envelope: one parse's products, declared
     once at the producer. A consumer that reads a key the producer stopped
     selecting is now a type error, not a silent None.
     """

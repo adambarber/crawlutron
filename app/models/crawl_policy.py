@@ -117,7 +117,7 @@ class CrawlPolicy(BaseModel):
         "cookie_jar is one of per_host, session, or none; only per_host/session apply the static "
         "cookies map (which stays inert without cookie_jar). cookie_namespace partitions the "
         "persistent jar; it is not a caller-facing knob -- keyed crawls are pinned to their key "
-        "id (#226) and an anonymous crawl that declares one is refused with 422 (#559). "
+        "id and an anonymous crawl that declares one is refused with 422. "
         "Applied only to direct HTTP strategies and echoed in diagnostics.",
         json_schema_extra=cast(JsonDict, REQUEST_PROFILE_KEYS_JSON),
     )
@@ -254,7 +254,7 @@ class CrawlPolicy(BaseModel):
     def _reject_injectable_header_values(cls, value: dict[str, str]) -> dict[str, str]:
         """Refuse header NAMES and VALUES that could smuggle bytes onto the wire, and
         bound value length: the name ban keeps a caller from setting a banned
-        header; this keeps a name or value from INVENTING one (#441, #544/S3).
+        header; this keeps a name or value from INVENTING one.
         """
         for name in value:
             reject_injectable_header_name(name)

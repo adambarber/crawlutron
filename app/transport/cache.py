@@ -77,7 +77,7 @@ class HttpCache:
         etag = lowered.get("etag")
         last_modified = lowered.get("last-modified")
         if not stores_for_ttl(self._ttl_seconds):
-            # The OFF convention (#394): ttl 0 stores nothing -- a validator that
+            # The OFF convention: ttl 0 stores nothing -- a validator that
             # is never expiring would pin a stale 304 answer forever.
             return
         now = self._clock()

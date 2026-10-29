@@ -22,7 +22,7 @@ async def reject_hostile_origin(request: Request, call_next):
     """Reject a present, non-loopback browser Origin (DNS-rebinding defense).
 
     Only a present but disallowed Origin is a 403; the shape follows the surface:
-    /mcp answers with the JSON-RPC error object, every REST route the envelope (#326).
+    /mcp answers with the JSON-RPC error object, every REST route the envelope.
     """
     origin = request.headers.get("origin")
     if not origin_allowed(origin):
@@ -42,7 +42,7 @@ async def _drain_declared_body(original_receive: Receive, *, max_bytes: int) -> 
     """Discard a refused declared body up to ``max_bytes`` -- never unbounded.
 
     Past the cap the client is streaming forever or lying; the 413's
-    Connection: close aborts the remainder (#525, SEC-04).
+    Connection: close aborts the remainder.
     """
     drained = 0
     while drained <= max_bytes:
@@ -60,7 +60,7 @@ async def limit_request_body(request: Request, call_next, *, max_bytes: int = MA
         try:
             if int(content_length) > max_bytes:
                 # Mirror the truncation path: drain the refused body before the
-                # 413, capped so a slow-post client cannot pin the task (#525).
+                # 413, capped so a slow-post client cannot pin the task.
                 await _drain_declared_body(original_receive, max_bytes=max_bytes)
                 return JSONResponse(
                     status_code=413,

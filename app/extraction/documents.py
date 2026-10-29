@@ -72,7 +72,7 @@ def extraction_thread_count() -> int:
 
 def _extraction_executor() -> concurrent.futures.ThreadPoolExecutor:
     """The shared pool, created on demand; recreate-on-demand is the documented
-    lifespan-restart contract (#87), so shutdown ends threads, not extraction.
+    lifespan-restart contract, so shutdown ends threads, not extraction.
     """
     global _EXTRACTION_EXECUTOR
     if _EXTRACTION_EXECUTOR is None:
@@ -113,7 +113,7 @@ async def shutdown_doc_extraction_executor() -> None:
     executor, _EXTRACTION_EXECUTOR = _EXTRACTION_EXECUTOR, None
     if executor is not None:
         # Refuse queued-but-unstarted work, then await every running future:
-        # no extraction thread outlives the shutdown (#560).
+        # no extraction thread outlives the shutdown.
         executor.shutdown(wait=True, cancel_futures=True)
     doc_executor, _DOC_EXECUTOR = _DOC_EXECUTOR, None
     if doc_executor is not None:
@@ -301,7 +301,7 @@ class _LogRestorer:
 
 class _DropBelowCritical(logging.Filter):
     """Drop every record while installed: suppression by filter, not by level,
-    so concurrent suppressions cannot snapshot and pin each other's levels (#507).
+    so concurrent suppressions cannot snapshot and pin each other's levels.
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
@@ -405,7 +405,7 @@ def extract_document(
 def _document_pool_exchange(worker, body: bytes, timeout_seconds: float, cap: int) -> str | None:
     """Send, wait, receive -- retiring the slot on every death or timeout path.
 
-    The cap rides the task so the worker truncates before send (#508). Death
+    The cap rides the task so the worker truncates before send. Death
     and timeout paths each retire the slot and report empty.
     """
     try:

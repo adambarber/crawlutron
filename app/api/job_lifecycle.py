@@ -49,7 +49,7 @@ def cancel_all_tasks() -> None:
     """Cancel every registered task and clear the registry, without awaiting.
 
     The registry-owned teardown primitive; ``app.api.job_runner`` layers its
-    execute-crawl reset on top of this (#542 moved that reset there).
+    execute-crawl reset on top of this; that reset moved there.
     """
     for task in list(_tasks.values()):
         task.cancel()
@@ -70,7 +70,7 @@ def start_tracked_task(
     holder: list[asyncio.Task] = []
 
     def release(t: asyncio.Task) -> None:
-        # Only this task's completion may reclaim the slot (#448): a stale
+        # Only this task's completion may reclaim the slot: a stale
         # callback from a predecessor must not evict the live replacement.
         if holder and _tasks.get(job_id) is t:
             _tasks.pop(job_id, None)
@@ -89,7 +89,7 @@ async def _track_then_run(
     """Yield once so the spawn site registers the task before any user code.
 
     Registration precedes the first ``await`` of ``factory``, so an early
-    failure can never land in a task the registry never saw (#448)."""
+    failure can never land in a task the registry never saw."""
     await asyncio.sleep(0)
     return await factory()
 
