@@ -16,11 +16,8 @@ from tests.chokepoint_walks import APP_ROOT, app_trees, nodes_of
 ALL_APP: frozenset[str] = frozenset()
 """Every app module.
 
-Load-bearing, not decoration: `app_trees` excludes `app/safety/safe_regex.py` by
-default, and a gate that dropped a module would lower its own count and quietly
-buy budget. It lives here rather than in each gate because two gates each
-carrying the empty set and each re-arguing why it is empty is the argument
-written twice and enforced neither time.
+Pins whole-tree scope at the gates that must see everything: if a default
+exclusion ever returns to ``app_trees``, these gates keep their full count.
 """
 
 Metrics = tuple[Callable[[str], int], Callable[[str], list[Any]]]

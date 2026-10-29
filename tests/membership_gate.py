@@ -331,7 +331,8 @@ def swallowing_test_double_offenders(tree: ast.AST, path: pathlib.Path) -> list[
 # not key on a literal module name
 _STDALIAS_MODULES = frozenset({"re"})
 
-# Chokepoint functions whose call sites are guarded by name-matching detectors elsewhere in this suite.
+# decompress_body is the only entry: the cap/bypass detectors (test_bounds.py)
+# key on its literal name, so an aliased call must be reported before it slips past them unseen.
 _SANCTIONED_FUNC_MODULES: dict[str, frozenset[str]] = {
     "decompress_body": frozenset({"app.transport.decompression"}),
 }
@@ -415,9 +416,11 @@ def aliased_sanctioned_func_offenders(tree: ast.AST, path: pathlib.Path) -> list
     aliases = _aliased_sanctioned_func_names(tree)
     if not aliases:
         return out
-    # The spellings each name-matching detector hard-codes today. An alias outside this set is invisible to
-    # the detector that guards the canonical name, which is the property this sweep reports.
+    # The spellings each name-matching detector hard-codes today; an alias outside the
+    # set is invisible to the detector that guards the canonical name, so the sweep reports it.
     known_spellings = {"decompress_body": frozenset({"decompress_body", "_decompress_body"})}
+    # _decompress_body is in the set because DECOMPRESS_CAP matches that spelling too
+    # (test_bounds.py); the sweep guards the same spellings the cap detector knows.
     for node in nodes_of(tree):
         if not isinstance(node, ast.Call):
             continue

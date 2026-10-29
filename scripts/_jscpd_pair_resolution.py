@@ -52,13 +52,11 @@ PROFILE_PATHS = {"all": tuple(root for roots in TREE_ROOTS.values() for root in 
 
 
 SANCTIONED_IGNORE_GLOBS = (
-    "**/__pycache__/**",
-    "**/.pytest_cache/**",
-    "**/tmp/**",
-    "**/node_modules/**",
-    "**/.git/**",
-    "**/fixtures/**",
-    "**/app/storage/migrations/**",
+    "**/__pycache__/**",  # build artifacts, not source
+    "**/.pytest_cache/**",  # pytest cache, not source
+    "**/node_modules/**",  # vendored third-party tree, not source
+    "**/.git/**",  # git metadata, not source
+    "**/app/storage/migrations/**",  # generated DDL snapshots, not hand-written source
 )
 
 
