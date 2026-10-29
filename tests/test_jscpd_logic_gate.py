@@ -48,7 +48,7 @@ def test_within_file_repetition_does_not_fire(monkeypatch) -> None:
 def test_the_helper_surface_is_declared() -> None:
     """The gate scans the helper namespace, not arbitrary test bodies."""
     surface = gate.helper_surface()
-    assert "app" in surface
+    assert "crawlutron" in surface
     assert "scripts" in surface
     assert any(name for name in surface if name.startswith("tests/_"))
     assert not any(name for name in surface if name.startswith("tests/invariants/"))

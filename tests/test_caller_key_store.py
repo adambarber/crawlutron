@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.storage.caller_key_store import CallerKeyStore
+from crawlutron.storage.caller_key_store import CallerKeyStore
 
 
 def test_issued_key_verifies_to_its_record(tmp_path):

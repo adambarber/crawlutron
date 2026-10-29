@@ -24,16 +24,16 @@ from tests.rules import Bites, Registry, Rule, Trips
 
 
 def _id_mint_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """Flag direct ``uuid4()`` calls or ``.hex`` slicing outside app/storage/ids.
+    """Flag direct ``uuid4()`` calls or ``.hex`` slicing outside crawlutron/storage/ids.
 
     A re-inlined mint is where a shorter slice regresses to 48 bits; both
     shapes are separate walks because a call and a subscript are different nodes.
     """
     return [
-        offender_at(path, call, "uuid4() minted outside app/storage/ids.py")
+        offender_at(path, call, "uuid4() minted outside crawlutron/storage/ids.py")
         for call in calls_named_leaf(tree, {"uuid4"})
     ] + [
-        offender_at(path, node, "uuid hex sliced outside app/storage/ids.py")
+        offender_at(path, node, "uuid hex sliced outside crawlutron/storage/ids.py")
         for node in subscript_reads(tree)
         if getattr(node.value, "attr", None) == "hex"
     ]
@@ -45,14 +45,16 @@ HANDLE_MINTING_IS_SINGLE_SOURCED = Rule(
     summary=(
         "Handles double as the lookup credential for the status/result routes, "
         "so a re-inlined mint is where a shorter slice silently regresses to 48 "
-        "bits; mint through app/storage/ids.py"
+        "bits; mint through crawlutron/storage/ids.py"
     ),
-    skip=frozenset({"app/storage/ids.py"}),  # owner: the single mint (entropy policy, 48-bit floor)
+    skip=frozenset({"crawlutron/storage/ids.py"}),  # owner: the single mint (entropy policy, 48-bit floor)
     bite=lambda: Trips(
         "import uuid\n\ndef f():\n    return uuid.uuid4().hex[:12]\n",
         count=2,
     ),
-    clean=lambda: ("from app.storage.ids import new_request_id\n\ndef f():\n    return new_request_id()\n",),
+    clean=lambda: (
+        "from crawlutron.storage.ids import new_request_id\n\ndef f():\n    return new_request_id()\n",
+    ),
 )
 
 
@@ -264,7 +266,7 @@ def test_no_rule_violations():
 
 def test_the_holder_is_one_value_with_exactly_the_two_fields():
     """Single holder: the semaphore and its loop are one dataclass value, not two globals."""
-    source = (REPO_ROOT / "app/api/async_crawl_runner.py").read_text(encoding="utf-8")
+    source = (REPO_ROOT / "crawlutron/api/async_crawl_runner.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
     holders = [
         node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "_SemaphoreHolder"
@@ -279,7 +281,7 @@ def test_the_holder_is_loop_bound_and_reset_clears_it():
     the public reset empties the holder so the next accessor rebuilds fresh."""
     import asyncio
 
-    import app.api.async_crawl_runner as runner
+    import crawlutron.api.async_crawl_runner as runner
 
     async def _accessor_on_this_loop():
         return runner.async_crawl_semaphore()

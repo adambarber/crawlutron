@@ -8,11 +8,11 @@ from typing import cast
 
 import pytest
 
-from app.models.crawl_result import EngineCrawlResult
-from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
-from app.models.discovered_link import DiscoveredLink
-from app.models.serialization import from_wire, to_dict
-from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
+from crawlutron.models.crawl_result import EngineCrawlResult
+from crawlutron.models.crawl_strategy_attempt import CrawlStrategyAttempt
+from crawlutron.models.discovered_link import DiscoveredLink
+from crawlutron.models.serialization import from_wire, to_dict
+from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 from tests._result_builders import _link, engine_result
 

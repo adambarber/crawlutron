@@ -6,9 +6,9 @@ import json
 
 import pytest
 
-import app.transport.content_cache as cc
-import app.transport.content_cache_internals as cci
-from app.transport.content_cache import ContentCache
+import crawlutron.transport.content_cache as cc
+import crawlutron.transport.content_cache_internals as cci
+from crawlutron.transport.content_cache import ContentCache
 from tests._cache_fixtures import (
     _make_cache,
     _seeded_then_write_fails,

@@ -9,10 +9,10 @@ import logging
 
 import pytest
 
-from app.admission.policy import PolicyTier, read_policy, validate_wire_policy
-from app.config.env import get_env_float, get_env_int, parse_bool_env
-from app.config.settings import CrawlerSettings
-from app.vocabulary.limits import (
+from crawlutron.admission.policy import PolicyTier, read_policy, validate_wire_policy
+from crawlutron.config.env import get_env_float, get_env_int, parse_bool_env
+from crawlutron.config.settings import CrawlerSettings
+from crawlutron.vocabulary.limits import (
     DEFAULT_HTTP_TIMEOUT_SECONDS,
     DEFAULT_MAX_RETRIES,
     MAX_HTTP_TIMEOUT_SECONDS,
@@ -141,7 +141,7 @@ class TestDeploymentValuesAreRefusedNotClamped:
         assert settings.default_max_retries == 3
 
     def test_the_refusal_is_logged_with_the_value_that_was_refused(self, caplog):
-        with caplog.at_level(logging.WARNING, logger="app.safety.validation"):
+        with caplog.at_level(logging.WARNING, logger="crawlutron.safety.validation"):
             CrawlerSettings.from_mapping({"CRAWLUTRON_DEFAULT_MAX_RETRIES": "9"})
         refused = [r for r in caplog.records if r.message == "operator_max_retries_out_of_range"]
         assert refused, "a refused deployment value must be visible at startup"

@@ -50,10 +50,10 @@ dependencies = [
     "pydantic>=2.0",
     # Local DBAPI schema migrations only; the package documents no network or telemetry behavior.
     "yoyo-migrations==9.0.0",
-    # Bounded-execution regex engine (app/safety/safe_regex.py): stdlib re cannot be
+    # Bounded-execution regex engine (crawlutron/safety/safe_regex.py): stdlib re cannot be
     # interrupted (GIL wedge) -- correctness/security needs the native timeout.
     "regex>=2026.5.9",
-    # Public-suffix dataset for registrable_domain (app/models/registrable_domain.py):
+    # Public-suffix dataset for registrable_domain (crawlutron/models/registrable_domain.py):
     # without it the suffix heuristic silently degrades.
     "publicsuffixlist>=1.0.2",
 ]
@@ -92,7 +92,7 @@ dev = [
     # which is not the same as untyped, and a reader of that report has to work
     # out the difference. Same reason as the `types-*` entries below.
     "types-PyYAML>=6.0",
-    # Static type-checking. The app tree IS mypy-clean (0 errors across 85
+    # Static type-checking. The crawlutron tree IS mypy-clean (0 errors across 85
     # files) and `typecheck` now runs in CI as a required gate, so this is a
     # real gate, not an advisory one — the old comment claiming otherwise was
     # stale and would have told the next reader to ignore type errors.
@@ -120,7 +120,7 @@ dev = [
 ]
 
 [project.urls]
-# The canonical remote, and the same value as app.vocabulary.identity.REPOSITORY_URL --
+# The canonical remote, and the same value as crawlutron.vocabulary.identity.REPOSITORY_URL --
 # which is the copy that goes out on the wire in the user-agent. pyproject
 # cannot import it, so tests/test_project_urls.py fails if these drift apart.
 Homepage = "https://github.com/adambarber/crawlutron"
@@ -129,7 +129,7 @@ Changelog = "https://github.com/adambarber/crawlutron/blob/main/CHANGELOG.md"
 Security = "https://github.com/adambarber/crawlutron/blob/main/SECURITY.md"
 
 [tool.hatch.build.targets.wheel]
-packages = ["app"]
+packages = ["crawlutron"]
 
 # Coverage engine config -- the ONE declaration the pre-push coverage hook and
 # any future CI consumer read. `core = "sysmon"` (PEP 669 sys.monitoring) is
@@ -143,7 +143,7 @@ core = "sysmon"
 branch = false
 # The deeper, non-default surface (weekly / pre-release, paired with the
 # mutation-proof evidence story): run it by hand with
-#   python -m coverage run --branch --dynamic-context=test_function -m pytest -q --cov=app
+#   python -m coverage run --branch --dynamic-context=test_function -m pytest -q --cov=crawlutron
 #   python -m coverage report --skip-covered --sort=cover
 # --dynamic-context needs the tracer started by pytest-cov to record test
 # names per line; branch coverage adds arc data on top. Neither is default:
@@ -199,7 +199,7 @@ select = [
 # pre-commit runs `ruff check` alone -- which left 154 over-length lines
 # unenforced in a repo whose ratchets are otherwise all mechanical. S101 was
 # exempted as "acceptable in tests" while `tests/**` below already carried the
-# whole `S` family, so it masked 8 asserts in app/ as collateral.
+# whole `S` family, so it masked 8 asserts in crawlutron/ as collateral.
 #
 # The principle this replaces: a suppression that suppresses nothing is a claim
 # about the code that nothing re-checks. The type-suppression half of that is
@@ -226,11 +226,11 @@ extend-immutable-calls = [
     "fastapi.Header",
 ]
 
-# Complexity ratchets. These are 10% UNDER the worst offender in app/ at the time
+# Complexity ratchets. These are 10% UNDER the worst offender in crawlutron/ at the time
 # of writing, not round numbers, because a round number is a number nobody
 # re-derived: the point is that every threshold names a function that exists and
 # is still too big. Measure with
-#   ruff check --isolated --preview --select C901,PLR0912,PLR0915 --output-format concise app
+#   ruff check --isolated --preview --select C901,PLR0912,PLR0915 --output-format concise crawlutron
 # and take the top value per rule; read it as the CURRENT worst.
 #
 # The thresholds ship with the refactor that brought the tree under them, not
@@ -255,7 +255,7 @@ max-statements = 87
 # PLR0911 (returns) and PLR0913 (arguments) are still unselected. Their maxima
 # are 10 and 24, against the 9 and 21 that a 10%-under ratchet would demand, and
 # both are exceeded by the same handful of long functions, the largest being
-# app/runtime/metrics.py's `_exposition` and app/main.py's `_lifespan`, which the
+# crawlutron/runtime/metrics.py's `_exposition` and crawlutron/main.py's `_lifespan`, which the
 # orchestration and extractor waves split. Both rules turn on in the same commit
 # that brings those functions under the ratchet.
 

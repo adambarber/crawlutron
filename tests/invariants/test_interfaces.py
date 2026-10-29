@@ -112,7 +112,9 @@ def _container_base_reading_is_not_broken() -> None:
         for base in node.bases
     }
     assert declared & _CONTAINER_PROTOCOL_BASES, "the container-base derivation matches nothing"
-    assert _container_protocol_offenders(tree, REPO_ROOT / "app" / "_probe.py"), "the detector stopped firing"
+    assert _container_protocol_offenders(tree, REPO_ROOT / "crawlutron" / "_probe.py"), (
+        "the detector stopped firing"
+    )
 
 
 def _container_protocol_offenders(tree: ast.Module, path: Path) -> list[str]:

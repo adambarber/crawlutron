@@ -10,7 +10,7 @@ from collections.abc import Callable
 
 import pytest
 
-from app.extraction.documents import suppress_trafilatura_chatter
+from crawlutron.extraction.documents import suppress_trafilatura_chatter
 
 TRAFILES = ("trafilatura.core", "trafilatura.utils", "trafilatura.xml")
 

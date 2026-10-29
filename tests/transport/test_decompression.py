@@ -6,9 +6,9 @@ import zlib
 import brotli
 import pytest
 
-from app.transport import decompression as decompression_mod
-from app.transport.body_decode import decode_body
-from app.transport.decompression import (
+from crawlutron.transport import decompression as decompression_mod
+from crawlutron.transport.body_decode import decode_body
+from crawlutron.transport.decompression import (
     DecompressionError,
     DecompressionTooLargeError,
     decompress_body,
@@ -99,7 +99,7 @@ def test_decompression_round_trips(compress, content_encoding):
 
 
 def test_http_charset_decode_error():
-    from app.transport.body_decode import decode_body
+    from crawlutron.transport.body_decode import decode_body
 
     # Charset rides on the content-type only; a stray value can never reach the decoder as a headers argument
     # (the parameter is gone).
@@ -190,7 +190,7 @@ def test_decode_unknown_charset_falls_back():
 
 def test_decode_handles_bytearray_and_headers():
 
-    from app.transport.decompression import decompress_body
+    from crawlutron.transport.decompression import decompress_body
 
     raw = b"compressed"
     body = gzip.compress(raw)
@@ -204,7 +204,7 @@ def test_decode_handles_bytearray_and_headers():
 
 def test_accepts_bytearray_gzip():
 
-    from app.transport.decompression import decompress_body
+    from crawlutron.transport.decompression import decompress_body
 
     body = bytearray(gzip.compress(b"hello world"))
     out = decompress_body(body, "gzip", max_output_bytes=1024)
@@ -212,7 +212,7 @@ def test_accepts_bytearray_gzip():
 
 
 def test_accepts_bytearray_brotli():
-    from app.transport.decompression import decompress_body
+    from crawlutron.transport.decompression import decompress_body
 
     body = bytearray(brotli.compress(b"<html>br content</html>"))
     out = decompress_body(body, "br", max_output_bytes=1024)
@@ -220,7 +220,7 @@ def test_accepts_bytearray_brotli():
 
 
 def test_accepts_memoryview():
-    from app.transport.decompression import decompress_body
+    from crawlutron.transport.decompression import decompress_body
 
     body = memoryview(gzip.compress(b"mv test"))
     out = decompress_body(body, "gzip", max_output_bytes=10_000_000)

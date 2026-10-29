@@ -44,7 +44,7 @@ def _provider_loop_reinlines(tree: ast.AST, path: pathlib.Path) -> list[str]:
 PROVIDER_DEDUPE_LOOP_LIVES_IN_THE_COLLECTOR = Rule(
     name="provider-dedupe-loop-lives-in-the-collector",
     find=_provider_loop_reinlines,
-    summary="Use app.search.providers.collect_results",
+    summary="Use crawlutron.search.providers.collect_results",
     bite=lambda: Bites(
         # The keyed-provider copy: seen:set + isinstance(item, dict) guard + SearchResult construction in one
         # function, re-inlined off the collector.
@@ -71,7 +71,7 @@ PROVIDER_DEDUPE_LOOP_LIVES_IN_THE_COLLECTOR = Rule(
 
 
 # The names of the one selector contract, and the single parameter that carries them; see
-# ``app/extraction/content.py`` for why they are one value rather than two parameters on three signatures.
+# ``crawlutron/extraction/content.py`` for why they are one value, not two parameters on three signatures.
 _SELECTOR_PARAMS = ("css_selector", "xpath")
 
 
@@ -143,7 +143,7 @@ THE_SELECTOR_PAIR_IS_ONE_CONTRACT = Rule(
         # A function that takes no selector is somebody else's business.
         "def extract_document(body, url) -> ExtractedContent:\n    ...\n",
     ),
-    proof_path=REPO_ROOT / "app" / "crawl" / "_synthetic.py",
+    proof_path=REPO_ROOT / "crawlutron" / "crawl" / "_synthetic.py",
 )
 
 
@@ -191,7 +191,7 @@ KEYED_PROVIDERS_INHERIT_THE_SHARED_RESPONSE_FLOW = Rule(
     ),
     bite=lambda: (
         Bites(
-            "from app.search.providers import ApiKeyProvider\n"
+            "from crawlutron.search.providers import ApiKeyProvider\n"
             "class SerperProvider(ApiKeyProvider):\n"
             "    name = 'serper'\n"
             "    _items_path = ('organic',)\n"
@@ -204,7 +204,7 @@ KEYED_PROVIDERS_INHERIT_THE_SHARED_RESPONSE_FLOW = Rule(
             "re-spells the shared provider flow in search()",
         ),
         Bites(
-            "from app.search.providers import ApiKeyProvider\n"
+            "from crawlutron.search.providers import ApiKeyProvider\n"
             "class BraveProvider(ApiKeyProvider):\n"
             "    name = 'brave'\n"
             "    _items_path = ('web', 'results')\n"
@@ -215,14 +215,14 @@ KEYED_PROVIDERS_INHERIT_THE_SHARED_RESPONSE_FLOW = Rule(
             "re-spells the shared provider flow in _fetch()",
         ),
         Bites(
-            "from app.search.providers import ApiKeyProvider\n"
+            "from crawlutron.search.providers import ApiKeyProvider\n"
             "class TavilyProvider(ApiKeyProvider):\n"
             "    name = 'tavily'\n"
             "    _items_path = ('results',)\n",
             "does not state a _call()",
         ),
         Bites(
-            "from app.search.providers import ApiKeyProvider\n"
+            "from crawlutron.search.providers import ApiKeyProvider\n"
             "class BingProvider(ApiKeyProvider):\n"
             "    name = 'bing'\n"
             "    def _call(self, query, limit):\n"
@@ -246,7 +246,7 @@ KEYED_PROVIDERS_INHERIT_THE_SHARED_RESPONSE_FLOW = Rule(
         "    async def search(self, query, limit, timeout_seconds):\n"
         "        return []\n",
     ),
-    proof_path=REPO_ROOT / "app" / "search" / "_synthetic.py",
+    proof_path=REPO_ROOT / "crawlutron" / "search" / "_synthetic.py",
 )
 
 

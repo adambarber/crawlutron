@@ -4,8 +4,8 @@ from urllib.parse import urlparse
 
 import pytest
 
-from app.models.host_policy import HostPolicy
-from app.models.normalized_url import NormalizedUrl
+from crawlutron.models.host_policy import HostPolicy
+from crawlutron.models.normalized_url import NormalizedUrl
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 from tests._validation_helpers import admit_or_none, assert_url_refused, registrable_domain
 
@@ -71,7 +71,7 @@ class TestPolicyValidation:
         assert_url_refused("https://other.test/page", policy, "host_not_allowed")
 
     def test_host_policy_constructed_from_settings(self):
-        from app.config.settings import CrawlerSettings
+        from crawlutron.config.settings import CrawlerSettings
 
         settings = CrawlerSettings.from_mapping(
             {
@@ -193,7 +193,7 @@ class TestPolicyValidation:
         assert registrable_domain("a.b.c.example.com", psl=None) == "example.com"
 
     def test_public_suffix_detection(self):
-        from app.models.registrable_domain import is_public_suffix
+        from crawlutron.models.registrable_domain import is_public_suffix
 
         # The cookie admission edge refuses a Domain= naming one of these
         # (#438): every TLD, and every listed multi-label suffix.
@@ -203,7 +203,7 @@ class TestPolicyValidation:
         assert not is_public_suffix("example.co.uk")
 
     def test_public_suffix_detection_falls_back_without_dataset(self):
-        from app.models.registrable_domain import is_public_suffix
+        from crawlutron.models.registrable_domain import is_public_suffix
 
         # Without the dataset every single label is still a TLD, and the known
         # two-part suffixes stay suffixes (the heuristic's whole fidelity).
@@ -241,8 +241,8 @@ class TestResolveEgress:
 
 
 async def test_crawl_request_applies_settings_host_policy():
-    from app.config.settings import CrawlerSettings
-    from app.orchestration.engine import crawl_request
+    from crawlutron.config.settings import CrawlerSettings
+    from crawlutron.orchestration.engine import crawl_request
 
     settings = CrawlerSettings(allowed_hosts="allowed.test")
     with pytest.raises(ValueError, match="host_not_allowed"):

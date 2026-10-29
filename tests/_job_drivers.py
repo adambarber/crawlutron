@@ -4,17 +4,17 @@ from collections.abc import Callable, Collection
 from contextlib import contextmanager
 from typing import TypedDict, Unpack
 
-from app.admission.policy import PolicyLike
-from app.models.crawl_request import CrawlRequest
-from app.models.crawl_result import EngineCrawlResult
-from app.models.json_value import JsonValue
-from app.storage.job_store import CrawlJobState, FrontierEntry, JobStatus
+from crawlutron.admission.policy import PolicyLike
+from crawlutron.models.crawl_request import CrawlRequest
+from crawlutron.models.crawl_result import EngineCrawlResult
+from crawlutron.models.json_value import JsonValue
+from crawlutron.storage.job_store import CrawlJobState, FrontierEntry, JobStatus
 from tests._job_store_doubles import seed_frontier
 from tests._policy_factories import canonical
 
 
 async def _create_api_job(client, root_url: str, execute, policy: PolicyLike | None = None):
-    from app.api import job_runner
+    from crawlutron.api import job_runner
 
     job_runner.install_execute_crawl(execute)
     response = await post_api_job(client, root_url, policy)
@@ -95,8 +95,8 @@ def drive_job(job_id, job_store, settings=None, shutdown_event=None):
 
     ``run_job``'s call shape is every runner-lifecycle test's ending, so it is
     spelled once. The task is returned, not awaited: cancel/wait tests hold it."""
-    from app.api import job_runner
-    from app.config.settings import CrawlerSettings
+    from crawlutron.api import job_runner
+    from crawlutron.config.settings import CrawlerSettings
 
     return asyncio.ensure_future(
         job_runner.run_job(
@@ -110,7 +110,7 @@ def drive_job(job_id, job_store, settings=None, shutdown_event=None):
 
 async def run_seeded_job(job, job_store, execute):
     """Drive an already-persisted job in-line to terminal; return the row."""
-    from app.api import job_runner
+    from crawlutron.api import job_runner
 
     job_runner.install_execute_crawl(execute)
     # A row a crash left RUNNING restarts the way the service restarts it: the recovery rewind first, because
@@ -222,7 +222,7 @@ async def post_api_job(client, root_url: str, policy: PolicyLike | None = None):
 
 
 async def post_render_with_pool(client, pool, url: str):
-    from app.transport.browser_pool import set_browser_pool
+    from crawlutron.transport.browser_pool import set_browser_pool
 
     old = set_browser_pool(pool)
     try:

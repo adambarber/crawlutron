@@ -54,7 +54,7 @@ def _admission_budget_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 
 def _task_ram_budget():
     """The budget dataclass, imported late so the module docstring stays the first prose."""
-    from app.runtime.pressure_sizing import TaskRamBudget
+    from crawlutron.runtime.pressure_sizing import TaskRamBudget
 
     return TaskRamBudget
 
@@ -69,7 +69,7 @@ def _admission_weights_are_known() -> None:
 
 
 ADMISSION_WEIGHTS_ARE_KEYWORDS = (
-    "from app.runtime.pressure_sizing import build_admission_policy\n"
+    "from crawlutron.runtime.pressure_sizing import build_admission_policy\n"
     "def build(limit, pool_size):\n"
     "    return build_admission_policy(limit, pool_size=pool_size,"
     " max_concurrent_pages=3, doc_workers=2)\n"
@@ -86,15 +86,15 @@ ADMISSION_BUDGET_ARRIVES_AS_A_BUDGET = Rule(
     premise=_admission_weights_are_known,
     bite=lambda: Bites(ADMISSION_WEIGHTS_ARE_KEYWORDS, marker="doc_workers=2"),
     clean=lambda: (
-        "from app.runtime.pressure_sizing import TaskRamBudget, build_admission_policy\n"
+        "from crawlutron.runtime.pressure_sizing import TaskRamBudget, build_admission_policy\n"
         "def build(limit, pool_size):\n"
         "    return build_admission_policy(limit, pool_size=pool_size,"
         " max_concurrent_pages=3, budget=TaskRamBudget(doc_workers=2))\n",
         # The computation itself is not this guard's subject.
-        "from app.runtime.pressure_sizing import max_http_concurrency_for\n"
+        "from crawlutron.runtime.pressure_sizing import max_http_concurrency_for\n"
         "def ceiling(limit, pool_size):\n"
         "    return max_http_concurrency_for(limit, pool_size, doc_workers=2)\n",
-        "from app.runtime.pressure_sizing import build_admission_policy\n"
+        "from crawlutron.runtime.pressure_sizing import build_admission_policy\n"
         "def build(limit, pool_size):\n"
         "    return build_admission_policy(limit, pool_size=pool_size, max_concurrent_pages=3)\n",
     ),
@@ -102,13 +102,13 @@ ADMISSION_BUDGET_ARRIVES_AS_A_BUDGET = Rule(
 
 
 # --------------------------------------------------------------------------- Endpoint readiness gate (the
-# rejection tail) ``request_gate`` (app/api/main_helpers.py) owns the whole gated tail: admit, reject
+# rejection tail) ``request_gate`` (crawlutron/api/main_helpers.py) owns the whole gated tail: admit, reject
 
 
 def _unsanctioned_readiness_counter_offenders(tree, path):
     """Flag a direct readiness-slot admit/release outside the gate chokepoint."""
     return [
-        offender_at(path, call, f"{callee.attr}() outside app.api.main_helpers.request_gate")
+        offender_at(path, call, f"{callee.attr}() outside crawlutron.api.main_helpers.request_gate")
         for call, callee in attribute_calls(tree)
         if callee.attr in {"begin_request", "end_request"}
     ]
@@ -118,10 +118,12 @@ READINESS_SLOTS_GO_THROUGH_THE_GATE = Rule(
     name="readiness-slots-go-through-the-gate",
     find=_unsanctioned_readiness_counter_offenders,
     summary=(
-        "take a readiness slot with app.api.main_helpers.request_gate; a hand-written "
+        "take a readiness slot with crawlutron.api.main_helpers.request_gate; a hand-written "
         "admit/release is how a rejected request holds its slot for the life of the process"
     ),
-    skip=frozenset({"app/api/main_helpers.py"}),  # owner: request_gate admits and releases inside itself
+    skip=frozenset(
+        {"crawlutron/api/main_helpers.py"}
+    ),  # owner: request_gate admits and releases inside itself
     bite=lambda: (
         Bites("def f():\n    readiness_state.begin_request()\n", "begin_request"),
         # The release is the expensive one to lose, in both its spellings: a finally and a return.
@@ -223,12 +225,12 @@ WHOLE_SITE_VISIT_IS_TRANSIENT_GATED = Rule(
 
 def _sync_store_methods() -> dict[str, frozenset[str]]:
     """Store class name -> its public synchronous method names; derived not listed."""
-    import app.storage.caller_key_store as caller_key_store
-    import app.storage.coordination_cookies as coordination_cookies
-    import app.storage.coordination_counters as coordination_counters
-    import app.storage.job_store as job_store
-    import app.storage.result_store as result_store
-    import app.storage.watch_store as watch_store
+    import crawlutron.storage.caller_key_store as caller_key_store
+    import crawlutron.storage.coordination_cookies as coordination_cookies
+    import crawlutron.storage.coordination_counters as coordination_counters
+    import crawlutron.storage.job_store as job_store
+    import crawlutron.storage.result_store as result_store
+    import crawlutron.storage.watch_store as watch_store
 
     modules = {
         "JobStore": job_store,
@@ -307,7 +309,7 @@ STORE_CALLS_ON_THE_LOOP = Rule(
             "store.delete",
         ),
         Bites(
-            "from app.storage.coordination_cookies import SharedCookieStore\n"
+            "from crawlutron.storage.coordination_cookies import SharedCookieStore\n"
             "class Jar:\n"
             "    def __init__(self, path):\n"
             "        self._store = SharedCookieStore(path)\n"

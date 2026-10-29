@@ -27,11 +27,11 @@ _CONTENT_PIPELINE_OWNER = frozenset({"content_pipeline.py"})  # owner: dispatche
 # Import-resolved, so an alias cannot slip past the sweep.
 _EXTRACTION_ENTRY_POINTS = frozenset(
     {
-        "app.extraction.content.extract_document",
-        "app.extraction.content.extract_html",
-        "app.extraction.content.extract_content",
-        "app.extraction.content.extract_post_fetch_discovery",
-        "app.extraction.content.normalized_extraction",
+        "crawlutron.extraction.content.extract_document",
+        "crawlutron.extraction.content.extract_html",
+        "crawlutron.extraction.content.extract_content",
+        "crawlutron.extraction.content.extract_post_fetch_discovery",
+        "crawlutron.extraction.content.normalized_extraction",
     }
 )
 
@@ -81,7 +81,7 @@ def _extraction_reach_past_offenders(tree: ast.AST, path: pathlib.Path) -> list[
     return offenders
 
 
-_EXTRACTION_PROOF_PATH = REPO_ROOT / "app" / "transport" / "_synthetic.py"
+_EXTRACTION_PROOF_PATH = REPO_ROOT / "crawlutron" / "transport" / "_synthetic.py"
 
 
 def _assert_owner_extraction_still_fires() -> None:
@@ -105,7 +105,7 @@ EXTRACTION_IS_DISPATCHED_BY_THE_CONTENT_PIPELINE_ALONE = Rule(
         # The offloaded extractor AND the bare extractor call are two dispatch shapes, so a source carrying
         # both is worth exactly two findings.
         Bites(
-            "from app.extraction.content import extract_html, normalized_extraction\n"
+            "from crawlutron.extraction.content import extract_html, normalized_extraction\n"
             "async def f(decoded, final_url):\n"
             "    extracted = await asyncio.to_thread(extract_html, decoded, final_url)\n"
             "    return normalized_extraction(extracted)\n",
@@ -113,7 +113,7 @@ EXTRACTION_IS_DISPATCHED_BY_THE_CONTENT_PIPELINE_ALONE = Rule(
             count=2,
         ),
         Bites(
-            "from app.extraction.content import extract_content as _ec\n"
+            "from crawlutron.extraction.content import extract_content as _ec\n"
             "def f(body, content_type, url):\n"
             "    return _ec(body, content_type, url)\n",
             "_run_extraction",
@@ -121,7 +121,7 @@ EXTRACTION_IS_DISPATCHED_BY_THE_CONTENT_PIPELINE_ALONE = Rule(
     ),
     clean=lambda: (
         # Routing through the chokepoint is the sanctioned shape.
-        "from app.transport.content_pipeline import _run_extraction\n"
+        "from crawlutron.transport.content_pipeline import _run_extraction\n"
         "async def f(body, final_url):\n"
         "    return await _run_extraction(extraction='full', content=body, decoded='')\n",
     ),
@@ -197,7 +197,7 @@ def test_discovery_result_projection_has_exactly_one_definition():
         if node.name == _DISCOVERY_PROJECTION
     ]
     assert len(definitions) == 1, f"the discovery projection was defined again: {definitions}"
-    assert "app/transport/content_pipeline.py" in definitions[0], definitions
+    assert "crawlutron/transport/content_pipeline.py" in definitions[0], definitions
 
 
 RULES = Registry(

@@ -11,7 +11,7 @@ import contextlib
 from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.storage.job_store import JobStore
+from crawlutron.storage.job_store import JobStore
 
 __all__ = [
     "keyed_quota_client",
@@ -26,7 +26,7 @@ def spy_on_history_reads(monkeypatch):
 
     The spy wraps ``JobAccumulators`` (not ``load``) so the real reads still
     run; every caller asserts on the recorded names."""
-    from app.storage.job_store import JobAccumulators
+    from crawlutron.storage.job_store import JobAccumulators
 
     reached: list[str] = []
     for name in ("read_results", "read_visited"):
@@ -42,11 +42,11 @@ def spy_on_history_reads(monkeypatch):
 
 async def run_with_webhook(request_id, execute_fn, webhook_url, job_store, result_store):
     """One async crawl with a scripted executor and a captured webhook post."""
-    from app.api.async_crawl_runner import run_async_crawl
-    from app.models.crawl_request import CrawlRequest
+    from crawlutron.api.async_crawl_runner import run_async_crawl
+    from crawlutron.models.crawl_request import CrawlRequest
 
-    with patch("app.api.async_crawl_runner.execute_crawl", new=execute_fn):
-        with patch("app.api.webhooks.post_webhook", new_callable=AsyncMock) as post_webhook:
+    with patch("crawlutron.api.async_crawl_runner.execute_crawl", new=execute_fn):
+        with patch("crawlutron.api.webhooks.post_webhook", new_callable=AsyncMock) as post_webhook:
             await run_async_crawl(
                 request_id,
                 CrawlRequest.model_validate({"url": "http://example.com/"}),
@@ -69,7 +69,7 @@ def stored_request(store: JobStore, response):
 
 def mount_tracker(client):
     """Attach the sync-door register to the test client's app and return it."""
-    from app.api.caller_concurrency import CallerConcurrencyTracker
+    from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
 
     tracker = CallerConcurrencyTracker()
     client._transport.app.state.concurrency_tracker = tracker

@@ -11,14 +11,14 @@ from fastapi.params import Depends as DependsParam
 from fastapi.routing import APIRoute
 from httpx import ASGITransport, AsyncClient
 
-from app.admission.policy import PolicyLike, read_policy
-from app.api import dependencies, job_runner, jobs_router
-from app.api.caller_auth import get_caller_identity
-from app.api.dependencies import get_job_store, get_settings, get_shutdown_event
-from app.config.settings import CrawlerSettings
-from app.models.crawl_policy import CrawlPolicy
-from app.models.crawl_request import CrawlRequest
-from app.storage.job_store import FrontierEntry, JobStatus
+from crawlutron.admission.policy import PolicyLike, read_policy
+from crawlutron.api import dependencies, job_runner, jobs_router
+from crawlutron.api.caller_auth import get_caller_identity
+from crawlutron.api.dependencies import get_job_store, get_settings, get_shutdown_event
+from crawlutron.config.settings import CrawlerSettings
+from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.models.crawl_request import CrawlRequest
+from crawlutron.storage.job_store import FrontierEntry, JobStatus
 from tests._job_harnesses import (
     ScriptedExecute,
     _create_api_job,
@@ -56,7 +56,7 @@ def test_every_job_endpoint_declares_its_providers_through_an_alias():
     default is the shape that let two hand-written lists look equivalent.
     """
     aliases = {value for name, value in vars(dependencies).items() if name.endswith("Dep")}
-    assert aliases, "app.api.dependencies declares no provider aliases"
+    assert aliases, "crawlutron.api.dependencies declares no provider aliases"
 
     for route in jobs_router.router.routes:
         # An APIRouter registers APIRoutes, but the attribute holding them is typed as BaseRoute, which
@@ -177,8 +177,8 @@ class TestCrashRecovery:
         self, job_store, monkeypatch, url, settings_values
     ):
 
-        from app.api.dependencies import get_settings
-        from app.config.settings import CrawlerSettings
+        from crawlutron.api.dependencies import get_settings
+        from crawlutron.config.settings import CrawlerSettings
 
         app = _make_app(job_store)
         app.dependency_overrides[get_settings] = lambda: CrawlerSettings.from_mapping(
@@ -211,7 +211,7 @@ class TestWholeSiteJobExecution:
         crawls in its own jar partition, not the anonymous shared one."""
         from httpx import ASGITransport, AsyncClient
 
-        from app.models.caller_identity import CallerIdentity
+        from crawlutron.models.caller_identity import CallerIdentity
 
         app = _make_app(job_store)
         app.dependency_overrides[get_caller_identity] = lambda: CallerIdentity(
@@ -407,7 +407,7 @@ class TestWholeSiteJobExecution:
     ):
         """#548: the occupied set is derived ONCE at loop start and threaded by
         value (the reserved delta), not re-derived per batch."""
-        import app.api.job_runner as job_runner_module
+        import crawlutron.api.job_runner as job_runner_module
 
         calls: list[int] = []
         real = job_runner_module.admitted_page_identities

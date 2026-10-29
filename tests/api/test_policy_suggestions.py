@@ -7,11 +7,11 @@ import logging
 
 import pytest
 
-from app.api.policy_suggestions import policy_suggestions
-from app.config.settings import CrawlerSettings
-from app.models.caller_identity import CallerIdentity
-from app.models.json_value import JsonValue
-from app.storage.result_store import CrawlResultStore
+from crawlutron.api.policy_suggestions import policy_suggestions
+from crawlutron.config.settings import CrawlerSettings
+from crawlutron.models.caller_identity import CallerIdentity
+from crawlutron.models.json_value import JsonValue
+from crawlutron.storage.result_store import CrawlResultStore
 from tests._assertions import completed_crawl
 from tests._fetcher_factories import make_crawl_payload
 from tests._policy_factories import canonical
@@ -234,8 +234,8 @@ async def test_validation_and_rollup_run_off_the_event_loop(tmp_path, monkeypatc
     either running on the loop stalls every concurrent request."""
     import asyncio
 
-    from app.models.normalized_url import admit_or_none
-    from app.models.trace_response import TraceResponse
+    from crawlutron.models.normalized_url import admit_or_none
+    from crawlutron.models.trace_response import TraceResponse
 
     store = CrawlResultStore(tmp_path / "offloop.db")
     store.put("crawl_blocked", _stored_trace("crawl_blocked", "https://offloop.test/"))
@@ -261,7 +261,7 @@ async def test_validation_and_rollup_run_off_the_event_loop(tmp_path, monkeypatc
         return real_admit(candidate, policy=policy)
 
     monkeypatch.setattr(TraceResponse, "model_validate", _validate_spy)
-    monkeypatch.setattr("app.api.policy_suggestions.admit_or_none", _admit_spy)
+    monkeypatch.setattr("crawlutron.api.policy_suggestions.admit_or_none", _admit_spy)
 
     await policy_suggestions(result_store=store, settings=CrawlerSettings.from_mapping({}))
 

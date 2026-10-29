@@ -5,10 +5,10 @@ from collections import OrderedDict
 
 import pytest
 
-import app.transport.browser_cookies as browser_cookies
-from app.transport import browser as browser_mod
-from app.transport.browser import get_browser_cookies_for
-from app.transport.browser_cookies import BROWSER_COOKIES_MAX, store_browser_cookies
+import crawlutron.transport.browser_cookies as browser_cookies
+from crawlutron.transport import browser as browser_mod
+from crawlutron.transport.browser import get_browser_cookies_for
+from crawlutron.transport.browser_cookies import BROWSER_COOKIES_MAX, store_browser_cookies
 
 
 @pytest.fixture
@@ -181,7 +181,7 @@ async def test_cffi_session_does_not_replay_cookies_it_received(base_url):
     becomes tenant B's ``Cookie:`` header when the jar replays by domain.
     """
     pytest.importorskip("curl_cffi")
-    from app.transport import http_client_pool
+    from crawlutron.transport import http_client_pool
 
     http_client_pool.reset_process_state()
     session = http_client_pool.get_cffi_session()
@@ -202,7 +202,7 @@ async def test_shared_httpx_client_does_not_replay_cookies_it_received(base_url)
     ``get_async_http_client`` serves every declared-crawler fetch and outlives
     them all, so its jar accumulates across tenants for the life of the process.
     """
-    from app.transport.http_client_pool import get_async_http_client
+    from crawlutron.transport.http_client_pool import get_async_http_client
 
     client = get_async_http_client()
     try:

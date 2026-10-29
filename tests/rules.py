@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from tests.chokepoint_walks import REPO_ROOT, app_trees, relative_posix
 
 #: Where a bite proof's synthetic module is pretended to live.
-_SYNTHETIC = REPO_ROOT / "app" / "_synthetic.py"
+_SYNTHETIC = REPO_ROOT / "crawlutron" / "_synthetic.py"
 
 #: ``(tree, path, **per_module) -> offender strings``.
 Detector = Callable[..., Iterable[str]]

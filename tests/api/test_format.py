@@ -1,12 +1,12 @@
 """Unified output formatting: every crawl strategy funnels through one path."""
 
-from app.api.unified_shaping import format_crawl_item
+from crawlutron.api.unified_shaping import format_crawl_item
 from tests._result_builders import engine_result
 
 
 class TestFormatCrawlItemUnified:
     def test_html_result_uses_markdownify(self) -> None:
-        from app.extraction.content import extract_content
+        from crawlutron.extraction.content import extract_content
 
         html = "<html><head><title>T</title></head><body><p>Body text here</p></body></html>"
         item = engine_result(

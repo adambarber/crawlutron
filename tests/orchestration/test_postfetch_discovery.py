@@ -9,11 +9,11 @@ from typing import get_type_hints
 
 from lxml import etree
 
-from app.admission.policy import read_policy
-from app.extraction.content import extract_post_fetch_discovery
-from app.models.crawl_policy import CrawlPolicy
-from app.models.normalized_url import NormalizedUrl
-from app.safety.validation import HostPolicy
+from crawlutron.admission.policy import read_policy
+from crawlutron.extraction.content import extract_post_fetch_discovery
+from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.safety.validation import HostPolicy
 from tests._assertions import install_to_thread_spy
 from tests._fetcher_factories import invoke_browser_strategy, invoke_http_strategy, make_fetch
 from tests._policy_factories import canonical, http_strategy_policy
@@ -100,7 +100,7 @@ async def test_browser_post_fetch_block_runs_off_loop(monkeypatch):
 
 async def test_no_lxml_tree_escapes_to_loop(monkeypatch):
     """The offloaded block returns plain data: no lxml element crosses back."""
-    import app.extraction.content as ext_mod
+    import crawlutron.extraction.content as ext_mod
 
     out = await asyncio.to_thread(
         ext_mod.extract_post_fetch_discovery,
@@ -145,7 +145,7 @@ def test_html_diagnostics_omit_policy_blocked_frame_and_private_form(monkeypatch
 
 
 async def test_discovery_feeds_are_policy_filtered():
-    from app.transport.fetch_policy import discovery_diagnostics
+    from crawlutron.transport.fetch_policy import discovery_diagnostics
 
     html = (
         '<link rel="alternate" type="application/rss+xml" href="https://blocked.test/feed">'
@@ -241,7 +241,7 @@ def test_the_discovery_envelope_declares_its_seven_keys():
     it, so a producer that stops selecting a key fails here, not silently at
     a reader.
     """
-    from app.extraction.discovery import PostFetchDiscovery
+    from crawlutron.extraction.discovery import PostFetchDiscovery
 
     assert set(get_type_hints(PostFetchDiscovery)) == {
         "diagnostics",

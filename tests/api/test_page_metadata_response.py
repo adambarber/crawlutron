@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.api.unified_shaping import build_unified_result
-from app.models.crawl_result import EngineCrawlResult
+from crawlutron.api.unified_shaping import build_unified_result
+from crawlutron.models.crawl_result import EngineCrawlResult
 from tests._result_builders import engine_result
 
 
@@ -29,7 +29,7 @@ class TestMetadataResponseKeyDrift:
         def _real_extractor(item):
             return ("# markdown", {"title": "Example", "language": "en"})
 
-        monkeypatch.setattr("app.api.unified_shaping.format_crawl_item", _real_extractor)
+        monkeypatch.setattr("crawlutron.api.unified_shaping.format_crawl_item", _real_extractor)
         result = build_unified_result(_item())
         assert result.metadata.title == "Example"
         assert result.metadata.language == "en"
@@ -41,6 +41,6 @@ class TestMetadataResponseKeyDrift:
         def _drifting_extractor(item):
             return ("# markdown", {"title": "x", "undeclared_key": "boom"})
 
-        monkeypatch.setattr("app.api.unified_shaping.format_crawl_item", _drifting_extractor)
+        monkeypatch.setattr("crawlutron.api.unified_shaping.format_crawl_item", _drifting_extractor)
         with pytest.raises(ValueError, match="unhandled extractor metadata keys"):
             build_unified_result(_item())

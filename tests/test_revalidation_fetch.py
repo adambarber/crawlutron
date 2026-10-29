@@ -3,8 +3,8 @@ conditional GET, and a 200 answer must be used and stored -- the code once fell
 through to a second unconditional fetch (double load for one crawl).
 """
 
-from app.transport.cache import HttpCache
-from app.transport.content_cache import ContentCache
+from crawlutron.transport.cache import HttpCache
+from crawlutron.transport.content_cache import ContentCache
 from tests._fetcher_factories import make_fetch, run_http_strategy
 
 

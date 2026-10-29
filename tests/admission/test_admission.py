@@ -2,10 +2,10 @@
 
 import pytest
 
-from app.health.readiness import ReadinessState
-from app.runtime.metrics import get_metrics
-from app.runtime.pressure_memory import MemoryGate, MemoryStats, read_memory_stats
-from app.runtime.pressure_sizing import CpuGate, ResourceGate, read_cpu_quota, read_cpu_usage_seconds
+from crawlutron.health.readiness import ReadinessState
+from crawlutron.runtime.metrics import get_metrics
+from crawlutron.runtime.pressure_memory import MemoryGate, MemoryStats, read_memory_stats
+from crawlutron.runtime.pressure_sizing import CpuGate, ResourceGate, read_cpu_quota, read_cpu_usage_seconds
 from tests._admission_doubles import pinned_resource_gate as _pinned_resource_gate
 from tests._timing_harnesses import recorder
 
@@ -137,9 +137,9 @@ def _cpu_gate(monkeypatch, *, target=0.90):
     only its two sensors are replaced, so the arithmetic is production's.
     """
     clock, usage = [0.0], [0.0]
-    monkeypatch.setattr("app.runtime.pressure_gates.time.monotonic", lambda: clock[0])
-    monkeypatch.setattr("app.runtime.pressure_gates.read_cpu_usage_seconds", lambda root="": usage[0])
-    monkeypatch.setattr("app.runtime.pressure_gates.read_cpu_quota", lambda root="": 2.0)
+    monkeypatch.setattr("crawlutron.runtime.pressure_gates.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr("crawlutron.runtime.pressure_gates.read_cpu_usage_seconds", lambda root="": usage[0])
+    monkeypatch.setattr("crawlutron.runtime.pressure_gates.read_cpu_quota", lambda root="": 2.0)
     return CpuGate(target=target), clock, usage
 
 
@@ -178,8 +178,8 @@ _GATE_KIND_IDS = [kind for kind, _ in GATE_KINDS]
 async def test_cpu_gate_unbounded_is_noop(monkeypatch):
     """No cgroup quota and no manual budget -> never throttles."""
     gate = CpuGate(target=0.90)
-    monkeypatch.setattr("app.runtime.pressure_gates.read_cpu_quota", lambda root="": None)
-    monkeypatch.setattr("app.runtime.pressure_gates.read_cpu_usage_seconds", lambda root="": 999.0)
+    monkeypatch.setattr("crawlutron.runtime.pressure_gates.read_cpu_quota", lambda root="": None)
+    monkeypatch.setattr("crawlutron.runtime.pressure_gates.read_cpu_usage_seconds", lambda root="": 999.0)
     assert gate.batch_scale_factor() == 1.0
     sleeps = recorder(monkeypatch)
     await gate.wait_while_saturated(max_wait_seconds=10)
@@ -274,7 +274,7 @@ def test_cpu_gate_is_warm_only_after_sample(monkeypatch):
 
     # Feed a real usage reading so the gate can take its first sample.
     monkeypatch.setattr(
-        "app.runtime.pressure_gates.read_cpu_usage_seconds",
+        "crawlutron.runtime.pressure_gates.read_cpu_usage_seconds",
         lambda root="/sys/fs/cgroup": 1.0,
     )
     gate.cpu_ratio()  # first sample establishes the baseline

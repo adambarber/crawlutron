@@ -7,7 +7,7 @@ not from another test's internals.
 
 from __future__ import annotations
 
-from app.vocabulary.taxonomy import (
+from crawlutron.vocabulary.taxonomy import (
     BROWSER_BLOCKED_CLASSIFICATIONS,
     FAILED_CLASSIFICATIONS,
     HTTP_BLOCKED_CLASSIFICATIONS,

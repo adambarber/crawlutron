@@ -9,12 +9,12 @@ from pathlib import Path
 
 import pytest
 
-from app.models.crawl_policy import CrawlPolicy
-from app.storage.caller_key_store import CallerKeyStore
-from app.storage.coordination_cookies import SharedCookieStore
-from app.storage.coordination_counters import CoordinationCounters
-from app.storage.job_store import CrawlJobState, JobStatus, JobStore
-from app.storage.migrations import (
+from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.storage.caller_key_store import CallerKeyStore
+from crawlutron.storage.coordination_cookies import SharedCookieStore
+from crawlutron.storage.coordination_counters import CoordinationCounters
+from crawlutron.storage.job_store import CrawlJobState, JobStatus, JobStore
+from crawlutron.storage.migrations import (
     CURRENT_SCHEMAS,
     LEGACY_COLUMNS,
     MIGRATION_IDS,
@@ -26,9 +26,9 @@ from app.storage.migrations import (
     schema_drift,
     stamp_store,
 )
-from app.storage.migrations.runner import LegacySchemaMismatch, migrate_store
-from app.storage.result_store import CrawlResultStore
-from app.storage.watch_store import WatchStore
+from crawlutron.storage.migrations.runner import LegacySchemaMismatch, migrate_store
+from crawlutron.storage.result_store import CrawlResultStore
+from crawlutron.storage.watch_store import WatchStore
 from tests._policy_factories import canonical, job_store
 
 _BOOKKEEPING_TABLES = {"_yoyo_log", "_yoyo_migration", "_yoyo_version", "yoyo_lock"}
@@ -276,7 +276,7 @@ def test_explicit_legacy_stamp_reports_only_the_marked_migration(tmp_path, capsy
     db_path = tmp_path / "cli-stamped-historical-jobs.db"
     _create_legacy_database(db_path, StoreSchema.CRAWL_JOBS)
 
-    from app.storage.migrations.runner import main
+    from crawlutron.storage.migrations.runner import main
 
     main(["stamp", str(db_path), StoreSchema.CRAWL_JOBS.value])
 

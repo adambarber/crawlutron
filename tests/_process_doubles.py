@@ -5,7 +5,7 @@ join after death); three copies previously froze three ideas of ``exitcode``."""
 
 from __future__ import annotations
 
-from app.extraction.doc_pool import DocExtractionPool, DocWorker
+from crawlutron.extraction.doc_pool import DocExtractionPool, DocWorker
 
 
 class StubProc:
@@ -128,7 +128,7 @@ def install_unkillable_doc_worker() -> tuple[DocWorker, DocExtractionPool, StubS
 
     Grown through a real acquisition, so the pool matches production's arrival;
     the spawner lets a test queue the workers the pool should grow into."""
-    import app.extraction.content as ext_mod
+    import crawlutron.extraction.content as ext_mod
 
     zombie = unkillable_doc_worker()
     spawner = StubSpawner(zombie)

@@ -4,11 +4,11 @@ import inspect
 from collections.abc import Callable
 from typing import Any
 
-from app.models.http_fetch_result import HttpFetchResult
-from app.models.normalized_url import NormalizedUrl
-from app.orchestration.engine import crawl_request
-from app.transport.cache import HttpCache
-from app.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
+from crawlutron.models.http_fetch_result import HttpFetchResult
+from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.orchestration.engine import crawl_request
+from crawlutron.transport.cache import HttpCache
+from crawlutron.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 from tests._policy_factories import canonical
 
 SCOPE_KEEP_DROP_PAGES = {

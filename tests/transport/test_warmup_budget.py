@@ -8,8 +8,8 @@ worker's navigation slot unbounded.
 
 from __future__ import annotations
 
-from app.transport.browser_render_phases import warmup_pages
-from app.transport.timeouts import render_phase_seconds
+from crawlutron.transport.browser_render_phases import warmup_pages
+from crawlutron.transport.timeouts import render_phase_seconds
 from tests._browser_doubles import BrowserFakePage
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 

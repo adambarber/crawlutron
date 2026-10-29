@@ -2,8 +2,8 @@
 
 from fastapi import FastAPI
 
-from app.storage.job_store import JobStore
-from app.transport.cookie_jar import CookieJar
+from crawlutron.storage.job_store import JobStore
+from crawlutron.transport.cookie_jar import CookieJar
 
 
 def test_factory_fixture_builds_the_promised_surface(factory):

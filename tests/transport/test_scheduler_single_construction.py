@@ -3,8 +3,8 @@
 import ast
 from collections.abc import Callable
 
-from app.config.settings import CrawlerSettings
-from app.transport.scheduler import DomainScheduler
+from crawlutron.config.settings import CrawlerSettings
+from crawlutron.transport.scheduler import DomainScheduler
 
 _KNOBS = (
     "_per_domain_limit",
@@ -18,9 +18,9 @@ _KNOBS = (
 
 
 def _admission_scheduler(policy_src: dict[str, object], settings: CrawlerSettings) -> DomainScheduler:
-    from app.admission.admission import JobAdmissionContext
-    from app.admission.policy import PolicyTier
-    from app.models.crawl_policy import CrawlPolicy
+    from crawlutron.admission.admission import JobAdmissionContext
+    from crawlutron.admission.policy import PolicyTier
+    from crawlutron.models.crawl_policy import CrawlPolicy
 
     policy = CrawlPolicy.model_validate(policy_src)
     context = JobAdmissionContext.create(policy, PolicyTier.model_defaults(), settings)
@@ -54,7 +54,7 @@ def test_settings_default_not_getattr_default():
 
 
 def _render_scheduler_of(settings: CrawlerSettings) -> DomainScheduler:
-    from app.api.render import render_scheduler
+    from crawlutron.api.render import render_scheduler
 
     return render_scheduler(settings)
 
@@ -99,7 +99,7 @@ def test_admission_global_limit_not_getattr_redefaulted():
 def test_recovery_start_limit_not_getattr_redefaulted():
     """#142: boot recovery sizes its runner cap from the settings home, not a
     second getattr default that can drift from CrawlerSettings.global_concurrency."""
-    from app.api.job_recovery import recovery_start_limit
+    from crawlutron.api.job_recovery import recovery_start_limit
 
     assert recovery_start_limit(CrawlerSettings(global_concurrency=6)) == 6
 
@@ -124,7 +124,7 @@ def _app_call_offenders(skip_suffix: str, bites: Callable[[ast.Call], str | None
 
 def test_domain_scheduler_constructed_only_in_its_home():
     """#142: ``DomainScheduler(...)`` is constructed nowhere but
-    app/transport/scheduler.py; every other module goes through
+    crawlutron/transport/scheduler.py; every other module goes through
     ``from_settings``, the declared single construction path."""
 
     def direct_build(_node, name):
@@ -132,7 +132,7 @@ def test_domain_scheduler_constructed_only_in_its_home():
             return "direct DomainScheduler build"
         return None
 
-    offenders = _app_call_offenders("app/transport/scheduler.py", direct_build)
+    offenders = _app_call_offenders("crawlutron/transport/scheduler.py", direct_build)
     assert not offenders, "DomainScheduler constructed outside its home: " + ", ".join(offenders)
 
 
@@ -147,5 +147,5 @@ def test_global_concurrency_not_getattr_redefaulted():
             return "global_concurrency re-defaulted via getattr"
         return None
 
-    offenders = _app_call_offenders("app/transport/scheduler.py", getattr_redefault)
+    offenders = _app_call_offenders("crawlutron/transport/scheduler.py", getattr_redefault)
     assert not offenders, "global_concurrency re-defaulted via getattr: " + ", ".join(offenders)

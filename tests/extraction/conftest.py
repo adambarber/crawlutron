@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-import app.extraction.documents as docex
+import crawlutron.extraction.documents as docex
 from tests._process_doubles import stub_worker
 
 

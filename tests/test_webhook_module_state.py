@@ -1,4 +1,4 @@
-"""Guards for ``app.api.webhooks`` after the dead-delivery-island deletion: the
+"""Guards for ``crawlutron.api.webhooks`` after the dead-delivery-island deletion: the
 crawl-plus-deliver story lives in ``async_crawl_runner``, and a second wiring
 apparatus here would recreate the island -- so its absence is pinned.
 """
@@ -8,7 +8,7 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from app.api import webhooks as wm
+from crawlutron.api import webhooks as wm
 from tests.chokepoint_walks import nodes_of
 
 ISLAND_NAMES = (
@@ -49,7 +49,7 @@ def test_deliver_pinned_webhook_is_called_only_from_post_webhook():
     """
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     callers: set[str] = set()
-    for path in sorted((repo_root / "app").rglob("*.py")):
+    for path in sorted((repo_root / "crawlutron").rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in nodes_of(tree):
             if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):

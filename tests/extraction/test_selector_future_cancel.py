@@ -6,7 +6,7 @@ import time
 import bs4
 import pytest
 
-from app.extraction.content import (
+from crawlutron.extraction.content import (
     ExtractedContent,
     Selectors,
     extract_selected,

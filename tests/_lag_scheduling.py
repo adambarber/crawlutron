@@ -9,7 +9,7 @@ import asyncio
 import itertools
 from collections.abc import Awaitable, Callable
 
-from app.runtime.pressure_sizing import ResourceGate
+from crawlutron.runtime.pressure_sizing import ResourceGate
 
 
 def lag_clock(lag: float, interval: float = 0.05) -> Callable[[], float]:

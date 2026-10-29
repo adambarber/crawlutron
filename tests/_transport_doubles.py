@@ -10,8 +10,8 @@ from multiprocessing.queues import Queue
 import httpx
 import pytest
 
-from app.models.http_fetch_result import HttpFetchResult
-from app.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
+from crawlutron.models.http_fetch_result import HttpFetchResult
+from crawlutron.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 from tests._fetch_outcome import FetchFailed, FetchOutcome
 
 _ISOLATED = multiprocessing.get_context("spawn")
@@ -118,7 +118,7 @@ def allow_scripted_egress(monkeypatch, ip: str = "1.2.3.4") -> None:
 
     A scripted host has no DNS, so the two network-asking seams stand down;
     everything downstream still runs. ``ip`` is public by construction."""
-    from app.transport import pinned_transport as pinned_mod
+    from crawlutron.transport import pinned_transport as pinned_mod
 
     monkeypatch.setattr(pinned_mod, "check_ssrf_protection", lambda url: None)
     monkeypatch.setattr(pinned_mod, "resolve_and_pin_host", lambda url: (url.host, ip))
@@ -137,7 +137,7 @@ def patch_http_fetcher_transport(
     if not allow_ssrf_bypass:
         raise ValueError("patch_http_fetcher_transport requires allow_ssrf_bypass=True")
 
-    from app.transport import http_client_pool as pool_mod
+    from crawlutron.transport import http_client_pool as pool_mod
 
     client = scripted_transport_client(responses)
     monkeypatch.setattr(pool_mod, "get_async_http_client", lambda: client)
@@ -153,7 +153,7 @@ def _genuine_cffi_outcome(url: str, timeout_seconds: int, max_content_length: in
     """
     import asyncio
 
-    from app.transport.fetchers import impersonating_fetcher
+    from crawlutron.transport.fetchers import impersonating_fetcher
     from tests._policy_factories import canonical
 
     async def _fetch():

@@ -6,7 +6,7 @@ call, so no test (and no production path) depends on wall time.
 
 import pytest
 
-from app.vocabulary.taxonomy import CrawlClassification
+from crawlutron.vocabulary.taxonomy import CrawlClassification
 from tests._policy_factories import canonical
 
 NOW = 1_000_000.0

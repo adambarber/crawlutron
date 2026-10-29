@@ -9,9 +9,9 @@ from urllib.parse import quote
 
 import pytest
 
-from app.safety.validation import HostPolicy
-from app.search.providers import SearchProviderError
-from app.search.providers_html import DuckDuckGoProvider
+from crawlutron.safety.validation import HostPolicy
+from crawlutron.search.providers import SearchProviderError
+from crawlutron.search.providers_html import DuckDuckGoProvider
 from tests._assertions import awaitable_search
 
 

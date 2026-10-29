@@ -8,7 +8,7 @@ from functools import cache
 
 from tests._walk_primitives import APP_ROOT, REPO_ROOT, _narrow, parsed, trees_under
 
-# app/safety/safe_regex.py is the sanctioned regex wrapper (the third-party `regex`
+# crawlutron/safety/safe_regex.py is the sanctioned regex wrapper (the third-party `regex`
 # engine); only the regex-engine-import rule excludes it, never a walk default.
 SANCTIONED = frozenset({"safe_regex.py"})
 
@@ -91,7 +91,7 @@ def _app_trees(exclude: frozenset[str]) -> tuple[tuple[pathlib.Path, ast.Module]
 
 
 def relative_posix(path: pathlib.Path) -> str:
-    """``app/admission/admission.py`` -- the label a detector exempts a path by."""
+    """``crawlutron/admission/admission.py`` -- the label a detector exempts a path by."""
     return path.relative_to(REPO_ROOT).as_posix()
 
 

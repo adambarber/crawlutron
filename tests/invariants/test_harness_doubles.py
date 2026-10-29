@@ -17,8 +17,8 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 def _model_declared_names() -> dict[str, str]:
-    """Every public name app/models/ declares, mapped to the module that declares it."""
-    models_root = REPO_ROOT / "app" / "models"
+    """Every public name crawlutron/models/ declares, mapped to the module that declares it."""
+    models_root = REPO_ROOT / "crawlutron" / "models"
     declared: dict[str, str] = {}
     for path, tree in trees_under(models_root):
         for node in tree.body:
@@ -234,12 +234,12 @@ def test_a_tests_module_never_declares_a_name_app_models_declares() -> None:
         "the model census came back empty or blind; the detector would govern nothing"
     )
     assert "JsonValue" in models, (
-        "app/models declares JsonValue via a PEP 695 type alias; a census blind "
+        "crawlutron/models declares JsonValue via a PEP 695 type alias; a census blind "
         "to that form cannot govern a tests/ module re-declaring it"
     )
     doubles = _tests_declared_names()
     findings = {name: (modules, models[name]) for name, modules in doubles.items() if name in models}
-    assert not findings, f"harness doubles of app/models/ declarations: {findings}"
+    assert not findings, f"harness doubles of crawlutron/models/ declarations: {findings}"
 
 
 def test_a_tests_module_never_mirrors_a_production_field_shape() -> None:
@@ -248,21 +248,21 @@ def test_a_tests_module_never_mirrors_a_production_field_shape() -> None:
     Superset-or-equal fires (a grown double is still the copy); a subset and a
     single-field record (<2 fields) stay silent. Governed transitively (#412).
     """
-    model_shapes = _declared_shapes(REPO_ROOT / "app" / "models")
+    model_shapes = _declared_shapes(REPO_ROOT / "crawlutron" / "models")
     assert model_shapes, "the shape census came back empty; the detector would govern nothing"
     findings: dict[tuple[str, ...], tuple[list[str], list[str]]] = {}
     for shape, modules in _declared_shapes(REPO_ROOT / "tests").items():
         for model_shape, model_modules in model_shapes.items():
             if shape >= model_shape:
                 findings[tuple(sorted(shape))] = (modules, model_modules)
-    assert not findings, f"harness records containing app/models/ field sets: {findings}"
+    assert not findings, f"harness records containing crawlutron/models/ field sets: {findings}"
 
 
 def _smallest_production_entry() -> tuple[frozenset[str], str, str]:
     """The alphabetically-first three-field production record: (shape, module, class),
     derived from the live census so the planted doubles aim at a record that exists."""
     entries: list[tuple[frozenset[str], str, str]] = []
-    census = _RecordCensus(list(trees_under(REPO_ROOT / "app" / "models")))
+    census = _RecordCensus(list(trees_under(REPO_ROOT / "crawlutron" / "models")))
     for module, name, shape in census.records():
         entries.append((shape, module, name))
     assert entries, "no multi-field production record exists; re-derive the planted doubles"
@@ -271,7 +271,7 @@ def _smallest_production_entry() -> tuple[frozenset[str], str, str]:
 
 def _planted_finding(source: str, label: str) -> tuple[list[str], list[str]] | None:
     """The finding one planted tests-side tree produces against the real census."""
-    model_shapes = _declared_shapes(REPO_ROOT / "app" / "models")
+    model_shapes = _declared_shapes(REPO_ROOT / "crawlutron" / "models")
     planted = _shapes_from_trees([(REPO_ROOT / label, ast.parse(source))])
     for shape, modules in planted.items():
         for model_shape, model_modules in model_shapes.items():
@@ -293,7 +293,7 @@ def test_a_double_whose_base_is_an_aliased_import_fires() -> None:
     assert planted_modules == ["tests/_planted_double.py"]
     # The planted shape may superset several production frames; any named
     # declaring module proves the detector found the production side.
-    assert production_modules and all(m.startswith("app/models/") for m in production_modules)
+    assert production_modules and all(m.startswith("crawlutron/models/") for m in production_modules)
 
 
 def test_a_double_split_across_a_local_record_base_fires() -> None:
@@ -314,7 +314,7 @@ def test_a_double_split_across_a_local_record_base_fires() -> None:
     assert finding is not None, "the split transitive double did NOT fire; the hole is live"
     planted_modules, production_modules = finding
     assert planted_modules == ["tests/_planted_double.py"]
-    assert production_modules and all(m.startswith("app/models/") for m in production_modules)
+    assert production_modules and all(m.startswith("crawlutron/models/") for m in production_modules)
 
 
 def test_a_tests_side_reuse_of_a_production_record_stays_silent() -> None:

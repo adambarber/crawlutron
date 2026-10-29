@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.models.crawl_strategy import CrawlStrategy
+from crawlutron.models.crawl_strategy import CrawlStrategy
 
 
 class TestBrowserActionKeysAreClosed:
@@ -27,13 +27,13 @@ class TestBrowserActionKeysAreClosed:
         One test over the table, not one per spelling -- a second copy is a
         second place to forget one key.
         """
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError, match="action keys not permitted"):
             CrawlPolicy(browser_profile={"actions": [action]})
 
     def test_a_permitted_action_still_validates(self):
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         for action in (
             {"type": "click", "selector": "#x"},
@@ -51,7 +51,7 @@ class TestBrowserActionKeysAreClosed:
         """
         import ast
 
-        from app.vocabulary.browser import BROWSER_ACTION_KEYS
+        from crawlutron.vocabulary.browser import BROWSER_ACTION_KEYS
         from tests.chokepoint_walks import TRANSPORT_DIR, attribute_calls, string_argument
 
         source = (TRANSPORT_DIR / "browser_driver.py").read_text()
@@ -86,25 +86,25 @@ class TestCallerKnobsBehindClosedKeysAreCeilinged:
     MAX_SCREENSHOT_SELECTORS = 16
 
     def test_scroll_steps_over_the_ceiling_are_refused(self):
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError, match="lazy_scroll_steps"):
             CrawlPolicy(browser_profile={"lazy_scroll_steps": 10**12})
 
     def test_a_scroll_delay_over_the_ceiling_is_refused(self):
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError, match="lazy_scroll_delay_seconds"):
             CrawlPolicy(browser_profile={"lazy_scroll_delay_seconds": 3600.0})
 
     def test_a_cookie_harvest_timeout_over_the_ceiling_is_refused(self):
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError, match="cookie_harvest_timeout_seconds"):
             CrawlPolicy(browser_profile={"cookie_harvest_timeout_seconds": 10**9})
 
     def test_too_many_screenshot_selectors_are_refused(self):
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         over = [f"#{index}" for index in range(self.MAX_SCREENSHOT_SELECTORS + 1)]
         with pytest.raises(ValidationError, match="screenshot_selectors"):
@@ -112,7 +112,7 @@ class TestCallerKnobsBehindClosedKeysAreCeilinged:
 
     def test_a_value_at_each_ceiling_is_accepted(self):
         """The ceilings are the boundary, not a lower bound the caller cannot reach."""
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         policy = CrawlPolicy(
             browser_profile={
@@ -129,8 +129,8 @@ class TestCallerKnobsBehindClosedKeysAreCeilinged:
         is a dict and the validator is gone, so the readers (never ``_profile_int``,
         whose contract is to pass a value through) are what actually bound work.
         """
-        from app.transport.browser_driver import BrowserDriver
-        from app.vocabulary.limits import (
+        from crawlutron.transport.browser_driver import BrowserDriver
+        from crawlutron.vocabulary.limits import (
             MAX_COOKIE_HARVEST_TIMEOUT_SECONDS,
             MAX_LAZY_SCROLL_DELAY_SECONDS,
             MAX_LAZY_SCROLL_STEPS,
@@ -170,7 +170,7 @@ class TestProfileStringsAreCeilinged:
     MAX_PROFILE_STRING = 8192
 
     def test_an_oversized_action_selector_is_refused(self):
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError, match="browser_profile actions"):
             CrawlPolicy(
@@ -180,20 +180,20 @@ class TestProfileStringsAreCeilinged:
             )
 
     def test_an_oversized_top_level_string_is_refused(self):
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError, match="browser_profile storage_state"):
             CrawlPolicy(browser_profile={"storage_state": "s" * (self.MAX_PROFILE_STRING + 1)})
 
     def test_an_oversized_screenshot_selector_is_refused(self):
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError, match="browser_profile screenshot_selectors"):
             CrawlPolicy(browser_profile={"screenshot_selectors": ["#" + "s" * (self.MAX_PROFILE_STRING + 1)]})
 
     def test_a_string_at_the_ceiling_is_accepted(self):
         """The ceiling is the boundary, not a lower bound the caller cannot reach."""
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         policy = CrawlPolicy(
             browser_profile={
@@ -215,13 +215,13 @@ class TestStrategyLadderIsBounded:
     MAX_STRATEGIES = 16
 
     def test_a_ladder_at_the_ceiling_is_accepted(self):
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         ladder = [CrawlStrategy.HTTP_DECLARED_CRAWLER] * self.MAX_STRATEGIES
         assert len(CrawlPolicy(strategies=ladder).strategies) == self.MAX_STRATEGIES
 
     def test_a_ladder_over_the_ceiling_is_refused(self):
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         over = [CrawlStrategy.HTTP_DECLARED_CRAWLER] * (self.MAX_STRATEGIES + 1)
         with pytest.raises(ValidationError, match="at most"):
@@ -229,7 +229,7 @@ class TestStrategyLadderIsBounded:
 
     def test_an_empty_ladder_is_still_refused(self):
         """The lower bound is unchanged: an empty ladder has no strategy to run."""
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError):
             CrawlPolicy(strategies=[])
@@ -240,7 +240,7 @@ class TestStrategyLadderIsBounded:
         Pins the distinction the ceiling rests on, so a later reader does not
         "fix" this by deduping and break cookie replay.
         """
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         repeated = [
             CrawlStrategy.BROWSER_HEADLESS,

@@ -6,9 +6,9 @@ import time
 
 import pytest
 
-from app.models.crawl_policy import CrawlPolicy
-from app.transport.cookie_jar import global_cookie_jar
-from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
+from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.transport.cookie_jar import global_cookie_jar
+from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._assertions import (
     accepted_crawl,
     assert_result_failed,
@@ -208,7 +208,7 @@ class TestShadowDomApi(_AsgiEndpointTests):
     async def test_v1_crawl_shadow_dom_flattened(self):
         # The ASGI harness runs no lifespan, so the pool is None; a real browser-strategy crawl needs a live
         # pool. Initialize (real camoufox) and close it in a finally so no browsers leak into later tests.
-        from app.transport.browser_pool import close_browser_pool, initialize_browser_pool
+        from crawlutron.transport.browser_pool import close_browser_pool, initialize_browser_pool
 
         await initialize_browser_pool()
         try:
@@ -278,7 +278,7 @@ class TestJobApi(_AsgiEndpointTests):
 
     async def _seed_job(self, root_url):
         """Seed a persisted row directly; create_endpoint refuses."""
-        from app.main import job_store
+        from crawlutron.main import job_store
 
         job = job_store.create(root_url, CrawlPolicy())
         return job.job_id

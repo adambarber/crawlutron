@@ -7,10 +7,10 @@ with If-None-Match / If-Modified-Since and an unchanged page is not_modified.
 import pytest
 from pydantic import ValidationError
 
-from app.models.crawl_request import CrawlRequest
-from app.models.host_policy import HostPolicy
-from app.models.normalized_url import NormalizedUrl
-from app.orchestration.engine import crawl_request
+from crawlutron.models.crawl_request import CrawlRequest
+from crawlutron.models.host_policy import HostPolicy
+from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.orchestration.engine import crawl_request
 from tests._fetcher_factories import request_fetcher, run_http_strategy, scripted_fetcher
 from tests._policy_factories import http_strategy_policy
 
@@ -193,7 +193,7 @@ def test_conditional_headers_rejected_without_validators():
 async def test_malformed_gzip_is_rejected_by_strategy():
     import gzip
 
-    from app.transport.decompression import DecompressionTooLargeError, decompress_body
+    from crawlutron.transport.decompression import DecompressionTooLargeError, decompress_body
 
     compressed = bytearray(gzip.compress(_html("real content").encode()))
     for i in range(2, 12):
@@ -218,7 +218,7 @@ async def test_malformed_gzip_is_rejected_by_strategy():
 
 class TestNotModifiedResponse:
     async def test_http_strategy_not_modified(self):
-        from app.transport.cache import HttpCache
+        from crawlutron.transport.cache import HttpCache
 
         not_mod_fetcher = scripted_fetcher(
             status=304, headers={"etag": "v1", "content-type": "text/html"}, body=b"not modified"

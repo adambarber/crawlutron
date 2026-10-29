@@ -7,9 +7,9 @@ re-check; it now follows itself, re-pinning per hop on the real client.
 import httpx
 import pytest
 
-from app.transport import http_client_pool as pool_mod
-from app.transport import pinned_transport as pinned_mod
-from app.transport.classification import classify_error_code
+from crawlutron.transport import http_client_pool as pool_mod
+from crawlutron.transport import pinned_transport as pinned_mod
+from crawlutron.transport.classification import classify_error_code
 from tests._fetcher_factories import run_default_http_fetcher
 from tests._transport_doubles import MockResponse, scripted_transport_client
 

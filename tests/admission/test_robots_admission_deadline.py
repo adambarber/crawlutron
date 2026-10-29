@@ -5,7 +5,7 @@ link-admission path, whose robots gather otherwise hangs chunks × timeout."""
 import asyncio
 import time
 
-from app.admission.admission_links import gather_robots_decisions
+from crawlutron.admission.admission_links import gather_robots_decisions
 from tests._policy_factories import admit, canonical
 
 

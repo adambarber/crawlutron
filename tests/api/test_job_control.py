@@ -8,10 +8,10 @@ from dataclasses import replace
 
 import pytest
 
-from app.api import job_runner
-from app.config.settings import CrawlerSettings
-from app.models.crawl_policy import CrawlPolicy
-from app.storage.job_store import FrontierEntry, JobStatus, JobStore
+from crawlutron.api import job_runner
+from crawlutron.config.settings import CrawlerSettings
+from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.storage.job_store import FrontierEntry, JobStatus, JobStore
 from tests._job_harnesses import (
     ScriptedExecute,
     _create_api_job,
@@ -111,7 +111,7 @@ class TestJobStateWaitContract:
 
         The "workable" fallback -- poll until the state matches -- is exactly
         the implementation that raced a starved box, so the harness refuses."""
-        from app.storage.job_store import JobStore
+        from crawlutron.storage.job_store import JobStore
         from tests._job_harnesses import _wait_status as wait_status
         from tests._policy_factories import UNRESTRICTED_HOST_POLICY, deployment_tier
 
@@ -206,8 +206,8 @@ class TestJobControlTransitions:
 
     @staticmethod
     async def _control(action: str, expected: int, *, seed_terminal: bool = False) -> None:
-        from app.main import job_store
-        from app.storage.job_store import JobStatus
+        from crawlutron.main import job_store
+        from crawlutron.storage.job_store import JobStatus
         from tests._app_factory import service_app
 
         job = job_store.create("http://example.com/", CrawlPolicy())

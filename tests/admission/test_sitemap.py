@@ -3,14 +3,14 @@
 import asyncio
 from functools import partial
 
-from app.admission.policy import read_policy
-from app.models.normalized_url import NormalizedUrl
-from app.orchestration.engine import parse_lastmod, seed_is_fresh, stale_seeds
-from app.transport.content_cache import ContentCache
-from app.transport.content_cache_key import build_content_cache_key
-from app.transport.fetch_helpers import SITEMAP_CACHE, fetch_sitemap_urls
-from app.transport.request_profile import headers_for_strategy
-from app.vocabulary.limits import SITEMAP_CACHE_TTL_SECONDS, SITEMAP_FAILURE_TTL_SECONDS
+from crawlutron.admission.policy import read_policy
+from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.orchestration.engine import parse_lastmod, seed_is_fresh, stale_seeds
+from crawlutron.transport.content_cache import ContentCache
+from crawlutron.transport.content_cache_key import build_content_cache_key
+from crawlutron.transport.fetch_helpers import SITEMAP_CACHE, fetch_sitemap_urls
+from crawlutron.transport.request_profile import headers_for_strategy
+from crawlutron.vocabulary.limits import SITEMAP_CACHE_TTL_SECONDS, SITEMAP_FAILURE_TTL_SECONDS
 from tests._assertions import install_to_thread_spy
 from tests._fetcher_factories import (
     concurrent_fetcher,
@@ -382,7 +382,7 @@ class TestSeedingIsOffLoop:
     async def test_freshness_filter_runs_in_a_worker_thread(self, monkeypatch, tmp_path):
         """The engine's sitemap seeding must offload the freshness batch via
         ``asyncio.to_thread`` rather than parsing envelopes on the loop."""
-        from app.orchestration.engine import crawl_request
+        from crawlutron.orchestration.engine import crawl_request
 
         seen = install_to_thread_spy(monkeypatch)
         fresh_url = "http://seed-batch.test/fresh"
@@ -391,9 +391,9 @@ class TestSeedingIsOffLoop:
             "policy": crawl_policy(discovery={"sitemaps": True}, limits={"max_depth": 1}),
         }
 
-        from app.admission.payload_helpers import payload_policy
-        from app.admission.policy import PolicyTier
-        from app.models.crawl_request import CrawlRequest
+        from crawlutron.admission.payload_helpers import payload_policy
+        from crawlutron.admission.policy import PolicyTier
+        from crawlutron.models.crawl_request import CrawlRequest
 
         derived = payload_policy(CrawlRequest.model_validate(payload), PolicyTier.model_defaults())
         cache = _cache_with_fresh(tmp_path, fresh_url, "2020-01-01T00:00:00Z", derived)

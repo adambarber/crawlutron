@@ -10,10 +10,10 @@ import contextlib
 import json
 from pathlib import Path
 
-from app.api.crawl_router import router as crawl_router
-from app.api.keys_router import router as keys_router
-from app.mcp.router import router as mcp_router
-from app.storage.job_store import JobStatus
+from crawlutron.api.crawl_router import router as crawl_router
+from crawlutron.api.keys_router import router as keys_router
+from crawlutron.mcp.router import router as mcp_router
+from crawlutron.storage.job_store import JobStatus
 from tests._async_harnesses import issue_key
 from tests._concurrency_probe import block_execute_crawl
 from tests._quota_harness import service_client
@@ -95,7 +95,7 @@ async def test_keyed_mcp_crawl_refused_when_holding_an_async_job(tmp_path):
 
 async def test_mcp_crawl_and_http_sync_crawl_share_one_ceiling(tmp_path, monkeypatch):
     """A sync crawl in flight over HTTP leaves the same caller's MCP crawl refused."""
-    from app.api import crawl_endpoint as crawl_mod
+    from crawlutron.api import crawl_endpoint as crawl_mod
 
     _, entered, released = block_execute_crawl(monkeypatch, crawl_mod)
     async with _mcp_client(tmp_path) as (client, job_store, keys):

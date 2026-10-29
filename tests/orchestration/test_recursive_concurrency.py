@@ -4,8 +4,8 @@ Before the batching fix the recursive branch awaited one link at a time,
 bypassing DomainScheduler entirely (no concurrency, no rate limiting).
 """
 
-from app.config.settings import CrawlerSettings
-from app.orchestration.engine import crawl_request
+from crawlutron.config.settings import CrawlerSettings
+from crawlutron.orchestration.engine import crawl_request
 from tests._fetcher_factories import concurrent_fetcher
 
 

@@ -1,7 +1,7 @@
 """Page classification: phrases, structural markers, taxonomy, status resolution and memory bounds."""
 
-from app.extraction.classify import classify_page, classify_page_with_evidence
-from app.vocabulary.taxonomy import (
+from crawlutron.extraction.classify import classify_page, classify_page_with_evidence
+from crawlutron.vocabulary.taxonomy import (
     BROWSER_BLOCKED_CLASSIFICATIONS,
     FAILED_CLASSIFICATIONS,
     HTTP_BLOCKED_CLASSIFICATIONS,
@@ -49,7 +49,7 @@ def test_benign_stays_rendered():
 
 
 def _strip(html):
-    from app.extraction.classify import strip_html_noise
+    from crawlutron.extraction.classify import strip_html_noise
 
     return strip_html_noise(html)
 
@@ -72,7 +72,7 @@ def test_case_insensitive_tags():
 
 
 def test_classify_unchanged_after_refactor():
-    from app.extraction.classify import classify_page
+    from crawlutron.extraction.classify import classify_page
 
     # spoof attempt still neutralized
     assert (
@@ -89,7 +89,7 @@ def test_strip_is_linear_under_pathological_unclosed_script_flood():
     N unclosed tags made the noise regex O(N^2); measured in CPU seconds (wall
     clock lies) and sized 1MB->4MB so the linear growth term dominates the noise.
     """
-    from app.extraction.classify import strip_html_noise
+    from crawlutron.extraction.classify import strip_html_noise
 
     def cpu_for(n):
         payload = ("<script>" + "a" * 500) * n
@@ -111,7 +111,7 @@ def test_strip_is_linear_when_noise_regions_are_all_closed():
     Each consumed region used to pay two find() scans of the whole remaining
     body for the openers that were not there -- O(k*n) in k closed regions.
     """
-    from app.extraction.classify import strip_html_noise
+    from crawlutron.extraction.classify import strip_html_noise
 
     one_region = "<script>" + "b" * 100 + "</script>"
     small = cpu_seconds(lambda: strip_html_noise(one_region * 1_000))
@@ -126,7 +126,7 @@ def test_strip_is_linear_when_text_has_many_lt_but_no_gt():
     The tail tag-strip ``<[^>]+>`` re-scanned to end-of-string at every ``<``
     on such text -- the same O(k*n) class, hiding behind the scanner fix.
     """
-    from app.extraction.classify import strip_html_noise
+    from crawlutron.extraction.classify import strip_html_noise
 
     big = cpu_seconds(lambda: strip_html_noise("<b" * 100_000))
     assert big < 1.0, f"{big:.6f}s of CPU for 200KB of bare '<' tokens is not a linear strip"
@@ -212,7 +212,7 @@ def test_wire_classification_literal_matches_the_enum():
     """
     import typing
 
-    from app.models.taxonomy import Classification
+    from crawlutron.models.taxonomy import Classification
 
     args = typing.get_args(Classification)
     enum_values = {m.value for m in CrawlClassification}

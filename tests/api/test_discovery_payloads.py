@@ -1,13 +1,13 @@
 """Capabilities, agent-hints and well-known discovery payload contracts."""
 
-from app.config.settings import CrawlerSettings
-from app.discovery.agent_hints import (
+from crawlutron.config.settings import CrawlerSettings
+from crawlutron.discovery.agent_hints import (
     EXAMPLE_POLICIES,
     STRATEGY_DESCRIPTIONS,
     agent_hints_payload,
 )
-from app.discovery.capabilities import capabilities_payload
-from app.discovery.well_known import discovery_payload
+from crawlutron.discovery.capabilities import capabilities_payload
+from crawlutron.discovery.well_known import discovery_payload
 
 
 class TestCapabilitiesPayload:
@@ -211,7 +211,7 @@ class TestDiscoveryPayload:
     def test_recommended_endpoints_name_the_trace_view(self):
         """A trace nobody can find is not shipped: the door an agent reads first
         is the discovery list, not the OpenAPI document."""
-        from app.discovery.well_known import discovery_payload
+        from crawlutron.discovery.well_known import discovery_payload
 
         recommended = discovery_payload()["recommended_endpoints"]
         assert "GET /v1/crawl/{request_id}/trace" in recommended
@@ -227,7 +227,7 @@ class TestDiscoveryPayload:
         """``conditional_fetch`` is the primitive; ``watches`` is the surface that
         uses it on the caller's behalf. An agent deciding whether to poll for
         changes has to be able to see that the service will."""
-        from app.discovery.capabilities import capabilities_payload
+        from crawlutron.discovery.capabilities import capabilities_payload
 
         features = capabilities_payload(CrawlerSettings.from_mapping({}))["features"]
         assert features["watches"] is True
@@ -236,7 +236,7 @@ class TestDiscoveryPayload:
         """The recommendation list is hand-curated, so it can drift from the
         routers it mirrors: an entry for a dead route sends a discovering agent
         at a 404. Every advertised METHOD /path must resolve against the app."""
-        from app.main import app as service
+        from crawlutron.main import app as service
 
         # The app mounts its routers via _IncludedRouter, so app.routes does not expose APIRoute objects; the
         # OpenAPI schema is the surface the recommendation list mirrors and the one a discovering agent

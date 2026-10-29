@@ -1,4 +1,4 @@
-"""``app/admission/policy.py`` — the two read edges between policy and model.
+"""``crawlutron/admission/policy.py`` — the two read edges between policy and model.
 
 ``read_policy`` is total and repairs; ``validate_wire_policy`` rejects. The
 repair is field-scoped, not a whole-policy default."""
@@ -8,8 +8,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from app.admission import policy as policy_module
-from app.admission.policy import (
+from crawlutron.admission import policy as policy_module
+from crawlutron.admission.policy import (
     ERROR_CODE_BY_FIELD,
     PolicyTier,
     discovery_flags,
@@ -17,9 +17,9 @@ from app.admission.policy import (
     stored_policy,
     validate_wire_policy,
 )
-from app.config.settings import CrawlerSettings
-from app.models.crawl_policy import CrawlPolicy
-from app.models.crawl_policy_limits import CrawlPolicyLimits
+from crawlutron.config.settings import CrawlerSettings
+from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.models.crawl_policy_limits import CrawlPolicyLimits
 
 # A field the model will reject on its own, used wherever a test needs "this row has exactly one bad field"
 # without hand-writing an invalid value inline.

@@ -5,9 +5,9 @@ from functools import partial
 
 import pytest
 
-from app.models.host_policy import HostPolicy, allow_private_targets, reset_private_target_memo
-from app.models.normalized_url import NormalizedUrl
-from app.safety.validation import filter_js_endpoints as _filter_js_endpoints
+from crawlutron.models.host_policy import HostPolicy, allow_private_targets, reset_private_target_memo
+from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.safety.validation import filter_js_endpoints as _filter_js_endpoints
 
 _HOST_POLICY = HostPolicy.unrestricted()
 admit = partial(NormalizedUrl, policy=_HOST_POLICY)
@@ -47,7 +47,7 @@ class TestNormalizationGuardMemoization:
     URL = "https://MEMO-T2-9E16C.TEST:443/path/?b=2&utm_source=x&a=1#frag"
 
     def _spy(self, monkeypatch):
-        import app.models.host_policy as host_policy
+        import crawlutron.models.host_policy as host_policy
 
         counts = {"env": 0, "ip": 0}
 
@@ -135,7 +135,7 @@ class TestSsrfPrivateTargetGuardWarning:
         else:
             monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", env)
         reset_private_target_memo()
-        with caplog.at_level(logging.WARNING, logger="app.models.host_policy"):
+        with caplog.at_level(logging.WARNING, logger="crawlutron.models.host_policy"):
             allow_private_targets()
         warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
         assert len(warnings) == 0
@@ -150,7 +150,7 @@ class TestSsrfPrivateTargetGuardWarning:
     def test_warning_emitted_when_guard_disabled(self, env, calls, caplog, monkeypatch):
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", env)
         reset_private_target_memo()
-        with caplog.at_level(logging.WARNING, logger="app.models.host_policy"):
+        with caplog.at_level(logging.WARNING, logger="crawlutron.models.host_policy"):
             for _ in range(calls):
                 allow_private_targets()
         recorded = [r for r in caplog.records if r.levelno == logging.WARNING]
@@ -162,7 +162,7 @@ class TestSsrfPrivateTargetGuardWarning:
         """A change to the env value triggers a new warning."""
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "1")
         reset_private_target_memo()
-        with caplog.at_level(logging.WARNING, logger="app.models.host_policy"):
+        with caplog.at_level(logging.WARNING, logger="crawlutron.models.host_policy"):
             allow_private_targets()
         first_warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
         assert len(first_warnings) == 1

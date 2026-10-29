@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.storage.result_store import CrawlResultStore
+from crawlutron.storage.result_store import CrawlResultStore
 
 
 def _clock(start=1000.0):
@@ -72,7 +72,7 @@ async def test_status_url_roundtrip_via_api(async_client):
 
 def test_a_payload_past_the_byte_cap_is_refused_not_retained(tmp_path):
     """#443: the write edge refuses an oversized payload before persistence."""
-    from app.storage.result_store import PayloadTooLargeError
+    from crawlutron.storage.result_store import PayloadTooLargeError
 
     store = CrawlResultStore(tmp_path / "cap.db", max_payload_bytes=128)
     oversized = {"request_id": "crawl_huge", "results": [], "pad": "x" * 512}

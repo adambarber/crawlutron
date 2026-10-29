@@ -6,8 +6,8 @@ must merge in a transaction, not last-writer-wins.
 
 import pytest
 
-from app.storage.coordination_cookies import SharedCookieStore
-from app.transport.cookie_jar import CookieJar
+from crawlutron.storage.coordination_cookies import SharedCookieStore
+from crawlutron.transport.cookie_jar import CookieJar
 from tests._policy_factories import canonical
 
 

@@ -1,6 +1,6 @@
 """content_metrics must count tags in a single pass with stable keys."""
 
-from app.transport.body_decode import content_metrics
+from crawlutron.transport.body_decode import content_metrics
 
 
 def test_content_metrics_counts_in_single_pass():

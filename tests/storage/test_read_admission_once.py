@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import app.storage.job_store_collections as collections
-from app.models.host_policy import HostPolicy
-from app.storage.job_store import JobStore
-from app.storage.job_store_collections import FrontierEntry
+import crawlutron.storage.job_store_collections as collections
+from crawlutron.models.host_policy import HostPolicy
+from crawlutron.storage.job_store import JobStore
+from crawlutron.storage.job_store_collections import FrontierEntry
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 from tests._policy_factories import job_store as store_on
 

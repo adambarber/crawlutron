@@ -6,10 +6,10 @@ import logging
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 
-from app.admission.policy import read_policy
-from app.config.settings import CrawlerSettings
-from app.models.crawl_policy import CrawlPolicy
-from app.storage.job_store import CrawlJobState, FrontierEntry, JobStatus, OrderedUrlSet
+from crawlutron.admission.policy import read_policy
+from crawlutron.config.settings import CrawlerSettings
+from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.storage.job_store import CrawlJobState, FrontierEntry, JobStatus, OrderedUrlSet
 from tests._job_harnesses import (
     frontier,
     loaded_job,
@@ -385,8 +385,8 @@ def test_cross_list_duplicate_keeps_shallowest_depth():
     Locked at ``row_to_state``, the walk a real load runs."""
     import sqlite3
 
-    from app.storage.job_store import FrontierEntry
-    from app.storage.job_store_read import row_to_state
+    from crawlutron.storage.job_store import FrontierEntry
+    from crawlutron.storage.job_store_read import row_to_state
 
     connection = sqlite3.connect("file:crosslist?mode=memory&cache=shared", uri=True)
     connection.row_factory = sqlite3.Row

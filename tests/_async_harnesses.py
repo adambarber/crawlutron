@@ -12,7 +12,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from app.models.json_value import JsonValue
+from crawlutron.models.json_value import JsonValue
 from tests._timing_harnesses import await_until
 
 
@@ -66,8 +66,8 @@ async def _drain_running_crawls(*, guard: float = 10.0) -> None:
 
     Bounded, not open-ended: a genuinely stuck crawl should fail at its own
     assertion, not hold later tests open."""
-    from app.main import job_store
-    from app.storage.job_store import TERMINAL_STATUSES, JobStatus
+    from crawlutron.main import job_store
+    from crawlutron.storage.job_store import TERMINAL_STATUSES, JobStatus
 
     terminal_codes = {status.value for status in TERMINAL_STATUSES}
 

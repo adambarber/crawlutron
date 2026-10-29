@@ -116,7 +116,7 @@ name = "pyright"
 kind = "exec"
 env = ["PATH"]
 timeout = 60s
-run = ".venv/bin/pyright app"
+run = ".venv/bin/pyright crawlutron"
 
 [[actions]]
 name = "shell"

@@ -10,14 +10,14 @@ import asyncio
 
 import pytest
 
-from app.api import main_helpers
-from app.config.settings import CrawlerSettings
-from app.health.readiness import ReadinessState
-from app.mcp.tools import handle_crawl, handle_map, handle_render, handle_search
-from app.models.crawl_request import CrawlRequest
-from app.models.map_request import MapRequest
-from app.models.render_request import RenderRequest
-from app.models.search_request import SearchRequest
+from crawlutron.api import main_helpers
+from crawlutron.config.settings import CrawlerSettings
+from crawlutron.health.readiness import ReadinessState
+from crawlutron.mcp.tools import handle_crawl, handle_map, handle_render, handle_search
+from crawlutron.models.crawl_request import CrawlRequest
+from crawlutron.models.map_request import MapRequest
+from crawlutron.models.render_request import RenderRequest
+from crawlutron.models.search_request import SearchRequest
 
 #: (label, handler, stub_target, payload, extra_patches) for the four fetch kinds.
 #: crawl also covers crawl_and_extract, which shares ``_guard_then_crawl``.
@@ -90,8 +90,8 @@ async def _invoke(monkeypatch, *, cap: int | None, label: str, prefill: int = 0)
     held: list[int] = []
     exec_stub = _stub_for(label, _active, held)
     for name, value in extra.items():
-        monkeypatch.setattr(f"app.mcp.tools.{name}", value)
-    monkeypatch.setattr(f"app.mcp.tools.{target}", exec_stub)
+        monkeypatch.setattr(f"crawlutron.mcp.tools.{name}", value)
+    monkeypatch.setattr(f"crawlutron.mcp.tools.{target}", exec_stub)
     settings = CrawlerSettings.from_mapping({})
     shutdown = asyncio.Event()
     result = await handler(payload, settings, shutdown)

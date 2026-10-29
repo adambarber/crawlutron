@@ -16,7 +16,7 @@ class TestRequestProfileVocabularyIsClosed:
         """A ``cookie_jar`` value outside the closed set silently disables static
         cookies (diagnostics echo the caller's spelling as a live mode) -- a
         misspelling like ``per-host`` must be refused, not a silent no-op (#245)."""
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         for bogus in ("per-host", "shared", "SESSION", "session-jar"):
             with pytest.raises(ValidationError, match="cookie_jar"):
@@ -25,14 +25,14 @@ class TestRequestProfileVocabularyIsClosed:
     def test_the_closed_cookie_jar_values_still_work(self):
         """The valid ``cookie_jar`` vocabulary is accepted, so the closure never
         rejects a spelling the header builder honours or a deliberate disable."""
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         for value in ("per_host", "session", "none"):
             profile = CrawlPolicy(request_profile={"cookie_jar": value})
             assert profile.request_profile["cookie_jar"] == value
 
     def test_an_unknown_key_is_refused(self):
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         # The TypedDict itself closes the key set now: pydantic refuses an extra
         # input (extra_forbidden) before the vocabulary closer ever runs.
@@ -41,7 +41,7 @@ class TestRequestProfileVocabularyIsClosed:
 
     def test_a_misspelled_key_is_refused_rather_than_ignored(self):
         """The failure this exists for: a typo that reports success and does nothing."""
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         for typo in ("cookie_jarr", "fingerprint_rotatoin", "accept_language"):
             with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
@@ -52,7 +52,7 @@ class TestRequestProfileVocabularyIsClosed:
 
         ``state`` sat in the allowlist with zero readers; this asserts the
         property for the request profile so the class cannot reappear."""
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         field = CrawlPolicy.model_fields["request_profile"]
         # ``.get`` rather than ``getattr(..., "keys")``: a dict's own ``keys`` attribute would satisfy the
@@ -72,7 +72,7 @@ class TestRequestProfileVocabularyIsClosed:
 
         Nothing compared the description against the table, so a key could be
         advertised and inert at the same time."""
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         field = CrawlPolicy.model_fields["request_profile"]
         description = field.description or ""
@@ -105,7 +105,7 @@ class TestRequestProfileCookiesCannotBypassTheNamespaceChokepoint:
     MAX_COOKIE_PAIRS = 32
 
     def _profile(self, cookies: dict[str, dict[str, str]]):
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         return CrawlPolicy(
             request_profile={"cookie_jar": "per_host", "cookie_namespace": "t1", "cookies": cookies}
@@ -141,7 +141,7 @@ class TestRequestProfileCookiesCannotBypassTheNamespaceChokepoint:
 
         A namespace is a caller-picked string with no caller authentication: a
         tenant key, not a boundary, so there is no value to refusing one."""
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         profile = CrawlPolicy(
             request_profile={"cookie_jar": "per_host", "cookies": {"e.example": {"a": "1"}}}
@@ -150,7 +150,7 @@ class TestRequestProfileCookiesCannotBypassTheNamespaceChokepoint:
 
     def test_a_namespace_is_itself_bounded(self):
         """A namespace is a dict key in a process-wide jar, so it is a size knob too."""
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError, match="cookie_namespace"):
             CrawlPolicy(request_profile={"cookie_namespace": "t" * 500})
@@ -167,7 +167,7 @@ class TestRequestProfileValueTypesMatchTheHeaderMapTheyCorrupt:
 
         The two keys are one reader; splitting them duplicated the body and
         made a third key a third copy."""
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         for key in ("user_agents", "accept_languages"):
             for bad in ({"a_string": "Mozilla"}, {"an_entry": [{"x": 1}]}, {"a_none_entry": [None]}):
@@ -175,13 +175,13 @@ class TestRequestProfileValueTypesMatchTheHeaderMapTheyCorrupt:
                     CrawlPolicy(request_profile={key: bad})
 
     def test_a_pool_at_the_ceiling_is_accepted(self):
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         pool = [f"agent-{index}" for index in range(64)]
         assert len(CrawlPolicy(request_profile={"user_agents": pool}).request_profile["user_agents"]) == 64
 
     def test_an_over_sized_pool_is_refused(self):
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         with pytest.raises(ValidationError, match="at most"):
             CrawlPolicy(request_profile={"user_agents": [f"agent-{i}" for i in range(65)]})
@@ -190,7 +190,7 @@ class TestRequestProfileValueTypesMatchTheHeaderMapTheyCorrupt:
         """Each pool entry lands in User-Agent/Accept-Language verbatim, so it is a
         header value: a CR/LF smuggle is refused, the #441 8 KiB ceiling holds, and
         a value exactly at the ceiling is still accepted -- over both keys (#454)."""
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         for key in ("user_agents", "accept_languages"):
             with pytest.raises(ValidationError, match=key):
@@ -203,7 +203,7 @@ class TestRequestProfileValueTypesMatchTheHeaderMapTheyCorrupt:
     def test_the_seed_and_family_must_be_strings(self):
         """``fingerprint_seed`` is interpolated into a hash and ``user_agent_family``
         is read with ``str()``, so a dict reaches the hash instead of a string."""
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         for key in ("fingerprint_seed", "user_agent_family", "cookie_jar", "fingerprint_rotation"):
             with pytest.raises(ValidationError, match=key):

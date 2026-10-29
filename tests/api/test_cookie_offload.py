@@ -10,8 +10,8 @@ import asyncio
 
 import pytest
 
-from app.models.normalized_url import NormalizedUrl
-from app.transport import cookie_jar
+from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.transport import cookie_jar
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 from tests.api._offload_doubles import LoopGuardSharedCookieStore
 
@@ -58,7 +58,7 @@ def guarded_jar(tmp_path):
 async def test_storing_cookies_from_the_async_fetch_path_stays_off_the_loop(guarded_jar):
     """The fetch tails' Set-Cookie door is awaited from async frames; a sync
     store.merge there is a SQLite write on the loop."""
-    from app.transport.request_profile import store_set_cookies
+    from crawlutron.transport.request_profile import store_set_cookies
 
     class _Headers:
         def get_list(self, key: str) -> list[str]:
@@ -81,8 +81,8 @@ async def test_building_request_headers_from_the_async_frame_stays_off_the_loop(
     """``resolve_http_limits`` runs in the async HTTP strategy frame; its jar
     read (the Cookie header) is a SQLite read there, so the resolver awaits it
     off the loop."""
-    from app.transport.http_cache import resolve_http_limits
-    from app.transport.http_response import HttpStrategyContext
+    from crawlutron.transport.http_cache import resolve_http_limits
+    from crawlutron.transport.http_response import HttpStrategyContext
 
     jar = cookie_jar.global_cookie_jar()
     await jar.aadd_cookie_header(_url(), "session=abc; Path=/", namespace="")

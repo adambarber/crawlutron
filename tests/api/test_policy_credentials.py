@@ -5,11 +5,11 @@ origin, and origin-keyed fields use the existing cross-host scrub.
 
 import pytest
 
-from app.admission.credentials import origin_of
-from app.admission.policy import validate_wire_policy
-from app.models.crawl_request import CrawlRequest
-from app.models.credential import Credential
-from app.transport.request_profile import apply_credentials
+from crawlutron.admission.credentials import origin_of
+from crawlutron.admission.policy import validate_wire_policy
+from crawlutron.models.crawl_request import CrawlRequest
+from crawlutron.models.credential import Credential
+from crawlutron.transport.request_profile import apply_credentials
 from tests._policy_factories import CrawlPolicy, PolicyTier, canonical, payload_policy, read_policy
 
 #: The settings a payload-policy test runs against: the defaults with nothing overridden.
@@ -71,7 +71,7 @@ class TestApplyCredentials:
     def test_headers_for_strategy_attaches_only_the_matching_origin(self):
         """Integration through the real header assembly seam (the only
         consumer): seed URL gets the header, any other origin does not."""
-        from app.transport.request_profile import headers_for_strategy
+        from crawlutron.transport.request_profile import headers_for_strategy
 
         policy = {
             "headers": {},

@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.models.normalized_url import NormalizedUrl
+from crawlutron.models.normalized_url import NormalizedUrl
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 

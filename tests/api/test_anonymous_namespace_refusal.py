@@ -13,9 +13,9 @@ from typing import TypedDict
 
 import pytest
 
-from app.api.caller_auth import effective_cookie_namespace
-from app.models.caller_identity import CallerIdentity
-from app.storage.job_store import JobStore
+from crawlutron.api.caller_auth import effective_cookie_namespace
+from crawlutron.models.caller_identity import CallerIdentity
+from crawlutron.storage.job_store import JobStore
 from tests.factories.store import job_store as make_store
 
 
@@ -55,8 +55,8 @@ def test_anonymous_declaration_is_refused_at_the_crawl_door(tmp_path: Path):
 
     from httpx import ASGITransport, AsyncClient
 
-    from app.api.dependencies import get_settings, get_shutdown_event
-    from app.config.settings import CrawlerSettings
+    from crawlutron.api.dependencies import get_settings, get_shutdown_event
+    from crawlutron.config.settings import CrawlerSettings
     from tests.factories.client import isolation_app, stores
 
     async def run():
@@ -95,8 +95,8 @@ def test_anonymous_callers_cannot_share_a_declared_namespace_jar(tmp_path: Path)
     """#559: two anonymous callers, same declared namespace -- the declaration is refused,
     so the second never reads the jar the first planted under it. Red before the fix: the
     passthrough honored 'tenant-x' and the cookie crossed."""
-    from app.storage.coordination_cookies import SharedCookieStore
-    from app.transport.cookie_jar import CookieJar
+    from crawlutron.storage.coordination_cookies import SharedCookieStore
+    from crawlutron.transport.cookie_jar import CookieJar
     from tests._policy_factories import canonical
 
     target = canonical("http://example.com/")
@@ -113,7 +113,7 @@ def test_anonymous_callers_cannot_share_a_declared_namespace_jar(tmp_path: Path)
 @pytest.mark.asyncio
 async def test_anonymous_map_declaration_is_refused_at_the_door(tmp_path: Path):
     """#559: the /v1/map door refuses an anonymous cookie_namespace declaration."""
-    from app.api.identity_router import router as identity_router
+    from crawlutron.api.identity_router import router as identity_router
     from tests._quota_harness import service_client
 
     async with service_client(tmp_path, routers={"doors": identity_router}) as (client, _s, _k):
@@ -129,8 +129,8 @@ async def test_anonymous_jobs_declaration_is_refused_at_the_door(tmp_path: Path)
     """#559: the /v1/jobs door refuses an anonymous declaration before any durable row."""
     from httpx import ASGITransport, AsyncClient
 
-    from app.api.dependencies import get_settings
-    from app.config.settings import CrawlerSettings
+    from crawlutron.api.dependencies import get_settings
+    from crawlutron.config.settings import CrawlerSettings
     from tests._job_harnesses import _make_app
 
     store: JobStore = make_store(tmp_path / "jobs.db")

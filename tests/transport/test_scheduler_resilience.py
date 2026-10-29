@@ -4,11 +4,11 @@ import asyncio
 
 import pytest
 
-from app.models.crawl_job import CrawlJob
-from app.models.crawl_result import EngineCrawlResult
-from app.models.taxonomy import Classification
-from app.transport.results import TerminalResult
-from app.transport.scheduler import DomainScheduler
+from crawlutron.models.crawl_job import CrawlJob
+from crawlutron.models.crawl_result import EngineCrawlResult
+from crawlutron.models.taxonomy import Classification
+from crawlutron.transport.results import TerminalResult
+from crawlutron.transport.scheduler import DomainScheduler
 from tests._policy_factories import canonical
 from tests._result_builders import make_job, make_result
 from tests._scheduler_doubles import FailingSink, engine_envelope, make_scheduler, ok_worker, run_through
@@ -19,7 +19,7 @@ def test_run_still_purges_up_front(monkeypatch):
     """The batch entry point keeps its up-front purge so a long run cannot grow
     the dicts without bound even when no 429 fires."""
     now = [1000.0]
-    monkeypatch.setattr("app.transport.scheduler.time.time", lambda: now[0])
+    monkeypatch.setattr("crawlutron.transport.scheduler.time.time", lambda: now[0])
     scheduler = make_scheduler()
     scheduler.set_domain_cooldown("stale.test", 10.0)
     assert "stale.test" in scheduler.domain_cooldowns
@@ -324,8 +324,8 @@ class TestSchedulerFailureAccountingIsAboutStatuses:
     @staticmethod
     def _terminal(job: CrawlJob, classification: Classification):
         """A real terminal result, with its status derived by the real chokepoint."""
-        from app.transport.results import terminal_engine_result
-        from app.vocabulary.taxonomy import status_for_classification
+        from crawlutron.transport.results import terminal_engine_result
+        from crawlutron.vocabulary.taxonomy import status_for_classification
 
         # Status is the outer function's own keyword, not a field of the shared value: it is what the
         # per-status constructors pin, and a CONTEXT_VARYING_STATUS classification needs one the table cannot
@@ -405,7 +405,7 @@ class TestSchedulerFailureAccountingIsAboutStatuses:
         """
         import typing
 
-        from app.vocabulary.taxonomy import DOMAIN_HEALTH_BY_STATUS, ResultStatus
+        from crawlutron.vocabulary.taxonomy import DOMAIN_HEALTH_BY_STATUS, ResultStatus
 
         members = set(typing.get_args(ResultStatus))
         assert members, "ResultStatus must be a Literal to be checkable"

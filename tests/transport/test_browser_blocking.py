@@ -7,10 +7,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from pydantic import ValidationError
 
-from app.models.crawl_policy import CrawlPolicy
-from app.models.intercepted_xhr_record import InterceptedXhrRecord
-from app.transport.browser_driver import BrowserDriver
-from app.transport.browser_targets import make_response_handler, make_ssrf_route_handler
+from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.models.intercepted_xhr_record import InterceptedXhrRecord
+from crawlutron.transport.browser_driver import BrowserDriver
+from crawlutron.transport.browser_targets import make_response_handler, make_ssrf_route_handler
 from tests._browser_doubles import (
     BrowserFakePage,
     FakeRequest,
@@ -127,7 +127,7 @@ async def test_ssrf_route_handler_allows_non_network_schemes():
 
 async def test_ws_guard_closes_internal_targets(monkeypatch):
     """WebSocket upgrades to private hosts are closed; public ones pass."""
-    from app.transport.browser import make_ssrf_websocket_handler
+    from crawlutron.transport.browser import make_ssrf_websocket_handler
     from tests._assertions import block_private_targets
 
     block_private_targets(monkeypatch)

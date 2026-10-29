@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from app.transport import http_client_pool
+from crawlutron.transport import http_client_pool
 
 __all__ = ["stub_builder"]
 

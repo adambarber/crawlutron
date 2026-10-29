@@ -41,7 +41,7 @@ CROSS_TREE_ROOT = "."
 # One jscpd invocation per root: jscpd names files relative to its root, so
 # attribution requires one scan per root.
 TREE_ROOTS = {
-    "production": ("app",),
+    "production": ("crawlutron",),
     "test": ("tests", "scripts"),
 }
 
@@ -56,7 +56,7 @@ SANCTIONED_IGNORE_GLOBS = (
     "**/.pytest_cache/**",  # pytest cache, not source
     "**/node_modules/**",  # vendored third-party tree, not source
     "**/.git/**",  # git metadata, not source
-    "**/app/storage/migrations/**",  # generated DDL snapshots, not hand-written source
+    "**/crawlutron/storage/migrations/**",  # generated DDL snapshots, not hand-written source
 )
 
 

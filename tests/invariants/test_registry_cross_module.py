@@ -24,13 +24,13 @@ def test_public_target_detector_resolves_imported_helpers():
         caught={
             "imported verdict helper": (
                 {
-                    "app/_public_helper.py": (
+                    "crawlutron/_public_helper.py": (
                         "import ipaddress\n"
                         "def parse_address(value):\n"
                         "    return ipaddress.ip_address(value)\n"
                     ),
-                    "app/_public_consumer.py": (
-                        "from app._public_helper import parse_address\n"
+                    "crawlutron/_public_consumer.py": (
+                        "from crawlutron._public_helper import parse_address\n"
                         "def verdict(value):\n"
                         "    address = parse_address(value)\n"
                         "    return address.is_private\n"
@@ -41,9 +41,10 @@ def test_public_target_detector_resolves_imported_helpers():
         },
         quiet={
             "imported owner": {
-                "app/_public_owner.py": "def verdict(value):\n    return value\n",
-                "app/_public_consumer.py": (
-                    "from app._public_owner import verdict\ndef check(value):\n    return verdict(value)\n"
+                "crawlutron/_public_owner.py": "def verdict(value):\n    return value\n",
+                "crawlutron/_public_consumer.py": (
+                    "from crawlutron._public_owner import verdict\n"
+                    "def check(value):\n    return verdict(value)\n"
                 ),
             },
         },
@@ -57,9 +58,11 @@ def test_bool_env_detector_resolves_imported_helpers():
         caught={
             "imported normalization helper": (
                 {
-                    "app/_bool_helper.py": ("def normalize(value):\n    return value.strip().lower()\n"),
-                    "app/_bool_consumer.py": (
-                        "from app._bool_helper import normalize\n"
+                    "crawlutron/_bool_helper.py": (
+                        "def normalize(value):\n    return value.strip().lower()\n"
+                    ),
+                    "crawlutron/_bool_consumer.py": (
+                        "from crawlutron._bool_helper import normalize\n"
                         "FALSE_WORDS = {'0', 'false', 'no', 'off'}\n"
                         "def parse(value):\n"
                         "    return normalize(value) in FALSE_WORDS\n"
@@ -70,9 +73,9 @@ def test_bool_env_detector_resolves_imported_helpers():
         },
         quiet={
             "imported owner": {
-                "app/_bool_owner.py": "def parse(value):\n    return value\n",
-                "app/_bool_consumer.py": (
-                    "from app._bool_owner import parse\ndef check(value):\n    return parse(value)\n"
+                "crawlutron/_bool_owner.py": "def parse(value):\n    return value\n",
+                "crawlutron/_bool_consumer.py": (
+                    "from crawlutron._bool_owner import parse\ndef check(value):\n    return parse(value)\n"
                 ),
             },
         },
@@ -86,14 +89,14 @@ def test_robots_policy_detector_resolves_imported_helpers():
         caught={
             "imported policy helper": (
                 {
-                    "app/_robots_helper.py": (
+                    "crawlutron/_robots_helper.py": (
                         "def parse_robot_policy(text):\n"
                         "    return [(True, text)]\n"
                         "def load_policy(text):\n"
                         "    return parse_robot_policy(text)\n"
                     ),
-                    "app/_robots_consumer.py": (
-                        "from app._robots_helper import load_policy\n"
+                    "crawlutron/_robots_consumer.py": (
+                        "from crawlutron._robots_helper import load_policy\n"
                         "def load(text):\n"
                         "    return load_policy(text)\n"
                     ),
@@ -103,11 +106,11 @@ def test_robots_policy_detector_resolves_imported_helpers():
         },
         quiet={
             "shared field parser": {
-                "app/_robots_primitive.py": (
+                "crawlutron/_robots_primitive.py": (
                     "def parse_fields(text):\n    return [(True, line) for line in text.splitlines()]\n"
                 ),
-                "app/_robots_consumer.py": (
-                    "from app._robots_primitive import parse_fields\n"
+                "crawlutron/_robots_consumer.py": (
+                    "from crawlutron._robots_primitive import parse_fields\n"
                     "def load(text):\n"
                     "    return parse_fields(text)\n"
                 ),
@@ -137,14 +140,16 @@ def _duplicate_def_nodes(tree: ast.AST) -> list[ast.FunctionDef]:
 def test_property_registry_rejects_duplicate_owner_count():
     prop = _property("bool-env")
     tree = ast.parse(DUPLICATE_DEF_SOURCE)
-    definitions = {"parse_bool_value": [("app/config/env.py", node) for node in _duplicate_def_nodes(tree)]}
+    definitions = {
+        "parse_bool_value": [("crawlutron/config/env.py", node) for node in _duplicate_def_nodes(tree)]
+    }
     assert _property_owner_failures((prop,), definitions) == ["parse_bool_value=2"]
 
 
 def test_property_owner_duplicate_is_not_sanctioned():
     prop = _property("bool-env")
     tree = ast.parse(DUPLICATE_DEF_SOURCE)
-    path = REPO_ROOT / "app" / "config" / "env.py"
+    path = REPO_ROOT / "crawlutron" / "config" / "env.py"
     owner_ids = _owner_definition_ids(tree, path, prop)
     duplicate = _duplicate_def_nodes(tree)[1]
     assert len(owner_ids) == 1, (

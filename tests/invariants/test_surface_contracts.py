@@ -21,16 +21,16 @@ from tests.rules import Bites, Registry, Rule, Silent
 
 _MIGRATION_DDL_PROPERTY = Property(
     name="migration-ddl",
-    owner_module="app/storage/migrations/",
+    owner_module="crawlutron/storage/migrations/",
     owner_symbols=(),
-    definition_site="app/storage/migrations/",
+    definition_site="crawlutron/storage/migrations/",
     fingerprints=("ddl",),
     reason="Schema changes must remain ordered and reversible in the migration package.",
 )
 
 
 def _ddl_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[str]:
-    if _relative_app_path(path).startswith("app/storage/migrations/"):
+    if _relative_app_path(path).startswith("crawlutron/storage/migrations/"):
         return []
     found: list[str] = []
     for node in nodes_of(tree):
@@ -49,7 +49,7 @@ DDL_IS_CONFINED_TO_THE_MIGRATIONS_PACKAGE = Rule(
     name="ddl-is-confined-to-the-migrations-package",
     find=lambda tree, path: _ddl_offenders(tree, path, _MIGRATION_DDL_PROPERTY),
     summary=(
-        "CREATE/ALTER/DROP statements belong only in app/storage/migrations, where "
+        "CREATE/ALTER/DROP statements belong only in crawlutron/storage/migrations, where "
         "they are ordered and reversible; a DDL statement anywhere else is a "
         "schema change that ships without a migration"
     ),
@@ -68,7 +68,7 @@ DDL_IS_CONFINED_TO_THE_MIGRATIONS_PACKAGE = Rule(
         # other module.
         Silent(
             "def apply(conn):\n    conn.execute('CREATE TABLE x (id TEXT)')\n",
-            at=REPO_ROOT / "app" / "storage" / "migrations" / "0001_crawl_jobs_initial.py",
+            at=REPO_ROOT / "crawlutron" / "storage" / "migrations" / "0001_crawl_jobs_initial.py",
         ),
     ),
 )
@@ -76,7 +76,7 @@ DDL_IS_CONFINED_TO_THE_MIGRATIONS_PACKAGE = Rule(
 
 # Two descriptions of one contract, neither derived from the other -- and the advertised one claimed
 # additionalProperties: False for a request model that in fact ignores extras.
-_MCP_TOOLS_MODULE = "app/mcp/tools.py"
+_MCP_TOOLS_MODULE = "crawlutron/mcp/tools.py"
 
 
 def _mcp_unvalidated_tool_offenders(tree, path, *, tools_module):
@@ -142,7 +142,7 @@ def test_advertised_mcp_schemas_come_from_the_request_models():
     The bite proves the detector; this proves the property on the real
     TOOL_SPECS: no tool ships a schema its request model does not describe.
     """
-    from app.mcp.tools import TOOL_SPECS
+    from crawlutron.mcp.tools import TOOL_SPECS
 
     for spec in TOOL_SPECS:
         assert spec.request_model is not None, spec.name

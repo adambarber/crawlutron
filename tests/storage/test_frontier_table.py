@@ -11,8 +11,8 @@ import sqlite3
 
 import pytest
 
-from app.storage.job_store import FrontierEntry, JobStatus
-from app.storage.sqlite_store import table_columns
+from crawlutron.storage.job_store import FrontierEntry, JobStatus
+from crawlutron.storage.sqlite_store import table_columns
 from tests._job_store_doubles import frontier, loaded_job, make_job_store, seed_frontier
 from tests._policy_factories import canonical
 
@@ -201,7 +201,7 @@ class TestMigrationCarriesTheQueue:
 
         migration_path = (
             pathlib.Path(__file__).parents[2]
-            / "app"
+            / "crawlutron"
             / "storage"
             / "migrations"
             / "0006_crawl_jobs_split_frontier.py"

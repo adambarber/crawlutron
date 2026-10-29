@@ -3,9 +3,9 @@ worker's numbers used to read as total traffic, and the gate tunes itself from
 them. Counter/gauge is the design: counters sum, gauges (shared cgroup) never.
 """
 
-from app.runtime.metrics import MetricsStore
-from app.storage.coordination_counters import CoordinationCounters
-from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
+from crawlutron.runtime.metrics import MetricsStore
+from crawlutron.storage.coordination_counters import CoordinationCounters
+from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._result_builders import engine_result
 
 

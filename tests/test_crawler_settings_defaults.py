@@ -7,8 +7,8 @@ from unittest.mock import patch
 
 import pytest
 
-import app.config.settings as settings_mod
-from app.config.settings import CrawlerSettings
+import crawlutron.config.settings as settings_mod
+from crawlutron.config.settings import CrawlerSettings
 
 
 def test_parallelism_defaults():
@@ -55,7 +55,7 @@ class TestFromMappingHardening:
         assert settings.adaptive_min_delay == 0.5
 
     def test_typo_respect_robots_fails_closed_with_warning(self, caplog):
-        with caplog.at_level(logging.WARNING, logger="app.safety.validation"):
+        with caplog.at_level(logging.WARNING, logger="crawlutron.safety.validation"):
             settings = CrawlerSettings.from_mapping({"CRAWLUTRON_RESPECT_ROBOTS": "ture"})
         assert settings.respect_robots is True  # dataclass default: robots stay respected
         assert any(

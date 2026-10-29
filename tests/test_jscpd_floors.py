@@ -112,7 +112,7 @@ def test_a_tree_that_scanned_nothing_fails(monkeypatch, capsys) -> None:
     _stub_report(
         monkeypatch,
         [],
-        sources={"app": 0, "tests": 200, "scripts": 200},
+        sources={"crawlutron": 0, "tests": 200, "scripts": 200},
     )
 
     assert gate._run(_args()) == 1
@@ -160,7 +160,7 @@ def test_checked_in_scan_config_is_owned_by_the_gate() -> None:
     res._validate_scan_config(gate.CONFIG_PATH)
 
 
-@pytest.mark.parametrize("glob", ["**/*.py", "app/*.py", "**/zz_probe_clone.py", "*", "**"])
+@pytest.mark.parametrize("glob", ["**/*.py", "crawlutron/*.py", "**/zz_probe_clone.py", "*", "**"])
 def test_python_source_globs_are_never_a_sanctioned_exception(glob) -> None:
     """The ignore list exists to skip caches and vendored trees, never source."""
     with pytest.raises(ValueError, match="Python source|whole tree"):
@@ -195,7 +195,7 @@ def test_jscpd_json_accepts_only_ignore(tmp_path) -> None:
 
 def test_every_root_is_scanned_by_its_own_single_root_invocation() -> None:
     """One root per invocation because jscpd's `name` is root-relative: fed several
-    roots it cannot tell production from test (`app/api/x.py` vs `tests/api/x.py`
+    roots it cannot tell production from test (`crawlutron/api/x.py` vs `tests/api/x.py`
     both arrive as `crawl/x.py`), so a cross-tree clone names neither.
     """
     roots = [root for tree_roots in gate.TREE_ROOTS.values() for root in tree_roots]
@@ -239,13 +239,13 @@ def test_one_floor_is_applied_to_every_root(monkeypatch) -> None:
 
 def test_the_same_content_in_two_trees_is_two_findings_not_one(monkeypatch, capsys) -> None:
     """Keyed by content AND tree so the two cannot collapse: one whole-tree scan sees
-    an app/ and tests/ fragment as one content hash, which names neither tree nor
+    a crawlutron/ and tests/ fragment as one content hash, which names neither tree nor
     floor -- test boilerplate must not cover production code.
     """
     _stub_report(
         monkeypatch,
         [
-            _duplicate("app/one.py", "app/two.py", fragment="shared"),
+            _duplicate("crawlutron/one.py", "crawlutron/two.py", fragment="shared"),
             _duplicate("tests/one.py", "tests/two.py", fragment="shared"),
         ],
     )

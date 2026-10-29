@@ -9,13 +9,13 @@ from dataclasses import asdict, replace
 import httpx
 import pytest
 
-from app.models.crawl_result import EngineCrawlResult
-from app.models.host_policy import HostPolicy
-from app.models.normalized_url import NormalizedUrl
-from app.transport.browser_pool import BrowserPoolExhaustedError
-from app.transport.classification import classify_error_code
-from app.transport.results import engine_result_from_exception
-from app.vocabulary.strategies import BROWSER_HEADED_WARMED, BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
+from crawlutron.models.crawl_result import EngineCrawlResult
+from crawlutron.models.host_policy import HostPolicy
+from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.transport.browser_pool import BrowserPoolExhaustedError
+from crawlutron.transport.classification import classify_error_code
+from crawlutron.transport.results import engine_result_from_exception
+from crawlutron.vocabulary.strategies import BROWSER_HEADED_WARMED, BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
 from tests._browser_doubles import _fake_browser
 from tests._chain_policies import chain_policy
 from tests._fetcher_factories import failing_fetcher, raise_fetcher, run_chain
@@ -43,7 +43,7 @@ def test_existing_taxonomy_is_preserved():
 
 def test_pool_exhausted_is_a_taxonomy_member():
     """A non-member code rejects the whole batch at response shaping (constants.py)."""
-    from app.vocabulary.taxonomy import CrawlClassification
+    from crawlutron.vocabulary.taxonomy import CrawlClassification
 
     assert CrawlClassification.browser_pool_exhausted.value == "browser_pool_exhausted"
 
@@ -128,13 +128,13 @@ class TestClassificationValueValidity:
     """
 
     def test_url_budget_exceeded_is_a_taxonomy_member(self):
-        from app.vocabulary.taxonomy import CrawlClassification
+        from crawlutron.vocabulary.taxonomy import CrawlClassification
 
         assert CrawlClassification.url_budget_exceeded.value == "url_budget_exceeded"
 
     def test_budget_exceeded_result_survives_response_shaping(self):
         """The boundary that rejected it: the strict enum on the wire model."""
-        from app.api.response_shaping import build_unified_result
+        from crawlutron.api.response_shaping import build_unified_result
 
         item = _budget_item()
         result = build_unified_result(item)
@@ -179,7 +179,7 @@ class TestShapeAllGuardsPerItem:
     """
 
     async def test_one_bad_item_does_not_fail_the_batch(self):
-        from app.api.response_shaping import (
+        from crawlutron.api.response_shaping import (
             EnvelopeOptions,
             abuild_unified_crawl_response,
             build_unified_result,
@@ -201,8 +201,8 @@ class TestShapeAllGuardsPerItem:
 
     def test_fallback_status_and_classification_agree(self):
         # The fallback hardcodes status="failed" and picks the classification independently.
-        from app.api.response_shaping import failed_unified_result
-        from app.vocabulary.taxonomy import status_for_classification
+        from crawlutron.api.response_shaping import failed_unified_result
+        from crawlutron.vocabulary.taxonomy import status_for_classification
 
         result = failed_unified_result({"normalized_url": "https://example.org/a"})
         assert status_for_classification(result.classification) == result.status

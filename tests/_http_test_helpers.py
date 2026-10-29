@@ -1,15 +1,15 @@
 from fastapi import FastAPI
 from starlette.requests import Request
 
-from app.transport.body_decode import decode_body, quality_score
-from app.transport.decompression import decompress_body
-from app.transport.request_profile import cookie_header_for_url, headers_for_strategy
-from app.vocabulary.strategies import HTTP_CFFI_IMPERSONATE
+from crawlutron.transport.body_decode import decode_body, quality_score
+from crawlutron.transport.decompression import decompress_body
+from crawlutron.transport.request_profile import cookie_header_for_url, headers_for_strategy
+from crawlutron.vocabulary.strategies import HTTP_CFFI_IMPERSONATE
 
 
 def minimal_request(path: str = "/") -> Request:
     """A starlette request whose app carries the one per-caller register."""
-    from app.api.caller_concurrency import CallerConcurrencyTracker
+    from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
 
     app = FastAPI()
     app.state.concurrency_tracker = CallerConcurrencyTracker()

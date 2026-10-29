@@ -8,9 +8,9 @@ from __future__ import annotations
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from app.api.dependencies import get_settings, get_watch_store
-from app.api.watch_router import router as watch_router
-from app.config.settings import CrawlerSettings
+from crawlutron.api.dependencies import get_settings, get_watch_store
+from crawlutron.api.watch_router import router as watch_router
+from crawlutron.config.settings import CrawlerSettings
 from tests._app_factory import service_app
 
 
@@ -24,7 +24,7 @@ def watch_client(store) -> AsyncClient:
         app.add_exception_handler(exception_class, handler)
     from tempfile import mkdtemp
 
-    from app.storage.caller_key_store import CallerKeyStore
+    from crawlutron.storage.caller_key_store import CallerKeyStore
 
     app.state.caller_key_store = CallerKeyStore(mkdtemp() + "/keys.db")
     app.dependency_overrides[get_watch_store] = lambda: store

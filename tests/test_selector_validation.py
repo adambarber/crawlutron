@@ -5,7 +5,7 @@ admission as ``invalid_policy``, never parked until extraction as a flaky error.
 import pytest
 from pydantic import ValidationError
 
-from app.models.crawl_policy import CrawlPolicy
+from crawlutron.models.crawl_policy import CrawlPolicy
 
 
 @pytest.mark.parametrize(

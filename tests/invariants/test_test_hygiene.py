@@ -199,7 +199,7 @@ DYNAMIC_RE_PATTERNS_ROUTE_THROUGH_SAFE_REGEX = Rule(
     name="dynamic-re-patterns-route-through-safe-regex",
     find=aliased_dynamic_pattern_re_offenders,
     summary=(
-        "re.<method>(<dynamic pattern>) must go through app.safety.safe_regex, under any"
+        "re.<method>(<dynamic pattern>) must go through crawlutron.safety.safe_regex, under any"
         " import alias -- the binding is resolved first, so an alias cannot rename a"
         " dynamic pattern past the ReDoS sweep"
     ),
@@ -231,13 +231,13 @@ SANCTIONED_FUNCS_ARE_NOT_ALIASED_PAST_THE_SPELLING_LISTS = Rule(
         " detectors do not recognize; a missing cap or filter would be invisible to them"
     ),
     bite=lambda: Bites(
-        "from app.transport.decompression import decompress_body as dec\n\n"
+        "from crawlutron.transport.decompression import decompress_body as dec\n\n"
         "def f(raw, enc):\n    return dec(raw, enc)\n",
         "alias of the sanctioned decompress_body",
     ),
     clean=lambda: (
         # The spelling _DECOMPRESS_FUNCS already lists is known and silent.
-        "from app.transport.decompression import decompress_body as _decompress_body\n\n"
+        "from crawlutron.transport.decompression import decompress_body as _decompress_body\n\n"
         "def f(raw, enc):\n    return _decompress_body(raw, enc)\n",
         # An import that is not a sanctioned function is not this sweep's business.
         "from os import path as p\n\n\ndef f():\n    return p.join('a')\n",
@@ -310,7 +310,7 @@ def test_dynamic_pattern_re_calls_under_any_alias():
     alias cannot rename a dynamic pattern past the chokepoint."""
     offenders = app_offenders(aliased_dynamic_pattern_re_offenders)
     assert not offenders, (
-        "re.<method> with a dynamic pattern must go through app.safety.safe_regex, under any"
+        "re.<method> with a dynamic pattern must go through crawlutron.safety.safe_regex, under any"
         f" import alias: {'; '.join(offenders)}"
     )
 
@@ -350,13 +350,13 @@ def _scheduler_run_positional_names() -> tuple[str, ...]:
 
     Read from production, not typed: the count and names tell a double from an
     unrelated ``run``, and a hand-kept tuple stales when the signature grows."""
-    tree = parsed(REPO_ROOT / "app" / "transport" / "scheduler.py")
+    tree = parsed(REPO_ROOT / "crawlutron" / "transport" / "scheduler.py")
     for node in nodes_of(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "run":
             args = node.args
             return tuple(a.arg for a in args.posonlyargs + args.args if a.arg not in {"self", "cls"})
     raise AssertionError(
-        "app/transport/scheduler.py no longer has a run(); the rule it backs is unverifiable"
+        "crawlutron/transport/scheduler.py no longer has a run(); the rule it backs is unverifiable"
     )
 
 

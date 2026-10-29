@@ -14,16 +14,16 @@ from pathlib import Path
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from app.api.caller_auth import get_caller_identity
-from app.models.caller_identity import CallerIdentity
-from app.storage.job_store import JobStore
+from crawlutron.api.caller_auth import get_caller_identity
+from crawlutron.models.caller_identity import CallerIdentity
+from crawlutron.storage.job_store import JobStore
 from tests._dependency_overrides import bind_base_overrides
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, deployment_tier
 from tests._result_builders import GRAPH_ROOT
 
 
 def _app(job_store: JobStore, caller: CallerIdentity) -> FastAPI:
-    from app.api.jobs_router import router as jobs_router
+    from crawlutron.api.jobs_router import router as jobs_router
 
     app = FastAPI()
     app.include_router(jobs_router)

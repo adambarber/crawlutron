@@ -10,8 +10,8 @@ import re
 from pathlib import Path
 from unittest.mock import patch
 
-import app.config.settings as settings_mod
-from app.config.settings import CrawlerSettings
+import crawlutron.config.settings as settings_mod
+from crawlutron.config.settings import CrawlerSettings
 
 _REFERENCE_LIMIT = 3 * 1024 * 1024 * 1024
 _KNOB = re.compile(r"\bCRAWLUTRON_[A-Z0-9_]+\b")

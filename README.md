@@ -132,7 +132,7 @@ container with Caddy or another reverse proxy that owns the `.local` zone.
 
 ## SQLite schema migrations
 
-Migrations live in `app/storage/migrations/`. Every store schema — jobs, results, metrics, coordination — lives in the single `cache/crawler.db`; startup applies that database's pending migrations under yoyo's lock, and an exact pre-ledger table is stamped instead of recreated. The CLI names the schema explicitly because they share one file.
+Migrations live in `crawlutron/storage/migrations/`. Every store schema — jobs, results, metrics, coordination — lives in the single `cache/crawler.db`; startup applies that database's pending migrations under yoyo's lock, and an exact pre-ledger table is stamped instead of recreated. The CLI names the schema explicitly because they share one file.
 
 ```bash
 # Apply pending migrations (normally automatic when the store opens).
@@ -141,8 +141,8 @@ Migrations live in `app/storage/migrations/`. Every store schema — jobs, resul
 
 # Add a migration: add a versioned schema to manifest.py, point CURRENT_SCHEMAS at it,
 # then add a yoyo step with apply and rollback SQL under the migration directory.
-$EDITOR app/storage/migrations/manifest.py
-$EDITOR app/storage/migrations/0001_crawl_jobs_initial.py
+$EDITOR crawlutron/storage/migrations/manifest.py
+$EDITOR crawlutron/storage/migrations/0001_crawl_jobs_initial.py
 
 # Stamp an existing database after checking it against the declared schema.
 .venv/bin/python -m app.storage.migrations stamp cache/crawler.db crawl_jobs
@@ -271,7 +271,7 @@ exhausted.
 ## Classifications
 
 Every crawl result carries a `classification` from a fixed enum of **36 values**
-(defined in `app/vocabulary/taxonomy.py`, returned by `GET /v1/capabilities` under
+(defined in `crawlutron/vocabulary/taxonomy.py`, returned by `GET /v1/capabilities` under
 `supported_classifications`). Examples: `rendered`, `not_modified`, `captcha_detected`,
 `waf_challenge_detected`, `robots_disallowed`, `navigation_timeout`,
 `private_network_target`, `network_error`, `http_error`, `url_budget_exceeded`,
@@ -413,7 +413,7 @@ with `422`.
 ├── requirements.txt      # Runtime deps (camoufox, fastapi, trafilatura, markitdown, ...)
 ├── requirements-dev.txt  # Dev/test deps (also installed by the Dockerfile test stage)
 ├── Makefile              # Gates + convenience targets mirroring scripts/run-tests.sh
-├── app/
+├── crawlutron/
 │   ├── main.py           # FastAPI factory (≈441 lines) — lifespan, app.state, router wiring
 │   ├── api/              # Door plane: one router per concern, mounted in main.py
 │   │   ├── crawl_router.py      # POST /v1/crawl, GET /v1/crawl/{id}, GET .../{id}/trace

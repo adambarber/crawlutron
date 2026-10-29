@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.extraction.content import ExtractedContent, Selectors, extract_selected
+from crawlutron.extraction.content import ExtractedContent, Selectors, extract_selected
 from tests._extraction_helpers import settings_with
 
 
@@ -19,10 +19,10 @@ def test_oversized_css_payload_is_refused_not_parsed(monkeypatch, caplog):
         raise AssertionError("BeautifulSoup was constructed for a refused payload")
 
     monkeypatch.setattr(bs4.BeautifulSoup, "__init__", exploding_init)
-    import app.extraction.documents as docex
+    import crawlutron.extraction.documents as docex
 
     huge = "<html><body>" + "<p>x</p>" * (docex.EXTRACTION_DOC_MAX_INPUT_BYTES // 6 + 1000) + "</body></html>"
-    with caplog.at_level(logging.WARNING, logger="app.extraction.content"):
+    with caplog.at_level(logging.WARNING, logger="crawlutron.extraction.content"):
         result = extract_selected(
             huge,
             "http://example.com/",

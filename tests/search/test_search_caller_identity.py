@@ -12,10 +12,10 @@ from pathlib import Path
 from fastapi import FastAPI
 from httpx import AsyncClient, Response
 
-from app.api.caller_concurrency import CallerConcurrencyTracker
-from app.api.dependencies import get_job_store, get_settings
-from app.config.settings import CrawlerSettings
-from app.storage.caller_key_store import CallerKeyStore
+from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
+from crawlutron.api.dependencies import get_job_store, get_settings
+from crawlutron.config.settings import CrawlerSettings
+from crawlutron.storage.caller_key_store import CallerKeyStore
 from tests._async_harnesses import expect_quota_refused, issue_key, serve
 from tests._policy_factories import job_store as make_job_store
 
@@ -25,8 +25,8 @@ async def _search_client(
     tmp_path: Path,
 ) -> AsyncIterator[tuple[AsyncClient, FastAPI]]:
     """An app serving /v1/search + /v1/keys over isolated stores, Tavily configured."""
-    from app.api.identity_router import router as identity_router
-    from app.api.keys_router import router as keys_router
+    from crawlutron.api.identity_router import router as identity_router
+    from crawlutron.api.keys_router import router as keys_router
 
     keys = CallerKeyStore(tmp_path / "keys.db")
     jobs = make_job_store(tmp_path / "jobs.db")
@@ -66,7 +66,7 @@ def _provider_body() -> str:
 
 def _stub_search_provider(monkeypatch, handler) -> None:
     """Point the search provider HTTP at ``handler`` so no real network is hit."""
-    import app.search.providers as providers_mod
+    import crawlutron.search.providers as providers_mod
 
     monkeypatch.setattr(providers_mod, "provider_http", handler)
 
@@ -130,8 +130,8 @@ async def test_search_is_refused_at_the_admission_cap(tmp_path, monkeypatch):
     Search shares the cap's counter; it must take a slot and refuse at the bound
     like every trackable door, not count-and-proceed with a discarded bool.
     """
-    from app.api import main_helpers
-    from app.health.readiness import ReadinessState
+    from crawlutron.api import main_helpers
+    from crawlutron.health.readiness import ReadinessState
 
     state = ReadinessState(max_active_requests=1)
     assert state.begin_request()  # fill the cap
@@ -151,7 +151,7 @@ async def test_search_readiness_slot_is_exactly_one_and_balanced(tmp_path, monke
     The pairing must be exactly one begin/end per request regardless of door --
     a search that both gates and hand-counts would double-count the population.
     """
-    from app.health.readiness import READINESS_STATE
+    from crawlutron.health.readiness import READINESS_STATE
 
     outside = READINESS_STATE.snapshot().active_requests
     held: list[int] = []

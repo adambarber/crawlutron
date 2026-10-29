@@ -1,7 +1,7 @@
 """Two crawls sharing headers but not identity never share a cache entry (#544/S5)."""
 
-from app.models.normalized_url import NormalizedUrl
-from app.transport.content_cache_key import build_content_cache_key
+from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.transport.content_cache_key import build_content_cache_key
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 

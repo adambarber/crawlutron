@@ -10,7 +10,7 @@ import base64
 import dataclasses
 import tracemalloc
 
-from app.transport.http_response import serialize_response
+from crawlutron.transport.http_response import serialize_response
 
 
 @dataclasses.dataclass

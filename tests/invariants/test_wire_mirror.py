@@ -11,9 +11,9 @@ import pytest
 
 from tests.chokepoint_walks import REPO_ROOT, file_tree, parsed
 
-# --- A wire model may not silently drop a domain model's field --------------- app/models/taxonomy.py holds
-# the internal dataclasses and the pydantic response models are the ones under app/models/
-_WIRE_MODEL_DIR = "app/models"
+# --- A wire model may not silently drop a domain model's field ---- crawlutron/models/taxonomy.py holds
+# the internal dataclasses and the pydantic response models are the ones under crawlutron/models/
+_WIRE_MODEL_DIR = "crawlutron/models"
 
 
 def _stem_pairs(package: str) -> dict[str, tuple[pathlib.Path, ast.ClassDef, ast.ClassDef]]:
@@ -147,8 +147,8 @@ def test_wire_models_mirror_every_domain_field():
 # build a dict by hand and hand it to FastAPI with a strict `response_model=`.
 
 _ADVERTISED_PAYLOADS = (
-    ("app/discovery/capabilities.py", "capabilities_payload", "CapabilitiesResponse"),
-    ("app/discovery/agent_hints.py", "agent_hints_payload", "AgentHintsResponse"),
+    ("crawlutron/discovery/capabilities.py", "capabilities_payload", "CapabilitiesResponse"),
+    ("crawlutron/discovery/agent_hints.py", "agent_hints_payload", "AgentHintsResponse"),
 )
 
 
@@ -238,8 +238,8 @@ def _constructor_keywords(tree: ast.Module, function_name: str, callee: str) -> 
 # The two terminal funnels re-spell the shared attempt shape (memory #4729);
 # they now live in two modules -- terminal_attempt below transport, the engine funnel here.
 _FUNNEL_ATTEMPT_FIELDS = (
-    "app/models/result_factory.py:terminal_attempt",
-    "app/transport/results.py:terminal_engine_result",
+    "crawlutron/models/result_factory.py:terminal_attempt",
+    "crawlutron/transport/results.py:terminal_engine_result",
 )
 
 
@@ -276,10 +276,10 @@ def test_the_internal_and_wire_taxonomies_name_the_same_members():
     That makes the adapters convert, not coerce; the fallback substitutes are the
     shape of the bug this whole change removed. All three axes are checked.
     """
-    from app.models.crawl_status import CrawlStatus
-    from app.models.crawl_strategy import CrawlStrategy
-    from app.models.taxonomy import Classification, CrawlStrategyName
-    from app.vocabulary.taxonomy import CrawlClassification, ResultStatus
+    from crawlutron.models.crawl_status import CrawlStatus
+    from crawlutron.models.crawl_strategy import CrawlStrategy
+    from crawlutron.models.taxonomy import Classification, CrawlStrategyName
+    from crawlutron.vocabulary.taxonomy import CrawlClassification, ResultStatus
 
     for axis, internal, wire in (
         ("status", literal_members(ResultStatus), _taxonomy_members(CrawlStatus)),
@@ -289,7 +289,7 @@ def test_the_internal_and_wire_taxonomies_name_the_same_members():
         assert internal == wire, (
             f"the {axis} taxonomies disagree: "
             f"internal-only={sorted(internal - wire)} wire-only={sorted(wire - internal)}. "
-            f"app/api/response_shaping.py converts this axis without a fallback branch, "
+            f"crawlutron/api/response_shaping.py converts this axis without a fallback branch, "
             f"which is only true while the sets are equal -- so add the member to both sides "
             f"in the same change."
         )

@@ -10,8 +10,8 @@ import contextlib
 from pathlib import Path
 from types import SimpleNamespace
 
-from app.api.identity_router import router as identity_router
-from app.api.keys_router import router as keys_router
+from crawlutron.api.identity_router import router as identity_router
+from crawlutron.api.keys_router import router as keys_router
 from tests._async_harnesses import issue_key
 from tests._quota_harness import service_client
 
@@ -33,7 +33,7 @@ class _HarvestingRenderer:
     """A pool-bound renderer double that runs the real harvest, then renders."""
 
     async def render(self, url, options, *, policy=None):
-        from app.transport.browser_cookies import harvest_session_cookies
+        from crawlutron.transport.browser_cookies import harvest_session_cookies
 
         page = SimpleNamespace(context=_HarvestingContext())
         await harvest_session_cookies(page, url)
@@ -61,7 +61,7 @@ class _HarvestingPool:
 @contextlib.asynccontextmanager
 async def _render_client(tmp_path: Path):
     """The render/keys app wired to a browser pool serving one harvesting page."""
-    from app.transport.browser_pool import set_browser_pool
+    from crawlutron.transport.browser_pool import set_browser_pool
 
     previous = set_browser_pool(_HarvestingPool())
     try:
@@ -77,7 +77,7 @@ async def _render_client(tmp_path: Path):
 
 async def test_keyed_render_harvest_lands_in_the_callers_namespace(tmp_path):
     """A keyed /v1/render stores its harvest under the caller's key id, not ""."""
-    from app.transport import browser_cookies
+    from crawlutron.transport import browser_cookies
 
     browser_cookies.reset_process_state()
     try:

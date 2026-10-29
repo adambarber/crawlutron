@@ -8,16 +8,16 @@ from unittest import mock
 
 import pytest
 
-from app.safety.validation import HostPolicy
-from app.search.providers import (
+from crawlutron.safety.validation import HostPolicy
+from crawlutron.search.providers import (
     PROVIDER_ENDPOINTS,
     SearchProviderError,
     SearchProviderUnavailable,
     collect_results,
     configured_search_providers,
 )
-from app.search.providers_api import BraveProvider, SerperProvider, TavilyProvider, get_search_provider
-from app.search.providers_html import DuckDuckGoProvider
+from crawlutron.search.providers_api import BraveProvider, SerperProvider, TavilyProvider, get_search_provider
+from crawlutron.search.providers_html import DuckDuckGoProvider
 from tests._assertions import one_search_result, provider_results
 
 
@@ -69,7 +69,7 @@ class TestCollectResults:
         assert results[0].description == ""
 
     def test_clips_whitespace_and_long_fields(self):
-        from app.search.providers import MAX_TEXT_LENGTH
+        from crawlutron.search.providers import MAX_TEXT_LENGTH
 
         results = _collect(
             [{"url": "https://example.gov/x", "title": " a  b ", "content": "z" * (MAX_TEXT_LENGTH + 50)}]
@@ -143,7 +143,7 @@ class TestSearchEndpoint:
             results = [{"title": f"R{i}", "url": f"https://example.gov/{i}"} for i in range(asked)]
             return 200, json.dumps({"results": results})
 
-        monkeypatch.setattr("app.search.providers.provider_http", _honoring_provider)
+        monkeypatch.setattr("crawlutron.search.providers.provider_http", _honoring_provider)
         resp = await async_client.post("/v1/search", json={"query": "x", "limit": 10})
         assert (capture[0]["json_body"]["max_results"], len(resp.json()["data"])) == (3, 3)
         assert resp.status_code == 200
@@ -180,7 +180,7 @@ class TestSearchEndpoint:
         # A refused/DNS/read-timeout provider fault must stay in the envelope.
         import httpx
 
-        import app.search.providers as providers_mod
+        import crawlutron.search.providers as providers_mod
 
         override_settings(search_provider="tavily", tavily_api_key="k")
 
@@ -202,7 +202,7 @@ class TestSearchEndpoint:
         assert resp.status_code == 422
 
     async def test_search_records_metrics(self, async_client, override_settings, fake_provider_http):
-        from app.runtime.metrics import get_metrics
+        from crawlutron.runtime.metrics import get_metrics
 
         override_settings(search_provider="tavily", tavily_api_key="k")
         fake_provider_http(200, provider_results({"title": "A", "url": "https://example.gov/a"}))
@@ -226,7 +226,7 @@ class TestProviderHttpCaps:
     """provider_http must bound provider response bodies before parsing."""
 
     async def test_search_body_under_cap_passes_through(self):
-        import app.search.providers as providers_mod
+        import crawlutron.search.providers as providers_mod
 
         small = json.dumps({"results": []}).encode()
         client = _FakeStreamClient(_FakeStreamResponse(small))
@@ -237,7 +237,7 @@ class TestProviderHttpCaps:
         assert (status, json.loads(body)) == (200, {"results": []})
 
     async def test_search_unbounded_body_is_refused(self):
-        import app.search.providers as providers_mod
+        import crawlutron.search.providers as providers_mod
 
         def _drip():
             while True:
@@ -284,7 +284,7 @@ class _FakeStreamClient:
 
 async def _provider_decode(monkeypatch, body: bytes, encoding):
     """Drive the real ``provider_http`` decode path over a faked response."""
-    import app.search.providers as providers_module
+    import crawlutron.search.providers as providers_module
 
     fake = _FakeStreamClient(_FakeStreamResponse(body, encoding=encoding))
     monkeypatch.setattr(providers_module, "get_async_http_client", lambda: fake)
@@ -329,7 +329,7 @@ async def test_provider_http_pins_the_connect_to_the_resolved_ip(monkeypatch):
     answer, on our own egress too): a rebind can never move the connection."""
     import socket
 
-    import app.search.providers as providers_module
+    import crawlutron.search.providers as providers_module
     from tests._assertions import block_private_targets
 
     block_private_targets(monkeypatch)

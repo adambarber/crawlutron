@@ -8,8 +8,8 @@ from dataclasses import replace
 
 import pytest
 
-from app.models.host_policy import HostPolicy
-from app.models.normalized_url import NormalizedUrl
+from crawlutron.models.host_policy import HostPolicy
+from crawlutron.models.normalized_url import NormalizedUrl
 from tests._fetcher_factories import run_http_strategy, scripted_fetcher
 from tests._parse_budget import ParseBudget
 
@@ -87,9 +87,9 @@ async def test_shaping_never_reparses_engine_produced_items(parse_budget):
     """The shaping ceiling for engine items went 1 -> 0: it reads the record."""
     import json
 
-    from app.api.unified_shaping import format_crawl_item
-    from app.extraction.llm_format import extract_llm_metadata
-    from app.models.serialization import to_dict
+    from crawlutron.api.unified_shaping import format_crawl_item
+    from crawlutron.extraction.llm_format import extract_llm_metadata
+    from crawlutron.models.serialization import to_dict
 
     result = await _run({"limits": {"max_depth": 1}}, html=META_HTML)
     item = replace(result, markdown=result.markdown or "# hello")
@@ -111,7 +111,7 @@ async def test_engine_item_without_a_tree_still_shapes_once(parse_budget):
     Carrying is conditional on a tree the pipeline built anyway; forcing its
     own parse would REGRESS the single-shot budget, so the fallback stays.
     """
-    from app.api.unified_shaping import format_crawl_item
+    from crawlutron.api.unified_shaping import format_crawl_item
 
     result = await _run({}, html=META_HTML)
     assert result.llm_metadata is None  # no tree existed to read from
@@ -124,7 +124,7 @@ async def test_engine_item_without_a_tree_still_shapes_once(parse_budget):
 
 async def test_carried_metadata_never_reaches_the_wire():
     """The wire shape is unchanged: llm_metadata is an internal field."""
-    from app.api.response_shaping import build_unified_result
+    from crawlutron.api.response_shaping import build_unified_result
 
     result = await _run({"limits": {"max_depth": 1}}, html=META_HTML)
     unified = build_unified_result(result)

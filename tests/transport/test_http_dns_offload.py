@@ -6,8 +6,8 @@ import threading
 import httpx
 import pytest
 
-from app.transport import pinned_transport
-from app.transport.fetchers import default_http_fetcher
+from crawlutron.transport import pinned_transport
+from crawlutron.transport.fetchers import default_http_fetcher
 from tests._policy_factories import canonical
 
 

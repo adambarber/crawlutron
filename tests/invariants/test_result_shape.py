@@ -9,8 +9,8 @@ import ast
 import pathlib
 import re
 
-from app.models.unified_crawl_response import UnifiedCrawlResponse
-from app.storage.migrations.manifest import LEGACY_COLUMNS, StoreSchema
+from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
+from crawlutron.storage.migrations.manifest import LEGACY_COLUMNS, StoreSchema
 from tests.chokepoint_walks import (
     REPO_ROOT,
     SANCTIONED,
@@ -84,7 +84,7 @@ def _crawl_response_construction_offenders(tree: ast.AST, path: pathlib.Path) ->
 CRAWL_RESPONSE_BUILT_ONLY_BY_THE_SHAPING_CHOKEPOINT = Rule(
     name="crawl-response-built-only-by-the-shaping-chokepoint",
     find=_crawl_response_construction_offenders,
-    summary="Use app.api.response_shaping.build_unified_crawl_response",
+    summary="Use crawlutron.api.response_shaping.build_unified_crawl_response",
     excludes=SANCTIONED,
     bite=lambda: Bites(
         "def f(results):\n    return UnifiedCrawlResponse(request_id='r', results=results)\n",
@@ -97,7 +97,7 @@ CRAWL_RESPONSE_BUILT_ONLY_BY_THE_SHAPING_CHOKEPOINT = Rule(
 # The rules below close both ends of that: the envelope is adapted in one module, and its scalar fields are
 # passed in one function. ---------------------------------------------------------------------------
 
-_ENVELOPE_OWNER_MODULE = "app/api/response_shaping.py"
+_ENVELOPE_OWNER_MODULE = "crawlutron/api/response_shaping.py"
 
 
 _ENVELOPE_OWNER_FUNCTION = "_response_envelope"
@@ -107,7 +107,7 @@ _ENVELOPE_BUILDERS = ("abuild_unified_crawl_response", "build_unified_crawl_resp
 
 
 _ENVELOPE_ADAPTER_EXEMPT = frozenset(
-    {"app/api/async_crawl_runner.py", "app/mcp/tools.py"}  # adapters, not wire endpoints
+    {"crawlutron/api/async_crawl_runner.py", "crawlutron/mcp/tools.py"}  # adapters, not wire endpoints
 )
 
 
@@ -127,14 +127,14 @@ def _unsanctioned_envelope_adapter_offenders(tree, path):
     ]
 
 
-_ENVELOPE_ADAPTER_PROOF_PATH = REPO_ROOT / "app" / "api" / "crawl_endpoint.py"
+_ENVELOPE_ADAPTER_PROOF_PATH = REPO_ROOT / "crawlutron" / "api" / "crawl_endpoint.py"
 
 
 CRAWL_RESPONSE_ENVELOPE_IS_ADAPTED_BY_ONE_OWNER = Rule(
     name="crawl-response-envelope-is-adapted-by-one-owner",
     find=_unsanctioned_envelope_adapter_offenders,
     summary=(
-        "adapt a producer envelope with app.api.response_shaping's envelope owner, "
+        "adapt a producer envelope with crawlutron.api.response_shaping's envelope owner, "
         "so an envelope field cannot be passed on one path and forgotten on another"
     ),
     excludes=SANCTIONED,
@@ -166,7 +166,7 @@ CRAWL_RESPONSE_ENVELOPE_IS_ADAPTED_BY_ONE_OWNER = Rule(
             "async def f(request_id):\n"
             "    return await abuild_unified_crawl_response([], "
             "options=EnvelopeOptions(request_id=request_id, success=False))\n",
-            at=REPO_ROOT / "app" / "api" / "async_crawl_runner.py",
+            at=REPO_ROOT / "crawlutron" / "api" / "async_crawl_runner.py",
         ),
     ),
 )
@@ -197,7 +197,7 @@ def _hand_rolled_envelope_fields_offenders(tree, path):
     return offenders
 
 
-_HAND_ROLLED_ENVELOPE_PROOF_PATH = REPO_ROOT / "app" / "api" / "crawl_endpoint.py"
+_HAND_ROLLED_ENVELOPE_PROOF_PATH = REPO_ROOT / "crawlutron" / "api" / "crawl_endpoint.py"
 
 
 def _hand_rolled_envelope_source(fn_name: str) -> str:
@@ -216,7 +216,7 @@ CRAWL_RESPONSE_ENVELOPE_FIELDS_ARE_PASSED_BY_ONE_OWNER = Rule(
     name="crawl-response-envelope-fields-are-passed-by-one-owner",
     find=_hand_rolled_envelope_fields_offenders,
     summary=(
-        "pass the unified envelope's fields in app.api.response_shaping._response_envelope; "
+        "pass the unified envelope's fields in crawlutron.api.response_shaping._response_envelope; "
         "a field the model requires is dropped, not rejected, when a caller forgets it"
     ),
     excludes=SANCTIONED,
@@ -313,7 +313,7 @@ RENDER_OPTIONS_BUILT_ONLY_BY_THE_RESOLVER = Rule(
     name="render-options-built-only-by-the-resolver",
     find=_render_options_construction_offenders,
     summary=(
-        "Use app.admission.render_options.resolve_render_options so request-side "
+        "Use crawlutron.admission.render_options.resolve_render_options so request-side "
         "options and server defaults merge in exactly one place"
     ),
     excludes=SANCTIONED,
@@ -326,7 +326,7 @@ RENDER_OPTIONS_BUILT_ONLY_BY_THE_RESOLVER = Rule(
         # exemption -- so it has to be proved at the real path.
         Silent(
             "def f(request, defaults):\n    return RenderOptions(**kwargs)\n",
-            at=REPO_ROOT / "app" / "crawl" / "render_options.py",
+            at=REPO_ROOT / "crawlutron" / "crawl" / "render_options.py",
         ),
     ),
 )

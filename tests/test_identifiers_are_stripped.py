@@ -1,6 +1,6 @@
 """No comment or docstring may cite a review item, milestone or fix number: those
 markers point at documents a future reader does not have, so each host sentence must
-stand alone. Scoped to app/ and tests/ plus ``.env.example`` -- not historical dated records.
+stand alone. Scoped to crawlutron/ and tests/ plus ``.env.example`` -- not historical dated records.
 """
 
 from __future__ import annotations
@@ -29,7 +29,11 @@ FORBIDDEN = (
 SCANNED = sorted(
     path
     for path in (
-        [*ROOT.joinpath("app").rglob("*.py"), *ROOT.joinpath("tests").rglob("*.py"), ROOT / ".env.example"]
+        [
+            *ROOT.joinpath("crawlutron").rglob("*.py"),
+            *ROOT.joinpath("tests").rglob("*.py"),
+            ROOT / ".env.example",
+        ]
     )
     if path.is_file()
 )

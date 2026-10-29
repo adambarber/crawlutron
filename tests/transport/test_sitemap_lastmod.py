@@ -3,7 +3,7 @@
 import asyncio
 import time
 
-from app.transport.fetch_helpers import SITEMAP_CACHE, fetch_sitemap_urls
+from crawlutron.transport.fetch_helpers import SITEMAP_CACHE, fetch_sitemap_urls
 from tests._assertions import install_to_thread_spy
 from tests._fetcher_factories import make_fetch, request_fetcher
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical

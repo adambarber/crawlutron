@@ -5,7 +5,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from app.api import job_runner
+from crawlutron.api import job_runner
 from tests._assertions import (
     accepted_crawl,
     completed_crawl,
@@ -37,7 +37,7 @@ class TestAsyncCrawlApi:
 
     async def test_v1_crawl_async_mode_over_batch_size_returns_422(self, crawl_api):
         """An oversized batch is rejected at accept-time, never 202'd then failed async."""
-        from app.config.settings import CrawlerSettings
+        from crawlutron.config.settings import CrawlerSettings
 
         urls = [f"{crawl_api.base}/{i}" for i in range(CrawlerSettings.from_mapping().max_batch_size + 1)]
         resp = await crawl_api.client.post("/v1/crawl", json={"urls": urls, "async_mode": True})
@@ -47,7 +47,7 @@ class TestAsyncCrawlApi:
     async def test_v1_crawl_rejects_policy_blocked_async_target_before_acceptance(
         self, crawl_api, override_settings
     ):
-        from app.main import job_store
+        from crawlutron.main import job_store
 
         override_settings(denied_hosts="blocked.test")
         response = await crawl_api.client.post(
@@ -89,7 +89,7 @@ class TestAsyncCrawlApi:
         undefined -- stats report what happened, never a value equal to crawled
         that conflates two job kinds under one field name.
         """
-        from app.main import job_store
+        from crawlutron.main import job_store
 
         request_id, _ = await submit_async_crawl(crawl_api.client, crawl_api.payload(async_mode=True))
 
@@ -124,7 +124,7 @@ class TestAsyncCrawlApi:
         request_id, _ = await submit_async_crawl(crawl_api.client, crawl_api.payload(async_mode=True))
 
         # Verify job exists in job_store with SINGLE_SHOT kind
-        from app.main import job_store
+        from crawlutron.main import job_store
 
         job = job_store.load(request_id)
         assert job is not None, "Job not found in job_store"
@@ -148,7 +148,7 @@ class TestAsyncCrawlApi:
 
     async def test_v1_crawl_async_mode_counts_failed_results(self, crawl_api):
         """Job stats must count failed results, not hardcode zero."""
-        from app.main import job_store
+        from crawlutron.main import job_store
 
         # One page fetches fine, one 404s (failed).
         request_id, _ = await submit_async_crawl(
@@ -205,7 +205,7 @@ class TestAsyncCrawlApi:
         in-flight request at a time, never three overlapping fetches.
         """
         monkeypatch.setenv("CRAWLUTRON_MAX_WEBHOOK_CONCURRENCY", "1")
-        async_crawl_runner = __import__("app.api.async_crawl_runner", fromlist=["x"])
+        async_crawl_runner = __import__("crawlutron.api.async_crawl_runner", fromlist=["x"])
         # The cached loop-bound semaphore is rebuilt from the new width.
         async_crawl_runner.reset_process_state()
 
@@ -256,7 +256,7 @@ class TestAsyncCrawlJobStoreIntegration:
 
     async def test_job_store_single_shot_kind(self):
         """Job_store.create_single_shot creates job with SINGLE_SHOT kind."""
-        from app.storage.job_store import JobKind, JobStatus
+        from crawlutron.storage.job_store import JobKind, JobStatus
 
         with single_shot_job() as (_store, job):
             assert job.job_id == "test-id"
@@ -271,11 +271,11 @@ class TestAsyncCrawlJobStoreIntegration:
 
     async def test_job_store_single_shot_persists_results(self):
         """Results are stored in job.results for SINGLE_SHOT jobs."""
-        from app.models.crawl_status import CrawlStatus
-        from app.models.unified_crawl_response import UnifiedCrawlResponse
-        from app.models.unified_crawl_result import UnifiedCrawlResult
-        from app.storage.job_store import JobKind, JobStatus
-        from app.vocabulary.taxonomy import CrawlClassification
+        from crawlutron.models.crawl_status import CrawlStatus
+        from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
+        from crawlutron.models.unified_crawl_result import UnifiedCrawlResult
+        from crawlutron.storage.job_store import JobKind, JobStatus
+        from crawlutron.vocabulary.taxonomy import CrawlClassification
 
         with single_shot_job() as (store, job):
             # Simulate completion
@@ -329,7 +329,7 @@ class TestAsyncCrawlShutdownOwnership:
                 cancelled.set()
                 raise
 
-        monkeypatch.setattr("app.api.async_crawl_runner.run_async_crawl", blocked_crawl)
+        monkeypatch.setattr("crawlutron.api.async_crawl_runner.run_async_crawl", blocked_crawl)
 
         # A 202 is a promise that the work outlives the request
         body = await asyncio.wait_for(
@@ -352,7 +352,7 @@ class TestAsyncCrawlTeardownIsolation:
     from a cancelled test can push a later test over its quota of four."""
 
     async def test_teardown_clears_a_stray_pending_anonymous_job(self):
-        from app.main import job_store
+        from crawlutron.main import job_store
         from tests._async_harnesses import _drain_running_crawls
 
         job_store.create_single_shot("stray_pending", "http://example.com/", {}, owner="")

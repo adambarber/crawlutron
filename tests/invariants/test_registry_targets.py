@@ -87,7 +87,7 @@ def test_public_target_detector_quiet_on_runtime_computed_name():
     )
     assert not public_target_offenders(
         runtime_name,
-        REPO_ROOT / "app" / "_synthetic.py",
+        REPO_ROOT / "crawlutron" / "_synthetic.py",
         _property("public-target"),
     )
 

@@ -14,12 +14,12 @@ from typing import TYPE_CHECKING
 from fastapi import APIRouter, FastAPI
 from httpx import AsyncClient
 
-from app.api.caller_concurrency import CallerConcurrencyTracker
-from app.api.dependencies import get_job_store, get_result_store, get_settings, get_shutdown_event
-from app.config.settings import CrawlerSettings
-from app.storage.caller_key_store import CallerKeyStore
-from app.storage.job_store import JobStore
-from app.storage.result_store import CrawlResultStore
+from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
+from crawlutron.api.dependencies import get_job_store, get_result_store, get_settings, get_shutdown_event
+from crawlutron.config.settings import CrawlerSettings
+from crawlutron.storage.caller_key_store import CallerKeyStore
+from crawlutron.storage.job_store import JobStore
+from crawlutron.storage.result_store import CrawlResultStore
 from tests._async_harnesses import serve
 from tests._policy_factories import job_store as make_store
 

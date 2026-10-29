@@ -9,9 +9,9 @@ from __future__ import annotations
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from app.api.metrics_router import router as metrics_router
-from app.runtime.metrics import MetricsStore, get_metrics
-from app.storage.coordination_counters import CoordinationCounters
+from crawlutron.api.metrics_router import router as metrics_router
+from crawlutron.runtime.metrics import MetricsStore, get_metrics
+from crawlutron.storage.coordination_counters import CoordinationCounters
 
 
 def _store(tmp_path) -> MetricsStore:

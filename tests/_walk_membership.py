@@ -12,30 +12,31 @@ from tests._walk_resolution import call_keyword_arguments
 
 @lru_cache(maxsize=1)
 def _model_modules() -> tuple[ModuleType, ...]:
-    """Every module in ``app.models``, derived rather than enumerated.
+    """Every module in ``crawlutron.models``, derived rather than enumerated.
 
     A stale candidate list resolves a taxonomy to nothing -- which approves
     every literal rather than failing."""
     import importlib
     import pkgutil
 
-    package = importlib.import_module("app.models")
+    package = importlib.import_module("crawlutron.models")
     return tuple(
-        importlib.import_module(f"app.models.{info.name}") for info in pkgutil.iter_modules(package.__path__)
+        importlib.import_module(f"crawlutron.models.{info.name}")
+        for info in pkgutil.iter_modules(package.__path__)
     )
 
 
 def _vocabulary_modules() -> tuple[ModuleType, ...]:
-    """Every topic module in ``app.vocabulary``, derived the same way.
+    """Every topic module in ``crawlutron.vocabulary``, derived the same way.
 
     A taxonomy name is looked up across the split-by-topic package; a stale or
     single-module lookup approves every literal."""
     import importlib
     import pkgutil
 
-    package = importlib.import_module("app.vocabulary")
+    package = importlib.import_module("crawlutron.vocabulary")
     return tuple(
-        importlib.import_module(f"app.vocabulary.{info.name}")
+        importlib.import_module(f"crawlutron.vocabulary.{info.name}")
         for info in pkgutil.iter_modules(package.__path__)
     )
 
@@ -100,14 +101,16 @@ def real_members(type_name: str) -> frozenset[str]:
 
     ``str``-Enum: values; ``Literal`` alias: ``literal_members`` (total over
     the union); a non-taxonomy raises ``LookupError`` -- never silence."""
-    from app.models import taxonomy
+    from crawlutron.models import taxonomy
 
     for module in (taxonomy, *_model_modules(), *_vocabulary_modules()):
         owner = getattr(module, type_name, None)
         if owner is not None:
             break
     else:
-        raise LookupError(f"{type_name} is not a taxonomy anywhere in app/models or app/vocabulary")
+        raise LookupError(
+            f"{type_name} is not a taxonomy anywhere in crawlutron/models or crawlutron/vocabulary"
+        )
     if hasattr(owner, "__members__"):
         return frozenset(member.value for member in owner)
     return taxonomy.literal_members(owner)

@@ -12,4 +12,4 @@ __all__ = ["ELSEWHERE"]
 
 #: A sanctioned `at=` path outside a rule's owner module: the "proves quiet
 #: elsewhere" half of a path-keyed bite.
-ELSEWHERE = REPO_ROOT / "app" / "crawl" / "content_cache.py"
+ELSEWHERE = REPO_ROOT / "crawlutron" / "crawl" / "content_cache.py"

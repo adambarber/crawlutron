@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from app.storage.result_store import CrawlResultStore
+from crawlutron.storage.result_store import CrawlResultStore
 from tests._host_policy_entry_table import host_policy_entry_table as _table_entries
 from tests._host_policy_probes import (
     _BLOCKED_URL,
@@ -23,8 +23,8 @@ from tests._policy_factories import canonical
 async def _probe_crawl_endpoint(monkeypatch, tmp_path):
     import asyncio
 
-    from app.api.crawl_endpoint import crawl
-    from app.models.crawl_request import CrawlRequest
+    from crawlutron.api.crawl_endpoint import crawl
+    from crawlutron.models.crawl_request import CrawlRequest
 
     effects = _effects()
     job_store = type(
@@ -44,7 +44,7 @@ async def _probe_crawl_endpoint(monkeypatch, tmp_path):
 
 
 async def _probe_crawl_executor(monkeypatch, tmp_path):
-    from app.api import crawl_executor
+    from crawlutron.api import crawl_executor
 
     effects = _effects()
 
@@ -53,7 +53,7 @@ async def _probe_crawl_executor(monkeypatch, tmp_path):
         return {"results": [{"status": "blocked", "classification": "blocked"}]}
 
     monkeypatch.setattr(crawl_executor, "crawl_request", denied_crawl_request)
-    from app.models.crawl_request import CrawlRequest
+    from crawlutron.models.crawl_request import CrawlRequest
 
     await _assert_refused(
         crawl_executor.execute_crawl(
@@ -67,9 +67,9 @@ async def _probe_crawl_executor(monkeypatch, tmp_path):
 
 
 async def _probe_jobs_router(monkeypatch, tmp_path):
-    from app.api import jobs_router
-    from app.models.caller_identity import CallerIdentity
-    from app.models.job_create_request import JobCreateRequest
+    from crawlutron.api import jobs_router
+    from crawlutron.models.caller_identity import CallerIdentity
+    from crawlutron.models.job_create_request import JobCreateRequest
 
     effects = _effects()
     job_store = type(
@@ -97,8 +97,8 @@ async def _probe_jobs_router(monkeypatch, tmp_path):
 
 
 async def _probe_map_endpoint(monkeypatch, tmp_path):
-    from app.api import map_endpoint
-    from app.models.map_request import MapRequest
+    from crawlutron.api import map_endpoint
+    from crawlutron.models.map_request import MapRequest
 
     effects = _effects()
 
@@ -118,9 +118,9 @@ async def _probe_map_endpoint(monkeypatch, tmp_path):
 
 
 async def _probe_watch_router(monkeypatch, tmp_path):
-    from app.api import watch_router
-    from app.models.caller_identity import CallerIdentity
-    from app.models.watch_create_request import WatchCreateRequest
+    from crawlutron.api import watch_router
+    from crawlutron.models.caller_identity import CallerIdentity
+    from crawlutron.models.watch_create_request import WatchCreateRequest
 
     effects = _effects()
     watch_store = type(
@@ -147,9 +147,9 @@ async def _probe_site_map(monkeypatch, tmp_path):
     entry point filters instead of raising, so the claim is the output, and the shape
     with no normalized root is where aggregation consults policy.
     """
-    from app.api.site_map import build_site_map
-    from app.models.host_policy import HostPolicy
-    from app.models.result_record import ProducerEnvelope
+    from crawlutron.api.site_map import build_site_map
+    from crawlutron.models.host_policy import HostPolicy
+    from crawlutron.models.result_record import ProducerEnvelope
     from tests._result_builders import engine_result
 
     allowed, denied = "https://allowed.test/feed", "https://denied.test/sitemap"
@@ -177,7 +177,7 @@ async def _probe_site_map(monkeypatch, tmp_path):
 
 
 async def _probe_render(monkeypatch, tmp_path):
-    from app.api.render import render_request
+    from crawlutron.api.render import render_request
 
     effects = _effects()
 
@@ -185,7 +185,7 @@ async def _probe_render(monkeypatch, tmp_path):
         effects["worker"].append(job.url.raw)
         raise AssertionError("blocked render reached the worker")
 
-    from app.models.render_request import RenderRequest
+    from crawlutron.models.render_request import RenderRequest
 
     await _assert_refused(
         render_request(
@@ -200,12 +200,12 @@ async def _probe_render(monkeypatch, tmp_path):
 async def _probe_async_runner(monkeypatch, tmp_path):
     import asyncio
 
-    from app.api import async_crawl_runner
+    from crawlutron.api import async_crawl_runner
 
     effects = _effects()
     # The REAL stores, not doubles: a hand-rolled `type("Store", ...)` drifted the moment a call site moved to
     # the async twin and reported a contract change as an AttributeError, which is noise, not a finding.
-    from app.storage.result_store import CrawlResultStore
+    from crawlutron.storage.result_store import CrawlResultStore
     from tests._job_harnesses import make_job_store
 
     job_store = make_job_store(str(tmp_path))
@@ -230,7 +230,7 @@ async def _probe_async_runner(monkeypatch, tmp_path):
 
 
 async def _probe_response_shaping(monkeypatch, tmp_path):
-    from app.api.response_shaping import frontier_link_url
+    from crawlutron.api.response_shaping import frontier_link_url
 
     async def invoke():
         return frontier_link_url({"normalized_url": _BLOCKED_URL}, policy=_denied_policy())
@@ -239,7 +239,7 @@ async def _probe_response_shaping(monkeypatch, tmp_path):
 
 
 async def _probe_webhook(monkeypatch, tmp_path):
-    from app.api import webhooks
+    from crawlutron.api import webhooks
 
     effects = _effects()
     monkeypatch_wire_guard(monkeypatch, effects)
@@ -254,7 +254,7 @@ async def _probe_webhook(monkeypatch, tmp_path):
 
 
 async def _probe_webhook_delivery(monkeypatch, tmp_path):
-    from app.api import webhooks
+    from crawlutron.api import webhooks
 
     effects = _effects()
     monkeypatch_wire_guard(monkeypatch, effects)
@@ -273,8 +273,8 @@ async def _probe_policy_suggestions(monkeypatch, tmp_path):
     rollup admits every stored URL through the deployment's policy, so a candidate rule
     about a refused host is not reviewable and surfaces as an empty proposal, not a raise.
     """
-    from app.api import policy_suggestions as module
-    from app.models.trace_response import TraceResponse
+    from crawlutron.api import policy_suggestions as module
+    from crawlutron.models.trace_response import TraceResponse
 
     async def _payloads_page(*, limit, cursor=None, owner=None):
         if cursor is not None:
@@ -301,9 +301,9 @@ async def _probe_policy_suggestions(monkeypatch, tmp_path):
 async def _probe_job_runner(monkeypatch, tmp_path):
     import asyncio
 
-    from app.api import job_runner
-    from app.storage.job_store_collections import FrontierEntry, JobStatus
-    from app.storage.job_store_state import CrawlJobState
+    from crawlutron.api import job_runner
+    from crawlutron.storage.job_store_collections import FrontierEntry, JobStatus
+    from crawlutron.storage.job_store_state import CrawlJobState
     from tests._job_store_doubles import make_job_store
 
     effects = _effects()
@@ -329,22 +329,22 @@ async def _probe_job_runner(monkeypatch, tmp_path):
 
 
 _PROBES = {
-    "app/api/crawl_endpoint.py:crawl": _probe_crawl_endpoint,
-    "app/api/crawl_executor.py:execute_crawl": _probe_crawl_executor,
-    "app/api/job_runner.py:run_job": _probe_job_runner,
-    "app/api/jobs_router.py:create_job": _probe_jobs_router,
-    "app/api/map_endpoint.py:map_site": _probe_map_endpoint,
-    "app/api/site_map.py:build_site_map": _probe_site_map,
-    "app/api/render.py:render_request": _probe_render,
-    "app/api/async_crawl_runner.py:run_async_crawl": _probe_async_runner,
-    "app/api/response_shaping.py:frontier_link_url": _probe_response_shaping,
-    "app/api/watch_router.py:create_watch": _probe_watch_router,
-    "app/api/policy_suggestions.py:policy_suggestions": _probe_policy_suggestions,
-    "app/api/policy_suggestions.py:build_policy_suggestions": _probe_policy_suggestions,
-    "app/api/webhooks.py:post_webhook": _probe_webhook,
-    "app/api/webhooks.py:post_webhook_guarded": _probe_webhook,
-    "app/api/webhooks.py:start_webhook_delivery": _probe_webhook,
-    "app/api/webhooks.py:deliver_pinned_webhook": _probe_webhook_delivery,
+    "crawlutron/api/crawl_endpoint.py:crawl": _probe_crawl_endpoint,
+    "crawlutron/api/crawl_executor.py:execute_crawl": _probe_crawl_executor,
+    "crawlutron/api/job_runner.py:run_job": _probe_job_runner,
+    "crawlutron/api/jobs_router.py:create_job": _probe_jobs_router,
+    "crawlutron/api/map_endpoint.py:map_site": _probe_map_endpoint,
+    "crawlutron/api/site_map.py:build_site_map": _probe_site_map,
+    "crawlutron/api/render.py:render_request": _probe_render,
+    "crawlutron/api/async_crawl_runner.py:run_async_crawl": _probe_async_runner,
+    "crawlutron/api/response_shaping.py:frontier_link_url": _probe_response_shaping,
+    "crawlutron/api/watch_router.py:create_watch": _probe_watch_router,
+    "crawlutron/api/policy_suggestions.py:policy_suggestions": _probe_policy_suggestions,
+    "crawlutron/api/policy_suggestions.py:build_policy_suggestions": _probe_policy_suggestions,
+    "crawlutron/api/webhooks.py:post_webhook": _probe_webhook,
+    "crawlutron/api/webhooks.py:post_webhook_guarded": _probe_webhook,
+    "crawlutron/api/webhooks.py:start_webhook_delivery": _probe_webhook,
+    "crawlutron/api/webhooks.py:deliver_pinned_webhook": _probe_webhook_delivery,
 }
 
 
@@ -354,17 +354,17 @@ async def test_host_policy_entry_point_refuses(entry, monkeypatch, tmp_path):
 
 
 def test_host_policy_probes_cover_the_full_api_entry_table():
-    api_entries = {name for name in _table_entries() if not name.startswith("app/mcp/")}
+    api_entries = {name for name in _table_entries() if not name.startswith("crawlutron/mcp/")}
     assert set(_PROBES) == api_entries
 
 
 async def test_render_probe_fails_when_policy_enforcement_is_removed(monkeypatch, tmp_path):
-    from app.admission import payload_helpers
-    from app.api import render
+    from crawlutron.admission import payload_helpers
+    from crawlutron.api import render
 
     def allow(url, *, policy):
-        from app.models.host_policy import HostPolicy
-        from app.models.normalized_url import NormalizedUrl
+        from crawlutron.models.host_policy import HostPolicy
+        from crawlutron.models.normalized_url import NormalizedUrl
 
         return NormalizedUrl(url, policy=HostPolicy.unrestricted())
 

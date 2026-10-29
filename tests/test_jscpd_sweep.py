@@ -13,8 +13,8 @@ from scripts._jscpd_report_types import JscpdDuplicate
 
 def _clone() -> JscpdDuplicate:
     return {
-        "firstFile": {"name": "one.py", "start": 1, "end": 2, "tree": "app"},
-        "secondFile": {"name": "two.py", "start": 1, "end": 2, "tree": "app"},
+        "firstFile": {"name": "one.py", "start": 1, "end": 2, "tree": "crawlutron"},
+        "secondFile": {"name": "two.py", "start": 1, "end": 2, "tree": "crawlutron"},
         "fragment": "def run():\n    return 1\n",
         "tokens": 8,
     }

@@ -1,11 +1,11 @@
 """Delayed-host pacing keys the batch on the canonical site (#497)."""
 
-from app.admission.admission import JobAdmissionContext
-from app.admission.policy import PolicyTier
-from app.api.job_runner import pace_delayed_batch
-from app.config.settings import CrawlerSettings
-from app.models.crawl_policy import CrawlPolicy
-from app.storage.job_store import FrontierEntry
+from crawlutron.admission.admission import JobAdmissionContext
+from crawlutron.admission.policy import PolicyTier
+from crawlutron.api.job_runner import pace_delayed_batch
+from crawlutron.config.settings import CrawlerSettings
+from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.storage.job_store import FrontierEntry
 from tests._policy_factories import canonical
 
 

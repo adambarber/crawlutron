@@ -1,7 +1,7 @@
 """Cookie bootstrap: after browser renders a blocked domain, retry cffi with
 the browser-minted session cookies before accepting the render result."""
 
-from app.vocabulary.strategies import BROWSER_HEADLESS, HTTP_CFFI_IMPERSONATE, HTTP_DECLARED_CRAWLER
+from crawlutron.vocabulary.strategies import BROWSER_HEADLESS, HTTP_CFFI_IMPERSONATE, HTTP_DECLARED_CRAWLER
 from tests._browser_doubles import _fake_browser
 from tests._chain_policies import chain_policy
 from tests._fetcher_factories import request_fetcher, run_chain
@@ -12,7 +12,7 @@ _rendered = _fake_browser(html="<html>rendered</html>", text="rendered")
 
 
 async def test_browser_cookies_replayed_through_cffi():
-    from app.transport import browser_cookies
+    from crawlutron.transport import browser_cookies
 
     browser_cookies.store_browser_cookies("example.com", "incap_ses=abc; visid=def")
 
@@ -69,7 +69,7 @@ def _harvesting_worker(jar):
     """A browser worker that runs the REAL harvest before answering rendered."""
     from types import SimpleNamespace
 
-    from app.transport.browser_cookies import harvest_session_cookies
+    from crawlutron.transport.browser_cookies import harvest_session_cookies
 
     page = SimpleNamespace(context=_CookieContext(jar))
 
@@ -86,8 +86,8 @@ async def test_harvested_cookies_never_cross_callers_in_the_chain():
     Caller A's browser-minted session must not ride caller B's cffi retry:
     each crawl's harvest and replay are keyed by its own cookie namespace.
     """
-    from app.transport import browser_cookies
-    from app.transport.cookie_jar import COOKIE_NAMESPACE
+    from crawlutron.transport import browser_cookies
+    from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE
 
     denied = (403, b"denied", "text/plain")
     marker = "tenant-a-session"

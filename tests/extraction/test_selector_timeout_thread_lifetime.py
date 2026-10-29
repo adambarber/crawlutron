@@ -15,8 +15,8 @@ import threading
 import bs4
 import pytest
 
-from app.extraction import documents
-from app.extraction.documents import ExtractedContent, Selectors, extract_selected
+from crawlutron.extraction import documents
+from crawlutron.extraction.documents import ExtractedContent, Selectors, extract_selected
 from tests._extraction_helpers import settings_with
 
 pytestmark = pytest.mark.usefixtures("four_worker_selector_pool")

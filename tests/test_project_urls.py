@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from app.vocabulary.identity import DEFAULT_USER_AGENT, REPOSITORY_URL, SERVICE_ID, SERVICE_VERSION
+from crawlutron.vocabulary.identity import DEFAULT_USER_AGENT, REPOSITORY_URL, SERVICE_ID, SERVICE_VERSION
 
 SERVICE_ROOT = Path(__file__).resolve().parent.parent
 PYPROJECT = SERVICE_ROOT / "pyproject.toml"
@@ -59,7 +59,7 @@ def test_openapi_title_is_the_brand() -> None:
     the rename missed it -- space/title-cased, it escaped hyphen/underscore sweeps -- and
     a positive pin catches the next spelling without widening a ban list.
     """
-    from app.main import app as service
+    from crawlutron.main import app as service
 
     assert service.title == "Crawlutron Execution Service"
 

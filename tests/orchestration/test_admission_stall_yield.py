@@ -2,7 +2,7 @@
 
 import asyncio
 
-from app.orchestration.admission_stall import AdmissionStallGuard
+from crawlutron.orchestration.admission_stall import AdmissionStallGuard
 from tests._recursive_harnesses import drive_recursive_crawl, make_crawl_task
 
 
@@ -22,7 +22,7 @@ async def test_zero_admission_pass_yields_instead_of_hot_spinning(monkeypatch):
         delays.append(delay)
         return await real_sleep(delay)
 
-    monkeypatch.setattr("app.orchestration.admission_stall.asyncio.sleep", sleep_spy)
+    monkeypatch.setattr("crawlutron.orchestration.admission_stall.asyncio.sleep", sleep_spy)
     stop = asyncio.Event()
 
     class SaturatedNeverAwaiting:

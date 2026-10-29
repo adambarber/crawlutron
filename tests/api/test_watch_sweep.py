@@ -1,21 +1,21 @@
 """The origin is a real HTTP server answering genuine ``304``s, so revalidation
 is answered by the wire; the delivery call is the one stub here (the sweeper's
-decision), while the funnel it rides is ``app.api.webhooks``' contract.
+decision), while the funnel it rides is ``crawlutron.api.webhooks``' contract.
 """
 
 import asyncio
 
 import pytest
 
-from app.api import watch_sweep
-from app.api.caller_concurrency import CallerConcurrencyTracker
-from app.api.watch_sweep import WatchSweeper, sweep_watches_forever
-from app.config.settings import CrawlerSettings
-from app.models.normalized_url import NormalizedUrl
-from app.models.watch_state import WatchState
-from app.models.watch_status import WatchStatus
-from app.storage.caller_key_store import CallerKeyStore
-from app.vocabulary.taxonomy import CrawlClassification
+from crawlutron.api import watch_sweep
+from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
+from crawlutron.api.watch_sweep import WatchSweeper, sweep_watches_forever
+from crawlutron.config.settings import CrawlerSettings
+from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.models.watch_state import WatchState
+from crawlutron.models.watch_status import WatchStatus
+from crawlutron.storage.caller_key_store import CallerKeyStore
+from crawlutron.vocabulary.taxonomy import CrawlClassification
 from tests._assertions import block_private_targets
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 from tests.helpers.server import EtagHandler
@@ -157,7 +157,7 @@ async def test_a_delivery_time_validation_failure_leaves_the_recorded_outcome_in
     """One DNS blip at webhook-delivery time must not turn a good check into a
     failed one (#450): the outcome ``arecord_check`` already wrote stands, and a
     delivery-time raise never reaches the sweep's failure recorder."""
-    from app.api import webhooks
+    from crawlutron.api import webhooks
 
     watch = register(watch_store, canonical(origin_url(etag_server)))
 

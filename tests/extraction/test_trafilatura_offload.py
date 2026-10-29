@@ -4,9 +4,9 @@ Both strategy result builders call the CPU-bound ``extract_html`` synchronously;
 they must go through ``asyncio.to_thread`` like their sibling calls.
 """
 
-from app.extraction.content import extract_html
-from app.models.host_policy import HostPolicy
-from app.models.normalized_url import NormalizedUrl
+from crawlutron.extraction.content import extract_html
+from crawlutron.models.host_policy import HostPolicy
+from crawlutron.models.normalized_url import NormalizedUrl
 from tests._assertions import install_to_thread_spy
 from tests._fetcher_factories import invoke_browser_strategy, invoke_http_strategy
 from tests._policy_factories import http_strategy_policy

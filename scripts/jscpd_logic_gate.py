@@ -28,7 +28,7 @@ def _helper_files() -> tuple[str, ...]:
 
 def helper_surface() -> tuple[str, ...]:
     """The scan surface: production, scripts, and the helper namespace."""
-    return ("app", "scripts") + _helper_files()
+    return ("crawlutron", "scripts") + _helper_files()
 
 
 def _is_cross_file(duplicate: JscpdDuplicate) -> bool:

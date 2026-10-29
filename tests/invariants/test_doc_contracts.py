@@ -9,10 +9,10 @@ import re
 
 import pytest
 
-from app.models.crawl_policy import CrawlPolicy
-from app.models.crawl_request import CrawlRequest
-from app.models.json_value import JsonValue
-from app.models.render_request import RenderRequest
+from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.models.crawl_request import CrawlRequest
+from crawlutron.models.json_value import JsonValue
+from crawlutron.models.render_request import RenderRequest
 from tests.chokepoint_walks import REPO_ROOT, parsed
 from tests.invariants._env_knobs import _KNOB_PATTERN, _consumed_knobs
 from tests.rules import Rule
@@ -87,21 +87,21 @@ def _broken_doc_reference_offenders(
     return offenders
 
 
-_DOTTED_APP_SYMBOL = re.compile(r"^app[\w./]+$")
+_DOTTED_APP_SYMBOL = re.compile(r"^crawlutron[\w./]+$")
 _FILE_EXTENSIONS = frozenset(
     {".py", ".md", ".toml", ".json", ".yaml", ".yml", ".ini", ".cfg", ".txt", ".in", ".sh"}
 )
 
 
 def _is_app_symbol_reference(candidate: str) -> bool:
-    """Whether a backticked token is an app module.symbol reference (not a file path)."""
+    """Whether a backticked token is a crawlutron module.symbol reference (not a file path)."""
     if not _DOTTED_APP_SYMBOL.match(candidate):
         return False
     if candidate.endswith("/"):
         return False
     last_segment = candidate.split("/")[-1]
     # A real file reference ends with a known source/doc extension; a symbol
-    # reference (app/logging_config.configure_service_logging) does not.
+    # reference (crawlutron/logging_config.configure_service_logging) does not.
     if any(last_segment.endswith(ext) for ext in _FILE_EXTENSIONS):
         return False
     return True
@@ -189,13 +189,13 @@ _NON_SYMBOL_WORDS = frozenset(
 
 
 def _app_symbol_definitions(root: pathlib.Path = REPO_ROOT) -> dict[str, frozenset[str]]:
-    """Every top-level name defined in app/, mapped to the module files that define it.
+    """Every top-level name defined in crawlutron/, mapped to the module files that define it.
 
     A bare backticked name in a doc can only be checked against this index: if no
-    module defines it, the doc is citing something that doesn't exist as an app symbol.
+    module defines it, the doc is citing something that doesn't exist as a crawlutron symbol.
     """
     definitions: dict[str, set[str]] = {}
-    for path in sorted((root / "app").rglob("*.py")):
+    for path in sorted((root / "crawlutron").rglob("*.py")):
         tree = parsed(path)
         relative = path.relative_to(root).as_posix()
         for node in tree.body:
@@ -230,7 +230,7 @@ def _doc_symbol_offenders(
     documents: list[str] | None = None,
     symbols: dict[str, frozenset[str]] | None = None,
 ) -> list[str]:
-    """Backticked app symbols in live docs must resolve to definitions."""
+    """Backticked crawlutron symbols in live docs must resolve to definitions."""
     if symbols is None:
         symbols = _app_symbol_definitions(app_root)
     docs = _live_documents() if documents is None else documents
@@ -257,7 +257,7 @@ def _check_dotted_symbol(name: str, candidate: str, app_root: pathlib.Path) -> l
     if len(parts) < 3:
         return []
     symbol = parts[-1]
-    module_path = app_root / "app" / pathlib.Path(*parts[1:-1]).with_suffix(".py")
+    module_path = app_root / "crawlutron" / pathlib.Path(*parts[1:-1]).with_suffix(".py")
     if not module_path.exists():
         return [f"{name}: `{candidate}` module does not exist"]
     tree = ast.parse(module_path.read_text(encoding="utf-8"))
@@ -435,14 +435,14 @@ def test_doc_symbol_detector_bites(tmp_path):
     symbols = _app_symbol_definitions()
     assert _doc_symbol_offenders(symbols=symbols) == []
     (tmp_path / "CONTRIBUTING.md").write_text(
-        "See ``app/ghost_module.configure_service_logging``.\nAnd ``_ghost_symbol`` is also gone.\n",
+        "See ``crawlutron/ghost_module.configure_service_logging``.\nAnd ``_ghost_symbol`` is also gone.\n",
         encoding="utf-8",
     )
     offenders = _doc_symbol_offenders(root=tmp_path, documents=["CONTRIBUTING.md"], symbols=symbols)
     assert any("module does not exist" in hit for hit in offenders), offenders
     assert any("names no app symbol" in hit for hit in offenders), offenders
     (tmp_path / "app_transport_ghost.md").write_text(
-        "See ``app/transport.robots_parse.no_such_symbol_xyz``.\n",
+        "See ``crawlutron/transport.robots_parse.no_such_symbol_xyz``.\n",
         encoding="utf-8",
     )
     offenders = _doc_symbol_offenders(root=tmp_path, documents=["app_transport_ghost.md"], symbols=symbols)
@@ -455,7 +455,7 @@ def test_doc_symbol_detector_spared_clean_references(tmp_path):
     document = REPO_ROOT / "CONTRIBUTING.md"
     (tmp_path / "CONTRIBUTING.md").write_text(
         document.read_text(encoding="utf-8")
-        + "\nSee ``app/models/host_policy.HostPolicy`` and ``filter_js_endpoints``.\n"
+        + "\nSee ``crawlutron/models/host_policy.HostPolicy`` and ``filter_js_endpoints``.\n"
         + "And ``git``, ``main`` and ``PEP 8`` are not symbols.\n",
         encoding="utf-8",
     )

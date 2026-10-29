@@ -1,6 +1,6 @@
 """HTTP fetch cache: batched stores, memory mirror and envelope edges."""
 
-from app.transport.cache import HttpCache
+from crawlutron.transport.cache import HttpCache
 from tests._thread_fanout import run_thread_fanout
 
 
@@ -124,7 +124,7 @@ def test_eviction_touches_only_the_overflow_window():
 async def test_error_page_etag_does_not_seed_shared_cache():
     """A 403/5xx carrying an ETag must not seed the conditional cache: the next crawl
     would replay the denied page's validator and could serve an empty not_modified."""
-    from app.transport.cache import HttpCache
+    from crawlutron.transport.cache import HttpCache
     from tests._fetcher_factories import request_fetcher, run_http_strategy
 
     cache = HttpCache()
@@ -151,8 +151,8 @@ async def test_error_page_etag_does_not_seed_shared_cache():
 async def test_http_cache_validators_isolated_across_cookie_namespaces():
     """The shared ETag cache must scope keys by cookie namespace; one caller's
     validator must not be replayed (as an empty not_modified) on another's crawl."""
-    from app.transport.cache import HttpCache
-    from app.transport.cookie_jar import COOKIE_NAMESPACE
+    from crawlutron.transport.cache import HttpCache
+    from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE
     from tests._fetcher_factories import request_fetcher, run_http_strategy
 
     cache = HttpCache()
