@@ -28,7 +28,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Internet :: WWW/HTTP",
     "Topic :: Text Processing :: Markup :: HTML",
@@ -103,14 +102,14 @@ dev = [
     "mypy==2.3.1",
     # The third type checker, and the only one that sees annotation lies mypy
     # structurally cannot here. It was pinned only in requirements-dev.txt, which
-    # no workflow reads: CI installs this extra, so pyright was absent there and
+    # only CI installs this extra (the Dockerfile test stage reads requirements-dev.txt), so pyright was absent there and
     # tests/test_pyright_budget.py -- a fail gate on it -- skipped in both the
     # `typecheck` job and the pre-commit hook while reporting success. Pinned for
     # the same reason as mypy: a new release must not turn a build red with no
     # repository change.
     "pyright==1.1.406",
     # Dead-code gate, run by the vulture hook through scripts/gate. It was pinned
-    # only in requirements-dev.txt -- which no workflow reads -- so the enforcement
+    # only in requirements-dev.txt (which only the Dockerfile test stage installs) -- so the enforcement
     # job, built from this extra alone, hit ModuleNotFoundError on `python -m
     # vulture` and failed on a clean checkout. Pinned for the same reason as the
     # other gate tools: a new release must not turn a build red with no

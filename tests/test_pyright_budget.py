@@ -85,7 +85,7 @@ def _interpreter() -> str:
 
 
 def test_pyright_is_declared_in_the_dev_extra_ci_installs() -> None:
-    """requirements-dev.txt is not read by any workflow, so it is not a source.
+    """requirements-dev.txt is read only by the Dockerfile test stage, not CI.
 
     CI runs ``pip install -e ".[dev]"``, so a tool only in requirements-dev.txt
     is absent where the gate needs it."""

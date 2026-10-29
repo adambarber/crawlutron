@@ -23,7 +23,7 @@ STRATEGY_DESCRIPTIONS = {
         "Firefox rendering in headless mode using Camoufox for JavaScript-dependent pages."
     ),
     CrawlStrategy.BROWSER_HEADED_WARMED: (
-        "Headed Firefox with configured warmup URLs for challenge-prone municipal systems."
+        "Headed Firefox with configured warmup URLs for challenge-prone sites."
     ),
 }
 

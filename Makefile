@@ -15,7 +15,7 @@ HOOK_CONFIG := $(SUITE_DIR)/.pre-commit-config.yaml
 VENV_BIN := $(SUITE_DIR)/.venv/bin
 PRE_COMMIT ?= $(if $(wildcard $(VENV_BIN)/pre-commit),$(VENV_BIN)/pre-commit,pre-commit)
 
-.PHONY: help install test test-fast test-all coverage lint typecheck clean
+.PHONY: help install test test-fast test-all coverage coverage-report graph lint typecheck clean
 
 help:
 	@echo "crawlutron development tasks:"
@@ -27,6 +27,7 @@ help:
 	@echo "  make coverage-report - show the collected coverage report (after make coverage)"
 	@echo "  make lint      - run the ruff hook (the style gate)"
 	@echo "  make typecheck - run the mypy hook (the fail type gate)"
+	@echo "  make graph     - regenerate docs/module-graph.md"
 	@echo "  make clean     - remove caches and build artifacts"
 
 install:
