@@ -214,7 +214,7 @@ class TestRunnerLifecycle:
             assert started == 0
             assert store.load(job.job_id).status == JobStatus.FAILED
 
-    async def test_resume_waits_out_a_stale_predecessor_before_respawning(self, job_store):
+    async def test_resume_waits_out_a_stale_predecessor_before_respawning(self, job_store, monkeypatch):
         """#523 COR-08: resume with a live (wedged) predecessor task must not spawn
         a RUNNING row with no runner; the old task is joined or cancelled first."""
         from app.api.job_lifecycle import tracked_task
@@ -226,7 +226,9 @@ class TestRunnerLifecycle:
         wedged = tracked_task(job.job_id)
         assert wedged is not None
 
-        await job_runner.resume_job(job.job_id, job_store, settings, asyncio.Event())
+        await job_runner.resume_job(
+            job.job_id, job_store, settings, asyncio.Event(), wedge_grace_seconds=0.05
+        )
         assert job_store.load(job.job_id).status is JobStatus.RUNNING
         live = tracked_task(job.job_id)
         assert live is not None, "resume left a RUNNING row with no runner task"
