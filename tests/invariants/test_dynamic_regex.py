@@ -8,7 +8,7 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from tests.chokepoint_walks import app_trees, call_nodes, nodes_of, offender, offender_at
+from tests.chokepoint_walks import SANCTIONED, app_trees, call_nodes, nodes_of, offender, offender_at
 from tests.invariants._shared import assert_trees_clean
 
 # Dynamic-pattern re.* calls: a non-literal first arg is a pattern built from attacker-influenced text (the
@@ -52,7 +52,7 @@ def test_no_dynamic_pattern_re_calls():
 def test_no_direct_regex_engine_import():
     """Only safe_regex.py may import the third-party `regex` engine."""
     offenders: list[str] = []
-    for path, tree in app_trees():
+    for path, tree in app_trees(exclude=SANCTIONED):  # only safe_regex legitimately imports `regex`
         for node in nodes_of(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:

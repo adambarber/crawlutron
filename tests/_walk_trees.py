@@ -8,8 +8,8 @@ from functools import cache
 
 from tests._walk_primitives import APP_ROOT, REPO_ROOT, _narrow, parsed, trees_under
 
-# app/safety/safe_regex.py is the sanctioned regex wrapper (stdlib `re` for literals; the third-party `regex`
-# engine for bounded execution). It owns the banned primitives, so a full-tree walk excludes it.
+# app/safety/safe_regex.py is the sanctioned regex wrapper (the third-party `regex`
+# engine); only the regex-engine-import rule excludes it, never a walk default.
 SANCTIONED = frozenset({"safe_regex.py"})
 
 
@@ -58,15 +58,15 @@ _STRUCTURAL_TOKENS = frozenset(
 )
 
 
-def app_python_files(*, exclude: frozenset[str] = SANCTIONED) -> tuple[pathlib.Path, ...]:
-    """Every app/*.py module except the sanctioned chokepoint wrappers.
+def app_python_files(*, exclude: frozenset[str] = frozenset()) -> tuple[pathlib.Path, ...]:
+    """Every app/*.py module except the exclude set's names.
 
-    One glob per exclude set per session, returned as a tuple; memoized below,
-    since the cache keys on the call and ``exclude`` spellings differ."""
+    The default sees ALL modules -- the sanctioned exclude belongs to the rule
+    that owns it, not the walk (a broad default hid safe_regex from every detector)."""
     return _app_files(frozenset(exclude))
 
 
-def app_trees(*, exclude: frozenset[str] = SANCTIONED) -> tuple[tuple[pathlib.Path, ast.Module], ...]:
+def app_trees(*, exclude: frozenset[str] = frozenset()) -> tuple[tuple[pathlib.Path, ast.Module], ...]:
     """``(path, tree)`` for the same files ``app_python_files`` walks.
 
     A reusable tuple rather than a generator, because generators defer
@@ -98,7 +98,7 @@ def relative_posix(path: pathlib.Path) -> str:
 def app_offenders(
     detector,
     *,
-    exclude: frozenset[str] = SANCTIONED,
+    exclude: frozenset[str] = frozenset(),
     skip: tuple[str, ...] = (),
     kwargs_for: Callable[[str], dict[str, object]] | None = None,
     **detector_kwargs,
