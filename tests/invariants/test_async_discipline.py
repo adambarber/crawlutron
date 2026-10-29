@@ -104,13 +104,6 @@ ADMISSION_BUDGET_ARRIVES_AS_A_BUDGET = Rule(
 # --------------------------------------------------------------------------- Endpoint readiness gate (the
 # rejection tail) ``request_gate`` (app/api/main_helpers.py) owns the whole gated tail: admit, reject
 
-_READINESS_GATE_EXEMPT = frozenset[str](
-    {
-        # The owner itself.
-        "app/api/main_helpers.py",
-    }
-)
-
 
 def _unsanctioned_readiness_counter_offenders(tree, path):
     """Flag a direct readiness-slot admit/release outside the gate chokepoint."""
@@ -128,7 +121,7 @@ READINESS_SLOTS_GO_THROUGH_THE_GATE = Rule(
         "take a readiness slot with app.api.main_helpers.request_gate; a hand-written "
         "admit/release is how a rejected request holds its slot for the life of the process"
     ),
-    skip=frozenset(_READINESS_GATE_EXEMPT),
+    skip=frozenset({"app/api/main_helpers.py"}),  # owner: request_gate admits and releases inside itself
     bite=lambda: (
         Bites("def f():\n    readiness_state.begin_request()\n", "begin_request"),
         # The release is the expensive one to lose, in both its spellings: a finally and a return.
