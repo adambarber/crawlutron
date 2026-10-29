@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from crawlutron.admission.admission_links import gather_deadline_bounded
 from crawlutron.admission.payload_helpers import checked_payload_urls
 from crawlutron.admission.render_options import resolve_render_options
 from crawlutron.config.settings import CrawlerSettings
@@ -76,16 +77,30 @@ async def _robots_allow_set(
     """
     if not options.respect_robots:
         return [(True, _ALLOWED_POLICY)] * len(urls)
-    allowed: list[tuple[bool, RobotsRules]] = []
-    for url in urls:
-        loaded = await _robots_policy.load_robots_rules(
-            url,
-            default_http_fetcher,
-            options.timeout_seconds,
-            policy=host_policy,
+    _DENYING = RobotsRules([(False, "/")], [], None, RobotsSource.unreachable)
+
+    async def one(url: NormalizedUrl) -> tuple[bool, RobotsRules]:
+        try:
+            loaded = await _robots_policy.load_robots_rules(
+                url,
+                default_http_fetcher,
+                options.timeout_seconds,
+                policy=host_policy,
+            )
+        except Exception:
+            # One origin's robots fetch must not abort the batch: fail that URL
+            # closed and let the rest of the admission set complete.
+            return False, _DENYING
+        return (_robots_policy.robots_allows(url, loaded.rules), loaded)
+
+    return list(
+        await gather_deadline_bounded(
+            urls,
+            one,
+            (False, _DENYING),
+            timeout_seconds=float(options.timeout_seconds),
         )
-        allowed.append((_robots_policy.robots_allows(url, loaded.rules), loaded))
-    return allowed
+    )
 
 
 def _failed_render_result(job: CrawlJob, exc: BaseException, *, submitted_url: str) -> CrawlResult:

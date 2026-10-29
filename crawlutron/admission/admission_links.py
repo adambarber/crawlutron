@@ -33,6 +33,7 @@ __all__ = [
     "admit_discovered_links",
     "compile_scope_pattern",
     "frontier_identity",
+    "gather_deadline_bounded",
     "gather_robots_decisions",
     "remaining_page_capacity",
 ]
@@ -324,7 +325,7 @@ def compile_scope_pattern(scope_regex: str | JsonValue | None) -> BoundedPattern
         raise ValueError(f"scope_regex does not compile: {exc}") from exc
 
 
-async def _gather_chunk_deadline[T](
+async def gather_deadline_bounded[T](
     urls: list[NormalizedUrl],
     check: Callable[[NormalizedUrl], Awaitable[T]],
     fail_closed: T,
@@ -360,7 +361,7 @@ async def _gather_chunk(
     deadline_slack_seconds: float,
 ) -> list[tuple[bool, float | None]]:
     """One chunk's deadline gather with T fixed to the decision shape (mypy)."""
-    return await _gather_chunk_deadline(
+    return await gather_deadline_bounded(
         chunk,
         check,
         fail_closed,

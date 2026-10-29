@@ -11,7 +11,8 @@ __all__ = ["OWNER_PUBLIC_SURFACE_RATCHET", "DECLARED_SURFACE_RATCHET"]
 # Values are (declared public symbols, executable entry points).
 OWNER_PUBLIC_SURFACE_RATCHET = {
     "crawlutron/admission/admission.py": (9, 9),
-    "crawlutron/admission/admission_links.py": (12, 5),
+    # gather_deadline_bounded is public (#323): render admission reuses the crawl-path gather.
+    "crawlutron/admission/admission_links.py": (13, 6),
     # RAISED to (14, 11) then LOWERED to (7, 6), (5, 5), (4, 4), then (2, 2): HostPolicy and
     # registrable_domain
     "crawlutron/safety/validation.py": (2, 2),
