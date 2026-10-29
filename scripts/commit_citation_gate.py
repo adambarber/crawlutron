@@ -17,8 +17,10 @@ _SUBJECT = re.compile(rf"^({'|'.join(_TYPES)})(\([^()\s]+\))?!?: \S")
 _CITATION = re.compile(r"#\d+\b")
 _BREAKING_FEAT = re.compile(r"^feat(\([^()\s]+\))?!:", re.MULTILINE)
 _POLICY_PATH = "crawlutron/models/crawl_policy.py"
-_SCHEMA_DECL = re.compile(r'POLICY_SCHEMA_VERSION\s*=\s*"')
+_ADDED_DECL = re.compile(r'^\+POLICY_SCHEMA_VERSION\s*=\s*"([^"]*)"', re.MULTILINE)
+_REMOVED_DECL = re.compile(r'^-POLICY_SCHEMA_VERSION\s*=\s*"([^"]*)"', re.MULTILINE)
 _DIFF_CMD = ("git", "diff", "--name-only", "HEAD")
+_PATCH_CMD = ("git", "diff", "HEAD", "--", _POLICY_PATH)
 
 
 def _diff_paths() -> list[str]:
@@ -31,12 +33,11 @@ def _diff_paths() -> list[str]:
 
 def _schema_bumped() -> bool:
     try:
-        out = subprocess.run(
-            (*_DIFF_CMD, _POLICY_PATH), capture_output=True, text=True, check=True, timeout=10
-        ).stdout
+        out = subprocess.run(_PATCH_CMD, capture_output=True, text=True, check=True, timeout=10).stdout
     except (OSError, subprocess.SubprocessError):
         return False
-    return bool(out.strip()) and bool(_SCHEMA_DECL.search(out))
+    added, removed = _ADDED_DECL.findall(out), _REMOVED_DECL.findall(out)
+    return bool(added) and (not removed or added[-1] != removed[-1])
 
 
 def main(argv: list[str]) -> int:
