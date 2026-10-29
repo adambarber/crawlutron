@@ -21,7 +21,7 @@ from tests.rules import Bites, Registry, Rule
 # --------------------------------------------------------------------------- The content pipeline: one
 # dispatch, one discovery call, one projection The browser and HTTP strategies each carried the same
 
-_CONTENT_PIPELINE_OWNER = frozenset({"content_pipeline.py"})
+_CONTENT_PIPELINE_OWNER = frozenset({"content_pipeline.py"})  # owner: dispatches the raw extractors
 
 
 # Import-resolved, so an alias cannot slip past the sweep.
@@ -99,7 +99,7 @@ EXTRACTION_IS_DISPATCHED_BY_THE_CONTENT_PIPELINE_ALONE = Rule(
     name="extraction-is-dispatched-by-the-content-pipeline-alone",
     find=_extraction_reach_past_offenders,
     summary="dispatch extraction through strategies/content_pipeline._run_extraction",
-    excludes=SANCTIONED | _CONTENT_PIPELINE_OWNER,
+    excludes=SANCTIONED | _CONTENT_PIPELINE_OWNER,  # owner: its own dispatch is the matched shape
     premise=_assert_owner_extraction_still_fires,
     bite=lambda: (
         # The offloaded extractor AND the bare extractor call are two dispatch shapes, so a source carrying
@@ -157,7 +157,7 @@ DISCOVERED_LINK_RESULT_FIELDS_COME_FROM_THE_PIPELINE = Rule(
     name="discovered-link-result-fields-come-from-the-pipeline",
     find=_respelled_discovery_result_fields_offenders,
     summary=("project the discovery envelope through content_pipeline.discovery_result_fields"),
-    excludes=SANCTIONED | _CONTENT_PIPELINE_OWNER,
+    excludes=SANCTIONED | _CONTENT_PIPELINE_OWNER,  # owner: projects the fields it defines
     bite=lambda: (
         # The historical shape: the block spelled at the result call.
         Bites(
