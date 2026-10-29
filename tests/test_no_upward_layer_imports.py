@@ -14,18 +14,18 @@ from __future__ import annotations
 
 from scripts.module_graph import build_graph
 
-_LOWERS = ("app.extraction", "app.admission", "app.transport")
+_LOWERS = ("crawlutron.extraction", "crawlutron.admission", "crawlutron.transport")
 
 
 def _orchestration_imports() -> list[str]:
-    """Every module-level import edge from a lower layer into app.orchestration."""
+    """Every module-level import edge from a lower layer into crawlutron.orchestration."""
     modules, _importers = build_graph()
     return sorted(
         f"{src} -> {dst}"
         for src, deps in modules.items()
         if src.startswith(_LOWERS)
         for dst in deps
-        if dst.startswith("app.orchestration")
+        if dst.startswith("crawlutron.orchestration")
     )
 
 
@@ -33,7 +33,7 @@ def test_lower_layers_import_nothing_from_orchestration() -> None:
     offenders = _orchestration_imports()
     assert not offenders, "\n".join(
         [
-            "lower layers import app.orchestration (ownership move required, "
+            "lower layers import crawlutron.orchestration (ownership move required, "
             "never a lazy import or a facade):",
             *offenders,
         ]
@@ -43,14 +43,14 @@ def test_lower_layers_import_nothing_from_orchestration() -> None:
 def test_gate_bites_on_a_planted_upward_import() -> None:
     for lower in _LOWERS:
         planted = {
-            f"{lower}.planted_up": {"app.orchestration.engine"},
-            "app.orchestration.engine": set(),
+            f"{lower}.planted_up": {"crawlutron.orchestration.engine"},
+            "crawlutron.orchestration.engine": set(),
         }
         found = sorted(
             f"{src} -> {dst}"
             for src, deps in planted.items()
             if src.startswith(_LOWERS)
             for dst in deps
-            if dst.startswith("app.orchestration")
+            if dst.startswith("crawlutron.orchestration")
         )
-        assert found == [f"{lower}.planted_up -> app.orchestration.engine"], (lower, found)
+        assert found == [f"{lower}.planted_up -> crawlutron.orchestration.engine"], (lower, found)

@@ -116,7 +116,7 @@ def test_operator_token_read_through_settings_home():
     offenders = []
     for path, tree in app_trees(exclude=frozenset()):
         rel = str(path)
-        if rel.endswith("app/config/settings.py"):
+        if rel.endswith("crawlutron/config/settings.py"):
             continue
         for node in call_nodes(tree):
             first = node.args[0] if node.args else None

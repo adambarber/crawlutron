@@ -7,14 +7,14 @@ import asyncio
 
 import pytest
 
-from app.api.response_shaping import (
+from crawlutron.api.response_shaping import (
     EnvelopeOptions,
     abuild_unified_crawl_response,
     build_unified_crawl_response,
     build_unified_result,
 )
-from app.api.unified_shaping import abuild_unified_result, aformat_crawl_item
-from app.models.crawl_result import EngineCrawlResult
+from crawlutron.api.unified_shaping import abuild_unified_result, aformat_crawl_item
+from crawlutron.models.crawl_result import EngineCrawlResult
 from tests._assertions import install_to_thread_spy
 from tests._result_builders import engine_result
 
@@ -42,7 +42,7 @@ def _html_item(i: int = 0) -> EngineCrawlResult:
 async def test_aformat_crawl_item_offloads_metadata_parse(monkeypatch):
     """The lxml metadata parse runs in a worker thread, not on the loop."""
     calls: list[tuple[str, str]] = []
-    from app.extraction import llm_format as llm_mod
+    from crawlutron.extraction import llm_format as llm_mod
 
     real_fn = llm_mod.extract_llm_metadata
 
@@ -122,7 +122,7 @@ async def test_sync_and_async_envelope_builders_agree_on_the_submitted_count(sub
 
 async def test_abuild_unified_result_single_item_matches_sync():
     item = _html_item(3)
-    from app.api.response_shaping import build_unified_result
+    from crawlutron.api.response_shaping import build_unified_result
 
     assert (await abuild_unified_result(item)).model_dump() == build_unified_result(item).model_dump()
 

@@ -6,7 +6,7 @@ every document extraction re-walk the env and re-read cgroup sysfs.
 
 from unittest.mock import patch
 
-from app.config.settings import CrawlerSettings
+from crawlutron.config.settings import CrawlerSettings
 from tests._crawl_runners import build_payload
 from tests._fetch_doubles import scripted_fetcher
 
@@ -25,17 +25,17 @@ async def test_document_extraction_never_constructs_settings_per_call(monkeypatc
 
     The spy rides the pipeline's own ``adocument_extract`` binding (the name it
     actually calls), and the patch on ``from_mapping`` makes any fallback loud."""
-    import app.transport.content_pipeline as cp
+    import crawlutron.transport.content_pipeline as cp
 
     fetcher = scripted_fetcher(status=200, ctype="text/csv", body=b"name,age\nada,30")
     settings = CrawlerSettings.from_mapping({})
 
     with (
-        patch("app.extraction.documents.CrawlerSettings.from_mapping") as per_call,
+        patch("crawlutron.extraction.documents.CrawlerSettings.from_mapping") as per_call,
         patch.object(cp, "adocument_extract", wraps=cp.adocument_extract) as spy,
     ):
         per_call.return_value = settings
-        from app.orchestration.engine import crawl_request
+        from crawlutron.orchestration.engine import crawl_request
 
         result = await crawl_request(_payload(), settings=settings, http_fetcher=fetcher, cache=None)
     assert result["results"], "the crawl produced no result"

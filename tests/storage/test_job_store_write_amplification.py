@@ -11,8 +11,8 @@ from contextlib import contextmanager
 
 import pytest
 
-from app.models.crawl_policy import CrawlPolicy
-from app.storage.job_store import CrawlJobState, JobStore
+from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.storage.job_store import CrawlJobState, JobStore
 from tests._job_harnesses import loaded_job, make_crawled_job_store, make_job_store
 from tests._policy_factories import canonical
 from tests._policy_factories import job_store as store_on

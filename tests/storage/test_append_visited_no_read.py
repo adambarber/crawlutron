@@ -5,9 +5,9 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Iterator
 
-from app.models.crawl_policy import CrawlPolicy
-from app.models.normalized_url import NormalizedUrl
-from app.storage.job_store import JobStore
+from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.storage.job_store import JobStore
 from tests._policy_factories import canonical
 from tests._policy_factories import job_store as store_on
 

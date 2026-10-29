@@ -6,7 +6,7 @@ rather than replace the parser, which would measure a patch and miss real ones.
 
 from dataclasses import dataclass, field
 
-from app.extraction.content import parse_count
+from crawlutron.extraction.content import parse_count
 
 
 @dataclass

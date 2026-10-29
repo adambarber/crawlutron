@@ -314,7 +314,7 @@ def test_the_status_view_is_a_declared_record() -> None:
     to a bare record would leave the budget unchanged, re-absorbing the declared key
     set -- so the declaration itself is a tested fact, not an assumption.
     """
-    from app.storage.job_store import JobStatusView
+    from crawlutron.storage.job_store import JobStatusView
 
     assert issubclass(JobStatusView, dict), "a TypedDict is a dict at runtime, so this is the weak half"
     assert getattr(JobStatusView, "__required_keys__", None), "every key of the view must be mandatory"

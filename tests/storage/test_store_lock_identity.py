@@ -11,10 +11,10 @@ from collections.abc import Callable
 
 import pytest
 
-from app.models.crawl_policy import CrawlPolicy
-from app.storage.coordination_counters import CoordinationCounters
-from app.storage.job_store import JobStore
-from app.storage.sqlite_store import process_lock, store_lock_key
+from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.storage.coordination_counters import CoordinationCounters
+from crawlutron.storage.job_store import JobStore
+from crawlutron.storage.sqlite_store import process_lock, store_lock_key
 from tests._policy_factories import job_store
 
 #: The real store classes, bound by name so the proof cannot drift onto a shape

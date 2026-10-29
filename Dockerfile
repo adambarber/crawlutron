@@ -131,8 +131,8 @@ COPY --from=builder --chown=appuser:appuser /root/.local /home/appuser/.local
 COPY --from=camoufox-binary /camoufox-bundle /home/appuser/.cache/camoufox
 
 # Copy application code. The logging helper is in-tree at
-# ``app/runtime/logging_config.py`` (no external shared-tree copy is needed).
-COPY --chown=appuser:appuser app /app/app
+# ``crawlutron/runtime/logging_config.py`` (no external shared-tree copy is needed).
+COPY --chown=appuser:appuser crawlutron /app/crawlutron
 
 # uvicorn applies its logging config in ``Config.__init__`` -- BEFORE the app
 # is imported -- so the service's JSON sink must exist by then or uvicorn's own

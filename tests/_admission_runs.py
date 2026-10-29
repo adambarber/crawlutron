@@ -9,12 +9,12 @@ from __future__ import annotations
 
 from collections import deque
 
-from app.models.crawl_task import CrawlTask
-from app.models.discovered_link import DiscoveredLink
-from app.models.host_policy import HostPolicy
-from app.orchestration.recursive import RecursiveRunState
-from app.transport.scheduler import DomainScheduler
-from app.vocabulary.strategies import BROWSER_HEADLESS
+from crawlutron.models.crawl_task import CrawlTask
+from crawlutron.models.discovered_link import DiscoveredLink
+from crawlutron.models.host_policy import HostPolicy
+from crawlutron.orchestration.recursive import RecursiveRunState
+from crawlutron.transport.scheduler import DomainScheduler
+from crawlutron.vocabulary.strategies import BROWSER_HEADLESS
 from tests._policy_factories import canonical
 from tests._recursive_harnesses import ContentionFreeGate
 
@@ -83,7 +83,7 @@ def minimum_admission_run(frontier, *, http_quota, browser_quota, batch_pages=10
     """A minimal run/state for ``admit_recursive_batch``: only the admission
     path is exercised, with ``respect_robots=False`` short-circuiting robots.
     """
-    from app.vocabulary.limits import ENGINE_BATCH_CONCURRENCY_MULTIPLIER
+    from crawlutron.vocabulary.limits import ENGINE_BATCH_CONCURRENCY_MULTIPLIER
 
     class FixedAdmission:
         def __init__(self, h, b):

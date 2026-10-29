@@ -10,7 +10,7 @@ from __future__ import annotations
 import ast
 import re
 
-from app.config.settings import ENVIRONMENT_FIELD_ALIASES
+from crawlutron.config.settings import ENVIRONMENT_FIELD_ALIASES
 from scripts.ast_scopes import is_body_owner
 from tests.chokepoint_walks import (
     REPO_ROOT,
@@ -101,7 +101,7 @@ def _settings_alias_declaration_constant(
     tree,
     node,
 ) -> bool:
-    if _relative_app_path(path) != "app/config/settings.py":
+    if _relative_app_path(path) != "crawlutron/config/settings.py":
         return False
     parents = parent_map(tree)
     current: ast.AST = node

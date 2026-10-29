@@ -352,9 +352,9 @@ class TestToolsCall:
         async def refuse(*args, **kwargs):
             raise ValueError("host_denied")
 
-        monkeypatch.setattr(f"app.mcp.tools.{handler_name}", refuse)
+        monkeypatch.setattr(f"crawlutron.mcp.tools.{handler_name}", refuse)
         if name == "render":
-            monkeypatch.setattr("app.mcp.tools.get_browser_pool", lambda: object())
+            monkeypatch.setattr("crawlutron.mcp.tools.get_browser_pool", lambda: object())
         resp, payload = await _call_tool(async_client, name, arguments)
 
         assert resp.status_code == 200
@@ -416,8 +416,8 @@ class TestInternalErrorContract:
     """N-4: an unexpected tool exception must stay inside the JSON-RPC shape."""
 
     async def test_unexpected_tool_exception_returns_internal_error(self, monkeypatch):
-        import app.mcp.server as server_mod
-        from app.mcp.server import handle_mcp_request
+        import crawlutron.mcp.server as server_mod
+        from crawlutron.mcp.server import handle_mcp_request
 
         async def boom(**kwargs):
             raise ValueError("simulated tool crash")

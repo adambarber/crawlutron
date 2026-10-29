@@ -7,9 +7,9 @@ so N URLs paid N sequential round-trips; tests pin the concurrent contract.
 import asyncio
 from contextlib import asynccontextmanager
 
-from app.admission.admission import RobotsGate
-from app.models.crawl_policy import CrawlPolicy
-from app.models.discovered_link import DiscoveredLink
+from crawlutron.admission.admission import RobotsGate
+from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.models.discovered_link import DiscoveredLink
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 from tests._recursive_harnesses import drive_recursive_crawl
 from tests._recursive_harnesses import make_crawl_task as _make_job
@@ -143,7 +143,7 @@ async def test_one_raising_robots_check_does_not_kill_the_batch():
 
 async def test_nonrecursive_robots_checks_run_concurrently(monkeypatch):
     """The engine's non-recursive branch must screen its batch with overlap."""
-    from app.orchestration.engine import crawl_request
+    from crawlutron.orchestration.engine import crawl_request
 
     state = {"in_flight": 0, "max_in_flight": 0}
 
@@ -185,7 +185,7 @@ async def test_nonrecursive_robots_checks_run_concurrently(monkeypatch):
 
 async def test_gather_preserves_order_and_skips_delay_when_disallowed():
     """Order is input order; disallowed URLs never pay for a crawl-delay fetch."""
-    from app.admission.admission_links import gather_robots_decisions
+    from crawlutron.admission.admission_links import gather_robots_decisions
 
     delay_calls: list[str] = []
 

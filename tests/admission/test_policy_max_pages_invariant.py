@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.admission.policy import DEFAULT_MAX_PAGES, read_policy
+from crawlutron.admission.policy import DEFAULT_MAX_PAGES, read_policy
 
 #: Every way ``max_pages`` can fail to be a usable explicit value. Each must
 #: resolve to the documented default -- never to the model's silent ``0``.

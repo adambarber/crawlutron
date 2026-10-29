@@ -12,9 +12,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from fastapi import FastAPI
 
-from app.api.dependencies import get_job_store, get_settings, get_shutdown_event
-from app.config.settings import CrawlerSettings
-from app.storage.job_store import JobStore
+from crawlutron.api.dependencies import get_job_store, get_settings, get_shutdown_event
+from crawlutron.config.settings import CrawlerSettings
+from crawlutron.storage.job_store import JobStore
 
 
 def bind_base_overrides(app: FastAPI, *, job_store: JobStore, shutdown_event: asyncio.Event) -> None:

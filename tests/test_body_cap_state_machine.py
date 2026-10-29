@@ -7,7 +7,7 @@ import pytest
 from starlette.requests import Request
 from starlette.responses import Response
 
-from app.api.middleware import MAX_REQUEST_BODY_BYTES, limit_request_body
+from crawlutron.api.middleware import MAX_REQUEST_BODY_BYTES, limit_request_body
 
 CAP = 10
 
@@ -240,7 +240,7 @@ async def test_cap_is_enforced_on_the_app_that_serves_traffic():
     would ever say so -- so this drives the shipped app over its own stack."""
     from httpx import ASGITransport, AsyncClient
 
-    from app.main import app
+    from crawlutron.main import app
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
         oversized = await http.post(

@@ -10,9 +10,9 @@ import json
 
 import pytest
 
-from app.storage.coordination_cookies import SharedCookieStore
-from app.transport import cookie_jar
-from app.transport.cookie_jar import MAX_COOKIE_LIFETIME_SECONDS, CookieJar
+from crawlutron.storage.coordination_cookies import SharedCookieStore
+from crawlutron.transport import cookie_jar
+from crawlutron.transport.cookie_jar import MAX_COOKIE_LIFETIME_SECONDS, CookieJar
 from tests._fetcher_factories import run_default_http_fetcher
 from tests._policy_factories import canonical
 from tests._transport_doubles import MockResponse, patch_http_fetcher_transport

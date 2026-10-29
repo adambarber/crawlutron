@@ -1,4 +1,4 @@
-"""The suite reaches an ``app`` module only through a public name.
+"""The suite reaches a ``crawlutron`` module only through a public name.
 
 A private name is the owner's seam; a test that needs a name the module does not
 make public is asking the module to widen its promise, not a reach to excuse."""
@@ -36,32 +36,32 @@ _PATCH_CALLS = frozenset({"setattr", "object", "delattr"})
 
 
 def _app_class_instances(tree: ast.Module) -> dict[str, str]:
-    """``local -> app class path`` for identifiers typed as an ``app`` class.
+    """``local -> app class path`` for identifiers typed as a ``crawlutron`` class.
 
     An instance-private reach (``cache._index``) names no module, so only a
-    base whose type names an ``app`` class can pin it to that class' home."""
+    base whose type names a ``crawlutron`` class can pin it to that class' home."""
     typed: dict[str, str] = {}
     for node in nodes_of(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             for arg in node.args.args + node.args.kwonlyargs + node.args.posonlyargs:
                 if arg.annotation is not None and isinstance(arg.annotation, ast.Name):
                     home = resolved_expr_name(tree, arg.annotation)
-                    if home.startswith("app."):
+                    if home.startswith("crawlutron."):
                         typed[arg.arg] = home
     for node in nodes_of(tree):
         if not isinstance(node, ast.AnnAssign) or isinstance(node.target, ast.Attribute):
             continue
         if isinstance(node.target, ast.Name) and isinstance(node.annotation, ast.Name):
             home = resolved_expr_name(tree, node.annotation)
-            if home.startswith("app."):
+            if home.startswith("crawlutron."):
                 typed[node.target.id] = home
     for node in nodes_of(tree):
         if not isinstance(node, (ast.Assign, ast.AnnAssign)) or not isinstance(node.value, ast.Call):
             continue
         home = resolved_expr_name(tree, node.value.func)
-        if not home.startswith("app."):
+        if not home.startswith("crawlutron."):
             continue
-        # A call result is an app-class instance only when the callee is a class
+        # A call result is an crawlutron-class instance only when the callee is a class
         # name; PascalCase is the tree's class convention.
         if home.rsplit(".", 1)[-1][:1].islower():
             continue
@@ -72,7 +72,7 @@ def _app_class_instances(tree: ast.Module) -> dict[str, str]:
 
 
 def _instance_private_key(tree: ast.Module, node: ast.Attribute, instances: dict[str, str]) -> str:
-    """Class-qualified reach key for ``inst._private`` on an app-class instance.
+    """Class-qualified reach key for ``inst._private`` on an crawlutron-class instance.
 
     ``cache._index`` with ``cache: ContentCache`` is the same weld as
     ``ContentCache._index``, so the key must share the class' ledger row."""
@@ -87,7 +87,7 @@ def _instance_private_key(tree: ast.Module, node: ast.Attribute, instances: dict
 
 
 def _attribute_reach_keys(tree: ast.Module, instances: dict[str, str]) -> Iterator[tuple[str, int]]:
-    """Resolved reach key and line for every private app attribute read.
+    """Resolved reach key and line for every private crawlutron attribute read.
 
     An instance base resolves to its class home via ``_instance_private_key``;
     any other base falls through to the import-resolved dotted name."""
@@ -100,21 +100,21 @@ def _attribute_reach_keys(tree: ast.Module, instances: dict[str, str]) -> Iterat
 
 
 def _private_app_names(tree: ast.Module) -> dict[str, int]:
-    """``"module.name" -> lineno`` for every private ``app`` name the file reaches.
+    """``"module.name" -> lineno`` for every private ``crawlutron`` name the file reaches.
 
     Import, bound module object, instance attribute and ``setattr`` (both
-    orders) all resolve to one key; non-``app`` targets are skipped."""
+    orders) all resolve to one key; non-``crawlutron`` targets are skipped."""
     found: dict[str, int] = {}
     instances = _app_class_instances(tree)
 
     def record(key: str, lineno: int) -> None:
         module, _, name = key.rpartition(".")
-        if module.startswith("app") and name.startswith("_") and not name.startswith("__"):
+        if module.startswith("crawlutron") and name.startswith("_") and not name.startswith("__"):
             found.setdefault(key, lineno)
 
     from_nodes: tuple[ast.ImportFrom, ...] = from_imports(tree)
     for import_node in from_nodes:
-        if not import_node.module or not import_node.module.startswith("app") or import_node.level:
+        if not import_node.module or not import_node.module.startswith("crawlutron") or import_node.level:
             continue
         for alias in import_node.names:
             record(f"{import_node.module}.{alias.name}", import_node.lineno)
@@ -159,42 +159,42 @@ PRIVATE_IMPORT_LEDGER = Rule(
     bite=lambda: (
         # An undeclared weld: the gate is the only thing standing between this and a test whose import is
         # invisible to a reviewer of the module it reaches.
-        "from app.transport.browser import _undeclared_probe_name\n",
+        "from crawlutron.transport.browser import _undeclared_probe_name\n",
         # And the `import x.y` / `x.y._name` form, which reaches the same private name through a module object
         # instead of a from-import.
-        "import app.orchestration.engine\n\nassert app.orchestration.engine._undeclared_probe\n",
+        "import crawlutron.orchestration.engine\nassert crawlutron.orchestration.engine._undeclared_probe\n",
         # And the string form, which is how the suite actually substitutes most of what it reaches: the
         # private name is a literal argument, so a detector reading imports and attribute reads sees nothing
-        "import app.orchestration.engine as engine\n\n"
+        "import crawlutron.orchestration.engine as engine\n\n"
         'monkeypatch.setattr(engine, "_undeclared_probe_name", lambda: None)\n',
         # An instance private: `cache._index` has no module in its own spelling, so only the base's type
         # (an app class) can pin the reach to the class that owns the member.
-        "from app.transport.content_cache import ContentCache\n\n"
+        "from crawlutron.transport.content_cache import ContentCache\n\n"
         'cache = ContentCache("/tmp/x")\n\nassert cache._undeclared_probe_index\n',
         # And the string-FIRST form, where the target is the first argument, not the replacement.
-        'import pytest\n\nmonkeypatch.setattr("app.api.job_runner._undeclared_probe", lambda: None)\n',
+        'import pytest\n\nmonkeypatch.setattr("crawlutron.api.job_runner._undeclared_probe", lambda: None)\n',
     ),
     clean=lambda: (
         # A public name is the whole point -- it carries no exemption.
-        "from app.orchestration.engine import crawl_request\n",
+        "from crawlutron.orchestration.engine import crawl_request\n",
         # The doc-extraction executor's public teardown is callable.
-        "from app.extraction.content import shutdown_doc_extraction_executor\n",
+        "from crawlutron.extraction.content import shutdown_doc_extraction_executor\n",
         # A name from outside app/ is not this rule's business.
-        "from app.models.crawl_result import EngineCrawlResult\n",
+        "from crawlutron.models.crawl_result import EngineCrawlResult\n",
         # A public name through a bound module object is the same name publicly, so it needs no row either.
-        "import app.extraction.content as extraction\n\nvalue = extraction.extract_content\n",
+        "import crawlutron.extraction.content as extraction\n\nvalue = extraction.extract_content\n",
         # And the same exemption for the string form: a private name on a *test* module, patched by string, is
         # the suite substituting its own double.
         "import tests.membership_gate as gate\n\n"
         'monkeypatch.setattr(gate, "_local_probe_name", lambda: None)\n',
-        # A PUBLIC member on an app-class instance is not a weld.
-        "from app.transport.content_cache import ContentCache\n\n"
+        # A PUBLIC member on an crawlutron-class instance is not a weld.
+        "from crawlutron.transport.content_cache import ContentCache\n\n"
         'cache = ContentCache("/tmp/x")\n\nassert cache.cache_dir\n',
         # A private member on an unrelated local object is not an app reach.
         "class _LocalProbe:\n    def __init__(self):\n        self._probe = 1\n\n"
         "p = _LocalProbe()\n\nassert p._probe\n",
         # A string-first setattr of a PUBLIC app name still needs no row.
-        'monkeypatch.setattr("app.api.job_runner.run_job", fake)\n',
+        'monkeypatch.setattr("crawlutron.api.job_runner.run_job", fake)\n',
     ),
 )
 
@@ -208,7 +208,7 @@ def test_no_rule_violations():
 # ---------------------------------------------------------------------------
 
 
-_APP_DIR = REPO_ROOT / "app"
+_APP_DIR = REPO_ROOT / "crawlutron"
 
 
 def _module_of(path: pathlib.Path) -> str:
@@ -219,14 +219,16 @@ def _cross_module_private_names(tree: ast.Module, path: pathlib.Path) -> dict[st
     """``"module.name" -> lineno`` for private names reached across a module boundary.
 
     ``body_decode.decode_body`` names the owner module, not the bind; a private
-    from-import (``from app.other import _priv``) is the same weld as a read."""
+    from-import (``from crawlutron.other import _priv``) is the same weld as a read."""
     here = _module_of(path)
-    found: dict[str, int] = _private_from_import_names(tree, lambda module: module.startswith("app"), here)
+    found: dict[str, int] = _private_from_import_names(
+        tree, lambda module: module.startswith("crawlutron"), here
+    )
     for key, lineno in _attribute_reach_keys(tree, {}):
-        if not key.startswith("app."):
+        if not key.startswith("crawlutron."):
             continue
         owner, _, attr = key.rpartition(".")
-        if not owner.startswith("app") or "." not in owner or not attr.startswith("_"):
+        if not owner.startswith("crawlutron") or "." not in owner or not attr.startswith("_"):
             continue
         if owner == here or owner == f"{here}.{attr}":
             continue
@@ -249,22 +251,22 @@ APP_PRIVATE_WELDS = Rule(
         "part of the seam between them and the module boundary is a fiction until it is public"
     ),
     bite=lambda: (
-        "from app.transport import body_decode\n\ntext = body_decode._undeclared_probe\n",
-        # The from-import spelling of the same weld: `from app.other import _priv` in an app
+        "from crawlutron.transport import body_decode\n\ntext = body_decode._undeclared_probe\n",
+        # The from-import spelling of the same weld: `from crawlutron.other import _priv` in an app
         # module is a cross-module reach an attribute-only walk never sees.
-        "from app.transport.http_cache import _undeclared_fromimport_probe\n",
+        "from crawlutron.transport.http_cache import _undeclared_fromimport_probe\n",
         # A private TYPE from-import is the same removable seam.
-        "from app.orchestration.request_pipeline import _UndeclaredPipelineState\n",
+        "from crawlutron.orchestration.request_pipeline import _UndeclaredPipelineState\n",
     ),
     clean=lambda: (
         # The public name for the same reach.
-        "from app.transport import body_decode\n\ntext = body_decode.decode_body\n",
+        "from crawlutron.transport import body_decode\n\ntext = body_decode.decode_body\n",
         # A module's own private name is what private means.
         "def helper():\n    return _internal_step()\n",
         # A cross-module PUBLIC call (drain is this module's public door).
-        "from app.transport import pooled_clients as pool\n\npool.drain_pending_client_closes()\n",
+        "from crawlutron.transport import pooled_clients as pool\n\npool.drain_pending_client_closes()\n",
         # A from-import of a PUBLIC name is not a weld.
-        "from app.transport.http_cache import is_expired\n",
+        "from crawlutron.transport.http_cache import is_expired\n",
     ),
 )
 
@@ -275,7 +277,7 @@ _SCRIPTS_DIR = REPO_ROOT / "scripts"
 
 
 def _scripts_private_import_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
-    """Every private ``app`` name a ``scripts`` module reaches.
+    """Every private ``crawlutron`` name a ``scripts`` module reaches.
 
     Same rule of thumb as the test tree: a helper reaching into an ``app``
     private is a weld that needs a public door, and scripts/ was outside this gate."""
@@ -294,12 +296,12 @@ SCRIPTS_PRIVATE_IMPORTS = Rule(
     ),
     scope=lambda *, exclude: trees_under(_SCRIPTS_DIR),
     bite=lambda: (
-        "from app.safety.validation import _undeclared_script_probe\n",
-        "import app.orchestration.engine as engine\n\ncall(engine._private_lift)\n",
+        "from crawlutron.safety.validation import _undeclared_script_probe\n",
+        "import crawlutron.orchestration.engine as engine\n\ncall(engine._private_lift)\n",
     ),
     clean=lambda: (
         # A public app door needs no ledger row.
-        "from app.transport.browser_driver import BrowserDriver\n",
+        "from crawlutron.transport.browser_driver import BrowserDriver\n",
         # A non-app import is not this rule's business.
         "import pathlib\n\nroot = pathlib.Path('.')\n",
     ),
@@ -341,7 +343,7 @@ def _module_public_names(tree: ast.Module) -> frozenset[str]:
 
 
 def _owner_public_names() -> dict[str, frozenset[str]]:
-    """``module -> public names`` for every app module, parsed once per process."""
+    """``module -> public names`` for every crawlutron module, parsed once per process."""
     global _OWNER_PUBLIC
     if _OWNER_PUBLIC is None:
         _OWNER_PUBLIC = {_module_of(path): _module_public_names(tree) for path, tree in trees_under(_APP_DIR)}
@@ -349,7 +351,7 @@ def _owner_public_names() -> dict[str, frozenset[str]]:
 
 
 def _non_owner_public_imports(tree: ast.Module, path: pathlib.Path) -> list[str]:
-    """Public app names this module from-imports from a non-owner module.
+    """Public crawlutron names this module from-imports from a non-owner module.
 
     A name imports from its definition site or a ``__all__``-declared re-export;
     anything else is an undeclared pass-through. Private names are the rule above."""
@@ -359,7 +361,7 @@ def _non_owner_public_imports(tree: ast.Module, path: pathlib.Path) -> list[str]
     app_imports = (
         node
         for node in from_imports(tree)
-        if node.module and node.module.startswith("app") and not node.level
+        if node.module and node.module.startswith("crawlutron") and not node.level
     )
     for node in app_imports:
         owner, _, _leaf = node.module.rpartition(".")
@@ -391,17 +393,17 @@ PUBLIC_OWNER_WELDS = Rule(
         "undeclared pass-through is a second home for one declaration"
     ),
     bite=lambda: (
-        Bites("from app.safety.validation import HostPolicy\n", "HostPolicy"),
-        Bites("from app.admission.admission import job_max_pages\n", "job_max_pages"),
+        Bites("from crawlutron.safety.validation import HostPolicy\n", "HostPolicy"),
+        Bites("from crawlutron.admission.admission import job_max_pages\n", "job_max_pages"),
     ),
     clean=lambda: (
         # The definition site is the whole point.
-        "from app.models.host_policy import HostPolicy\n",
+        "from crawlutron.models.host_policy import HostPolicy\n",
         # A declared __all__ re-export is a public door.
-        "from app.storage.job_store import job_max_pages\n",
-        "from app.transport.http_client_pool import get_async_http_client\n",
+        "from crawlutron.storage.job_store import job_max_pages\n",
+        "from crawlutron.transport.http_client_pool import get_async_http_client\n",
         # A submodule import names a module, not a name.
-        "from app.transport import content_cache\n",
+        "from crawlutron.transport import content_cache\n",
         # Relative imports are intra-package.
         "from .job_store_collections import TERMINAL_STATUSES\n",
     ),
@@ -437,7 +439,7 @@ def _conftest_trees(*, exclude: frozenset[str] = frozenset()) -> tuple[tuple[pat
 
 
 def _conftest_private_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
-    """Every private ``app`` name ``conftest.py`` reaches, with nothing exempted.
+    """Every private ``crawlutron`` name ``conftest.py`` reaches, with nothing exempted.
 
     The autouse fixture has no test to be near -- its reaches are plumbing,
     one obligation (mutating process-wide state), no ledger kind describes it."""
@@ -457,13 +459,14 @@ CONFTEST_WELDS = Rule(
         "expose the reset, because a caller obliged to publish a reset has no other way to publish it"
     ),
     bite=lambda: (
-        "from app.transport import pinned_transport as pinned_mod\n\npinned_mod._undeclared_probe.clear()\n",
+        "from crawlutron.transport import pinned_transport as pinned_mod\n"
+        "pinned_mod._undeclared_probe.clear()\n",
     ),
     clean=lambda: (
         # The shape this rule exists to force: ask the owner, do not touch the state.
-        "from app.transport import pinned_transport\n\npinned_transport.reset_dns_cache()\n",
+        "from crawlutron.transport import pinned_transport\n\npinned_transport.reset_dns_cache()\n",
         # A public app name is the whole point.
-        "from app.transport import pinned_transport\n\npinned_transport.apinned_hops\n",
+        "from crawlutron.transport import pinned_transport\n\npinned_transport.apinned_hops\n",
         # Not an app import, so not this rule's business.
         "import os\n\nos.environ.get('CRAWLUTRON_LOG_LEVEL')\n",
     ),

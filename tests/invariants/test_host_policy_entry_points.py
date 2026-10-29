@@ -19,7 +19,7 @@ _DECISION_NAMES = frozenset(
         "validate_webhook_url_async",
     }
 )
-_MODULE_PREFIXES = ("app.api.", "app.mcp.")
+_MODULE_PREFIXES = ("crawlutron.api.", "crawlutron.mcp.")
 
 
 def _module_name(path: pathlib.Path) -> str:
@@ -158,15 +158,15 @@ def test_host_policy_entry_table_matches_ast_discovery():
 def test_host_policy_discovery_rejects_undeclared_entry_point():
     modules = _app_modules() + (
         (
-            REPO_ROOT / "app/api/_undeclared_entry.py",
+            REPO_ROOT / "crawlutron/api/_undeclared_entry.py",
             ast.parse(
-                "from app.models.host_policy import HostPolicy\n"
-                "from app.models.normalized_url import admit_or_none\n"
+                "from crawlutron.models.host_policy import HostPolicy\n"
+                "from crawlutron.models.normalized_url import admit_or_none\n"
                 "def undeclared_entry(url, *, policy: HostPolicy):\n"
                 "    return admit_or_none(url, policy=policy)\n"
             ),
         ),
     )
     discovered = discover_host_policy_entry_points(modules)
-    assert "app/api/_undeclared_entry.py:undeclared_entry" in discovered
+    assert "crawlutron/api/_undeclared_entry.py:undeclared_entry" in discovered
     assert discovered - _table_entries()

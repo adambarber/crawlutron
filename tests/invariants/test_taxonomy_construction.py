@@ -15,8 +15,8 @@ def test_crawl_strategy_name_members_match_vocabulary():
     and this pins them to the constants."""
     from typing import get_args
 
-    from app.models.taxonomy import CrawlStrategyName
-    from app.vocabulary.strategies import (
+    from crawlutron.models.taxonomy import CrawlStrategyName
+    from crawlutron.vocabulary.strategies import (
         BROWSER_HEADED_WARMED,
         BROWSER_HEADLESS,
         HTTP_CFFI_IMPERSONATE,
@@ -39,14 +39,14 @@ def test_classification_literal_covers_the_enum_exactly():
     alone says they are one set."""
     from typing import get_args
 
-    from app.models.taxonomy import Classification
-    from app.vocabulary.taxonomy import CrawlClassification
+    from crawlutron.models.taxonomy import Classification
+    from crawlutron.vocabulary.taxonomy import CrawlClassification
 
     declared = set(get_args(Classification))
     enum = {member.value for member in CrawlClassification}
     assert enum - declared == set(), (
         "every CrawlClassification member needs a Classification Literal member:"
-        f" missing {sorted(enum - declared)} (app/models/taxonomy.py)"
+        f" missing {sorted(enum - declared)} (crawlutron/models/taxonomy.py)"
     )
     assert declared - enum == set(), (
         "a Classification member with no CrawlClassification member is downgraded"
@@ -59,7 +59,7 @@ def test_crawl_error_is_the_pipeline_additions_over_classification():
 
     ``CrawlError`` derives from the union so membership cannot drift; a
     silently deleted condition narrows the ``error`` field callers key on."""
-    from app.models.taxonomy import PIPELINE_ONLY_CRAWL_ERRORS, Classification, literal_members
+    from crawlutron.models.taxonomy import PIPELINE_ONLY_CRAWL_ERRORS, Classification, literal_members
 
     pipeline_only = literal_members(PIPELINE_ONLY_CRAWL_ERRORS)
     classification = literal_members(Classification)
@@ -138,8 +138,8 @@ def test_result_construction_enforces_membership_at_the_dataclass():
     build site can escape membership checking; a bad direct construction raises."""
     from dataclasses import asdict
 
-    from app.models.crawl_result import CrawlResult, EngineCrawlResult
-    from app.models.crawl_strategy_attempt import CrawlStrategyAttempt
+    from crawlutron.models.crawl_result import CrawlResult, EngineCrawlResult
+    from crawlutron.models.crawl_strategy_attempt import CrawlStrategyAttempt
     from tests._result_builders import engine_result
 
     # The all-member baseline, named once and DERIVED rather than restated.

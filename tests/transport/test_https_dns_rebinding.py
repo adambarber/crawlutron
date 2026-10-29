@@ -1,4 +1,4 @@
-"""HTTPS DNS-rebinding TOCTOU SSRF in app/transport/pinned_transport.
+"""HTTPS DNS-rebinding TOCTOU SSRF in crawlutron/transport/pinned_transport.
 
 HTTPS kept the hostname (for SNI) and re-resolved at connect with no peer-IP
 verification; these tests pin it and assert a rebind is fail-closed.
@@ -12,9 +12,9 @@ import httpcore
 import httpx
 import pytest
 
-from app.transport import http_client_pool as pool_mod
-from app.transport import pinned_transport as pinned
-from app.transport.fetchers import default_http_fetcher
+from crawlutron.transport import http_client_pool as pool_mod
+from crawlutron.transport import pinned_transport as pinned
+from crawlutron.transport.fetchers import default_http_fetcher
 from tests._assertions import block_private_targets
 from tests._policy_factories import canonical
 

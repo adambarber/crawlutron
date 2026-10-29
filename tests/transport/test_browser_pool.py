@@ -4,10 +4,10 @@ import inspect
 
 import pytest
 
-import app.transport.browser_pool as bp
-from app.runtime import pressure_sizing as rp
-from app.transport.browser_driver import BrowserDriver
-from app.transport.browser_pool import (
+import crawlutron.transport.browser_pool as bp
+from crawlutron.runtime import pressure_sizing as rp
+from crawlutron.transport.browser_driver import BrowserDriver
+from crawlutron.transport.browser_pool import (
     BROWSER_POOL_ACQUIRE_TIMEOUT_SECONDS,
     BrowserPool,
     BrowserPoolExhaustedError,
@@ -195,7 +195,7 @@ def _bare_renderer(**overrides):
 
     Only renderer-owned collaborators go through this; page-facing steps use
     :func:`_bare_driver`. Both stay real -- only the page is a double."""
-    from app.transport.browser import BrowserRenderer
+    from crawlutron.transport.browser import BrowserRenderer
 
     return BrowserRenderer(**overrides)
 

@@ -7,8 +7,8 @@ mid-batch pause/cancel; ``save()`` never touches status (atomic CAS only).
 import ast
 import asyncio
 
-from app.models.crawl_policy import CrawlPolicy
-from app.storage.job_store import CrawlJobState, JobStatus, JobStore
+from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.storage.job_store import CrawlJobState, JobStatus, JobStore
 from tests._job_harnesses import frontier, loaded_job, make_job_store, run_to_terminal
 from tests._policy_factories import canonical
 from tests.chokepoint_walks import app_trees, nodes_of, offender
@@ -107,7 +107,7 @@ class TestDeleteFinality:
 
     async def test_restart_recovery_does_not_resume_a_deleted_job(self, tmp_path):
         """A deleted job's resurrected PENDING row must not be re-started on boot."""
-        from app.api.job_recovery import recover_orphaned_running_jobs
+        from crawlutron.api.job_recovery import recover_orphaned_running_jobs
 
         store, job = await self._deleted_job(tmp_path)
         rewound = await recover_orphaned_running_jobs(store)
@@ -167,8 +167,8 @@ class TestErrorStampingGatedOnTheFailedCas:
     """The error field is stamped only when the FAILED CAS lands (#365)."""
 
     async def test_a_lost_cas_leaves_the_error_field_untouched(self, tmp_path):
-        from app.api.job_runner import arecord_terminal_failure
-        from app.storage.job_store import Expected
+        from crawlutron.api.job_runner import arecord_terminal_failure
+        from crawlutron.storage.job_store import Expected
 
         store = make_job_store(tmp_path)
         _running_job(store)
@@ -192,7 +192,7 @@ class TestErrorStampingGatedOnTheFailedCas:
         assert store.load("j1").error is None, "the error was stamped on a row the FAILED CAS did not land on"
 
     async def test_a_won_cas_stamps_the_error(self, tmp_path):
-        from app.api.job_runner import arecord_terminal_failure
+        from crawlutron.api.job_runner import arecord_terminal_failure
 
         store = make_job_store(tmp_path)
         _running_job(store)

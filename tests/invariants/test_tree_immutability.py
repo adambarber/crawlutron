@@ -93,17 +93,17 @@ _BINDING_PASSES = 4
 
 
 def _names_app_tree(component: ast.expr) -> bool:
-    """Whether one path component selects the `app/` tree.
+    """Whether one path component selects the `crawlutron/` tree.
 
-    A relative literal names the tree when its first segment is ``app``; an
-    absolute literal is a real path and any ``app`` segment counts.
+    A relative literal names the tree when its first segment is ``crawlutron``; an
+    absolute literal is a real path and any ``crawlutron`` segment counts.
     """
     if not (isinstance(component, ast.Constant) and isinstance(component.value, str)):
         return False
     parts = [part for part in component.value.split("/") if part not in ("", ".")]
     if not parts:
         return False
-    return parts[0] == "app" or (component.value.startswith("/") and "app" in parts)
+    return parts[0] == "crawlutron" or (component.value.startswith("/") and "crawlutron" in parts)
 
 
 def _path_components(expr: ast.expr) -> list[ast.expr] | None:
@@ -132,10 +132,10 @@ def _tree_role(
     anchors: set[str],
     rooted: set[str],
 ) -> str:
-    """Classify a path expression as the app tree, a service root, or neither.
+    """Classify a path expression as the crawlutron tree, a service root, or neither.
 
     The unnamed-anchor case is the point: a path whose first filesystem anchor
-    this cannot name (`tmp_path`, a parameter) must not be assumed to be `app/`.
+    this cannot name (`tmp_path`, a parameter) must not be assumed to be `crawlutron/`.
     """
     for position, component in enumerate(components):
         if isinstance(component, ast.Name) and component.id in rooted:
@@ -155,7 +155,7 @@ def _tree_role(
 
 
 def _absorb_path_aliases(tree: ast.AST, anchors: set[str], rooted: set[str]) -> bool:
-    """Add names this module binds to a service root or to `app/`."""
+    """Add names this module binds to a service root or to `crawlutron/`."""
     grew = False
     for node in nodes_of(tree):
         if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
@@ -231,8 +231,8 @@ PLANTED_MUTATION = (
     "from scripts import jscpd_gate as gate\n"
     "\n"
     "def test_migrations_clones_are_not_reported(capsys):\n"
-    "    in_migrations = gate.SERVICE_ROOT / 'app' / 'crawl' / 'migrations' / 'zz_probe.py'\n"
-    "    in_production = gate.SERVICE_ROOT / 'app' / 'zz_probe.py'\n"
+    "    in_migrations = gate.SERVICE_ROOT / 'crawlutron' / 'crawl' / 'migrations' / 'zz_probe.py'\n"
+    "    in_production = gate.SERVICE_ROOT / 'crawlutron' / 'zz_probe.py'\n"
     "    in_migrations.write_text('x')\n"
     "    try:\n"
     "        assert True\n"
@@ -258,7 +258,7 @@ TESTS_MUST_NOT_MUTATE_APP = Rule(
     scope=_tests_tree,
     summary=(
         "mirror the path shape under tmp_path and point the code under test at the mirror: "
-        "a test that mutates app/ turns every concurrent tree walk into a list-then-read race, "
+        "a test that mutates crawlutron/ turns every concurrent tree walk into a list-then-read race, "
         "and the detectors that lose it report nothing while looking green"
     ),
     bite=lambda: (
@@ -284,16 +284,16 @@ TESTS_MUST_NOT_MUTATE_APP = Rule(
             "import os\n"
             "\n"
             "ROOT = Path(__file__).resolve().parent.parent\n"
-            "APP = ROOT / 'app'\n"
+            "APP = ROOT / 'crawlutron'\n"
             "\n"
             "def rename_it():\n"
             "    (APP / 'crawl' / 'ids.py').rename(APP / 'crawl' / 'ids_v2.py')\n"
-            "    os.remove(ROOT / 'app' / 'main.py')\n",
+            "    os.remove(ROOT / 'crawlutron' / 'main.py')\n",
             count=2,
         ),
     ),
     clean=lambda: (
-        # A test's own scratch tree is not the production tree, and `read_text` on an app/ module is a
+        # A test's own scratch tree is not the production tree, and `read_text` on a crawlutron/ module is a
         # legitimate thing for a detector test to do.
         MIRRORED_SCRATCH_TREE,
     ),
@@ -301,7 +301,7 @@ TESTS_MUST_NOT_MUTATE_APP = Rule(
 
 
 def test_tests_do_not_mutate_the_production_tree():
-    """No test writes, unlinks, renames, or replaces a path inside `app/`.
+    """No test writes, unlinks, renames, or replaces a path inside `crawlutron/`.
 
     Tree-wide, and read from the tree rather than from a file list, so the
     sweep covers a test added tomorrow with nothing to register.
@@ -312,7 +312,7 @@ def test_tests_do_not_mutate_the_production_tree():
 def test_tree_detectors_bite():
     """Bites: the shapes that actually shipped, and the near-misses beside them.
 
-    The first is the real offender (making `app/` move mid-suite); the rest are
+    The first is the real offender (making `crawlutron/` move mid-suite); the rest are
     ways a fix could regress the rule into a no-op or false alarm.
     """
     TESTS_MUST_NOT_MUTATE_APP.check_bites()

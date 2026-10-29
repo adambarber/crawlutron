@@ -10,9 +10,9 @@ from pathlib import Path
 from fastapi import FastAPI
 from httpx import AsyncClient
 
-from app.api.dependencies import get_job_store, get_result_store, get_settings, get_shutdown_event
-from app.config.settings import CrawlerSettings
-from app.storage import caller_key_store, job_store, result_store
+from crawlutron.api.dependencies import get_job_store, get_result_store, get_settings, get_shutdown_event
+from crawlutron.config.settings import CrawlerSettings
+from crawlutron.storage import caller_key_store, job_store, result_store
 from tests._async_harnesses import serve
 from tests._quota_harness import keyed_client, stores
 
@@ -23,8 +23,8 @@ def isolation_app(
     keys: caller_key_store.CallerKeyStore,
 ) -> FastAPI:
     """A test app with the crawl and key routers over isolated stores."""
-    from app.api.crawl_router import router as crawl_router
-    from app.api.keys_router import router as keys_router
+    from crawlutron.api.crawl_router import router as crawl_router
+    from crawlutron.api.keys_router import router as keys_router
 
     app = FastAPI()
     app.include_router(crawl_router)

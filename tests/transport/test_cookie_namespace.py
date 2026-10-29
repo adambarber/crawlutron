@@ -4,9 +4,9 @@ Without isolation the shared jar leaks cookies across tenants; the namespace
 contextvar is set per ``crawl_request`` from ``cookie_namespace``, keying jars.
 """
 
-from app.storage.coordination_cookies import DEFAULT_MAX_HOSTS_PER_NAMESPACE
-from app.transport.cookie_jar import COOKIE_JAR_MAX_HOSTS_PER_NAMESPACE, COOKIE_NAMESPACE, CookieJar
-from app.transport.request_profile import cookie_namespace_for
+from crawlutron.storage.coordination_cookies import DEFAULT_MAX_HOSTS_PER_NAMESPACE
+from crawlutron.transport.cookie_jar import COOKIE_JAR_MAX_HOSTS_PER_NAMESPACE, COOKIE_NAMESPACE, CookieJar
+from crawlutron.transport.request_profile import cookie_namespace_for
 from tests._cookie_helpers import cookie_file, read_cookie_file
 from tests._policy_factories import canonical
 
@@ -114,7 +114,7 @@ def test_store_backed_crawl_does_not_evict_sibling_tenant_past_cap(tmp_path):
     """The store-backed eviction is also per-namespace (#234). A floods first, then
     B writes, so the global budget is already spent; B's single slot must survive.
     """
-    from app.storage.coordination_cookies import SharedCookieStore
+    from crawlutron.storage.coordination_cookies import SharedCookieStore
 
     jar = CookieJar(
         SharedCookieStore(tmp_path / "coordination.db", max_hosts=DEFAULT_MAX_HOSTS_PER_NAMESPACE)

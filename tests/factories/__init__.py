@@ -8,8 +8,8 @@ from pathlib import Path
 from fastapi import FastAPI
 from httpx import AsyncClient
 
-from app.storage import caller_key_store, job_store, result_store
-from app.transport.cookie_jar import CookieJar
+from crawlutron.storage import caller_key_store, job_store, result_store
+from crawlutron.transport.cookie_jar import CookieJar
 from tests._app_factory import service_app
 from tests._policy_factories import job_store as make_store
 from tests.factories.client import isolation_client

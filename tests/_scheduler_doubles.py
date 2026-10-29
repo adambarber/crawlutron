@@ -5,11 +5,11 @@ envelope (``failed_result_for``), and the ``on_result`` delivery channel."""
 
 from typing import TypeVar
 
-from app.models.crawl_job import CrawlJob
-from app.models.crawl_result import EngineCrawlResult
-from app.models.crawl_task import CrawlTask
-from app.transport.results import failed_result_for
-from app.transport.scheduler import DomainScheduler
+from crawlutron.models.crawl_job import CrawlJob
+from crawlutron.models.crawl_result import EngineCrawlResult
+from crawlutron.models.crawl_task import CrawlTask
+from crawlutron.transport.results import failed_result_for
+from crawlutron.transport.scheduler import DomainScheduler
 from tests._result_builders import make_result
 
 # The two job shapes ``DomainScheduler.run`` is polymorphic over.

@@ -6,7 +6,7 @@ so the division belongs where the budget is DERIVED (hence ``doc_worker_count``)
 
 import pytest
 
-from app.runtime import pressure_sizing as rp
+from crawlutron.runtime import pressure_sizing as rp
 
 
 @pytest.fixture(autouse=True)
@@ -99,8 +99,8 @@ def test_the_content_length_budget_is_split_across_workers(monkeypatch):
     Left whole, the fleet held N times the ``CONTENT_RAM`` knob; the per-page
     ceiling is NOT divided (binds when generous), the fleet RAM aggregate IS.
     """
-    from app.models.crawl_policy_limits import CrawlPolicyLimits
-    from app.transport import content_cache_key as cck
+    from crawlutron.models.crawl_policy_limits import CrawlPolicyLimits
+    from crawlutron.transport import content_cache_key as cck
 
     budget = 16 * 1024 * 1024
     monkeypatch.setattr(cck, "content_ram_budget_bytes", lambda: budget)
@@ -123,8 +123,8 @@ def test_an_explicit_content_cap_is_not_divided(monkeypatch):
 
     Division answers "how much SHARED budget may this process hold"; an explicit
     cap is single-page, and scaling it shrinks an operator-written policy."""
-    from app.models.crawl_policy_limits import CrawlPolicyLimits
-    from app.transport import content_cache_key as cck
+    from crawlutron.models.crawl_policy_limits import CrawlPolicyLimits
+    from crawlutron.transport import content_cache_key as cck
 
     explicit = CrawlPolicyLimits(max_content_length_bytes=5 * 1024 * 1024)
 
@@ -202,7 +202,7 @@ def test_the_content_ram_budget_is_read_at_call_time_not_import_time(monkeypatch
     the only evidence is that a later env change takes effect, so the knob is
     re-read per call through the declared derivation, never a module snapshot.
     """
-    from app.transport import content_cache_key as cck
+    from crawlutron.transport import content_cache_key as cck
 
     monkeypatch.delenv("CRAWLUTRON_CONTENT_RAM_BUDGET_BYTES", raising=False)
     assert cck.content_ram_budget_bytes() == 1 * 1024 * 1024 * 1024

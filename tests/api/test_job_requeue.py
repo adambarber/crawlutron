@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import asyncio
 
-from app.api import job_runner
-from app.config.settings import CrawlerSettings
-from app.models.crawl_policy import CrawlPolicy
-from app.storage.job_store import JobStatus
+from crawlutron.api import job_runner
+from crawlutron.config.settings import CrawlerSettings
+from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.storage.job_store import JobStatus
 from tests._job_harnesses import (
     ScriptedExecute,
     _create_api_job,
@@ -217,7 +217,7 @@ class TestRunnerLifecycle:
     async def test_resume_waits_out_a_stale_predecessor_before_respawning(self, job_store, monkeypatch):
         """#523 COR-08: resume with a live (wedged) predecessor task must not spawn
         a RUNNING row with no runner; the old task is joined or cancelled first."""
-        from app.api.job_lifecycle import tracked_task
+        from crawlutron.api.job_lifecycle import tracked_task
 
         job, hang, settings = _started_hung_job(job_store)
         await _wait_status(job_store, job.job_id, {"running"})
@@ -242,7 +242,7 @@ class TestRunnerLifecycle:
     async def test_boot_backlog_starts_at_most_global_concurrency_runners(self, job_store):
         """#523 COR-09: a 10-job crash backlog must not spawn 10 concurrent
         runners at startup; starts are bounded by the global concurrency."""
-        from app.api import job_lifecycle
+        from crawlutron.api import job_lifecycle
 
         hang = asyncio.Event()
         job_runner.install_execute_crawl(ScriptedExecute(results=[_canned_result(GRAPH_ROOT)], hang=hang))
@@ -261,7 +261,7 @@ class TestRunnerLifecycle:
     async def test_recover_and_start_resumes_pending_jobs(self, job_store):
         import asyncio as _asyncio
 
-        from app.config.settings import CrawlerSettings as _CS
+        from crawlutron.config.settings import CrawlerSettings as _CS
 
         hang = _asyncio.Event()
         job_runner.install_execute_crawl(ScriptedExecute(results=[_canned_result(GRAPH_ROOT)], hang=hang))
@@ -333,9 +333,9 @@ async def test_recovery_cas_lost_logs_warning(caplog):
     import logging
     from unittest.mock import AsyncMock, MagicMock
 
-    from app.api import job_recovery
-    from app.config.settings import CrawlerSettings
-    from app.storage.job_store import JobKind, JobStatus
+    from crawlutron.api import job_recovery
+    from crawlutron.config.settings import CrawlerSettings
+    from crawlutron.storage.job_store import JobKind, JobStatus
 
     mock_store = MagicMock()
     mock_store.alist_jobs = AsyncMock(
@@ -346,7 +346,7 @@ async def test_recovery_cas_lost_logs_warning(caplog):
     mock_store.aset_status = AsyncMock(return_value=False)  # lost CAS
     mock_store.aload = AsyncMock(return_value=None)
 
-    with caplog.at_level(logging.WARNING, logger="app.api.job_recovery"):
+    with caplog.at_level(logging.WARNING, logger="crawlutron.api.job_recovery"):
         await job_recovery.recover_and_start_pending_jobs(
             mock_store, CrawlerSettings.from_mapping({}), asyncio.Event(), lambda *a, **k: None
         )

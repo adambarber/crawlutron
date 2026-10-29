@@ -40,7 +40,7 @@ async def test_recursive_scope_regex_uses_safe_compilation(monkeypatch):
 async def test_recursive_scope_regex_timeout_fails_closed(monkeypatch):
     # A pathological pattern that defeats the regex engine's optimizer must raise RegexTimeout, which the
     # scope filter treats as out-of-scope (fail-closed): the crawl completes, nothing hangs.
-    from app.safety.safe_regex import RegexTimeout
+    from crawlutron.safety.safe_regex import RegexTimeout
 
     calls = {"n": 0}
 
@@ -48,9 +48,9 @@ async def test_recursive_scope_regex_timeout_fails_closed(monkeypatch):
         calls["n"] += 1
         raise RegexTimeout("test-induced budget expiry")
 
-    # The bounded scope check is deduped into app.admission.scope_match, so match_bounded is invoked there;
+    # The bounded scope check is deduped into crawlutron.admission.scope_match; match_bounded runs there;
     # patching that one seam now guards both the recursive loop and the sitemap-seed filter.
-    monkeypatch.setattr("app.admission.scope_match.match_bounded", _always_timeout)
+    monkeypatch.setattr("crawlutron.admission.scope_match.match_bounded", _always_timeout)
     pages = site_linking_to("/a", "/b")
     out = await crawled_results(pages, limits=LINKED_PAIR_LIMITS, policy={"scope_regex": r"^/keep/"})
     assert calls["n"] > 0, "bounded match never invoked"

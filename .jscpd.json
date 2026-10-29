@@ -4,6 +4,6 @@
     "**/.pytest_cache/**",
     "**/node_modules/**",
     "**/.git/**",
-    "**/app/storage/migrations/**"
+    "**/crawlutron/storage/migrations/**"
   ]
 }

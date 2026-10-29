@@ -2,10 +2,10 @@
 RAM-weighted admission gate the recursive path uses -- not run RAM-blind
 against a 256-connection hardcode (#350)."""
 
-from app.orchestration import request_pipeline
-from app.orchestration.engine import crawl_request
-from app.runtime.pressure_memory import MemoryStats
-from app.runtime.pressure_sizing import WeightedAdmission
+from crawlutron.orchestration import request_pipeline
+from crawlutron.orchestration.engine import crawl_request
+from crawlutron.runtime.pressure_memory import MemoryStats
+from crawlutron.runtime.pressure_sizing import WeightedAdmission
 from tests._fetch_doubles import FetcherDouble
 
 

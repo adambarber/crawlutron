@@ -1,10 +1,10 @@
 from dataclasses import dataclass
 
-from app.models.intercepted_xhr_record import InterceptedXhrRecord
-from app.transport.browser import BrowserRenderer
-from app.transport.browser_driver import BrowserDriver
-from app.transport.browser_targets import make_response_handler
-from app.vocabulary.taxonomy import ResultStatus
+from crawlutron.models.intercepted_xhr_record import InterceptedXhrRecord
+from crawlutron.transport.browser import BrowserRenderer
+from crawlutron.transport.browser_driver import BrowserDriver
+from crawlutron.transport.browser_targets import make_response_handler
+from crawlutron.vocabulary.taxonomy import ResultStatus
 from tests._browser_page_doubles import (
     DEFAULT_PAGE_ANSWERS,
     DEFAULT_PAGE_HTML,
@@ -151,7 +151,7 @@ async def render_pinned(monkeypatch, url: str = "http://example.com/"):
     The one navigation a pinned-render test performs, so the two halves of the
     arrangement -- a pinned renderer, and the call into it -- are stated once.
     """
-    from app.models.render_options import RenderOptions
+    from crawlutron.models.render_options import RenderOptions
     from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
     page, renderer = pinned_page_renderer(monkeypatch)
@@ -223,8 +223,8 @@ class FakeRequest:
 
 
 def _fake_browser(html=None, text="doc", metadata=None, status="success", classification="rendered"):
-    from app.models.crawl_result import CrawlResult
-    from app.models.result_factory import terminal_attempt
+    from crawlutron.models.crawl_result import CrawlResult
+    from crawlutron.models.result_factory import terminal_attempt
 
     def worker(job):
         return CrawlResult(
@@ -252,8 +252,8 @@ def ssrf_route_handler(resource_mode=None, *, include_screenshot: bool = False, 
 
     The policy argument is the only difference from calling the factory
     directly, and it keeps these tests about the blocklist, not the guard."""
-    from app.transport.browser import make_ssrf_route_handler
-    from app.transport.pinned_transport import build_pinned_request
+    from crawlutron.transport.browser import make_ssrf_route_handler
+    from crawlutron.transport.pinned_transport import build_pinned_request
     from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
     return make_ssrf_route_handler(
@@ -317,7 +317,7 @@ def scripted_renderer(browser, cm=None, *, sleep=None):
 
     ``sleep`` is a no-op by default; ``cm`` is for reuse assertions that
     count context-manager entries."""
-    from app.transport.browser_driver import BrowserDriver
+    from crawlutron.transport.browser_driver import BrowserDriver
 
     def _sleep(_seconds):
         return None if sleep is None else sleep(_seconds)
@@ -336,7 +336,7 @@ async def render_bare(renderer, url: str = "http://example.com/"):
 
     ``render_once`` rather than ``render``: these tests are about what
     the browser half registers and refuses, not the pooling entry."""
-    from app.models.render_options import RenderOptions
+    from crawlutron.models.render_options import RenderOptions
     from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
     return await renderer.render_once(
@@ -382,7 +382,7 @@ async def run_blocking_document_route():
     crawl for the length of a DNS lookup."""
     import threading
 
-    from app.transport.browser import make_ssrf_route_handler
+    from crawlutron.transport.browser import make_ssrf_route_handler
     from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
     thread_ids: list[int] = []

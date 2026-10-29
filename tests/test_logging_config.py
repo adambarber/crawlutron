@@ -11,7 +11,7 @@ import logging
 
 import pytest
 
-from app.runtime.logging_config import configure_service_logging
+from crawlutron.runtime.logging_config import configure_service_logging
 
 
 @pytest.fixture
@@ -45,7 +45,7 @@ def _last_record(log_file):
 
 def test_module_logger_extras_serialize_to_json(service_sink):
     """Module loggers (app.*) must emit extras as JSON fields, not bare text."""
-    logging.getLogger("app.transport.http").warning(
+    logging.getLogger("crawlutron.transport.http").warning(
         "http_strategy_result_error", extra={"error_code": "boom", "error_detail": "bad"}
     )
     record = _last_record(service_sink)
@@ -58,7 +58,7 @@ def test_module_logger_extras_serialize_to_json(service_sink):
 
 def test_info_records_from_app_loggers_reach_the_sink(service_sink):
     """INFO-level service events must not be dropped on the way out."""
-    logging.getLogger("app.api.job_runner").info("job_submitted")
+    logging.getLogger("crawlutron.api.job_runner").info("job_submitted")
     assert _last_record(service_sink)["message"] == "job_submitted"
 
 
@@ -77,9 +77,9 @@ def test_uvicorn_loggers_route_through_the_service_sink():
     import logging.config
     from pathlib import Path
 
-    import app.main
+    import crawlutron.main
 
-    config_path = Path(app.main.__file__).resolve().parent.parent / "uvicorn-log-config.json"
+    config_path = Path(crawlutron.main.__file__).resolve().parent.parent / "uvicorn-log-config.json"
     config = json.loads(config_path.read_text())
     root = logging.getLogger()
     saved_handlers = root.handlers[:]
@@ -106,7 +106,7 @@ def test_uvicorn_loggers_route_through_the_service_sink():
 
 def test_doc_worker_suppresses_pdfminer_chatter():
     """The doc worker drops pdfminer's expected per-font WARNINGs at the source."""
-    from app.extraction.doc_pool import configure_doc_worker_logging
+    from crawlutron.extraction.doc_pool import configure_doc_worker_logging
 
     pdfminer = logging.getLogger("pdfminer")
     saved_level = pdfminer.level

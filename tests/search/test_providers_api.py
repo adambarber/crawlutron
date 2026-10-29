@@ -9,9 +9,9 @@ import json
 
 import pytest
 
-from app.safety.validation import HostPolicy
-from app.search.providers import BaseProvider, ProviderCall, SearchProviderError
-from app.search.providers_api import ApiKeyProvider, BraveProvider, SerperProvider, TavilyProvider
+from crawlutron.safety.validation import HostPolicy
+from crawlutron.search.providers import BaseProvider, ProviderCall, SearchProviderError
+from crawlutron.search.providers_api import ApiKeyProvider, BraveProvider, SerperProvider, TavilyProvider
 from tests._assertions import awaitable_search, block_private_targets, provider_results
 
 

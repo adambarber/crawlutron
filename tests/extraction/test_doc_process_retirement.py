@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import os
 
-import app.extraction.doc_pool as dp
-from app.extraction.doc_pool import DocExtractionPool, spawn_doc_worker
+import crawlutron.extraction.doc_pool as dp
+from crawlutron.extraction.doc_pool import DocExtractionPool, spawn_doc_worker
 
 
 class _EofPipe:
@@ -50,7 +50,7 @@ def test_doc_worker_runtime_disables_onnxruntime_telemetry(monkeypatch):
     onnxruntime's telemetry thread is the one that aborts with the libc++
     recursive-mutex noise when a worker is torn down mid-flight, and it makes a
     network call a worker has no business making."""
-    import app.extraction.doc_pool as dp
+    import crawlutron.extraction.doc_pool as dp
 
     calls: list[str] = []
     monkeypatch.setattr(dp, "configure_doc_worker_logging", lambda: calls.append("logging"))
@@ -72,7 +72,7 @@ def test_doc_worker_runtime_survives_a_missing_onnxruntime():
     """The quieting is best-effort: a worker without onnxruntime still starts."""
     import sys
 
-    import app.extraction.doc_pool as dp
+    import crawlutron.extraction.doc_pool as dp
 
     saved = sys.modules.pop("onnxruntime", None)
     try:

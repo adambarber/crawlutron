@@ -6,9 +6,9 @@ or a decompression fault; the override row plus the constructor cleanups are the
 
 from __future__ import annotations
 
-from app.transport.cache import HttpCache
-from app.transport.http import http_strategy_result
-from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
+from crawlutron.transport.cache import HttpCache
+from crawlutron.transport.http import http_strategy_result
+from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._fetch_doubles import scripted_fetcher
 from tests._fetcher_factories import make_fetch, run_http_strategy, strategy_request
 from tests._policy_factories import http_strategy_policy

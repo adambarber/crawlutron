@@ -1,4 +1,4 @@
-"""The one way a test obtains the service's ASGI app: ``app.main`` declares the
+"""The one way a test obtains the service's ASGI app: ``crawlutron.main`` declares the
 global as ``FastAPI | None`` (right for a module that may lack FastAPI), but a
 caller needs a real app, so the narrowing lives here once instead of per site.
 """
@@ -11,7 +11,9 @@ def service_app() -> FastAPI:
     no app, and reaching through ``None`` would surface a confusing AttributeError
     several frames from the real cause.
     """
-    from app.main import app
+    from crawlutron.main import app
 
-    assert app is not None, "app.main built no ASGI app -- FastAPI is not importable in this environment"
+    assert app is not None, (
+        "crawlutron.main built no ASGI app -- FastAPI is not importable in this environment"
+    )
     return app

@@ -206,7 +206,7 @@ class TestLookalikes:
 
 class TestCleanCheck:
     def _trees(self, source: str) -> list[tuple[pathlib.Path, ast.Module]]:
-        return [(pathlib.Path("app/x.py"), ast.parse(source))]
+        return [(pathlib.Path("crawlutron/x.py"), ast.parse(source))]
 
     def test_a_tree_with_no_offenders_passes(self):
         _urljoin_rule().check_clean(self._trees("def f():\n    return 1\n"))
@@ -215,14 +215,14 @@ class TestCleanCheck:
         with pytest.raises(AssertionError) as caught:
             _urljoin_rule().check_clean(self._trees("def f(a, b):\n    return urljoin(a, b)\n"))
         message = str(caught.value)
-        assert "app/x.py" in message
+        assert "crawlutron/x.py" in message
         assert "raw urljoin" in message
         assert "URLs are joined only through the chokepoint" in message
 
     def test_the_owner_is_excluded_by_default(self):
         """Sanctioned basenames keep a rule from failing on the owner that defines it."""
         rule = _urljoin_rule(excludes=frozenset({"validation.py"}))
-        rule.check_clean([(pathlib.Path("app/safety/validation.py"), ast.parse("urljoin(a, b)\n"))])
+        rule.check_clean([(pathlib.Path("crawlutron/safety/validation.py"), ast.parse("urljoin(a, b)\n"))])
 
 
 class TestRuleScope:
@@ -292,7 +292,7 @@ class TestAProofStatesWhichModuleItRunsIn:
     claims; both halves must run, so the location is per proof."""
 
     OWNER = pathlib.Path("/repo/app/owner.py")
-    ELSEWHERE = pathlib.Path("/repo/app/transport/other.py")
+    ELSEWHERE = pathlib.Path("/repo/crawlutron/transport/other.py")
     SOURCE = "class R:\n    async def close(self):\n        self._browser = None\n"
 
     @staticmethod

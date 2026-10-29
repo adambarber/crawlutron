@@ -43,7 +43,7 @@ async def test_https_subresource_allows_a_stable_fresh_answer(monkeypatch) -> No
 async def test_wss_target_refuses_a_changed_fresh_answer(monkeypatch) -> None:
     """The wss path has the same no-dial-ownership residual (#540): a fresh
     answer that differs from its immediate repeat closes the socket."""
-    from app.transport.browser_targets import make_ssrf_websocket_handler
+    from crawlutron.transport.browser_targets import make_ssrf_websocket_handler
 
     resolves_in_sequence(monkeypatch, "93.184.216.34", "93.184.216.35")
     ws = _FakeWS("wss://example.com/chat")
@@ -56,7 +56,7 @@ async def test_wss_target_refuses_a_changed_fresh_answer(monkeypatch) -> None:
 def test_check_ssrf_protection_stable_refuses_changed_answer(monkeypatch) -> None:
     """The named verdict itself: two fresh resolves must agree exactly; a
     changed answer set raises (the private-answer law stays in force too)."""
-    from app.transport.pinned_transport import check_ssrf_protection_stable
+    from crawlutron.transport.pinned_transport import check_ssrf_protection_stable
 
     resolves_in_sequence(monkeypatch, "93.184.216.34", "93.184.216.35")
     with pytest.raises(ValueError, match="changed"):
@@ -65,7 +65,7 @@ def test_check_ssrf_protection_stable_refuses_changed_answer(monkeypatch) -> Non
 
 def test_check_ssrf_protection_stable_allows_identical_public_answers(monkeypatch) -> None:
     """Two identical fresh public answers pass the stability verdict."""
-    from app.transport.pinned_transport import check_ssrf_protection_stable
+    from crawlutron.transport.pinned_transport import check_ssrf_protection_stable
 
     resolves_in_sequence(monkeypatch, "93.184.216.34", "93.184.216.34")
     check_ssrf_protection_stable(canonical("https://example.com/"))
@@ -76,7 +76,7 @@ def test_check_ssrf_protection_stable_ignores_answer_order(monkeypatch) -> None:
     must not read as rebinding (set comparison, not list comparison)."""
     import socket
 
-    from app.transport.pinned_transport import check_ssrf_protection_stable
+    from crawlutron.transport.pinned_transport import check_ssrf_protection_stable
 
     block_private_targets(monkeypatch)
     answers = [

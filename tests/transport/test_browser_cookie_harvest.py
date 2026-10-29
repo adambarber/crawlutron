@@ -7,11 +7,11 @@ sync read raced it and retried cookieless; awaiting it fixes that.
 import asyncio
 from contextlib import contextmanager
 
-from app.models.normalized_url import NormalizedUrl
-from app.transport import browser as browser_mod
-from app.transport.browser_cookies import harvest_session_cookies
-from app.transport.browser_driver import BrowserDriver
-from app.transport.cookie_jar import COOKIE_NAMESPACE
+from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.transport import browser as browser_mod
+from crawlutron.transport.browser_cookies import harvest_session_cookies
+from crawlutron.transport.browser_driver import BrowserDriver
+from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE
 from tests._browser_doubles import BrowserFakePage, FakeBrowserDriver, ScriptedPage, build_pinned_renderer
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
@@ -115,7 +115,7 @@ class TestHarvestWaitBounded:
     whole per-URL budget; the finally-block caps the harvest wait."""
 
     async def test_render_finally_harvest_timeout(self):
-        from app.models.render_options import RenderOptions
+        from crawlutron.models.render_options import RenderOptions
 
         url = canonical("http://example.com/page")
         with isolated_browser_cookies(url) as domain:

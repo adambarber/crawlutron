@@ -12,10 +12,10 @@ import ssl
 
 import httpx
 
-from app.models.serialization import to_dict
-from app.transport.classification import classify_error_code
-from app.transport.decompression import DecompressionTooLargeError
-from app.transport.results import crawl_result_from_exception, engine_result_from_exception
+from crawlutron.models.serialization import to_dict
+from crawlutron.transport.classification import classify_error_code
+from crawlutron.transport.decompression import DecompressionTooLargeError
+from crawlutron.transport.results import crawl_result_from_exception, engine_result_from_exception
 from tests._fetcher_factories import invoke_http_strategy, run_http_strategy
 from tests._policy_factories import http_strategy_policy
 
@@ -71,7 +71,7 @@ def test_specific_rows_win_over_the_oserror_base():
 def test_resolver_budget_still_maps_dns_error():
     """The bounded resolver's verdict must not be swallowed by the TimeoutError
     or OSError rows: the request never got to navigate (#383/#405)."""
-    from app.transport.pinned_transport import ResolverBudgetExceeded
+    from crawlutron.transport.pinned_transport import ResolverBudgetExceeded
 
     assert classify_error_code(ResolverBudgetExceeded("over budget")) == "dns_error"
 
@@ -120,7 +120,7 @@ def test_both_failure_primitives_log_the_same_server_side_payload(caplog):
     caplog.set_level(logging.WARNING)
 
     engine = engine_result_from_exception(
-        error=RuntimeError("engine boom /app/engine"),
+        error=RuntimeError("engine boom /crawlutron/engine"),
         original_url="https://example.com/a",
         normalized_url="https://example.com/a",
         strategy="HTTP_DECLARED_CRAWLER",
@@ -147,7 +147,7 @@ def test_both_failure_primitives_log_the_same_server_side_payload(caplog):
         (render_record, render, "BROWSER_HEADLESS"),
     ):
         assert {"strategy", "error_code", "error_detail"} <= set(vars(record))
-        assert record.error_detail in {"engine boom /app/engine", "render boom /app/render"}
+        assert record.error_detail in {"engine boom /crawlutron/engine", "render boom /app/render"}
         assert record.strategy == expected_strategy
         assert record.error_code == result.classification
         assert "/app/" not in json.dumps(to_dict(result), default=str)
@@ -190,7 +190,7 @@ class TestEmittedErrorCodesAreValidClassifications:
     """
 
     async def test_strategy_error_codes_shape_through_the_response_model(self):
-        from app.models.strategy_attempt import StrategyAttempt
+        from crawlutron.models.strategy_attempt import StrategyAttempt
 
         for exc, expected_code in _ERROR_CODE_CASES:
             res = await _run(exc)
@@ -214,7 +214,7 @@ class TestEmittedErrorCodesAreValidClassifications:
         A code with no entry falls through to ``blocked``, the wrong verdict
         for a known-dead fetch -- keeping it eligible for re-crawl.
         """
-        from app.vocabulary.taxonomy import CLASSIFICATION_STATUS_BY_LABEL, status_for_classification
+        from crawlutron.vocabulary.taxonomy import CLASSIFICATION_STATUS_BY_LABEL, status_for_classification
 
         for code in _NEW_ERROR_CODES:
             assert code in CLASSIFICATION_STATUS_BY_LABEL, (

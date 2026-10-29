@@ -12,10 +12,10 @@ def _spy_on_every_teardown(monkeypatch, http_closer) -> list[str]:
     is the real object with its real ``close`` replaced, not a stand-in, so a
     hand-rolled gate that knows one method fails on whatever the next one is.
     """
-    from app import main as main_mod
-    from app.extraction import content as extraction_mod
-    from app.orchestration import engine as engine_mod
-    from app.transport import http_client_pool as http_mod
+    from crawlutron import main as main_mod
+    from crawlutron.extraction import content as extraction_mod
+    from crawlutron.orchestration import engine as engine_mod
+    from crawlutron.transport import http_client_pool as http_mod
 
     ran: list[str] = []
 

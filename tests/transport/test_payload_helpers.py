@@ -3,10 +3,10 @@
 import pytest
 from pydantic import ValidationError
 
-from app.admission.payload_helpers import payload_policy
-from app.admission.policy import PolicyTier, validate_wire_policy
-from app.config.settings import CrawlerSettings
-from app.models.crawl_policy import CrawlPolicy
+from crawlutron.admission.payload_helpers import payload_policy
+from crawlutron.admission.policy import PolicyTier, validate_wire_policy
+from crawlutron.config.settings import CrawlerSettings
+from crawlutron.models.crawl_policy import CrawlPolicy
 
 
 def _normalized_policy(**policy: object) -> CrawlPolicy:
@@ -40,13 +40,13 @@ class TestPayloadPolicyCarriesAdvertisedLimits:
     def test_max_content_length_above_ceiling_rejected(self):
         # An explicit cap must not be a caller-controlled RAM/decompression override: over the hard ceiling it
         # is rejected, like max_rps, never silently clamped into a different contract.
-        from app.vocabulary.limits import MAX_CONTENT_LENGTH_BYTES
+        from crawlutron.vocabulary.limits import MAX_CONTENT_LENGTH_BYTES
 
         with pytest.raises(ValueError):
             _normalized_policy(limits={"max_content_length_bytes": MAX_CONTENT_LENGTH_BYTES + 1})
 
     def test_max_content_length_at_ceiling_survives(self):
-        from app.vocabulary.limits import MAX_CONTENT_LENGTH_BYTES
+        from crawlutron.vocabulary.limits import MAX_CONTENT_LENGTH_BYTES
 
         policy = _normalized_policy(limits={"max_content_length_bytes": MAX_CONTENT_LENGTH_BYTES})
         assert policy.limits.max_content_length_bytes == MAX_CONTENT_LENGTH_BYTES
@@ -54,8 +54,8 @@ class TestPayloadPolicyCarriesAdvertisedLimits:
     def test_max_content_length_above_ceiling_is_a_validation_error(self):
         # The pydantic boundary must 422 oversized caps (le= on the model).
 
-        from app.models.crawl_policy_limits import CrawlPolicyLimits
-        from app.vocabulary.limits import MAX_CONTENT_LENGTH_BYTES
+        from crawlutron.models.crawl_policy_limits import CrawlPolicyLimits
+        from crawlutron.vocabulary.limits import MAX_CONTENT_LENGTH_BYTES
 
         with pytest.raises(ValidationError):
             CrawlPolicyLimits(max_content_length_bytes=MAX_CONTENT_LENGTH_BYTES + 1)
@@ -75,7 +75,7 @@ class TestPydanticDefaultPreservesRamScaling:
     """
 
     def test_default_request_omits_the_cap(self):
-        from app.models.crawl_request import CrawlRequest
+        from crawlutron.models.crawl_request import CrawlRequest
 
         request = CrawlRequest(url="https://example.com/")
         payload = request.model_dump(exclude_none=True)
@@ -83,8 +83,8 @@ class TestPydanticDefaultPreservesRamScaling:
         assert "max_content_length_bytes" not in dumped_limits
 
     def test_explicit_cap_still_flows(self):
-        from app.models.crawl_policy_limits import CrawlPolicyLimits
-        from app.models.crawl_request import CrawlRequest
+        from crawlutron.models.crawl_policy_limits import CrawlPolicyLimits
+        from crawlutron.models.crawl_request import CrawlRequest
 
         request = CrawlRequest(
             url="https://example.com/",
@@ -98,8 +98,8 @@ class TestMaxContentLengthBytesActuallyEnforced:
     async def test_crawl_enforces_explicit_content_cap(self, base_url, monkeypatch):
         # The advertised limit must bite end-to-end: normalization keeps it and the fetcher fails the page
         # with HTTP 413.
-        from app.orchestration.engine import crawl_request
-        from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
+        from crawlutron.orchestration.engine import crawl_request
+        from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "1")
         settings = CrawlerSettings.from_mapping({"CRAWLUTRON_ALLOW_PRIVATE_TARGETS": "1"})
@@ -122,7 +122,7 @@ class TestPayloadHelpersEdges:
     """Cover remaining branches in payload_helpers.py"""
 
     def test_payload_policy_invalid_limits(self):
-        from app.admission.policy import validate_wire_policy
+        from crawlutron.admission.policy import validate_wire_policy
 
         with pytest.raises(ValueError) as cm:
             validate_wire_policy({"limits": "not a dict"}, PolicyTier.model_defaults())
@@ -145,7 +145,7 @@ class TestExplicitEmptyStrategiesIsRejectedNotDefaulted:
 
     def test_an_absent_strategies_key_still_gets_the_default_chain(self):
         """Rejection must not cost the documented default."""
-        from app.vocabulary.strategies import DEFAULT_STRATEGIES
+        from crawlutron.vocabulary.strategies import DEFAULT_STRATEGIES
 
         assert [s.value for s in _normalized_policy().strategies] == DEFAULT_STRATEGIES
 

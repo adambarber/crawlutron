@@ -50,8 +50,8 @@ def literal_typed_field_members() -> FieldMembers:
     """Every Literal field across the result dataclasses, as ``field -> members``.
 
     The list *is* the models: members come from literal_members over
-    ``app.models``, so a new field is covered the day it is added."""
-    from app.models import taxonomy
+    ``crawlutron.models``, so a new field is covered the day it is added."""
+    from crawlutron.models import taxonomy
     from tests.model_index import resolve_declared_type
 
     out: dict[str, set[str]] = {}
@@ -334,7 +334,7 @@ _STDALIAS_MODULES = frozenset({"re"})
 # decompress_body is the only entry: the cap/bypass detectors (test_bounds.py)
 # key on its literal name, so an aliased call must be reported before it slips past them unseen.
 _SANCTIONED_FUNC_MODULES: dict[str, frozenset[str]] = {
-    "decompress_body": frozenset({"app.transport.decompression"}),
+    "decompress_body": frozenset({"crawlutron.transport.decompression"}),
 }
 
 
@@ -399,7 +399,7 @@ def aliased_dynamic_pattern_re_offenders(tree: ast.AST, path: pathlib.Path) -> l
                 path,
                 node.lineno,
                 f"{func.value.id}.{func.attr}(<dynamic pattern>) -- alias of re;"
-                " route through app.safety.safe_regex",
+                " route through crawlutron.safety.safe_regex",
             )
         )
     return out

@@ -14,7 +14,7 @@ def test_default_max_content_length_is_none_so_ram_scaling_stays_live():
     to None (absent => RAM-scaled), keeping explicit values as true overrides.
     """
     sys.path.insert(0, str(_APP_ROOT))
-    from app.models.crawl_policy_limits import CrawlPolicyLimits
+    from crawlutron.models.crawl_policy_limits import CrawlPolicyLimits
 
     limits = CrawlPolicyLimits()
     assert limits.max_content_length_bytes is None
@@ -22,6 +22,6 @@ def test_default_max_content_length_is_none_so_ram_scaling_stays_live():
 
 def test_engine_fallback_limit_matches():
     sys.path.insert(0, str(_APP_ROOT))
-    from app.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
+    from crawlutron.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 
     assert DEFAULT_MAX_CONTENT_LENGTH_BYTES == 10 * 1024 * 1024

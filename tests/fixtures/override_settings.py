@@ -11,7 +11,7 @@ def override_settings():
 
     The suite's only spelling of "env plus overrides becomes settings";
     test files used to carry private module-level copies of the same lines."""
-    from app.config.settings import CrawlerSettings
+    from crawlutron.config.settings import CrawlerSettings
     from tests._app_factory import service_app
 
     app = service_app()

@@ -10,7 +10,7 @@ from unittest import mock
 
 import pytest
 
-from app.safety.atomic_write import atomic_write_text
+from crawlutron.safety.atomic_write import atomic_write_text
 
 
 def _watch_fsync(monkeypatch, calls: list[int]) -> None:

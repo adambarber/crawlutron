@@ -9,7 +9,7 @@ from tests._policy_factories import canonical
 
 def _planted_jar(namespace: str):
     """The process jar holding one hop cookie in ``namespace``; state reset around."""
-    from app.transport.cookie_jar import global_cookie_jar, reset_process_state
+    from crawlutron.transport.cookie_jar import global_cookie_jar, reset_process_state
 
     reset_process_state()
     jar = global_cookie_jar()
@@ -19,7 +19,7 @@ def _planted_jar(namespace: str):
 
 def _hop_under(namespace: str):
     """One redirect hop with ``namespace`` bound; the (url, headers) result."""
-    from app.transport.cookie_jar import COOKIE_NAMESPACE, reset_process_state
+    from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE, reset_process_state
 
     _planted_jar(namespace)
     token = COOKIE_NAMESPACE.set(namespace)
@@ -34,7 +34,7 @@ def _hop_under(namespace: str):
 def _run_redirect(headers):
     import asyncio
 
-    from app.transport.pinned_transport import redirect_target
+    from crawlutron.transport.pinned_transport import redirect_target
 
     return asyncio.run(
         redirect_target(canonical("http://a.example/x"), headers, 301, "http://b.example/y", 0)
@@ -64,7 +64,7 @@ def test_browser_harvest_keys_by_the_crawl_namespace():
     A keyed crawl's harvested session must never surface to an anonymous or
     other-tenant read: the store and the get are keyed by the same namespace.
     """
-    from app.transport import browser_cookies
+    from crawlutron.transport import browser_cookies
 
     browser_cookies.reset_process_state()
     try:
@@ -85,8 +85,8 @@ def test_browser_harvest_defaults_to_the_bound_contextvar_namespace():
 
     release_page calls the harvest without an explicit namespace, so the default
     must be the bound crawl namespace -- not a hardcoded shared slot."""
-    from app.transport import browser_cookies
-    from app.transport.cookie_jar import COOKIE_NAMESPACE
+    from crawlutron.transport import browser_cookies
+    from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE
 
     browser_cookies.reset_process_state()
     try:
@@ -115,9 +115,9 @@ def _page_with_cookies(cookies):
 def _run_harvest(page, *, namespace=None):
     import asyncio
 
-    from app.models.host_policy import HostPolicy
-    from app.models.normalized_url import NormalizedUrl
-    from app.transport.browser_cookies import harvest_session_cookies
+    from crawlutron.models.host_policy import HostPolicy
+    from crawlutron.models.normalized_url import NormalizedUrl
+    from crawlutron.transport.browser_cookies import harvest_session_cookies
 
     url = NormalizedUrl("http://example.com/", policy=HostPolicy.unrestricted())
 

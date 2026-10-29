@@ -11,17 +11,17 @@ import pathlib
 
 import pytest
 
-from app.runtime.process_state import ProcessStateOwner
+from crawlutron.runtime.process_state import ProcessStateOwner
 from tests.chokepoint_walks import REPO_ROOT
 
 OWNERS: tuple[str, ...] = (
-    "app.runtime.cgroup_sense",
-    "app.orchestration.engine",
-    "app.transport.fetch_helpers",
-    "app.transport.browser_cookies",
-    "app.transport.cookie_jar",
-    "app.transport.pooled_clients",
-    "app.transport.pinned_transport",
+    "crawlutron.runtime.cgroup_sense",
+    "crawlutron.orchestration.engine",
+    "crawlutron.transport.fetch_helpers",
+    "crawlutron.transport.browser_cookies",
+    "crawlutron.transport.cookie_jar",
+    "crawlutron.transport.pooled_clients",
+    "crawlutron.transport.pinned_transport",
 )
 
 
@@ -82,7 +82,7 @@ def test_engine_reset_empties_the_shared_content_cache() -> None:
     #147: the shared content cache was emptied by nothing and seen by nothing.
     A seeded entry survived both halves.
     """
-    import app.orchestration.engine as engine
+    import crawlutron.orchestration.engine as engine
 
     cache = engine.get_shared_content_cache()
     cache.set("engine-reset-probe", {"data": "value"})
@@ -100,7 +100,7 @@ def test_every_owner_is_listed() -> None:
     """
     listed = {name.rpartition(".")[2] for name in OWNERS}
     found: set[str] = set()
-    for path in sorted((REPO_ROOT / "app").rglob("*.py")):
+    for path in sorted((REPO_ROOT / "crawlutron").rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         names = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
         if {"reset_process_state", "has_process_state"} <= names:

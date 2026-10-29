@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from app.models.crawl_strategy import CrawlStrategy
-from app.orchestration.strategy_chain import starting_strategies
-from app.transport.scheduler import DomainScheduler
-from app.vocabulary.strategies import BROWSER_HEADLESS, HTTP_CFFI_IMPERSONATE, HTTP_DECLARED_CRAWLER
+from crawlutron.models.crawl_strategy import CrawlStrategy
+from crawlutron.orchestration.strategy_chain import starting_strategies
+from crawlutron.transport.scheduler import DomainScheduler
+from crawlutron.vocabulary.strategies import BROWSER_HEADLESS, HTTP_CFFI_IMPERSONATE, HTTP_DECLARED_CRAWLER
 
 # The policy ladder as the enum members `starting_strategies` validates, not as the bare name strings.
 LADDER: list[CrawlStrategy] = [
@@ -65,7 +65,7 @@ class TestExecuteCrawlChainPinningFailureUnpin:
     async def test_browser_pool_exhaustion_unpins_and_falls_back_to_http(self) -> None:
         """When the pinned browser strategy exhausts its pool, the chain clears the
         pin and serves the page over the HTTP fallback."""
-        from app.vocabulary.strategies import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
+        from crawlutron.vocabulary.strategies import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
         from tests._browser_doubles import _fake_browser
         from tests._chain_policies import chain_policy
         from tests._fetcher_factories import request_fetcher, run_chain

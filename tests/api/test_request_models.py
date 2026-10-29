@@ -14,8 +14,8 @@ import pytest
 from httpx import AsyncClient
 from pydantic import BaseModel, ValidationError
 
-from app.models.crawl_request import CrawlRequest
-from app.models.render_request import RenderRequest
+from crawlutron.models.crawl_request import CrawlRequest
+from crawlutron.models.render_request import RenderRequest
 from tests._app_factory import service_app
 
 
@@ -73,9 +73,9 @@ _BOUND_REQUEST_BODIES = (
 
 #: Derived from the package, so a model is covered the day its file is written.
 def _wire_model_modules() -> tuple[ModuleType, ...]:
-    package = importlib.import_module("app.models")
+    package = importlib.import_module("crawlutron.models")
     names = (m.name for m in pkgutil.iter_modules(package.__path__))
-    return tuple(importlib.import_module(f"app.models.{name}") for name in names)
+    return tuple(importlib.import_module(f"crawlutron.models.{name}") for name in names)
 
 
 def _declared_models() -> dict[str, type[BaseModel]]:
@@ -204,7 +204,7 @@ def test_validator_values_honor_the_header_value_law():
     """Cached validators ride If-None-Match/If-Modified-Since verbatim, so each
     is a header value at one remove: the #441 law applies at the model edge --
     CRLF in if_none_match is refused (a 422 at the API) (#525 SEC-08)."""
-    from app.models.fetch_validators import FetchValidators
+    from crawlutron.models.fetch_validators import FetchValidators
 
     with pytest.raises(ValidationError, match="if_none_match"):
         FetchValidators(if_none_match='"v1"\r\nX-Smuggled: 1')
@@ -251,7 +251,7 @@ class TestRequestCollectionsAreBounded:
     MAX_HEADERS = 64
 
     def test_url_lists_are_capped(self):
-        from app.models.crawl_request import CrawlRequest
+        from crawlutron.models.crawl_request import CrawlRequest
 
         at_ceiling = {"urls": [f"https://example.com/{index}" for index in range(self.MAX_URLS)]}
         assert len(CrawlRequest(**at_ceiling).urls or []) == self.MAX_URLS
@@ -263,8 +263,8 @@ class TestRequestCollectionsAreBounded:
 
         Three models bind URLs through one base; a ceiling on only the biggest
         leaves the other two uncapped -- the shape this test exists to prevent."""
-        from app.models.map_request import MapRequest
-        from app.models.render_request import RenderRequest
+        from crawlutron.models.map_request import MapRequest
+        from crawlutron.models.render_request import RenderRequest
 
         too_many = [f"https://example.com/{index}" for index in range(self.MAX_URLS + 1)]
         for model in (MapRequest, RenderRequest):
@@ -272,7 +272,7 @@ class TestRequestCollectionsAreBounded:
                 model(urls=too_many)
 
     def test_validator_maps_are_capped(self):
-        from app.models.crawl_request import CrawlRequest
+        from crawlutron.models.crawl_request import CrawlRequest
 
         at_ceiling = {f"https://example.com/{i}": {"if_none_match": "x"} for i in range(self.MAX_VALIDATORS)}
         # A url source is required alongside it -- unrelated to the cap, but the model will not validate a
@@ -286,7 +286,7 @@ class TestRequestCollectionsAreBounded:
             CrawlRequest(url="https://example.com/0", validators=over)
 
     def test_header_maps_are_capped(self):
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         at_ceiling = {f"x-custom-{i}": "v" for i in range(self.MAX_HEADERS)}
         assert len(CrawlPolicy(headers=at_ceiling).headers) == self.MAX_HEADERS
@@ -296,7 +296,7 @@ class TestRequestCollectionsAreBounded:
 
     def test_the_credential_ceiling_still_holds(self):
         """Pins the pre-existing cap so the siblings are not capped BELOW it by accident."""
-        from app.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy import CrawlPolicy
 
         at_ceiling = {f"https://h{i}.example": {"kind": "bearer", "token": "t"} for i in range(32)}
         assert len(CrawlPolicy(credentials=at_ceiling).credentials) == 32

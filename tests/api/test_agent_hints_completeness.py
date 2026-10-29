@@ -2,10 +2,10 @@
 
 import pytest
 
-from app.discovery.agent_hints import agent_hints_payload
-from app.models.crawl_extraction_method import CrawlExtractionMethod
-from app.models.crawl_strategy import CrawlStrategy
-from app.vocabulary.extraction import EXTRACTION_DESCRIPTIONS
+from crawlutron.discovery.agent_hints import agent_hints_payload
+from crawlutron.models.crawl_extraction_method import CrawlExtractionMethod
+from crawlutron.models.crawl_strategy import CrawlStrategy
+from crawlutron.vocabulary.extraction import EXTRACTION_DESCRIPTIONS
 
 
 def test_hints_advertise_every_extraction_method():

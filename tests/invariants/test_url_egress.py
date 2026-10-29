@@ -124,8 +124,8 @@ def test_scope_regex_compiler_has_exactly_one_definition():
     bounds = [label for label in found if "length bound" in label]
     assert len(compilers) == 1, f"scope-regex compiler duplicated again: {compilers}"
     assert len(bounds) == 1, f"scope-regex length bound duplicated again: {bounds}"
-    assert "app/admission/admission_links.py" in compilers[0], compilers
-    assert "app/admission/admission_links.py" in bounds[0], bounds
+    assert "crawlutron/admission/admission_links.py" in compilers[0], compilers
+    assert "crawlutron/admission/admission_links.py" in bounds[0], bounds
 
 
 def _frontier_expression(node: ast.AST) -> bool:
@@ -134,7 +134,7 @@ def _frontier_expression(node: ast.AST) -> bool:
 
 # The admission chokepoint owns the pattern it bans: admit_job_links is the one function allowed to grow a
 # frontier, so the sweep that bans direct growth everywhere else has to skip the module that defines it.
-_ADMISSION_CHOKEPOINT = "app/admission/admission_links.py"
+_ADMISSION_CHOKEPOINT = "crawlutron/admission/admission_links.py"
 
 
 def _direct_frontier_growth_offenders(
@@ -205,17 +205,17 @@ JOB_FRONTIER_GROWTH_ONLY_USES_FUNNEL = Rule(
         "replacement, alias or slice mutation elsewhere re-opens the funnel every "
         "other entry point is collapsed through"
     ),
-    skip=frozenset({"app/admission/admission.py"}),  # admit_job_links lives here
+    skip=frozenset({"crawlutron/admission/admission.py"}),  # admit_job_links lives here
     kwargs_for=lambda relative: (
         {"allowed_functions": frozenset({"normalize_job_state"})}
-        if relative in ("app/storage/job_store_state.py", "app/storage/job_store_read.py")
+        if relative in ("crawlutron/storage/job_store_state.py", "crawlutron/storage/job_store_read.py")
         else {"allowed_functions": frozenset({"_persist"})}
-        if relative == "app/storage/job_store.py"
+        if relative == "crawlutron/storage/job_store.py"
         else {"allowed_functions": frozenset({"admit_discovered_links", "_admit_chunk"})}
-        if relative == "app/admission/admission_links.py"
+        if relative == "crawlutron/admission/admission_links.py"
         else {}
     ),
-    proof_path=REPO_ROOT / "app" / "api" / "job_runner.py",
+    proof_path=REPO_ROOT / "crawlutron" / "api" / "job_runner.py",
     bite=lambda: (
         Bites(
             "def run(job, url):\n    job.frontier.append(url)\n",
@@ -243,9 +243,9 @@ JOB_FRONTIER_GROWTH_ONLY_USES_FUNNEL = Rule(
 
 
 _FILTER_NAMES = {
-    "app.vocabulary.hosts.is_analytics_host": "is_analytics_host",
-    "app.vocabulary.hosts.is_document_url": "is_document_url",
-    "app.admission.scope_match.scope_allows": "scope_allows",
+    "crawlutron.vocabulary.hosts.is_analytics_host": "is_analytics_host",
+    "crawlutron.vocabulary.hosts.is_document_url": "is_document_url",
+    "crawlutron.admission.scope_match.scope_allows": "scope_allows",
 }
 
 
@@ -253,8 +253,8 @@ def _imported_filter_names(tree: ast.Module) -> dict[str, str]:
     aliases: dict[str, str] = {}
     for node in nodes_of(tree):
         if isinstance(node, ast.ImportFrom) and node.module in {
-            "app.vocabulary.hosts",
-            "app.admission.scope_match",
+            "crawlutron.vocabulary.hosts",
+            "crawlutron.admission.scope_match",
         }:
             for imported in node.names:
                 canonical = f"{node.module}.{imported.name}"
@@ -316,7 +316,7 @@ SHARED_ADMISSION_FILTER_SET_HAS_NO_TWIN_LIST = Rule(
 
 
 def test_job_frontier_detector_sanction_is_narrow():
-    path = REPO_ROOT / "app" / "crawl" / "job_store.py"
+    path = REPO_ROOT / "crawlutron" / "crawl" / "job_store.py"
     allowed = frozenset({"normalize_job_state", "_persist"})
     bad = ast.parse("def grow_frontier(job):\n    job.frontier.append('x')\n")
     assert _direct_frontier_growth_offenders(bad, path, allowed_functions=allowed)

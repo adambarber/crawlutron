@@ -3,14 +3,14 @@ from __future__ import annotations
 import httpx
 import pytest
 
-import app.transport.fetchers as fetchers_mod
-import app.transport.http_client_pool as pool_mod
-import app.transport.pinned_transport as pinned_mod
-from app.config.settings import CrawlerSettings
-from app.extraction.content import extract_post_fetch_discovery
-from app.models.normalized_url import NormalizedUrl
-from app.orchestration.engine import crawl_request
-from app.safety.validation import HostPolicy
+import crawlutron.transport.fetchers as fetchers_mod
+import crawlutron.transport.http_client_pool as pool_mod
+import crawlutron.transport.pinned_transport as pinned_mod
+from crawlutron.config.settings import CrawlerSettings
+from crawlutron.extraction.content import extract_post_fetch_discovery
+from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.orchestration.engine import crawl_request
+from crawlutron.safety.validation import HostPolicy
 from tests._browser_doubles import _fake_browser
 from tests._fetcher_factories import make_html_fetcher, routed_fetcher
 from tests._policy_factories import canonical
@@ -154,8 +154,8 @@ async def test_render_request_never_invokes_worker_for_policy_blocked_host():
         calls.append(job.url.raw)
         return rendered(job)
 
-    from app.api.render import render_request
-    from app.models.render_request import RenderRequest
+    from crawlutron.api.render import render_request
+    from crawlutron.models.render_request import RenderRequest
 
     with pytest.raises(ValueError, match="host_denied"):
         await render_request(

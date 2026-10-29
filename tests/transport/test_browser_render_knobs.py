@@ -8,14 +8,14 @@ import tempfile
 
 import pytest
 
-from app.transport.browser_driver import BrowserDriver
+from crawlutron.transport.browser_driver import BrowserDriver
 from tests._assertions import set_optional_env
 from tests._browser_doubles import ScriptedPage
 from tests._policy_factories import BOOL_ENV_CASES
 
 
 def _settings(**overrides):
-    from app.config.settings import CrawlerSettings
+    from crawlutron.config.settings import CrawlerSettings
 
     return CrawlerSettings(**overrides)
 
@@ -69,7 +69,7 @@ def test_browser_knob_defaults_unchanged():
     Shipped defaults live in constants/settings, and a driver reads its knobs
     at construction -- no module global to patch and drift behind.
     """
-    from app.vocabulary.limits import (
+    from crawlutron.vocabulary.limits import (
         DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS,
         DEFAULT_LAZY_SCROLL_DELAY_SECONDS,
         DEFAULT_LAZY_SCROLL_STEPS,
@@ -105,7 +105,7 @@ def test_explicit_cache_dir_wins_over_settings():
 
 def test_browser_knob_env_mapping():
     """Env vars flow through CrawlerSettings; garbage falls back to defaults."""
-    from app.config.settings import CrawlerSettings
+    from crawlutron.config.settings import CrawlerSettings
 
     mapped = CrawlerSettings.from_mapping(
         {
@@ -130,7 +130,7 @@ def test_browser_knob_env_mapping():
 
 
 def test_log_knob_env_mapping():
-    from app.config.settings import CrawlerSettings
+    from crawlutron.config.settings import CrawlerSettings
 
     log_file = f"{tempfile.gettempdir()}/crawler.jsonl"
     mapped = CrawlerSettings.from_mapping(

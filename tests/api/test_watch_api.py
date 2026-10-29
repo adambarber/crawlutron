@@ -6,7 +6,7 @@ reports was written by the sweep, so tests write via the store, read via the API
 import pytest
 from httpx import Response
 
-from app.vocabulary.taxonomy import CrawlClassification
+from crawlutron.vocabulary.taxonomy import CrawlClassification
 from tests._assertions import block_private_targets, plaintext_webhook_refusal
 from tests._policy_factories import canonical
 from tests._watch_harnesses import watch_client

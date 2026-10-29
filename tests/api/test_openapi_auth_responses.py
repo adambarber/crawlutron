@@ -10,8 +10,8 @@ import pytest
 from fastapi.dependencies.utils import get_typed_signature
 from fastapi.routing import APIRoute
 
-from app.api import crawl_router, identity_router, jobs_router, keys_router, watch_router
-from app.api.caller_auth import get_caller_identity, get_keys_caller
+from crawlutron.api import crawl_router, identity_router, jobs_router, keys_router, watch_router
+from crawlutron.api.caller_auth import get_caller_identity, get_keys_caller
 
 _AUTH_DEPS = {get_caller_identity.__name__, get_keys_caller.__name__}
 _AUTH_ROUTERS = (crawl_router, identity_router, jobs_router, keys_router, watch_router)
@@ -58,7 +58,7 @@ def _auth_ops() -> list[tuple[str, str]]:
 
 
 def _spec_responses() -> dict[tuple[str, str], set[str]]:
-    from app.main import app
+    from crawlutron.main import app
 
     spec = app.openapi()
     return {

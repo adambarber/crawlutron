@@ -8,11 +8,11 @@ from typing import cast
 import pytest
 from fastapi import HTTPException
 
-from app.api import job_runner
-from app.config.settings import CrawlerSettings
-from app.storage.job_store import TERMINAL_STATUSES, JobStatus, JobStore
-from app.storage.result_store import CrawlResultStore
-from app.storage.watch_store import WatchStore
+from crawlutron.api import job_runner
+from crawlutron.config.settings import CrawlerSettings
+from crawlutron.storage.job_store import TERMINAL_STATUSES, JobStatus, JobStore
+from crawlutron.storage.result_store import CrawlResultStore
+from crawlutron.storage.watch_store import WatchStore
 from tests._api_harnesses import spy_on_history_reads
 from tests._job_harnesses import ScriptedExecute, _seed_job, make_crawled_job_store, make_job_store
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, deployment_tier
@@ -141,7 +141,7 @@ class TestStartupRecoveryStaysOffTheLoop:
     pins that the recovery never blocks the loop that just booted the service."""
 
     async def test_recovery_rewinds_and_starts_without_touching_the_loop(self, loop_guard_store):
-        from app.api.job_runner import recover_and_start_pending_jobs, start_job
+        from crawlutron.api.job_runner import recover_and_start_pending_jobs, start_job
 
         job_runner.reset_job_runner()
         job_runner.install_execute_crawl(ScriptedExecute(results=[_canned_result(_ROOT)]))
@@ -156,7 +156,7 @@ class TestStartupRecoveryStaysOffTheLoop:
             job_runner.reset_job_runner()
 
     async def test_rewinding_a_crash_orphan_never_touches_the_loop(self, loop_guard_store):
-        from app.api.job_runner import recover_orphaned_running_jobs
+        from crawlutron.api.job_runner import recover_orphaned_running_jobs
 
         job = await _off_loop(_seed_job, loop_guard_store, _ROOT, {"limits": {"max_depth": 1}}, running=True)
         rewound = await recover_orphaned_running_jobs(loop_guard_store)
@@ -168,8 +168,8 @@ class TestStartupRecoveryStaysOffTheLoop:
         """A booting/other worker must not rewind a RUNNING job its own process is
         driving: the task registry is the ownership check, so a live task means
         the row is not a crash orphan (#220)."""
-        from app.api.job_lifecycle import start_tracked_task
-        from app.api.job_runner import recover_orphaned_running_jobs
+        from crawlutron.api.job_lifecycle import start_tracked_task
+        from crawlutron.api.job_runner import recover_orphaned_running_jobs
 
         owned = await _off_loop(
             _seed_job, loop_guard_store, _ROOT, {"limits": {"max_depth": 1}}, running=True
@@ -195,7 +195,7 @@ class TestSingleShotResultStoreStaysOffTheLoop:
     async def test_reading_a_stored_single_shot_response_stays_off_the_loop(
         self, loop_guard_store, result_store
     ):
-        from app.api.crawl_endpoint import get_crawl_result
+        from crawlutron.api.crawl_endpoint import get_crawl_result
 
         await _off_loop(loop_guard_store.create_single_shot, "req-1", _ROOT, {"strategies": []})
         await _off_loop(loop_guard_store.set_status, "req-1", JobStatus.COMPLETED, expected=JobStatus.PENDING)
@@ -205,7 +205,7 @@ class TestSingleShotResultStoreStaysOffTheLoop:
         assert json.loads(cast("str | bytes | bytearray", response.body))["request_id"] == "req-1"
 
     async def test_a_pending_single_shot_read_stays_off_the_loop(self, loop_guard_store, result_store):
-        from app.api.crawl_endpoint import get_crawl_result
+        from crawlutron.api.crawl_endpoint import get_crawl_result
 
         await _off_loop(loop_guard_store.create_single_shot, "req-2", _ROOT, {"strategies": []})
         with pytest.raises(HTTPException) as raised:
@@ -247,7 +247,7 @@ class TestStatusEndpointAnswersOnlyForTerminalJobs:
     async def test_a_running_job_that_has_written_results_is_still_pending(
         self, loop_guard_store, result_store
     ):
-        from app.api.crawl_endpoint import get_crawl_result
+        from crawlutron.api.crawl_endpoint import get_crawl_result
 
         await _off_loop(loop_guard_store.create_single_shot, "req-3", _ROOT, {"strategies": []})
         await _job_with_results_written(loop_guard_store, "req-3")
@@ -263,7 +263,7 @@ class TestStatusEndpointAnswersOnlyForTerminalJobs:
 
         The runner's terminal write is an unchecked CAS, so a paused job is
         published anyway; keyed on the store alone the endpoint answers 200."""
-        from app.api.crawl_endpoint import get_crawl_result
+        from crawlutron.api.crawl_endpoint import get_crawl_result
 
         await _off_loop(loop_guard_store.create_single_shot, "req-5", _ROOT, {"strategies": []})
         await _off_loop(loop_guard_store.set_status, "req-5", JobStatus.RUNNING, expected=JobStatus.PENDING)
@@ -278,7 +278,7 @@ class TestStatusEndpointAnswersOnlyForTerminalJobs:
 
         Both transitions compare-and-set from ``RUNNING``; whichever lands
         first wins, and a paused job is stopped, not finished (so 202)."""
-        from app.api.crawl_endpoint import get_crawl_result
+        from crawlutron.api.crawl_endpoint import get_crawl_result
 
         await _off_loop(loop_guard_store.create_single_shot, "req-6", _ROOT, {"strategies": []})
         await _off_loop(loop_guard_store.set_status, "req-6", JobStatus.RUNNING, expected=JobStatus.PENDING)
@@ -293,7 +293,7 @@ class TestStatusEndpointAnswersOnlyForTerminalJobs:
         self, loop_guard_store, result_store
     ):
         """The complement on the store path: the fix must not make it unreadable."""
-        from app.api.crawl_endpoint import get_crawl_result
+        from crawlutron.api.crawl_endpoint import get_crawl_result
 
         await _off_loop(loop_guard_store.create_single_shot, "req-7", _ROOT, {"strategies": []})
         await _off_loop(loop_guard_store.set_status, "req-7", JobStatus.RUNNING, expected=JobStatus.PENDING)
@@ -305,7 +305,7 @@ class TestStatusEndpointAnswersOnlyForTerminalJobs:
 
     async def test_the_same_job_answers_200_once_it_is_completed(self, loop_guard_store, result_store):
         """The complement: the fix must not make a finished job unreadable."""
-        from app.api.crawl_endpoint import get_crawl_result
+        from crawlutron.api.crawl_endpoint import get_crawl_result
 
         await _off_loop(loop_guard_store.create_single_shot, "req-4", _ROOT, {"strategies": []})
         await _job_with_results_written(loop_guard_store, "req-4")

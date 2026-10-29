@@ -8,15 +8,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import app.api.render as render_mod
+import crawlutron.api.render as render_mod
 from tests._fetcher_factories import routed_fetcher
 from tests._render_producer import render_stub_request
 
 if TYPE_CHECKING:
     import pytest
 
-    from app.models.crawl_result import EngineCrawlResult
-    from app.models.result_record import RenderEnvelope
+    from crawlutron.models.crawl_result import EngineCrawlResult
+    from crawlutron.models.result_record import RenderEnvelope
 
 
 def _disallow_fetcher() -> object:

@@ -22,7 +22,7 @@ def _documented_env() -> dict[str, str]:
 
 def _app_and_scripts_sources() -> list[tuple[str, ast.Module]]:
     found: list[tuple[str, ast.Module]] = []
-    for base in ("app", "scripts"):
+    for base in ("crawlutron", "scripts"):
         for path in sorted((REPO_ROOT / base).rglob("*.py")):
             if "__pycache__" in path.parts:
                 continue
@@ -111,7 +111,7 @@ def _default_site_index_cached() -> dict[str, list[tuple[str, int, int | float |
 
 
 def _code_default_sites(knob: str) -> list[tuple[str, int, int | float | str | bool]]:
-    """Every (file, line, default) where app/ or scripts/ reads ``knob`` with a literal default."""
+    """Every (file, line, default) where crawlutron/ or scripts/ reads ``knob`` with a literal default."""
     return list(_default_site_index_cached().get(knob, ()))
 
 
@@ -131,7 +131,7 @@ def _value_matches(raw: str, default: int | float | str | bool) -> bool:
 
 
 def _dead_documented_knobs() -> list[str]:
-    """Documented knobs no app/ or scripts/ module even mentions."""
+    """Documented knobs no crawlutron/ or scripts/ module even mentions."""
     documented = set(_documented_env())
     mentioned: set[str] = set()
     for _relative, tree in _app_and_scripts_sources():

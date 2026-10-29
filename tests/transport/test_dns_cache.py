@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app.transport import pinned_transport as http_mod
+from crawlutron.transport import pinned_transport as http_mod
 from tests._policy_factories import canonical
 from tests._thread_fanout import run_thread_fanout
 

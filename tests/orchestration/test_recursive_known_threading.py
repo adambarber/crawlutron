@@ -14,7 +14,7 @@ from tests._result_builders import make_engine_result
 
 async def test_expansions_thread_the_occupied_set(monkeypatch):
     """The expansion's ``known`` is the threaded value, not a frontier rewalk."""
-    import app.admission.admission_links as admission_links
+    import crawlutron.admission.admission_links as admission_links
 
     walked: list[object] = []
     real = admission_links.frontier_identity

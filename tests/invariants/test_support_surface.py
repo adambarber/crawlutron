@@ -62,7 +62,7 @@ SUPPORT_SURFACE_LEDGER = Rule(
         "from tests.invariants._registry_machinery import _property\n",
         "from tests._ci_contract import _hook_blocks\n",
         # A non-test target is somebody else's rule.
-        "from app.transport.scheduler import DomainScheduler\n",
+        "from crawlutron.transport.scheduler import DomainScheduler\n",
         # A module-level test-module import without a private name is not a helper reach.
         "from tests import membership_gate\n",
     ),

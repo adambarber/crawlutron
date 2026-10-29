@@ -1,8 +1,8 @@
 """One shared freshness engine drives both caches' TTL/expiry decisions (#124)."""
 
-import app.transport.freshness as freshness
-from app.transport.cache import HttpCache
-from app.transport.content_cache import ContentCache
+import crawlutron.transport.freshness as freshness
+from crawlutron.transport.cache import HttpCache
+from crawlutron.transport.content_cache import ContentCache
 
 
 class _Clock:
@@ -27,7 +27,7 @@ def test_freshness_boundary_is_one_rule():
 
 def test_http_cache_routes_ttl_decisions_through_the_engine(monkeypatch):
     # Both caches bound the SAME engine functions: one rule, written once.
-    import app.transport.cache as cache_mod
+    import crawlutron.transport.cache as cache_mod
 
     assert cache_mod.is_expired is freshness.is_expired
     assert cache_mod.expiry_for is freshness.expiry_for
@@ -45,7 +45,7 @@ def test_http_cache_routes_ttl_decisions_through_the_engine(monkeypatch):
 
 
 def test_content_cache_routes_ttl_decisions_through_the_engine(tmp_path, monkeypatch):
-    import app.transport.content_cache as content_mod
+    import crawlutron.transport.content_cache as content_mod
 
     assert content_mod.is_expired is freshness.is_expired
     assert content_mod.expiry_for is freshness.expiry_for

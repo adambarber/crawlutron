@@ -57,7 +57,7 @@ def _non_member_classification_offenders(tree, path, *, members=None):
             path,
             node,
             f"classification={value!r} is not a CrawlClassification member; "
-            r"add it to the enum (app/vocabulary/taxonomy.py) or route through the classifier",
+            r"add it to the enum (crawlutron/vocabulary/taxonomy.py) or route through the classifier",
         )
         for node, _field, value in non_member_literals(
             (node, "classification", value, members)
@@ -184,7 +184,7 @@ def _non_member_status_offenders(tree: ast.AST, path: pathlib.Path, *, members=N
         members=members,
         label="status",
         type_name="ResultStatus",
-        advice=("add it to the Literal (app/models/taxonomy.py) or derive it from an existing member"),
+        advice=("add it to the Literal (crawlutron/models/taxonomy.py) or derive it from an existing member"),
     )
 
 

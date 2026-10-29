@@ -19,7 +19,7 @@ from tests.rules import Bites, Rule
 _SEAM_NAME = "commit_crawl_delay"
 
 #: The one file whose seam parameter the law constrains directly.
-_SEAM_MODULE = REPO_ROOT / "app" / "admission" / "admission_links.py"
+_SEAM_MODULE = REPO_ROOT / "crawlutron" / "admission" / "admission_links.py"
 
 
 def _site_keyed(node: ast.AST, tree: ast.Module) -> bool:
@@ -90,7 +90,7 @@ COMMIT_CRAWL_DELAY_IS_SITE_KEYED = Rule(
             "candidate.host",
         ),
         Bites(
-            "import app.admission.admission_links as m\n"
+            "import crawlutron.admission.admission_links as m\n"
             "def f(pass_, candidate, delay):\n"
             "    m._admit_chunk_call_site(pass_, candidate.normalized_url.host, delay)\n"
             "commit_crawl_delay(candidate.raw, 1.0)\n",

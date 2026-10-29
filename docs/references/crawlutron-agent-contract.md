@@ -19,8 +19,8 @@ discover the contract from:
 - Swagger UI at `/docs`
 - `POST /mcp` — MCP 2026-07-28 endpoint (see [MCP](#mcp-mcp-2026-07-28))
 
-The static implementation source of truth is `app/models/`; the
-discovery payloads and OpenAPI app metadata are in `app/main.py`.
+The static implementation source of truth is `crawlutron/models/`; the
+discovery payloads and OpenAPI app metadata are in `crawlutron/main.py`.
 
 ## Endpoint Selection
 

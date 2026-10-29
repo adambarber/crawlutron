@@ -2,11 +2,11 @@ import ast
 
 import pytest
 
-from app.extraction.classify import CLASSIFICATION_SIGNATURES, STRONG_CLASSIFICATION_MARKERS
-from app.transport import browser as browser_mod
-from app.transport import http as http_mod
-from app.transport.results import TerminalResult
-from app.vocabulary.taxonomy import (
+from crawlutron.extraction.classify import CLASSIFICATION_SIGNATURES, STRONG_CLASSIFICATION_MARKERS
+from crawlutron.transport import browser as browser_mod
+from crawlutron.transport import http as http_mod
+from crawlutron.transport.results import TerminalResult
+from crawlutron.vocabulary.taxonomy import (
     BROWSER_BLOCKED_CLASSIFICATIONS,
     CLASSIFICATION_STATUS_BY_LABEL,
     FAILED_CLASSIFICATIONS,
@@ -179,7 +179,7 @@ def test_the_grouping_relations_still_hold():
     """The relations the derived declarations must preserve, stated as values.
 
     The properties the hand-written transcriptions carried; what a refactor of
-    ``app/vocabulary`` could silently break."""
+    ``crawlutron/vocabulary`` could silently break."""
     entire = {member.value for member in CrawlClassification}
     assert BROWSER_BLOCKED_CLASSIFICATIONS <= HTTP_BLOCKED_CLASSIFICATIONS
     assert BROWSER_BLOCKED_CLASSIFICATIONS <= NON_TRANSIENT_CLASSIFICATIONS
@@ -192,7 +192,7 @@ def test_the_grouping_relations_still_hold():
 def test_every_classifiable_label_is_an_explicit_table_entry():
     """Drift guard: no classifier output may fall through to the default.
 
-    Adding a signature to ``app.extraction.classify`` without a status is the
+    Adding a signature to ``crawlutron.extraction.classify`` without a status is the
     regression this pins -- it is what let the two if-chains drift apart."""
     table = CLASSIFICATION_STATUS_BY_LABEL
     missing = [label for label in _classifiable_labels() if label not in table]
@@ -240,13 +240,13 @@ def test_known_group_statuses_are_unchanged(browser_resolver):
 
 class TestStatusForClassification:
     def test_http_status_not_found(self):
-        from app.vocabulary.taxonomy import status_for_classification
+        from crawlutron.vocabulary.taxonomy import status_for_classification
 
         status = status_for_classification("not_found")
         assert status == "failed"
 
     def test_http_status_site_error(self):
-        from app.vocabulary.taxonomy import status_for_classification
+        from crawlutron.vocabulary.taxonomy import status_for_classification
 
         status = status_for_classification("site_error")
         assert status == "failed"
@@ -282,7 +282,7 @@ def test_every_table_status_is_a_declared_result_status():
     invented status would be silently coerced to ``failed`` at shaping."""
     import typing
 
-    from app.vocabulary.taxonomy import ResultStatus
+    from crawlutron.vocabulary.taxonomy import ResultStatus
 
     declared = set(typing.get_args(ResultStatus))
     bad = {
@@ -312,8 +312,8 @@ class TestStatusAgreesWithClassification:
         ],
     )
     def test_exception_chokepoint_status_matches_the_table(self, classification):
-        from app.transport.results import engine_result_from_exception
-        from app.vocabulary.taxonomy import status_for_classification
+        from crawlutron.transport.results import engine_result_from_exception
+        from crawlutron.vocabulary.taxonomy import status_for_classification
 
         result = engine_result_from_exception(
             error=ConnectionError("boom"),
@@ -325,7 +325,7 @@ class TestStatusAgreesWithClassification:
         assert result.status == status_for_classification(classification) == "failed"
 
     def test_robots_disallowed_builder_status_matches_the_table(self):
-        from app.vocabulary.taxonomy import status_for_classification
+        from crawlutron.vocabulary.taxonomy import status_for_classification
 
         result = skipped_result(
             "http://example.com/",
@@ -337,8 +337,8 @@ class TestStatusAgreesWithClassification:
 
     def test_browser_retry_exhausted_status_matches_the_table(self):
         """The browser retry loop's terminal verdict for a navigation timeout."""
-        from app.models.result_factory import terminal_crawl_result
-        from app.vocabulary.taxonomy import status_for_classification
+        from crawlutron.models.result_factory import terminal_crawl_result
+        from crawlutron.vocabulary.taxonomy import status_for_classification
 
         result = terminal_crawl_result(
             url="http://example.com/",
@@ -354,7 +354,10 @@ class TestStatusAgreesWithClassification:
     def test_taxonomy_allows_the_documented_context_varying_status(self):
         """``unknown_error`` legitimately also pairs with ``retry_exhausted``:
         the browser retry loop's verdict describes the attempt, not the page."""
-        from app.vocabulary.taxonomy import status_agrees_with_classification, status_for_classification
+        from crawlutron.vocabulary.taxonomy import (
+            status_agrees_with_classification,
+            status_for_classification,
+        )
 
         assert status_for_classification("unknown_error") == "failed"
         assert status_agrees_with_classification("unknown_error", "failed")
@@ -363,7 +366,7 @@ class TestStatusAgreesWithClassification:
     def test_taxonomy_rejects_a_disagreeing_pair(self):
         """A pair neither the table default nor the documented context set allows
         must not be constructible at the terminal builder."""
-        from app.transport.results import failed_engine_result
+        from crawlutron.transport.results import failed_engine_result
 
         with pytest.raises(ValueError, match="disagrees with the taxonomy status"):
             failed_engine_result(
@@ -382,8 +385,8 @@ class TestStatusAgreesWithClassification:
 def test_capabilities_advertises_exactly_the_taxonomy():
     """The /v1/capabilities wire list is generated from the single enum, not a
     second hand-copied list."""
-    from app.config.settings import CrawlerSettings
-    from app.discovery.capabilities import capabilities_payload
+    from crawlutron.config.settings import CrawlerSettings
+    from crawlutron.discovery.capabilities import capabilities_payload
 
     advertised = capabilities_payload(CrawlerSettings.from_mapping())["supported_classifications"]
     assert advertised == [member.value for member in CrawlClassification]

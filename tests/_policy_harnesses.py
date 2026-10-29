@@ -11,11 +11,11 @@ import asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from app.api.caller_auth import get_caller_identity
-from app.api.crawl_router import router as crawl_router
-from app.api.dependencies import get_result_store
-from app.api.policy_router import router as policy_router
-from app.models.caller_identity import CallerIdentity
+from crawlutron.api.caller_auth import get_caller_identity
+from crawlutron.api.crawl_router import router as crawl_router
+from crawlutron.api.dependencies import get_result_store
+from crawlutron.api.policy_router import router as policy_router
+from crawlutron.models.caller_identity import CallerIdentity
 from tests._app_factory import service_app
 from tests._dependency_overrides import bind_base_overrides
 

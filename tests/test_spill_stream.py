@@ -6,8 +6,8 @@ import os
 import time
 import tracemalloc
 
-from app.orchestration.engine import ResultSpill
-from app.orchestration.spill_sink import SpillSink
+from crawlutron.orchestration.engine import ResultSpill
+from crawlutron.orchestration.spill_sink import SpillSink
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 from tests._result_builders import Spill, engine_result
 
@@ -111,7 +111,7 @@ class TestSpillGcCadence:
     def _spy(self, monkeypatch):
         import os
 
-        import app.orchestration.engine as engine_mod
+        import crawlutron.orchestration.engine as engine_mod
 
         scans = {"n": 0}
         real_listdir = os.listdir
@@ -125,7 +125,7 @@ class TestSpillGcCadence:
         return scans
 
     def test_first_construction_scans_and_following_ones_do_not(self, monkeypatch):
-        import app.orchestration.engine as engine_mod
+        import crawlutron.orchestration.engine as engine_mod
 
         scans = self._spy(monkeypatch)
         spills = [ResultSpill(), ResultSpill(), ResultSpill()]
@@ -139,7 +139,7 @@ class TestSpillGcCadence:
     def test_scan_resumes_once_the_interval_elapsed(self, monkeypatch):
         import time
 
-        import app.orchestration.engine as engine_mod
+        import crawlutron.orchestration.engine as engine_mod
 
         scans = self._spy(monkeypatch)
         spill = ResultSpill()
@@ -160,7 +160,7 @@ class TestSpillGcCadence:
 class TestSpillFileOwnership:
     def test_result_spill_close_deletes_owned_file(self):
         """Auto-created spill files are removed on close."""
-        from app.orchestration.engine import ResultSpill
+        from crawlutron.orchestration.engine import ResultSpill
 
         spill = ResultSpill()  # auto-owned path
         path = spill.path
@@ -172,7 +172,7 @@ class TestSpillFileOwnership:
         """Caller-supplied spill paths are NOT removed on close."""
         import tempfile
 
-        from app.orchestration.engine import ResultSpill
+        from crawlutron.orchestration.engine import ResultSpill
 
         target = os.path.join(tempfile.gettempdir(), "spill_keep_test.json")
         try:

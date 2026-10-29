@@ -1,4 +1,4 @@
-"""Module dependency graph and coupling report for app/.
+"""Module dependency graph and coupling report for crawlutron/.
 
 Usage: ``python scripts/module_graph.py [--mermaid] [-o docs/module-graph.md]``. For the
 splitting programme: size = work, fan-in = risk, cycles = misplaced boundary; ranked output.
@@ -12,7 +12,7 @@ import pathlib
 import sys
 from collections import defaultdict
 
-APP_ROOT = pathlib.Path(__file__).resolve().parent.parent / "app"
+APP_ROOT = pathlib.Path(__file__).resolve().parent.parent / "crawlutron"
 STDLIB = set(sys.stdlib_module_names)
 
 
@@ -138,7 +138,7 @@ def report(modules: dict[str, set[str]], importers: dict[str, set[str]]) -> None
 
 def mermaid(modules: dict[str, set[str]]) -> str:
     def node(name: str) -> str:
-        return name.replace("app.", "").replace(".", "_").replace("-", "_")
+        return name.replace("crawlutron.", "").replace(".", "_").replace("-", "_")
 
     lines = ["graph LR"]
     for name in sorted(modules):

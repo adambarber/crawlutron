@@ -10,9 +10,9 @@ import pytest
 from curl_cffi.requests.exceptions import RequestException
 from curl_cffi.requests.models import STREAM_END
 
-import app.transport.http_client_pool as http_mod
-from app.transport.fetchers import default_http_fetcher, impersonating_fetcher
-from app.vocabulary.strategies import HTTP_CFFI_IMPERSONATE
+import crawlutron.transport.http_client_pool as http_mod
+from crawlutron.transport.fetchers import default_http_fetcher, impersonating_fetcher
+from crawlutron.vocabulary.strategies import HTTP_CFFI_IMPERSONATE
 from tests._fetch_outcome import FetchFailed
 from tests._fetcher_factories import scripted_fetcher, strategy_request
 from tests._policy_factories import canonical, make_base_policy
@@ -26,8 +26,8 @@ _DEFAULT_CFFI_FETCHER = impersonating_fetcher()
 
 class TestCffiImpersonateStrategy:
     async def test_http_cffi_imersonate_result(self):
-        from app.transport.cache import HttpCache
-        from app.transport.http import http_strategy_result
+        from crawlutron.transport.cache import HttpCache
+        from crawlutron.transport.http import http_strategy_result
 
         # A real HttpFetchResult, not a local class that has the same five attributes: the strategy reads a
         # production model, so a stand-in with a matching shape can pass while the model drifts.
@@ -379,7 +379,7 @@ async def test_cffi_session_reused_across_requests(base_url, monkeypatch):
 
     The socket/timer watchdog needs the loop to make progress; the
     zero-second sleep patch yields, so transfers need no wall time."""
-    from app.transport import http_client_pool as http_mod
+    from crawlutron.transport import http_client_pool as http_mod
 
     constructions = 0
 
@@ -403,7 +403,7 @@ async def test_cffi_session_reused_across_requests(base_url, monkeypatch):
 
 def test_cffi_session_rebuilt_on_loop_change(monkeypatch):
     """A new event loop gets a fresh session (no sockets bound to a dead loop)."""
-    from app.transport import http_client_pool as http_mod
+    from crawlutron.transport import http_client_pool as http_mod
 
     async def _get():
         return http_mod.get_cffi_session()
@@ -427,7 +427,7 @@ async def test_cffi_missing_falls_back_to_httpx(monkeypatch, counting_server):
     stubbed fallback would only prove the stub was called."""
     import sys
 
-    from app.transport import http_client_pool as http_mod
+    from crawlutron.transport import http_client_pool as http_mod
 
     monkeypatch.setitem(sys.modules, "curl_cffi.requests", None)
     url = f"http://127.0.0.1:{counting_server.server_port}/"
@@ -462,7 +462,7 @@ class TestCffiHeaderInjectionRefused:
         """
         import socket
 
-        from app.transport.fetchers import cffi_fetch
+        from crawlutron.transport.fetchers import cffi_fetch
 
         probe = _WireProbeSession()
         monkeypatch.setattr(http_mod, "get_cffi_session", lambda: probe)

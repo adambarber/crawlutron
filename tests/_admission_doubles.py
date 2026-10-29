@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 
-from app.runtime.pressure_sizing import ResourceGate
+from crawlutron.runtime.pressure_sizing import ResourceGate
 
 __all__ = ["PinnedGate", "pinned_resource_gate", "no_crawl_delay"]
 

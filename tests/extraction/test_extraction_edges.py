@@ -5,8 +5,8 @@ import logging
 
 import pytest
 
-import app.extraction.content as extraction
-from app.extraction.content import (
+import crawlutron.extraction.content as extraction
+from crawlutron.extraction.content import (
     ExtractedContent,
     Selectors,
     extract_document,
@@ -205,7 +205,7 @@ def test_selector_on_non_html_is_reported_not_silently_dropped(caplog):
     PDF returns the full content; the warning is the load-bearing assertion.
     """
     pdf = b"%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n%%EOF\n"
-    with caplog.at_level(logging.WARNING, logger="app.extraction.content"):
+    with caplog.at_level(logging.WARNING, logger="crawlutron.extraction.content"):
         result = extraction.extract_content(
             pdf,
             "application/pdf",
@@ -224,7 +224,7 @@ def test_selector_on_non_html_is_reported_not_silently_dropped(caplog):
     # unconditionally and proves nothing.
     caplog.clear()
     html = "<html><body><div id='agenda'>item one</div><p>filler</p></body></html>"
-    with caplog.at_level(logging.WARNING, logger="app.extraction.content"):
+    with caplog.at_level(logging.WARNING, logger="crawlutron.extraction.content"):
         narrowed = extraction.extract_content(
             html, "text/html", "http://example.com/", selectors=Selectors(css="#agenda")
         )
@@ -234,7 +234,7 @@ def test_selector_on_non_html_is_reported_not_silently_dropped(caplog):
 
     # No selector, no warning: the common path must stay quiet.
     caplog.clear()
-    with caplog.at_level(logging.WARNING, logger="app.extraction.content"):
+    with caplog.at_level(logging.WARNING, logger="crawlutron.extraction.content"):
         extraction.extract_content(pdf, "application/pdf", canonical("http://example.com/doc.pdf"))
     assert "extraction_selector_ignored_non_html" not in caplog.text, caplog.text
 
@@ -258,8 +258,8 @@ EXTRACTION_STAGE_CONTRACTS = (
 def test_extraction_stage_contracts_are_public(name):
     """A stage contract a test can name must not be a private name."""
     assert not name.startswith("_")
-    assert hasattr(extraction, name), f"app.extraction.content.{name} is not public"
-    assert name in vars(extraction), f"{name} is not defined in app.extraction.content"
+    assert hasattr(extraction, name), f"crawlutron.extraction.content.{name} is not public"
+    assert name in vars(extraction), f"{name} is not defined in crawlutron.extraction.content"
 
 
 @pytest.mark.parametrize("name", EXTRACTION_STAGE_CONTRACTS)

@@ -7,7 +7,7 @@ import asyncio
 
 import pytest
 
-from app.runtime.pressure_sizing import LoopLagProbe
+from crawlutron.runtime.pressure_sizing import LoopLagProbe
 from tests._lag_scheduling import lag_clock, lagged_gate, scripted_sleep
 
 

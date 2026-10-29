@@ -54,7 +54,7 @@
 # `pre-commit run --all-files` rather than restating ruff, mypy, pyright and
 # jscpd, and `make lint` / `make typecheck` invoke hooks by id from here instead
 # of spelling out their own copies. The Makefile did not always: it carried a
-# second `ruff check app tests scripts` and a bare `mypy` that had already
+# second `ruff check crawlutron tests scripts` and a bare `mypy` that had already
 # drifted from these in both scope and interpreter, and nothing compared them,
 # because the contract tests covered CI and this file and the Makefile was not
 # one of the things under contract. It is now -- tests/
@@ -90,7 +90,7 @@ repos:
         name: ruff check
         entry: >-
           bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
-          .venv/bin/python -m scripts.gate_fanout ruff -- .venv/bin/python -m ruff check app tests scripts
+          .venv/bin/python -m scripts.gate_fanout ruff -- .venv/bin/python -m ruff check crawlutron tests scripts
         language: system
         files: &service_trigger ^(docker/browser-crawler/|(?!docker/))
         pass_filenames: false
@@ -105,7 +105,7 @@ repos:
         name: ruff format
         entry: >-
           bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
-          .venv/bin/python -m scripts.gate_fanout ruff-format -- .venv/bin/python -m ruff format --check app tests scripts
+          .venv/bin/python -m scripts.gate_fanout ruff-format -- .venv/bin/python -m ruff format --check crawlutron tests scripts
         language: system
         files: *service_trigger
         pass_filenames: false
@@ -170,7 +170,7 @@ repos:
         stages: [pre-commit]
 
       # The second sweep, wired as a real gate: the per-tree gate cannot see
-      # a two-line repetition between two helper files (app/, scripts/, tests/_*),
+      # a two-line repetition between two helper files (crawlutron/, scripts/, tests/_*),
       # so this 2/30 gate over the helper surface fails on any cross-file LOGIC
       # clone. Preamble and within-file repetition are not findings.
       - id: helper-clone-sweep
@@ -185,7 +185,7 @@ repos:
 
       # Type gate: catches the stringly-typed-identity class statically, and is
       # the same command CI runs. No path argument: `mypy.ini`'s `files` is the
-      # scope, and this hook restating it as `mypy app` is how a second checker
+      # scope, and this hook restating it as `mypy crawlutron` is how a second checker
       # scope silently grew without the hook's gate covering it.
       - id: mypy
         name: mypy
@@ -213,7 +213,7 @@ repos:
         name: vulture dead code (min-confidence 90, zero tolerance)
         entry: >-
           bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
-          .venv/bin/python -m scripts.gate_fanout vulture -- .venv/bin/python -m vulture app tests scripts --min-confidence 90
+          .venv/bin/python -m scripts.gate_fanout vulture -- .venv/bin/python -m vulture crawlutron tests scripts --min-confidence 90
         language: system
         files: *service_trigger
         pass_filenames: false
@@ -234,7 +234,7 @@ repos:
       # Coverage as a measured-descriptive surface, not a gate: no threshold,
       # no fail-under, no ratchet until the owner rules one. It runs at the
       # pre-push stage -- a measurement pass on every commit would train
-      # --no-verify -- and `files:` scopes it to app/tests so docs-only
+      # --no-verify -- and `files:` scopes it to crawlutron/tests so docs-only
       # commits skip it entirely. The engine config lives once in
       # pyproject.toml ([tool.coverage.run], core = "sysmon" via PEP 669 on
       # Python 3.12, the lever that holds tracer overhead to a measured
@@ -250,9 +250,9 @@ repos:
         name: coverage (measured-descriptive, pre-push)
         entry: >-
           bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
-          .venv/bin/python -m pytest -q -o addopts="" -n auto --dist worksteal --cov=app --cov-report=
+          .venv/bin/python -m pytest -q -o addopts="" -n auto --dist worksteal --cov=crawlutron --cov-report=
         language: system
-        files: ^(app|tests)/
+        files: ^(crawlutron|tests)/
         pass_filenames: false
         stages: [pre-push]
 

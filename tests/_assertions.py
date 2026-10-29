@@ -24,7 +24,7 @@ def block_private_targets(monkeypatch) -> None:
 def plaintext_webhook_refusal(monkeypatch):
     """The closed #499 door for one call: drop the plaintext opt-in and its memo."""
     monkeypatch.delenv("CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK", raising=False)
-    from app.api.webhooks import reset_plaintext_webhook_memo
+    from crawlutron.api.webhooks import reset_plaintext_webhook_memo
 
     reset_plaintext_webhook_memo()
     try:
@@ -80,7 +80,7 @@ def assert_dns_pinning_uses_first_resolution(monkeypatch, rebound_ip, public_ip=
     import socket
     from unittest.mock import patch
 
-    from app.transport.pinned_transport import resolve_and_pin_host
+    from crawlutron.transport.pinned_transport import resolve_and_pin_host
 
     block_private_targets(monkeypatch)
     calls = []
@@ -117,7 +117,7 @@ def assert_result_failed(result, classification: str) -> None:
 
     ``status`` is read from production, not restated as ``"failed"``, so a
     classification added as skipped cannot be asserted into "failed"."""
-    from app.vocabulary.taxonomy import status_for_classification
+    from crawlutron.vocabulary.taxonomy import status_for_classification
 
     assert _field(result, "classification") == classification
     assert _field(result, "status") == status_for_classification(classification)

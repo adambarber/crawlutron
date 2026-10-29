@@ -14,7 +14,7 @@ from collections.abc import Callable
 import pytest
 from yoyo import migrations as _yoyo
 
-from app.storage.migrations.manifest import (
+from crawlutron.storage.migrations.manifest import (
     CALLER_KEYS_SCHEMA,
     COORDINATION_COOKIES_SCHEMA,
     COORDINATION_COUNTERS_SCHEMA,
@@ -25,7 +25,7 @@ from app.storage.migrations.manifest import (
     create_table_sql,
 )
 
-MIGRATIONS_ROOT = pathlib.Path(__file__).parents[2] / "app" / "storage" / "migrations"
+MIGRATIONS_ROOT = pathlib.Path(__file__).parents[2] / "crawlutron" / "storage" / "migrations"
 
 #: A step's apply and rollback: a statement string, or a callable that runs it.
 Step = str | Callable[[sqlite3.Connection], None]

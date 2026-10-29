@@ -26,7 +26,7 @@ def _cross_tree_duplicate() -> JscpdDuplicate:
 
     A harness re-spelling production's truth looks like one legitimate copy on
     each side, so a per-tree gate has nothing to object to even in principle."""
-    return _duplicate("app/orchestration/recursive.py", "tests/_recursive_harnesses.py")
+    return _duplicate("crawlutron/orchestration/recursive.py", "tests/_recursive_harnesses.py")
 
 
 def _stubbed_scan(duplicates: list[JscpdDuplicate], sources: int = 400) -> dict[str, object]:
@@ -44,7 +44,7 @@ def test_a_clone_spanning_two_trees_fails(monkeypatch, capsys) -> None:
     assert gate._run(_args()) == 1
     error = capsys.readouterr().err
     assert "[cross]" in error
-    assert "app/orchestration/recursive.py" in error
+    assert "crawlutron/orchestration/recursive.py" in error
     assert "tests/_recursive_harnesses.py" in error
 
 
@@ -93,7 +93,7 @@ def test_jscpd_command_resolves_the_service_copy(monkeypatch) -> None:
         assert command[command.index("--threshold") + 1] == "0"
 
 
-@pytest.mark.parametrize("directory", ("app", "tests", "scripts"))
+@pytest.mark.parametrize("directory", ("crawlutron", "tests", "scripts"))
 def test_duplicate_in_each_service_tree_fails(monkeypatch, directory):
     _stub_report(
         monkeypatch,

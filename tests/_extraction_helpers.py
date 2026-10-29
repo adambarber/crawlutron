@@ -7,25 +7,25 @@ __all__ = ["format_extracted_document_text"]
 from dataclasses import replace
 from typing import TypedDict, Unpack
 
-import app.extraction.content as _extraction_module
-from app.config.settings import CrawlerSettings
-from app.extraction.content import (
+import crawlutron.extraction.content as _extraction_module
+from crawlutron.config.settings import CrawlerSettings
+from crawlutron.extraction.content import (
     detect_pagination as _production_detect_pagination,
 )
-from app.extraction.content import (
+from crawlutron.extraction.content import (
     extract_content as _production_extract_content,
 )
-from app.extraction.content import (
+from crawlutron.extraction.content import (
     extract_discovered_links as _production_extract_discovered_links,
 )
-from app.extraction.content import (
+from crawlutron.extraction.content import (
     extract_js_endpoints as _extract_js_endpoints_with_policy,
 )
-from app.extraction.content import (
+from crawlutron.extraction.content import (
     html_diagnostics as _production_html_diagnostics,
 )
-from app.extraction.document_text import format_extracted_document_text
-from app.transport.fetchers import default_http_fetcher as _production_default_http_fetcher
+from crawlutron.extraction.document_text import format_extracted_document_text
+from crawlutron.transport.fetchers import default_http_fetcher as _production_default_http_fetcher
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 
@@ -35,7 +35,7 @@ def pin_selector_pool(monkeypatch):
     """
     import asyncio
 
-    from app.extraction.content import shutdown_doc_extraction_executor
+    from crawlutron.extraction.content import shutdown_doc_extraction_executor
 
     monkeypatch.setenv("CRAWLUTRON_EXTRACTION_THREADS", "4")
     asyncio.run(shutdown_doc_extraction_executor())

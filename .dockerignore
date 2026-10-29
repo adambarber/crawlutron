@@ -15,18 +15,18 @@
 #
 # The four sources, from the Dockerfile's own COPY lines:
 #   requirements.txt         builder, camoufox-binary
-#   app/                     runtime
+#   crawlutron/              runtime
 #   uvicorn-log-config.json  runtime
 #   requirements-dev.txt     development
 *
-!app/
-!app/**
+!crawlutron/
+!crawlutron/**
 !requirements.txt
 !requirements-dev.txt
 !uvicorn-log-config.json
 !Dockerfile
 
-# `!app/**` re-admits local bytecode sitting beside the source, which the leading
+# `!crawlutron/**` re-admits local bytecode sitting beside the source, which the leading
 # `*` had already excluded, so it has to be excluded again after the negation.
 # These are stale .pyc files for sources edited since they were written.
 **/__pycache__/

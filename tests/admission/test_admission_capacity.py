@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.models.normalized_url import NormalizedUrl
+from crawlutron.models.normalized_url import NormalizedUrl
 from tests._admission_doubles import no_crawl_delay as _no_crawl_delay
 from tests._policy_factories import admit, canonical
 
@@ -200,13 +200,13 @@ class TestAPersistedScopeRestrictionFailsClosed:
     """
 
     def test_a_declared_pattern_that_cannot_compile_raises(self):
-        from app.admission.admission_links import compile_scope_pattern
+        from crawlutron.admission.admission_links import compile_scope_pattern
 
         with pytest.raises(ValueError, match="scope_regex"):
             compile_scope_pattern("(((")
 
     def test_an_undeclared_pattern_still_means_no_restriction(self):
-        from app.admission.admission_links import compile_scope_pattern
+        from crawlutron.admission.admission_links import compile_scope_pattern
 
         assert compile_scope_pattern(None) is None
         assert compile_scope_pattern("") is None

@@ -12,7 +12,7 @@ import tempfile
 from http.cookiejar import CookieJar as StdCookieJar
 from unittest.mock import patch
 
-from app.transport.cookie_jar import (
+from crawlutron.transport.cookie_jar import (
     CookieJar,
     RecordingSendPolicy,
     cookie_from,
@@ -87,7 +87,7 @@ def test_concurrent_cookie_writes_do_not_raise():
 
 def _cookie_jar_max_hosts() -> int:
     """The jar's LRU cap, read from the module that owns it."""
-    from app.transport.cookie_jar import COOKIE_JAR_MAX_HOSTS_PER_NAMESPACE
+    from crawlutron.transport.cookie_jar import COOKIE_JAR_MAX_HOSTS_PER_NAMESPACE
 
     return COOKIE_JAR_MAX_HOSTS_PER_NAMESPACE
 
@@ -140,7 +140,7 @@ def test_reset_process_state_rebinds_a_fresh_default_jar():
         A test that swaps the process global for a guarded double and resets left that
     double installed for every later test in the worker -- the engine's reset rebuilds.
     """
-    from app.transport import cookie_jar
+    from crawlutron.transport import cookie_jar
 
     class _SentinelJar(cookie_jar.CookieJar):
         """A jar identity the reset cannot produce, so a mere clear cannot pass."""
@@ -175,7 +175,7 @@ def test_contributor_derivation_equivalence_pin():
     """Equivalence pin for #414/#418: contributors == slots whose cookies stdlib sends.
     Case 1: same-named cookies at different paths -> both contributors.
     Case 2: secure cookie on plain HTTP filtered -> only non-secure contributor; OLD fails."""
-    from app.transport.cookie_jar import CookieRecord, sendable_cookie_header
+    from crawlutron.transport.cookie_jar import CookieRecord, sendable_cookie_header
     from tests._policy_factories import canonical
 
     # Case 1: two same-named cookies at different paths on same host
@@ -243,7 +243,7 @@ def test_contributor_derivation_equivalence_pin_old_fails():
     """WALK-PAST for #418: OLD name-membership fails pin on case 2.
     Not run by default; run manually to verify walk-past.
     """
-    from app.transport.cookie_jar import CookieRecord
+    from crawlutron.transport.cookie_jar import CookieRecord
     from tests._policy_factories import canonical
 
     # Case 2: secure cookie filtered on plain HTTP + same-named non-secure
@@ -264,7 +264,7 @@ def test_contributor_derivation_equivalence_pin_old_fails():
     assert old_contributors == {"secure.example.com", "plain.example.com"}, f"OLD: {old_contributors}"
 
     # NEW derivation: only plain cookie contributor (secure filtered)
-    from app.transport.cookie_jar import sendable_cookie_header
+    from crawlutron.transport.cookie_jar import sendable_cookie_header
 
     _header, new_contributors = sendable_cookie_header(records, url)
     assert new_contributors == {"plain.example.com"}, f"NEW: {new_contributors}"

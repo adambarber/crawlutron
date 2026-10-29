@@ -6,7 +6,7 @@ not a 500 or a dropped filter -- pinning the fix for the dead ``result is None``
 import pytest
 from pydantic import ValidationError
 
-from app.models.crawl_policy import CrawlPolicy
+from crawlutron.models.crawl_policy import CrawlPolicy
 
 
 def test_overlong_scope_regex_raises_validation_error():

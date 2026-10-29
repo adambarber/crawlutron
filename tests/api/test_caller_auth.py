@@ -5,7 +5,7 @@ Regression pins for the auth paths that had zero coverage (#199).
 
 from __future__ import annotations
 
-from app.storage.caller_key_store import CallerKeyStore
+from crawlutron.storage.caller_key_store import CallerKeyStore
 from tests._async_harnesses import issue_key
 from tests.factories.client import isolation_client, post_crawl, quota_client
 from tests.factories.store import complete_job
@@ -13,13 +13,13 @@ from tests.factories.store import complete_job
 
 def test_203_cleanup_pins():
     # #203 pin 1: presented_key has all call sites in caller_auth.py, so it stays private.
-    import app.api.caller_auth as caller_auth
+    import crawlutron.api.caller_auth as caller_auth
 
     assert "presented_key" not in caller_auth.__all__
     assert not hasattr(caller_auth, "presented_key")
 
     # #203 pin 2: CallerIdentity.label is written but never read in app/.
-    from app.models.caller_identity import CallerIdentity
+    from crawlutron.models.caller_identity import CallerIdentity
 
     assert "label" not in CallerIdentity.model_fields
 
@@ -96,7 +96,7 @@ async def test_non_ascii_key_on_keys_door_is_401(tmp_path):
         ),
     }
     with pytest.raises(HTTPException) as raised:
-        from app.api.caller_auth import get_keys_caller
+        from crawlutron.api.caller_auth import get_keys_caller
 
         await get_keys_caller(Request(scope))
     assert raised.value.status_code == 401
@@ -176,7 +176,7 @@ def test_operator_token_fallback_reads_settings_home(monkeypatch):
     CrawlerSettings (the declared home), not a raw os.environ get."""
     from types import SimpleNamespace
 
-    import app.api.caller_auth as caller_auth
+    import crawlutron.api.caller_auth as caller_auth
 
     monkeypatch.setenv("CRAWLUTRON_KEY_ADMIN_TOKEN", "tok-from-env")
 

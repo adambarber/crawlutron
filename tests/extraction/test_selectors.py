@@ -5,8 +5,8 @@ import threading
 
 import bs4
 
-import app.extraction.content as extraction
-from app.extraction.content import ExtractedContent, Selectors, extract_selected
+import crawlutron.extraction.content as extraction
+from crawlutron.extraction.content import ExtractedContent, Selectors, extract_selected
 from tests._extraction_helpers import settings_with
 from tests._parse_budget import ParseBudget
 from tests._policy_factories import canonical
@@ -38,7 +38,7 @@ def test_css_selector_slow_must_not_hang(monkeypatch, caplog):
         lambda self, selector: never_released.wait(timeout=30) or [],
     )
     html = "<html><body><p class='x'>hi</p></body></html>"
-    with caplog.at_level(logging.WARNING, logger="app.extraction.content"):
+    with caplog.at_level(logging.WARNING, logger="crawlutron.extraction.content"):
         result = extract_selected(
             html,
             "http://example.com/",
@@ -72,7 +72,7 @@ def test_xpath_selector_slow_must_not_hang(caplog):
     the evaluation this function actually performs.
     """
     html = "<html><body><p>x</p></body></html>"
-    with caplog.at_level(logging.WARNING, logger="app.extraction.content"):
+    with caplog.at_level(logging.WARNING, logger="crawlutron.extraction.content"):
         result = extract_selected(
             html,
             "http://example.com/",

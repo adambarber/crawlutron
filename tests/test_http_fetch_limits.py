@@ -9,7 +9,7 @@ import http.server
 import threading
 from contextlib import contextmanager
 
-from app.transport.fetchers import default_http_fetcher
+from crawlutron.transport.fetchers import default_http_fetcher
 from tests._fetcher_factories import _spawn_fetch
 from tests._policy_factories import canonical
 from tests.helpers.server import SilentHandler
@@ -108,7 +108,7 @@ async def test_chunked_response_without_content_length_is_capped():
 
 class TestFetchContentLengthLimit:
     def test_http_large_content(self):
-        from app.transport.fetchers import default_http_fetcher
+        from crawlutron.transport.fetchers import default_http_fetcher
 
         result = _spawn_fetch(
             lambda s: asyncio.run(

@@ -2,8 +2,8 @@
 
 import contextlib
 
-import app.transport.http_client_pool as http_mod
-from app.transport.http_client_pool import get_async_http_client
+import crawlutron.transport.http_client_pool as http_mod
+from crawlutron.transport.http_client_pool import get_async_http_client
 from tests._pool_ws_doubles import FakeClient as _FakeClient
 
 
@@ -44,7 +44,7 @@ class TestPooledClientBuilders:
 
 class TestAsyncHttpClientLifecycle:
     async def test_http_async_client_close(self):
-        from app.transport.http_client_pool import close_async_http_client
+        from crawlutron.transport.http_client_pool import close_async_http_client
 
         # Build a client, then close it: the close path exercises a live one.
         get_async_http_client()

@@ -5,7 +5,7 @@ bounds replay. Pins the seam the content cache honors (#247, #385).
 
 import pytest
 
-from app.transport.cache_control import (
+from crawlutron.transport.cache_control import (
     forbids_shared_store,
     forbids_store,
     max_age_seconds,
@@ -82,7 +82,7 @@ _PAST = "Sun, 22 Aug 1982 00:00:00 GMT"
     ["expires", "Expires", "EXPIRES"],
 )
 def test_expires_seconds_parses_the_origin_instant(header_case):
-    from app.transport.cache_control import expires_seconds
+    from crawlutron.transport.cache_control import expires_seconds
 
     # Real origins send the canonical capitalization; the lookup must not depend
     # on it (#400) -- the case-insensitivity is the .lower() in the comprehension.

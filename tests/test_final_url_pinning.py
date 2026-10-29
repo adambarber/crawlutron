@@ -6,8 +6,8 @@ keying and link-base must all reflect the ORIGINAL hostname, never the IP.
 import asyncio
 from unittest.mock import patch
 
-from app.transport import http_client_pool as pool_mod
-from app.transport.fetchers import default_http_fetcher
+from crawlutron.transport import http_client_pool as pool_mod
+from crawlutron.transport.fetchers import default_http_fetcher
 from tests._policy_factories import canonical
 
 

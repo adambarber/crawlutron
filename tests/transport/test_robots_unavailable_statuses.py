@@ -7,14 +7,14 @@ from __future__ import annotations
 
 import pytest
 
-from app.models.host_policy import HostPolicy
-from app.transport.robots import (
+from crawlutron.models.host_policy import HostPolicy
+from crawlutron.transport.robots import (
     ROBOTS_FAILURE_TTL_SECONDS,
     RobotsRules,
     load_robots_rules,
     robots_cache,
 )
-from app.vocabulary.robots import RobotsSource
+from crawlutron.vocabulary.robots import RobotsSource
 from tests._policy_factories import canonical
 
 _ROBOTS_URL = "https://waf.test/robots.txt"

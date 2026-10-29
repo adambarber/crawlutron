@@ -7,8 +7,8 @@ import time
 import bs4
 import pytest
 
-from app.extraction import documents as docex
-from app.extraction.content import (
+from crawlutron.extraction import documents as docex
+from crawlutron.extraction.content import (
     ExtractedContent,
     Selectors,
     extract_selected,

@@ -6,6 +6,6 @@ import pytest
 @pytest.fixture
 def watch_store(tmp_path):
     """WatchStore backed by a per-test SQLite db under ``tmp_path``."""
-    from app.storage.watch_store import WatchStore
+    from crawlutron.storage.watch_store import WatchStore
 
     return WatchStore(tmp_path / "watches.db")

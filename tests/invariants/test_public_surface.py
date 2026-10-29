@@ -21,7 +21,7 @@ from tests.property_registry import Property
 
 _PUBLIC_SURFACE_PROPERTY = Property(
     name="one-public-door",
-    # Deliberately not in PROPERTY_REGISTRY, and deliberately not pointing at an app module.
+    # Deliberately not in PROPERTY_REGISTRY, and deliberately not pointing at a crawlutron module.
     owner_module="tests/invariants/test_registry.py",
     owner_symbols=("_public_surface_offenders",),
     definition_site="tests/invariants/test_registry.py:_public_surface_offenders",
@@ -92,14 +92,14 @@ def test_property_owner_public_surfaces_equal_all():
     assert not offenders, "property owner public surface drifted: " + ", ".join(offenders)
 
 
-def _all_surface_modules(root: pathlib.Path = REPO_ROOT / "app") -> set[str]:
-    """Every module (outside ``app/models``) that declares a literal ``__all__``.
-    app/models is governed by the models section below, not this gate.
+def _all_surface_modules(root: pathlib.Path = REPO_ROOT / "crawlutron") -> set[str]:
+    """Every module (outside ``crawlutron/models``) that declares a literal ``__all__``.
+    crawlutron/models is governed by the models section below, not this gate.
     """
     found: set[str] = set()
     for path in sorted(root.rglob("*.py")):
         rel = relative_posix(path)
-        if path.name == "__init__.py" or rel.startswith("app/models/"):
+        if path.name == "__init__.py" or rel.startswith("crawlutron/models/"):
             continue
         if _declared_public_symbols(parsed(path)) is None:
             continue
@@ -149,10 +149,10 @@ def test_property_owner_public_surface_budgets_are_tight():
     assert not stale, "property owner budgets are stale; lower them to: " + ", ".join(stale)
 
 
-# --------------------------------------------------------------------------- app/models: one home per
+# --------------------------------------------------------------------------- crawlutron/models: one home per
 # declaration, and that home is the file's name
 
-_MODELS_ROOT = REPO_ROOT / "app" / "models"
+_MODELS_ROOT = REPO_ROOT / "crawlutron" / "models"
 
 
 # The two modules here that hold a concern rather than a type.
@@ -223,11 +223,11 @@ def _models_home_offenders(root: pathlib.Path = _MODELS_ROOT) -> list[str]:
 def _models_reexport_offenders(root: pathlib.Path = _MODELS_ROOT) -> list[str]:
     """A declaration re-exported from ``__init__.py`` is a declaration with two homes.
 
-    ``from app.models import X`` lets a type live in the wrong file and still
+    ``from crawlutron.models import X`` lets a type live in the wrong file and still
     import cleanly -- the drift one-concept-per-file makes impossible."""
     tree = parsed(root / "__init__.py")
     return [
-        f"app/models/__init__.py imports "
+        f"crawlutron/models/__init__.py imports "
         f"{', '.join(alias.name for alias in node.names)} -- re-exporting makes a type"
         " findable from anywhere, which is what the one-home rule forbids"
         for node in tree.body
@@ -278,7 +278,7 @@ _COHESIVE_MODULES = frozenset(
 
 
 def test_no_model_surface_co_locates_unrelated_types():
-    """Nothing in ``app/models`` is a grab-bag of unrelated, co-located types:
+    """Nothing in ``crawlutron/models`` is a grab-bag of unrelated, co-located types:
     a type's name must find its home. The exceptions are a ``*_response.py`` wire
     projection, a concern module, and ``_COHESIVE_MODULES`` one-concept families.
     """
@@ -343,10 +343,10 @@ def test_models_typing_detectors_bite(tmp_path):
     (tmp_path / "__init__.py").write_text('"""A barrel."""\n')
     assert _models_reexport_offenders(tmp_path) == []
     (tmp_path / "__init__.py").write_text(
-        '"""A barrel."""\n\nfrom app.models.crawl_task import CrawlTask\n\n__all__ = ["CrawlTask"]\n'
+        '"""A barrel."""\n\nfrom crawlutron.models.crawl_task import CrawlTask\n\n__all__ = ["CrawlTask"]\n'
     )
     assert _models_reexport_offenders(tmp_path) == [
-        "app/models/__init__.py imports CrawlTask -- re-exporting makes a type findable"
+        "crawlutron/models/__init__.py imports CrawlTask -- re-exporting makes a type findable"
         " from anywhere, which is what the one-home rule forbids"
     ]
     (tmp_path / "__init__.py").write_text('"""A barrel."""\n\nimport os\n')

@@ -40,7 +40,7 @@ def _app_tree_key() -> tuple[tuple[str, int, int], ...]:
 
 
 def _app_file_paths() -> list[pathlib.Path]:
-    return [path for path in (REPO_ROOT / "app").rglob("*.py") if "__pycache__" not in path.parts]
+    return [path for path in (REPO_ROOT / "crawlutron").rglob("*.py") if "__pycache__" not in path.parts]
 
 
 @cache
@@ -220,7 +220,7 @@ def assert_property_detector_bites(
     ``caught`` maps a label to (source, exact offender count); a detector that
     cannot recognise its own property fails here, not in production.
     """
-    path = REPO_ROOT / "app" / "_synthetic.py"
+    path = REPO_ROOT / "crawlutron" / "_synthetic.py"
 
     def run_case(source: str | dict[str, str], default_path: pathlib.Path) -> list[str]:
         if isinstance(source, str):

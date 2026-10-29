@@ -11,12 +11,12 @@ from typing import Any, NamedTuple
 import pytest
 from httpx import AsyncClient
 
-from app.admission.policy import PolicyLike
-from app.api import job_runner
-from app.storage.job_store import CrawlJobState, JobStatus, JobStore
-from app.transport.robots import RobotsRules
-from app.transport.robots_parse import parse_robots_rules
-from app.vocabulary.robots import RobotsSource
+from crawlutron.admission.policy import PolicyLike
+from crawlutron.api import job_runner
+from crawlutron.storage.job_store import CrawlJobState, JobStatus, JobStore
+from crawlutron.transport.robots import RobotsRules
+from crawlutron.transport.robots_parse import parse_robots_rules
+from crawlutron.vocabulary.robots import RobotsSource
 from tests._job_harnesses import (
     ScriptedExecute,
     _create_api_job,
@@ -168,7 +168,7 @@ class TestWholeSiteAdmissionContract:
 
         # The public loader, not the private decode rule: this test drives the whole job through the API, so
         # the gate is built inside JobAdmissionContext.create and the decode rule is not a thing the test
-        monkeypatch.setattr("app.admission.admission.load_robots_rules", _rules_from(fetch_robots))
+        monkeypatch.setattr("crawlutron.admission.admission.load_robots_rules", _rules_from(fetch_robots))
         policy = self._policy(1, 2)
         policy["limits"]["respect_robots"] = True
         await self._admitted(
@@ -284,7 +284,7 @@ class TestWholeSiteAdmissionContract:
         )
 
     async def test_robots_crawl_delay_is_committed_before_admission(self, client, job_store, monkeypatch):
-        from app.transport.scheduler import DomainScheduler
+        from crawlutron.transport.scheduler import DomainScheduler
 
         root = "https://example.test/root"
         child = "https://example.test/child"
@@ -299,8 +299,8 @@ class TestWholeSiteAdmissionContract:
         def set_domain_min_delay(self, domain: str, seconds: float) -> None:
             committed.append((domain, seconds))
 
-        monkeypatch.setattr("app.admission.admission.RobotsGate.allows", allows)
-        monkeypatch.setattr("app.admission.admission.RobotsGate.crawl_delay", crawl_delay)
+        monkeypatch.setattr("crawlutron.admission.admission.RobotsGate.allows", allows)
+        monkeypatch.setattr("crawlutron.admission.admission.RobotsGate.crawl_delay", crawl_delay)
         monkeypatch.setattr(DomainScheduler, "set_domain_min_delay", set_domain_min_delay)
         policy = self._policy(1, 2)
         policy["limits"]["respect_robots"] = True

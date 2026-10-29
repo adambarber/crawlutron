@@ -8,13 +8,13 @@ from collections.abc import Iterator
 
 import pytest
 
-import app.transport.content_cache as cc
-from app.models.normalized_url import NormalizedUrl
-from app.safety.validation import HostPolicy
-from app.transport.cache import HttpCache
-from app.transport.content_cache import ContentCache
-from app.transport.fetchers import default_http_fetcher
-from app.vocabulary.strategies import HTTP_DECLARED_CRAWLER
+import crawlutron.transport.content_cache as cc
+from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.safety.validation import HostPolicy
+from crawlutron.transport.cache import HttpCache
+from crawlutron.transport.content_cache import ContentCache
+from crawlutron.transport.fetchers import default_http_fetcher
+from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._cache_fixtures import _make_cache, counting_entry_reads, on_disk_bytes, reopen_cache, scoped_cache
 from tests._fetch_scripted import request_fetcher
 from tests._fetcher_factories import clocked_cache, crawled_results, run_http_strategy, tap_fetcher
@@ -358,7 +358,7 @@ async def test_private_response_is_never_stored_for_replay(tmp_path):
     Two callers (different cookie namespaces) share the key when neither sends a
     Cookie yet, so only forbidding the store keeps B from being served A's body.
     """
-    from app.transport.cookie_jar import COOKIE_NAMESPACE
+    from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE
 
     run, fetches = await _directive_runner(
         "http://example.com/private", {"cache-control": "private"}, tmp_path

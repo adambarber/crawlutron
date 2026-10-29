@@ -2,7 +2,7 @@
 
 import asyncio
 
-from app.models.normalized_url import NormalizedUrl
+from crawlutron.models.normalized_url import NormalizedUrl
 from tests._fetch_doubles import FetcherDouble, Route
 
 

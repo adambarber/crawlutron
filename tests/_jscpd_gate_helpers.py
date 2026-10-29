@@ -72,7 +72,7 @@ def _args_for(
 
 def _strip_root(name: str, root: str) -> str:
     """jscpd's name for a file in a multi-root invocation: it strips the root prefix,
-    reporting `crawl/recursive.py` for `app/orchestration/recursive.py` -- a pair
+    reporting `crawl/recursive.py` for `crawlutron/orchestration/recursive.py` -- a pair
     the gate resolves back against the filesystem, so the stub must reproduce it.
     """
     return name[len(root) + 1 :] if name.startswith(root + "/") else name
@@ -206,8 +206,8 @@ def _roots_of(command: list[str]) -> list[str]:
 
 
 def _duplicate(
-    first_path: str = "app/new.py",
-    second_path: str = "app/other.py",
+    first_path: str = "crawlutron/new.py",
+    second_path: str = "crawlutron/other.py",
     fragment: str = "duplicate",
 ) -> JscpdDuplicate:
     return {

@@ -2,16 +2,16 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import NoReturn
 
-from app.models.browser_profile_record import BrowserProfileRecord
-from app.transport.browser import BrowserRenderer
-from app.transport.browser_driver import BrowserDriver
-from app.transport.browser_pool import (
+from crawlutron.models.browser_profile_record import BrowserProfileRecord
+from crawlutron.transport.browser import BrowserRenderer
+from crawlutron.transport.browser_driver import BrowserDriver
+from crawlutron.transport.browser_pool import (
     BROWSER_POOL_ACQUIRE_TIMEOUT_SECONDS,
     BrowserPool,
     BrowserPoolExhaustedError,
     set_browser_pool,
 )
-from app.vocabulary.browser import BrowserAction
+from crawlutron.vocabulary.browser import BrowserAction
 
 
 @contextmanager

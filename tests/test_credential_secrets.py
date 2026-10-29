@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.models.credential import Credential
+from crawlutron.models.credential import Credential
 
 
 def test_credential_repr_does_not_leak_secrets():

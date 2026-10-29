@@ -5,10 +5,10 @@ import socket
 
 import pytest
 
-import app.transport.pinned_transport as http_mod
-from app.models.normalized_url import NormalizedUrl
-from app.safety.validation import HostPolicy
-from app.transport.pinned_transport import check_ssrf_protection, resolve_and_pin_host
+import crawlutron.transport.pinned_transport as http_mod
+from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.safety.validation import HostPolicy
+from crawlutron.transport.pinned_transport import check_ssrf_protection, resolve_and_pin_host
 from tests._assertions import (
     assert_dns_pinning_uses_first_resolution,
     block_private_targets,
@@ -205,7 +205,7 @@ class TestSSRFProtection:
 
         The process-global DNS cache is cleared first, so a prior test cannot
         serve this call from cache and report 0 getaddrinfo calls."""
-        from app.transport.pinned_transport import reset_process_state
+        from crawlutron.transport.pinned_transport import reset_process_state
 
         reset_process_state()
         with host_resolves_to(monkeypatch, "8.8.8.8") as resolved:
@@ -229,7 +229,7 @@ class TestFrontierIdentityRefusesRejectedTargets:
     @pytest.mark.parametrize("target", REJECTED)
     def test_private_target_is_not_given_an_identity(self, monkeypatch, target):
         block_private_targets(monkeypatch)
-        from app.admission.admission_links import frontier_identity
+        from crawlutron.admission.admission_links import frontier_identity
 
         assert frontier_identity(target, host_policy=HostPolicy.unrestricted()) is None
 
@@ -239,7 +239,7 @@ class TestFrontierIdentityRefusesRejectedTargets:
         Bare string, dict or ``normalized_url``-bearing object -- a guard for
         one shape leaves the others open; ``FrontierEntry`` is safe by construction."""
         block_private_targets(monkeypatch)
-        from app.admission.admission_links import frontier_identity
+        from crawlutron.admission.admission_links import frontier_identity
 
         target = "http://169.254.169.254/latest/meta-data/"
         policy = HostPolicy.unrestricted()
@@ -257,7 +257,7 @@ class TestFrontierIdentityRefusesRejectedTargets:
         owner refuses. If only the first is honoured the guard is half a guard.
         """
         block_private_targets(monkeypatch)
-        from app.admission.admission_links import frontier_identity
+        from crawlutron.admission.admission_links import frontier_identity
 
         policy = HostPolicy.from_strings("example.com", "")
         assert frontier_identity("http://evil.test/x", host_policy=policy) is None
@@ -268,7 +268,7 @@ class TestFrontierIdentityRefusesRejectedTargets:
         The guard must admit the allowed too; this stops the fix from being
         ``return None`` on line 114."""
         block_private_targets(monkeypatch)
-        from app.admission.admission_links import frontier_identity
+        from crawlutron.admission.admission_links import frontier_identity
 
         got = frontier_identity("https://example.gov/page/", host_policy=HostPolicy.unrestricted())
         # The identity is the admitted value, and its text is the page's durable identity
@@ -394,8 +394,8 @@ def test_allow_private_preserves_host_for_webhook_style_urls(monkeypatch):
 
 
 def test_shared_public_target_verdict_matches_reserved_range_corpus(monkeypatch):
-    from app.models.host_policy import host_egress_reason, reset_private_target_memo
-    from app.safety.validation import is_public_ip_value
+    from crawlutron.models.host_policy import host_egress_reason, reset_private_target_memo
+    from crawlutron.safety.validation import is_public_ip_value
 
     # The corpus claim is about the host verdict, so the escape hatch must be off: with it on,
     # host_egress_reason admits everything by design.

@@ -11,7 +11,7 @@ TESTS_DIR = pathlib.Path(__file__).resolve().parent
 REPO_ROOT = TESTS_DIR.parent
 
 
-APP_ROOT = REPO_ROOT / "app"
+APP_ROOT = REPO_ROOT / "crawlutron"
 
 
 TRANSPORT_DIR = APP_ROOT / "transport"
@@ -129,13 +129,13 @@ def _trees_under(directory: pathlib.Path) -> tuple[tuple[pathlib.Path, ast.Modul
 
 
 def file_tree(relative: str) -> tuple[pathlib.Path, ast.Module]:
-    """Parse one module by its repo-relative path (e.g. app/api/webhooks.py)."""
+    """Parse one module by its repo-relative path (e.g. crawlutron/api/webhooks.py)."""
     path = REPO_ROOT / relative
     return path, parsed(path)
 
 
 def offender(path: pathlib.Path, lineno: int, detail: str = "") -> str:
-    """Format an offender as ``app/pkg/mod.py:lineno detail`` for messages."""
+    """Format an offender as ``crawlutron/pkg/mod.py:lineno detail`` for messages."""
     label = f"{path.relative_to(REPO_ROOT)}:{lineno}"
     return f"{label} {detail}".strip()
 

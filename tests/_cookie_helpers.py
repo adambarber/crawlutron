@@ -12,7 +12,7 @@ import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from app.transport.cookie_jar import CookieJar
+from crawlutron.transport.cookie_jar import CookieJar
 
 
 @contextmanager
