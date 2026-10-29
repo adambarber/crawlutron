@@ -27,21 +27,26 @@ were deleted with the last row. What remains is enforcement only: the
 app-to-app cross-module weld detector, the suite/scripts private-name detector,
 and the conftest door detector all still bite, now with zero exemptions.
 
-## 3. Rule-level skip/excludes lists
+## 3. Rule-level skip/excludes lists — ELIMINATED or REASONED (2026-10-28, wave 1c)
 
-| File | Exemption | Rows |
+Every list below was probed red-first (dropped locally; the rule fired or the
+file did not exist). Two were eliminated outright; the rest are live owner
+exemptions, each now carrying its one-line reason at the site:
+
+| File | Exemption | Verdict |
 |---|---|---|
-| tests/invariants/test_dedup_construction.py | `_FAKE_BUILDER_SANCTIONED` = {_fetcher_factories.py, _fetch_doubles.py}; `_ROBOTS_SCANNER_SANCTIONED` | 2 lists |
-| tests/invariants/test_dedup_filters.py | `_JS_ENDPOINTS_FILTER_SANCTIONED` = {validation.py} | 1 |
-| tests/invariants/test_dynamic_regex.py | `SANCTIONED` = {safe_regex.py} (tests/_walk_trees.py) | 1 |
-| tests/invariants/test_bounds.py | `bounded_io.py`, `discovery.py`, `_DECOMPRESS_SANCTIONED` = {decompression.py}, `_DISCOVERY_CHOKEPOINT` skip | 4 |
-| tests/invariants/test_async_discipline.py | `_READINESS_GATE_EXEMPT` = {main_helpers.py, endpoint.py (PENDING)} | 2 |
-| tests/invariants/test_handle_ownership.py | skip {app/storage/ids.py} | 1 |
-| tests/invariants/test_public_surface.py | `_MODELS_CONCERN_MODULES` = {taxonomy.py, serialization.py} | 2 |
-| tests/invariants/test_result_errors.py | `ENVELOPE_SANCTIONED`(+exceptions.py), `_TERMINAL_RESULT_SANCTIONED` = 3 | 2 lists |
-| tests/invariants/test_result_pipeline.py | `_CONTENT_PIPELINE_OWNER` | 1 |
-| tests/invariants/test_result_shape.py | `content_cache.py` owner + `SANCTIONED` | 1 |
-| tests/invariants/test_taxonomy.py | `_TRANSIENCE_HOME_SANCTIONED`, `_ERROR_OK`, `_POOL_EXHAUSTION_CATCH_SANCTIONED` = 3 | 3 |
+| test_dedup_construction.py | `_FAKE_BUILDER_SANCTIONED`, `_ROBOTS_SCANNER_SANCTIONED` | reason written (sanctioned builders / scanner itself) |
+| test_dedup_filters.py | `_JS_ENDPOINTS_FILTER_SANCTIONED` | ELIMINATED (dead name; rule excludes validation.py inline) |
+| test_dynamic_regex.py | `SANCTIONED` = {safe_regex.py} | reason lives at the definition (tests/_walk_trees.py) |
+| test_bounds.py | discovery/bounded_io/decompression/chokepoint skips | reasons written (each names its owner) |
+| test_async_discipline.py | `_READINESS_GATE_EXEMPT` | reason written inline (owner gate); list deleted |
+| test_handle_ownership.py | skip {ids.py} | reason written (the mint itself) |
+| test_public_surface.py | `_MODELS_CONCERN_MODULES` | reason pre-existing + existence guard test |
+| test_result_errors.py | `ENVELOPE_SANCTIONED`, `_TERMINAL_RESULT_SANCTIONED` | reasons written (envelope factory / terminal sinks) |
+| test_result_pipeline.py | `_CONTENT_PIPELINE_OWNER` | reasons written (dispatch owner) |
+| test_result_shape.py | content_cache.py, `_ENVELOPE_ADAPTER_EXEMPT` | reasons written (envelope owner / adapters) |
+| test_taxonomy.py | `_TRANSIENCE_HOME_SANCTIONED` | ELIMINATED (constants.py no longer exists) |
+| test_taxonomy.py | `_ERROR_CHOKEPOINT_SANCTIONED`, `_POOL_EXHAUSTION_CATCH_SANCTIONED` | reasons written (chokepoint / 503 + worker guard) |
 
 ## 4. Doc-reference exclusions
 
