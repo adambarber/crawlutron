@@ -18,8 +18,6 @@ from tests.chokepoint_walks import (
 from tests.invariants._shared import _enclosing_defs
 from tests.rules import Bites, Registry, Rule, Silent
 
-_JS_ENDPOINTS_FILTER_SANCTIONED = frozenset({"validation.py"})
-
 
 def _reinline_js_endpoints_filter_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag the inlined endpoint-filter comprehension outside its chokepoint.
