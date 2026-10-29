@@ -193,7 +193,7 @@ def test_the_gate_helper_fails_loudly_with_no_argument() -> None:
 
 def test_the_gate_venv_guard_names_the_dev_extra(tmp_path_factory) -> None:
     """A missing venv fails, naming pyproject.toml's dev extra -- not
-    requirements-dev.txt, which no workflow reads -- and exercises the branch.
+    requirements-dev.txt, which only the Dockerfile test stage installs -- and exercises the branch.
     """
     repo = tmp_path_factory.mktemp("novenv")
     service_root = _gate_repo(repo, layout="root", venv=False)

@@ -18,7 +18,7 @@
 # `files:` matches both shapes for the same reason — a hook must not fire on a
 # parent repo's OTHER docker services (e.g. `docker/llm/`).
 #
-# `files:` is a TRIGGER, not a list of inputs. All seven hooks are whole-tree
+# `files:` is a TRIGGER, not a list of inputs. Every hook is whole-tree
 # with `pass_filenames: false`, so the trigger decides "should this scan run"
 # not "which files this hook reads." A per-file guess drifts: the old pattern
 # listed .py and the gate configs but not `.gitignore`, so the commit that
@@ -27,10 +27,10 @@
 # or nested under a parent repo as `docker/browser-crawler/*` — and excludes a
 # parent repo's OTHER docker services.
 #
-# All seven hooks share one YAML anchor (`*service_trigger`) so the trigger
+# All hook entries share one YAML anchor (`*service_trigger`) so the trigger
 # cannot drift across copies: changing one automatically changes all.
 #
-# All seven hooks also share ONE entry preamble, and it is a committed helper
+# All hook entries also share ONE entry preamble, and it is a committed helper
 # rather than a YAML anchor. An anchor can only supply a whole scalar, and each
 # hook has to extend the preamble with its own command, so an anchored prefix is
 # not expressible in YAML; a file is. `scripts/gate` owns the two things the
@@ -44,7 +44,7 @@
 # is asserted by EXECUTION -- the contract builds a synthetic repository in each
 # layout and runs the real entry string in it -- not by matching the config text.
 #
-# The seven entries are still seven copies of that one-line lookup, because YAML
+# The entries are still copies of that one-line lookup, because YAML
 # cannot interpolate, so nothing in the file stops them from drifting apart. The
 # contract closes that gap instead: every entry must be byte-identical up to its
 # command, and `scripts/gate` is an enforcement input, so a commit that edits
