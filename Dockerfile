@@ -137,7 +137,7 @@ COPY --chown=appuser:appuser crawlutron /app/crawlutron
 # uvicorn applies its logging config in ``Config.__init__`` -- BEFORE the app
 # is imported -- so the service's JSON sink must exist by then or uvicorn's own
 # startup lines stay plain text. This config installs the root JSON handler and
-# points uvicorn's loggers at it; ``app.main`` adds the env-configured rotating
+# points uvicorn's loggers at it; ``crawlutron.main`` adds the env-configured rotating
 # file sink on import (and skips the stream handler as already present).
 COPY --chown=appuser:appuser uvicorn-log-config.json /app/uvicorn-log-config.json
 
@@ -150,7 +150,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
 # Production command. The bind interface defaults to loopback (callers
 # authenticate with an API key; see SECURITY.md); CRAWLUTRON_HOST must be set explicitly to
 # expose the port (the compose file sets 0.0.0.0, gated by its loopback mapping).
-CMD ["sh", "-c", "exec uvicorn app.main:app --host ${CRAWLUTRON_HOST:-127.0.0.1} --port 8765 --workers ${CRAWLUTRON_WORKERS} --log-config /app/uvicorn-log-config.json --log-level ${CRAWLUTRON_LOG_LEVEL}"]
+CMD ["sh", "-c", "exec uvicorn crawlutron.main:app --host ${CRAWLUTRON_HOST:-127.0.0.1} --port 8765 --workers ${CRAWLUTRON_WORKERS} --log-config /app/uvicorn-log-config.json --log-level ${CRAWLUTRON_LOG_LEVEL}"]
 
 # ==========================================
 # 3. Development Stage: Hot-reloading and dev tools
@@ -169,4 +169,4 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 USER appuser
 
 # Development command with hot-reloading and debug logging
-CMD ["sh", "-c", "exec uvicorn app.main:app --host ${CRAWLUTRON_HOST:-127.0.0.1} --port 8765 --reload --log-config /app/uvicorn-log-config.json --log-level debug"]
+CMD ["sh", "-c", "exec uvicorn crawlutron.main:app --host ${CRAWLUTRON_HOST:-127.0.0.1} --port 8765 --reload --log-config /app/uvicorn-log-config.json --log-level debug"]
