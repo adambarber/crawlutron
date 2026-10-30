@@ -204,6 +204,43 @@ def test_pyright_config_targets_the_running_interpreter() -> None:
     )
 
 
+def test_pyright_config_include_points_at_a_live_tracked_package() -> None:
+    """The whole-tree analysis must analyze the tree, or it passes empty.
+
+    The app-to-crawlutron rename repointed every gate config except this one,
+    leaving `include` pointing at a directory with zero tracked files -- pyright
+    reported filesAnalyzed: 0 and the budget gate passed trivially against no
+    analysis at all. This pin makes that shape a build failure.
+    """
+    config = json.loads(_strip_jsonc((SERVICE_ROOT / "pyrightconfig.json").read_text(encoding="utf-8")))
+    includes = config.get("include", [])
+    assert includes, f"pyrightconfig.json declares no include paths: {includes}"
+
+    git = shutil.which("git")
+    assert git, "git is required to prove the include path is a tracked package"
+    is_tracked = subprocess.run(
+        [git, "-C", str(SERVICE_ROOT), "ls-files"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+
+    resolved = []
+    for entry in includes:
+        root = SERVICE_ROOT / entry
+        if not root.exists():
+            continue
+        tracked_here = [f for f in is_tracked if f.startswith(entry.rstrip("/") + "/") and f.endswith(".py")]
+        resolved.append((entry, len(tracked_here)))
+    live = [(entry, n) for entry, n in resolved if n > 0]
+    assert live, (
+        "no include path in pyrightconfig.json resolves to tracked .py files: "
+        f"{resolved}. An include that matches nothing lets the whole-tree "
+        "analysis pass with filesAnalyzed: 0 -- a gate that analyses nothing "
+        "proves nothing."
+    )
+
+
 # --------------------------------------------------------------------------- Keeping pyright's view of the
 # models TRUE. This is not another check for annotation lies; it protects the checker itself.
 
