@@ -11,7 +11,7 @@
     // owner of project-specific safety predicates; this file is the single owner
     // of "the type annotation is a lie". Gated by tests/test_pyright_budget.py
     // and a pre-commit hook, both at zero.
-    "include": ["app"],
+    "include": ["crawlutron"],
     "exclude": [
         "tests",
         "scripts",
@@ -39,16 +39,13 @@
     // A suppression that suppresses nothing is a claim about the code that
     // nothing ever re-checks, and a comment explaining a suppression is
     // indistinguishable from a working one until the code underneath changes.
-    // Five in `app/api_models.py`, two on the `lxml.etree` imports and one on
-    // `browser_pool._configured_strategy` had stopped suppressing anything while
-    // their comments still explained why they were needed; the api_models ones
-    // never suppressed anything, from the commit that added them onward. This is
-    // the rule that turns that decay into a build failure.
+    // This rule turns that decay into a build failure.
     //
     // It also catches prose: a comment that quotes a suppression directive IS a
     // suppression directive, so an explanatory comment can silently mute the
-    // line it sits on. One paragraph in `app/api_models.py` had been doing
-    // exactly that.
+    // line it sits on. The only live suppressions are in `extraction/doc_pool.py`
+    // and `transport/cookie_jar.py`, each carrying the stdlib-over-narrow reason
+    // for why it is there.
     "reportUnnecessaryTypeIgnoreComment": "error",
 
     "reportMissingTypeStubs": "none",
