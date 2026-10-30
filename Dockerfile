@@ -51,11 +51,17 @@ RUN pip install --no-cache-dir "$(grep -iE '^camoufox' requirements.txt)"
 # Fetch the browser binary with a persistent cache mount as a safety net:
 # if the layer cache is pruned but the build cache survives, ``fetch``
 # short-circuits and the bundle layer is rebuilt cheaply from warm cache.
-RUN --mount=type=cache,target=/root/.cache/camoufox,sharing=locked \
-    python -m camoufox fetch \
-    && test -d /root/.cache/camoufox \
+# camoufox writes its install under user_cache_dir("camoufox") and manages that
+# dir itself (rmtree on replace). Pointing it at the buildkit cache MOUNT root
+# breaks: camoufox's own cleanup runs on the mount while buildkit holds it open
+# -> errno 16 "Device or resource busy". Point XDG_CACHE_HOME at a path INSIDE
+# the mount (distinct from the raw fetch cache) so camoufox owns a real dir and
+# the mount only persists the finished install across rebuilds.
+RUN --mount=type=cache,target=/root/.cache/camoufox-mount,sharing=locked \
+    XDG_CACHE_HOME=/root/.cache/camoufox-mount python -m camoufox fetch \
+    && test -d /root/.cache/camoufox-mount/camoufox \
     && mkdir -p /camoufox-bundle \
-    && cp -a /root/.cache/camoufox/. /camoufox-bundle/
+    && cp -a /root/.cache/camoufox-mount/camoufox/. /camoufox-bundle/
 
 # ==========================================
 # 2. Runtime Stage: Lean production image
