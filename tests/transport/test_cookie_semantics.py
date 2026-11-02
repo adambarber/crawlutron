@@ -358,3 +358,93 @@ def test_the_reap_scopes_its_slot_writes_to_the_tombstones_own_namespace(tmp_pat
     assert jar.cookie_header_for(canonical("http://a.example/"), namespace="t2") == "live=y"
     # The reap emptied t1's slot; a re-read does not resurrect the deletion.
     assert set(store.load("t1", "a.example")) == set()
+
+
+async def _cffi_redirect_walk(url: str, responses, monkeypatch, stub_builder):
+    """The impersonating fetcher against a scripted cffi session, installed
+    through the public pooled-builder seam. Each scripted answer is a real
+    httpx.Response-shaped header set wrapped in the queue/STREAM_END contract
+    the cffi stream reader consumes, so the walk, the pin, and the jar all run
+    production code.
+    """
+    from curl_cffi.requests.models import STREAM_END
+
+    scripted = iter(responses)
+    closed: list[bool] = []
+
+    class _ScriptedCffiResponse:
+        """The slice of a cffi streamed Response the walk touches."""
+
+        def __init__(self, response: MockResponse) -> None:
+            self.status_code = response.status_code
+            self.headers = response.headers
+            self.queue = _QueueOf(response)
+            self.closed = False
+
+        async def aclose(self) -> None:
+            self.closed = True
+            closed.append(True)
+
+    class _QueueOf:
+        """Replay one terminal answer, then STREAM_END."""
+
+        def __init__(self, response: MockResponse) -> None:
+            body = b"" if response.status_code in (301, 302, 303, 307, 308) else b"<html>ok</html>"
+            self.items = [body, STREAM_END]
+
+        async def get(self):
+            if self.items:
+                return self.items.pop(0)
+            raise AssertionError("the walk read past its scripted answer")
+
+    session = type("Session", (), {})()
+
+    async def _get(url, **kwargs):
+        try:
+            return _ScriptedCffiResponse(next(scripted))
+        except StopIteration:
+            raise AssertionError("the walk sent more requests than the script answers") from None
+
+    session.get = _get
+    stub_builder("cffi", lambda settings: session)
+    from crawlutron.transport.fetchers import default_http_fetcher
+
+    return await default_http_fetcher(canonical(url), {}, 30, impersonate=True)
+
+
+_REDIRECT_SCRIPT = [
+    MockResponse(302, {"location": "http://target.test/next", "set-cookie": "sess=hop1; Path=/"}, b""),
+    MockResponse(200, {"content-type": "text/html"}, b"<html>ok</html>"),
+]
+
+
+def _script_hermetic_walk(monkeypatch):
+    from tests._transport_doubles import allow_scripted_egress
+
+    allow_scripted_egress(monkeypatch)
+    return [_REDIRECT_SCRIPT[0], _REDIRECT_SCRIPT[1]]
+
+
+async def test_cffi_redirect_hop_cookie_is_stored_under_its_origin(stub_builder, monkeypatch):
+    """RFC 6265 5.3 on the impersonated transport: the redirect response's
+    Set-Cookie is attributed to the origin that SENT it, never the redirect
+    target (#571). The target's jar slot must stay empty."""
+    _script_hermetic_walk(monkeypatch)
+    await _cffi_redirect_walk("http://hop1.test/login", _REDIRECT_SCRIPT, monkeypatch, stub_builder)
+    jar = cookie_jar.global_cookie_jar()
+    assert "sess=hop1" in _header_for(jar, "http://hop1.test/dashboard")
+    assert _header_for(jar, "http://target.test/") == ""
+
+
+async def test_redirect_hop_cookie_attribution_is_identical_across_transports(stub_builder, monkeypatch):
+    """Twin parity (#571): the httpx and cffi walks must attribute the same
+    redirect Set-Cookie to the same origin -- one law, two transports."""
+    _script_hermetic_walk(monkeypatch)
+    await _cffi_redirect_walk("http://hop1.test/login", _REDIRECT_SCRIPT, monkeypatch, stub_builder)
+    cffi_jar = cookie_jar.global_cookie_jar()
+    patch_http_fetcher_transport(monkeypatch, _REDIRECT_SCRIPT, allow_ssrf_bypass=True)
+    await run_default_http_fetcher("http://hop1.test/login")
+    httpx_jar = cookie_jar.global_cookie_jar()
+    for jar in (cffi_jar, httpx_jar):
+        assert "sess=hop1" in _header_for(jar, "http://hop1.test/dashboard")
+        assert _header_for(jar, "http://target.test/") == ""

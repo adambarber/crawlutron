@@ -100,7 +100,7 @@ async def _afetch_document_bytes(
         async with pinned_transport.apinned_stream(
             client, chain, pinned_url, hop_headers, timeout
         ) as response:
-            if await chain.advance(response):
+            if await chain.advance(response) is not None:
                 continue
             return await read_capped_async(response.aiter_raw(), EXTRACTION_DOC_MAX_INPUT_BYTES)
     raise AssertionError("apinned_hops raises on a body that neither returned nor advanced")

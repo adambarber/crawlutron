@@ -11,6 +11,7 @@ import functools
 import logging
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import httpx
@@ -31,6 +32,62 @@ if TYPE_CHECKING:
     from curl_cffi.requests.models import Response as CffiResponse
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class _CffiHop:
+    """One cffi walk's shared frame: the parameters every hop arm forwards.
+
+    The walk's arms (GET, too-large gate, redirect advance, stream read) all
+    speak the same request identity, so it travels as one value instead of a
+    six-parameter echo between the hop handler and its arms.
+    """
+
+    url: NormalizedUrl
+    timeout_seconds: int
+    max_content_length: int
+    started: float
+    release_stream_noblock: Callable[[CffiResponse], None] | None
+
+    async def stream_read(self, chain, response) -> HttpFetchResult:
+        """Stream RAW curl bytes under the cap, then finish the fetch.
+
+        A hostile origin can omit content-length and stream gigabytes, so the
+        queue is read directly and every non-terminal exit releases the handle
+        without awaiting it.
+        """
+        raw = bytearray()
+        completed = False
+        early_result: HttpFetchResult | None = None
+        try:
+            early_result = await _drain_capped_stream(
+                response,
+                raw,
+                timeout_seconds=self.timeout_seconds,
+                max_content_length=self.max_content_length,
+                too_large=functools.partial(http_413, self.url, chain.url, self.started),
+            )
+            completed = early_result is None
+        finally:
+            if not completed:
+                if self.release_stream_noblock is not None:
+                    self.release_stream_noblock(response)
+                else:
+                    _release_stream_noblock(response)
+        if early_result is not None:
+            return early_result
+        # STREAM_END means the producer is done, so awaiting close is safe -- and
+        # now required: an unreleased handle stalls the next streamed request.
+        await response.aclose()
+        return await _finish_fetch(
+            url=self.url,
+            chain=chain,
+            response=response,
+            raw=bytes(raw),
+            status_code=response.status_code,
+            started=self.started,
+            max_content_length=self.max_content_length,
+        )
 
 
 async def default_http_fetcher(
@@ -104,11 +161,11 @@ async def _stream_terminal_hop(
         if pinned_transport.declared_length_exceeds(content_length, max_content_length):
             return http_413(url, chain.url, started), None
         status_code = response.status_code
-        hop_url = chain.url
-        if await chain.advance(response):
+        served_url = await chain.advance(response)
+        if served_url is not None:
             # A real cookie (RFC 6265 5.3), but persistence is DEFERRED: stored
             # only after the next hop's pin admits the walk.
-            return None, (hop_url, response.headers)
+            return None, (served_url, response.headers)
         raw = bytearray()
         async for chunk in response.aiter_raw():
             raw.extend(chunk)
@@ -117,13 +174,12 @@ async def _stream_terminal_hop(
         return (
             await _finish_fetch(
                 url=url,
-                final_url=chain.url,
-                status_code=status_code,
+                chain=chain,
+                response=response,
                 raw=raw,
-                response_headers=response.headers,
+                status_code=status_code,
+                started=started,
                 max_content_length=max_content_length,
-                elapsed_ms=int((time.monotonic() - started) * 1000),
-                too_large=functools.partial(http_413, url, chain.url, started),
             ),
             None,
         )
@@ -147,37 +203,39 @@ async def _flush_deferred_hop_cookies(
 async def _finish_fetch(
     *,
     url: NormalizedUrl,
-    final_url: NormalizedUrl,
-    status_code: int,
+    chain,
+    response,
     raw: bytes | bytearray,
-    response_headers: TransportHeaders,
+    status_code: int,
+    started: float,
     max_content_length: int,
-    elapsed_ms: int,
-    too_large: Callable[[], HttpFetchResult],
 ) -> HttpFetchResult:
     """Decompress, persist cookies, and build the terminal result -- the shared
     tail both transports use, so the bomb cap, cookie persistence, and header
-    casing cannot diverge; ``too_large`` is a factory that runs only on a bomb.
+    casing cannot diverge. ``chain``/``response`` arrive pre-advance: the final
+    URL and headers are the terminal hop's own, and the 413 factory runs only
+    on a bomb.
     """
+    too_large = functools.partial(http_413, url, chain.url, started)
     try:
         body = _decompress_body(
             raw,
-            response_headers.get("content-encoding", ""),
+            response.headers.get("content-encoding", ""),
             max_output_bytes=max_content_length,
         )
     except DecompressionTooLargeError:
         return too_large()
-    await store_set_cookies(final_url, response_headers)
-    headers = {key.lower(): value for key, value in response_headers.items()}
+    await store_set_cookies(chain.url, response.headers)
+    headers = {key.lower(): value for key, value in response.headers.items()}
     # Already decompressed above; drop the header to avoid a second pass.
     headers.pop("content-encoding", None)
     return HttpFetchResult(
         url=url,
-        final_url=final_url,
+        final_url=chain.url,
         status_code=status_code,
         headers=headers,
         body=body,
-        elapsed_ms=elapsed_ms,
+        elapsed_ms=int((time.monotonic() - started) * 1000),
     )
 
 
@@ -202,8 +260,14 @@ async def cffi_fetch(
     client = http_client_pool.get_cffi_session()
     # Declared outside the walk so the twin loops share no longer a window.
     pending: tuple[NormalizedUrl, TransportHeaders] | None = None
+    hop = _CffiHop(
+        url=url,
+        timeout_seconds=timeout_seconds,
+        max_content_length=max_content_length,
+        started=time.monotonic(),
+        release_stream_noblock=release_stream_noblock,
+    )
     try:
-        started = time.monotonic()
         async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(
             url, headers, pin=pin, timeout_seconds=timeout_seconds
         ):
@@ -211,17 +275,7 @@ async def cffi_fetch(
             # flushes only after THIS hop's pin admitted the walk.
             await _flush_deferred_hop_cookies(pending)
             pending = None
-            handled, pending = await _handle_cffi_hop(
-                url,
-                chain,
-                client,
-                pinned_url,
-                hop_headers,
-                timeout_seconds=timeout_seconds,
-                max_content_length=max_content_length,
-                started=started,
-                release_stream_noblock=release_stream_noblock,
-            )
+            handled, pending = await _handle_cffi_hop(hop, chain, client, pinned_url, hop_headers)
             if handled is not None:
                 return handled
         raise AssertionError("apinned_hops raises on a body that neither returned nor advanced")
@@ -240,16 +294,11 @@ async def cffi_fetch(
 
 
 async def _handle_cffi_hop(
-    url: NormalizedUrl,
+    hop: _CffiHop,
     chain,
     client,
     pinned_url: str,
     hop_headers: dict[str, str],
-    *,
-    timeout_seconds: int,
-    max_content_length: int,
-    started: float,
-    release_stream_noblock: Callable[[CffiResponse], None] | None,
 ) -> tuple[HttpFetchResult | None, tuple[NormalizedUrl, TransportHeaders] | None]:
     """One pinned hop: GET, too-large gate, redirect advance, or streamed body;
     the redirect arm returns its pending cookie hop instead of storing it.
@@ -260,7 +309,7 @@ async def _handle_cffi_hop(
             headers=hop_headers,
             allow_redirects=False,
             stream=True,
-            timeout=Timeouts.for_request(timeout_seconds).read,
+            timeout=Timeouts.for_request(hop.timeout_seconds).read,
         )
     except SSLError:
         # A TLS-handshake failure means impersonation never completed: serving
@@ -271,87 +320,17 @@ async def _handle_cffi_hop(
         return None, None
     # Content-length check
     content_length = response.headers.get("content-length")
-    if pinned_transport.declared_length_exceeds(content_length, max_content_length):
+    if pinned_transport.declared_length_exceeds(content_length, hop.max_content_length):
         await response.aclose()  # release the curl handle
-        elapsed_ms = int((time.monotonic() - started) * 1000)
-        return _cffi_too_large_result(url, chain.url, response, elapsed_ms), None
-    if await chain.advance(response):
+        return http_413(hop.url, chain.url, hop.started), None
+    served_url = await chain.advance(response)
+    if served_url is not None:
         await response.aclose()  # release the curl handle
         # Deferred like the httpx twin: stored only when the next pin admits.
-        return None, (chain.url, response.headers)
+        return None, (served_url, response.headers)
     # Never trust response.elapsed across curl_cffi versions: a timedelta
     # there TypeErrors and silently downgrades every fetch to plain httpx.
-    elapsed_ms = int((time.monotonic() - started) * 1000)
-    return (
-        await _read_capped_stream(
-            url,
-            chain,
-            response,
-            timeout_seconds=timeout_seconds,
-            max_content_length=max_content_length,
-            elapsed_ms=elapsed_ms,
-            release_stream_noblock=release_stream_noblock,
-        ),
-        None,
-    )
-
-
-async def _read_capped_stream(
-    url: NormalizedUrl,
-    chain,
-    response,
-    *,
-    timeout_seconds: int,
-    max_content_length: int,
-    elapsed_ms: int,
-    release_stream_noblock: Callable[[CffiResponse], None] | None,
-) -> HttpFetchResult | None:
-    """Stream RAW bytes with a running cap and finish the fetch.
-
-    A hostile origin can omit content-length and stream gigabytes; abort with
-    a 413 past the cap. The curl queue is read directly; every exit releases it.
-    """
-    raw = bytearray()
-    completed = False
-    early_result: HttpFetchResult | None = None
-    try:
-        early_result = await _drain_capped_stream(
-            response,
-            raw,
-            timeout_seconds=timeout_seconds,
-            max_content_length=max_content_length,
-            too_large=lambda: _cffi_too_large_result(url, chain.url, response, elapsed_ms),
-        )
-        completed = early_result is None
-    finally:
-        if not completed:
-            if release_stream_noblock is not None:
-                release_stream_noblock(response)
-            else:
-                _release_stream_noblock(response)
-    if early_result is not None:
-        return early_result
-    # STREAM_END means the producer is done, so awaiting close is safe -- and
-    # now required: an unreleased handle stalls the next streamed request.
-    await response.aclose()
-    # Decompress with a size cap (decompression-bomb guard), normalise
-    # headers and persist cookies via the shared tail.
-    return await _finish_fetch(
-        url=url,
-        final_url=chain.url,
-        status_code=response.status_code,
-        raw=bytes(raw),
-        response_headers=response.headers,
-        max_content_length=max_content_length,
-        elapsed_ms=elapsed_ms,
-        too_large=functools.partial(
-            _cffi_too_large_result,
-            url,
-            chain.url,
-            response,
-            elapsed_ms,
-        ),
-    )
+    return await hop.stream_read(chain, response), None
 
 
 async def _drain_capped_stream(
@@ -405,21 +384,6 @@ def http_413(url: NormalizedUrl, final_url: NormalizedUrl, started: float) -> Ht
         headers={"content-type": "application/octet-stream"},
         body=b"",
         elapsed_ms=int((time.monotonic() - started) * 1000),
-    )
-
-
-def _cffi_too_large_result(
-    url: NormalizedUrl, current_url: NormalizedUrl, response: CffiResponse, elapsed_ms: int
-) -> HttpFetchResult:
-    # Synthetic headers, never echoed: echoing content-encoding turned the
-    # empty refusal body into a decompression fault instead of the size verdict.
-    return HttpFetchResult(
-        url=url,
-        final_url=current_url,
-        status_code=413,
-        headers={"content-type": "application/octet-stream"},
-        body=b"",
-        elapsed_ms=elapsed_ms,
     )
 
 

@@ -371,12 +371,17 @@ class _RedirectChain:
             lambda: self._rule(self.url, self.headers), timeout_seconds=self.timeout_seconds
         )
 
-    async def advance(self, response: httpx.Response) -> bool:
-        """Step to the next hop; return True when the caller should re-request.
+    async def advance(self, response: httpx.Response) -> NormalizedUrl | None:
+        """Step to the next hop; return the URL the response was served from.
 
-        False means terminal - read the body. Awaited: a cross-origin hop reads
-        the persistent jar off the loop.
+        ``None`` means terminal - read the body. The served URL is captured
+        BEFORE the step: a redirect response's cookie state belongs to the
+        origin that sent it (#571), and this is the one decision site -- the
+        return value is the only post-advance handle a caller gets, so a
+        read-after-mutate of ``self.url`` is unrepresentable. Awaited: a
+        cross-origin hop reads the persistent jar off the loop.
         """
+        served_url = self.url
         target = await redirect_target(
             self.url,
             self.headers,
@@ -385,10 +390,10 @@ class _RedirectChain:
             self.hops,
         )
         if target is None:
-            return False
+            return None
         self.url, self.headers = target
         self.hops += 1
-        return True
+        return served_url
 
 
 async def apinned_hops(
