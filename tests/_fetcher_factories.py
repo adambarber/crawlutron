@@ -111,7 +111,7 @@ def make_html_fetcher(calls: list[str], body: bytes = b"<html><body>page content
     return FetcherDouble(lambda url, *_: {"status": 200, "ctype": "text/html", "body": body}, calls)
 
 
-async def run_default_http_fetcher(url: str, headers=None, *, pin=None, timeout_seconds: int = 30):
+async def run_default_http_fetcher(url: str, headers=None, *, pin=None):
     """The real default fetcher against a caller-supplied pin rule; ``pin`` is the
     fetcher's own seam, forwarded rather than rebound over the transport module's
     private builder, because a redirect test needs a pin that is not a resolver.
@@ -121,7 +121,7 @@ async def run_default_http_fetcher(url: str, headers=None, *, pin=None, timeout_
     return await default_http_fetcher(
         canonical(url),
         {} if headers is None else headers,
-        timeout_seconds,
+        30,
         pin=pin,
     )
 

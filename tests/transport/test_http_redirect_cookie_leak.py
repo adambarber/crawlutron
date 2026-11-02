@@ -74,19 +74,18 @@ async def test_http_fetcher_keeps_cookie_on_same_domain_redirect(monkeypatch):
 
 
 class _TwoCookieHandler(BaseHTTPRequestHandler):
-    """Serve a response carrying two separate ``Set-Cookie`` headers.
+    """Serve two separate ``Set-Cookie`` headers, framing the body explicitly."""
 
-    A real socket, not a ``MockResponse``: a plain dict holds one value per key,
-    so it cannot express the duplicate header this behavior turns on.
-    """
+    BODY = b"<html>ok</html>"
 
     def do_GET(self):
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
         self.send_header("Set-Cookie", "session=abc; Path=/")
         self.send_header("Set-Cookie", "csrf=xyz; Path=/")
+        self.send_header("Content-Length", str(len(__class__.BODY)))
         self.end_headers()
-        self.wfile.write(b"<html>ok</html>")
+        self.wfile.write(__class__.BODY)
 
     def log_message(self, *args):
         """Silence the default per-request stderr logging."""
@@ -102,9 +101,7 @@ async def test_http_fetcher_persists_every_set_cookie_header():
 
     server = spawn_threaded_server(_TwoCookieHandler)
     url = f"http://127.0.0.1:{server.server_port}/"
-    # The response read gets a generous budget: under full-battery load (browser
-    # subprocesses sharing the loop) a loopback read can exceed the 30s default.
-    await run_default_http_fetcher(url, timeout_seconds=60)
+    await run_default_http_fetcher(url)
     server.shutdown()
     server.server_close()
 
