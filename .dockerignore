@@ -5,7 +5,7 @@
 # the service sits in a monorepo subdirectory or is the repo root.
 #
 # An allowlist, not a denylist, for two reasons. The image is built from exactly
-# four sources (listed at the bottom), and an allowlist states that as a fact
+# five sources (listed at the bottom), and an allowlist states that as a fact
 # rather than guessing what some future directory might weigh. And it cannot go
 # stale: the local-only trees this context used to ship -- .venv alone was 771 MB
 # of an 867 MB context, alongside cache/, logs/, tmp/, report/, .cortexkit/,
@@ -13,16 +13,17 @@
 # being named, so none of them needs a line here to stay out. Being wrong costs
 # a loud `COPY failed: not found`, never a silently missing file.
 #
-# The four sources, from the Dockerfile's own COPY lines:
-#   requirements.txt         builder, camoufox-binary
-#   crawlutron/              runtime
-#   uvicorn-log-config.json  runtime
-#   requirements-dev.txt     development
+# The five sources, from the Dockerfile's own COPY lines:
+#   pyproject.toml            builder, camoufox-binary, development
+#   uv.lock                   builder, camoufox-binary, development
+#   crawlutron/               runtime
+#   uvicorn-log-config.json   runtime
+#   Dockerfile                the build itself
 *
 !crawlutron/
 !crawlutron/**
-!requirements.txt
-!requirements-dev.txt
+!pyproject.toml
+!uv.lock
 !uvicorn-log-config.json
 !Dockerfile
 

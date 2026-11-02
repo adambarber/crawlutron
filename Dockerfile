@@ -2,9 +2,15 @@
 # Build context is this repository's root, where this Dockerfile lives, so the
 # build is `docker build .` (or `docker compose build`) from the repository root
 # with no extra flags. `.dockerignore` is written for that same root: it
-# allowlists the four things the stages below COPY, which holds the build
+# allowlists the five things the stages below COPY, which holds the build
 # context to ~2.6 MB instead of the whole working tree.
-ARG CRAWLUTRON_BASE_IMAGE=python:3.12-slim-bookworm
+#
+# The base image is pinned by tag AND digest (CRAWLUTRON_BASE_IMAGE below) so a
+# rebuilt image is byte-for-byte reproducible and a fast-moving upstream tag can
+# never silently roll the deployment forward. The digest is the multi-arch OCI
+# index captured 2026-11-02. A further major bump (Python 3.15) is deferred: the
+# frozen lock cannot resolve on 3.15 until upstream ships cp315 wheels.
+ARG CRAWLUTRON_BASE_IMAGE=python:3.14.10-slim-bookworm@sha256:516b51cb9db2ef061e465c803e50f64361b82cefd91e525b889b967b83e83527
 
 # ==========================================
 # 1. Builder Stage: Compile Python dependencies
@@ -16,24 +22,31 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Install uv from its official image. The tag matches the uv pinned by the
+# project's own tooling (uv 0.13.6), so the builder and the Astral image agree.
+COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /uvx /bin/
+
 # Install build dependencies required for compiling Python wheels
 # (e.g., lxml, charset-normalizer, brotli, pydantic-core)
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
-    build-essential python3-dev libxml2-dev libxslt1-dev \
+    build-essential=12.9 python3-dev=3.11.2-1+b1 \
+    libxml2-dev=2.9.14+dfsg-1.3~deb12u6 libxslt1-dev=1.1.35-1+deb12u4 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies to a standard local directory
-COPY requirements.txt .
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --user -r requirements.txt
+# pyproject.toml + uv.lock are the single source of truth for the dependency
+# graph (requirements*.txt were deleted in dc6f2bbe). ``uv sync --frozen``
+# installs exactly the locked pins, with no hash-check drift.
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-project --python /usr/local/bin/python
 
 # ==========================================
 # 2b. Isolated Camoufox browser-binary stage
 # ==========================================
 # The browser binary download (~1.3 GB) is isolated into its own stage that
-# depends ONLY on the camoufox requirement line. Editing other requirements
+# depends ONLY on the camoufox requirement line. Editing other dependencies
 # (e.g. adding h2) therefore cannot invalidate this download, eliminating the
 # >10 minute rebuilds previously caused by a full layer-cache miss.
 #
@@ -44,9 +57,21 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # runtime stage can pull it out via ``COPY --from=camoufox-binary``.
 FROM ${CRAWLUTRON_BASE_IMAGE} AS camoufox-binary
 
+# The pin-extraction pipeline below greps the frozen lock; force bash+pipefail
+# so a failing ``uv export`` fails the RUN instead of silently producing empty.
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir "$(grep -iE '^camoufox' requirements.txt)"
+
+COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /uvx /bin/
+COPY pyproject.toml uv.lock ./
+
+# Install ONLY the camoufox pin into a dedicated dir so the fetch RUN below has
+# the module on PYTHONPATH. The pin is extracted from the frozen lock (single
+# source of truth); the ``awk`` step drops uv's trailing line-continuation.
+RUN uv pip install --no-cache-dir --python /usr/local/bin/python \
+    --target /camoufox-deps \
+    "$(uv export --frozen | grep -iE '^camoufox' | awk '{print $1}')"
 
 # Fetch the browser binary with a persistent cache mount as a safety net:
 # if the layer cache is pruned but the build cache survives, ``fetch``
@@ -64,7 +89,7 @@ RUN pip install --no-cache-dir "$(grep -iE '^camoufox' requirements.txt)"
 # RUN fetches over the wire exactly as before.
 RUN --mount=type=cache,target=/root/.cache/camoufox-mount,sharing=locked \
     --mount=type=bind,from=seed,target=/seed \
-    sh -c 'if [ -d /seed ]; then mkdir -p /root/.cache/camoufox-mount && (cp -a /seed/camoufox /root/.cache/camoufox-mount/ 2>/dev/null || cp -a /seed/. /root/.cache/camoufox-mount/camoufox/); fi; XDG_CACHE_HOME=/root/.cache/camoufox-mount python -m camoufox fetch; test -d /root/.cache/camoufox-mount/camoufox && mkdir -p /camoufox-bundle && cp -a /root/.cache/camoufox-mount/camoufox/. /camoufox-bundle/'
+    sh -c 'if [ -d /seed ]; then mkdir -p /root/.cache/camoufox-mount && (cp -a /seed/camoufox /root/.cache/camoufox-mount/ 2>/dev/null || cp -a /seed/. /root/.cache/camoufox-mount/camoufox/); fi; PYTHONPATH=/camoufox-deps XDG_CACHE_HOME=/root/.cache/camoufox-mount python -m camoufox fetch; test -d /root/.cache/camoufox-mount/camoufox && mkdir -p /camoufox-bundle && cp -a /root/.cache/camoufox-mount/camoufox/. /camoufox-bundle/'
 
 # ==========================================
 # 2. Runtime Stage: Lean production image
@@ -76,7 +101,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONHASHSEED=random \
     PYTHONPATH=/app \
     TZ=UTC \
-    PATH=/home/appuser/.local/bin:$PATH \
+    PATH=/app/.venv/bin:$PATH \
     CRAWLUTRON_LOG_LEVEL=info \
     # Single worker so the browser pool is one GLOBAL pool (per-worker pools would
     # multiply the browser count by the worker count and blow the RAM budget).
@@ -109,13 +134,20 @@ WORKDIR /app
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
-    libgtk-3-0 libasound2 libdbus-glib-1-2 libxt6 libxtst6 libxrandr2 libgbm1 \
-    ca-certificates curl fonts-liberation fonts-noto-core poppler-utils \
-    libx11-xcb1 libxcomposite1 libxdamage1 libxfixes3 libxcb1 libxcb-shm0 \
-    libxcb-render0 libxext6 libx11-6 libglib2.0-0 libstdc++6 libatk1.0-0 \
-    libatk-bridge2.0-0 libcups2 libpango-1.0-0 libcairo2 libnss3 libnspr4 \
-    libdbus-1-3 libxkbcommon0 libxshmfence1 libfontconfig1 \
-    libxml2 libxslt1.1 \
+    libgtk-3-0=3.24.38-2~deb12u3 libasound2=1.2.8-1+b1 \
+    libdbus-glib-1-2=0.112-3 libxt6=1:1.2.1-1.1 libxtst6=2:1.2.3-1.1 \
+    libxrandr2=2:1.5.2-2+b1 libgbm1=22.3.6-1+deb12u2 \
+    ca-certificates=20250419~deb12u2 curl=7.88.1-10+deb12u15 \
+    fonts-liberation=1:1.07.4-11 fonts-noto-core=20201225-1 \
+    poppler-utils=22.12.0-2+deb12u3 libx11-xcb1=2:1.8.4-2+deb12u2 \
+    libxcomposite1=1:0.4.5-1 libxdamage1=1:1.1.6-1 libxfixes3=1:6.0.0-2 \
+    libxcb1=1.15-1 libxcb-shm0=1.15-1 libxcb-render0=1.15-1 \
+    libxext6=2:1.3.4-1+b1 libx11-6=2:1.8.4-2+deb12u2 libglib2.0-0=2.74.6-2+deb12u9 \
+    libstdc++6=12.2.0-14+deb12u1 libatk1.0-0=2.46.0-5 libatk-bridge2.0-0=2.46.0-5 \
+    libcups2=2.4.2-3+deb12u9 libpango-1.0-0=1.50.12+ds-1 libcairo2=1.16.0-7 \
+    libnss3=2:3.87.1-1+deb12u4 libnspr4=2:4.35-1 libdbus-1-3=1.14.10-1~deb12u1 \
+    libxkbcommon0=1.5.0-1 libxshmfence1=1.3-1 libfontconfig1=2.14.1-4 \
+    libxml2=2.9.14+dfsg-1.3~deb12u6 libxslt1.1=1.1.35-1+deb12u4 \
     && rm -rf /var/lib/apt/lists/*
 
 
@@ -128,8 +160,8 @@ RUN useradd -m -s /bin/bash appuser \
 USER appuser
 ENV HOME=/home/appuser
 
-# Copy installed Python packages from builder stage to the appuser's local directory
-COPY --from=builder --chown=appuser:appuser /root/.local /home/appuser/.local
+# Copy the uv-resolved venv from the builder stage (the appuser owns it).
+COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
 
 # Bring in the pre-fetched Camoufox browser binary from the earlier
 # ``camoufox-binary`` build stage. This avoids the circular ``--from=
@@ -169,10 +201,12 @@ FROM runtime AS development
 # Switch back to root to install dev dependencies
 USER root
 
-# Install development tools (pytest, pytest-asyncio, ruff, etc.)
-COPY requirements-dev.txt .
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -r requirements-dev.txt
+# Install uv and sync the dev extra (pytest, pytest-asyncio, ruff, etc.) into
+# the venv the runtime stage already copied in, on top of the exact locked pins.
+COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /uvx /bin/
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --extra dev --no-install-project --python /app/.venv/bin/python
 
 # Switch back to appuser
 USER appuser
