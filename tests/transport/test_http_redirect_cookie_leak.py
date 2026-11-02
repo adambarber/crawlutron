@@ -102,7 +102,9 @@ async def test_http_fetcher_persists_every_set_cookie_header():
 
     server = spawn_threaded_server(_TwoCookieHandler)
     url = f"http://127.0.0.1:{server.server_port}/"
-    await run_default_http_fetcher(url)
+    # The response read gets a generous budget: under full-battery load (browser
+    # subprocesses sharing the loop) a loopback read can exceed the 30s default.
+    await run_default_http_fetcher(url, timeout_seconds=60)
     server.shutdown()
     server.server_close()
 

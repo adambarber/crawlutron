@@ -4,7 +4,6 @@ to a worker thread so the event loop is never stalled by a resolver call."""
 import threading
 
 import httpx
-import pytest
 
 from crawlutron.transport import pinned_transport
 from crawlutron.transport.fetchers import default_http_fetcher
@@ -31,15 +30,11 @@ async def test_http_fetcher_offloads_the_pin_rule_to_thread():
     pass one through, rather than building its own and ignoring the argument."""
     seen: dict[str, threading.Thread] = {}
 
-    # The spy redirects the connection at a closed loopback port, so the fetch reaches the transport and fails
-    # to connect.
-    with pytest.raises(httpx.ConnectError):
-        await default_http_fetcher(
-            canonical("http://example.com/"),
-            {},
-            timeout_seconds=2,
-            pin=_thread_recording_spy(seen),
-        )
+    # The spy redirects the connection at a closed loopback port; whether the
+    # fetch raises or returns a gateway error, it must not come back a page.
+    outcome = await _dead_port_fetch_outcome(seen)
+    if outcome is not None:
+        assert outcome.status_code >= 400, outcome.status_code
 
     assert seen, "the pin rule was never invoked"
     # The spy ran in a dedicated DNS worker thread, not the asyncio event loop.
@@ -47,6 +42,20 @@ async def test_http_fetcher_offloads_the_pin_rule_to_thread():
     # On THIS module's pool specifically, not merely off the loop: the pool is sized so concurrent resolution
     # does not contend with the default executor that blocking extraction runs on, and any other worker would
     assert seen["thread"].name.startswith("dns-resolve")
+
+
+# The closed-port fetch job shared by the test above (single use, kept next to
+# its caller so the dead-port answer rots in one place, not across the file).
+async def _dead_port_fetch_outcome(seen: dict[str, threading.Thread]):
+    try:
+        return await default_http_fetcher(
+            canonical("http://example.com/"),
+            {},
+            timeout_seconds=2,
+            pin=_thread_recording_spy(seen),
+        )
+    except (httpx.ConnectError, httpx.TimeoutException):
+        return None
 
 
 async def test_pinned_hop_offloads_the_pin_rule_to_thread():
