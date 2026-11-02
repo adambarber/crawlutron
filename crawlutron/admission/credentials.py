@@ -7,9 +7,9 @@ from __future__ import annotations
 
 import base64
 from collections.abc import Mapping
-from urllib.parse import urlsplit
 
 from crawlutron.models.credential import Credential
+from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.safety.header_values import reject_injectable_header_value
 
@@ -17,26 +17,12 @@ __all__ = ["apply_credentials", "authorization_value", "origin_of"]
 
 
 def origin_of(url: str) -> str:
-    """Canonical ``scheme://host[:port]`` for ``url``: lowercases scheme/host, drops
-    default ports, rejects non-HTTP schemes and userinfo (never addressed through
-    ``user@``). Idempotent.
+    """Canonical ``scheme://host[:port]`` for ``url``, via admission: one spelling,
+    the one NormalizedUrl produces. Raises on non-HTTP schemes, userinfo, and any
+    host admission refuses -- so a credential for an origin no crawl can reach is
+    loud at config load, never silently dead.
     """
-    parsed = urlsplit(url.strip())
-    scheme = parsed.scheme.lower()
-    if scheme not in {"http", "https"}:
-        raise ValueError("credential origin requires http/https")
-    # The same host canonicalization NormalizedUrl.origin runs: trailing FQDN
-    # dot stripped, IPv6 literals re-bracketed so the one origin spelling matches.
-    host = (parsed.hostname or "").rstrip(".")
-    if not host:
-        raise ValueError("credential origin requires a host")
-    if parsed.username is not None or parsed.password is not None:
-        raise ValueError("credential origin may not carry userinfo")
-    port = parsed.port  # raises ValueError for a malformed port
-    if port is not None and not ((scheme == "http" and port != 80) or (scheme == "https" and port != 443)):
-        port = None
-    host_part = f"[{host}]" if ":" in host else host
-    return f"{scheme}://{host_part}" if port is None else f"{scheme}://{host_part}:{port}"
+    return NormalizedUrl(url.strip(), policy=HostPolicy.unrestricted()).origin
 
 
 def authorization_value(credential: Credential) -> str:

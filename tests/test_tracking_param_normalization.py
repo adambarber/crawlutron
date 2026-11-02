@@ -2,8 +2,9 @@
 
 from functools import partial
 
+from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl as _NormalizedUrl
-from crawlutron.safety.validation import HostPolicy
+from crawlutron.models.normalized_url import admit_or_none
 
 admit = partial(
     _NormalizedUrl,
@@ -28,6 +29,23 @@ def test_legitimate_params_preserved():
     a = admit("https://example.gov/p?category=news&page=2")
     b = admit("https://example.gov/p?page=2&category=news")
     assert a == b and a.raw == "https://example.gov/p?category=news&page=2"
+
+
+def test_unicode_host_admits_identical_to_punycode():
+    """IDN canonicalization is admission's job: the unicode and punycode spellings
+    are one identity -- one raw (cache key, dedup), consistent host and site."""
+    unicode_form = admit("https://Bücher.example/page")
+    punycode_form = admit("https://xn--bcher-kva.example/page")
+    assert unicode_form == punycode_form
+    assert unicode_form.raw == "https://xn--bcher-kva.example/page"
+    assert unicode_form.host == "xn--bcher-kva.example"
+    assert unicode_form.site == "xn--bcher-kva.example"
+
+
+def test_unicode_host_refused_when_unencodable():
+    # A host the IDNA grammar cannot encode cannot be canonicalized: admission
+    # refuses rather than admitting a value whose identity cannot be trusted.
+    assert admit_or_none(f"https://{'a' * 64}.com", policy=HostPolicy.unrestricted()) is None
 
 
 def test_sorting_still_applied_after_strip():

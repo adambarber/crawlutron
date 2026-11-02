@@ -19,7 +19,6 @@ from crawlutron.transport.pinned_transport import (
     bounded_thread_resolve,
     check_ssrf_protection_stable,
 )
-from crawlutron.vocabulary.hosts import is_analytics_host as _is_analytics_url
 
 # The resolve bound is the pinned transport's own: one implementation for both families.
 _BOUNDED = bounded_thread_resolve
@@ -51,7 +50,7 @@ async def resolve_browser_target(
 
 
 # Subresource types with no crawlable text: aborted in reduced-resource mode.
-# Tracking/analytics hosts are never fetched (crawlutron.vocabulary.hosts, shared with enqueue refusal).
+# Tracking/analytics hosts are never fetched (NormalizedUrl.is_analytics_host, shared with enqueue refusal).
 _REDUCED_BLOCK_RESOURCE_TYPES = frozenset({"image", "font", "media"})
 
 
@@ -86,7 +85,7 @@ def make_ssrf_route_handler(
             return
         # Analytics and presentation subresources never consume crawl bandwidth:
         # drop unconditionally, or when reduced-mode says so and no screenshot.
-        if _is_analytics_url(admitted) or (
+        if admitted.is_analytics_host or (
             getattr(request, "resource_type", "") in _REDUCED_BLOCK_RESOURCE_TYPES and not include_screenshot
         ):
             await route.abort()

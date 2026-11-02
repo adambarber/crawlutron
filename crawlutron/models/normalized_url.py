@@ -7,8 +7,44 @@ from __future__ import annotations
 
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
+from crawlutron.models.host_canonical import idna_host
 from crawlutron.models.host_policy import HostPolicy, host_egress_reason, host_policy_reason
 from crawlutron.models.registrable_domain import registrable_domain
+
+#: Tracking/ad/social-feed infrastructure: recorded as links, never enqueued; apex
+#: or any subdomain. Dotted-suffix tuple so ``endswith`` is one C-level call.
+ANALYTICS_HOST_SUFFIXES = frozenset(
+    {
+        "google-analytics.com",
+        "googletagmanager.com",
+        "doubleclick.net",
+        "googlesyndication.com",
+        "googletagservices.com",
+        "adservice.google.com",
+        "facebook.net",
+        "connect.facebook.net",
+        "analytics.twitter.com",
+        "x.com",
+        "pinterest.com",
+        "hotjar.com",
+        "scorecardresearch.com",
+        "mixpanel.com",
+        "amplitude.com",
+        "segment.io",
+        "segment.com",
+        "criteo.com",
+        "pubmatic.com",
+        "rubiconproject.com",
+        "adroll.com",
+    }
+)
+_ANALYTICS_DOTTED = tuple("." + s for s in ANALYTICS_HOST_SUFFIXES)
+
+#: Non-HTML resource extensions: no further HTML links; discovery records them.
+DOCUMENT_URL_EXTENSIONS = frozenset(
+    {".pdf", ".csv", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".zip", ".rtf"}
+)
+_DOCUMENT_URL_EXTENSIONS = tuple(sorted(DOCUMENT_URL_EXTENSIONS))
 
 #: Tracking/attribution parameters that carry no content identity; dropping them
 #: canonicalizes UTM variants to one key. Bare ``ref`` stays: ambiguous, often content.
@@ -35,10 +71,6 @@ def _is_tracking_param(key: str) -> bool:
     return k.startswith("utm_") or k in _TRACKING_PARAM_EXACT
 
 
-def _strip_trailing_colon(value: str) -> str:
-    return value[:-1] if value.endswith(":") else value
-
-
 def _bracketed_netloc(host: str, port: int | None) -> str:
     """Netloc with IPv6 literals re-bracketed; bare colons parse as host:port pairs."""
     host_part = f"[{host}]" if ":" in host else host
@@ -58,7 +90,7 @@ def _canonical_parts(url: str, *, policy: HostPolicy) -> tuple[str, str, str, st
         raise ValueError("userinfo_refused")
 
     scheme = parsed.scheme
-    host = parsed.hostname.lower().rstrip(".")
+    host = idna_host(parsed.hostname)
     # A bracketed host that is not an IPv6 literal is IPvFuture (RFC 3986);
     # nothing here dials one, so refuse rather than de-bracket it into a hostname.
     if parsed.netloc.startswith("[") and ":" not in host:
@@ -137,6 +169,23 @@ class NormalizedUrl:
     def site(self) -> str:
         """The registrable domain, which is what the scheduler's per-site gates key on."""
         return self._site
+
+    @property
+    def is_analytics_host(self) -> bool:
+        """True when this URL points at tracking/ad infrastructure (apex or any subdomain)."""
+        return self._host in ANALYTICS_HOST_SUFFIXES or self._host.endswith(_ANALYTICS_DOTTED)
+
+    @property
+    def is_document_url(self) -> bool:
+        """True when this URL's path names a known document resource (pdf, docx, ...)."""
+        return self._path.lower().endswith(_DOCUMENT_URL_EXTENSIONS)
+
+    def crosses_origin(self, current: NormalizedUrl) -> bool:
+        """Whether a hop from ``current`` to self leaves the origin (the scheme/host/port
+        law). Fails toward True: a kept credential header is unrecoverable, a stripped
+        one only costs a re-login.
+        """
+        return self.origin != current.origin
 
     @property
     def port(self) -> int | None:

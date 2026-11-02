@@ -8,6 +8,7 @@ from importlib import import_module
 from typing import Protocol, cast
 
 from crawlutron.models.address_class import AddressClass, classify
+from crawlutron.models.host_canonical import idna_host
 
 TWO_PART_PUBLIC_SUFFIXES = {"co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au"}
 
@@ -51,11 +52,14 @@ def _heuristic_registrable_domain(host: str) -> str:
 
 
 def registrable_domain(host: str, *, psl: _PublicSuffixDataset | None = None) -> str:
-    """The registrable site a host belongs to, or the host itself when no site."""
+    """The registrable site a host belongs to, or the host itself when no site.
+    Hosts arrive canonical (punycode) from admission; a raw unicode host is
+    encoded here so PSL rules keyed on punycode still match.
+    """
     host = host.lower().rstrip(".")
     try:
-        ascii_host = host.encode("idna").decode("ascii")
-    except Exception:
+        ascii_host = idna_host(host)
+    except ValueError:
         ascii_host = host
     if psl is None:
         psl = _public_suffix_list()

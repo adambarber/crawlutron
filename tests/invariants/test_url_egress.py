@@ -243,8 +243,8 @@ JOB_FRONTIER_GROWTH_ONLY_USES_FUNNEL = Rule(
 
 
 _FILTER_NAMES = {
-    "crawlutron.vocabulary.hosts.is_analytics_host": "is_analytics_host",
-    "crawlutron.vocabulary.hosts.is_document_url": "is_document_url",
+    "is_analytics_host": "is_analytics_host",
+    "is_document_url": "is_document_url",
     "crawlutron.admission.scope_match.scope_allows": "scope_allows",
 }
 
@@ -252,10 +252,7 @@ _FILTER_NAMES = {
 def _imported_filter_names(tree: ast.Module) -> dict[str, str]:
     aliases: dict[str, str] = {}
     for node in nodes_of(tree):
-        if isinstance(node, ast.ImportFrom) and node.module in {
-            "crawlutron.vocabulary.hosts",
-            "crawlutron.admission.scope_match",
-        }:
+        if isinstance(node, ast.ImportFrom) and node.module == "crawlutron.admission.scope_match":
             for imported in node.names:
                 canonical = f"{node.module}.{imported.name}"
                 if canonical in _FILTER_NAMES:
@@ -275,14 +272,20 @@ def _shared_admission_filter_offenders(tree: ast.AST, path: pathlib.Path) -> lis
     function_calls: dict[ast.FunctionDef | ast.AsyncFunctionDef, set[str]] = {}
     filter_names = set(_FILTER_NAMES.values())
     for node in nodes_of(tree):
-        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
-            continue
-        name = aliases.get(node.func.id, node.func.id)
-        if name not in filter_names:
+        # The ladder answers as URL methods (is_analytics_host) or free predicates
+        # (scope_allows): a twin may re-inline either shape.
+        names: list[str] = []
+        if isinstance(node, ast.Attribute) and node.attr in filter_names:
+            names.append(node.attr)
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            name = aliases.get(node.func.id, node.func.id)
+            if name in filter_names:
+                names.append(name)
+        else:
             continue
         owner = enclosing_function(node, parents)
         if isinstance(owner, ast.FunctionDef | ast.AsyncFunctionDef):
-            function_calls.setdefault(owner, set()).add(name)
+            function_calls.setdefault(owner, set()).update(names)
     offenders: list[str] = []
     for function, names in function_calls.items():
         if len(names) >= 2:
@@ -304,8 +307,8 @@ SHARED_ADMISSION_FILTER_SET_HAS_NO_TWIN_LIST = Rule(
         "    candidates = []\n"
         "    for link in links:\n"
         "        if link.url in visited: continue\n"
-        "        if is_analytics_host(link.url): continue\n"
-        "        if is_document_url(link.url): continue\n"
+        "        if link.url.is_analytics_host: continue\n"
+        "        if link.url.is_document_url: continue\n"
         "        if scope is not None and not scope_allows(scope, link.url): continue\n"
         "        candidates.append(link)\n"
         "    return candidates\n",

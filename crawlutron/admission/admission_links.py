@@ -16,7 +16,6 @@ from crawlutron.models.json_value import JsonValue as JsonValue
 from crawlutron.models.normalized_url import NormalizedUrl, admit_or_none
 from crawlutron.safety.safe_regex import BoundedPattern, UnsafePattern, compile_untrusted
 from crawlutron.storage.job_store import FrontierEntry
-from crawlutron.vocabulary.hosts import is_analytics_host, is_document_url
 
 #: The candidate shapes link admission accepts: the extraction record itself, a
 #: wire mapping, or raw text -- the three forms the stream flattens to one type.
@@ -458,9 +457,9 @@ def _candidate_stream[T](
             continue
         if normalized in known:
             continue
-        if is_analytics_host(normalized):
+        if normalized.is_analytics_host:
             continue
-        if not want_document_bodies and is_document_url(normalized):
+        if not want_document_bodies and normalized.is_document_url:
             continue
         if scope_pattern is not None and not scope_allows(scope_pattern, normalized.raw):
             continue

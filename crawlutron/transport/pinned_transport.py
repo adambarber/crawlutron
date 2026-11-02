@@ -309,7 +309,7 @@ async def redirect_target(
         # ``resolve`` is quiet because discovery drops refused links; a redirect
         # walk refuses loudly, so a refused hop never reads as page success.
         raise ValueError(f"redirect target refused admission: {location!r}")
-    if _crosses_origin(new_url, current_url):
+    if new_url.crosses_origin(current_url):
         request_headers = await _stripped_credentials(request_headers, new_url)
     return new_url, request_headers
 
@@ -325,14 +325,6 @@ async def _stripped_credentials(headers: dict[str, str], new_url: NormalizedUrl)
     if jar_cookie:
         stripped["Cookie"] = jar_cookie
     return stripped
-
-
-def _crosses_origin(new_url: NormalizedUrl, current_url: NormalizedUrl) -> bool:
-    """Whether a redirect hop leaves the origin (the scheme/host/port law shared
-    with ``credentials.origin_of``). The direct comparison is the fail-safe reading,
-    failing toward stripping: a kept header is unrecoverable; a dropped one only costs a re-login.
-    """
-    return new_url.origin != current_url.origin
 
 
 class _RedirectChain:

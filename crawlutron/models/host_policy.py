@@ -72,12 +72,12 @@ class HostPolicy:
 
 
 def host_policy_reason(host: str, *, policy: HostPolicy) -> str | None:
-    """Why this host is refused, or None when the policy admits it."""
-    normalized = _normalize_policy_host(host)
-    if any(normalized == entry or normalized.endswith(f".{entry}") for entry in policy.denied_hosts):
+    """Why this host is refused, or None when the policy admits it. Hosts here are
+    admitted values (punycode via admission) or already-normalized config entries."""
+    if any(host == entry or host.endswith(f".{entry}") for entry in policy.denied_hosts):
         return "host_denied"
     if policy.allowed_hosts and not any(
-        normalized == entry or normalized.endswith(f".{entry}") for entry in policy.allowed_hosts
+        host == entry or host.endswith(f".{entry}") for entry in policy.allowed_hosts
     ):
         return "host_not_allowed"
     return None
