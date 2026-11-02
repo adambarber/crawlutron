@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from crawlutron.storage.job_store import JobStore
@@ -77,7 +77,7 @@ def mount_tracker(client):
 
 
 @contextlib.asynccontextmanager
-async def keyed_quota_client(tmp_path, *, max_concurrency: int = 1) -> AsyncIterator[object]:
+async def keyed_quota_client(tmp_path, *, max_concurrency: int = 1) -> AsyncGenerator[object, None]:
     """A quota client with a mounted tracker and one keyed caller."""
     from tests.factories.client import quota_client
 

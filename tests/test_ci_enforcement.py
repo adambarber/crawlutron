@@ -12,7 +12,6 @@ from tests._ci_contract import (
     ENFORCEMENT_COMMAND,
     ENFORCEMENT_TRIGGER_PATTERN,
     REPORTING_JOBS,
-    SERVICE_ROOT,
     WORKFLOW_PATH,
     _assert_failure_propagation,
     _assert_no_config_exclude,
@@ -68,7 +67,9 @@ def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
     assert "scripts/jscpd_gate.py" not in workflow
     required = _required_needs(workflow)
     assert required == REPORTING_JOBS
-    assert "pre-commit==4.6.2" in (SERVICE_ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
+    # The enforcement job builds its venv from ``-e .[dev]`` alone; re-installing
+    # a specific tool on top would reintroduce a second, drifting declaration.
+    assert ".[dev]" in workflow
     _assert_failure_propagation(workflow)
 
 
@@ -81,7 +82,7 @@ def test_no_ci_job_reruns_a_precommit_hook_command() -> None:
         "python -m ruff check",
         "python -m mypy",
         "python -m scripts.jscpd_gate",
-        "tests/test_pyright_budget.py",
+        "basedpyright",
         "tests/invariants/",
     }
     assert_no_hook_command_rerun(WORKFLOW_PATH.read_text(encoding="utf-8"), hook_tools)

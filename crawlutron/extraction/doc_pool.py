@@ -3,6 +3,7 @@ Document extraction runs in a persistent worker pool (import once, amortize
 spawn cost), with per-task timeout-kill; all collaborators arrive via the pool constructor.
 """
 
+import importlib
 import io
 import logging
 import multiprocessing
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 def configure_doc_worker_runtime() -> None:
     """Quiet the native stack the worker carries, before any conversion runs."""
     try:
-        import onnxruntime  # type: ignore[import-untyped]
+        import onnxruntime
 
         onnxruntime.disable_telemetry_events()
     except Exception:
@@ -152,7 +153,7 @@ def doc_worker_main(conn) -> None:
         configure_doc_worker_logging()
         # Warm import inside the readiness handshake: the worker
         # pays markitdown's cost here, inside the acquisition budget.
-        import markitdown  # noqa: F401  imported for its cost, in the worker only
+        importlib.import_module("markitdown")
 
         # Readiness is signalled here, after the child's imports: the parent's
         # conversion budget must not pay for this worker's start-up.
@@ -244,7 +245,8 @@ class DocExtractionPool:
         """A worker ready to serve, or the failure that ends the acquisition.
 
         A spawn failure is transient (cgroup ceiling) and distinct from a
-        teardown; it ends this acquisition rather than being waited out."""
+        teardown; it ends this acquisition rather than being waited out.
+        """
         try:
             return self._spawn(ready_timeout)
         except (OSError, DocWorkerSpawnError) as exc:
@@ -380,7 +382,8 @@ class DocExtractionPool:
 
     def teardown(self) -> None:
         """Terminate every pooled worker, forget the slots, and close the pool.
-        A later acquire returns ``None`` (degraded) instead of resurrecting it."""
+        A later acquire returns ``None`` (degraded) instead of resurrecting it.
+        """
         with self._lock:
             self._closed = True
             self._lock.notify_all()

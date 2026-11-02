@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import contextlib
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -23,7 +23,7 @@ from tests._policy_factories import job_store as make_job_store
 @contextlib.asynccontextmanager
 async def _search_client(
     tmp_path: Path,
-) -> AsyncIterator[tuple[AsyncClient, FastAPI]]:
+) -> AsyncGenerator[tuple[AsyncClient, FastAPI], None]:
     """An app serving /v1/search + /v1/keys over isolated stores, Tavily configured."""
     from crawlutron.api.identity_router import router as identity_router
     from crawlutron.api.keys_router import router as keys_router

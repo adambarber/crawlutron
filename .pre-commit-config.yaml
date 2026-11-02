@@ -51,14 +51,14 @@
 # the helper runs the gates.
 #
 # This file is the only place a gate command is written. CI runs
-# `pre-commit run --all-files` rather than restating ruff, mypy, pyright and
+# `pre-commit run --all-files` rather than restating ruff, mypy, basedpyright and
 # jscpd, and `make lint` / `make typecheck` invoke hooks by id from here instead
 # of spelling out their own copies. The Makefile did not always: it carried a
 # second `ruff check crawlutron tests scripts` and a bare `mypy` that had already
 # drifted from these in both scope and interpreter, and nothing compared them,
 # because the contract tests covered CI and this file and the Makefile was not
 # one of the things under contract. It is now -- tests/
-# test_precommit_ci_contract.py fails if a recipe runs a gate tool directly, or
+# test_makefile_contract.py fails if a recipe runs a gate tool directly, or
 # names a hook id this file does not declare, and the Makefile is in
 # ENFORCEMENT_INPUTS so editing it re-runs every gate below.
 #
@@ -112,35 +112,28 @@ repos:
         stages: [pre-commit]
 
       # Third type checker, scoped to the files being committed. Mypy is the
-      # fail gate and Ruff owns style; this one exists because pyright finds
-      # annotation lies both declared gates miss -- a `regex.Pattern` passed
-      # where `re.Pattern[str]` was declared, a symbol imported from the wrong
-      # module, a `urllib.error` reference that only resolved because another
-      # import happened to bind the submodule. Mypy passes those because the
-      # `regex` package is untyped in its config and degrades the value to Any.
+      # fail gate and Ruff owns style; this one exists because basedpyright
+      # finds annotation lies both declared gates miss -- a `regex.Pattern`
+      # passed where `re.Pattern[str]` was declared, a symbol imported from the
+      # wrong module, a `urllib.error` reference that only resolved because
+      # another import happened to bind the submodule. Mypy passes those because
+      # the `regex` package is untyped in its config and degrades the value to
+      # Any.
       #
-      # The hook runs the BUDGET TEST, not raw pyright, and that distinction is
-      # the point. A raw exit code would have to be either a hard fail -- which
-      # it cannot be while one proven false positive survives, since pyright
-      # honours none of the three suppression forms at an annotation position --
-      # or advisory, which is what "CI runs it separately" always decays into.
-      # The budget assertion is the third option: any NEW annotation lie fails
-      # this commit, the one known-bad finding is documented in exactly one place
-      # (the test), and the test's tight-budget check fails the day the count
-      # drops so the allowance cannot linger.
+      # The hook runs basedpyright directly -- no wrapper. A raw exit code IS
+      # the gate: any finding fails the commit, and basedpyright fails close
+      # where pyright passed empty (a config whose include matches nothing
+      # reports "does not exist" and exits 3 instead of "0 errors"), so the
+      # whole-tree analysis cannot silently analyze nothing. `--pythonpath` pins
+      # the interpreter to the service venv, the one the gates actually run.
       #
-      # Cost is ~15s (pytest startup plus 2.8s of analysis) against a 110s suite,
-      # which is the right order for a gate that catches a class of defect mypy
-      # structurally cannot see here.
-      #
-      # Run serially: the file's cost is one memoized pyright subprocess that no
-      # parallelism shortens, while `-n auto` spends more spawning fourteen workers
-      # than the nine tests take to run. Measured 4.1s serial against 5.2s.
-      - id: pyright
-        name: pyright budget
+      # Cost is ~2.8s of analysis with none of the pytest startup the old
+      # budget-test wrapper paid.
+      - id: basedpyright
+        name: basedpyright whole tree (zero annotation lies)
         entry: >-
           bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
-          .venv/bin/python -m scripts.gate_fanout pyright -- .venv/bin/python -m pytest tests/test_pyright_budget.py -q -o addopts=""
+          .venv/bin/python -m scripts.gate_fanout basedpyright -- .venv/bin/basedpyright --pythonpath .venv/bin/python
         language: system
         files: *service_trigger
         pass_filenames: false

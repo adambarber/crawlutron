@@ -6,7 +6,6 @@ in ``_meta``; a request missing them is malformed (``-32602``/400).
 from __future__ import annotations
 
 import base64
-from typing import Any
 
 from crawlutron.mcp.constants import (
     INVALID_PARAMS,
@@ -76,7 +75,7 @@ def error_response(
 
 
 def _require_meta_key(
-    meta: dict[str, JsonValue], key: str, expected: type[Any], label: str, request_id: int | str
+    meta: dict[str, JsonValue], key: str, expected: type[object], label: str, request_id: int | str
 ) -> object:
     """Return ``meta[key]``, or reject naming what was wrong -- absent vs
     wrong-typed are distinct corrections, so one function keeps the reasons

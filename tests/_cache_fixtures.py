@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 import tempfile
 import threading
-from collections.abc import Iterator
+from collections.abc import Generator
 from typing import Any
 
 import crawlutron.transport.content_cache as cc
@@ -13,7 +13,7 @@ from crawlutron.transport.content_cache import ContentCache
 
 
 @contextlib.contextmanager
-def scoped_cache(**settings) -> Iterator[ContentCache]:
+def scoped_cache(**settings) -> Generator[ContentCache, None, None]:
     """A ContentCache over a throwaway directory, removed when the block ends.
 
     This owns the near-duplicated arrange; warm-restart and seeder sites stay
@@ -24,7 +24,7 @@ def scoped_cache(**settings) -> Iterator[ContentCache]:
 
 
 @contextlib.contextmanager
-def parked_entry_unlink(monkeypatch, cache) -> Iterator[tuple[threading.Event, threading.Event]]:
+def parked_entry_unlink(monkeypatch, cache) -> Generator[tuple[threading.Event, threading.Event], None, None]:
     """Park entry unlinks until released; return ``(started, release)``. A
     parked unlink proves the commit lock is free while disk I/O runs.
     """
@@ -43,7 +43,7 @@ def parked_entry_unlink(monkeypatch, cache) -> Iterator[tuple[threading.Event, t
 
 
 @contextlib.contextmanager
-def entry_replaced_by_directory(cache, key) -> Iterator[Any]:
+def entry_replaced_by_directory(cache, key) -> Generator[Any, None, None]:
     """Swap an entry's file for a directory so reading it raises OSError.
     Undone on exit; a RAM-resident value serves while a disk-hit is None.
     """
@@ -57,7 +57,7 @@ def entry_replaced_by_directory(cache, key) -> Iterator[Any]:
 
 
 @contextlib.contextmanager
-def counting_entry_reads(monkeypatch, cache, key) -> Iterator[list[int]]:
+def counting_entry_reads(monkeypatch, cache, key) -> Generator[list[int], None, None]:
     """Count one entry's ``read_bytes`` calls while active (non-destructive).
     A RAM hit reads 0 bytes, a disk hit 1 -- the observable told apart.
     """

@@ -9,7 +9,7 @@ import logging
 import os
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, NamedTuple, TypeVar
+from typing import Literal, NamedTuple, TypeVar
 
 from lxml import etree
 from markdownify import markdownify as html_to_md
@@ -53,7 +53,8 @@ _DOC_EXECUTOR: concurrent.futures.ThreadPoolExecutor | None = None
 
 def _doc_executor() -> concurrent.futures.ThreadPoolExecutor:
     """The document branch's own pool, created on first use, sized to the worker
-    count and torn down with extraction on shutdown."""
+    count and torn down with extraction on shutdown.
+    """
     global _DOC_EXECUTOR
     if _DOC_EXECUTOR is None:
         _DOC_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
@@ -84,7 +85,8 @@ def _extraction_executor() -> concurrent.futures.ThreadPoolExecutor:
 
 def extraction_executor() -> concurrent.futures.ThreadPoolExecutor:
     """Public door for the shared selector-extraction pool: submit access
-    without reaching the private on-demand constructor."""
+    without reaching the private on-demand constructor.
+    """
     return _extraction_executor()
 
 
@@ -185,7 +187,7 @@ def extract_selected(
     *,
     selectors: Selectors | None = None,
     settings: CrawlerSettings | None = None,
-    tree: Any | None = None,
+    tree: etree._Element | None = None,
 ) -> ExtractedContent:
     """Mechanical DOM targeting: extract only matched nodes as Markdown, via a
     Selectors value (never loose css/xpath params), CSS by BeautifulSoup and
@@ -239,7 +241,7 @@ def _css_selected_fragment(html: str, selectors: Selectors, selector_timeout: fl
 
 
 def _xpath_selected_fragment(
-    html: str, selectors: Selectors, selector_timeout: float, *, tree: Any | None
+    html: str, selectors: Selectors, selector_timeout: float, *, tree: etree._Element | None
 ) -> str | None:
     """The XPath form: lxml under the shared deadline; invalid XPath is caller error."""
     xpath = selectors.xpath or ""

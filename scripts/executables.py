@@ -42,7 +42,7 @@ def require_repo_tool(service_root: Path, name: str) -> str:
 
 # Tools whose --version output carries the product name; probed once per
 # resolution, so a broken venv install fails naming the tool, not inside a gate.
-_VERSIONED_TOOLS = frozenset({"jscpd", "pre-commit", "mypy", "ruff", "pyright", "vulture", "pytest"})
+_VERSIONED_TOOLS = frozenset({"jscpd", "pre-commit", "mypy", "ruff", "basedpyright", "vulture", "pytest"})
 
 
 def _is_working_tool(candidate: Path) -> bool:

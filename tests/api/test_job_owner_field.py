@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -33,7 +33,7 @@ def _app(job_store: JobStore, caller: CallerIdentity) -> FastAPI:
 
 
 @contextlib.asynccontextmanager
-async def _client(job_store: JobStore, caller: CallerIdentity) -> AsyncIterator[AsyncClient]:
+async def _client(job_store: JobStore, caller: CallerIdentity) -> AsyncGenerator[AsyncClient, None]:
     transport = ASGITransport(app=_app(job_store, caller))
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client

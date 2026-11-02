@@ -10,7 +10,7 @@ import asyncio
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any, NamedTuple, cast
+from typing import TYPE_CHECKING, NamedTuple, cast
 
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.crawl_task import CrawlTask
@@ -52,7 +52,7 @@ class AdmissionStallGuard:
 
 async def fail_remaining_frontier(
     spill: SpillSink,
-    spill_write: Callable[[Any, int, EngineCrawlResult], Awaitable[None]],
+    spill_write: Callable[[SpillSink | None, int, EngineCrawlResult], Awaitable[None]],
     frontier: deque[tuple[int, CrawlTask]],
 ) -> None:
     """Report every frontier URL as a capacity-stalled failure.

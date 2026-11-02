@@ -409,9 +409,8 @@ with `422`.
 .  # repository root (clone of crawlutron)
 ├── Dockerfile            # Multi-stage build; isolated camoufox-binary stage (context: .)
 ├── docker-compose.yml    # Standalone local stack (loopback-only)
-├── pyproject.toml        # Package metadata + ruff config
-├── requirements.txt      # Runtime deps (camoufox, fastapi, trafilatura, markitdown, ...)
-├── requirements-dev.txt  # Dev/test deps (also installed by the Dockerfile test stage)
+├── pyproject.toml        # Package metadata + deps (single source; uv.lock pins every pin)
+├── uv.lock               # Frozen transitive dependency graph + hashes
 ├── Makefile              # Gates + convenience targets mirroring scripts/run-tests.sh
 ├── crawlutron/
 │   ├── main.py           # FastAPI factory (≈441 lines) — lifespan, app.state, router wiring

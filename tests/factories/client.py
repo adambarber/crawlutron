@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -15,6 +15,15 @@ from crawlutron.config.settings import CrawlerSettings
 from crawlutron.storage import caller_key_store, job_store, result_store
 from tests._async_harnesses import serve
 from tests._quota_harness import keyed_client, stores
+
+# The isolated-stores result both harness clients yield: HTTP client plus the
+# store trio, unpacked as ``(client, store, results, keys)`` at call sites.
+type _Isolated = tuple[
+    AsyncClient,
+    job_store.JobStore,
+    result_store.CrawlResultStore,
+    caller_key_store.CallerKeyStore,
+]
 
 
 def isolation_app(
@@ -39,9 +48,7 @@ def isolation_app(
 @contextlib.asynccontextmanager
 async def isolation_client(
     tmp_path: Path,
-) -> AsyncIterator[
-    tuple[AsyncClient, job_store.JobStore, result_store.CrawlResultStore, caller_key_store.CallerKeyStore]
-]:
+) -> AsyncGenerator[_Isolated, None]:
     """An HTTP client over isolated stores, yielding the client and the stores."""
     store, results, keys = stores(tmp_path)
     app = isolation_app(store, results, keys)
@@ -52,9 +59,7 @@ async def isolation_client(
 @contextlib.asynccontextmanager
 async def quota_client(
     tmp_path: Path,
-) -> AsyncIterator[
-    tuple[AsyncClient, job_store.JobStore, result_store.CrawlResultStore, caller_key_store.CallerKeyStore]
-]:
+) -> AsyncGenerator[_Isolated, None]:
     """An HTTP client whose app can run the crawl POST: settings and shutdown wired."""
     store, results, keys = stores(tmp_path)
     app = isolation_app(store, results, keys)

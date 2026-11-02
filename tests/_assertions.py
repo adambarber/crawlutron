@@ -38,7 +38,8 @@ def host_resolves_to(monkeypatch, ip: str, *, resolver=None):
     """The precondition for a resolution-dependent SSRF verdict: ``name`` resolves to ``ip``.
 
     ``resolver`` replaces the whole ``getaddrinfo`` (a mixed-answer pin); a plain
-    ``ip`` pins every answer to that single address."""
+    ``ip`` pins every answer to that single address.
+    """
     import socket
     from unittest.mock import patch
 
@@ -61,7 +62,8 @@ def resolves_in_sequence(monkeypatch, *ips: str) -> list[str]:
 
     The browser stability check (#540) is a verdict over CONSECUTIVE fresh
     answers, so the stub hands out a scripted sequence rather than one pinned
-    IP: answer n goes to lookup n."""
+    IP: answer n goes to lookup n.
+    """
     import socket
 
     block_private_targets(monkeypatch)
@@ -108,7 +110,8 @@ def _field(result, name: str):
     """Read ``name`` off a wire dict or a result object.
 
     The endpoint tests read the serialized dict, the strategy tests the result
-    object -- one shared assertion instead of two restated spellings."""
+    object -- one shared assertion instead of two restated spellings.
+    """
     return result[name] if isinstance(result, dict) else getattr(result, name)
 
 
@@ -116,7 +119,8 @@ def assert_result_failed(result, classification: str) -> None:
     """A failed result whose status agrees with the classification table.
 
     ``status`` is read from production, not restated as ``"failed"``, so a
-    classification added as skipped cannot be asserted into "failed"."""
+    classification added as skipped cannot be asserted into "failed".
+    """
     from crawlutron.vocabulary.taxonomy import status_for_classification
 
     assert _field(result, "classification") == classification
@@ -127,7 +131,8 @@ def assert_pool_unavailable(resp) -> None:
     """A 503 carrying the browser-pool-unavailable envelope.
 
     Two endpoint tests asserted this shape for two reasons with the same lines
-    written out; when the envelope changed, one kept passing on a stale shape."""
+    written out; when the envelope changed, one kept passing on a stale shape.
+    """
     assert resp.status_code == 503, resp.status_code
     assert resp.json()["code"] == "browser_pool_unavailable", resp.json()
 
@@ -185,7 +190,8 @@ def one_search_result(override_settings, fake_provider_http, **overrides):
     """Pin the provider to Tavily and serve exactly one search result.
 
     The pairing IS the fixture (provider, key, wire-shaped body); ``overrides``
-    tweaks a result field, ``items`` changes the count."""
+    tweaks a result field, ``items`` changes the count.
+    """
     override_settings(search_provider="tavily", tavily_api_key="test-key")
     result = {"title": "A", "url": "https://example.gov/a", "content": "desc"}
     items = overrides.pop("items", None)
@@ -210,10 +216,17 @@ def awaitable_search(provider, query: str, limit: int):
 def browser_available() -> bool:
     # Both probes import inside the function, matching the idiom the playwright probe below already used.
     with contextlib.suppress(Exception):
-        from camoufox.utils import launch_path
+        # A local predicate, never a network action: `launch_path()` auto-installs
+        # (GitHub API) when the paired build is absent; the offline probe just raises.
+        from camoufox.pkgman import LAUNCH_FILE, OS_NAME, camoufox_path
 
-        path = launch_path()
-        return bool(path) and os.path.exists(path)
+        directory = camoufox_path(download_if_missing=False)
+        executable = (
+            directory / "Camoufox.app" / "Contents" / "MacOS" / "camoufox"
+            if OS_NAME == "mac"
+            else directory / LAUNCH_FILE[OS_NAME]
+        )
+        return executable.exists()
     try:
         from playwright.sync_api import sync_playwright
     except Exception:
@@ -262,7 +275,8 @@ async def accepted_crawl(client, payload: dict[str, object]) -> dict[str, object
     """POST a crawl that must be accepted for background execution.
 
     Asserts the 202/``accepted`` contract once, so a webhook or status-URL test
-    is not also the place that re-spells the accept envelope; returns it."""
+    is not also the place that re-spells the accept envelope; returns it.
+    """
     response = await client.post("/v1/crawl", json=payload)
     assert response.status_code == 202, response.text
     body = response.json()
@@ -274,7 +288,8 @@ async def completed_crawl(client, payload: dict[str, object]) -> dict[str, objec
     """POST a crawl that must run synchronously and return its response body.
 
     The mirror of :func:`accepted_crawl`: 200 with results inline, so a
-    single-result test reads ``["results"][0]``, not re-derived codes."""
+    single-result test reads ``["results"][0]``, not re-derived codes.
+    """
     response = await client.post("/v1/crawl", json=payload)
     assert response.status_code == 200, response.text
     return response.json()

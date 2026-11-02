@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
-from typing import Any, cast
 
 from crawlutron.runtime.pressure_memory import MemoryGate, ResourceGauge
 from crawlutron.runtime.pressure_probes import (
@@ -34,14 +33,23 @@ class CpuGate(ResourceGauge):
         self,
         target: float | None = None,
         *,
+        poll_seconds: float = 0.1,
+        max_wait_seconds: float = 30.0,
         sample_seconds: float = 0.25,
         min_window_seconds: float = 0.05,
         cpu_budget: float | None = None,
-        **kwargs: object,
+        cgroup_root: str = "/sys/fs/cgroup",
+        usage_ratio: Callable[[], float] | None = None,
     ):
-        # Validated boundary: CpuGate only adds sample knobs; any other kwarg is
-        # a ResourceGauge parameter the base validates itself.
-        super().__init__(target=target, **cast("dict[str, Any]", kwargs))
+        # CpuGate adds only the sample knobs; the resource gauge params it forwards
+        # are declared here, typed, instead of an opaque kwargs bag.
+        super().__init__(
+            target=target,
+            poll_seconds=poll_seconds,
+            max_wait_seconds=max_wait_seconds,
+            cgroup_root=cgroup_root,
+            usage_ratio=usage_ratio,
+        )
         self.sample_seconds = sample_seconds
         self.min_window_seconds = min_window_seconds
         self._cpu_budget = cpu_budget if cpu_budget is not None else DEFAULT_CPU_BUDGET

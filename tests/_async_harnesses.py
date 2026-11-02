@@ -5,7 +5,7 @@ webhook sink); the sink is process-global, so clearing and draining are its."""
 
 import asyncio
 import contextlib
-from collections.abc import AsyncGenerator, AsyncIterator, Sequence
+from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass
 
 import pytest
@@ -117,7 +117,7 @@ async def run_loop_rebind_scenario(get_client, *, guard: float | None = None):
 
 
 @contextlib.asynccontextmanager
-async def serve(app: FastAPI) -> AsyncIterator[AsyncClient]:
+async def serve(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
     """The one ASGI test-client bootstrap: mount the app and speak HTTP to it."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client

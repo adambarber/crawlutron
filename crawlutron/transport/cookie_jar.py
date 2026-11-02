@@ -20,13 +20,14 @@ from crawlutron.models.registrable_domain import is_public_suffix
 from crawlutron.storage.coordination_cookies import DEFAULT_MAX_HOSTS_PER_NAMESPACE
 from crawlutron.storage.coordination_store import atwin
 from crawlutron.transport.cookie_store import InMemoryCookieStore
-from crawlutron.transport.header_carrier import HeaderCarrier, cookie_header_request
+from crawlutron.transport.header_carrier import cookie_header_request
 
 if TYPE_CHECKING:
+    from urllib.request import Request
+
     from crawlutron.storage.coordination_cookies import SharedCookieStore
 
-# typeshed omits this stdlib parser; vars() reads it without tripping the
-# mypy attr check or B009, and the cast carries the type.
+# typeshed omits this stdlib parser; vars() reads it without tripping the mypy attr check or B009.
 _parse_ns_headers = cast(
     "Callable[[list[str]], list[list[tuple[str, str | None]]]]",
     vars(_cookiejar_module)["parse_ns_headers"],
@@ -88,8 +89,8 @@ class RecordingSendPolicy(DefaultCookiePolicy):
         super().__init__(rfc2965=False, strict_ns_domain=DefaultCookiePolicy.DomainStrict)
         self.accepted: list[Cookie] = []
 
-    def return_ok(self, cookie: Cookie, request: HeaderCarrier) -> bool:  # type: ignore[override]  # stdlib over-narrow
-        ok = super().return_ok(cookie, request)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+    def return_ok(self, cookie: Cookie, request: Request) -> bool:
+        ok = super().return_ok(cookie, request)
         if ok:
             self.accepted.append(cookie)
         return ok
@@ -436,7 +437,7 @@ def sendable_cookie_header(
         slots[id(cookie)] = slot
         jar.set_cookie(cookie)
     request = cookie_header_request(url.raw)
-    jar.add_cookie_header(request)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]  # stdlib over-narrow
+    jar.add_cookie_header(cast("Request", request))  # HeaderCarrier provides the stdlib duck-type boundary
     header = request.get_header("Cookie") or ""
     return header, {slots[id(cookie)] for cookie in policy.accepted}
 

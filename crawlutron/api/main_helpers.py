@@ -6,7 +6,7 @@ Centralizes JobStatusResponse construction and a gated endpoint's lifecycle:
 
 import logging
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 
 from fastapi import HTTPException
@@ -51,7 +51,7 @@ def request_gate(
     *,
     logger: logging.Logger,
     reject: Callable[[ValueError], HTTPException] = validation_http_error,
-) -> Iterator[None]:
+) -> Generator[None, None, None]:
     """Admit one readiness-tracked request and own the whole tail: the
     ``begin_request`` admission, the rejection envelope, and the ``end_request``
     release. A fixed-cap refusal (503) happens before admission, taking no slot.

@@ -7,11 +7,20 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from typing import TypeGuard
+from typing import Protocol, TypeGuard, cast
 
 from crawlutron.models.crawl_job import CrawlJob
 from crawlutron.models.crawl_result import CrawlResult
 from crawlutron.models.crawl_worker import AsyncCrawlWorker, CrawlWorker, SyncCrawlWorker
+
+
+class _Closeable(Protocol):
+    """A leaked awaitable's close surface: coroutines declare close(), the
+    inferred worker type only carries Awaitable. The hasattr guard below is the
+    runtime check for membership.
+    """
+
+    def close(self) -> None: ...
 
 
 def _is_sync_worker(worker: CrawlWorker) -> TypeGuard[SyncCrawlWorker]:
@@ -33,7 +42,7 @@ def _invoke_sync_worker(worker: SyncCrawlWorker, job: CrawlJob) -> CrawlResult:
     if inspect.isawaitable(result):
         # Close the un-awaited coroutine to avoid RuntimeWarning.
         if hasattr(result, "close"):
-            result.close()  # pyright: ignore[reportAttributeAccessIssue]
+            cast(_Closeable, result).close()
         # It used to surface ~100 lines away as a strategy error -- a browser
         # page's .html on a never-awaited coroutine, as a network_error.
         raise TypeError(

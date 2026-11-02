@@ -9,9 +9,9 @@ from __future__ import annotations
 import asyncio
 import functools
 import sqlite3
-from collections.abc import Callable, Coroutine
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any, ClassVar, Concatenate, ParamSpec, TypeVar
+from typing import ClassVar, Concatenate, ParamSpec, TypeVar
 
 from crawlutron.storage.migrations.manifest import StoreSchema
 from crawlutron.storage.sqlite_store import connect_store, process_lock, store_lock_key
@@ -53,7 +53,7 @@ class CoordinationStore:
 
 def atwin[Owner, **P, R](
     sync: Callable[Concatenate[Owner, P], R],
-) -> Callable[Concatenate[Owner, P], Coroutine[Any, Any, R]]:
+) -> Callable[Concatenate[Owner, P], Awaitable[R]]:
     """The async twin of a store method, declared FROM the sync method: the
     ``a``-prefixed twin runs the sync call on a worker thread so the loop never
     waits on the store lock, keeping one signature instead of a drifting copy.

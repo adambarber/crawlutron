@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from typing import Any
+
+from charset_normalizer.models import CharsetMatches
 
 from crawlutron.models.content_metrics import ContentMetrics
 
 # Declared before the import so the ImportError fallback below is the same type
 # as the symbol it stands in for; an unannotated None assignment is a type error.
-_charset_from_bytes: Callable[[bytes], Any] | None
+_charset_from_bytes: Callable[[bytes], CharsetMatches] | None
 
 try:
     from charset_normalizer import from_bytes as _charset_from_bytes

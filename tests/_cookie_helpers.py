@@ -9,14 +9,14 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 
 from crawlutron.transport.cookie_jar import CookieJar
 
 
 @contextmanager
-def cookie_file(jar: CookieJar, name: str) -> Iterator[str]:
+def cookie_file(jar: CookieJar, name: str) -> Generator[str, None, None]:
     """Export ``jar`` to ``name``; yield the path, removed on exit, and removed
     *first* if a previous run left one behind so an atomicity test never reads a
     file it did not write.

@@ -1,6 +1,7 @@
-"""A pyright budget at zero says the annotations there are true, nothing about an
-absent one -- ``JobStatusView`` was ``dict[str, Any]`` with twelve keys declared
-nowhere, so a dropped key reached no response until one TypedDict fixed it.
+"""The annotation ratchet: every declared record and bare ``Any`` is counted, and
+zero means the tree's annotations are true -- nothing about an absent one, since
+``JobStatusView`` was ``dict[str, Any]`` with twelve keys declared nowhere, so a
+dropped key reached no response until one TypedDict fixed it.
 """
 
 from __future__ import annotations
@@ -198,7 +199,8 @@ def _assert_undeclared_record_fires() -> None:
 def test_the_scripts_typing_budget_reaches_scripts() -> None:
     """The H1 reach, kept as the sealed gate's bite proof: the shared classifier
     fires on a synthetic undeclared record, so one introduced into scripts/ fails
-    the sealed zero assertion above with its file and line named."""
+    the sealed zero assertion above with its file and line named.
+    """
     _assert_undeclared_record_fires()
 
 
@@ -233,7 +235,8 @@ test_tests_collection_is_deterministic = collection_is_deterministic(
 def test_the_tests_typing_budget_reaches_tests() -> None:
     """The H1 reach: the typing budget now sweeps tests/, which had none. The real
     tree shows it, and the shared classifier fires on a synthetic undeclared
-    record, so one in tests/ fires."""
+    record, so one in tests/ fires.
+    """
     assert suite_measurement(_METRIC) == 0, "the tests typing budget stopped reaching the real tree"
     assert suite_measurement(_ANY) == 0, "the bare-Any budget stopped reaching the real tree"
     _assert_undeclared_record_fires()
@@ -255,7 +258,8 @@ test_collector_sees_the_whole_tree = collector_sees_the_whole_tree(
 def test_the_collector_counts_a_bare_any_and_not_a_callables_spine() -> None:
     """#193's second metric bites on the position the record detector misses: a
     parameter annotated bare ``Any``; and does not count the ``Any`` inside a
-    ``Callable``'s spine, which the record test above pins as honest."""
+    ``Callable``'s spine, which the record test above pins as honest.
+    """
     bare = ast.parse("def f(profile: Any) -> Any: ...")
     counted = {metric for metric, _line, _source in candidates(bare)}
     assert counted == {_ANY}, f"a bare Any must be its own counted defect: {counted}"

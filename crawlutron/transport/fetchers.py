@@ -11,7 +11,7 @@ import functools
 import logging
 import time
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import httpx
 from curl_cffi.requests.exceptions import RequestException, SSLError
@@ -41,10 +41,11 @@ async def default_http_fetcher(
     *,
     impersonate: bool = False,
     pin: pinned_transport.PinRule | None = None,
-    release_stream_noblock: Callable[[Any], None] | None = None,
+    release_stream_noblock: Callable[[CffiResponse], None] | None = None,
 ) -> HttpFetchResult:
     """The one fetcher: TLS impersonation first when asked, the pooled httpx
-    client otherwise; ``impersonate`` bound via ``partial`` so no twin can drift."""
+    client otherwise; ``impersonate`` bound via ``partial`` so no twin can drift.
+    """
     if impersonate:
         attempted = await cffi_fetch(
             url,
@@ -96,7 +97,8 @@ async def _stream_terminal_hop(
 ) -> tuple[HttpFetchResult | None, tuple[NormalizedUrl, TransportHeaders] | None]:
     """Send one SSRF-pinned hop; ``(None, pending_cookie_hop)`` when the hop is
     a redirect asking for another (re-pinned) request -- the pending tuple is
-    stored only once the next hop's pin admits the walk."""
+    stored only once the next hop's pin admits the walk.
+    """
     async with pinned_transport.apinned_stream(client, chain, pinned_url, hop_headers, timeout) as response:
         content_length = response.headers.get("content-length")
         if pinned_transport.declared_length_exceeds(content_length, max_content_length):
@@ -136,7 +138,8 @@ async def _flush_deferred_hop_cookies(
     deferred: tuple[NormalizedUrl, TransportHeaders] | None,
 ) -> None:
     """Store the previous hop's Set-Cookie exactly once: reaching a fresh loop
-    iteration means this hop's pin admitted the walk."""
+    iteration means this hop's pin admitted the walk.
+    """
     if deferred is not None:
         await _store_hop_cookies(*deferred)
 
@@ -184,7 +187,7 @@ async def cffi_fetch(
     timeout_seconds: int,
     max_content_length: int,
     *,
-    release_stream_noblock: Callable[[Any], None] | None = None,
+    release_stream_noblock: Callable[[CffiResponse], None] | None = None,
     pin: pinned_transport.PinRule | None = None,
 ) -> HttpFetchResult | None:
     """The curl_cffi transport behind ``impersonate=True``: TLS-impersonated,
@@ -246,10 +249,11 @@ async def _handle_cffi_hop(
     timeout_seconds: int,
     max_content_length: int,
     started: float,
-    release_stream_noblock: Callable[[Any], None] | None,
+    release_stream_noblock: Callable[[CffiResponse], None] | None,
 ) -> tuple[HttpFetchResult | None, tuple[NormalizedUrl, TransportHeaders] | None]:
     """One pinned hop: GET, too-large gate, redirect advance, or streamed body;
-    the redirect arm returns its pending cookie hop instead of storing it."""
+    the redirect arm returns its pending cookie hop instead of storing it.
+    """
     try:
         response = await client.get(
             pinned_url,
@@ -300,7 +304,7 @@ async def _read_capped_stream(
     timeout_seconds: int,
     max_content_length: int,
     elapsed_ms: int,
-    release_stream_noblock: Callable[[Any], None] | None,
+    release_stream_noblock: Callable[[CffiResponse], None] | None,
 ) -> HttpFetchResult | None:
     """Stream RAW bytes with a running cap and finish the fetch.
 

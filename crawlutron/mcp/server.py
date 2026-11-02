@@ -7,7 +7,7 @@ Stateless protocol: headers validated against the body, ``server/discover`` /
 from __future__ import annotations
 
 import logging
-from typing import Any, cast
+from typing import cast
 from urllib.parse import urlsplit
 
 from pydantic import ValidationError
@@ -184,7 +184,7 @@ async def call_tool(
 ) -> JsonValue:
     from crawlutron.mcp.tools import TOOLS_BY_NAME, validation_message
 
-    params = cast(dict[str, Any], body)
+    params = body
 
     name = params.get("name")
     if not isinstance(name, str):

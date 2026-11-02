@@ -12,7 +12,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple, Protocol, cast
+from typing import TYPE_CHECKING, NamedTuple, Protocol, cast
 
 from crawlutron.config.env import get_env_int
 from crawlutron.models.browser_profile_record import BrowserProfileRecord
@@ -51,16 +51,17 @@ logger = logging.getLogger(__name__)
 class BrowserHandle(Protocol):
     """What the driver does with a launched browser: open pages. Closure is
     probed duck-typed (:func:`_browser_closed`), because the real Playwright
-    ``Browser`` publishes no ``is_closed`` and a double may."""
+    ``Browser`` publishes no ``is_closed`` and a double may.
+    """
 
     async def new_page(self, **kwargs: object) -> RenderPage: ...
 
 
 class BrowserContextManager(Protocol):
-    """The ``async with`` wrapper a browser factory hands back.
-
-    AsyncCamoufox yields ``Browser | BrowserContext``; the driver only calls
-    ``new_page`` on it, so the handle is the protocol member, not the class.
+    """The ``async with`` wrapper a browser factory hands back. AsyncCamoufox
+    yields ``Browser | BrowserContext``; the driver calls ``new_page`` on it, so
+    the handle is the protocol member, not the class. The yielded object is
+    narrowed to BrowserHandle at the single acquire boundary.
     """
 
     async def __aenter__(self) -> object: ...
@@ -134,7 +135,7 @@ class BrowserDriver:
     def __init__(
         self,
         *,
-        browser_factory: Callable[..., Any] | None = None,
+        browser_factory: Callable[..., BrowserContextManager] | None = None,
         sleep: Callable[[float], None] = time.sleep,
         max_browser_renders: int | None = None,
         cache_dir: str | Path | None = None,
@@ -250,7 +251,7 @@ class BrowserDriver:
             launch_kwargs = self.browser_kwargs(browser_profile)
             cm = self._browser_factory(**launch_kwargs)
             # The yielded handle is object-typed in the wild (Browser|BrowserContext);
-            # the driver only calls new_page on it, so cast to the handle here.
+            # the driver only calls new_page on it, so narrow to the handle here.
             browser = cast(BrowserHandle, await cm.__aenter__())
             self._browser = browser
             self._browser_cm = cm
@@ -384,7 +385,8 @@ class BrowserDriver:
         """Scroll to the bottom repeatedly to trigger lazy-loaded content.
 
         The scroll evaluate returns the page height; two stable polls stop the
-        pass early so a static page pays no fixed-delay tax."""
+        pass early so a static page pays no fixed-delay tax.
+        """
         steps, delay = self.scroll_config_for(browser_profile)
         previous_height: float | None = None
         stable_polls = 0

@@ -135,7 +135,7 @@ def _child(rc_path: str, argv: list[str]) -> int:
     completed = subprocess.run(argv, cwd=SERVICE_ROOT, capture_output=True, text=True, check=False)
     attempts = [completed]
     if completed.returncode in (-6, 134) and "failed" not in completed.stdout:
-        # A pyright teardown aborts (SIGABRT) after a passing report under
+        # A gate child can SIGABRT on teardown after a passing report under
         # saturation; retry once after the burst drains, fail-loud on repeat.
         time.sleep(3)
         attempts.append(subprocess.run(argv, cwd=SERVICE_ROOT, capture_output=True, text=True, check=False))

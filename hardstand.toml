@@ -116,11 +116,11 @@ timeout = 60s
 run = ".venv/bin/make typecheck"
 
 [[actions]]
-name = "pyright"
+name = "basedpyright"
 kind = "exec"
 env = ["PATH"]
 timeout = 60s
-run = ".venv/bin/pyright crawlutron"
+run = ".venv/bin/basedpyright --pythonpath .venv/bin/python"
 
 [[actions]]
 name = "shell"

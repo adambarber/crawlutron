@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import re
 from html import unescape
-from typing import Any, TypedDict, cast
+from typing import TypedDict, cast
+
+from lxml import etree
 
 from crawlutron.extraction.documents import ExtractedContent
 from crawlutron.extraction.llm_format import (
@@ -40,7 +42,7 @@ def extract_discovered_links(
     source_url: NormalizedUrl | None,
     *,
     max_links: int = 250,
-    tree: Any | None = None,
+    tree: etree._Element | None = None,
 ) -> tuple[list[DiscoveredLink], int, bool]:
     if not html or not source_url:
         return [], 0, False

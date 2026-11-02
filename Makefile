@@ -68,19 +68,18 @@ coverage-report:
 # commands now live in exactly one file: .pre-commit-config.yaml, which CI also
 # reads rather than re-declaring.
 #
-# tests/test_precommit_ci_contract.py is what keeps it that way: it fails if a
+# tests/test_makefile_contract.py is what keeps it that way: it fails if a
 # target here restates a hook command, and if a target names a hook id that does
 # not exist.
 lint:
 	cd "$(SUITE_DIR)" && $(PRE_COMMIT) run ruff --all-files --config "$(HOOK_CONFIG)"
 
-# Pyright is the third opinion that finds annotation lies mypy cannot see -- the
-# `regex` package is untyped in mypy.ini and degrades its values to Any -- and it
-# is gated by the same budget test, in the two places that actually run: as part
-# of the pytest suite (`make test`) and as the pre-commit `pyright` hook, which
-# analyses the tree on every commit rather than on a schedule. It has no target
-# here for the same reason it is not a third declaration of mypy: its budget
-# already has two homes and a moving one is a fourth.
+# basedpyright is the third opinion that finds annotation lies mypy cannot see --
+# the `regex` package is untyped in mypy.ini and degrades its values to Any --
+# and it runs directly as the pre-commit `basedpyright` hook, analysing the tree
+# on every commit rather than on a schedule. It has no target here for the same
+# reason it is not a third declaration of mypy: its finding count is zero-or-fail
+# and a moving declaration is a fourth.
 typecheck:
 	cd "$(SUITE_DIR)" && $(PRE_COMMIT) run mypy --all-files --config "$(HOOK_CONFIG)"
 

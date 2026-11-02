@@ -18,7 +18,7 @@ described — see the blockers section. One commit, `c5ab69d`, is packaged as
 
 Rules that bite (from memory #4666 and the previous failed pass):
 - Never type `JsonValue` at a site that then does `.get()/.items()/**` without a
-  guarded local narrowing — mypy/pyright go red.
+  guarded local narrowing — mypy/basedpyright go red.
 - `dict[str, str]` / `dict[str, int]` (open key set, typed value) are NOT counted.
 - **JsonValue cannot be a pydantic `BaseModel` field** without `RecursionError`
   at schema generation (the model is used as a FastAPI `response_model` / `model`).

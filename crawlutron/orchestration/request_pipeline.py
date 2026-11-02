@@ -6,7 +6,7 @@ import asyncio
 import functools
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 from crawlutron.admission.admission import normalize_sitemap_candidates
 from crawlutron.admission.admission_links import gather_robots_decisions
@@ -51,6 +51,7 @@ from crawlutron.transport.scheduler import DomainScheduler
 
 if TYPE_CHECKING:
     from crawlutron.models.http_fetcher import HttpFetcher
+    from crawlutron.orchestration.engine import SeedCache
 
 
 @dataclass(frozen=True)
@@ -58,7 +59,10 @@ class PipelineDependencies:
     get_content_cache: Callable[[], ContentCache]
     make_spill: Callable[[str | None], SpillSink]
     compile_scope_regex_safe: Callable[[str | None], BoundedPattern | None]
-    stale_seeds: Callable[[Iterable[tuple[NormalizedUrl, str | None]], Any, CrawlPolicy], set[NormalizedUrl]]
+    stale_seeds: Callable[
+        [Iterable[tuple[NormalizedUrl, str | None]], SeedCache | None, CrawlPolicy],
+        set[NormalizedUrl],
+    ]
     fetch_and_decode: FetchAndDecode | None
     shared_http_cache: HttpCache
     resource_gate: ResourceGate
@@ -95,7 +99,8 @@ class PipelineState:
 
 def build_jobs(state: PipelineState) -> list[CrawlTask]:
     """One task per admitted pair; the pair's NormalizedUrl is reused, never
-    rebuilt -- the gate's construction is the only one on the entry path."""
+    rebuilt -- the gate's construction is the only one on the entry path.
+    """
     return [
         CrawlTask(index=index, original_url=original_url, normalized_url=normalized_url)
         for index, (original_url, normalized_url) in enumerate(state.url_pairs)
@@ -104,7 +109,8 @@ def build_jobs(state: PipelineState) -> list[CrawlTask]:
 
 def compute_ram_derived_concurrency(state: PipelineState) -> int:
     """The RAM-derived HTTP concurrency ceiling this process may sustain, the
-    value weighted admission and the scheduler's connection ceiling both honor."""
+    value weighted admission and the scheduler's connection ceiling both honor.
+    """
     limit = read_memory_stats().total_bytes or 0
     # Reserve the doc pool too, exactly as build_admission_policy does, so
     # the scheduler ceiling and admission's max_http_concurrency cannot diverge.
@@ -113,7 +119,8 @@ def compute_ram_derived_concurrency(state: PipelineState) -> int:
 
 def _build_scheduler(state: PipelineState) -> DomainScheduler:
     """Delegates to the single construction path; this layer only supplies the
-    RAM-derived connection ceiling and the policy's RPS cap."""
+    RAM-derived connection ceiling and the policy's RPS cap.
+    """
     # The scheduler's own connection ceiling is the RAM-derived admission
     # ceiling, not a hardcoded constant: the two cannot diverge.
     return DomainScheduler.from_settings(
@@ -278,7 +285,8 @@ async def _spill_one(state: PipelineState, index: int, result: EngineCrawlResult
 
 def _build_admission(state: PipelineState) -> WeightedAdmission:
     """The RAM-weighted admission gate for one crawl, shared by both the
-    recursive and non-recursive paths so they cannot drift on the same bound."""
+    recursive and non-recursive paths so they cannot drift on the same bound.
+    """
     return WeightedAdmission(
         state.dependencies.resource_gate,
         build_admission_policy(
@@ -297,7 +305,8 @@ async def _dispatch_paced(
 ) -> None:
     """Dispatch a sync batch in admission-sized chunks: the scheduler's own
     ceiling (global_limit) is already RAM-derived, but a batch must not send the
-    whole frontier out at once either, so each chunk is admitted before submit."""
+    whole frontier out at once either, so each chunk is admitted before submit.
+    """
     admission = _build_admission(state)
     remaining = list(jobs)
     while remaining:

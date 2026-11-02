@@ -5,7 +5,7 @@ drives the real router with an isolated key store.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from crawlutron.storage.caller_key_store import CallerKeyStore
@@ -32,7 +32,7 @@ def _issue(keys: CallerKeyStore, label: str, *, max_pages: int = 0) -> str:
 @asynccontextmanager
 async def _keyed_watch_client(
     watch_store, key_store: CallerKeyStore, *, max_watches: int = 100
-) -> AsyncIterator[AsyncClient]:
+) -> AsyncGenerator[AsyncClient, None]:
     """A client over ``/v1/watches`` whose app holds ``key_store`` for identity."""
     app = FastAPI()
     app.include_router(watch_router)

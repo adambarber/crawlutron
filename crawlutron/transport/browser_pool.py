@@ -10,7 +10,7 @@ import asyncio
 import logging
 import time
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.browser_pool_exhausted import BrowserPoolExhaustedError
@@ -51,11 +51,11 @@ class BrowserPool:
         *,
         pool_size: int | None = None,
         settings: CrawlerSettings | None = None,
-        **renderer_kwargs: object,
+        warmup_urls: list[str] | None = None,
     ) -> None:
         self._pool_size = pool_size or derive_browser_pool_size()
         self._settings = settings
-        self._renderer_kwargs = renderer_kwargs
+        self._warmup_urls = warmup_urls
         self._renderers: list[BrowserRenderer] = []
         self._available: asyncio.Queue[BrowserRenderer] = asyncio.Queue()
         self._lock = asyncio.Lock()
@@ -72,11 +72,9 @@ class BrowserPool:
             if self._initialized:
                 return
             for i in range(self._pool_size):
-                # The kwargs bag passes through to BrowserRenderer unopened; Any is
-                # the honest unpack type at this construction boundary.
-                renderer = BrowserRenderer(
-                    settings=self._settings, **cast("dict[str, Any]", self._renderer_kwargs)
-                )
+                # warmup_urls is the one renderer knob the pool forwards; declared
+                # as its own typed parameter rather than an opaque kwargs bag.
+                renderer = BrowserRenderer(settings=self._settings, warmup_urls=self._warmup_urls)
                 self._renderers.append(renderer)
                 await self._available.put(renderer)
                 logger.info("browser_pool_renderer_created", extra={"index": i})
@@ -157,7 +155,7 @@ class BrowserPool:
         The first renderer's profile stands for the pool (headed-warmed if it
         carries warmup URLs, else plain headless); before init, the kwargs decide.
         """
-        warmup = self._renderer_kwargs.get("warmup_urls")
+        warmup = self._warmup_urls
         if self._renderers:
             # The renderers resolve warmup URLs from the environment when the
             # constructor did not pass them, so the live list is authoritative.

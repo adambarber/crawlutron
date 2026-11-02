@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable, Coroutine
-from typing import Any
+from collections.abc import Awaitable, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +20,8 @@ def is_running(job_id: str) -> bool:
 def tracked_task(job_id: str) -> asyncio.Task | None:
     """The live task registered for ``job_id``, or ``None`` when none/finished.
 
-    Lets a supervisor await the exact task owning a job instead of polling."""
+    Lets a supervisor await the exact task owning a job instead of polling.
+    """
     task = _tasks.get(job_id)
     return task if task is not None and not task.done() else None
 
@@ -58,12 +58,13 @@ def cancel_all_tasks() -> None:
 
 def start_tracked_task(
     job_id: str,
-    factory: Callable[[], Coroutine[Any, Any, Any]],
+    factory: Callable[[], Awaitable[object]],
 ) -> asyncio.Task:
     """Spawn ``factory()`` as the task owning ``job_id``, or return live one.
 
     One registry means one drain and one cancel path; the factory runs only
-    once a slot is free."""
+    once a slot is free.
+    """
     existing = _tasks.get(job_id)
     if existing is not None and not existing.done():
         return existing
@@ -84,12 +85,13 @@ def start_tracked_task(
 
 async def _track_then_run(
     holder: list[asyncio.Task],
-    factory: Callable[[], Coroutine[Any, Any, Any]],
+    factory: Callable[[], Awaitable[object]],
 ) -> object:
     """Yield once so the spawn site registers the task before any user code.
 
     Registration precedes the first ``await`` of ``factory``, so an early
-    failure can never land in a task the registry never saw."""
+    failure can never land in a task the registry never saw.
+    """
     await asyncio.sleep(0)
     return await factory()
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import threading
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable, Generator
 from contextlib import contextmanager
 from http.cookiejar import CookieJar as _StdlibCookieJar
 from typing import TYPE_CHECKING, Protocol, TypeVar, cast
@@ -399,7 +399,9 @@ def has_process_state() -> bool:
 
 
 @contextmanager
-def swap_pooled_builders(swaps: list[tuple[LoopBoundPooledClient, PooledClientBuilder]]) -> Iterator[None]:
+def swap_pooled_builders(
+    swaps: list[tuple[LoopBoundPooledClient, PooledClientBuilder]],
+) -> Generator[None, None, None]:
     """Rebind the given pooled singletons' builders, restored on the way out.
 
     The builders are the one part of the pools a caller can legitimately

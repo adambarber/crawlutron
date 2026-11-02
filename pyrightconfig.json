@@ -1,16 +1,16 @@
 {
-    // Pyright is the THIRD type checker here, alongside mypy (the fail gate) and
-    // whatever AFT runs for live diagnostics. It earns its place by finding
-    // annotation lies both declared gates miss: a `regex.Pattern` passed where a
-    // `re.Pattern[str]` was declared, a symbol imported from the wrong module,
-    // a `urllib.error` reference that only resolves because another import
-    // happened to bind the submodule. Mypy passes those because the `regex`
-    // package is untyped in its config and degrades the value to `Any`.
+    // basedpyright is the THIRD type checker here, alongside mypy (the fail
+    // gate) and whatever AFT runs for live diagnostics. It earns its place by
+    // finding annotation lies both declared gates miss: a `regex.Pattern` passed
+    // where a `re.Pattern[str]` was declared, a symbol imported from the wrong
+    // module, a `urllib.error` reference that only resolves because another
+    // import happened to bind the submodule. Mypy passes those because the
+    // `regex` package is untyped in its config and degrades the value to `Any`.
     //
     // Ruff is the single owner of style and the custom AST suite is the single
     // owner of project-specific safety predicates; this file is the single owner
-    // of "the type annotation is a lie". Gated by tests/test_pyright_budget.py
-    // and a pre-commit hook, both at zero.
+    // of "the type annotation is a lie". Gated by a pre-commit hook running
+    // basedpyright directly, whose finding count is zero-or-fail.
     "include": ["crawlutron"],
     "exclude": [
         "tests",

@@ -2,7 +2,9 @@
 
 Declared support surface (#476): the pre-commit/CI/hook/Makefile contract test
 modules import these from here, not from each other's internals. Bodies moved
-verbatim from test_precommit_ci_contract.py and test_ci_enforcement.py.
+verbatim from test_ci_enforcement.py; the jscpd fixture config migrated here
+when its single consumer (test_makefile_contract.py) outlived the module that
+first owned it.
 """
 
 from __future__ import annotations
@@ -53,7 +55,6 @@ ENFORCEMENT_INPUTS = (
     "mypy.ini",
     "pytest.ini",
     "pyproject.toml",
-    "requirements-dev.txt",
     ".github/workflows/ci.yml",
 )
 
@@ -267,6 +268,42 @@ def _jobs(workflow: str) -> dict[str, dict[str, object]]:
     jobs = document.get("jobs")
     assert isinstance(jobs, dict) and jobs, "the workflow must declare jobs"
     return cast("dict[str, dict[str, object]]", jobs)
+
+
+# A syntactically valid pre-commit config carrying a second, QUOTED jscpd hook
+# that would pass a lax threshold; only the quotes tell it from the real config.
+_FIXTURE_FILES = r"^(docker/browser-crawler/)?.*\.py$"
+
+
+def _fixture_hook(hook_id: str, name: str, entry: str, *, quoted: bool = False) -> str:
+    """One hook block of the fixture config. The hooks differ only in id, name,
+    entry and whether the id is quoted -- the whole defect the fixture exists to
+    express -- so the four shared lines are written once.
+    """
+    rendered_id = f'"{hook_id}"' if quoted else hook_id
+    return (
+        f"      - id: {rendered_id}\n"
+        f"        name: {name}\n"
+        f"        entry: {entry}\n"
+        "        language: system\n"
+        f"        files: {_FIXTURE_FILES}\n"
+        "        pass_filenames: false\n"
+        "        stages: [pre-commit]\n"
+    )
+
+
+QUOTED_SECOND_JSCPD_HOOK = (
+    "repos:\n"
+    "  - repo: local\n"
+    "    hooks:\n"
+    + _fixture_hook("jscpd", "jscpd", ".venv/bin/python -m scripts.jscpd_gate all")
+    + _fixture_hook(
+        "jscpd-legacy",
+        "jscpd legacy",
+        "jscpd --threshold 40 app tests || true",
+        quoted=True,
+    )
+)
 
 
 #: Compile-time, runtime and test docstrings may run no longer than three lines.

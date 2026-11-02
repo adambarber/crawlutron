@@ -1,6 +1,7 @@
 """The jscpd report's shape, declared once: jscpd's JSON report is an external
 boundary whose key set the duplication gate depends on (``firstFile``/``secondFile``/
-``fragment``/``tokens``); a dropped key fails at the consumer instead of as ``None``."""
+``fragment``/``tokens``); a dropped key fails at the consumer instead of as ``None``.
+"""
 
 from __future__ import annotations
 

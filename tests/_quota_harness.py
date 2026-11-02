@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncGenerator, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -44,7 +44,7 @@ async def keyed_client(
     *,
     keys: CallerKeyStore,
     overrides: Mapping[Callable[[Request], object], Callable[[], object]] | None = None,
-) -> AsyncIterator[AsyncClient]:
+) -> AsyncGenerator[AsyncClient, None]:
     """Configure ``app`` as a keyed service and serve it with an in-process client."""
     app.state.concurrency_tracker = CallerConcurrencyTracker()
     app.state.caller_key_store = keys
@@ -61,7 +61,7 @@ async def service_client(
     *,
     routers: Mapping[str, APIRouter],
     with_results: bool = False,
-) -> AsyncIterator[tuple[AsyncClient, JobStore, CallerKeyStore]]:
+) -> AsyncGenerator[tuple[AsyncClient, JobStore, CallerKeyStore], None]:
     """Serve a keyed HTTP client over one register and one key admin and ``routers``.
 
     ``with_results`` also wires a result store and propagates the job store to

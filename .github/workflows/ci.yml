@@ -40,7 +40,6 @@ jobs:
         run: |
           python3 -m venv .venv
           .venv/bin/python -m pip install -e ".[dev]"
-          python3 -m pip install "pre-commit==4.6.2"
       - name: Run all configured hooks
         run: pre-commit run --all-files --config .pre-commit-config.yaml
 
@@ -115,7 +114,7 @@ jobs:
   # stay unconditional and this aggregate fails if any of them did not succeed.
   # The gate-carrying jobs are enforcement (every pre-commit hook), test-fast
   # (the suite) and test-browser (the Camoufox suite); there is no separate lint
-  # or typecheck job because pre-commit already runs ruff, mypy and pyright
+  # or typecheck job because pre-commit already runs ruff, mypy and basedpyright
   # inside `enforcement`.
   required:
     name: Required quality gate

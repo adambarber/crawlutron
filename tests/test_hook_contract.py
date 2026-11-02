@@ -34,7 +34,8 @@ def test_all_hooks_share_one_trigger() -> None:
 
     #557: coverage is a measurement surface, not an enforcement gate. Its
     scope is ``^(app|tests)/`` and its stage is pre-push, so the divergent
-    files value cannot silently skip a gate; the one-surface law holds it."""
+    files value cannot silently skip a gate; the one-surface law holds it.
+    """
     hooks = _hook_blocks(CONFIG_PATH.read_text(encoding="utf-8"))
     enforcement = [(hook_id, block) for hook_id, block in hooks if hook_id != "coverage"]
     triggers = {_field(block, "files") for _, block in enforcement}
@@ -53,7 +54,8 @@ def test_a_hook_with_a_divergent_trigger_is_caught() -> None:
     """Bites: a hook with a different ``files:`` value fails the all-share-one check.
 
     Without the chokepoint, adding a sixth hook -- or reverting one copy to a
-    per-file pattern -- silently reintroduces the drift."""
+    per-file pattern -- silently reintroduces the drift.
+    """
     config = CONFIG_PATH.read_text(encoding="utf-8")
     reverted = config.replace("*service_trigger", r"^(docker/browser-crawler/)?.*\.py$")
     reverted_hooks = _hook_blocks(reverted)
@@ -65,7 +67,8 @@ def test_every_gate_fires_on_every_enforcement_input() -> None:
     """No gate's own configuration can be edited without that gate running.
 
     A ``files:`` pattern nothing matches is a config nothing checks; ``.jscpd.json``
-    was the live instance -- a commit that hid a clone ran no hook at all."""
+    was the live instance -- a commit that hid a clone ran no hook at all.
+    """
     hooks = _hook_blocks(CONFIG_PATH.read_text(encoding="utf-8"))
     assert hooks
     # #557: coverage is a measurement surface, not an enforcement gate. It is
@@ -85,7 +88,8 @@ def test_the_workflow_is_written_for_the_repository_root_it_will_run_from() -> N
     """GitHub only loads workflows from a repository root.
 
     Nested today, it has never run; it is written for the root layout it is
-    going to, where a ``docker/browser-crawler/`` prefix cannot survive the copy."""
+    going to, where a ``docker/browser-crawler/`` prefix cannot survive the copy.
+    """
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
     assert "docker/browser-crawler" not in workflow, (
         "the workflow names a path that will not exist once the service is its own repository"
@@ -102,7 +106,8 @@ def test_every_job_checks_out_full_history() -> None:
     """Every job needs ``fetch-depth: 0`` for the git-history budget ratchet.
 
     GitHub's default shallow checkout makes the ratchet test SKIP -- a gate
-    silently inert in CI; each checkout must fetch the full history."""
+    silently inert in CI; each checkout must fetch the full history.
+    """
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
     for name, job in _jobs(workflow).items():
         checkouts = [
@@ -124,7 +129,8 @@ def test_every_hook_resolves_the_service_root_in_both_layouts(tmp_path_factory) 
     """The config travels, so its commands must work at either root.
 
     The dual-layout resolution is one committed helper (``scripts/gate``); the
-    property is asserted by EXECUTION in each synthetic layout."""
+    property is asserted by EXECUTION in each synthetic layout.
+    """
     config = CONFIG_PATH.read_text(encoding="utf-8")
     for hook_id, block in _hook_blocks(config):
         entry = _entry(block)
@@ -167,7 +173,8 @@ def test_every_hook_shares_one_gate_entry_preamble() -> None:
     """The five entry preambles are byte-identical, so they cannot drift.
 
     YAML has no interpolation, so the one-line lookup cannot be an anchor -- but
-    it CAN be checked: editing one preamble and not the others fails here."""
+    it CAN be checked: editing one preamble and not the others fails here.
+    """
     hooks = _hook_blocks(CONFIG_PATH.read_text(encoding="utf-8"))
     prologues = {_split_gate_entry(_entry(block))[0] for _, block in hooks}
     commands = {_split_gate_entry(_entry(block))[1] for _, block in hooks}
@@ -192,15 +199,14 @@ def test_the_gate_helper_fails_loudly_with_no_argument() -> None:
 
 
 def test_the_gate_venv_guard_names_the_dev_extra(tmp_path_factory) -> None:
-    """A missing venv fails, naming pyproject.toml's dev extra -- not
-    requirements-dev.txt, which only the Dockerfile test stage installs -- and exercises the branch.
+    """A missing venv fails, naming pyproject.toml's dev extra -- the single
+    source for the gate tools the venv must carry.
     """
     repo = tmp_path_factory.mktemp("novenv")
     service_root = _gate_repo(repo, layout="root", venv=False)
     completed = _run_gate(service_root / "scripts" / "gate", [".venv/bin/python", "-c", "print(1)"], repo)
     assert completed.returncode != 0, "a missing venv must fail the gate helper"
     assert "pyproject.toml's dev extra" in completed.stderr
-    assert "requirements-dev.txt" not in completed.stderr
 
 
 def _gate_repo(repo: Path, *, layout: str, venv: bool) -> Path:
@@ -240,7 +246,8 @@ def _split_gate_entry(entry: str) -> tuple[str, str]:
     """The entry as ``(bash -c prologue, command)``.
 
     pre-commit shlex-splits to ``bash -c SCRIPT gate ARGS...``; the split point
-    is the prologue script's closing quote before the gate's own ``$0``."""
+    is the prologue script's closing quote before the gate's own ``$0``.
+    """
     prologue, separator, command = entry.partition(GATE_ENTRY_END)
     assert separator, f"gate entry has no {GATE_ENTRY_END!r} terminator: {entry!r}"
     return prologue + "'", command.strip()
@@ -250,7 +257,8 @@ def _run_gate_entry_in_layout(repo: Path, layout: str) -> tuple[Path, subprocess
     """Run a real hook entry against a synthetic repo laid out the named way.
 
     ``nested`` builds ``<repo>/docker/browser-crawler``; ``root`` builds the
-    service at the repo root. Real files, not re-typed stand-ins."""
+    service at the repo root. Real files, not re-typed stand-ins.
+    """
     # `browser-crawler` here is the pre-extraction layout the hook's prologue still probes for, not this
     # project's name; the nested branch exists to prove the helper resolves there too.
     service_root = _gate_repo(repo, layout=layout, venv=True)

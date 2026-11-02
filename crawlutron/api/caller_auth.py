@@ -7,7 +7,7 @@ caller, a wrong key is a 401. Ownership elsewhere is an exact id match.
 from __future__ import annotations
 
 import secrets
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncGenerator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, NoReturn, TypedDict
@@ -265,7 +265,7 @@ async def admit(
     tracking: Tracking,
     payload: PolicyCarrier | None = None,
     reserve_slot: bool = True,
-) -> AsyncIterator[str]:
+) -> AsyncGenerator[str, None]:
     """Admit one request: resolve the page bound, the quotas, the cookie namespace.
 
     The caller's admit lock spans count->check->insert for async doors
