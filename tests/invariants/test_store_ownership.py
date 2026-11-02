@@ -118,6 +118,85 @@ BROWSER_RELEASE_ONLY_THROUGH_THE_CHOKEPOINT = Rule(
 )
 
 
+# --- browser release call sites ----------------------------------------------- A release is a whole-process
+# teardown; the methods allowed to trigger one are declared, everything else is a C3.
+_BROWSER_RELEASE_CALL_ATTRS = frozenset({"close", "shutdown", "teardown", "dispose"})
+_BROWSER_RELEASE_RECEIVERS = frozenset({"driver", "_driver", "browser", "_browser"})
+_BROWSER_RELEASE_CALL_EXEMPT = frozenset({"close", "_acquire_browser", "_release_browser"})
+
+
+def _browser_release_call_offenders(tree, path, *, owners, attrs, receivers, exempt):
+    """Flag a browser release call from any method outside the declared owners."""
+    if path not in owners:
+        return
+    for node in functions(tree):
+        if node.name in exempt:
+            continue
+        for inner in ast.walk(node):
+            if not (isinstance(inner, ast.Call) and isinstance(inner.func, ast.Attribute)):
+                continue
+            callee = inner.func
+            receiver = None
+            if isinstance(callee.value, ast.Name):
+                receiver = callee.value.id
+            elif isinstance(callee.value, ast.Attribute):
+                receiver = callee.value.attr
+            if callee.attr in attrs and receiver in receivers:
+                yield offender_at(
+                    path,
+                    inner,
+                    f"{node.name}() releases a browser (.{callee.attr}) outside a declared owner; "
+                    f"an attempt lifecycle must not tear down the browser: retry the page",
+                )
+
+
+BROWSER_RELEASE_CALLS_HAVE_DECLARED_OWNERS = Rule(
+    name="browser-release-calls-have-declared-owners",
+    find=lambda tree, path: _browser_release_call_offenders(
+        tree,
+        path,
+        owners=_BROWSER_RELEASE_OWNERS,
+        attrs=_BROWSER_RELEASE_CALL_ATTRS,
+        receivers=_BROWSER_RELEASE_RECEIVERS,
+        exempt=_BROWSER_RELEASE_CALL_EXEMPT,
+    ),
+    summary=(
+        "A browser release (driver.close() and kin) tears down the whole process, so only "
+        "the lifecycle owners may trigger one: a close method delegating shutdown, the "
+        "recycle bound in _acquire_browser, and _release_browser itself. A render attempt "
+        "is a page lifecycle and must never reach into the browser's"
+    ),
+    bite=lambda: Bites(
+        "class Renderer:\n"
+        "    async def render(self):\n"
+        "        try:\n"
+        "            pass\n"
+        "        except Exception:\n"
+        "            await self._driver.close()\n",
+        "releases a browser",
+        at=REPO_ROOT / "crawlutron" / "transport" / "browser.py",
+    ),
+    clean=lambda: (
+        # A close method is a declared owner: it may delegate the teardown.
+        "class Renderer:\n    async def close(self):\n        await self._driver.close()\n",
+        # The recycle bound releases the old browser to launch a fresh one.
+        "class Driver:\n    async def _acquire_browser(self):\n        await self._release_browser()\n",
+        # An unrelated close on a foreign receiver is not a browser release.
+        "class Handler:\n    async def handle(self):\n        await client.close()\n",
+        # The clean half at a path the rule does not own: the sweep is path-keyed.
+        Silent(
+            "class Renderer:\n"
+            "    async def render(self):\n"
+            "        try:\n"
+            "            pass\n"
+            "        except Exception:\n"
+            "            await self._driver.close()\n",
+            at=_ELSEWHERE,
+        ),
+    ),
+)
+
+
 #: The lock constructors a store must not hand itself.
 _PRIVATE_LOCK_NAMES = frozenset({"Lock", "RLock"})
 
@@ -206,7 +285,13 @@ STORES_SERIALIZE_ON_THE_FILES_PROCESS_LOCK = Rule(
 )
 
 
-RULES = Registry((BROWSER_RELEASE_ONLY_THROUGH_THE_CHOKEPOINT, STORES_SERIALIZE_ON_THE_FILES_PROCESS_LOCK))
+RULES = Registry(
+    (
+        BROWSER_RELEASE_ONLY_THROUGH_THE_CHOKEPOINT,
+        BROWSER_RELEASE_CALLS_HAVE_DECLARED_OWNERS,
+        STORES_SERIALIZE_ON_THE_FILES_PROCESS_LOCK,
+    )
+)
 
 
 def test_no_rule_violations():

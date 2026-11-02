@@ -217,7 +217,6 @@ class BrowserRenderer:
             except Exception as error:
                 classification: Classification = _render_classification(error)
                 last_error = classify_error_code(error)
-                await self._driver.close()
                 if attempts >= max_attempts:
                     status = _render_failure_status(classification)
                     return self._failure_result(url, status, classification, attempts, started, last_error)

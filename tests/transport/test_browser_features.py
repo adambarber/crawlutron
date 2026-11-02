@@ -36,8 +36,17 @@ class FakePage(ScriptedPage):
         self.calls = []
         self.elements = {}
         self.responses = []
+        # C3 red lever: the first goto raises this, later ones succeed.
+        self.fail_first_goto: BaseException | None = None
         # Where each interaction call goes.
         self.click = self._click
+        self.goto = self._goto
+
+    async def _goto(self, url, wait_until="load", **kwargs):
+        error, self.fail_first_goto = self.fail_first_goto, None
+        if error is not None:
+            raise error
+        await super().goto(url, wait_until=wait_until, **kwargs)
 
     async def _click(self, selector):
         self.calls.append(("click", selector))
@@ -71,10 +80,14 @@ class FakeBrowser:
 
     def __init__(self):
         self.pages = 0
+        self.fail_first_goto: BaseException | None = None
 
     async def new_page(self, **kwargs):
         self.pages += 1
-        return FakePage()
+        page = FakePage()
+        page.fail_first_goto = self.fail_first_goto
+        self.fail_first_goto = None  # only the first attempt's first goto fails
+        return page
 
     @property
     def is_closed(self):
@@ -169,6 +182,19 @@ class TestBrowserReuse:
         await _render(renderer, "/page")
         assert renderer.driver.reused
         assert cm.enters == 1
+        assert browser.pages == 2
+
+    async def test_a_transient_failure_retries_on_the_same_browser(self):
+        """C3: a page-level exception is an attempt lifecycle, not a browser one.
+
+        The retry loop must never tear down the browser between attempts: the
+        driver's recycle bound and shutdown own that, so attempt 2 renders on the
+        browser attempt 1 launched, entered exactly once."""
+        browser, cm, renderer = _reuse_renderer()
+        browser.fail_first_goto = TimeoutError("navigation timeout")
+        result = await _render(renderer)
+        assert result.status == "success"
+        assert cm.enters == 1, "the browser was relaunched for the retry"
         assert browser.pages == 2
 
     async def test_close_releases_browser(self):
