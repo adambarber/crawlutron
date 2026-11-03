@@ -8,6 +8,7 @@ from typing import cast
 
 import pytest
 
+from crawlutron.admission.policy import DEFAULT_MAX_PAGES, validate_wire_policy
 from crawlutron.api.caller_auth import (
     check_page_quota,
     effective_cookie_namespace,
@@ -468,9 +469,25 @@ async def test_anonymous_page_quota_refuses_over_budget_crawls(tmp_path):
 
 
 async def test_keyed_crawl_keeps_an_explicit_zero_page_limit(tmp_path):
-    """A keyed caller's explicit ``max_pages=0`` stays 0 in the stored row (#194)."""
+    """#593: /v1/crawl resolves an explicit ``max_pages=0`` to the bounded
+    service default (DEFAULT_MAX_PAGES) and persists that value -- stored ==
+    enforced, so the engine never silently re-expands it to a different cap."""
     async with quota_client(tmp_path) as (client, store, results, keys):
         issued = keys.issue_key("agent-a", max_pages=0)
         response = await post_crawl(client, max_pages=0, key=issued.secret)
         stored = _stored_request(store, response)
-        assert stored.policy.limits.max_pages == 0
+        assert stored.policy.limits.max_pages == DEFAULT_MAX_PAGES
+
+
+async def test_keyed_crawl_zero_limit_enforced_as_stored(tmp_path):
+    """#593 execution-level: the bound the engine enforces equals the stored
+    bound, so validate_wire_policy is a no-op on max_pages==DEFAULT_MAX_PAGES."""
+    async with quota_client(tmp_path) as (client, store, results, keys):
+        issued = keys.issue_key("agent-b", max_pages=0)
+        response = await post_crawl(client, max_pages=0, key=issued.secret)
+        assert response.status_code == 202, response.text
+        stored = _stored_request(store, response)
+        wire = stored.policy.model_dump()
+        enforced = validate_wire_policy(wire)
+        assert enforced.limits.max_pages == DEFAULT_MAX_PAGES
+        assert stored.policy.limits.max_pages == enforced.limits.max_pages

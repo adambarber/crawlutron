@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, NoReturn, TypedDict
 
 from fastapi import Request
 
+from crawlutron.admission.policy import DEFAULT_MAX_PAGES
 from crawlutron.api.exceptions import http_error
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.caller_identity import CallerIdentity
@@ -25,6 +26,7 @@ from crawlutron.transport.request_profile import cookie_namespace_for
 
 if TYPE_CHECKING:
     from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
+    from crawlutron.models.crawl_policy import CrawlPolicy
     from crawlutron.models.crawl_request import CrawlRequest
     from crawlutron.models.map_request import MapRequest
     from crawlutron.storage.job_store import JobStore
@@ -273,20 +275,13 @@ async def admit(
     """
     active = caller if caller is not None else anonymous_caller()
     resolved = resolve_page_limit(active, requested_pages)
+    if payload is not None and resolved <= 0:
+        # /v1/crawl and /v1/map: a surviving 0 becomes the bounded service default
+        # and is persisted (stored == enforced). /v1/jobs passes no payload and keeps
+        # 0 as the unbounded whole-site sentinel.
+        resolved = DEFAULT_MAX_PAGES
     if payload is not None:
-        # An anonymous namespace declaration is refused at the door (422),
-        # not silently downgraded; the declared profile is the caller's claim.
-        refuse_anonymous_cookie_namespace(active, payload.policy.request_profile)
-        policy = payload.policy.model_copy(
-            update={"limits": payload.policy.limits.model_copy(update={"max_pages": resolved})}
-        )
-        namespace = effective_cookie_namespace(policy.request_profile, active)
-        # Scrub a refused declaration so the engine cannot re-derive it.
-        if namespace != cookie_namespace_for(policy.request_profile):
-            profile = dict(policy.request_profile)
-            profile["cookie_namespace"] = namespace
-            policy = policy.model_copy(update={"request_profile": profile})
-        payload.policy = policy
+        payload.policy = _apply_payload_policy(payload, active, resolved)
     check_page_quota(active, resolved)
     job_store = tracking.job_store
     concurrency_tracker = tracking.concurrency_tracker
@@ -315,6 +310,22 @@ async def admit(
         yield active.caller_id
     finally:
         concurrency_tracker.release(active.caller_id)
+
+
+def _apply_payload_policy(payload: PolicyCarrier, active: CallerIdentity, resolved: int) -> CrawlPolicy:
+    """Write the resolved page bound and the effective cookie namespace into a
+    carrier's policy, scrubbing any namespace the door refused. /v1/crawl and
+    /v1/map only; /v1/jobs passes no payload."""
+    refuse_anonymous_cookie_namespace(active, payload.policy.request_profile)
+    policy = payload.policy.model_copy(
+        update={"limits": payload.policy.limits.model_copy(update={"max_pages": resolved})}
+    )
+    namespace = effective_cookie_namespace(policy.request_profile, active)
+    if namespace != cookie_namespace_for(policy.request_profile):
+        profile = dict(policy.request_profile)
+        profile["cookie_namespace"] = namespace
+        policy = policy.model_copy(update={"request_profile": profile})
+    return policy
 
 
 __all__ = [
