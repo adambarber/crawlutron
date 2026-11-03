@@ -48,6 +48,7 @@ from crawlutron.transport.results import (
 )
 from crawlutron.transport.robots import FetchAndDecode, RobotsRules
 from crawlutron.transport.scheduler import DomainScheduler
+from crawlutron.vocabulary.strategies import BROWSER_STRATEGIES
 
 if TYPE_CHECKING:
     from crawlutron.models.http_fetcher import HttpFetcher
@@ -298,22 +299,49 @@ def _build_admission(state: PipelineState) -> WeightedAdmission:
     )
 
 
+def _bucket_tasks_by_tier(
+    scheduler: DomainScheduler, tasks: list[CrawlTask], policy: CrawlPolicy
+) -> tuple[list[CrawlTask], list[CrawlTask]]:
+    """Split one task list into HTTP and browser tiers. A pinned browser strategy
+    wins; an unpinned task follows its policy chain (a browser link in the chain
+    may render, so it counts against browser capacity).
+    """
+    http_jobs: list[CrawlTask] = []
+    browser_jobs: list[CrawlTask] = []
+    chain_has_browser = any(strategy in BROWSER_STRATEGIES for strategy in policy.strategies)
+    for task in tasks:
+        pinned = scheduler.get_pinned_strategy(task.domain)
+        if pinned in BROWSER_STRATEGIES or (pinned is None and chain_has_browser):
+            browser_jobs.append(task)
+        else:
+            http_jobs.append(task)
+    return http_jobs, browser_jobs
+
+
 async def _dispatch_paced(
     state: PipelineState,
     scheduler: DomainScheduler,
     jobs: list[CrawlTask],
 ) -> None:
-    """Dispatch a sync batch in admission-sized chunks: the scheduler's own
-    ceiling (global_limit) is already RAM-derived, but a batch must not send the
-    whole frontier out at once either, so each chunk is admitted before submit.
+    """Dispatch a sync batch in admission-sized chunks, tier-aware: browser jobs
+    are admitted against the browser capacity instead of being lumped into HTTP.
     """
     admission = _build_admission(state)
     remaining = list(jobs)
     while remaining:
-        admit_http, _admit_browser = await admission.admit(len(remaining), 0)
-        # Never stall a one-shot batch under a saturated gate: dispatch at least
-        # one job so a pinned gate cannot leave the crawl in flight forever.
-        chunk, remaining = remaining[: max(1, admit_http)], remaining[max(1, admit_http) :]
+        http_jobs, browser_jobs = _bucket_tasks_by_tier(scheduler, remaining, state.policy)
+        admit_http, admit_browser = await admission.admit(len(http_jobs), len(browser_jobs))
+        take_http = http_jobs[:admit_http] if admit_http else []
+        take_browser = browser_jobs[:admit_browser] if admit_browser else []
+        # Saturated gate: bounded progress floor -- dispatch one job so a pinned
+        # gate cannot leave the batch in flight forever.
+        if not take_http and not take_browser and remaining:
+            if http_jobs:
+                take_http = http_jobs[:1]
+            elif browser_jobs:
+                take_browser = browser_jobs[:1]
+        chunk = take_http + take_browser
+        remaining = http_jobs[len(take_http) :] + browser_jobs[len(take_browser) :]
         await scheduler.run(
             chunk,
             lambda job: _worker(state, job),
