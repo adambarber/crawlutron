@@ -30,6 +30,13 @@ def _resolve_as(addrs):
     return patch("socket.getaddrinfo", return_value=addrs)
 
 
+def _resolve_https_as(addrs, monkeypatch):
+    """The scripted public-HTTPS answer, with the guard forced on: the shared
+    setup every pinned-HTTPS composition test stands on."""
+    block_private_targets(monkeypatch)
+    return _resolve_as([(socket.AF_INET, socket.SOCK_STREAM, 6, "", addrs)])
+
+
 class TestBuildPinnedRequest:
     """The builder applies the pin policy so a fetcher cannot re-resolve at connect.
 
@@ -40,26 +47,27 @@ class TestBuildPinnedRequest:
     def test_plain_http_uses_pinned_ip_and_host_header(self, monkeypatch):
         block_private_targets(monkeypatch)
         with _resolve_as(_PUBLIC):
-            connect_url, headers = build_pinned_request(canonical("http://example.com:8080/a/b?x=1"), {})
-        parsed = urlparse(connect_url)
-        assert parsed.hostname == "93.184.216.34"
-        assert parsed.port == 8080
-        assert parsed.path == "/a/b"
-        assert parsed.query == "x=1"
-        assert headers["Host"] == "example.com:8080"
+            request = build_pinned_request(canonical("http://example.com:8080/a/b?x=1"), {})
+        assert request.connect_url == "http://93.184.216.34:8080/a/b?x=1"
+        assert request.headers["Host"] == "example.com:8080"
+        # No TLS identity to attest on plain HTTP.
+        assert request.tls_hostname is None
 
     def test_https_now_pins_to_the_ip_and_keeps_host_header(self, monkeypatch):
-        block_private_targets(monkeypatch)
-        https_addrs = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
-        with _resolve_as(https_addrs):
-            connect_url, headers = build_pinned_request(canonical("https://example.com/secure.pdf"), {})
-        parsed = urlparse(connect_url)
-        # HTTPS must be IP-pinned like HTTP so a DNS rebind cannot redirect it; the
-        # original hostname is preserved for TLS SNI (httpx) and as the Host header.
-        assert parsed.hostname == "93.184.216.34"
-        assert parsed.scheme == "https"
-        assert parsed.path == "/secure.pdf"
-        assert headers["Host"] == "example.com"
+        with _resolve_https_as(("93.184.216.34", 443), monkeypatch):
+            request = build_pinned_request(canonical("https://example.com/secure.pdf"), {})
+        assert request.connect_url == "https://93.184.216.34/secure.pdf"
+        assert request.headers["Host"] == "example.com"
+        # The identity rides the pin (#574): the hostname to attest travels with it.
+        assert request.tls_hostname == "example.com"
+
+    def test_an_ip_literal_pin_carries_no_tls_identity(self, monkeypatch):
+        # The address IS the identity: no SNI and cert verification against the
+        # literal itself. Re-deriving a hostname here would attest to a lie.
+        with _resolve_https_as(("93.184.216.34", 443), monkeypatch):
+            request = build_pinned_request(canonical("https://93.184.216.34/"), {})
+        assert request.connect_url == "https://93.184.216.34/"
+        assert request.tls_hostname is None
 
     def test_plain_http_brackets_ipv6_literal(self, monkeypatch):
         # getaddrinfo can hand back a public IPv6 address; an unbracketed literal corrupts the URL netloc (its
@@ -67,14 +75,13 @@ class TestBuildPinnedRequest:
         block_private_targets(monkeypatch)
         v6_addrs = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2606:4700:4700::1111", 80, 0, 0))]
         with _resolve_as(v6_addrs):
-            connect_url, headers = build_pinned_request(canonical("http://v6.example/docs.pdf?x=1"), {})
-        parsed = urlparse(connect_url)
-        assert connect_url.startswith("http://[2606:4700:4700::1111]/")
-        assert parsed.hostname == "2606:4700:4700::1111"
+            request = build_pinned_request(canonical("http://v6.example/docs.pdf?x=1"), {})
+        assert request.connect_url.startswith("http://[2606:4700:4700::1111]/")
+        parsed = urlparse(request.connect_url)
         assert parsed.port is None
         assert parsed.path == "/docs.pdf"
         assert parsed.query == "x=1"
-        assert headers["Host"] == "v6.example"
+        assert request.headers["Host"] == "v6.example"
 
     def test_host_header_brackets_resolved_ipv6(self, monkeypatch):
         # #495: the Host header composes the original v6 literal with a port; unbracketed
@@ -84,8 +91,8 @@ class TestBuildPinnedRequest:
         literal = canonical("http://[2606:4700::1111]:8080/x")
         v6_addrs = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2606:4700::1111", 8080, 0, 0))]
         with _resolve_as(v6_addrs):
-            _, headers = build_pinned_request(literal, {})
-        assert headers["Host"] == "[2606:4700::1111]:8080"
+            request = build_pinned_request(literal, {})
+        assert request.headers["Host"] == "[2606:4700::1111]:8080"
 
 
 class TestOneResolutionPerHop:
@@ -102,9 +109,9 @@ class TestOneResolutionPerHop:
             return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 80))]
 
         monkeypatch.setattr(socket, "getaddrinfo", fake)
-        connect_url, _headers = build_pinned_request(canonical(f"{scheme}://example.com/a"), {})
+        request = build_pinned_request(canonical(f"{scheme}://example.com/a"), {})
         assert calls["n"] == 1, calls
-        assert connect_url == f"{scheme}://93.184.216.34/a"
+        assert request.connect_url == f"{scheme}://93.184.216.34/a"
 
 
 def _stalling_resolver(monkeypatch, seconds: float, addrs=None):
@@ -145,7 +152,7 @@ class TestResolverDeadline:
         """The budget cuts both ways: a resolver that answers inside the request's
         budget resolves, even though the posture alone would have cut it off."""
         _stalling_resolver(monkeypatch, 0.4)
-        chain, pinned_url, _hop_headers = await anext(
+        chain, pinned = await anext(
             apinned_hops(
                 canonical("http://ok.example/"),
                 {},
@@ -153,7 +160,7 @@ class TestResolverDeadline:
                 timeout_seconds=2,
             )
         )
-        assert pinned_url == "http://93.184.216.34/"
+        assert pinned.connect_url == "http://93.184.216.34/"
         assert chain.url == canonical("http://ok.example/")
 
     def test_the_derivation_never_exceeds_the_posture(self):
@@ -180,8 +187,8 @@ class TestWrapperBudget:
         """No budget in hand means the DNS posture, not the caller's guess: a stall
         the posture tolerates still resolves."""
         _stalling_resolver(monkeypatch, 1.2)
-        connect_url, _headers = await build_pinned_request_async(canonical("http://ok.example/"), {})
-        assert urlparse(connect_url).hostname == "93.184.216.34"
+        request = await build_pinned_request_async(canonical("http://ok.example/"), {})
+        assert urlparse(request.connect_url).hostname == "93.184.216.34"
 
 
 class TestHeaderValueWireGuard:
@@ -220,7 +227,22 @@ class TestHeaderValueWireGuard:
     async def test_clean_headers_still_reach_the_pin(self):
         # No false positives: ordinary values (multibyte included) pass untouched.
         with _resolve_as(_PUBLIC):
-            _chain, _pinned_url, hop_headers = await anext(
+            _chain, pinned = await anext(
                 apinned_hops(canonical("http://example.com/"), {"X-Tenant": "Café"}, pin=build_pinned_request)
             )
-        assert hop_headers["X-Tenant"] == "Café"
+        assert pinned.headers["X-Tenant"] == "Café"
+
+
+class TestPinnedRequestIdentity:
+    """#574: the pin travels WITH its TLS identity -- a transport receiving the
+    pinned request receives the hostname to attest. The builder is the sole
+    composer; no consumer re-derives identity from a connect URL."""
+
+    async def test_the_identity_rides_the_off_loop_entry_and_the_walk(self, monkeypatch):
+        with _resolve_https_as(("93.184.216.34", 443), monkeypatch):
+            request = await build_pinned_request_async(canonical("https://example.com/"), {})
+            _chain, pinned = await anext(
+                apinned_hops(canonical("https://example.com/"), {}, pin=build_pinned_request)
+            )
+        assert request.tls_hostname == "example.com"
+        assert pinned.tls_hostname == "example.com"

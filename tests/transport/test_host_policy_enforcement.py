@@ -114,10 +114,10 @@ class _Stream:
 class _Client:
     def __init__(self, response):
         self.response = response
-        self.calls: list[tuple[str, bool]] = []
+        self.calls: list[tuple[str, bool, dict | None]] = []
 
     def stream(self, method, url, headers=None, timeout=None, follow_redirects=False, extensions=None):
-        self.calls.append((url, follow_redirects))
+        self.calls.append((url, follow_redirects, extensions))
         return _Stream(self.response)
 
 
@@ -142,8 +142,10 @@ async def test_redirect_to_policy_blocked_host_is_refused_before_fetch(monkeypat
             30,
         )
 
-    assert [url for url, _follow in client.calls] == ["https://93.184.216.34/"]
-    assert all(follow is False for _url, follow in client.calls)
+    assert [url for url, _follow, _ext in client.calls] == ["https://93.184.216.34/"]
+    assert all(follow is False for _url, follow, _ext in client.calls)
+    # The connect URL is the pinned IP, so TLS identity must ride the extension (#574).
+    assert all(ext == {"sni_hostname": "allowed.test"} for _url, _follow, ext in client.calls)
 
 
 async def test_render_request_never_invokes_worker_for_policy_blocked_host():

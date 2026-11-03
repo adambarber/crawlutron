@@ -119,7 +119,7 @@ async def default_http_fetcher(
     started = time.monotonic()
     timeout = Timeouts.for_request(timeout_seconds).as_httpx()
     pending: tuple[NormalizedUrl, TransportHeaders] | None = None
-    async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(
+    async for chain, pinned in pinned_transport.apinned_hops(
         url, headers, pin=pin, timeout_seconds=timeout_seconds
     ):
         # The previous hop's Set-Cookie flushes here: reaching this iteration
@@ -130,8 +130,7 @@ async def default_http_fetcher(
             client,
             chain=chain,
             url=url,
-            pinned_url=pinned_url,
-            hop_headers=hop_headers,
+            pinned=pinned,
             timeout=timeout,
             max_content_length=max_content_length,
             started=started,
@@ -146,8 +145,7 @@ async def _stream_terminal_hop(
     *,
     chain,
     url,
-    pinned_url,
-    hop_headers,
+    pinned,
     timeout,
     max_content_length,
     started,
@@ -156,7 +154,7 @@ async def _stream_terminal_hop(
     a redirect asking for another (re-pinned) request -- the pending tuple is
     stored only once the next hop's pin admits the walk.
     """
-    async with pinned_transport.apinned_stream(client, chain, pinned_url, hop_headers, timeout) as response:
+    async with pinned_transport.apinned_stream(client, chain, pinned, timeout) as response:
         content_length = response.headers.get("content-length")
         if pinned_transport.declared_length_exceeds(content_length, max_content_length):
             return http_413(url, chain.url, started), None
@@ -268,14 +266,14 @@ async def cffi_fetch(
         release_stream_noblock=release_stream_noblock,
     )
     try:
-        async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(
+        async for chain, pinned in pinned_transport.apinned_hops(
             url, headers, pin=pin, timeout_seconds=timeout_seconds
         ):
             # Same door as the httpx twin: the previous hop's Set-Cookie
             # flushes only after THIS hop's pin admitted the walk.
             await _flush_deferred_hop_cookies(pending)
             pending = None
-            handled, pending = await _handle_cffi_hop(hop, chain, client, pinned_url, hop_headers)
+            handled, pending = await _handle_cffi_hop(hop, chain, client, pinned)
             if handled is not None:
                 return handled
         raise AssertionError("apinned_hops raises on a body that neither returned nor advanced")
@@ -297,16 +295,27 @@ async def _handle_cffi_hop(
     hop: _CffiHop,
     chain,
     client,
-    pinned_url: str,
-    hop_headers: dict[str, str],
+    pinned,
 ) -> tuple[HttpFetchResult | None, tuple[NormalizedUrl, TransportHeaders] | None]:
     """One pinned hop: GET, too-large gate, redirect advance, or streamed body;
     the redirect arm returns its pending cookie hop instead of storing it.
     """
+    # A pinned HTTPS hop dials through a one-shot session carrying the resolve
+    # table: the wire URL stays the logical hostname, so SNI and certificate
+    # verification attest to it while curl connects to the pinned IP (#574).
+    one_shot = None
+    dial_client = client
+    wire_url = pinned.connect_url
+    resolve_entry = pinned_transport.cffi_resolve_entry(pinned)
+    if resolve_entry is not None:
+        dial_client = one_shot = http_client_pool.build_pinned_cffi_session(resolve_entry)
+        # The wire URL stays the logical hostname: SNI and certificate
+        # verification attest to it while curl connects to the pinned IP.
+        wire_url = pinned.url.raw
     try:
-        response = await client.get(
-            pinned_url,
-            headers=hop_headers,
+        response = await dial_client.get(
+            wire_url,
+            headers=pinned.headers,
             allow_redirects=False,
             stream=True,
             timeout=Timeouts.for_request(hop.timeout_seconds).read,
@@ -318,6 +327,9 @@ async def _handle_cffi_hop(
     except Exception:
         # Fall back to plain httpx for this request on transport errors.
         return None, None
+    finally:
+        if one_shot is not None:
+            await one_shot.close()
     # Content-length check
     content_length = response.headers.get("content-length")
     if pinned_transport.declared_length_exceeds(content_length, hop.max_content_length):

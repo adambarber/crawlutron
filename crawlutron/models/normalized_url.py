@@ -5,6 +5,7 @@ other way to build it. Host and site ride the value; ``raw`` is the text form.
 
 from __future__ import annotations
 
+import ipaddress
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from crawlutron.models.host_canonical import idna_host
@@ -169,6 +170,18 @@ class NormalizedUrl:
     def site(self) -> str:
         """The registrable domain, which is what the scheduler's per-site gates key on."""
         return self._site
+
+    @property
+    def tls_hostname(self) -> str | None:
+        """The hostname TLS must attest on this origin: the canonical host on
+        https, else None. An IP literal attests to itself -- no SNI, no alias."""
+        if self._scheme != "https":
+            return None
+        try:
+            ipaddress.ip_address(self._host)
+        except ValueError:
+            return self._host
+        return None
 
     @property
     def is_analytics_host(self) -> bool:

@@ -190,9 +190,11 @@ def _hanging_resolver(seconds: float):
 
 
 def _hanging_pin():
+    from tests._browser_doubles import pinned_request
+
     def pin(url, headers):
         time.sleep(7)
-        return ("http://1.2.3.4/", {})
+        return pinned_request(url, "http://1.2.3.4/", {})
 
     return pin
 

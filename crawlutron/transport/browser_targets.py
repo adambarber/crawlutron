@@ -16,6 +16,7 @@ from crawlutron.models.json_value import JsonValue
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.safety.json_safe import json_default
 from crawlutron.transport.pinned_transport import (
+    PinnedRequest,
     bounded_thread_resolve,
     check_ssrf_protection_stable,
 )
@@ -37,16 +38,16 @@ class RouteResponse(Protocol):
 async def resolve_browser_target(
     url: NormalizedUrl,
     *,
-    pin: Callable[..., Awaitable[tuple[str, dict[str, str]]]],
+    pin: Callable[..., Awaitable[PinnedRequest]],
     timeout_seconds: float | None = None,
 ) -> tuple[str, dict[str, str]]:
     """SSRF-check and IP-pin ``url`` for browser navigation: the browser connects
     to the resolved IP (no DNS rebinding) while keeping the original ``Host``;
     unsafe targets raise. Async because pinning resolves DNS; ``pin`` is required.
     """
-    pinned_url, request_headers = await pin(url, {}, timeout_seconds=timeout_seconds)
-    host = request_headers.get("Host")
-    return pinned_url, ({"Host": host} if host else {})
+    pinned = await pin(url, {}, timeout_seconds=timeout_seconds)
+    host = pinned.headers.get("Host")
+    return pinned.connect_url, ({"Host": host} if host else {})
 
 
 # Subresource types with no crawlable text: aborted in reduced-resource mode.
@@ -59,7 +60,7 @@ def make_ssrf_route_handler(
     *,
     include_screenshot: bool = False,
     policy: HostPolicy,
-    pin: Callable[..., tuple[str, dict[str, str]]],
+    pin: Callable[..., PinnedRequest],
     timeout_seconds: float | None = None,
 ):
     """A Playwright ``page.route`` handler aborting requests to SSRF-unsafe hosts:
@@ -119,7 +120,7 @@ async def _resolve_ssrf_pinned_url(
     request_scheme: str,
     admitted: NormalizedUrl,
     *,
-    pin: Callable[..., tuple[str, dict[str, str]]],
+    pin: Callable[..., PinnedRequest],
     timeout_seconds: float | None,
     abort: Callable[[], Awaitable[None]],
 ) -> tuple[str, dict[str, str]] | None:
@@ -137,7 +138,8 @@ async def _resolve_ssrf_pinned_url(
                 timeout_seconds=timeout_seconds,
             )
             return request.url, {}
-        return await _BOUNDED(lambda: pin(admitted, {}), timeout_seconds=timeout_seconds)
+        pinned = await _BOUNDED(lambda: pin(admitted, {}), timeout_seconds=timeout_seconds)
+        return pinned.connect_url, pinned.headers
     except Exception:
         # Fail closed: DNS timeout, resolver errors, anything unexpected ->
         # abort rather than let an unchecked connection proceed.

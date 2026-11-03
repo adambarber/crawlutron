@@ -11,7 +11,9 @@ import concurrent.futures
 import socket
 import typing
 from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
 from typing import Protocol
+from urllib.parse import urlparse
 
 import httpx
 
@@ -187,7 +189,24 @@ def declared_length_exceeds(header_value: str | None, limit: int) -> bool:
     return declared > limit
 
 
-def build_pinned_request(url: NormalizedUrl, headers: dict[str, str]) -> tuple[str, dict[str, str]]:
+@dataclass(frozen=True, slots=True)
+class PinnedRequest:
+    """One hop's wire plan: where to dial and what TLS must attest.
+
+    The composition owns both -- identity travels with the pin, so no
+    transport ever re-derives a hostname from a connect URL (#574).
+    """
+
+    connect_url: str
+    headers: dict[str, str]
+    url: NormalizedUrl
+
+    @property
+    def tls_hostname(self) -> str | None:
+        return self.url.tls_hostname
+
+
+def build_pinned_request(url: NormalizedUrl, headers: dict[str, str]) -> PinnedRequest:
     """Build the pinned request for an admitted URL -- the sole owner of the
     composition (IP blocklist, fresh pin, exact-IP connect with Host preserved).
     Both schemes pin the connect to the validated IP; one resolution per hop.
@@ -202,35 +221,24 @@ def build_pinned_request(url: NormalizedUrl, headers: dict[str, str]) -> tuple[s
         connect_url = f"{connect_url}?{url.query}"
     out_headers = dict(headers)
     out_headers["Host"] = f"[{url.host}]{port}" if ":" in url.host else f"{url.host}{port}"
-    return connect_url, out_headers
-
-
-def sni_extension(scheme: str, host: str) -> dict[str, str] | None:
-    """The httpx request extension that keeps TLS SNI on the logical hostname
-    when the connect URL carries the pinned IP (the optional one here so a
-    caller can pass it straight to ``client.stream``).
-    """
-    if scheme == "https":
-        return {"sni_hostname": host}
-    return None
+    return PinnedRequest(connect_url=connect_url, headers=out_headers, url=url)
 
 
 def apinned_stream(
     client: httpx.AsyncClient,
     chain: _RedirectChain,
-    pinned_url: str,
-    hop_headers: dict[str, str],
+    request: PinnedRequest,
     timeout: httpx.Timeout,
 ) -> typing.AsyncContextManager[httpx.Response]:
     """Open the one SSRF-pinned httpx stream for a hop: GET to the validated IP
     with the logical hostname carried as TLS SNI and redirects left to the chain."""
     return client.stream(
         "GET",
-        pinned_url,
-        headers=hop_headers,
+        request.connect_url,
+        headers=request.headers,
         timeout=timeout,
         follow_redirects=False,
-        extensions=sni_extension(chain.url.scheme, chain.url.host),
+        extensions={"sni_hostname": sni} if (sni := request.tls_hostname) else None,
     )
 
 
@@ -240,7 +248,7 @@ class PinRule(Protocol):
     SSRF decision and must never be doubled; tests inject a pinned request without rebinding the builder.
     """
 
-    def __call__(self, url: NormalizedUrl, headers: dict[str, str]) -> tuple[str, dict[str, str]]: ...
+    def __call__(self, url: NormalizedUrl, headers: dict[str, str]) -> PinnedRequest: ...
 
 
 # Dedicated thread pool for blocking DNS: concurrent fetches never stall the
@@ -265,7 +273,7 @@ async def build_pinned_request_async(
     headers: dict[str, str],
     *,
     timeout_seconds: float | None = None,
-) -> tuple[str, dict[str, str]]:
+) -> PinnedRequest:
     """Off-loop entry to the pin rule: SSRF-safe build, getaddrinfo included, on a
     worker thread so a resolver lookup never stalls the event loop.
     """
@@ -356,7 +364,7 @@ class _RedirectChain:
         # time, so a substituted builder goes to the pool with the same bound.
         self._rule = pin
 
-    async def pin(self) -> tuple[str, dict[str, str]]:
+    async def pin(self) -> PinnedRequest:
         """The connect-ready request for the current hop (DNS off the loop, wait
         bounded by the request's own budget)."""
         return await bounded_thread_resolve(
@@ -394,10 +402,10 @@ async def apinned_hops(
     *,
     pin: PinRule | None = None,
     timeout_seconds: float | None = None,
-) -> AsyncIterator[tuple[_RedirectChain, str, dict[str, str]]]:
+) -> AsyncIterator[tuple[_RedirectChain, PinnedRequest]]:
     """Yield each hop of the manual redirect walk, already SSRF-checked and re-pinned.
 
-    The body receives ``(chain, pinned_url, hop_headers)``, sends, then leaves;
+    The body receives ``(chain, pinned_request)``, sends, then leaves;
     ``continue`` after ``chain.advance(response)`` asks for the next hop.
     """
     # timeout_seconds is the request budget; it bounds the resolver wait.
@@ -405,16 +413,32 @@ async def apinned_hops(
     reject_injectable_header_values(headers)
     chain = _RedirectChain(url, headers, pin=pin or build_pinned_request, timeout_seconds=timeout_seconds)
     while True:
-        pinned_url, hop_headers = await chain.pin()
+        pinned = await chain.pin()
         # Service-built additions (Host, hop cookies) ride the same law.
-        reject_injectable_header_values(hop_headers)
+        reject_injectable_header_values(pinned.headers)
         served_hops = chain.hops
-        yield chain, pinned_url, hop_headers
+        yield chain, pinned
         if chain.hops == served_hops:
             raise AssertionError(
                 "the walk body ended without returning a result and without "
                 "chain.advance(response) asking for another hop"
             )
+
+
+def cffi_resolve_entry(request: PinnedRequest) -> list[str] | None:
+    """The curl_cffi resolve table for a pinned hop: ``host:port:ip`` dialing the
+    pinned IP while SNI and cert verification stay on the logical hostname.
+    None when there is nothing to pin (HTTP hops, or the local-dev posture where
+    the pin is the hostname itself).
+    """
+    if request.connect_url == request.url.raw:
+        return None
+    tls = request.tls_hostname
+    if tls is None:
+        return None
+    parsed = urlparse(request.connect_url)
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    return [f"{tls}:{port}:{parsed.hostname}"]
 
 
 def reset_process_state() -> None:

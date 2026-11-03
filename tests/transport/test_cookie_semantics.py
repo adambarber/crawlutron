@@ -235,10 +235,12 @@ async def test_hop_cookie_is_not_planted_when_the_next_pin_refuses(monkeypatch):
     a hop's Set-Cookie until the NEXT pin admits it: a walk dying at a refused
     pin plants nothing (#525 SEC-06) -- no state leaks to an unreached target."""
 
+    from crawlutron.transport.pinned_transport import PinnedRequest
+
     def refusing_pin(url, headers):
         if url.host == "refused.test":
             raise ValueError("SSRF protection: cannot resolve hostname refused.test")
-        return str(url), dict(headers)
+        return PinnedRequest(connect_url=str(url), headers=dict(headers), url=url)
 
     responses = [
         MockResponse(302, {"location": "http://refused.test/x", "set-cookie": "sess=defer1; Path=/"}, b""),

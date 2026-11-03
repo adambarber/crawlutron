@@ -33,6 +33,22 @@ _DEFAULT_CFFI_SESSION: CffiSession | None = None
 _CFFI_SESSION_INIT_LOCK = threading.Lock()
 
 
+def build_pinned_cffi_session(resolve_entry: list[str]) -> CffiSession:
+    """A one-shot impersonated session carrying the hop's resolve table.
+
+    curl_cffi has no per-request curl_options in 0.17.0, so the table rides the
+    session; per-hop lifetime keeps it from pinning a stale IP across fetches.
+    """
+    from curl_cffi.const import CurlOpt
+
+    session: CffiSession = cffi_requests.AsyncSession(
+        impersonate=CFFI_IMPERSONATE_TARGET,
+        discard_cookies=True,
+        curl_options={CurlOpt.RESOLVE: resolve_entry},
+    )
+    return bind_to_running_loop(session)
+
+
 def _build_cffi_session(settings: CrawlerSettings | None = None) -> CffiSession:
     """Build a shared curl_cffi AsyncSession (impersonation fixed, no timeout --
     the timeout rides each ``get()`` so one session serves every budget); ``settings``

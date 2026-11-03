@@ -63,7 +63,11 @@ __all__ = [
     "resolve_browser_target",
 ]
 from crawlutron.transport.document import default_document_text_extractor
-from crawlutron.transport.pinned_transport import build_pinned_request, build_pinned_request_async
+from crawlutron.transport.pinned_transport import (
+    PinnedRequest,
+    build_pinned_request,
+    build_pinned_request_async,
+)
 from crawlutron.vocabulary.browser import BrowserAction
 from crawlutron.vocabulary.limits import DEFAULT_CHALLENGE_WAIT_SECONDS, DEFAULT_MAX_CONCURRENT_PAGES
 from crawlutron.vocabulary.taxonomy import ResultStatus, status_for_classification
@@ -117,8 +121,8 @@ class BrowserRenderer:
         warmup_urls: list[str] | None = None,
         settings: CrawlerSettings | None = None,
         driver: BrowserDriver | None = None,
-        pin: Callable[..., Awaitable[tuple[str, dict[str, str]]]] | None = None,
-        pin_sync: Callable[..., tuple[str, dict[str, str]]] | None = None,
+        pin: Callable[..., Awaitable[PinnedRequest]] | None = None,
+        pin_sync: Callable[..., PinnedRequest] | None = None,
         status_for: Callable[[str], ResultStatus] | None = None,
     ) -> None:
         self._sleep = sleep

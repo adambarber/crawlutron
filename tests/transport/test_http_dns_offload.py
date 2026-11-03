@@ -16,10 +16,12 @@ def _thread_recording_spy(seen: dict[str, threading.Thread], *, dead_port: bool 
     Both tests assert the same property -- the rule ran off the loop thread --
     so the recorder is shared and passed as ``pin=``, not by module swap.
     """
+    from crawlutron.transport.pinned_transport import PinnedRequest
 
     def spy(url, headers):
         seen["thread"] = threading.current_thread()
-        return (("http://127.0.0.1:9/" if dead_port else url.raw), dict(headers))
+        connect = "http://127.0.0.1:9/" if dead_port else url.raw
+        return PinnedRequest(connect_url=connect, headers=dict(headers), url=url)
 
     return spy
 
@@ -71,11 +73,11 @@ async def test_pinned_hop_offloads_the_pin_rule_to_thread():
         {},
         pin=_thread_recording_spy(seen, dead_port=False),
     )
-    chain, pinned_url, hop_headers = await anext(walk)
+    chain, pinned = await anext(walk)
 
     assert seen, "the pin rule was never invoked"
     assert seen["thread"] is not threading.current_thread()
     assert seen["thread"].name.startswith("dns-resolve")
-    assert pinned_url == "http://example.com/"
-    assert hop_headers == {}
+    assert pinned.connect_url == "http://example.com/"
+    assert pinned.headers == {}
     assert chain.url == canonical("http://example.com/")

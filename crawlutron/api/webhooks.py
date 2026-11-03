@@ -126,30 +126,25 @@ async def deliver_pinned_webhook(
     """
     # one place) rather than urlparse/check/pin inline -- manual composition is the
     # shape that produced the redirect findings, and this closes validation's window.
-    from crawlutron.transport.pinned_transport import build_pinned_request_async, sni_extension
+    from crawlutron.transport.pinned_transport import build_pinned_request_async
 
     normalized = NormalizedUrl(webhook_url, policy=host_policy)
-    connect_url, connect_headers = await build_pinned_request_async(
-        normalized, {}, timeout_seconds=Timeouts.defaults().read
-    )
-    request_headers = {"Content-Type": "application/json", **connect_headers}
+    pinned = await build_pinned_request_async(normalized, {}, timeout_seconds=Timeouts.defaults().read)
+    request_headers = {"Content-Type": "application/json", **pinned.headers}
     secret = webhook_secret()
     if secret:
         timestamp = str(int(time.time()))
         request_headers[_SIGNATURE_HEADER] = _signature(payload_bytes, secret, timestamp)
         request_headers[_TIMESTAMP_HEADER] = timestamp
-    # The pin connect URL now carries the validated IP for HTTPS too; keep the
-    # original hostname as TLS SNI so real-site TLS still attests and routes.
-    extensions = sni_extension(normalized.scheme, normalized.host)
     # Deliberate one-per-delivery cost: pooling would re-resolve by hostname (defeating
     # the pin) or cache the IP across deliveries (reopening the rebinding window).
     async with httpx.AsyncClient(timeout=Timeouts.defaults().as_httpx()) as client:
         async with client.stream(
             "POST",
-            connect_url,
+            pinned.connect_url,
             content=payload_bytes,
             headers=request_headers,
-            extensions=extensions,
+            extensions={"sni_hostname": sni} if (sni := pinned.tls_hostname) else None,
         ) as response:
             try:
                 # The webhook RESPONSE is attacker-controlled: drain it through

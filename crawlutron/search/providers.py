@@ -18,10 +18,10 @@ from crawlutron.models.normalized_url import NormalizedUrl, admit_or_none
 from crawlutron.safety.bounded_io import BodyTooLarge, read_capped_async
 from crawlutron.transport.http_client_pool import get_async_http_client
 from crawlutron.transport.pinned_transport import (
+    PinnedRequest,
     ResolverBudgetExceeded,
     bounded_thread_resolve,
     build_pinned_request,
-    sni_extension,
 )
 from crawlutron.transport.timeouts import Timeouts
 
@@ -117,18 +117,16 @@ async def provider_http(
         request_url = request_url.copy_merge_params(
             {k: v for k, v in params.items() if isinstance(v, (str, int, float, bool)) or v is None}
         )
-    pinned_url, hop_headers, extensions = await _pinned_provider_request(
-        request_url, headers, timeout_seconds
-    )
+    pinned = await _pinned_provider_request(request_url, headers, timeout_seconds)
     try:
         async with client.stream(
             method,
-            pinned_url,
+            pinned.connect_url,
             json=json_body,
             data=data,
-            headers=hop_headers,
+            headers=pinned.headers,
             timeout=timeout,
-            extensions=extensions,
+            extensions={"sni_hostname": sni} if (sni := pinned.tls_hostname) else None,
         ) as response:
             try:
                 raw = await read_capped_async(response.aiter_bytes(), _SEARCH_RESPONSE_MAX_BYTES)
@@ -148,21 +146,19 @@ async def _pinned_provider_request(
     request_url: httpx.URL,
     headers: dict[str, str] | None,
     timeout_seconds: float,
-) -> tuple[str, dict[str, str], dict[str, str] | None]:
+) -> PinnedRequest:
     """The pinned provider request: the merged URL admitted, the connect
     pinned to the freshly validated IP, SNI on the hostname. Fixed endpoint
     registry, no caller input in the URL (pinned by test)."""
     admitted = NormalizedUrl(str(request_url), policy=HostPolicy.unrestricted())
-    hop_headers = dict(headers or {})
 
-    def pin() -> tuple[str, dict[str, str]]:
-        return build_pinned_request(admitted, hop_headers)
+    def pin() -> PinnedRequest:
+        return build_pinned_request(admitted, dict(headers or {}))
 
     try:
-        connect_url, hop_headers = await bounded_thread_resolve(pin, timeout_seconds=timeout_seconds)
+        return await bounded_thread_resolve(pin, timeout_seconds=timeout_seconds)
     except (ValueError, ResolverBudgetExceeded):
         raise SearchProviderError("provider endpoint could not be resolved to a public address") from None
-    return connect_url, hop_headers, sni_extension(admitted.scheme, admitted.host)
 
 
 def clip_text(text: str) -> str:

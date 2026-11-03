@@ -29,6 +29,7 @@ from crawlutron.transport.browser_targets import (
     make_ssrf_route_handler,
     make_ssrf_websocket_handler,
 )
+from crawlutron.transport.pinned_transport import PinnedRequest
 from crawlutron.transport.render_page import RenderPage
 from crawlutron.transport.timeouts import render_phase_seconds
 from crawlutron.vocabulary.browser import BrowserAction
@@ -47,7 +48,7 @@ logger = logging.getLogger(__name__)
 class WireGuard(NamedTuple):
     """The collaborators the SSRF guards need: the sync pin, the policy, the budget."""
 
-    pin_sync: Callable[..., tuple[str, dict[str, str]]]
+    pin_sync: Callable[..., PinnedRequest]
     policy: HostPolicy
     timeout_seconds: float
 

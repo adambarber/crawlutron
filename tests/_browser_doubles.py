@@ -127,9 +127,11 @@ def stub_pinned_request(pinned: tuple[str, dict[str, str]] = PINNED_PUBLIC_IP):
 
     The real builder is a coroutine produced by ``_off_loop``; returning one
     built here keeps the tests on a fixed pin, not the live resolver."""
+    from crawlutron.transport.pinned_transport import PinnedRequest
 
     async def _stub(url, headers: dict[str, str], timeout_seconds: float | None = None):
-        return pinned[0], {**headers, **pinned[1]}
+        merged = {**headers, **pinned[1]}
+        return PinnedRequest(connect_url=pinned[0], headers=merged, url=url)
 
     return _stub
 
@@ -185,6 +187,7 @@ __all__ = [
     "render_pinned",
     "PINNED_PUBLIC_IP",
     "blocking_pinned_request",
+    "pinned_request",
     "response_handler_double",
     "run_blocking_document_route",
     "ssrf_route_handler",
@@ -291,21 +294,32 @@ async def assert_route_decision(
         assert route.decision == decision, f"expected {decision} for {url}, got {route.decision}"
 
 
+def pinned_request(url, connect_url, headers):
+    """One construction site for a test pin's return value."""
+    from crawlutron.transport.pinned_transport import PinnedRequest
+
+    return PinnedRequest(connect_url=connect_url, headers=headers, url=url)
+
+
 async def run_route_with_pinner(url, *, pinned=None, raises=None, resource_type="document"):
     """Run the SSRF route handler over one request with a stubbed pin rule.
 
-    ``pinned`` is what the stub returns, ``raises`` what it raises instead;
-    returns the :class:`FakeRoute` the handler decided on."""
+    ``pinned`` is what the stub returns (tuple or PinnedRequest), ``raises``
+    what it raises instead; returns the :class:`FakeRoute` the handler decided on."""
+    from crawlutron.transport.pinned_transport import PinnedRequest
+
     if raises is not None:
 
         def pin(url, headers):
             raise raises
 
     else:
-        outcome = pinned if pinned is not None else (url, {})
+        plan = pinned if pinned is not None else pinned_request(url, url, {})
+        if not isinstance(plan, PinnedRequest):
+            plan = pinned_request(url, plan[0], dict(plan[1]))
 
         def pin(url, headers):
-            return outcome
+            return pinned_request(url, plan.connect_url, dict(plan.headers))
 
     route = FakeRoute()
     await ssrf_route_handler(pin=pin)(route, FakeRequest(url, resource_type))
@@ -351,7 +365,7 @@ def blocking_pinned_request(thread_ids: list[int], delay: float = 0.05):
     def build(url, headers):
         thread_ids.append(threading.get_ident())
         time.sleep(delay)
-        return PINNED_PUBLIC_IP
+        return pinned_request(url, *PINNED_PUBLIC_IP)
 
     return build
 

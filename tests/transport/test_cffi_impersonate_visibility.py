@@ -45,3 +45,36 @@ async def test_cffi_ssl_error_classifies_as_tls_error():
 
     assert classify_error_code(CffiSSLError("handshake failure")) == "tls_error"
     assert classify_error_code(ssl.SSLError("x")) == "tls_error"
+
+
+class TestPinnedHttpsWireShape:
+    """#574: the cffi hop dials the pinned IP with the logical hostname as TLS
+    identity. The wire must never carry an IP literal where a hostname attests."""
+
+    async def test_cffi_https_hop_gets_the_logical_url_not_the_ip_literal(self, monkeypatch):
+        import socket as socket_mod
+        from urllib.parse import urlparse
+
+        from tests._assertions import block_private_targets
+        from tests._cffi_doubles import RecordingSession, terminal_response
+
+        block_private_targets(monkeypatch)
+        session = RecordingSession()
+        session.response = terminal_response()
+
+        def _one_shot(resolve_entry):
+            session.resolve_entry = resolve_entry
+            return session
+
+        monkeypatch.setattr(http_mod, "build_pinned_cffi_session", _one_shot)
+        fake_dns = [(socket_mod.AF_INET, socket_mod.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
+        monkeypatch.setattr(socket_mod, "getaddrinfo", lambda *a, **k: fake_dns)
+
+        await default_http_fetcher(canonical("https://example.com/"), {}, 10, 1024, impersonate=True)
+
+        assert session.calls, "the cffi transport was never reached"
+        parsed = urlparse(session.calls[0])
+        # The wire URL carries the hostname: SNI and cert verification follow it.
+        assert parsed.hostname == "example.com", session.calls[0]
+        # The pin rides the resolve table, not the URL: dial the IP, attest the name.
+        assert session.resolve_entry == ["example.com:443:93.184.216.34"]

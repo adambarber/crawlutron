@@ -92,14 +92,10 @@ async def _afetch_document_bytes(
     # both read FROM the vocabulary, never a local scalar.
     budget = Timeouts.for_request(timeout_seconds) if timeout_seconds is not None else Timeouts.defaults()
     timeout = budget.as_httpx()
-    async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(
-        url, {}, pin=pin, timeout_seconds=budget.read
-    ):
+    async for chain, pinned in pinned_transport.apinned_hops(url, {}, pin=pin, timeout_seconds=budget.read):
         # Follow_redirects=False: the chain below is the redirect loop, so httpx
         # following one too would connect to a target nobody re-validated.
-        async with pinned_transport.apinned_stream(
-            client, chain, pinned_url, hop_headers, timeout
-        ) as response:
+        async with pinned_transport.apinned_stream(client, chain, pinned, timeout) as response:
             if await chain.advance(response) is not None:
                 continue
             return await read_capped_async(response.aiter_raw(), EXTRACTION_DOC_MAX_INPUT_BYTES)

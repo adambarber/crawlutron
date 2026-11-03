@@ -17,6 +17,7 @@ from tests._browser_doubles import (
     FakeRoute,
     assert_continued,
     assert_route_decision,
+    pinned_request,
     response_handler_double,
     run_blocking_document_route,
     run_route_with_pinner,
@@ -38,12 +39,12 @@ class _BlockingResolver:
         self.broken: list[str] = []
 
     def build(self, url, headers):
-        del url, headers
+        del headers
         try:
             self.barrier.wait()
         except threading.BrokenBarrierError:
             self.broken.append("not all resolvers were in flight at once")
-        return ("http://1.2.3.4:80/", {"Host": "example.com"})
+        return pinned_request(url, "http://1.2.3.4:80/", {"Host": "example.com"})
 
 
 # ============================================================ Finding 1: Route handler must PIN subresources
@@ -194,17 +195,17 @@ async def test_image_blocked_by_default_unless_screenshot():
 
     # Screenshot explicitly requested -> continue (renders need images/fonts)
     route = FakeRoute()
-    await ssrf_route_handler(include_screenshot=True, pin=lambda url, headers: ("http://1.2.3.4/", {}))(
-        route, FakeRequest("https://x.test/logo.png", "image")
-    )
+    await ssrf_route_handler(
+        include_screenshot=True, pin=lambda url, headers: pinned_request(url, "http://1.2.3.4/", {})
+    )(route, FakeRequest("https://x.test/logo.png", "image"))
     assert route.decision == "continue"
 
 
 async def test_document_always_continues_with_pinned_url():
     route = FakeRoute()
-    await ssrf_route_handler(pin=lambda url, headers: ("http://1.2.3.4/", {"Host": "x.test"}))(
-        route, FakeRequest("http://x.test/page", "document")
-    )
+    await ssrf_route_handler(
+        pin=lambda url, headers: pinned_request(url, "http://1.2.3.4/", {"Host": "x.test"})
+    )(route, FakeRequest("http://x.test/page", "document"))
     assert route.decision == "continue"
     assert route.actions[-1][1]["url"] == "http://1.2.3.4/"
 

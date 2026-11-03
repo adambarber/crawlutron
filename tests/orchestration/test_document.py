@@ -425,9 +425,9 @@ class TestDocumentFetchHonorsRequestBudget:
         real_stream = pinned_mod.apinned_stream
 
         @contextlib.asynccontextmanager
-        async def capture_stream(*args, **kwargs):
-            seen_timeouts.append(args[4] if len(args) > 4 else kwargs.get("timeout"))
-            async with real_stream(*args, **kwargs) as response:
+        async def capture_stream(client, chain, request, timeout, **_kwargs):
+            seen_timeouts.append(timeout)
+            async with real_stream(client, chain, request, timeout) as response:
                 yield response
 
         monkeypatch.setattr(pinned_mod, "apinned_stream", capture_stream)
