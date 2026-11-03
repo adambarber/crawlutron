@@ -35,7 +35,10 @@ run = "ln -sfn ../../.venv .venv"
 
 [[setup]]
 name = "regen-version"
-run = ".venv/bin/python -m pip install -e . --no-deps --quiet"
+# The shared venv has no pip, so `pip install -e .` can never run here
+# (fresh `hardstand up` died at this step). Same contract, pipless: write the
+# dev-sufficient version file from git describe; a real build overwrites it.
+run = ".venv/bin/python scripts/regen_version.py"
 
 # Setup, part 2 (#488): bind the WORKSPACE tree into the shared venv's sys.path.
 #
