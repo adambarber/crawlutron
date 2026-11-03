@@ -6,14 +6,12 @@ trusting ``json.loads``'s ``Any`` -- a corrupt record is a miss, never a 500.
 
 import json
 
-import pytest
-
 from crawlutron.models.serialization import to_dict
 from crawlutron.orchestration.engine import ResultSpill
 from crawlutron.transport.content_cache import ContentCache
+from tests._assertions import assert_skipped_spill_line, load_spill_checked
 from tests._job_drivers import raw_job_row
 from tests._job_harnesses import make_job_store
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 from tests._result_builders import engine_result
 
 
@@ -56,20 +54,23 @@ def test_a_frontier_entry_that_is_not_an_entry_fails_at_persist(tmp_path):
         raise AssertionError("a non-entry frontier element was persisted silently")
 
 
-async def test_a_corrupt_spill_index_is_not_served_as_a_result(tmp_path):
-    """A line whose ``i`` is not the integer the writer wrote must not slip through
-    reassembly; the read checks the declared line shape instead of trusting it. The
-    spill stays OPEN as production leaves it: a closed handle raises before any read.
+async def test_a_corrupt_spill_index_is_not_served_as_a_result(caplog, tmp_path):
+    """A line whose ``i`` is not the integer the writer wrote is SKIPPED and
+    logged, never served (#C8): one corrupt record must not erase the other
+    results -- and it must not slip into the ordering either way. The spill
+    stays OPEN as production leaves it: a closed handle raises before any read.
     """
     spill = ResultSpill(str(tmp_path / "spill.ndjson"))
     payload = to_dict(engine_result("https://example.test/a", "rendered"))
     try:
+        await spill.write(0, engine_result("https://example.test/good", "rendered"))
+        spill.flush()  # the good line hits disk BEFORE the external append
         with open(spill.path, "a", encoding="utf-8") as fh:
             # A full valid ``r`` payload with a corrupt index: the ONLY defect is
-            # the ``i`` the writer declares int, so the refusal must name it.
+            # the ``i`` the writer declares int -- skipped+logged, never served.
             fh.write(json.dumps({"i": "5", "r": payload}) + "\n")
-        with pytest.raises(TypeError, match="spill line is not a _SpillLine"):
-            spill.load_ordered(policy=UNRESTRICTED_HOST_POLICY)
+        results = load_spill_checked(caplog, spill)
+        assert_skipped_spill_line(caplog, served=results, expected=["https://example.test/good"])
     finally:
         spill.close()
 

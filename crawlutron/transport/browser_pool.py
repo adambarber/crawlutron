@@ -58,6 +58,13 @@ class BrowserPool:
         self._warmup_urls = warmup_urls
         self._renderers: list[BrowserRenderer] = []
         self._available: asyncio.Queue[BrowserRenderer] = asyncio.Queue()
+        # Renderers currently checked out: close() must not sweep them mid-render
+        # (its failure there is swallowed -- the leak class #C6 closed); their
+        # close belongs to release()'s retired path.
+        self._checked_out: set[BrowserRenderer] = set()
+        # In-flight retired-close tasks, held so nothing is garbage-collected
+        # mid-await and close() can wait them out.
+        self._retired_closes: set[asyncio.Task[None]] = set()
         self._lock = asyncio.Lock()
         self._initialized = False
 
@@ -65,6 +72,18 @@ class BrowserPool:
     def pool_size(self) -> int:
         """The number of renderers this pool manages."""
         return self._pool_size
+
+    @classmethod
+    def for_testing(cls, renderers: list[BrowserRenderer]) -> BrowserPool:
+        """A pre-initialized pool over the GIVEN renderers -- the public door for
+        tests that need a live pool without real browser processes. Not a
+        production path: initialize() is where real renderers come from."""
+        pool = cls(pool_size=len(renderers))
+        for renderer in renderers:
+            pool._renderers.append(renderer)
+            pool._available.put_nowait(renderer)
+        pool._initialized = True
+        return pool
 
     async def initialize(self) -> None:
         """Create and warm up all browser renderers."""
@@ -108,29 +127,48 @@ class BrowserPool:
                 "The pool is exhausted or a renderer leaked; try again later."
             ) from None
         logger.debug("browser_pool_acquired", extra={"available": self._available.qsize()})
+        self._checked_out.add(renderer)
         return renderer
 
     def release(self, worker: BrowserRenderer) -> None:
-        """Return a renderer to the pool, unless its generation was retired: one
-        closed by ``close`` during checkout would otherwise re-enter the queue for
-        the next acquire -- dropped here, the only place that can reintroduce it.
+        """Return a renderer to the pool; a renderer retired by ``close`` (checked
+        out while the pool closed) gets its close SCHEDULED by the pool instead of
+        a silent drop -- the drop leaked the renderer's ~700 MiB browser process
+        (#C6). The pool owns the close task: callers stay sync-oblivious.
         """
+        self._checked_out.discard(worker)
         if not self._initialized or not any(r is worker for r in self._renderers):
-            logger.debug(
-                "browser_pool_release_retired",
-                extra={"initialized": self._initialized, "available": self._available.qsize()},
-            )
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                logger.warning(
+                    "browser_pool_release_retired_no_loop", extra={"renderer": type(worker).__name__}
+                )
+                return
+            task = loop.create_task(self._close_retired(worker))
+            self._retired_closes.add(task)
+            task.add_done_callback(self._retired_closes.discard)
             return
         self._available.put_nowait(worker)
         logger.debug("browser_pool_released", extra={"available": self._available.qsize()})
 
+    async def _close_retired(self, renderer: BrowserRenderer) -> None:
+        """Close a renderer the pool no longer tracks -- the retired path is the
+        LAST chance to reap the process, and its failure is logged, not silent (#C6)."""
+        try:
+            await renderer.close()
+        except Exception as e:
+            logger.warning("browser_pool_retired_close_failed", extra={"error": str(e)})
+
     async def close(self) -> None:
-        """Close all renderers and drain the idle queue, not just clear the list;
-        keeping closed renderers queued made the pool's halves disagree -- a new
-        generation queued behind closed ones, so early acquires returned them.
-        """
+        """Close all idle renderers and drain the queue; CHECKED-OUT renderers are
+        not swept mid-render (the close would race the active render and its failure
+        is swallowed) -- their reap belongs to release()'s retired path, which this
+        close waits out."""
         async with self._lock:
             for renderer in self._renderers:
+                if renderer in self._checked_out:
+                    continue
                 try:
                     await renderer.close()
                 except Exception as e:
@@ -142,7 +180,15 @@ class BrowserPool:
                 except asyncio.QueueEmpty:
                     break
             self._initialized = False
+            if self._retired_closes:
+                await asyncio.gather(*list(self._retired_closes), return_exceptions=True)
             logger.info("browser_pool_closed", extra={"available": self._available.qsize()})
+
+    async def wait_for_retired_closes(self) -> None:
+        """Await every in-flight retired close (the pool's own drain door; close()
+        waits these too) -- the deterministic join for release-then-assert flows."""
+        if self._retired_closes:
+            await asyncio.gather(*list(self._retired_closes), return_exceptions=True)
 
     def __len__(self) -> int:
         """How many renderers the pool holds (before init, none)."""

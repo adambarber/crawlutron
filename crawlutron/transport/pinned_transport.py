@@ -57,13 +57,24 @@ _DNS_CACHE_MAX = 4096
 _DNS_CACHE: BoundedTTLCache[str, list[str]] = BoundedTTLCache(max_entries=_DNS_CACHE_MAX, ttl=_DNS_TTL)
 
 
-def _bounded_addrinfo(hostname: str) -> list[str]:
+def bounded_addrinfo(hostname: str) -> list[str]:
     """One getaddrinfo on the shared DNS executor, bounded by the DNS posture:
     a resolve that outlasts the budget raises the classifiable ResolverBudgetExceeded
-    instead of waiting unbounded on the caller's thread."""
+    instead of waiting unbounded on the caller's thread. A SATURATED executor
+    (every worker inside a live resolve) refuses fast (#C10) -- queued resolves
+    behind uncancellable threads are the hostage queue this refuses to build."""
     wait_for = dns_wait_for(None)
+    if len(_dns_futures) >= DNS_WORKERS:
+        raise ResolverBudgetExceeded(
+            f"DNS resolver saturated ({DNS_WORKERS} workers busy); "
+            f"refusing to queue behind uncancellable resolves"
+        )
     future = DNS_EXECUTOR.submit(socket.getaddrinfo, hostname, None)
-    done, _ = concurrent.futures.wait({future}, timeout=wait_for)
+    _dns_futures.add(future)
+    try:
+        done, _ = concurrent.futures.wait({future}, timeout=wait_for)
+    finally:
+        _dns_futures.discard(future)
     if not done:
         future.cancel()
         raise ResolverBudgetExceeded(f"DNS resolution exceeded the {wait_for:.1f}s budget") from None
@@ -81,7 +92,7 @@ def _resolve_ips(hostname: str, *, use_cache: bool = True) -> list[str]:
         cached = _DNS_CACHE.get(hostname)
         if cached is not None:
             return cached
-    ips = _bounded_addrinfo(hostname)
+    ips = bounded_addrinfo(hostname)
     if use_cache:
         # Only the validation path populates the cache; the pinning path resolves
         # fresh, or a rebound private IP would poison the shared validation cache.
@@ -253,7 +264,39 @@ class PinRule(Protocol):
 
 # Dedicated thread pool for blocking DNS: concurrent fetches never stall the
 # event loop or contend with the default executor used for extraction.
-DNS_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=32, thread_name_prefix="dns-resolve")
+DNS_WORKERS = 32
+DNS_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=DNS_WORKERS, thread_name_prefix="dns-resolve"
+)
+
+# A RUNNING getaddrinfo cannot be cancelled, so a hostile/slow resolver can
+# occupy every DNS_EXECUTOR worker; queued resolves then each wait the full
+# budget -- the request path hostage to a queue (#C10). Saturation law: when
+# every worker is already inside an over-budget resolve, a new resolve refuses
+# FAST (the classifiable ResolverBudgetExceeded) instead of queueing. The
+# registry is event-loop-side only (submit/await/cleanup -- never the workers),
+# so it needs no lock.
+_dns_futures: set[concurrent.futures.Future] = set()
+
+
+def dns_in_flight_resolves() -> int:
+    """Public door over the saturation accounting: live resolver workers now."""
+    return sum(1 for f in _dns_futures if not f.done())
+
+
+def dns_seed_saturation(workers: int) -> None:
+    """TEST DOOR: seed the registry to full capacity so the saturation verdict
+    is provable without real network resolves. Pairs with dns_clear_saturation."""
+    _dns_futures.update({concurrent.futures.Future() for _ in range(workers)})
+
+
+def dns_clear_saturation() -> None:
+    """TEST DOOR: drop the seeded placeholders -- a never-started Future cancels
+    (True); a real in-flight resolve does not (False) and stays accounted."""
+    for future in list(_dns_futures):
+        if future.cancel():
+            _dns_futures.discard(future)
+
 
 # The DNS wait posture: the ceiling on the resolver wait, derived from
 # the request's budget by ``dns_wait_for`` so a tight request tightens it.

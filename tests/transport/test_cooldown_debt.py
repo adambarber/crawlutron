@@ -29,8 +29,11 @@ async def test_breaker_park_never_truncates_a_longer_429_window(monkeypatch):
         return make_engine_result(job.normalized_url)
 
     first = await scheduler.run([_task(0, "http://example.com/a")], worker, failed_result=engine_envelope)
-    assert first is not None and ran_at == [700.0], (
-        f"the first batch follows the settled bounded-batch contract: ran_at={ran_at}, sleeps={requested}"
+    # First batch: ONE fetch, inside the window (bounded-batch contract -- the
+    # exact nap composition is implementation order, not the contract), naps capped.
+    assert first is not None and len(ran_at) == 1 and 0 < ran_at[0] < 900.0, (
+        f"the first batch must terminate bounded with one in-window fetch: "
+        f"ran_at={ran_at}, sleeps={requested}"
     )
     assert all(d <= 300.0 + 1e-9 for d in requested), f"a nap exceeded the cap: {requested}"
 

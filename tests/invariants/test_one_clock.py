@@ -43,10 +43,25 @@ _DELEGATED_WALL_CONSUMERS = frozenset(
     }
 )
 
-# The time module's CLOCK members -- the names whose bare call reads a clock.
-# A from-import of a NON-clock member is not a timeline read (cycle 3, 3c).
+# The time module's CLOCK members -- the names whose bare call reads a clock;
+# a from-import of a NON-clock member is not a timeline read (cycle 3, 3c).
 _TIME_CLOCK_MEMBERS = frozenset(
-    {"time", "monotonic", "monotonic_ns", "perf_counter", "perf_counter_ns", "process_time", "thread_time"}
+    {
+        "time",
+        "time_ns",
+        "monotonic",
+        "monotonic_ns",
+        "perf_counter",
+        "perf_counter_ns",
+        "process_time",
+        "process_time_ns",
+        "thread_time",
+        "thread_time_ns",
+        "clock_gettime",
+        "clock_gettime_ns",
+        "clock_settime",
+        "clock_settime_ns",
+    }
 )
 
 
@@ -198,20 +213,26 @@ def _from_import_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
 
 def _wall_default_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
     """Clock defaults of the wrong family: a wall default is the original #580
-    defect in two tokens, invisible to any call-site sweep."""
+    defect in two tokens, invisible to any call-site sweep. Covers both
+    spellings -- the dotted ``time.time`` and the from-imported alias used as
+    the default (``from time import time as wall; def f(clock=wall)``), which
+    hid from BOTH sweeps (cycle 4, hole 2)."""
     if path not in _SCHEDULER_PACKAGE:
         return
+    imported = _from_imported_clocks(tree)
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         for default in (node.args.kw_defaults or []) + list(node.args.defaults):
             dotted = _dotted(default)
-            if dotted is not None and dotted.startswith("time.") and dotted != "time.monotonic":
+            wrong_dotted = dotted is not None and dotted.startswith("time.") and dotted != "time.monotonic"
+            aliased = isinstance(default, ast.Name) and default.id in imported
+            if wrong_dotted or aliased:
                 yield offender_at(
                     path,
                     default,
-                    f"clock default is {dotted}: the scheduler's one timeline is monotonic; "
-                    f"a wall default is the #580 defect",
+                    f"clock default is {dotted or getattr(default, 'id', '?')}: the scheduler's one timeline "
+                    f"is monotonic; a wall default is the #580 defect",
                 )
 
 
@@ -301,6 +322,13 @@ THE_SCHEDULER_PACKAGE_FROM_IMPORTS_NO_CLOCK = Rule(
             "via a from-import",
             at=_SCHED_STATE,
         ),
+        # The ns twins and the clock_gettime family are clock reads too (pass 4).
+        Bites(
+            "from time import clock_gettime, CLOCK_MONOTONIC\n\n"
+            "def remaining(self):\n    return clock_gettime(CLOCK_MONOTONIC)\n",
+            "via a from-import",
+            at=_SCHED_STATE,
+        ),
     ),
     clean=lambda: (
         # A non-clock member is not a timeline read (cycle 3, precision 3c).
@@ -324,6 +352,16 @@ THE_SCHEDULER_PACKAGE_DEFAULTS_TO_MONOTONIC = Rule(
             "    def __init__(self, *, clock=time.time):\n"
             "        self._clock = clock\n",
             "clock default is time.time",
+            at=_SCHED,
+        ),
+        # The from-imported alias used AS the default hides from both prior
+        # sweeps -- dotted-only defaults and bare-name CALL checks (pass 4).
+        Bites(
+            "from time import time as wall\n\n"
+            "class DomainScheduler:\n"
+            "    def __init__(self, *, clock=wall):\n"
+            "        self._clock = clock\n",
+            "clock default is wall",
             at=_SCHED,
         ),
     ),

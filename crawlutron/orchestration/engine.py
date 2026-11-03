@@ -292,12 +292,21 @@ class ResultSpill:
     def _claim_ownership(self) -> None:
         """Hold this spill's ownership lock for as long as the spill is open.
         Held on the spill's own descriptor, so only closing it or process exit
-        releases it; a failure here is logged (not swallowed) so the sweep won't delete a live spill.
+        releases it. Failure is FATAL (#C7): an unlocked spill is exactly the file
+        the sweep's own-lock probe may collect after gc_age_seconds -- a long crawl
+        would lose its result. The half-built spill is reaped before raising.
         """
         try:
             fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            logger.warning("spill %s could not be locked for ownership", self.path)
+        except OSError as error:
+            with contextlib.suppress(Exception):
+                self._fh.close()
+            if self._own:
+                with contextlib.suppress(OSError):
+                    os.unlink(self.path)
+            raise OSError(
+                f"spill {self.path} could not be owned; refusing an ownable-by-anyone spill"
+            ) from error
 
     def gc_stale_spills(self, max_age: float) -> None:
         """Delete spill files older than ``max_age`` that no live process owns.
@@ -329,10 +338,17 @@ class ResultSpill:
             self._fh.write(line + "\n")
             self.count += 1
 
+    def flush(self) -> None:
+        """The public flush door: load_ordered flushes internally; tests and
+        tooling reading the file mid-flight use the same one handle."""
+        self._fh.flush()
+
     def load_ordered(self, *, policy: HostPolicy) -> list[EngineCrawlResult]:
         """Reassemble all spilled results in submission order, one pass, via ``from_wire``.
         Mid-crawl each page lives on disk; reassembly materializes the full admitted set in
         RAM -- the JSON contract -- bounded by the batch wire cap (500) or max_pages (2000).
+        A corrupt line (a crash's partial buffered write) is SKIPPED and logged, never
+        fatal: one bad record must not erase the N-1 results the crawl still owns (#C8).
         """
         self._fh.flush()
         slots: dict[int, EngineCrawlResult] = {}
@@ -341,7 +357,13 @@ class ResultSpill:
                 line = line.strip()
                 if not line:
                     continue
-                entry = _spill_line(line)  # parsed once per line (N1): index + payload read off the one dict
+                try:
+                    entry = _spill_line(line)  # parsed once per line (N1)
+                except (json.JSONDecodeError, TypeError):
+                    logger.warning("skipping corrupt spill line: %.80r", line)
+                    continue
+                # OUTSIDE the skip-guard: a record the WIRE refuses is a writer
+                # lie, not a crash artifact -- it raises, never silently skips.
                 slots[entry["i"]] = from_wire(EngineCrawlResult, entry["r"], policy=policy)
         return [slots[key] for key in sorted(slots)]
 

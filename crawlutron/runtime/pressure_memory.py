@@ -18,6 +18,12 @@ from crawlutron.runtime.cgroup_sense import read_int
 _DEFAULT_TARGET = 0.85
 _DEFAULT_HARD = 0.92
 
+# When no ceiling can be sensed (no cgroup files; sysconf without /proc), the
+# gate stands on THIS floor instead of collapsing to 0 -- a 0 ceiling made every
+# ratio 0.0 and the gate ran fully open forever (#C11). 1 GiB is conservative:
+# a small crawl still fits; a real memory hog throttles against it.
+_CONSERVATIVE_CEILING_BYTES = 1 << 30
+
 
 @dataclass(frozen=True)
 class MemoryStats:
@@ -56,19 +62,22 @@ def read_memory_stats(
     if v1_max is not None and v1_cur is not None and 0 < v1_max < total_ram:
         return MemoryStats(total_bytes=v1_max, used_bytes=v1_cur)
 
-    return MemoryStats(total_bytes=total_ram or 0, used_bytes=0)
+    # An unknowable ceiling fails CLOSED (#C11): the conservative floor keeps
+    # the gate a gate; total_ram==0 here is sensor refusal, not "no memory".
+    return MemoryStats(total_bytes=total_ram or _CONSERVATIVE_CEILING_BYTES, used_bytes=0)
 
 
 def batch_scale(used: float, total: float, target: float, hard: float | None = None) -> float:
     """Dispatch multiplier for current pressure.
 
     <= target -> 1.0 (full speed); target..hard -> linear down to 0;
-    >= hard   -> 0 (caller must pause until usage drains).
+    >= hard   -> 0 (caller must pause until usage drains). A zero ceiling is a
+    caller lie (the conservative floor owns unknowable ceilings) -- refuse.
     """
+    if total <= 0:
+        raise ValueError(f"batch_scale needs a positive ceiling, got {total=}")
     if hard is None:
         hard = min(0.999, target + 0.05)
-    if total <= 0:
-        return 1.0
     ratio = used / total
     if ratio <= target:
         return 1.0
