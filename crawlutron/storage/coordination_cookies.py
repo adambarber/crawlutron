@@ -68,12 +68,7 @@ class SharedCookieStore(CoordinationStore):
                     key,
                 ).fetchone()
                 merged = {**self._decode(row[0]), **cookies} if row else dict(cookies)
-                self._conn.execute(
-                    "INSERT INTO coordination_cookies (namespace, host, payload, touched_at) "
-                    "VALUES (?, ?, ?, ?) ON CONFLICT(namespace, host) DO UPDATE SET "
-                    "payload = excluded.payload, touched_at = excluded.touched_at",
-                    (key[0], key[1], json.dumps(merged), now),
-                )
+                self._upsert_slot(key[0], key[1], json.dumps(merged), now)
                 self._conn.execute(
                     "DELETE FROM coordination_cookies WHERE (namespace, host) IN ("
                     "SELECT namespace, host FROM coordination_cookies WHERE namespace = ? "
@@ -103,11 +98,15 @@ class SharedCookieStore(CoordinationStore):
             )
             self._conn.commit()
 
-    def all_slots(self) -> dict[tuple[str, str], dict[str, str]]:
-        """Every stored slot, for the import/export path."""
+    def slots_for_namespace(self, namespace: str) -> dict[str, dict[str, str]]:
+        """One namespace's slots as {host: cookies}; the WHERE is what keeps a
+        per-request read from deserializing every other tenant's payloads."""
         with self._lock:
-            rows = self._conn.execute("SELECT namespace, host, payload FROM coordination_cookies").fetchall()
-        return {(str(namespace), str(host)): self._decode(payload) for namespace, host, payload in rows}
+            rows = self._conn.execute(
+                "SELECT host, payload FROM coordination_cookies WHERE namespace = ?",
+                (namespace or "",),
+            ).fetchall()
+        return {str(host): self._decode(payload) for host, payload in rows}
 
     def put(self, namespace: str, host: str, value: Mapping[str, str]) -> None:
         """Replace one slot's payload wholesale (the prune path).
@@ -118,12 +117,7 @@ class SharedCookieStore(CoordinationStore):
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
-                self._conn.execute(
-                    "INSERT INTO coordination_cookies (namespace, host, payload, touched_at) "
-                    "VALUES (?, ?, ?, ?) ON CONFLICT(namespace, host) DO UPDATE SET "
-                    "payload = excluded.payload, touched_at = excluded.touched_at",
-                    (namespace or "", host, json.dumps(dict(value)), time.time()),
-                )
+                self._upsert_slot(namespace or "", host, json.dumps(dict(value)), time.time())
                 self._conn.execute("COMMIT")
             except BaseException:
                 self._conn.execute("ROLLBACK")
@@ -138,3 +132,12 @@ class SharedCookieStore(CoordinationStore):
             # empty rather than crashing every request that reads the host.
             return {}
         return {str(k): str(v) for k, v in decoded.items()} if isinstance(decoded, dict) else {}
+
+    def _upsert_slot(self, namespace: str, host: str, payload: str, touched_at: float) -> None:
+        """The one upsert statement; ``merge`` and ``put`` differ only in their caller."""
+        self._conn.execute(
+            "INSERT INTO coordination_cookies (namespace, host, payload, touched_at) "
+            "VALUES (?, ?, ?, ?) ON CONFLICT(namespace, host) DO UPDATE SET "
+            "payload = excluded.payload, touched_at = excluded.touched_at",
+            (namespace, host, payload, touched_at),
+        )

@@ -10,7 +10,11 @@ from typing import Protocol, runtime_checkable
 
 @runtime_checkable
 class CookieStore(Protocol):
-    """A per-namespace cookie store: read+touch, union write, clear."""
+    """A per-namespace cookie store: namespace-scoped read, read+touch, union write, replace, clear."""
+
+    def slots_for_namespace(self, namespace: str) -> dict[str, dict[str, str]]:
+        """One namespace's slots as {host: cookies}; never another namespace's rows."""
+        ...
 
     def load(self, namespace: str, host: str) -> dict[str, str]: ...
 
@@ -19,6 +23,8 @@ class CookieStore(Protocol):
     def touch(self, namespace: str, host: str) -> None:
         """Mark one slot recently used (the read path)."""
         ...
+
+    def put(self, namespace: str, host: str, value: Mapping[str, str]) -> None: ...
 
     def clear(self, namespace: str = "") -> None: ...
 
@@ -77,12 +83,10 @@ class InMemoryCookieStore:
         with self._lock:
             return len(self._data)
 
-    def snapshot(self) -> dict[tuple[str, str], dict[str, str]]:
-        """A copied view of every slot, consistent under the store's lock.
-        The export/legacy path reads whole namespaces; a copy avoids holding the lock.
-        """
+    def slots_for_namespace(self, namespace: str) -> dict[str, dict[str, str]]:
+        """One namespace's slots as {host: cookies}, copied under the lock."""
         with self._lock:
-            return {key: dict(value) for key, value in self._data.items()}
+            return {key[1]: dict(value) for key, value in self._data.items() if key[0] == namespace}
 
     def _evict(self, namespace: str) -> None:
         stale = [key for key in self._data if key[0] == namespace]

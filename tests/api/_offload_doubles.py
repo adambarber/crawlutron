@@ -195,9 +195,9 @@ class LoopGuardSharedCookieStore(SharedCookieStore):
         _refuse_on_loop("SharedCookieStore.touch")
         return super().touch(namespace, host)
 
-    def all_slots(self):
-        _refuse_on_loop("SharedCookieStore.all_slots")
-        return super().all_slots()
+    def slots_for_namespace(self, namespace: str) -> dict[str, dict[str, str]]:
+        _refuse_on_loop("SharedCookieStore.slots_for_namespace")
+        return super().slots_for_namespace(namespace)
 
     def clear(self, namespace: str = "") -> None:
         _refuse_on_loop("SharedCookieStore.clear")

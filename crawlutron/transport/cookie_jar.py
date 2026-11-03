@@ -119,6 +119,11 @@ class CookieJar:
         """
         return self._store
 
+    @property
+    def _medium(self) -> SharedCookieStore | InMemoryCookieStore:
+        """The one store-vs-memory decision; every cookie op dispatches through it."""
+        return self._store if self._store is not None else self._inmemory
+
     def add_cookie_header(self, url: NormalizedUrl, set_cookie_header: str, *, namespace: str = "") -> None:
         """Parse one ``Set-Cookie`` header and store the cookie with its RFC 6265 attributes.
 
@@ -135,10 +140,7 @@ class CookieJar:
             self._deleted.setdefault(key, {})[name] = time.time()
         else:
             self._deleted.get(key, {}).pop(name, None)
-        if self._store is not None:
-            self._store.merge(key[0], key[1], payload)
-            return
-        self._inmemory.merge(key[0], key[1], payload)
+        self._medium.merge(key[0], key[1], payload)
 
     def cookie_header_for(self, url: NormalizedUrl, *, namespace: str = "") -> str:
         """Return a ``Cookie`` header for the given URL under RFC 6265 send rules.
@@ -150,15 +152,13 @@ class CookieJar:
         records = self._records_for(ns)
         header, contributors = sendable_cookie_header(records, url)
         self._prune_deleted()
-        medium = self._store if self._store is not None else self._inmemory
         for host in contributors:
-            medium.touch(ns, host)
+            self._medium.touch(ns, host)
         return header
 
     def _records_for(self, namespace: str) -> list[tuple[str, str, CookieRecord]]:
         """Every live record in one namespace as (name, slot host, record)."""
-        slots = self._store.all_slots() if self._store is not None else self._inmemory.snapshot()
-        return list(_live_records(slots, namespace))
+        return list(_live_records(self._medium.slots_for_namespace(namespace)))
 
     # One async twin for the one door async crawl frames await, derived
     # from the sync method: the fetch tails' Set-Cookie path never holds the loop.
@@ -177,12 +177,11 @@ class CookieJar:
         if not self._deleted:
             return
         clock = time.time() if now is None else now
-        medium = self._store if self._store is not None else self._inmemory
         for (ns, host), deleted in list(self._deleted.items()):
             expired = [n for n, at in deleted.items() if clock - at >= TOMBSTONE_WINDOW_SECONDS]
             if not expired:
                 continue
-            slot = medium.load(ns, host)
+            slot = self._medium.load(ns, host)
             if not slot:
                 self._deleted.pop((ns, host), None)
                 continue
@@ -195,7 +194,7 @@ class CookieJar:
                 else:
                     changed = True
             if changed:
-                medium.put(ns, host, keep)
+                self._medium.put(ns, host, keep)
             for name in expired:
                 deleted.pop(name, None)
             if not deleted:
@@ -203,10 +202,7 @@ class CookieJar:
 
     def clear(self, *, namespace: str = "") -> None:
         """Clear cookies. With a ``namespace``, only that namespace is cleared."""
-        if self._store is not None:
-            self._store.clear(namespace or "")
-            return
-        self._inmemory.clear(namespace or "")
+        self._medium.clear(namespace or "")
 
     def export_to_file(self, path: str) -> None:
         """Write the jar's legacy shared namespace to a JSON file atomically --
@@ -224,10 +220,7 @@ class CookieJar:
         """
         for host, cookies in self._read_legacy_file(path).items():
             records = {name: json.dumps(_host_cookie(host, value)) for name, value in cookies.items()}
-            if self._store is not None:
-                self._store.merge("", host, records)
-                continue
-            self._inmemory.merge("", host, records)
+            self._medium.merge("", host, records)
 
     @classmethod
     def import_from_file(cls, path: str) -> CookieJar:
@@ -242,9 +235,8 @@ class CookieJar:
         Live name=value pairs only: the legacy file never carried attributes,
         and a dead record must not resurrect through an export/import cycle.
         """
-        slots = self._store.all_slots() if self._store is not None else self._inmemory.snapshot()
         out: dict[str, dict[str, str]] = {}
-        for name, host, record in _live_records(slots, ""):
+        for name, host, record in _live_records(self._medium.slots_for_namespace("")):
             out.setdefault(host, {})[name] = record["value"]
         return out
 
@@ -384,14 +376,10 @@ def _is_expired(record: CookieRecord, now: float) -> bool:
     return record["expires"] is not None and record["expires"] <= now
 
 
-def _live_records(
-    slots: dict[tuple[str, str], dict[str, str]], namespace: str
-) -> Iterator[tuple[str, str, CookieRecord]]:
-    """Yield (name, slot host, record) for every live record in one namespace."""
+def _live_records(slots: dict[str, dict[str, str]]) -> Iterator[tuple[str, str, CookieRecord]]:
+    """Yield (name, slot host, record) for every live record in the given slots."""
     now = time.time()
-    for (slot_ns, host), cookies in slots.items():
-        if slot_ns != namespace:
-            continue
+    for host, cookies in slots.items():
         for name, payload in cookies.items():
             record = _load_record(payload)
             if record is not None and not _is_expired(record, now):

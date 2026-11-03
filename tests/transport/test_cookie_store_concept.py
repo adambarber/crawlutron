@@ -9,7 +9,7 @@ from tests._policy_factories import canonical
 def test_cookie_store_protocol_is_declared():
     """The one concept is a real, named protocol (not a comment)."""
     assert CookieStore.__name__ == "CookieStore"
-    for verb in ("load", "merge", "clear"):
+    for verb in ("slots_for_namespace", "load", "merge", "touch", "put", "clear"):
         assert hasattr(CookieStore, verb)
 
 
@@ -79,3 +79,30 @@ def test_browser_and_jar_share_per_namespace_cap_semantics():
     assert store.load("", "d0") == {}
     assert store.load("", "d1") == {"b": "2"}
     assert store.load("", "d2") == {"c": "3"}
+
+
+def test_namespace_read_answers_only_that_namespace(tmp_path):
+    """The per-request read must never load other namespaces' rows (#574-defect).
+
+    Every request asks one namespace's question; a medium that answers by
+    scanning the whole table deserializes N-1 tenants' cookies per request.
+    """
+    store = SharedCookieStore(tmp_path / "coordination.db")
+    for tenant in ("tenant-a", "tenant-b"):
+        for host in range(5):
+            store.merge(tenant, f"h{host}.example", {"k": "v"})
+
+    slots = store.slots_for_namespace("tenant-a")
+
+    assert set(slots) == {(f"h{host}.example") for host in range(5)}
+    assert all(value == {"k": "v"} for value in slots.values())
+
+
+def test_both_media_answer_the_namespace_scoped_read(tmp_path):
+    """The verb is part of the one concept: in-memory and SQLite answer it alike."""
+    from crawlutron.transport.cookie_store import InMemoryCookieStore
+
+    store = InMemoryCookieStore(max_hosts_per_namespace=8)
+    store.merge("tenant-a", "a.example", {"k": "1"})
+    store.merge("tenant-b", "b.example", {"k": "2"})
+    assert store.slots_for_namespace("tenant-a") == {"a.example": {"k": "1"}}
