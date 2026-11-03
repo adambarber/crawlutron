@@ -48,9 +48,7 @@ OUTPUT_FIELDS = [
 def capabilities_payload(settings: CrawlerSettings) -> CapabilitiesPayload:
     """The whole discovery payload, one named section per concern."""
     return {
-        "service": SERVICE_IDENTITY["service"],
-        "version": SERVICE_IDENTITY["version"],
-        "policy_schema_version": SERVICE_IDENTITY["policy_schema_version"],
+        **SERVICE_IDENTITY,
         "supported_strategies": [strategy.value for strategy in CrawlStrategy],
         "supported_extractions": [method.value for method in CrawlExtractionMethod],
         "supported_classifications": [c.value for c in CrawlClassification],

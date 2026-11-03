@@ -6,13 +6,29 @@ MCP server name, OpenAPI name, discovery payloads) are declared once, imported e
 
 from __future__ import annotations
 
-from typing import Final
+from typing import Final, TypedDict
 
-# Service version: single source of truth, imported directly by callers.
-SERVICE_VERSION: str = "0.3.0"
+from crawlutron import __version__
+
+# Service version: the version the installed package carries. Derived, never
+# declared -- a second hardcoded number is the wire-lying bug this forecloses.
+SERVICE_VERSION: Final = __version__
 # The service's own id, as callers and clients see it: one constant, seven
 # references, so a rename that missed one would make the wire lie about the service.
 SERVICE_ID: Final = "crawlutron"
+
+
+class ServiceIdentity(TypedDict):
+    """The identity block every discovery payload embeds: a key declared here
+    must exist in both payload TypedDicts, so an identity key that reaches one
+    endpoint and not the other fails the build, not the wire.
+    """
+
+    service: str
+    version: str
+    policy_schema_version: str
+
+
 ROUTER_MODULE_DOC: Final = (
     "Pure router: imports :func:`{handler}` and binds it\n"
     "to the ``{path}`` POST path. The handler implementation lives in the\n"

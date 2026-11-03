@@ -6,8 +6,6 @@ Values mirror the spec; only codes this server can produce are declared --
 
 from crawlutron.vocabulary.identity import SERVICE_ID, SERVICE_VERSION
 
-# SERVICE_VERSION is deliberately not folded into MCP_SERVER_VERSION: what we
-# speak and what we tolerate are different claims, and the error path quotes both.
 MCP_PROTOCOL_VERSION = "2026-07-28"
 SUPPORTED_PROTOCOL_VERSIONS = [MCP_PROTOCOL_VERSION]
 MCP_SERVER_NAME = SERVICE_ID

@@ -8,9 +8,7 @@ from crawlutron.models.service_identity import SERVICE_IDENTITY
 
 def discovery_payload() -> DiscoveryPayload:
     return {
-        "service": SERVICE_IDENTITY["service"],
-        "version": SERVICE_IDENTITY["version"],
-        "policy_schema_version": SERVICE_IDENTITY["policy_schema_version"],
+        **SERVICE_IDENTITY,
         "links": {
             "openapi": "/openapi.json",
             "swagger_ui": "/docs",

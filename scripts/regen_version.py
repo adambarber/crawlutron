@@ -58,7 +58,7 @@ def _describe() -> str:
 
 
 def _version_parts(desc: str) -> tuple[str, tuple[int | str, ...]]:
-    match = re.match(r"^(.*?)-(\d+)-g([0-9a-f]+)$", desc)
+    match = re.match(r"^v?(.*?)-(\d+)-g([0-9a-f]+)$", desc)
     if match:
         tag = f"{match.group(1)}.dev{match.group(2)}+g{match.group(3)}"
     else:
