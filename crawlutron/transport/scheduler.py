@@ -126,11 +126,11 @@ def _circuit_remaining(scheduler: DomainScheduler, domain: str) -> float:
 
 
 async def _park_open_breaker(scheduler: DomainScheduler, domain: str) -> None:
-    """Record the open window as a domain cooldown and sleep it out, capped.
-    The same park a 429 takes; the caller re-checks the breaker after it."""
+    """Record the open window as a capped cooldown and sleep the same capped
+    number: a raw-window stamp would outlive half-open, napping batches past it."""
     remaining = _circuit_remaining(scheduler, domain)
     if remaining > 0:
-        scheduler.set_domain_cooldown(domain, remaining)
+        scheduler.set_domain_cooldown(domain, min(remaining, MAX_COOLDOWN_WAIT))
         await asyncio.sleep(min(remaining, MAX_COOLDOWN_WAIT))
 
 

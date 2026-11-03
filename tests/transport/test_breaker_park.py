@@ -6,6 +6,8 @@ retry storms, zero fetches, transient_requeues polluted."""
 import asyncio
 import re
 
+import pytest
+
 from crawlutron.models.crawl_task import CrawlTask
 from crawlutron.transport.scheduler import DomainScheduler
 from tests._policy_factories import canonical
@@ -13,8 +15,8 @@ from tests._recursive_harnesses import drive_recursive_crawl, make_crawl_task
 from tests._result_builders import make_engine_result
 from tests._scheduler_doubles import engine_envelope, make_scheduler, ok_worker, trip_circuit
 
-# Captured before any test patches asyncio.sleep: the advance helper sleeps on
-# the REAL primitive, or its inner sleep(0) re-enters the patch forever.
+# Bound at module import, before any runtime patch -- its inner sleep(0) must
+# be the REAL primitive or the helper re-enters the patch forever (attack 3).
 _REAL_SLEEP = asyncio.sleep
 
 
@@ -87,7 +89,7 @@ async def test_open_breaker_parks_the_batch_and_records_a_cooldown(monkeypatch):
     assert results is not None and results[0].status == "success", results
 
 
-async def _terminal_envelope_results(monkeypatch, *, base: float):
+async def _terminal_envelope_results(*, base: float):
     """Trip the breaker, run one batch, hand back the terminal results: the
     shared shape of "the breaker stands and the job fails classified once"."""
     scheduler = make_scheduler(circuit_cooldown_base=base)
@@ -103,7 +105,7 @@ async def _terminal_envelope_results(monkeypatch, *, base: float):
 async def test_breaker_still_open_after_the_park_cap_fails_the_job(monkeypatch):
     """Past the park cap (or a re-asserted window) the envelope is terminal:
     the job fails once through the classified channel, exactly as before."""
-    results = await _terminal_envelope_results(monkeypatch, base=30.0)
+    results = await _terminal_envelope_results(base=30.0)
     _assert_terminal(results)
 
 
@@ -171,6 +173,11 @@ async def test_breaker_window_over_the_park_cap_fails_terminal(monkeypatch):
     results = await scheduler.run([job], worker, failed_result=engine_envelope)
 
     assert requested == [300.0], f"the park must be capped at 300s: {requested}"
+    # The STAMP matches the sleep: a cooldown outliving the breaker window by
+    # the uncapped remainder would keep napping batches past half-open.
+    assert scheduler.domain_cooldowns["example.com"] == pytest.approx(300.0), (
+        f"the park must stamp the capped window, not the raw breaker remaining: {scheduler.domain_cooldowns}"
+    )
     _assert_terminal(results)
 
 
