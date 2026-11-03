@@ -7,6 +7,7 @@ the database -- the defective process-local ``Lock`` invisible to siblings.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import functools
 import sqlite3
 from collections.abc import Awaitable, Callable
@@ -20,6 +21,15 @@ __all__ = ["CoordinationStore", "atwin"]
 
 P = ParamSpec("P")
 R = TypeVar("R")
+
+# Bounded dedicated pool for blocking SQLite store calls. The store lock (one RLock
+# per db file) already serializes in-process store access, so a modest bound is
+# enough: the point is to keep store saturation from starving the default
+# ``asyncio.to_thread`` executor used by extraction and other crawl work.
+_STORE_WORKERS = 8
+_STORE_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=_STORE_WORKERS, thread_name_prefix="coordination-store"
+)
 
 
 class CoordinationStore:
@@ -64,6 +74,9 @@ def atwin[Owner, **P, R](
         # Resolved through the instance at CALL time, not the captured function:
         # a subclass override (the bus-publishing store) shadows it for the twin.
         sync_now: Callable[..., R] = getattr(self, sync.__name__)
-        return await asyncio.to_thread(sync_now, *args, **kwargs)
+        # Runs on the dedicated store executor, never the default asyncio pool:
+        # store saturation can never starve extraction and the rest of the loop.
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(_STORE_EXECUTOR, functools.partial(sync_now, *args, **kwargs))
 
     return twin

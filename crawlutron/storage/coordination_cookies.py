@@ -35,40 +35,42 @@ class SharedCookieStore(CoordinationStore):
         self._max_hosts = max(1, int(max_hosts))
 
     def load(self, namespace: str, host: str) -> dict[str, str]:
-        """Return the cookies for one slot and mark it recently used."""
-        now = time.time()
+        """Return the cookies for one slot.
+
+        Read-only: a SELECT and a decode, no write transaction. Recency is
+        refreshed through the explicit ``touch`` door (the jar calls it for
+        contributor hosts), so a read never generates WAL frames or holds the
+        SQLite write lock.
+        """
         with self._lock:
             row = self._conn.execute(
                 "SELECT payload FROM coordination_cookies WHERE namespace = ? AND host = ?",
                 (namespace or "", host),
             ).fetchone()
-            if row is None:
-                return {}
-            # A read refreshes recency, so a host that is being crawled
-            # survives the next eviction instead of the oldest-unread slot.
-            self._conn.execute(
-                "UPDATE coordination_cookies SET touched_at = ? WHERE namespace = ? AND host = ?",
-                (now, namespace or "", host),
-            )
-            self._conn.commit()
+        if row is None:
+            return {}
         return self._decode(row[0])
 
     def merge(self, namespace: str, host: str, cookies: Mapping[str, str]) -> None:
         """Union ``cookies`` into the slot, then evict past the per-namespace cap.
         Eviction scopes to the slot being written, so one tenant's crawl cannot
         evict another tenant's sessions. The union stays transactional.
+
+        Lock order: SQLite write lock (``BEGIN IMMEDIATE``) first, then the
+        process store lock -- never the reverse. That single order keeps
+        ``merge``/``put``/``touch``/``clear`` from deadlocking on one another
+        when a cross-process writer holds the write lock.
         """
-        now = time.time()
         key = (namespace or "", host)
-        with self._lock:
-            self._conn.execute("BEGIN IMMEDIATE")
-            try:
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            with self._lock:
                 row = self._conn.execute(
                     "SELECT payload FROM coordination_cookies WHERE namespace = ? AND host = ?",
                     key,
                 ).fetchone()
                 merged = {**self._decode(row[0]), **cookies} if row else dict(cookies)
-                self._upsert_slot(key[0], key[1], json.dumps(merged), now)
+                self._upsert_slot(key[0], key[1], json.dumps(merged), time.time())
                 self._conn.execute(
                     "DELETE FROM coordination_cookies WHERE (namespace, host) IN ("
                     "SELECT namespace, host FROM coordination_cookies WHERE namespace = ? "
@@ -76,27 +78,37 @@ class SharedCookieStore(CoordinationStore):
                     (key[0], self._max_hosts),
                 )
                 self._conn.execute("COMMIT")
-            except BaseException:
-                self._conn.execute("ROLLBACK")
-                raise
+        except BaseException:
+            self._conn.execute("ROLLBACK")
+            raise
 
     def clear(self, namespace: str = "") -> None:
         """Clear one namespace, or every slot when ``namespace`` is empty."""
-        with self._lock:
-            if namespace:
-                self._conn.execute("DELETE FROM coordination_cookies WHERE namespace = ?", (namespace,))
-            else:
-                self._conn.execute("DELETE FROM coordination_cookies")
-            self._conn.commit()
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            with self._lock:
+                if namespace:
+                    self._conn.execute("DELETE FROM coordination_cookies WHERE namespace = ?", (namespace,))
+                else:
+                    self._conn.execute("DELETE FROM coordination_cookies")
+                self._conn.execute("COMMIT")
+        except BaseException:
+            self._conn.execute("ROLLBACK")
+            raise
 
     def touch(self, namespace: str, host: str) -> None:
         """Mark one slot recently used (the read path)."""
-        with self._lock:
-            self._conn.execute(
-                "UPDATE coordination_cookies SET touched_at = ? WHERE namespace = ? AND host = ?",
-                (time.time(), namespace or "", host),
-            )
-            self._conn.commit()
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            with self._lock:
+                self._conn.execute(
+                    "UPDATE coordination_cookies SET touched_at = ? WHERE namespace = ? AND host = ?",
+                    (time.time(), namespace or "", host),
+                )
+                self._conn.execute("COMMIT")
+        except BaseException:
+            self._conn.execute("ROLLBACK")
+            raise
 
     def slots_for_namespace(self, namespace: str) -> dict[str, dict[str, str]]:
         """One namespace's slots as {host: cookies}; the WHERE is what keeps a
@@ -114,14 +126,14 @@ class SharedCookieStore(CoordinationStore):
         Scoped to exactly this (namespace, host); only removes records, so a
         prune cannot resurrect a deleted cookie.
         """
-        with self._lock:
-            self._conn.execute("BEGIN IMMEDIATE")
-            try:
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            with self._lock:
                 self._upsert_slot(namespace or "", host, json.dumps(dict(value)), time.time())
                 self._conn.execute("COMMIT")
-            except BaseException:
-                self._conn.execute("ROLLBACK")
-                raise
+        except BaseException:
+            self._conn.execute("ROLLBACK")
+            raise
 
     @staticmethod
     def _decode(payload: str) -> dict[str, str]:

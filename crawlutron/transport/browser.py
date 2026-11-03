@@ -308,10 +308,19 @@ class BrowserRenderer:
             return html, text, classification, False
 
         deadline = time.monotonic() + self._challenge_wait_seconds
+        settled = False
         while time.monotonic() < deadline:
-            # Use asyncio.sleep to avoid busy-waiting if injected sleep is patched/no-op
-            await asyncio.sleep(1)
-            await self._driver.wait_for_ready_state(page)
+            # Poll readiness through the injected clock: one cheap readyState
+            # read per tick, no full DOM re-serialization, and the clock is
+            # controllable in tests. Never raw asyncio.sleep.
+            await self._async_sleep(1)
+            ready_state = await page.evaluate("() => document.readyState")
+            if ready_state in {"interactive", "complete"}:
+                settled = True
+                break
+
+        if settled:
+            # One final extract to confirm whether the challenge cleared.
             next_html = await self.extract_html(page) if options.include_html else None
             next_text = await self.extract_text(page) if options.include_text else None
             raw_next_title = await page.evaluate("() => document.title")

@@ -42,6 +42,21 @@ def _observed(name: str) -> Callable[[], None]:
     return premise
 
 
+def _subject_imports(module_path: pathlib.Path) -> Callable[[], None]:
+    """Premise proving the detector's subject module exists on the live tree."""
+
+    def premise() -> None:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(module_path.stem, module_path)
+        assert spec is not None and spec.loader is not None, f"{module_path} does not load"
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        assert mod is not None
+
+    return premise
+
+
 def _premises() -> dict[str, Callable[[], None]]:
     from tests.invariants._encoding_sets import _ALWAYS_DECODABLE_ENCODINGS
     from tests.invariants._env_knobs import _consumed_knobs
@@ -66,44 +81,66 @@ def _premises() -> dict[str, Callable[[], None]]:
     }
 
 
+def _subject_detector(test_module_rel: str, source_rel: str, function: str) -> ArmedHandRolled:
+    """ArmedHandRolled whose premise is that the subject source module loads."""
+    return ArmedHandRolled(
+        name=function,
+        module=_INVARIANTS / test_module_rel,
+        function=function,
+        premise=_subject_imports(_INVARIANTS.parent.parent / source_rel),
+    )
+
+
 def hand_rolled_detectors() -> tuple[ArmedHandRolled, ...]:
     """Every detector in the suite that no ``Rule`` declares."""
     premises = _premises()
-    return (
-        ArmedHandRolled(
-            name="undecodable-encoding",
-            module=_INVARIANTS / "test_encoding_bounds.py",
-            function="_undecodable_encoding_offenders",
-            premise=premises["undecodable-encoding"],
+    base = [
+        ArmedHandRolled(name=n, module=_INVARIANTS / m, function=f, premise=premises[p])
+        for n, m, f, p in (
+            (
+                "undecodable-encoding",
+                "test_encoding_bounds.py",
+                "_undecodable_encoding_offenders",
+                "undecodable-encoding",
+            ),
+            (
+                "resolved-env-reader",
+                "test_knob_contracts.py",
+                "_resolved_env_reader_offenders",
+                "resolved-env-reader",
+            ),
+            ("public-surface", "test_public_surface.py", "_public_surface_offenders", "public-surface"),
+            ("bool-env", "test_registry_bool_env.py", "bool_env_offenders", "bool-env"),
+            ("robots-policy", "test_registry_robots.py", "robots_policy_offenders", "robots-policy"),
+            ("public-target", "test_registry_targets.py", "public_target_offenders", "public-target"),
+        )
+    ]
+    chokepoint = [
+        _subject_detector(
+            "test_coordination_cookies_begin_lock.py",
+            "crawlutron/storage/coordination_cookies.py",
+            "_begin_immediate_inside_store_lock",
         ),
-        ArmedHandRolled(
-            name="resolved-env-reader",
-            module=_INVARIANTS / "test_knob_contracts.py",
-            function="_resolved_env_reader_offenders",
-            premise=premises["resolved-env-reader"],
+        _subject_detector(
+            "test_atwin_store_executor.py",
+            "crawlutron/storage/coordination_store.py",
+            "_asyncio_to_thread_offenders",
         ),
-        ArmedHandRolled(
-            name="public-surface",
-            module=_INVARIANTS / "test_public_surface.py",
-            function="_public_surface_offenders",
-            premise=premises["public-surface"],
+        _subject_detector(
+            "test_atwin_store_executor.py",
+            "crawlutron/storage/coordination_store.py",
+            "_atwin_executor_offenders",
         ),
-        ArmedHandRolled(
-            name="bool-env",
-            module=_INVARIANTS / "test_registry_bool_env.py",
-            function="bool_env_offenders",
-            premise=premises["bool-env"],
+        _subject_detector(
+            "test_cookie_load_read_only.py",
+            "crawlutron/storage/coordination_cookies.py",
+            "_load_mutation_offenders",
         ),
-        ArmedHandRolled(
-            name="robots-policy",
-            module=_INVARIANTS / "test_registry_robots.py",
-            function="robots_policy_offenders",
-            premise=premises["robots-policy"],
+        _subject_detector(
+            "test_challenge_wait_poll.py", "crawlutron/transport/browser.py", "_raw_sleep_offenders"
         ),
-        ArmedHandRolled(
-            name="public-target",
-            module=_INVARIANTS / "test_registry_targets.py",
-            function="public_target_offenders",
-            premise=premises["public-target"],
+        _subject_detector(
+            "test_challenge_wait_poll.py", "crawlutron/transport/browser.py", "_too_many_extract_offenders"
         ),
-    )
+    ]
+    return (*base, *chokepoint)

@@ -3,6 +3,9 @@
 Every ``from tests.chokepoint_walks import ...`` in the tree resolves here.
 """
 
+import ast
+import pathlib
+
 from tests._walk_assertions import (
     assert_detector,
     assert_fires_once,
@@ -103,6 +106,7 @@ __all__ = [
     "call_keyword_values",
     "call_nodes",
     "callable_defs",
+    "call_offenders",
     "calls_named",
     "calls_named_leaf",
     "calls_to_any",
@@ -137,6 +141,7 @@ __all__ = [
     "resolved_expr_name",
     "returns",
     "single_target_name_assignments",
+    "stmt_offenders",
     "string_argument",
     "string_literals",
     "subscript_reads",
@@ -148,3 +153,30 @@ __all__ = [
     "with_blocks",
     "writes",
 ]
+
+
+def call_offenders(tree: ast.Module, path: pathlib.Path, predicate, message: str) -> list[str]:
+    """Offender strings for every ``ast.Call`` in ``tree`` that ``predicate`` accepts."""
+    return [
+        offender_at(path, node, message)
+        for node in nodes_of(tree)
+        if isinstance(node, ast.Call) and predicate(node)
+    ]
+
+
+def stmt_offenders(
+    tree: ast.Module,
+    path: pathlib.Path,
+    outer_match,
+    stmt_match,
+    message: str,
+) -> list[str]:
+    """Offender strings for statements matching ``stmt_match`` inside nodes matching ``outer_match``."""
+    out: list[str] = []
+    for node in nodes_of(tree):
+        if not outer_match(node):
+            continue
+        for stmt in ast.walk(node):
+            if stmt_match(stmt):
+                out.append(offender_at(path, stmt, message))
+    return out

@@ -1,6 +1,7 @@
 """Browser pool: worker acquisition, timeout, sizing and global worker edges."""
 
 import inspect
+from collections.abc import Callable
 
 import pytest
 
@@ -173,10 +174,7 @@ def test_explicit_pool_size_arg_wins(monkeypatch):
 
 
 def _driver_with_exploding_cm(*, max_browser_renders: int = 1):
-    """A driver holding a browser whose context manager raises on exit.
-
-    A released browser (none cached) with exactly one exit is the contract under
-    test; the fixture asserts both, the caller only says which call was made."""
+    """A driver whose browser context manager raises on exit; the contract is exactly one exit."""
     context_manager = _ExplodingContextManager()
     driver = BrowserDriver(
         browser_factory=lambda **_kwargs: context_manager,
@@ -191,10 +189,7 @@ def _driver_with_exploding_cm(*, max_browser_renders: int = 1):
 
 
 def _bare_renderer(**overrides):
-    """A real ``BrowserRenderer`` with no browser factory and no warmup.
-
-    Only renderer-owned collaborators go through this; page-facing steps use
-    :func:`_bare_driver`. Both stay real -- only the page is a double."""
+    """A real ``BrowserRenderer`` with no browser factory; only the page is a double."""
     from crawlutron.transport.browser import BrowserRenderer
 
     return BrowserRenderer(**overrides)
@@ -227,12 +222,43 @@ def _page(**stubs):
     return type("_StubPage", (), {name: _method(name, answer) for name, answer in stubs.items()})()
 
 
-async def _challenge_wait_outcome(renderer, page):
-    """Drive ``_extract_with_challenge_wait`` asking for everything.
+class _ChallengePage:
+    """Page double answering ``evaluate`` by the JS asked; settles after N readyState polls."""
 
-    ``which page`` is a question only if html and text are both requested, so
-    options are the same in every test; the tuple comes back per assertion.
-    """
+    def __init__(self, *, settle_on_poll: int = 1) -> None:
+        self._ready_polls = 0
+        self.settle_on_poll = settle_on_poll
+        self._normal = False
+
+    async def content(self) -> str:
+        return (
+            "<html><body>Normal page content</body></html>"
+            if self._normal
+            else "<html><body>Just a moment...</body></html>"
+        )
+
+    async def evaluate(self, js: str, *args, **kwargs) -> str:
+        if "readyState" in js:
+            self._ready_polls += 1
+            self._normal = self._ready_polls >= self.settle_on_poll
+            return "complete" if self._normal else "loading"
+        if "document.title" in js:
+            return "Normal" if self._normal else "Just a moment..."
+        return "Normal page content" if self._normal else "Just a moment..."
+
+
+def _sleeps() -> tuple[list[float], Callable[[float], None]]:
+    """An injected clock that records every sleep the renderer performs."""
+    captured: list[float] = []
+
+    def record(seconds: float) -> None:
+        captured.append(seconds)
+
+    return captured, record
+
+
+async def _challenge_wait_outcome(renderer, page):
+    """Drive ``extract_with_challenge_wait`` asking for html and text."""
     options = type("obj", (), {"include_html": True, "include_text": True})()
     return await renderer.extract_with_challenge_wait(page, options)
 
@@ -291,35 +317,24 @@ class TestWorkerExtractorErrorDegrades:
         assert calls == ["evaluate"]
 
     async def test_browser_renderer_extract_with_challenge_wait_timeout(self):
-        renderer = _bare_renderer(challenge_wait_seconds=0.001)
-
-        # Page that always shows Cloudflare challenge
-        page = _page(evaluate="Just a moment...", content="<html><body>Just a moment...</body></html>")
+        """Challenge never clears: the injected clock drives the poll loop, never escapes."""
+        sleeps, record_sleep = _sleeps()
+        renderer = _bare_renderer(sleep=record_sleep, challenge_wait_seconds=0.01)
+        page = _ChallengePage(settle_on_poll=999)
         _html, _text, classification, escaped = await _challenge_wait_outcome(renderer, page)
         assert classification == "bot_challenge_detected"
-        assert not (escaped)
+        assert not escaped
+        assert sleeps, "injected clock drove the poll loop (no real asyncio.sleep)"
 
     async def test_browser_renderer_extract_with_challenge_wait_escaped(self):
-        renderer = _bare_renderer(challenge_wait_seconds=0.001)
-        polls = 0
-
-        def _challenge_then_normal(*_args, **_kwargs):
-            """One poll counter shared by evaluate and content, as a real page's is."""
-            nonlocal polls
-            polls += 1
-            return "Just a moment..." if polls <= 3 else "Normal page content"
-
-        def _body(*_args, **_kwargs):
-            return (
-                "<html><body>Just a moment...</body></html>"
-                if _challenge_then_normal() == "Just a moment..."
-                else "<html><body>Normal page content</body></html>"
-            )
-
-        page = _page(evaluate=_challenge_then_normal, content=_body)
+        """Challenge clears after the page settles; one final extract confirms escape."""
+        sleeps, record_sleep = _sleeps()
+        renderer = _bare_renderer(sleep=record_sleep, challenge_wait_seconds=5.0)
+        page = _ChallengePage(settle_on_poll=1)
         _html, _text, classification, escaped = await _challenge_wait_outcome(renderer, page)
         assert classification != "bot_challenge_detected"
         assert escaped
+        assert sleeps, "injected clock drove the poll loop (no real asyncio.sleep)"
 
     async def test_browser_renderer_extract_html_error(self):
         result = await _bare_renderer().extract_html(_page(content=Exception("content failed")))
@@ -378,8 +393,7 @@ class _ClosedBrowserScenario:
 
 
 async def test_a_method_shaped_is_closed_probe_does_not_relaunch_every_render():
-    """#516: a bound ``is_closed`` method is always truthy, so the truthy probe
-    relaunched the browser on every render, defeating the recycle bound."""
+    """#516: a bound ``is_closed`` is always truthy, so it relaunches every render."""
     scenario = _ClosedBrowserScenario()
 
     await scenario.driver.open_page({})
@@ -391,8 +405,7 @@ async def test_a_method_shaped_is_closed_probe_does_not_relaunch_every_render():
 
 
 async def test_a_closed_browser_is_replaced_not_reused():
-    """#516: the fixed probe must still detect closure -- a closed browser is
-    released and a fresh one launched, never reused."""
+    """#516: a closed browser is released and replaced, never reused."""
     scenario = _ClosedBrowserScenario()
 
     await scenario.driver.open_page({})
@@ -405,11 +418,7 @@ async def test_a_closed_browser_is_replaced_not_reused():
 
 
 class TestCloseLeavesNoStaleRendererToAcquire:
-    """close() retired the renderers but kept handing them out.
-
-    ``close`` cleared ``_renderers`` but not ``_available``; ``initialize``
-    appends to the BACK, ``acquire`` pops the FRONT -- closed ones returned.
-    """
+    """close() retired renderers but kept handing them out."""
 
     @staticmethod
     def _pool(pool_size: int = 2) -> BrowserPool:
