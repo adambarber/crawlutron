@@ -24,6 +24,16 @@ def _adaptive_scheduler() -> DomainScheduler:
 
 
 class TestScheduler:
+    @staticmethod
+    def _cooled_rig(monkeypatch, *, window: float):
+        """The injected-clock cooldown rig: recorder, mutable clock, a scheduler
+        with a stamped example.com debt, and one job on that domain."""
+        sleeps = recorder(monkeypatch)
+        now = [1000.0]
+        scheduler = make_scheduler(delay_seconds=0.05, clock=lambda: now[0])
+        scheduler.set_domain_cooldown("example.com", window)
+        return sleeps, now, scheduler, make_job(0, "http://example.com/")
+
     def test_jitter_in_range(self):
         scheduler = make_scheduler(global_limit=5, per_domain_limit=3, delay_seconds=1.0)
         base = scheduler._delay_seconds
@@ -56,12 +66,8 @@ class TestScheduler:
         """A cooldown's park is the REMAINING duration on the one clock, and a
         served cooldown requests no nap at all (#580): stamp and read share the
         injected clock, so no wall-clock step can bend the wait either way."""
-        sleeps = recorder(monkeypatch)
-        now = [1000.0]
-        scheduler = make_scheduler(delay_seconds=0.05, clock=lambda: now[0])
-        scheduler.set_domain_cooldown("example.com", 0.3)
+        sleeps, now, scheduler, job = self._cooled_rig(monkeypatch, window=0.3)
         now[0] += 0.15  # half the window elapsed before the batch fires
-        job = make_job(0, "http://example.com/")
 
         async def worker(ran_job: CrawlJob) -> EngineCrawlResult:
             return make_result(ran_job.url.raw, ran_job.domain)
@@ -88,13 +94,10 @@ class TestScheduler:
     async def test_cooldown_delay_applied_to_domain(self, monkeypatch):
         """A domain in cooldown must have the cooldown awaited before the worker.
 
-        Asserted on the *request*, not the wall time -- the worker's own check
-        pins the ordering; the 90%-of-window floor absorbs before-run spend.
-        """
-        sleeps = recorder(monkeypatch)
-        scheduler = make_scheduler(delay_seconds=0.05)
-        scheduler.set_domain_cooldown("example.com", 0.3)
-        job = make_job(0, "http://example.com/")
+        Asserted on the *request*, not the wall time -- and on the INJECTED
+        clock, so the window cannot decay while the worker spins up (the real
+        monotonic clock made the 90% floor a timing race under xdist)."""
+        sleeps, now, scheduler, job = self._cooled_rig(monkeypatch, window=0.3)
 
         async def worker(ran_job: CrawlJob) -> EngineCrawlResult:
             assert sleeps.requests_over(0.27), (

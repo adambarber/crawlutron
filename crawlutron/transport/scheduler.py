@@ -107,7 +107,7 @@ class TokenBucket:
         return max(0.0, -self.tokens / self.rate)
 
 
-# Upper bound on how long any single job will sleep on a domain cooldown.
+# Upper bound on any single cooldown/nap sleep -- bounds batch patience.
 MAX_COOLDOWN_WAIT = 300.0
 
 
@@ -118,6 +118,14 @@ def _remaining_until(expiry: float | None, now: float) -> float:
     if expiry is None:
         return 0.0
     return max(0.0, min(expiry - now, MAX_COOLDOWN_WAIT))
+
+
+async def _sleep_out(expiry: float | None, now: Callable[[], float]) -> None:
+    """One capped nap on a standing deadline: the cap bounds the batch's
+    patience; successive runs walk a window longer than the cap down."""
+    remaining = _remaining_until(expiry, now())
+    if remaining > 0:
+        await asyncio.sleep(remaining)
 
 
 def _circuit_remaining(scheduler: DomainScheduler, domain: str) -> float:
@@ -244,12 +252,13 @@ class DomainScheduler:
         return state
 
     def set_domain_cooldown(self, domain: str, seconds: float) -> None:
-        """Set a cooldown period for a domain after a rate limit (429) response.
-        Also purges elapsed records on an amortized cadence -- rebuilding the
-        map per 429 is quadratic.
-        """
+        """Extend a domain's cooldown to the LONGER of its standing debt and
+        ``seconds``: debts only grow -- a breaker park may never truncate a
+        longer Retry-After window. Also purges on the amortized cadence."""
+        now = self._clock()
         if seconds > 0:
-            self._state(domain).cooldown_until = self._clock() + seconds
+            state = self._state(domain)
+            state.cooldown_until = max(state.cooldown_until or 0.0, now + seconds)
         self._sets_since_purge += 1
         if self._sets_since_purge >= COOLDOWN_PURGE_INTERVAL:
             self._sets_since_purge = 0
@@ -396,11 +405,7 @@ class DomainScheduler:
         async def run_one(job: _Job) -> None:
             # Domain cooldown BEFORE the global semaphore, or one rate-limited
             # domain blocks every other domain's slot (cooldown deadlock).
-            cooldown_expiry = self._state(job.domain).cooldown_until
-            if cooldown_expiry is not None:
-                remaining = _remaining_until(cooldown_expiry, self._clock())
-                if remaining > 0:
-                    await asyncio.sleep(remaining)
+            await _sleep_out(self._state(job.domain).cooldown_until, self._clock)
             if await self._run_one_gated(job, global_gate, deliver, worker, failed_result):
                 return
 
@@ -413,12 +418,10 @@ class DomainScheduler:
 
     def _reserve_fire(self, domain: str) -> float:
         """Reserve the domain's next fire slot; return seconds until it arrives.
-
-        THE spacing mechanism: a fire time is booked under the domain gate (the
-        caller holds it), one per fire, so same-domain requests space by the
-        delay instead of sleeping it concurrently -- the herd this replaces.
-        Monotonic, like the bucket and circuits; a parked job's spent
-        reservation is never refunded (conservative direction).
+        THE spacing mechanism: a fire time is booked under the domain gate, one
+        per fire, so same-domain requests space by the delay instead of sleeping
+        it concurrently. Monotonic; a parked job's spent reservation is never
+        refunded (conservative direction).
         """
         state = self._state(domain)
         now = self._clock()
@@ -465,15 +468,12 @@ class DomainScheduler:
         # breaker trip or 429 cooldown parks us here, outside every gate.
         if await _skip_if_breaker_open(self, job, deliver, failed_result):
             return True
-        cooldown_expiry = self._state(job.domain).cooldown_until
-        if cooldown_expiry is not None:
-            # A cooldown held this domain: whether this job slept out the
-            # remainder or arrived after expiry, it fires after the domain's
-            # next slot -- not shoulder-to-shoulder with every peer waking at
-            # the same expiry (the herd convergence a raw sleep produced).
-            remaining = _remaining_until(cooldown_expiry, self._clock())
-            if remaining > 0:
-                await asyncio.sleep(remaining)
+        # A cooldown held this domain: sleep it out, then fire after the
+        # domain's next slot -- not shoulder-to-shoulder with peers waking
+        # at the same expiry (the herd a raw sleep produced).
+        expiry = self._state(job.domain).cooldown_until
+        await _sleep_out(expiry, self._clock)
+        if expiry is not None:
             # Reservation only: the bucket reserve was already spent.
             async with self._state(job.domain).gate:
                 reserve_wait = self._reserve_fire(job.domain)
