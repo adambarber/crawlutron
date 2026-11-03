@@ -11,7 +11,7 @@ from crawlutron.transport.results import TerminalResult
 from crawlutron.transport.scheduler import DomainScheduler
 from tests._policy_factories import canonical
 from tests._result_builders import make_job, make_result
-from tests._scheduler_doubles import FailingSink, engine_envelope, make_scheduler, ok_worker, run_through
+from tests._scheduler_doubles import FailingSink, engine_envelope, make_scheduler, run_through
 from tests._timing_harnesses import recorder
 
 
@@ -63,13 +63,9 @@ class _PerDomainDelayScheduler(DomainScheduler):
         return 0.4 if domain == "example.com" else 0.0
 
 
-async def test_domain_delay_does_not_block_other_domains(monkeypatch):
-    """The per-domain delay is awaited inside the *domain* gate, not the global one.
-
-    Sleeping while holding a global slot burned it on pure waiting and starved
-    every other domain; the hosts must be registrable-distinct.
-    """
-    scheduler = make_scheduler(_PerDomainDelayScheduler, adaptive=False)
+def _nap_waits_for_fast_domain(monkeypatch, label: str) -> list[str]:
+    """Shim: any reservation-length nap waits (bounded) for a fast-domain peer
+    to be served; a nap must never hold a GLOBAL slot while it waits."""
     fast_started = asyncio.Event()
     starved: list[str] = []
     yield_to_loop = asyncio.sleep
@@ -77,47 +73,41 @@ async def test_domain_delay_does_not_block_other_domains(monkeypatch):
     async def _sleep(delay, *args, **kwargs):
         del args, kwargs
         if delay >= 0.2:
-            # Slow.example.com's 0.4s per-domain delay (jittered). It may not finish until the fast domain has
-            # been served.
             try:
                 await asyncio.wait_for(fast_started.wait(), 2.0)
             except TimeoutError:
-                starved.append("fast.example.org")
+                starved.append(label)
             return
         await yield_to_loop(0)
 
     monkeypatch.setattr(asyncio, "sleep", _sleep)
+    return starved
 
-    async def worker(job):
-        if job.domain == "example.org":
-            fast_started.set()
-        await yield_to_loop(0)
-        return make_result(job.url.raw, job.domain)
 
-    jobs = [make_job(0, "http://slow.example.com/"), make_job(1, "http://fast.example.org/")]
-    await scheduler.run(jobs, worker, failed_result=engine_envelope)
-    assert not starved, (
-        "fast.example.org could not run until slow.example.com's per-domain delay "
-        "finished: the delay is being awaited while holding a GLOBAL concurrency "
-        "slot, so it burns that slot on pure waiting and starves every other domain"
-    )
-    assert fast_started.is_set(), "the fast domain was never served"
+def _fast_domain_worker(job):
+    """Serve example.org instantly; every other domain sleeps a real yield."""
+    if job.domain == "example.org":
+        _FAST_STARTED.set()
+    return make_result(job.url.raw, job.domain)
+
+
+_FAST_STARTED = asyncio.Event()
 
 
 def _nap_until_peer_recorded(monkeypatch, real_sleep, committed: asyncio.Event):
-    """Sequenced sleep shim: the SECOND jitter nap blocks until ``committed``
-    fires, so the job's post-nap re-check cannot race the peer's commit; every
-    requested delay is still recorded. Zero wall clock."""
+    """Sequenced sleep shim: every nap blocks until ``committed`` fires, so the
+    napped job's post-nap re-check cannot race the peer's commit; every
+    requested delay is still recorded. Zero wall clock. (#577: the first fire
+    takes no nap at all -- its wait is zero -- so the FIRST nap is the peer's
+    reservation and waiting on it is deadlock-free; the trip's worker naps
+    nothing before committing.)
+    """
     sleeps = recorder(monkeypatch)
-    jitter_naps = 0
 
     async def _sleep(delay, *args, **kwargs):
-        nonlocal jitter_naps
         del args, kwargs
         if not committed.is_set():
-            jitter_naps += 1
-            if jitter_naps > 1:
-                await committed.wait()
+            await committed.wait()
         sleeps.delays.append(delay)
         await real_sleep(0)
 
@@ -138,50 +128,63 @@ async def _run_two_jobs(scheduler, worker):
 
 
 class TestJitterSleepDoesNotHoldTheDomainGate:
-    """#541: the per-domain delay is a per-fire wait, never a gate hold."""
+    """#541's property, INVERTED by #577: the per-domain delay is a fire-time
+    reservation. The nap must not hold the gate AND must not let a peer fire
+    inside the reservation -- both were possible; only the first was a defect.
+    """
 
-    async def test_second_same_domain_job_starts_while_the_first_jitter_sleeps(self, monkeypatch):
-        """Two same-domain jobs: the second must START while the first's jitter
-        sleep is still running -- the gate is free during the nap.
+    async def test_second_same_domain_job_waits_out_the_first_reservation(self, monkeypatch):
+        """Two same-domain jobs with a real delay: the second's fetch must happen
+        only after its reservation nap completes -- never concurrent with it.
         """
         scheduler = make_scheduler(_PerDomainDelayScheduler, adaptive=False)
-        second_jitter_began = asyncio.Event()
-        starvation: list[str] = []
         yield_to_loop = asyncio.sleep
-        jitter_naps = 0
+        naps = {"begun": 0, "done": 0}
+        fetched_during: list[int] = []  # naps completed when each worker ran
 
         async def _sleep(delay, *args, **kwargs):
-            nonlocal jitter_naps
             del args, kwargs
             if delay >= 0.2:
-                # A jitter nap. The FIRST one must not hold the domain gate:
-                # the peer's own nap has to begin while it is in flight.
-                jitter_naps += 1
-                if jitter_naps == 1:
-                    try:
-                        await asyncio.wait_for(second_jitter_began.wait(), 2.0)
-                    except TimeoutError:
-                        starvation.append(
-                            "the second same-domain job never started while the first jitter slept"
-                        )
-                    return
-                second_jitter_began.set()
+                naps["begun"] += 1
+                await yield_to_loop(0)
+                naps["done"] += 1
                 return
             await yield_to_loop(0)
 
         monkeypatch.setattr(asyncio, "sleep", _sleep)
 
         async def worker(job):
+            fetched_during.append(naps["done"])
             await yield_to_loop(0)
             return make_result(job.url.raw, job.domain)
 
         results = await _run_two_jobs(scheduler, worker)
 
         assert sorted(results) == [0, 1], "both jobs must still run"
-        assert not starvation, (
-            f"{starvation[0]}: the jitter sleep is being awaited while holding the "
-            "per-domain gate, so a same-domain peer duty-cycles behind it"
+        assert naps["begun"] == 1, "the second fire must nap exactly once (its reservation)"
+        # Job 0 (no reservation wait) runs before any nap; job 1 runs only after
+        # its own reservation nap completed -- the herd ran BOTH at naps_done == 0.
+        assert fetched_during == [0, 1], (
+            f"the second same-domain fetch must follow the first's completed "
+            f"reservation nap; the herd shape is [0, 0]: {fetched_during}"
         )
+
+    async def test_the_domain_gate_is_still_free_during_a_reservation_nap(self, monkeypatch):
+        """#541's true half, kept: a DIFFERENT-domain job must run while a peer's
+        reservation naps -- the nap never holds the GLOBAL gate either.
+        """
+        scheduler = make_scheduler(_PerDomainDelayScheduler, adaptive=False)
+        _FAST_STARTED.clear()
+        starved = _nap_waits_for_fast_domain(monkeypatch, "fast.example.org")
+
+        jobs = [make_job(0, "http://slow.example.com/"), make_job(1, "http://fast.example.org/")]
+        await scheduler.run(jobs, _fast_domain_worker, failed_result=engine_envelope)
+        assert not starved, (
+            "fast.example.org could not run until slow.example.com's reservation "
+            "finished: the nap is being awaited while holding a GLOBAL concurrency "
+            "slot, so it burns that slot on pure waiting"
+        )
+        assert _FAST_STARTED.is_set(), "the fast domain was never served"
 
     async def test_a_cooldown_firing_during_the_nap_is_not_skipped(self, monkeypatch):
         """A 429 cooldown that lands while a peer naps must park the peer before
@@ -243,21 +246,6 @@ class TestJitterSleepDoesNotHoldTheDomainGate:
         assert sleeps.requests_over(25.0), (
             f"the napped job never parked on the open breaker (park sleep missing): {sleeps.delays}"
         )
-
-
-async def test_zero_delay_requests_no_sleep_at_all(monkeypatch):
-    """The inverse: a domain configured with no delay must request no wait.
-
-    With every sleep now zero-second, the skip is observable as a request, not
-    time; a scheduler turning zero into a positive sleep invents politeness.
-    """
-    sleeps = recorder(monkeypatch)
-    scheduler = make_scheduler(adaptive=False)
-    jobs = [make_job(0, "https://example.com/a"), make_job(1, "https://example.com/b")]
-    await scheduler.run(jobs, ok_worker, failed_result=engine_envelope)
-    assert sleeps.delays == [0, 0], (
-        f"a zero-delay scheduler must request only zero-second yields, saw {sleeps.delays}"
-    )
 
 
 class TestDeliveryFailuresAreNotWorkerFailures:

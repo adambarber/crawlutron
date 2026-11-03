@@ -55,7 +55,7 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     "crawlutron/safety/header_values.py": (3, 3),
     # Four transport/spill surfaces pinned with their true public doors; growing
     # any of these needs an explicit ratchet edit, shrinking auto-tightens.
-    "crawlutron/transport/scheduler_purge.py": (2, 2),
+    "crawlutron/transport/scheduler_domain_state.py": (1, 1),
     "crawlutron/orchestration/spill_sink.py": (2, 2),
     "crawlutron/transport/http_cache.py": (4, 4),
     "crawlutron/transport/http_classify.py": (3, 3),
@@ -77,7 +77,7 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/api/dependencies.py": (16, 7),
     "crawlutron/api/exceptions.py": (10, 7),
     "crawlutron/api/identity_router.py": (5, 3),
-    "crawlutron/api/job_runner.py": (16, 13),
+    "crawlutron/api/job_runner.py": (15, 12),
     "crawlutron/api/jobs_router.py": (6, 5),
     "crawlutron/api/main_helpers.py": (3, 3),
     "crawlutron/api/map_endpoint.py": (2, 1),

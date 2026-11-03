@@ -63,27 +63,32 @@ HANDLE_MINTING_IS_SINGLE_SOURCED = Rule(
 
 
 def _unbounded_domain_delay_writes(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """Flag direct writes to ``_domain_min_delay`` outside ``set_domain_min_delay``.
+    """Flag direct writes to the domain's ``min_delay`` outside ``set_domain_min_delay``.
 
     Only that setter clamps the robots Crawl-delay floor; a bare write
-    elsewhere drops an ``inf`` straight into ``asyncio.sleep``.
+    elsewhere drops an ``inf`` straight into ``asyncio.sleep``. #577 moved the
+    state into ``DomainState.min_delay``; the detector follows the field, not
+    the old map name.
     """
     offenders: list[str] = []
+    # __init__ is the field's zero default, not a floor installation; only the
+    # clamped setter may raise it above zero.
+    exempt = {"set_domain_min_delay", "__init__"}
     for func in (
         node for node in nodes_of(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     ):
-        if func.name == "set_domain_min_delay":
+        if func.name in exempt:
             continue
         for node in unannotated_writes(func):
             targets = assignment_targets(node)
             for target in targets:
-                if (
-                    isinstance(target, ast.Subscript)
-                    and isinstance(target.value, ast.Attribute)
-                    and target.value.attr == "_domain_min_delay"
-                ):
+                if isinstance(target, ast.Attribute) and target.attr == "min_delay":
                     offenders.append(
-                        offender_at(path, node, f"unbounded write to _domain_min_delay in {func.name}()")
+                        offender_at(
+                            path,
+                            node,
+                            f"unbounded write to the politeness floor in {func.name}()",
+                        )
                     )
     return offenders
 
@@ -97,16 +102,16 @@ DOMAIN_POLITENESS_FLOOR_ONLY_VIA_THE_SETTER = Rule(
         "asyncio.sleep; commit it through the clamped setter"
     ),
     bite=lambda: Trips(
-        "class S:\n    def other(self):\n        self._domain_min_delay['x'] = 1e9\n"
-        "    def bump(self):\n        self._domain_min_delay['y'] += 1\n",
+        "class S:\n    def other(self):\n        self._state('x').min_delay = 1e9\n"
+        "    def bump(self):\n        self._state('y').min_delay += 1\n",
         count=2,
     ),
     clean=lambda: (
         # The setter's clamped write and a read are both fine: the rule is about who may WRITE, and an
         # augmented assignment is still a write.
         "class S:\n    def set_domain_min_delay(self, d, s):\n"
-        "        self._domain_min_delay[d] = min(s, 300.0)\n"
-        "    def read(self, d):\n        return self._domain_min_delay.get(d, 0.0)\n",
+        "        self._state(d).min_delay = min(s, 300.0)\n"
+        "    def read(self, d):\n        return self._state(d).min_delay\n",
     ),
 )
 

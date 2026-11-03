@@ -38,12 +38,9 @@ from crawlutron.api.response_shaping import failed_unified_result
 from crawlutron.api.unified_shaping import abuild_unified_result
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_request import CrawlRequest
-from crawlutron.models.crawl_result import CrawlResult, EngineCrawlResult
-from crawlutron.models.crawl_task import CrawlTask
+from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.normalized_url import NormalizedUrl, admit_or_none
-from crawlutron.models.result_factory import terminal_attempt
 from crawlutron.models.result_record import ProducerEnvelope
-from crawlutron.models.taxonomy import Classification
 from crawlutron.storage.job_store import (
     CrawlJobState,
     FrontierEntry,
@@ -54,7 +51,7 @@ from crawlutron.storage.job_store import (
 )
 from crawlutron.transport.robots import FetchAndDecode
 from crawlutron.vocabulary.limits import MAX_URL_TRANSIENT_ATTEMPTS
-from crawlutron.vocabulary.taxonomy import is_transient_classification, status_for_classification
+from crawlutron.vocabulary.taxonomy import is_transient_classification
 
 logger = logging.getLogger(__name__)
 
@@ -137,55 +134,6 @@ def job_engine_payload(job: CrawlJobState, batch: Sequence[FrontierEntry]) -> Cr
     # is ours, not a caller's: one engine batch is one page deep by definition.
     policy = policy.model_copy(update={"limits": policy.limits.model_copy(update={"max_depth": 0})})
     return CrawlRequest(urls=urls, policy=policy)
-
-
-async def pace_delayed_batch(
-    context: JobAdmissionContext,
-    batch: Sequence[FrontierEntry],
-) -> None:
-    tasks: list[CrawlTask] = []
-    for index, entry in enumerate(batch):
-        # The membership test uses the same canonical key commit_crawl_delay
-        # recorded: a host must never miss its own site's delay.
-        if entry.url.site in context.delayed_hosts:
-            tasks.append(
-                CrawlTask(
-                    index=index,
-                    original_url=entry.url.raw,
-                    normalized_url=entry.url,
-                )
-            )
-    if not tasks:
-        return
-
-    def pace_result(job: CrawlTask) -> CrawlResult:
-        # The status is derived from the label, not spelled beside it: two literals
-        # go stale the day the taxonomy moves, and nothing in the suite sees it.
-        classification: Classification = "rendered"
-        return CrawlResult(
-            url=job.normalized_url,
-            attempt=terminal_attempt(
-                strategy=None,
-                status=status_for_classification(classification),
-                classification=classification,
-                elapsed_ms=0,
-                error=None,
-            ),
-            final_url=job.normalized_url,
-            html=None,
-            text=None,
-            attempts=0,
-            domain=job.domain,
-        )
-
-    async def no_op(job: CrawlTask) -> CrawlResult:
-        return pace_result(job)
-
-    await context.scheduler.run(
-        tasks,
-        no_op,
-        failed_result=lambda job, exc: pace_result(job),
-    )
 
 
 async def _seed_job_sitemaps(job: CrawlJobState, context: JobAdmissionContext) -> None:
@@ -366,7 +314,6 @@ async def run_job(
             if not job.in_flight:
                 job.in_flight = list(batch)
             await job_store.asave(job)
-            await pace_delayed_batch(context, batch)
             result = await _execute_crawl(
                 job_engine_payload(job, batch), settings=settings, shutdown_event=shutdown_event
             )
@@ -487,7 +434,6 @@ __all__ = [
     "cancel_job_task",
     "install_execute_crawl",
     "is_running",
-    "pace_delayed_batch",
     "pause_job",
     "recover_orphaned_running_jobs",
     "run_job",

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from crawlutron.admission.admission_links import (
@@ -75,11 +75,11 @@ class JobAdmissionContext:
     timeout_seconds: int
     robots: RobotsGate
     scheduler: DomainScheduler
-    delayed_hosts: set[str] = field(default_factory=set)
 
     def commit_crawl_delay(self, domain: str, delay: float) -> None:
+        """The site-keyed seam: the floor lands on the admission scheduler; the
+        engine path re-commits onto its own scheduler from live robots (#577)."""
         self.scheduler.set_domain_min_delay(domain, delay)
-        self.delayed_hosts.add(domain.lower())
 
     @classmethod
     def create(

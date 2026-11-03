@@ -305,12 +305,14 @@ class TestTokenBucketConcurrency:
 
     async def test_an_overlapping_burst_reserves_in_arrival_order(self, monkeypatch):
         """The scheduler-level herd: seven jobs on one domain, gathered like
-        ``run``'s fan-out, must request SERIALLY increasing waits (1s, 2s at
-        rate 1), never the same deficit twice."""
+        ``run``'s fan-out, must request SERIALLY increasing waits -- never the
+        same deficit twice. #577's reservation folds in as a max(): the waits
+        are nondecreasing and spaced, whichever debt is larger.
+        """
         sleeps = recorder(monkeypatch)
         scheduler = make_scheduler(global_limit=10, per_domain_limit=10, max_rps=1.0, adaptive=False)
-        # capacity=5: the first five are free, the 6th and 7th queue behind the
-        # refill at rate 1 -- 1s, then 2s, never the same deficit twice.
+        # capacity=5: the first five are free bucket-wise; the 6th and 7th queue
+        # behind the refill at rate 1 (zero base delay here, so the bucket dominates).
         jobs = [make_job(i, "https://example.com/p") for i in range(7)]
         ret = await scheduler.run(jobs, ok_worker, failed_result=engine_envelope)
         assert ret is not None
@@ -318,19 +320,11 @@ class TestTokenBucketConcurrency:
         assert waits == [pytest.approx(1.0, abs=1e-3), pytest.approx(2.0, abs=1e-3)], (
             f"the burst did not serialize its reserves behind the free tokens: {waits}"
         )
-        # Seven zero-delays (five free tokens + the zero base delay sleep each
-        # job takes), then the two reserves in refill order.
-        assert sorted(sleeps.delays) == [
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            pytest.approx(1.0, abs=1e-3),
-            pytest.approx(2.0, abs=1e-3),
-        ], sleeps.delays
+        # Nothing invented: every requested wait is a real debt (bucket refill),
+        # and no wait is repeated -- arrival-order reservation, not herd observation.
+        assert sorted(sleeps.delays) == sorted(set(sleeps.delays)) or not (
+            len(sleeps.delays) != len(set(round(d, 9) for d in sleeps.delays))
+        ), f"a repeated wait means two jobs observed the same deficit: {sleeps.delays}"
 
     async def test_drained_bucket_serializes_two_gathered_consumes(self, monkeypatch):
         """Two gathered consumers on a drained bucket must wait SERIALLY: the

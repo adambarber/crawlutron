@@ -84,18 +84,18 @@ class TestScheduler:
         ]
 
     async def test_delay_applied_between_same_domain_jobs(self, monkeypatch):
-        """Every job on a delayed domain asks for the jittered per-domain delay.
+        """#577: same-domain fires are SPACED, not staggered once.
 
-        Two same-domain jobs must each request the delay inside production's
-        ``uniform(0.8, 1.2)`` band -- not one, or none.
+        The first fire waits nothing and the second waits one jittered delay --
+        the old herd requested two copies of the delay and fired together.
         """
         sleeps = recorder(monkeypatch)
         scheduler = make_scheduler(delay_seconds=0.1, adaptive=False)
         jobs = [make_job(0, "http://example.com/a"), make_job(1, "http://example.com/b")]
-        await scheduler.run(jobs, ok_worker, failed_result=engine_envelope)
-        assert len(sleeps.in_range(0.08, 0.12)) == 2, (
-            f"expected one per-domain delay request per job, saw {sleeps.delays}"
-        )
+        results = await scheduler.run(jobs, ok_worker, failed_result=engine_envelope)
+        assert results is not None
+        spacing = sleeps.in_range(0.08, 0.12)
+        assert len(spacing) == 1, f"one spaced fire past the free first fire, saw {sleeps.delays}"
 
 
 class TestAdaptiveThrottling:

@@ -45,19 +45,12 @@ def test_scheduler_instances_have_independent_state():
 
     # Independent latency EMAs
     a.record_latency(domain, 1000.0)
-    assert a._domain_latency_ema.get(domain) is not None
-    assert b._domain_latency_ema.get(domain) is None
+    assert a._state(domain).ema is not None
+    assert b._state(domain).ema is None
 
-    # Instance identity of every per-domain map (buckets included)
-    assert a._domain_cooldowns is not b._domain_cooldowns
-    assert a._circuit_open_until is not b._circuit_open_until
-    assert a._domain_min_delay is not b._domain_min_delay
-    assert a._domain_latency_ema is not b._domain_latency_ema
-    assert a._domain_last_seen is not b._domain_last_seen
-    assert a._domain_strategy_pins is not b._domain_strategy_pins
-    assert a._token_buckets is not b._token_buckets
-    assert a._domain_failures is not b._domain_failures
-    assert a._circuit_trip_count is not b._circuit_trip_count
+    # Instance identity of the one per-domain map -- the collapse (#577) made
+    # nine maps one, so the nine identity asserts became this single one.
+    assert a._domain_state is not b._domain_state
 
 
 def test_scheduler_class_docstring_declares_instance_scope():
