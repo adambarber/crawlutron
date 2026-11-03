@@ -131,7 +131,7 @@ async def _park_open_breaker(scheduler: DomainScheduler, domain: str) -> None:
     remaining = _circuit_remaining(scheduler, domain)
     if remaining > 0:
         scheduler.set_domain_cooldown(domain, remaining)
-        await asyncio.sleep(remaining)
+        await asyncio.sleep(min(remaining, MAX_COOLDOWN_WAIT))
 
 
 async def _skip_if_breaker_open[Job: ScheduledJob, Result: SchedulerResult](

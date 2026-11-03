@@ -13,6 +13,10 @@ from tests._recursive_harnesses import drive_recursive_crawl, make_crawl_task
 from tests._result_builders import make_engine_result
 from tests._scheduler_doubles import engine_envelope, make_scheduler, ok_worker, trip_circuit
 
+# Captured before any test patches asyncio.sleep: the advance helper sleeps on
+# the REAL primitive, or its inner sleep(0) re-enters the patch forever.
+_REAL_SLEEP = asyncio.sleep
+
 
 def _task(index: int, url: str) -> CrawlTask:
     return CrawlTask(index=index, original_url=url, normalized_url=canonical(url))
@@ -32,22 +36,31 @@ async def _allows(url):
     return True
 
 
+async def _advance_on_sleep(clock: _Clock, requested: list[float], delay=None):
+    """Record the sleep request and move the injected clock past it, so parks
+    and half-open recoveries are deterministic and zero wall clock."""
+    if delay:
+        requested.append(delay)
+        clock.now += delay
+    await _REAL_SLEEP(0)
+
+
+def _parking_clock(monkeypatch) -> tuple[_Clock, list[float]]:
+    """An injected clock that advances by every sleep the scheduler requests:
+    parks elapse deterministically, zero wall clock."""
+    clock = _Clock()
+    requested: list[float] = []
+    monkeypatch.setattr(
+        "crawlutron.transport.scheduler.asyncio.sleep",
+        lambda delay=None: _advance_on_sleep(clock, requested, delay),
+    )
+    return clock, requested
+
+
 async def test_open_breaker_parks_the_batch_and_records_a_cooldown(monkeypatch):
     """A batch facing an open breaker parks (cooldown recorded), then RUNS when
     the window elapses -- no failed envelope, no requeue, no lost fetch."""
-    clock = _Clock()
-    requested: list[float] = []
-    real_sleep = asyncio.sleep
-
-    async def advance_on_sleep(delay=None):
-        # Record the park request and move the injected clock past the window,
-        # so the half-open recovery is deterministic and zero wall clock.
-        if delay:
-            requested.append(delay)
-            clock.now += delay
-        await real_sleep(0)
-
-    monkeypatch.setattr("crawlutron.transport.scheduler.asyncio.sleep", advance_on_sleep)
+    clock, requested = _parking_clock(monkeypatch)
     scheduler = make_scheduler(circuit_cooldown_base=30.0, clock=clock)
     trip_circuit(scheduler, "example.com")
 
@@ -74,21 +87,24 @@ async def test_open_breaker_parks_the_batch_and_records_a_cooldown(monkeypatch):
     assert results is not None and results[0].status == "success", results
 
 
-async def test_breaker_still_open_after_the_park_cap_fails_the_job(monkeypatch):
-    """Past the park cap (or a re-asserted window) the envelope is terminal:
-    the job fails once through the classified channel, exactly as before."""
-    scheduler = make_scheduler(circuit_cooldown_base=30.0)
+async def _terminal_envelope_results(monkeypatch, *, base: float):
+    """Trip the breaker, run one batch, hand back the terminal results: the
+    shared shape of "the breaker stands and the job fails classified once"."""
+    scheduler = make_scheduler(circuit_cooldown_base=base)
     trip_circuit(scheduler, "example.com")
 
     async def worker(job):
         raise AssertionError(f"the worker must not run while the breaker is open: {job}")
 
     job = _task(0, "http://example.com/a")
-    results = await scheduler.run([job], worker, failed_result=engine_envelope)
+    return await scheduler.run([job], worker, failed_result=engine_envelope)
 
-    assert results is not None
-    assert results[0].classification == "circuit_breaker_open", results
-    assert results[0].diagnostics.get("circuit_breaker") is True, results[0].diagnostics
+
+async def test_breaker_still_open_after_the_park_cap_fails_the_job(monkeypatch):
+    """Past the park cap (or a re-asserted window) the envelope is terminal:
+    the job fails once through the classified channel, exactly as before."""
+    results = await _terminal_envelope_results(monkeypatch, base=30.0)
+    _assert_terminal(results)
 
 
 async def test_recursive_batch_over_an_open_breaker_runs_not_requeues(monkeypatch):
@@ -130,6 +146,32 @@ async def test_recursive_batch_over_an_open_breaker_runs_not_requeues(monkeypatc
     assert all(r.status == "success" for r in result.spill.writes.values()), (
         f"expected successes after parking out the window, got {result.spill.writes}"
     )
+
+
+def _assert_terminal(results) -> None:
+    """The terminal breaker envelope: classified once, breaker-named diagnostics."""
+    assert results is not None
+    assert results[0].classification == "circuit_breaker_open", results
+    assert results[0].diagnostics.get("circuit_breaker") is True, results[0].diagnostics
+
+
+async def test_breaker_window_over_the_park_cap_fails_terminal(monkeypatch):
+    """A breaker window larger than the park cap parks only the cap, then the
+    still-open re-check fails the job terminally -- no oversized wait waves the
+    batch at the origin (#580 follow-up: the cap the park sleeps is pinned)."""
+    clock, requested = _parking_clock(monkeypatch)
+    # Two trips: 200 then 400 (min(400, cooldown ceiling 600)) > the 300 cap.
+    scheduler = make_scheduler(circuit_cooldown_base=200.0, circuit_cooldown=600.0, clock=clock)
+    trip_circuit(scheduler, "example.com", failures=scheduler.circuit_threshold * 2)
+
+    async def worker(job):
+        raise AssertionError(f"the worker must not run while the breaker re-check stands: {job}")
+
+    job = _task(0, "http://example.com/a")
+    results = await scheduler.run([job], worker, failed_result=engine_envelope)
+
+    assert requested == [300.0], f"the park must be capped at 300s: {requested}"
+    _assert_terminal(results)
 
 
 async def test_the_breaker_skip_names_the_open_window_not_none():
