@@ -73,6 +73,15 @@ class DeferredClose[T]:
             self._log.warning("deferred_close_failed", extra={"error": str(e)})
 
     async def drain(self) -> None:
-        """Await every pending close, including ones scheduled while draining."""
+        """Await every pending close, including ones scheduled while draining.
+
+        Each gather re-snapshots ``_pending`` after yielding, so a close
+        scheduled mid-drain is joined too (a snapshot gather abandons it).
+        The ``sleep(0)`` yield is required: ``asyncio.gather`` completes
+        synchronously on an already-done child and would otherwise starve the
+        done-callbacks that drop finished tasks out of ``_pending``, spinning
+        forever on a closed task.
+        """
         while self._pending:
             await asyncio.gather(*list(self._pending), return_exceptions=True)
+            await asyncio.sleep(0)

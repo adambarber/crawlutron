@@ -5,6 +5,7 @@ closed, or refused exactly once per release, and close() reaps everything.
 """
 
 import asyncio
+from collections.abc import Callable
 
 import pytest
 
@@ -35,32 +36,39 @@ async def _assert_queue_holds_no_duplicate(pool: BrowserPool) -> None:
 
 
 async def test_drain_joins_a_close_scheduled_while_draining():
-    """The drain-recheck loop, red-first (a snapshot gather abandons the late
-    close): one close gated mid-drain, a second scheduled DURING the drain;
-    drain() must not complete while either close is unfinished."""
+    """Mutation-discriminated drain-recheck loop.
+
+    Three closes chained mid-drain: first gated inside drain's initial
+    gather; second scheduled while drain is joined on first; third scheduled
+    from within second's close -- strictly inside drain. A snapshot gather
+    (the pre-consolidation hand-rolled shape) abandons second and third; a
+    single-shot ``if`` recheck joins second but abandons third (third is
+    still gated when drain returns); only the committed ``while`` recheck
+    follows the chain to the end and joins all three.
+    """
     owner = DeferredClose(aclose=lambda r: r.close())
-    gated = _GatedRenderer()
-    late = _GatedRenderer()
+    first = _GatedRenderer()
+    second = _GatedRenderer(on_close=lambda: owner.schedule(third))
+    third = _GatedRenderer()
 
-    owner.schedule(gated)
+    owner.schedule(first)
     drain_task = asyncio.ensure_future(owner.drain())
-    for _ in range(3):
-        await asyncio.sleep(0)
+    await first.started.wait()  # first is inside drain's gather
+    owner.schedule(second)  # second scheduled mid-drain
+    first.gate.set()
+    await first.finished.wait()  # first fully done
+    await asyncio.sleep(0)  # let drain's post-first recheck run
 
-    assert not drain_task.done(), "drain returned while a gated close was still pending"
-    owner.schedule(late)  # scheduled WHILE draining: the recheck loop must catch it
-    gated.gates[0].set()
-    for _ in range(3):
-        await asyncio.sleep(0)
-
-    # The discriminator, mutation-verified: under a snapshot gather the drain
-    # completes here while the mid-drain close is still unfinished.
-    assert not drain_task.done(), "drain completed while the mid-drain close was still pending"
-    late.gates[0].set()
+    # DISCRIMINATOR: under a single-shot ``if`` drain exits after first and
+    # abandons second and third; under ``while`` it stays joined on the chain.
+    assert not drain_task.done(), "drain exited before joining the mid-drain close chain"
+    second.gate.set()
+    await second.finished.wait()  # second fully done; third scheduled mid-drain
+    third.gate.set()  # release third so drain can join it
 
     await asyncio.wait_for(drain_task, timeout=1.0)
-    assert gated.closed == 1 and late.closed == 1, (
-        f"the mid-drain close was abandoned: gated={gated.closed}, late={late.closed}"
+    assert first.closed == 1 and second.closed == 1 and third.closed == 1, (
+        f"a mid-drain close was abandoned: first={first.closed}, second={second.closed}, third={third.closed}"
     )
 
 
@@ -71,16 +79,15 @@ async def test_drain_returns_immediately_when_nothing_is_pending():
     await asyncio.wait_for(owner.drain(), timeout=0.1)
 
 
-async def test_schedule_outside_any_loop_declines_silently():
-    """No running loop: the owner declines; the caller's own teardown reclaims.
-    (The closed-loop guard beside it is defense-in-depth for the sync-rebuild
-    shutdown race -- unreachable through a public door without racing loops.)"""
+async def test_schedule_outside_any_loop_declines_honestly():
+    """No running loop: the owner declines (logged) instead of creating a loop
+    or closing on a foreign thread; the caller's own teardown reclaims."""
     owner = DeferredClose(aclose=lambda r: r.close())
     spy = _SpyRenderer()
 
     await asyncio.get_running_loop().run_in_executor(None, owner.schedule, spy)
 
-    assert spy.closed == 0, "schedule must not create a loop or close on a foreign thread"
+    assert spy.closed == 0, "schedule must not close on a foreign thread"
 
 
 async def test_release_closes_a_renderer_retired_by_close():
@@ -158,14 +165,25 @@ async def test_close_reaps_every_retired_renderer_scheduled_after_the_drain():
 
 
 class _GatedRenderer:
-    """Renderer whose close blocks on an event, so the drain is observable."""
+    """Renderer whose close blocks on an event, so the drain is observable.
 
-    def __init__(self) -> None:
+    ``started`` fires once the close coroutine is running inside the owner's
+    gather; ``finished`` once the close body has run. ``on_close``, if given,
+    is awaited at the end of ``close`` -- used to schedule a third close
+    strictly mid-drain (re-entrant schedule during drain).
+    """
+
+    def __init__(self, on_close: Callable[[], None] | None = None) -> None:
         self.closed = 0
-        self.gates: list[asyncio.Event] = []
+        self.gate = asyncio.Event()
+        self.started = asyncio.Event()
+        self.finished = asyncio.Event()
+        self._on_close = on_close
 
     async def close(self) -> None:
-        gate = asyncio.Event()
-        self.gates.append(gate)
-        await gate.wait()
+        self.started.set()
+        await self.gate.wait()
         self.closed += 1
+        self.finished.set()
+        if self._on_close is not None:
+            self._on_close()
