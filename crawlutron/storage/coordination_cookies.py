@@ -37,16 +37,16 @@ class SharedCookieStore(CoordinationStore):
     def load(self, namespace: str, host: str) -> dict[str, str]:
         """Return the cookies for one slot.
 
-        Read-only: a SELECT and a decode, no write transaction. Recency is
-        refreshed through the explicit ``touch`` door (the jar calls it for
-        contributor hosts), so a read never generates WAL frames or holds the
-        SQLite write lock.
+        Read-only: a SELECT and a decode, no write transaction, no lock. WAL
+        snapshot reads proceed while a cross-process writer holds the SQLite
+        write lock during ``BEGIN IMMEDIATE`` (up to ``busy_timeout``), so a
+        read-heavy cookie workload is not serialized behind a slow writer.
+        Recency is refreshed through the explicit ``touch`` door.
         """
-        with self._lock:
-            row = self._conn.execute(
-                "SELECT payload FROM coordination_cookies WHERE namespace = ? AND host = ?",
-                (namespace or "", host),
-            ).fetchone()
+        row = self._conn.execute(
+            "SELECT payload FROM coordination_cookies WHERE namespace = ? AND host = ?",
+            (namespace or "", host),
+        ).fetchone()
         if row is None:
             return {}
         return self._decode(row[0])
@@ -57,14 +57,15 @@ class SharedCookieStore(CoordinationStore):
         evict another tenant's sessions. The union stays transactional.
 
         Lock order: SQLite write lock (``BEGIN IMMEDIATE``) first, then the
-        process store lock -- never the reverse. That single order keeps
-        ``merge``/``put``/``touch``/``clear`` from deadlocking on one another
-        when a cross-process writer holds the write lock.
+        process store lock -- never the reverse. ``BEGIN`` is taken inside the
+        store lock because ``self._conn`` is shared by every executor thread:
+        only one thread may start a transaction on it at a time, or SQLite
+        raises ``cannot start a transaction within a transaction``.
         """
         key = (namespace or "", host)
-        self._conn.execute("BEGIN IMMEDIATE")
-        try:
-            with self._lock:
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
                 row = self._conn.execute(
                     "SELECT payload FROM coordination_cookies WHERE namespace = ? AND host = ?",
                     key,
@@ -78,46 +79,49 @@ class SharedCookieStore(CoordinationStore):
                     (key[0], self._max_hosts),
                 )
                 self._conn.execute("COMMIT")
-        except BaseException:
-            self._conn.execute("ROLLBACK")
-            raise
+            except BaseException:
+                self._conn.execute("ROLLBACK")
+                raise
 
     def clear(self, namespace: str = "") -> None:
         """Clear one namespace, or every slot when ``namespace`` is empty."""
-        self._conn.execute("BEGIN IMMEDIATE")
-        try:
-            with self._lock:
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
                 if namespace:
                     self._conn.execute("DELETE FROM coordination_cookies WHERE namespace = ?", (namespace,))
                 else:
                     self._conn.execute("DELETE FROM coordination_cookies")
                 self._conn.execute("COMMIT")
-        except BaseException:
-            self._conn.execute("ROLLBACK")
-            raise
+            except BaseException:
+                self._conn.execute("ROLLBACK")
+                raise
 
     def touch(self, namespace: str, host: str) -> None:
         """Mark one slot recently used (the read path)."""
-        self._conn.execute("BEGIN IMMEDIATE")
-        try:
-            with self._lock:
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
                 self._conn.execute(
                     "UPDATE coordination_cookies SET touched_at = ? WHERE namespace = ? AND host = ?",
                     (time.time(), namespace or "", host),
                 )
                 self._conn.execute("COMMIT")
-        except BaseException:
-            self._conn.execute("ROLLBACK")
-            raise
+            except BaseException:
+                self._conn.execute("ROLLBACK")
+                raise
 
     def slots_for_namespace(self, namespace: str) -> dict[str, dict[str, str]]:
         """One namespace's slots as {host: cookies}; the WHERE is what keeps a
-        per-request read from deserializing every other tenant's payloads."""
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT host, payload FROM coordination_cookies WHERE namespace = ?",
-                (namespace or "",),
-            ).fetchall()
+        per-request read from deserializing every other tenant's payloads.
+
+        Read-only: no lock, so it proceeds while a cross-process writer holds
+        the SQLite write lock during ``BEGIN IMMEDIATE``.
+        """
+        rows = self._conn.execute(
+            "SELECT host, payload FROM coordination_cookies WHERE namespace = ?",
+            (namespace or "",),
+        ).fetchall()
         return {str(host): self._decode(payload) for host, payload in rows}
 
     def put(self, namespace: str, host: str, value: Mapping[str, str]) -> None:
@@ -126,14 +130,14 @@ class SharedCookieStore(CoordinationStore):
         Scoped to exactly this (namespace, host); only removes records, so a
         prune cannot resurrect a deleted cookie.
         """
-        self._conn.execute("BEGIN IMMEDIATE")
-        try:
-            with self._lock:
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
                 self._upsert_slot(namespace or "", host, json.dumps(dict(value)), time.time())
                 self._conn.execute("COMMIT")
-        except BaseException:
-            self._conn.execute("ROLLBACK")
-            raise
+            except BaseException:
+                self._conn.execute("ROLLBACK")
+                raise
 
     @staticmethod
     def _decode(payload: str) -> dict[str, str]:

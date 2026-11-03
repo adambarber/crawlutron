@@ -146,3 +146,13 @@ def offender_at(path: pathlib.Path, node: ast.AST, *detail: str) -> str:
     The three-argument spelling wraps exactly when the message is longest, so
     twelve wrapped detectors read as clones; joining here keeps them one line."""
     return offender(path, lineno(node), "".join(detail))
+
+
+def attribute_call_on(call: ast.Call, obj: str, attr: str) -> bool:
+    """True if ``call`` is ``<obj>.<attr>(...)``."""
+    return (
+        isinstance(call.func, ast.Attribute)
+        and call.func.attr == attr
+        and isinstance(call.func.value, ast.Name)
+        and call.func.value.id == obj
+    )

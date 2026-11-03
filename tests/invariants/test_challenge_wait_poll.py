@@ -9,25 +9,18 @@ final extract after the readyState poll; the poll itself uses
 
 import ast
 
-from tests.chokepoint_walks import REPO_ROOT, parsed, stmt_offenders
+from tests._walk_assertions import assert_detectors_clean
+from tests.chokepoint_walks import REPO_ROOT, attribute_call_on, offender_at, parsed
 
 _BROWSER = REPO_ROOT / "crawlutron" / "transport" / "browser.py"
 
 
 def test_challenge_wait_injected_clock_two_extracts() -> None:
-    tree = parsed(_BROWSER)
-    offenders: list[str] = []
-    offenders.extend(_raw_sleep_offenders(tree))
-    offenders.extend(_too_many_extract_offenders(tree))
-    assert not offenders, f"browser.py: {offenders}"
-
-
-def _call_of(stmt: ast.AST) -> ast.Call | None:
-    """The call behind an expression statement, unwrapping ``await``."""
-    value = stmt.value if isinstance(stmt, ast.Expr) else None
-    if isinstance(value, ast.Await):
-        value = value.value
-    return value if isinstance(value, ast.Call) else None
+    assert_detectors_clean(
+        parsed(_BROWSER),
+        path=_BROWSER,
+        detectors=(_raw_sleep_offenders, _too_many_extract_offenders),
+    )
 
 
 def _challenge_wait_target(tree: ast.Module) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
@@ -40,50 +33,42 @@ def _challenge_wait_target(tree: ast.Module) -> ast.FunctionDef | ast.AsyncFunct
     return None
 
 
-def _is_raw_asyncio_sleep_stmt(stmt: ast.AST) -> bool:
-    call = _call_of(stmt)
-    return bool(
-        call
-        and isinstance(call.func, ast.Attribute)
-        and call.func.attr == "sleep"
-        and isinstance(call.func.value, ast.Name)
-        and call.func.value.id == "asyncio"
-    )
+def _is_asyncio_sleep(call: ast.Call) -> bool:
+    return attribute_call_on(call, "asyncio", "sleep")
 
 
-def _raw_sleep_offenders(tree: ast.Module) -> list[str]:
-    target = _challenge_wait_target(tree)
-    return stmt_offenders(
-        tree,
-        _BROWSER,
-        lambda node: node is target,
-        _is_raw_asyncio_sleep_stmt,
-        "raw asyncio.sleep in the challenge-wait loop; use self._async_sleep",
-    )
-
-
-def _is_extract_stmt(stmt: ast.AST) -> bool:
-    call = _call_of(stmt)
+def _is_extract_call(call: ast.Call) -> bool:
     return (
-        call is not None
-        and isinstance(call.func, ast.Attribute)
+        isinstance(call.func, ast.Attribute)
         and call.func.attr in {"extract_html", "extract_text"}
         and isinstance(call.func.value, ast.Name)
         and call.func.value.id == "self"
     )
 
 
-def _too_many_extract_offenders(tree: ast.Module) -> list[str]:
+def _calls_in_target(tree: ast.Module, predicate) -> list[ast.Call]:
+    """Every ``ast.Call`` inside ``extract_with_challenge_wait`` matching
+    ``predicate``, regardless of statement shape (``ast.Expr``, ``ast.Assign``,
+    ...)."""
     target = _challenge_wait_target(tree)
     if target is None:
         return []
-    calls = 0
-    for stmt in ast.walk(target):
-        if _is_extract_stmt(stmt):
-            calls += 1
-    if calls > 4:
-        return [
-            f"{_BROWSER.name}:{target.lineno} extract_with_challenge_wait calls "
-            f"extract_html/extract_text {calls} times; cap at 4"
-        ]
-    return []
+    return [n for n in ast.walk(target) if isinstance(n, ast.Call) and predicate(n)]
+
+
+def _raw_sleep_offenders(tree: ast.Module) -> list[str]:
+    return [
+        offender_at(_BROWSER, call, "raw asyncio.sleep in the challenge-wait loop; use self._async_sleep")
+        for call in _calls_in_target(tree, _is_asyncio_sleep)
+    ]
+
+
+def _too_many_extract_offenders(tree: ast.Module) -> list[str]:
+    calls = len(_calls_in_target(tree, _is_extract_call))
+    if calls <= 4:
+        return []
+    target = _challenge_wait_target(tree)
+    return [
+        f"{_BROWSER.name}:{target.lineno} extract_with_challenge_wait calls "
+        f"extract_html/extract_text {calls} times; cap at 4"
+    ]

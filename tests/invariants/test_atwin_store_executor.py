@@ -11,26 +11,22 @@ bound is modest.
 
 import ast
 
-from tests.chokepoint_walks import REPO_ROOT, call_offenders, parsed
+from tests._walk_assertions import assert_detectors_clean
+from tests.chokepoint_walks import REPO_ROOT, attribute_call_on, call_offenders, parsed
 
 _STORE = REPO_ROOT / "crawlutron" / "storage" / "coordination_store.py"
 
 
 def test_atwin_routes_to_store_executor_not_default() -> None:
-    tree = parsed(_STORE)
-    offenders: list[str] = []
-    offenders.extend(_asyncio_to_thread_offenders(tree))
-    offenders.extend(_atwin_executor_offenders(tree))
-    assert not offenders, f"coordination_store.py: {offenders}"
+    assert_detectors_clean(
+        parsed(_STORE),
+        path=_STORE,
+        detectors=(_asyncio_to_thread_offenders, _atwin_executor_offenders),
+    )
 
 
 def _is_asyncio_to_thread(call: ast.Call) -> bool:
-    return (
-        isinstance(call.func, ast.Attribute)
-        and call.func.attr == "to_thread"
-        and isinstance(call.func.value, ast.Name)
-        and call.func.value.id == "asyncio"
-    )
+    return attribute_call_on(call, "asyncio", "to_thread")
 
 
 def _is_run_in_executor_without_store(call: ast.Call) -> bool:
