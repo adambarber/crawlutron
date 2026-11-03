@@ -148,7 +148,10 @@ class BrowserPool:
             logger.debug("browser_pool_released", extra={"available": self._available.qsize()})
             return
         if self._initialized and any(r is worker for r in self._renderers):
-            logger.warning("browser_pool_release_refused_double", extra={"renderer": type(worker).__name__})
+            logger.warning(
+                "browser_pool_release_refused_not_checked_out",
+                extra={"renderer": type(worker).__name__, "checked_out": bool(worker in self._checked_out)},
+            )
             return
         logger.warning(
             "browser_pool_release_refused_foreign",

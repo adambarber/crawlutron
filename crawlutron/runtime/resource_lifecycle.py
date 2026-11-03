@@ -57,8 +57,10 @@ class DeferredClose[T]:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
+            self._log.warning("deferred_close_no_loop", extra={"resource": type(resource).__name__})
             return
         if loop.is_closed():
+            self._log.warning("deferred_close_loop_closed", extra={"resource": type(resource).__name__})
             return
         task = loop.create_task(self._guarded(resource))
         self._pending.add(task)
