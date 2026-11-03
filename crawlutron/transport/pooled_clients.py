@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Protocol, TypeVar, cast
 
 import httpx
 
+from crawlutron.runtime.resource_lifecycle import DeferredClose
 from crawlutron.transport.timeouts import Timeouts
 from crawlutron.vocabulary.identity import DEFAULT_USER_AGENT
 
@@ -80,16 +81,9 @@ def _build_async_client(settings: CrawlerSettings | None = None) -> httpx.AsyncC
 # backlog and reaper cover both httpx and curl_cffi kinds.
 _PENDING_CLIENT_CLOSE: list[PooledClient] = []
 
-
 _PENDING_CLIENT_CLOSE_MAX = 32
 
-
 _PENDING_CLIENT_CLOSE_LOCK = threading.Lock()
-
-
-# Close tasks scheduled from a synchronous context. asyncio holds tasks only
-# weakly, so a strong owner keeps them alive; each done callback evicts its entry.
-_INFLIGHT_CLIENT_CLOSES: set[asyncio.Future] = set()
 
 
 def _queue_superseded_close(old_client: PooledClient) -> PooledClient | None:
@@ -114,7 +108,7 @@ def _release_dropped_client(
 ) -> None:
     """Best-effort release of a client the cap displaced, run outside the close lock.
     Sync close() is called directly when present; otherwise the coroutine
-    teardown is scheduled on the running loop, or the reference dropped if none runs.
+    teardown is scheduled through the shared owner, or the reference dropped if none runs.
     """
     if stale_to_release is None:
         return
@@ -152,27 +146,11 @@ def _client_is_closed(client: PooledClient) -> bool:
 
 
 def _schedule_client_close(client: PooledClient | None, *, is_closed: Callable[[PooledClient], bool]) -> None:
-    """Best-effort asynchronous close of a superseded pooled client: schedule the
-    async aclose on the running loop (never block), so sockets don't leak when
-    the loop changes. is_closed is required, not inferred -- only the owner knows how a kind reports closed.
-    """
+    """Best-effort async close of a superseded pooled client through the shared
+    owner; the caller keeps the predicate, the owner keeps the mechanism."""
     if client is None or is_closed(client):
         return
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        # No running loop: ensure_future would silently build one and strand the
-        # coroutine. Declining is honest -- the queued reference closes it.
-        return
-    if loop.is_closed():
-        # A swap racing loop shutdown: create_task would raise into the synchronous
-        # swap path. The client is dropped; process teardown reclaims its sockets.
-        return
-    task = loop.create_task(_safe_aclose(client))
-    # asyncio holds tasks weakly, so a teardown scheduled from a synchronous
-    # rebuild needs a strong owner; the done callback evicts, bounding the set.
-    _INFLIGHT_CLIENT_CLOSES.add(task)
-    task.add_done_callback(_INFLIGHT_CLIENT_CLOSES.discard)
+    _SUPERSEDED_CLOSE.schedule(client, skip_if_closed=False)
 
 
 class LoopBoundPooledClient:
@@ -351,6 +329,9 @@ async def _safe_aclose(client: PooledClient) -> None:
         # httpx through ``aclose()``; either handle satisfies the await here.
         close = client.aclose if hasattr(client, "aclose") else client.close
         await close()
+
+
+_SUPERSEDED_CLOSE: DeferredClose[PooledClient] = DeferredClose(aclose=_safe_aclose)
 
 
 T = TypeVar("T")

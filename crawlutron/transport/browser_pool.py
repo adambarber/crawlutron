@@ -24,6 +24,7 @@ from crawlutron.runtime.pressure_sizing import (
 from crawlutron.runtime.pressure_sizing import (
     derive_browser_pool_size as derive_browser_pool_size,
 )
+from crawlutron.runtime.resource_lifecycle import DeferredClose
 from crawlutron.transport.browser import BrowserRenderer
 from crawlutron.transport.results import crawl_result_from_exception
 from crawlutron.vocabulary.strategies import BROWSER_HEADED_WARMED, BROWSER_HEADLESS
@@ -58,13 +59,13 @@ class BrowserPool:
         self._warmup_urls = warmup_urls
         self._renderers: list[BrowserRenderer] = []
         self._available: asyncio.Queue[BrowserRenderer] = asyncio.Queue()
-        # Renderers currently checked out: close() must not sweep them mid-render
-        # (its failure there is swallowed -- the leak class #C6 closed); their
-        # close belongs to release()'s retired path.
+        # Renderers currently checked out: close() must not sweep them mid-render.
         self._checked_out: set[BrowserRenderer] = set()
-        # In-flight retired-close tasks, held so nothing is garbage-collected
-        # mid-await and close() can wait them out.
-        self._retired_closes: set[asyncio.Task[None]] = set()
+        # Renderers close() skipped as checked out: release() closes EXACTLY these
+        # -- never inferred from the initialized flag, which is how a second close
+        # or a re-queue of a dead renderer used to slip through (#589).
+        self._retired: set[BrowserRenderer] = set()
+        self._retired_closes = DeferredClose[BrowserRenderer](aclose=lambda r: r.close())
         self._lock = asyncio.Lock()
         self._initialized = False
 
@@ -131,34 +132,28 @@ class BrowserPool:
         return renderer
 
     def release(self, worker: BrowserRenderer) -> None:
-        """Return a renderer to the pool; a renderer retired by ``close`` (checked
-        out while the pool closed) gets its close SCHEDULED by the pool instead of
-        a silent drop -- the drop leaked the renderer's ~700 MiB browser process
-        (#C6). The pool owns the close task: callers stay sync-oblivious.
+        """The release state machine, exact on pool state: retired by close -> the
+        pool schedules its close once (the #C6 leak path); checked out -> back to
+        the queue; owned but idle -> a double or never-acquired release, refused;
+        anything else -> a foreign object, refused. The queue can never hold a
+        renderer twice, and a retired renderer is closed exactly once (#589).
         """
-        self._checked_out.discard(worker)
-        if not self._initialized or not any(r is worker for r in self._renderers):
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                logger.warning(
-                    "browser_pool_release_retired_no_loop", extra={"renderer": type(worker).__name__}
-                )
-                return
-            task = loop.create_task(self._close_retired(worker))
-            self._retired_closes.add(task)
-            task.add_done_callback(self._retired_closes.discard)
+        if worker in self._retired:
+            self._retired.discard(worker)
+            self._retired_closes.schedule(worker)
             return
-        self._available.put_nowait(worker)
-        logger.debug("browser_pool_released", extra={"available": self._available.qsize()})
-
-    async def _close_retired(self, renderer: BrowserRenderer) -> None:
-        """Close a renderer the pool no longer tracks -- the retired path is the
-        LAST chance to reap the process, and its failure is logged, not silent (#C6)."""
-        try:
-            await renderer.close()
-        except Exception as e:
-            logger.warning("browser_pool_retired_close_failed", extra={"error": str(e)})
+        if self._initialized and worker in self._checked_out:
+            self._checked_out.discard(worker)
+            self._available.put_nowait(worker)
+            logger.debug("browser_pool_released", extra={"available": self._available.qsize()})
+            return
+        if self._initialized and any(r is worker for r in self._renderers):
+            logger.warning("browser_pool_release_refused_double", extra={"renderer": type(worker).__name__})
+            return
+        logger.warning(
+            "browser_pool_release_refused_foreign",
+            extra={"renderer": type(worker).__name__, "initialized": self._initialized},
+        )
 
     async def close(self) -> None:
         """Close all idle renderers and drain the queue; CHECKED-OUT renderers are
@@ -168,27 +163,27 @@ class BrowserPool:
         async with self._lock:
             for renderer in self._renderers:
                 if renderer in self._checked_out:
+                    self._retired.add(renderer)
                     continue
                 try:
                     await renderer.close()
                 except Exception as e:
                     logger.warning("browser_pool_renderer_close_failed", extra={"error": str(e)})
             self._renderers.clear()
+            self._checked_out.clear()
             while True:
                 try:
                     self._available.get_nowait()
                 except asyncio.QueueEmpty:
                     break
             self._initialized = False
-            if self._retired_closes:
-                await asyncio.gather(*list(self._retired_closes), return_exceptions=True)
+            await self._retired_closes.drain()
             logger.info("browser_pool_closed", extra={"available": self._available.qsize()})
 
     async def wait_for_retired_closes(self) -> None:
-        """Await every in-flight retired close (the pool's own drain door; close()
-        waits these too) -- the deterministic join for release-then-assert flows."""
-        if self._retired_closes:
-            await asyncio.gather(*list(self._retired_closes), return_exceptions=True)
+        """Await every in-flight retired close -- the deterministic join for
+        release-then-assert flows; close() waits the same drain."""
+        await self._retired_closes.drain()
 
     def __len__(self) -> int:
         """How many renderers the pool holds (before init, none)."""
