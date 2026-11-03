@@ -180,6 +180,8 @@ class CrawlJobState:
         return job
 
 
+#: Late-save tombstone defense: a post-tombstone upsert is a no-op, so a racing
+#: late ``save()`` cannot resurrect data columns on a tombstoned row.
 _UPSERT_JOB_ROW_SQL = """
       INSERT INTO crawl_jobs (job_id, kind, root_url, policy, status,
                                created_at, updated_at, error, stats, in_flight, transient_retries,

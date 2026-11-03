@@ -223,9 +223,9 @@ def _accumulator_delete_outside_tombstone(tree: ast.Module, path: pathlib.Path) 
 
 
 def test_accumulator_delete_only_in_tombstone_row():
-    """JobAccumulators.delete may only be called from _tombstone_row, so no code
-    path can delete another caller's history without an ownership-matched UPDATE
-    landing first (#C1 foreclosure)."""
+    """JobAccumulators.delete is only referenced inside _tombstone_row.
+    A where-called refactoring guard; ordering is pinned behaviorally by tests.
+    """
     offenders: list[str] = []
     for path, tree in app_trees():
         offenders.extend(_accumulator_delete_outside_tombstone(tree, path))
@@ -320,9 +320,8 @@ def test_delete_ownerless_tombstones_a_live_row(tmp_path):
 
 
 def test_concurrent_foreign_deletes_preserve_owner_history(tmp_path):
-    """Concurrent foreign delete_for_caller calls must not destroy owner history.
-    The lock serializes writers; every foreign call returns False and every
-    accumulator row survives (#C1)."""
+    """Concurrent foreign delete_for_caller calls are idempotent no-ops: each
+    returns False and none destroys owner history (serialized by the lock)."""
     store, job = _seeded_job_with_results(tmp_path)
     loaded = store.load(job.job_id)
     loaded.frontier_removed.extend(entry.url for entry in loaded.frontier)
@@ -357,6 +356,36 @@ def test_concurrent_foreign_deletes_preserve_owner_history(tmp_path):
     # Owner delete still works after the foreign storm.
     assert store.delete_for_caller(job.job_id, "key_a") is True
     assert store.load(job.job_id) is None
+
+
+def test_owner_save_interleaved_with_foreign_deletes(tmp_path):
+    """Owner ``save()`` interleaved with foreign deletes: foreign deletes return
+    False and the owner's published state lands intact (history not destroyed)."""
+    store, job = _seeded_job_with_results(tmp_path)
+    loaded = store.load(job.job_id)
+    loaded.visited.add(canonical("http://example.com/page2"))
+    store.save(loaded)
+
+    results: list[bool] = []
+
+    def foreign_delete() -> None:
+        results.append(store.delete_for_caller(job.job_id, "key_b"))
+
+    # Interleave foreign delete with an idempotent owner re-save: every foreign
+    # delete must be a no-op and the owner's state unchanged.
+    for _ in range(4):
+        foreign_delete()
+        loaded2 = store.load(job.job_id)
+        store.save(loaded2)
+
+    assert all(r is False for r in results), "every foreign delete must return False"
+    # Owner state unchanged by the foreign-delete storm.
+    assert store.load(job.job_id) is not None
+    view = store.status_for_caller(job.job_id, "key_a")
+    assert view is not None
+    assert view["visited_size"] == 2
+    assert view["results_count"] == 1
+    assert view["frontier_size"] == 1
 
 
 class TestErrorStampingGatedOnTheFailedCas:
