@@ -8,6 +8,7 @@ from __future__ import annotations
 import contextvars
 import json
 import os
+import threading
 import time
 from collections.abc import Callable, Iterator
 from http import cookiejar as _cookiejar_module
@@ -110,6 +111,9 @@ class CookieJar:
         # (namespace, slot host) -> {name: deleted_at epoch}: the tombstones
         # this jar wrote, pruned after the union window.
         self._deleted: dict[tuple[str, str], dict[str, float]] = {}
+        # Guards every _deleted access; acquired before the medium lock, never
+        # the reverse (_deleted_lock -> medium lock).
+        self._deleted_lock = threading.Lock()
 
     @property
     def store(self) -> SharedCookieStore | None:
@@ -136,10 +140,11 @@ class CookieJar:
         name, record = parsed
         payload = {name: json.dumps(record)}
         key = (namespace or "", record["domain"])
-        if record["value"] == "":
-            self._deleted.setdefault(key, {})[name] = time.time()
-        else:
-            self._deleted.get(key, {}).pop(name, None)
+        with self._deleted_lock:
+            if record["value"] == "":
+                self._deleted.setdefault(key, {})[name] = time.time()
+            else:
+                self._deleted.get(key, {}).pop(name, None)
         self._medium.merge(key[0], key[1], payload)
 
     def cookie_header_for(self, url: NormalizedUrl, *, namespace: str = "") -> str:
@@ -174,31 +179,32 @@ class CookieJar:
         The tombstone's own writer rewrites its slot minus dead records, scoped
         to the (namespace, host) slots holding them -- never another namespace.
         """
-        if not self._deleted:
-            return
-        clock = time.time() if now is None else now
-        for (ns, host), deleted in list(self._deleted.items()):
-            expired = [n for n, at in deleted.items() if clock - at >= TOMBSTONE_WINDOW_SECONDS]
-            if not expired:
-                continue
-            slot = self._medium.load(ns, host)
-            if not slot:
-                self._deleted.pop((ns, host), None)
-                continue
-            keep: dict[str, str] = {}
-            changed = False
-            for name, payload in slot.items():
-                record = _load_record(payload)
-                if record is not None and not _is_expired(record, clock):
-                    keep[name] = payload
-                else:
-                    changed = True
-            if changed:
-                self._medium.put(ns, host, keep)
-            for name in expired:
-                deleted.pop(name, None)
-            if not deleted:
-                self._deleted.pop((ns, host), None)
+        with self._deleted_lock:
+            if not self._deleted:
+                return
+            clock = time.time() if now is None else now
+            for (ns, host), deleted in list(self._deleted.items()):
+                expired = [n for n, at in deleted.items() if clock - at >= TOMBSTONE_WINDOW_SECONDS]
+                if not expired:
+                    continue
+                slot = self._medium.load(ns, host)
+                if not slot:
+                    self._deleted.pop((ns, host), None)
+                    continue
+                keep: dict[str, str] = {}
+                changed = False
+                for name, payload in slot.items():
+                    record = _load_record(payload)
+                    if record is not None and not _is_expired(record, clock):
+                        keep[name] = payload
+                    else:
+                        changed = True
+                if changed:
+                    self._medium.put(ns, host, keep)
+                for name in expired:
+                    deleted.pop(name, None)
+                if not deleted:
+                    self._deleted.pop((ns, host), None)
 
     def clear(self, *, namespace: str = "") -> None:
         """Clear cookies. With a ``namespace``, only that namespace is cleared."""

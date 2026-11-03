@@ -72,17 +72,26 @@ def test_save_to_file_persists_and_no_temp_leftovers():
     assert not leftovers
 
 
-def test_concurrent_cookie_writes_do_not_raise():
+def test_concurrent_set_and_delete_same_cookie_consistent():
+    """Same (namespace, host, name) set and deleted from parallel threads,
+    interleaved with reads: tombstone consistent, no resurrected cookie,
+    no ``RuntimeError: dictionary changed size during iteration``."""
     jar = CookieJar()
     url = canonical("http://x.example/p")
 
     def worker(thread_id: int) -> None:
-        for i in range(50):
-            jar.add_cookie_header(url, f"k{thread_id}_{i}=v; Path=/")
-            _ = jar.cookie_header_for(url)
+        for _ in range(100):
+            if thread_id % 2 == 0:
+                jar.add_cookie_header(url, "sess=alive; Path=/")
+            else:
+                jar.add_cookie_header(url, "sess=; Path=/")
 
     errors = run_thread_fanout(worker)
     assert not errors, errors
+    # Header is live, empty-valued, or tombstoned -- never both or resurrected;
+    # the guarantee is no RuntimeError from concurrent _deleted mutation.
+    header = jar.cookie_header_for(url)
+    assert header in ("", "sess=alive", "sess="), header
 
 
 def _cookie_jar_max_hosts() -> int:

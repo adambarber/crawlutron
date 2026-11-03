@@ -9,6 +9,7 @@ import pytest
 from crawlutron.storage.coordination_cookies import SharedCookieStore
 from crawlutron.transport.cookie_jar import CookieJar
 from tests._policy_factories import canonical
+from tests._thread_fanout import run_thread_fanout
 
 
 @pytest.fixture
@@ -124,3 +125,26 @@ def test_store_rejects_a_hostile_namespace_as_data(tmp_path):
 
     assert store.load(hostile, "example.com") == {"a": "1"}
     assert store.load("", "example.com") == {}
+
+
+def test_concurrent_merge_touch_load_same_slot_union(store_path):
+    """Concurrent merge/touch/load on one SharedCookieStore, same slot:
+    the final slot is the union of every concurrent write, and no thread
+    hits "cannot start a transaction within a transaction" on the shared
+    connection. Reads and writes serialize on self._lock now; on the
+    lock-free-read variant this race surfaces as a sqlite3 error."""
+    store = SharedCookieStore(store_path)
+    ns, host = "tenant-a", "example.com"
+
+    def worker(thread_id: int) -> None:
+        for _ in range(50):
+            store.merge(ns, host, {f"k{thread_id}": f"v{thread_id}"})
+            store.touch(ns, host)
+            _ = store.load(ns, host)
+
+    errors = run_thread_fanout(worker)
+    assert not errors, errors
+
+    slot = store.load(ns, host)
+    expected = {f"k{tid}": f"v{tid}" for tid in range(8)}
+    assert slot == expected, f"slot is not the union: {slot!r} != {expected!r}"

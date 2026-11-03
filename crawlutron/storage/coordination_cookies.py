@@ -16,8 +16,6 @@ from crawlutron.storage.migrations.manifest import StoreSchema
 
 __all__ = ["DEFAULT_MAX_HOSTS_PER_NAMESPACE", "SharedCookieStore"]
 
-# The DNS, robots and sitemap caches are all bounded for the same reason: an unbounded
-# eviction accumulates every host forever.
 DEFAULT_MAX_HOSTS_PER_NAMESPACE = 1024
 
 
@@ -35,32 +33,27 @@ class SharedCookieStore(CoordinationStore):
         self._max_hosts = max(1, int(max_hosts))
 
     def load(self, namespace: str, host: str) -> dict[str, str]:
-        """Return the cookies for one slot.
+        """Return the cookies for one slot under self._lock.
 
-        Read-only: a SELECT and a decode, no write transaction, no lock. WAL
-        snapshot reads proceed while a cross-process writer holds the SQLite
-        write lock during ``BEGIN IMMEDIATE`` (up to ``busy_timeout``), so a
-        read-heavy cookie workload is not serialized behind a slow writer.
-        Recency is refreshed through the explicit ``touch`` door.
+        Serializes all access to the shared connection so a concurrent
+        writer cannot corrupt the transaction state.
         """
-        row = self._conn.execute(
-            "SELECT payload FROM coordination_cookies WHERE namespace = ? AND host = ?",
-            (namespace or "", host),
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT payload FROM coordination_cookies WHERE namespace = ? AND host = ?",
+                (namespace or "", host),
+            ).fetchone()
         if row is None:
             return {}
         return self._decode(row[0])
 
     def merge(self, namespace: str, host: str, cookies: Mapping[str, str]) -> None:
         """Union ``cookies`` into the slot, then evict past the per-namespace cap.
-        Eviction scopes to the slot being written, so one tenant's crawl cannot
-        evict another tenant's sessions. The union stays transactional.
 
-        Lock order: SQLite write lock (``BEGIN IMMEDIATE``) first, then the
-        process store lock -- never the reverse. ``BEGIN`` is taken inside the
-        store lock because ``self._conn`` is shared by every executor thread:
-        only one thread may start a transaction on it at a time, or SQLite
-        raises ``cannot start a transaction within a transaction``.
+        Lock order: store lock (``self._lock``) first, then ``BEGIN IMMEDIATE``
+        on the shared connection -- never the reverse. The store lock is one RLock
+        per database file shared by every instance, so only one thread may start a
+        transaction on ``self._conn`` at a time.
         """
         key = (namespace or "", host)
         with self._lock:
@@ -112,16 +105,13 @@ class SharedCookieStore(CoordinationStore):
                 raise
 
     def slots_for_namespace(self, namespace: str) -> dict[str, dict[str, str]]:
-        """One namespace's slots as {host: cookies}; the WHERE is what keeps a
-        per-request read from deserializing every other tenant's payloads.
+        """One namespace's slots as {host: cookies}; every access under self._lock."""
 
-        Read-only: no lock, so it proceeds while a cross-process writer holds
-        the SQLite write lock during ``BEGIN IMMEDIATE``.
-        """
-        rows = self._conn.execute(
-            "SELECT host, payload FROM coordination_cookies WHERE namespace = ?",
-            (namespace or "",),
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT host, payload FROM coordination_cookies WHERE namespace = ?",
+                (namespace or "",),
+            ).fetchall()
         return {str(host): self._decode(payload) for host, payload in rows}
 
     def put(self, namespace: str, host: str, value: Mapping[str, str]) -> None:
@@ -144,13 +134,14 @@ class SharedCookieStore(CoordinationStore):
         try:
             decoded = json.loads(payload)
         except (TypeError, ValueError):
-            # A row this process did not write and cannot parse is treated as
-            # empty rather than crashing every request that reads the host.
             return {}
         return {str(k): str(v) for k, v in decoded.items()} if isinstance(decoded, dict) else {}
 
     def _upsert_slot(self, namespace: str, host: str, payload: str, touched_at: float) -> None:
-        """The one upsert statement; ``merge`` and ``put`` differ only in their caller."""
+        """The one upsert statement; ``merge`` and ``put`` differ only in their caller.
+
+        Caller must hold self._lock.
+        """
         self._conn.execute(
             "INSERT INTO coordination_cookies (namespace, host, payload, touched_at) "
             "VALUES (?, ?, ?, ?) ON CONFLICT(namespace, host) DO UPDATE SET "

@@ -119,7 +119,7 @@ def hand_rolled_detectors() -> tuple[ArmedHandRolled, ...]:
         _subject_detector(
             "test_coordination_cookies_begin_lock.py",
             "crawlutron/storage/coordination_cookies.py",
-            "_read_methods_use_store_lock",
+            "_read_methods_must_use_store_lock",
         ),
         _subject_detector(
             "test_coordination_cookies_begin_lock.py",
