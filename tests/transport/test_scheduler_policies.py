@@ -1,7 +1,6 @@
 """Breaker, latency EMA and cooldown policies bound per-domain pressure."""
 
 import asyncio
-import time
 
 import pytest
 
@@ -17,10 +16,11 @@ from tests._timing_harnesses import recorder
 
 
 class TestSchedulerCircuitBreaker:
-    def test_record_success_resets_the_escalation_ladder(self, monkeypatch):
+    def test_record_success_resets_the_escalation_ladder(self):
         now = [0.0]
-        monkeypatch.setattr("crawlutron.transport.scheduler.time.monotonic", lambda: now[0])
-        scheduler = make_scheduler(circuit_threshold=1, circuit_cooldown_base=30.0, circuit_cooldown=600.0)
+        scheduler = make_scheduler(
+            circuit_threshold=1, circuit_cooldown_base=30.0, circuit_cooldown=600.0, clock=lambda: now[0]
+        )
         scheduler.record_failure("example.com")  # t=0: first window, base cooldown
         assert scheduler.is_circuit_open("example.com")
         now[0] = 5.0  # still inside that window
@@ -98,12 +98,12 @@ class TestSchedulerPolicies:
         trip_circuit(scheduler, "example.com")
         assert scheduler.is_circuit_open("example.com")
 
-    def test_circuit_breaker_cooldown_expired(self, monkeypatch):
-        scheduler = make_scheduler(global_limit=10, per_domain_limit=10)
+    def test_circuit_breaker_cooldown_expired(self):
+        now = [0.0]
+        scheduler = make_scheduler(global_limit=10, per_domain_limit=10, clock=lambda: now[0])
         trip_circuit(scheduler, "example.com")
         # Half-open: after the window elapses the breaker re-admits the domain.
-        real = time.monotonic
-        monkeypatch.setattr("crawlutron.transport.scheduler.time.monotonic", lambda: real() + 10_000.0)
+        now[0] += 10_000.0
         assert not (scheduler.is_circuit_open("example.com"))
 
     def test_scheduler_record_latency(self):
@@ -127,15 +127,15 @@ class TestSchedulerPolicies:
             f"the 6th request inside one second at 5 rps requested no refill wait: {sleeps.delays}"
         )
 
-    def test_circuit_breaker_exponential_backoff(self, monkeypatch):
+    def test_circuit_breaker_exponential_backoff(self):
         """Consecutive trips escalate the cooldown
         exponentially (base -> doubled -> ... -> cap)."""
         now = [0.0]
-        monkeypatch.setattr("crawlutron.transport.scheduler.time.monotonic", lambda: now[0])
         s = make_scheduler(
             circuit_threshold=5,
             circuit_cooldown_base=30.0,
             circuit_cooldown=600.0,
+            clock=lambda: now[0],
         )
 
         def still_open_after(failures: int, elapsed: float) -> bool:
@@ -271,26 +271,25 @@ class TestCooldownPurgeCadence:
         # the bound is derived rather than repeated: 250 sets over 100-set intervals is three purges.
         assert calls["n"] == 250 // COOLDOWN_PURGE_INTERVAL
 
-    def test_expired_cooldowns_are_still_reclaimed(self, monkeypatch):
+    def test_expired_cooldowns_are_still_reclaimed(self):
         """Amortizing must not let expired entries accumulate indefinitely:
         once the interval elapses only expired entries drop, and the fresh
         cooldown for the setting domain survives."""
-        fake_now = [1000.0]
-        monkeypatch.setattr("crawlutron.transport.scheduler.time.time", lambda: fake_now[0])
-        scheduler = make_scheduler()
+        now = [1000.0]
+        scheduler = make_scheduler(clock=lambda: now[0])
         scheduler.set_domain_cooldown("old.test", 10.0)
-        fake_now[0] = 1100.0  # the first cooldown has elapsed
+        now[0] = 1100.0  # the first cooldown has elapsed
         # Burn past the interval so the amortized purge fires.
         for i in range(COOLDOWN_PURGE_INTERVAL + 1):
             scheduler.set_domain_cooldown(f"d{i}.test", 5.0)
         assert "old.test" not in scheduler.domain_cooldowns
         assert scheduler.domain_cooldowns, "fresh cooldowns were dropped"
 
-    def test_a_fresh_cooldown_is_never_purged_by_the_amortized_run(self, monkeypatch):
+    def test_a_fresh_cooldown_is_never_purged_by_the_amortized_run(self):
         """The domain that just earned a cooldown is never removed by the purge
         that follows its own set."""
-        monkeypatch.setattr("crawlutron.transport.scheduler.time.time", lambda: 1000.0)
-        scheduler = make_scheduler()
+        now = [1000.0]
+        scheduler = make_scheduler(clock=lambda: now[0])
         scheduler.set_domain_cooldown("rate-limited.test", 30.0)
         assert "rate-limited.test" in scheduler.domain_cooldowns
         assert scheduler.domain_cooldowns["rate-limited.test"] > 1000.0

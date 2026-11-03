@@ -1,6 +1,5 @@
 """Crawl engine: strategy dispatch, chain edges and scope resolution."""
 
-import time
 import urllib.error
 
 import pytest
@@ -254,14 +253,24 @@ class TestEngineChainEdges:
             body=b"rate limited",
         )
 
-        scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0)
+        now = [1000.0]
+        scheduler = DomainScheduler(
+            global_limit=1, per_domain_limit=1, delay_seconds=0.0, clock=lambda: now[0]
+        )
         result = await run_chain(
             "http://example.com/", fetcher, policy=http_policy(extraction="dom"), scheduler=scheduler
         )
         assert result.classification == "rate_limited"
         cooldowns = scheduler.domain_cooldowns
         assert "example.com" in cooldowns
-        assert abs(cooldowns["example.com"] - (time.time() + 30)) <= 5
+        # The park is the Retry-After duration on the ONE clock, not a wall
+        # stamp (#580): still standing at 30-5, gone past 30.
+        now[0] += 25.0
+        scheduler.purge_expired()
+        assert "example.com" in cooldowns
+        now[0] += 10.0
+        scheduler.purge_expired()
+        assert "example.com" not in scheduler.domain_cooldowns
 
     async def test_robots_crawl_delay_sets_domain_min_delay(self, monkeypatch):
         """A host's robots Crawl-delay is honored as a

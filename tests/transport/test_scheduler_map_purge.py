@@ -50,10 +50,9 @@ def test_in_flight_reservation_is_never_purged():
     cadence purge fires while peers hold reservations; a record carrying
     ``next_fire > now`` must survive it.
     """
-    import time as _time
-
-    s = _scheduler()
-    s._state("spaced.test").next_fire = _time.monotonic() + 10.0
+    now = [1000.0]
+    s = _scheduler(clock=lambda: now[0])
+    s._state("spaced.test").next_fire = now[0] + 10.0
     s.purge_expired()
     assert "spaced.test" in s._domain_state, "a live reservation was purged mid-run"
 
@@ -82,9 +81,8 @@ def test_committed_politeness_floor_survives_the_purge():
 def test_a_fully_inert_record_is_dropped():
     """The collapse's purpose: every field inert -> the record goes, including
     the retired domain's gate/bucket weight."""
-    import time as _time
-
-    s = _scheduler()
-    s._state("dead.test").next_fire = _time.monotonic() - 1.0  # spent reservation
+    now = [1000.0]
+    s = _scheduler(clock=lambda: now[0])
+    s._state("dead.test").next_fire = now[0] - 1.0  # spent reservation
     s.purge_expired()
     assert "dead.test" not in s._domain_state

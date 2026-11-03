@@ -86,19 +86,20 @@ SchedulerWorker = Callable[[_Job], Awaitable[_Result]]
 class TokenBucket:
     """Token bucket rate limiter: refills at ``rate`` tokens/sec, caps at ``capacity``."""
 
-    def __init__(self, rate: float, capacity: int = 5) -> None:
+    def __init__(
+        self, rate: float, capacity: int = 5, *, clock: Callable[[], float] = time.monotonic
+    ) -> None:
         self.rate = rate
         self.capacity = capacity
         self.tokens = float(capacity)
-        self.last_refill = time.monotonic()
+        self._clock = clock
+        self.last_refill = clock()
 
     def consume(self, tokens: float = 1.0) -> float:
-        """Reserve ``tokens``, returning seconds to wait before firing (0 if available).
-
-        A short caller drives the balance negative, so overlapping callers queue
-        behind what was taken (the max_rps herd); rate >= 1/MAX_RATE_LIMIT_RPS.
-        """
-        now = time.monotonic()
+        """Reserve ``tokens``, returning seconds to wait before firing (0 if
+        available). A short caller drives the balance negative, so overlapping
+        callers queue behind what was taken (the max_rps herd)."""
+        now = self._clock()
         elapsed = now - self.last_refill
         self.tokens = min(self.capacity, self.tokens + elapsed * self.rate)
         self.last_refill = now
@@ -110,9 +111,18 @@ class TokenBucket:
 MAX_COOLDOWN_WAIT = 300.0
 
 
+def _remaining_until(expiry: float | None, now: float) -> float:
+    """Seconds a stamped deadline still stands, capped; 0 when elapsed or absent.
+    The ONE remaining-computation for every nap in this package (#580): each
+    reader once compared its own clock family against the expiry."""
+    if expiry is None:
+        return 0.0
+    return max(0.0, min(expiry - now, MAX_COOLDOWN_WAIT))
+
+
 def _circuit_remaining(scheduler: DomainScheduler, domain: str) -> float:
     """Seconds left on the domain's open breaker window, 0 when closed/half-open."""
-    return scheduler._state(domain).breaker_remaining()
+    return scheduler._state(domain).breaker_remaining(now=scheduler._clock())
 
 
 async def _park_open_breaker(scheduler: DomainScheduler, domain: str) -> None:
@@ -121,7 +131,7 @@ async def _park_open_breaker(scheduler: DomainScheduler, domain: str) -> None:
     remaining = _circuit_remaining(scheduler, domain)
     if remaining > 0:
         scheduler.set_domain_cooldown(domain, remaining)
-        await asyncio.sleep(min(remaining, MAX_COOLDOWN_WAIT))
+        await asyncio.sleep(remaining)
 
 
 async def _skip_if_breaker_open[Job: ScheduledJob, Result: SchedulerResult](
@@ -196,8 +206,10 @@ class DomainScheduler:
         adaptive_max_delay: float = 30.0,
         adaptive_latency_factor: float = 1.0,
         adaptive_smoothing: float = 0.2,
-        clock: Callable[[], float] = time.time,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
+        # THE one clock: every timestamp here flows through it, monotonic --
+        # an in-memory timeline no wall step can bend (#580).
         self._clock = clock
         self._global_limit = max(1, global_limit)
         self._per_domain_limit = max(1, per_domain_limit)
@@ -237,7 +249,7 @@ class DomainScheduler:
         map per 429 is quadratic.
         """
         if seconds > 0:
-            self._state(domain).cooldown_until = time.time() + seconds
+            self._state(domain).cooldown_until = self._clock() + seconds
         self._sets_since_purge += 1
         if self._sets_since_purge >= COOLDOWN_PURGE_INTERVAL:
             self._sets_since_purge = 0
@@ -269,6 +281,7 @@ class DomainScheduler:
         """Charge one failure against the domain's breaker (escalation math
         lives with the counters it escalates, in DomainState)."""
         self._state(domain).charge_failure(
+            now=self._clock(),
             threshold=self.circuit_threshold,
             base=self._circuit_cooldown_base,
             cooldown_max=self._circuit_cooldown_max,
@@ -276,7 +289,7 @@ class DomainScheduler:
 
     def is_circuit_open(self, domain: str) -> bool:
         """Check if the circuit breaker is open for a domain."""
-        return self._state(domain).breaker_open()
+        return self._state(domain).breaker_open(now=self._clock())
 
     def record_latency(self, domain: str, latency_ms: float) -> None:
         """Feed observed response latency (ms) into the adaptive delay estimator.
@@ -336,14 +349,12 @@ class DomainScheduler:
     def purge_expired(self) -> None:
         """Drop every record whose fields are all inert; liveness is per-field
         inside :class:`DomainState`, so one predicate owns the whole question."""
-        wall_now, mono_now, clock_now = time.time(), time.monotonic(), self._clock()
+        now = self._clock()
         self._domain_state = {
             domain: state
             for domain, state in self._domain_state.items()
             if state.live(
-                wall_now=wall_now,
-                mono_now=mono_now,
-                clock_now=clock_now,
+                now=now,
                 window=self._circuit_cooldown_max,
                 pin_ttl=_STRATEGY_PIN_TTL_SECONDS,
                 gate_limit=self._per_domain_limit,
@@ -387,11 +398,9 @@ class DomainScheduler:
             # domain blocks every other domain's slot (cooldown deadlock).
             cooldown_expiry = self._state(job.domain).cooldown_until
             if cooldown_expiry is not None:
-                now = time.time()
-                if now < cooldown_expiry:
-                    # Cap the wait: a hostile Retry-After must not park this
-                    # gather for years; beyond the cap the origin re-asserts.
-                    await asyncio.sleep(min(cooldown_expiry - now, MAX_COOLDOWN_WAIT))
+                remaining = _remaining_until(cooldown_expiry, self._clock())
+                if remaining > 0:
+                    await asyncio.sleep(remaining)
             if await self._run_one_gated(job, global_gate, deliver, worker, failed_result):
                 return
 
@@ -412,7 +421,7 @@ class DomainScheduler:
         reservation is never refunded (conservative direction).
         """
         state = self._state(domain)
-        now = time.monotonic()
+        now = self._clock()
         fire_at = max(now, state.next_fire or 0.0)
         state.next_fire = fire_at + jittered_delay(self.current_delay(domain))
         return fire_at - now
@@ -426,7 +435,7 @@ class DomainScheduler:
         if self._max_rps > 0:
             state = self._state(job.domain)
             if state.bucket is None:
-                state.bucket = TokenBucket(rate=self._max_rps)
+                state.bucket = TokenBucket(rate=self._max_rps, clock=self._clock)
             bucket_wait = state.bucket.consume(1.0)
         # Reserve under the gate, sleep OUTSIDE it: no gate sees a sleep, and
         # per-domain slots stay live during the nap.
@@ -462,9 +471,9 @@ class DomainScheduler:
             # remainder or arrived after expiry, it fires after the domain's
             # next slot -- not shoulder-to-shoulder with every peer waking at
             # the same expiry (the herd convergence a raw sleep produced).
-            remaining = cooldown_expiry - time.time()
+            remaining = _remaining_until(cooldown_expiry, self._clock())
             if remaining > 0:
-                await asyncio.sleep(min(remaining, MAX_COOLDOWN_WAIT))
+                await asyncio.sleep(remaining)
             # Reservation only: the bucket reserve was already spent.
             async with self._state(job.domain).gate:
                 reserve_wait = self._reserve_fire(job.domain)

@@ -36,7 +36,6 @@ async def test_open_breaker_parks_the_batch_and_records_a_cooldown(monkeypatch):
     """A batch facing an open breaker parks (cooldown recorded), then RUNS when
     the window elapses -- no failed envelope, no requeue, no lost fetch."""
     clock = _Clock()
-    monkeypatch.setattr("crawlutron.transport.scheduler.time.monotonic", clock)
     requested: list[float] = []
     real_sleep = asyncio.sleep
 
@@ -49,7 +48,7 @@ async def test_open_breaker_parks_the_batch_and_records_a_cooldown(monkeypatch):
         await real_sleep(0)
 
     monkeypatch.setattr("crawlutron.transport.scheduler.asyncio.sleep", advance_on_sleep)
-    scheduler = make_scheduler(circuit_cooldown_base=30.0)
+    scheduler = make_scheduler(circuit_cooldown_base=30.0, clock=clock)
     trip_circuit(scheduler, "example.com")
 
     ran = []
@@ -96,7 +95,6 @@ async def test_recursive_batch_over_an_open_breaker_runs_not_requeues(monkeypatc
     """The storm end-to-end: a recursive batch over an open breaker must run each
     job once after parking -- no circuit_breaker_open envelopes, no requeue churn."""
     clock = _Clock()
-    monkeypatch.setattr("crawlutron.transport.scheduler.time.monotonic", clock)
     real_sleep = asyncio.sleep
 
     async def advance_on_sleep(delay=None):
@@ -109,7 +107,7 @@ async def test_recursive_batch_over_an_open_breaker_runs_not_requeues(monkeypatc
     monkeypatch.setattr("crawlutron.orchestration.admission_stall.asyncio.sleep", advance_on_sleep)
 
     scheduler = DomainScheduler(
-        global_limit=4, per_domain_limit=4, delay_seconds=0.0, circuit_cooldown_base=30.0
+        global_limit=4, per_domain_limit=4, delay_seconds=0.0, circuit_cooldown_base=30.0, clock=clock
     )
     trip_circuit(scheduler, "a")
     ran = []

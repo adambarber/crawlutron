@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -18,11 +17,17 @@ class DomainState:
     A field is dropped only when it is inert; liveness is per-field (see
     ``live``), so an in-flight reservation or a half-climbed failure ladder
     survives a mid-run purge. The breaker math lives here with the counters
-    it escalates; the scheduler keeps only the knobs.
+    it escalates; the scheduler keeps only the knobs. Every timestamp here is
+    a reading of the scheduler's ONE injected monotonic clock, handed in as
+    ``now`` (#580): no method of this class reads a clock of its own, so a
+    second family cannot re-enter through a side door.
     """
 
     def __init__(self) -> None:
-        # Wall clock (Retry-After) vs monotonic (circuits, reservations, buckets).
+        # Monotonic fire-time reservation; None = the domain owes no spacing.
+        self.next_fire: float | None = None
+        # Monotonic cooldown expiry (Retry-After); stamped from the injected
+        # clock at the setter, so NTP steps cannot bend it (#580).
         self.cooldown_until: float | None = None
         self.circuit_open_until: float | None = None
         self.failures = 0
@@ -30,8 +35,6 @@ class DomainState:
         # Robots Crawl-delay floor: never time-elapsed, purged only by liveness
         # of the whole record, bounded by the politeness ceiling at the setter.
         self.min_delay = 0.0
-        # Monotonic fire-time reservation; None = the domain owes no spacing.
-        self.next_fire: float | None = None
         self.ema: float | None = None
         self.last_seen: float | None = None
         self.pin: tuple[str, float] | None = None
@@ -44,9 +47,7 @@ class DomainState:
     def live(
         self,
         *,
-        wall_now: float,
-        mono_now: float,
-        clock_now: float,
+        now: float,
         window: float,
         pin_ttl: float,
         gate_limit: int,
@@ -56,19 +57,19 @@ class DomainState:
         Every liveness rule in one place -- the hand-enumerated six-map relay
         this replaces forgot three maps; a fourth state field cannot.
         """
-        if self.cooldown_until is not None and self.cooldown_until > wall_now:
+        if self.cooldown_until is not None and self.cooldown_until > now:
             return True
-        if self.circuit_open_until is not None and self.circuit_open_until > mono_now:
+        if self.circuit_open_until is not None and self.circuit_open_until > now:
             return True
-        if self.next_fire is not None and self.next_fire > mono_now:
+        if self.next_fire is not None and self.next_fire > now:
             return True
         if self.failures > 0 or self.trips > 0:
             return True
         if self.min_delay > 0:
             return True
-        if self.pin is not None and clock_now - self.pin[1] <= pin_ttl:
+        if self.pin is not None and now - self.pin[1] <= pin_ttl:
             return True
-        if self.ema is not None and self.last_seen is not None and self.last_seen > clock_now - window:
+        if self.ema is not None and self.last_seen is not None and self.last_seen > now - window:
             return True
         # In use right now: the gate's counter is below its limit -- any holder
         # or waiter. ``locked()`` alone is "at capacity" and misses a half-full
@@ -81,7 +82,7 @@ class DomainState:
         # other reason, never a reason by itself (idle domains drop theirs).
         return False
 
-    def charge_failure(self, *, threshold: int, base: float, cooldown_max: float) -> None:
+    def charge_failure(self, *, now: float, threshold: int, base: float, cooldown_max: float) -> None:
         """Count one failure; open the breaker past ``threshold`` with an
         exponentially escalating cooldown (base, base*2, ... capped) -- a tarpit
         parks progressively longer. Total observations charged, not URLs: a
@@ -91,7 +92,7 @@ class DomainState:
         n = self.failures // threshold
         if n >= 1 and n > self.trips:
             self.trips = n
-            self.circuit_open_until = time.monotonic() + min(base * (2 ** (n - 1)), cooldown_max)
+            self.circuit_open_until = now + min(base * (2 ** (n - 1)), cooldown_max)
 
     def reset_breaker(self) -> None:
         """Clear the failure ladder -- counters only. An open window is NOT
@@ -102,12 +103,12 @@ class DomainState:
         self.failures = 0
         self.trips = 0
 
-    def breaker_open(self) -> bool:
+    def breaker_open(self, *, now: float) -> bool:
         """Whether the breaker window still stands; a served cooldown half-opens."""
         expiry = self.circuit_open_until
         if expiry is None:
             return False
-        if time.monotonic() >= expiry:
+        if now >= expiry:
             # Half-open: reset so a recovered domain is not penalised by a
             # stale escalation.
             self.failures = 0
@@ -116,12 +117,12 @@ class DomainState:
             return False
         return True
 
-    def breaker_remaining(self) -> float:
+    def breaker_remaining(self, *, now: float) -> float:
         """Seconds left on an open window, 0 when closed."""
         expiry = self.circuit_open_until
         if expiry is None:
             return 0.0
-        return max(0.0, expiry - time.monotonic())
+        return max(0.0, expiry - now)
 
     def feed_latency(self, latency_ms: float, *, smoothing: float, clock_now: float) -> None:
         """Fold one latency observation into the EMA (negative is a bad

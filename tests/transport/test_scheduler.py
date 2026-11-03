@@ -1,7 +1,5 @@
 """The run queue admits, throttles and breaks circuits per domain."""
 
-import time
-
 import pytest
 
 from crawlutron.models.crawl_job import CrawlJob
@@ -35,14 +33,57 @@ class TestScheduler:
         # not applied unconditionally.
         assert jittered_delay(0.0) == 0.0
 
-    def test_set_domain_cooldown_is_in_future(self):
-        scheduler = make_scheduler(global_limit=5, per_domain_limit=3, delay_seconds=0.1)
+    def test_set_domain_cooldown_keeps_the_record_live_for_the_window(self):
+        """A fresh cooldown parks the domain for (just under) the declared
+        window on the injected clock -- behavior, not a wall-time stamp pin."""
+        now = [1000.0]
+        scheduler = make_scheduler(
+            global_limit=5, per_domain_limit=3, delay_seconds=0.1, clock=lambda: now[0]
+        )
         scheduler.set_domain_cooldown("example.com", 5.0)
-        cooldowns = scheduler.domain_cooldowns
-        assert "example.com" in cooldowns
-        expiry = cooldowns["example.com"]
-        assert expiry > time.time()
-        assert expiry - time.time() > 4.0
+        scheduler.purge_expired()
+        assert "example.com" in scheduler.domain_cooldowns
+        # Still standing at window-1; gone at window+1 (the purge is the
+        # public door for "is the debt still owed").
+        now[0] += 4.0
+        scheduler.purge_expired()
+        assert "example.com" in scheduler.domain_cooldowns
+        now[0] += 2.0
+        scheduler.purge_expired()
+        assert "example.com" not in scheduler.domain_cooldowns
+
+    async def test_cooldown_naps_only_the_remaining_window(self, monkeypatch):
+        """A cooldown's park is the REMAINING duration on the one clock, and a
+        served cooldown requests no nap at all (#580): stamp and read share the
+        injected clock, so no wall-clock step can bend the wait either way."""
+        sleeps = recorder(monkeypatch)
+        now = [1000.0]
+        scheduler = make_scheduler(delay_seconds=0.05, clock=lambda: now[0])
+        scheduler.set_domain_cooldown("example.com", 0.3)
+        now[0] += 0.15  # half the window elapsed before the batch fires
+        job = make_job(0, "http://example.com/")
+
+        async def worker(ran_job: CrawlJob) -> EngineCrawlResult:
+            return make_result(ran_job.url.raw, ran_job.domain)
+
+        results = await scheduler.run([job], worker, failed_result=engine_envelope)
+        assert results is not None and results[0].status == "success"
+        # Each park reads the remaining window on the ONE clock (F2 double-check).
+        naps = [d for d in sleeps.delays if d >= 0.1]
+        assert naps == [pytest.approx(0.15, abs=1e-9)] * len(naps) and naps, (
+            "the park must be the remaining window on the ONE clock, not a "
+            f"re-derivation from another family: {sleeps.delays}"
+        )
+
+        # Served: the same domain re-fires with no cooldown debt left. The
+        # recorder accumulates across runs, so compare against the snapshot.
+        before = len(sleeps.delays)
+        now[0] += 1.0
+        results = await scheduler.run([job], worker, failed_result=engine_envelope)
+        served = results is not None and results[0].status == "success"
+        assert served and not any(d >= 0.1 for d in sleeps.delays[before:]), (
+            f"an elapsed cooldown requested a nap: {sleeps.delays[before:]}"
+        )
 
     async def test_cooldown_delay_applied_to_domain(self, monkeypatch):
         """A domain in cooldown must have the cooldown awaited before the worker.

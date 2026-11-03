@@ -9,7 +9,6 @@ is itself a herd.
 from __future__ import annotations
 
 import asyncio
-import time
 from typing import TypedDict
 
 import pytest
@@ -102,29 +101,26 @@ class TestCooldownWakeReReserves:
     """
 
     async def test_peers_waking_from_one_cooldown_re_reserve(self, monkeypatch):
-        """Zero real sleep: a fake wall clock advances when a COOLDOWN-sized nap
-        is requested (only the scheduler's cooldown sleeps take that size), so
-        the 429 expiry passes deterministically and instantly."""
+        """Zero real sleep: the ONE injected clock advances whenever a wait is
+        requested -- cooldown naps and spacing waits share it since #580, so
+        every requested sleep just moves the clock. The 429 expiry passes
+        deterministically and instantly."""
         real_sleep = asyncio.sleep
         requested: list[float] = []
-        wall = {"now": time.time()}
-        scheduler = _scheduler(delay_seconds=0.15)
+        now = {"t": 1000.0}
+        scheduler = _scheduler(delay_seconds=0.15, clock=lambda: now["t"])
         started = asyncio.Event()
 
-        def fake_time() -> float:
-            return wall["now"]
-
-        async def fake_wall_sleep(delay, *args, **kwargs):
+        async def fake_clocked_sleep(delay, *args, **kwargs):
             del args, kwargs
             requested.append(delay)
-            # A cooldown nap is the only large sleep on the WALL clock; it
-            # costs zero real time -- it just moves the fake clock.
-            if delay >= 0.1:
-                wall["now"] += delay
+            # Every wait is on the one clock now: any requested delay just
+            # moves it (zero real time).
+            if delay > 0:
+                now["t"] += delay
             await real_sleep(0)
 
-        monkeypatch.setattr(asyncio, "sleep", fake_wall_sleep)
-        monkeypatch.setattr(time, "time", fake_time)
+        monkeypatch.setattr(asyncio, "sleep", fake_clocked_sleep)
 
         async def worker(job):
             if job.index == 0:
