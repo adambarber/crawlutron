@@ -49,6 +49,7 @@ class DomainState:
         clock_now: float,
         window: float,
         pin_ttl: float,
+        gate_limit: int,
     ) -> bool:
         """True while any field still owes the domain something.
 
@@ -68,6 +69,13 @@ class DomainState:
         if self.pin is not None and clock_now - self.pin[1] <= pin_ttl:
             return True
         if self.ema is not None and self.last_seen is not None and self.last_seen > clock_now - window:
+            return True
+        # In use right now: the gate's counter is below its limit -- any holder
+        # or waiter. ``locked()`` alone is "at capacity" and misses a half-full
+        # gate (limit 2, one holder): a record dropped then re-mints a FULL
+        # fresh gate under the old holder and the cap silently widens
+        # (#577 adversarial F1). _value is CPython-stable (starts at the limit).
+        if self.gate._value < gate_limit:
             return True
         # The bucket rides along: it is kept while the record is live for any
         # other reason, never a reason by itself (idle domains drop theirs).

@@ -346,6 +346,7 @@ class DomainScheduler:
                 clock_now=clock_now,
                 window=self._circuit_cooldown_max,
                 pin_ttl=_STRATEGY_PIN_TTL_SECONDS,
+                gate_limit=self._per_domain_limit,
             )
         }
 
@@ -457,9 +458,18 @@ class DomainScheduler:
             return True
         cooldown_expiry = self._state(job.domain).cooldown_until
         if cooldown_expiry is not None:
+            # A cooldown held this domain: whether this job slept out the
+            # remainder or arrived after expiry, it fires after the domain's
+            # next slot -- not shoulder-to-shoulder with every peer waking at
+            # the same expiry (the herd convergence a raw sleep produced).
             remaining = cooldown_expiry - time.time()
             if remaining > 0:
                 await asyncio.sleep(min(remaining, MAX_COOLDOWN_WAIT))
+            # Reservation only: the bucket reserve was already spent.
+            async with self._state(job.domain).gate:
+                reserve_wait = self._reserve_fire(job.domain)
+            if reserve_wait > 0:
+                await asyncio.sleep(reserve_wait)
         async with self._state(job.domain).gate:
             async with global_gate:
                 try:
