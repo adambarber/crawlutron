@@ -194,6 +194,7 @@ ON CONFLICT(job_id) DO UPDATE SET
           stats=excluded.stats,
           in_flight=excluded.in_flight,
           transient_retries=excluded.transient_retries
+WHERE deleted_at IS NULL
 """
 
 

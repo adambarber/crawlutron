@@ -7,6 +7,7 @@ mid-batch pause/cancel; ``save()`` never touches status (atomic CAS only).
 import ast
 import asyncio
 import pathlib
+import threading
 
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.storage.job_store import CrawlJobState, JobStatus, JobStore
@@ -39,6 +40,37 @@ def _seeded_job(tmp_path, owner: str = "key_a") -> tuple[JobStore, CrawlJobState
     loaded.visited.add(canonical("http://example.com/page1"))
     store.save(loaded)
     return store, job
+
+
+def _seeded_job_with_results(tmp_path, owner: str = "key_a") -> tuple[JobStore, CrawlJobState]:
+    """One owned job with a visited page and one result row; tests add frontier on top."""
+    store, job = _seeded_job(tmp_path, owner=owner)
+    loaded = store.load(job.job_id)
+    loaded.results = [{"url": "http://example.com/page1", "status": "success"}]
+    store.save(loaded)
+    return store, job
+
+
+def assert_history_intact(
+    store: JobStore,
+    job_id: str,
+    caller_id: str,
+    *,
+    visited: set,
+    results: list,
+    frontier: list[str],
+) -> None:
+    """Assert the job row and all accumulator history survive for the caller."""
+    after = store.status_for_caller(job_id, caller_id)
+    assert after is not None
+    assert after["visited_size"] == len(visited)
+    assert after["results_count"] == len(results)
+    assert after["frontier_size"] == len(frontier)
+    surviving = store.load_for_caller(job_id, caller_id)
+    assert surviving is not None
+    assert surviving.visited == visited
+    assert surviving.results == results
+    assert [e.url.raw for e in surviving.frontier] == frontier
 
 
 def _running_job(store: JobStore, job_id: str = "j1") -> CrawlJobState:
@@ -234,11 +266,8 @@ def test_set_status_cannot_flip_a_tombstoned_row(tmp_path):
 def test_foreign_delete_for_caller_leaves_history_intact(tmp_path):
     """A foreign caller must not destroy another caller's results + visited + frontier.
     The UPDATE decides ownership before any accumulator row is touched (#C1)."""
-    store = _store(tmp_path)
-    job = store.create("http://example.com/", CrawlPolicy(), owner="key_a")
+    store, job = _seeded_job(tmp_path)
     loaded = store.load(job.job_id)
-    assert loaded is not None
-    loaded.visited.add(canonical("http://example.com/page1"))
     loaded.visited.add(canonical("http://example.com/page2"))
     loaded.results = [{"url": "http://example.com/page1", "status": "success"}]
     loaded.frontier_removed.extend(entry.url for entry in loaded.frontier)
@@ -257,27 +286,22 @@ def test_foreign_delete_for_caller_leaves_history_intact(tmp_path):
     assert store.delete_for_caller(job.job_id, "key_b") is False
 
     # Row and all children survive for the owner.
-    after = store.status_for_caller(job.job_id, "key_a")
-    assert after is not None
-    assert after["visited_size"] == 2
-    assert after["results_count"] == 1
-    assert after["frontier_size"] == 1
-    surviving = store.load_for_caller(job.job_id, "key_a")
-    assert surviving is not None
-    assert surviving.visited == {
-        canonical("http://example.com/page1"),
-        canonical("http://example.com/page2"),
-    }
-    assert surviving.results == [{"url": "http://example.com/page1", "status": "success"}]
-    assert [e.url.raw for e in surviving.frontier] == ["http://example.com/page3"]
+    assert_history_intact(
+        store,
+        job.job_id,
+        "key_a",
+        visited={
+            canonical("http://example.com/page1"),
+            canonical("http://example.com/page2"),
+        },
+        results=[{"url": "http://example.com/page1", "status": "success"}],
+        frontier=["http://example.com/page3"],
+    )
 
 
 def test_delete_for_caller_owner_tombstones_everything(tmp_path):
     """Owner delete removes row, results, visited, and frontier together."""
-    store, job = _seeded_job(tmp_path)
-    loaded = store.load(job.job_id)
-    loaded.results = [{"url": "http://example.com/page1", "status": "success"}]
-    store.save(loaded)
+    store, job = _seeded_job_with_results(tmp_path)
 
     assert store.delete_for_caller(job.job_id, "key_a") is True
     assert store.load(job.job_id) is None
@@ -293,6 +317,46 @@ def test_delete_ownerless_tombstones_a_live_row(tmp_path):
     assert store.load(job.job_id) is None
     assert store.exists(job.job_id) is False
     assert store.exists_for_caller(job.job_id, "key_a") is False
+
+
+def test_concurrent_foreign_deletes_preserve_owner_history(tmp_path):
+    """Concurrent foreign delete_for_caller calls must not destroy owner history.
+    The lock serializes writers; every foreign call returns False and every
+    accumulator row survives (#C1)."""
+    store, job = _seeded_job_with_results(tmp_path)
+    loaded = store.load(job.job_id)
+    loaded.frontier_removed.extend(entry.url for entry in loaded.frontier)
+    loaded.frontier_mark = 0
+    loaded.frontier = frontier(["http://example.com/page2"], depth=1)
+    store.save(loaded)
+
+    results: list[bool] = []
+    barrier = threading.Barrier(8)
+
+    def foreign_delete() -> None:
+        barrier.wait()
+        results.append(store.delete_for_caller(job.job_id, "key_b"))
+
+    threads = [threading.Thread(target=foreign_delete) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert all(r is False for r in results), "every foreign delete must return False"
+    # History fully intact for the owner.
+    assert_history_intact(
+        store,
+        job.job_id,
+        "key_a",
+        visited={canonical("http://example.com/page1")},
+        results=[{"url": "http://example.com/page1", "status": "success"}],
+        frontier=["http://example.com/page2"],
+    )
+
+    # Owner delete still works after the foreign storm.
+    assert store.delete_for_caller(job.job_id, "key_a") is True
+    assert store.load(job.job_id) is None
 
 
 class TestErrorStampingGatedOnTheFailedCas:
