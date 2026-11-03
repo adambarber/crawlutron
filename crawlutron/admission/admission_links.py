@@ -455,8 +455,8 @@ def _candidate_stream[T](
         if normalized is None:
             pass_.invalid_skipped += 1
             continue
-        if normalized in known:
-            continue
+        # No stream-level known check here: _admit_chunk is the single dedupe
+        # site, so a pre-known duplicate is counted, never silently dropped.
         if normalized.is_analytics_host:
             continue
         if not want_document_bodies and normalized.is_document_url:

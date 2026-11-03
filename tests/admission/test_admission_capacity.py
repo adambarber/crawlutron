@@ -210,3 +210,22 @@ class TestAPersistedScopeRestrictionFailsClosed:
 
         assert compile_scope_pattern(None) is None
         assert compile_scope_pattern("") is None
+
+
+async def test_a_pre_known_duplicate_is_counted_not_silently_dropped():
+    """#594: a candidate whose identity is already in ``known`` must land in
+    duplicates_skipped; the stream used to drop it without counting."""
+    known = {canonical("https://example.test/seen")}
+    frontier: list[NormalizedUrl] = []
+    outcome = await admit(
+        ["https://example.test/seen"],
+        frontier=frontier,
+        known=known,
+        respect_robots=False,
+    )
+
+    assert outcome.accepted == 0
+    assert outcome.duplicates_skipped == 1, (
+        "a pre-known duplicate was dropped silently; duplicates_skipped underreports"
+    )
+    assert outcome.known_delta == frozenset()
