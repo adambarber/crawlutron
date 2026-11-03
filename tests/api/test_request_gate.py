@@ -11,7 +11,7 @@ import tempfile
 import pytest
 from fastapi import HTTPException
 
-from crawlutron.api import main_helpers, map_endpoint
+from crawlutron.api import async_crawl_runner, crawl_endpoint, main_helpers, map_endpoint
 from crawlutron.api.caller_auth import Tracking
 from crawlutron.api.crawl_endpoint import crawl
 from crawlutron.api.exceptions import error_envelope_from_detail
@@ -22,9 +22,11 @@ from crawlutron.health.readiness import READINESS_STATE, ReadinessState
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.map_request import MapRequest
+from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
 from crawlutron.runtime.metrics import get_metrics
 from crawlutron.storage.result_store import CrawlResultStore
-from tests._job_harnesses import make_job_store
+from tests._job_harnesses import ScriptedExecute, make_job_store
+from tests._result_builders import _canned_result
 
 logger = logging.getLogger(__name__)
 
@@ -171,3 +173,88 @@ async def test_request_gate_is_unbounded_without_a_cap(monkeypatch):
     with request_gate("test_request_rejected", logger=logger):
         pass
     assert state.snapshot().active_requests == 10
+
+
+def _crawl_call(tmpdir: str) -> CrawlRequest:
+    """The one-crawl-per-test request body the slot tests share."""
+    return CrawlRequest(urls=["http://example.test/"])
+
+
+async def _run_crawl(payload: CrawlRequest, tmpdir: str, job_store) -> object:
+    """The public crawl() door over one real per-test store pair."""
+    return await crawl(
+        payload,
+        CrawlerSettings.from_mapping(),
+        job_store,
+        CrawlResultStore(pathlib.Path(tmpdir) / "results.db"),
+        asyncio.Event(),
+    )
+
+
+async def test_crawl_holds_exactly_one_slot_for_the_whole_request(monkeypatch):
+    """#576: a successful sync /v1/crawl samples the counter from inside the crawl
+    it waits on, so the slot is proven taken once for the work, not twice -- a
+    second nested gate would pass a before/after check only via the refusal it
+    causes, so the count inside is what proves the double-acquire fixed.
+    """
+    held: list[int] = []
+
+    async def _record_slot(payload_dict, *, settings, shutdown_event, url_pairs=None):
+        held.append(_active())
+        return await ScriptedExecute(results=[])(
+            payload_dict, settings=settings, shutdown_event=shutdown_event
+        )
+
+    monkeypatch.setattr(crawl_endpoint, "execute_crawl", _record_slot)
+
+    before = _active()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        await _run_crawl(_crawl_call(tmpdir), tmpdir, make_job_store(tmpdir))
+
+    assert held == [before + 1]
+    assert _active() == before
+
+
+async def test_async_crawl_acceptance_holds_one_slot_and_releases_at_202(monkeypatch):
+    """#576: the 202 door holds a slot while admitting/queueing and releases it at
+    the 202 -- the durable row, not the readiness counter, owns the async work.
+    """
+    held: list[int] = []
+    monkeypatch.setattr(async_crawl_runner, "run_async_crawl", lambda *a, **k: None)
+
+    before = _active()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        job_store = make_job_store(tmpdir)
+        real_create = job_store.acreate_single_shot
+
+        async def _sampling_create(*args, **kwargs):
+            held.append(_active())  # sampled mid-queueing, under the outer gate
+            return await real_create(*args, **kwargs)
+
+        monkeypatch.setattr(job_store, "acreate_single_shot", _sampling_create)
+        response = await _run_crawl(
+            _crawl_call(tmpdir).model_copy(update={"async_mode": True}), tmpdir, job_store
+        )
+
+    assert response.status_code == 202
+    assert held == [before + 1]
+    assert _active() == before
+
+
+async def test_crawl_succeeds_at_a_cap_of_one(monkeypatch):
+    """#576: with CRAWLUTRON_MAX_ACTIVE_REQUESTS=1, a sync crawl still completes --
+    a nested gate would see the outer slot taken and refuse 503 capacity_exceeded.
+    """
+    monkeypatch.setattr(main_helpers, "readiness_state", ReadinessState(max_active_requests=1))
+
+    async def _execute(payload_dict, *, settings, shutdown_event, url_pairs=None):
+        return await ScriptedExecute(results=[_canned_result("http://example.test/")])(
+            payload_dict, settings=settings, shutdown_event=shutdown_event
+        )
+
+    monkeypatch.setattr(crawl_endpoint, "execute_crawl", _execute)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        response = await _run_crawl(_crawl_call(tmpdir), tmpdir, make_job_store(tmpdir))
+
+    assert isinstance(response, UnifiedCrawlResponse)

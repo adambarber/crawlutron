@@ -8,6 +8,7 @@ import logging
 import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
+from contextvars import ContextVar
 
 from fastapi import HTTPException
 
@@ -17,6 +18,8 @@ from crawlutron.models.job_status_response import JobStatusResponse
 from crawlutron.models.result_record import ProducerEnvelope
 from crawlutron.runtime.metrics import get_metrics
 from crawlutron.storage.job_store import JobStatusView
+
+_gate_token: ContextVar[str | None] = ContextVar("crawlutron_request_gate_token", default=None)
 
 
 def build_job_status(view: JobStatusView) -> JobStatusResponse:
@@ -55,20 +58,27 @@ def request_gate(
     """Admit one readiness-tracked request and own the whole tail: the
     ``begin_request`` admission, the rejection envelope, and the ``end_request``
     release. A fixed-cap refusal (503) happens before admission, taking no slot.
+    Nested acquisition is a defect: one request is one slot (#576).
     """
-    if not readiness_state.begin_request():
-        raise http_error(
-            503,
-            "capacity_exceeded",
-            "Request refused: active requests are at the configured cap (CRAWLUTRON_MAX_ACTIVE_REQUESTS)",
-        )
+    if _gate_token.get() is not None:
+        raise RuntimeError(f"request_gate re-entered inside gate {event!r}: one request is one slot")
+    _gate_token.set(event)
     try:
-        yield
-    except ValueError as error:
-        logger.warning(event, extra={"error": str(error)})
-        raise reject(error) from error
+        if not readiness_state.begin_request():
+            raise http_error(
+                503,
+                "capacity_exceeded",
+                "Request refused: active requests are at the configured cap (CRAWLUTRON_MAX_ACTIVE_REQUESTS)",
+            )
+        try:
+            yield
+        except ValueError as error:
+            logger.warning(event, extra={"error": str(error)})
+            raise reject(error) from error
+        finally:
+            readiness_state.end_request()
     finally:
-        readiness_state.end_request()
+        _gate_token.set(None)
 
 
 __all__ = ["build_job_status", "record_crawl_completion", "request_gate"]

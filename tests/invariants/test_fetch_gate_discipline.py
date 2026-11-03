@@ -10,14 +10,12 @@ import ast
 import pathlib
 
 from tests.chokepoint_walks import (
-    REPO_ROOT,
     call_nodes,
     enclosing_function,
     functions,
     local_nodes,
     offender_at,
     parent_map,
-    parsed,
     resolved_call_name,
     resolved_expr_name,
 )
@@ -33,10 +31,9 @@ _GATED_FETCH_EXECUTORS = frozenset(
     }
 )
 
-# The one executor-calling executor (map_site -> execute_crawl); resolved
-# structurally from map_endpoint.py's own tree, not by exempting a name.
-_INNER_EXECUTOR_EDGE = ("crawlutron.api.map_endpoint.map_site", "crawlutron.api.crawl_executor.execute_crawl")
-_MAP_ENDPOINT = REPO_ROOT / "crawlutron" / "api" / "map_endpoint.py"
+# The one executor-calling executor (map_site -> execute_crawl); its callers'
+# gating is what counts because reaching map_site through a gate gates its edge.
+_GATED_EXECUTOR_NAMES = frozenset(name.rsplit(".", 1)[-1] for name in _GATED_FETCH_EXECUTORS)
 
 # Background workers run the same executor off the readiness path, holding a durable
 # job row rather than a slot; they are not doors and need no request_gate.
@@ -121,31 +118,22 @@ def _admit_tool_gated(tree: ast.AST) -> bool:
     return False
 
 
-def _inner_edge_callers() -> frozenset[str]:
-    """The fully-qualified names of functions whose body calls the inner executor.
+def _entered_only_through_gates(fn: ast.FunctionDef | ast.AsyncFunctionDef, tree: ast.AST) -> bool:
+    """Whether every in-module call of ``fn`` sits lexically under ``request_gate``.
 
-    Derived from map_endpoint.py's own tree, not hand-listed: when map_site stops
-    calling execute_crawl the edge disappears and the exemption seals shut."""
-    if not _MAP_ENDPOINT.exists():
-        return frozenset()
-    inner_tree = parsed(_MAP_ENDPOINT)
-    inner_name = _INNER_EXECUTOR_EDGE[1].rsplit(".", 1)[-1]
-    callers = frozenset(
-        f"{_INNER_EXECUTOR_EDGE[0].rsplit('.', 1)[0]}.{fn.name}"
-        for fn in functions(inner_tree)
-        if any(resolved_call_name(inner_tree, call).endswith(inner_name) for call in call_nodes(fn))
+    A door's private helper (crawl()'s ``_admitted_crawl``) inherits the door's
+    gate transitively: the derived fact is the call sites' enclosure, not a name.
+    """
+    call_sites = [
+        call for call in call_nodes(tree) if resolved_call_name(tree, call).rsplit(".", 1)[-1] == fn.name
+    ]
+    return bool(call_sites) and all(
+        _gated(call, tree, parent_map(tree), frozenset(), False) for call in call_sites
     )
-    return callers
-
-
-def _module_of(path: pathlib.Path) -> str:
-    """``crawlutron/api/map_endpoint.py`` -> ``crawlutron.api.map_endpoint``: the file's own module."""
-    return path.relative_to(REPO_ROOT).with_suffix("").as_posix().replace("/", ".")
 
 
 def _ungated_fetch_executor_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     parents = parent_map(tree)
-    module = _module_of(path)
     admit_tool = frozenset(
         id(call) for call in call_nodes(tree) if resolved_call_name(tree, call) == _MCP_ADMIT_TOOL
     )
@@ -156,16 +144,18 @@ def _ungated_fetch_executor_offenders(tree: ast.AST, path: pathlib.Path) -> list
         if name not in _GATED_FETCH_EXECUTORS:
             continue
         owner = enclosing_function(call, parents)
-        owner_qualified = f"{module}.{owner.name}" if owner is not None else None
-        # Gated transitively: this owner IS the inner executor edge (map_site),
-        # so its callers' gating is what counts.
-        if owner_qualified is not None and owner_qualified in _inner_edge_callers():
+        # Gated transitively: this owner IS a gated executor (map_site), so its
+        # callers' gating is what counts.
+        if owner is not None and owner.name in _GATED_EXECUTOR_NAMES:
             continue
         if _gated(call, tree, parents, admit_tool, admit_tool_gated):
             continue
         # A helper behind a work= lambda is gated only when every call of it
         # funnels through the MCP chokepoint; a derived fact, not a name skip.
         if admit_tool_gated and owner is not None and _entered_only_through_admit_tool(owner, tree):
+            continue
+        # A door's private helper inherits the door's gate; same derived-fact shape.
+        if owner is not None and _entered_only_through_gates(owner, tree):
             continue
         offenders.append(
             offender_at(

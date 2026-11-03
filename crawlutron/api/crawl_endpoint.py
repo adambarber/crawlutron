@@ -127,43 +127,44 @@ async def _admitted_crawl(
     webhook_url: str | None,
 ) -> JSONResponse | Response | UnifiedCrawlResponse:
     """One admission for both doors: sync holds a slot for the crawl's life; async
-    persists a durable job row. Gate, admit, and dispatch stay one block."""
-    with request_gate("crawl_request_rejected", logger=_logger, reject=_crawl_rejection):
-        async with admit(
-            active_caller,
-            payload.policy.limits.max_pages,
-            tracking=Tracking(job_store=job_store, concurrency_tracker=concurrency_tracker),
-            payload=payload,
-            reserve_slot=not (payload.async_mode or webhook_url),
-        ) as owner:
-            # Built after admission (a slot exists); calling runs nothing.
-            crawl_awaitable = (
-                None
-                if payload.async_mode or webhook_url
-                else execute_crawl(
-                    payload, settings=settings, shutdown_event=shutdown_event, url_pairs=checked_pairs
-                )
+    persists a durable job row. Admit and dispatch stay one block; the readiness
+    gate belongs to crawl() alone."""
+    async_door = bool(payload.async_mode or webhook_url)
+    async with admit(
+        active_caller,
+        payload.policy.limits.max_pages,
+        tracking=Tracking(job_store=job_store, concurrency_tracker=concurrency_tracker),
+        payload=payload,
+        reserve_slot=not async_door,
+    ) as owner:
+        # Built after admission (a slot exists); calling runs nothing.
+        crawl_awaitable = (
+            None
+            if async_door
+            else execute_crawl(
+                payload, settings=settings, shutdown_event=shutdown_event, url_pairs=checked_pairs
             )
-            if payload.async_mode or webhook_url:
-                return await _accepted_async(
-                    payload,
-                    settings=settings,
-                    job_store=job_store,
-                    result_store=result_store,
-                    shutdown_event=shutdown_event,
-                    host_policy=host_policy,
-                    checked=checked_pairs,
-                    owner=owner,
-                    webhook_url=webhook_url,
-                )
-            return await _run_sync_crawl(
+        )
+        if async_door:
+            return await _accepted_async(
                 payload,
+                settings=settings,
+                job_store=job_store,
                 result_store=result_store,
+                shutdown_event=shutdown_event,
+                host_policy=host_policy,
                 checked=checked_pairs,
                 owner=owner,
-                request=request,
-                crawl_awaitable=crawl_awaitable if crawl_awaitable is not None else _missing_sync_awaitable(),
+                webhook_url=webhook_url,
             )
+        return await _run_sync_crawl(
+            payload,
+            result_store=result_store,
+            checked=checked_pairs,
+            owner=owner,
+            request=request,
+            crawl_awaitable=crawl_awaitable if crawl_awaitable is not None else _missing_sync_awaitable(),
+        )
 
 
 def _missing_sync_awaitable() -> Awaitable[ProducerEnvelope]:
