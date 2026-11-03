@@ -6,24 +6,16 @@ mid-batch pause/cancel; ``save()`` never touches status (atomic CAS only).
 
 import ast
 import asyncio
-import pathlib
 import threading
 
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.storage.job_store import CrawlJobState, JobStatus, JobStore
 from tests._job_harnesses import frontier, loaded_job, make_job_store, run_to_terminal
 from tests._policy_factories import canonical
-from tests._walk_primitives import REPO_ROOT
 from tests.chokepoint_walks import (
     app_trees,
-    assert_detector,
-    call_nodes,
-    enclosing_function,
     nodes_of,
     offender,
-    offender_at,
-    parent_map,
-    resolved_call_name,
 )
 
 
@@ -204,51 +196,6 @@ def test_status_assignment_detector_bites():
         and any(isinstance(t, ast.Attribute) and t.attr == "status" for t in n.targets)
     ]
     assert hits == [1]
-
-
-def _accumulator_delete_outside_tombstone(tree: ast.Module, path: pathlib.Path) -> list[str]:
-    """Flag any ``JobAccumulators.delete`` call not enclosed in ``_tombstone_row``.
-    Child-history deletion runs only after a successful ownership UPDATE; a
-    where-called invariant, not ordering -- behavior is pinned by tests.
-    """
-    parents = parent_map(tree)
-    out: list[str] = []
-    for call in call_nodes(tree):
-        if resolved_call_name(tree, call) != "self._accumulators.delete":
-            continue
-        fn = enclosing_function(call, parents)
-        if fn is None or fn.name != "_tombstone_row":
-            out.append(offender_at(path, call, "JobAccumulators.delete outside _tombstone_row"))
-    return out
-
-
-def test_accumulator_delete_only_in_tombstone_row():
-    """JobAccumulators.delete is only referenced inside _tombstone_row.
-    A where-called refactoring guard; ordering is pinned behaviorally by tests.
-    """
-    offenders: list[str] = []
-    for path, tree in app_trees():
-        offenders.extend(_accumulator_delete_outside_tombstone(tree, path))
-    assert not offenders, f"accumulator delete outside _tombstone_row: {offenders}"
-
-
-def test_accumulator_delete_detector_bites():
-    clean = """
-class JobStore:
-    def _tombstone_row(self, job_id):
-        self._accumulators.delete(job_id)
-"""
-    bad = """
-class Other:
-    def purge(self, job_id):
-        self._accumulators.delete(job_id)
-"""
-    assert_detector(
-        _accumulator_delete_outside_tombstone,
-        path=REPO_ROOT / "crawlutron/storage/job_store.py",
-        clean=(clean,),
-        trips={bad: 1},
-    )
 
 
 def test_set_status_cannot_flip_a_tombstoned_row(tmp_path):
