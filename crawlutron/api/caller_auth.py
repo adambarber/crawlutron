@@ -276,9 +276,8 @@ async def admit(
     active = caller if caller is not None else anonymous_caller()
     resolved = resolve_page_limit(active, requested_pages)
     if payload is not None and resolved <= 0:
-        # /v1/crawl and /v1/map: a surviving 0 becomes the bounded service default
-        # and is persisted (stored == enforced). /v1/jobs passes no payload and keeps
-        # 0 as the unbounded whole-site sentinel.
+        # /v1/crawl and /v1/map bind a surviving 0 to DEFAULT_MAX_PAGES
+        # (stored == enforced); /v1/jobs passes no payload and keeps 0.
         resolved = DEFAULT_MAX_PAGES
     if payload is not None:
         payload.policy = _apply_payload_policy(payload, active, resolved)
