@@ -17,6 +17,17 @@ def test_an_unknowable_ceiling_is_conservative_not_zero():
     assert stats.total_bytes > 0, f"the ceiling collapsed to 0: the memory gate runs fully open ({stats})"
 
 
+def test_the_floor_branch_senses_honest_usage_not_zero():
+    """The fail-closed floor must not read usage 0.0 -- that left the ratio at 0
+    and the gate fully open on exactly the branch claiming to gate (adversarial
+    pass 5, confirmed defect). RSS is the kernel's honest answer."""
+    stats = read_memory_stats(cgroup_root="/nonexistent", total_ram=0)
+    assert stats.used_bytes > 0, f"the floor branch never sensed usage: {stats}"
+    assert stats.used_bytes < stats.total_bytes, (
+        f"usage must stay under the ceiling for a sane process: {stats}"
+    )
+
+
 def test_the_gate_throttles_when_only_a_conservative_ceiling_is_known(monkeypatch):
     """With a conservative ceiling standing in, the gate is a real gate: a usage
     signal at/above the hard ceiling pauses dispatch instead of full speed."""

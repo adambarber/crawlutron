@@ -6,6 +6,7 @@ and every later resolve waits the full budget before its timeout: the request
 path is hostage to the queue. The saturation chokepoint fails fast instead.
 """
 
+import asyncio
 import time
 
 import pytest
@@ -35,3 +36,28 @@ def test_the_accounting_door_reports_live_resolves():
     """Below saturation the resolve path is unchanged, and the chokepoint's own
     accounting starts at zero: no in-flight resolve, no saturation verdict."""
     assert pt.dns_in_flight_resolves() == 0
+
+
+def test_the_async_path_is_registered_too():
+    """bounded_thread_resolve is the ASYNC DNS entry point (browser targets,
+    search providers) -- its futures must register in the same saturation
+    registry, or the chokepoint's guarantee holds for only one of two paths
+    (adversarial pass 5, confirmed defect)."""
+
+    async def scenario():
+        def hang():
+            return "never returned in time"
+
+        task = asyncio.ensure_future(pt.bounded_thread_resolve(hang, timeout_seconds=5.0))
+        for _ in range(100):
+            if pt.dns_in_flight_resolves() >= 1:
+                break
+            await asyncio.sleep(0.01)
+        registered = pt.dns_in_flight_resolves()
+        task.cancel()
+        return registered
+
+    registered = asyncio.run(scenario())
+    assert registered >= 1, (
+        f"the async resolve path bypassed the saturation registry (in-flight: {registered})"
+    )

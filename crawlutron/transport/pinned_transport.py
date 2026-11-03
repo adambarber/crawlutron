@@ -38,16 +38,21 @@ class ResolverBudgetExceeded(TimeoutError):
 
 async def bounded_thread_resolve[T](work: Callable[[], T], *, timeout_seconds: float | None) -> T:
     """Run one blocking resolve off the loop, bounded by the DNS posture tightened
-    by the caller's own budget. A resolver that outlasts the wait raises
-    the classifiable resolution failure; the future is cancelled first."""
+    by the caller's own budget; a resolver that outlasts the wait raises the
+    classifiable failure. Registered in the SAME saturation registry as the sync
+    path (#C10): the chokepoint covers every DNS entry point, not one of two."""
     wait_for = dns_wait_for(timeout_seconds)
+    _refuse_if_saturated()
     loop = asyncio.get_running_loop()
     future = loop.run_in_executor(DNS_EXECUTOR, work)
+    _dns_futures.add(future)
     try:
         return await asyncio.wait_for(future, timeout=wait_for)
     except TimeoutError:
         future.cancel()
         raise ResolverBudgetExceeded(f"DNS resolution exceeded the {wait_for:.1f}s budget") from None
+    finally:
+        _dns_futures.discard(future)
 
 
 # Per-host DNS cache; the TTL is short so rebinds stay bounded, with IP
@@ -57,18 +62,21 @@ _DNS_CACHE_MAX = 4096
 _DNS_CACHE: BoundedTTLCache[str, list[str]] = BoundedTTLCache(max_entries=_DNS_CACHE_MAX, ttl=_DNS_TTL)
 
 
-def bounded_addrinfo(hostname: str) -> list[str]:
-    """One getaddrinfo on the shared DNS executor, bounded by the DNS posture:
-    a resolve that outlasts the budget raises the classifiable ResolverBudgetExceeded
-    instead of waiting unbounded on the caller's thread. A SATURATED executor
-    (every worker inside a live resolve) refuses fast (#C10) -- queued resolves
-    behind uncancellable threads are the hostage queue this refuses to build."""
-    wait_for = dns_wait_for(None)
+def _refuse_if_saturated() -> None:
+    """The saturation law, ONE copy (#C10): all workers inside live resolves =>
+    a new resolve refuses FAST instead of queueing behind uncancellable threads."""
     if len(_dns_futures) >= DNS_WORKERS:
         raise ResolverBudgetExceeded(
-            f"DNS resolver saturated ({DNS_WORKERS} workers busy); "
-            f"refusing to queue behind uncancellable resolves"
+            f"DNS resolver saturated ({DNS_WORKERS} workers busy); refusing to queue"
         )
+
+
+def bounded_addrinfo(hostname: str) -> list[str]:
+    """One getaddrinfo on the shared DNS executor, bounded by the DNS posture: a
+    resolve that outlasts the budget raises the classifiable ResolverBudgetExceeded
+    instead of waiting unbounded on the caller's thread. Saturated => refuse fast (#C10)."""
+    wait_for = dns_wait_for(None)
+    _refuse_if_saturated()
     future = DNS_EXECUTOR.submit(socket.getaddrinfo, hostname, None)
     _dns_futures.add(future)
     try:
@@ -186,11 +194,8 @@ def resolve_and_pin_host(url: NormalizedUrl) -> tuple[str, str]:
 
 
 def declared_length_exceeds(header_value: str | None, limit: int) -> bool:
-    """True iff a Content-Length header parses to an int strictly over ``limit``.
-
-    A malformed, negative, or absent value reads as "unknown size" and returns
-    False (never raises); skipping pre-flight is safe as the streamed running cap still bounds the body.
-    """
+    """True iff a Content-Length header parses to an int strictly over ``limit``;
+    malformed/negative/absent reads as unknown size, False (streamed cap still bounds)."""
     if not header_value:
         return False
     try:
@@ -270,13 +275,13 @@ DNS_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
 )
 
 # A RUNNING getaddrinfo cannot be cancelled, so a hostile/slow resolver can
-# occupy every DNS_EXECUTOR worker; queued resolves then each wait the full
-# budget -- the request path hostage to a queue (#C10). Saturation law: when
-# every worker is already inside an over-budget resolve, a new resolve refuses
-# FAST (the classifiable ResolverBudgetExceeded) instead of queueing. The
-# registry is event-loop-side only (submit/await/cleanup -- never the workers),
-# so it needs no lock.
-_dns_futures: set[concurrent.futures.Future] = set()
+# occupy every worker; queued resolves then each wait the full budget -- the
+# request path hostage to a queue (#C10). Saturation law: when every worker is
+# inside a live resolve, a new resolve refuses FAST instead of queueing. Both
+# DNS entry points register here (sync concurrent + async asyncio-wrapped,
+# pass 5); the registry is event-loop-side only, so it needs no lock.
+_DnsFuture = concurrent.futures.Future | asyncio.Future
+_dns_futures: set[_DnsFuture] = set()
 
 
 def dns_in_flight_resolves() -> int:
@@ -485,11 +490,8 @@ def cffi_resolve_entry(request: PinnedRequest) -> list[str] | None:
 
 
 def reset_process_state() -> None:
-    """Drop every memoized DNS resolution.
-
-    The cache is process-wide with a 60s TTL, so a test that resolves once is
-    served the same answer all session; production wants the memo, so the drop lives on the owner.
-    """
+    """Drop every memoized DNS resolution: the cache is process-wide with a 60s
+    TTL, so a test that resolves once is served the same answer all session."""
     _DNS_CACHE.clear()
 
 

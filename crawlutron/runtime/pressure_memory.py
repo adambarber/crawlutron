@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+import resource
+import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -39,6 +41,14 @@ def _total_system_ram() -> int:
         return 0
 
 
+def _own_rss_bytes() -> int:
+    """The process's own resident set: the usage source that survives when neither
+    cgroup layer is mounted. Units are platform-dependent (macOS BYTES, Linux KiB).
+    """
+    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return rss * 1024 if sys.platform != "darwin" else rss
+
+
 def read_memory_stats(
     cgroup_root: str = "/sys/fs/cgroup",
     *,
@@ -64,7 +74,11 @@ def read_memory_stats(
 
     # An unknowable ceiling fails CLOSED (#C11): the conservative floor keeps
     # the gate a gate; total_ram==0 here is sensor refusal, not "no memory".
-    return MemoryStats(total_bytes=total_ram or _CONSERVATIVE_CEILING_BYTES, used_bytes=0)
+    # The USAGE side must be honest too (adversarial pass 5): used_bytes=0 on
+    # this branch left the ratio at 0.0 -- a fully-open gate with a nonzero
+    # denominator. The process's own RSS is the one usage source the kernel
+    # still reports without /proc or cgroups.
+    return MemoryStats(total_bytes=total_ram or _CONSERVATIVE_CEILING_BYTES, used_bytes=_own_rss_bytes())
 
 
 def batch_scale(used: float, total: float, target: float, hard: float | None = None) -> float:
@@ -189,9 +203,9 @@ class MemoryGate(ResourceGauge):
         state, so interleaved readiness/metrics/wait readers cannot perturb
         the dispatch estimator's slope series."""
         stats = read_memory_stats(cgroup_root=self.cgroup_root)
-        if stats.total_bytes <= 0:
-            return 0.0
-        return stats.used_bytes / stats.total_bytes
+        # Unreachable through read_memory_stats (its floor owns unknowable
+        # ceilings); if a caller lies with a 0 total, fail CLOSED, not open.
+        return stats.used_bytes / stats.total_bytes if stats.total_bytes > 0 else 1.0
 
     def _track_slope(self, ratio: float) -> None:
         """Advance the climb-rate series. Only the leading estimate calls

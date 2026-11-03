@@ -315,4 +315,6 @@ def test_read_memory_stats_v1(tmp_path):
 def test_read_memory_stats_missing_files_falls_back_to_total_ram(tmp_path):
     stats = read_memory_stats(cgroup_root=str(tmp_path / "does-not-exist"), total_ram=4 * 1024**3)
     assert stats.total_bytes == 4 * 1024**3
-    assert stats.used_bytes == 0
+    # The fallback senses the process's OWN RSS (adversarial pass 5): a 0 usage
+    # left the ratio at 0 and the gate open on the branch that claims to gate.
+    assert 0 < stats.used_bytes < stats.total_bytes, stats

@@ -344,16 +344,22 @@ class ResultSpill:
         self._fh.flush()
 
     def load_ordered(self, *, policy: HostPolicy) -> list[EngineCrawlResult]:
-        """Reassemble all spilled results in submission order, one pass, via ``from_wire``.
-        Mid-crawl each page lives on disk; reassembly materializes the full admitted set in
-        RAM -- the JSON contract -- bounded by the batch wire cap (500) or max_pages (2000).
-        A corrupt line (a crash's partial buffered write) is SKIPPED and logged, never
-        fatal: one bad record must not erase the N-1 results the crawl still owns (#C8).
-        """
+        """Reassemble all spilled results in submission order, one pass, via ``from_wire``;
+        RAM is the materialized set, bounded by the batch wire cap (500) or max_pages (2000).
+        A corrupt line (a crash's partial buffered write, binary corruption included) is
+        SKIPPED and logged, never fatal (#C8): one bad record must not erase the N-1 results."""
         self._fh.flush()
         slots: dict[int, EngineCrawlResult] = {}
-        with open(self.path, encoding="utf-8") as fh:
-            for line in fh:
+        # Per-LINE decoding: a text handle decodes in buffered chunks, so one
+        # bad byte poisons the whole chunk -- every GOOD line before it dies
+        # too (observed live, adversarial pass 5). Decode each line alone.
+        with open(self.path, "rb") as fh:
+            for raw in fh:
+                try:
+                    line = raw.decode("utf-8")
+                except UnicodeDecodeError:
+                    logger.warning("skipping corrupt spill line: undecodable bytes: %.40r", raw)
+                    continue
                 line = line.strip()
                 if not line:
                     continue

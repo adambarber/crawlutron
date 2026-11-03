@@ -27,7 +27,7 @@ from tests._ci_contract import (
 
 
 def test_all_hooks_share_one_trigger() -> None:
-    """The five ENFORCEMENT hooks' ``files:`` values are one YAML anchor.
+    """The ENFORCEMENT hooks' ``files:`` values are one YAML anchor.
 
     The trigger was copied five times and never compared -- a ``.gitignore`` edit
     slipped through with every hook Skipped; they are now ``&service_trigger``.
@@ -35,14 +35,28 @@ def test_all_hooks_share_one_trigger() -> None:
     #557: coverage is a measurement surface, not an enforcement gate. Its
     scope is ``^(app|tests)/`` and its stage is pre-push, so the divergent
     files value cannot silently skip a gate; the one-surface law holds it.
+
+    #588: the commit-MSG hooks are exempt from the files law entirely:
+    a commit-msg hook receives the MESSAGE FILE, not changed filenames, so a
+    files trigger there only ever SUPPRESSED the gate (the citation gate ran
+    on no non-service commit). Their trigger is the stage itself.
     """
     hooks = _hook_blocks(CONFIG_PATH.read_text(encoding="utf-8"))
-    enforcement = [(hook_id, block) for hook_id, block in hooks if hook_id != "coverage"]
+    message_stage = {hook_id for hook_id, block in hooks if "commit-msg" in str(_field(block, "stages"))}
+    enforcement = [
+        (hook_id, block) for hook_id, block in hooks if hook_id not in {"coverage"} | message_stage
+    ]
     triggers = {_field(block, "files") for _, block in enforcement}
     assert triggers == {ENFORCEMENT_TRIGGER_PATTERN}, (
         f"enforcement hooks must all share the one trigger {ENFORCEMENT_TRIGGER_PATTERN!r}; "
         f"got {sorted(triggers)}"
     )
+    for hook_id in message_stage:
+        block = next(b for h, b in hooks if h == hook_id)
+        assert "files" not in block, (
+            f"commit-msg hook {hook_id} must carry NO files trigger: it judges the "
+            f"message, not filenames -- a files key only suppressed it (#588)"
+        )
     coverage = [(hook_id, block) for hook_id, block in hooks if hook_id == "coverage"]
     assert coverage, "the coverage surface must exist as its own hook"
     assert all(_field(block, "files") == "^(crawlutron|tests)/" for _, block in coverage), (
@@ -75,6 +89,10 @@ def test_every_gate_fires_on_every_enforcement_input() -> None:
     # exempt here alone; the one-surface law still holds it elsewhere.
     for hook_id, block in hooks:
         if hook_id == "coverage":
+            continue
+        if "files" not in block:
+            # A commit-msg hook has no files trigger by law (#588): it judges
+            # the message, so the enforcement-input check does not apply.
             continue
         pattern = _field(block, "files")
         for name in ENFORCEMENT_INPUTS:
