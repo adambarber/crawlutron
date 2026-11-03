@@ -6,16 +6,39 @@ mid-batch pause/cancel; ``save()`` never touches status (atomic CAS only).
 
 import ast
 import asyncio
+import pathlib
 
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.storage.job_store import CrawlJobState, JobStatus, JobStore
 from tests._job_harnesses import frontier, loaded_job, make_job_store, run_to_terminal
 from tests._policy_factories import canonical
-from tests.chokepoint_walks import app_trees, nodes_of, offender
+from tests._walk_primitives import REPO_ROOT
+from tests.chokepoint_walks import (
+    app_trees,
+    assert_detector,
+    call_nodes,
+    enclosing_function,
+    nodes_of,
+    offender,
+    offender_at,
+    parent_map,
+    resolved_call_name,
+)
 
 
 def _store(tmp_path) -> JobStore:
     return make_job_store(tmp_path)
+
+
+def _seeded_job(tmp_path, owner: str = "key_a") -> tuple[JobStore, CrawlJobState]:
+    """One owned job carrying a visited page; tests add what they need on top."""
+    store = _store(tmp_path)
+    job = store.create("http://example.com/", CrawlPolicy(), owner=owner)
+    loaded = store.load(job.job_id)
+    assert loaded is not None
+    loaded.visited.add(canonical("http://example.com/page1"))
+    store.save(loaded)
+    return store, job
 
 
 def _running_job(store: JobStore, job_id: str = "j1") -> CrawlJobState:
@@ -151,6 +174,53 @@ def test_status_assignment_detector_bites():
     assert hits == [1]
 
 
+def _accumulator_delete_outside_tombstone(tree: ast.Module, path: pathlib.Path) -> list[str]:
+    """Flag any ``JobAccumulators.delete`` call not enclosed in ``_tombstone_row``.
+
+    Child-history deletion must happen only after a successful ownership UPDATE,
+    and only from the single tombstone chokepoint. A where-called invariant, not
+    an ordering invariant -- the test suite pins the ordering behaviorally.
+    """
+    parents = parent_map(tree)
+    out: list[str] = []
+    for call in call_nodes(tree):
+        if resolved_call_name(tree, call) != "self._accumulators.delete":
+            continue
+        fn = enclosing_function(call, parents)
+        if fn is None or fn.name != "_tombstone_row":
+            out.append(offender_at(path, call, "JobAccumulators.delete outside _tombstone_row"))
+    return out
+
+
+def test_accumulator_delete_only_in_tombstone_row():
+    """JobAccumulators.delete may only be called from _tombstone_row, so no code
+    path can delete another caller's history without an ownership-matched UPDATE
+    landing first (#C1 foreclosure)."""
+    offenders: list[str] = []
+    for path, tree in app_trees():
+        offenders.extend(_accumulator_delete_outside_tombstone(tree, path))
+    assert not offenders, f"accumulator delete outside _tombstone_row: {offenders}"
+
+
+def test_accumulator_delete_detector_bites():
+    clean = """
+class JobStore:
+    def _tombstone_row(self, job_id):
+        self._accumulators.delete(job_id)
+"""
+    bad = """
+class Other:
+    def purge(self, job_id):
+        self._accumulators.delete(job_id)
+"""
+    assert_detector(
+        _accumulator_delete_outside_tombstone,
+        path=REPO_ROOT / "crawlutron/storage/job_store.py",
+        clean=(clean,),
+        trips={bad: 1},
+    )
+
+
 def test_set_status_cannot_flip_a_tombstoned_row(tmp_path):
     """A deleted job's status is frozen: a late runner's CAS must not land (#363)."""
     store = _store(tmp_path)
@@ -161,6 +231,70 @@ def test_set_status_cannot_flip_a_tombstoned_row(tmp_path):
     # The row is still gone to every reader: nothing changed, nothing resurrected.
     assert store.load("j-gone") is None
     assert store.exists("j-gone") is False
+
+
+def test_foreign_delete_for_caller_leaves_history_intact(tmp_path):
+    """A foreign caller must not destroy another caller's results + visited + frontier.
+    The UPDATE decides ownership before any accumulator row is touched (#C1)."""
+    store = _store(tmp_path)
+    job = store.create("http://example.com/", CrawlPolicy(), owner="key_a")
+    loaded = store.load(job.job_id)
+    assert loaded is not None
+    loaded.visited.add(canonical("http://example.com/page1"))
+    loaded.visited.add(canonical("http://example.com/page2"))
+    loaded.results = [{"url": "http://example.com/page1", "status": "success"}]
+    loaded.frontier_removed.extend(entry.url for entry in loaded.frontier)
+    loaded.frontier_mark = 0
+    loaded.frontier = frontier(["http://example.com/page3"], depth=1)
+    store.save(loaded)
+
+    before = store.status_for_caller(job.job_id, "key_a")
+    assert before is not None
+    assert before["visited_size"] == 2
+    assert before["results_count"] == 1
+    assert before["frontier_size"] == 1
+
+    # Foreign caller: nothing matched, nothing deleted; idempotent on the foreign path.
+    assert store.delete_for_caller(job.job_id, "key_b") is False
+    assert store.delete_for_caller(job.job_id, "key_b") is False
+
+    # Row and all children survive for the owner.
+    after = store.status_for_caller(job.job_id, "key_a")
+    assert after is not None
+    assert after["visited_size"] == 2
+    assert after["results_count"] == 1
+    assert after["frontier_size"] == 1
+    surviving = store.load_for_caller(job.job_id, "key_a")
+    assert surviving is not None
+    assert surviving.visited == {
+        canonical("http://example.com/page1"),
+        canonical("http://example.com/page2"),
+    }
+    assert surviving.results == [{"url": "http://example.com/page1", "status": "success"}]
+    assert [e.url.raw for e in surviving.frontier] == ["http://example.com/page3"]
+
+
+def test_delete_for_caller_owner_tombstones_everything(tmp_path):
+    """Owner delete removes row, results, visited, and frontier together."""
+    store, job = _seeded_job(tmp_path)
+    loaded = store.load(job.job_id)
+    loaded.results = [{"url": "http://example.com/page1", "status": "success"}]
+    store.save(loaded)
+
+    assert store.delete_for_caller(job.job_id, "key_a") is True
+    assert store.load(job.job_id) is None
+    assert store.load_for_caller(job.job_id, "key_a") is None
+    assert store.status_for_caller(job.job_id, "key_a") is None
+
+
+def test_delete_ownerless_tombstones_a_live_row(tmp_path):
+    """delete() still tombstones a live row (no caller binding) as before."""
+    store, job = _seeded_job(tmp_path)
+
+    assert store.delete(job.job_id) is True
+    assert store.load(job.job_id) is None
+    assert store.exists(job.job_id) is False
+    assert store.exists_for_caller(job.job_id, "key_a") is False
 
 
 class TestErrorStampingGatedOnTheFailedCas:

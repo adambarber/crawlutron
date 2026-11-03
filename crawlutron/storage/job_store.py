@@ -78,8 +78,7 @@ class JobStore:
     ):
         self.db_path = Path(db_path)
         self._host_policy = policy
-        # Operator tier required: a stored row that omitted a limit must
-        # resolve to the API path's number, not the model default.
+        # Operator tier: an omitted limit resolves to the API path's number, not the default.
         self.tier = tier
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn, memory_name = connect_store(self.db_path, schema=StoreSchema.CRAWL_JOBS)
@@ -195,8 +194,6 @@ class JobStore:
         Row, history and visited set are read under one hold of the lock; ``owner``
         narrows to the caller's own row before any deserialization."""
         with self._lock:
-            # The row and its collections read under one hold of the lock;
-            # ``owner`` narrows to the caller's own row before deserialization.
             columns = (
                 "SELECT job_id, kind, owner, root_url, policy, status, "
                 "created_at, updated_at, error, stats, in_flight, transient_retries "
@@ -250,14 +247,17 @@ class JobStore:
         )
 
     def _tombstone_row(self, job_id: str, statement: str, params: tuple[object, ...]) -> bool:
-        """Mark a live row deleted under the lock, or False for a non-match."""
+        """Tombstone iff the ownership UPDATE matches; history dies with it."""
         with self._lock:
             if self._is_tombstoned(job_id):
                 return False
-            self._accumulators.delete(job_id)
             cur = self._conn.execute(statement, (time.time(), time.time(), *params))
+            if cur.rowcount != 1:
+                self._conn.rollback()
+                return False
+            self._accumulators.delete(job_id)
             self._conn.commit()
-        return cur.rowcount > 0
+        return True
 
     def _is_tombstoned(self, job_id: str) -> bool:
         """Whether a row exists marked deleted. Caller must hold ``self._lock``."""
