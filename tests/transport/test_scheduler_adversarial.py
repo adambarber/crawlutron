@@ -1,0 +1,148 @@
+"""#577 adversarial findings, pinned as behavior (F1, F2).
+
+F1: the purge must never drop a record whose gate is in use -- a re-minted
+gate is FULL, so the per-domain concurrency cap silently widens mid-crawl.
+F2: jobs waking from a 429 cooldown nap re-reserve, or the wake-up instant
+is itself a herd.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import time
+from typing import TypedDict
+
+import pytest
+
+from crawlutron.transport.scheduler import COOLDOWN_PURGE_INTERVAL, DomainScheduler
+from tests._result_builders import make_job, make_result
+from tests._scheduler_doubles import engine_envelope
+
+
+class _FloorCheck(TypedDict):
+    """What the mid-storm probe records about the committed floor."""
+
+    floor_after_storm: bool
+
+
+def _scheduler(**overrides) -> DomainScheduler:
+    base = dict(global_limit=10, per_domain_limit=1, delay_seconds=0.0, adaptive=False)
+    base.update(overrides)
+    return DomainScheduler(**base)
+
+
+def _jobs(n: int) -> list[object]:
+    return [make_job(i, f"http://example.com/{i}") for i in range(n)]
+
+
+def _instant_sleep_shim(monkeypatch) -> None:
+    """Every sleep becomes a single zero-second yield (suite zero-wall doctrine)."""
+    real_sleep = asyncio.sleep
+
+    async def instant_sleep(delay, *args, **kwargs):
+        del delay, args, kwargs
+        await real_sleep(0)
+
+    monkeypatch.setattr(asyncio, "sleep", instant_sleep)
+
+
+class TestPurgeNeverDropsAnInUseGate:
+    """F1: record liveness includes 'the gate is held or waited on right now';
+    dropping it re-mints a FULL gate under the live holders and the cap widens."""
+
+    @pytest.mark.parametrize("limit", [1, 2])
+    async def test_a_mid_worker_cadence_purge_keeps_the_cap(self, monkeypatch, limit):
+        _instant_sleep_shim(monkeypatch)
+        scheduler = _scheduler(per_domain_limit=limit)
+        in_flight = 0
+        peak = 0
+
+        async def worker(job):
+            nonlocal in_flight, peak
+            in_flight += 1
+            peak = max(peak, in_flight)
+            if job.index == 0:
+                # While this worker holds a gate slot, a 429 storm drives the
+                # amortized purge over the held record.
+                for _ in range(COOLDOWN_PURGE_INTERVAL):
+                    scheduler.set_domain_cooldown("other.test", 1.0)
+            await asyncio.sleep(0.01)
+            in_flight -= 1
+            return make_result(job.url.raw, job.domain)
+
+        results = await scheduler.run(_jobs(4), worker, failed_result=engine_envelope)
+        assert results is not None and len(results) == 4
+        assert peak <= limit, f"a mid-worker purge widened the gate: peak {peak} at per_domain_limit={limit}"
+
+    async def test_the_purged_mid_run_record_keeps_its_spacing_state(self, monkeypatch):
+        """The politeness corollary: the same storm must not erase next_fire,
+        min_delay, or the bucket of a record a worker is using."""
+        _instant_sleep_shim(monkeypatch)
+        scheduler = _scheduler()
+        seen: list[_FloorCheck] = []
+
+        async def worker(job):
+            if job.index == 0:
+                scheduler.set_domain_min_delay("example.com", 0.05)
+                for _ in range(COOLDOWN_PURGE_INTERVAL):
+                    scheduler.set_domain_cooldown("other.test", 1.0)
+                seen.append({"floor_after_storm": scheduler.current_delay("example.com") >= 0.05})
+            await asyncio.sleep(0)
+            return make_result(job.url.raw, job.domain)
+
+        await scheduler.run(_jobs(2), worker, failed_result=engine_envelope)
+        assert seen and seen[0]["floor_after_storm"] is True, "the committed floor was purged mid-worker"
+
+
+class TestCooldownWakeReReserves:
+    """F2: peers waking from the same 429 cooldown must still space their
+    fires -- the wake instant is not a synchronized free-for-all. Suite rules:
+    conftest patches asyncio.sleep to zero-second yields, so spacing is
+    observed through the REQUESTED waits (SleepRecorder), never wall time.
+    """
+
+    async def test_peers_waking_from_one_cooldown_re_reserve(self, monkeypatch):
+        """Zero real sleep: a fake wall clock advances when a COOLDOWN-sized nap
+        is requested (only the scheduler's cooldown sleeps take that size), so
+        the 429 expiry passes deterministically and instantly."""
+        real_sleep = asyncio.sleep
+        requested: list[float] = []
+        wall = {"now": time.time()}
+        scheduler = _scheduler(delay_seconds=0.15)
+        started = asyncio.Event()
+
+        def fake_time() -> float:
+            return wall["now"]
+
+        async def fake_wall_sleep(delay, *args, **kwargs):
+            del args, kwargs
+            requested.append(delay)
+            # A cooldown nap is the only large sleep on the WALL clock; it
+            # costs zero real time -- it just moves the fake clock.
+            if delay >= 0.1:
+                wall["now"] += delay
+            await real_sleep(0)
+
+        monkeypatch.setattr(asyncio, "sleep", fake_wall_sleep)
+        monkeypatch.setattr(time, "time", fake_time)
+
+        async def worker(job):
+            if job.index == 0:
+                # A 429 lands while the batch is spacing: everyone converges
+                # on this expiry.
+                scheduler.set_domain_cooldown("example.com", 0.1)
+                started.set()
+            if job.index > 0:
+                await started.wait()
+            await real_sleep(0)
+            return make_result(job.url.raw, job.domain)
+
+        results = await scheduler.run(_jobs(3), worker, failed_result=engine_envelope)
+        assert results is not None and len(results) == 3
+        # After the cooldown, waking peers requested SPACED waits again: the
+        # re-reservation makes each wait its cumulative slot (delay x queue position).
+        spacing = sorted(d for d in requested if 0.11 < d < 0.3)
+        assert len(spacing) >= 2, f"cooldown-wake peers must each re-reserve a spacing wait: {requested}"
+        assert all(spacing[i + 1] > spacing[i] for i in range(len(spacing) - 1)), (
+            f"spacing waits must stagger cumulatively, not copy: {spacing}"
+        )
