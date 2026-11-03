@@ -176,10 +176,8 @@ def test_status_assignment_detector_bites():
 
 def _accumulator_delete_outside_tombstone(tree: ast.Module, path: pathlib.Path) -> list[str]:
     """Flag any ``JobAccumulators.delete`` call not enclosed in ``_tombstone_row``.
-
-    Child-history deletion must happen only after a successful ownership UPDATE,
-    and only from the single tombstone chokepoint. A where-called invariant, not
-    an ordering invariant -- the test suite pins the ordering behaviorally.
+    Child-history deletion runs only after a successful ownership UPDATE; a
+    where-called invariant, not ordering -- behavior is pinned by tests.
     """
     parents = parent_map(tree)
     out: list[str] = []
