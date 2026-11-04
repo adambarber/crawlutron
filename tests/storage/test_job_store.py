@@ -3,6 +3,7 @@
 import datetime
 import json
 import logging
+import pathlib
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 
@@ -18,6 +19,7 @@ from tests._job_harnesses import (
     seed_frontier,
     write_row_policy,
 )
+from tests._lock_scope_walks import calls_inside_self_lock
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, deployment_tier, job_store
 
 
@@ -149,7 +151,6 @@ class TestJobStoreLifecycle:
 
 class TestJobStoreCorruptRow:
     def test_job_store_load_corrupt_row(self):
-        import pathlib
         import tempfile
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -424,3 +425,75 @@ def test_cross_list_duplicate_keeps_shallowest_depth():
 
     assert loaded.frontier == []
     assert loaded.in_flight == [FrontierEntry(canonical("https://example.test/child"), 1)]
+
+
+def test_read_row_normalizes_outside_the_store_lock():
+    """``_read_row`` must not deserialize or normalize under ``self._lock``.
+
+    ``row_to_state``/``normalize_job_state`` re-derive the whole job's
+    identity per load; holding the store lock across that work blocks every
+    writer behind one reader's CPU. Asserted on the live source: the row and
+    its accumulators are read under the lock, the walk runs after it."""
+    offenders = calls_inside_self_lock(
+        "crawlutron/storage/job_store.py",
+        ("_read_row", "_row_to_job"),
+        ("_row_to_job", "row_to_state"),
+    )
+    assert offenders == [], (
+        "_read_row/_row_to_job deserializes/normalizes inside the store lock: "
+        "one slow load blocks every writer behind a reader's CPU work"
+    )
+
+
+def test_same_length_results_replacement_is_persisted(job_store):
+    """Same-length replacement of results must be persisted, not skipped.
+
+    The accumulator short-circuits on ``persisted == len(results)``; with a
+    same-length swap that length is unchanged, so the old content survives
+    unless the persist is keyed on content identity.
+    """
+    job = job_store.create("http://example.com/", CrawlPolicy())
+    job.results = [{"url": "http://example.com/a", "status": "success"}]
+    job_store.save(job)
+
+    job.results = [{"url": "http://example.com/b", "status": "success"}]
+    job_store.save(job)
+
+    loaded = job_store.load(job.job_id)
+    assert loaded is not None
+    assert len(loaded.results) == 1
+    assert loaded.results[0]["url"] == "http://example.com/b"
+
+
+def test_same_length_visited_replacement_is_persisted(job_store):
+    """Same-length replacement of the visited set must be persisted."""
+    job = job_store.create("http://example.com/", CrawlPolicy())
+    job.visited = OrderedUrlSet([canonical("http://example.com/a")])
+    job_store.save(job)
+
+    job_id = job.job_id
+    job = job_store.load(job_id)
+    job.visited = OrderedUrlSet([canonical("http://example.com/b")])
+    job_store.save(job)
+
+    loaded = job_store.load(job_id)
+    assert loaded is not None
+    assert loaded.visited == OrderedUrlSet([canonical("http://example.com/b")])
+
+
+def test_same_length_frontier_replacement_is_persisted(job_store):
+    """Same-length frontier replacement persists: a reload leaves
+    ``frontier_mark == len(frontier)``, so the swap hit the ``mark == len``
+    short circuit and skipped the persist."""
+    job = job_store.create("http://example.com/", CrawlPolicy())
+    seed_frontier(job, frontier(["http://example.com/page2"]))
+    job_store.save(job)
+
+    job_id = job.job_id
+    job = job_store.load(job_id)
+    job.frontier = [FrontierEntry(url=canonical("http://example.com/page3"), depth=0)]
+    job_store.save(job)
+
+    loaded = job_store.load(job_id)
+    assert loaded is not None
+    assert loaded.frontier == [FrontierEntry(url=canonical("http://example.com/page3"), depth=0)]

@@ -12,9 +12,9 @@ _BUDGET_HISTORY: dict[str, list[int]] = {
     #: 22 -> 21 (#160); 21 -> 20 (#330); 20 -> 19 (#136); then 19 -> 1 -> SEALED:
     #: the row AND this record are gone (#419's seal; the zero test is the gate).
     "abc size": [1, 0],
-    #: 358 -> 357 (#383); 357 -> 355 (#136);
-    #: 355 -> 348 (#419, the render phases left browser.py).
-    "largest class": [358, 357, 355, 348],
+    #: 358 -> 357 (#383); 357 -> 355 (#136); 355 -> 348 (#419, browser.py);
+    #: 348 -> 345 (#314, the job store's owner-filter branches collapsed).
+    "largest class": [358, 357, 355, 348, 345],
     #: 8 first declared; 7 (#136-ish pool split); 6 -> 2 by #419's five splits;
     #: SEALED: row and record gone; test_zero_long_blocks_in_app is the gate.
 }

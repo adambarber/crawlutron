@@ -43,6 +43,23 @@ from .job_store_state import (
     _job_row_params,
 )
 
+_ROW_COLUMNS = (
+    "SELECT job_id, kind, owner, root_url, policy, status, created_at, updated_at, error, "
+    "stats, in_flight, transient_retries FROM crawl_jobs"
+)
+
+
+def _owner_statement(
+    projection: str, where_job_id: bool, tail: str, owner: str | None
+) -> tuple[str, tuple[object, ...]]:
+    """The owner-filtered read statement and its bindings, every fragment a
+    module literal (``""`` is a real owner, so the split is on None alone)."""
+    anchor = " WHERE job_id = ?" if where_job_id else " WHERE 1=1"
+    owner_clause = "" if owner is None else " AND owner = ?"
+    statement = projection + anchor + owner_clause + " AND deleted_at IS NULL" + tail
+    return statement, () if owner is None else (owner,)
+
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -99,13 +116,20 @@ class JobStore:
     def _row_to_job(self, row: sqlite3.Row, *, with_accumulators: bool = True) -> CrawlJobState:
         """One row, read through the declared record (the walk lives beside it).
 
-        The frontier always loads: the runner's state-only reload owns
-        the queue, so only results/visited are with-accumulators collections."""
+        Collection reads take the store lock (reentrant); the deserializing
+        walk runs outside it, so a slow load never blocks a writer behind a
+        reader's CPU. The frontier always loads: the runner's state-only
+        reload owns the queue, so only results/visited are with-accumulators
+        collections."""
+        with self._lock:
+            visited = self._accumulators.read_visited(row["job_id"]) if with_accumulators else []
+            results = self._accumulators.read_results(row["job_id"]) if with_accumulators else []
+            frontier = self._accumulators.read_frontier(row["job_id"])
         return row_to_state(
             row,
-            visited=self._accumulators.read_visited(row["job_id"]) if with_accumulators else [],
-            results=self._accumulators.read_results(row["job_id"]) if with_accumulators else [],
-            frontier=self._accumulators.read_frontier(row["job_id"]),
+            visited=visited,
+            results=results,
+            frontier=frontier,
             host_policy=self._host_policy,
             tier=self.tier,
         )
@@ -191,34 +215,25 @@ class JobStore:
         self, job_id: str, *, with_accumulators: bool, owner: str | None = None
     ) -> CrawlJobState | None:
         """The one row read both loaders share.
-        Row, history and visited set are read under one hold of the lock; ``owner``
-        narrows to the caller's own row before any deserialization."""
+        The row is selected under one hold of the lock; the deserializing walk
+        runs after release (``_row_to_job`` takes the lock again for its own
+        collection reads). ``owner`` narrows to the caller's own row before
+        any deserialization."""
+        statement, params = _owner_statement(_ROW_COLUMNS, True, "", owner)
         with self._lock:
-            columns = (
-                "SELECT job_id, kind, owner, root_url, policy, status, "
-                "created_at, updated_at, error, stats, in_flight, transient_retries "
-                "FROM crawl_jobs "
-            )
-            if owner is None:
-                row = self._conn.execute(
-                    columns + "WHERE job_id = ? AND deleted_at IS NULL", (job_id,)
-                ).fetchone()
-            else:
-                row = self._conn.execute(
-                    columns + "WHERE job_id = ? AND owner = ? AND deleted_at IS NULL", (job_id, owner)
-                ).fetchone()
-            if row is None:
-                return None
-            factory = self._row_to_job_factory
-            try:
-                if factory is None:
-                    return self._row_to_job(row, with_accumulators=with_accumulators)
-                return factory(row, self._row_to_job, with_accumulators=with_accumulators)
-            except (json.JSONDecodeError, ValueError, TypeError) as exc:
-                # Surface corruption instead of silently returning None so a
-                # broken row is observable in logs rather than masked.
-                logger.warning("job_store_load_corrupt", extra={"job_id": job_id, "error": str(exc)})
-                return None
+            row = self._conn.execute(statement, (job_id, *params)).fetchone()
+        if row is None:
+            return None
+        factory = self._row_to_job_factory
+        try:
+            if factory is None:
+                return self._row_to_job(row, with_accumulators=with_accumulators)
+            return factory(row, self._row_to_job, with_accumulators=with_accumulators)
+        except (json.JSONDecodeError, ValueError, TypeError) as exc:
+            # Surface corruption instead of silently returning None so a
+            # broken row is observable in logs rather than masked.
+            logger.warning("job_store_load_corrupt", extra={"job_id": job_id, "error": str(exc)})
+            return None
 
     def load_for_caller(self, job_id: str, caller_id: str) -> CrawlJobState | None:
         """The job iff ``caller_id`` owns it; foreign/missing read the same miss.
@@ -281,17 +296,9 @@ class JobStore:
     def _read_job_list(self, owner: str | None, *, limit: int | None, offset: int = 0) -> list[JobStatusView]:
         """The status views owned by ``owner``, or every row when None, sliced
         by optional ``limit``/``offset`` (LIMIT is appended iff ``limit`` given)."""
-        params: tuple[object, ...]
         with self._lock:
             counts = self._accumulators.counts_by_job()
-            if owner is None:
-                statement = _JOB_STATUS_PROJECTION + " WHERE deleted_at IS NULL" + _JOB_LIST_ORDER
-                params = ()
-            else:
-                statement = (
-                    _JOB_STATUS_PROJECTION + " WHERE owner = ? AND deleted_at IS NULL" + _JOB_LIST_ORDER
-                )
-                params = (owner,)
+            statement, params = _owner_statement(_JOB_STATUS_PROJECTION, False, _JOB_LIST_ORDER, owner)
             if limit is not None:
                 statement += " LIMIT ? OFFSET ?"
                 params = (*params, max(0, limit), max(0, offset))
@@ -309,14 +316,8 @@ class JobStore:
     def _count_jobs(self, owner: str | None) -> int:
         """Live row count, filtered to ``owner`` when one is given."""
         with self._lock:
-            if owner is None:
-                row = self._conn.execute(
-                    "SELECT count(*) FROM crawl_jobs WHERE deleted_at IS NULL"
-                ).fetchone()
-            else:
-                row = self._conn.execute(
-                    "SELECT count(*) FROM crawl_jobs WHERE owner = ? AND deleted_at IS NULL", (owner,)
-                ).fetchone()
+            statement, params = _owner_statement("SELECT count(*) FROM crawl_jobs", False, "", owner)
+            row = self._conn.execute(statement, params).fetchone()
         return int(row[0])
 
     def status_row(self, job_id: str) -> JobStatusView | None:
@@ -333,15 +334,8 @@ class JobStore:
     def _read_status_row(self, job_id: str, owner: str | None) -> JobStatusView | None:
         """One job's status view, or None when no row matches the owner filter."""
         with self._lock:
-            if owner is None:
-                row = self._conn.execute(
-                    _JOB_STATUS_PROJECTION + " WHERE job_id = ? AND deleted_at IS NULL", (job_id,)
-                ).fetchone()
-            else:
-                row = self._conn.execute(
-                    _JOB_STATUS_PROJECTION + " WHERE job_id = ? AND owner = ? AND deleted_at IS NULL",
-                    (job_id, owner),
-                ).fetchone()
+            statement, params = _owner_statement(_JOB_STATUS_PROJECTION, True, "", owner)
+            row = self._conn.execute(statement, (job_id, *params)).fetchone()
             if row is None:
                 return None
             visited, results = self._accumulators.counts_for(job_id)
@@ -371,15 +365,8 @@ class JobStore:
     def _has_job_row(self, job_id: str, owner: str | None) -> bool:
         """Whether a row matches, filtered to ``owner`` when one is given."""
         with self._lock:
-            if owner is None:
-                row = self._conn.execute(
-                    "SELECT 1 FROM crawl_jobs WHERE job_id = ? AND deleted_at IS NULL", (job_id,)
-                ).fetchone()
-            else:
-                row = self._conn.execute(
-                    "SELECT 1 FROM crawl_jobs WHERE job_id = ? AND owner = ? AND deleted_at IS NULL",
-                    (job_id, owner),
-                ).fetchone()
+            statement, params = _owner_statement("SELECT 1 FROM crawl_jobs", True, "", owner)
+            row = self._conn.execute(statement, (job_id, *params)).fetchone()
         return row is not None
 
     def close(self) -> None:

@@ -18,6 +18,7 @@ from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._cache_fixtures import _make_cache, counting_entry_reads, on_disk_bytes, reopen_cache, scoped_cache
 from tests._fetch_scripted import request_fetcher
 from tests._fetcher_factories import clocked_cache, crawled_results, run_http_strategy, tap_fetcher
+from tests._lock_scope_walks import calls_inside_self_lock
 from tests.helpers.server import EtagHandler
 
 
@@ -82,6 +83,19 @@ def test_set_get_roundtrip():
         assert c.get("missing") is None
         c.set("k", {"a": 1, "b": "x"})
         assert c.get("k") == {"a": 1, "b": "x"}
+
+
+def test_set_writes_disk_outside_the_lock():
+    """``set`` performs the disk write outside the commit lock, like ``aset``.
+
+    The write seam must not sit inside ``with self._lock:``: one slow disk
+    write would block every other cache operation. Asserted on the live
+    source so the two set twins cannot drift apart again."""
+    offenders = calls_inside_self_lock("crawlutron/transport/content_cache.py", ("set",), ("write_data",))
+    assert offenders == [], (
+        "set() calls write_data inside the commit lock: one slow disk write "
+        "blocks every other cache operation (the aset twin runs it outside)"
+    )
 
 
 def test_disk_persistence_across_instances(tmp_path):
