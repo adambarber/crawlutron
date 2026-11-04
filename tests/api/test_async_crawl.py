@@ -49,7 +49,9 @@ class TestAsyncCrawlApi:
     async def test_v1_crawl_rejects_policy_blocked_async_target_before_acceptance(
         self, crawl_api, override_settings
     ):
-        from crawlutron.main import job_store
+        from tests._app_factory import service_app
+
+        job_store = service_app().state.job_store
 
         override_settings(denied_hosts="blocked.test")
         response = await crawl_api.client.post(
@@ -91,7 +93,9 @@ class TestAsyncCrawlApi:
         undefined -- stats report what happened, never a value equal to crawled
         that conflates two job kinds under one field name.
         """
-        from crawlutron.main import job_store
+        from tests._app_factory import service_app
+
+        job_store = service_app().state.job_store
 
         request_id, _ = await submit_async_crawl(crawl_api.client, crawl_api.payload(async_mode=True))
 
@@ -126,7 +130,9 @@ class TestAsyncCrawlApi:
         request_id, _ = await submit_async_crawl(crawl_api.client, crawl_api.payload(async_mode=True))
 
         # Verify job exists in job_store with SINGLE_SHOT kind
-        from crawlutron.main import job_store
+        from tests._app_factory import service_app
+
+        job_store = service_app().state.job_store
 
         job = job_store.load(request_id)
         assert job is not None, "Job not found in job_store"
@@ -150,7 +156,9 @@ class TestAsyncCrawlApi:
 
     async def test_v1_crawl_async_mode_counts_failed_results(self, crawl_api):
         """Job stats must count failed results, not hardcode zero."""
-        from crawlutron.main import job_store
+        from tests._app_factory import service_app
+
+        job_store = service_app().state.job_store
 
         # One page fetches fine, one 404s (failed).
         request_id, _ = await submit_async_crawl(
@@ -354,7 +362,9 @@ class TestAsyncCrawlTeardownIsolation:
     from a cancelled test can push a later test over its quota of four."""
 
     async def test_teardown_clears_a_stray_pending_anonymous_job(self):
-        from crawlutron.main import job_store
+        from tests._app_factory import service_app
+
+        job_store = service_app().state.job_store
         from tests._async_harnesses import _drain_running_crawls
 
         job_store.create_single_shot("stray_pending", "http://example.com/", {}, owner="")

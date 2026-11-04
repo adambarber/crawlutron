@@ -255,8 +255,20 @@ async def post_webhook(
     Best-effort: nothing raises -- a lost callback is logged, so it cannot corrupt
     an already-recorded outcome; validation lives in the pin per attempt.
     """
-    cap = max_webhook_size()
-    payload_bytes = _serialize_webhook_payload(payload, cap)
+    try:
+        ensure_https_webhook_url(webhook_url)
+    except ValueError:
+        logger.warning("webhook_plaintext_refused", extra={"url": webhook_url})
+        return
+    try:
+        cap = max_webhook_size()
+        payload_bytes = _serialize_webhook_payload(payload, cap)
+    except (TypeError, ValueError) as exc:
+        logger.warning(
+            "webhook_payload_serialization_failed",
+            extra={"url": webhook_url, "error": str(exc)},
+        )
+        return
     if payload_bytes is None:
         # The exact size is never materialised; the cap floor is what is known.
         logger.warning(

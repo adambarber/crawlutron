@@ -167,7 +167,7 @@ class TestAgentHintsPayload:
 
 class TestDiscoveryPayload:
     def test_discovery_payload_structure(self):
-        payload = discovery_payload()
+        payload = discovery_payload(CrawlerSettings.from_mapping({}))
         assert payload["service"] == "crawlutron"
         assert "version" in payload
         assert "policy_schema_version" in payload
@@ -176,13 +176,13 @@ class TestDiscoveryPayload:
         assert "description" in payload
 
     def test_discovery_payload_links(self):
-        payload = discovery_payload()
+        payload = discovery_payload(CrawlerSettings.from_mapping({}))
         assert "openapi" in payload["links"]
         assert "capabilities" in payload["links"]
         assert "agent_hints" in payload["links"]
 
     def test_discovery_advertises_async_and_job_surfaces(self):
-        payload = discovery_payload()
+        payload = discovery_payload(CrawlerSettings.from_mapping({}))
         assert payload["links"]["result_retrieval"] == "/v1/crawl/{request_id}"
         assert payload["links"]["jobs"] == "/v1/jobs"
         assert payload["links"]["map"] == "/v1/map"
@@ -194,7 +194,7 @@ class TestDiscoveryPayload:
         """An agent that discovers the service the documented way can start a
         job and read its state, but could not stop one: the control and delete
         endpoints were live but absent from the recommendation list."""
-        recommended = discovery_payload()["recommended_endpoints"]
+        recommended = discovery_payload(CrawlerSettings.from_mapping({}))["recommended_endpoints"]
         assert "POST /v1/jobs/{job_id}/control" in recommended
         assert "DELETE /v1/jobs/{job_id}" in recommended
 
@@ -202,7 +202,7 @@ class TestDiscoveryPayload:
         """A watch is only useful to an agent that can register one and then read
         what the sweep concluded: both halves were live in the router and absent
         from the list a discovering agent actually reads."""
-        recommended = discovery_payload()["recommended_endpoints"]
+        recommended = discovery_payload(CrawlerSettings.from_mapping({}))["recommended_endpoints"]
         assert "POST /v1/watches" in recommended
         assert "GET /v1/watches" in recommended
         assert "GET /v1/watches/{watch_id}" in recommended
@@ -213,14 +213,14 @@ class TestDiscoveryPayload:
         is the discovery list, not the OpenAPI document."""
         from crawlutron.discovery.well_known import discovery_payload
 
-        recommended = discovery_payload()["recommended_endpoints"]
+        recommended = discovery_payload(CrawlerSettings.from_mapping({}))["recommended_endpoints"]
         assert "GET /v1/crawl/{request_id}/trace" in recommended
 
     def test_recommended_endpoints_name_the_policy_suggestion_surface(self):
         """A suggestion surface an agent cannot discover is not a surface: the
         guidance already tells agents to generate reviewable policy suggestions,
         and this is the door that does it."""
-        recommended = discovery_payload()["recommended_endpoints"]
+        recommended = discovery_payload(CrawlerSettings.from_mapping({}))["recommended_endpoints"]
         assert "GET /v1/policy-suggestions" in recommended
 
     def test_capabilities_advertises_watches(self):
@@ -245,6 +245,29 @@ class TestDiscoveryPayload:
             for route, operations in service.openapi()["paths"].items()
             for method in operations
         }
-        advertised = discovery_payload()["recommended_endpoints"]
+        advertised = discovery_payload(CrawlerSettings.from_mapping({}))["recommended_endpoints"]
         stale = [entry for entry in advertised if entry not in live]
         assert not stale, f"recommended_endpoints name routes the app does not serve: {stale}"
+
+
+class TestOperatorSeal:
+    """is_operator_sealed reports whether the keys surface refuses everything."""
+
+    def test_no_token_means_sealed(self):
+        payload = discovery_payload(CrawlerSettings.from_mapping({}))
+        assert payload["is_operator_sealed"] is True
+
+    def test_token_set_means_open(self):
+        payload = discovery_payload(CrawlerSettings.from_mapping({"CRAWLUTRON_KEY_ADMIN_TOKEN": "secret"}))
+        assert payload["is_operator_sealed"] is False
+
+    async def test_endpoint_reflects_the_seal(self, async_client, monkeypatch):
+        from crawlutron.api.dependencies import get_settings
+
+        app = async_client._transport.app  # type: ignore[attr-defined]
+        app.dependency_overrides[get_settings] = lambda: CrawlerSettings.from_mapping({})
+        try:
+            body = (await async_client.get("/.well-known/crawler-service")).json()
+            assert body["is_operator_sealed"] is True
+        finally:
+            app.dependency_overrides.pop(get_settings, None)

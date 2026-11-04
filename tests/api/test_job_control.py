@@ -206,10 +206,10 @@ class TestJobControlTransitions:
 
     @staticmethod
     async def _control(action: str, expected: int, *, seed_terminal: bool = False) -> None:
-        from crawlutron.main import job_store
         from crawlutron.storage.job_store import JobStatus
         from tests._app_factory import service_app
 
+        job_store = service_app().state.job_store
         job = job_store.create("http://example.com/", CrawlPolicy())
         if seed_terminal:
             job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)

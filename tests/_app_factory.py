@@ -17,3 +17,10 @@ def service_app() -> FastAPI:
         "crawlutron.main built no ASGI app -- FastAPI is not importable in this environment"
     )
     return app
+
+
+def fresh_app() -> FastAPI:
+    """A NEWLY constructed app (create_app), not the cached module-level one."""
+    from crawlutron.main import create_app
+
+    return create_app()

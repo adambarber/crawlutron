@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from crawlutron.config.settings import CrawlerSettings
 from tests._app_factory import service_app
 from tests._assertions import assert_pool_unavailable
 from tests._job_harnesses import post_render_with_pool
@@ -31,13 +32,10 @@ def _booted_app(monkeypatch, *, workers: str | None = None):
 
     if workers is not None:
         monkeypatch.setenv("CRAWLUTRON_WORKERS", workers)
-    monkeypatch.setattr(
-        main_mod,
-        "settings",
-        dataclasses.replace(main_mod.settings, cookie_persistence_enabled=True),
-    )
+    settings = dataclasses.replace(CrawlerSettings.from_mapping(), cookie_persistence_enabled=True)
     stub_heavy_teardown(monkeypatch)
-    return service_app()
+    app = main_mod.create_app(settings)
+    return app
 
 
 def _database_file(store) -> Path:
@@ -81,13 +79,14 @@ class TestMultiWorkerInvariants:
 
         A per-process path would pass each store's own test; the path is read
         from each live connection's ``PRAGMA database_list``, not the argument."""
-        from crawlutron.main import DATABASE_PATH, job_store, result_store
         from crawlutron.runtime.metrics import get_metrics
         from crawlutron.storage.coordination_cookies import SharedCookieStore
         from crawlutron.storage.coordination_counters import CoordinationCounters
         from crawlutron.transport.cookie_jar import CookieJar
 
         app = _booted_app(monkeypatch)
+        settings = app.state.crawler_settings
+        job_store, result_store = app.state.job_store, app.state.result_store
 
         async with app.router.lifespan_context(app):
             jar = app.state.cookie_jar
@@ -104,8 +103,8 @@ class TestMultiWorkerInvariants:
             "counters": _database_file(counters),
         }
 
-        expected = Path(DATABASE_PATH).resolve()
-        assert expected.name == "crawler.db", DATABASE_PATH
+        expected = Path(settings.cache_dir, "crawler.db").resolve()
+        assert expected.name == "crawler.db", settings.cache_dir
         for name, path in opened.items():
             assert path == expected, f"{name} opened {path}, not {expected}"
 

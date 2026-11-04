@@ -20,7 +20,7 @@ def test_service_version_is_the_package_version():
 def test_every_wire_surface_reports_the_package_version():
     surfaces = {
         "capabilities": capabilities_payload(CrawlerSettings.from_mapping({}))["version"],
-        "well_known": discovery_payload()["version"],
+        "well_known": discovery_payload(CrawlerSettings.from_mapping({}))["version"],
         "mcp_server_info": server_info()["version"],
         "user_agent": DEFAULT_USER_AGENT.split("/")[1].split(" ")[0],
     }

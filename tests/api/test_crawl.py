@@ -278,9 +278,9 @@ class TestJobApi(_AsgiEndpointTests):
 
     async def _seed_job(self, root_url):
         """Seed a persisted row directly; create_endpoint refuses."""
-        from crawlutron.main import job_store
+        from tests._app_factory import service_app
 
-        job = job_store.create(root_url, CrawlPolicy())
+        job = service_app().state.job_store.create(root_url, CrawlPolicy())
         return job.job_id
 
     async def test_v1_jobs_create_runs_and_list_get(self):
