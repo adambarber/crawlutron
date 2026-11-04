@@ -6,6 +6,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from crawlutron.api import job_runner
+from crawlutron.runtime.metrics import get_metrics
 from tests._assertions import (
     accepted_crawl,
     completed_crawl,
@@ -362,3 +363,17 @@ class TestAsyncCrawlTeardownIsolation:
         await _drain_running_crawls()
 
         assert job_store.active_count_for_caller("") == 0
+
+
+class TestAsyncCrawlMetrics:
+    """The async door's metrics must say what the sync door's say (#314 A6)."""
+
+    async def test_async_crawl_records_elapsed_ms(self, crawl_api):
+        """One async crawl updates ``crawler_crawl_seconds_total``: the sync path
+        records elapsed through the shared completion helper, so the async path
+        does not leave the duration counter frozen at zero."""
+        get_metrics().reset()
+        before = get_metrics().snapshot().total_elapsed_ms
+        await submit_async_crawl(crawl_api.client, crawl_api.payload(async_mode=True))
+        after = get_metrics().snapshot().total_elapsed_ms
+        assert after > before
