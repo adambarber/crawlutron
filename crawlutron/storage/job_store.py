@@ -17,6 +17,7 @@ from crawlutron.storage.ids import new_job_id
 from crawlutron.storage.migrations import StoreSchema
 from crawlutron.storage.sqlite_store import connect_store, process_lock, store_lock_key
 
+from .job_store_accumulators import JobAccumulators
 from .job_store_collections import (
     TERMINAL_STATUSES,
     Expected,
@@ -38,7 +39,6 @@ from .job_store_state import (
     _CAS_STATUS_SQL,
     _UPSERT_JOB_ROW_SQL,
     CrawlJobState,
-    JobAccumulators,
     _create_job,
     _job_row_params,
 )

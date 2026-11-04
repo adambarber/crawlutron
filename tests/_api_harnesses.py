@@ -26,7 +26,7 @@ def spy_on_history_reads(monkeypatch):
 
     The spy wraps ``JobAccumulators`` (not ``load``) so the real reads still
     run; every caller asserts on the recorded names."""
-    from crawlutron.storage.job_store import JobAccumulators
+    from crawlutron.storage.job_store_accumulators import JobAccumulators
 
     reached: list[str] = []
     for name in ("read_results", "read_visited"):

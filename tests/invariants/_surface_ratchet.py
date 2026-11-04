@@ -62,6 +62,9 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     "crawlutron/transport/http_cache.py": (4, 4),
     "crawlutron/transport/http_classify.py": (3, 3),
     "crawlutron/transport/pooled_clients.py": (13, 11),
+    # #314/wave-2: JobAccumulators (one class) moved here whole from job_store_state
+    # to hold the 500-line ceiling; the seam owns every accumulator table.
+    "crawlutron/storage/job_store_accumulators.py": (1, 1),
 }
 
 # Former #215 exemptions: their __all__ deliberately does not enumerate every public
@@ -117,7 +120,7 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/storage/job_store.py": (2, 1),
     "crawlutron/storage/job_store_collections.py": (11, 6),
     "crawlutron/storage/job_store_read.py": (3, 2),
-    "crawlutron/storage/job_store_state.py": (3, 2),
+    "crawlutron/storage/job_store_state.py": (2, 1),
     "crawlutron/runtime/resource_lifecycle.py": (2, 2),
     # RAISED to (2, 2) by #589: DeferredClose is the shared deferred-close owner
     # (BrowserPool + pooled HTTP clients); two hand-rolled copies deleted.
