@@ -77,15 +77,17 @@ def _traced_crawled_job(tmp_path, statements: list[str], pages: int, *, grown: t
 
 
 def test_persisting_overlapping_batches_never_selects_the_stored_visited_set(tmp_path):
-    """A batch persist must run zero reads against the visited table.
+    """A delta persist must not re-read the stored visited set per save.
 
     The high-water mark (#539) lives on the live state, so the write delta
-    needs no read at all: the mark never consults the table.
-    """
+    needs no read at all. The FIRST save is the exception: table-trust (#314
+    F2) seeds the collection digests from the table once, so a skip never
+    rides a stale memory digest; every later own-commit save is read-free."""
     statements: list[str] = []
     store, job = _traced_crawled_job(
         tmp_path, statements, 20, grown=("https://example.com/p0", "https://example.com/fresh")
     )
+    statements.clear()  # the seed reads belong to the first save; measure only the delta saves
     store.save(job)  # resave with nothing new
 
     visited_reads = _visited_statements(statements, "SELECT")

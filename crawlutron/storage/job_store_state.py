@@ -21,6 +21,7 @@ from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.json_value import JsonValue
 from crawlutron.models.normalized_url import NormalizedUrl, admit_or_none
 from crawlutron.safety.json_safe import json_default
+from crawlutron.storage.sqlite_store import connection_data_version
 
 from .job_store_collections import (
     FrontierEntry,
@@ -238,10 +239,38 @@ class JobAccumulators:
 
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
-        # Content identity of the last persisted batch per (job_id, collection).
-        # A same-length replacement changes the digest and forces a persist, so
-        # nothing is silently skipped on a ``mark == len`` short circuit.
+        # Table-trust digests: what the TABLE last held per (job_id, collection),
+        # re-seeded at save entry whenever another connection has committed
+        # (PRAGMA data_version), so a skip never rides a stale memory digest.
         self._content_digest: dict[str, dict[str, str]] = {}
+        self._seeded_version: dict[str, int] = {}
+        self._table_rows: dict[str, list] = {}
+        self._table_rows_job: str | None = None
+
+    def _data_version(self) -> int:
+        return connection_data_version(self._conn)
+
+    def _note_table_truth(self, job_id: str, version: int) -> None:
+        """Stamp ``job_id``'s digests as truth as of ``version`` (reads just ran)."""
+        self._seeded_version[job_id] = version
+
+    def _seed_table_truth(self, job_id: str) -> None:
+        """Re-read the tables' content when another connection may have written.
+
+        A skip decision must compare against what the TABLE holds, not what this
+        process last wrote; own commits leave ``data_version`` put, so the
+        no-op path stays read-free. The version is read BEFORE the rows so a
+        commit landing mid-read forces the next save to re-seed."""
+        version = self._data_version()
+        if self._seeded_version.get(job_id) == version:
+            return
+        self._table_rows = {
+            "results": self.read_results(job_id),
+            "visited": self.read_visited(job_id),
+            "frontier": self.read_frontier(job_id),
+        }
+        self._table_rows_job = job_id
+        self._seeded_version[job_id] = version
 
     def _digest(self, payload) -> str:
         """A stable content identity for one persisted batch."""
@@ -250,9 +279,9 @@ class JobAccumulators:
     def _content_matches(self, job_id: str, collection: str, digest: str) -> bool:
         """The single content-identity seam every accumulator mutation gates on.
 
-        True iff ``digest`` is what this store last persisted for ``(job_id,
-        collection)``, so an identical batch is not re-written and a
-        same-length replacement is not skipped.
+        True iff ``digest`` matches the TABLE's persisted content -- the map is
+        re-seeded from the tables at each save entry -- so an identical batch is
+        not re-written and an out-of-band table change is never skipped over.
         """
         return self._content_digest.get(job_id, {}).get(collection) == digest
 
@@ -315,6 +344,7 @@ class JobAccumulators:
         # Drop the remembered content identity so a re-created job with the same
         # job_id is persisted in full instead of matching a tombstoned digest.
         self._content_digest.pop(job_id, None)
+        self._seeded_version.pop(job_id, None)
 
     def counts_by_job(self) -> dict[str, tuple[int, int]]:
         """``{job_id: (visited, results)}`` for the job list, in one query, instead of a
@@ -359,15 +389,15 @@ class JobAccumulators:
         job.frontier_removed.clear()
         digest = self._digest([{"url": entry.url.raw, "depth": entry.depth} for entry in job.frontier])
         mark = job.frontier_mark
+        if self._content_matches(job_id, "frontier", digest):
+            # Content identical to the persisted table: nothing to write.
+            job.frontier_mark = len(job.frontier)
+            return
         if mark > len(job.frontier):
             # The live list shrank below the persisted prefix by a mutation that
             # logged no removal -- a wholesale replacement. Resync, O(queue).
             self._conn.execute('DELETE FROM "crawl_job_frontier" WHERE job_id = ?', (job_id,))
             mark = 0
-        if self._content_matches(job_id, "frontier", digest):
-            # Content identical to the persisted table: nothing to write.
-            job.frontier_mark = len(job.frontier)
-            return
         if mark == len(job.frontier):
             # Same-length replacement: the tail is empty but the content changed,
             # so the table still holds the old rows. Resync the whole queue.
@@ -401,6 +431,12 @@ class JobAccumulators:
         digest = self._digest(results)
         if self._content_matches(job_id, "results", digest):
             return
+        table = self._table_rows.get("results", []) if self._table_rows_job == job_id else []
+        if self._digest(results[: len(table)]) != self._digest(table):
+            # The stored rows are not the live history's head (an out-of-band
+            # change): the tail delta cannot splice, so resync in full.
+            self._conn.execute('DELETE FROM "crawl_job_results" WHERE job_id = ?', (job_id,))
+            table = []
         row = self._conn.execute(
             'SELECT max(seq) FROM "crawl_job_results" WHERE job_id = ?', (job_id,)
         ).fetchone()
@@ -424,16 +460,16 @@ class JobAccumulators:
         """
         job_id = job.job_id
         digest = self._digest([url.raw for url in job.visited])
+        if self._content_matches(job_id, "visited", digest):
+            # Content identical to the persisted table: nothing to write.
+            job.visited_mark = len(job.visited)
+            return
         if job.visited_mark > len(job.visited):
             # A set that shrank below the mark (retry-requeue discard) resyncs,
             # and INSERT OR IGNORE stays: the ignore is the cross-process guard.
             self._conn.execute('DELETE FROM "crawl_job_visited" WHERE job_id = ?', (job_id,))
             job.visited_mark = 0
         mark = job.visited_mark
-        if self._content_matches(job_id, "visited", digest):
-            # Content identical to the persisted table: nothing to write.
-            job.visited_mark = len(job.visited)
-            return
         if mark == len(job.visited):
             # Same-length replacement: the tail is empty but the content changed,
             # so the table still holds the old rows. Resync the whole set.

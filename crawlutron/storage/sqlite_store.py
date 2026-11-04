@@ -170,6 +170,14 @@ def table_has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
     return any(info.name == column for info in table_columns(conn, table))
 
 
+def connection_data_version(conn: sqlite3.Connection) -> int:
+    """``PRAGMA data_version``: how many foreign commits this connection has seen.
+
+    The one PRAGMA read outside ``configure_store_connection``'s write path, so
+    the chokepoint gate keeps every PRAGMA text in this module."""
+    return int(conn.execute("PRAGMA data_version").fetchone()[0])
+
+
 def table_indexes(conn: sqlite3.Connection, table: str) -> tuple[IndexInfo, ...]:
     """Return explicit and SQLite-generated index metadata for ``table``."""
     table = _validated_identifier(table)
@@ -193,6 +201,7 @@ __all__ = [
     "ColumnInfo",
     "IndexInfo",
     "configure_store_connection",
+    "connection_data_version",
     "connect_store",
     "process_lock",
     "store_lock_key",

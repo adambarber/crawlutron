@@ -177,6 +177,7 @@ class JobStore:
         (deleted) job is a no-op here, so a late ``save`` cannot resurrect it."""
         if self._is_tombstoned(job.job_id):
             return
+        self._accumulators._seed_table_truth(job.job_id)
         job.updated_at = time.time()
         self._conn.execute(_UPSERT_JOB_ROW_SQL, _job_row_params(job))
         self._accumulators.append(job)

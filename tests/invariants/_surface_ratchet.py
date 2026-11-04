@@ -20,7 +20,9 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     # RAISED to (7, 6): failed_unified_result is the single failure projection.
     "crawlutron/api/response_shaping.py": (7, 6),
     "crawlutron/api/unified_shaping.py": (5, 5),
-    "crawlutron/storage/sqlite_store.py": (9, 7),
+    # RAISED to (10, 8) by #314/F2: connection_data_version is the one PRAGMA read
+    # chokepoint outside configure_store_connection, backing the table-trust digest.
+    "crawlutron/storage/sqlite_store.py": (10, 8),
     "crawlutron/safety/safe_regex.py": (7, 2),
     # robots_pattern_to_regex is public (#190) -- robots_allows itself calls it -- so the
     # parity/per-host tests drive that real contract; the matcher class behind it stays private.
