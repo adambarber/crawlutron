@@ -112,9 +112,13 @@ class WatchStore(CoordinationStore):
         return [_row_to_state(row) for row in rows]
 
     def count_for_owner(self, owner: str) -> int:
-        """How many watches ``owner`` has registered; the per-caller cap reads it."""
+        """How many watches ``owner`` has registered; the per-caller cap reads it.
+        Deactivated rows are not counted: the sweep can never run them."""
         with self._lock:
-            row = self._conn.execute("SELECT count(*) FROM watches WHERE owner = ?", (owner,)).fetchone()
+            row = self._conn.execute(
+                "SELECT count(*) FROM watches WHERE owner = ? AND status = ?",
+                (owner, WatchStatus.ACTIVE),
+            ).fetchone()
         return int(row[0])
 
     def delete(self, watch_id: str) -> bool:
