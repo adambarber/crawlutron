@@ -64,6 +64,13 @@ BROWSER_PROFILE_KEYS: Final[frozenset[str]] = frozenset(
     }
 )
 
+#: The values a ``browser_profile.viewport`` may carry: the consumers compare
+#: equality (``== "mobile"``), so anything else silently defaulted.
+VIEWPORT_VALUES: Final[frozenset[str]] = frozenset({"desktop", "mobile"})
+
+#: The values a ``browser_profile.resource_mode`` may carry; ``reduced`` disables images.
+RESOURCE_MODE_VALUES: Final[frozenset[str]] = frozenset({"full", "reduced"})
+
 #: Every key one ``browser_profile.actions`` entry may carry, read off the
 #: chain's own ``action.get(...)`` calls: an unnamed key fills nothing.
 BROWSER_ACTION_KEYS: Final[frozenset[str]] = frozenset({"type", "selector", "timeout", "seconds", "value"})

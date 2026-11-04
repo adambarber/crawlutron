@@ -8,7 +8,30 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from crawlutron.transport.scheduler import TokenBucket
 
-__all__ = ["DomainState"]
+__all__ = ["DomainGate", "DomainState"]
+
+
+class DomainGate:
+    """The domain's concurrency gate: the semaphore plus its public occupancy.
+
+    ``Semaphore._value`` is a CPython detail, so in-flight occupancy is
+    tracked here explicitly (#577 F1: any holder or waiter keeps the record
+    live; ``locked()`` alone misses a half-full gate). ``async with`` works
+    unchanged by delegation.
+    """
+
+    def __init__(self, limit: int) -> None:
+        self._semaphore = asyncio.Semaphore(limit)
+        self.occupancy = 0
+
+    async def __aenter__(self) -> None:
+        await self._semaphore.acquire()
+        self.occupancy += 1
+        return None
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        self.occupancy -= 1
+        self._semaphore.release()
 
 
 class DomainState:
@@ -41,8 +64,8 @@ class DomainState:
         self.bucket: TokenBucket | None = None
         # Per-domain concurrency gate, scheduler-lifetime: one home for the
         # domain's pacing, never re-minted per batch. The scheduler's _state()
-        # mints the record and sizes this semaphore from its knobs.
-        self.gate = asyncio.Semaphore(1)
+        # mints the record and sizes this gate from its knobs.
+        self.gate = DomainGate(1)
 
     def live(
         self,
@@ -50,7 +73,6 @@ class DomainState:
         now: float,
         window: float,
         pin_ttl: float,
-        gate_limit: int,
     ) -> bool:
         """True while any field still owes the domain something.
 
@@ -71,12 +93,15 @@ class DomainState:
             return True
         if self.ema is not None and self.last_seen is not None and self.last_seen > now - window:
             return True
-        # In use right now: the gate's counter is below its limit -- any holder
-        # or waiter. ``locked()`` alone is "at capacity" and misses a half-full
+        # In use right now: any holder or waiter -- the gate's public
+        # occupancy. ``locked()`` alone is "at capacity" and misses a half-full
         # gate (limit 2, one holder): a record dropped then re-mints a FULL
         # fresh gate under the old holder and the cap silently widens
-        # (#577 adversarial F1). _value is CPython-stable (starts at the limit).
-        if self.gate._value < gate_limit:
+        # (#577 adversarial F1). The count rides the gate itself (DomainGate),
+        # so no semaphore implementation detail is read.
+        if self.gate.occupancy > 0:
+            return True
+        if self.gate.occupancy > 0:
             return True
         # The bucket rides along: it is kept while the record is live for any
         # other reason, never a reason by itself (idle domains drop theirs).

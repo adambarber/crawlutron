@@ -282,7 +282,7 @@ and `output_format`. The request/browsing profile knobs — `request_profile`, `
       "respect_robots": true
     },
     "request_profile": { "user_agent_family": "declared_crawler" },
-    "browser_profile": { "resource_mode": "document" },
+    "browser_profile": { "resource_mode": "full" },
     "discovery": { "robots": true, "sitemaps": true, "feeds": true }
   }
 }
