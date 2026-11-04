@@ -53,8 +53,8 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     # #441 + #544/S3: the header wire law for names and values, shared by the
     # policy, credential, and transport edges.
     "crawlutron/safety/header_values.py": (3, 3),
-    # Four transport/spill surfaces pinned with their true public doors; growing any of
-    # these needs an explicit ratchet edit. #314/A3 raised the state row to (2, 2).
+    # #314/A3 raised the state row to (2, 2) for DomainGate, whose public
+    # occupancy answers liveness. Growing any of these needs an explicit edit.
     "crawlutron/transport/scheduler_domain_state.py": (2, 2),
     "crawlutron/orchestration/spill_sink.py": (2, 2),
     "crawlutron/transport/http_cache.py": (4, 4),

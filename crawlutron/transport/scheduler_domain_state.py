@@ -101,8 +101,6 @@ class DomainState:
         # so no semaphore implementation detail is read.
         if self.gate.occupancy > 0:
             return True
-        if self.gate.occupancy > 0:
-            return True
         # The bucket rides along: it is kept while the record is live for any
         # other reason, never a reason by itself (idle domains drop theirs).
         return False
