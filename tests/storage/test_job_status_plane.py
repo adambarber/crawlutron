@@ -9,6 +9,7 @@ import asyncio
 import threading
 
 from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.storage.job_store import CrawlJobState, JobStatus, JobStore
 from tests._job_harnesses import frontier, loaded_job, make_job_store, run_to_terminal
 from tests._policy_factories import canonical
@@ -48,8 +49,8 @@ def assert_history_intact(
     job_id: str,
     caller_id: str,
     *,
-    visited: set,
-    results: list,
+    visited: set[NormalizedUrl],
+    results: list[dict[str, object]],
     frontier: list[str],
 ) -> None:
     """Assert the job row and all accumulator history survive for the caller."""
