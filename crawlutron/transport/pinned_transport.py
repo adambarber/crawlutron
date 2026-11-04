@@ -43,16 +43,17 @@ async def bounded_thread_resolve[T](work: Callable[[], T], *, timeout_seconds: f
     path (#C10): the chokepoint covers every DNS entry point, not one of two."""
     wait_for = dns_wait_for(timeout_seconds)
     _refuse_if_saturated()
-    loop = asyncio.get_running_loop()
-    future = loop.run_in_executor(DNS_EXECUTOR, work)
-    _dns_futures.add(future)
+    # The CONCURRENT future is what stays undone until the worker thread
+    # returns; the asyncio wrapper the caller awaits is cancelled by the wait
+    # timeout, so registering it would re-open the blind window this closes.
+    concurrent_future = DNS_EXECUTOR.submit(work)
+    _register_dns_future(concurrent_future)
+    future = asyncio.wrap_future(concurrent_future)
     try:
         return await asyncio.wait_for(future, timeout=wait_for)
     except TimeoutError:
-        future.cancel()
+        concurrent_future.cancel()
         raise ResolverBudgetExceeded(f"DNS resolution exceeded the {wait_for:.1f}s budget") from None
-    finally:
-        _dns_futures.discard(future)
 
 
 # Per-host DNS cache; the TTL is short so rebinds stay bounded, with IP
@@ -71,6 +72,15 @@ def _refuse_if_saturated() -> None:
         )
 
 
+def _register_dns_future(future: _DnsFuture) -> None:
+    """Account a resolve until its RESOLVER THREAD completes, not until the
+    caller's wait times out (wave-3 N1): a getaddrinfo still running inside a
+    worker is exactly the saturation the chokepoint must keep counting. Both
+    future kinds support add_done_callback, so one registration covers both paths."""
+    _dns_futures.add(future)
+    future.add_done_callback(_dns_futures.discard)
+
+
 def bounded_addrinfo(hostname: str) -> list[str]:
     """One getaddrinfo on the shared DNS executor, bounded by the DNS posture: a
     resolve that outlasts the budget raises the classifiable ResolverBudgetExceeded
@@ -78,11 +88,14 @@ def bounded_addrinfo(hostname: str) -> list[str]:
     wait_for = dns_wait_for(None)
     _refuse_if_saturated()
     future = DNS_EXECUTOR.submit(socket.getaddrinfo, hostname, None)
-    _dns_futures.add(future)
+    _register_dns_future(future)
     try:
         done, _ = concurrent.futures.wait({future}, timeout=wait_for)
-    finally:
+    except BaseException:
+        # Symmetry with the callback: a synchronous failure (KeyboardInterrupt,
+        # event teardown) must not leave a stale future holding a registry slot.
         _dns_futures.discard(future)
+        raise
     if not done:
         future.cancel()
         raise ResolverBudgetExceeded(f"DNS resolution exceeded the {wait_for:.1f}s budget") from None
@@ -286,7 +299,9 @@ _dns_futures: set[_DnsFuture] = set()
 
 def dns_in_flight_resolves() -> int:
     """Public door over the saturation accounting: live resolver workers now."""
-    return sum(1 for f in _dns_futures if not f.done())
+    # The callback may discard from the completing thread mid-iteration, so
+    # the accounting iterates over a snapshot.
+    return sum(1 for f in tuple(_dns_futures) if not f.done())
 
 
 def dns_seed_saturation(workers: int) -> None:
