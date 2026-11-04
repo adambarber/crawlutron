@@ -22,6 +22,52 @@ FastAPI. It exposes a single, machine-readable crawl contract that supports:
 - **Webhooks, batching, recursion, rate limiting, robots.txt respect** — best-effort,
   caller-owned frontier semantics.
 
+## Platforms
+
+Linux and macOS are supported; Windows is not. The service is built on POSIX
+primitives the Windows runtime does not provide: `fcntl` advisory file locking
+(`crawlutron/safety/atomic_write.py`, `crawlutron/orchestration/engine.py`,
+`crawlutron/transport/content_cache.py`), `resource`/sysconf-based memory
+sizing (`crawlutron/runtime/pressure_memory.py`), and cgroup filesystem
+readings for the resource gauges (`crawlutron/runtime/cgroup_sense.py`).
+Deploy it as a Linux container or run it directly on Linux/macOS.
+
+## Security residuals and environment escape hatches
+
+Three residual weaknesses are known and accepted, with the assumption that
+guards them stated:
+
+- **S1 — HTTPS DNS rebind window.** HTTP targets are IP-pinned end to end.
+  HTTPS browser navigation does two fresh DNS resolves but lets the browser
+  connect by hostname, so a hostile DNS server can rebind between check and
+  connect.
+- **S4 — credential origins ride the egress guard.** Credential origins pass
+  the same SSRF egress check as crawl targets: a private/loopback credential
+  origin requires `CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1`.
+- **S5 — caller keys hash with plain SHA-256.** Unsalted SHA-256 is not a
+  password-hashing KDF; it is acceptable here only because key secrets are
+  `secrets.token_urlsafe(32)` (256-bit entropy) — unguessable, so a digest
+  table adds nothing to attack. Do not reuse this pattern for human-chosen
+  secrets.
+
+### Dangerous environment escape hatches
+
+Every `CRAWLUTRON_*` variable that weakens a safety default (derived from the
+live settings/env code — `crawlutron/models/host_policy.py`,
+`crawlutron/api/webhooks.py`, `crawlutron/config/settings.py`,
+`crawlutron/transport/driver_config.py`):
+
+| Variable | Default | Weakened when | Effect |
+| -------- | ------- | ------------- | ------ |
+| `CRAWLUTRON_ALLOW_PRIVATE_TARGETS` | unset | `1` | Disables the SSRF private-target guard: caller URLs may reach private, loopback, and link-local addresses including cloud metadata endpoints. Logs a `SSRF private-target guard DISABLED` WARNING. |
+| `CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK` | unset | `1` | Allows `http://` webhook targets, so result payloads leave over unencrypted HTTP. Logs a `Plaintext-webhook guard DISABLED` WARNING. |
+| `CRAWLUTRON_RESPECT_ROBOTS` | `true` | `false` | Stops robots.txt enforcement; disallowed targets crawl instead of returning `robots_disallowed`. |
+| `CRAWLUTRON_HEADLESS` | `true` | `false` | Runs the browser headed. Not a safety guard, but changes the automation surface. |
+
+See `SECURITY.md` for the threat model and reporting process, and
+`docs/reviews/ADVERSARIAL_REVIEW_BROWSER_CRAWLER.md` for the dated adversarial review of
+the crawler.
+
 The service is intended to be deployed as a Docker container. A standalone
 `docker-compose.yml` lives at the repository root for local development;
 production deployments typically front it with an authenticated reverse proxy.
@@ -53,10 +99,6 @@ What the SSRF defenses cover:
 - **Per-tenant cookie namespace** — multi-tenant callers should set
   `request_profile.cookie_namespace` so cookies from different callers
   are isolated in the shared cookie jar.
-
-See `SECURITY.md` for the threat model and reporting process, and
-`docs/reviews/ADVERSARIAL_REVIEW_BROWSER_CRAWLER.md` for the dated adversarial review of
-the crawler.
 
 
 ## Adversarial Test Coverage
@@ -462,3 +504,8 @@ python3 -m pytest -q
 
 The manual test plan lives at `docs/references/crawlutron-manual-test-plan.md`
 and the agent integration contract at `docs/references/crawlutron-agent-contract.md`.
+
+## License
+
+MIT — `pyproject.toml` (`license = "MIT"`) and the `LICENSE` file agree; the
+`NOTICE` file carries the third-party attributions.

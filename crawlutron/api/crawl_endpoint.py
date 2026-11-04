@@ -31,7 +31,7 @@ from crawlutron.models.trace_response import TraceResponse
 from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
 from crawlutron.runtime.metrics import get_metrics
 from crawlutron.storage.ids import new_request_id
-from crawlutron.storage.job_store import TERMINAL_STATUSES, JobKind, JobStore
+from crawlutron.storage.job_store import TERMINAL_STATUSES, FrontierEntry, JobKind, JobStore
 from crawlutron.storage.result_store import CrawlResultStore
 
 _logger = logging.getLogger(__name__)
@@ -198,11 +198,9 @@ async def _accepted_async(
     request_id = new_request_id()
     # The store's tier, not ``settings``: the row is read back with the
     # store's tier, and two tier sources drift apart the moment they differ.
+    batch = [FrontierEntry(url=url, depth=0) for _, url in checked]
     await job_store.acreate_single_shot(
-        request_id,
-        checked[0][0],
-        payload.policy,
-        owner=owner,
+        request_id, checked[0][0], payload.policy, owner=owner, frontier=batch
     )
     from crawlutron.api.async_crawl_runner import run_async_crawl
 
