@@ -3,6 +3,8 @@ and swallows serialization failures per its best-effort contract (#S3)."""
 
 import logging
 
+import httpx
+
 from crawlutron.models.host_policy import HostPolicy
 from tests._webhook_doubles import record_webhook_delivery
 
@@ -10,7 +12,7 @@ _HTTPS = "https://webhook.example.com/cb"
 _OK = {"results": []}
 
 
-async def _post_through_chokepoint(monkeypatch, *, url: str, payload) -> list:
+async def _post_through_chokepoint(monkeypatch, *, url: str, payload) -> list[httpx.Request]:
     """One post_webhook drive for the contract tests; returns delivered requests."""
     from crawlutron.api import webhooks
 
