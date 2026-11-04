@@ -4,8 +4,8 @@ A non-numeric / negative / absent value must read as "unknown size" and skip
 pre-flight rejection -- not raise ``int("abc")`` out of the fetch.
 """
 
+from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
-from crawlutron.safety.validation import HostPolicy
 from crawlutron.transport.fetchers import default_http_fetcher
 from crawlutron.transport.pinned_transport import declared_length_exceeds
 from tests._transport_doubles import MockResponse, patch_http_fetcher_transport

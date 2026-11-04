@@ -4,9 +4,9 @@ import pytest
 
 from crawlutron.admission.payload_helpers import checked_payload_urls
 from crawlutron.models.crawl_request import CrawlRequest
+from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.orchestration.request_pipeline import build_jobs
-from crawlutron.safety.validation import HostPolicy
 
 POLICY = HostPolicy.unrestricted()
 

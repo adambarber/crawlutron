@@ -3,7 +3,7 @@
 import asyncio
 
 from crawlutron.admission.admission_links import AdmissionOutcome, admit_discovered_links
-from crawlutron.safety.validation import HostPolicy
+from crawlutron.models.host_policy import HostPolicy
 
 
 def _run(links: list[object]) -> AdmissionOutcome:

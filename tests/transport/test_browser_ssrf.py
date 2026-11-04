@@ -214,9 +214,9 @@ async def test_route_handler_resolve_is_bounded_by_the_dns_posture(monkeypatch):
     """A resolver that outlasts the DNS posture must not hold the route handler
     open (#405): the handler aborts fail-closed within the posture, not when the
     pin's own hang ends."""
-    from crawlutron.transport import pinned_transport
+    from crawlutron.transport import pinned_dns
 
-    monkeypatch.setattr(pinned_transport, "DNS_WAIT_SECONDS", 0.2)
+    monkeypatch.setattr(pinned_dns, "DNS_WAIT_SECONDS", 0.2)
     handler = make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY, pin=_hanging_pin())
     await _handler_aborts_within_budget(handler)
 
@@ -235,11 +235,11 @@ async def test_route_handler_resolve_honors_the_render_budget_parameter(monkeypa
 async def test_websocket_handler_resolve_is_bounded_by_the_dns_posture(monkeypatch):
     """The websocket guard's resolve carries the same bound: a hung resolver
     closes the socket within the posture instead of stalling the upgrade."""
-    from crawlutron.transport import pinned_transport
+    from crawlutron.transport import pinned_dns
     from crawlutron.transport.browser_targets import make_ssrf_websocket_handler
 
     monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
-    monkeypatch.setattr(pinned_transport, "DNS_WAIT_SECONDS", 0.2)
+    monkeypatch.setattr(pinned_dns, "DNS_WAIT_SECONDS", 0.2)
     monkeypatch.setattr(socket, "getaddrinfo", _hanging_resolver(7.0))
 
     class FakeWS:

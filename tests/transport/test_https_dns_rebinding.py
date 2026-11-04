@@ -13,7 +13,7 @@ import httpx
 import pytest
 
 from crawlutron.transport import http_client_pool as pool_mod
-from crawlutron.transport import pinned_transport as pinned
+from crawlutron.transport import pinned_dns as pinned
 from crawlutron.transport.fetchers import default_http_fetcher
 from tests._assertions import block_private_targets
 from tests._policy_factories import canonical

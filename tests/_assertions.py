@@ -86,7 +86,7 @@ def assert_dns_pinning_uses_first_resolution(monkeypatch, rebound_ip, public_ip=
     import socket
     from unittest.mock import patch
 
-    from crawlutron.transport.pinned_transport import resolve_and_pin_host
+    from crawlutron.transport.pinned_dns import resolve_and_pin_host
 
     block_private_targets(monkeypatch)
     calls = []

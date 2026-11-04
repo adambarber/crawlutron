@@ -12,8 +12,8 @@ from lxml import etree
 from crawlutron.admission.policy import read_policy
 from crawlutron.extraction.content import extract_post_fetch_discovery
 from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
-from crawlutron.safety.validation import HostPolicy
 from tests._assertions import install_to_thread_spy
 from tests._fetcher_factories import invoke_browser_strategy, invoke_http_strategy, make_fetch
 from tests._policy_factories import canonical, http_strategy_policy

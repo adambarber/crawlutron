@@ -15,11 +15,11 @@ from crawlutron.models.intercepted_xhr_record import InterceptedXhrRecord
 from crawlutron.models.json_value import JsonValue
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.safety.json_safe import json_default
-from crawlutron.transport.pinned_transport import (
-    PinnedRequest,
+from crawlutron.transport.pinned_dns import (
     bounded_thread_resolve,
     check_ssrf_protection_stable,
 )
+from crawlutron.transport.pinned_transport import PinnedRequest
 
 # The resolve bound is the pinned transport's own: one implementation for both families.
 _BOUNDED = bounded_thread_resolve

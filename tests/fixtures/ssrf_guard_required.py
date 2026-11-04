@@ -11,7 +11,7 @@ def ssrf_guard_required(monkeypatch):
     the test default CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1; otherwise the guard
     short-circuits before the real path runs."""
     called: list[str] = []
-    from crawlutron.transport import pinned_transport as pinned_mod
+    from crawlutron.transport import pinned_dns as pinned_mod
 
     def _track(name: str, fn):
         def wrapper(*args, **kwargs):

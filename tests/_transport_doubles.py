@@ -118,7 +118,7 @@ def allow_scripted_egress(monkeypatch, ip: str = "1.2.3.4") -> None:
 
     A scripted host has no DNS, so the two network-asking seams stand down;
     everything downstream still runs. ``ip`` is public by construction."""
-    from crawlutron.transport import pinned_transport as pinned_mod
+    from crawlutron.transport import pinned_dns as pinned_mod
 
     monkeypatch.setattr(pinned_mod, "check_ssrf_protection", lambda url: None)
     monkeypatch.setattr(pinned_mod, "resolve_and_pin_host", lambda url: (url.host, ip))

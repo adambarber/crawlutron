@@ -9,8 +9,8 @@ from collections.abc import Generator
 import pytest
 
 import crawlutron.transport.content_cache as cc
+from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
-from crawlutron.safety.validation import HostPolicy
 from crawlutron.transport.cache import HttpCache
 from crawlutron.transport.content_cache import ContentCache
 from crawlutron.transport.fetchers import default_http_fetcher

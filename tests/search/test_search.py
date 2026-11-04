@@ -8,7 +8,7 @@ from unittest import mock
 
 import pytest
 
-from crawlutron.safety.validation import HostPolicy
+from crawlutron.models.host_policy import HostPolicy
 from crawlutron.search.providers import (
     PROVIDER_ENDPOINTS,
     SearchProviderError,

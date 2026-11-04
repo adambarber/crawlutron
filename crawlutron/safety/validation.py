@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from crawlutron.models.address_class import AddressClass, classify
-from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.normalized_url import NormalizedUrl, admit_or_none
+from crawlutron.models.normalized_url import admit_or_none
+
+if TYPE_CHECKING:
+    # Annotation-only under the deferred-annotation law: the runtime namespace
+    # carries no undeclared re-export (#604).
+    from crawlutron.models.host_policy import HostPolicy
+    from crawlutron.models.normalized_url import NormalizedUrl
 
 __all__ = ["filter_js_endpoints", "is_public_ip_value"]
 

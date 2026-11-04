@@ -21,7 +21,7 @@ OWNERS: tuple[str, ...] = (
     "crawlutron.transport.browser_cookies",
     "crawlutron.transport.cookie_jar",
     "crawlutron.transport.pooled_clients",
-    "crawlutron.transport.pinned_transport",
+    "crawlutron.transport.pinned_dns",
 )
 
 

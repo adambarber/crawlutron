@@ -26,7 +26,7 @@ class TestDNSRebindingProtection:
         path (#387, mixed refused). One verdict per hostname: refuse."""
         import socket
 
-        from crawlutron.transport.pinned_transport import resolve_and_pin_host
+        from crawlutron.transport.pinned_dns import resolve_and_pin_host
 
         def mixed_getaddrinfo(host, *args, **kwargs):
             return [

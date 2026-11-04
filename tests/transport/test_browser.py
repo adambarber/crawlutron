@@ -5,10 +5,10 @@ import base64
 import pytest
 
 from crawlutron.models.crawl_result import CrawlResult
+from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.render_options import RenderOptions
 from crawlutron.orchestration.engine import crawl_request
-from crawlutron.safety.validation import HostPolicy
 from crawlutron.transport.browser import BrowserRenderer
 from crawlutron.transport.cache import HttpCache
 from crawlutron.vocabulary.strategies import BROWSER_HEADLESS

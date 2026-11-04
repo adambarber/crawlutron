@@ -34,7 +34,7 @@ class TestHttpStrategyEdges:
         await close_async_http_client()
 
     def test_is_private_or_loopback_ip_invalid(self):
-        from crawlutron.transport.pinned_transport import is_private_or_loopback_ip
+        from crawlutron.transport.pinned_dns import is_private_or_loopback_ip
 
         assert is_private_or_loopback_ip("127.0.0.1")
         assert is_private_or_loopback_ip("192.168.1.1")

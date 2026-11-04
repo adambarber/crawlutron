@@ -12,7 +12,7 @@ import time
 
 import pytest
 
-import crawlutron.transport.pinned_transport as pt
+import crawlutron.transport.pinned_dns as pt
 
 
 def test_a_saturated_resolver_fails_fast():

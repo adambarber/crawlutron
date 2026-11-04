@@ -14,7 +14,7 @@ from crawlutron.api.webhooks import (
 from crawlutron.api.webhooks import (
     validate_webhook_url as _validate_webhook_url,
 )
-from crawlutron.safety.validation import HostPolicy
+from crawlutron.models.host_policy import HostPolicy
 from tests._assertions import (
     block_private_targets,
     host_resolves_to,

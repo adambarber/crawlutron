@@ -3,24 +3,30 @@
 The policy sub-mappings were re-typed at every site -- each copy a place a
 change lands in only one test. Factories return the MODEL, not the wire mapping."""
 
+from __future__ import annotations
+
 import pathlib
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from crawlutron.admission.admission_links import admit_discovered_links
 from crawlutron.admission.payload_helpers import payload_policy
-from crawlutron.admission.policy import PolicyTier, read_policy
+from crawlutron.admission.policy import PolicyTier, read_policy, wire_policy
 from crawlutron.config.settings import CrawlerSettings
-from crawlutron.models.crawl_policy import CrawlPolicy
-from crawlutron.models.json_value import JsonValue
+from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
-from crawlutron.safety.validation import HostPolicy
 from crawlutron.storage.job_store import CrawlJobState, JobStore
-from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
+
+if TYPE_CHECKING:
+    # Annotation-only names, imported for the type checker (deferred annotations
+    # keep full checking); the factory never constructs these at runtime.
+    from crawlutron.models.crawl_policy import CrawlPolicy
+    from crawlutron.models.json_value import JsonValue
 
 UNRESTRICTED_HOST_POLICY = HostPolicy.unrestricted()
 
 
-def canonical(url: "str | NormalizedUrl") -> NormalizedUrl:
+def canonical(url: str | NormalizedUrl) -> NormalizedUrl:
     """The admitted value production would hold for ``url``.
 
     Going through the production normalizer is the point: a hand-rolled form
@@ -56,15 +62,10 @@ _STRATEGY_LIMITS = {"timeout_seconds": 10, "max_retries": 0, "max_discovered_lin
 
 def make_base_policy(strategies=None) -> CrawlPolicy:
     return read_policy(
-        {
-            "schema_version": "2026-06-23",
-            "strategies": list(strategies) if strategies is not None else [HTTP_DECLARED_CRAWLER],
-            "limits": dict(_CRAWL_LIMITS),
-            "headers": {},
-            "request_profile": {},
-            "browser_profile": {},
-            "discovery": {},
-        }
+        wire_policy(
+            strategies=strategies,
+            limits=dict(_CRAWL_LIMITS),
+        )
     )
 
 
@@ -73,11 +74,7 @@ def _policy(extra=None) -> CrawlPolicy:
 
     Carries no ``strategies`` on purpose: strategy tests want the default
     ladder to climb, not a pinned step."""
-    policy: dict[str, JsonValue] = {
-        "request_profile": {},
-        "headers": {},
-        "limits": dict(_STRATEGY_LIMITS),
-    }
+    policy = wire_policy(limits=dict(_STRATEGY_LIMITS))
     if extra:
         policy.update(extra)
     return read_policy(policy)
@@ -151,10 +148,19 @@ __all__ = [
     "UNRESTRICTED_HOST_POLICY",
     "_policy",
     "admit",
+    "crawl_limits",
+    "crawl_policy",
     "http_strategy_policy",
     "make_base_policy",
     "payload_policy",
 ]
+
+
+def crawl_policy(strategies=None, **over: JsonValue) -> dict[str, JsonValue]:
+    """The wire policy a test fixture sends: the live-server limits by default,
+    any wire block overridden through ``over``. The grammar lives in
+    ``crawlutron.admission.policy.wire_policy``; this names a profile only."""
+    return {**wire_policy(strategies=strategies, limits=crawl_limits()), **over}
 
 
 def crawl_limits(*, respect_robots: bool | None = None, **over: JsonValue) -> dict[str, JsonValue]:
@@ -167,34 +173,6 @@ def crawl_limits(*, respect_robots: bool | None = None, **over: JsonValue) -> di
         limits["respect_robots"] = respect_robots
     limits.update(over)
     return limits
-
-
-def crawl_policy(
-    strategies=None,
-    *,
-    limits: dict[str, JsonValue] | None = None,
-    discovery: dict[str, JsonValue] | None = None,
-    scope_regex: str | None = None,
-    extraction: str | None = None,
-) -> dict[str, JsonValue]:
-    """A crawl policy carrying strategies, limits, and the named extra blocks.
-
-    Each extra block is a named keyword, so a typo'd name is a ``TypeError``;
-    the dict is the WIRE shape production's ``payload_policy`` declares."""
-    limits_block = crawl_limits()
-    if limits is not None:
-        limits_block.update(limits)
-    policy: dict[str, JsonValue] = {
-        "strategies": list(strategies) if strategies is not None else [HTTP_DECLARED_CRAWLER],
-        "limits": limits_block,
-    }
-    if discovery is not None:
-        policy["discovery"] = discovery
-    if scope_regex is not None:
-        policy["scope_regex"] = scope_regex
-    if extraction is not None:
-        policy["extraction"] = extraction
-    return policy
 
 
 def deployment_tier(**overrides: str) -> PolicyTier:

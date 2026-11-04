@@ -5,11 +5,9 @@ they must go through ``asyncio.to_thread`` like their sibling calls.
 """
 
 from crawlutron.extraction.content import extract_html
-from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.normalized_url import NormalizedUrl
 from tests._assertions import install_to_thread_spy
 from tests._fetcher_factories import invoke_browser_strategy, invoke_http_strategy
-from tests._policy_factories import http_strategy_policy
+from tests._policy_factories import canonical, http_strategy_policy
 
 _HTML_BODY = (
     b"<html><head><title>T</title></head><body><article><p>"
@@ -62,7 +60,5 @@ async def test_trafilatura_result_unchanged_by_offload(monkeypatch):
         resp=_resp,
         dedupe_patch=True,
     )
-    direct = extract_html(
-        _HTML_BODY.decode(), NormalizedUrl("http://example.com/", policy=HostPolicy.unrestricted())
-    )
+    direct = extract_html(_HTML_BODY.decode(), canonical("http://example.com/"))
     assert result.text == (direct.text or "")

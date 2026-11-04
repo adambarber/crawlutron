@@ -41,7 +41,7 @@ from crawlutron.transport.browser_targets import (
 )
 from crawlutron.transport.classification import classify_error_code
 from crawlutron.transport.driver_config import async_sleep
-from crawlutron.transport.pinned_transport import ResolverBudgetExceeded
+from crawlutron.transport.pinned_dns import ResolverBudgetExceeded
 from crawlutron.transport.render_page import RenderPage
 
 if TYPE_CHECKING:

@@ -71,7 +71,7 @@ def test_specific_rows_win_over_the_oserror_base():
 def test_resolver_budget_still_maps_dns_error():
     """The bounded resolver's verdict must not be swallowed by the TimeoutError
     or OSError rows: the request never got to navigate (#383/#405)."""
-    from crawlutron.transport.pinned_transport import ResolverBudgetExceeded
+    from crawlutron.transport.pinned_dns import ResolverBudgetExceeded
 
     assert classify_error_code(ResolverBudgetExceeded("over budget")) == "dns_error"
 

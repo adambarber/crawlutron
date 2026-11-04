@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from crawlutron.safety.validation import HostPolicy
+from crawlutron.models.host_policy import HostPolicy
 from crawlutron.search.providers import BaseProvider, ProviderCall, SearchProviderError
 from crawlutron.search.providers_api import ApiKeyProvider, BraveProvider, SerperProvider, TavilyProvider
 from tests._assertions import awaitable_search, block_private_targets, provider_results

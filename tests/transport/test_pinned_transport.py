@@ -11,12 +11,11 @@ from urllib.parse import urlparse
 import pytest
 
 from crawlutron.transport.classification import classify_error_code
+from crawlutron.transport.pinned_dns import DNS_WAIT_SECONDS, dns_wait_for
 from crawlutron.transport.pinned_transport import (
-    DNS_WAIT_SECONDS,
     apinned_hops,
     build_pinned_request,
     build_pinned_request_async,
-    dns_wait_for,
 )
 from tests._assertions import block_private_targets
 from tests._policy_factories import canonical

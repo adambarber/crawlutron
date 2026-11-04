@@ -6,11 +6,12 @@ origin, and origin-keyed fields use the existing cross-host scrub.
 import pytest
 
 from crawlutron.admission.credentials import origin_of
-from crawlutron.admission.policy import validate_wire_policy
+from crawlutron.admission.policy import PolicyTier, read_policy, validate_wire_policy
+from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.credential import Credential
 from crawlutron.transport.request_profile import apply_credentials
-from tests._policy_factories import CrawlPolicy, PolicyTier, canonical, payload_policy, read_policy
+from tests._policy_factories import canonical, payload_policy
 
 #: The settings a payload-policy test runs against: the defaults with nothing overridden.
 MODEL_DEFAULTS_TIER = PolicyTier.model_defaults()

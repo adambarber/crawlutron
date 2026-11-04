@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Mapping, MutableMapping
 
+from crawlutron.models.host_policy import HostPolicy
+
 _BLOCKED_URL = "https://blocked.test/secret"
 
 
@@ -15,8 +17,6 @@ def _denied_settings():
 
 
 def _denied_policy():
-    from crawlutron.safety.validation import HostPolicy
-
     return HostPolicy.from_strings("", "blocked.test")
 
 

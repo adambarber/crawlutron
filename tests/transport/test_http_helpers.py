@@ -12,8 +12,8 @@ from crawlutron.config.settings import CrawlerSettings
 from crawlutron.extraction.document_text import format_extracted_document_text
 from crawlutron.extraction.trees import FrameCollector, frames_from, walkable
 from crawlutron.models.crawl_request import CrawlRequest
+from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.render_request import RenderRequest
-from crawlutron.safety.validation import HostPolicy
 from crawlutron.transport.fetch_policy import (
     fetch_with_retries,
     looks_like_binary_body,

@@ -5,10 +5,11 @@ import socket
 
 import pytest
 
-import crawlutron.transport.pinned_transport as http_mod
+import crawlutron.transport.pinned_dns as http_mod
+from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
-from crawlutron.safety.validation import HostPolicy
-from crawlutron.transport.pinned_transport import check_ssrf_protection, resolve_and_pin_host
+from crawlutron.transport.pinned_dns import check_ssrf_protection, resolve_and_pin_host
+from crawlutron.transport.pinned_transport import apinned_hops, build_pinned_request
 from tests._assertions import (
     assert_dns_pinning_uses_first_resolution,
     block_private_targets,
@@ -142,11 +143,7 @@ async def test_pinned_hop_never_targets_loopback_for_unresolvable(monkeypatch):
     # attacker-influenced, unresolvable hostname.
     _unresolvable_host(monkeypatch)
     with pytest.raises(ValueError):
-        await anext(
-            http_mod.apinned_hops(
-                canonical("http://nonexistent.invalid/"), {}, pin=http_mod.build_pinned_request
-            )
-        )
+        await anext(apinned_hops(canonical("http://nonexistent.invalid/"), {}, pin=build_pinned_request))
 
 
 def test_pinned_builder_surfaces_unresolvable_host_as_an_ssrf_refusal(monkeypatch):
@@ -156,7 +153,7 @@ def test_pinned_builder_surfaces_unresolvable_host_as_an_ssrf_refusal(monkeypatc
     not a ``socket.gaierror`` leaking from a layer that documents ValueError."""
     _unresolvable_host(monkeypatch)
     with pytest.raises(ValueError, match="SSRF protection: cannot resolve hostname"):
-        http_mod.build_pinned_request(canonical("http://nonexistent.invalid/"), {})
+        build_pinned_request(canonical("http://nonexistent.invalid/"), {})
 
 
 class TestSSRFProtection:
@@ -205,7 +202,7 @@ class TestSSRFProtection:
 
         The process-global DNS cache is cleared first, so a prior test cannot
         serve this call from cache and report 0 getaddrinfo calls."""
-        from crawlutron.transport.pinned_transport import reset_process_state
+        from crawlutron.transport.pinned_dns import reset_process_state
 
         reset_process_state()
         with host_resolves_to(monkeypatch, "8.8.8.8") as resolved:

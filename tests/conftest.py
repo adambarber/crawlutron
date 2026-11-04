@@ -269,7 +269,7 @@ def _clear_global_http_state() -> None:
     from crawlutron.runtime.cgroup_sense import reset_process_state as _reset_cgroup
     from crawlutron.transport import cookie_jar as cookie_mod
     from crawlutron.transport import http_client_pool as pool_mod
-    from crawlutron.transport import pinned_transport as pinned_mod
+    from crawlutron.transport import pinned_dns as pinned_mod
 
     cookie_mod.reset_process_state()
     # The renderer's per-domain cookie store is module-global and bounded, not cleared, so a test that

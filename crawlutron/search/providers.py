@@ -17,12 +17,8 @@ from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl, admit_or_none
 from crawlutron.safety.bounded_io import BodyTooLarge, read_capped_async
 from crawlutron.transport.http_client_pool import get_async_http_client
-from crawlutron.transport.pinned_transport import (
-    PinnedRequest,
-    ResolverBudgetExceeded,
-    bounded_thread_resolve,
-    build_pinned_request,
-)
+from crawlutron.transport.pinned_dns import ResolverBudgetExceeded, bounded_thread_resolve
+from crawlutron.transport.pinned_transport import PinnedRequest, build_pinned_request
 from crawlutron.transport.timeouts import Timeouts
 
 if TYPE_CHECKING:

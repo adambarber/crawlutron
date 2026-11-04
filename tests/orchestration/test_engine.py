@@ -4,6 +4,8 @@ import urllib.error
 
 import pytest
 
+from crawlutron.admission.policy import PolicyTier, read_policy
+from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.crawl_policy_limits import CrawlPolicyLimits
 from crawlutron.models.crawl_result import CrawlResult
 from crawlutron.models.result_factory import terminal_attempt
@@ -23,12 +25,9 @@ from tests._fetcher_factories import (
     scripted_fetcher,
 )
 from tests._policy_factories import (
-    CrawlPolicy,
-    PolicyTier,
     canonical,
     http_strategy_policy,
     payload_policy,
-    read_policy,
 )
 
 

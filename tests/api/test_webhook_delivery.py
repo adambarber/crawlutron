@@ -18,7 +18,7 @@ from httpx import Request
 
 from crawlutron.api.async_crawl_runner import run_async_crawl
 from crawlutron.models.crawl_request import CrawlRequest
-from crawlutron.safety.validation import HostPolicy
+from crawlutron.models.host_policy import HostPolicy
 from crawlutron.storage.job_store import JobStatus, JobStore
 from crawlutron.storage.result_store import CrawlResultStore
 from tests._api_harnesses import run_with_webhook as _run_with_webhook

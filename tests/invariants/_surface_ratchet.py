@@ -65,6 +65,9 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     # #314/wave-2: JobAccumulators (one class) moved here whole from job_store_state
     # to hold the 500-line ceiling; the seam owns every accumulator table.
     "crawlutron/storage/job_store_accumulators.py": (1, 1),
+    # #314/wave-3: DNS + SSRF split out of pinned_transport (500-line ceiling);
+    # the seam owns every resolve-and-pin door plus the process-state reset pair.
+    "crawlutron/transport/pinned_dns.py": (15, 12),
 }
 
 # Former #215 exemptions: their __all__ deliberately does not enumerate every public
@@ -72,7 +75,7 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
 DECLARED_SURFACE_RATCHET = {
     # Generated at build time by the hatch-vcs hook (#561); never hand-edited.
     "crawlutron/_version.py": (3, 0),
-    "crawlutron/admission/policy.py": (10, 5),
+    "crawlutron/admission/policy.py": (11, 6),
     "crawlutron/api/_depends_singletons.py": (2, 0),
     "crawlutron/api/async_crawl_runner.py": (4, 3),
     "crawlutron/api/caller_auth.py": (17, 14),

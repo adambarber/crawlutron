@@ -8,11 +8,9 @@ import pytest
 from pydantic import ValidationError
 
 from crawlutron.models.crawl_request import CrawlRequest
-from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.orchestration.engine import crawl_request
 from tests._fetcher_factories import request_fetcher, run_http_strategy, scripted_fetcher
-from tests._policy_factories import http_strategy_policy
+from tests._policy_factories import canonical, http_strategy_policy
 
 
 def _html(body: str) -> str:
@@ -227,7 +225,7 @@ class TestNotModifiedResponse:
         cache = HttpCache()
         # The cache is value-keyed: seed it with the admitted value the strategy will read under, or the
         # conditional GET silently misses.
-        cache.store(NormalizedUrl("http://example.com/", policy=HostPolicy.unrestricted()), {"etag": "v1"})
+        cache.store(canonical("http://example.com/"), {"etag": "v1"})
         result = await run_http_strategy(
             url="http://example.com/",
             policy=http_strategy_policy(),

@@ -12,9 +12,9 @@ from crawlutron.extraction.content import forms_from
 from crawlutron.extraction.document_text import format_extracted_document_text
 from crawlutron.extraction.trees import walkable
 from crawlutron.models.crawl_request import CrawlRequest
+from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.orchestration.engine import crawl_request
-from crawlutron.safety.validation import HostPolicy
 from crawlutron.transport.cache import HttpCache
 from crawlutron.transport.fetch_policy import looks_like_binary_body
 from crawlutron.transport.request_profile import (

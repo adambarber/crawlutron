@@ -17,7 +17,7 @@ from curl_cffi.requests.exceptions import SSLError as CffiSSLError
 from crawlutron.models.browser_pool_exhausted import BrowserPoolExhaustedError
 from crawlutron.models.taxonomy import Classification, CrawlStrategyName
 from crawlutron.transport.decompression import DecompressionError, DecompressionTooLargeError
-from crawlutron.transport.pinned_transport import ResolverBudgetExceeded
+from crawlutron.transport.pinned_dns import ResolverBudgetExceeded
 from crawlutron.transport.scheduler_exceptions import CircuitBreakerOpen
 from crawlutron.vocabulary.taxonomy import is_transient_classification
 
