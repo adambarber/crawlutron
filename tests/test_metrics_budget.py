@@ -39,9 +39,9 @@ BLOCK_LENGTH = 40
 # and "block length" are sealed (#419): the zero tests are the whole gates.
 _BUDGETS = {
     "abc size": 0,
-    # LOWERED 358 -> 357 (#383): BrowserRenderer's render loop lost a declaration line.
-    # LOWERED 357 -> 355 (#136); 355 -> 348 (#419): the render phases left browser.py.
-    "largest class": 348,
+    # LOWERED 358 -> 357 (#383); 355 -> 348 (#419); 348 -> 345 (#314): the job
+    # store's owner-filter branches collapsed into one clause helper.
+    "largest class": 345,
 }
 
 #: The scripts/ tree: SEALED at zero by #419 (main and _run split; the rows

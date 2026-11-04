@@ -3,6 +3,7 @@
 import datetime
 import json
 import logging
+import pathlib
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 
@@ -18,6 +19,7 @@ from tests._job_harnesses import (
     seed_frontier,
     write_row_policy,
 )
+from tests._lock_scope_walks import calls_inside_self_lock
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, deployment_tier, job_store
 
 
@@ -149,7 +151,6 @@ class TestJobStoreLifecycle:
 
 class TestJobStoreCorruptRow:
     def test_job_store_load_corrupt_row(self):
-        import pathlib
         import tempfile
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -426,6 +427,24 @@ def test_cross_list_duplicate_keeps_shallowest_depth():
     assert loaded.in_flight == [FrontierEntry(canonical("https://example.test/child"), 1)]
 
 
+def test_read_row_normalizes_outside_the_store_lock():
+    """``_read_row`` must not deserialize or normalize under ``self._lock``.
+
+    ``row_to_state``/``normalize_job_state`` re-derive the whole job's
+    identity per load; holding the store lock across that work blocks every
+    writer behind one reader's CPU. Asserted on the live source: the row and
+    its accumulators are read under the lock, the walk runs after it."""
+    offenders = calls_inside_self_lock(
+        "crawlutron/storage/job_store.py",
+        ("_read_row", "_row_to_job"),
+        ("_row_to_job", "row_to_state"),
+    )
+    assert offenders == [], (
+        "_read_row/_row_to_job deserializes/normalizes inside the store lock: "
+        "one slow load blocks every writer behind a reader's CPU work"
+    )
+
+
 def test_same_length_results_replacement_is_persisted(job_store):
     """Same-length replacement of results must be persisted, not skipped.
 
@@ -463,12 +482,9 @@ def test_same_length_visited_replacement_is_persisted(job_store):
 
 
 def test_same_length_frontier_replacement_is_persisted(job_store):
-    """Same-length replacement of the frontier must be persisted.
-
-    A reload leaves ``frontier_mark == len(frontier)``, so a same-length swap
-    without a removal log used to hit the ``mark == len`` short circuit and
-    skip the persist.
-    """
+    """Same-length frontier replacement persists: a reload leaves
+    ``frontier_mark == len(frontier)``, so the swap hit the ``mark == len``
+    short circuit and skipped the persist."""
     job = job_store.create("http://example.com/", CrawlPolicy())
     seed_frontier(job, frontier(["http://example.com/page2"]))
     job_store.save(job)
