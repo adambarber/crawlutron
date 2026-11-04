@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable
 from secrets import SystemRandom
 from typing import TYPE_CHECKING, Protocol, TypeVar
 
-from crawlutron.transport.scheduler_domain_state import DomainState
+from crawlutron.transport.scheduler_domain_state import DomainGate, DomainState
 from crawlutron.transport.scheduler_exceptions import CircuitBreakerOpen
 from crawlutron.vocabulary.taxonomy import DOMAIN_HEALTH_BY_STATUS, ResultStatus
 
@@ -247,7 +247,7 @@ class DomainScheduler:
         state = self._domain_state.get(domain)
         if state is None:
             state = DomainState()
-            state.gate = asyncio.Semaphore(self._per_domain_limit)
+            state.gate = DomainGate(self._per_domain_limit)
             self._domain_state[domain] = state
         return state
 
@@ -366,7 +366,6 @@ class DomainScheduler:
                 now=now,
                 window=self._circuit_cooldown_max,
                 pin_ttl=_STRATEGY_PIN_TTL_SECONDS,
-                gate_limit=self._per_domain_limit,
             )
         }
 
