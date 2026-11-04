@@ -45,9 +45,11 @@ def test_import_configures_nothing(tmp_path):
     probe = (
         "import logging, os, sys\n"
         "import crawlutron.main\n"
+        "made = sorted(set(os.listdir('.')) - {'__pycache__'})\n"
         "db = [p for p in os.listdir('cache') if p.endswith('.db')] if os.path.isdir('cache') else []\n"
         "handlers = [type(h).__name__ for h in logging.getLogger().handlers]\n"
         "assert crawlutron.main.__file__ == sys.argv[1], crawlutron.main.__file__\n"
+        "print('MADE', made)\n"
         "print('DBS', db)\n"
         "print('HANDLERS', handlers)\n"
     )
@@ -66,6 +68,7 @@ def test_import_configures_nothing(tmp_path):
         env=env,
     )
     lines = dict(line.split(" ", 1) for line in result.stdout.splitlines())
+    assert lines["MADE"] == "[]", f"import created filesystem entries: {lines['MADE']}"
     assert lines["DBS"] == "[]", "import created a database file"
     assert "StreamHandler" not in lines["HANDLERS"], lines["HANDLERS"]
 
