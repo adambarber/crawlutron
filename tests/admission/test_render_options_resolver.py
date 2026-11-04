@@ -167,6 +167,15 @@ class TestResolveRenderOptions:
         with pytest.raises(ValueError, match="lazy_scroll_steps"):
             resolve_render_options({"browser_profile": {"lazy_scroll_steps": 999_999}}, {})
 
+    @pytest.mark.parametrize("key", ["lazy_scroll_steps", "lazy_scroll_delay_seconds"])
+    def test_a_non_numeric_string_knob_is_refused(self, key):
+        """A string knob that parses no number is caller garbage: it refuses
+        like every other off-boundary value instead of crossing raw and
+        silently defaulting at the consumer.
+        """
+        with pytest.raises(ValueError, match=key):
+            resolve_render_options({"browser_profile": {key: "not_a_number"}}, {})
+
     @pytest.mark.parametrize(
         ("key", "ceiling"),
         [

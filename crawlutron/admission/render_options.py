@@ -89,8 +89,8 @@ def resolve_render_options(
     profile = dict(raw_profile) if isinstance(raw_profile, dict) else {}
     close_browser_profile_vocabulary(profile)
     # A string-shaped knob slips the authority's numeric refusal (the consumers
-    # coerce it, so the ceiling applies here before it crosses); numbers are
-    # already refused above the ceiling and stand below it.
+    # coerce it, so the ceiling applies here before it crosses); a non-numeric
+    # string is caller garbage and refuses like every other off-boundary value.
     for key, ceiling in (
         ("lazy_scroll_steps", MAX_LAZY_SCROLL_STEPS),
         ("lazy_scroll_delay_seconds", MAX_LAZY_SCROLL_DELAY_SECONDS),
@@ -100,7 +100,7 @@ def resolve_render_options(
             try:
                 profile[key] = min(float(knob), ceiling)
             except ValueError:
-                pass
+                raise ValueError(f"{key} must be a number, got {knob!r}") from None
     return RenderOptions(**kwargs, browser_profile=cast("BrowserProfileRecord", profile))
 
 
