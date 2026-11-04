@@ -36,6 +36,7 @@ def close_browser_profile_vocabulary(profile: Mapping[str, object]) -> Mapping[s
 
     _refuse_over_ceiling_knobs(profile)
     refuse_oversized_profile_strings(profile)
+    _refuse_unusable_values(profile)
 
     actions = profile.get("actions")
     if actions is None:
@@ -81,6 +82,24 @@ def _refuse_over_ceiling_knobs(profile: Mapping[str, object]) -> None:
             f"browser_profile screenshot_selectors may carry at most {MAX_SCREENSHOT_SELECTORS} "
             f"entries, got {len(selectors)}"
         )
+
+
+def _refuse_unusable_values(profile: Mapping[str, object]) -> None:
+    """Refuse a closed value the consumers would silently default.
+    The readers narrow with ``==``, so a typo'd viewport or resource mode meant
+    the default applied while the request reported success.
+    """
+    from crawlutron.vocabulary.browser import RESOURCE_MODE_VALUES, VIEWPORT_VALUES
+
+    for key, values in (("viewport", VIEWPORT_VALUES), ("resource_mode", RESOURCE_MODE_VALUES)):
+        value = profile.get(key)
+        if isinstance(value, str) and value not in values:
+            raise ValueError(
+                f"browser_profile {key} {value!r} is not permitted; valid values are: "
+                f"{', '.join(sorted(values))}"
+            )
+        if value is not None and not isinstance(value, str):
+            raise ValueError(f"browser_profile {key} must be a string, got {type(value).__name__}")
 
 
 def refuse_oversized_profile_strings(

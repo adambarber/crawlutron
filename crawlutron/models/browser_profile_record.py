@@ -1,6 +1,6 @@
 """The browser_profile record: every key ``BROWSER_PROFILE_KEYS`` admits."""
 
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 from crawlutron.models.json_value import JsonValue
 
@@ -11,8 +11,8 @@ class BrowserProfileRecord(TypedDict, total=False):
     ``actions`` stays ``JsonValue``: the vocabulary closes it by isinstance on the wire.
     """
 
-    viewport: str
-    resource_mode: str
+    viewport: Literal["desktop", "mobile"]
+    resource_mode: Literal["full", "reduced"]
     storage_state: str
     actions: JsonValue
     include_html: bool
