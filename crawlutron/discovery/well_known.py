@@ -1,12 +1,14 @@
 """Well-known discovery endpoint."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from crawlutron.api.dependencies import get_settings
+from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.discovery_response import DiscoveryPayload, DiscoveryResponse
 from crawlutron.models.service_identity import SERVICE_IDENTITY
 
 
-def discovery_payload() -> DiscoveryPayload:
+def discovery_payload(settings: CrawlerSettings) -> DiscoveryPayload:
     return {
         **SERVICE_IDENTITY,
         "links": {
@@ -60,7 +62,7 @@ def discovery_payload() -> DiscoveryPayload:
             "key_issuance": "POST /v1/keys mints and revokes caller keys but accepts only the operator token "
             "(X-API-Key: CRAWLUTRON_KEY_ADMIN_TOKEN); with no token configured the keys surface is sealed.",
         },
-        "is_operator_sealed": False,
+        "is_operator_sealed": not bool(settings.key_admin_token),
     }
 
 
@@ -69,8 +71,10 @@ def create_well_known_router() -> APIRouter:
     router = APIRouter(tags=["Discovery"])
 
     @router.get("/.well-known/crawler-service", response_model=DiscoveryResponse)
-    async def well_known_crawler_service() -> DiscoveryPayload:
+    async def well_known_crawler_service(
+        settings: CrawlerSettings = Depends(get_settings),
+    ) -> DiscoveryPayload:
         """Discover crawler service contracts."""
-        return discovery_payload()
+        return discovery_payload(settings)
 
     return router
