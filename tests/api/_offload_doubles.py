@@ -17,9 +17,9 @@ class LoopGuardJobStore(JobStore):
         _refuse_on_loop("JobStore.create")
         return super().create(root_url, policy, owner=owner)
 
-    def create_single_shot(self, job_id, root_url, policy, *, owner=""):
+    def create_single_shot(self, job_id, root_url, policy, *, owner="", frontier=None):
         _refuse_on_loop("JobStore.create_single_shot")
-        return super().create_single_shot(job_id, root_url, policy, owner=owner)
+        return super().create_single_shot(job_id, root_url, policy, owner=owner, frontier=frontier)
 
     def save(self, job):
         _refuse_on_loop("JobStore.save")

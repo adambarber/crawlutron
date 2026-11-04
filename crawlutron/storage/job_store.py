@@ -45,6 +45,9 @@ from .job_store_state import (
 
 logger = logging.getLogger(__name__)
 
+#: The admitted batch seeded at a single-shot job's birth (None = single URL).
+type _Batch = list[FrontierEntry] | None
+
 __all__ = [
     "TERMINAL_STATUSES",
     "CrawlJobState",
@@ -124,15 +127,16 @@ class JobStore:
         )
 
     def create_single_shot(
-        self, job_id: str, root_url: str, policy: PolicyLike, *, owner: str = ""
+        self, job_id: str, root_url: str, policy: PolicyLike, *, owner: str = "", frontier: _Batch = None
     ) -> CrawlJobState:
-        """Create a new single-shot async crawl job with the given job_id (request_id)."""
+        """Create a single-shot async crawl job; ``frontier`` seeds the admitted batch."""
         return _create_job(
             self,
             job_id,
             JobKind.SINGLE_SHOT,
             str(NormalizedUrl(root_url, policy=self._host_policy)),
             read_policy(policy, self.tier),
+            frontier=frontier,
             owner=owner,
         )
 
@@ -332,16 +336,13 @@ class JobStore:
 
     def _read_status_row(self, job_id: str, owner: str | None) -> JobStatusView | None:
         """One job's status view, or None when no row matches the owner filter."""
+        where = " WHERE job_id = ? AND deleted_at IS NULL"
+        params: tuple[object, ...] = (job_id,)
+        if owner is not None:
+            where += " AND owner = ?"
+            params = (job_id, owner)
         with self._lock:
-            if owner is None:
-                row = self._conn.execute(
-                    _JOB_STATUS_PROJECTION + " WHERE job_id = ? AND deleted_at IS NULL", (job_id,)
-                ).fetchone()
-            else:
-                row = self._conn.execute(
-                    _JOB_STATUS_PROJECTION + " WHERE job_id = ? AND owner = ? AND deleted_at IS NULL",
-                    (job_id, owner),
-                ).fetchone()
+            row = self._conn.execute(_JOB_STATUS_PROJECTION + where, params).fetchone()
             if row is None:
                 return None
             visited, results = self._accumulators.counts_for(job_id)

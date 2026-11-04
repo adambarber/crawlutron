@@ -11,6 +11,7 @@ from tests._assertions import (
     accepted_crawl,
     completed_crawl,
     plaintext_webhook_refusal,
+    poll_crawl_completion,
     poll_webhook_delivery,
     submit_async_crawl,
 )
@@ -377,3 +378,19 @@ class TestAsyncCrawlMetrics:
         await submit_async_crawl(crawl_api.client, crawl_api.payload(async_mode=True))
         after = get_metrics().snapshot().total_elapsed_ms
         assert after > before
+
+
+class TestAsyncCrawlBatchTruth:
+    """A single-shot batch row must record that it is a batch (#314 A7)."""
+
+    async def test_batch_submission_records_frontier_size(self, crawl_api):
+        """Three submitted URLs are three frontier rows: the same whole-site
+        batch vocabulary, so listing cannot hide the batch behind URL 1."""
+        payload = crawl_api.batch_payload(["/", "/page2", "/page3"], async_mode=True)
+        body = await accepted_crawl(crawl_api.client, payload)
+        request_id = body["request_id"]
+        response = await poll_crawl_completion(crawl_api.client, request_id)
+        assert response.status_code == 200
+        status = (await crawl_api.client.get(f"/v1/jobs/{request_id}")).json()
+        assert status["frontier_size"] == 3
+        assert status["kind"] == "single_shot"
