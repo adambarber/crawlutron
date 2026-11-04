@@ -8,10 +8,16 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, TypedDict, cast
 
 from crawlutron.models.crawl_policy import CrawlPolicy
-from crawlutron.models.crawl_policy_vocabulary import refuse_oversized_profile_strings
+from crawlutron.models.crawl_policy_vocabulary import close_browser_profile_vocabulary
 from crawlutron.models.json_value import JsonValue
 from crawlutron.models.render_options import RenderOptions
-from crawlutron.vocabulary.limits import MAX_HTTP_TIMEOUT_SECONDS, MAX_RETRIES
+from crawlutron.vocabulary.limits import (
+    MAX_COOKIE_HARVEST_TIMEOUT_SECONDS,
+    MAX_HTTP_TIMEOUT_SECONDS,
+    MAX_LAZY_SCROLL_DELAY_SECONDS,
+    MAX_LAZY_SCROLL_STEPS,
+    MAX_RETRIES,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -75,13 +81,26 @@ def resolve_render_options(
         value = _pick(request, base, key)
         if value is not None:
             kwargs[key] = bool(value)
-    # An unsized profile string is per-request memory a pooled renderer
-    # holds; the crawl boundary already refused it, so this is the render edge.
+    # The vocabulary authority is the render edge's validation boundary:
+    # unknown keys, over-ceiling knobs, oversized strings, malformed actions,
+    # and off-vocabulary values all refuse here (a 422), so the raw wire
+    # dict crosses as the record with every door closed.
     raw_profile = _pick(request, base, "browser_profile")
     profile = dict(raw_profile) if isinstance(raw_profile, dict) else {}
-    refuse_oversized_profile_strings(profile)
-    # This resolver is the validation boundary: sizes refused above, the
-    # vocabulary closed the key set — the raw wire dict crosses as the record.
+    close_browser_profile_vocabulary(profile)
+    # A string-shaped knob slips the authority's numeric refusal (the consumers
+    # coerce it, so the ceiling applies here before it crosses); numbers are
+    # already refused above the ceiling and stand below it.
+    for key, ceiling in (
+        ("lazy_scroll_steps", MAX_LAZY_SCROLL_STEPS),
+        ("lazy_scroll_delay_seconds", MAX_LAZY_SCROLL_DELAY_SECONDS),
+        ("cookie_harvest_timeout_seconds", MAX_COOKIE_HARVEST_TIMEOUT_SECONDS),
+    ):
+        if isinstance(knob := profile.get(key), str):
+            try:
+                profile[key] = min(float(knob), ceiling)
+            except ValueError:
+                pass
     return RenderOptions(**kwargs, browser_profile=cast("BrowserProfileRecord", profile))
 
 

@@ -14,7 +14,14 @@ from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.render_options import RenderOptions
 from crawlutron.models.render_request import RenderRequest
 from crawlutron.transport.browser_result import browser_strategy_result
-from crawlutron.vocabulary.limits import MAX_HEADER_VALUE_BYTES, MAX_HTTP_TIMEOUT_SECONDS, MAX_RETRIES
+from crawlutron.vocabulary.limits import (
+    MAX_COOKIE_HARVEST_TIMEOUT_SECONDS,
+    MAX_HEADER_VALUE_BYTES,
+    MAX_HTTP_TIMEOUT_SECONDS,
+    MAX_LAZY_SCROLL_DELAY_SECONDS,
+    MAX_LAZY_SCROLL_STEPS,
+    MAX_RETRIES,
+)
 from tests._browser_doubles import _fake_browser
 from tests._fetcher_factories import strategy_request
 
@@ -116,11 +123,11 @@ class TestResolveRenderOptions:
 
     def test_an_oversized_profile_string_is_refused(self):
         """#444: an unsized profile string is per-request memory a caller sets
-        and a pooled renderer holds -- an absurd user_agent is not accepted.
+        and a pooled renderer holds -- an absurd storage_state is not accepted.
         """
-        with pytest.raises(ValueError, match="browser_profile user_agent"):
+        with pytest.raises(ValueError, match="browser_profile storage_state"):
             resolve_render_options(
-                {"browser_profile": {"user_agent": "A" * (MAX_HEADER_VALUE_BYTES + 1)}}, {}
+                {"browser_profile": {"storage_state": "A" * (MAX_HEADER_VALUE_BYTES + 1)}}, {}
             )
 
     def test_a_nested_oversized_action_string_is_refused(self):
@@ -140,10 +147,41 @@ class TestResolveRenderOptions:
     def test_a_profile_string_at_the_cap_is_accepted(self):
         """The cap is a ceiling, not a lower bound a caller cannot reach."""
         options = resolve_render_options(
-            {"browser_profile": {"user_agent": "A" * MAX_HEADER_VALUE_BYTES}}, {}
+            {"browser_profile": {"storage_state": "A" * MAX_HEADER_VALUE_BYTES}}, {}
         )
 
-        assert options.browser_profile["user_agent"] == "A" * MAX_HEADER_VALUE_BYTES
+        assert options.browser_profile["storage_state"] == "A" * MAX_HEADER_VALUE_BYTES
+
+    def test_an_unknown_profile_key_is_refused(self):
+        """The resolver is the render path's validation boundary: the same
+        vocabulary authority the crawl path answers to refuses here too -- a
+        key nothing reads is inert, and inert means a caller mistake.
+        """
+        with pytest.raises(ValueError, match="bogus_key"):
+            resolve_render_options({"browser_profile": {"bogus_key": 1}}, {})
+
+    def test_an_over_ceiling_lazy_scroll_knob_is_refused(self):
+        """The vocabulary refuses what the consumers would only clamp: a
+        caller-side knob above its ceiling never crosses as the record.
+        """
+        with pytest.raises(ValueError, match="lazy_scroll_steps"):
+            resolve_render_options({"browser_profile": {"lazy_scroll_steps": 999_999}}, {})
+
+    @pytest.mark.parametrize(
+        ("key", "ceiling"),
+        [
+            ("lazy_scroll_steps", MAX_LAZY_SCROLL_STEPS),
+            ("lazy_scroll_delay_seconds", MAX_LAZY_SCROLL_DELAY_SECONDS),
+            ("cookie_harvest_timeout_seconds", MAX_COOKIE_HARVEST_TIMEOUT_SECONDS),
+        ],
+    )
+    def test_caller_profile_knobs_at_the_ceiling_stand(self, key, ceiling):
+        """The clamp pins the ceiling, not a lower number: values at the
+        ceiling stand and values above it are refused, so the assertions
+        cannot pass by coincidence in either direction.
+        """
+        profile = {key: ceiling}
+        assert resolve_render_options({"browser_profile": profile}, {}).browser_profile == profile
 
 
 class TestRenderEndpointConsumesResolver:
