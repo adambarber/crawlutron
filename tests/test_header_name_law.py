@@ -6,7 +6,10 @@ from pydantic import ValidationError
 from crawlutron.models.crawl_policy import CrawlPolicy
 
 
-@pytest.mark.parametrize("name", ["X-Evil\r\nX-Injected: yes", "X-Bad\n", "X-Nul\x00"])
+@pytest.mark.parametrize(
+    "name",
+    ["X-Evil\r\nX-Injected: yes", "X-Bad\n", "X-Nul\x00", "X-Bel\x07", "X-Del\x7f"],
+)
 def test_header_name_with_wire_bytes_is_refused(name: str) -> None:
     with pytest.raises(ValidationError, match="smuggle"):
         CrawlPolicy(headers={name: "value"})

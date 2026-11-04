@@ -167,12 +167,15 @@ def test_hop_by_hop_headers_are_refused_through_every_model_embedding_the_policy
 
 
 #: The wire delimiters and the parser-poisoning byte, alone and in the smuggling
-#: shape the issue names: each can end one header and start another on the wire.
+#: shape the issue names; wave-3 S5 widens to the full RFC 7230 CTL set (C0 + DEL).
 INJECTABLE_VALUES = (
     "a\r\nCookie: admin=1",
     "a\rb",
     "a\nb",
     "a\x00b",
+    "a\x01b",
+    "a\x1fb",
+    "a\x7fb",
 )
 
 

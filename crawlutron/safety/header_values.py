@@ -1,6 +1,6 @@
-"""The one law for headers on the wire: CR, LF, and NUL can end
-one header and start another, and curl_cffi transmits embedded CRLF verbatim,
-so every edge handing a name or value to a transport refuses these bytes.
+"""The one law for headers on the wire: control characters can end one header
+and start another, and curl_cffi transmits embedded CRLF verbatim, so every
+edge handing a name or value to a transport refuses all C0 controls plus DEL.
 """
 
 from __future__ import annotations
@@ -14,17 +14,17 @@ __all__ = [
     "reject_injectable_header_values",
 ]
 
-#: CR and LF are the wire delimiters; NUL poisons lenient parsers. Nothing else
-#: is refused -- multibyte text is a legal header value.
-_INJECTABLE = re.compile(r"[\r\n\x00]")
+#: The RFC 7230 CTL set: every C0 control plus DEL. Any of them can corrupt
+#: HTTP framing in some lenient parser (CR/LF split headers; NUL and the rest
+#: poison token parsing); multibyte text stays a legal header value.
+_INJECTABLE = re.compile(r"[\x00-\x1f\x7f]")
 
 
 def reject_injectable_header_name(name: str) -> None:
     """Raise ValueError when the header NAME could smuggle bytes onto the wire."""
     if _INJECTABLE.search(name):
         raise ValueError(
-            f"header name '{name}' is not permitted: CR, LF, and NUL bytes can "
-            "smuggle extra headers onto the wire"
+            f"header name '{name}' is not permitted: control bytes can smuggle extra headers onto the wire"
         )
 
 
@@ -35,8 +35,7 @@ def reject_injectable_header_value(name: str, value: str) -> None:
     """
     if _INJECTABLE.search(value):
         raise ValueError(
-            f"header '{name}' value is not permitted: CR, LF, and NUL bytes can "
-            "smuggle extra headers onto the wire"
+            f"header '{name}' value is not permitted: control bytes can smuggle extra headers onto the wire"
         )
 
 
