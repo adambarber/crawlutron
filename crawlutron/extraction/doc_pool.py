@@ -383,13 +383,14 @@ class DocExtractionPool:
     def teardown(self) -> None:
         """Terminate every pooled worker, forget the slots, and close the pool.
         A later acquire returns ``None`` (degraded) instead of resurrecting it.
-        """
+        Only the swap happens under the lock: termination takes seconds, and
+        no acquisition may block behind it."""
         with self._lock:
             self._closed = True
             self._lock.notify_all()
             pool, self._slots = self._slots, None
-            for worker in pool or []:
-                self.retire(worker)
+        for worker in pool or []:
+            self.retire(worker)
 
     def __len__(self) -> int:
         """How many slots the pool holds (none before the first acquisition)."""
