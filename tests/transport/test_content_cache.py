@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ast
 import contextlib
+import pathlib
 import sys
 from collections.abc import Generator
 
@@ -82,6 +84,54 @@ def test_set_get_roundtrip():
         assert c.get("missing") is None
         c.set("k", {"a": 1, "b": "x"})
         assert c.get("k") == {"a": 1, "b": "x"}
+
+
+def test_set_writes_disk_outside_the_lock():
+    """``set`` performs the disk write outside the commit lock, like ``aset``.
+
+    The write seam must not sit inside ``with self._lock:``: one slow disk
+    write would block every other cache operation. Asserted on the live
+    source so the two set twins cannot drift apart again."""
+    source = pathlib.Path("crawlutron/transport/content_cache.py").read_text()
+    tree = ast.parse(source)
+    set_fn = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "set")
+
+    def write_calls_under_lock(node):
+        """``write_data`` calls lexically inside a ``with self._lock:`` block."""
+        found = []
+        for child in ast.walk(node):
+            if not isinstance(child, ast.With):
+                continue
+            if not any(
+                isinstance(item.context_expr, ast.Attribute) and item.context_expr.attr == "_lock"
+                for item in child.items
+            ):
+                continue
+            for call in ast.walk(child):
+                if (
+                    isinstance(call, ast.Call)
+                    and isinstance(call.func, ast.Attribute)
+                    and call.func.attr == "write_data"
+                ):
+                    found.append(call)
+        return found
+
+    assert write_calls_under_lock(set_fn) == [], (
+        "set() calls write_data inside the commit lock: one slow disk write "
+        "blocks every other cache operation (the aset twin runs it outside)"
+    )
+
+    calls = [
+        node
+        for node in ast.walk(set_fn)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "write_data"
+    ]
+    assert calls, "set() no longer writes to disk at all"
+    # Every write_data call is outside the lock (proven above) -- and there is
+    # exactly one, so no second locked copy was parked on another branch.
+    assert len(calls) == 1
 
 
 def test_disk_persistence_across_instances(tmp_path):

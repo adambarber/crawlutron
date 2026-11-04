@@ -299,26 +299,23 @@ class ContentCache:
     def set(self, key: str, value: JsonValue, ttl: int | None = None) -> None:
         """Store ``value`` (JSON-serializable) with a TTL in seconds; ``ttl <= 0`` stores nothing."""
         if not stores_for_ttl(self.default_ttl if ttl is None else ttl):
-            # The OFF convention: a non-positive TTL refuses the store, so the
-            # knob's 0 can never invert into a permanent entry.
-            return
+            return  # OFF convention: a non-positive TTL refuses the store.
         envelope, expires = self._entry_to_store(value, ttl)
         # Serialize first: the size feeds the per-entry cap and byte accounting.
         data = json.dumps(envelope)
+        size = len(data)
         path = self._path_for(key)
         with self._lock:
-            if self.max_entry_bytes is not None and len(data) > self.max_entry_bytes:
-                # Refuse before any disk write: a still-valid older
-                # entry for this key is kept; TTL governs its staleness.
+            # Refuse before any disk write: a still-valid older entry is kept.
+            if self.max_entry_bytes is not None and size > self.max_entry_bytes:
                 return
-            self.write_data(path, data)
-            self._commit_entry_locked(key, path, len(data))
-            # Freshness metadata is known at write time; record it so later
-            # cached_at_of() calls never deserialize this envelope.
+        self.write_data(path, data)
+        with self._lock:
+            # The prior size is read here (not before the check) so a concurrent
+            # commit cannot leave the byte total off by a stale delta.
+            self._commit_entry_locked(key, path, size)
             self._index_cached_at[key] = (expires, envelope["cached_at"])
-            # Mirror small values into the in-memory value cache, under
-            # the same gate + count cap as every other mirror write.
-            self._remember_memory_locked(key, value, expires, len(data))
+            self._remember_memory_locked(key, value, expires, size)
         self._enforce_limits()
 
     async def aget(self, key: str) -> JsonValue | None:
