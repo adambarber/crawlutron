@@ -42,6 +42,20 @@ def _collection(state, name):
     return state.frontier
 
 
+def _raw_connection_save(db, job_id):
+    """One out-of-band writer: raw sqlite3, no store lock, no snapshot law."""
+    import sqlite3
+
+    conn = sqlite3.connect(db)
+    conn.execute("UPDATE crawl_jobs SET stats = ? WHERE job_id = ?", ('{"total_crawled": 99}', job_id))
+    conn.execute(
+        'INSERT INTO "crawl_job_results" (job_id, seq, payload) VALUES (?, ?, ?)',
+        (job_id, 1, '{"url": "https://example.com/p1", "status": "success"}'),
+    )
+    conn.commit()
+    conn.close()
+
+
 @pytest.mark.parametrize("collection", ["results", "visited", "frontier"])
 def test_a_stale_process_resyncs_out_of_band_collection_changes(tmp_path, collection):
     """A's skip must not fire when the table holds different content.
@@ -86,28 +100,25 @@ def test_load_does_not_mix_row_and_collection_generations(tmp_path, monkeypatch)
     job.results = [{"url": "https://example.com/p0", "status": "success"}]
     store.save(job)
 
-    real_row_to_job = store._row_to_job
+    # Park on a live seam (an accumulator read under the hold). The racing
+    # writer is a RAW connection: a second JobStore would block on the hold.
+    real_read_results = store._accumulators.read_results
     barrier = threading.Event()
     resumed = threading.Event()
 
-    def interleaving_row_to_job(row, **kwargs):
-        """Between the row select and the collection reads, save from another thread."""
-        if kwargs.get("with_accumulators") and not barrier.is_set():
+    def parking_read_results(job_id):
+        """Park after the row select; let a raw-connection save land first."""
+        if not barrier.is_set():
             barrier.set()
             resumed.wait(5)
-        return real_row_to_job(row, **kwargs)
+        return real_read_results(job_id)
 
-    monkeypatch.setattr(store, "_row_to_job", interleaving_row_to_job)
+    monkeypatch.setattr(store._accumulators, "read_results", parking_read_results)
 
     def sibling_save():
         if not barrier.wait(5):
             return
-        sibling_store = store_on(db)
-        sibling = sibling_store.load(job.job_id)
-        assert sibling is not None
-        sibling.stats = {"total_crawled": 99}
-        sibling.results = sibling.results + [{"url": "https://example.com/p1", "status": "success"}]
-        sibling_store.save(sibling)
+        _raw_connection_save(db, job.job_id)
         resumed.set()
 
     writer = threading.Thread(target=sibling_save)

@@ -117,9 +117,13 @@ class JobStore:
         self._accumulators = JobAccumulators(self._conn)
 
     def _read_collections(self, row: sqlite3.Row, *, with_accumulators: bool) -> CrawlJobState:
-        """Collections under one lock hold, then the walk outside it.
+        """Collections read under the (reentrant) lock; the caller owns the hold.
 
-        The single body both loaders share, so the atomic hold cannot drift."""
+        The single body both loaders share, so the atomic hold cannot drift.
+        Entered from ``_read_row`` the hold spans select + reads + walk (one
+        generation); a direct entry (``_row_to_job`` outside ``_read_row``)
+        re-acquires for the reads only.
+        """
         with self._lock:
             visited = self._accumulators.read_visited(row["job_id"]) if with_accumulators else []
             results = self._accumulators.read_results(row["job_id"]) if with_accumulators else []
@@ -136,11 +140,11 @@ class JobStore:
     def _row_to_job(self, row: sqlite3.Row, *, with_accumulators: bool = True) -> CrawlJobState:
         """One row, read through the declared record (the walk lives beside it).
 
-        Collection reads take the store lock (reentrant, and already held when
-        entered from ``_read_row``); the deserializing walk runs outside it, so
-        a slow load never blocks a writer behind a reader's CPU. The frontier
-        always loads: the runner's state-only reload owns the queue, so only
-        results/visited are with-accumulators collections."""
+        Entered from ``_read_row`` the caller's hold spans the reads and the
+        walk, so the state returned is one generation; a direct entry re-acquires
+        for the reads only. The frontier always loads: the runner's state-only
+        reload owns the queue, so only results/visited are with-accumulators
+        collections."""
         return self._read_collections(row, with_accumulators=with_accumulators)
 
     def create(self, root_url: str, policy: PolicyLike, *, owner: str = "") -> CrawlJobState:
@@ -226,19 +230,33 @@ class JobStore:
         self, job_id: str, *, with_accumulators: bool, owner: str | None = None
     ) -> CrawlJobState | None:
         """The one row read both loaders share.
-        The row select and the collection reads hold one lock (reentrant), so
-        the returned state is one generation; the deserializing walk runs after
-        release. ``owner`` narrows to the caller's own row before any walk."""
+        Row select, collection reads and the walk hold one lock (reentrant), so
+        the returned state is one generation on every route. ``owner`` narrows
+        to the caller's own row before any walk."""
         statement, params = _owner_statement(_ROW_COLUMNS, True, "", owner)
         try:
+            # One hold AND one read snapshot across row select, collection reads
+            # and the walk: the lock serializes in-process callers, but only the
+            # deferred read transaction pins the WAL snapshot, so a sibling or
+            # raw connection committing mid-load still reads one generation.
+            # The RLock re-enters for the collection reads; both end together.
             with self._lock:
-                row = self._conn.execute(statement, (job_id, *params)).fetchone()
-                if row is None:
-                    return None
-                factory = self._row_to_job_factory
-                if factory is None:
-                    return self._read_collections(row, with_accumulators=with_accumulators)
-            return factory(row, self._row_to_job, with_accumulators=with_accumulators)
+                self._conn.execute("BEGIN")
+                try:
+                    row = self._conn.execute(statement, (job_id, *params)).fetchone()
+                    if row is None:
+                        self._conn.execute("COMMIT")
+                        return None
+                    factory = self._row_to_job_factory
+                    if factory is None:
+                        state = self._read_collections(row, with_accumulators=with_accumulators)
+                    else:
+                        state = factory(row, self._row_to_job, with_accumulators=with_accumulators)
+                except BaseException:
+                    self._conn.execute("ROLLBACK")
+                    raise
+                self._conn.execute("COMMIT")
+                return state
         except (json.JSONDecodeError, ValueError, TypeError) as exc:
             # Surface corruption instead of silently returning None so a
             # broken row is observable in logs rather than masked.
