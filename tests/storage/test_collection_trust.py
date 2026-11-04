@@ -69,3 +69,54 @@ def test_a_stale_process_resyncs_out_of_band_collection_changes(tmp_path, collec
     assert _collection(healed, collection) == _collection(job, collection), (
         f"{collection}: the out-of-band change was never healed"
     )
+
+
+def test_load_does_not_mix_row_and_collection_generations(tmp_path, monkeypatch):
+    """A load returns one generation: row fields and collections as of one point.
+
+    #314 F3: the row select released the lock before the collection reads; a save
+    landing in between mixed a stale row with newer collections."""
+    import threading
+
+    from crawlutron.models.crawl_policy import CrawlPolicy
+
+    db = tmp_path / "jobs.db"
+    store = store_on(db)
+    job = store.create("https://example.com/", CrawlPolicy())
+    job.results = [{"url": "https://example.com/p0", "status": "success"}]
+    store.save(job)
+
+    real_row_to_job = store._row_to_job
+    barrier = threading.Event()
+    resumed = threading.Event()
+
+    def interleaving_row_to_job(row, **kwargs):
+        """Between the row select and the collection reads, save from another thread."""
+        if kwargs.get("with_accumulators") and not barrier.is_set():
+            barrier.set()
+            resumed.wait(5)
+        return real_row_to_job(row, **kwargs)
+
+    monkeypatch.setattr(store, "_row_to_job", interleaving_row_to_job)
+
+    def sibling_save():
+        if not barrier.wait(5):
+            return
+        sibling_store = store_on(db)
+        sibling = sibling_store.load(job.job_id)
+        assert sibling is not None
+        sibling.stats = {"total_crawled": 99}
+        sibling.results = sibling.results + [{"url": "https://example.com/p1", "status": "success"}]
+        sibling_store.save(sibling)
+        resumed.set()
+
+    writer = threading.Thread(target=sibling_save)
+    writer.start()
+    loaded = store.load(job.job_id)
+    writer.join()
+
+    # One generation: the loaded stats row and results collection agree. A save
+    # between row-select and collection-reads must not mix the two generations.
+    assert loaded is not None
+    mixed = loaded.stats.get("total_crawled") == 0 and len(loaded.results) == 2
+    assert not mixed, "load mixed a stale row with newer collections"

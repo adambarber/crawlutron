@@ -116,14 +116,10 @@ class JobStore:
         # the append-only side has its own owner so neither pays for the other.
         self._accumulators = JobAccumulators(self._conn)
 
-    def _row_to_job(self, row: sqlite3.Row, *, with_accumulators: bool = True) -> CrawlJobState:
-        """One row, read through the declared record (the walk lives beside it).
+    def _read_collections(self, row: sqlite3.Row, *, with_accumulators: bool) -> CrawlJobState:
+        """Collections under one lock hold, then the walk outside it.
 
-        Collection reads take the store lock (reentrant); the deserializing
-        walk runs outside it, so a slow load never blocks a writer behind a
-        reader's CPU. The frontier always loads: the runner's state-only
-        reload owns the queue, so only results/visited are with-accumulators
-        collections."""
+        The single body both loaders share, so the atomic hold cannot drift."""
         with self._lock:
             visited = self._accumulators.read_visited(row["job_id"]) if with_accumulators else []
             results = self._accumulators.read_results(row["job_id"]) if with_accumulators else []
@@ -136,6 +132,16 @@ class JobStore:
             host_policy=self._host_policy,
             tier=self.tier,
         )
+
+    def _row_to_job(self, row: sqlite3.Row, *, with_accumulators: bool = True) -> CrawlJobState:
+        """One row, read through the declared record (the walk lives beside it).
+
+        Collection reads take the store lock (reentrant, and already held when
+        entered from ``_read_row``); the deserializing walk runs outside it, so
+        a slow load never blocks a writer behind a reader's CPU. The frontier
+        always loads: the runner's state-only reload owns the queue, so only
+        results/visited are with-accumulators collections."""
+        return self._read_collections(row, with_accumulators=with_accumulators)
 
     def create(self, root_url: str, policy: PolicyLike, *, owner: str = "") -> CrawlJobState:
         """Create a new whole-site crawl job with initial frontier containing root_url."""
@@ -220,19 +226,18 @@ class JobStore:
         self, job_id: str, *, with_accumulators: bool, owner: str | None = None
     ) -> CrawlJobState | None:
         """The one row read both loaders share.
-        The row is selected under one hold of the lock; the deserializing walk
-        runs after release (``_row_to_job`` takes the lock again for its own
-        collection reads). ``owner`` narrows to the caller's own row before
-        any deserialization."""
+        The row select and the collection reads hold one lock (reentrant), so
+        the returned state is one generation; the deserializing walk runs after
+        release. ``owner`` narrows to the caller's own row before any walk."""
         statement, params = _owner_statement(_ROW_COLUMNS, True, "", owner)
-        with self._lock:
-            row = self._conn.execute(statement, (job_id, *params)).fetchone()
-        if row is None:
-            return None
-        factory = self._row_to_job_factory
         try:
-            if factory is None:
-                return self._row_to_job(row, with_accumulators=with_accumulators)
+            with self._lock:
+                row = self._conn.execute(statement, (job_id, *params)).fetchone()
+                if row is None:
+                    return None
+                factory = self._row_to_job_factory
+                if factory is None:
+                    return self._read_collections(row, with_accumulators=with_accumulators)
             return factory(row, self._row_to_job, with_accumulators=with_accumulators)
         except (json.JSONDecodeError, ValueError, TypeError) as exc:
             # Surface corruption instead of silently returning None so a
