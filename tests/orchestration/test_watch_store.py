@@ -184,12 +184,14 @@ def test_delete_reports_whether_the_watch_existed(watch_store):
 def test_count_for_owner_counts_only_active_watches(watch_store):
     """A deactivated watch must not consume the caller's registration cap: the cap
     bounds live scheduling load, and the sweep never runs a deactivated row."""
-    watch = register(watch_store, url="https://example.com/a")
-    assert watch_store.count_for_owner("") == 1
+    watch = watch_store.create(
+        canonical("https://example.com/a"), interval_seconds=INTERVAL, now=NOW, owner="caller-1"
+    )
+    assert watch_store.count_for_owner("caller-1") == 1
 
     watch_store.deactivate(watch.watch_id, now=NOW, next_check_at=NOW + 10_000 * INTERVAL)
 
-    assert watch_store.count_for_owner("") == 0
+    assert watch_store.count_for_owner("caller-1") == 0
 
 
 def test_count_for_owner_still_counts_its_owner_and_no_one_else(watch_store):
@@ -198,6 +200,7 @@ def test_count_for_owner_still_counts_its_owner_and_no_one_else(watch_store):
     register(watch_store, url="https://example.com/b")
 
     assert watch_store.count_for_owner("") == 2
+    assert watch_store.count_for_owner("caller-x") == 0
 
 
 def test_a_failed_check_does_not_stop_counting_a_watch(watch_store):
