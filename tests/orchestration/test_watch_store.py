@@ -181,6 +181,39 @@ def test_delete_reports_whether_the_watch_existed(watch_store):
     assert watch_store.delete(state.watch_id) is False
 
 
+def test_count_for_owner_counts_only_active_watches(watch_store):
+    """A deactivated watch must not consume the caller's registration cap: the cap
+    bounds live scheduling load, and the sweep never runs a deactivated row."""
+    watch = register(watch_store, url="https://example.com/a")
+    assert watch_store.count_for_owner("") == 1
+
+    watch_store.deactivate(watch.watch_id, now=NOW, next_check_at=NOW + 10_000 * INTERVAL)
+
+    assert watch_store.count_for_owner("") == 0
+
+
+def test_count_for_owner_still_counts_its_owner_and_no_one_else(watch_store):
+    """The active-count baseline: ownership filtering stays exactly as it was."""
+    register(watch_store, url="https://example.com/a")
+    register(watch_store, url="https://example.com/b")
+
+    assert watch_store.count_for_owner("") == 2
+
+
+def test_a_failed_check_does_not_stop_counting_a_watch(watch_store):
+    """A non-terminal failure keeps the watch active and counted; only a
+    ``deactivate`` (terminal status) releases the cap slot."""
+    watch = register(watch_store, url="https://example.com/a")
+    watch_store.record_check(
+        watch.watch_id,
+        outcome=CrawlClassification.site_error,
+        now=NOW,
+        next_check_at=NOW + INTERVAL,
+    )
+
+    assert watch_store.count_for_owner("") == 1
+
+
 def test_get_of_unknown_watch_is_none(watch_store):
     assert watch_store.get("nonexistent") is None
 
