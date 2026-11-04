@@ -46,7 +46,7 @@ from tests._job_store_doubles import (
     single_shot_orphan,
 )
 from tests._policy_factories import canonical
-from tests._result_builders import _canned_result
+from tests._result_builders import engine_result
 
 #: Hang guard for the store waits. Deliberately NOT ``HANG_GUARD_SECONDS``: that one guards waits for a task
 #: the SAME loop has already scheduled, and such a task either runs on the next turn or never.
@@ -120,7 +120,7 @@ class ScriptedExecute:
     def _entry(self, url: NormalizedUrl) -> EngineCrawlResult:
         sequence = self._scripts.get(url.raw)
         if sequence is None:
-            return _canned_result(url, classification=self._default)
+            return engine_result(url, self._default)
         return sequence.pop(0) if len(sequence) > 1 else sequence[0]
 
     async def __call__(self, payload_dict, *, settings, shutdown_event):

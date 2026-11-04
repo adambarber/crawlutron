@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, NamedTuple
 from crawlutron.models.crawl_task import CrawlTask
 from crawlutron.orchestration.recursive import run_recursive_crawl
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
-from tests._result_builders import Spill, make_engine_result
+from tests._result_builders import Spill, engine_result
 from tests._scheduler_doubles import FakeScheduler
 
 if TYPE_CHECKING:
@@ -139,7 +139,7 @@ def _crawl_defaults(
 
 async def _allowed_result(job: CrawlTask) -> EngineCrawlResult:
     """The result for a URL a crawl test did not expect to be denied."""
-    return make_engine_result(job.normalized_url.raw)
+    return engine_result(job.normalized_url.raw, "rendered")
 
 
 async def _no_seeds() -> list[NormalizedUrl]:

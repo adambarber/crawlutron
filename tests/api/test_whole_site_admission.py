@@ -29,7 +29,7 @@ from tests._job_harnesses import (
     write_row_policy,
 )
 from tests._policy_factories import canonical
-from tests._result_builders import _canned_result, _scripted_result_map
+from tests._result_builders import engine_result
 
 #: The one link every admission test here expects to survive, and the root it is discovered from.
 ADMITTED = "https://example.test/included"
@@ -79,7 +79,12 @@ def _root_with_alias(alias_query: str) -> _AliasSite:
     root = "https://example.test/root"
     root_alias = f"{root}?{alias_query}"
     child = "https://example.test/child"
-    return _AliasSite(root, root_alias, child, ScriptedExecute(_scripted_result_map((root, child))))
+    return _AliasSite(
+        root,
+        root_alias,
+        child,
+        ScriptedExecute({u: [engine_result(u, "rendered")] for u in (root, child)}),
+    )
 
 
 class TestWholeSiteAdmissionContract:
@@ -125,7 +130,7 @@ class TestWholeSiteAdmissionContract:
 
         Only links and policy vary across tests; the attempt count, discovery
         total and visited set derive from ``admitted``, never restated."""
-        engine = ScriptedExecute({root: [_canned_result(root, links=links)]})
+        engine = ScriptedExecute({root: [engine_result(root, "rendered", links=links)]})
         job = await run_api_job(client, job_store, root, engine, policy)
         assert engine.attempts == {root: 1, **{url: 1 for url in admitted}}
         assert job.stats["total_discovered"] == len(admitted)
@@ -143,12 +148,11 @@ class TestWholeSiteAdmissionContract:
         root = "https://example.test/root"
         child = "https://example.test/child"
         grandchild = "https://example.test/grandchild"
-        engine = ScriptedExecute(
-            {
-                root: [_canned_result(root, links=[child])],
-                child: [_canned_result(child, links=[grandchild])],
-            }
-        )
+        chain = {
+            root: [engine_result(root, "rendered", links=[child])],
+            child: [engine_result(child, "rendered", links=[grandchild])],
+        }
+        engine = ScriptedExecute(chain)
         job = await run_api_job(client, job_store, root, engine, self._policy(1, 10))
         assert engine.attempts == {root: 1, child: 1}
         assert_settled(job, visited={root, child}, discovered=1)
@@ -179,7 +183,7 @@ class TestWholeSiteAdmissionContract:
         root = "https://example.test/root"
         second = "https://example.test/second"
         third = "https://example.test/third"
-        engine = ScriptedExecute(_scripted_result_map((root, second, third)))
+        engine = ScriptedExecute({u: [engine_result(u, "rendered")] for u in (root, second, third)})
         finished = await run_seeded_scripted_job(
             job_store, root, self._policy(1, 2), engine, frontier=[root, second, third]
         )
@@ -194,7 +198,7 @@ class TestWholeSiteAdmissionContract:
     async def test_in_flight_recovery_keeps_every_admitted_url(self, job_store):
         first = "https://example.test/first"
         second = "https://example.test/second"
-        engine = ScriptedExecute(_scripted_result_map((first, second)))
+        engine = ScriptedExecute({u: [engine_result(u, "rendered")] for u in (first, second)})
         finished = await run_seeded_scripted_job(
             job_store,
             first,
@@ -211,21 +215,13 @@ class TestWholeSiteAdmissionContract:
         }
         assert finished.stats["cap_overcommitted"] == 1
 
-    async def test_canonical_root_alias_counts_once(self, client, job_store):
-        root = "https://example.test/root"
-        self_alias = f"{root}?utm_source=tw"  # #520: "root/" is distinct now; the query alias is not
-        job = await self._admission_scenario(client, job_store, root, [self_alias], self._policy(1, 2))
-
-        assert job.visited == {canonical(root)}
-        assert len(job.results) == 1
-
     async def test_cap_truncation_is_exposed_by_job_api(self, client, job_store):
         root = "https://example.test/root"
         child = "https://example.test/child"
         job_id = await _create_api_job(
             client,
             root,
-            ScriptedExecute(results=[_canned_result(root, links=[child])]),
+            ScriptedExecute(results=[engine_result(root, "rendered", links=[child])]),
             self._policy(1, 1),
         )
         assert await _wait_status(job_store, job_id, {"completed", "failed"}) == "completed"
@@ -245,7 +241,7 @@ class TestWholeSiteAdmissionContract:
             job_store,
             "https://example.test/root",
             {},
-            ScriptedExecute(results=[_canned_result("https://example.test/root")]),
+            ScriptedExecute(results=[engine_result("https://example.test/root", "rendered")]),
             on_seeded=_corrupt_policy,
         )
         assert finished.status == JobStatus.COMPLETED
@@ -262,7 +258,9 @@ class TestWholeSiteAdmissionContract:
             return [seed]
 
         monkeypatch.setattr(job_runner, "fetch_job_sitemap_candidates", sitemap_candidates)
-        engine = ScriptedExecute({root: [_canned_result(root)], seed: [_canned_result(seed)]})
+        engine = ScriptedExecute(
+            {root: [engine_result(root, "rendered")], seed: [engine_result(seed, "rendered")]}
+        )
         job = await run_api_job(
             client,
             job_store,
@@ -308,7 +306,7 @@ class TestWholeSiteAdmissionContract:
             client,
             job_store,
             root,
-            ScriptedExecute(results=[_canned_result(root, links=[child])]),
+            ScriptedExecute(results=[engine_result(root, "rendered", links=[child])]),
             policy,
         )
 
@@ -318,24 +316,22 @@ class TestWholeSiteAdmissionContract:
     async def test_in_flight_batch_discovering_each_other_does_not_double_crawl(self, job_store):
         root = "https://example.test/root"
         child = "https://example.test/child"
-        engine = ScriptedExecute(_scripted_result_map((root, child), links={root: [child]}))
+        # The root hands the child to the frontier while the child is still in flight.
+        engine = ScriptedExecute(
+            {
+                root: [engine_result(root, "rendered", links=[child])],
+                child: [engine_result(child, "rendered")],
+            }
+        )
         finished = await run_seeded_scripted_job(
             job_store, root, self._policy(1, 2), engine, frontier=[root, child]
         )
         assert_pair_crawled_once(finished, engine, root, child)
         assert finished.stats["total_discovered"] == 0
 
-    async def test_legacy_frontier_canonical_aliases_do_not_underfill_cap(self, job_store):
-        root, root_alias, child, engine = _root_with_alias("utm_source=test")
-        finished = await run_seeded_scripted_job(
-            job_store, root, self._policy(1, 2), engine, frontier=[root, root_alias, child]
-        )
-        assert_pair_crawled_once(finished, engine, root, child)
-        assert finished.stats["cap_truncated"] == 0
-
     async def test_chunked_in_flight_recovery_never_loses_admitted_urls(self, job_store):
         urls = [f"https://example.test/page-{index}" for index in range(10)]
-        engine = ScriptedExecute(_scripted_result_map(urls))
+        engine = ScriptedExecute({u: [engine_result(u, "rendered")] for u in urls})
         finished = await run_seeded_scripted_job(
             job_store, urls[0], self._policy(1, 2), engine, frontier=[], in_flight=urls, running=True
         )
@@ -344,21 +340,6 @@ class TestWholeSiteAdmissionContract:
         assert finished.in_flight == []
         assert finished.stats["cap_overcommitted"] == 1
 
-    async def test_cross_list_alias_identity_is_single_work_item(self, job_store):
-        root, root_alias, child, engine = _root_with_alias("utm_source=legacy")
-        finished = await run_seeded_scripted_job(
-            job_store,
-            root,
-            self._policy(1, 2),
-            engine,
-            frontier=[child, root_alias],
-            in_flight=[root],
-            running=True,
-        )
-        assert_pair_crawled_once(finished, engine, root, child)
-        assert finished.in_flight == []
-        assert finished.frontier == []
-
     async def test_unbounded_batch_chunking_does_not_report_truncation(self, client, job_store):
         root = "https://example.test/root"
         leaves = [f"https://example.test/leaf-{index}" for index in range(12)]
@@ -366,7 +347,8 @@ class TestWholeSiteAdmissionContract:
             client,
             job_store,
             root,
-            results=[_canned_result(root, links=leaves)] + [_canned_result(leaf) for leaf in leaves],
+            results=[engine_result(root, "rendered", links=leaves)]
+            + [engine_result(leaf, "rendered") for leaf in leaves],
             policy=job_limits(max_depth=1, max_pages=0),
         )
 
@@ -401,13 +383,57 @@ class TestWholeSiteAdmissionContract:
             job_store,
             root,
             results=[
-                _canned_result(root, links=[f"{child}?utm_source=one", f"{child}/", other]),
-                _canned_result(child),
-                _canned_result(f"{child}/"),
-                _canned_result(other),
+                engine_result(root, "rendered", links=[f"{child}?utm_source=one", f"{child}/", other]),
+                engine_result(child, "rendered"),
+                engine_result(f"{child}/", "rendered"),
+                engine_result(other, "rendered"),
             ],
             policy=job_limits(max_depth=1, max_pages=4),
         )
         assert job.stats["total_discovered"] == 3  # #520: the slash variant is distinct path text
         assert job.visited == {canonical(root), canonical(child), canonical(f"{child}/"), canonical(other)}
         assert len(job.results) == 4
+
+
+class TestWholeSiteAliasIdentity:
+    """Alias-shaped URLs (#520): the query alias is the same page, the slash
+    variant is a distinct one -- the cases the cap accounting once underfilled."""
+
+    @staticmethod
+    def _policy(max_depth: int, max_pages: int) -> PolicyLike:
+        return {
+            "limits": {"max_depth": max_depth, "max_pages": max_pages, "respect_robots": False},
+            "discovery": {"robots": True, "sitemaps": False, "feeds": True},
+        }
+
+    async def test_canonical_root_alias_counts_once(self, client, job_store):
+        root = "https://example.test/root"
+        self_alias = f"{root}?utm_source=tw"  # "root/" is distinct now; the query alias is not
+        engine = ScriptedExecute({root: [engine_result(root, "rendered", links=[self_alias])]})
+        job = await run_api_job(client, job_store, root, engine, self._policy(1, 2))
+
+        assert job.visited == {canonical(root)}
+        assert len(job.results) == 1
+
+    async def test_legacy_frontier_canonical_aliases_do_not_underfill_cap(self, job_store):
+        root, root_alias, child, engine = _root_with_alias("utm_source=test")
+        finished = await run_seeded_scripted_job(
+            job_store, root, self._policy(1, 2), engine, frontier=[root, root_alias, child]
+        )
+        assert_pair_crawled_once(finished, engine, root, child)
+        assert finished.stats["cap_truncated"] == 0
+
+    async def test_cross_list_alias_identity_is_single_work_item(self, job_store):
+        root, root_alias, child, engine = _root_with_alias("utm_source=legacy")
+        finished = await run_seeded_scripted_job(
+            job_store,
+            root,
+            self._policy(1, 2),
+            engine,
+            frontier=[child, root_alias],
+            in_flight=[root],
+            running=True,
+        )
+        assert_pair_crawled_once(finished, engine, root, child)
+        assert finished.in_flight == []
+        assert finished.frontier == []

@@ -10,7 +10,7 @@ from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.crawl_task import CrawlTask
 from crawlutron.transport.results import failed_result_for
 from crawlutron.transport.scheduler import DomainScheduler
-from tests._result_builders import make_result
+from tests._result_builders import engine_result
 
 # The two job shapes ``DomainScheduler.run`` is polymorphic over.
 _EnvelopeJob = TypeVar("_EnvelopeJob", CrawlJob, CrawlTask)
@@ -53,7 +53,7 @@ async def ok_worker[EnvelopeJob: (CrawlJob, CrawlTask)](job: EnvelopeJob) -> Eng
 
     A bare ``"ok"`` would not be one: the scheduler reads ``.status`` off the
     return, so a string becomes a swallowed domain failure."""
-    return make_result(_job_url(job), job.domain)
+    return engine_result(_job_url(job), "rendered")
 
 
 def engine_envelope[EnvelopeJob: (CrawlJob, CrawlTask)](

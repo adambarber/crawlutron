@@ -16,7 +16,7 @@ from crawlutron.storage.watch_store import WatchStore
 from tests._api_harnesses import spy_on_history_reads
 from tests._job_harnesses import ScriptedExecute, _seed_job, make_crawled_job_store, make_job_store
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, deployment_tier
-from tests._result_builders import _canned_result
+from tests._result_builders import engine_result
 from tests.api._offload_doubles import (
     LoopGuardJobStore,
     LoopGuardResultStore,
@@ -144,7 +144,7 @@ class TestStartupRecoveryStaysOffTheLoop:
         from crawlutron.api.job_runner import recover_and_start_pending_jobs, start_job
 
         job_runner.reset_job_runner()
-        job_runner.install_execute_crawl(ScriptedExecute(results=[_canned_result(_ROOT)]))
+        job_runner.install_execute_crawl(ScriptedExecute(results=[engine_result(_ROOT, "rendered")]))
         try:
             job = await _off_loop(_seed_job, loop_guard_store, _ROOT, {"limits": {"max_depth": 1}})
             await recover_and_start_pending_jobs(

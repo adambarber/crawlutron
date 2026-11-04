@@ -20,7 +20,7 @@ from tests._admission_runs import task as _task
 from tests._policy_factories import canonical
 from tests._recursive_harnesses import ContentionFreeGate, drive_recursive_crawl, make_crawl_task
 from tests._recursive_harnesses import _allowed_result as _allows
-from tests._result_builders import engine_result, make_engine_result
+from tests._result_builders import engine_result
 
 # The root seed as written, and the value the engine actually holds for it. These are not the same string:
 # normalization strips that trailing slash. Naming both makes the distinction something a test can see.
@@ -40,7 +40,7 @@ def _expanding_worker():
             if job.normalized_url == canonical(_ROOT_CANONICAL)
             else []
         )
-        return make_engine_result(job.normalized_url, links)
+        return engine_result(job.normalized_url, "rendered", raw_links=links)
 
     return worker
 
@@ -57,7 +57,7 @@ async def test_an_override_production_does_not_take_is_rejected(keyword, value):
     a misspelling must not run against a default nobody chose."""
 
     async def worker(job):
-        return make_engine_result(job.normalized_url)
+        return engine_result(job.normalized_url, "rendered")
 
     with pytest.raises(TypeError, match=keyword):
         await drive_recursive_crawl([make_crawl_task(0, "a")], worker, allows=_allows, **{keyword: value})
@@ -70,7 +70,7 @@ async def test_a_real_override_still_reaches_production():
     this drives a real bound through and reads it back off the crawl."""
 
     async def worker(job):
-        return make_engine_result(job.normalized_url)
+        return engine_result(job.normalized_url, "rendered")
 
     jobs = [make_crawl_task(0, "a"), make_crawl_task(1, "a"), make_crawl_task(2, "a")]
     spill, _scheduler, _gate = await drive_recursive_crawl(
@@ -81,7 +81,7 @@ async def test_a_real_override_still_reaches_production():
 
 async def test_dispatches_single_page_and_consults_gate():
     async def worker(job):
-        return make_engine_result(job.normalized_url)
+        return engine_result(job.normalized_url, "rendered")
 
     jobs = [_task(_ROOT)]
     spill, scheduler, gate = await _run(jobs, worker)
@@ -98,7 +98,7 @@ async def test_expands_frontier_from_discovered_links():
         return [_link("http://a/1"), _link("http://a/2")] if url == canonical(_ROOT_CANONICAL) else []
 
     async def worker(job):
-        return make_engine_result(job.normalized_url, _links_for(job.normalized_url))
+        return engine_result(job.normalized_url, "rendered", raw_links=_links_for(job.normalized_url))
 
     jobs = [_task(_ROOT)]
     spill, scheduler, _ = await _run(jobs, worker)
@@ -148,7 +148,7 @@ async def test_robots_disallows_discovered_link_silently():
     async def worker(job):
         seen.append(job.normalized_url)
         links = [_link("http://a/blocked")] if job.normalized_url == canonical(_ROOT_CANONICAL) else []
-        return make_engine_result(job.normalized_url, links)
+        return engine_result(job.normalized_url, "rendered", raw_links=links)
 
     async def allows(url):
         return url.raw != "http://a/blocked"
@@ -201,7 +201,7 @@ def _tiered_worker(fail_index: int | None = None):
     async def worker(job):
         if fail_index is not None and job.index == fail_index:
             raise RuntimeError("transient failure")
-        return make_engine_result(job.normalized_url)
+        return engine_result(job.normalized_url, "rendered")
 
     return worker
 
@@ -261,7 +261,7 @@ async def test_pool_exhaustion_requeue_does_not_consume_a_max_pages_slot():
                 # real page rides on the seed's final permanent failure, not on any re-queue.
                 discovered_links=[_link("http://a/real")],
             )
-        return make_engine_result(job.normalized_url)
+        return engine_result(job.normalized_url, "rendered")
 
     jobs = [_task("http://a/seed")]
 
@@ -292,11 +292,12 @@ async def test_in_flight_pages_count_against_the_cap_at_expansion():
 
     async def worker(job):
         if job.normalized_url == canonical("http://a/0"):
-            return make_engine_result(
+            return engine_result(
                 job.normalized_url,
-                [_link(f"http://a/{i}") for i in (1, 2, 3)],
+                "rendered",
+                raw_links=[_link(f"http://a/{i}") for i in (1, 2, 3)],
             )
-        return make_engine_result(job.normalized_url)
+        return engine_result(job.normalized_url, "rendered")
 
     spill, _scheduler, _gate = await drive_recursive_crawl(
         [_task("http://a/0"), _task("http://a/x", index=1)],

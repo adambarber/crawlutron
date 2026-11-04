@@ -32,14 +32,27 @@ from tests._job_harnesses import (
     run_seeded_scripted_job,
 )
 from tests._policy_factories import canonical
-from tests._result_builders import (
-    GRAPH_CHILD,
-    GRAPH_ROOT,
-    _canned_result,
-    _root_child_results,
-    _small_link_graph_results,
-    engine_result,
-)
+from tests._result_builders import GRAPH_CHILD, GRAPH_ROOT, engine_result
+
+
+def _root_child():
+    """The two pages a two-batch test needs: root discovers the leaf child."""
+    return [
+        engine_result(GRAPH_ROOT, "rendered", links=[GRAPH_CHILD]),
+        engine_result(GRAPH_CHILD, "rendered"),
+    ]
+
+
+def _small_link_graph():
+    """The four-page fixture graph: a fan-out root, one shared child, two leaves."""
+    return [
+        engine_result(
+            GRAPH_ROOT, "rendered", links=[GRAPH_CHILD, "http://example.test/c", "http://example.test/d"]
+        ),
+        engine_result(GRAPH_CHILD, "rendered", links=["http://example.test/d"]),
+        engine_result("http://example.test/c", "rendered"),
+        engine_result("http://example.test/d", "rendered"),
+    ]
 
 
 @pytest.fixture(autouse=True)
@@ -128,7 +141,7 @@ class TestCrashRecovery:
         job_store.save(job)
         job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
 
-        job_runner.install_execute_crawl(ScriptedExecute(results=[_canned_result(GRAPH_ROOT)]))
+        job_runner.install_execute_crawl(ScriptedExecute(results=[engine_result(GRAPH_ROOT, "rendered")]))
         await job_runner.recover_and_start_pending_jobs(
             job_store, CrawlerSettings.from_mapping({}), asyncio.Event(), job_runner.start_job
         )
@@ -142,7 +155,7 @@ class TestCrashRecovery:
     async def test_in_flight_requeue_survives_job_wide_page_cap(self, job_store):
         root = GRAPH_ROOT
         discovered = GRAPH_CHILD
-        engine = ScriptedExecute({root: [_canned_result(root, links=[discovered])]})
+        engine = ScriptedExecute({root: [engine_result(root, "rendered", links=[discovered])]})
         finished = await run_seeded_scripted_job(
             job_store,
             root,
@@ -161,7 +174,15 @@ class TestCrashRecovery:
     async def test_normal_completion_clears_in_flight(self, client, job_store):
         # A healthy run must not leave a stale in_flight that would double-crawl on a later resume: the batch
         # is cleared in the same save that records its results.
-        job = await run_scripted_api_job(client, job_store, GRAPH_ROOT, results=_root_child_results())
+        job = await run_scripted_api_job(
+            client,
+            job_store,
+            GRAPH_ROOT,
+            results=[
+                engine_result(GRAPH_ROOT, "rendered", links=[GRAPH_CHILD]),
+                engine_result(GRAPH_CHILD, "rendered"),
+            ],
+        )
         assert job.visited == {canonical(GRAPH_ROOT), canonical(GRAPH_CHILD)}
         assert job.in_flight == []
 
@@ -256,7 +277,7 @@ class TestWholeSiteJobExecution:
     async def test_run_job_uses_engine_payload_builder(self, client, job_store):
         root = GRAPH_ROOT
         captured: list[CrawlRequest] = []
-        engine = recording_execute(ScriptedExecute(results=[_canned_result(root)]), captured)
+        engine = recording_execute(ScriptedExecute(results=[engine_result(root, "rendered")]), captured)
 
         await run_api_job(
             client,
@@ -286,7 +307,7 @@ class TestWholeSiteJobExecution:
             client,
             job_store,
             GRAPH_ROOT,
-            ScriptedExecute(results=_small_link_graph_results()),
+            ScriptedExecute(results=_small_link_graph()),
             job_limits(max_depth=2, max_pages=2),
         )
 
@@ -294,7 +315,7 @@ class TestWholeSiteJobExecution:
 
     async def test_max_pages_absent_keeps_the_whole_site_unbounded(self, client, job_store):
         captured: list[CrawlRequest] = []
-        engine = recording_execute(ScriptedExecute(results=_small_link_graph_results()), captured)
+        engine = recording_execute(ScriptedExecute(results=_small_link_graph()), captured)
 
         job = await run_api_job(
             client,
@@ -315,11 +336,7 @@ class TestWholeSiteJobExecution:
         assert all(payload.policy.limits.max_depth == 0 for payload in captured)
 
     async def test_create_runs_to_completed(self, client, job_store):
-        job_id = await _create_api_job(
-            client,
-            GRAPH_ROOT,
-            ScriptedExecute(results=_root_child_results()),
-        )
+        job_id = await _create_api_job(client, GRAPH_ROOT, ScriptedExecute(results=_root_child()))
 
         status = await _wait_status(job_store, job_id, {"completed", "failed"})
         assert status == "completed"
@@ -333,11 +350,12 @@ class TestWholeSiteJobExecution:
     async def test_total_failed_counts_once_per_failed_item(self, client, job_store):
         # Batch 2 submits b and c, both fail: the per-item `failed` counter is cumulative, so adding it inside
         # the loop once reported 1+2=3.
+        offered = [GRAPH_CHILD, "http://example.test/c"]
         job = await run_scripted_api_job(
             client,
             job_store,
             GRAPH_ROOT,
-            results=[_canned_result(GRAPH_ROOT, links=[GRAPH_CHILD, "http://example.test/c"])],
+            results=[engine_result(GRAPH_ROOT, "rendered", links=offered)],
         )
         assert job.stats["total_crawled"] == 3
         assert job.stats["total_failed"] == 2
@@ -373,7 +391,8 @@ class TestWholeSiteJobExecution:
             client,
             job_store,
             GRAPH_ROOT,
-            results=[_canned_result(GRAPH_ROOT, links=leaves)] + [_canned_result(u) for u in leaves],
+            results=[engine_result(GRAPH_ROOT, "rendered", links=leaves)]
+            + [engine_result(u, "rendered") for u in leaves],
         )
         assert job.stats["total_discovered"] == 25
         assert job.stats["total_crawled"] == 26
@@ -387,9 +406,9 @@ class TestWholeSiteJobExecution:
             GRAPH_ROOT,
             ScriptedExecute(
                 results=[
-                    _canned_result(GRAPH_ROOT, links=[GRAPH_CHILD, "http://example.test/c"]),
-                    _canned_result(GRAPH_CHILD, links=[GRAPH_ROOT]),
-                    _canned_result("http://example.test/c"),
+                    engine_result(GRAPH_ROOT, "rendered", links=[GRAPH_CHILD, "http://example.test/c"]),
+                    engine_result(GRAPH_CHILD, "rendered", links=[GRAPH_ROOT]),
+                    engine_result("http://example.test/c", "rendered"),
                 ]
             ),
         )
@@ -421,7 +440,7 @@ class TestWholeSiteJobExecution:
             client,
             job_store,
             GRAPH_ROOT,
-            results=[_canned_result(GRAPH_ROOT, links=[GRAPH_CHILD, "http://example.test/c"])],
+            results=[engine_result(GRAPH_ROOT, "rendered", links=[GRAPH_CHILD, "http://example.test/c"])],
         )
         assert_settled(job, visited=[GRAPH_ROOT, GRAPH_CHILD, "http://example.test/c"], crawled=3)
         assert len(calls) == 1  # once at loop start, then threaded via the known set
@@ -436,10 +455,10 @@ class TestWholeSiteJobExecution:
             job_store,
             GRAPH_ROOT,
             results=[
-                _canned_result(GRAPH_ROOT, links=[GRAPH_CHILD, "http://example.test/c"]),
-                _canned_result(GRAPH_CHILD, links=[shared]),
-                _canned_result("http://example.test/c", links=[shared]),
-                _canned_result(shared),
+                engine_result(GRAPH_ROOT, "rendered", links=[GRAPH_CHILD, "http://example.test/c"]),
+                engine_result(GRAPH_CHILD, "rendered", links=[shared]),
+                engine_result("http://example.test/c", "rendered", links=[shared]),
+                engine_result(shared, "rendered"),
             ],
             policy=job_limits(max_depth=2),
         )

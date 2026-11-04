@@ -26,7 +26,7 @@ from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
 from crawlutron.runtime.metrics import get_metrics
 from crawlutron.storage.result_store import CrawlResultStore
 from tests._job_harnesses import ScriptedExecute, make_job_store
-from tests._result_builders import _canned_result
+from tests._result_builders import engine_result
 
 logger = logging.getLogger(__name__)
 
@@ -248,7 +248,7 @@ async def test_crawl_succeeds_at_a_cap_of_one(monkeypatch):
     monkeypatch.setattr(main_helpers, "readiness_state", ReadinessState(max_active_requests=1))
 
     async def _execute(payload_dict, *, settings, shutdown_event, url_pairs=None):
-        return await ScriptedExecute(results=[_canned_result("http://example.test/")])(
+        return await ScriptedExecute(results=[engine_result("http://example.test/", "rendered")])(
             payload_dict, settings=settings, shutdown_event=shutdown_event
         )
 

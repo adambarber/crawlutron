@@ -25,14 +25,16 @@ from tests._job_harnesses import (
     submit_blocked_job,
 )
 from tests._policy_factories import canonical
-from tests._result_builders import (
-    GRAPH_CHILD,
-    GRAPH_ROOT,
-    _canned_result,
-    _root_child_results,
-    _root_fans_out,
-)
+from tests._result_builders import GRAPH_CHILD, GRAPH_ROOT, engine_result
 from tests._timing_harnesses import await_until
+
+
+def _root_child():
+    """Root discovers the child (a leaf); the two-page shape the control tests want."""
+    return [
+        engine_result(GRAPH_ROOT, "rendered", links=[GRAPH_CHILD]),
+        engine_result(GRAPH_CHILD, "rendered"),
+    ]
 
 
 class TestStatusResponseShape:
@@ -42,11 +44,7 @@ class TestStatusResponseShape:
     dropped without a word; asserted here through the HTTP surface."""
 
     async def test_status_response_carries_the_job_kind(self, client):
-        job_id = await _create_api_job(
-            client,
-            GRAPH_ROOT,
-            ScriptedExecute(results=_root_child_results()),
-        )
+        job_id = await _create_api_job(client, GRAPH_ROOT, ScriptedExecute(results=_root_child()))
 
         response = await client.get(f"/v1/jobs/{job_id}")
 
@@ -88,7 +86,7 @@ class TestJobStateWaitContract:
         monkeypatch.setattr(job_store, "set_status", gated_set_status)
 
         job_id = job_store.create(GRAPH_ROOT, CrawlPolicy()).job_id
-        job_runner.install_execute_crawl(ScriptedExecute(results=[_canned_result(GRAPH_ROOT)]))
+        job_runner.install_execute_crawl(ScriptedExecute(results=[engine_result(GRAPH_ROOT, "rendered")]))
         assert job_store.status_bus is not None
 
         runner = drive_job(job_id, job_store)
@@ -134,7 +132,13 @@ class TestJobControlOverRunner:
 
     async def test_pause_retains_frontier_and_resume_finishes(self, client, job_store):
         job_id, release = await self._blocked(
-            client, job_store, _root_fans_out(GRAPH_ROOT, GRAPH_CHILD, "http://example.test/c")
+            client,
+            job_store,
+            [
+                engine_result(GRAPH_ROOT, "rendered", links=[GRAPH_CHILD, "http://example.test/c"]),
+                engine_result(GRAPH_CHILD, "rendered"),
+                engine_result("http://example.test/c", "rendered"),
+            ],
         )
 
         pause_resp = await client.post(f"/v1/jobs/{job_id}/control", json={"action": "pause"})
@@ -159,7 +163,7 @@ class TestJobControlOverRunner:
         }
 
     async def test_cancel_persists_terminal_state(self, client, job_store):
-        job_id, release = await self._blocked(client, job_store, _root_child_results())
+        job_id, release = await self._blocked(client, job_store, _root_child())
 
         cancel_resp = await client.post(f"/v1/jobs/{job_id}/control", json={"action": "cancel"})
         assert cancel_resp.status_code == 200
@@ -184,7 +188,7 @@ class TestJobControlOverRunner:
         assert conflict.status_code == 409
 
     async def test_delete_running_job_cancels(self, client, job_store):
-        job_id, release = await self._blocked(client, job_store, [_canned_result(GRAPH_ROOT)])
+        job_id, release = await self._blocked(client, job_store, [engine_result(GRAPH_ROOT, "rendered")])
 
         del_resp = await client.delete(f"/v1/jobs/{job_id}")
         assert del_resp.status_code == 200
@@ -242,7 +246,7 @@ class TestEveryVisitedUrlHasAnEnvelope:
         async def _execute(payload_dict, *, settings, shutdown_event):
             urls = await _execution_urls(payload_dict, None)
             answered = [u for u in urls if not u.raw.endswith("/gone")]
-            results = [_canned_result(u, links=["http://example.test/gone"]) for u in answered]
+            results = [engine_result(u, "rendered", links=["http://example.test/gone"]) for u in answered]
             return _execution_payload(results, len(urls))
 
         job = await run_api_job(
@@ -262,7 +266,12 @@ class TestEveryVisitedUrlHasAnEnvelope:
 
     async def test_results_never_exceed_the_visited_set(self, client, job_store):
         """The accounting is a partition: each visited URL, exactly one envelope."""
-        job = await run_scripted_api_job(client, job_store, GRAPH_ROOT, results=_root_child_results())
+        # The accounting is a partition: each visited URL, exactly one envelope.
+        pair = [
+            engine_result(GRAPH_ROOT, "rendered", links=[GRAPH_CHILD]),
+            engine_result(GRAPH_CHILD, "rendered"),
+        ]
+        job = await run_scripted_api_job(client, job_store, GRAPH_ROOT, results=pair)
         assert len(job.results) == job.stats["total_crawled"]
 
 
@@ -285,7 +294,7 @@ class TestTheRunnerClaim:
         job = TestTheRunnerClaim._seeded(job_store)
         assert job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
         assert job_store.set_status(job.job_id, JobStatus.PAUSED, expected=JobStatus.RUNNING)
-        engine = ScriptedExecute(results=[_canned_result(GRAPH_ROOT)])
+        engine = ScriptedExecute(results=[engine_result(GRAPH_ROOT, "rendered")])
         job_runner.install_execute_crawl(engine)
         return job, engine
 
@@ -294,7 +303,7 @@ class TestTheRunnerClaim:
         # did not become means no work.
         job = self._seeded(job_store)
         assert job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
-        engine = ScriptedExecute(results=[_canned_result(GRAPH_ROOT)])
+        engine = ScriptedExecute(results=[engine_result(GRAPH_ROOT, "rendered")])
         job_runner.install_execute_crawl(engine)
 
         await drive_job(job.job_id, job_store)

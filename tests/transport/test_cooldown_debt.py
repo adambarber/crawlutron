@@ -7,7 +7,7 @@ window -- the NEXT batch then fires 300s+ early. Debts only grow: the
 setter max-combines, and the second batch must wait out what remains.
 """
 
-from tests._result_builders import make_engine_result
+from tests._result_builders import engine_result
 from tests._scheduler_doubles import engine_envelope, make_scheduler, trip_circuit
 from tests.transport.test_breaker_park import _parking_clock, _task
 
@@ -26,7 +26,7 @@ async def test_breaker_park_never_truncates_a_longer_429_window(monkeypatch):
 
     async def worker(job):
         ran_at.append(clock.now)
-        return make_engine_result(job.normalized_url)
+        return engine_result(job.normalized_url, "rendered")
 
     first = await scheduler.run([_task(0, "http://example.com/a")], worker, failed_result=engine_envelope)
     # First batch: ONE fetch, inside the window (bounded-batch contract -- the

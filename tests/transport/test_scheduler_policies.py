@@ -8,7 +8,7 @@ from crawlutron.models.crawl_job import CrawlJob
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.transport.scheduler import COOLDOWN_PURGE_INTERVAL, DomainScheduler, TokenBucket
 from tests._policy_factories import canonical
-from tests._result_builders import make_job, make_result
+from tests._result_builders import engine_result, make_job
 from tests._scheduler_doubles import engine_envelope, make_scheduler, ok_worker, trip_circuit
 
 # Breaker, EMA and bucket policy tests record their clock through these two:
@@ -218,7 +218,7 @@ class TestSchedulerPolicies:
             # real sleep.
             if job.index == 0:
                 await release_slow.wait()
-            return make_result(job.url.raw, job.domain)
+            return engine_result(job.url.raw, "rendered")
 
         async def _on_result(idx: int, _r) -> None:
             on_result_order.append(idx)
@@ -240,7 +240,7 @@ class TestSchedulerPolicies:
         sched = make_scheduler(global_limit=10, per_domain_limit=10)
 
         async def worker(job: CrawlJob) -> EngineCrawlResult:
-            return make_result(job.url.raw, job.domain)
+            return engine_result(job.url.raw, "rendered")
 
         jobs = [make_job(i, f"http://h{i}.example.com/") for i in range(4)]
         ret = await sched.run(jobs, worker, failed_result=engine_envelope)

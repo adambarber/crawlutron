@@ -344,30 +344,30 @@ def test_the_admission_helper_declares_the_production_known_set() -> None:
     )
 
 
-def test_the_canned_result_builder_declares_the_record_s_url_union() -> None:
+def test_the_result_builder_declares_the_record_s_url_union() -> None:
     """The builder declares the record's own union (text or value) -- the
     arg-type mypy reported where a NormalizedUrl reached a str parameter."""
     import inspect
 
-    from tests._result_builders import _canned_result
+    from tests._result_builders import engine_result
 
-    annotation = str(inspect.signature(_canned_result).parameters["url"].annotation)
+    annotation = str(inspect.signature(engine_result).parameters["url"].annotation)
     assert "NormalizedUrl" in annotation and "str" in annotation, (
-        f"_canned_result(url) drifted from the record's own union: {annotation}"
+        f"engine_result(url) drifted from the record's own union: {annotation}"
     )
 
 
-def test_make_engine_result_carries_the_caller_s_link_records_once_each() -> None:
-    """Every ``make_engine_result`` caller hands it real ``DiscoveredLink``
-    records; the result carries those records once each, never re-derived
-    from strings (a re-wrap crashes and the engine swallows it)."""
-    from tests._result_builders import GRAPH_ROOT, _link, make_engine_result
+def test_engine_result_carries_the_caller_s_link_records_once_each() -> None:
+    """Every ``engine_result`` caller handing link records gets them carried
+    once each; the result carries those records, never re-derived from
+    strings (a re-wrap crashes and the engine swallows it)."""
+    from tests._result_builders import GRAPH_ROOT, _link, engine_result
 
     links = [
         _link("http://example.test/b", GRAPH_ROOT),
         _link("http://example.test/c", GRAPH_ROOT),
     ]
-    result = make_engine_result(GRAPH_ROOT, links)
+    result = engine_result(GRAPH_ROOT, "rendered", raw_links=links)
 
     assert result.discovered_links == links, (
         "the builder must carry the caller's own link records, not re-derive them"

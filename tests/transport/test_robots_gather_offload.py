@@ -13,7 +13,7 @@ from crawlutron.models.discovered_link import DiscoveredLink
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 from tests._recursive_harnesses import drive_recursive_crawl
 from tests._recursive_harnesses import make_crawl_task as _make_job
-from tests._result_builders import make_engine_result
+from tests._result_builders import engine_result
 
 
 @asynccontextmanager
@@ -71,7 +71,7 @@ async def test_recursive_batch_robots_checks_run_concurrently():
     jobs = [_make_job(i, f"host{i}.example") for i in range(5)]
 
     async def worker(job):
-        return make_engine_result(job.normalized_url)
+        return engine_result(job.normalized_url, "rendered")
 
     await _drive(jobs, worker, allows, crawl_delay)
     assert state["calls"] == 5
@@ -101,8 +101,8 @@ async def test_recursive_link_robots_checks_run_concurrently():
 
     async def worker(job):
         if job.normalized_url == canonical("http://seed.example/page0"):
-            return make_engine_result(job.normalized_url, links=links)
-        return make_engine_result(job.normalized_url)
+            return engine_result(job.normalized_url, "rendered", raw_links=links)
+        return engine_result(job.normalized_url, "rendered")
 
     await _drive(jobs, worker, allows, crawl_delay, max_depth=1)
     assert state["calls"] >= 6  # seed batch screen + 5 discovered links
@@ -130,7 +130,7 @@ async def test_one_raising_robots_check_does_not_kill_the_batch():
     jobs = [_make_job(0, "poison.example"), _make_job(0, "ok0.example"), _make_job(1, "ok1.example")]
 
     async def worker(job):
-        return make_engine_result(job.normalized_url)
+        return engine_result(job.normalized_url, "rendered")
 
     run = await drive_recursive_crawl(jobs, worker, allows=allows)
     written = [run.spill.writes[i].normalized_url for i in run.spill.writes]
@@ -216,7 +216,7 @@ async def test_recursive_screen_no_robots_calls_when_disrespected():
     jobs = [_make_job(i, f"nr{i}.example") for i in range(3)]
 
     async def worker(job):
-        return make_engine_result(job.normalized_url)
+        return engine_result(job.normalized_url, "rendered")
 
     spill = (
         await drive_recursive_crawl(jobs, worker, allows=allows, crawl_delay=None, respect_robots=False)

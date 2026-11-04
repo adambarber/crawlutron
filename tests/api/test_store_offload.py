@@ -8,7 +8,7 @@ from crawlutron.api import job_runner
 from crawlutron.config.settings import CrawlerSettings
 from tests._job_harnesses import ScriptedExecute
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
-from tests._result_builders import _canned_result
+from tests._result_builders import engine_result
 from tests.api._offload_doubles import (
     _off_loop,
 )
@@ -30,7 +30,9 @@ class TestJobEndpointsStayOffTheLoop:
         # asserting on timing, not on the off-the-loop behaviour it is named for.
         hang = asyncio.Event()
         job_runner.reset_job_runner()
-        job_runner.install_execute_crawl(ScriptedExecute(results=[_canned_result(_ROOT)], hang=hang))
+        job_runner.install_execute_crawl(
+            ScriptedExecute(results=[engine_result(_ROOT, "rendered")], hang=hang)
+        )
         try:
             created = await jobs_client.post(
                 "/v1/jobs",

@@ -9,7 +9,7 @@ from tests._admission_runs import link as _link
 from tests._admission_runs import run as _run
 from tests._admission_runs import task as _task
 from tests._policy_factories import canonical
-from tests._result_builders import make_engine_result
+from tests._result_builders import engine_result
 
 
 async def test_expansions_thread_the_occupied_set(monkeypatch):
@@ -26,7 +26,7 @@ async def test_expansions_thread_the_occupied_set(monkeypatch):
     monkeypatch.setattr(admission_links, "frontier_identity", counting)
 
     async def worker(job):
-        return make_engine_result(job.normalized_url, [_link("http://a/dup")])
+        return engine_result(job.normalized_url, "rendered", raw_links=[_link("http://a/dup")])
 
     spill, _scheduler, _gate = await _run([_task("http://a/A"), _task("http://a/B", index=1)], worker)
     assert walked == [], f"the frontier was rewalked for admission: {walked}"

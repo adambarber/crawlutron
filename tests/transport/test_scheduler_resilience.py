@@ -10,7 +10,7 @@ from crawlutron.models.taxonomy import Classification
 from crawlutron.transport.results import TerminalResult
 from crawlutron.transport.scheduler import DomainScheduler
 from tests._policy_factories import canonical
-from tests._result_builders import make_job, make_result
+from tests._result_builders import engine_result, make_job
 from tests._scheduler_doubles import FailingSink, engine_envelope, make_scheduler, run_through
 from tests._timing_harnesses import recorder
 
@@ -38,7 +38,7 @@ class TestSchedulerResilience:
         async def failing_worker(job: CrawlJob) -> EngineCrawlResult:
             if job.index == 1:
                 raise RuntimeError("transient failure")
-            return make_result(job.url.raw, job.domain)
+            return engine_result(job.url.raw, "rendered")
 
         results = await scheduler.run(jobs, failing_worker, failed_result=engine_envelope)
         assert results is not None
@@ -87,7 +87,7 @@ def _fast_domain_worker(job):
     """Serve example.org instantly; every other domain sleeps a real yield."""
     if job.domain == "example.org":
         _FAST_STARTED.set()
-    return make_result(job.url.raw, job.domain)
+    return engine_result(job.url.raw, "rendered")
 
 
 _FAST_STARTED = asyncio.Event()
@@ -161,7 +161,7 @@ class TestJitterSleepDoesNotHoldTheDomainGate:
         async def worker(job):
             fetched_during.append(naps["done"])
             await yield_to_loop(0)
-            return make_result(job.url.raw, job.domain)
+            return engine_result(job.url.raw, "rendered")
 
         results = await _run_two_jobs(scheduler, worker)
 
@@ -207,12 +207,12 @@ class TestJitterSleepDoesNotHoldTheDomainGate:
                 # The 429 lands while the second job is inside its jitter nap.
                 scheduler.set_domain_cooldown("example.com", 0.5)
                 cooldown_committed.set()
-                return make_result(job.url.raw, job.domain)
+                return engine_result(job.url.raw, "rendered")
             assert sleeps.requests_over(0.45), (
                 "the worker ran without awaiting the cooldown that fired during its "
                 f"nap; the recorded sleep requests were {sleeps.delays}"
             )
-            return make_result(job.url.raw, job.domain)
+            return engine_result(job.url.raw, "rendered")
 
         results = await _run_two_jobs(scheduler, worker)
 
@@ -247,7 +247,7 @@ class TestJitterSleepDoesNotHoldTheDomainGate:
                 scheduler.record_failure("example.com")  # trips at threshold 1
                 trip_committed.set()
             await real_sleep(0)
-            return make_result(job.url.raw, job.domain)
+            return engine_result(job.url.raw, "rendered")
 
         results = await _run_two_jobs(scheduler, worker)
 

@@ -21,13 +21,13 @@ from tests._job_harnesses import (
     single_shot_orphan,
 )
 from tests._policy_factories import canonical
-from tests._result_builders import GRAPH_CHILD, GRAPH_ROOT, _canned_result, _flaky, _link, engine_result
+from tests._result_builders import GRAPH_CHILD, GRAPH_ROOT, _link, engine_result
 
 
 def _started_hung_job(job_store, root=GRAPH_ROOT):
     """Create and start a job whose runner blocks inside the scripted engine hang."""
     hang = asyncio.Event()
-    job_runner.install_execute_crawl(ScriptedExecute(results=[_canned_result(root)], hang=hang))
+    job_runner.install_execute_crawl(ScriptedExecute(results=[engine_result(root, "rendered")], hang=hang))
     settings = CrawlerSettings.from_mapping({})
     job = job_store.create(root, CrawlPolicy())
     job_runner.start_job(job.job_id, job_store, settings, asyncio.Event())
@@ -50,7 +50,15 @@ class TestTransientFailureRequeue:
 
     async def test_transient_failure_is_requeued_then_succeeds(self, client, job_store):
         root = GRAPH_ROOT
-        engine = ScriptedExecute(_flaky(root, "network_error", "dns_error", lands_on=_canned_result(root)))
+        engine = ScriptedExecute(
+            {
+                root: [
+                    engine_result(root, "network_error", status="failed"),
+                    engine_result(root, "dns_error", status="failed"),
+                    engine_result(root, "rendered"),
+                ]
+            }
+        )
         job = await run_api_job(client, job_store, root, engine)
         # The two early failures must not have finalized the page; the crawl retried and the single committed
         # outcome is the eventual success.
@@ -62,7 +70,7 @@ class TestTransientFailureRequeue:
 
     async def test_transient_retries_are_bounded_then_terminal(self, client, job_store):
         root = GRAPH_ROOT
-        engine = ScriptedExecute(_flaky(root, "network_error"))
+        engine = ScriptedExecute({root: [engine_result(root, "network_error", status="failed")]})
         job = await run_api_job(client, job_store, root, engine)
         # A permanently-flaky page is attempted exactly the cap (not forever, not once), then recorded as a
         # terminal failure so the whole-site job can end.
@@ -78,7 +86,12 @@ class TestTransientFailureRequeue:
         admitted = GRAPH_CHILD
         refused = "http://example.test/c"
         engine = ScriptedExecute(
-            _flaky(root, "network_error", lands_on=_canned_result(root, links=[admitted, refused]))
+            {
+                root: [
+                    engine_result(root, "network_error", status="failed"),
+                    engine_result(root, "rendered", links=[admitted, refused]),
+                ]
+            }
         )
 
         job = await run_api_job(
@@ -94,7 +107,7 @@ class TestTransientFailureRequeue:
 
     async def test_permanent_failure_is_terminal_without_requeue(self, client, job_store):
         root = GRAPH_ROOT
-        engine = ScriptedExecute({root: [_canned_result(root, status="failed", classification="not_found")]})
+        engine = ScriptedExecute({root: [engine_result(root, "not_found", status="failed")]})
         job = await run_api_job(client, job_store, root, engine)
         # "Page is gone" is an answer, not a transient blip: recorded once, not retried.
         assert job.status == JobStatus.COMPLETED
@@ -112,7 +125,7 @@ class TestTransientFailureRequeue:
         divergent = _link("/rel", GRAPH_ROOT, normalized="https://ok.test/abs")
         install = ScriptedExecute(
             results=[
-                _canned_result(GRAPH_ROOT, raw_links=[divergent]),
+                engine_result(GRAPH_ROOT, "rendered", raw_links=[divergent]),
             ]
         )
         crawled: list[list[str]] = []
@@ -141,7 +154,7 @@ class TestTransientFailureRequeue:
         job_id = await _create_api_job(
             client,
             GRAPH_ROOT,
-            ScriptedExecute(results=[_canned_result(GRAPH_ROOT, raw_links=[empty], links=[])]),
+            ScriptedExecute(results=[engine_result(GRAPH_ROOT, "rendered", raw_links=[empty], links=[])]),
         )
         # The string link rides in a second result so a regression that queues raw values is observable before
         # completion too.
@@ -245,7 +258,9 @@ class TestRunnerLifecycle:
         from crawlutron.api import job_lifecycle
 
         hang = asyncio.Event()
-        job_runner.install_execute_crawl(ScriptedExecute(results=[_canned_result(GRAPH_ROOT)], hang=hang))
+        job_runner.install_execute_crawl(
+            ScriptedExecute(results=[engine_result(GRAPH_ROOT, "rendered")], hang=hang)
+        )
         settings = CrawlerSettings.from_mapping({"CRAWLUTRON_GLOBAL_CONCURRENCY": "2"})
         job_ids = [job_store.create(GRAPH_ROOT, CrawlPolicy()).job_id for _ in range(10)]
 
@@ -264,7 +279,9 @@ class TestRunnerLifecycle:
         from crawlutron.config.settings import CrawlerSettings as _CS
 
         hang = _asyncio.Event()
-        job_runner.install_execute_crawl(ScriptedExecute(results=[_canned_result(GRAPH_ROOT)], hang=hang))
+        job_runner.install_execute_crawl(
+            ScriptedExecute(results=[engine_result(GRAPH_ROOT, "rendered")], hang=hang)
+        )
         # Orphan RUNNING row rewinds to PENDING...
         job = job_store.create(GRAPH_ROOT, CrawlPolicy())
         job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)

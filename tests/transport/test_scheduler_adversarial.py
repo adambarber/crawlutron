@@ -14,7 +14,7 @@ from typing import TypedDict
 import pytest
 
 from crawlutron.transport.scheduler import COOLDOWN_PURGE_INTERVAL, DomainScheduler
-from tests._result_builders import make_job, make_result
+from tests._result_builders import engine_result, make_job
 from tests._scheduler_doubles import engine_envelope
 
 
@@ -67,7 +67,7 @@ class TestPurgeNeverDropsAnInUseGate:
                     scheduler.set_domain_cooldown("other.test", 1.0)
             await asyncio.sleep(0.01)
             in_flight -= 1
-            return make_result(job.url.raw, job.domain)
+            return engine_result(job.url.raw, "rendered")
 
         results = await scheduler.run(_jobs(4), worker, failed_result=engine_envelope)
         assert results is not None and len(results) == 4
@@ -87,7 +87,7 @@ class TestPurgeNeverDropsAnInUseGate:
                     scheduler.set_domain_cooldown("other.test", 1.0)
                 seen.append({"floor_after_storm": scheduler.current_delay("example.com") >= 0.05})
             await asyncio.sleep(0)
-            return make_result(job.url.raw, job.domain)
+            return engine_result(job.url.raw, "rendered")
 
         await scheduler.run(_jobs(2), worker, failed_result=engine_envelope)
         assert seen and seen[0]["floor_after_storm"] is True, "the committed floor was purged mid-worker"
@@ -131,7 +131,7 @@ class TestCooldownWakeReReserves:
             if job.index > 0:
                 await started.wait()
             await real_sleep(0)
-            return make_result(job.url.raw, job.domain)
+            return engine_result(job.url.raw, "rendered")
 
         results = await scheduler.run(_jobs(3), worker, failed_result=engine_envelope)
         assert results is not None and len(results) == 3

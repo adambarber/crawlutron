@@ -7,7 +7,7 @@ from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.crawl_task import CrawlTask
 from crawlutron.transport.scheduler import DomainScheduler, jittered_delay
 from tests._policy_factories import canonical
-from tests._result_builders import make_job, make_result
+from tests._result_builders import engine_result, make_job
 from tests._scheduler_doubles import engine_envelope, make_scheduler, ok_worker, trip_circuit
 from tests._timing_harnesses import recorder
 
@@ -70,7 +70,7 @@ class TestScheduler:
         now[0] += 0.15  # half the window elapsed before the batch fires
 
         async def worker(ran_job: CrawlJob) -> EngineCrawlResult:
-            return make_result(ran_job.url.raw, ran_job.domain)
+            return engine_result(ran_job.url.raw, "rendered")
 
         results = await scheduler.run([job], worker, failed_result=engine_envelope)
         assert results is not None and results[0].status == "success"
@@ -104,7 +104,7 @@ class TestScheduler:
                 "the worker ran before the domain cooldown was awaited; the "
                 f"recorded sleep requests were {sleeps.delays}"
             )
-            return make_result(ran_job.url.raw, ran_job.domain)
+            return engine_result(ran_job.url.raw, "rendered")
 
         # The delivery channel decides the return: with no sink, ``run`` hands back the index-keyed mapping
         # (the docstring's "otherwise" branch).

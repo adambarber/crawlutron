@@ -12,7 +12,7 @@ from crawlutron.config.settings import CrawlerSettings
 from tests._api_harnesses import spy_on_history_reads
 from tests._job_drivers import _seed_job
 from tests._job_harnesses import ScriptedExecute
-from tests._result_builders import _canned_result
+from tests._result_builders import engine_result
 
 _BATCH = 8
 
@@ -23,7 +23,7 @@ def _chain_execute(pages: int):
     for i in range(pages):
         link = f"http://example.test/p{i + 1}" if i + 1 < pages else None
         scripts[f"http://example.test/p{i}"] = [
-            _canned_result(f"http://example.test/p{i}", links=[link] if link else [])
+            engine_result(f"http://example.test/p{i}", "rendered", links=[link] if link else [])
         ]
     return ScriptedExecute(scripts=scripts)
 

@@ -154,9 +154,9 @@ class TestBatchIsHttpHeavy:
 
 
 async def _ok_worker(job):
-    from tests._result_builders import make_engine_result
+    from tests._result_builders import engine_result
 
-    return make_engine_result(job.normalized_url)
+    return engine_result(job.normalized_url, "rendered")
 
 
 async def _robots_allow_all(url):

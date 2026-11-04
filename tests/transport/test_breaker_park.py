@@ -12,7 +12,7 @@ from crawlutron.models.crawl_task import CrawlTask
 from crawlutron.transport.scheduler import DomainScheduler
 from tests._policy_factories import canonical
 from tests._recursive_harnesses import drive_recursive_crawl, make_crawl_task
-from tests._result_builders import make_engine_result
+from tests._result_builders import engine_result
 from tests._scheduler_doubles import engine_envelope, make_scheduler, ok_worker, trip_circuit
 
 # Bound at module import, before any runtime patch -- its inner sleep(0) must
@@ -132,7 +132,7 @@ async def test_recursive_batch_over_an_open_breaker_runs_not_requeues(monkeypatc
 
     async def worker(job):
         ran.append(job.index)
-        return make_engine_result(job.normalized_url)
+        return engine_result(job.normalized_url, "rendered")
 
     result = await drive_recursive_crawl(
         [make_crawl_task(0, "a"), make_crawl_task(1, "a")],

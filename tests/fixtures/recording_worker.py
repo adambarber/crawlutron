@@ -10,12 +10,12 @@ def recording_worker():
     Several dispatch and robots tests assert *which* jobs reached the worker;
     a copy that drops the ``seen.append`` turns that into a vacuous truth."""
     from crawlutron.models.normalized_url import NormalizedUrl
-    from tests._result_builders import make_engine_result
+    from tests._result_builders import engine_result
 
     seen: list[NormalizedUrl] = []
 
     async def worker(job):
         seen.append(job.normalized_url)
-        return make_engine_result(job.normalized_url)
+        return engine_result(job.normalized_url, "rendered")
 
     return seen, worker
