@@ -424,3 +424,60 @@ def test_cross_list_duplicate_keeps_shallowest_depth():
 
     assert loaded.frontier == []
     assert loaded.in_flight == [FrontierEntry(canonical("https://example.test/child"), 1)]
+
+
+def test_same_length_results_replacement_is_persisted(job_store):
+    """Same-length replacement of results must be persisted, not skipped.
+
+    The accumulator short-circuits on ``persisted == len(results)``; with a
+    same-length swap that length is unchanged, so the old content survives
+    unless the persist is keyed on content identity.
+    """
+    job = job_store.create("http://example.com/", CrawlPolicy())
+    job.results = [{"url": "http://example.com/a", "status": "success"}]
+    job_store.save(job)
+
+    job.results = [{"url": "http://example.com/b", "status": "success"}]
+    job_store.save(job)
+
+    loaded = job_store.load(job.job_id)
+    assert loaded is not None
+    assert len(loaded.results) == 1
+    assert loaded.results[0]["url"] == "http://example.com/b"
+
+
+def test_same_length_visited_replacement_is_persisted(job_store):
+    """Same-length replacement of the visited set must be persisted."""
+    job = job_store.create("http://example.com/", CrawlPolicy())
+    job.visited = OrderedUrlSet([canonical("http://example.com/a")])
+    job_store.save(job)
+
+    job_id = job.job_id
+    job = job_store.load(job_id)
+    job.visited = OrderedUrlSet([canonical("http://example.com/b")])
+    job_store.save(job)
+
+    loaded = job_store.load(job_id)
+    assert loaded is not None
+    assert loaded.visited == OrderedUrlSet([canonical("http://example.com/b")])
+
+
+def test_same_length_frontier_replacement_is_persisted(job_store):
+    """Same-length replacement of the frontier must be persisted.
+
+    A reload leaves ``frontier_mark == len(frontier)``, so a same-length swap
+    without a removal log used to hit the ``mark == len`` short circuit and
+    skip the persist.
+    """
+    job = job_store.create("http://example.com/", CrawlPolicy())
+    seed_frontier(job, frontier(["http://example.com/page2"]))
+    job_store.save(job)
+
+    job_id = job.job_id
+    job = job_store.load(job_id)
+    job.frontier = [FrontierEntry(url=canonical("http://example.com/page3"), depth=0)]
+    job_store.save(job)
+
+    loaded = job_store.load(job_id)
+    assert loaded is not None
+    assert loaded.frontier == [FrontierEntry(url=canonical("http://example.com/page3"), depth=0)]
