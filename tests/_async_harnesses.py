@@ -66,8 +66,12 @@ async def _drain_running_crawls(*, guard: float = 10.0) -> None:
 
     Bounded, not open-ended: a genuinely stuck crawl should fail at its own
     assertion, not hold later tests open."""
-    from crawlutron.main import job_store
+    from crawlutron.config.settings import CrawlerSettings
+    from crawlutron.main import create_app
     from crawlutron.storage.job_store import TERMINAL_STATUSES, JobStatus
+
+    app = create_app(CrawlerSettings.from_mapping())
+    job_store = app.state.job_store
 
     terminal_codes = {status.value for status in TERMINAL_STATUSES}
 

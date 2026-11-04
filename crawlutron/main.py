@@ -10,12 +10,8 @@ from typing import TYPE_CHECKING
 
 from crawlutron.admission.policy import PolicyTier
 from crawlutron.config.env import get_env_float, get_env_int
-
-# Standalone JSON-line logging, wired once so every entry point logs the same;
-# integrations override ``configure_service_logging`` in their own layer.
 from crawlutron.models.address_class import is_loopback_bind
 from crawlutron.models.host_policy import HostPolicy
-from crawlutron.runtime.logging_config import configure_service_logging
 from crawlutron.runtime.pressure_sizing import default_executor_workers
 from crawlutron.vocabulary.identity import SERVICE_ID, SERVICE_VERSION
 
@@ -50,8 +46,7 @@ from .discovery.agent_hints import create_agent_hints_router
 from .discovery.capabilities import create_capabilities_router
 from .discovery.well_known import create_well_known_router
 from .health.readiness import create_health_router
-
-settings = CrawlerSettings.from_mapping()
+from .runtime.logging_config import configure_service_logging
 
 _TeardownStep = tuple[str, Callable[[], Awaitable[None]]]
 
@@ -72,53 +67,68 @@ async def _run_shutdown_steps(steps: Sequence[_TeardownStep]) -> None:
         raise RuntimeError("shutdown steps failed: " + " | ".join(failures))
 
 
-# ONE database: the store chokepoint opens a connection per schema and the
-# runner filters by id; WAL serializes writers, so counters never contend.
-DATABASE_PATH = settings.cache_dir + "/crawler.db"
+def create_app(settings: CrawlerSettings | None = None) -> FastAPI:
+    """Build the wired service app: stores, logging, lifespan, routers.
 
-# Job store for resumable crawls
-job_store = JobStore(
-    DATABASE_PATH,
-    policy=HostPolicy.from_settings(settings),
-    tier=PolicyTier.from_settings(settings),
-)
+    The one factory for every entry point; importing this module stays
+    side-effect free so CLI/MCP paths construct nothing they do not use.
+    """
+    if FastAPI is None:
+        raise RuntimeError("create_app requires FastAPI, which is not importable here")
+    settings = settings or CrawlerSettings.from_mapping()
+    database_path = settings.cache_dir + "/crawler.db"
+    job_store = JobStore(
+        database_path,
+        policy=HostPolicy.from_settings(settings),
+        tier=PolicyTier.from_settings(settings),
+    )
+    result_store = CrawlResultStore(
+        database_path,
+        ttl_seconds=get_env_float("CRAWLUTRON_RESULT_TTL_SECONDS", 3600.0),
+        max_entries=get_env_int("CRAWLUTRON_RESULT_MAX_ENTRIES", 1000),
+    )
+    watch_store = WatchStore(database_path)
+    caller_key_store = CallerKeyStore(database_path)
+    _configure_logging(settings)
 
-# Completed single-request crawl results (fixes the dead status_url promise and
-# makes results recoverable if the HTTP connection drops mid-response).
-result_store = CrawlResultStore(
-    DATABASE_PATH,
-    ttl_seconds=get_env_float("CRAWLUTRON_RESULT_TTL_SECONDS", 3600.0),
-    max_entries=get_env_int("CRAWLUTRON_RESULT_MAX_ENTRIES", 1000),
-)
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        await _startup_services(app, settings, database_path)
+        yield
+        await _shutdown_services(app)
 
-# Registered watches and revalidation history: no policy or tier -- a watch
-# arrives admitted, and the sweep re-admits against the policy in force when it checks.
-watch_store = WatchStore(DATABASE_PATH)
+    return _build_app(
+        settings,
+        job_store=job_store,
+        result_store=result_store,
+        watch_store=watch_store,
+        caller_key_store=caller_key_store,
+        lifespan=lifespan,
+    )
 
-# Inbound caller keys: issuance, verification, and revocation for API-key identity.
-caller_key_store = CallerKeyStore(DATABASE_PATH)
 
-# Ensure the parent directory of the log file exists before the logger tries
-# to open it; standalone checkouts default to ./logs which may not exist.
-if settings.log_file_path:
-    os.makedirs(os.path.dirname(settings.log_file_path) or ".", exist_ok=True)
-logger = configure_service_logging(
-    service_name=SERVICE_ID,
-    log_level=settings.log_level,
-    log_file_path=settings.log_file_path,
-    log_file_max_bytes=settings.log_file_max_bytes,
-    log_file_backup_count=settings.log_file_backup_count,
-)
-# Third-party extraction libraries log expected per-element WARNINGs (parser
-# noise that cannot be acted on). Keep ERROR+ visible, drop the chatter.
-logging.getLogger("trafilatura").setLevel(logging.ERROR)
+def _configure_logging(settings: CrawlerSettings) -> logging.Logger:
+    """Wire the standalone JSON logging; opt-in via create_app, never at import."""
+    if settings.log_file_path:
+        os.makedirs(os.path.dirname(settings.log_file_path) or ".", exist_ok=True)
+    logger = configure_service_logging(
+        service_name=SERVICE_ID,
+        log_level=settings.log_level,
+        log_file_path=settings.log_file_path,
+        log_file_max_bytes=settings.log_file_max_bytes,
+        log_file_backup_count=settings.log_file_backup_count,
+    )
+    # Third-party extraction libraries log expected per-element WARNINGs (parser
+    # noise that cannot be acted on). Keep ERROR+ visible, drop the chatter.
+    logging.getLogger("trafilatura").setLevel(logging.ERROR)
+    return logger
 
 
 def warn_if_bound_off_loopback(host: str) -> None:
     """Warn at startup when the API is reachable from off the machine."""
     if is_loopback_bind(host):
         return
-    logger.warning(
+    logging.getLogger(SERVICE_ID).warning(
         "Binding to %s exposes the crawl API on the network; callers without a "
         "key crawl anonymously (shared bucket, default policy limits), and "
         "issuance/revocation require CRAWLUTRON_KEY_ADMIN_TOKEN. Anonymous "
@@ -256,20 +266,20 @@ if FastAPI is not None:
     # ``FastAPI | None`` by construction, not FastAPI that happens to be None.
     app: FastAPI | None
 
-    @asynccontextmanager
-    async def _lifespan(_app: FastAPI):
-        await _startup_services(_app, settings)
-        yield
-        await _shutdown_services(_app)
+    _module_app: FastAPI | None = None
 
-    app = _build_app(
-        settings,
-        job_store=job_store,
-        result_store=result_store,
-        watch_store=watch_store,
-        caller_key_store=caller_key_store,
-        lifespan=_lifespan,
-    )
+    def __getattr__(name: str):
+        """Lazily build the ASGI app on first attribute access.
+
+        Importing this module constructs nothing; ``app`` discovery (uvicorn,
+        tests) triggers one create_app() cached for the process lifetime.
+        """
+        global _module_app
+        if name == "app":
+            if _module_app is None:
+                _module_app = create_app()
+            return _module_app
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 else:
     # ``FastAPI`` is None here (the optional import failed): no app to build,
@@ -294,7 +304,7 @@ def install_default_executor(loop: asyncio.AbstractEventLoop) -> None:
         logging.getLogger(__name__).warning("default_executor_install_failed", exc_info=True)
 
 
-async def _startup_services(_app: FastAPI, settings: CrawlerSettings) -> None:
+async def _startup_services(_app: FastAPI, settings: CrawlerSettings, database_path: str) -> None:
     """Start the readiness sampler, pools, cookies, metrics, jobs and watches.
 
     Startup order is load-bearing: the pool initializes before cookies load,
@@ -320,12 +330,12 @@ async def _startup_services(_app: FastAPI, settings: CrawlerSettings) -> None:
     # One browser pool only: initialized here, reached via get_browser_pool(),
     # with no second pool global.
     await initialize_browser_pool(settings)
-    _load_cookie_jar(settings, _app)
-    _bind_metrics()
+    _load_cookie_jar(settings, _app, database_path)
+    _bind_metrics(database_path)
     await _recover_jobs_and_start_sweep(_app, settings)
 
 
-def _bind_metrics() -> None:
+def _bind_metrics(database_path: str) -> None:
     """Bind the shared-store counters; gauges stay process-local.
 
     /metrics reports the service, not this worker: counters go to the shared
@@ -335,7 +345,7 @@ def _bind_metrics() -> None:
 
     from .runtime.metrics import get_metrics
 
-    get_metrics().bind_counters(CoordinationCounters(DATABASE_PATH))
+    get_metrics().bind_counters(CoordinationCounters(database_path))
 
 
 async def _recover_jobs_and_start_sweep(_app: FastAPI, settings: CrawlerSettings) -> None:
@@ -350,21 +360,21 @@ async def _recover_jobs_and_start_sweep(_app: FastAPI, settings: CrawlerSettings
 
     shutdown_event = asyncio.Event()
     _app.state.shutdown_event = shutdown_event
-    await recover_and_start_pending_jobs(job_store, settings, shutdown_event, start_job)
+    await recover_and_start_pending_jobs(_app.state.job_store, settings, shutdown_event, start_job)
     _app.state.watch_sweep_task = asyncio.create_task(
         sweep_watches_forever(
-            watch_store,
+            _app.state.watch_store,
             host_policy=HostPolicy.from_settings(settings),
             settings=settings,
             shutdown_event=shutdown_event,
-            key_store=caller_key_store,
+            key_store=_app.state.caller_key_store,
             concurrency_tracker=_app.state.concurrency_tracker,
-            job_store=job_store,
+            job_store=_app.state.job_store,
         )
     )
 
 
-def _load_cookie_jar(settings: CrawlerSettings, _app: FastAPI) -> None:
+def _load_cookie_jar(settings: CrawlerSettings, _app: FastAPI, database_path: str) -> None:
     """Load the shared cookie jar when cookie persistence is on.
 
     Cookies load before job recovery (a clear-then-populate load drops them);
@@ -377,7 +387,7 @@ def _load_cookie_jar(settings: CrawlerSettings, _app: FastAPI) -> None:
     from crawlutron.transport import cookie_jar as cookie_jar_module
     from crawlutron.transport.cookie_jar import CookieJar
 
-    jar = CookieJar(SharedCookieStore(DATABASE_PATH))
+    jar = CookieJar(SharedCookieStore(database_path))
     jar.import_file_into(settings.cookie_jar_path)
     cookie_jar_module.set_global_cookie_jar(jar)
     # Published like ``shutdown_event``: what the process is using
