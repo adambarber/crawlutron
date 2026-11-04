@@ -25,7 +25,7 @@ from crawlutron.transport.request_profile import (
 from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from crawlutron.vocabulary.taxonomy import status_for_classification
 from tests._extraction_helpers import extract_discovered_links
-from tests._fetcher_factories import ok_fetcher, routed_fetcher
+from tests._fetch_doubles import FetcherDouble, make_fetch
 from tests._http_fetch_doubles import FEED_ADVERTISING_PAGE
 from tests._http_fetch_doubles import diagnostics_for_failed_probes as _diagnostics_for_failed_probes
 from tests._http_test_helpers import (
@@ -41,6 +41,10 @@ from tests._worker_doubles import (
 )
 
 
+def _ok_fetcher(url, *_):
+    return make_fetch(url=url)
+
+
 class TestCrawlRequest:
     async def test_batch_size_exceeded(self) -> None:
         settings = CrawlerSettings.from_mapping()
@@ -51,7 +55,7 @@ class TestCrawlRequest:
             "policy": {"strategies": [HTTP_DECLARED_CRAWLER]},
         }
         with pytest.raises(ValueError, match=r"^batch_size_exceeded$"):
-            await crawl_request(payload, settings=settings, http_fetcher=ok_fetcher, browser_worker=None)
+            await crawl_request(payload, settings=settings, http_fetcher=_ok_fetcher, browser_worker=None)
 
     def test_checked_payload_urls_is_the_shared_batch_gate(self) -> None:
         """One chokepoint returns in-range urls and rejects oversized batches."""
@@ -105,7 +109,7 @@ class TestCrawlRequest:
         the engine does not re-run _payload_urls over the payload."""
         fetched: list[str] = []
 
-        spy_fetcher = routed_fetcher({}, calls=fetched, default={})
+        spy_fetcher = FetcherDouble(lambda url, *_: {}, fetched)
 
         base = make_base_policy()
         policy = read_policy(
@@ -128,11 +132,11 @@ class TestCrawlRequest:
     async def test_invalid_url_raises(self) -> None:
         payload = {"url": "not a url", "policy": {"strategies": [HTTP_DECLARED_CRAWLER]}}
         with pytest.raises(ValueError, match=r"^invalid_url"):
-            await crawl_request(payload, http_fetcher=ok_fetcher, browser_worker=None)
+            await crawl_request(payload, http_fetcher=_ok_fetcher, browser_worker=None)
 
     async def test_success_with_injected_fetcher(self) -> None:
         payload = {"url": "http://example.com/", "policy": {"strategies": [HTTP_DECLARED_CRAWLER]}}
-        result = await crawl_request(payload, http_fetcher=ok_fetcher, browser_worker=None)
+        result = await crawl_request(payload, http_fetcher=_ok_fetcher, browser_worker=None)
         assert result["submitted_count"] == 1
         assert result["results"][0].status == "success"
 
@@ -178,12 +182,15 @@ class TestFetchHelperUtilities:
         )
 
     async def test_discovery_robots_success_and_malformed_crawl_delay(self) -> None:
-        fetcher = routed_fetcher(
-            {
-                "/robots.txt": (200, b"User-agent: *\nCrawl-delay: notanumber\n", "text/plain"),
-                "sitemap": ConnectionError("no sitemap"),
-            },
-            default=FEED_ADVERTISING_PAGE,
+        _robots_ok = (200, b"User-agent: *\nCrawl-delay: notanumber\n", "text/plain")
+        fetcher = FetcherDouble(
+            lambda url, _sent_headers, *_: (
+                _robots_ok
+                if "/robots.txt" in url.raw
+                else ConnectionError("no sitemap")
+                if "sitemap" in url.raw
+                else FEED_ADVERTISING_PAGE
+            )
         )
 
         result, diagnostics = await _diagnostics_for_failed_probes(fetcher)

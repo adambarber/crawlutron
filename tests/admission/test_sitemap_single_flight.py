@@ -3,7 +3,7 @@
 import asyncio
 
 from crawlutron.transport.fetch_helpers import SITEMAP_CACHE, fetch_sitemap_urls
-from tests._fetcher_factories import concurrent_fetcher
+from tests._fetch_doubles import FetcherDouble
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
 
@@ -23,7 +23,24 @@ async def test_concurrent_cold_fetches_share_one_upstream_walk():
         fetch_started.set()
         return (200, body.encode(), "application/xml")
 
-    fetcher = concurrent_fetcher(slow_respond, yield_times=5)
+    # One upstream walk is the property: the fetcher counts entries and never lets the second caller start a
+    # second one, so the counter's high water is the number of walks that ran.
+    _walks = {"n": 0, "most": 0}
+
+    async def _shared_walk_answer(url, sent_headers, *_args):
+        _walks["n"] += 1
+        _walks["most"] = max(_walks["most"], _walks["n"])
+        try:
+            remaining = 5
+            while remaining:
+                await asyncio.sleep(0)
+                remaining -= 1
+            return slow_respond(url, sent_headers)
+        finally:
+            _walks["n"] -= 1
+
+    fetcher = FetcherDouble(_shared_walk_answer)
+    fetcher.peak = lambda: _walks["most"]
 
     first, second = await asyncio.gather(
         fetch_sitemap_urls(fetcher, url, 10, host_policy=UNRESTRICTED_HOST_POLICY),

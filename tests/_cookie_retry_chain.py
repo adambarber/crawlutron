@@ -10,9 +10,11 @@ from typing import TYPE_CHECKING, cast
 
 from tests._browser_doubles import _fake_browser
 from tests._chain_policies import chain_policy
-from tests._fetcher_factories import request_fetcher, run_chain
+from tests._fetch_doubles import FetcherDouble
+from tests._fetcher_factories import run_chain
 
 if TYPE_CHECKING:
+    from crawlutron.models.http_fetcher import HttpFetcher
     from crawlutron.models.json_value import JsonValue
 
 #: A browser worker's success shape, which is what the strategy chain needs back once the cffi hop has the
@@ -35,8 +37,13 @@ def cffi_retry_chain(
     )
 
     return run_chain(
-        fetcher=request_fetcher(lambda url, headers: DENIED),
-        cffi_fetcher=request_fetcher(on_cffi or (lambda url, headers: DENIED)),
+        fetcher=cast("HttpFetcher", FetcherDouble(lambda url, sent_headers, *_: DENIED)),
+        cffi_fetcher=cast(
+            "HttpFetcher",
+            FetcherDouble(
+                lambda url, sent_headers, *_: (on_cffi or (lambda url, headers: DENIED))(url, sent_headers)
+            ),
+        ),
         browser_worker=lambda job: RENDERED(job),
         policy=cast(
             "dict[str, JsonValue]",

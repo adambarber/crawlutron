@@ -9,8 +9,8 @@ from __future__ import annotations
 from crawlutron.transport.cache import HttpCache
 from crawlutron.transport.http import http_strategy_result
 from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
-from tests._fetch_doubles import scripted_fetcher
-from tests._fetcher_factories import make_fetch, run_http_strategy, strategy_request
+from tests._fetch_doubles import FetcherDouble, make_fetch
+from tests._fetcher_factories import run_http_strategy, strategy_request
 from tests._policy_factories import http_strategy_policy
 
 # The synthetic refusal both transports emit: 413, octet-stream, no body.
@@ -21,7 +21,7 @@ async def test_httpx_413_octet_stream_classifies_payload_too_large():
     result = await run_http_strategy(
         url="http://example.com/",
         policy=http_strategy_policy(),
-        http_fetcher=scripted_fetcher(**_413_OCTET),
+        http_fetcher=FetcherDouble(lambda url, *_: _413_OCTET),
     )
     assert result.classification == "payload_too_large"
     assert result.http_status == 413
@@ -50,7 +50,7 @@ async def test_413_octet_stream_matches_the_real_strategy_path():
             http_strategy_policy(),
             HTTP_DECLARED_CRAWLER,
         ),
-        http_fetcher=scripted_fetcher(**_413_OCTET),
+        http_fetcher=FetcherDouble(lambda url, *_: _413_OCTET),
         cache=HttpCache(),
     )
     assert result.classification == "payload_too_large"
@@ -60,6 +60,8 @@ async def test_status_override_table_holds_its_413_row():
     result = await run_http_strategy(
         url="http://example.com/",
         policy=http_strategy_policy(),
-        http_fetcher=scripted_fetcher(status=413, ctype="application/octet-stream", body=b""),
+        http_fetcher=FetcherDouble(
+            lambda url, *_: {"status": 413, "ctype": "application/octet-stream", "body": b""}
+        ),
     )
     assert result.classification == "payload_too_large"

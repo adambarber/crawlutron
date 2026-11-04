@@ -12,13 +12,7 @@ from crawlutron.transport.fetch_helpers import SITEMAP_CACHE, fetch_sitemap_urls
 from crawlutron.transport.request_profile import headers_for_strategy
 from crawlutron.vocabulary.limits import SITEMAP_CACHE_TTL_SECONDS, SITEMAP_FAILURE_TTL_SECONDS
 from tests._assertions import install_to_thread_spy
-from tests._fetcher_factories import (
-    concurrent_fetcher,
-    make_fetch,
-    request_fetcher,
-    routed_fetcher,
-    scripted_fetcher,
-)
+from tests._fetch_doubles import FetcherDouble, make_fetch
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, crawl_policy
 
 
@@ -57,7 +51,7 @@ def _replay_recording_fetcher(*, fresh_etag: str = "v2"):
             return _resp(304, etag="v1")
         return _resp(200, "<x></x>", etag=fresh_etag)
 
-    return request_fetcher(respond, record_headers=sent), sent
+    return FetcherDouble(lambda url, sent_headers, *_: respond(url, sent_headers), record_headers=sent), sent
 
 
 async def test_expired_entry_replays_its_validator_without_the_caller_asking():
@@ -103,14 +97,16 @@ async def test_etag_captured_and_stored_on_200():
       <url><loc>http://x.test/p1</loc><lastmod>2024-01-01</lastmod></url>
     </urlset>"""
 
-    fetcher = scripted_fetcher(
-        status=200,
-        headers={
-            "content-type": "application/xml",
-            "etag": "v2",
-            "last-modified": "Wed, 01 Jan 2024 00:00:00 GMT",
-        },
-        body=xml.encode("utf-8"),
+    fetcher = FetcherDouble(
+        lambda url, *_: {
+            "status": 200,
+            "headers": {
+                "content-type": "application/xml",
+                "etag": "v2",
+                "last-modified": "Wed, 01 Jan 2024 00:00:00 GMT",
+            },
+            "body": xml.encode("utf-8"),
+        }
     )
 
     out = await fetch_sitemap_urls(fetcher, url, 10, host_policy=UNRESTRICTED_HOST_POLICY)
@@ -175,7 +171,22 @@ class TestSitemapFanoutBound:
             child_fetches += 1
             return _resp_test_sitemap_fanout(_child_xml(int(u.raw.split("child")[1].split(".")[0])))
 
-        fetcher = concurrent_fetcher(respond)
+        # Overlap is observed as the largest set of children in flight at once; the list holds one sample per
+        # entry, so the cap is read off the samples rather than restated.
+        _active: list[str] = []
+        _samples: list[int] = []
+
+        async def _overlap_answer(url, sent_headers, *_args):
+            _active.append(url.raw)
+            _samples.append(len(_active))
+            try:
+                await asyncio.sleep(0)
+                return respond(url, sent_headers)
+            finally:
+                _active.remove(url.raw)
+
+        fetcher = FetcherDouble(_overlap_answer)
+        fetcher.peak = lambda: max(_samples)
 
         try:
             out = await fetch_sitemap_urls(
@@ -197,7 +208,9 @@ class TestSitemapFanoutBound:
 
 
 def _sitemap_fetcher(xml: str):
-    return scripted_fetcher(status=200, ctype="application/xml", body=xml.encode("utf-8"))
+    return FetcherDouble(
+        lambda url, *_: {"status": 200, "ctype": "application/xml", "body": xml.encode("utf-8")}
+    )
 
 
 async def test_extracts_lastmod_per_loc():
@@ -230,10 +243,15 @@ async def test_index_children_recurse_without_lastmod():
       <url><loc>http://x.test/p</loc><lastmod>2024-03-03</lastmod></url>
     </urlset>"""
 
-    fetcher = routed_fetcher(
-        {"/sitemap.xml": (200, index, "application/xml"), "sub.xml": (200, sub, "application/xml")},
-        missing="raise",
-    )
+    _routes = {"/sitemap.xml": (200, index, "application/xml"), "sub.xml": (200, sub, "application/xml")}
+
+    def _index_sub_answer(url, _sent_headers, *_):
+        for fragment, spec in _routes.items():
+            if fragment in url.raw:
+                return spec
+        raise AssertionError(f"unscripted fetch: {url} (routes: {sorted(_routes)}) ")
+
+    fetcher = FetcherDouble(_index_sub_answer)
 
     urls = await fetch_sitemap_urls(
         fetcher,
@@ -250,7 +268,7 @@ async def test_failed_sitemap_fetch_is_cached_on_the_short_clock():
     url = canonical("http://x.test/sitemap.xml")
     SITEMAP_CACHE.discard((url.raw, UNRESTRICTED_HOST_POLICY))
     try:
-        fetcher = scripted_fetcher(status=500, ctype="application/xml", body=b"")
+        fetcher = FetcherDouble(lambda url, *_: {"status": 500, "ctype": "application/xml", "body": b""})
         out = await fetch_sitemap_urls(fetcher, url, 10, host_policy=UNRESTRICTED_HOST_POLICY)
         assert out == set()
         delta = SITEMAP_CACHE.time_until_expiry((url.raw, UNRESTRICTED_HOST_POLICY))
@@ -406,13 +424,14 @@ class TestSeedingIsOffLoop:
             f"<url><loc>{fresh_url}</loc><lastmod>2020-01-01T00:00:00Z</lastmod></url>"
             "</urlset>"
         )
-        fetcher = routed_fetcher(
-            {
-                "/robots.txt": (200, "User-agent: *\nAllow: /\n", "text/plain"),
-                "sitemap": (200, fresh_sitemap, "application/xml"),
-            },
-            calls=fetched,
-            default=(200, b"<html><body>page</body></html>", "text/html"),
+        _allow_all = (200, "User-agent: *\nAllow: /\n", "text/plain")
+        _seeds = (200, fresh_sitemap, "application/xml")
+        _page = (200, b"<html><body>page</body></html>", "text/html")
+        fetcher = FetcherDouble(
+            lambda url, _sent_headers, *_: (
+                _allow_all if url.raw.endswith("/robots.txt") else _seeds if "sitemap" in url.raw else _page
+            ),
+            fetched,
         )
 
         await crawl_request(payload, http_fetcher=fetcher, content_cache=cache)

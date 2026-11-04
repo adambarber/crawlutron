@@ -5,7 +5,8 @@ through to a second unconditional fetch (double load for one crawl).
 
 from crawlutron.transport.cache import HttpCache
 from crawlutron.transport.content_cache import ContentCache
-from tests._fetcher_factories import make_fetch, run_http_strategy
+from tests._fetch_doubles import make_fetch
+from tests._fetcher_factories import run_http_strategy
 
 
 class _CountingFetcher:
@@ -121,7 +122,7 @@ async def test_content_cache_revalidation_304_reports_not_modified(tmp_path):
     """A content-cache revalidation that earns a 304 must classify not_modified, not a fresh render.
     WatchSweeper keys on not_modified to suppress a change webhook; a 304 served as 'rendered'
     fires modified forever (the #236 regression)."""
-    from tests._fetcher_factories import request_fetcher
+    from tests._fetch_doubles import FetcherDouble
 
     etag = '"v1"'
 
@@ -130,7 +131,7 @@ async def test_content_cache_revalidation_304_reports_not_modified(tmp_path):
             return {"status": 304, "headers": {"etag": etag}, "body": b""}
         return {"status": 200, "headers": {"etag": etag}, "body": b"<html>STOC</html>"}
 
-    fetcher = request_fetcher(respond)
+    fetcher = FetcherDouble(lambda url, sent_headers, *_: respond(url, sent_headers))
     cache = HttpCache()
     content_cache = ContentCache(cache_dir=str(tmp_path / "cc"), default_ttl=3600)
 

@@ -9,7 +9,8 @@ from pydantic import ValidationError
 
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.orchestration.engine import crawl_request
-from tests._fetcher_factories import request_fetcher, run_http_strategy, scripted_fetcher
+from tests._fetch_doubles import FetcherDouble
+from tests._fetcher_factories import run_http_strategy
 from tests._policy_factories import canonical, http_strategy_policy
 
 
@@ -39,7 +40,7 @@ def _ok_fetcher(headers_out, body=b"hello", extra_headers=None):
         headers_out.update(headers)
         return spec
 
-    return request_fetcher(respond)
+    return FetcherDouble(lambda url, sent_headers, *_: respond(url, sent_headers))
 
 
 async def test_caller_validators_sent_as_conditional_headers():
@@ -66,7 +67,7 @@ async def test_no_validators_means_no_conditional_headers():
 async def test_caller_validator_304_yields_not_modified():
     """A 304 against caller-owned validators is not_modified: no body exists."""
 
-    fetcher = scripted_fetcher(status=304, headers={}, body=b"")
+    fetcher = FetcherDouble(lambda url, *_: {"status": 304, "headers": {}, "body": b""})
 
     result = await _run_http(fetcher, validators={"if_none_match": '"v1"'})
     assert result.status == "success"
@@ -79,14 +80,16 @@ async def test_caller_validator_304_yields_not_modified():
 
 
 async def test_success_result_surfaces_origin_validators():
-    fetcher = scripted_fetcher(
-        status=200,
-        headers={
-            "content-type": "text/html",
-            "etag": '"abc123"',
-            "last-modified": "Wed, 01 Jan 2025 00:00:00 GMT",
-        },
-        body=_html("fresh").encode(),
+    fetcher = FetcherDouble(
+        lambda url, *_: {
+            "status": 200,
+            "headers": {
+                "content-type": "text/html",
+                "etag": '"abc123"',
+                "last-modified": "Wed, 01 Jan 2025 00:00:00 GMT",
+            },
+            "body": _html("fresh").encode(),
+        }
     )
 
     result = await _run_http(fetcher)
@@ -106,7 +109,7 @@ async def test_engine_routes_validators_by_url():
                 return (304, b"", "text/html")
             return (200, _html(f"page {path}"), "text/html")
 
-        return request_fetcher(respond)
+        return FetcherDouble(lambda url, sent_headers, *_: respond(url, sent_headers))
 
     # Two URLs; only the second carries validators.
     payload2 = {
@@ -197,10 +200,12 @@ async def test_malformed_gzip_is_rejected_by_strategy():
     for i in range(2, 12):
         compressed[i] ^= 0xFF
 
-    fetcher = scripted_fetcher(
-        status=200,
-        headers={"content-type": "text/html", "content-encoding": "gzip"},
-        body=bytes(compressed),
+    fetcher = FetcherDouble(
+        lambda url, *_: {
+            "status": 200,
+            "headers": {"content-type": "text/html", "content-encoding": "gzip"},
+            "body": bytes(compressed),
+        }
     )
 
     result = await _run_http(fetcher)
@@ -218,8 +223,12 @@ class TestNotModifiedResponse:
     async def test_http_strategy_not_modified(self):
         from crawlutron.transport.cache import HttpCache
 
-        not_mod_fetcher = scripted_fetcher(
-            status=304, headers={"etag": "v1", "content-type": "text/html"}, body=b"not modified"
+        not_mod_fetcher = FetcherDouble(
+            lambda url, *_: {
+                "status": 304,
+                "headers": {"etag": "v1", "content-type": "text/html"},
+                "body": b"not modified",
+            }
         )
 
         cache = HttpCache()

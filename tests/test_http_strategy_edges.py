@@ -5,7 +5,8 @@ from crawlutron.admission.policy import PolicyTier, read_policy, validate_wire_p
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.http_fetch_result import HttpFetchResult
 from crawlutron.models.normalized_url import NormalizedUrl
-from tests._fetcher_factories import failing_fetcher, request_fetcher, run_http_strategy, scripted_fetcher
+from tests._fetch_doubles import FetcherDouble
+from tests._fetcher_factories import run_http_strategy
 from tests._policy_factories import http_strategy_policy
 from tests._transport_doubles import (
     isolated_process,
@@ -88,7 +89,9 @@ class TestHttpStrategyEdges:
 
         cache = HttpCache()
 
-        unreachable_fetcher = failing_fetcher(httpx.RequestError("connection failed", request=None))
+        unreachable_fetcher = FetcherDouble(
+            lambda url, *_: httpx.RequestError("connection failed", request=None)
+        )
 
         result = await run_http_strategy(
             url="http://fail.example.com/",
@@ -112,8 +115,8 @@ class TestHttpStrategyEdges:
             500, headers={"content-type": "text/plain"}, content=b"error", request=request
         )
 
-        unreachable_fetcher = failing_fetcher(
-            httpx.HTTPStatusError("server error", request=request, response=response)
+        unreachable_fetcher = FetcherDouble(
+            lambda url, *_: httpx.HTTPStatusError("server error", request=request, response=response)
         )
 
         result = await run_http_strategy(
@@ -137,8 +140,12 @@ class TestHttpStrategyEdges:
 
         cache = HttpCache()
 
-        binary_fetcher = scripted_fetcher(
-            status=200, headers={"content-type": "application/octet-stream"}, body=b"binary"
+        binary_fetcher = FetcherDouble(
+            lambda url, *_: {
+                "status": 200,
+                "headers": {"content-type": "application/octet-stream"},
+                "body": b"binary",
+            }
         )
 
         result = await run_http_strategy(
@@ -179,7 +186,7 @@ async def test_stateful_request_profile_is_resolved_once_for_headers_and_diagnos
         captured_headers.update(headers)
         return (200, b"<html><body>profile content</body></html>", "text/html")
 
-    fetcher = request_fetcher(respond)
+    fetcher = FetcherDouble(lambda url, sent_headers, *_: respond(url, sent_headers))
 
     policy = read_policy({**http_strategy_policy().model_dump(), "request_profile": profile})
     result = await run_http_strategy(

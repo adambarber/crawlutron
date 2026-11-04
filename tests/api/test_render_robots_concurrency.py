@@ -5,8 +5,10 @@ per origin before any browser worker started; the crawl path has been
 bounded-concurrent since #544/P10, and render shares that doctrine.
 """
 
+import asyncio
+
 import crawlutron.api.render as render_mod
-from tests._fetch_scripted import concurrent_fetcher
+from tests._fetch_doubles import FetcherDouble
 from tests._render_producer import render_stub_request
 
 _ORIGINS = 8
@@ -14,9 +16,21 @@ _ORIGINS = 8
 
 def _multi_origin_fetcher():
     """Distinct cold origins, each serving an allowing robots.txt, tracking inflight."""
-    return concurrent_fetcher(
-        lambda url, _headers: (200, "User-agent: *\n", "text/plain"),
-    )
+    _outstanding: list[str] = []
+    _high_water: list[int] = []
+
+    async def _answer(url, sent_headers, *_args):
+        _outstanding.append(url.host)
+        _high_water.append(len(_outstanding))
+        try:
+            await asyncio.sleep(0)
+            return (200, "User-agent: *\n", "text/plain")
+        finally:
+            _outstanding.remove(url.host)
+
+    fetcher = FetcherDouble(_answer)
+    fetcher.peak = lambda: max(_high_water)
+    return fetcher
 
 
 async def test_render_batch_robots_fetches_overlap(monkeypatch):

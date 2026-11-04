@@ -68,9 +68,10 @@ class TestExecuteCrawlChainPinningFailureUnpin:
         from crawlutron.vocabulary.strategies import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
         from tests._browser_doubles import _fake_browser
         from tests._chain_policies import chain_policy
-        from tests._fetcher_factories import request_fetcher, run_chain
+        from tests._fetch_doubles import FetcherDouble
+        from tests._fetcher_factories import run_chain
 
-        http_fetcher = request_fetcher(lambda _url, _headers: (200, b"<html>ok</html>", "text/html"))
+        http_fetcher = FetcherDouble(lambda _url, _sent_headers, *_: (200, b"<html>ok</html>", "text/html"))
         scheduler = DomainScheduler(global_limit=8, per_domain_limit=8, delay_seconds=0.0)
         scheduler.set_pinned_strategy("example.com", BROWSER_HEADLESS)
 

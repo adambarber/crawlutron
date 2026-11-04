@@ -9,11 +9,9 @@ from crawlutron.transport.results import crawl_result_from_engine_result
 from crawlutron.vocabulary.extraction import EXTRACTION_FULL
 from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._assertions import assert_result_success
+from tests._fetch_doubles import FetcherDouble
 from tests._fetcher_factories import (
-    request_fetcher,
     run_http_strategy,
-    scripted_fetcher,
-    sequenced_fetcher,
     strategy_request,
 )
 from tests._policy_factories import canonical
@@ -61,7 +59,7 @@ async def _run(
 
 def _html_fetcher(html: str):
     """An async fetcher that serves a fixed HTML body for any URL."""
-    return scripted_fetcher(status=200, ctype="text/html", body=html.encode("utf-8"))
+    return FetcherDouble(lambda url, *_: {"status": 200, "ctype": "text/html", "body": html.encode("utf-8")})
 
 
 def _run_kwargs(fetcher):
@@ -87,7 +85,7 @@ class TestHttpStrategy:
                 "headers": {"ETag": "'test-etag'", "Content-Type": "text/html"},
             }
 
-        fetcher = request_fetcher(respond)
+        fetcher = FetcherDouble(lambda url, sent_headers, *_: respond(url, sent_headers))
         # Custom cache that captures headers before lowercasing them
 
         class _CaptureCache(HttpCache):
@@ -115,7 +113,7 @@ class TestHttpStrategy:
             recorded.append((url, headers))
             return (200, b"<html><body><a href='/p'>p</a></body></html>", "text/html")
 
-        fetcher = request_fetcher(respond)
+        fetcher = FetcherDouble(lambda url, sent_headers, *_: respond(url, sent_headers))
 
         cache = HttpCache()
         cache.store("http://x.test/", {"etag": '"page-etag-v1"'})
@@ -261,7 +259,9 @@ async def test_recursive_crawl_drops_sitewide_lists_from_page_diagnostics(monkey
 
     monkeypatch.setattr(http_mod, "discovery_diagnostics", fake_diag)
 
-    fetcher = scripted_fetcher(status=200, ctype="text/html", body=b"<html><body>x</body></html>")
+    fetcher = FetcherDouble(
+        lambda url, *_: {"status": 200, "ctype": "text/html", "body": b"<html><body>x</body></html>"}
+    )
 
     kwargs = _run_kwargs(fetcher)
     r_rec = await _run(
@@ -285,13 +285,20 @@ class TestHttpStrategyRetry:
 
         # The cffi retry is the second step, so the sequence is the fixture: attempt one fails, attempt two
         # succeeds.
-        retry_fetcher = sequenced_fetcher(
-            [
-                ConnectionError("first attempt fails"),
-                (200, b"<html><body>recovered</body></html>", "text/html"),
-            ],
-            repeat_last=False,
-        )
+        _steps = [
+            ConnectionError("first attempt fails"),
+            (200, b"<html><body>recovered</body></html>", "text/html"),
+        ]
+        _n = {"value": 0}
+
+        def _sequenced_answer(url, *_):
+            index = _n["value"]
+            _n["value"] += 1
+            if index >= len(_steps):
+                raise AssertionError(f"unscripted fetch #{index + 1}: {url}")
+            return _steps[index]
+
+        retry_fetcher = FetcherDouble(_sequenced_answer)
 
         result = await run_http_strategy(
             url="http://x/",
@@ -316,7 +323,9 @@ async def test_a_binary_body_result_keeps_its_attempt_type_for_the_render_adapte
     # An archive: inside the detector's real contract (PK magic under a non-text content type).
     archive = b"PK\x03\x04" + b"\x00" * 64
 
-    binary_fetcher = scripted_fetcher(status=200, ctype="application/octet-stream", body=archive)
+    binary_fetcher = FetcherDouble(
+        lambda url, *_: {"status": 200, "ctype": "application/octet-stream", "body": archive}
+    )
 
     result = await _run(**_run_kwargs(binary_fetcher))
 

@@ -12,7 +12,7 @@ from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.orchestration.engine import crawl_request
 from tests._browser_doubles import _fake_browser
-from tests._fetcher_factories import make_html_fetcher, routed_fetcher
+from tests._fetch_doubles import FetcherDouble, make_fetch
 from tests._policy_factories import canonical
 
 
@@ -46,9 +46,13 @@ def _one_hop_policy(**extra: object) -> dict[str, object]:
 async def test_recursive_crawl_never_fetches_policy_blocked_discovered_host(allowed, denied):
     calls: list[str] = []
 
-    fetcher = make_html_fetcher(
+    fetcher = FetcherDouble(
+        lambda url, *_: {
+            "status": 200,
+            "ctype": "text/html",
+            "body": b'<html><body><a href="https://blocked.test/secret">blocked</a></body></html>',
+        },
         calls,
-        b'<html><body><a href="https://blocked.test/secret">blocked</a></body></html>',
     )
 
     response = await crawl_request(
@@ -64,17 +68,17 @@ async def test_recursive_crawl_never_fetches_policy_blocked_discovered_host(allo
 async def test_sitemap_blocked_host_is_refused_before_page_fetch():
     calls: list[str] = []
 
-    fetcher = routed_fetcher(
-        {
-            "/sitemap.xml": (
-                200,
-                b"<urlset><url><loc>https://allowed.test/keep</loc></url>"
-                b"<url><loc>https://blocked.test/secret</loc></url></urlset>",
-                "application/xml",
-            ),
-        },
-        calls=calls,
-        default=(200, b"<html>ok</html>", "text/html"),
+    _robots = (
+        200,
+        b"<urlset><url><loc>https://allowed.test/keep</loc></url>"
+        b"<url><loc>https://blocked.test/secret</loc></url></urlset>",
+        "application/xml",
+    )
+    fetcher = FetcherDouble(
+        lambda url, _sent_headers, *_: (
+            _robots if "/sitemap.xml" in url.raw else (200, b"<html>ok</html>", "text/html")
+        ),
+        calls,
     )
 
     response = await crawl_request(
@@ -188,7 +192,7 @@ async def test_allow_listed_private_target_is_still_refused(monkeypatch):
     monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     calls: list[str] = []
 
-    fetcher = make_html_fetcher(calls, b"<html></html>")
+    fetcher = FetcherDouble(lambda url, *_: make_fetch(url=url, body=b"<html></html>"), calls)
 
     with pytest.raises(ValueError, match="private_network_target"):
         await crawl_request(

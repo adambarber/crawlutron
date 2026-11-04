@@ -29,16 +29,19 @@ from crawlutron.vocabulary.extraction import (
 from crawlutron.vocabulary.strategies import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
 from tests._assertions import assert_result_failed, assert_result_success
 from tests._extraction_helpers import extract_discovered_links
-from tests._fetcher_factories import (
-    make_fetch,
-    ok_fetcher,
-    raise_fetcher,
-    routed_fetcher,
-    run_chain,
-)
+from tests._fetch_doubles import FetcherDouble, make_fetch
+from tests._fetcher_factories import run_chain
 from tests._http_fetch_doubles import diagnostics_for_failed_probes as _diagnostics_for_failed_probes
 from tests._http_fetch_doubles import run_http_result as _run_http_result
 from tests._policy_factories import canonical, make_base_policy
+
+
+def _raise_fetcher(url, *_):
+    raise ConnectionError("network down")
+
+
+def _ok_fetcher(url, *_):
+    return make_fetch(url=url)
 
 
 class TestValidationHelpers:
@@ -140,7 +143,7 @@ class TestHeaderHelpers:
 class TestFetchRetries:
     async def test_fetch_with_retries_reraises_after_exhaustion(self) -> None:
         with pytest.raises(ConnectionError):
-            await fetch_with_retries(raise_fetcher, "http://x/", {}, 5, 0)
+            await fetch_with_retries(_raise_fetcher, "http://x/", {}, 5, 0)
 
     def test_retry_backoff_is_exponential_and_capped(self) -> None:
         """Each retry gap doubles from the base and plateaus at the ceiling."""
@@ -287,7 +290,7 @@ class TestHttpStrategyResult:
     async def test_network_error_handler(self) -> None:
         # A raw ConnectionError classifies specifically as connection_error, not the generic network_error
         # tail: the old broad-except sink hardcoded network_error and masked the real code; the shared
-        assert_result_failed(await self._run(fetcher=raise_fetcher), "connection_error")
+        assert_result_failed(await self._run(fetcher=_raise_fetcher), "connection_error")
 
     async def test_binary_body_short_circuits(self) -> None:
         result = await self._run(
@@ -313,12 +316,13 @@ class TestHttpStrategyResult:
         assert non_html.text == ""
 
     async def test_discovery_diagnostics_records_exceptions_and_feeds(self) -> None:
-        feed_fetcher = routed_fetcher(
-            {
-                "/robots.txt": ConnectionError("discovery failed"),
-                "/sitemap.xml": ConnectionError("discovery failed"),
-            },
-            default=FEED_ADVERTISING_PAGE,
+        _failed_probe = ConnectionError("discovery failed")
+        feed_fetcher = FetcherDouble(
+            lambda url, _sent_headers, *_: (
+                _failed_probe
+                if any(f in url.raw for f in ("/robots.txt", "/sitemap.xml"))
+                else FEED_ADVERTISING_PAGE
+            )
         )
 
         _result, diagnostics = await _diagnostics_for_failed_probes(feed_fetcher)
@@ -332,14 +336,14 @@ class TestExecuteCrawlChain:
     async def test_http_strategy_runs(self) -> None:
         assert_result_success(
             await run_chain(
-                fetcher=ok_fetcher, policy=dict(make_base_policy(), strategies=[HTTP_DECLARED_CRAWLER])
+                fetcher=_ok_fetcher, policy=dict(make_base_policy(), strategies=[HTTP_DECLARED_CRAWLER])
             )
         )
 
     async def test_browser_strategy_without_worker(self) -> None:
         assert (
             await run_chain(
-                fetcher=ok_fetcher, policy=dict(make_base_policy(), strategies=[BROWSER_HEADLESS])
+                fetcher=_ok_fetcher, policy=dict(make_base_policy(), strategies=[BROWSER_HEADLESS])
             )
         ).classification == "browser_crash"
 
@@ -347,6 +351,6 @@ class TestExecuteCrawlChain:
         # A strategy outside CrawlStrategyName is rejected at construction of the attempt: the strategy axis
         with pytest.raises(ValueError, match=r"\.strategy="):
             await run_chain(
-                fetcher=ok_fetcher,
+                fetcher=_ok_fetcher,
                 policy=make_base_policy().model_copy(update={"strategies": ["NOT_A_STRATEGY"]}),
             )

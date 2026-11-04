@@ -9,12 +9,8 @@ from __future__ import annotations
 from crawlutron.admission.policy import read_policy
 from crawlutron.transport.http import http_strategy_result
 from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
-from tests._fetch_doubles import scripted_fetcher
-from tests._fetch_scripted import routed_fetcher
-from tests._fetcher_factories import (
-    make_fetch,
-    strategy_request,
-)
+from tests._fetch_doubles import FetcherDouble, make_fetch
+from tests._fetcher_factories import strategy_request
 from tests._policy_factories import make_base_policy
 
 _DISCOVERY_ALL_ON = {"robots": True, "sitemaps": True, "feeds": True}
@@ -30,17 +26,18 @@ FEED_ADVERTISING_PAGE = (
 
 
 def fake_fetcher(calls):
-    return routed_fetcher(
-        {
-            "/robots.txt": (200, "User-agent: *\nDisallow: /secret\n", "text/plain"),
-            "sitemap": (
-                200,
-                "<urlset><loc>https://x.test/p1</loc><lastmod>2024-05-05</lastmod></urlset>",
-                "application/xml",
-            ),
-        },
-        calls=calls,
-        default=(200, b"<html></html>", "text/html"),
+    _disallow = (200, "User-agent: *\nDisallow: /secret\n", "text/plain")
+    _urlset = (
+        200,
+        "<urlset><loc>https://x.test/p1</loc><lastmod>2024-05-05</lastmod></urlset>",
+        "application/xml",
+    )
+    _blank = (200, b"<html></html>", "text/html")
+    return FetcherDouble(
+        lambda url, _sent_headers, *_: (
+            _disallow if url.raw.endswith("/robots.txt") else _urlset if "sitemap" in url.raw else _blank
+        ),
+        calls,
     )
 
 
@@ -64,10 +61,10 @@ async def run_http_result(
     """
     if fetcher is None:
         fetcher = (
-            scripted_fetcher(status=status, ctype=ctype, body=body)
+            FetcherDouble(lambda url, *_: {"status": status, "ctype": ctype, "body": body})
             if final_url == _PAGE_URL
-            else routed_fetcher(
-                default=make_fetch(status=status, body=body, ctype=ctype, final_url=final_url),
+            else FetcherDouble(
+                lambda url, *_: make_fetch(status=status, body=body, ctype=ctype, final_url=final_url)
             )
         )
 

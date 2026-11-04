@@ -5,15 +5,14 @@ from crawlutron.orchestration.engine import crawl_request
 from crawlutron.transport.robots import robots_allows
 from crawlutron.transport.robots_parse import parse_robots_rules
 from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
-from tests._fetcher_factories import routed_fetcher
+from tests._fetch_doubles import FetcherDouble
 from tests._policy_factories import canonical
 
 
 def _make_fetcher(robots_status: int, robots_body: str = ""):
-    return routed_fetcher(
-        {"/robots.txt": (robots_status, robots_body, "text/plain")},
-        default=(200, b"<html><body>hi</body></html>", "text/html"),
-    )
+    _robots = (robots_status, robots_body, "text/plain")
+    _home = (200, b"<html><body>hi</body></html>", "text/html")
+    return FetcherDouble(lambda url, _sent_headers, *_: _robots if "/robots.txt" in url.raw else _home)
 
 
 def _policy():

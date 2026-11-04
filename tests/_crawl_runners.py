@@ -3,21 +3,21 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, TypedDict, Unpack
+from typing import TYPE_CHECKING, TypedDict, Unpack, cast
 from urllib.parse import urlparse
 
 from crawlutron.admission.policy import read_policy
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.http_fetch_result import HttpFetchResult
 from crawlutron.models.json_value import JsonValue
+from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.orchestration.engine import crawl_request
 from crawlutron.transport.cache import HttpCache
 from crawlutron.transport.content_cache import CONTENT_CACHE_MAX_TOTAL_BYTES, ContentCache
 from crawlutron.transport.fetchers import default_http_fetcher
 from crawlutron.transport.strategy_request import StrategyRequest
 from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
-from tests._fetch_doubles import PageData, PageMap, site_fetcher
-from tests._fetch_scripted import tap_fetcher
+from tests._fetch_doubles import FetcherDouble, PageData, PageMap
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
 if TYPE_CHECKING:
@@ -123,6 +123,30 @@ def xml_page(body: str) -> PageData:
 # Deep enough to follow the seed's links, wide enough that the page cap is never what a test is measuring.
 LINKED_PAIR_LIMITS = {"max_depth": 1, "max_pages": 10}
 
+#: The page table a scope test crawls: a root with keep/drop links.
+_SCOPE_KEEP_DROP_PAGES = {
+    "/": (
+        200,
+        '<html><body><a href="/keep/x">k</a><a href="/drop/y">d</a></body></html>',
+        "text/html",
+    ),
+    "/keep/x": (200, "<html>k</html>", "text/html"),
+    "/drop/y": (200, "<html>d</html>", "text/html"),
+}
+
+
+async def run_scoped_crawl(scope_regex=None, *, max_depth=1, max_pages=10, pages=None):
+    """Run a crawl bounded by ``scope_regex`` and report the crawled URL text set.
+
+    A crawl driver, not a fetch double: the page table routes through the one
+    scripted-site funnel and the projection is all this adds."""
+    out = await crawled_results(
+        pages if pages is not None else _SCOPE_KEEP_DROP_PAGES,
+        limits={"max_depth": max_depth, "max_pages": max_pages},
+        policy={"scope_regex": scope_regex},
+    )
+    return {r.normalized_url.raw for r in out["results"] if r.normalized_url is not None}
+
 
 async def crawled_results(
     pages: PageMap,
@@ -140,13 +164,30 @@ async def crawled_results(
     Payload, fetcher and cache wiring are stated once so a hand-rolled call
     cannot differ from a routed one; ``limits`` is the limits sub-mapping."""
     body: dict[str, JsonValue] = {"limits": dict(limits or {}), **(policy or {})}
-    fetcher = tap_fetcher(site_fetcher(pages), calls) if calls is not None else site_fetcher(pages)
+
+    def _page_answer(url: NormalizedUrl, *_):
+        entry = pages.get(url.path or "/")
+        if entry is None:
+            return {"status": 404, "body": b"<html></html>", "ctype": "text/html"}
+        status, body, ctype = entry
+        return {
+            "status": status,
+            "body": body.encode("utf-8") if isinstance(body, str) else body,
+            "ctype": ctype,
+        }
+
+    base = FetcherDouble(_page_answer)
+    fetcher = (
+        FetcherDouble(lambda url, sent_headers, timeout, cap: base(url, sent_headers, timeout, cap), calls)
+        if calls is not None
+        else base
+    )
     return await crawl_request(
         {"url": url, "policy": body},
-        http_fetcher=fetcher,
+        http_fetcher=cast("HttpFetcher", fetcher),
         # The cffi impersonation slot binds the same scripted fetcher: a leaf with an
         # empty body would otherwise ride the REAL curl_cffi transport (not hermetic).
-        cffi_fetcher=fetcher,
+        cffi_fetcher=cast("HttpFetcher", fetcher),
         cache=HttpCache(),
         spill_path=spill_path,
         content_cache=content_cache,

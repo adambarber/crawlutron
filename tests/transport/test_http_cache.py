@@ -125,7 +125,8 @@ async def test_error_page_etag_does_not_seed_shared_cache():
     """A 403/5xx carrying an ETag must not seed the conditional cache: the next crawl
     would replay the denied page's validator and could serve an empty not_modified."""
     from crawlutron.transport.cache import HttpCache
-    from tests._fetcher_factories import request_fetcher, run_http_strategy
+    from tests._fetch_doubles import FetcherDouble
+    from tests._fetcher_factories import run_http_strategy
 
     cache = HttpCache()
     seen: list[dict] = []
@@ -135,7 +136,7 @@ async def test_error_page_etag_does_not_seed_shared_cache():
             {"status": 200, "headers": {"etag": '"fresh-v1"'}, "body": b"<html>ok</html>"},
         ]
     )
-    fetcher = request_fetcher(lambda url, headers: next(responses), record_headers=seen)
+    fetcher = FetcherDouble(lambda url, sent_headers, *_: next(responses), record_headers=seen)
 
     async def run():
         await run_http_strategy(
@@ -153,12 +154,17 @@ async def test_http_cache_validators_isolated_across_cookie_namespaces():
     validator must not be replayed (as an empty not_modified) on another's crawl."""
     from crawlutron.transport.cache import HttpCache
     from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE
-    from tests._fetcher_factories import request_fetcher, run_http_strategy
+    from tests._fetch_doubles import FetcherDouble
+    from tests._fetcher_factories import run_http_strategy
 
     cache = HttpCache()
     seen: list[dict] = []
-    fetcher = request_fetcher(
-        lambda url, headers: {"status": 200, "headers": {"etag": '"tenant-A-v1"'}, "body": b"<html>a</html>"},
+    fetcher = FetcherDouble(
+        lambda url, sent_headers, *_: {
+            "status": 200,
+            "headers": {"etag": '"tenant-A-v1"'},
+            "body": b"<html>a</html>",
+        },
         record_headers=seen,
     )
     policy = {"limits": {}}

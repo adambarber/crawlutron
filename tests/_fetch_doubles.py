@@ -1,4 +1,9 @@
-"""Core fetch doubles: results, pages and scripted sites."""
+"""The one import door for every fetch double (#314, 3.3).
+
+One construction per concern: ``FetcherDouble`` is the primitive, ``make_fetch``
+builds the result it answers with, and ``Route``/``PageData``/``PageMap`` are the
+input grammar a test expresses its answer in. Callers write the small answer
+closure at the site when the response depends on request or state."""
 
 import inspect
 from collections.abc import Callable
@@ -6,20 +11,8 @@ from typing import Any
 
 from crawlutron.models.http_fetch_result import HttpFetchResult
 from crawlutron.models.normalized_url import NormalizedUrl
-from crawlutron.orchestration.engine import crawl_request
-from crawlutron.transport.cache import HttpCache
 from crawlutron.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 from tests._policy_factories import canonical
-
-SCOPE_KEEP_DROP_PAGES = {
-    "/": (
-        200,
-        '<html><body><a href="/keep/x">k</a><a href="/drop/y">d</a></body></html>',
-        "text/html",
-    ),
-    "/keep/x": (200, "<html>k</html>", "text/html"),
-    "/drop/y": (200, "<html>d</html>", "text/html"),
-}
 
 #: One scripted page: (status, raw body, content type). The fetcher estimates
 #: the type when a page does not declare one; declaring it makes a sitemap.
@@ -121,64 +114,3 @@ class FetcherDouble:
             # ``_answer`` would be a second reading of it.
             return result
         return _answer(result, url)
-
-
-def site_fetcher(pages: PageMap):
-    """A fetcher serving a scripted page table by path, 404 for anything else.
-
-    A crawler test that reads a body it did not arrange passes for the wrong
-    reason, so an unscripted path is a 404 rather than a default page.
-    """
-
-    def answer(url: NormalizedUrl, *_):
-        entry = pages.get(url.path or "/")
-        if entry is None:
-            return {"status": 404, "body": b"<html></html>", "ctype": "text/html"}
-        status, body, ctype = entry
-        return {
-            "status": status,
-            "body": body.encode("utf-8") if isinstance(body, str) else body,
-            "ctype": ctype,
-        }
-
-    return FetcherDouble(answer)
-
-
-async def run_scoped_crawl(scope_regex=None, *, max_depth=1, max_pages=10, pages=None):
-    pages = pages if pages is not None else SCOPE_KEEP_DROP_PAGES
-    payload = {
-        "url": "http://example.com/",
-        "policy": {"limits": {"max_depth": max_depth, "max_pages": max_pages}, "scope_regex": scope_regex},
-    }
-    out = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
-    return {r.normalized_url.raw for r in out["results"] if r.normalized_url is not None}
-
-
-def ok_fetcher(url, sent_headers, timeout, max_content_length=DEFAULT_MAX_CONTENT_LENGTH_BYTES):
-    """The 200-for-everything fetcher, passed around as a value.
-
-    Callers hand this function itself to the engine, so it is a fetcher rather
-    than a factory; the cap still comes from production's constant.
-    """
-    return make_fetch(url=url)
-
-
-def raise_fetcher(url, sent_headers, timeout, max_content_length=DEFAULT_MAX_CONTENT_LENGTH_BYTES):
-    """The network-is-down fetcher, passed around as a value like ``ok_fetcher``."""
-    raise ConnectionError("network down")
-
-
-def scripted_fetcher(*, status=200, body=b"", headers=None, ctype="text/html; charset=utf-8"):
-    """A fetcher that serves one fixed response for every URL; the
-    ``scripted-fetcher`` funnel bans re-stating the production signature, which is
-    owned by :func:`fetcher_double`, and ``headers`` replaces the response wholesale.
-    """
-    return FetcherDouble(lambda url, *_: {"status": status, "body": body, "headers": headers, "ctype": ctype})
-
-
-def failing_fetcher(error: BaseException | type[BaseException] | None = None, calls: list[str] | None = None):
-    """A fetcher that raises instead of responding, optionally recording URLs; with
-    ``calls`` it becomes a recorder, and a class is raised per call so each failure
-    is distinct -- pass an instance only when the exception must carry state.
-    """
-    return FetcherDouble(lambda url, *_: error if error is not None else ConnectionError, calls)

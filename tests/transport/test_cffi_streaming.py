@@ -13,8 +13,9 @@ from curl_cffi.requests.models import STREAM_END
 import crawlutron.transport.http_client_pool as http_mod
 from crawlutron.transport.fetchers import default_http_fetcher, impersonating_fetcher
 from crawlutron.vocabulary.strategies import HTTP_CFFI_IMPERSONATE
+from tests._fetch_doubles import FetcherDouble
 from tests._fetch_outcome import FetchFailed
-from tests._fetcher_factories import scripted_fetcher, strategy_request
+from tests._fetcher_factories import strategy_request
 from tests._policy_factories import canonical, make_base_policy
 from tests._timing_harnesses import await_until
 from tests._transport_doubles import real_cffi_fetch_outcome
@@ -31,8 +32,12 @@ class TestCffiImpersonateStrategy:
 
         # A real HttpFetchResult, not a local class that has the same five attributes: the strategy reads a
         # production model, so a stand-in with a matching shape can pass while the model drifts.
-        cffi_fetcher = scripted_fetcher(
-            status=200, ctype="text/html", body=b"<html><body>content</body></html>"
+        cffi_fetcher = FetcherDouble(
+            lambda url, *_: {
+                "status": 200,
+                "ctype": "text/html",
+                "body": b"<html><body>content</body></html>",
+            }
         )
         policy = make_base_policy(strategies=[HTTP_CFFI_IMPERSONATE]).model_copy(
             update={"extraction": "full"}

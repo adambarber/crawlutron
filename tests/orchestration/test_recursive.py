@@ -4,11 +4,11 @@ Uses a deterministic in-process fake fetcher (no real network I/O) plus one
 real-server smoke test.
 """
 
+from tests._crawl_runners import run_scoped_crawl
 from tests._fetcher_factories import (
     LINKED_PAIR_LIMITS,
     crawled_results,
     crawled_urls,
-    run_scoped_crawl,
     site_linking_to,
     xml_page,
 )

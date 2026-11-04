@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import crawlutron.api.render as render_mod
-from tests._fetcher_factories import routed_fetcher
+from tests._fetch_doubles import FetcherDouble
 from tests._render_producer import render_stub_request
 
 if TYPE_CHECKING:
@@ -21,10 +21,9 @@ if TYPE_CHECKING:
 
 def _disallow_fetcher() -> object:
     """A fetcher that disallows /secret and serves the home page."""
-    return routed_fetcher(
-        {"/robots.txt": (200, "User-agent: *\nDisallow: /secret\n", "text/plain")},
-        default=(200, b"<html><body>ok</body></html>", "text/html"),
-    )
+    _robots = (200, "User-agent: *\nDisallow: /secret\n", "text/plain")
+    _home = (200, b"<html><body>ok</body></html>", "text/html")
+    return FetcherDouble(lambda url, _sent_headers, *_: _robots if "/robots.txt" in url.raw else _home)
 
 
 async def _render(monkeypatch: pytest.MonkeyPatch, *, url: str, respect_robots: bool) -> RenderEnvelope:

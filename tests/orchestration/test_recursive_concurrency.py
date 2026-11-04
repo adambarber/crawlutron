@@ -4,9 +4,11 @@ Before the batching fix the recursive branch awaited one link at a time,
 bypassing DomainScheduler entirely (no concurrency, no rate limiting).
 """
 
+import asyncio
+
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.orchestration.engine import crawl_request
-from tests._fetcher_factories import concurrent_fetcher
+from tests._fetch_doubles import FetcherDouble
 
 
 def _page_html(path: str) -> str:
@@ -28,9 +30,22 @@ async def test_recursive_crawl_fetches_links_concurrently():
         path = url.path or "/"
         return (200, _page_html(path), "text/html")
 
-    # The harness owns the overlap counter and the scheduling point that makes overlap observable; this test
-    # owns what each path answers.
-    fetcher = concurrent_fetcher(respond)
+    # Each fetch parks on its own event pair: entering marks the URL active, and the peak is how many marks
+    # were outstanding at the widest moment, which one-at-a-time scheduling holds at 1.
+    _live: set[str] = set()
+    _widest = {"n": 0}
+
+    async def _overlap_answer(url, sent_headers, *_args):
+        _live.add(url.raw)
+        _widest["n"] = max(_widest["n"], len(_live))
+        try:
+            await asyncio.sleep(0)
+            return respond(url, sent_headers)
+        finally:
+            _live.discard(url.raw)
+
+    fetcher = FetcherDouble(_overlap_answer)
+    fetcher.peak = lambda: _widest["n"]
 
     payload = {
         "url": "http://example.com/",

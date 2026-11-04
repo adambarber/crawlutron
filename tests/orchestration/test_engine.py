@@ -1,5 +1,6 @@
 """Crawl engine: strategy dispatch, chain edges and scope resolution."""
 
+import asyncio
 import urllib.error
 
 import pytest
@@ -16,13 +17,11 @@ from crawlutron.vocabulary.extraction import EXTRACTION_DOCUMENT, EXTRACTION_TRA
 from crawlutron.vocabulary.strategies import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
 from tests._assertions import browser_available
 from tests._browser_doubles import _fake_browser
+from tests._fetch_doubles import FetcherDouble
 from tests._fetcher_factories import (
     cache_with_etag,
     crawled_result,
-    hanging_fetcher,
-    routed_fetcher,
     run_chain,
-    scripted_fetcher,
 )
 from tests._policy_factories import (
     canonical,
@@ -67,9 +66,11 @@ class TestEngineCrawlRequest:
     async def test_crawl_request_http_failure_falls_back_to_browser(self, base_url):
 
         # The intent here is page-fetch failure -> browser fallback.
-        failing_fetcher = routed_fetcher(
-            {"/robots.txt": (200, "User-agent: *\nAllow: /\n", "text/plain")},
-            default=urllib.error.URLError("connection refused"),
+        _robots = (200, "User-agent: *\nAllow: /\n", "text/plain")
+        failing_fetcher = FetcherDouble(
+            lambda url, _sent_headers, *_: (
+                _robots if "/robots.txt" in url.raw else urllib.error.URLError("connection refused")
+            )
         )
 
         renderer = BrowserRenderer()
@@ -222,6 +223,9 @@ class TestEngineChainEdges:
         must be failed as network_error instead of holding a slot."""
 
         # True tarpit: never returns until the caller's deadline cancels us.
+        async def _never(url, *_):
+            await asyncio.Future()
+
         result = await crawled_result(
             "http://example.com/slow",
             policy={
@@ -237,7 +241,7 @@ class TestEngineChainEdges:
                 "headers": {},
                 "request_profile": {},
             },
-            http_fetcher=hanging_fetcher(),
+            http_fetcher=FetcherDouble(_never),
         )
         assert result.status == "failed"
         # The budget's classification is precise (url_budget_exceeded), not the generic network_error tail the
@@ -246,10 +250,12 @@ class TestEngineChainEdges:
         assert result.error == "url_budget_exceeded"
 
     async def test_rate_limited_sets_domain_cooldown(self):
-        fetcher = scripted_fetcher(
-            status=429,
-            headers={"retry-after": "30", "content-type": "text/plain"},
-            body=b"rate limited",
+        fetcher = FetcherDouble(
+            lambda url, *_: {
+                "status": 429,
+                "headers": {"retry-after": "30", "content-type": "text/plain"},
+                "body": b"rate limited",
+            }
         )
 
         now = [1000.0]
@@ -283,12 +289,13 @@ class TestEngineChainEdges:
 
         monkeypatch.setattr(DomainScheduler, "set_domain_min_delay", spy)
 
+        _robots = (200, "User-agent: *\nCrawl-delay: 2\n", "text/html")
+        _home = (200, b"<html><body>ok</body></html>", "text/html")
         await crawled_result(
             "http://example.com/",
             policy=http_policy(extraction="dom"),
-            http_fetcher=routed_fetcher(
-                {"/robots.txt": (200, "User-agent: *\nCrawl-delay: 2\n", "text/html")},
-                default=(200, b"<html><body>ok</body></html>", "text/html"),
+            http_fetcher=FetcherDouble(
+                lambda url, _sent_headers, *_: _robots if "/robots.txt" in url.raw else _home
             ),
         )
         assert any(d == "example.com" and abs(s - 2.0) < 1e-6 for d, s in calls), calls
@@ -315,8 +322,12 @@ class TestEngineChainEdges:
         result = await crawled_result(
             "http://example.com/",
             policy=http_policy(extraction="dom", browser_profile={"include_html": False}),
-            http_fetcher=scripted_fetcher(
-                status=200, ctype="text/html", body=b"<html><body>some page content</body></html>"
+            http_fetcher=FetcherDouble(
+                lambda url, *_: {
+                    "status": 200,
+                    "ctype": "text/html",
+                    "body": b"<html><body>some page content</body></html>",
+                }
             ),
         )
         assert result.html is None
@@ -354,10 +365,12 @@ class TestEngineScopeEdges:
         # HTTP returns access_denied (blocked), browser_worker is None -> browser_crash
         result = await run_chain(
             "http://example.com/page",
-            scripted_fetcher(
-                status=200,
-                ctype="text/html",
-                body=b"<html><title>Access Denied</title>bot challenge</html>",
+            FetcherDouble(
+                lambda url, *_: {
+                    "status": 200,
+                    "ctype": "text/html",
+                    "body": b"<html><title>Access Denied</title>bot challenge</html>",
+                }
             ),
             policy=http_policy(HTTP_DECLARED_CRAWLER, BROWSER_HEADLESS),
         )

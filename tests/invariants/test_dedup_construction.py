@@ -85,7 +85,7 @@ def _fetcher_factory_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     for node in call_nodes(tree):
         if getattr(node.func, "id", "") == "HttpFetchResult":
             offenders.append(
-                offender_at(path, node, "use _fetcher_factories.make_fetch instead of HttpFetchResult(...)")
+                offender_at(path, node, "use _fetch_doubles.make_fetch instead of HttpFetchResult(...)")
             )
     return offenders
 
@@ -93,7 +93,7 @@ def _fetcher_factory_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 FETCH_FAKES_COME_FROM_THE_SANCTIONED_BUILDER = Rule(
     name="fetch-fakes-come-from-the-sanctioned-builder",
     find=_fetcher_factory_offenders,
-    summary="Use _fetcher_factories.make_fetch()",
+    summary="Use _fetch_doubles.make_fetch()",
     excludes=_FAKE_BUILDER_SANCTIONED,
     bite=lambda: Bites(
         "def f():\n    return HttpFetchResult(url='u')\n",

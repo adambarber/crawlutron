@@ -10,7 +10,8 @@ import pytest
 
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
-from tests._fetcher_factories import run_http_strategy, scripted_fetcher
+from tests._fetch_doubles import FetcherDouble
+from tests._fetcher_factories import run_http_strategy
 from tests._parse_budget import ParseBudget
 
 HTML = (
@@ -37,7 +38,9 @@ def parse_budget() -> ParseBudget:
 
 
 async def _run(policy_extra: dict[str, object], *, html: str = HTML):
-    fetcher = scripted_fetcher(status=200, headers={"content-type": "text/html"}, body=html.encode())
+    fetcher = FetcherDouble(
+        lambda url, *_: {"status": 200, "headers": {"content-type": "text/html"}, "body": html.encode()}
+    )
 
     return await run_http_strategy(
         url="http://example.com/",

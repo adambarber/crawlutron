@@ -15,8 +15,14 @@ from crawlutron.transport.robots import (
     robots_cache,
 )
 from crawlutron.vocabulary.robots import RobotsSource
-from tests._fetcher_factories import make_html_fetcher
+from tests._fetch_doubles import FetcherDouble
 from tests._policy_factories import canonical, crawl_policy
+
+_HTML_BODY = b"<html><body>page content</body></html>"
+
+
+def _html_fetcher(calls: list[str]) -> FetcherDouble:
+    return FetcherDouble(lambda url, *_: {"status": 200, "ctype": "text/html", "body": _HTML_BODY}, calls)
 
 
 def _policy(*, respect_robots: bool = True) -> dict[str, object]:
@@ -48,7 +54,7 @@ async def test_job_fetch_populates_cache_seen_by_engine():
     page_calls: list[str] = []
     result = await crawl_request(
         {"url": "https://shared.test/public", "policy": _policy()},
-        http_fetcher=make_html_fetcher(page_calls),
+        http_fetcher=_html_fetcher(page_calls),
     )
     assert result["results"][0].status == "success"
     assert fetch_calls == 1
@@ -66,7 +72,7 @@ async def test_engine_fetch_populates_cache_seen_by_job_path():
     engine_calls: list[str] = []
     result = await crawl_request(
         {"url": "https://reverse.test/public", "policy": _policy()},
-        http_fetcher=make_html_fetcher(engine_calls),
+        http_fetcher=_html_fetcher(engine_calls),
     )
     assert result["results"][0].status == "success"
     assert sum(url.endswith("/robots.txt") for url in engine_calls) == 1
@@ -91,7 +97,7 @@ async def test_engine_and_job_single_flight_each_collapse_same_origin_misses():
         *(
             crawl_request(
                 {"url": f"https://flight.test/page-{index}", "policy": _policy()},
-                http_fetcher=make_html_fetcher([]),
+                http_fetcher=_html_fetcher([]),
                 fetch_and_decode=decode,
             )
             for index in range(5)
@@ -165,7 +171,7 @@ async def test_respect_false_does_not_fetch_robots_even_when_discovery_requests_
                 "discovery": {"robots": True},
             },
         },
-        http_fetcher=make_html_fetcher(calls),
+        http_fetcher=_html_fetcher(calls),
     )
     assert result["results"][0].status == "success"
     robots_diagnostics = result["results"][0].diagnostics["robots"]

@@ -1,4 +1,7 @@
-"""Sanctioned fetch fakes; definitions live in the sibling helper modules."""
+"""Sanctioned fetch fakes; definitions live in the sibling helper modules.
+
+Fetch doubles are imported here only when the bodies need them; the single
+import door for a fetch double is ``tests._fetch_doubles`` (#314, 3.3)."""
 
 from __future__ import annotations
 
@@ -38,24 +41,7 @@ from tests._crawl_runners import (
     xml_page,
 )
 from tests._fetch_doubles import (
-    SCOPE_KEEP_DROP_PAGES,
     FetcherDouble,
-    Route,
-    failing_fetcher,
-    make_fetch,
-    ok_fetcher,
-    raise_fetcher,
-    run_scoped_crawl,
-    scripted_fetcher,
-    site_fetcher,
-)
-from tests._fetch_scripted import (
-    concurrent_fetcher,
-    hanging_fetcher,
-    request_fetcher,
-    routed_fetcher,
-    sequenced_fetcher,
-    tap_fetcher,
 )
 from tests._policy_factories import canonical
 
@@ -106,11 +92,6 @@ async def invoke_browser_strategy(
     )
 
 
-def make_html_fetcher(calls: list[str], body: bytes = b"<html><body>page content</body></html>"):
-    """A fetcher serving one HTML body for any URL, recording what it was asked for."""
-    return FetcherDouble(lambda url, *_: {"status": 200, "ctype": "text/html", "body": body}, calls)
-
-
 async def run_default_http_fetcher(url: str, headers=None, *, pin=None):
     """The real default fetcher against a caller-supplied pin rule; ``pin`` is the
     fetcher's own seam, forwarded rather than rebound over the transport module's
@@ -145,7 +126,6 @@ def make_expiring_cache(tmpdir, *, max_total_bytes: int = 10_000):
 
 __all__ = [
     "LLM_FORMAT_TEST_HTML",
-    "SCOPE_KEEP_DROP_PAGES",
     "_spawn_fetch",
     "build_payload",
     "cache_with_etag",
@@ -154,33 +134,17 @@ __all__ = [
     "crawled_results",
     "crawled_urls",
     "clocked_cache",
-    "FetcherDouble",
     "invoke_browser_strategy",
     "invoke_http_strategy",
     "make_crawl_payload",
     "make_expiring_cache",
-    "make_fetch",
-    "make_html_fetcher",
     "make_seeded_cache",
-    "failing_fetcher",
-    "concurrent_fetcher",
-    "hanging_fetcher",
-    "ok_fetcher",
-    "raise_fetcher",
     "site_linking_to",
-    "Route",
-    "request_fetcher",
-    "routed_fetcher",
     "run_cached_twice",
     "run_chain",
-    "scripted_fetcher",
-    "sequenced_fetcher",
-    "tap_fetcher",
     "run_crawl_async",
     "run_default_http_fetcher",
     "run_http_strategy",
-    "run_scoped_crawl",
-    "site_fetcher",
     "LINKED_PAIR_LIMITS",
     "xml_page",
 ]

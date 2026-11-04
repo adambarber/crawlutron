@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from crawlutron.config.settings import CrawlerSettings
 from tests._crawl_runners import build_payload
-from tests._fetch_doubles import scripted_fetcher
+from tests._fetch_doubles import FetcherDouble
 
 
 def _payload() -> dict[str, object]:
@@ -27,7 +27,7 @@ async def test_document_extraction_never_constructs_settings_per_call(monkeypatc
     actually calls), and the patch on ``from_mapping`` makes any fallback loud."""
     import crawlutron.transport.content_pipeline as cp
 
-    fetcher = scripted_fetcher(status=200, ctype="text/csv", body=b"name,age\nada,30")
+    fetcher = FetcherDouble(lambda url, *_: {"status": 200, "ctype": "text/csv", "body": b"name,age\nada,30"})
     settings = CrawlerSettings.from_mapping({})
 
     with (

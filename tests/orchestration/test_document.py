@@ -18,7 +18,8 @@ from crawlutron.transport.document import (
 )
 from tests._doc_pool_fixtures import fresh_doc_pool
 from tests._extraction_helpers import format_extracted_document_text
-from tests._fetcher_factories import run_http_strategy, scripted_fetcher
+from tests._fetch_doubles import FetcherDouble
+from tests._fetcher_factories import run_http_strategy
 from tests._policy_factories import canonical
 
 FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "sample_table.pdf"
@@ -193,7 +194,9 @@ async def _document_extraction_of_a_csv():
 
     The body arrives as a bytearray (no content-encoding), which is the path
     the decompressor must pass through unchanged."""
-    fetcher = scripted_fetcher(status=200, ctype="text/csv", body=bytearray(b"name,age\nAlice,30\nBob,25"))
+    fetcher = FetcherDouble(
+        lambda url, *_: {"status": 200, "ctype": "text/csv", "body": bytearray(b"name,age\nAlice,30\nBob,25")}
+    )
     return await run_http_strategy(
         url="https://sudbury.ma.us/x.csv",
         policy={

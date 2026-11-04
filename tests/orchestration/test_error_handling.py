@@ -18,7 +18,8 @@ from crawlutron.transport.results import engine_result_from_exception
 from crawlutron.vocabulary.strategies import BROWSER_HEADED_WARMED, BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
 from tests._browser_doubles import _fake_browser
 from tests._chain_policies import chain_policy
-from tests._fetcher_factories import failing_fetcher, raise_fetcher, run_chain
+from tests._fetch_doubles import FetcherDouble
+from tests._fetcher_factories import run_chain
 from tests._worker_doubles import (
     assert_coroutine_worker_is_awaited_directly,
     assert_sync_worker_returning_awaitable_is_named,
@@ -215,7 +216,11 @@ _rendered = _fake_browser(
     text="rendered page body",
 )
 
-_unreachable_fetcher = failing_fetcher(AssertionError("an HTTP strategy ran but should not have"))
+_unreachable_fetcher = FetcherDouble(
+    lambda url, *_: AssertionError("an HTTP strategy ran but should not have")
+)
+
+_raise_fetcher = FetcherDouble(lambda url, *_: (_ for _ in ()).throw(ConnectionError("network down")))
 
 
 class TestStrategyChainGuardsRaisingStrategies:
@@ -273,7 +278,7 @@ class TestStrategyChainGuardsRaisingStrategies:
         """The HTTP strategy already envelopes its own raise; the chain guard
         must leave that result exactly as the sink built it."""
         result = await run_chain(
-            fetcher=raise_fetcher,
+            fetcher=_raise_fetcher,
             policy=chain_policy(HTTP_DECLARED_CRAWLER),
         )
 

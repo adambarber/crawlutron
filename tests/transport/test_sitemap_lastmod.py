@@ -5,7 +5,7 @@ import time
 
 from crawlutron.transport.fetch_helpers import SITEMAP_CACHE, fetch_sitemap_urls
 from tests._assertions import install_to_thread_spy
-from tests._fetcher_factories import make_fetch, request_fetcher
+from tests._fetch_doubles import FetcherDouble, make_fetch
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
 # Where the complexity claim lives: growth step and the ratio bound. Quadratic
@@ -27,8 +27,8 @@ def _sitemapindex(body: str) -> str:
 
 def _sitemap_fetcher(body: str):
     """A fetcher answering one 200 sitemap body."""
-    return request_fetcher(
-        lambda u, headers: make_fetch(
+    return FetcherDouble(
+        lambda u, _sent_headers, *_: make_fetch(
             url="http://x.test/sitemap.xml",
             final_url="http://x.test/sitemap.xml",
             status=200,

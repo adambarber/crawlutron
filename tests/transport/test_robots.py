@@ -25,7 +25,7 @@ from crawlutron.transport.robots_parse import (
     select_robots_values,
 )
 from crawlutron.vocabulary.identity import SERVICE_ID
-from tests._fetcher_factories import routed_fetcher
+from tests._fetch_doubles import FetcherDouble
 from tests._http_fetch_doubles import fake_fetcher as _fake_fetcher
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, crawl_policy
 from tests._timing_harnesses import cpu_seconds
@@ -346,12 +346,9 @@ async def test_purge_handles_production_shaped_entries():
             # that a full cache must not crash purging during a real crawl.
             em.robots_cache.put(robots_entry_key(f"http://purge-{i}.test"), ([], [], None), ttl=-1.0)
 
-        fetcher = routed_fetcher(
-            {
-                "/robots.txt": (200, "User-agent: *\nAllow: /\n", "text/plain"),
-            },
-            default=(200, b"<html><body>hi</body></html>", "text/html"),
-        )
+        _robots = (200, "User-agent: *\nAllow: /\n", "text/plain")
+        _home = (200, b"<html><body>hi</body></html>", "text/html")
+        fetcher = FetcherDouble(lambda url, _sent_headers, *_: _robots if "/robots.txt" in url.raw else _home)
 
         result = await crawl_request(
             {
@@ -397,18 +394,23 @@ async def test_robots_cache_shared_across_requests():
 
     calls = {"robots": 0}
 
+    def count_robots(url, headers):
+        if url.raw.endswith("/robots.txt"):
+            calls["robots"] += 1
+
     def make_fetcher():
         # A fresh fetcher per request is the point of this test -- the sharing under test lives in the robots
         # cache, not in the fetcher -- so what each call gets is the same routing with a shared counter behind
-        def count_robots(url, headers):
-            if url.raw.endswith("/robots.txt"):
-                calls["robots"] += 1
+        _routes = {"/robots.txt": (200, "User-agent: *\nDisallow: /secret\n", "text/plain")}
 
-        return routed_fetcher(
-            {"/robots.txt": (200, "User-agent: *\nDisallow: /secret\n", "text/plain")},
-            default=(200, b"<html><body>hi</body></html>", "text/html"),
-            on_route=count_robots,
-        )
+        def _robot_entry_answer(url, sent_headers, *_):
+            for fragment, spec in _routes.items():
+                if fragment in url.raw:
+                    count_robots(url, sent_headers)
+                    return spec
+            return (200, b"<html><body>hi</body></html>", "text/html")
+
+        return FetcherDouble(_robot_entry_answer)
 
     payload = {
         "url": "http://x.test/",

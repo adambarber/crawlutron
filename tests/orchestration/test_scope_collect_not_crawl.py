@@ -6,26 +6,17 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import pytest
 
 from crawlutron.models.result_record import ProducerEnvelope
-from crawlutron.orchestration.engine import crawl_request
-from crawlutron.transport.cache import HttpCache
-from tests._fetch_doubles import FetcherDouble, PageMap
-from tests._fetcher_factories import site_fetcher, tap_fetcher
+from tests._crawl_runners import crawled_results
 
 if TYPE_CHECKING:
     from crawlutron.models.host_policy import HostPolicy
     from crawlutron.models.http_fetcher import HttpFetcher
     from crawlutron.models.normalized_url import NormalizedUrl
-
-
-def _recording_fetcher(pages: PageMap) -> FetcherDouble:
-    # The real site fetcher answers; the tap only records. The subject of every test in this file is which
-    # URLs get enqueued, so the fetcher must not be a second implementation of the site.
-    return tap_fetcher(site_fetcher(pages))
 
 
 def _doc_pages():
@@ -51,13 +42,9 @@ async def _crawl_example_site(pages, **policy):
     ``policy`` is merged over the default limits, so a test names the one knob
     it is about instead of re-spelling a crawl it is not testing.
     """
-    fetcher = _recording_fetcher(pages)
-    payload = {
-        "url": "http://example.com/",
-        "policy": {"limits": {"max_depth": 2, "max_pages": 10}, **policy},
-    }
-    out = await crawl_request(payload, http_fetcher=cast("HttpFetcher", fetcher), cache=HttpCache())
-    return out, fetcher.calls
+    calls: list[str] = []
+    out = await crawled_results(pages, limits={"max_depth": 2, "max_pages": 10}, policy=policy, calls=calls)
+    return out, calls
 
 
 def _recorded_discovered(out: ProducerEnvelope, root_url: str = "http://example.com/") -> set[str]:

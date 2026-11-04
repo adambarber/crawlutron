@@ -6,11 +6,11 @@ the pattern is compiled once (rejecting pathological forms) and used in the loop
 
 import re
 
+from tests._crawl_runners import run_scoped_crawl
 from tests._fetcher_factories import (
     LINKED_PAIR_LIMITS,
     crawled_results,
     crawled_urls,
-    run_scoped_crawl,
     site_linking_to,
 )
 from tests._policy_factories import canonical

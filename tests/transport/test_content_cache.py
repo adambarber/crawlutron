@@ -16,8 +16,8 @@ from crawlutron.transport.content_cache import ContentCache
 from crawlutron.transport.fetchers import default_http_fetcher
 from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._cache_fixtures import _make_cache, counting_entry_reads, on_disk_bytes, reopen_cache, scoped_cache
-from tests._fetch_scripted import request_fetcher
-from tests._fetcher_factories import clocked_cache, crawled_results, run_http_strategy, tap_fetcher
+from tests._fetch_doubles import FetcherDouble
+from tests._fetcher_factories import clocked_cache, crawled_results, run_http_strategy
 from tests._lock_scope_walks import calls_inside_self_lock
 from tests.helpers.server import EtagHandler
 
@@ -32,7 +32,9 @@ def etag_case(tmp_path, etag_server):
     return (
         f"http://127.0.0.1:{port}/",
         {"strategies": [HTTP_DECLARED_CRAWLER], "extraction": "full", "headers": {}},
-        tap_fetcher(default_http_fetcher),
+        FetcherDouble(
+            lambda url, sent_headers, timeout, cap: default_http_fetcher(url, sent_headers, timeout, cap)
+        ),
         HttpCache(),
         ContentCache(tmp_path),
     )
@@ -177,7 +179,14 @@ def real_fetcher(calls: list[str] | None = None):
     Every integration below is about what the *real* transport did, so the
     fetcher is production's own; only the observation is test-owned.
     """
-    return default_http_fetcher if calls is None else tap_fetcher(default_http_fetcher, calls)
+    return (
+        default_http_fetcher
+        if calls is None
+        else FetcherDouble(
+            lambda url, sent_headers, timeout, cap: default_http_fetcher(url, sent_headers, timeout, cap),
+            calls,
+        )
+    )
 
 
 async def test_cache_short_circuits_real_fetch(counting_server, tmp_path):
@@ -335,7 +344,7 @@ async def _directive_runner(url: str, headers: dict[str, str], tmp_path):
     run = cached_strategy_runner(
         url,
         {"strategies": [HTTP_DECLARED_CRAWLER], "extraction": "full", "headers": {}},
-        request_fetcher(respond),
+        FetcherDouble(lambda url, sent_headers, *_: respond(url, sent_headers)),
         content_cache=ContentCache(tmp_path),
     )
     return run, fetches

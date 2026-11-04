@@ -6,7 +6,8 @@ from crawlutron.vocabulary.strategies import BROWSER_HEADLESS, HTTP_CFFI_IMPERSO
 from tests._browser_doubles import _fake_browser
 from tests._chain_policies import chain_policy
 from tests._cookie_retry_chain import cffi_retry_chain, cookie_oracle
-from tests._fetcher_factories import request_fetcher, run_chain
+from tests._fetch_doubles import FetcherDouble
+from tests._fetcher_factories import run_chain
 
 _rendered = _fake_browser(html="<html>rendered</html>", text="rendered")
 
@@ -81,10 +82,11 @@ async def test_harvested_cookies_never_cross_callers_in_the_chain():
         )
         policy["request_profile"] = {"cookie_namespace": tenant}
         token = COOKIE_NAMESPACE.set(tenant)
+        oracle = cffi_oracle(calls)
         try:
             result = await run_chain(
-                fetcher=request_fetcher(lambda url, headers: denied),
-                cffi_fetcher=request_fetcher(cffi_oracle(calls)),
+                fetcher=FetcherDouble(lambda url, sent_headers, *_: denied),
+                cffi_fetcher=FetcherDouble(lambda url, sent_headers, *_: oracle(url, sent_headers)),
                 browser_worker=_harvesting_worker(jar),
                 policy=policy,
             )

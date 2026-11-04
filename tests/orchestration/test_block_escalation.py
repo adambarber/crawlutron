@@ -6,7 +6,8 @@ import pytest
 
 from crawlutron.vocabulary.strategies import HTTP_CFFI_IMPERSONATE, HTTP_DECLARED_CRAWLER
 from tests._assertions import assert_result_success
-from tests._fetcher_factories import run_chain, scripted_fetcher, sequenced_fetcher
+from tests._fetch_doubles import FetcherDouble
+from tests._fetcher_factories import run_chain
 
 
 def escalate(base_policy: dict[str, object]) -> dict[str, object]:
@@ -45,12 +46,16 @@ class TestBlockAutoEscalation:
     ):
         # First strategy hits a challenge page; second (escalated) gets real content. Stated as a sequence so
         # the transition is the fixture.
-        fetcher = sequenced_fetcher(
-            [
-                (200, challenge_body, "text/html"),
-                (200, real_body, "text/html"),
-            ]
-        )
+        _ladder = [challenge_body, real_body]
+        _at = {"n": 0}
+
+        def _escalating_answer(url, *_):
+            # The ladder serves the challenge first, then holds at the escalated page.
+            index = min(_at["n"], len(_ladder) - 1)
+            _at["n"] += 1
+            return (200, _ladder[index], "text/html")
+
+        fetcher = FetcherDouble(_escalating_answer)
 
         result = await run_chain(fetcher=fetcher, policy=escalate(base_policy))
         assert_result_success(result, classification="rendered")
@@ -62,8 +67,12 @@ class TestBlockAutoEscalation:
         assert result.attempted_strategies[1].status == "success"
 
     async def test_blocked_single_strategy_reports_blocked(self, base_policy):
-        fetcher = scripted_fetcher(
-            body=b"<html><body>Access denied - please sign in to continue</body></html>"
+        fetcher = FetcherDouble(
+            lambda url, *_: {
+                "status": 200,
+                "body": b"<html><body>Access denied - please sign in to continue</body></html>",
+                "ctype": "text/html",
+            }
         )
 
         result = await run_chain(fetcher=fetcher, policy=base_policy)

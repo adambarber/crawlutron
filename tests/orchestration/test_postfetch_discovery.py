@@ -15,7 +15,8 @@ from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
 from tests._assertions import install_to_thread_spy
-from tests._fetcher_factories import invoke_browser_strategy, invoke_http_strategy, make_fetch
+from tests._fetch_doubles import make_fetch
+from tests._fetcher_factories import invoke_browser_strategy, invoke_http_strategy
 from tests._policy_factories import canonical, http_strategy_policy
 
 HTML = (
