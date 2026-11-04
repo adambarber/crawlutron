@@ -9,10 +9,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import time
 from dataclasses import dataclass
 
 from crawlutron.api.crawl_executor import execute_crawl
 from crawlutron.api.job_runner import arecord_terminal_failure
+from crawlutron.api.main_helpers import record_crawl_completion
 from crawlutron.api.response_shaping import (
     EnvelopeOptions,
     abuild_unified_crawl_response,
@@ -23,7 +25,6 @@ from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
-from crawlutron.runtime.metrics import get_metrics
 from crawlutron.storage.job_store import TERMINAL_STATUSES, CrawlJobState, JobStatus
 
 logger = logging.getLogger(__name__)
@@ -153,6 +154,7 @@ async def _crawl_and_build_response(
     Job results and stats are written here: the store is the single source of
     truth for async jobs; unified results are dict-tolerant (never crash stats).
     """
+    _crawl_started = time.monotonic()
     result = await execute_crawl(
         payload,
         settings=crawl_settings,
@@ -160,7 +162,13 @@ async def _crawl_and_build_response(
         url_pairs=url_pairs,
     )
     result["request_id"] = request_id
-    get_metrics().observe_crawl(results=result.get("results", []), caller_id=job.owner)
+    record_crawl_completion(
+        result,
+        _crawl_started,
+        event="crawl_request_completed",
+        logger=logger,
+        caller_id=job.owner,
+    )
     response_model = await abuild_unified_crawl_response(
         result.get("results", []),
         adapt=build_unified_result,

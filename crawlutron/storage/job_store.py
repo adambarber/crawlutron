@@ -62,6 +62,9 @@ def _owner_statement(
 
 logger = logging.getLogger(__name__)
 
+#: The admitted batch seeded at a single-shot job's birth (None = single URL).
+type _Batch = list[FrontierEntry] | None
+
 __all__ = [
     "TERMINAL_STATUSES",
     "CrawlJobState",
@@ -148,15 +151,16 @@ class JobStore:
         )
 
     def create_single_shot(
-        self, job_id: str, root_url: str, policy: PolicyLike, *, owner: str = ""
+        self, job_id: str, root_url: str, policy: PolicyLike, *, owner: str = "", frontier: _Batch = None
     ) -> CrawlJobState:
-        """Create a new single-shot async crawl job with the given job_id (request_id)."""
+        """Create a single-shot async crawl job; ``frontier`` seeds the admitted batch."""
         return _create_job(
             self,
             job_id,
             JobKind.SINGLE_SHOT,
             str(NormalizedUrl(root_url, policy=self._host_policy)),
             read_policy(policy, self.tier),
+            frontier=frontier,
             owner=owner,
         )
 

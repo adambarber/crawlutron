@@ -6,10 +6,12 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from crawlutron.api import job_runner
+from crawlutron.runtime.metrics import get_metrics
 from tests._assertions import (
     accepted_crawl,
     completed_crawl,
     plaintext_webhook_refusal,
+    poll_crawl_completion,
     poll_webhook_delivery,
     submit_async_crawl,
 )
@@ -362,3 +364,33 @@ class TestAsyncCrawlTeardownIsolation:
         await _drain_running_crawls()
 
         assert job_store.active_count_for_caller("") == 0
+
+
+class TestAsyncCrawlMetrics:
+    """The async door's metrics must say what the sync door's say (#314 A6)."""
+
+    async def test_async_crawl_records_elapsed_ms(self, crawl_api):
+        """One async crawl updates ``crawler_crawl_seconds_total``: the sync path
+        records elapsed through the shared completion helper, so the async path
+        does not leave the duration counter frozen at zero."""
+        get_metrics().reset()
+        before = get_metrics().snapshot().total_elapsed_ms
+        await submit_async_crawl(crawl_api.client, crawl_api.payload(async_mode=True))
+        after = get_metrics().snapshot().total_elapsed_ms
+        assert after > before
+
+
+class TestAsyncCrawlBatchTruth:
+    """A single-shot batch row must record that it is a batch (#314 A7)."""
+
+    async def test_batch_submission_records_frontier_size(self, crawl_api):
+        """Three submitted URLs are three frontier rows: the same whole-site
+        batch vocabulary, so listing cannot hide the batch behind URL 1."""
+        payload = crawl_api.batch_payload(["/", "/page2", "/page3"], async_mode=True)
+        body = await accepted_crawl(crawl_api.client, payload)
+        request_id = body["request_id"]
+        response = await poll_crawl_completion(crawl_api.client, request_id)
+        assert response.status_code == 200
+        status = (await crawl_api.client.get(f"/v1/jobs/{request_id}")).json()
+        assert status["frontier_size"] == 3
+        assert status["kind"] == "single_shot"
