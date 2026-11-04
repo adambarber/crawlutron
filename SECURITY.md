@@ -49,6 +49,26 @@ It is a powerful SSRF-enabled service that:
 - Inject credentials, rotate proxies, or rotate identities.
 - Bypass paywalls, logins, or any access control on the target.
 
+### Known residual weaknesses
+
+- **S1 — HTTPS DNS rebind window.** HTTP targets are IP-pinned end to end.
+  HTTPS browser navigation does two fresh DNS resolves but lets the browser
+  connect by hostname, so a hostile DNS server can rebind between check and
+  connect.
+- **S4 — credential origins ride the egress guard.** Credential origins pass
+  the same SSRF egress check as crawl targets: a private/loopback credential
+  origin requires `CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1`.
+- **S5 — caller keys hash with plain SHA-256.** Unsalted SHA-256 is acceptable
+  only because key secrets are `secrets.token_urlsafe(32)` (256-bit entropy);
+  a digest table adds nothing to attack against an unguessable secret.
+
+### Dangerous environment escape hatches
+
+The README's "Dangerous environment escape hatches" table is the single
+source (derived from the live settings/env code) for every `CRAWLUTRON_*`
+variable that weakens a safety default. Keep `CRAWLUTRON_RESPECT_ROBOTS` and
+the two `ALLOW_*` hatches unset in production.
+
 ## Operational Guidance
 
 - Never expose this service to the public internet without authentication,
