@@ -87,11 +87,9 @@ class DomainState:
         if self.bucket is None:
             snapshot.bucket = None
         else:
-            # Deferred import: scheduler.py imports this module, so the bucket
-            # constructor is only resolvable at call time, not import time.
-            from crawlutron.transport.scheduler import TokenBucket
-
-            copy = TokenBucket(self.bucket.rate, self.bucket.capacity)
+            # Same class as the source, default clock: the balance is transferred
+            # below, so the snapshot's refill runs off its own last_refill reading.
+            copy = type(self.bucket)(self.bucket.rate, self.bucket.capacity)
             copy.tokens = self.bucket.tokens
             copy.last_refill = self.bucket.last_refill
             snapshot.bucket = copy
