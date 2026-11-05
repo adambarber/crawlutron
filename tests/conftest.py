@@ -9,6 +9,7 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 from pathlib import Path
 from typing import TextIO
 from unittest.mock import patch
@@ -224,11 +225,13 @@ def _document_pool_per_test(monkeypatch):
     from crawlutron.extraction.doc_pool import DocExtractionPool
 
     built: list[DocExtractionPool] = []
+    build_lock = threading.Lock()
 
     class _LazyDocPool:
         def __getattr__(self, name):
-            if not built:
-                built.append(docex.build_doc_pool())
+            with build_lock:
+                if not built:
+                    built.append(docex.build_doc_pool())
             return getattr(built[0], name)
 
     proxy = _LazyDocPool()
