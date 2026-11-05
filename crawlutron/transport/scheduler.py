@@ -497,3 +497,12 @@ class DomainScheduler:
     @property
     def domain_cooldowns(self) -> dict[str, float]:
         return {d: s.cooldown_until for d, s in self._domain_state.items() if s.cooldown_until}
+
+    @property
+    def global_limit(self) -> int:
+        """The configured global concurrency ceiling (the test read door for #633)."""
+        return self._global_limit
+
+    def snapshot(self) -> dict[str, DomainState]:
+        """A read-only view of the per-domain records (the test read door for #633)."""
+        return dict(self._domain_state)
