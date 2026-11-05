@@ -459,12 +459,12 @@ def test_respawn_terminates_the_replaced_worker_off_the_pool_lock(fake_pool):
     )
 
 
-def test_undead_retired_slot_does_not_consume_a_pool_slot(fake_pool):
+def test_undead_retired_slot_does_not_consume_a_pool_slot(fake_pool, monkeypatch):
     """A slot that will not die must not permanently shrink the pool.
 
     A retired-but-alive slot is skipped by both scans, so if it still counts
     toward the size budget the pool is one worker short forever."""
-    _zombie, pool, spawner = install_unkillable_doc_worker()
+    _zombie, pool, spawner = install_unkillable_doc_worker(monkeypatch)
 
     spawned, worker = _acquire_the_replacement(pool, spawner, 31337)
 

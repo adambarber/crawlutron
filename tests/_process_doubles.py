@@ -123,12 +123,16 @@ class StubSpawner:
         self._queue.extend(workers)
 
 
-def install_unkillable_doc_worker() -> tuple[DocWorker, DocExtractionPool, StubSpawner]:
+def install_unkillable_doc_worker(monkeypatch) -> tuple[DocWorker, DocExtractionPool, StubSpawner]:
     """:func:`unkillable_doc_worker`, seeded into the pool as its only slot.
 
     Grown through a real acquisition, so the pool matches production's arrival;
-    the spawner lets a test queue the workers the pool should grow into."""
+    the spawner lets a test queue the workers the pool should grow into. Both
+    module bindings are patched so no lazy proxy survives alongside the stub
+    pool (#615); monkeypatch restores them at fixture finalization.
+    """
     import crawlutron.extraction.content as ext_mod
+    import crawlutron.extraction.documents as docex
 
     zombie = unkillable_doc_worker()
     spawner = StubSpawner(zombie)
@@ -136,5 +140,6 @@ def install_unkillable_doc_worker() -> tuple[DocWorker, DocExtractionPool, StubS
     pool.acquire(0.1)
     pool.release(zombie)
     spawner.asked.clear()
-    ext_mod.DOC_POOL = pool
+    monkeypatch.setattr(docex, "DOC_POOL", pool, raising=False)
+    monkeypatch.setattr(ext_mod, "DOC_POOL", pool, raising=False)
     return zombie, pool, spawner

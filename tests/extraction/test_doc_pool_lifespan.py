@@ -130,11 +130,11 @@ def test_doc_timeout_kills_and_pool_recovers(monkeypatch):
         _restore_pool()
 
 
-def test_undead_retired_slot_is_reaped_from_the_pool(fake_pool):
+def test_undead_retired_slot_is_reaped_from_the_pool(fake_pool, monkeypatch):
     """A retired slot whose process will not die must be reaped on the normal
     path: it is skipped by both scans, so it occupies a slot -- and holds a
     PID -- forever while the size budget grows around it."""
-    zombie, pool, spawner = install_unkillable_doc_worker()
+    zombie, pool, spawner = install_unkillable_doc_worker(monkeypatch)
 
     spawned, worker = _acquire_the_replacement(pool, spawner, 31337)
 
