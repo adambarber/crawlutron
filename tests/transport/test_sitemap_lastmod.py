@@ -61,12 +61,12 @@ async def test_lastmod_association_is_linear_not_quadratic():
     bound once (#611) -- and the best-of-N sampling keeps a descheduled
     process from reading as super-linear.
     """
-    small_elapsed = await _best_of_three(_entries(_BASE), _BASE + 1)
-    large_elapsed = await _best_of_three(_entries(_BASE * _GROW_STEP), _BASE * _GROW_STEP + 1)
+    small_elapsed = await _warmed_best(_entries(_BASE), _BASE + 1)
+    large_elapsed = await _warmed_best(_entries(_BASE * _GROW_STEP), _BASE * _GROW_STEP + 1)
     assert large_elapsed < small_elapsed * _RATIO_BOUND, "association cost grew super-linearly"
 
 
-async def _best_of_three(entries: str, max_urls: int, samples: int = _SAMPLES) -> float:
+async def _warmed_best(entries: str, max_urls: int, samples: int = _SAMPLES) -> float:
     """Warm the walk once, then return the cheapest of ``samples`` process_time runs."""
     await _walk(entries, max_urls)
     best = float("inf")
