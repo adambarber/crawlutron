@@ -30,7 +30,6 @@ pytest_plugins = (
     "tests.fixtures.ssrf_guard_required",
     "tests.fixtures.fake_provider_http",
     "tests.fixtures.recording_worker",
-    "tests.fixtures.recording_worker",
     "tests.fixtures.watch_store",
     "tests.fixtures.client",
     "tests.fixtures.real_http_servers",
