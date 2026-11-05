@@ -15,6 +15,18 @@ import pytest
 import crawlutron.transport.pinned_dns as pt
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_registry():
+    """The saturation verdicts must not read pool state other tests left
+    behind: drain the shared registry first, and name the contamination
+    instead of letting a leaked future decide a later assertion."""
+    deadline = time.monotonic() + 15.0
+    while pt.dns_in_flight_resolves() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert pt.dns_in_flight_resolves() == 0, "a prior test leaked registered DNS futures"
+    yield
+
+
 def test_a_saturated_resolver_fails_fast():
     """When every resolver worker is inside a live resolve, a new resolve must
     raise the classifiable ResolverBudgetExceeded in ~no time, NOT queue the
