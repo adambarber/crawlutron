@@ -488,11 +488,13 @@ class DomainScheduler:
     def domain_cooldowns(self) -> dict[str, float]:
         return {d: s.cooldown_until for d, s in self._domain_state.items() if s.cooldown_until}
 
+    def snapshot(self) -> dict[str, DomainState]:
+        """An observation-only view: fresh DomainState copies per domain. Scalars are
+        COPIED, so a reader can re-stamp without touching the scheduler's record;
+        each DomainGate is SHARED -- a live semaphore, so occupancy stays truthful."""
+        return {n: s.observation_copy() for n, s in self._domain_state.items()}
+
     @property
     def global_limit(self) -> int:
         """Configured global concurrency ceiling: the test read door (#633)."""
         return self._global_limit
-
-    def snapshot(self) -> dict[str, DomainState]:
-        """A read-only view of the per-domain records: the test read door (#633)."""
-        return dict(self._domain_state)

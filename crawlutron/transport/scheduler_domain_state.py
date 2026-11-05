@@ -67,6 +67,26 @@ class DomainState:
         # mints the record and sizes this gate from its knobs.
         self.gate = DomainGate(1)
 
+    def observation_copy(self) -> DomainState:
+        """A snapshot record: every scalar field copied, the LIVE gate shared.
+
+        The gate is a semaphore, not data -- it cannot be copied, and
+        sharing keeps occupancy truthful. Writes to the copy never reach
+        the scheduler's record."""
+        snapshot = DomainState()
+        snapshot.next_fire = self.next_fire
+        snapshot.cooldown_until = self.cooldown_until
+        snapshot.circuit_open_until = self.circuit_open_until
+        snapshot.failures = self.failures
+        snapshot.trips = self.trips
+        snapshot.min_delay = self.min_delay
+        snapshot.ema = self.ema
+        snapshot.last_seen = self.last_seen
+        snapshot.pin = self.pin
+        snapshot.bucket = self.bucket
+        snapshot.gate = self.gate
+        return snapshot
+
     def live(
         self,
         *,

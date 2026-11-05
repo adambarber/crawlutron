@@ -71,9 +71,9 @@ def _unbounded_domain_delay_writes(tree: ast.AST, path: pathlib.Path) -> list[st
     the old map name.
     """
     offenders: list[str] = []
-    # __init__ is the field's zero default, not a floor installation; only the
-    # clamped setter may raise it above zero.
-    exempt = {"set_domain_min_delay", "__init__"}
+    # __init__ is the field's zero default, not a floor installation; only the clamped setter may raise it.
+    # observation_copy restates the source's OWN already-clamped value -- it installs no new floor.
+    exempt = {"set_domain_min_delay", "__init__", "observation_copy"}
     for func in (
         node for node in nodes_of(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     ):
