@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from crawlutron.models.browser_profile_record import BrowserProfileRecord
 from crawlutron.models.crawl_strategy import CrawlStrategy
+from crawlutron.vocabulary.limits import MAX_CRAWL_STRATEGIES
 
 
 class TestBrowserActionKeysAreClosed:
@@ -212,20 +213,16 @@ class TestStrategyLadderIsBounded:
     session cookie a later CFFI entry replays -- repetition can be the win.
     """
 
-    #: Most ladder entries in one request. The vocabulary is three strategies and cookie replay needs a repeat
-    #: or two after a browser render, so this is several times more than any useful ladder.
-    MAX_STRATEGIES = 16
-
     def test_a_ladder_at_the_ceiling_is_accepted(self):
         from crawlutron.models.crawl_policy import CrawlPolicy
 
-        ladder = [CrawlStrategy.HTTP_DECLARED_CRAWLER] * self.MAX_STRATEGIES
-        assert len(CrawlPolicy(strategies=ladder).strategies) == self.MAX_STRATEGIES
+        ladder = [CrawlStrategy.HTTP_DECLARED_CRAWLER] * MAX_CRAWL_STRATEGIES
+        assert len(CrawlPolicy(strategies=ladder).strategies) == MAX_CRAWL_STRATEGIES
 
     def test_a_ladder_over_the_ceiling_is_refused(self):
         from crawlutron.models.crawl_policy import CrawlPolicy
 
-        over = [CrawlStrategy.HTTP_DECLARED_CRAWLER] * (self.MAX_STRATEGIES + 1)
+        over = [CrawlStrategy.HTTP_DECLARED_CRAWLER] * (MAX_CRAWL_STRATEGIES + 1)
         with pytest.raises(ValidationError, match="at most"):
             CrawlPolicy(strategies=over)
 
@@ -263,6 +260,7 @@ class TestRequestLimitConstantsArePinned:
             pytest.param("MAX_LAZY_SCROLL_DELAY_SECONDS", 5.0, id="lazy-scroll-delay"),
             pytest.param("MAX_COOKIE_HARVEST_TIMEOUT_SECONDS", 5.0, id="cookie-harvest"),
             pytest.param("MAX_SCREENSHOT_SELECTORS", 16, id="screenshot-selectors"),
+            pytest.param("MAX_CRAWL_STRATEGIES", 16, id="crawl-strategies"),
         ],
     )
     def test_the_vocabulary_limit_holds_its_wire_value(self, constant, value):

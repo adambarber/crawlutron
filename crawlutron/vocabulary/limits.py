@@ -10,6 +10,10 @@ from typing import Final
 
 MAX_SCREENSHOT_SELECTORS: Final[int] = 16
 
+# Most entries in one policy's ordered fetch-strategy ladder; the vocabulary is
+# three strategies and cookie replay needs a repeat or two after a browser render.
+MAX_CRAWL_STRATEGIES: Final[int] = 16
+
 #: Most scroll steps in one lazy-load pass. Deep pages settle in a few dozen;
 #: this is well past the point of usefulness, not the point of cost.
 MAX_LAZY_SCROLL_STEPS: Final[int] = 50
