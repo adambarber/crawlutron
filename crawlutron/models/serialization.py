@@ -10,13 +10,13 @@ from collections.abc import Callable, Mapping
 from dataclasses import MISSING, fields, is_dataclass
 from typing import Union, cast, get_args, get_origin, get_type_hints
 
-from crawlutron.models.crawl_result import CrawlResult, EngineCrawlResult
+from crawlutron.models.freezable_record import FreezableRecord
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.json_value import JsonValue
 from crawlutron.models.normalized_url import NormalizedUrl
 
 
-def to_dict(result: EngineCrawlResult | CrawlResult) -> dict[str, JsonValue]:
+def to_dict(result: FreezableRecord) -> dict[str, JsonValue]:
     """Return a JSON-serializable dict for any frozen-dataclass crawl result, WITHOUT
     deepcopying leaf values (heavy fields are shared by reference; only nested
     dataclasses become dicts). elapsed_ms is a property, so fields() -- this walk -- omits it.
