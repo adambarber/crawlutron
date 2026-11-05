@@ -1,12 +1,24 @@
 """Scheduler scope honesty: per-domain state is per-instance, not process-wide."""
 
 import asyncio
+from dataclasses import dataclass
 
 import pytest
 
+import crawlutron.transport.scheduler as scheduler_mod
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.transport.scheduler import DomainScheduler
+from crawlutron.vocabulary.taxonomy import ResultStatus
 from tests._timing_harnesses import HANG_GUARD_SECONDS
+
+
+@dataclass
+class _Result:
+    """The SchedulerResult shape every worker must hand back: status drives the
+    domain-health verdict, elapsed_ms feeds the adaptive latency estimator."""
+
+    status: ResultStatus = "success"
+    elapsed_ms: int = 1
 
 
 def test_scheduler_instances_have_independent_state():
@@ -62,12 +74,9 @@ def test_scheduler_class_docstring_declares_instance_scope():
     assert "per-instance" in doc or "per instance" in doc
 
 
-async def test_concurrent_instances_allow_combined_concurrency():
-    """Two schedulers with per_domain_limit=1 each allow 1 concurrent → combined 2.
-
-    This demonstrates the scope: the per-domain gate is per-instance. A caller
-    assuming a service-wide bound would observe double the rate with two requests.
-    """
+def _two_instances_with_one_job_each():
+    """The shared scenario for the scope pair: two per-domain_limit=1 instances,
+    one job on the same domain each. Returns (a, b, jobs_a, jobs_b)."""
     settings = CrawlerSettings.from_mapping(
         {
             "CRAWLUTRON_PER_DOMAIN_CONCURRENCY": "1",
@@ -76,67 +85,71 @@ async def test_concurrent_instances_allow_combined_concurrency():
     )
     a = DomainScheduler.from_settings(settings, global_limit=10, max_rps=0.0)
     b = DomainScheduler.from_settings(settings, global_limit=10, max_rps=0.0)
+    jobs_a = [_Job(0)]
+    jobs_b = [_Job(1)]
+    return a, b, jobs_a, jobs_b
 
-    class Job:
-        def __init__(self, index, domain):
-            self.index = index
-            self.domain = domain
 
-    jobs_a = [Job(0, "example.com")]
-    jobs_b = [Job(1, "example.com")]
+class _Job:
+    """One queued job on the shared test domain."""
+
+    def __init__(self, index):
+        self.index = index
+        self.domain = "example.com"
+
+
+async def _race_both_instances(a, b, jobs_a, jobs_b, worker, timeout_seconds):
+    """Run both instances' single job through ``worker`` under one timeout:
+    the gather both scope tests share, parameterized so the two tests differ
+    only in worker, timeout, and expectation."""
+    return await asyncio.wait_for(
+        asyncio.gather(
+            a.run(jobs_a, worker, failed_result=lambda j, e: None),
+            b.run(jobs_b, worker, failed_result=lambda j, e: None),
+        ),
+        timeout=timeout_seconds,
+    )
+
+
+async def test_concurrent_instances_allow_combined_concurrency():
+    """Two schedulers with per_domain_limit=1 each allow 1 concurrent → combined 2.
+
+    This demonstrates the scope: the per-domain gate is per-instance. A caller
+    assuming a service-wide bound would observe double the rate with two requests.
+    """
+    a, b, jobs_a, jobs_b = _two_instances_with_one_job_each()
 
     # A rendezvous, not a stopwatch: the two workers must both be inside their
     # jobs at once, which only independent gates permit.
     both_running = asyncio.Barrier(2)
+    success_a, success_b = _Result(), _Result()
 
     async def slow_worker(job):
         async with both_running:
-            return job
+            return success_a if job.index == 0 else success_b
 
-    results = await asyncio.wait_for(
-        asyncio.gather(
-            a.run(jobs_a, slow_worker, failed_result=lambda j, e: None),
-            b.run(jobs_b, slow_worker, failed_result=lambda j, e: None),
-        ),
-        timeout=HANG_GUARD_SECONDS,
-    )
-    # run() returns per-job result dicts keyed by job index; both completed.
-    for result in results:
-        assert result is not None
-        assert list(result) == [0] or list(result) == [1]
+    results = await _race_both_instances(a, b, jobs_a, jobs_b, slow_worker, HANG_GUARD_SECONDS)
+    # run() returns job.index -> the worker's own result, not a failure fill:
+    # each instance delivered exactly its worker's verdict for its own job.
+    assert results[0] == {0: success_a}
+    assert results[1] == {1: success_b}
 
 
-def test_the_gather_of_two_instances_cannot_outlast_a_shared_gate():
-    """Red check for the conversion: a SHARED gate serializes the two workers, so
-    the rendezvous barrier above cannot be reached by both -- the point of the
-    scope test, stated as a hang-guard instead of a stopwatch claim."""
+async def test_a_shared_gate_mint_sinks_the_rendezvous(monkeypatch):
+    """Literal mutation for the rendezvous above: minting ONE shared gate for
+    both instances (the collapse #577 guards against) must break the rendezvous
+    -- the second worker can never enter, so the run times out under the guard."""
 
-    class SharedJob:
-        def __init__(self, index):
-            self.index = index
-            self.domain = "example.com"
+    shared_gate = scheduler_mod.DomainGate(1)
+    monkeypatch.setattr(scheduler_mod, "DomainGate", lambda limit: shared_gate)
 
-    settings = CrawlerSettings.from_mapping(
-        {
-            "CRAWLUTRON_PER_DOMAIN_CONCURRENCY": "1",
-            "CRAWLUTRON_PER_DOMAIN_DELAY_MS": "0",
-        }
-    )
-    shared = DomainScheduler.from_settings(settings, global_limit=10, max_rps=0.0)
+    a, b, jobs_a, jobs_b = _two_instances_with_one_job_each()
 
     both_running = asyncio.Barrier(2)
 
     async def slow_worker(job):
         async with both_running:
-            return job
+            return _Result()
 
-    jobs = [SharedJob(0), SharedJob(1)]
-
-    async def scenario():
-        with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(
-                shared.run(jobs, slow_worker, failed_result=lambda j, e: None),
-                timeout=0.2,
-            )
-
-    asyncio.run(scenario())
+    with pytest.raises(asyncio.TimeoutError):
+        await _race_both_instances(a, b, jobs_a, jobs_b, slow_worker, 0.2)

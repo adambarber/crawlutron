@@ -13,7 +13,6 @@ import time
 import pytest
 
 import crawlutron.transport.pinned_dns as pt
-from tests._timing_harnesses import HANG_GUARD_SECONDS
 
 
 @pytest.fixture(autouse=True)
@@ -45,9 +44,10 @@ def test_a_saturated_resolver_fails_fast():
         pt.dns_clear_saturation()
 
 
-def await_guarded(work):
-    """Run a synchronous call on a thread under the absolute hang guard: if the
-    refusal is not fast, the join times out and the test fails as a hang."""
+def await_guarded(work, ceiling_seconds=1.0):
+    """Run a synchronous call on a thread under a tight purpose-bound ceiling:
+    the saturated refusal must return well inside it; a queued call fails the
+    is_alive check as a hang, never as merely slow."""
     outcome = {}
 
     def runner():
@@ -58,7 +58,7 @@ def await_guarded(work):
 
     worker = threading.Thread(target=runner, daemon=True)
     worker.start()
-    worker.join(timeout=HANG_GUARD_SECONDS)
+    worker.join(timeout=ceiling_seconds)
     assert not worker.is_alive(), "the saturated refusal did not return fast -- it queued"
     if "error" in outcome:
         raise outcome["error"]
