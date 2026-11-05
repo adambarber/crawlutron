@@ -67,7 +67,7 @@ class BrowserFakePage:
         self.context = context if context is not None else FakePageContext()
         self.on_wait_for_selector = on_wait_for_selector or _selector_is_present
 
-    async def on(self, event, handler):
+    def on(self, event, handler):
         pass
 
     async def goto(self, url, wait_until="load", **kwargs):
