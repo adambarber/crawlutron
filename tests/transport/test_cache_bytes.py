@@ -35,15 +35,15 @@ def budgeted_cache(tmp_path, *, max_total_bytes: int = 400, **settings) -> Conte
     )
 
 
-def _at_cap_budget() -> tuple[float, dict, int]:
+def _at_cap_budget() -> tuple[float, dict[str, str], int]:
     """``(now, value, cap)`` where ``cap`` is exactly the on-disk envelope size.
 
     The budget is the envelope's bytes, not the value's, so the two are computed
     together here -- a change to either moves both.
     """
     now = 1000.0
-    value = {"body": "x" * 150}
-    envelope = {"expires": now + 60, "value": value, "cached_at": now}
+    value: dict[str, str] = {"body": "x" * 150}
+    envelope: dict[str, object] = {"expires": now + 60, "value": value, "cached_at": now}
     cap = len(json.dumps(envelope))
     assert cap > len(json.dumps(value))
     return now, value, cap
@@ -159,7 +159,7 @@ class TestContentCacheByteBudget:
     def test_cache_writes_are_best_effort(self, tmp_path, monkeypatch):
         """The disk writer declares durable=False: entries are reproducible, so a
         power loss may drop one whole but the fsync-per-store ceiling is gone (#357)."""
-        kwargs: list[dict] = []
+        kwargs: list[dict[str, object]] = []
         real_write = cci.atomic_write_text
 
         def spy(path, data, **kw):

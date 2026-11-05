@@ -10,6 +10,7 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+from typing import TextIO
 from unittest.mock import patch
 
 import pytest
@@ -133,8 +134,13 @@ def pytest_collection_modifyitems(config, items):
 # 435: zero-run xdist workers abort natively when teardown races the camoufox
 # import graph's shutdown; unbuffered streams shrink that race.
 try:
-    sys.stdout.reconfigure(line_buffering=False, write_through=True)
-    sys.stderr.reconfigure(line_buffering=False, write_through=True)
+    # ``reconfigure`` exists only on TextIOWrapper, not every TextIO; the
+    # except arm already tolerates both the attr and value gaps.
+    stdout: TextIO = sys.stdout
+    stderr: TextIO = sys.stderr
+    if hasattr(stdout, "reconfigure") and hasattr(stderr, "reconfigure"):
+        stdout.reconfigure(line_buffering=False, write_through=True)
+        stderr.reconfigure(line_buffering=False, write_through=True)
     os.environ["PYTHONUNBUFFERED"] = "1"
     os.environ["PYTHONDONTWRITEBYTECODE"] = "1"  # no pyc writes during collection
 except (AttributeError, ValueError):

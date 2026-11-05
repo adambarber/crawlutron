@@ -9,7 +9,7 @@ from crawlutron.extraction.content import (
     looks_like_document,
     text_from_html,
 )
-from crawlutron.extraction.doc_pool import doc_task_hooks, install_doc_pool_hooks
+from crawlutron.extraction.doc_pool import DocPoolHooks, doc_task_hooks, install_doc_pool_hooks
 from tests._extraction_helpers import (
     detect_pagination,
     doc_worker_acquisitions,
@@ -20,7 +20,8 @@ from tests._policy_factories import canonical
 
 
 def test_document_test_hooks_follow_the_injected_seam():
-    for hooks in ({"die": True, "hang": True}, None):
+    injected: DocPoolHooks = {"die": True, "hang": True, "output": None}
+    for hooks in (injected, None):
         install_doc_pool_hooks(hooks)
         assert doc_task_hooks() is hooks
     install_doc_pool_hooks(None)
@@ -192,6 +193,6 @@ async def test_extract_document_skips_oversized_input(monkeypatch):
     acquisitions = doc_worker_acquisitions(monkeypatch)
     monkeypatch.setattr(docex, "EXTRACTION_DOC_MAX_INPUT_BYTES", 100)
 
-    out = await asyncio.to_thread(ex.extract_document, b"x" * 101, "http://x.test/big.pdf")
+    out = await asyncio.to_thread(ex.extract_document, b"x" * 101, canonical("http://x.test/big.pdf"))
     assert out.text is None and out.markdown is None
     assert acquisitions == [], "a refused document still asked for a markitdown worker"

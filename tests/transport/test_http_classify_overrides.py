@@ -29,7 +29,7 @@ class _Extracted:
     content_type = "text/html"
 
 
-def _evidence(classification: str, signature: str, status: int) -> list[dict]:
+def _evidence(classification: str, signature: str, status: int) -> list[dict[str, object]]:
     return [
         {
             "classification": classification,

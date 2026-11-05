@@ -6,7 +6,7 @@ restore (a leaked builder fails only on a rerun) and one-kind-at-a-time.
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from typing import Any
 
 import pytest
@@ -17,7 +17,7 @@ __all__ = ["stub_builder"]
 
 
 @pytest.fixture
-def stub_builder() -> Callable[[str, Callable[..., Any]], None]:
+def stub_builder() -> Generator[Callable[[str, Callable[..., Any]], None], None, None]:
     """Install a pooled-client builder for this test's body, undone at teardown.
 
     ``seam`` is ``"http"`` or ``"cffi"`` -- the keyword the public seam accepts, not

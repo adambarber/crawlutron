@@ -332,7 +332,7 @@ class TestSchedulerFailureAccountingIsAboutStatuses:
         return terminal_engine_result(
             TerminalResult(
                 original_url=job.url.raw,
-                normalized_url=job.url.raw,
+                normalized_url=job.url,
                 strategy=None,
                 classification=classification,
                 # ``error`` is a taxonomy code, not an optional: production's own envelope passes the

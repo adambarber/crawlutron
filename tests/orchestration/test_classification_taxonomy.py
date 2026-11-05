@@ -19,6 +19,7 @@ from crawlutron.vocabulary.taxonomy import (
 from tests._classification_sets import GROUPING_ASSIGNMENTS as _GROUPING_ASSIGNMENTS
 from tests._classification_sets import GROUPINGS as _GROUPINGS
 from tests._classification_sets import UNRECOGNIZED_LABELS
+from tests._policy_factories import canonical
 from tests._result_builders import skipped_result
 from tests.chokepoint_walks import app_trees, nodes_of
 
@@ -318,7 +319,7 @@ class TestStatusAgreesWithClassification:
         result = engine_result_from_exception(
             error=ConnectionError("boom"),
             original_url="http://example.com/",
-            normalized_url="http://example.com/",
+            normalized_url=canonical("http://example.com/"),
             strategy=None,
             known_classification=classification,
         )
@@ -341,7 +342,7 @@ class TestStatusAgreesWithClassification:
         from crawlutron.vocabulary.taxonomy import status_for_classification
 
         result = terminal_crawl_result(
-            url="http://example.com/",
+            url=canonical("http://example.com/"),
             status="retry_exhausted",
             classification="navigation_timeout",
             attempts=2,
@@ -372,7 +373,7 @@ class TestStatusAgreesWithClassification:
             failed_engine_result(
                 TerminalResult(
                     original_url="http://example.com/",
-                    normalized_url="http://example.com/",
+                    normalized_url=canonical("http://example.com/"),
                     strategy=None,
                     # robots_disallowed's taxonomy status is "skipped", so a builder asserting "failed" for it
                     # is exactly the disagreement the guard exists to reject.

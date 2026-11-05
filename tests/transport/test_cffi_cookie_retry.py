@@ -15,7 +15,7 @@ _rendered = _fake_browser(html="<html>rendered</html>", text="rendered")
 async def test_browser_cookies_replayed_through_cffi():
     browser_cookies.store_browser_cookies("example.com", "incap_ses=abc; visid=def")
 
-    calls = []
+    calls: list[dict[str, str]] = []
     result = await cffi_retry_chain(on_cffi=cookie_oracle("incap_ses", record=calls))
 
     assert result.status == "success"

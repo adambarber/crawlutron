@@ -8,7 +8,7 @@ from tests._policy_factories import admit, canonical
 
 
 async def test_discovered_link_delay_commits_in_order_and_breaks_at_cap():
-    events: list[tuple] = []
+    events: list[tuple[str, ...] | tuple[str, str, float]] = []
     links = [
         "https://example.test/first",
         "https://example.test/over-cap",

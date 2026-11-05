@@ -13,10 +13,20 @@ import pytest
 from crawlutron.safety.atomic_write import atomic_write_text
 
 
+def _counting_fsync(real_fsync, calls: list[int]):
+    """The fsync double: record, delegate, return the delegate's answer."""
+
+    def _fsync(fd: int) -> object:
+        calls.append(fd)
+        return real_fsync(fd)
+
+    return _fsync
+
+
 def _watch_fsync(monkeypatch, calls: list[int]) -> None:
     """Count ``os.fsync`` calls without dropping them, so durability is observable."""
     real_fsync = os.fsync
-    monkeypatch.setattr(os, "fsync", lambda fd: calls.append(fd) or real_fsync(fd))
+    monkeypatch.setattr(os, "fsync", _counting_fsync(real_fsync, calls))
 
 
 class TestAtomicWrite:

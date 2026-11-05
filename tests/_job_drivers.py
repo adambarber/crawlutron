@@ -8,7 +8,7 @@ from crawlutron.admission.policy import PolicyLike
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.json_value import JsonValue
-from crawlutron.storage.job_store import CrawlJobState, FrontierEntry, JobStatus
+from crawlutron.storage.job_store import CrawlJobState, FrontierEntry, JobStatus, JobStore
 from tests._job_store_doubles import seed_frontier
 from tests._policy_factories import canonical
 
@@ -90,7 +90,7 @@ async def run_scripted_api_job(
     return await run_api_job(client, job_store, root_url, ScriptedExecute(results=results), policy)
 
 
-def drive_job(job_id, job_store, settings=None, shutdown_event=None):
+def drive_job(job_id: str, job_store: JobStore, settings=None, shutdown_event=None) -> asyncio.Task[None]:
     """Run ``run_job`` for one already-persisted job; return the task.
 
     ``run_job``'s call shape is every runner-lifecycle test's ending, so it is

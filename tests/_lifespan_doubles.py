@@ -10,8 +10,10 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import pytest
 
+    from crawlutron.health.readiness import ReadinessState
 
-def stub_heavy_teardown(monkeypatch: pytest.MonkeyPatch) -> object:
+
+def stub_heavy_teardown(monkeypatch: pytest.MonkeyPatch) -> ReadinessState:
     """Neutralise the lifespan's heavy teardown -- each close it reaches is a no-op
     and a fresh ``READINESS_STATE`` is installed -- and return that state, which
     a sampler test asserts against.

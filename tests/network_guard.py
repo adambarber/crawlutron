@@ -76,8 +76,9 @@ def pytest_configure(config: pytest.Config) -> None:
     global _INSTALLED
     if _INSTALLED:
         return
-    # Autouse plugin hooks: armed at configure, before any fixture or test can dial out.
-    socket.socket.connect = _guarded_connect
+    # Autouse plugin hooks armed before any test can dial out. The class-method
+    # swap needs setattr (a typed assignment is refused statically).
+    setattr(socket.socket, "connect", _guarded_connect)  # noqa: B010 - the seam is the subject
     socket.create_connection = _guarded_create
     socket.getaddrinfo = _guarded_gai
     _INSTALLED = True
@@ -87,7 +88,7 @@ def pytest_unconfigure(config: pytest.Config) -> None:
     global _INSTALLED
     if not _INSTALLED:
         return
-    socket.socket.connect = _REAL_CONNECT
+    setattr(socket.socket, "connect", _REAL_CONNECT)  # noqa: B010 - the seam is the point
     socket.create_connection = _REAL_CREATE
     socket.getaddrinfo = _REAL_GAI
     _INSTALLED = False

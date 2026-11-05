@@ -12,13 +12,13 @@ from types import SimpleNamespace
 
 from crawlutron.api.identity_router import router as identity_router
 from crawlutron.api.keys_router import router as keys_router
-from crawlutron.models.taxonomy import Classification, CrawlStrategyName
-from tests._policy_factories import canonical
+from crawlutron.models.render_options import RenderOptions
+from crawlutron.models.taxonomy import Classification
 from crawlutron.transport.browser import BrowserRenderer
 from crawlutron.transport.browser_pool import BrowserPool
 from crawlutron.transport.render_page import RenderPage
-from crawlutron.models.render_options import RenderOptions
 from tests._async_harnesses import issue_key
+from tests._policy_factories import canonical
 from tests._quota_harness import service_client
 
 
@@ -53,7 +53,7 @@ class _HarvestingRenderer(BrowserRenderer):
 
 
 async def _harvest_then_render(
-    render_page: RenderPage, render_options: RenderOptions
+    render_page: RenderPage, _render_options: RenderOptions
 ) -> tuple[str | None, str | None, Classification, bool]:
     from crawlutron.transport.browser_cookies import harvest_session_cookies
 

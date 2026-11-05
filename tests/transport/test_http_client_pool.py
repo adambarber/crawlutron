@@ -14,6 +14,7 @@ class TestPooledClientBuilders:
     per-test site to inject at -- the seam states the capability as an argument.
     """
 
+
 class _SentinelClient:
     """A close-recording PooledClient double; the tests assert identity only."""
 

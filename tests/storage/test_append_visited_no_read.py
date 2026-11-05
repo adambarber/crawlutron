@@ -6,6 +6,7 @@ import sqlite3
 from collections.abc import Iterator
 
 from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.models.json_value import JsonValue
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.storage.job_store import JobStore
 from tests._policy_factories import canonical
@@ -15,9 +16,12 @@ from tests._policy_factories import job_store as store_on
 def _crawled_job(store: JobStore, count: int):
     """A job whose visited set is built from one result row per crawled page."""
     job = store.create("https://example.com/", CrawlPolicy())
-    pages = [{"url": url, "status": "success"} for url in _page_urls(count)]
+    pages: list[dict[str, JsonValue]] = [{"url": url, "status": "success"} for url in _page_urls(count)]
     job.results.extend(pages)
-    job.visited.update({canonical(page["url"]): None for page in pages})
+    for page in pages:
+        url_text = page["url"]
+        assert isinstance(url_text, str)
+        job.visited.update({canonical(url_text): None})
     return job
 
 
@@ -39,11 +43,11 @@ def _store_with_traced_connection(tmp_path, trace_target: list[str]) -> JobStore
         conn.set_trace_callback(trace_target.append)
         return conn
 
-    sqlite3.connect = connect  # type: ignore[method-assign]
+    sqlite3.connect = connect
     try:
         return store_on(tmp_path / "jobs.db")
     finally:
-        sqlite3.connect = real_connect  # type: ignore[method-assign]
+        sqlite3.connect = real_connect
 
 
 def _on_disk_visited(db_path, job_id: str | None = None) -> list[str]:

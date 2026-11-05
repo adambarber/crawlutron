@@ -333,10 +333,13 @@ class TestTheRunnerClaim:
         await drive_job(job.job_id, raced)
 
         assert engine.attempts == {}, "a runner crawled a job after it had been stopped"
-        assert raced.load(job.job_id).status is JobStatus.PAUSED
+        # Read the truth through the REAL store: the raced double's aload is the
+        # stale read under test, not an assertion source.
+        loaded = await job_store.aload(job.job_id)
+        assert loaded is not None and loaded.status is JobStatus.PAUSED
 
 
-class _RunnerReadRunsBeforeTheStore:
+class _RunnerReadRunsBeforeTheStore(JobStore):
     """Store whose rows read as they were before this run's status flip: the
     read/claim window, with everything else delegating to real rows."""
 

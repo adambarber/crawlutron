@@ -4,11 +4,13 @@ registry, the endpoint skip and the #386 pin boundary."""
 from __future__ import annotations
 
 import json
+from typing import cast
 from unittest import mock
 
 import pytest
 
 from crawlutron.models.host_policy import HostPolicy
+from crawlutron.models.json_value import JsonValue
 from crawlutron.search.providers import (
     PROVIDER_ENDPOINTS,
     SearchProviderError,
@@ -135,31 +137,34 @@ class TestSearchEndpoint:
 
     async def test_search_clamps_limit_to_server_max(self, async_client, override_settings, monkeypatch):
         override_settings(search_provider="tavily", tavily_api_key="k", search_limit_max=3)
-        capture = []
+        capture: list[dict[str, object]] = []
 
         async def _honoring_provider(method, url, **kwargs):
             capture.append(kwargs)
-            asked = kwargs["json_body"]["max_results"]
-            results = [{"title": f"R{i}", "url": f"https://example.gov/{i}"} for i in range(asked)]
+            asked: dict[str, JsonValue] = cast("dict[str, JsonValue]", kwargs["json_body"])
+            asked_int = cast("int", asked["max_results"])
+            results = [{"title": f"R{i}", "url": f"https://example.gov/{i}"} for i in range(asked_int)]
             return 200, json.dumps({"results": results})
 
         monkeypatch.setattr("crawlutron.search.providers.provider_http", _honoring_provider)
         resp = await async_client.post("/v1/search", json={"query": "x", "limit": 10})
-        assert (capture[0]["json_body"]["max_results"], len(resp.json()["data"])) == (3, 3)
+        sent = cast("dict[str, JsonValue]", capture[0]["json_body"])
+        assert (sent["max_results"], len(resp.json()["data"])) == (3, 3)
         assert resp.status_code == 200
 
     async def test_search_uses_default_limit_when_omitted(
         self, async_client, override_settings, fake_provider_http
     ):
         override_settings(search_provider="tavily", tavily_api_key="k", search_limit_default=2)
-        capture = []
+        capture: list[dict[str, object]] = []
         fake_provider_http(
             200,
             json.dumps({"results": [{"title": "R", "url": f"https://example.gov/{i}"} for i in range(3)]}),
             capture=capture,
         )
         await async_client.post("/v1/search", json={"query": "x"})
-        assert capture[0]["json_body"]["max_results"] == 2
+        sent = cast("dict[str, JsonValue]", capture[0]["json_body"])
+        assert sent["max_results"] == 2
 
     async def test_search_unconfigured_provider_returns_503(self, async_client, override_settings):
         override_settings(search_provider="brave")  # no CRAWLUTRON_BRAVE_API_KEY
@@ -312,7 +317,7 @@ async def test_provider_registry_urls_are_not_caller_influenced(fake_provider_ht
     """The trust-boundary claim for the provider pin (#386): no caller input
     reaches the request URL. Every provider's search must target one of the
     fixed registry endpoints for any query, limit, and key."""
-    capture = []
+    capture: list[dict[str, object]] = []
     fake_provider_http(200, "{}", capture=capture)
     for hostile_query in ("", "x" * 500, "https://evil.test/?q="):
         for limit in (1, 100):

@@ -127,7 +127,7 @@ async def _probe_watch_router(monkeypatch, tmp_path):
         "Store",
         (),
         {
-            "acreate": lambda self, *args, **kwargs: effects["persisted"].append(args),
+            "acreate": lambda self, *args, **kwargs: effects["persisted"].append(repr(args)),
             "acount_for_owner": lambda self, *args, **kwargs: 0,
         },
     )()
@@ -159,7 +159,7 @@ async def _probe_site_map(monkeypatch, tmp_path):
         status="failed",
         normalized_url=None,
         final_url=None,
-        diagnostics={"discovery": {"feeds": [allowed, denied]}},
+        diagnostics={"discovery": {"sitemap_urls": [], "feeds": [allowed, denied]}},
     )
     envelope: ProducerEnvelope = {
         "request_id": "req-1",
@@ -215,10 +215,13 @@ async def _probe_async_runner(monkeypatch, tmp_path):
         return {"results": [], "request_id": "job", "submitted_count": 0, "policy_schema_version": ""}
 
     monkeypatch.setattr(async_crawl_runner, "execute_crawl", denied_execute)
+    from crawlutron.models.crawl_request import CrawlRequest
+
+    request = CrawlRequest.model_validate({"url": _BLOCKED_URL})
     await _assert_refused(
         async_crawl_runner.run_async_crawl(
             "job",
-            {"url": _BLOCKED_URL},
+            request,
             _BLOCKED_URL,
             _denied_settings(),
             job_store,

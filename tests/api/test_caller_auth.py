@@ -181,7 +181,6 @@ def _request_with(headers: dict[str, str]) -> Request:
 def test_operator_token_fallback_reads_settings_home(monkeypatch):
     """#142: with no app state, the operator token resolves through
     CrawlerSettings (the declared home), not a raw os.environ get."""
-    from types import SimpleNamespace
 
     import crawlutron.api.caller_auth as caller_auth
 

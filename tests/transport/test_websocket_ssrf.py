@@ -5,6 +5,8 @@ never connected allowed targets. These tests cover both, on the installed-Playwr
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from tests._assertions import block_private_targets, host_resolves_to
 from tests._browser_doubles import pinned_page_renderer, render_bare
 from tests._browser_page_doubles import FakePageContext, _ContextSwappingPage
@@ -16,6 +18,10 @@ _PUBLIC = "1.2.3.4"
 class _WSGuardContext(FakePageContext):
     """A context whose websocket-route surface matches installed Playwright 1.62.0:
     ``route_web_socket(url, handler)`` records the handler the renderer installs."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.ws_handler: Callable[..., object] | None = None
 
     def route_web_socket(self, url, handler):
         self.ws_handler = handler
@@ -29,7 +35,11 @@ class _WSBearingPage(_ContextSwappingPage):
 
     @property
     def ws_handler(self):
-        return self.context.ws_handler
+        # The context class records the handler; narrow past the GuardContext
+        # protocol to the recording subclass.
+        ctx = self.context
+        assert isinstance(ctx, _WSGuardContext)
+        return ctx.ws_handler
 
 
 async def test_ws_guard_is_installed_and_closes_unsafe_connects_safe(monkeypatch):

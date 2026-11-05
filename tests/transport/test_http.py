@@ -1,6 +1,10 @@
 """HTTP fetch strategy behavior against a real local server (no mocks)."""
 
+from crawlutron.admission.policy import read_policy
+from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.crawl_strategy_attempt import CrawlStrategyAttempt
+from crawlutron.models.json_value import JsonValue
+from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.transport.cache import HttpCache
 from crawlutron.transport.fetch_policy import looks_like_binary_body
 from crawlutron.transport.fetchers import default_http_fetcher
@@ -17,8 +21,8 @@ from tests._fetcher_factories import (
 from tests._policy_factories import canonical
 
 
-def http_policy(**overrides):
-    policy = {
+def http_policy(**overrides: JsonValue) -> CrawlPolicy:
+    raw: dict[str, JsonValue] = {
         "strategies": [HTTP_DECLARED_CRAWLER],
         "extraction": EXTRACTION_FULL,
         "scope_regex": None,
@@ -33,15 +37,15 @@ def http_policy(**overrides):
         "browser_profile": {},
         "discovery": {},
     }
-    policy.update(overrides)
-    return policy
+    raw.update(overrides)
+    return read_policy(raw)
 
 
 async def _run(
     *,
     url,
     strategy=HTTP_DECLARED_CRAWLER,
-    policy: dict[str, object] | None = None,
+    policy: CrawlPolicy | dict[str, JsonValue] | None = None,
     http_fetcher=default_http_fetcher,
     **kwargs,
 ):
@@ -107,7 +111,7 @@ class TestHttpStrategy:
     async def test_discovery_fetch_omits_page_conditional_headers(self):
         # If-None-Match / If-Modified-Since belong to the HTML page request. Forwarding them to
         # robots.txt/sitemap fetches invites false 304s -- discovery fetches get base headers only.
-        recorded: list[tuple[str, dict]] = []
+        recorded: list[tuple[str, dict[str, str]]] = []
 
         def respond(url, headers):
             recorded.append((url, headers))
@@ -116,7 +120,7 @@ class TestHttpStrategy:
         fetcher = FetcherDouble(lambda url, sent_headers, *_: respond(url, sent_headers))
 
         cache = HttpCache()
-        cache.store("http://x.test/", {"etag": '"page-etag-v1"'})
+        cache.store(canonical("http://x.test/"), {"etag": '"page-etag-v1"'})
         await _run(
             policy=http_policy(discovery={"robots": True}),
             url="http://x.test/",
@@ -124,7 +128,9 @@ class TestHttpStrategy:
             cache=cache,
             content_cache=None,
         )
-        robot_calls = [h for u, h in recorded if u.raw.endswith("/robots.txt")]
+        robot_calls = [
+            h for u, h in recorded if isinstance(u, NormalizedUrl) and u.raw.endswith("/robots.txt")
+        ]
         assert robot_calls, "discovery never fetched robots.txt"
         for headers in robot_calls:
             lower = {k.lower() for k in headers}
@@ -217,7 +223,7 @@ class TestHttpStrategy:
         response = await crawl_homepage_async(base_url)
         assert response["submitted_count"] == 1
         assert len(response["results"]) == 1
-        assert "Example Org" in response["results"][0].markdown
+        assert "Example Org" in str(response["results"][0].markdown)
 
     async def test_js_endpoints_and_sitemap_discovery_gated_without_discovery(self):
         # The heavier discovery-only extras -- JS-endpoint extraction and the remote sitemap/feed discovery
@@ -337,7 +343,7 @@ async def test_a_binary_body_result_keeps_its_attempt_type_for_the_render_adapte
     assert result.attempted_strategies[0].elapsed_ms > 0
 
     # And the adapter that reads those attributes must not raise.
-    adapted = crawl_result_from_engine_result(result, url="http://x.test/")
+    adapted = crawl_result_from_engine_result(result, url=canonical("http://x.test/"))
     assert adapted.classification == "binary_no_text"
     assert adapted.elapsed_ms == result.attempted_strategies[0].elapsed_ms
     assert adapted.attempts == len(result.attempted_strategies)

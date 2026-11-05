@@ -191,7 +191,13 @@ def test_hot_path_client_reuse_skips_env_scan():
         scans["count"] += 1
         return original(*args, **kwargs)
 
-    settings_mod.CrawlerSettings.from_mapping = staticmethod(_counting_from_mapping)
+    # The module-function swap is the deliberate global seam for one test; a
+    # plain assignment triggers mypy's method-assign, so go through a def alias.
+
+    def _swap(replacement: object) -> None:
+        setattr(settings_mod.CrawlerSettings, "from_mapping", replacement)  # noqa: B010 - the seam is the subject
+
+    _swap(staticmethod(_counting_from_mapping))
     try:
 
         async def inner():
@@ -203,7 +209,7 @@ def test_hot_path_client_reuse_skips_env_scan():
 
         first, reuses_second, reuses_third, reuse_calls, total = asyncio.run(inner())
     finally:
-        settings_mod.CrawlerSettings.from_mapping = original
+        _swap(staticmethod(original))
     assert first is not None
     assert reuses_second and reuses_third
     # Construction walked the env exactly once; the two reuse calls added nothing.

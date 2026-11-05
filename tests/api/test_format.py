@@ -1,6 +1,7 @@
 """Unified output formatting: every crawl strategy funnels through one path."""
 
 from crawlutron.api.unified_shaping import format_crawl_item
+from tests._policy_factories import canonical
 from tests._result_builders import engine_result
 
 
@@ -16,7 +17,7 @@ class TestFormatCrawlItemUnified:
             markdown=extract_content(
                 html,
                 "text/html",
-                "http://example.com/",
+                canonical("http://example.com/"),
             ).markdown,
             final_url="http://example.com/",
         )

@@ -18,6 +18,7 @@ import pytest
 from crawlutron.extraction import documents
 from crawlutron.extraction.documents import ExtractedContent, Selectors, extract_selected
 from tests._extraction_helpers import settings_with
+from tests._policy_factories import canonical
 
 pytestmark = pytest.mark.usefixtures("four_worker_selector_pool")
 
@@ -40,7 +41,7 @@ def test_timed_out_selector_thread_does_not_outlive_teardown(monkeypatch):
 
     result = extract_selected(
         "<html><body><p class='x'>hi</p></body></html>",
-        "http://example.com/",
+        canonical("http://example.com/"),
         selectors=Selectors(css=".x"),
         settings=settings,
     )

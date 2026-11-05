@@ -88,7 +88,7 @@ def test_expires_seconds_parses_the_origin_instant(header_case):
     # on it (#400) -- the case-insensitivity is the .lower() in the comprehension.
     seconds = expires_seconds({header_case: _FUTURE}, now=_NOW)
     assert seconds is not None and seconds > 0
-    assert expires_seconds({header_case: _PAST}, now=_NOW) is not None
-    assert expires_seconds({header_case: _PAST}, now=_NOW) <= 0.0  # already stale
+    past = expires_seconds({header_case: _PAST}, now=_NOW)
+    assert past is not None and past <= 0.0  # already stale
     assert expires_seconds({header_case: "not a date"}, now=_NOW) is None
     assert expires_seconds({}, now=_NOW) is None

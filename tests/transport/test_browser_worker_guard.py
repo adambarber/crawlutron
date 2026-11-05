@@ -6,6 +6,7 @@ import pytest
 
 from crawlutron.models.crawl_job import CrawlJob
 from crawlutron.models.crawl_result import CrawlResult
+from crawlutron.models.json_value import JsonValue
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.render_options import RenderOptions
 from crawlutron.transport.browser_pool import BrowserPool, PooledBrowserWorker
@@ -110,7 +111,7 @@ class TestTransientRequeue:
             invocations.append(job.url.raw)
             return await pooled(job)
 
-        payload = {
+        payload: dict[str, JsonValue] = {
             "url": f"{base_url}/",
             # max_depth > 0 selects the recursive dispatcher, which owns the pool-exhaustion frontier
             # re-queue.

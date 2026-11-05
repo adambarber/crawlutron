@@ -66,7 +66,7 @@ class TestServiceWorkersBlocked:
 
         class _RecordingBrowser:
             def __init__(self):
-                self.page_kwargs_seen: list[dict] = []
+                self.page_kwargs_seen: list[dict[str, object]] = []
 
             async def new_page(self, **kwargs):
                 self.page_kwargs_seen.append(kwargs)

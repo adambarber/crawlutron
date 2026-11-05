@@ -104,7 +104,7 @@ def test_recovery_start_limit_not_getattr_redefaulted():
     assert recovery_start_limit(CrawlerSettings(global_concurrency=6)) == 6
 
 
-def _app_call_offenders(skip_suffix: str, bites: Callable[[ast.Call], str | None]) -> list[str]:
+def _app_call_offenders(skip_suffix: str, bites: Callable[[ast.Call, object], str | None]) -> list[str]:
     """File:line for every app call ``bites`` flags, outside ``skip_suffix`` modules.
 
     Shared sweep for the #142 structural gates: the bypass shape is mechanical,
@@ -127,8 +127,12 @@ def test_domain_scheduler_constructed_only_in_its_home():
     crawlutron/transport/scheduler.py; every other module goes through
     ``from_settings``, the declared single construction path."""
 
-    def direct_build(_node, name):
-        if name.rsplit(".", 1)[-1] == "DomainScheduler" and name != "DomainScheduler.from_settings":
+    def direct_build(_node: ast.Call, name: object) -> str | None:
+        if (
+            isinstance(name, str)
+            and name.rsplit(".", 1)[-1] == "DomainScheduler"
+            and name != "DomainScheduler.from_settings"
+        ):
             return "direct DomainScheduler build"
         return None
 
@@ -141,7 +145,7 @@ def test_global_concurrency_not_getattr_redefaulted():
     a ``getattr(settings, "global_concurrency", ...)`` re-defaults the knob
     outside from_settings' never-re-defaulted contract."""
 
-    def getattr_redefault(node, _name):
+    def getattr_redefault(node: ast.Call, _name: object) -> str | None:
         args = node.args
         if len(args) >= 3 and isinstance(args[1], ast.Constant) and args[1].value == "global_concurrency":
             return "global_concurrency re-defaulted via getattr"

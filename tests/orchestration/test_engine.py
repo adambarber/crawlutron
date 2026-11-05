@@ -9,7 +9,9 @@ import pytest
 from crawlutron.admission.policy import PolicyTier, read_policy
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.crawl_policy_limits import CrawlPolicyLimits
+from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.crawl_result import CrawlResult
+from crawlutron.models.json_value import JsonValue
 from crawlutron.models.result_factory import terminal_attempt
 from crawlutron.models.serialization import to_dict
 from crawlutron.transport.browser import BrowserRenderer
@@ -24,8 +26,6 @@ from tests._fetcher_factories import (
     crawled_result,
     run_chain,
 )
-from crawlutron.models.crawl_request import CrawlRequest
-from crawlutron.models.json_value import JsonValue
 from tests._policy_factories import (
     canonical,
     http_strategy_policy,
@@ -186,7 +186,9 @@ class TestEngineChainEdges:
                 # model_construct bypasses field validation by design; the funnel
                 # (not pydantic) is the subject, so pydantic's serializer warning is noise.
                 warnings.simplefilter("ignore")
-                payload_policy(CrawlRequest.model_construct(url="http://x/", policy=forged), PolicyTier.model_defaults())
+                payload_policy(
+                    CrawlRequest.model_construct(url="http://x/", policy=forged), PolicyTier.model_defaults()
+                )
 
     async def test_browser_strategy_document_extraction(self, base_url):
         # Live origin: 's robots gate fail-closes connection-refused origins (127.0.0.1:1), so the subject

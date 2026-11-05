@@ -242,6 +242,7 @@ async def test_cap_is_enforced_on_the_app_that_serves_traffic():
 
     from crawlutron.main import app
 
+    assert app is not None, "the lifespan-set app is absent"
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
         oversized = await http.post(
             "/v1/jobs",

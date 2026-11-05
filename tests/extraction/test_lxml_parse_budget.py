@@ -9,6 +9,7 @@ from dataclasses import replace
 import pytest
 
 from crawlutron.models.host_policy import HostPolicy
+from crawlutron.models.json_value import JsonValue
 from crawlutron.models.normalized_url import NormalizedUrl
 from tests._fetch_doubles import FetcherDouble
 from tests._fetcher_factories import run_http_strategy
@@ -37,7 +38,7 @@ def parse_budget() -> ParseBudget:
     return ParseBudget()
 
 
-async def _run(policy_extra: dict[str, object], *, html: str = HTML):
+async def _run(policy_extra: dict[str, JsonValue], *, html: str = HTML):
     fetcher = FetcherDouble(
         lambda url, *_: {"status": 200, "headers": {"content-type": "text/html"}, "body": html.encode()}
     )

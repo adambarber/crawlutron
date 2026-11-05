@@ -10,6 +10,7 @@ from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.orchestration.engine import ResultSpill
 from crawlutron.transport.content_cache import ContentCache
+from tests._fetch_doubles import FetcherDouble
 from tests._loop_liveness import LoopLiveness as _LoopLiveness
 
 
@@ -45,7 +46,9 @@ class TestContentCacheStoreSerializationOffTheEventLoop:
             strategy="HTTP_DECLARED_CRAWLER",
             policy=CrawlPolicy(),
             host_policy=host_policy,
-            http_fetcher=None,
+            # The probe never calls the fetcher; the double satisfies the HttpFetcher
+            # contract so the context is honestly typed.
+            http_fetcher=FetcherDouble(lambda *_: (200, b"", "text/html")),
             cache=None,
             content_cache=cache,
             caller_validators=None,
@@ -65,9 +68,11 @@ class TestContentCacheStoreSerializationOffTheEventLoop:
             f"the event loop made {observed[0]} heartbeat ticks while a >1 MiB body "
             "was base64-serialized for the content cache"
         )
-        # The store really happened: the envelope on disk carries the body.
+        # The store really happened: the envelope on disk carries the body. The
+        # cache's value type is JsonValue; narrow to the envelope's dict shape.
         stored = await cache.aget("k")
-        assert stored is not None and stored["status_code"] == 200
+        assert isinstance(stored, dict)
+        assert stored["status_code"] == 200
 
 
 class TestSpillWriteDictOffTheEventLoop:

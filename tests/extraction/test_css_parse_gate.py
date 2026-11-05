@@ -4,6 +4,7 @@ import pytest
 
 from crawlutron.extraction.content import ExtractedContent, Selectors, extract_selected
 from tests._extraction_helpers import settings_with
+from tests._policy_factories import canonical
 
 
 @pytest.mark.real_sleeps
@@ -25,7 +26,7 @@ def test_oversized_css_payload_is_refused_not_parsed(monkeypatch, caplog):
     with caplog.at_level(logging.WARNING, logger="crawlutron.extraction.content"):
         result = extract_selected(
             huge,
-            "http://example.com/",
+            canonical("http://example.com/"),
             selectors=Selectors(css=".x"),
             settings=settings_with(extraction_selector_timeout=5.0),
         )

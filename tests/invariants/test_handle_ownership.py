@@ -277,7 +277,11 @@ def test_the_holder_is_one_value_with_exactly_the_two_fields():
         node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "_SemaphoreHolder"
     ]
     assert len(holders) == 1, "the holder type must be defined exactly once"
-    fields = [stmt.target.id for stmt in holders[0].body if isinstance(stmt, ast.AnnAssign)]
+    fields = [
+        stmt.target.id
+        for stmt in holders[0].body
+        if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name)
+    ]
     assert fields == ["semaphore", "loop"], "the holder carries exactly the semaphore and its loop"
 
 

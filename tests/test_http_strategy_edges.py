@@ -1,11 +1,18 @@
+from __future__ import annotations
+
+from typing import cast
+
 import httpx
 import pytest
 
 from crawlutron.admission.policy import PolicyTier, read_policy, validate_wire_policy
 from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.http_fetch_result import HttpFetchResult
+from crawlutron.models.http_fetch_result import HttpFetchResult as _HttpFetchResult
+from crawlutron.models.json_value import JsonValue
 from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.models.request_profile_record import RequestProfileRecord
 from tests._fetch_doubles import FetcherDouble
+from tests._fetch_outcome import FetchFailed
 from tests._fetcher_factories import run_http_strategy
 from tests._policy_factories import http_strategy_policy
 from tests._transport_doubles import (
@@ -63,7 +70,7 @@ class TestHttpStrategyEdges:
         assert worker.exitcode == 0, f"worker crashed: exitcode={worker.exitcode}"
         assert not out_queue.empty(), "worker produced no result"
         outcome = out_queue.get()
-        assert isinstance(outcome, HttpFetchResult), f"cffi fetch failed in the subprocess: {outcome}"
+        assert isinstance(outcome, _HttpFetchResult), f"cffi fetch failed in the subprocess: {outcome}"
         assert outcome.status_code == 200
 
     def test_the_isolated_fetch_reports_the_result_rather_than_its_status(self, monkeypatch):
@@ -80,6 +87,7 @@ class TestHttpStrategyEdges:
             server.shutdown()
             server.server_close()
 
+        assert not isinstance(outcome, FetchFailed) and outcome.final_url is not None
         assert outcome.final_url.raw.startswith(NormalizedUrl(url, policy=HostPolicy.unrestricted()).raw), (
             f"cffi fetch produced {outcome!r}"
         )
@@ -165,15 +173,9 @@ async def test_http_strategy_rejects_non_mapping_request_profile():
     # ``read_policy`` is total by contract -- it repairs a bad field with its default and never raises.
     for profile in ("hello", ["hello"]):
         with pytest.raises(ValueError, match="^invalid_policy_profile$"):
-            policy = validate_wire_policy(
-                {**http_strategy_policy().model_dump(), "request_profile": profile},
-                PolicyTier.model_defaults(),
-            )
-            await run_http_strategy(
-                url="http://profile.example/",
-                policy=policy,
-                http_fetcher=fetcher,
-            )
+            bad_dump = http_strategy_policy().model_dump()
+            bad_dump["request_profile"] = cast("JsonValue", profile)
+            validate_wire_policy(bad_dump, PolicyTier.model_defaults())
 
 
 async def test_stateful_request_profile_is_resolved_once_for_headers_and_diagnostics():
@@ -188,7 +190,9 @@ async def test_stateful_request_profile_is_resolved_once_for_headers_and_diagnos
 
     fetcher = FetcherDouble(lambda url, sent_headers, *_: respond(url, sent_headers))
 
-    policy = read_policy({**http_strategy_policy().model_dump(), "request_profile": profile})
+    profile_dump = http_strategy_policy().model_dump()
+    profile_dump["request_profile"] = cast("RequestProfileRecord", profile)
+    policy = read_policy(profile_dump)
     result = await run_http_strategy(
         url="http://profile.example/",
         policy=policy,

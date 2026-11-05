@@ -47,6 +47,7 @@ class TestServiceRenderRequest:
             {"url": "http://127.0.0.1:1/x", "options": {"respect_robots": False}}, worker=worker
         )
         error = out["results"][0].error
+        assert error is not None
         assert secret not in error, f"raw exception text leaked into the response: {error!r}"
         # RuntimeError classifies to the stable network_error code.
         assert error == "network_error"

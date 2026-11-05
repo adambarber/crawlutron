@@ -4,6 +4,8 @@ Exactly one place now decides effective RenderOptions; the two consumers split:
 capture is the pipeline's on the crawl path, payload is the caller's include_html.
 """
 
+from collections.abc import Callable
+
 import pytest
 from pydantic import ValidationError
 
@@ -11,6 +13,7 @@ from crawlutron.admission.policy import read_policy
 from crawlutron.admission.render_options import policy_wants_html, resolve_render_options
 from crawlutron.api.render import render_options_for
 from crawlutron.config.settings import CrawlerSettings
+from crawlutron.models.json_value import JsonValue
 from crawlutron.models.render_options import RenderOptions
 from crawlutron.models.render_request import RenderRequest
 from crawlutron.transport.browser_result import browser_strategy_result
@@ -39,10 +42,10 @@ def _settings() -> CrawlerSettings:
 
 def _request(options: object) -> RenderRequest:
     """The wire boundary the endpoint itself validates: options are declared or refused."""
-    body = {"url": "http://example.com/"}
-    if options is not None:
-        body["options"] = options
-    return RenderRequest.model_validate(body)
+    # ``options`` is deliberately untyped here: the boundary under test rejects
+    # non-dict shapes, so the caller must be able to hand one over.
+    bad_body: Callable[..., RenderRequest] = RenderRequest.model_validate
+    return bad_body({"url": "http://example.com/", "options": options})
 
 
 class TestResolveRenderOptions:
@@ -86,7 +89,7 @@ class TestResolveRenderOptions:
         assert options.browser_profile == {"viewport": "mobile"}
 
     def test_browser_profile_is_copied_defensively(self):
-        profile = {"viewport": "mobile"}
+        profile: dict[str, JsonValue] = {"viewport": "mobile"}
         options = resolve_render_options({"browser_profile": profile}, {})
         profile["viewport"] = "desktop"
         assert options.browser_profile == {"viewport": "mobile"}
@@ -230,7 +233,7 @@ class TestRenderEndpointConsumesResolver:
         assert options.max_retries == MAX_RETRIES
 
 
-def _browser_policy() -> dict[str, object]:
+def _browser_policy() -> dict[str, JsonValue]:
     return {
         "strategies": ["BROWSER_HEADLESS"],
         "limits": {"timeout_seconds": 11, "max_retries": 7, "max_discovered_links": 10},

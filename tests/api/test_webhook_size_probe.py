@@ -39,7 +39,8 @@ def _probe_peak(payload) -> tuple[int, int | None]:
         )
         _cur, peak = tracemalloc.get_traced_memory()
         tracemalloc.stop()
-    delivered = len(deliver.await_args.args[1]) if deliver.await_count else None
+    args = deliver.await_args.args if deliver.await_args is not None else ()
+    delivered = len(args[1]) if deliver.await_count else None
     return peak, delivered
 
 

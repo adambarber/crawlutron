@@ -7,6 +7,7 @@ so /ready missed MCP work and the capacity cap refused none of it.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 
 import pytest
 
@@ -14,50 +15,64 @@ from crawlutron.api import main_helpers
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.health.readiness import ReadinessState
 from crawlutron.mcp.tools import handle_crawl, handle_map, handle_render, handle_search
-from crawlutron.models.crawl_request import CrawlRequest
-from crawlutron.models.map_request import MapRequest
-from crawlutron.models.render_request import RenderRequest
-from crawlutron.models.search_request import SearchRequest
+from crawlutron.models.crawl_request import CrawlRequest as CrawlRequest
+from crawlutron.models.json_value import JsonValue
+from crawlutron.models.map_request import MapRequest as MapRequest
+from crawlutron.models.render_request import RenderRequest as RenderRequest
+from crawlutron.models.search_request import SearchRequest as SearchRequest
 
-#: (label, handler, stub_target, payload, extra_patches) for the four fetch kinds.
-#: crawl also covers crawl_and_extract, which shares ``_guard_then_crawl``.
-_TOOL_CASES = [
-    ("map", handle_map, "map_site", MapRequest(url="http://example.com/"), {}),
-    (
-        "render",
-        handle_render,
-        "render_endpoint_handler",
-        RenderRequest(url="http://example.com/"),
-        {"get_browser_pool": lambda: object()},
-    ),
-    ("search", handle_search, "search_endpoint_handler", SearchRequest(query="x"), {}),
-    ("crawl", handle_crawl, "execute_crawl", CrawlRequest(url="http://example.com/"), {}),
-]
+#: The MCP tool-handler shape: the real handle_* coroutines plus the test stubs.
+type ToolHandler = Callable[..., Awaitable[object]]
+
+
+def _tool_cases():
+    # (label, handler, stub_target, payload, extra_patches) for the four fetch
+    # kinds; spelled locally so the import block stays the test's own.
+    return [
+        ("map", handle_map, "map_site", MapRequest(url="http://example.com/"), {}),
+        (
+            "render",
+            handle_render,
+            "render_endpoint_handler",
+            RenderRequest(url="http://example.com/"),
+            {"get_browser_pool": lambda: object()},
+        ),
+        ("search", handle_search, "search_endpoint_handler", SearchRequest(query="x"), {}),
+        ("crawl", handle_crawl, "execute_crawl", CrawlRequest(url="http://example.com/"), {}),
+    ]
+
+
+_TOOL_CASES = _tool_cases()
 
 _TOOL_IDS = [case[0] for case in _TOOL_CASES]
 
 
-def _stub_for(label: str, active, held: list[int]):
+def _stub_for(label: str, active, held: list[int]) -> ToolHandler:
     """A stubbed executor that records the readiness count alive during its run."""
 
-    async def _record_render(payload, *, settings):
+    async def _record_render(payload: JsonValue, *, settings: CrawlerSettings) -> object:
         del settings
         held.append(active())
         return {"results": [], "request_id": "req-1", "submitted_count": 0}
 
-    async def _record_crawl(payload, *, settings, shutdown_event):
-        del settings, shutdown_event
+    async def _record_crawl(
+        payload: JsonValue, *, settings: CrawlerSettings, shutdown_event: asyncio.Event
+    ) -> object:
+        del payload, settings, shutdown_event
         held.append(active())
-        envelope = {"results": [], "request_id": "req-1", "submitted_count": 0}
+        envelope: dict[str, JsonValue] = {"results": [], "request_id": "req-1", "submitted_count": 0}
         envelope["policy_schema_version"] = ""
         return envelope
 
-    async def _record_map(payload, *, settings, shutdown_event):
-        del settings, shutdown_event
+    async def _record_map(
+        payload: JsonValue, *, settings: CrawlerSettings, shutdown_event: asyncio.Event
+    ) -> object:
+        # Only the crawl stub spells its envelope; map's shape is the bare bag.
+        del payload, settings
         held.append(active())
         return {"all_urls": []}
 
-    async def _record_search(payload, *, settings, caller):
+    async def _record_search(payload: JsonValue, *, settings: CrawlerSettings, caller: object) -> object:
         del settings, caller
         held.append(active())
         return {"success": True, "data": []}
@@ -78,7 +93,12 @@ async def _invoke(monkeypatch, *, cap: int | None, label: str, prefill: int = 0)
     before the fetch runs so a ``cap`` is already reached.
     """
     case = next(c for c in _TOOL_CASES if c[0] == label)
-    _, handler, target, payload, extra = case
+    # The case tuple is untyped at unpack; assert back to the real handle_*
+    # coroutine so the awaited call is typed, not unknown.
+    handler = case[1]
+    assert callable(handler), "the case carries a callable handler"
+    typed_handler: ToolHandler = handler
+    _, _real, target, payload, extra = case
     state = ReadinessState(max_active_requests=cap)
     monkeypatch.setattr(main_helpers, "readiness_state", state)
     for _ in range(prefill):
@@ -94,7 +114,7 @@ async def _invoke(monkeypatch, *, cap: int | None, label: str, prefill: int = 0)
     monkeypatch.setattr(f"crawlutron.mcp.tools.{target}", exec_stub)
     settings = CrawlerSettings.from_mapping({})
     shutdown = asyncio.Event()
-    result = await handler(payload, settings, shutdown)
+    result = await typed_handler(payload, settings, shutdown)
     return result, held, state
 
 

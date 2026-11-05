@@ -4,21 +4,15 @@
 detail; the occupancy question is now explicit on the record (#314/A3).
 """
 
-from dataclasses import dataclass
-
 from crawlutron.transport.scheduler_domain_state import DomainState
 
 
-@dataclass
-class _Gate:
-    """A gate-like object with no ``_value``: only the public contract exists."""
-
-    occupancy: int = 0
-
-
 def _state(gate_occupancy: int = 0) -> DomainState:
+    """A record whose gate holds ``gate_occupancy`` in-flight holders: the real
+    DomainGate with occupancy set, so the public contract (not ``_value``) is
+    the thing under test."""
     state = DomainState()
-    state.gate = _Gate(gate_occupancy)
+    state.gate.occupancy = gate_occupancy
     return state
 
 

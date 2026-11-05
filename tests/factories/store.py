@@ -26,7 +26,7 @@ def complete_job(store: JobStore, job_id: str, payload: JsonValue, owner: str = 
     seed_owned_job(store, job_id=job_id, owner=owner)
     done = store.load(job_id)
     assert done is not None
-    done.results = [payload]
+    done.results = [payload if isinstance(payload, dict) else {"payload": payload}]
     store.save(done)
     store.set_status(job_id, JobStatus.COMPLETED, expected=JobStatus.PENDING)
 

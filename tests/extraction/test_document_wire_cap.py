@@ -44,7 +44,9 @@ def _piped_worker(monkeypatch, reply_len: int):
             return True
 
         def recv(self):
-            _body, _hooks, task_cap = seen[-1]
+            task = seen[-1]
+            assert isinstance(task, tuple) and len(task) == 3
+            body, _hooks, task_cap = task
             return ("ok", "x" * min(reply_len, task_cap))
 
         def close(self):

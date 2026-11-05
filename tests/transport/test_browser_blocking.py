@@ -338,8 +338,8 @@ class TestExecuteJsBlocked:
         )
         assert policy.browser_profile["viewport"] == "mobile"
         actions = policy.browser_profile["actions"]
-        assert isinstance(actions, list) and isinstance(actions[0], dict)
-        assert actions[0]["type"] == "click"
+        assert isinstance(actions, list)
+        assert actions[0] == {"type": "click", "selector": "#a"}
 
 
 class _Clickable:

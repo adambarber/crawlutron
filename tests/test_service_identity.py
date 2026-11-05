@@ -9,6 +9,7 @@ from crawlutron.discovery.capabilities import capabilities_payload
 from crawlutron.discovery.well_known import discovery_payload
 from crawlutron.mcp.protocol import server_info
 from crawlutron.models.crawl_strategy import CrawlStrategy
+from crawlutron.models.json_value import JsonValue
 from crawlutron.vocabulary.identity import DEFAULT_USER_AGENT, SERVICE_VERSION
 from crawlutron.vocabulary.strategies import CFFI_IMPERSONATE_TARGET
 
@@ -18,11 +19,14 @@ def test_service_version_is_the_package_version():
 
 
 def test_every_wire_surface_reports_the_package_version():
-    surfaces = {
+    ua_version: str = DEFAULT_USER_AGENT.split("/")[1].split(" ")[0]
+    mcp_info = server_info()
+    assert isinstance(mcp_info, dict)
+    surfaces: dict[str, JsonValue] = {
         "capabilities": capabilities_payload(CrawlerSettings.from_mapping({}))["version"],
         "well_known": discovery_payload(CrawlerSettings.from_mapping({}))["version"],
-        "mcp_server_info": server_info()["version"],
-        "user_agent": DEFAULT_USER_AGENT.split("/")[1].split(" ")[0],
+        "mcp_server_info": mcp_info["version"],
+        "user_agent": ua_version,
     }
     wrong = {name: value for name, value in surfaces.items() if value != __version__}
     assert not wrong, f"wire surfaces reporting a version the package does not carry: {wrong}"

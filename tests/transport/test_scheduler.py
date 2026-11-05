@@ -196,7 +196,7 @@ class TestObservedLatencyCrossesPipelines:
         from crawlutron.models.result_factory import terminal_attempt
 
         return CrawlResult(
-            url="https://example.com/x",
+            url=canonical("https://example.com/x"),
             attempt=terminal_attempt(
                 strategy=None,
                 status="success",
@@ -204,7 +204,7 @@ class TestObservedLatencyCrossesPipelines:
                 elapsed_ms=elapsed_ms,
                 error=None,
             ),
-            final_url="https://example.com/x",
+            final_url=canonical("https://example.com/x"),
             html=None,
             text=None,
             attempts=1,
@@ -218,8 +218,8 @@ class TestObservedLatencyCrossesPipelines:
 
         return build_engine_result(
             original_url="https://example.com/x",
-            normalized_url="https://example.com/x",
-            final_url="https://example.com/x",
+            normalized_url=canonical("https://example.com/x"),
+            final_url=canonical("https://example.com/x"),
             attempt=CrawlStrategyAttempt(
                 strategy="HTTP_DECLARED_CRAWLER",
                 status="success",

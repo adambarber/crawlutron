@@ -60,6 +60,7 @@ def _auth_ops() -> list[tuple[str, str]]:
 def _spec_responses() -> dict[tuple[str, str], set[str]]:
     from crawlutron.main import app
 
+    assert app is not None, "the lifespan-set app is absent; re-ground this spec walk"
     spec = app.openapi()
     return {
         (method, path): set(operation["responses"])

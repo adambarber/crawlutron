@@ -83,7 +83,10 @@ def test_cookie_namespace_for_helper_reads_profile():
     assert cookie_namespace_for({"cookie_namespace": "tenant_a"}) == "tenant_a"
     assert cookie_namespace_for({"cookie_namespace": "  tenant_b  "}) == "tenant_b"
     assert cookie_namespace_for({}) == ""
-    assert cookie_namespace_for({"cookie_namespace": 42}) == ""  # non-str ignored
+    # A non-str namespace is ignored; an object mapping is the honest spelling
+    # of "deliberately wrong value type".
+    invalid: object = {"cookie_namespace": 42}
+    assert cookie_namespace_for(invalid) == ""  # type: ignore[arg-type]
 
 
 def test_cookie_namespace_contextvar_default_is_empty():

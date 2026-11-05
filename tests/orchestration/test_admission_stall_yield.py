@@ -3,11 +3,57 @@
 import asyncio
 
 from crawlutron.orchestration.admission_stall import AdmissionStallGuard
+from crawlutron.runtime.pressure_gates import ResourceGate
+from crawlutron.runtime.pressure_sizing import AdmissionPolicy, WeightedAdmission
 from tests._recursive_harnesses import drive_recursive_crawl, make_crawl_task
 
 
 async def _allows(url):
     return True
+
+
+class _ZeroGate(ResourceGate):
+    """A gate reporting zero use; the saturated override consults none of it,
+    but the surface must be the real ResourceGate, not a duck."""
+
+    def memory_ratio(self) -> float:
+        return 0.0
+
+    def cpu_ratio(self) -> float:
+        return 0.0
+
+    def batch_scale_factor(self) -> float:
+        return 1.0
+
+    async def wait_while_saturated(self, max_wait_seconds: float | None = None) -> None:
+        raise AssertionError("the saturated admission never waits on the gate")
+
+
+class SaturatedNeverAwaiting(WeightedAdmission):
+    """(0,0) every pass, without ever awaiting: the ONLY yield must be the loop's.
+
+    Subclasses the real admission so the double is structurally the production
+    type, not a duck it merely resembles; the zero policy is what makes it."""
+
+    def __init__(self, stop_event: asyncio.Event) -> None:
+        super().__init__(
+            _ZeroGate(),
+            AdmissionPolicy(
+                http_task_bytes=0,
+                browser_task_bytes=0,
+                browser_pool_reserve_bytes=0,
+                max_http_concurrency=0,
+                max_browser_concurrency=0,
+            ),
+        )
+        self.calls = 0
+        self._stop = stop_event
+
+    async def admit(self, want_http: int, want_browser: int) -> tuple[int, int]:
+        self.calls += 1
+        if self.calls >= 3:
+            self._stop.set()
+        return 0, 0
 
 
 async def test_zero_admission_pass_yields_instead_of_hot_spinning(monkeypatch):
@@ -25,22 +71,10 @@ async def test_zero_admission_pass_yields_instead_of_hot_spinning(monkeypatch):
     monkeypatch.setattr("crawlutron.orchestration.admission_stall.asyncio.sleep", sleep_spy)
     stop = asyncio.Event()
 
-    class SaturatedNeverAwaiting:
-        """(0,0) every pass, without ever awaiting: the ONLY yield must be the loop's."""
-
-        def __init__(self):
-            self.calls = 0
-
-        async def admit(self, want_http, want_browser):
-            self.calls += 1
-            if self.calls >= 3:
-                stop.set()
-            return 0, 0
-
     async def worker(job):
         raise AssertionError(f"nothing dispatches under a (0,0) admission: {job}")
 
-    admission = SaturatedNeverAwaiting()
+    admission = SaturatedNeverAwaiting(stop)
     await drive_recursive_crawl(
         [make_crawl_task(0, "a"), make_crawl_task(1, "a")],
         worker,

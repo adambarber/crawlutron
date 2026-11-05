@@ -4,6 +4,7 @@ import logging
 import threading
 
 import bs4
+from lxml import etree
 
 import crawlutron.extraction.content as extraction
 from crawlutron.extraction.content import ExtractedContent, Selectors, extract_selected
@@ -41,7 +42,7 @@ def test_css_selector_slow_must_not_hang(monkeypatch, caplog):
     with caplog.at_level(logging.WARNING, logger="crawlutron.extraction.content"):
         result = extract_selected(
             html,
-            "http://example.com/",
+            canonical("http://example.com/"),
             selectors=Selectors(css=".x"),
             settings=settings_with(extraction_selector_timeout=0.2),
         )
@@ -50,18 +51,17 @@ def test_css_selector_slow_must_not_hang(monkeypatch, caplog):
 
 def test_css_selector_fast_still_works():
     html = "<html><body><p class='x'>hi</p></body></html>"
-    result = extract_selected(html, "http://example.com/", selectors=Selectors(css=".x"))
+    result = extract_selected(html, canonical("http://example.com/"), selectors=Selectors(css=".x"))
     assert result.text is not None
     assert "hi" in (result.text or "")
 
 
-class _SlowFakeTree:
-    """An XPath tree whose evaluation blocks far past the selector deadline."""
+class _SlowFakeTree(etree.ElementBase):
+    """An XPath tree whose evaluation blocks past the selector deadline."""
 
-    def __init__(self) -> None:
-        self.never_released = threading.Event()
+    never_released = threading.Event()
 
-    def xpath(self, expr):
+    def xpath(self, expr):  # type: ignore[override]  # the double's whole point: it overrides _Element
         return self.never_released.wait(timeout=30) or []
 
 
@@ -75,7 +75,7 @@ def test_xpath_selector_slow_must_not_hang(caplog):
     with caplog.at_level(logging.WARNING, logger="crawlutron.extraction.content"):
         result = extract_selected(
             html,
-            "http://example.com/",
+            canonical("http://example.com/"),
             selectors=Selectors(xpath="//p"),
             settings=settings_with(extraction_selector_timeout=0.2),
             tree=_SlowFakeTree(),

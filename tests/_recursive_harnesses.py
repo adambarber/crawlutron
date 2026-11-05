@@ -11,6 +11,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, NamedTuple
 
 from crawlutron.models.crawl_task import CrawlTask
+from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.orchestration.recursive import run_recursive_crawl
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 from tests._result_builders import Spill, engine_result
@@ -21,10 +22,16 @@ if TYPE_CHECKING:
     # runtime imports so this file does not restate the module's own import block.
     from crawlutron.models.crawl_result import EngineCrawlResult
     from crawlutron.models.host_policy import HostPolicy
-    from crawlutron.models.normalized_url import NormalizedUrl
     from crawlutron.runtime.pressure_sizing import WeightedAdmission
+    from crawlutron.transport.scheduler import DomainScheduler
 
-__all__ = ["ContentionFreeGate", "RecursiveRun", "drive_recursive_crawl", "make_crawl_task"]
+__all__ = [
+    "ContentionFreeGate",
+    "RecursiveRun",
+    "_allowed_url",
+    "drive_recursive_crawl",
+    "make_crawl_task",
+]
 
 
 class ContentionFreeGate:
@@ -56,7 +63,7 @@ class RecursiveRun(NamedTuple):
     """What one ``drive_recursive_crawl`` call left behind."""
 
     spill: Spill
-    scheduler: FakeScheduler
+    scheduler: FakeScheduler | DomainScheduler | None
     gate: ContentionFreeGate
 
 
@@ -75,7 +82,7 @@ async def drive_recursive_crawl(
     robots_disallowed: Callable[[CrawlTask], Awaitable[EngineCrawlResult]] | None = None,
     sitemap_seeds: Callable[[], Awaitable[list[NormalizedUrl]]] | None = None,
     spill: Spill | None = None,
-    scheduler: FakeScheduler | None = None,
+    scheduler: FakeScheduler | DomainScheduler | None = None,
     gate: ContentionFreeGate | None = None,
     gate_scale: float = 1.0,
     admission: WeightedAdmission | None = None,
@@ -135,6 +142,11 @@ def _crawl_defaults(
         "global_concurrency": 4,
         "seed_sitemaps": False,
     }
+
+
+async def _allowed_url(url: NormalizedUrl) -> bool:
+    """The allow-all robots answer, as RobotsAllows declares it."""
+    return True
 
 
 async def _allowed_result(job: CrawlTask) -> EngineCrawlResult:

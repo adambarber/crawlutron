@@ -151,6 +151,13 @@ def test_add_column_migration_adds_exactly_its_columns(migration_id: str) -> Non
         )
 
     for (table, column, column_ddl), (apply_step, rollback_step) in zip(specs, pairs, strict=True):
+        assert callable(apply_step) and callable(rollback_step), (
+            f"{migration_id} emits a statement, not a callable"
+        )
+        # The add-column steps are callables by construction (line above pins it);
+        # narrowing the union here is honest, not a dodge.
+        if not callable(apply_step) or not callable(rollback_step):
+            continue
         conn = sqlite3.connect(":memory:")
         conn.execute(_BASE_TABLE_SQL[table])
         # The manifest schemas describe the FINAL table, so the column the

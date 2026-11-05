@@ -284,10 +284,13 @@ class TestAsyncCrawlRunnerSavesOffTheEventLoop:
         monkeypatch.setattr("crawlutron.api.async_crawl_runner.execute_crawl", _fake_execute)
 
         async def scenario() -> int:
+            from crawlutron.models.crawl_request import CrawlRequest
+
+            request = CrawlRequest(url="http://example.com/")
             await asyncio.wait_for(
                 run_async_crawl(
                     job.job_id,
-                    {"url": "http://example.com/"},
+                    request,
                     None,
                     CrawlerSettings.from_mapping(),
                     store,

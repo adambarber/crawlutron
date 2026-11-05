@@ -30,10 +30,11 @@ def _app_and_scripts_sources() -> list[tuple[str, ast.Module]]:
     return found
 
 
-def _literal_number(node: ast.AST) -> int | float | str | bool | None:
+def _literal_number(node: ast.AST) -> int | float | str | bool | bytes | None:
     """A numeric/string/bool literal, or a simple ``48 * 1024 * 1024`` product."""
     if isinstance(node, ast.Constant):
-        return node.value
+        value = node.value
+        return value if isinstance(value, (int, float, str, bool, bytes)) else None
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
         left, right = _literal_number(node.left), _literal_number(node.right)
         if isinstance(left, (int, float)) and isinstance(right, (int, float)):
@@ -81,18 +82,19 @@ def _call_name_arg(call: ast.Call, name_index: int) -> str | None:
     return None
 
 
-def _call_default_arg(call: ast.Call, name_index: int) -> int | float | str | bool | None:
+def _call_default_arg(call: ast.Call, name_index: int) -> int | float | str | bool | bytes | None:
     """The literal default argument of a reader call: positional after the name, or ``default=``."""
     default_node = call.args[name_index + 1] if len(call.args) > name_index + 1 else None
     for keyword in call.keywords:
         if keyword.arg == "default":
             default_node = keyword.value
-    return _literal_number(default_node) if default_node is not None else None
+    value = _literal_number(default_node) if default_node is not None else None
+    return value if isinstance(value, (int, float, str, bool, bytes)) else None
 
 
-def _default_site_index() -> dict[str, list[tuple[str, int, int | float | str | bool]]]:
+def _default_site_index() -> dict[str, list[tuple[str, int, int | float | str | bool | bytes]]]:
     """Every knob's (file, line, default) literal read sites, in one tree walk."""
-    index: dict[str, list[tuple[str, int, int | float | str | bool]]] = {}
+    index: dict[str, list[tuple[str, int, int | float | str | bool | bytes]]] = {}
     for relative, call in _reader_calls(_app_and_scripts_sources()):
         for name_index in (0, 1):
             knob = _call_name_arg(call, name_index)
@@ -105,12 +107,12 @@ def _default_site_index() -> dict[str, list[tuple[str, int, int | float | str | 
 
 
 @lru_cache(maxsize=1)
-def _default_site_index_cached() -> dict[str, list[tuple[str, int, int | float | str | bool]]]:
+def _default_site_index_cached() -> dict[str, list[tuple[str, int, int | float | str | bool | bytes]]]:
     """The walk is one cost per process, not one cost per knob (was ~11s of 23s)."""
     return _default_site_index()
 
 
-def _code_default_sites(knob: str) -> list[tuple[str, int, int | float | str | bool]]:
+def _code_default_sites(knob: str) -> list[tuple[str, int, int | float | str | bool | bytes]]:
     """Every (file, line, default) where crawlutron/ or scripts/ reads ``knob`` with a literal default."""
     return list(_default_site_index_cached().get(knob, ()))
 
@@ -119,7 +121,7 @@ def _parse_bool(raw: str) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _value_matches(raw: str, default: int | float | str | bool) -> bool:
+def _value_matches(raw: str, default: int | float | str | bool | bytes) -> bool:
     if isinstance(default, bool):
         return _parse_bool(raw) == default
     if isinstance(default, (int, float)):

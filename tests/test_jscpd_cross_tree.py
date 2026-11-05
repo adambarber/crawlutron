@@ -34,7 +34,7 @@ def _stubbed_scan(duplicates: list[JscpdDuplicate], sources: int = 400) -> dict[
     return {"statistics": {"total": {"sources": sources}}, "duplicates": duplicates}
 
 
-def _without_cross_tree_scan(monkeypatch, duplicates: list[dict], sources: int = 400) -> None:
+def _without_cross_tree_scan(monkeypatch, duplicates: list[JscpdDuplicate], sources: int = 400) -> None:
     monkeypatch.setattr(res, "_cross_tree_scan", lambda floor, args: _stubbed_scan(duplicates, sources))
 
 

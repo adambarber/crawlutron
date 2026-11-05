@@ -77,20 +77,20 @@ async def test_abuild_unified_crawl_response_matches_sync():
     """Async shaping is byte-identical to the sync contract (all item shapes)."""
     items = [
         _html_item(0),
-        {
-            "original_url": "http://example.com/doc.pdf",
-            "status": "success",
-            "classification": "rendered",
-            "text": "pdf text",
-        },
-        {"original_url": "http://example.com/empty", "status": "failed", "classification": "not_found"},
-        {
-            "original_url": "http://example.com/csv",
-            "status": "success",
-            "classification": "rendered",
-            "markdown": "# H\n\nb",
-            "final_url": "http://example.com/csv",
-        },
+        engine_result(
+            "http://example.com/doc.pdf",
+            "rendered",
+            status="success",
+            text="pdf text",
+        ),
+        engine_result("http://example.com/empty", "not_found", status="failed"),
+        engine_result(
+            "http://example.com/csv",
+            "rendered",
+            status="success",
+            markdown="# H\n\nb",
+            final_url="http://example.com/csv",
+        ),
     ]
     sync = build_unified_crawl_response(
         items, options=EnvelopeOptions(request_id="r", policy_schema_version="v")

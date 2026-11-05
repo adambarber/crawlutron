@@ -87,12 +87,14 @@ class TestExtractionEdges:
         ids=["no_html", "css_no_match", "xpath_no_match", "xpath_invalid"],
     )
     def test_extract_selected_yields_nothing_when_it_matches_nothing(self, html, selectors):
-        assert extract_selected(html, "http://e.com/", selectors=selectors) == ExtractedContent(None, None)
+        assert extract_selected(html, canonical("http://e.com/"), selectors=selectors) == ExtractedContent(
+            None, None
+        )
 
     def test_extract_selected_xpath_string_node(self):
         result = extract_selected(
             "<div><span>text1</span><span>text2</span></div>",
-            "http://e.com/",
+            canonical("http://e.com/"),
             selectors=Selectors(xpath="//span/text()"),
         )
         assert result.text is not None
@@ -106,13 +108,13 @@ class TestExtractionEdges:
         ids=["trafilatura", "markdownify_fallback"],
     )
     def test_extract_html_always_yields_text(self, html):
-        assert extract_html(html, "http://e.com/").text is not None
+        assert extract_html(html, canonical("http://e.com/")).text is not None
 
     def test_extract_document_markitdown_import_error(self):
-        assert extract_document(b"fake pdf content", "http://e.com/doc.pdf").text is not None
+        assert extract_document(b"fake pdf content", canonical("http://e.com/doc.pdf")).text is not None
 
     def test_extract_document_markitdown_exception(self):
-        result = extract_document(b"not a pdf", "http://e.com/doc.pdf")
+        result = extract_document(b"not a pdf", canonical("http://e.com/doc.pdf"))
         assert isinstance(result, ExtractedContent)
 
     def test_parse_html_tree_empty(self):
@@ -226,7 +228,7 @@ def test_selector_on_non_html_is_reported_not_silently_dropped(caplog):
     html = "<html><body><div id='agenda'>item one</div><p>filler</p></body></html>"
     with caplog.at_level(logging.WARNING, logger="crawlutron.extraction.content"):
         narrowed = extraction.extract_content(
-            html, "text/html", "http://example.com/", selectors=Selectors(css="#agenda")
+            html, "text/html", canonical("http://example.com/"), selectors=Selectors(css="#agenda")
         )
     assert "extraction_selector_ignored_non_html" not in caplog.text, caplog.text
     assert "item one" in (narrowed.markdown or ""), narrowed

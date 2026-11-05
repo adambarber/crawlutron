@@ -2,6 +2,7 @@
 
 import gzip
 import zlib
+from collections.abc import Callable
 
 import brotli
 import pytest
@@ -19,11 +20,11 @@ _CAP = 10_000_000
 
 
 def test_cap_is_required_keyword():
-    # The uncapped branch existed only as a default; making the cap mandatory turns "forgot to bound a bomb"
-    # into a TypeError. The call is made through a mapping of arguments on purpose.
-    uncapped: dict[str, object] = {"body": gzip.compress(b"hello"), "content_encoding": "gzip"}
+    # The bound is a required keyword; a call that omits it is a TypeError.
+    # Callable[..., object] is the honest spelling of "deliberately wrong call shape".
+    uncapped: Callable[..., object] = decompress_body
     with pytest.raises(TypeError):
-        decompress_body(**uncapped)
+        uncapped(gzip.compress(b"hello"), "gzip")
 
 
 def test_garbage_gzip_is_rejected_under_cap():
@@ -61,15 +62,14 @@ def test_concatenated_gzip_members_are_decoded():
 
 
 def test_decode_body_no_longer_decompresses():
-    # Decompression lives at the chokepoint, not inside the text decoder; the headers parameter existed only
-    # to double-decompress uncapped.
-    with_headers: dict[str, object] = {
-        "body": gzip.compress(b"hello world"),
-        "content_type": "text/html",
-        "headers": {"content-encoding": "gzip"},
-    }
+    # Decompression lives at the chokepoint, not inside the text decoder.
+    legacy: Callable[..., object] = decode_body
     with pytest.raises(TypeError):
-        decode_body(**with_headers)
+        legacy(
+            gzip.compress(b"hello world"),
+            "text/html",
+            headers={"content-encoding": "gzip"},
+        )
 
 
 def test_decode_body_respects_charset():
@@ -268,9 +268,9 @@ def test_decompression_without_limit_is_rejected():
     payload = b"hello world"
     bomb = gzip.compress(payload)
     # No cap is no longer a legal call — the bound is required.
-    uncapped: dict[str, object] = {"body": bomb, "content_encoding": "gzip"}
+    uncapped: Callable[..., object] = decompress_body
     with pytest.raises(TypeError):
-        decompress_body(**uncapped)
+        uncapped(bomb, "gzip")
 
 
 def test_deflate_bomb_is_bounded():
@@ -294,12 +294,23 @@ def test_brotli_feeds_incrementally(monkeypatch):
 
     calls: list[int] = []
 
-    # Subclassing ``brotli.Decompressor`` directly, not a variable bound to it: the base class is resolved
-    # when this statement runs, and the monkeypatch below replaces the module attribute afterwards, so the spy
-    class SpyDecompressor(brotli.Decompressor):
-        def process(self, data, size):
+    # A plain class satisfies the _StreamingDecompressor protocol the decoder consumes; subclassing
+    # brotli.Decompressor would bind to its (single-arg) published stub, not its real 2-arg API.
+    real_decompressor = brotli.Decompressor  # captured before the patch
+
+    class SpyDecompressor:
+        # The real brotli API is 2-arg while its published stub says 1-arg, so
+        # the spy routes through a wide alias: the honest 2-arg call is the point.
+        def __init__(self):
+            self._real = real_decompressor()
+            self._real_process: Callable[..., bytes] = self._real.process
+
+        def process(self, data, size=None, /):
             calls.append(len(data))
-            return super().process(data, size)
+            return self._real_process(data, size if size is not None else len(data))
+
+        def is_finished(self):
+            return self._real.is_finished()
 
     monkeypatch.setattr(brotli, "Decompressor", SpyDecompressor)
     import os
@@ -339,9 +350,12 @@ class TestDecompressionSelection:
 def test_brotli_streaming_clamps_accumulated_output(monkeypatch):
     # One greedy process() materialises a slice's whole expansion; the stream must not return that huge blob
     # (or a small on-wire body becomes a remote OOM). Drive the public entry so the bounded decode runs.
-    class BombProcess(brotli.Decompressor):
-        def process(self, data, size):
+    class BombProcess:
+        def process(self, data, size, /):
             return b"Z" * 16_384_000  # one slice expands well past any small cap
+
+        def is_finished(self):
+            return False
 
     monkeypatch.setattr(brotli, "Decompressor", BombProcess)
     cap = 10_000

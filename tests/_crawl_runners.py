@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from crawlutron.models.taxonomy import CrawlStrategyName
     from crawlutron.runtime.pressure_gates import ResourceGate
     from crawlutron.transport.scheduler import DomainScheduler
+    from tests.helpers.server import TestServer
 
 #: The policy limits a scripted crawl is run under, in wire shape.
 Limits = dict[str, JsonValue]
@@ -388,7 +389,7 @@ def make_seeded_cache(
     return cache, clock
 
 
-def _spawn_fetch(fn: Callable[[object], HttpFetchResult]) -> HttpFetchResult:
+def _spawn_fetch(fn: Callable[[TestServer], HttpFetchResult]) -> HttpFetchResult:
     from tests.helpers.server import spawn_server
 
     server = spawn_server()

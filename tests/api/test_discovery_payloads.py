@@ -8,6 +8,7 @@ from crawlutron.discovery.agent_hints import (
 )
 from crawlutron.discovery.capabilities import capabilities_payload
 from crawlutron.discovery.well_known import discovery_payload
+from crawlutron.models.crawl_strategy import CrawlStrategy
 
 
 class TestCapabilitiesPayload:
@@ -147,7 +148,7 @@ class TestAgentHintsPayload:
         payload = agent_hints_payload()
         assert len(payload["strategies"]) == len(STRATEGY_DESCRIPTIONS)
         for key, value in payload["strategies"].items():
-            assert value == STRATEGY_DESCRIPTIONS.get(key)
+            assert value == STRATEGY_DESCRIPTIONS[CrawlStrategy(key)]
 
     def test_example_policies_exist(self):
         payload = agent_hints_payload()
@@ -240,6 +241,7 @@ class TestDiscoveryPayload:
 
         # The app mounts its routers via _IncludedRouter, so app.routes does not expose APIRoute objects; the
         # OpenAPI schema is the surface the recommendation list mirrors and the one a discovering agent
+        assert service is not None, "the lifespan-set app is absent; re-ground this walk"
         live = {
             f"{method.upper()} {route}"
             for route, operations in service.openapi()["paths"].items()
@@ -264,7 +266,7 @@ class TestOperatorSeal:
     async def test_endpoint_reflects_the_seal(self, async_client, monkeypatch):
         from crawlutron.api.dependencies import get_settings
 
-        app = async_client._transport.app  # type: ignore[attr-defined]
+        app = async_client._transport.app
         app.dependency_overrides[get_settings] = lambda: CrawlerSettings.from_mapping({})
         try:
             body = (await async_client.get("/.well-known/crawler-service")).json()

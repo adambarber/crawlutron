@@ -3,6 +3,8 @@ its settle semantic, so the field is removed everywhere and sending it is now RE
 (422), not ignored -- silence taught an upgrading caller nothing, one round trip does.
 """
 
+from collections.abc import Callable
+
 import pytest
 from pydantic import ValidationError
 
@@ -16,6 +18,9 @@ class TestWaitUntilKnobRemoved:
     def test_render_request_refuses_wait_until_by_name(self):
         from crawlutron.models.render_request import RenderRequest
 
+        # The knob is deliberately absent, so the kwarg dies at construction:
+        # bound through a wide alias because the refusal IS the contract.
+        refusing: Callable[..., object] = RenderRequest
         with pytest.raises(ValidationError) as exc:
-            RenderRequest(url="http://example.com/", wait_until="load")
+            refusing(url="http://example.com/", wait_until="load")
         assert any("wait_until" in str(error["loc"]) for error in exc.value.errors())

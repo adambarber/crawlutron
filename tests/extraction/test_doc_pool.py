@@ -21,6 +21,7 @@ from tests._doc_pool_fixtures import _seeded
 from tests._extraction_harnesses import acquire_the_replacement as _acquire_the_replacement
 from tests._extraction_helpers import settings_with
 from tests._lock_doubles import DelegatingLock
+from tests._policy_factories import canonical
 from tests._process_doubles import (
     StubConn,
     StubProc,
@@ -234,7 +235,7 @@ def test_extract_document_degrades_on_spawn_failure(monkeypatch):
     pool = _failing_spawn_pool()
     monkeypatch.setattr(docex, "DOC_POOL", pool)
 
-    result = ext_mod.extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
+    result = ext_mod.extract_document(b"%PDF-1.4 fake", canonical("http://example.com/x.pdf"))
 
     assert result.text is None and result.markdown is None
 
@@ -310,7 +311,7 @@ def test_extract_document_degrades_when_no_worker_can_be_acquired(fake_pool, mon
 
     def _call() -> None:
         result_box["result"] = ext_mod.extract_document(
-            b"%PDF-1.4 fake", "http://example.com/x.pdf", settings=settings
+            b"%PDF-1.4 fake", canonical("http://example.com/x.pdf"), settings=settings
         )
 
     thread = threading.Thread(target=_call, daemon=True)

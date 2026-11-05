@@ -30,16 +30,21 @@ async def test_lifespan_installs_a_sized_default_executor():
     from crawlutron.main import install_default_executor
 
     loop = asyncio.get_running_loop()
+    # _default_executor is the asyncio-internal slot the lifespan installs
+    # through; the reads name that slot, not the public setter.
+    executor_slot = getattr(loop, "_default_executor", None)
     try:
         install_default_executor(loop)
-        executor = loop._default_executor
-        assert isinstance(executor, concurrent.futures.ThreadPoolExecutor)
-        assert executor._max_workers == default_executor_workers()
+        executor_slot = getattr(loop, "_default_executor", None)
+        assert isinstance(executor_slot, concurrent.futures.ThreadPoolExecutor)
+        assert executor_slot._max_workers == default_executor_workers()
     finally:
-        executor = loop._default_executor
-        if executor is not None:
-            loop._default_executor = None
-            executor.shutdown(wait=False, cancel_futures=True)
+        executor_slot = getattr(loop, "_default_executor", None)
+        if executor_slot is not None:
+            # The private slot reset is the teardown seam the lifespan owns;
+            # object.__setattr__ names it (the doubles' seam spelling).
+            object.__setattr__(loop, "_default_executor", None)
+            executor_slot.shutdown(wait=False, cancel_futures=True)
 
 
 @pytest.mark.parametrize("bad", [AttributeError, RuntimeError])

@@ -57,7 +57,9 @@ def test_doc_worker_runtime_disables_onnxruntime_telemetry(monkeypatch):
     import sys
 
     fake = type(sys)("fake_onnxruntime")
-    fake.disable_telemetry_events = lambda: calls.append("telemetry")
+    # The stub module stands in for onnxruntime's own surface: the dynamic
+    # module write goes through object.__setattr__, the doubles' seam spelling.
+    object.__setattr__(fake, "disable_telemetry_events", lambda: calls.append("telemetry"))
     monkeypatch.setitem(sys.modules, "onnxruntime", fake)
 
     dp.configure_doc_worker_runtime()

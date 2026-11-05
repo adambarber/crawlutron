@@ -217,11 +217,15 @@ class TestResolveEgress:
 
     def test_relative_resolves_against_source(self):
         base = NormalizedUrl("https://example.gov/p", policy=UNRESTRICTED_HOST_POLICY)
-        assert base.resolve("/api/x").raw == "https://example.gov/api/x"
+        resolved = base.resolve("/api/x")
+        assert resolved is not None
+        assert resolved.raw == "https://example.gov/api/x"
 
     def test_protocol_relative_resolves_then_accepts(self):
         base = NormalizedUrl("https://example.gov/p", policy=UNRESTRICTED_HOST_POLICY)
-        assert base.resolve("//cdn.example.gov/x").raw == "https://cdn.example.gov/x"
+        resolved = base.resolve("//cdn.example.gov/x")
+        assert resolved is not None
+        assert resolved.raw == "https://cdn.example.gov/x"
 
     def test_absolute_http_url_admits_without_base(self):
         assert admit_or_none("https://example.gov/a").raw == "https://example.gov/a"

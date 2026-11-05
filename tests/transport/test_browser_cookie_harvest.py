@@ -5,13 +5,16 @@ sync read raced it and retried cookieless; awaiting it fixes that.
 """
 
 import asyncio
+from collections.abc import Callable
 from contextlib import contextmanager
+from typing import cast
 
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.transport import browser as browser_mod
 from crawlutron.transport.browser_cookies import harvest_session_cookies
 from crawlutron.transport.browser_driver import BrowserDriver
 from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE
+from crawlutron.vocabulary.browser import BrowserAction
 from tests._browser_doubles import BrowserFakePage, FakeBrowserDriver, ScriptedPage, build_pinned_renderer
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
@@ -99,15 +102,15 @@ class _WedgedContext:
     route-install surface is present so the guard wiring succeeds first."""
 
     # The declared return is what this WOULD answer if it ever did.
-    async def cookies(self, url: str | None = None) -> list[dict[str, str]]:
+    async def cookies(self, urls: str | list[str] | None = None) -> list[dict[str, str]]:
         await asyncio.Event().wait()
         raise AssertionError("unreachable: this coroutine never resolves")
 
-    async def route(self, pattern, handler):
-        pass
+    async def route(self, pattern: str, handler: Callable[..., object]) -> object:
+        return None
 
-    def route_web_socket(self, pattern, handler):
-        pass
+    def route_web_socket(self, pattern: str, handler: Callable[..., object]) -> object:
+        return None
 
 
 class TestHarvestWaitBounded:
@@ -165,7 +168,7 @@ class TestActionChainFailuresAreVisible:
         with caplog.at_level("WARNING"):
             await driver.run_action_chain(
                 page,
-                [{"type": "wait", "selector": "#hydration-done", "timeout": 2500}],
+                [cast("BrowserAction", {"type": "wait", "selector": "#hydration-done", "timeout": 2500})],
                 url="http://example.com/page",
                 budget_seconds=5.0,
             )
@@ -199,7 +202,7 @@ class TestActionChainIsOneBoundedHold:
             await asyncio.Event().wait()
 
         page.on_wait_for_selector = never_appears
-        actions = [
+        actions: list[BrowserAction] = [
             {"type": "wait", "selector": "#one", "timeout": 60_000},
             {"type": "wait", "selector": "#two", "timeout": 60_000},
             {"type": "wait", "selector": "#three", "timeout": 60_000},

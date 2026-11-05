@@ -191,6 +191,9 @@ class TestLifespanContextManager:
         ``None`` raised at startup; the decorator cannot see that."""
         from crawlutron.main import app
 
+        # The lifespan runs on the app the module holds; assert its presence so
+        # the union-narrowing is explicit about which arm the test needs.
+        assert app is not None, "the lifespan-set app is absent"
         async with app.router.lifespan_context(app):
             assert isinstance(app.state.shutdown_event, asyncio.Event)
 

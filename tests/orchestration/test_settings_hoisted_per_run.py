@@ -7,11 +7,12 @@ every document extraction re-walk the env and re-read cgroup sysfs.
 from unittest.mock import patch
 
 from crawlutron.config.settings import CrawlerSettings
+from crawlutron.models.json_value import JsonValue
 from tests._crawl_runners import build_payload
 from tests._fetch_doubles import FetcherDouble
 
 
-def _payload() -> dict[str, object]:
+def _payload() -> dict[str, JsonValue]:
     return build_payload(
         url="http://example.com/doc.csv",
         strategies=["HTTP_DECLARED_CRAWLER"],

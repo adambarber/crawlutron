@@ -67,7 +67,7 @@ class _BrokenStream:
     """A stream whose body read raises, so the pump needs no origin."""
 
     status_code = 502
-    headers = {}
+    headers: dict[str, str] = {}
 
     async def __aenter__(self) -> "_BrokenStream":
         return self

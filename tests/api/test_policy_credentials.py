@@ -4,11 +4,12 @@ origin, and origin-keyed fields use the existing cross-host scrub.
 """
 
 import pytest
+from pydantic import SecretStr
 
 from crawlutron.admission.credentials import origin_of
 from crawlutron.admission.policy import PolicyTier, read_policy, validate_wire_policy
 from crawlutron.models.crawl_policy import CrawlPolicy
-from crawlutron.models.crawl_request import CrawlRequest
+from crawlutron.models.crawl_request import CrawlRequest as _CrawlRequest
 from crawlutron.models.credential import Credential
 from crawlutron.transport.request_profile import apply_credentials
 from tests._policy_factories import canonical, payload_policy
@@ -19,7 +20,7 @@ MODEL_DEFAULTS_TIER = PolicyTier.model_defaults()
 
 def _wire_policy(policy: dict[str, object]) -> CrawlPolicy:
     """The wire path a caller's policy takes: the model coerces, the funnel absorbs the tier."""
-    request = CrawlRequest.model_validate({"url": "https://a.example/", "policy": policy})
+    request = _CrawlRequest.model_validate({"url": "https://a.example/", "policy": policy})
     return payload_policy(request, MODEL_DEFAULTS_TIER)
 
 
@@ -34,7 +35,8 @@ class TestWireModel:
 
     def test_policy_accepts_origin_keyed_credentials(self):
         policy = CrawlPolicy(credentials={"https://private.example": {"kind": "bearer", "token": "t"}})
-        assert policy.credentials["https://private.example"].token.get_secret_value() == "t"
+        token = policy.credentials["https://private.example"].token
+        assert token is not None and token.get_secret_value() == "t"
 
     def test_policy_rejects_non_origin_keys(self):
         # A path/query key can never match a per-hop origin lookup: reject, never silently normalize a
@@ -95,7 +97,8 @@ class TestPayloadPolicy:
             {"credentials": {"HTTPS://Private.Example:443/": {"kind": "bearer", "token": "t"}}}
         )
         assert list(policy.credentials) == ["https://private.example"]
-        assert policy.credentials["https://private.example"].token.get_secret_value() == "t"
+        token = policy.credentials["https://private.example"].token
+        assert token is not None and token.get_secret_value() == "t"
 
     def test_malformed_credential_is_rejected_not_dropped(self):
         with pytest.raises(ValueError, match="credentials"):
@@ -184,7 +187,9 @@ class TestCredentialValueInjection:
         validation (model_construct, or a future door) still cannot put CRLF
         on the wire through apply_credentials.
         """
-        smuggled = Credential.model_construct(kind="bearer", token="t\r\nX-Smuggled: 1")
+        # model_construct skips validation on purpose: the smuggled CRLF is the
+        # value the assembly edge must catch even past the model.
+        smuggled = Credential.model_construct(kind="bearer", token=SecretStr("t\r\nX-Smuggled: 1"))
         with pytest.raises(ValueError):
             apply_credentials(
                 {},

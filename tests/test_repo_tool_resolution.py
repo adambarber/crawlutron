@@ -73,5 +73,7 @@ def test_a_working_venv_tool_is_accepted(service_root: Path) -> None:
 def test_the_rejection_probe_matches_the_system_resolver() -> None:
     """Sanity pin: `which` + X_OK is what the PATH fallback trusts, so the
     fake-venv rejections are rejections of the venv copy, not of PATH."""
-    assert os.access(shutil.which("sh"), os.X_OK)
+    sh = shutil.which("sh")
+    assert sh is not None, "the sanity pin needs sh on PATH"
+    assert os.access(sh, os.X_OK)
     assert stat.S_IXUSR & os.stat(sys.executable).st_mode

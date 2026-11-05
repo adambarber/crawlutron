@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+from typing import cast
 
 from crawlutron.api import job_runner
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.models.discovered_link import DiscoveredLink
 from crawlutron.storage.job_store import JobStatus
 from tests._job_harnesses import (
     ScriptedExecute,
@@ -149,7 +151,9 @@ class TestTransientFailureRequeue:
 
     async def test_frontier_skips_unnormalizable_links(self, client, job_store):
         """A link without a validated normalized_url is never queue-eligible."""
-        empty = {"url": "http://evil.test/x", "normalized_url": ""}
+        # The unnormalizable link is a DiscoveredLink whose normalized_url the
+        # extraction layer would never produce: the pipeline must refuse it.
+        empty = cast("DiscoveredLink", {"url": "http://evil.test/x", "normalized_url": ""})
         bare = "http://legacy.test/string-link"
         job_id = await _create_api_job(
             client,
@@ -364,8 +368,12 @@ async def test_recovery_cas_lost_logs_warning(caplog):
     mock_store.aload = AsyncMock(return_value=None)
 
     with caplog.at_level(logging.WARNING, logger="crawlutron.api.job_recovery"):
+
+        def _null_start(*args: object, **kwargs: object) -> asyncio.Task[object]:
+            raise AssertionError("an unresumable row never starts a runner")
+
         await job_recovery.recover_and_start_pending_jobs(
-            mock_store, CrawlerSettings.from_mapping({}), asyncio.Event(), lambda *a, **k: None
+            mock_store, CrawlerSettings.from_mapping({}), asyncio.Event(), _null_start
         )
     assert any(
         r.message == "recovery_cas_lost" and getattr(r, "job_id", None) == "unresumable-1"

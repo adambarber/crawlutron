@@ -6,6 +6,8 @@ SSRF screening are the base's job, covered by the ``test_search.py`` contract.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
+from typing import cast
 
 import pytest
 
@@ -76,14 +78,17 @@ class TestKeyedProviderParsing:
 
     async def test_keyed_providers_transmit_their_configured_key(self, fake_provider_http):
         """Each keyed provider sends the key it was constructed with."""
-        capture = []
+        capture: list[dict[str, object]] = []
         fake_provider_http(200, json.dumps({"results": []}), capture=capture)
         await TavilyProvider("tavily-key", HostPolicy.unrestricted()).search("x", 1, 5.0)
         await BraveProvider("brave-key", HostPolicy.unrestricted()).search("x", 1, 5.0)
         await SerperProvider("serper-key", HostPolicy.unrestricted()).search("x", 1, 5.0)
-        assert capture[0]["json_body"]["api_key"] == "tavily-key"
-        assert capture[1]["headers"]["X-Subscription-Token"] == "brave-key"
-        assert capture[2]["headers"]["X-API-KEY"] == "serper-key"
+        tavily_body = cast("dict[str, object]", capture[0]["json_body"])
+        brave_headers = cast("dict[str, object]", capture[1]["headers"])
+        serper_headers = cast("dict[str, object]", capture[2]["headers"])
+        assert tavily_body["api_key"] == "tavily-key"
+        assert brave_headers["X-Subscription-Token"] == "brave-key"
+        assert serper_headers["X-API-KEY"] == "serper-key"
 
     async def test_non_2xx_provider_status_raises_with_detail(self, fake_provider_http):
         fake_provider_http(401, json.dumps({"detail": "invalid api key"}))
@@ -157,7 +162,10 @@ def test_an_incomplete_base_provider_fails_at_construction():
     hook implemented is a construction error, not a NotImplementedError thrown at
     the first search after the provider was wired in."""
     with pytest.raises(TypeError):
-        BaseProvider(HostPolicy.unrestricted())
+        # The runtime check is the test's subject: built through type's own door
+        # (the constructor must fail) with the class named as data.
+        build: Callable[..., object] = BaseProvider
+        build(HostPolicy.unrestricted())
 
 
 def test_a_keyed_provider_without_a_call_fails_at_construction():
@@ -172,7 +180,8 @@ def test_a_keyed_provider_without_a_call_fails_at_construction():
         _items_path = ("results",)
 
     with pytest.raises(TypeError):
-        _CalllessProvider("key", HostPolicy.unrestricted())
+        build: Callable[..., object] = _CalllessProvider
+        build("key", HostPolicy.unrestricted())
 
 
 def test_new_provider_with_only_per_provider_fields_works(fake_provider_http):

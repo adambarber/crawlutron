@@ -60,10 +60,9 @@ class TestJsonLdExtraction:
         html = '<html><head><script type="application/ld+json">42</script></head><body>x</body></html>'
         meta = extract_llm_metadata(html, canonical("https://example.com"))
         assert meta["json_ld"] == 42
-        # The wire model admits what the extractor can produce: intersecting the
-        # model's declared keys with the extractor's bag keeps the spread literal.
-        wire_keys = PageMetadataResponse.model_fields & meta.keys()
-        projected = PageMetadataResponse(**{key: meta[key] for key in wire_keys})
+        # The wire model admits what the extractor can produce: validate the
+        # extractor's bag directly, no intermediate dict to type.
+        projected = PageMetadataResponse.model_validate(meta)
         assert projected.json_ld == 42
 
     def test_page_metadata_declares_json_ld_as_the_system_type(self):

@@ -322,7 +322,7 @@ def _declared_all(tree: ast.Module) -> set[str]:
         if isinstance(node, ast.Assign) and any(
             isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets
         ):
-            return {e.value for e in getattr(node.value, "elts", ()) if isinstance(e, ast.Constant)}
+            return {str(e.value) for e in getattr(node.value, "elts", ()) if isinstance(e, ast.Constant)}
     return set()
 
 
@@ -364,6 +364,7 @@ def _non_owner_public_imports(tree: ast.Module, path: pathlib.Path) -> list[str]
         if node.module and node.module.startswith("crawlutron") and not node.level
     )
     for node in app_imports:
+        assert node.module is not None  # the generator above already filters on it
         owner, _, _leaf = node.module.rpartition(".")
         if owner == here or node.module == here:
             continue

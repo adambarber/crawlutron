@@ -2,19 +2,21 @@
 stale callback evict a replacement task's registration."""
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 
 from crawlutron.api import job_runner
 
 
-def _finishable_and_blocked_factories() -> tuple[Callable, Callable, asyncio.Event]:
+def _finishable_and_blocked_factories() -> tuple[
+    Callable[[], Coroutine[object, object, str]], Callable[[], Coroutine[object, object, str]], asyncio.Event
+]:
     """A factory that finishes in one turn, and one held open by an event."""
     b_release = asyncio.Event()
 
-    async def fast():
+    async def fast() -> str:
         return "a"
 
-    async def slow():
+    async def slow() -> str:
         await b_release.wait()
         return "b"
 
@@ -44,7 +46,7 @@ async def test_a_task_that_never_gets_registered_is_still_awaitable_by_the_calle
     job_id = "escape-job"
     boom = RuntimeError("escaped before registration")
 
-    async def fail_now():
+    async def fail_now() -> None:
         raise boom
 
     try:
@@ -62,7 +64,7 @@ async def test_a_failed_task_is_never_reported_as_running():
     job_runner.reset_job_runner()
     job_id = "failed-owner-job"
 
-    async def fail_now():
+    async def fail_now() -> None:
         raise RuntimeError("early failure")
 
     try:

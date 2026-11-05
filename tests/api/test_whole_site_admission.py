@@ -12,8 +12,8 @@ import pytest
 from httpx import AsyncClient
 
 from crawlutron.admission.policy import PolicyLike
-from crawlutron.models.json_value import JsonValue
 from crawlutron.api import job_runner
+from crawlutron.models.json_value import JsonValue
 from crawlutron.storage.job_store import CrawlJobState, JobStatus, JobStore
 from crawlutron.transport.robots import RobotsRules
 from crawlutron.transport.robots_parse import parse_robots_rules
@@ -88,22 +88,26 @@ def _root_with_alias(alias_query: str) -> _AliasSite:
     )
 
 
+def _contract_policy(
+    max_depth: int,
+    max_pages: int,
+    scope_regex: str | None = None,
+    *,
+    respect_robots=False,
+    sitemaps=False,
+) -> PolicyLike:
+    """Site-wide policy rows; ``scope_regex`` narrows the admitted link set."""
+    policy: dict[str, JsonValue] = {
+        "limits": {"max_depth": max_depth, "max_pages": max_pages, "respect_robots": respect_robots},
+        "discovery": {"robots": True, "sitemaps": sitemaps, "feeds": True},
+    }
+    if scope_regex is not None:
+        policy["scope_regex"] = scope_regex
+    return policy
+
+
 class TestWholeSiteAdmissionContract:
-    @staticmethod
-    def _policy(
-        max_depth: int, max_pages: int, scope_regex: str | None = None, *, respect_robots=False, sitemaps=False
-    ) -> PolicyLike:
-        policy: dict[str, JsonValue] = {
-            "limits": {
-                "max_depth": max_depth,
-                "max_pages": max_pages,
-                "respect_robots": respect_robots,
-            },
-            "discovery": {"robots": True, "sitemaps": sitemaps, "feeds": True},
-        }
-        if scope_regex is not None:
-            policy["scope_regex"] = scope_regex
-        return policy
+    _policy = staticmethod(_contract_policy)
 
     async def _admitted(
         self,

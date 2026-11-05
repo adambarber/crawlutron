@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+from typing import cast
 
 import pytest
 
@@ -44,7 +45,9 @@ def _omittable(parameters: list[inspect.Parameter]) -> frozenset[str]:
     return frozenset(param.name for param in parameters if param.default is not inspect.Parameter.empty)
 
 
-def _parameters_of_kind(signature: inspect.Signature, kinds: frozenset) -> list[inspect.Parameter]:
+def _parameters_of_kind(
+    signature: inspect.Signature, kinds: frozenset[inspect._ParameterKind]
+) -> list[inspect.Parameter]:
     """Every parameter of one or more kinds, in declaration order.
 
     One selector rather than one per kind; positional is a pair of kinds, so
@@ -218,11 +221,13 @@ def test_the_contract_guard_sees_defaulting_not_just_names():
     )
 
     # Same parameter names, same order, same coroutine-ness -- only the defaulting differs.
-    rest = ", ".join(f"{name}=None" for name in _EXPECTED_SHAPE["keyword_only"])
-    mutated = ast.parse(
+    kwonly = cast("tuple[str, ...]", _EXPECTED_SHAPE["keyword_only"])
+    rest = ", ".join(f"{name}=None" for name in kwonly)
+    mutated_tree = ast.parse(
         f"async def f(url, headers, timeout_seconds=10, max_content_length=1, *, {rest}): ...\n"
-    ).body[0]
-    assert isinstance(mutated, (ast.FunctionDef, ast.AsyncFunctionDef))
+    )
+    mutated_node = next(node for node in mutated_tree.body if isinstance(node, ast.AsyncFunctionDef))
+    mutated = mutated_node
     assert tuple(arg.arg for arg in mutated.args.args) == _EXPECTED_SHAPE["positional"]
     assert tuple(arg.arg for arg in mutated.args.kwonlyargs) == _EXPECTED_SHAPE["keyword_only"]
     widened = _defaulted_params(mutated)
@@ -260,9 +265,12 @@ def _binds_fetcher(call: ast.Call, tree: ast.Module) -> bool:
     recognized the bare call would walk past every production site."""
     if resolved_call_name(tree, call) == "default_http_fetcher":
         return True
+    call_func = call.func
+    if not isinstance(call_func, ast.Call):
+        return False
     return (
         bool(call.args)
-        and resolved_call_name(tree, call.func) in {"partial", "functools.partial"}
+        and resolved_call_name(tree, call_func) in {"partial", "functools.partial"}
         and resolved_expr_name(tree, call.args[0]) == "default_http_fetcher"
     )
 

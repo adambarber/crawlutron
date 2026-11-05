@@ -8,9 +8,10 @@ import pytest
 
 from crawlutron.admission.admission import requeue_admitted_pages
 from crawlutron.admission.payload_helpers import payload_policy
-from crawlutron.admission.policy import PolicyTier, validate_wire_policy
+from crawlutron.admission.policy import PolicyTier, read_policy, validate_wire_policy
+from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.crawl_request import CrawlRequest
-from crawlutron.models.host_policy import HostPolicy
+from crawlutron.models.host_policy import HostPolicy as _HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.runtime.pressure_sizing import (
     BROWSER_RAM_FRACTION,
@@ -19,10 +20,12 @@ from crawlutron.runtime.pressure_sizing import (
     build_admission_policy,
 )
 from crawlutron.storage.job_store import FrontierEntry
+from crawlutron.storage.job_store_collections import OrderedUrlSet
+from crawlutron.storage.job_store_state import CrawlJobState
 from tests._admission_doubles import PinnedGate
 from tests._admission_doubles import no_crawl_delay as _no_crawl_delay
 from tests._fetcher_factories import crawled_results
-from tests._policy_factories import admit, canonical
+from tests._policy_factories import admit, canonical, crawl_policy
 
 
 @pytest.mark.parametrize(
@@ -250,25 +253,22 @@ async def _allowed() -> bool:
     return True
 
 
-class _RequeueJob:
-    """The slice of a job state that the requeue path actually reads.
-
-    Deliberately narrow: a widening change surfaces as a missing attribute
-    here, not a confusing failure inside a real job row.
-    """
-
-    def __init__(self, *, policy, tier=None, visited=()):
-        self.policy = policy
-        self.tier = tier
-        self.visited = set(visited)
-        self.in_flight = []
-        self.frontier = []
-        self.stats: dict[str, int] = {}
-        self.job_id = "job-requeue"
+def _requeue_job(
+    *, policy: CrawlPolicy | None = None, tier: PolicyTier | None = None, visited=()
+) -> CrawlJobState:
+    """The slice of a job state the requeue path reads, as a real CrawlJobState;
+    a hand-rolled double drifted the moment the path read one more field."""
+    job = CrawlJobState(job_id="job-requeue")
+    if policy is not None:
+        job.policy = policy
+    if tier is not None:
+        job.tier = tier
+    job.visited = OrderedUrlSet(visited)
+    return job
 
 
 def _requeue_context():
-    return SimpleNamespace(host_policy=HostPolicy.unrestricted())
+    return SimpleNamespace(host_policy=_HostPolicy.unrestricted())
 
 
 def test_requeue_honors_the_threaded_known_set():
@@ -278,7 +278,9 @@ def test_requeue_honors_the_threaded_known_set():
     -- an O(visited) backslide the caller's discard-then-requeue sequencing
     accidentally masked.
     """
-    job = _RequeueJob(policy={"limits": {"max_pages": 5}}, visited=["https://far.test/"])
+    job = _requeue_job(
+        policy=read_policy(crawl_policy(limits={"max_pages": 5})), visited=["https://far.test/"]
+    )
     known = {canonical("https://near.test/")}
 
     with patch(
@@ -308,7 +310,10 @@ class TestRequeueOvercommitContract:
     """
 
     def test_requeue_past_the_cap_admits_and_reports_overcommit_not_blocked(self):
-        job = _RequeueJob(policy={"limits": {"max_pages": 2}}, visited=["https://a.test/", "https://b.test/"])
+        job = _requeue_job(
+            policy=read_policy(crawl_policy(limits={"max_pages": 2})),
+            visited=["https://a.test/", "https://b.test/"],
+        )
 
         outcome = requeue_admitted_pages(
             job,
@@ -323,7 +328,9 @@ class TestRequeueOvercommitContract:
         assert job.stats["cap_overcommitted"] == 1
 
     def test_requeue_under_the_cap_is_plain_admission_with_no_cap_signal(self):
-        job = _RequeueJob(policy={"limits": {"max_pages": 2}}, visited=["https://a.test/"])
+        job = _requeue_job(
+            policy=read_policy(crawl_policy(limits={"max_pages": 2})), visited=["https://a.test/"]
+        )
 
         outcome = requeue_admitted_pages(
             job,
@@ -334,8 +341,10 @@ class TestRequeueOvercommitContract:
         assert outcome.accepted == 1
         assert outcome.cap_blocked is False
         assert outcome.cap_overcommitted == 0
-        assert "cap_overcommitted" not in job.stats
-        assert "cap_truncated" not in job.stats
+        # Real job state carries the counters at zero; the contract is no
+        # overcommit SIGNAL, i.e. the counter never leaves 0.
+        assert job.stats["cap_overcommitted"] == 0
+        assert job.stats["cap_truncated"] == 0
 
     async def test_normal_admission_refuses_past_the_cap_and_flags_no_overcommit(self):
         """The ordinary path refuses, and the two signals never both fire.

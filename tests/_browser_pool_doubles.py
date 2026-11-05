@@ -1,4 +1,4 @@
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from typing import NoReturn
 
@@ -60,7 +60,7 @@ class _MockDriver(BrowserDriver):
     def note_render(self) -> None:
         pass
 
-    def harvest_timeout_for(self, browser_profile: BrowserProfileRecord | None) -> float:
+    def harvest_timeout_for(self, browser_profile: Mapping[str, object] | None) -> float:
         return 1.0
 
     async def safe_close_page(self, page: object) -> None:

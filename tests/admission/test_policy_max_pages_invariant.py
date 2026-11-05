@@ -12,7 +12,7 @@ from crawlutron.admission.policy import DEFAULT_MAX_PAGES, read_policy
 
 #: Every way ``max_pages`` can fail to be a usable explicit value. Each must
 #: resolve to the documented default -- never to the model's silent ``0``.
-_ABSENT_OR_INVALID = [
+_ABSENT_OR_INVALID: list[tuple[object, str]] = [
     (None, "nothing supplied"),
     ({}, "empty policy"),
     ({"limits": {}}, "absent inside limits"),

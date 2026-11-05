@@ -1,6 +1,7 @@
 """Validation, headers, retries and parsing stay pure and total."""
 
 import asyncio
+from collections.abc import Callable
 
 import pytest
 from pydantic import ValidationError
@@ -13,6 +14,7 @@ from crawlutron.extraction.document_text import format_extracted_document_text
 from crawlutron.extraction.trees import FrameCollector, frames_from, walkable
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.host_policy import HostPolicy
+from crawlutron.models.json_value import JsonValue
 from crawlutron.models.render_request import RenderRequest
 from crawlutron.transport.fetch_policy import (
     fetch_with_retries,
@@ -96,7 +98,10 @@ class TestValidationHelpers:
         from crawlutron.admission.policy import validate_wire_policy
 
         tier = PolicyTier.model_defaults()
-        cases: list[tuple[dict[str, object], str]] = [
+        # The wire door must reject non-mapping and bad-shape policies; a raw
+        # object callable is the honest spelling of "deliberately wrong shape".
+        bad_wire: Callable[..., object] = validate_wire_policy
+        cases: list[tuple[object, str]] = [
             ("x", "invalid_policy"),
             ({"limits": "x"}, "invalid_policy_limits"),
             ({"headers": "x"}, "invalid_policy_headers"),
@@ -106,7 +111,7 @@ class TestValidationHelpers:
         ]
         for policy, expected in cases:
             with pytest.raises(ValueError, match=rf"^{expected}$"):
-                validate_wire_policy(policy, tier)
+                bad_wire(policy, tier)
 
     def test_retry_after_seconds_invalid(self) -> None:
         assert retry_after_seconds({"retry-after": "notanint"}) is None
@@ -116,22 +121,28 @@ class TestValidationHelpers:
 
 class TestHeaderHelpers:
     def test_mobile_safari_user_agent(self) -> None:
-        policy = {"request_profile": {"user_agent_family": "mobile_safari"}, "headers": {}}
+        policy: dict[str, JsonValue] = {
+            "request_profile": {"user_agent_family": "mobile_safari"},
+            "headers": {},
+        }
         headers = headers_for_strategy(HTTP_DECLARED_CRAWLER, read_policy(policy), canonical("http://x/"))
         assert "iPhone" in headers["User-Agent"]
 
     def test_configured_user_agent_overrides_identity(self, monkeypatch) -> None:
         monkeypatch.setenv("CRAWLUTRON_USER_AGENT", "crawler-test/1")
         headers = headers_for_strategy(
-            HTTP_DECLARED_CRAWLER, read_policy({"headers": {}}), canonical("http://x/")
+            HTTP_DECLARED_CRAWLER,
+            read_policy({"headers": {}}),
+            canonical("http://x/"),
         )
         assert headers["User-Agent"] == "crawler-test/1"
 
     def test_cookie_header_invalid_structures(self) -> None:
-        assert (
-            cookie_header_for_url({"cookie_jar": "per_host", "cookies": "notdict"}, canonical("http://host/"))
-            == ""
-        )
+        # A non-dict cookie jar value is rejected. object is the honest spelling of
+        # "deliberately wrong value type"; the door asserts it does not raise.
+        bad_profile: Callable[..., object] = cookie_header_for_url
+        invalid: object = {"cookie_jar": "per_host", "cookies": "notdict"}
+        assert bad_profile(invalid, canonical("http://host/")) == ""
         assert (
             cookie_header_for_url(
                 {"cookie_jar": "per_host", "cookies": {"host": "notdict"}}, canonical("http://host/")
@@ -143,7 +154,7 @@ class TestHeaderHelpers:
 class TestFetchRetries:
     async def test_fetch_with_retries_reraises_after_exhaustion(self) -> None:
         with pytest.raises(ConnectionError):
-            await fetch_with_retries(_raise_fetcher, "http://x/", {}, 5, 0)
+            await fetch_with_retries(_raise_fetcher, canonical("http://x/"), {}, 5, 0)
 
     def test_retry_backoff_is_exponential_and_capped(self) -> None:
         """Each retry gap doubles from the base and plateaus at the ceiling."""
@@ -171,7 +182,7 @@ class TestFetchRetries:
                 raise ConnectionError("transient")
             return answer
 
-        response, meta = await fetch_with_retries(_flaky, "http://x/", {}, 5, 2)
+        response, meta = await fetch_with_retries(_flaky, canonical("http://x/"), {}, 5, 2)
         assert response is answer
         assert meta["attempts"] == 3
         # Gaps happen only between attempts (2 retries -> 2 waits), increasing and within the ceiling.

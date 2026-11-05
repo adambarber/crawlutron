@@ -98,7 +98,7 @@ async def test_success_result_surfaces_origin_validators():
 
 async def test_engine_routes_validators_by_url():
     """Batch request: validators apply only to the matching URL."""
-    seen_headers: dict[str, dict] = {}
+    seen_headers: dict[str, dict[str, str]] = {}
 
     def make_fetcher():
         def respond(url, headers):
@@ -123,8 +123,8 @@ async def test_engine_routes_validators_by_url():
     assert "If-None-Match" not in seen_headers["/plain"]
     # Etagged URL revalidated conditionally -> 304 -> not_modified.
     assert seen_headers["/etagged"]["If-None-Match"] == '"v9"'
-    plain = [r for u, r in results.items() if u.raw.endswith("/plain")][0]
-    assert plain.status == "success"
+    resolved = [r for u, r in results.items() if u is not None and u.raw.endswith("/plain")]
+    assert resolved and resolved[0].status == "success"
 
 
 async def test_real_server_conditional_roundtrip(base_url):

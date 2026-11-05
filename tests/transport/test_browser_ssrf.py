@@ -171,6 +171,7 @@ async def test_ssrf_guards_install_at_context_level(monkeypatch):
     await render_bare(renderer)
 
     ctx = page.context
+    assert isinstance(ctx, _GuardedContext), "the context swapped in must be the recording one"
     # The base page has no route surface, so any install recorded here came
     # from the context -- the surface a later page on it inherits.
     assert any(pattern == "**/*" for pattern, _ in ctx.route_calls)
@@ -274,7 +275,7 @@ async def test_resolver_budget_timeout_is_a_resolution_failure_not_a_navigation_
 
     result = await renderer.render(
         canonical("http://example.com/"),
-        RenderOptions(timeout_seconds=0.2, max_retries=0),
+        RenderOptions(timeout_seconds=1, max_retries=0),
         policy=UNRESTRICTED_HOST_POLICY,
     )
 

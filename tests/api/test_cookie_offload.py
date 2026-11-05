@@ -83,16 +83,19 @@ async def test_building_request_headers_from_the_async_frame_stays_off_the_loop(
     off the loop."""
     from crawlutron.transport.http_cache import resolve_http_limits
     from crawlutron.transport.http_response import HttpStrategyContext
+    from tests._fetch_doubles import FetcherDouble
 
     jar = cookie_jar.global_cookie_jar()
     await jar.aadd_cookie_header(_url(), "session=abc; Path=/", namespace="")
+    # resolve_http_limits never calls the fetcher; the double satisfies the
+    # HttpFetcher contract so the context is honestly typed.
     ctx = HttpStrategyContext(
         original_url="https://example.test/a",
         normalized_url=_url(),
         strategy="HTTP_DECLARED_CRAWLER",
         policy=_policy_with_cookie_jar(),
         host_policy=UNRESTRICTED_HOST_POLICY,
-        http_fetcher=None,
+        http_fetcher=FetcherDouble(lambda *_: (200, b"", "text/html")),
         cache=None,
         content_cache=None,
         caller_validators={},

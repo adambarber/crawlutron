@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import contextlib
 import sys
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 
 import pytest
 
 import crawlutron.transport.content_cache as cc
 from crawlutron.models.host_policy import HostPolicy
+from crawlutron.models.json_value import JsonValue
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.transport.cache import HttpCache
 from crawlutron.transport.content_cache import ContentCache
@@ -73,11 +74,12 @@ def test_read_paths_refuse_the_dead_ttl_argument():
     is a loud TypeError, not a silently-ignored knob (#222)."""
     with scoped_cache(default_ttl=3600) as c:
         c.set("k", "v")
-        for method in (c.get, c.cached_at_of):
+        for method in (c.get, c.cached_at_of, c.aget):
+            # The dead kwarg is a loud TypeError; an object callable is the
+            # honest spelling of "deliberately wrong call shape".
+            bad_call: Callable[..., object] = method
             with pytest.raises(TypeError):
-                method("k", ttl=0)
-        with pytest.raises(TypeError):
-            c.aget("k", ttl=0)
+                bad_call("k", ttl=0)
 
 
 def test_set_get_roundtrip():
@@ -254,7 +256,7 @@ async def test_crawl_request_serves_recursive_pages_from_content_cache(tmp_path)
         "/": (200, '<html><body><a href="/a">a</a></body></html>', "text/html"),
         "/a": (200, "<html>a</html>", "text/html"),
     }
-    limits = {"max_depth": 1, "max_pages": 5}
+    limits: dict[str, JsonValue] = {"max_depth": 1, "max_pages": 5}
     content_cache = ContentCache(tmp_path)
 
     def page_fetches():
@@ -282,7 +284,7 @@ async def test_mirror_gate_uses_serialized_size_not_shallow_getsizeof(tmp_path, 
     multi-MB serialized entry passed the old mirror gate and landed in RAM
     (worst case MEMORY_CACHE_MAX x full-size entries)."""
     cache = ContentCache(tmp_path)
-    fat = {"body": "x" * (cc.MEMORY_CACHE_MAX_SIZE + 1024)}
+    fat: dict[str, JsonValue] = {"body": "x" * (cc.MEMORY_CACHE_MAX_SIZE + 1024)}
     assert sys.getsizeof(fat) < cc.MEMORY_CACHE_MAX_SIZE  # shallow size: tiny
 
     await cache.aset("fat-key", fat)
@@ -306,7 +308,7 @@ async def test_cold_aget_does_not_mirror_oversized_envelope(tmp_path, monkeypatc
     """After a warm restart the index is cold for pre-existing files: ``aget``
     must gate the mirror on the actual bytes, not a zero default, so a multi-MB
     read never lands in RAM."""
-    fat = {"body": "x" * (1024 * 1024 + 1024)}  # > MEMORY_CACHE_MAX_SIZE
+    fat: dict[str, JsonValue] = {"body": "x" * (1024 * 1024 + 1024)}  # > MEMORY_CACHE_MAX_SIZE
     writer = ContentCache(tmp_path)
     await writer.aset("fat-key", fat)
 

@@ -17,6 +17,7 @@ from crawlutron.api.response_shaping import (
     build_unified_result,
     render_result_to_unified,
 )
+from crawlutron.models.classification_evidence import ClassificationEvidenceRecord
 from crawlutron.models.crawl_result import CrawlResult, EngineCrawlResult
 from crawlutron.models.crawl_status import CrawlStatus
 from crawlutron.models.result_factory import terminal_attempt
@@ -45,8 +46,7 @@ HEALTHY_CLASSIFICATIONS: tuple[Classification, ...] = (
 POISON_KINDS = ("not_a_result", "boom_mapping", "bad_evidence", "bad_validators", "none", "scalar")
 
 #: Poison items enter via an explicit cast per loop; the lie is localized there.
-#: Poison is NOT a result -- the guard's subject.
-POISON_EVIDENCE: list[dict[str, object]] = [{"detail": 42}]
+#: A well-typed record with an ill-typed extra key is the OPEN-payload poison.
 
 
 class _BoomMapping(dict[str, object]):
@@ -115,7 +115,8 @@ def _poison(kind: str, index: int) -> object:
         return _BoomMapping()
     if kind == "bad_evidence":
         # A poison classification feeds the OPEN payload field, never `error=` (a declared Literal).
-        return replace(healthy, classification_evidence=POISON_EVIDENCE)
+        evidence = cast("list[ClassificationEvidenceRecord]", [{"detail": 42}])
+        return replace(healthy, classification_evidence=evidence)
     if kind == "bad_validators":
         bad = cast("dict[str, str]", {"etag": {"not": "a string"}})
         return replace(healthy, validators=bad)
@@ -135,19 +136,18 @@ def _engine_build(rng: random.Random, index: int) -> tuple[EngineCrawlResult, tu
 
 
 def _render_build(rng: random.Random, index: int) -> tuple[CrawlResult, tuple[str, str]]:
-    return cast(CrawlResult, _healthy_render(index)), ("success", "rendered")
+    return _healthy_render(index), ("success", "rendered")
 
 
 def _random_batch[T](
     rng: random.Random,
     build: Callable[[random.Random, int], tuple[T, tuple[str, str]]],
-    result_type: type[T],
 ) -> tuple[list[T], list[tuple[str, str] | None], list[str | None]]:
     """Per position, the builder's healthy (item, expectation) pair, or a poison
-    slot cast to ``result_type`` — survival is poison's only contract; ``kinds``
-    lets the sweep prove every strategy ran.
+    slot cast to ``T`` — survival is poison's only contract; ``kinds`` lets the
+    sweep prove every strategy ran.
     """
-    batch: list[object] = []
+    batch: list[T] = []
     expected: list[tuple[str, str] | None] = []
     kinds: list[str | None] = []
     for index in range(rng.randint(BATCH_MIN, BATCH_MAX)):
@@ -159,7 +159,7 @@ def _random_batch[T](
         else:
             kind = rng.choice(POISON_KINDS)
             # The cast IS the property: poison is not a result, and the guard must hold anyway.
-            batch.append(cast(result_type, _poison(kind, index)))
+            batch.append(cast(T, _poison(kind, index)))
             expected.append(None)
             kinds.append(kind)
     return batch, expected, kinds
@@ -191,7 +191,7 @@ class TestBatchShapeProperty:
         seen_healthy = 0
         for seed in SEEDS:
             rng = random.Random(seed)
-            batch, expected, kinds = _random_batch(rng, _engine_build, EngineCrawlResult)
+            batch, expected, kinds = _random_batch(rng, _engine_build)
             seen_kinds.update(kind for kind in kinds if kind is not None)
             seen_healthy += sum(1 for kind in kinds if kind is None)
             shaped = build_unified_crawl_response(batch).results
@@ -204,14 +204,14 @@ class TestBatchShapeProperty:
         """Both response builders must carry the same per-item contract."""
         for seed in SEEDS:
             rng = random.Random(1000 + seed)
-            batch, expected, _ = _random_batch(rng, _engine_build, EngineCrawlResult)
+            batch, expected, _ = _random_batch(rng, _engine_build)
             response = build_unified_crawl_response(batch, options=EnvelopeOptions(request_id=f"r{seed}"))
             _check_shaped(response.results, expected)
 
     async def test_async_builder_survives_the_same_batches(self):
         for seed in SEEDS:
             rng = random.Random(2000 + seed)
-            batch, expected, _ = _random_batch(rng, _engine_build, EngineCrawlResult)
+            batch, expected, _ = _random_batch(rng, _engine_build)
             response = await abuild_unified_crawl_response(
                 batch, adapt=build_unified_result, options=EnvelopeOptions(request_id=f"r{seed}")
             )
@@ -222,7 +222,7 @@ class TestBatchShapeProperty:
         comprehension); its batch is the render record, so the poison cast targets it."""
         for seed in SEEDS:
             rng = random.Random(3000 + seed)
-            batch, expected, _ = _random_batch(rng, _render_build, CrawlResult)
+            batch, expected, _ = _random_batch(rng, _render_build)
             shaped = await abuild_unified_crawl_response(batch, adapt=render_result_to_unified)
             _check_shaped(shaped.results, expected)
             response = await abuild_unified_crawl_response(

@@ -4,13 +4,14 @@ successful result; the engine must try the next strategy in the chain
 
 import pytest
 
+from crawlutron.models.json_value import JsonValue
 from crawlutron.vocabulary.strategies import HTTP_CFFI_IMPERSONATE, HTTP_DECLARED_CRAWLER
 from tests._assertions import assert_result_success
 from tests._fetch_doubles import FetcherDouble
 from tests._fetcher_factories import run_chain
 
 
-def escalate(base_policy: dict[str, object]) -> dict[str, object]:
+def escalate(base_policy: dict[str, JsonValue]) -> dict[str, JsonValue]:
     """``base_policy`` with the two-step ladder that can answer a block."""
     return dict(base_policy, strategies=[HTTP_DECLARED_CRAWLER, HTTP_CFFI_IMPERSONATE])
 

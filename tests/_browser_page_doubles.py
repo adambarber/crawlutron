@@ -1,5 +1,6 @@
 from collections.abc import Callable
-from typing import Protocol
+
+from crawlutron.transport.render_page import GuardContext
 
 #: What the renderer reads out of a page, in the order it asks.
 DEFAULT_PAGE_ANSWERS = {
@@ -14,17 +15,9 @@ DEFAULT_PAGE_ANSWERS = {
 DEFAULT_PAGE_HTML = "<html><body><h1>Visible body text</h1></body></html>"
 
 
-class PageCookieContext(Protocol):
-    """The renderer's whole page-context contract: it only reads ``cookies``, and
-    declaring it as a Protocol lets a test pass its own context double without the
-    page naming that double's class.
-    """
-
-    async def cookies(self, urls: str | list[str] | None = None) -> list[dict[str, str]]: ...
-
-    async def route(self, pattern: str, handler: Callable[..., object]) -> object: ...
-
-    def route_web_socket(self, pattern: str, handler: Callable[..., object]) -> object: ...
+# The double satisfies the production GuardContext Protocol directly; redeclaring
+# the same shape here would be a second hand-rolled contract that can drift.
+PageCookieContext = GuardContext
 
 
 class FakePageContext:

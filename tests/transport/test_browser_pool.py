@@ -364,14 +364,17 @@ class TestWorkerExtractorErrorDegrades:
 
 
 class _MethodClosedBrowserDouble:
-    """Playwright-shaped: ``is_closed`` is a METHOD (bound = always truthy)."""
+    """Playwright-shaped: ``is_closed`` is a METHOD (bound = always truthy);
+    ``force_closed`` lets a test flip the answer the method returns, instead of
+    rebinding the method itself."""
 
     def __init__(self):
         self.is_closed_calls = 0
+        self.force_closed = False
 
     def is_closed(self) -> bool:
         self.is_closed_calls += 1
-        return False
+        return self.force_closed
 
     async def new_page(self, **_kwargs):
         return _page()
@@ -410,7 +413,7 @@ async def test_a_closed_browser_is_replaced_not_reused():
 
     await scenario.driver.open_page({})
     scenario.driver.note_render()
-    scenario.browser.is_closed = lambda: True  # the browser was closed underneath us
+    scenario.browser.force_closed = True  # the browser was closed underneath us
     await scenario.driver.open_page({})
 
     assert scenario.cm.enters == 2, "a closed browser was reused"

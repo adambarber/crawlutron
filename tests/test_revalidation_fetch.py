@@ -3,6 +3,8 @@ conditional GET, and a 200 answer must be used and stored -- the code once fell
 through to a second unconditional fetch (double load for one crawl).
 """
 
+from crawlutron.models.http_fetch_result import HttpFetchResult
+from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.transport.cache import HttpCache
 from crawlutron.transport.content_cache import ContentCache
 from tests._fetch_doubles import make_fetch
@@ -20,9 +22,11 @@ class _CountingFetcher:
 
     def __init__(self) -> None:
         self.calls = 0
-        self.header_sets: list[dict] = []
+        self.header_sets: list[dict[str, str]] = []
 
-    async def __call__(self, url, headers, timeout_seconds, max_content_length):
+    async def __call__(
+        self, url: NormalizedUrl, headers: dict[str, str], timeout_seconds: int, max_content_length: int = 0
+    ) -> HttpFetchResult:
         self.calls += 1
         self.header_sets.append(dict(headers))
         return self._response(url)

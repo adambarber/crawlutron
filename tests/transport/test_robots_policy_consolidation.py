@@ -7,6 +7,7 @@ import pytest
 from crawlutron.admission.admission import RobotsGate
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.host_policy import HostPolicy
+from crawlutron.models.json_value import JsonValue
 from crawlutron.orchestration.engine import crawl_request
 from crawlutron.transport.robots import (
     ROBOTS_FAILURE_TTL_SECONDS,
@@ -25,7 +26,7 @@ def _html_fetcher(calls: list[str]) -> FetcherDouble:
     return FetcherDouble(lambda url, *_: {"status": 200, "ctype": "text/html", "body": _HTML_BODY}, calls)
 
 
-def _policy(*, respect_robots: bool = True) -> dict[str, object]:
+def _policy(*, respect_robots: bool = True) -> dict[str, JsonValue]:
     return crawl_policy(limits={"respect_robots": respect_robots})
 
 
@@ -130,18 +131,16 @@ async def test_owner_preserves_4xx_and_5xx_ttl_semantics():
         return None, next(statuses)
 
     policy = HostPolicy.unrestricted()
-    missing = await load_robots_rules(
-        canonical("https://missing.test"), object(), 5, fetch_and_decode=decode, policy=policy
-    )
-    missing_again = await load_robots_rules(
-        canonical("https://missing.test"), object(), 5, fetch_and_decode=decode, policy=policy
-    )
-    failure = await load_robots_rules(
-        canonical("https://failure.test"), object(), 5, fetch_and_decode=decode, policy=policy
-    )
-    failure_again = await load_robots_rules(
-        canonical("https://failure.test"), object(), 5, fetch_and_decode=decode, policy=policy
-    )
+
+    def _load(url: str):
+        return load_robots_rules(
+            canonical(url), FetcherDouble(lambda *_: (None, None)), 5, fetch_and_decode=decode, policy=policy
+        )
+
+    missing = await _load("https://missing.test")
+    missing_again = await _load("https://missing.test")
+    failure = await _load("https://failure.test")
+    failure_again = await _load("https://failure.test")
     assert missing.rules == []
     assert missing.source is RobotsSource.unavailable
     assert missing_again.rules == []

@@ -32,7 +32,7 @@ _SCRIPTS_BUDGET_HISTORY: dict[str, list[int]] = {
 _TESTS_BUDGET_HISTORY: dict[str, list[int]] = {
     #: 2 -> 0 (#419, same splits); the While went with the fixed-point walk.
     "abc size": [2, 0],
-    "largest class": [330, 329, 306, 305],
+    "largest class": [330, 329, 306, 305, 291],
     #: 1 -> 0 (#419, the host-policy While moved into the fixed-point walk).
     "block length": [1, 0],
 }

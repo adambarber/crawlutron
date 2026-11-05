@@ -33,11 +33,15 @@ class TestTimeoutsChokepoint:
         assert Timeouts.defaults().read == 30.0
 
     def test_frozen(self):
-        # Bound through object: static checker forbids the write; the test asserts
-        # the runtime guard fires where the static one does.
-        timeout: object = Timeouts.for_request(5.0)
+        # object.__setattr__ BYPASSES frozen, so the guarded path is the plain
+        # write mypy refuses: name it via a def alias (the guard is the subject).
+        timeout = Timeouts.for_request(5.0)
+
+        def violating(name: str, value: float) -> None:
+            setattr(timeout, name, value)
+
         with pytest.raises(dataclasses.FrozenInstanceError):
-            timeout.read = 99.0
+            violating("read", 99.0)
 
 
 class TestRenderPhaseBudgetPin:

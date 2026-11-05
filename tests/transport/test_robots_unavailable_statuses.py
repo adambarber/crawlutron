@@ -15,30 +15,52 @@ from crawlutron.transport.robots import (
     robots_cache,
 )
 from crawlutron.vocabulary.robots import RobotsSource
+from tests._fetch_doubles import FetcherDouble
 from tests._policy_factories import canonical
 
 _ROBOTS_URL = "https://waf.test/robots.txt"
 
 
-def _decode_queue(*answers):
+def _decode_queue(*answers: tuple[str | None, int | None]):
     """A decode double answering each call with the next (body, status)."""
-    answers = iter(answers)
+    queue = iter(answers)
     calls: list[str] = []
 
     async def decode(fetcher, url, headers, timeout_seconds):
         assert url.raw.endswith("/robots.txt"), f"fetched {url.raw}"
         calls.append(url.raw)
-        return next(answers)
+        return next(queue)
 
     return decode, calls
 
 
 async def _load(origin: str, *answers):
     decode, calls = _decode_queue(*answers)
+    # The decode double never touches the fetcher; the double satisfies the
+    # HttpFetcher contract without a live transport.
     rules = await load_robots_rules(
-        canonical(origin), object(), 5, fetch_and_decode=decode, policy=HostPolicy.unrestricted()
+        canonical(origin),
+        FetcherDouble(lambda *_: (None, None)),
+        5,
+        fetch_and_decode=decode,
+        policy=HostPolicy.unrestricted(),
     )
     return rules, calls
+
+
+def _loads_against(decode, policy):
+    """A load bound to one decode double and policy, for tests re-using them."""
+
+    def _load():
+        return load_robots_rules(
+            canonical("https://waf.test"),
+            FetcherDouble(lambda *_: (None, None)),
+            5,
+            fetch_and_decode=decode,
+            policy=policy,
+        )
+
+    return _load
 
 
 UNAVAILABLE_STATUSES = [400, 404, 410, 451]
@@ -83,10 +105,10 @@ async def test_refusal_status_is_not_cached_as_a_denial():
     robots_cache.clear()
     try:
         decode, calls = _decode_queue((None, 403))
+        load_with = _loads_against(decode, policy)
+
         # The short-lived entry still serves the window without re-fetching.
-        again = await load_robots_rules(
-            canonical("https://waf.test"), object(), 5, fetch_and_decode=decode, policy=policy
-        )
+        again = await load_with()
         assert again.rules == [(False, "/")]
         assert len(calls) == 1
     finally:
@@ -107,9 +129,9 @@ async def test_later_robots_200_wins_after_unavailable_status():
             ttl=-1.0,
         )
         decode, calls = _decode_queue(("User-agent: *\nDisallow: /private\n", 200))
-        rules = await load_robots_rules(
-            canonical("https://waf.test"), object(), 5, fetch_and_decode=decode, policy=policy
-        )
+        load_with = _loads_against(decode, policy)
+
+        rules = await load_with()
         assert rules.rules == [(False, "/private")]
         assert rules.source is RobotsSource.policy
         assert len(calls) == 1
@@ -130,7 +152,11 @@ async def test_robots_5xx_refusal_ttl_is_the_short_failure_ttl():
     try:
         decode, _ = _decode_queue((None, 500))
         await load_robots_rules(
-            canonical("https://down.test"), object(), 5, fetch_and_decode=decode, policy=policy
+            canonical("https://down.test"),
+            FetcherDouble(lambda *_: (None, None)),
+            5,
+            fetch_and_decode=decode,
+            policy=policy,
         )
         delta = robots_cache.time_until_expiry(("https://down.test", policy))
         assert delta is not None and delta <= ROBOTS_FAILURE_TTL_SECONDS

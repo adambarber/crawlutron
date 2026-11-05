@@ -11,6 +11,7 @@ from curl_cffi.requests.exceptions import RequestException
 from curl_cffi.requests.models import STREAM_END
 
 import crawlutron.transport.http_client_pool as http_mod
+from crawlutron.models.http_fetcher import HttpFetcher
 from crawlutron.transport.fetchers import default_http_fetcher, impersonating_fetcher
 from crawlutron.vocabulary.strategies import HTTP_CFFI_IMPERSONATE
 from tests._fetch_doubles import FetcherDouble
@@ -140,7 +141,7 @@ def _scheduled_closes():
 
 def _scripted_stream(
     stub_builder, items, *, headers=None
-) -> tuple[_Response, _Session, list[object], object]:
+) -> tuple[_Response, _Session, list[object], HttpFetcher]:
     """A cffi session whose queue replays `items`; return it and an injected fetcher.
 
     One scripted queue, one session, one release log; ``items`` is the only
@@ -176,7 +177,7 @@ async def test_cancellation_of_the_queue_wait_releases_the_handle(stub_builder):
         stub_builder, [b"first"]
     )  # then the producer wedges
 
-    fetch = asyncio.create_task(fetcher(canonical(URL), {}, 5, 4096))
+    fetch: asyncio.Task[object] = asyncio.create_task(fetcher(canonical(URL), {}, 5, 4096))
     await await_until(
         lambda: bool(session.gets) and response.queue.drained,
         "the cffi fetch never reached the streaming queue wait",
@@ -390,7 +391,7 @@ async def test_cffi_session_reused_across_requests(base_url, monkeypatch):
 
     # Subclassing ``cffi_requests.AsyncSession`` directly rather than a variable bound to it: the base is
     # resolved when this statement runs, and the test patches the module attribute afterwards, so the counter
-    class _CountingSession(cffi_requests.AsyncSession):
+    class _CountingSession(cffi_requests.AsyncSession[cffi_requests.models.Response]):
         def __init__(self, *args, **kwargs):
             nonlocal constructions
             constructions += 1

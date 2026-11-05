@@ -1,5 +1,7 @@
 """Payload helpers: policy construction, advertised limits and invalid-limit handling."""
 
+from typing import cast
+
 import pytest
 from pydantic import ValidationError
 
@@ -7,6 +9,7 @@ from crawlutron.admission.payload_helpers import payload_policy
 from crawlutron.admission.policy import PolicyTier, validate_wire_policy
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.models.json_value import JsonValue
 
 
 def _normalized_policy(**policy: object) -> CrawlPolicy:
@@ -15,7 +18,7 @@ def _normalized_policy(**policy: object) -> CrawlPolicy:
     Every test here is about one policy field, so the wire mapping is written
     once; rejections still raise from the real entry point.
     """
-    return validate_wire_policy(dict(policy), PolicyTier.model_defaults())
+    return validate_wire_policy(cast("dict[str, JsonValue]", policy), PolicyTier.model_defaults())
 
 
 class TestPayloadPolicyCarriesAdvertisedLimits:

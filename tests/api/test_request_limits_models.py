@@ -5,7 +5,6 @@ from pydantic import ValidationError
 
 from crawlutron.models.browser_profile_record import BrowserProfileRecord
 from crawlutron.models.crawl_strategy import CrawlStrategy
-from crawlutron.models.json_value import JsonValue
 
 
 class TestBrowserActionKeysAreClosed:

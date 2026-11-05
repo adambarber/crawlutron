@@ -14,6 +14,7 @@ from crawlutron.extraction.content import (
     extract_selected,
 )
 from tests._extraction_helpers import settings_with
+from tests._policy_factories import canonical
 
 pytestmark = pytest.mark.usefixtures("four_worker_selector_pool")
 
@@ -40,7 +41,7 @@ def test_timed_out_selectors_are_cancelled_not_orphaned(monkeypatch):
     settings = settings_with(extraction_selector_timeout=0.05)
     executor = docex.extraction_executor()
     real_submit = executor.submit
-    captured: list[concurrent.futures.Future] = []
+    captured: list[concurrent.futures.Future[object]] = []
 
     def capturing_submit(fn, /, *args, **kwargs):
         fut = real_submit(fn, *args, **kwargs)
@@ -50,7 +51,7 @@ def test_timed_out_selectors_are_cancelled_not_orphaned(monkeypatch):
     monkeypatch.setattr(executor, "submit", capturing_submit)
     for _ in range(8):
         result = extract_selected(
-            html, "http://example.com/", selectors=Selectors(css=".x"), settings=settings
+            html, canonical("http://example.com/"), selectors=Selectors(css=".x"), settings=settings
         )
         assert result == ExtractedContent(None, None)
     assert len(calls) == 4, "the saturated pool did not hold exactly the first four"

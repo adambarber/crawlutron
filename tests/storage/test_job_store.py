@@ -91,7 +91,7 @@ def test_crawljobstate_serialization(job_store):
     job = CrawlJobState(
         job_id="test123",
         root_url="http://example.com/",
-        policy={"strategies": ["HTTP_DECLARED_CRAWLER"]},
+        policy=read_policy({"strategies": ["HTTP_DECLARED_CRAWLER"]}),
         status=JobStatus.RUNNING,
         frontier=frontier(["http://example.com/a", "http://example.com/b"]),
         visited=OrderedUrlSet([canonical("http://example.com/")]),

@@ -19,7 +19,7 @@ class _GotoKwargsPage(BrowserFakePage):
 
     def __init__(self):
         super().__init__()
-        self.goto_kwargs_seen: list[dict] = []
+        self.goto_kwargs_seen: list[dict[str, object]] = []
 
     async def goto(self, url, wait_until="load", **kwargs):
         await super().goto(url, wait_until=wait_until, **kwargs)
@@ -52,7 +52,8 @@ async def test_warmup_goto_budget_is_floored_like_every_render_phase() -> None:
         timeout_seconds=0.2,
     )
     assert page.goto_kwargs_seen == [{"timeout": render_phase_seconds(0.2)}], page.goto_kwargs_seen
-    assert page.goto_kwargs_seen[0]["timeout"] >= 1.0
+    rendered_timeout = page.goto_kwargs_seen[0]["timeout"]
+    assert isinstance(rendered_timeout, float) and rendered_timeout >= 1.0
 
 
 async def test_warmup_goto_budget_reaches_every_warmup_url() -> None:

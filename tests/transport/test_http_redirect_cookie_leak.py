@@ -83,9 +83,9 @@ class _TwoCookieHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/html")
         self.send_header("Set-Cookie", "session=abc; Path=/")
         self.send_header("Set-Cookie", "csrf=xyz; Path=/")
-        self.send_header("Content-Length", str(len(__class__.BODY)))
+        self.send_header("Content-Length", str(len(_TwoCookieHandler.BODY)))
         self.end_headers()
-        self.wfile.write(__class__.BODY)
+        self.wfile.write(_TwoCookieHandler.BODY)
 
     def log_message(self, *args):
         """Silence the default per-request stderr logging."""

@@ -9,7 +9,8 @@ import pathlib
 import tempfile
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
+from fastapi.responses import JSONResponse
 
 from crawlutron.api import async_crawl_runner, crawl_endpoint, main_helpers, map_endpoint
 from crawlutron.api.caller_auth import Tracking
@@ -180,7 +181,9 @@ def _crawl_call(tmpdir: str) -> CrawlRequest:
     return CrawlRequest(urls=["http://example.test/"])
 
 
-async def _run_crawl(payload: CrawlRequest, tmpdir: str, job_store) -> object:
+async def _run_crawl(
+    payload: CrawlRequest, tmpdir: str, job_store
+) -> JSONResponse | Response | UnifiedCrawlResponse:
     """The public crawl() door over one real per-test store pair."""
     return await crawl(
         payload,
@@ -236,6 +239,8 @@ async def test_async_crawl_acceptance_holds_one_slot_and_releases_at_202(monkeyp
             _crawl_call(tmpdir).model_copy(update={"async_mode": True}), tmpdir, job_store
         )
 
+    # async_mode returns the durable-job 202 envelope, never a UnifiedCrawlResponse.
+    assert isinstance(response, (JSONResponse, Response))
     assert response.status_code == 202
     assert held == [before + 1]
     assert _active() == before

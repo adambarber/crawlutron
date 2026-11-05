@@ -61,6 +61,9 @@ def test_openapi_title_is_the_brand() -> None:
     """
     from crawlutron.main import app as service
 
+    # ``app`` is a module-level ``FastAPI | None`` holder; the lifespan sets it,
+    # and this import-path check is about the type, not a live app instance.
+    assert service is not None
     assert service.title == "Crawlutron Execution Service"
 
 

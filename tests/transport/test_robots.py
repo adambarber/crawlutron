@@ -16,7 +16,7 @@ from crawlutron.orchestration.engine import crawl_request
 from crawlutron.safety.bounded_ttl import BoundedTTLCache
 from crawlutron.transport.cache import HttpCache
 from crawlutron.transport.fetch_policy import discovery_diagnostics
-from crawlutron.transport.robots import robots_allows, robots_pattern_to_regex
+from crawlutron.transport.robots import RobotsRules, robots_allows, robots_pattern_to_regex
 from crawlutron.transport.robots_parse import (
     iter_robots_fields,
     parse_robots_crawl_delay,
@@ -25,6 +25,7 @@ from crawlutron.transport.robots_parse import (
     select_robots_values,
 )
 from crawlutron.vocabulary.identity import SERVICE_ID
+from crawlutron.vocabulary.robots import RobotsSource
 from tests._fetch_doubles import FetcherDouble
 from tests._http_fetch_doubles import fake_fetcher as _fake_fetcher
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, crawl_policy
@@ -320,8 +321,14 @@ def test_purge_removes_only_expired_production_tuples():
     try:
         now = time.monotonic()
         # Expired entry: ttl-1 (engines treat expires_at > now as fresh).
-        em.robots_cache.put(robots_entry_key("http://old.test"), ([], [], None), ttl=-1.0)
-        em.robots_cache.put(robots_entry_key("http://fresh.test"), ([], [], None), ttl=600.0)
+        em.robots_cache.put(
+            robots_entry_key("http://old.test"), RobotsRules([], [], None, RobotsSource.unavailable), ttl=-1.0
+        )
+        em.robots_cache.put(
+            robots_entry_key("http://fresh.test"),
+            RobotsRules([], [], None, RobotsSource.unavailable),
+            ttl=600.0,
+        )
         assert purge_robots_cache(now) == 1
         assert em.robots_cache.get(robots_entry_key("http://old.test")) is None
         assert em.robots_cache.get(robots_entry_key("http://fresh.test")) is not None
@@ -344,7 +351,11 @@ async def test_purge_handles_production_shaped_entries():
         for i in range(ROBOTS_CACHE_MAX_ENTRIES + 1):
             # Stale entries (ttl -1) stay present under the chokepoint's purge-only-deletion semantics; the is
             # that a full cache must not crash purging during a real crawl.
-            em.robots_cache.put(robots_entry_key(f"http://purge-{i}.test"), ([], [], None), ttl=-1.0)
+            em.robots_cache.put(
+                robots_entry_key(f"http://purge-{i}.test"),
+                RobotsRules([], [], None, RobotsSource.unavailable),
+                ttl=-1.0,
+            )
 
         _robots = (200, "User-agent: *\nAllow: /\n", "text/plain")
         _home = (200, b"<html><body>hi</body></html>", "text/html")
@@ -374,8 +385,9 @@ def test_failure_ttl_is_60s_not_600s():
         # Pin the stored per-entry TTL: a 500 response writes rules=[(False,"/")]
         # with ttl=min(600,60)=60 seconds.
         key = robots_entry_key("http://fail-ttl.test")
-        em.robots_cache.put(key, ([(False, "/")], [], None), ttl=60.0)
-        assert em.robots_cache.peek(key) == ([(False, "/")], [], None)
+        pinned = RobotsRules([(False, "/")], [], None, RobotsSource.unreachable)
+        em.robots_cache.put(key, pinned, ttl=60.0)
+        assert em.robots_cache.peek(key) == pinned
         delta = em.robots_cache.time_until_expiry(key)
         assert delta is not None, "the fetch wrote a robots entry; the cache must hold it"
         # 60s TTL at write time → delta ≈ 60, never the 600s default.

@@ -9,7 +9,7 @@ from crawlutron.models.host_policy import HostPolicy
 from tests._webhook_doubles import record_webhook_delivery
 
 _HTTPS = "https://webhook.example.com/cb"
-_OK = {"results": []}
+_OK: dict[str, list[object]] = {"results": []}
 
 
 async def _post_through_chokepoint(monkeypatch, *, url: str, payload) -> list[httpx.Request]:

@@ -11,6 +11,8 @@ from crawlutron.models.crawl_task import CrawlTask
 from crawlutron.orchestration.admission_stall import AdmissionStallGuard
 from crawlutron.orchestration.recursive import admit_recursive_batch
 from crawlutron.runtime.metrics import get_metrics
+from crawlutron.runtime.pressure_gates import ResourceGate
+from crawlutron.runtime.pressure_sizing import AdmissionPolicy, WeightedAdmission
 from crawlutron.transport.scheduler import DomainScheduler
 from crawlutron.vocabulary.strategies import BROWSER_HEADLESS
 from tests._admission_runs import link as _link
@@ -19,7 +21,7 @@ from tests._admission_runs import run as _run
 from tests._admission_runs import task as _task
 from tests._policy_factories import canonical
 from tests._recursive_harnesses import ContentionFreeGate, drive_recursive_crawl, make_crawl_task
-from tests._recursive_harnesses import _allowed_result as _allows
+from tests._recursive_harnesses import _allowed_url as _allows
 from tests._result_builders import engine_result
 
 # The root seed as written, and the value the engine actually holds for it. These are not the same string:
@@ -322,8 +324,22 @@ async def test_saturated_admission_loop_terminates_within_bounded_interval():
     """A (0,0) admission must not spin: the loop stops at the injected-clock
     bound and reports every unconsumed URL as a capacity-stalled failure."""
 
-    class SaturatedAdmission:
-        async def admit(self, want_http, want_browser):
+    class SaturatedAdmission(WeightedAdmission):
+        """A real (0,0) admission: zero capacities, one yield per admit."""
+
+        def __init__(self) -> None:
+            super().__init__(
+                ResourceGate(memory_ratio=lambda: 0.0, cpu_ratio=lambda: 0.0),
+                AdmissionPolicy(
+                    http_task_bytes=0,
+                    browser_task_bytes=0,
+                    browser_pool_reserve_bytes=0,
+                    max_http_concurrency=0,
+                    max_browser_concurrency=0,
+                ),
+            )
+
+        async def admit(self, want_http: int, want_browser: int) -> tuple[int, int]:
             await asyncio.sleep(0)  # yield so the injected-clock guard observes
             return 0, 0
 

@@ -5,7 +5,9 @@ trusting ``json.loads``'s ``Any`` -- a corrupt record is a miss, never a 500.
 """
 
 import json
+from collections.abc import Callable
 
+from crawlutron.admission.policy import read_policy
 from crawlutron.models.serialization import to_dict
 from crawlutron.orchestration.engine import ResultSpill
 from crawlutron.transport.content_cache import ContentCache
@@ -19,7 +21,7 @@ async def test_a_non_integer_stats_column_reads_as_its_declared_zeros(tmp_path):
     """The stats column is written from ``dict[str, int]``; the read is checked,
     not ``json.loads``'s raw value poured into a view that declares ``int``."""
     store = make_job_store(tmp_path)
-    job = store.create("https://example.test/root", {"limits": {"max_depth": 2}})
+    job = store.create("https://example.test/root", read_policy({"limits": {"max_depth": 2}}))
     with raw_job_row(store) as connection:
         connection.execute(
             "UPDATE crawl_jobs SET stats = ? WHERE job_id = ?",
@@ -42,10 +44,11 @@ def test_a_frontier_entry_that_is_not_an_entry_fails_at_persist(tmp_path):
     """The write edge serializes ``FrontierEntry`` records only: a bare string in
     the frontier is a writer bug and dies at persist, not in the reader."""
     store = make_job_store(tmp_path)
-    job = store.create("https://example.test/root", {"limits": {"max_depth": 2}})
+    job = store.create("https://example.test/root", read_policy({"limits": {"max_depth": 2}}))
     # An APPEND is the delta the write edge serializes: the bare string must die
-    # there, never land as a row.
-    job.frontier.append("https://example.test/bare")
+    # there, never land as a row. The append itself is the deliberate violation.
+    bad_append: Callable[..., object] = job.frontier.append
+    bad_append("https://example.test/bare")
     try:
         store.save(job)
     except (AttributeError, TypeError):

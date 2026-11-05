@@ -118,7 +118,7 @@ class _Stream:
 class _Client:
     def __init__(self, response):
         self.response = response
-        self.calls: list[tuple[str, bool, dict | None]] = []
+        self.calls: list[tuple[str, bool, dict[str, object] | None]] = []
 
     def stream(self, method, url, headers=None, timeout=None, follow_redirects=False, extensions=None):
         self.calls.append((url, follow_redirects, extensions))

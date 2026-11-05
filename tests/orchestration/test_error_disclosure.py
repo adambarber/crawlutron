@@ -16,24 +16,22 @@ from crawlutron.models.serialization import to_dict
 from crawlutron.transport.classification import classify_error_code
 from crawlutron.transport.decompression import DecompressionTooLargeError
 from crawlutron.transport.results import crawl_result_from_exception, engine_result_from_exception
+from tests._fetch_doubles import FetcherDouble
 from tests._fetcher_factories import invoke_http_strategy, run_http_strategy
-from tests._policy_factories import http_strategy_policy
+from tests._policy_factories import canonical, http_strategy_policy
 
 
-class _RaisingFetcher:
+class _RaisingFetcher(FetcherDouble):
+    """A fetcher whose call raises: the shared double with an exception route."""
+
     def __init__(self, exc):
+        super().__init__(lambda _url, _headers, *_: (_ for _ in ()).throw(exc))
         self.exc = exc
-
-    def __call__(self, url, headers, timeout, max_content_length):
-        async def _raise():
-            raise self.exc
-
-        return _raise()
 
 
 async def _run(exc):
     fetcher = _RaisingFetcher(exc)
-    policy = {"limits": {}, "extraction": "html", "headers": {}}
+    policy = http_strategy_policy(extraction="html")
     return await run_http_strategy(
         url="http://example.com/",
         policy=policy,
@@ -118,16 +116,19 @@ def test_both_failure_primitives_log_the_same_server_side_payload(caplog):
     same operation at two layers, each spelling its own ``extra`` dict.
     """
     caplog.set_level(logging.WARNING)
+    # The session fixture may arm the SSRF memo here (env=1 for loopback tests);
+    # the assertion is about the two failure primitives' payloads only.
+    classification = logging.getLogger("crawlutron.transport.classification")
 
     engine = engine_result_from_exception(
         error=RuntimeError("engine boom /crawlutron/engine"),
         original_url="https://example.com/a",
-        normalized_url="https://example.com/a",
+        normalized_url=canonical("https://example.com/a"),
         strategy="HTTP_DECLARED_CRAWLER",
     )
     render = crawl_result_from_exception(
         error=RuntimeError("render boom /app/render"),
-        url="https://example.com/b",
+        url=canonical("https://example.com/b"),
         domain="example.com",
         strategy="BROWSER_HEADLESS",
         elapsed_ms=7,
@@ -139,7 +140,10 @@ def test_both_failure_primitives_log_the_same_server_side_payload(caplog):
     assert vars(engine_record).keys() == vars(render_record).keys()
     assert engine_record.funcName == render_record.funcName == "classify_and_log"
     # Distinct event names, so the two layers stay tellable apart in the stream.
-    assert {r.msg for r in caplog.records} == {"strategy_result_error", "render_result_error"}
+    assert {r.msg for r in caplog.records if r.name == classification.name} == {
+        "strategy_result_error",
+        "render_result_error",
+    }
     # The raw detail is in the log and not on the wire: that asymmetry is the whole reason the field exists,
     # on both paths.
     for record, result, expected_strategy in (

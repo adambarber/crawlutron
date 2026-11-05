@@ -29,7 +29,9 @@ def _crawl_response(
                 "rendered",
                 final_url=original_url,
                 diagnostics={
-                    "robots": {"sitemaps": list(sitemaps)},
+                    # The sitemap gate reads only these blocks' URL lists; the
+                    # remaining RobotsDiagnostics keys are not consumed here.
+                    "robots": {"allowed": True, "evaluation": "allowed", "sitemaps": list(sitemaps)},
                     "discovery": {"sitemap_urls": list(sitemaps), "feeds": list(feeds)},
                 },
                 discovered_links=[_link(link, original_url) for link in links],

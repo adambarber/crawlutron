@@ -12,8 +12,11 @@ def test_purge_drops_latency_for_silent_domains():
     s = _scheduler()
     s.record_latency("live.test", 100.0)
     s.record_latency("retired.test", 200.0)
-    # Retire: rewind its last-seen past the retention window.
-    s._state("retired.test").last_seen -= s._circuit_cooldown_max * 2
+    # Retire: rewind its last-seen past the retention window; record_latency
+    # set it, so the None arm of the union is dead here.
+    retired = s._state("retired.test")
+    assert retired.last_seen is not None
+    retired.last_seen -= s._circuit_cooldown_max * 2
     s.purge_expired()
     assert "live.test" in s._domain_state
     assert "retired.test" not in s._domain_state
@@ -37,7 +40,9 @@ def test_amortized_purge_still_runs_on_set_domain_cooldown():
     s = _scheduler()
     s.record_latency("retired.test", 50.0)
     # Silenced long ago: the amortized cadence must still drop it.
-    s._state("retired.test").last_seen -= s._circuit_cooldown_max * 2
+    retired = s._state("retired.test")
+    assert retired.last_seen is not None
+    retired.last_seen -= s._circuit_cooldown_max * 2
     for _ in range(COOLDOWN_PURGE_INTERVAL):
         s.set_domain_cooldown("d.test", 1.0)
     assert "retired.test" not in s._domain_state

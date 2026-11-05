@@ -21,8 +21,9 @@ def test_teardown_terminates_workers_outside_the_lock(monkeypatch):
     worker = stub_worker(31337)
     spawner = StubSpawner(worker)
     pool = DocExtractionPool(spawn=spawner, worker_count=lambda: 1, enabled=lambda: True)
-    assert pool.acquire(0.1) is worker
-    pool.release(worker)
+    acquired = pool.acquire(0.1)
+    assert acquired is not None and acquired is worker
+    pool.release(acquired)
 
     parked = threading.Event()
     release = threading.Event()
@@ -35,7 +36,12 @@ def test_teardown_terminates_workers_outside_the_lock(monkeypatch):
     monkeypatch.setattr(dp, "terminate_doc_process", parked_terminate)
 
     teardown_done: list[bool] = []
-    teardown = threading.Thread(target=lambda: teardown_done.append(pool.teardown() or True))
+
+    def _teardown() -> None:
+        pool.teardown()
+        teardown_done.append(True)
+
+    teardown = threading.Thread(target=_teardown)
     teardown.start()
     assert parked.wait(10), "teardown never reached the worker termination"
 
@@ -59,7 +65,9 @@ def test_teardown_forgets_slots_and_closes_the_pool(seed):
     spawner = StubSpawner(*[stub_worker(pid) for pid in range(seed)])
     pool = DocExtractionPool(spawn=spawner, worker_count=lambda: seed or 1, enabled=lambda: True)
     for _ in range(seed):
-        pool.release(pool.acquire(0.1))
+        slot = pool.acquire(0.1)
+        assert slot is not None
+        pool.release(slot)
     pool.teardown()
 
     assert len(pool) == 0
