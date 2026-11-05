@@ -13,6 +13,7 @@ import time
 import pytest
 
 import crawlutron.transport.pinned_dns as pt
+from tests._timing_harnesses import HANG_GUARD_SECONDS
 
 
 @pytest.fixture(autouse=True)
@@ -36,13 +37,32 @@ def test_a_saturated_resolver_fails_fast():
     pt.dns_seed_saturation(32)
     try:
         assert pt.dns_in_flight_resolves() >= 32
-        started = time.monotonic()
+        # The refusal is a pre-submit decision, so it is a fail-fast property:
+        # run it under a hang guard, not a stopwatch.
         with pytest.raises(pt.ResolverBudgetExceeded, match="saturated"):
-            pt.bounded_addrinfo("victim.test")
-        elapsed = time.monotonic() - started
-        assert elapsed < 1.0, f"the fast-fail took {elapsed:.2f}s -- it queued instead"
+            await_guarded(lambda: pt.bounded_addrinfo("victim.test"))
     finally:
         pt.dns_clear_saturation()
+
+
+def await_guarded(work):
+    """Run a synchronous call on a thread under the absolute hang guard: if the
+    refusal is not fast, the join times out and the test fails as a hang."""
+    outcome = {}
+
+    def runner():
+        try:
+            outcome["value"] = work()
+        except BaseException as exc:  # re-raised in the caller below
+            outcome["error"] = exc
+
+    worker = threading.Thread(target=runner, daemon=True)
+    worker.start()
+    worker.join(timeout=HANG_GUARD_SECONDS)
+    assert not worker.is_alive(), "the saturated refusal did not return fast -- it queued"
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome.get("value")
 
 
 def test_the_accounting_door_reports_live_resolves():

@@ -2,8 +2,11 @@
 
 import asyncio
 
+import pytest
+
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.transport.scheduler import DomainScheduler
+from tests._timing_harnesses import HANG_GUARD_SECONDS
 
 
 def test_scheduler_instances_have_independent_state():
@@ -74,10 +77,6 @@ async def test_concurrent_instances_allow_combined_concurrency():
     a = DomainScheduler.from_settings(settings, global_limit=10, max_rps=0.0)
     b = DomainScheduler.from_settings(settings, global_limit=10, max_rps=0.0)
 
-    async def slow_worker(job):
-        await asyncio.sleep(0.05)
-        return job
-
     class Job:
         def __init__(self, index, domain):
             self.index = index
@@ -86,15 +85,58 @@ async def test_concurrent_instances_allow_combined_concurrency():
     jobs_a = [Job(0, "example.com")]
     jobs_b = [Job(1, "example.com")]
 
-    async def run_one(sched, jobs, name):
-        results = await sched.run(jobs, slow_worker, failed_result=lambda j, e: None)
-        return results
+    # A rendezvous, not a stopwatch: the two workers must both be inside their
+    # jobs at once, which only independent gates permit.
+    both_running = asyncio.Barrier(2)
 
-    # Both run concurrently; if gates were shared, total time ≈ 100ms (serialized).
-    # If independent, total time ≈ 50ms (parallel per instance).
-    start = asyncio.get_event_loop().time()
-    await asyncio.gather(run_one(a, jobs_a, "a"), run_one(b, jobs_b, "b"))
-    elapsed = asyncio.get_event_loop().time() - start
+    async def slow_worker(job):
+        async with both_running:
+            return job
 
-    # Independent gates: ~50ms. Shared gate would force ~100ms. Allow generous margin.
-    assert elapsed < 0.15, f"Expected ~50ms concurrent, got {elapsed:.3f}s"
+    results = await asyncio.wait_for(
+        asyncio.gather(
+            a.run(jobs_a, slow_worker, failed_result=lambda j, e: None),
+            b.run(jobs_b, slow_worker, failed_result=lambda j, e: None),
+        ),
+        timeout=HANG_GUARD_SECONDS,
+    )
+    # run() returns per-job result dicts keyed by job index; both completed.
+    for result in results:
+        assert result is not None
+        assert list(result) == [0] or list(result) == [1]
+
+
+def test_the_gather_of_two_instances_cannot_outlast_a_shared_gate():
+    """Red check for the conversion: a SHARED gate serializes the two workers, so
+    the rendezvous barrier above cannot be reached by both -- the point of the
+    scope test, stated as a hang-guard instead of a stopwatch claim."""
+
+    class SharedJob:
+        def __init__(self, index):
+            self.index = index
+            self.domain = "example.com"
+
+    settings = CrawlerSettings.from_mapping(
+        {
+            "CRAWLUTRON_PER_DOMAIN_CONCURRENCY": "1",
+            "CRAWLUTRON_PER_DOMAIN_DELAY_MS": "0",
+        }
+    )
+    shared = DomainScheduler.from_settings(settings, global_limit=10, max_rps=0.0)
+
+    both_running = asyncio.Barrier(2)
+
+    async def slow_worker(job):
+        async with both_running:
+            return job
+
+    jobs = [SharedJob(0), SharedJob(1)]
+
+    async def scenario():
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(
+                shared.run(jobs, slow_worker, failed_result=lambda j, e: None),
+                timeout=0.2,
+            )
+
+    asyncio.run(scenario())
