@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from typing import cast
 
 import httpx
@@ -28,12 +29,35 @@ from tests.helpers.server import _Handler, spawn_threaded_server
 class TestHttpStrategyEdges:
     """Cover remaining branches in http.py"""
 
-    def test_charset_from_bytes_import_error(self):
-        from crawlutron.transport.body_decode import decode_body
+    def test_charset_from_bytes_import_error(self, monkeypatch):
+        """Re-import with ``from_bytes`` missing from charset_normalizer so the
+        module's real ImportError branch runs, then decode through the fallback."""
+        import importlib
+        import types
 
-        body = b"test content"
-        result = decode_body(body, "text/plain; charset=utf-8")
-        assert result == "test content"
+        from crawlutron.transport import body_decode
+
+        real_module = importlib.import_module("charset_normalizer")
+        real_models = importlib.import_module("charset_normalizer.models")
+        # A package stub that keeps ``models`` importable but carries no ``from_bytes``:
+        # ``from charset_normalizer import from_bytes`` raises ImportError -> None binding.
+        stub = types.ModuleType("charset_normalizer")
+        stub.__dict__["models"] = real_models
+        monkeypatch.setitem(sys.modules, "charset_normalizer", stub)
+        try:
+            fresh = importlib.reload(body_decode)
+            assert fresh._charset_from_bytes is None
+            # Undecodable body: lossy UTF-8 replaces, nothing raises.
+            result = fresh.decode_body(b"\xff\xfe x", "text/plain; charset=utf-8")
+            assert result == "\ufffd\ufffd x"
+            # The declared-charset fast path is untouched: valid bodies decode strictly.
+            assert fresh.decode_body(b"ok", "text/plain; charset=utf-8") == "ok"
+        finally:
+            # Restore the real module before monkeypatch's undo so later tests get the
+            # actual normalizer; swap it back and reload to drop the None binding.
+            monkeypatch.undo()
+            sys.modules["charset_normalizer"] = real_module
+            importlib.reload(body_decode)
 
     async def test_close_async_http_client_error(self):
         from crawlutron.transport.http_client_pool import close_async_http_client

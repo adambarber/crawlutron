@@ -3,6 +3,7 @@
 import asyncio
 import dataclasses
 import logging
+import sys
 from pathlib import Path
 
 import pytest
@@ -112,10 +113,30 @@ class TestMultiWorkerInvariants:
 class TestAppLifecycleEdges:
     """Cover remaining branches in main.py"""
 
-    def test_main_import_error_handling(self):
-        import crawlutron.main
+    def test_main_import_error_handling(self, monkeypatch):
+        """Re-import with fastapi unimportable so the module's ImportError branch
+        actually runs: FastAPI -> None and unknown attributes raise AttributeError."""
+        import importlib
 
-        assert (crawlutron.main) is not None
+        import crawlutron.main as main_mod
+
+        class _BrokenFastAPI:
+            def __getattr__(self, name):
+                raise ImportError("fastapi unavailable (#630)")
+
+        monkeypatch.setitem(sys.modules, "fastapi", _BrokenFastAPI())
+        monkeypatch.setitem(sys.modules, "fastapi.exceptions", _BrokenFastAPI())
+        fresh = importlib.reload(main_mod)
+        try:
+            assert fresh.app is None, "the ImportError fallback must leave app None"
+            with pytest.raises(AttributeError):
+                _ = fresh.nonexistent_attribute
+        finally:
+            # Restore before monkeypatch's own undo so the autouse teardown sees a healthy
+            # module; pop the stale ``app = None`` binding so the lazy builder re-arms.
+            monkeypatch.undo()
+            main_mod.__dict__.pop("app", None)
+            importlib.reload(main_mod)
 
     async def test_render_endpoint_value_error(self, async_client):
         # Own the premise explicitly: ordering must never decide it.
