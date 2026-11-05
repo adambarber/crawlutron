@@ -77,18 +77,6 @@ class TestCallerKnobsBehindClosedKeysAreCeilinged:
     for when the model is bypassed (900 s chain budget bounds wall clock only).
     """
 
-    #: Longest scroll a lazy-load pass will take, in steps. Deep pages still load in a few dozen; this is past
-    #: the point of usefulness, not the point of cost.
-    MAX_LAZY_SCROLL_STEPS = 50
-    #: Longest per-step scroll pause, in seconds.
-    MAX_LAZY_SCROLL_DELAY_SECONDS = 5.0
-    #: Longest cookie-harvest wait, in seconds. The harvest runs in a finally block on a pooled renderer, so
-    #: this is a hold on a shared resource.
-    MAX_COOKIE_HARVEST_TIMEOUT_SECONDS = 5.0
-    #: Most element screenshots in one render. Each is a full base64 PNG in the result metadata, so this
-    #: bounds the response as well as the render.
-    MAX_SCREENSHOT_SELECTORS = 16
-
     def test_scroll_steps_over_the_ceiling_are_refused(self):
         from crawlutron.models.crawl_policy import CrawlPolicy
 
@@ -109,24 +97,31 @@ class TestCallerKnobsBehindClosedKeysAreCeilinged:
 
     def test_too_many_screenshot_selectors_are_refused(self):
         from crawlutron.models.crawl_policy import CrawlPolicy
+        from crawlutron.vocabulary.limits import MAX_SCREENSHOT_SELECTORS
 
-        over = [f"#{index}" for index in range(self.MAX_SCREENSHOT_SELECTORS + 1)]
+        over = [f"#{index}" for index in range(MAX_SCREENSHOT_SELECTORS + 1)]
         with pytest.raises(ValidationError, match="screenshot_selectors"):
             CrawlPolicy(browser_profile={"screenshot_selectors": over})
 
     def test_a_value_at_each_ceiling_is_accepted(self):
         """The ceilings are the boundary, not a lower bound the caller cannot reach."""
         from crawlutron.models.crawl_policy import CrawlPolicy
+        from crawlutron.vocabulary.limits import (
+            MAX_COOKIE_HARVEST_TIMEOUT_SECONDS,
+            MAX_LAZY_SCROLL_DELAY_SECONDS,
+            MAX_LAZY_SCROLL_STEPS,
+            MAX_SCREENSHOT_SELECTORS,
+        )
 
         policy = CrawlPolicy(
             browser_profile={
-                "lazy_scroll_steps": self.MAX_LAZY_SCROLL_STEPS,
-                "lazy_scroll_delay_seconds": self.MAX_LAZY_SCROLL_DELAY_SECONDS,
-                "cookie_harvest_timeout_seconds": self.MAX_COOKIE_HARVEST_TIMEOUT_SECONDS,
-                "screenshot_selectors": [f"#{i}" for i in range(self.MAX_SCREENSHOT_SELECTORS)],
+                "lazy_scroll_steps": MAX_LAZY_SCROLL_STEPS,
+                "lazy_scroll_delay_seconds": MAX_LAZY_SCROLL_DELAY_SECONDS,
+                "cookie_harvest_timeout_seconds": MAX_COOKIE_HARVEST_TIMEOUT_SECONDS,
+                "screenshot_selectors": [f"#{i}" for i in range(MAX_SCREENSHOT_SELECTORS)],
             }
         )
-        assert policy.browser_profile["lazy_scroll_steps"] == self.MAX_LAZY_SCROLL_STEPS
+        assert policy.browser_profile["lazy_scroll_steps"] == MAX_LAZY_SCROLL_STEPS
 
     def test_the_readers_clamp_too_even_when_the_model_is_bypassed(self):
         """Defence in depth, asserted at the call path: by render time the profile
@@ -255,3 +250,42 @@ class TestStrategyLadderIsBounded:
             CrawlStrategy.HTTP_CFFI_IMPERSONATE,
         ]
         assert len(CrawlPolicy(strategies=repeated).strategies) == 3
+
+
+class TestRequestLimitConstantsArePinned:
+    """One wire-contract pin per limit constant: the number on the wire is the
+    named constant, not a restated literal that can drift from its home."""
+
+    @pytest.mark.parametrize(
+        "constant,value",
+        [
+            pytest.param("MAX_LAZY_SCROLL_STEPS", 50, id="lazy-scroll-steps"),
+            pytest.param("MAX_LAZY_SCROLL_DELAY_SECONDS", 5.0, id="lazy-scroll-delay"),
+            pytest.param("MAX_COOKIE_HARVEST_TIMEOUT_SECONDS", 5.0, id="cookie-harvest"),
+            pytest.param("MAX_SCREENSHOT_SELECTORS", 16, id="screenshot-selectors"),
+        ],
+    )
+    def test_the_vocabulary_limit_holds_its_wire_value(self, constant, value):
+        import crawlutron.vocabulary.limits as limits
+
+        assert getattr(limits, constant) == value
+
+    @pytest.mark.parametrize(
+        "module_name,constant,value",
+        [
+            pytest.param(
+                "crawlutron.models.single_url_source_request", "MAX_URLS_PER_REQUEST", 500, id="urls"
+            ),
+            pytest.param(
+                "crawlutron.models.crawl_request", "MAX_VALIDATORS_PER_REQUEST", 64, id="validators"
+            ),
+            pytest.param(
+                "crawlutron.models.crawl_policy_vocabulary", "MAX_HEADERS_PER_REQUEST", 64, id="headers"
+            ),
+        ],
+    )
+    def test_the_model_limit_holds_its_wire_value(self, module_name, constant, value):
+        import importlib
+
+        module = importlib.import_module(module_name)
+        assert getattr(module, constant) == value
