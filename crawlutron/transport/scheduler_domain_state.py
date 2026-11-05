@@ -68,11 +68,12 @@ class DomainState:
         self.gate = DomainGate(1)
 
     def observation_copy(self) -> DomainState:
-        """A snapshot record: every scalar field copied, the LIVE gate shared.
+        """A snapshot record: every field copied; only the LIVE gate is shared.
 
         The gate is a semaphore, not data -- it cannot be copied, and
-        sharing keeps occupancy truthful. Writes to the copy never reach
-        the scheduler's record."""
+        sharing keeps occupancy truthful. The bucket is copied too (token
+        balance included), so consuming through a snapshot never drains the
+        scheduler's real bucket. Writes to the copy never reach the record."""
         snapshot = DomainState()
         snapshot.next_fire = self.next_fire
         snapshot.cooldown_until = self.cooldown_until
@@ -83,7 +84,17 @@ class DomainState:
         snapshot.ema = self.ema
         snapshot.last_seen = self.last_seen
         snapshot.pin = self.pin
-        snapshot.bucket = self.bucket
+        if self.bucket is None:
+            snapshot.bucket = None
+        else:
+            # Deferred import: scheduler.py imports this module, so the bucket
+            # constructor is only resolvable at call time, not import time.
+            from crawlutron.transport.scheduler import TokenBucket
+
+            copy = TokenBucket(self.bucket.rate, self.bucket.capacity)
+            copy.tokens = self.bucket.tokens
+            copy.last_refill = self.bucket.last_refill
+            snapshot.bucket = copy
         snapshot.gate = self.gate
         return snapshot
 
