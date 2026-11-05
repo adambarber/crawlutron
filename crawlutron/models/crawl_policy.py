@@ -25,7 +25,7 @@ from crawlutron.vocabulary.limits import MAX_CRAWL_STRATEGIES, MAX_HEADER_VALUE_
 POLICY_SCHEMA_VERSION = "2026-06-23"
 
 
-__all__ = ["CrawlPolicy", "MAX_CRAWL_STRATEGIES", "POLICY_SCHEMA_VERSION"]
+__all__ = ["CrawlPolicy", "POLICY_SCHEMA_VERSION"]
 
 
 class CrawlPolicy(BaseModel):
