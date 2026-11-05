@@ -1,6 +1,16 @@
+"""Job control request body."""
+
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+
+_ALLOWED_ACTIONS = ("pause", "resume", "cancel")
+
+
+def _normalize_action(value: object) -> object:
+    return value.lower() if isinstance(value, str) else value
 
 
 class JobControlRequest(BaseModel):
@@ -8,4 +18,8 @@ class JobControlRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    action: str = Field(..., description="One of: pause, resume, cancel.")
+    action: Annotated[
+        Literal["pause", "resume", "cancel"],
+        BeforeValidator(_normalize_action),
+        Field(description="One of: pause, resume, cancel."),
+    ]
