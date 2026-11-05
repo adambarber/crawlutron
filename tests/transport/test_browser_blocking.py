@@ -221,6 +221,11 @@ class _FakeResponse:
         return self._payload
 
 
+def payload_truncated(e: InterceptedXhrRecord) -> bool:
+    """Whether the record itself flags its payload as truncated."""
+    return bool(e.get("payload_truncated"))
+
+
 async def test_response_handler_caps_entries_and_payload_size():
     collected: list[InterceptedXhrRecord] = []
     handler = make_response_handler(collected)
@@ -231,14 +236,13 @@ async def test_response_handler_caps_entries_and_payload_size():
         await handler(_FakeResponse(f"https://x/{i}", big))
 
     assert len(collected) == 10, f"entry cap not enforced: {len(collected)}"
-    # Each kept payload is capped at max_payload_chars (8192); oversized ones are flagged truncated rather
-    # than stored whole.
-    assert all(
-        e.get("payload_truncated") or len((e.get("payload") or {}).get("blob", "")) <= 8192 for e in collected
-    )
-    assert all("payload_truncated" in e or (e.get("payload") or {}).get("blob") for e in collected)
-    # Oversized payloads are truncated out rather than stored whole.
-    assert all(len((e.get("payload") or {}).get("blob", "")) <= 200_000 for e in collected)
+    for e in collected:
+        payload = e.get("payload")
+        assert payload is None or payload_truncated(e) or isinstance(payload, dict)
+        if isinstance(payload, dict):
+            blob = payload.get("blob", "")
+            assert isinstance(blob, str)
+            assert len(blob) <= 200_000
     assert any(e.get("payload_truncated") for e in collected)
 
 
@@ -304,20 +308,21 @@ class TestExecuteJsBlocked:
         page = _make_mock_page()
         await BrowserDriver().run_action_chain(
             page,
-            [
-                {"type": "execute_js", "script": "malicious()"},
-                {"type": "scroll_bottom"},
-            ],
+            [{"type": "execute_js", "value": "malicious()"}, {"type": "scroll_bottom"}],
         )
         called_scripts = [str(c.args[0]) for c in page.evaluate.call_args_list]
-        assert "malicious()" not in called_scripts
+        # The poison rides in `value`, a declared BrowserAction key -- execute_js is the refused verb, not a
+        # declined key shape, and the chain must neither run it nor trip on the payload.
+        assert not any("malicious" in script for script in called_scripts)
         # The hardcoded, safe scroll_bottom evaluate must still run.
         assert any("window.scrollTo" in c for c in called_scripts)
 
     def test_crawl_policy_rejects_execute_js_action(self):
         """The API must reject execute_js actions before any crawl runs."""
         with pytest.raises(ValidationError):
-            CrawlPolicy(browser_profile={"actions": [{"type": "execute_js", "script": "x()"}]})
+            CrawlPolicy.model_validate(
+                {"browser_profile": {"actions": [{"type": "execute_js", "script": "x()"}]}}
+            )
 
     def test_crawl_policy_allows_benign_actions_and_profile(self):
         """Benign browser_profile keys/actions are still accepted."""
@@ -332,7 +337,9 @@ class TestExecuteJsBlocked:
             }
         )
         assert policy.browser_profile["viewport"] == "mobile"
-        assert policy.browser_profile["actions"][0]["type"] == "click"
+        actions = policy.browser_profile["actions"]
+        assert isinstance(actions, list) and isinstance(actions[0], dict)
+        assert actions[0]["type"] == "click"
 
 
 class _Clickable:

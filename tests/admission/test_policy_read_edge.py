@@ -20,6 +20,7 @@ from crawlutron.admission.policy import (
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.crawl_policy_limits import CrawlPolicyLimits
+from crawlutron.models.json_value import JsonValue
 
 # A field the model will reject on its own, used wherever a test needs "this row has exactly one bad field"
 # without hand-writing an invalid value inline.
@@ -91,7 +92,10 @@ class TestReadPolicyRepairsOnlyWhatFailed:
 
     def test_a_valid_policy_is_untouched(self):
         """The repair must not fire on input the model already accepts."""
-        raw = {"strategies": ["BROWSER_HEADLESS"], "limits": {"max_depth": 2, "max_pages": 9}}
+        raw: dict[str, JsonValue] = {
+            "strategies": ["BROWSER_HEADLESS"],
+            "limits": {"max_depth": 2, "max_pages": 9},
+        }
 
         assert read_policy(raw) == CrawlPolicy.model_validate(raw)
 
@@ -114,13 +118,12 @@ class TestReadPolicyIsTotal:
         A bad ``limits`` used to raise ``TypeError`` and 500; it must stay a
         field-level rejection, so the strategy chain beside it survives."""
         resolved = read_policy({"limits": "not a mapping", "strategies": ["BROWSER_HEADLESS"]})
-
         assert [strategy.value for strategy in resolved.strategies] == ["BROWSER_HEADLESS"]
 
     def test_read_policy_leaves_the_callers_mapping_alone(self):
         """The API layer echoes this payload back, so repairing in place would
         change what the caller sent them."""
-        raw = {"limits": {"max_retries": _OVER_MAX_RETRIES, "max_depth": 4}}
+        raw: dict[str, JsonValue] = {"limits": {"max_retries": _OVER_MAX_RETRIES, "max_depth": 4}}
 
         read_policy(raw)
 
@@ -154,7 +157,7 @@ class TestValidateWirePolicyRejects:
         assert validated.limits.max_depth == 2
 
     def test_validate_wire_policy_leaves_the_callers_mapping_alone(self):
-        raw: dict[str, object] = {"limits": {}}
+        raw: dict[str, JsonValue] = {"limits": {}}
 
         validate_wire_policy(raw)
 
@@ -273,7 +276,7 @@ class TestStoredPolicy:
     """The write edge, mirroring the read edge in the other direction."""
 
     def test_a_dict_round_trips_through_the_read_edge(self):
-        raw = {"strategies": ["BROWSER_HEADLESS"], "limits": {"max_depth": 2}}
+        raw: dict[str, JsonValue] = {"strategies": ["BROWSER_HEADLESS"], "limits": {"max_depth": 2}}
 
         assert read_policy(stored_policy(raw)) == read_policy(raw)
 
@@ -287,16 +290,18 @@ class TestStoredPolicy:
         assert stored_policy({"limits": {"max_retries": _OVER_MAX_RETRIES}}) == read_policy({}).model_dump()
 
 
-def test_read_policy_does_not_call_model_validate_with_a_raw_model() -> None:
+@pytest.mark.parametrize(
+    "shape", [None, 17, "text", ["a"], {"limits": "nope"}, {"limits": {"max_depth": -1}}]
+)
+def test_read_policy_does_not_call_model_validate_with_a_raw_model(shape) -> None:
     """Guard against the total edge quietly becoming a raising one.
 
     ``read_policy`` runs on the job control loop, where an exception crashes
     the job rather than the request; totality is the contract."""
-    for raw in (None, 17, "text", ["a"], {"limits": "nope"}, {"limits": {"max_depth": -1}}):
-        try:
-            read_policy(raw)
-        except ValidationError:  # pragma: no cover - the assertion
-            pytest.fail(f"read_policy raised ValidationError for {raw!r}")
+    try:
+        read_policy(shape)
+    except ValidationError:  # pragma: no cover - the assertion
+        pytest.fail(f"read_policy raised ValidationError for {shape!r}")
 
 
 def _within_model_bounds(field: str, value: int) -> bool:

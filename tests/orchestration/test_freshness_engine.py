@@ -3,6 +3,7 @@
 import crawlutron.transport.freshness as freshness
 from crawlutron.transport.cache import HttpCache
 from crawlutron.transport.content_cache import ContentCache
+from tests._policy_factories import canonical
 
 
 class _Clock:
@@ -11,6 +12,25 @@ class _Clock:
 
     def __call__(self) -> float:
         return self.t
+
+
+def _spy_on_engine(monkeypatch, mod) -> list[str]:
+    """Route mod's freshness calls through a recorder, keeping the real engine."""
+    calls: list[str] = []
+    real_expiry = mod.expiry_for
+    real_expired = mod.is_expired
+
+    def spy_expiry(url, ttl):
+        calls.append("expiry")
+        return real_expiry(url, ttl)
+
+    def spy_expired(expires_at, now):
+        calls.append("expired")
+        return real_expired(expires_at, now)
+
+    monkeypatch.setattr(mod, "expiry_for", spy_expiry)
+    monkeypatch.setattr(mod, "is_expired", spy_expired)
+    return calls
 
 
 def test_expiry_from_ttl_is_one_rule():
@@ -31,15 +51,10 @@ def test_http_cache_routes_ttl_decisions_through_the_engine(monkeypatch):
 
     assert cache_mod.is_expired is freshness.is_expired
     assert cache_mod.expiry_for is freshness.expiry_for
-    calls: list[str] = []
-    real_expiry = cache_mod.expiry_for
-    real_expired = cache_mod.is_expired
-    monkeypatch.setattr(cache_mod, "expiry_for", lambda n, t: calls.append("expiry") or real_expiry(n, t))
-    monkeypatch.setattr(cache_mod, "is_expired", lambda n, e: calls.append("expired") or real_expired(n, e))
-    clock = _Clock()
-    cache = HttpCache(ttl_seconds=10, clock=clock)
-    cache.store("http://x/1", {"etag": '"v1"'})
-    cache.get("http://x/1")
+    calls = _spy_on_engine(monkeypatch, cache_mod)
+    cache = HttpCache(ttl_seconds=10, clock=_Clock())
+    cache.store(canonical("http://x/1"), {"etag": '"v1"'})
+    cache.get(canonical("http://x/1"))
     assert "expiry" in calls, "HttpCache.store did not route expiry through the engine"
     assert "expired" in calls, "HttpCache.get did not route freshness through the engine"
 
@@ -49,13 +64,8 @@ def test_content_cache_routes_ttl_decisions_through_the_engine(tmp_path, monkeyp
 
     assert content_mod.is_expired is freshness.is_expired
     assert content_mod.expiry_for is freshness.expiry_for
-    calls: list[str] = []
-    real_expiry = content_mod.expiry_for
-    real_expired = content_mod.is_expired
-    monkeypatch.setattr(content_mod, "expiry_for", lambda n, t: calls.append("expiry") or real_expiry(n, t))
-    monkeypatch.setattr(content_mod, "is_expired", lambda n, e: calls.append("expired") or real_expired(n, e))
-    clock = _Clock()
-    cache = ContentCache(tmp_path / "c", clock=clock)
+    calls = _spy_on_engine(monkeypatch, content_mod)
+    cache = ContentCache(tmp_path / "c", clock=_Clock())
     cache.set("k", {"etag": '"v1"'}, ttl=10)
     cache.get("k")
     assert "expiry" in calls, "ContentCache.set did not route expiry through the engine"

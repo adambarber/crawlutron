@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from typing import Protocol
 
 #: What the renderer reads out of a page, in the order it asks.
@@ -19,7 +20,11 @@ class PageCookieContext(Protocol):
     page naming that double's class.
     """
 
-    async def cookies(self, url: str | None = None) -> list[dict[str, str]]: ...
+    async def cookies(self, urls: str | list[str] | None = None) -> list[dict[str, str]]: ...
+
+    async def route(self, pattern: str, handler: Callable[..., object]) -> object: ...
+
+    def route_web_socket(self, pattern: str, handler: Callable[..., object]) -> object: ...
 
 
 class FakePageContext:
@@ -30,14 +35,16 @@ class FakePageContext:
         self.route_calls: list[tuple[str, object]] = []
         self.ws_calls: list[tuple[str, object]] = []
 
-    async def cookies(self, url: str | None = None) -> list[dict[str, str]]:
+    async def cookies(self, urls: str | list[str] | None = None) -> list[dict[str, str]]:
         return []
 
-    async def route(self, pattern, handler):
+    async def route(self, pattern: str, handler: Callable[..., object]) -> object:
         self.route_calls.append((pattern, handler))
+        return None
 
-    def route_web_socket(self, pattern, handler):
+    def route_web_socket(self, pattern: str, handler: Callable[..., object]) -> object:
         self.ws_calls.append((pattern, handler))
+        return None
 
 
 async def _selector_is_present(selector, timeout=None, **kwargs):
@@ -67,7 +74,7 @@ class BrowserFakePage:
         self.context = context if context is not None else FakePageContext()
         self.on_wait_for_selector = on_wait_for_selector or _selector_is_present
 
-    def on(self, event, handler):
+    async def on(self, event, handler):
         pass
 
     async def goto(self, url, wait_until="load", **kwargs):
@@ -96,6 +103,15 @@ class BrowserFakePage:
 
     async def wait_for_selector(self, selector, timeout=None, **kwargs):
         return await self.on_wait_for_selector(selector, timeout=timeout, **kwargs)
+
+    async def hover(self, selector: str) -> object:
+        return None
+
+    async def fill(self, selector: str, value: str) -> object:
+        return None
+
+    async def click(self, selector: str) -> object:
+        return None
 
 
 class _ContextSwappingPage(BrowserFakePage):

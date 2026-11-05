@@ -8,6 +8,7 @@ import base64
 
 from crawlutron.models.render_options import RenderOptions
 from crawlutron.transport.browser_driver import BrowserDriver
+from crawlutron.vocabulary.browser import BrowserAction
 from tests._browser_doubles import BrowserFakeContextManager, ScriptedPage, scripted_renderer
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
@@ -33,23 +34,23 @@ class FakePage(ScriptedPage):
 
     def __init__(self):
         super().__init__()
-        self.calls = []
-        self.elements = {}
-        self.responses = []
+        self.calls: list[tuple[object, ...]] = []
+        self.elements: dict[str, FakeElement] = {}
+        self.responses: list[object] = []
         # C3 red lever: the first goto raises this, later ones succeed.
         self.fail_first_goto: BaseException | None = None
-        # Where each interaction call goes.
-        self.click = self._click
-        self.goto = self._goto
 
-    async def _goto(self, url, wait_until="load", **kwargs):
+    async def goto(self, url, wait_until="load", **kwargs):
         error, self.fail_first_goto = self.fail_first_goto, None
         if error is not None:
             raise error
         await super().goto(url, wait_until=wait_until, **kwargs)
 
-    async def _click(self, selector):
+    async def _click(self, selector: str) -> object:
         self.calls.append(("click", selector))
+        return None
+
+    click = _click
 
     def on(self, event, handler):
         self.calls.append(("on", event))
@@ -125,7 +126,7 @@ class TestActionChain:
     async def test_action_chain_dispatches_correctly(self):
         page = FakePage()
         driver = BrowserDriver()
-        actions = [
+        actions: list[BrowserAction] = [
             {"type": "click", "selector": "#go"},
             {"type": "fill", "selector": "#q", "value": "hello"},
             {"type": "hover", "selector": "#menu"},
@@ -151,8 +152,9 @@ class TestActionChain:
         async def fine(selector=None):
             page.calls.append(("hover", selector))
 
-        page.click = boom
-        page.hover = fine
+        # Instance overrides, not class edits: the click verb must fail on THIS page only.
+        object.__setattr__(page, "click", boom)
+        object.__setattr__(page, "hover", fine)
         await BrowserDriver().run_action_chain(
             page,
             [{"type": "click", "selector": "#x"}, {"type": "hover", "selector": "#after"}],

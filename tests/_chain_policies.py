@@ -4,10 +4,11 @@
 three things -- a ladder, no-robots limits, no profile -- so it is written once.
 """
 
+from crawlutron.models.json_value import JsonValue
 from tests._policy_factories import crawl_limits
 
 
-def chain_policy(*strategies: str, discovery: dict[str, object] | None = None) -> dict[str, object]:
+def chain_policy(*strategies: str, discovery: dict[str, JsonValue] | None = None) -> dict[str, JsonValue]:
     """A chain policy over `strategies`.
 
     The limits are ``crawl_limits`` with robots off (no second copy to drift),

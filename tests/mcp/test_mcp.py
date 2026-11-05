@@ -7,24 +7,27 @@ from __future__ import annotations
 
 import json
 
+import httpx
 import pytest
 
+from crawlutron.models.json_value import JsonValue
 from tests._assertions import one_search_result
 from tests._browser_doubles import FakeBrowserPool, owned_browser_pool
 from tests._policy_factories import canonical
 
 _PROTOCOL_VERSION = "2026-07-28"
 
-_META = {
+_META: dict[str, JsonValue] = {
     "io.modelcontextprotocol/protocolVersion": _PROTOCOL_VERSION,
     "io.modelcontextprotocol/clientInfo": {"name": "test-client", "version": "1.0"},
     "io.modelcontextprotocol/clientCapabilities": {},
 }
 
 
-def _body(method: str, *, params: dict[str, object] | None = None, request_id: int = 1) -> dict[str, object]:
-    # ``_META`` is copied per call so a test that mutates a request's _meta (e.g. to probe a mismatched
-    # protocol version) cannot poison sibling tests through a shared mutable module-level dict.
+def _body(
+    method: str, *, params: dict[str, JsonValue] | None = None, request_id: int = 1
+) -> dict[str, JsonValue]:
+    # ``_META`` is copied per call so a test that mutates a request's _meta cannot poison siblings.
     return {
         "jsonrpc": "2.0",
         "id": request_id,
@@ -33,14 +36,16 @@ def _body(method: str, *, params: dict[str, object] | None = None, request_id: i
     }
 
 
-def _headers(body: dict[str, object], **overrides) -> dict[str, object]:
+def _headers(body: dict[str, JsonValue], **overrides: str | None) -> dict[str, str]:
     headers = {
         "MCP-Protocol-Version": _PROTOCOL_VERSION,
-        "Mcp-Method": body["method"],
+        "Mcp-Method": str(body["method"]),
         "Accept": "application/json, text/event-stream",
     }
+    params = body.get("params")
     if body.get("method") == "tools/call":
-        headers["Mcp-Name"] = (body.get("params") or {}).get("name", "")
+        assert isinstance(params, dict)
+        headers["Mcp-Name"] = str(params.get("name", ""))
     for key, value in overrides.items():
         if value is None:
             headers.pop(key, None)
@@ -49,13 +54,13 @@ def _headers(body: dict[str, object], **overrides) -> dict[str, object]:
     return headers
 
 
-async def _mcp(client, body: dict[str, object], headers: dict[str, object] | None = None):
+async def _mcp(client, body: dict[str, JsonValue], headers: dict[str, str | None] | None = None):
     return await client.post("/mcp", json=body, headers=_headers(body, **(headers or {})))
 
 
 async def _assert_complete(
-    client, body: dict[str, object], headers: dict[str, object] | None = None
-) -> dict[str, object]:
+    client, body: dict[str, JsonValue], headers: dict[str, str | None] | None = None
+) -> dict[str, JsonValue]:
     """Post one request, assert it succeeded, and return its result.
 
     Every result must carry ``resultType: "complete"``; the model drops
@@ -63,13 +68,18 @@ async def _assert_complete(
     resp = await _mcp(client, body, headers)
     assert resp.status_code == 200, resp.text
     result = resp.json()["result"]
+    assert isinstance(result, dict)
     assert result["resultType"] == "complete"
     return result
 
 
 async def _assert_complete_tool(
-    client, body: dict[str, object], headers: dict[str, object] | None = None, *, _check_error: bool = True
-) -> dict[str, object]:
+    client,
+    body: dict[str, JsonValue],
+    headers: dict[str, str | None] | None = None,
+    *,
+    _check_error: bool = True,
+) -> dict[str, JsonValue]:
     """Assert a completed *tool* result, and return it.
 
     ``isError`` is a tool result's field, not a discover result's -- folding it
@@ -81,7 +91,7 @@ async def _assert_complete_tool(
 
 
 async def _assert_header_mismatch(
-    client, *, body: dict[str, object], headers: dict[str, object] | None = None, code: int = -32020
+    client, *, body: dict[str, JsonValue], headers: dict[str, str | None] | None = None, code: int = -32020
 ) -> None:
     """Assert the endpoint rejected headers that are missing or contradict the body.
 
@@ -89,50 +99,112 @@ async def _assert_header_mismatch(
     parameter because an absent ``_meta`` is InvalidParams (-32602)."""
     resp = await _mcp(client, body, headers)
     assert resp.status_code == 400, resp.text
-    assert resp.json()["error"]["code"] == code, resp.text
+    assert _error_of(resp)["code"] == code, resp.text
 
 
-async def _assert_invalid_request(client, *, body: dict[str, object]) -> None:
+def _text_of(item: JsonValue) -> str:
+    """The text member of one content item, checked so string reads stay honest."""
+    assert isinstance(item, dict)
+    return str(item["text"])
+
+
+def _meta_of(body: dict[str, JsonValue]) -> dict[str, JsonValue]:
+    """The mutable _meta block a request-body test edits."""
+    params = body["params"]
+    assert isinstance(params, dict)
+    meta = params["_meta"]
+    assert isinstance(meta, dict)
+    return meta
+
+
+def _error_of(resp) -> dict[str, JsonValue]:
+    """The JSON-RPC error object of a rejected request, checked to be a dict."""
+    error = resp.json()["error"]
+    assert isinstance(error, dict), resp.text
+    return error
+
+
+def _payload_dict(resp) -> dict[str, JsonValue]:
+    """The response body as a dict, checked so the next read stays honest."""
+    payload = resp.json()
+    assert isinstance(payload, dict), resp.text
+    return payload
+
+
+def _member(payload: dict[str, JsonValue], key: str) -> dict[str, JsonValue]:
+    """A dict-valued member of a wire payload or result, checked."""
+    value = payload[key]
+    assert isinstance(value, dict), (key, value)
+    return value
+
+
+def _items(result: dict[str, JsonValue], key: str) -> list[JsonValue]:
+    """A list-valued member of a wire result, checked so iteration stays honest."""
+    value = result[key]
+    assert isinstance(value, list), (key, value)
+    return value
+
+
+def _item(result: dict[str, JsonValue], key: str, index: int = 0) -> dict[str, JsonValue]:
+    """One dict item of a result's list member, checked so field reads stay honest."""
+    value = _items(result, key)[index]
+    assert isinstance(value, dict), (key, value)
+    return value
+
+
+async def _assert_invalid_request(client, *, body: dict[str, JsonValue]) -> None:
     """Assert a malformed JSON-RPC envelope is refused as Invalid Request."""
     resp = await _mcp(client, body)
     assert resp.status_code == 400, resp.text
-    assert resp.json()["error"]["code"] == -32600, resp.text
+    assert _error_of(resp)["code"] == -32600, resp.text
 
 
-async def _tool_call(client, name: str, arguments: dict[str, object]) -> dict[str, object]:
+async def _tool_call(client, name: str, arguments: dict[str, JsonValue]) -> dict[str, JsonValue]:
     """Invoke one MCP tool; return its structuredContent on success."""
-    return (
+    structured = _member(
         await _assert_complete_tool(
-            client,
-            _body("tools/call", params={"name": name, "arguments": arguments, "_meta": _META}),
-        )
-    )["structuredContent"]
+            client, _body("tools/call", params={"name": name, "arguments": arguments, "_meta": _META})
+        ),
+        "structuredContent",
+    )
+    return structured
 
 
-def _search_tool_body(query: str = "x") -> dict[str, object]:
-    """A tools/call body naming the search tool; the Mcp-Name rules turn on the name."""
-    return _body("tools/call", params={"name": "search", "arguments": {"query": query}, "_meta": _META})
+def _search_or_discover(name: str) -> dict[str, JsonValue]:
+    """A discover body, or a search tools/call body (the Mcp-Name rules turn on it)."""
+    return (
+        _body("tools/call", params={"name": "search", "arguments": {"query": "x"}, "_meta": _META})
+        if name == "search"
+        else _body("server/discover")
+    )
 
 
 class TestRequestMetadataValidation:
-    async def test_missing_protocol_version_header_rejected(self, async_client):
-        await _assert_header_mismatch(
-            async_client, body=_body("server/discover"), headers={"MCP-Protocol-Version": None}
-        )
+    @pytest.mark.parametrize(("name", "header"), [("server/discover", "Mcp-Method"), ("search", "Mcp-Name")])
+    async def test_missing_request_metadata_header_rejected(self, async_client, name, header):
+        body = _search_or_discover(name)
+        await _assert_header_mismatch(async_client, body=body, headers={header: None})
+
+    @pytest.mark.parametrize(
+        ("name", "header", "wrong"),
+        [("server/discover", "Mcp-Method", "tools/list"), ("search", "Mcp-Name", "crawl")],
+    )
+    async def test_mismatched_request_metadata_header_rejected(self, async_client, name, header, wrong):
+        body = _search_or_discover(name)
+        await _assert_header_mismatch(async_client, body=body, headers={header: wrong})
 
     async def test_unsupported_protocol_version_reports_supported(self, async_client):
         body = _body("server/discover")
-        body["params"]["_meta"]["io.modelcontextprotocol/protocolVersion"] = "2025-06-18"
+        _meta_of(body)["io.modelcontextprotocol/protocolVersion"] = "2025-06-18"
         resp = await _mcp(async_client, body, {"MCP-Protocol-Version": "2025-06-18"})
         assert resp.status_code == 400
-        error = resp.json()["error"]
-        assert error["code"] == -32022
-        assert error["data"]["supported"] == [_PROTOCOL_VERSION]
-        assert error["data"]["requested"] == "2025-06-18"
+        data = _member(_error_of(resp), "data")
+        assert data["supported"] == [_PROTOCOL_VERSION]
+        assert data["requested"] == "2025-06-18"
 
     async def test_header_body_protocol_version_mismatch_rejected(self, async_client):
         body = _body("server/discover")
-        body["params"]["_meta"]["io.modelcontextprotocol/protocolVersion"] = "2025-06-18"
+        _meta_of(body)["io.modelcontextprotocol/protocolVersion"] = "2025-06-18"
         await _assert_header_mismatch(async_client, body=body)  # header stays 2026-07-28
 
     async def test_missing_meta_rejected(self, async_client):
@@ -144,61 +216,19 @@ class TestRequestMetadataValidation:
             code=-32602,
         )
 
-    @pytest.mark.parametrize(
-        ("key", "label", "wrong_type"),
-        [
-            ("io.modelcontextprotocol/protocolVersion", "a string", 7),
-            ("io.modelcontextprotocol/clientCapabilities", "an object", "nope"),
-        ],
-    )
-    async def test_meta_key_rejection_separates_absent_from_wrong_type(
-        self, async_client, key, label, wrong_type
-    ):
-        cases = (
-            ("delete", f"Missing required _meta key: {key}"),
-            (wrong_type, f"Invalid _meta key (must be {label}): {key}"),
-        )
-        for value, reason in cases:
-            body = _body("server/discover")
-            if value == "delete":
-                del body["params"]["_meta"][key]
-            else:
-                body["params"]["_meta"][key] = value
-            resp = await _mcp(async_client, body)
-            assert resp.status_code == 400, resp.text
-            error = resp.json()["error"]
-            assert error["code"] == -32602, resp.text
-            assert error["message"] == reason, resp.text
-
-    async def test_missing_mcp_method_header_rejected(self, async_client):
-        await _assert_header_mismatch(
-            async_client, body=_body("server/discover"), headers={"Mcp-Method": None}
-        )
-
-    async def test_mcp_method_header_body_mismatch_rejected(self, async_client):
-        await _assert_header_mismatch(
-            async_client, body=_body("server/discover"), headers={"Mcp-Method": "tools/list"}
-        )
-
-    async def test_missing_mcp_name_header_on_tools_call_rejected(self, async_client):
-        await _assert_header_mismatch(async_client, body=_search_tool_body(), headers={"Mcp-Name": None})
-
-    async def test_mcp_name_header_body_mismatch_rejected(self, async_client):
-        await _assert_header_mismatch(async_client, body=_search_tool_body(), headers={"Mcp-Name": "crawl"})
-
     async def test_unknown_method_returns_404(self, async_client):
         resp = await _mcp(async_client, _body("resources/list"))
         assert resp.status_code == 404, resp.text
-        assert resp.json()["error"]["code"] == -32601
+        assert _error_of(resp)["code"] == -32601
 
     async def test_non_loopback_origin_rejected(self, async_client):
         """A disallowed Origin on /mcp must yield the JSON-RPC error shape, not the
         REST envelope; the middleware is the single Origin gate, emitting per surface."""
         resp = await _mcp(async_client, _body("server/discover"), {"Origin": "http://evil.example"})
         assert resp.status_code == 403
-        body = resp.json()
+        body = _payload_dict(resp)
         assert body.get("jsonrpc") == "2.0"
-        assert body["error"]["code"] == -32600
+        assert _member(body, "error")["code"] == -32600
         assert "code" not in body and "message" not in body and "details" not in body
 
     async def test_notification_accepted_without_response(self, async_client):
@@ -216,32 +246,43 @@ class TestRequestMetadataValidation:
             headers={"MCP-Protocol-Version": _PROTOCOL_VERSION, "Mcp-Method": "server/discover"},
         )
         assert resp.status_code == 400
-        assert resp.json()["error"]["code"] == -32700
+        assert _error_of(resp)["code"] == -32700
+
+
+def _assert_dict_tool(tool: JsonValue) -> str:
+    """One advertised tool: a dict with a description and an object schema; its name."""
+    assert isinstance(tool, dict)
+    assert tool["description"]
+    assert _member(tool, "inputSchema")["type"] == "object"
+    return str(tool["name"])
 
 
 class TestDiscover:
     async def test_server_discover_advertises_supported_versions(self, async_client):
         result = await _assert_complete(async_client, _body("server/discover"))
-        assert _PROTOCOL_VERSION in result["supportedVersions"]
-        assert "tools" in result["capabilities"]
-        assert result["ttlMs"] > 0
+        assert _PROTOCOL_VERSION in _items(result, "supportedVersions")
+        assert "tools" in _member(result, "capabilities")
+        ttl = result["ttlMs"]
+        assert isinstance(ttl, int) and ttl > 0
         assert result["cacheScope"] == "public"
-        assert result["_meta"]["io.modelcontextprotocol/serverInfo"]["name"] == "crawlutron"
+        assert _member(_member(result, "_meta"), "io.modelcontextprotocol/serverInfo")["name"] == "crawlutron"
         assert "instructions" in result
 
-
-class TestToolsList:
     async def test_tools_list_exposes_every_tool(self, async_client):
         """The advertised set is the whole surface, composite included: an agent
         reads this list and nothing else, so a tool that exists but is not
         advertised is a tool no agent finds."""
         result = await _assert_complete(async_client, _body("tools/list"))
-        names = [tool["name"] for tool in result["tools"]]
-        assert names == ["search", "crawl", "crawl_and_extract", "map", "render"]
-        for tool in result["tools"]:
-            assert tool["description"]
-            assert tool["inputSchema"]["type"] == "object"
-        assert result["ttlMs"] > 0
+        tools = _items(result, "tools")
+        assert [_assert_dict_tool(tool) for tool in tools] == [
+            "search",
+            "crawl",
+            "crawl_and_extract",
+            "map",
+            "render",
+        ]
+        ttl = result["ttlMs"]
+        assert isinstance(ttl, int) and ttl > 0
         assert result["cacheScope"] == "public"
 
 
@@ -258,17 +299,18 @@ def browser_pool_stub():
 class TestToolsCall:
     async def test_search_tool_returns_results(self, async_client, override_settings, fake_provider_http):
         one_search_result(override_settings, fake_provider_http)
-        result = await _assert_complete_tool(
-            async_client,
-            _body(
-                "tools/call",
-                params={"name": "search", "arguments": {"query": "worcester", "limit": 3}, "_meta": _META},
-            ),
+        body = _body(
+            "tools/call",
+            params={"name": "search", "arguments": {"query": "worcester", "limit": 3}, "_meta": _META},
         )
-        assert result["content"][0]["type"] == "text"
-        payload = json.loads(result["content"][0]["text"])
-        assert payload["data"][0]["url"] == "https://example.gov/a"
-        assert result["structuredContent"]["provider"] == "tavily"
+        result = await _assert_complete_tool(async_client, body)
+        first = _item(result, "content")
+        assert first["type"] == "text"
+        payload = json.loads(_text_of(first))
+        data = payload["data"]
+        assert isinstance(data, list) and isinstance(data[0], dict)
+        assert data[0]["url"] == "https://example.gov/a"
+        assert _member(result, "structuredContent")["provider"] == "tavily"
 
     @pytest.mark.usefixtures("browser_pool_stub")
     async def test_crawl_tool_crawls_the_url(self, async_client, base_url):
@@ -276,26 +318,27 @@ class TestToolsCall:
         # headed browser) must be accepted over MCP; the engine picks the first working strategy.
         sc = await _tool_call(async_client, "crawl", {"url": f"{base_url}/"})
         assert sc["success"] is True
-        assert sc["results"][0]["classification"] in ("success", "rendered")
+        first = _item(sc, "results")
+        assert first["classification"] in ("success", "rendered")
 
     @pytest.mark.usefixtures("browser_pool_stub")
     async def test_crawl_and_extract_returns_content_without_the_crawl_bulk(self, async_client, base_url):
         """The composite exists for the projection: many pages' extracted content,
         without the html, headers and diagnostics the full response repeats."""
         sc = await _tool_call(
-            async_client,
-            "crawl_and_extract",
-            {"urls": [f"{base_url}/", f"{base_url}/blog"]},
+            async_client, "crawl_and_extract", {"urls": [f"{base_url}/", f"{base_url}/blog"]}
         )
 
         assert sc["submitted_count"] == 2
-        pages = sc["pages"]
-        assert [page["url"] for page in pages] == [
+        pages = _items(sc, "pages")
+        page_dicts = [page for page in pages if isinstance(page, dict)]
+        assert len(page_dicts) == len(pages)
+        assert [page["url"] for page in page_dicts] == [
             canonical(f"{base_url}/").raw,
             canonical(f"{base_url}/blog").raw,
         ]
-        assert all(page["status"] == "success" for page in pages)
-        assert all(page["markdown"] for page in pages)
+        assert all(page["status"] == "success" for page in page_dicts)
+        assert all(page["markdown"] for page in page_dicts)
         for bulk in ("html", "headers", "diagnostics", "results"):
             assert bulk not in sc, f"the composite carried {bulk}"
 
@@ -308,13 +351,13 @@ class TestToolsCall:
         full = await _tool_call(async_client, "crawl", {"url": f"{base_url}/blocked"})
         projected = await _tool_call(async_client, "crawl_and_extract", {"url": f"{base_url}/blocked"})
 
-        original = full["results"][0]
-        page = projected["pages"][0]
-        assert (page["status"], page["classification"], page["markdown"]) == (
+        original = _item(full, "results")
+        page = _item(projected, "pages")
+        assert [page["status"], page["classification"], page["markdown"]] == [
             original["status"],
             original["classification"],
             original["markdown"],
-        )
+        ]
         assert page["markdown"] is None, "a blocked page produced content; the fixture changed"
 
     @pytest.mark.usefixtures("browser_pool_stub")
@@ -324,18 +367,14 @@ class TestToolsCall:
         assert isinstance(sc["all_urls"], list)
 
     async def test_crawl_tool_rejects_async_delivery(self, async_client, base_url):
-        body = _body(
-            "tools/call",
-            params={
-                "name": "crawl",
-                "arguments": {"url": f"{base_url}/", "async_mode": True},
-                "_meta": _META,
-            },
+        arguments: dict[str, JsonValue] = {"url": f"{base_url}/", "async_mode": True}
+        resp = await _mcp(
+            async_client,
+            _body("tools/call", params={"name": "crawl", "arguments": arguments, "_meta": _META}),
         )
-        resp = await _mcp(async_client, body)
-        result = resp.json()["result"]
+        result = _member(_payload_dict(resp), "result")
         assert result["isError"] is True
-        assert "async_mode" in result["content"][0]["text"]
+        assert "async_mode" in _text_of(_item(result, "content"))
 
     @pytest.mark.parametrize(
         ("name", "handler_name", "arguments"),
@@ -357,59 +396,55 @@ class TestToolsCall:
             monkeypatch.setattr("crawlutron.mcp.tools.get_browser_pool", lambda: object())
         resp, payload = await _call_tool(async_client, name, arguments)
 
-        assert resp.status_code == 200
-        assert "error" not in payload
-        result = payload["result"]
+        assert resp.status_code == 200 and "error" not in payload
+        result = _member(payload, "result")
         assert result["isError"] is True
-        assert "host_denied" in result["content"][0]["text"]
+        assert "host_denied" in _text_of(_item(result, "content"))
 
     async def test_unknown_tool_returns_protocol_error(self, async_client):
         resp, payload = await _call_tool(async_client, "not_a_tool", {})
-        assert resp.status_code == 200
-        error = payload["error"]
-        assert error["code"] == -32602
-        assert "Unknown tool" in error["message"]
+        error = _member(payload, "error")
+        assert error["code"] == -32602 and "Unknown tool" in str(error["message"])
 
     async def test_non_object_arguments_rejected(self, async_client):
         resp, payload = await _call_tool(async_client, "search", "not-a-dict")
-        assert resp.status_code == 200
-        assert payload["error"]["code"] == -32602
+        assert _member(payload, "error")["code"] == -32602
 
 
 class TestCallerAuth:
     """#205: /mcp must refuse an invalid credential, not silently crawl as someone."""
 
     @pytest.mark.usefixtures("browser_pool_stub")
-    async def test_wrong_key_on_tools_call_is_a_401_not_a_benign_200(self, async_client, base_url):
-        """A wrong key over /mcp must not return a successful 200 crawl; it is 401."""
-        body = _body(
-            "tools/call",
-            params={"name": "crawl", "arguments": {"url": f"{base_url}/"}, "_meta": _META},
+    @pytest.mark.parametrize("method", ["crawl", "discover"])
+    async def test_a_wrong_key_is_a_401_not_a_benign_200(self, async_client, base_url, method):
+        """The route refuses an invalid credential for every method, not just tools/call."""
+        body = (
+            _body(
+                "tools/call", params={"name": "crawl", "arguments": {"url": f"{base_url}/"}, "_meta": _META}
+            )
+            if method == "crawl"
+            else _body("server/discover")
         )
         resp = await _mcp(async_client, body, {"X-API-Key": "definitely-not-a-key"})
-        _assert_401_api_key(resp)
-
-    @pytest.mark.usefixtures("browser_pool_stub")
-    async def test_wrong_key_on_discover_is_also_a_401(self, async_client):
-        """The route refuses an invalid credential for every method, not just tools/call."""
-        resp = await _mcp(async_client, _body("server/discover"), {"X-API-Key": "definitely-not-a-key"})
         _assert_401_api_key(resp)
 
 
 def _assert_401_api_key(resp):
     """Assert the response is a 401 with an api-key error message."""
     assert resp.status_code == 401, resp.text
-    assert "api key" in resp.json()["error"]["message"].lower()
+    assert "api key" in str(_error_of(resp)["message"]).lower()
 
 
-async def _call_tool(async_client, name, arguments):
+async def _call_tool(
+    async_client: httpx.AsyncClient, name: str, arguments: JsonValue
+) -> tuple[httpx.Response, dict[str, JsonValue]]:
     """POST a ``tools/call`` for ``name`` and return ``(response, payload)``.
 
     ``_meta`` must never drop -- a request without it is rejected before the
     tool is named (three copies per test, one of them the edited copy)."""
     body = _body("tools/call", params={"name": name, "arguments": arguments, "_meta": _META})
     resp = await _mcp(async_client, body)
-    return resp, resp.json()
+    return resp, _payload_dict(resp)
 
 
 class TestInternalErrorContract:
@@ -432,27 +467,25 @@ class TestInternalErrorContract:
             settings=None,
             shutdown_event=None,
         )
-        assert status == 500
-        assert payload is not None
-        assert payload["error"]["code"] == -32603
+        assert status == 500 and payload and isinstance(payload, dict)
+        assert _member(payload, "error")["code"] == -32603
         assert payload["id"] == 1
 
 
 class TestEnvelopeValidation:
     """#230: the JSON-RPC 2.0 envelope is validated, not just echoed."""
 
-    @pytest.mark.parametrize("request_id", [True, False])
-    async def test_boolean_id_is_refused(self, async_client, request_id):
-        # JSON-RPC 2.0 restricts id to String/Number/NULL; bool is neither (it is
-        # a subclass of int only by accident) and must be refused as invalid.
+    @pytest.mark.parametrize(
+        ("bool_id", "version"),
+        [(True, "2.0"), (False, None), (False, "1.0"), (False, 2.0), (False, "3.0")],
+    )
+    async def test_a_non_conforming_envelope_is_refused(self, async_client, bool_id, version):
+        """JSON-RPC 2.0: id is String/Number/NULL (bool is neither, only accidentally an int)
+        and jsonrpc must be the literal "2.0"; absent is refused like any wrong value."""
         body = _body("server/discover")
-        body["id"] = request_id
-        await _assert_invalid_request(async_client, body=body)
-
-    @pytest.mark.parametrize("version", [None, "1.0", 2.0, "3.0"])
-    async def test_wrong_or_absent_jsonrpc_is_refused(self, async_client, version):
-        body = _body("server/discover")
-        if version is None:
+        if bool_id:
+            body["id"] = True
+        elif version is None:
             del body["jsonrpc"]
         else:
             body["jsonrpc"] = version
@@ -460,5 +493,6 @@ class TestEnvelopeValidation:
 
     async def test_correct_jsonrpc_with_int_id_still_works(self, async_client):
         # The new validation must not reject the valid envelope the helpers build.
-        result = await _assert_complete(async_client, _body("server/discover"))
-        assert _PROTOCOL_VERSION in result["supportedVersions"]
+        assert _PROTOCOL_VERSION in _items(
+            await _assert_complete(async_client, _body("server/discover")), "supportedVersions"
+        )

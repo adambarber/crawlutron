@@ -61,11 +61,17 @@ def _call_edges(
             target = index.get(resolved, [])
             if not target and isinstance(child.func, ast.Name):
                 target = same_tree_target(tree, child.func.id)
-            offloaded = resolved == "asyncio.to_thread" and child.args and isinstance(child.args[0], ast.Name)
+            offloaded = (
+                resolved == "asyncio.to_thread"
+                and child.args
+                and isinstance(child.args[0], ast.Name)
+            )
             if not target and offloaded:
                 # asyncio.to_thread(f, ...) calls f: the offload convention is a
                 # real call edge the plain resolver cannot see on its own.
-                target = same_tree_target(tree, child.args[0].id)
+                first_arg = child.args[0]
+                assert isinstance(first_arg, ast.Name)
+                target = same_tree_target(tree, first_arg.id)
             if len(target) == 1 and target[0][2] is not node:
                 target_name = next(
                     candidate_name

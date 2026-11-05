@@ -97,7 +97,8 @@ def _caller_supplied() -> set[str]:
     Reachability rather than a hand-kept list: an input model ADDED inherits
     pydantic's default ``ignore`` until somebody decides otherwise."""
     models = _declared_models()
-    reachable, frontier = set(), set(_BOUND_REQUEST_BODIES)
+    reachable: set[str] = set()
+    frontier = set(_BOUND_REQUEST_BODIES)
     while frontier:
         frontier -= reachable
         reachable |= frontier
@@ -258,18 +259,22 @@ class TestRequestCollectionsAreBounded:
         with pytest.raises(ValidationError):
             CrawlRequest(urls=[f"https://example.com/{i}" for i in range(self.MAX_URLS + 1)])
 
-    def test_the_render_and_map_models_cap_urls_too(self):
+    def test_the_render_model_caps_urls_too_and_map_has_no_batch(self):
         """The cap must travel with the shared url-source base, not just CrawlRequest.
 
-        Three models bind URLs through one base; a ceiling on only the biggest
-        leaves the other two uncapped -- the shape this test exists to prevent."""
+        RenderRequest binds URLs through the same base as CrawlRequest, so the
+        ceiling applies there too; MapRequest takes exactly one root url -- a
+        urls key is forbidden outright, not capped."""
         from crawlutron.models.map_request import MapRequest
         from crawlutron.models.render_request import RenderRequest
 
         too_many = [f"https://example.com/{index}" for index in range(self.MAX_URLS + 1)]
-        for model in (MapRequest, RenderRequest):
-            with pytest.raises(ValidationError):
-                model(urls=too_many)
+        with pytest.raises(ValidationError):
+            RenderRequest(urls=too_many)
+        # MapRequest's static shape has no urls key at all (extra=forbid), so the
+        # refusal is exercised through the wire form it would arrive in.
+        with pytest.raises(ValidationError):
+            MapRequest.model_validate({"url": "https://example.com/", "urls": too_many})
 
     def test_validator_maps_are_capped(self):
         from crawlutron.models.crawl_request import CrawlRequest

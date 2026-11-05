@@ -9,9 +9,19 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from collections.abc import AsyncGenerator
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from crawlutron.storage.job_store import JobStore
+
+if TYPE_CHECKING:
+    from httpx import AsyncClient
+
+    from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
+    from crawlutron.storage.caller_key_store import IssuedKey
+
+#: What ``keyed_quota_client`` yields: client, job store, concurrency tracker, issued key.
+type _QuotaClient = tuple[AsyncClient, JobStore, CallerConcurrencyTracker, IssuedKey]
 
 __all__ = [
     "keyed_quota_client",
@@ -67,17 +77,21 @@ def stored_request(store: JobStore, response):
     return stored
 
 
-def mount_tracker(client):
+def mount_tracker(client: AsyncClient):
     """Attach the sync-door register to the test client's app and return it."""
     from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
 
     tracker = CallerConcurrencyTracker()
-    client._transport.app.state.concurrency_tracker = tracker
+    transport = client._transport
+    # ASGITransport carries the app; assert it rather than import the class here.
+    app = getattr(transport, "app", None)
+    assert app is not None, "the quota client must ride an ASGI transport"
+    app.state.concurrency_tracker = tracker
     return tracker
 
 
 @contextlib.asynccontextmanager
-async def keyed_quota_client(tmp_path, *, max_concurrency: int = 1) -> AsyncGenerator[object, None]:
+async def keyed_quota_client(tmp_path, *, max_concurrency: int = 1) -> AsyncGenerator[_QuotaClient, None]:
     """A quota client with a mounted tracker and one keyed caller."""
     from tests.factories.client import quota_client
 

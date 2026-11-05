@@ -114,7 +114,10 @@ def test_the_workflow_is_written_for_the_repository_root_it_will_run_from() -> N
     )
     assert f"--config {WORKFLOW_ROOT_CONFIG}" in workflow
     for name, job in _jobs(workflow).items():
-        run_defaults = (job.get("defaults") or {}).get("run") or {}
+        defaults = job.get("defaults")
+        assert isinstance(defaults, dict) or defaults is None
+        run_defaults = (defaults or {}).get("run") or {}
+        assert isinstance(run_defaults, dict)
         assert "working-directory" not in run_defaults, (
             f"job {name} runs in {run_defaults['working-directory']}, which is not the repository root"
         )
@@ -128,10 +131,12 @@ def test_every_job_checks_out_full_history() -> None:
     """
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
     for name, job in _jobs(workflow).items():
+        job_steps = job.get("steps")
+        assert isinstance(job_steps, list) or job_steps is None
         checkouts = [
             step
-            for step in job.get("steps") or []
-            if str(step.get("uses", "")).split("@")[0] == "actions/checkout"
+            for step in job_steps or []
+            if isinstance(step, dict) and str(step.get("uses", "")).split("@")[0] == "actions/checkout"
         ]
         if not checkouts:
             continue

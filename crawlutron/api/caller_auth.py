@@ -113,8 +113,8 @@ def quota_denials() -> dict[int | str, dict[str, object]]:
 
 def _key_admin_token(request: Request) -> str:
     """The configured operator token, or '' when unset (via the settings home)."""
-    state = getattr(request, "app", None)
-    state = getattr(state, "state", None) if state is not None else None
+    app = request.scope.get("app")
+    state = getattr(app, "state", None) if app is not None else None
     if state is not None:
         token = getattr(state, "key_admin_token", None)
         if isinstance(token, str) and token:

@@ -160,7 +160,8 @@ def _unregistered_marker_uses(tree: ast.Module, path: pathlib.Path) -> list[str]
     return [
         offender_at(path, node, f"pytest.mark.{node.attr} is not registered in pytest.ini")
         for node in ast.walk(tree)
-        if _is_pytest_mark(node)
+        if isinstance(node, ast.Attribute)
+        and _is_pytest_mark(node)
         and node.attr not in declared
         and node.attr not in _BUILTIN_AND_PLUGIN_MARKERS
     ]

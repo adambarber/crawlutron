@@ -19,7 +19,11 @@ _STORE = REPO_ROOT / "crawlutron" / "storage" / "coordination_cookies.py"
 def test_every_cookie_table_read_is_namespace_scoped() -> None:
     tree = parsed(_STORE)
     name = pathlib.Path(_STORE).name
-    offenders = [f"{name}:{node.lineno}" for node in ast.walk(tree) if _is_unscoped_read(node)]
+    offenders = []
+    for node in ast.walk(tree):
+        if _is_unscoped_read(node):
+            assert isinstance(node, ast.expr)
+            offenders.append(f"{name}:{node.lineno}")
     assert not offenders, f"unfiltered coordination_cookies statement(s) reading payloads: {offenders}"
 
 

@@ -68,6 +68,8 @@ def _too_many_extract_offenders(tree: ast.Module) -> list[str]:
     if calls <= 4:
         return []
     target = _challenge_wait_target(tree)
+    if target is None:
+        return []
     return [
         f"{_BROWSER.name}:{target.lineno} extract_with_challenge_wait calls "
         f"extract_html/extract_text {calls} times; cap at 4"

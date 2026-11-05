@@ -9,13 +9,14 @@ from crawlutron.extraction.output_formats import (
     csv_neutralize,
     serialize_results,
 )
+from crawlutron.models.json_value import JsonValue
 
 # The two result shapes the serialization table is built from. Module level so the table reads as
 # formats-over-bodies rather than as four bodies spelling the same result four times.
-_TEXT_RESULT: list[dict[str, object]] = [{"url": "http://x/", "text": "content"}]
-_MARKDOWN_RESULT: list[dict[str, object]] = [{"url": "http://x/", "markdown": "# Title\n\nContent"}]
+_TEXT_RESULT: list[dict[str, JsonValue]] = [{"url": "http://x/", "text": "content"}]
+_MARKDOWN_RESULT: list[dict[str, JsonValue]] = [{"url": "http://x/", "markdown": "# Title\n\nContent"}]
 
-SAMPLE: list[dict[str, object]] = [
+SAMPLE: list[dict[str, JsonValue]] = [
     {
         "original_url": "http://a.example/",
         "final_url": "http://a.example/",
@@ -139,7 +140,7 @@ class TestOutputFormatSerialization:
     def test_output_formats_serialize_unknown_format(self):
         from crawlutron.extraction.output_formats import serialize_results
 
-        results = [{"original_url": "http://x/"}]
+        results: list[dict[str, JsonValue]] = [{"original_url": "http://x/"}]
         with pytest.raises(ValueError):
             serialize_results(results, "unknown_format")
 
@@ -206,7 +207,7 @@ def test_csv_neutralize_handles_empty_value():
 
 def test_serialize_results_csv_neutralizes_attacker_content():
     """End-to-end: an error field that starts with = is quoted in the CSV."""
-    results = [{"original_url": "http://x/", "error": "=cmd|'/c calc'!A1"}]
+    results: list[dict[str, JsonValue]] = [{"original_url": "http://x/", "error": "=cmd|'/c calc'!A1"}]
     body, media_type = serialize_results(results, "csv")
     assert media_type == "text/csv; charset=utf-8"
     # The formula trigger must be preceded by a single quote.
@@ -219,7 +220,7 @@ def test_serialize_results_csv_neutralizes_attacker_content():
 
 def test_serialize_results_csv_preserves_url_columns():
     """URL columns are NOT neutralized: =foo in a URL is a query separator."""
-    results = [{"original_url": "https://x/?q=foo&p=bar", "error": "ok"}]
+    results: list[dict[str, JsonValue]] = [{"original_url": "https://x/?q=foo&p=bar", "error": "ok"}]
     body, _ = serialize_results(results, "csv")
     assert "https://x/?q=foo&p=bar" in body
 
@@ -262,7 +263,7 @@ class TestOutputFormatsEdges:
     def test_serialize_results_csv(self):
         from crawlutron.extraction.output_formats import serialize_results
 
-        results = [
+        results: list[dict[str, JsonValue]] = [
             {
                 "original_url": "http://x/",
                 "normalized_url": "http://x/",
@@ -283,6 +284,6 @@ class TestOutputFormatsEdges:
     def test_serialize_results_unknown_format(self):
         from crawlutron.extraction.output_formats import serialize_results
 
-        results = [{"url": "http://x/", "text": "content"}]
+        results: list[dict[str, JsonValue]] = [{"url": "http://x/", "text": "content"}]
         with pytest.raises(ValueError):
             serialize_results(results, "unknown")

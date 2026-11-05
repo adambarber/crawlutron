@@ -6,13 +6,12 @@ import door for a fetch double is ``tests._fetch_doubles`` (#314, 3.3)."""
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import pytest
 
 from crawlutron.admission.policy import CrawlPolicy
 from crawlutron.models.http_fetch_result import HttpFetchResult
-from crawlutron.models.http_fetcher import HttpFetcher
 from crawlutron.models.json_value import JsonValue
 from tests._browser_doubles import _fake_browser
 
@@ -72,7 +71,7 @@ async def invoke_http_strategy(
     return await run_http_strategy(
         url="http://example.com/",
         policy=policy,
-        http_fetcher=cast("HttpFetcher", fetcher_double),
+        http_fetcher=fetcher_double,
         **kwargs,
     )
 

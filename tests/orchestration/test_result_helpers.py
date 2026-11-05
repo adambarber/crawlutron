@@ -1,5 +1,6 @@
 """Result helpers: blocked, binary, failed and skipped engine results."""
 
+from tests._policy_factories import canonical
 from tests._result_builders import skipped_result
 
 
@@ -11,8 +12,8 @@ class TestResultHelpersEdges:
 
         result = binary_no_text_result(
             original_url="http://x/file.bin",
-            normalized_url="http://x/file.bin",
-            final_url="http://x/file.bin",
+            normalized_url=canonical("http://x/file.bin"),
+            final_url=canonical("http://x/file.bin"),
             strategy="HTTP_DECLARED_CRAWLER",
             http_status=200,
             headers={"content-type": "application/octet-stream"},
@@ -46,8 +47,8 @@ class TestFunnelDerivesAxes:
         )
         result = build_engine_result(
             original_url="http://a/",
-            normalized_url="http://a/",
-            final_url="http://a/final",
+            normalized_url=canonical("http://a/"),
+            final_url=canonical("http://a/final"),
             attempt=attempt,
             http_status=200,
         )
@@ -85,21 +86,21 @@ class TestTerminalResultContract:
         result = failed_engine_result(
             TerminalResult(
                 original_url="http://a/",
-                normalized_url="http://a/",
+                normalized_url=canonical("http://a/"),
                 strategy="HTTP_DECLARED_CRAWLER",
                 classification="network_error",
                 error="connection_error",
                 http_status=502,
-                final_url="http://a/final",
-                diagnostics={"k": "v"},
+                final_url=canonical("http://a/final"),
+                diagnostics={"error_code": "k"},
             )
         )
         assert result.status == "failed"
         assert result.classification == "network_error"
         assert result.error == "connection_error"
         assert result.http_status == 502
-        assert result.final_url == "http://a/final"
-        assert result.diagnostics == {"k": "v"}
+        assert result.final_url == canonical("http://a/final")
+        assert result.diagnostics == {"error_code": "k"}
         assert result.html is None and result.text is None and result.content_type is None
         assert self._attempt_fields(result) == {
             "strategy": "HTTP_DECLARED_CRAWLER",
@@ -136,7 +137,7 @@ class TestTerminalCrawlResult:
         from crawlutron.models.result_factory import terminal_crawl_result
 
         result = terminal_crawl_result(
-            url="http://x/page",
+            url=canonical("http://x/page"),
             status="failed",
             classification="site_error",
             attempts=2,
@@ -144,7 +145,7 @@ class TestTerminalCrawlResult:
             domain="x",
             error="network_error",
         )
-        assert result.url == "http://x/page"
+        assert result.url == canonical("http://x/page")
         assert result.status == "failed"
         assert result.classification == "site_error"
         assert result.attempts == 2

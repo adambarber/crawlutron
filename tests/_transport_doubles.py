@@ -86,7 +86,7 @@ def scripted_transport_client(
     *,
     observed_requests: list[httpx.Request] | None = None,
     observed_responses: list[httpx.Response] | None = None,
-) -> httpx.AsyncClient:
+) -> ScriptedClient:
     """A real ``httpx.AsyncClient`` that answers from `responses`, in call order.
 
     ``httpx.MockTransport`` is the seam httpx publishes; a call beyond the
@@ -129,7 +129,7 @@ def patch_http_fetcher_transport(
     responses: Sequence[httpx.Response],
     *,
     allow_ssrf_bypass: bool,
-) -> httpx.AsyncClient:
+) -> ScriptedClient:
     """Point the httpx fetcher at a scripted transport; return the client.
 
     ``allow_ssrf_bypass`` is required because installing this also installs

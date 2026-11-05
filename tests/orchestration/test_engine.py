@@ -2,6 +2,7 @@
 
 import asyncio
 import urllib.error
+import warnings
 
 import pytest
 
@@ -23,6 +24,8 @@ from tests._fetcher_factories import (
     crawled_result,
     run_chain,
 )
+from crawlutron.models.crawl_request import CrawlRequest
+from crawlutron.models.json_value import JsonValue
 from tests._policy_factories import (
     canonical,
     http_strategy_policy,
@@ -48,7 +51,8 @@ class TestEngineCrawlRequest:
         from tests._fetcher_factories import crawl_homepage_async
 
         response = await crawl_homepage_async(base_url)
-        assert "Example Org" in response["results"][0].markdown
+        first_markdown = response["results"][0].markdown or ""
+        assert "Example Org" in first_markdown
 
     async def test_crawl_request_conditional_cache_304(self, base_url):
         url = f"{base_url}/with_etag"
@@ -107,7 +111,7 @@ def test_seed_freshness_uses_real_default_strategies():
 
     url = canonical("http://seed-fresh.test/page")
     # Normalized shape but no strategies key: the default must apply.
-    policy: dict[str, object] = {"headers": {}, "request_profile": {}}
+    policy: dict[str, JsonValue] = {"headers": {}, "request_profile": {}}
     expected_key = build_content_cache_key(
         url,
         HTTP_DECLARED_CRAWLER,
@@ -151,7 +155,7 @@ class TestEngineChainEdges:
     def test_result_dict(self):
         d = to_dict(
             CrawlResult(
-                url="http://x/",
+                url=canonical("http://x/"),
                 attempt=terminal_attempt(
                     strategy=None,
                     status="success",
@@ -159,7 +163,7 @@ class TestEngineChainEdges:
                     elapsed_ms=1,
                     error=None,
                 ),
-                final_url="http://x/",
+                final_url=canonical("http://x/"),
                 html=None,
                 text="t",
                 attempts=1,
@@ -170,10 +174,19 @@ class TestEngineChainEdges:
         assert d["url"] == "http://x/"
 
     def test_payload_policy_rejects_wire_dict(self):
-        # The typed funnel takes a validated CrawlRequest only; a raw wire dict
-        # is refused so callers cannot bypass the request-model validation edge.
-        with pytest.raises(TypeError):
-            payload_policy({"policy": {"strategies": ["BOGUS"]}}, PolicyTier.model_defaults())
+        # The typed funnel takes a validated CrawlRequest only; a model carrying
+        # a strategy the vocabulary refuses must not slip past the funnel either.
+        from crawlutron.models.crawl_policy import CrawlPolicy
+
+        forged = CrawlPolicy.model_construct()
+        # __dict__-level mutation: the funnel, not pydantic, is the subject.
+        object.__setattr__(forged, "strategies", ["BOGUS"])
+        with pytest.raises(ValueError, match="invalid_policy_strategy"):
+            with warnings.catch_warnings():
+                # model_construct bypasses field validation by design; the funnel
+                # (not pydantic) is the subject, so pydantic's serializer warning is noise.
+                warnings.simplefilter("ignore")
+                payload_policy(CrawlRequest.model_construct(url="http://x/", policy=forged), PolicyTier.model_defaults())
 
     async def test_browser_strategy_document_extraction(self, base_url):
         # Live origin: 's robots gate fail-closes connection-refused origins (127.0.0.1:1), so the subject
@@ -192,7 +205,7 @@ class TestEngineChainEdges:
             policy={"strategies": [BROWSER_HEADLESS], "extraction": EXTRACTION_TRAFILATURA},
             browser_worker=_fake_browser(html="<html><body>trafilatura body</body></html>"),
         )
-        assert "trafilatura body" in result.markdown or ""
+        assert "trafilatura body" in (result.markdown or "")
 
     async def test_browser_strategy_no_content(self, base_url):
         result = await crawled_result(
@@ -347,7 +360,7 @@ class TestEngineScopeEdges:
         result = skipped_engine_result(
             TerminalResult(
                 original_url="http://example.com/page",
-                normalized_url="http://example.com/page",
+                normalized_url=canonical("http://example.com/page"),
                 # A disallow precedes any strategy attempt, so the recorded strategy is None, never a label
                 # that implies an HTTP fetch happened.
                 strategy=None,

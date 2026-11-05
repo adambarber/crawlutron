@@ -307,7 +307,7 @@ def test_tombstone_within_the_window_is_retained_and_propagates(tmp_path, monkey
     assert _header_for(sibling, "http://a.example/") == ""
 
 
-def _zero_window_jar(tmp_path, monkeypatch) -> tuple[object, object]:
+def _zero_window_jar(tmp_path, monkeypatch) -> tuple[SharedCookieStore, CookieJar]:
     """A store + jar with the tombstone window closed, so reads reap immediately."""
     monkeypatch.setattr(cookie_jar, "TOMBSTONE_WINDOW_SECONDS", 0.0)
     store = SharedCookieStore(tmp_path / "coordination.db")

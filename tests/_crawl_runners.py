@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, TypedDict, Unpack, cast
+from typing import TYPE_CHECKING, TypedDict, Unpack
 from urllib.parse import urlparse
 
 from crawlutron.admission.policy import read_policy
@@ -121,7 +121,7 @@ def xml_page(body: str) -> PageData:
 
 
 # Deep enough to follow the seed's links, wide enough that the page cap is never what a test is measuring.
-LINKED_PAIR_LIMITS = {"max_depth": 1, "max_pages": 10}
+LINKED_PAIR_LIMITS: dict[str, JsonValue] = {"max_depth": 1, "max_pages": 10}
 
 #: The page table a scope test crawls: a root with keep/drop links.
 _SCOPE_KEEP_DROP_PAGES = {
@@ -178,16 +178,16 @@ async def crawled_results(
 
     base = FetcherDouble(_page_answer)
     fetcher = (
-        FetcherDouble(lambda url, sent_headers, timeout, cap: base(url, sent_headers, timeout, cap), calls)
+        FetcherDouble(lambda url, headers, timeout, cap: base(url, headers, timeout, cap), calls)
         if calls is not None
         else base
     )
     return await crawl_request(
         {"url": url, "policy": body},
-        http_fetcher=cast("HttpFetcher", fetcher),
+        http_fetcher=fetcher,
         # The cffi impersonation slot binds the same scripted fetcher: a leaf with an
         # empty body would otherwise ride the REAL curl_cffi transport (not hermetic).
-        cffi_fetcher=cast("HttpFetcher", fetcher),
+        cffi_fetcher=fetcher,
         cache=HttpCache(),
         spill_path=spill_path,
         content_cache=content_cache,

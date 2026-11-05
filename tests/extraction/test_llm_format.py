@@ -36,9 +36,10 @@ class TestJsonLdExtraction:
             "</head><body><p>Body</p></body></html>"
         )
         meta = extract_llm_metadata(html, canonical("https://example.com"))
-        assert meta.get("json_ld") is not None
-        assert meta["json_ld"]["name"] == "Test"
-        assert meta["json_ld"]["@context"] == "https://schema.org"
+        json_ld = meta.get("json_ld")
+        assert isinstance(json_ld, dict)
+        assert json_ld["name"] == "Test"
+        assert json_ld["@context"] == "https://schema.org"
 
     def test_json_ld_multiple_blocks_become_list(self):
         html = (
@@ -59,16 +60,17 @@ class TestJsonLdExtraction:
         html = '<html><head><script type="application/ld+json">42</script></head><body>x</body></html>'
         meta = extract_llm_metadata(html, canonical("https://example.com"))
         assert meta["json_ld"] == 42
-        # The wire model admits what the extractor can produce.
-        projected = PageMetadataResponse(
-            **{k: meta[k] for k in PageMetadataResponse.model_fields & meta.keys()}
-        )
+        # The wire model admits what the extractor can produce: intersecting the
+        # model's declared keys with the extractor's bag keeps the spread literal.
+        wire_keys = PageMetadataResponse.model_fields & meta.keys()
+        projected = PageMetadataResponse(**{key: meta[key] for key in wire_keys})
         assert projected.json_ld == 42
 
     def test_page_metadata_declares_json_ld_as_the_system_type(self):
         """Both declarations of the passthrough payload name the system type, not a
         shape the arbitrary-JSON door never promised."""
-        json_ld_annotation = PageMetadata.__annotations__["json_ld"]
+        json_ld_annotation = PageMetadata.__annotations__.get("json_ld")
+        assert json_ld_annotation is not None
         assert getattr(json_ld_annotation, "__forward_arg__", json_ld_annotation) == "JsonValue", (
             "the owner must name the system type"
         )

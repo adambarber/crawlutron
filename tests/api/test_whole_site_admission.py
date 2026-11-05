@@ -12,6 +12,7 @@ import pytest
 from httpx import AsyncClient
 
 from crawlutron.admission.policy import PolicyLike
+from crawlutron.models.json_value import JsonValue
 from crawlutron.api import job_runner
 from crawlutron.storage.job_store import CrawlJobState, JobStatus, JobStore
 from crawlutron.transport.robots import RobotsRules
@@ -89,14 +90,16 @@ def _root_with_alias(alias_query: str) -> _AliasSite:
 
 class TestWholeSiteAdmissionContract:
     @staticmethod
-    def _policy(max_depth: int, max_pages: int, scope_regex: str | None = None) -> PolicyLike:
-        policy: PolicyLike = {
+    def _policy(
+        max_depth: int, max_pages: int, scope_regex: str | None = None, *, respect_robots=False, sitemaps=False
+    ) -> PolicyLike:
+        policy: dict[str, JsonValue] = {
             "limits": {
                 "max_depth": max_depth,
                 "max_pages": max_pages,
-                "respect_robots": False,
+                "respect_robots": respect_robots,
             },
-            "discovery": {"robots": True, "sitemaps": False, "feeds": True},
+            "discovery": {"robots": True, "sitemaps": sitemaps, "feeds": True},
         }
         if scope_regex is not None:
             policy["scope_regex"] = scope_regex
@@ -130,7 +133,7 @@ class TestWholeSiteAdmissionContract:
 
         Only links and policy vary across tests; the attempt count, discovery
         total and visited set derive from ``admitted``, never restated."""
-        engine = ScriptedExecute({root: [engine_result(root, "rendered", links=links)]})
+        engine = ScriptedExecute({root: [engine_result(root, "rendered", links=list(links))]})
         job = await run_api_job(client, job_store, root, engine, policy)
         assert engine.attempts == {root: 1, **{url: 1 for url in admitted}}
         assert job.stats["total_discovered"] == len(admitted)
@@ -173,8 +176,7 @@ class TestWholeSiteAdmissionContract:
         # The public loader, not the private decode rule: this test drives the whole job through the API, so
         # the gate is built inside JobAdmissionContext.create and the decode rule is not a thing the test
         monkeypatch.setattr("crawlutron.admission.admission.load_robots_rules", _rules_from(fetch_robots))
-        policy = self._policy(1, 2)
-        policy["limits"]["respect_robots"] = True
+        policy = self._policy(1, 2, respect_robots=True)
         await self._admitted(
             client, job_store, ADMISSION_ROOT, ["https://example.test/blocked", ADMITTED], policy
         )
@@ -250,8 +252,7 @@ class TestWholeSiteAdmissionContract:
     async def test_job_seeds_sitemap_pages_through_shared_admission(self, client, job_store, monkeypatch):
         root = "https://example.test/root"
         seed = "https://example.test/from-sitemap"
-        policy = self._policy(1, 10)
-        policy["discovery"]["sitemaps"] = True
+        policy = self._policy(1, 10, scope_regex="^https://example.test/", sitemaps=True)
 
         async def sitemap_candidates(root_url, context):
             assert root_url == root
@@ -300,8 +301,7 @@ class TestWholeSiteAdmissionContract:
         monkeypatch.setattr("crawlutron.admission.admission.RobotsGate.allows", allows)
         monkeypatch.setattr("crawlutron.admission.admission.RobotsGate.crawl_delay", crawl_delay)
         monkeypatch.setattr(DomainScheduler, "set_domain_min_delay", set_domain_min_delay)
-        policy = self._policy(1, 2)
-        policy["limits"]["respect_robots"] = True
+        policy = self._policy(1, 2, respect_robots=True)
         job = await run_api_job(
             client,
             job_store,

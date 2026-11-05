@@ -5,6 +5,8 @@ Regression pins for the auth paths that had zero coverage (#199).
 
 from __future__ import annotations
 
+from starlette.requests import Request
+
 from crawlutron.storage.caller_key_store import CallerKeyStore
 from tests._async_harnesses import issue_key
 from tests.factories.client import isolation_client, post_crawl, quota_client
@@ -171,6 +173,11 @@ async def test_keys_door_is_sealed_when_no_operator_token_is_configured(tmp_path
         _assert_401(minted)
 
 
+def _request_with(headers: dict[str, str]) -> Request:
+    """A real Request with only headers set; app state absent, so the fallback funnel runs."""
+    return Request(scope={"type": "http", "headers": [(k.encode(), v.encode()) for k, v in headers.items()]})
+
+
 def test_operator_token_fallback_reads_settings_home(monkeypatch):
     """#142: with no app state, the operator token resolves through
     CrawlerSettings (the declared home), not a raw os.environ get."""
@@ -182,8 +189,8 @@ def test_operator_token_fallback_reads_settings_home(monkeypatch):
 
     # State carries no token and no settings: the fallback lands on the funnel.
     presenting = {"x-api-key": "tok-from-env"}
-    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()), headers=presenting)
+    request = _request_with(presenting)
     assert caller_auth.is_operator(request) is True
 
-    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()), headers={})
+    request = _request_with({})
     assert caller_auth.is_operator(request) is False

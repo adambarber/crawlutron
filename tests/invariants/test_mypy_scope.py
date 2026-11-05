@@ -1,14 +1,13 @@
-"""The mypy scope covers every shared-harness module it claims (#397)."""
+"""The mypy scope covers every test module it claims (#314: widened to ``tests``)."""
 
 from __future__ import annotations
 
 import configparser
-import glob
 
 from tests.chokepoint_walks import REPO_ROOT
 
 _MYPY_INI = REPO_ROOT / "mypy.ini"
-_SCOPE_GLOB = "tests/**/_*.py"
+_SCOPE_TERM = "tests"
 _TESTS = REPO_ROOT / "tests"
 
 
@@ -19,69 +18,64 @@ def _declared_scope_files() -> str:
     return parser["mypy"]["files"]
 
 
-def _declared_scope_globs() -> tuple[str, ...]:
-    """The ``files`` value's glob terms, comma-split and stripped."""
+def _declared_scope_terms() -> tuple[str, ...]:
+    """The ``files`` value's terms, comma-split and stripped."""
     return tuple(term.strip() for term in _declared_scope_files().split(","))
 
 
-def _tree_private_modules() -> tuple[str, ...]:
-    """Every ``tests/**/_*.py`` module in the tree, as repo-relative posix strings."""
-    return tuple(sorted(str(path.relative_to(REPO_ROOT).as_posix()) for path in _TESTS.rglob("_*.py")))
+def _tree_test_modules() -> tuple[str, ...]:
+    """Every ``tests/**/*.py`` module in the tree, as repo-relative posix strings."""
+    return tuple(sorted(str(path.relative_to(REPO_ROOT).as_posix()) for path in _TESTS.rglob("*.py")))
 
 
-def _scope_matches(tree_private_module: str) -> bool:
-    """Whether the scope's glob terms reach ``tree_private_module``, as mypy expands them."""
-    return any(
-        tree_private_module in glob.glob(term, root_dir=REPO_ROOT, recursive=True)
-        for term in _declared_scope_globs()
-    )
+def _scope_matches(module: str) -> bool:
+    """Whether the scope's terms reach ``module``: a term matches a module when the
+    module lives under that term's directory (mypy's ``files`` is directory-rooted)."""
+    return any(module == term or module.startswith(f"{term}/") for term in _declared_scope_terms())
 
 
-def test_the_mypy_scope_names_the_harness_glob() -> None:
-    """mypy.ini must scope the harness recursively (``tests/**/_*.py``), not two
-    named modules and not the flat term that never left tests/ top level."""
-    assert _SCOPE_GLOB in _declared_scope_files(), (
+def test_the_scope_names_the_tests_tree() -> None:
+    """mypy.ini must scope the whole tests tree, not a private-module glob that
+    leaves every public test module checked only by transitive-import luck."""
+    assert _SCOPE_TERM in _declared_scope_terms(), (
         "mypy.ini files = "
         + _declared_scope_files()
         + " does not contain the "
-        + _SCOPE_GLOB
-        + " glob; a harness module is then checked only by transitive-import luck"
+        + _SCOPE_TERM
+        + " term; test modules outside the named set are then checked by luck"
     )
 
 
-def test_the_scope_reaches_every_private_module_the_tree_holds() -> None:
-    """The scope is total over the harness, subtree by subtree: every
-    ``tests/**/_*.py`` module in the tree must be matched by a declared glob term,
-    with the covered set enumerated so a newly matched module is evidence, not luck."""
-    tree_private_modules = _tree_private_modules()
-    covered = {module for module in tree_private_modules if _scope_matches(module)}
-    uncovered = sorted(set(tree_private_modules) - covered)
+def test_the_scope_reaches_every_test_module_the_tree_holds() -> None:
+    """The scope is total over tests/, module by module: every test module in the
+    tree must be matched by a declared term, so a newly added module is evidence."""
+    uncovered = sorted(module for module in _tree_test_modules() if not _scope_matches(module))
     assert not uncovered, (
         "mypy.ini files = "
         + _declared_scope_files()
-        + " does not reach the harness modules "
+        + " does not reach the test modules "
         + str(uncovered)
-        + "; a private module outside app/ and the flat tests/ top level is then"
-        " checked only by transitive-import luck"
+        + "; a module outside every declared term is checked only by luck"
     )
 
 
-def test_the_scope_covers_the_real_harness_tree() -> None:
-    """The glob is not vestigial: each subtree it claims must actually hold harness
-    modules, enumerated per subtree rather than one hardcoded file."""
-    tree_private_modules = _tree_private_modules()
-    covered = {module for module in tree_private_modules if _scope_matches(module)}
-    subtrees = {module.rsplit("/", 1)[0] for module in covered}
-    assert "tests" in subtrees, "the flat tests/ harness subtree is gone from the scope's reach"
+def test_the_scope_covers_the_real_test_tree() -> None:
+    """The term is not vestigial: the subtrees it claims must actually hold test
+    modules, and the reach proof's module must exist."""
+    subtrees = {module.rsplit("/", 1)[0] for module in _tree_test_modules()}
+    assert "tests" in subtrees, "the flat tests/ subtree is gone from the scope's reach"
     assert "tests/invariants" in subtrees, (
-        "the invariants harness subtree is gone from the scope's reach; re-ground this gate in the live tree"
+        "the invariants subtree is gone from the scope's reach; re-ground this gate in the live tree"
     )
     assert (REPO_ROOT / "tests" / "_policy_factories.py").exists(), (
         "the reach proof's module is gone; re-ground this gate in the live tree"
     )
 
 
-def test_the_old_two_module_scope_fails_the_gate() -> None:
-    """The pre-#397 scope (named modules, no glob) fails the invariant."""
-    old_scope = "app, tests/_fetch_outcome.py, tests/_transport_doubles.py"
-    assert _SCOPE_GLOB not in old_scope, "the old scope must not contain the glob"
+def test_the_old_harness_glob_scope_fails_the_gate() -> None:
+    """The pre-#314 scope (production + the private-module glob) fails the invariant:
+    it left every public test module outside the checker."""
+    old_scope = "crawlutron, tests/**/_*.py"
+    assert _SCOPE_TERM not in (term.strip() for term in old_scope.split(",")), (
+        "the old scope must not reach the tests tree"
+    )

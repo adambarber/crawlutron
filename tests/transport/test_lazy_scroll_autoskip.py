@@ -37,7 +37,7 @@ async def test_a_growing_page_uses_every_step():
         page.evaluates.append(expression)
         return next(heights, None)
 
-    page.evaluate = evaluate
+    object.__setattr__(page, "evaluate", evaluate)
     await _driver(sleeps).lazy_load_scroll(page)
     assert len(sleeps) == 5
 
@@ -59,7 +59,7 @@ async def test_a_scroll_failure_still_returns():
     async def evaluate(expression, *args, **kwargs):
         raise RuntimeError("page closed")
 
-    page.evaluate = evaluate
+    object.__setattr__(page, "evaluate", evaluate)
     await _driver(sleeps).lazy_load_scroll(page)
     assert sleeps == []
 

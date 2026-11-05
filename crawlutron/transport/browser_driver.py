@@ -10,7 +10,7 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple, Protocol, cast
 
@@ -404,11 +404,11 @@ class BrowserDriver:
                     return
             await self._async_sleep(delay)
 
-    def harvest_timeout_for(self, browser_profile: BrowserProfileRecord | None) -> float:
+    def harvest_timeout_for(self, browser_profile: Mapping[str, object] | None) -> float:
         """Cookie-harvest wait bound: policy profile beats settings."""
         return harvest_timeout_for(browser_profile, self._harvest_timeout_seconds)
 
-    def scroll_config_for(self, browser_profile: BrowserProfileRecord | None) -> tuple[int, float]:
+    def scroll_config_for(self, browser_profile: Mapping[str, object] | None) -> tuple[int, float]:
         """Lazy-scroll steps/delay: policy profile beats settings."""
         return scroll_config_for(browser_profile, self._lazy_scroll_steps, self._lazy_scroll_delay_seconds)
 

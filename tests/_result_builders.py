@@ -56,7 +56,7 @@ class _EngineResultOverrides(TypedDict, total=False):
     validators: dict[str, str]
 
 
-def make_job(index: int, url: str, *, options: RenderOptions | None = None):
+def make_job(index: int, url: str, *, options: RenderOptions | None = None) -> CrawlJob:
     """A ``CrawlJob`` carrying the default render options.
 
     ``CrawlJob.options`` has no default; the URL goes in admitted, so

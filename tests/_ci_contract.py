@@ -12,7 +12,6 @@ from __future__ import annotations
 import re
 import subprocess
 from pathlib import Path
-from typing import cast
 
 import yaml
 
@@ -267,7 +266,11 @@ def _jobs(workflow: str) -> dict[str, dict[str, object]]:
     assert isinstance(document, dict), "the workflow must be a mapping"
     jobs = document.get("jobs")
     assert isinstance(jobs, dict) and jobs, "the workflow must declare jobs"
-    return cast("dict[str, dict[str, object]]", jobs)
+    typed: dict[str, dict[str, object]] = {}
+    for name, job in jobs.items():
+        assert isinstance(job, dict), f"job {name} is not a mapping"
+        typed[str(name)] = job
+    return typed
 
 
 # A syntactically valid pre-commit config carrying a second, QUOTED jscpd hook

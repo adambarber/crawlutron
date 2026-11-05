@@ -14,13 +14,29 @@ class TestPooledClientBuilders:
     per-test site to inject at -- the seam states the capability as an argument.
     """
 
+class _SentinelClient:
+    """A close-recording PooledClient double; the tests assert identity only."""
+
+    async def aclose(self) -> object:
+        return None
+
+    def close(self):
+        async def _close():
+            return None
+
+        return _close()
+
+
+class TestPooledClientBuilderSeam:
+    """A test may supply its own client builder; the seam states the capability."""
+
     def test_a_supplied_builder_produces_the_pooled_client(self):
-        sentinel = object()
+        sentinel = _SentinelClient()
         with http_mod.pooled_client_builders(cffi=lambda settings: sentinel):
             assert http_mod.get_cffi_session() is sentinel
 
     def test_the_builder_is_restored_after_the_seam_closes(self):
-        sentinel = object()
+        sentinel = _SentinelClient()
         with http_mod.pooled_client_builders(cffi=lambda settings: sentinel):
             pass
         assert http_mod.get_cffi_session() is not sentinel
@@ -31,13 +47,13 @@ class TestPooledClientBuilders:
         A builder left installed outlives the test, so every later test gets the
         previous one's double -- an order-dependent, hard-to-read failure.
         """
-        sentinel = object()
+        sentinel = _SentinelClient()
         with contextlib.suppress(ValueError), http_mod.pooled_client_builders(cffi=lambda settings: sentinel):
             raise ValueError
         assert http_mod.get_cffi_session() is not sentinel
 
     def test_supplying_one_builder_leaves_the_other_alone(self):
-        sentinel = object()
+        sentinel = _SentinelClient()
         with http_mod.pooled_client_builders(cffi=lambda settings: sentinel):
             assert not isinstance(http_mod.get_async_http_client(), _FakeClient)
 

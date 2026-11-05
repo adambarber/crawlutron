@@ -13,6 +13,7 @@ from typing import TypedDict
 
 import pytest
 
+from crawlutron.models.crawl_job import CrawlJob
 from crawlutron.transport.scheduler import COOLDOWN_PURGE_INTERVAL, DomainScheduler
 from tests._result_builders import engine_result, make_job
 from tests._scheduler_doubles import engine_envelope
@@ -24,13 +25,28 @@ class _FloorCheck(TypedDict):
     floor_after_storm: bool
 
 
-def _scheduler(**overrides) -> DomainScheduler:
-    base = dict(global_limit=10, per_domain_limit=1, delay_seconds=0.0, adaptive=False)
+def _scheduler(**overrides: object) -> DomainScheduler:
+    base: dict[str, object] = {
+        "global_limit": 10,
+        "per_domain_limit": 1,
+        "delay_seconds": 0.0,
+        "adaptive": False,
+    }
     base.update(overrides)
-    return DomainScheduler(**base)
+    # The four knobs the test scheduler actually varies; isinstance narrows each.
+    assert isinstance(base["global_limit"], int)
+    assert isinstance(base["per_domain_limit"], int)
+    assert isinstance(base["delay_seconds"], float)
+    assert isinstance(base["adaptive"], bool)
+    return DomainScheduler(
+        global_limit=base["global_limit"],
+        per_domain_limit=base["per_domain_limit"],
+        delay_seconds=base["delay_seconds"],
+        adaptive=base["adaptive"],
+    )
 
 
-def _jobs(n: int) -> list[object]:
+def _jobs(n: int) -> list[CrawlJob]:
     return [make_job(i, f"http://example.com/{i}") for i in range(n)]
 
 

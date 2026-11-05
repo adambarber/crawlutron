@@ -16,6 +16,7 @@ from crawlutron.extraction.content import (
 )
 from crawlutron.extraction.doc_pool import (
     DocExtractionPool,
+    DocPoolHooks,
     install_doc_pool_hooks,
     spawn_doc_worker,
     terminate_doc_process,
@@ -26,6 +27,13 @@ from tests._extraction_harnesses import assert_extraction_empty
 from tests._extraction_helpers import doc_worker_acquisitions, extract_discovered_links, settings_with
 from tests._policy_factories import BOOL_ENV_CASES, canonical
 from tests._process_doubles import StubSpawner, stub_worker
+
+DOC_URL = canonical("http://example.com/x.pdf")
+
+
+def _hooks(*, die: bool = False, hang: bool = False, output: str | None = None) -> DocPoolHooks:
+    """The TypedDict the hooks seam takes, spelled once."""
+    return {"die": die, "hang": hang, "output": output}
 
 
 @pytest.mark.parametrize(("raw", "expected"), BOOL_ENV_CASES)
@@ -117,7 +125,7 @@ class TestHtmlTreeParsing:
 class TestSelectedExtraction:
     def test_extraction_selected_with_xpath(self):
         html = "<html><body><div>Hello</div></body></html>"
-        result = extract_selected(html, "http://x/", selectors=Selectors(xpath="//div/text()"))
+        result = extract_selected(html, canonical("http://x/"), selectors=Selectors(xpath="//div/text()"))
         assert result.text == "Hello"
         assert result.markdown == "Hello"
 
@@ -149,13 +157,11 @@ async def test_extract_document_timeout_is_enforced(monkeypatch):
     the suite's in-process sleep patch is irrelevant -- no real sleeps needed."""
     # The worker subprocess hangs; a deadline short enough to notice is the whole point of the test, so it is
     # passed in rather than written onto the module the call lives in.
-    install_doc_pool_hooks({"hang": True})
+    install_doc_pool_hooks(_hooks(hang=True))
     try:
         settings = settings_with(extraction_doc_timeout=0.01)
 
-        assert_extraction_empty(
-            extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf", settings=settings)
-        )
+        assert_extraction_empty(extract_document(b"%PDF-1.4 fake", DOC_URL, settings=settings))
     finally:
         install_doc_pool_hooks(None)
 
@@ -165,9 +171,9 @@ async def test_extract_document_child_death_returns_empty(monkeypatch):
     not an unhandled EOFError, and leaves no zombie behind."""
     # Isolate the pool this call drives: the child-death contract is per worker,
     # so this test's pool must hold only this call's own worker.
-    install_doc_pool_hooks({"die": True})
+    install_doc_pool_hooks(_hooks(die=True))
     try:
-        assert_extraction_empty(extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf"))
+        assert_extraction_empty(extract_document(b"%PDF-1.4 fake", DOC_URL))
     finally:
         install_doc_pool_hooks(None)
 
@@ -184,11 +190,9 @@ async def test_extract_document_output_is_truncated_at_the_configured_cap(monkey
     Same emission hook as the other scenarios; 10 KB against a 10 KB cap is a
     truncation, visible without materializing the 5 MB default."""
     cap = 10000
-    install_doc_pool_hooks({"output": "x" * (cap + 1000)})
+    install_doc_pool_hooks(_hooks(output="x" * (cap + 1000)))
     try:
-        result = extract_document(
-            b"%PDF-1.4 fake", "http://example.com/x.pdf", settings_with(extraction_max_markdown=cap)
-        )
+        result = extract_document(b"%PDF-1.4 fake", DOC_URL, settings_with(extraction_max_markdown=cap))
     finally:
         install_doc_pool_hooks(None)
 
@@ -202,7 +206,7 @@ async def test_extract_document_normal_works():
 
     No hook: the echo path is covered elsewhere, and only a real conversion
     exercises the parent/child request-reply shape."""
-    result = extract_document(b"name,score\nada,10\n", "http://example.com/data.csv")
+    result = extract_document(b"name,score\nada,10\n", canonical("http://example.com/data.csv"))
 
     assert result.markdown is not None
     # "ada" only reaches the reply if markitdown really read these bytes, and it only gets read in a worker
@@ -224,11 +228,11 @@ async def test_extract_document_process_pool_isolation(monkeypatch):
 
     The kill and the hang are injected into the worker SUBPROCESS via the
     hooks seam, so the in-process sleep patch never needed to apply here."""
-    install_doc_pool_hooks({"hang": True})
+    install_doc_pool_hooks(_hooks(hang=True))
     try:
         result = extract_document(
             b"%PDF-1.4 fake",
-            "http://example.com/x.pdf",
+            DOC_URL,
             settings=settings_with(extraction_doc_timeout=0.01),
         )
     finally:
@@ -243,7 +247,7 @@ async def test_extract_document_process_pool_normal_works():
     from crawlutron.extraction.content import extract_document
 
     # No hooks installed - normal operation.
-    result = extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
+    result = extract_document(b"%PDF-1.4 fake", DOC_URL)
     # With fake bytes, markitdown returns something (or None for unparseable); the key is it doesn't crash.
     assert isinstance(result, ext_mod.ExtractedContent)
 
@@ -255,11 +259,11 @@ async def test_extract_document_recovers_after_timeout(monkeypatch):
     the (semaphore-bounded) extraction concurrency.
     """
     # First call hangs and is killed on timeout (short timeout, hang injected).
-    install_doc_pool_hooks({"hang": True})
+    install_doc_pool_hooks(_hooks(hang=True))
     try:
         hung = extract_document(
             b"%PDF-1.4 fake",
-            "http://example.com/hang.pdf",
+            canonical("http://example.com/hang.pdf"),
             settings=settings_with(extraction_doc_timeout=0.01),
         )
     finally:
@@ -267,11 +271,11 @@ async def test_extract_document_recovers_after_timeout(monkeypatch):
     assert hung.text is None
 
     # Second call (same process / shared semaphore) must succeed.
-    install_doc_pool_hooks({"output": "## Recovered"})
+    install_doc_pool_hooks(_hooks(output="## Recovered"))
     try:
         recovered = extract_document(
             b"%PDF-1.4 fake",
-            "http://example.com/ok.pdf",
+            canonical("http://example.com/ok.pdf"),
             settings=settings_with(extraction_doc_timeout=10.0),
         )
     finally:
@@ -284,12 +288,12 @@ async def test_test_hooks_inert_without_seam(monkeypatch):
     never reach a production child now the env gate is deleted."""
     monkeypatch.setenv("TEST_MARKITDOWN_OUTPUT", "## hijacked")
 
-    ungated = extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
+    ungated = extract_document(b"%PDF-1.4 fake", DOC_URL)
     assert ungated.markdown != "## hijacked"
 
-    install_doc_pool_hooks({"output": "## hijacked"})
+    install_doc_pool_hooks(_hooks(output="## hijacked"))
     try:
-        gated = extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
+        gated = extract_document(b"%PDF-1.4 fake", DOC_URL)
     finally:
         install_doc_pool_hooks(None)
     assert gated.markdown == "## hijacked"

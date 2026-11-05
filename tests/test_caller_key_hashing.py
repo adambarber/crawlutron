@@ -19,15 +19,17 @@ def test_two_keys_with_the_same_secret_carry_different_hashes(tmp_path):
     store = CallerKeyStore(tmp_path / "keys.db")
     first = store.issue_key("agent-a")
     second = store.issue_key("agent-b")
-    first_hash = store.get_for_id(first.key_id).key_hash
-    second_hash = store.get_for_id(second.key_id).key_hash
-    assert first_hash != second_hash
+    first_record = store.get_for_id(first.key_id)
+    second_record = store.get_for_id(second.key_id)
+    assert first_record is not None and second_record is not None
+    assert first_record.key_hash != second_record.key_hash
 
 
 def test_a_tampered_hash_does_not_verify(tmp_path):
     store = CallerKeyStore(tmp_path / "keys.db")
     issued = store.issue_key("agent-a")
     record = store.get_for_id(issued.key_id)
+    assert record is not None
     salt, digest = record.key_hash.split("$", 1)
     flipped = f"{salt}{'0' if digest[0] != '0' else '1'}{digest[1:]}"
     # Own sqlite3 connection: the row is mutated through the wire, not the
@@ -41,9 +43,11 @@ def test_a_tampered_hash_does_not_verify(tmp_path):
 def test_the_stored_hash_is_not_a_bare_digest_of_the_secret(tmp_path):
     store = CallerKeyStore(tmp_path / "keys.db")
     issued = store.issue_key("agent-a")
+    record = store.get_for_id(issued.key_id)
+    assert record is not None
     import hashlib
 
-    assert store.get_for_id(issued.key_id).key_hash != hashlib.sha256(issued.secret.encode()).hexdigest()
+    assert record.key_hash != hashlib.sha256(issued.secret.encode()).hexdigest()
 
 
 @pytest.mark.parametrize("iteration_constant", [210_000], ids=["pbkdf2-iterations"])

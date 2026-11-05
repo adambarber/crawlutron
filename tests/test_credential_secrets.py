@@ -21,5 +21,6 @@ def test_credential_repr_does_not_leak_secrets():
     assert "super-secret-pass-456" not in str(basic)
 
     # But the secret value must still be accessible via .get_secret_value()
+    assert bearer.token is not None and basic.password is not None
     assert bearer.token.get_secret_value() == "super-secret-token-123"
     assert basic.password.get_secret_value() == "super-secret-pass-456"

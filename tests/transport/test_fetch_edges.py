@@ -13,7 +13,9 @@ from crawlutron.extraction.document_text import format_extracted_document_text
 from crawlutron.extraction.trees import walkable
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.host_policy import HostPolicy
+from crawlutron.models.json_value import JsonValue
 from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.models.request_profile_record import RequestProfileRecord
 from crawlutron.orchestration.engine import crawl_request
 from crawlutron.transport.cache import HttpCache
 from crawlutron.transport.fetch_policy import looks_like_binary_body
@@ -208,7 +210,7 @@ class TestCallWorkerContract:
 
 class TestFingerprintInjectionRotation:
     def test_user_agent_pool_rotates_per_domain_and_is_stable(self):
-        profile = {"user_agents": ["UA-A", "UA-B", "UA-C"]}
+        profile: RequestProfileRecord = {"user_agents": ["UA-A", "UA-B", "UA-C"]}
         # Use more hosts than pool size so rotation is clearly visible.
         hosts = [f"{c}.com" for c in "abcdef"]
         seen = {d: select_fingerprint(profile, canonical(f"http://{d}/")).get("user_agent") for d in hosts}
@@ -219,7 +221,7 @@ class TestFingerprintInjectionRotation:
         assert select_fingerprint(profile, canonical("http://a.com/"))["user_agent"] == seen["a.com"]
 
     def test_fingerprint_rotation_changes_accept_language_per_domain(self):
-        base = {"request_profile": {"fingerprint_rotation": True}, "headers": {}}
+        base: dict[str, JsonValue] = {"request_profile": {"fingerprint_rotation": True}, "headers": {}}
         langs = {
             d: headers_for_strategy("HTTP_DECLARED_CRAWLER", read_policy(base), canonical(f"http://{d}/"))[
                 "Accept-Language"
@@ -244,14 +246,20 @@ class TestFingerprintInjectionRotation:
         assert "Mozilla" not in headers["User-Agent"]
 
     def test_fingerprint_injected_user_agent_lands_in_headers(self):
-        profile = {"request_profile": {"user_agents": ["Rotated-UA-1", "Rotated-UA-2"]}, "headers": {}}
+        profile: dict[str, JsonValue] = {
+            "request_profile": {"user_agents": ["Rotated-UA-1", "Rotated-UA-2"]},
+            "headers": {},
+        }
         h1 = headers_for_strategy("HTTP_DECLARED_CRAWLER", read_policy(profile), canonical("http://a.com/"))
         h2 = headers_for_strategy("HTTP_DECLARED_CRAWLER", read_policy(profile), canonical("http://b.com/"))
         assert h1["User-Agent"] == "Rotated-UA-1"
         assert h2["User-Agent"] == "Rotated-UA-2"
 
     def test_explicit_headers_still_override_fingerprint(self):
-        profile = {"request_profile": {"user_agents": ["Rotated-UA-1"]}, "headers": {"User-Agent": "forced"}}
+        profile: dict[str, JsonValue] = {
+            "request_profile": {"user_agents": ["Rotated-UA-1"]},
+            "headers": {"User-Agent": "forced"},
+        }
         h = headers_for_strategy("HTTP_DECLARED_CRAWLER", read_policy(profile), canonical("http://a.com/"))
         assert h["User-Agent"] == "forced"
 

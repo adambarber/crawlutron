@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import ast
 from collections.abc import Callable, Iterator
-from typing import Any
+from typing import Protocol
 
 import pytest
 
@@ -20,7 +20,14 @@ Pins whole-tree scope at the gates that must see everything: if a default
 exclusion ever returns to ``app_trees``, these gates keep their full count.
 """
 
-Metrics = tuple[Callable[[str], int], Callable[[str], list[Any]]]
+
+class OffenderLike(Protocol):
+    """One work-list entry: a position plus its rendering."""
+
+    def __str__(self) -> str: ...
+
+
+Metrics = tuple[Callable[[str], int], Callable[[str], list[OffenderLike]]]
 """``(measurement, offenders)`` for one gate -- the two read functions.
 
 Each gate keeps its own ``offenders``, because a work list is only useful in the
@@ -30,11 +37,23 @@ list of edits. What is shared is the walk and the arithmetic around them, below.
 """
 
 
-def walk(
-    collect: Callable[[ast.AST], list[tuple[str, int, Any]]],
+def _read[T: OffenderLike](read: tuple[Callable[[str], int], Callable[[str], list[T]]]) -> Metrics:
+    """Adapt one gate's own offender type to the shared entry protocol."""
+    measurement, offenders = read
+
+    def like_offenders(metric: str) -> list[OffenderLike]:
+        return list(offenders(metric))
+
+    return measurement, like_offenders
+
+
+def walk[
+    D,
+](
+    collect: Callable[[ast.AST], list[tuple[str, int, D]]],
     *,
     exclude: frozenset[str] = ALL_APP,
-) -> Iterator[tuple[str, str, Any]]:
+) -> Iterator[tuple[str, str, D]]:
     """Every candidate in the app tree as ``(metric, where, detail)``: the collector
     is per-gate but the walk is shared, and the part worth writing once is qualifying
     each line number with its path so the work list can be acted on.
@@ -60,7 +79,6 @@ def definition_counts(*, exclude: frozenset[str] = ALL_APP) -> dict[str, int]:
 def report(
     budgets: dict[str, int],
     read: Metrics,
-    render: Callable[[str, str], Any],
     *,
     headline: Callable[[str, int, int], str],
 ) -> None:

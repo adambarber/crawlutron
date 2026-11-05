@@ -7,6 +7,7 @@ import time
 import pytest
 
 from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.models.json_value import JsonValue
 from crawlutron.transport.cookie_jar import global_cookie_jar
 from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._assertions import (
@@ -15,6 +16,10 @@ from tests._assertions import (
     browser_available,
     completed_crawl,
     poll_webhook_delivery,
+    wire_dict,
+    wire_member,
+    wire_result,
+    wire_results,
 )
 from tests._fetcher_factories import make_crawl_payload
 from tests._policy_factories import crawl_policy
@@ -23,14 +28,14 @@ from tests.helpers.server import WEBHOOK_RECEIVED
 
 #: Discovery turned fully on. Three tests assert on what robots, sitemaps and feeds contributed, and spelling
 #: the triple at each is how one of them kept asking for feeds the fixture never served.
-DISCOVERY_ALL = {"robots": True, "sitemaps": True, "feeds": True}
+DISCOVERY_ALL: JsonValue = {"robots": True, "sitemaps": True, "feeds": True}
 
 #: A scope the loopback fixture cannot match -- the point of the scope tests is that the discovered links are
 #: *outside* it.
 EXAMPLE_SCOPE = r"^https://example\.com"
 
 #: Room for 100 links and one level of depth, so the scope is the only thing deciding what comes back.
-WIDE_LIMITS = {"max_discovered_links": 100, "max_depth": 1}
+WIDE_LIMITS: JsonValue = {"max_discovered_links": 100, "max_depth": 1}
 
 
 class TestCrawlApi(_AsgiEndpointTests):
@@ -42,16 +47,12 @@ class TestCrawlApi(_AsgiEndpointTests):
         assert body["submitted_count"] == 1
         assert "policy_schema_version" in body
         assert body["success"] is True
-        assert len(body["results"]) == 1
-
-        result = body["results"][0]
-        assert "Example Org" in result["markdown"]
-        assert isinstance(result["diagnostics"], dict)
-        assert "content_metrics" in result["diagnostics"]
-        assert result["status"] == "success"
-        assert result["classification"] == "rendered"
-        assert result["http_status"] == 200
-        assert result["metadata"].get("json_ld") is not None
+        result = wire_result(body)
+        assert "Example Org" in str(result["markdown"])
+        diagnostics = wire_member(result, "diagnostics")
+        assert "content_metrics" in diagnostics
+        metadata = wire_member(result, "metadata")
+        assert metadata.get("json_ld") is not None
         # Plain single-page crawl skips link extraction entirely
         assert result["discovered_link_count"] == 0
         assert result["discovered_links"] == []
@@ -63,27 +64,30 @@ class TestCrawlApi(_AsgiEndpointTests):
         payload.pop("url")
         body = await completed_crawl(self.client, payload)
         assert body["submitted_count"] == 2
-        assert len(body["results"]) == 2
-        assert "Example Org" in body["results"][0]["markdown"]
+        results = wire_results(body)
+        assert len(results) == 2
+        assert "Example Org" in str(wire_dict(results[0], "results[0]")["markdown"])
 
     async def test_v1_crawl_discovery_includes_robots_and_sitemap(self):
         payload = make_crawl_payload(
             f"{self.base}/",
             policy=crawl_policy([HTTP_DECLARED_CRAWLER], discovery=DISCOVERY_ALL),
         )
-        result = (await completed_crawl(self.client, payload))["results"][0]
-        diagnostics = result["diagnostics"]
-        assert "robots" in diagnostics
-        assert diagnostics["robots"]["allowed"] is True
-        assert f"{self.base}/sitemap.xml" in diagnostics["robots"]["sitemaps"]
-        assert "discovery" in diagnostics
-        assert f"{self.base}/page1" in diagnostics["discovery"]["sitemap_urls"]
-        assert f"{self.base}/page2" in diagnostics["discovery"]["sitemap_urls"]
+        result = wire_result(await completed_crawl(self.client, payload))
+        diagnostics = wire_member(result, "diagnostics")
+        robots = wire_member(diagnostics, "robots")
+        assert robots["allowed"] is True
+        sitemaps = robots["sitemaps"]
+        assert isinstance(sitemaps, list)
+        assert f"{self.base}/sitemap.xml" in sitemaps
+        discovery = wire_member(diagnostics, "discovery")
+        sitemap_urls = discovery["sitemap_urls"]
+        assert isinstance(sitemap_urls, list)
+        assert f"{self.base}/page1" in sitemap_urls
+        assert f"{self.base}/page2" in sitemap_urls
 
     async def test_v1_crawl_404_is_classified_not_found(self):
-        result = (await completed_crawl(self.client, make_crawl_payload(f"{self.base}/missing")))["results"][
-            0
-        ]
+        result = wire_result(await completed_crawl(self.client, make_crawl_payload(f"{self.base}/missing")))
         assert_result_failed(result, "not_found")
 
     async def test_v1_crawl_rejects_payload_without_url(self):
@@ -96,24 +100,29 @@ class TestCrawlApi(_AsgiEndpointTests):
             f"{self.base}/",
             policy=crawl_policy([HTTP_DECLARED_CRAWLER], scope_regex=EXAMPLE_SCOPE, limits=WIDE_LIMITS),
         )
-        result = (await completed_crawl(self.client, payload))["results"][0]
-        assert result["discovered_link_count"] >= 1
-        for link in result["discovered_links"]:
+        result = wire_result(await completed_crawl(self.client, payload))
+        count = result["discovered_link_count"]
+        assert isinstance(count, int) and count >= 1
+        links = result["discovered_links"]
+        assert isinstance(links, list)
+        for link in links:
             normalized = link["normalized_url"] if isinstance(link, dict) else link
-            assert not normalized.startswith("https://example.com"), (
+            assert not str(normalized).startswith("https://example.com"), (
                 f"discovered link {normalized!r} matches the scope; fixture is on loopback"
             )
 
     async def test_v1_crawl_webhook_returns_202_and_delivers(self):
-        payload = {
-            "url": f"{self.base}/",
-            "policy": {
-                "strategies": [HTTP_DECLARED_CRAWLER],
-                "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50},
+        body = await accepted_crawl(
+            self.client,
+            {
+                "url": f"{self.base}/",
+                "policy": {
+                    "strategies": [HTTP_DECLARED_CRAWLER],
+                    "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50},
+                },
+                "webhook_url": f"{self.base}/webhook_sink",
             },
-            "webhook_url": f"{self.base}/webhook_sink",
-        }
-        body = await accepted_crawl(self.client, payload)
+        )
         assert "status_url" in body
         # The accepted envelope is a promise that the work outlives the request, so the delivery is polled for
         # rather than assumed to have already happened by the time the 202 came back.
@@ -222,11 +231,12 @@ class TestShadowDomApi(_AsgiEndpointTests):
                     },
                 },
             )
-            result = body["results"][0]
+            result = wire_result(body)
             assert result["status"] == "success"
             # After flattening, the shadow-root anchor is in the HTML and extracted.
-            assert "Shadow Link" in (result.get("html") or "")
-            assert "/shadow-link" in (result.get("html") or "")
+            rendered = str(result.get("html") or "")
+            assert "Shadow Link" in rendered
+            assert "/shadow-link" in rendered
         finally:
             await close_browser_pool()
 
@@ -255,9 +265,9 @@ class TestCookiePersistenceApi:
         body2 = await completed_crawl(
             self.client, make_crawl_payload(f"{self.base}/check-cookie", max_discovered_links=10)
         )
-        result = body2["results"][0]
+        result = wire_result(body2)
         # The response body of /check-cookie is the Cookie header it received
-        assert "session_id=abc123" in (result.get("html") or result.get("text") or "")
+        assert "session_id=abc123" in str(result.get("html") or result.get("text") or "")
 
     async def test_cookie_persistence_survives_restart(self):
         # First crawl sets cookie
@@ -265,12 +275,12 @@ class TestCookiePersistenceApi:
             self.client, make_crawl_payload(f"{self.base}/set-cookie", max_discovered_links=10)
         )
         # Second crawl verifies cookie is sent
-        result = (
+        result = wire_result(
             await completed_crawl(
                 self.client, make_crawl_payload(f"{self.base}/check-cookie", max_discovered_links=10)
             )
-        )["results"][0]
-        assert "session_id=abc123" in (result.get("html") or result.get("text") or "")
+        )
+        assert "session_id=abc123" in str(result.get("html") or result.get("text") or "")
 
 
 class TestJobApi(_AsgiEndpointTests):

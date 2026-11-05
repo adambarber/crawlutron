@@ -90,8 +90,8 @@ class FetcherDouble:
     async def __call__(
         self,
         url: NormalizedUrl,
-        sent_headers: dict[str, str],
-        timeout: int,
+        headers: dict[str, str],
+        timeout_seconds: int,
         max_content_length: int = DEFAULT_MAX_CONTENT_LENGTH_BYTES,
     ) -> HttpFetchResult:
         """What the strategy reads, whichever way this factory was built: declared as
@@ -101,10 +101,10 @@ class FetcherDouble:
         # ``calls`` speaks text: it is what tests assert membership in, and the wire form of the value is the
         # text the request was made to.
         self.calls.append(url.raw)
-        self.headers.append(dict(sent_headers))
+        self.headers.append(dict(headers))
         if self._record_cap is not None:
             self._record_cap.append(max_content_length)
-        result = self._answer(url, sent_headers, timeout, max_content_length)
+        result = self._answer(url, headers, timeout_seconds, max_content_length)
         if inspect.isawaitable(result):
             result = await result
         # The flag says which of the two answer shapes this factory produces, and each arm now says so out

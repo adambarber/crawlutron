@@ -4,6 +4,7 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
+from crawlutron.models.browser_profile_record import BrowserProfileRecord
 from crawlutron.models.crawl_policy_vocabulary import MAX_BROWSER_ACTIONS
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.vocabulary.browser import (
@@ -83,7 +84,11 @@ class TestBrowserProfileVocabularyIsClosed:
         from crawlutron.models.crawl_policy import CrawlPolicy
 
         profile = CrawlPolicy(browser_profile={"actions": [{"type": action_type, "selector": "#x"}]})
-        assert profile.browser_profile["actions"][0]["type"] == action_type
+        actions = profile.browser_profile["actions"]
+        assert isinstance(actions, list)
+        first = actions[0]
+        assert isinstance(first, dict)
+        assert first["type"] == action_type
 
     def test_execute_js_stays_refused_with_its_reasoning_intact(self):
         """The RCE refusal must survive, and must still be about execute_js."""
@@ -136,7 +141,7 @@ class TestBrowserProfileVocabularyIsClosed:
         """
         from crawlutron.models.crawl_policy import CrawlPolicy
 
-        typed_values: dict[str, object] = {
+        typed_values: BrowserProfileRecord = {
             "actions": [],
             "auto_accept_cookie_consent": True,
             "cookie_harvest_timeout_seconds": 5,
@@ -149,8 +154,10 @@ class TestBrowserProfileVocabularyIsClosed:
             "storage_state": "s.json",
             "viewport": "mobile",
         }
-        value = typed_values[key]
-        assert CrawlPolicy(browser_profile={key: value}).browser_profile[key] == value
+        profile = CrawlPolicy(browser_profile=typed_values)
+        written = dict(profile.browser_profile)
+        expected = dict(typed_values)
+        assert written[key] == expected[key]
 
     def test_no_allowed_profile_key_is_inert(self):
         """Every allowed key must have a reader, or allowing it is a lie.

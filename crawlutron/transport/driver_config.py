@@ -186,7 +186,7 @@ def page_kwargs(browser_profile: BrowserProfileRecord | None) -> dict[str, objec
     return {"service_workers": "block", "viewport": {"width": 1365, "height": 768}}
 
 
-def harvest_timeout_for(browser_profile: BrowserProfileRecord | None, default_seconds: float) -> float:
+def harvest_timeout_for(browser_profile: Mapping[str, object] | None, default_seconds: float) -> float:
     """Cookie-harvest wait bound: policy profile beats settings, ceilinged."""
     from crawlutron.vocabulary.limits import MAX_COOKIE_HARVEST_TIMEOUT_SECONDS
 
@@ -200,7 +200,7 @@ def harvest_timeout_for(browser_profile: BrowserProfileRecord | None, default_se
 
 
 def scroll_config_for(
-    browser_profile: BrowserProfileRecord | None, default_steps: int, default_delay: float
+    browser_profile: Mapping[str, object] | None, default_steps: int, default_delay: float
 ) -> tuple[int, float]:
     """Lazy-scroll steps/delay: policy profile beats settings, ceilinged."""
     from crawlutron.vocabulary.limits import MAX_LAZY_SCROLL_DELAY_SECONDS, MAX_LAZY_SCROLL_STEPS

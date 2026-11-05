@@ -14,6 +14,8 @@ from tests._assertions import (
     poll_crawl_completion,
     poll_webhook_delivery,
     submit_async_crawl,
+    wire_result,
+    wire_results,
 )
 from tests._async_harnesses import crawl_api as _crawl_api
 from tests._fetcher_factories import make_crawl_payload
@@ -32,7 +34,9 @@ class TestAsyncCrawlApi:
         """Async_mode=true returns 202 with request_id and status_url."""
         body = await accepted_crawl(crawl_api.client, crawl_api.payload(async_mode=True))
         assert "request_id" in body
-        assert body["request_id"].startswith("crawl_")
+        request_id = body["request_id"]
+        assert isinstance(request_id, str)
+        assert request_id.startswith("crawl_")
         assert "status_url" in body
         assert body["status_url"] == f"/v1/crawl/{body['request_id']}"
         assert body["webhook_url"] is None
@@ -84,9 +88,10 @@ class TestAsyncCrawlApi:
             on_pending=check_pending,
         )
         body = response.json()
+        assert isinstance(body, dict)
         assert body["success"] is True
-        assert len(body["results"]) == 1
-        assert body["results"][0]["status"] == "success"
+        assert len(wire_results(body)) == 1
+        assert wire_result(body)["status"] == "success"
 
     async def test_single_shot_stats_do_not_fabricate_discovered(self, crawl_api):
         """Single-shot jobs never enqueue a frontier, so ``total_discovered`` is
@@ -151,7 +156,7 @@ class TestAsyncCrawlApi:
         """Default sync mode (async_mode=false) still returns results directly."""
         body = await completed_crawl(crawl_api.client, crawl_api.payload(async_mode=False))
         assert body["success"] is True
-        assert len(body["results"]) == 1
+        assert len(wire_results(body)) == 1
         assert "request_id" in body
 
     async def test_v1_crawl_async_mode_counts_failed_results(self, crawl_api):
@@ -347,6 +352,7 @@ class TestAsyncCrawlShutdownOwnership:
             timeout=5,
         )
         job_id = body["request_id"]
+        assert isinstance(job_id, str)
 
         assert await asyncio.wait_for(started.wait(), timeout=5), "the crawl never started"
         assert job_runner.is_running(job_id), "an in-flight async crawl is invisible to the runner"
@@ -399,6 +405,7 @@ class TestAsyncCrawlBatchTruth:
         payload = crawl_api.batch_payload(["/", "/page2", "/page3"], async_mode=True)
         body = await accepted_crawl(crawl_api.client, payload)
         request_id = body["request_id"]
+        assert isinstance(request_id, str)
         response = await poll_crawl_completion(crawl_api.client, request_id)
         assert response.status_code == 200
         status = (await crawl_api.client.get(f"/v1/jobs/{request_id}")).json()

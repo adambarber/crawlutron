@@ -10,6 +10,7 @@ from contextlib import contextmanager
 import pytest
 
 from crawlutron.models.crawl_result import EngineCrawlResult
+from crawlutron.models.json_value import JsonValue
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 
@@ -130,6 +131,39 @@ def _field(result, name: str):
     object -- one shared assertion instead of two restated spellings.
     """
     return result[name] if isinstance(result, dict) else getattr(result, name)
+
+
+def wire_results(body: dict[str, JsonValue]) -> list[JsonValue]:
+    """The ``results`` list of a crawl envelope, checked to be a list.
+
+    Every endpoint test indexes the first result; narrowing here keeps the
+    wire's JsonValue union from reaching each call site."""
+    results = body["results"]
+    assert isinstance(results, list), body
+    return results
+
+
+def wire_result(body: dict[str, JsonValue], index: int = 0) -> dict[str, JsonValue]:
+    """One result of a crawl envelope, checked to be a dict."""
+    result = wire_results(body)[index]
+    assert isinstance(result, dict), result
+    return result
+
+
+def wire_dict(value: JsonValue, key: str) -> dict[str, JsonValue]:
+    """A dict-valued member of a wire payload, checked so indexing stays honest."""
+    assert isinstance(value, dict), (key, value)
+    return value
+
+
+def wire_member(result: dict[str, JsonValue], key: str) -> dict[str, JsonValue]:
+    """A result's named sub-dict, checked to be present and a dict.
+
+    Unlike :func:`wire_dict` this names a missing key as such, so a dropped
+    diagnostics block fails as an absent contract, not a wrong type."""
+    member = result.get(key)
+    assert isinstance(member, dict), f"result[{key!r}] missing or not a dict: {result}"
+    return member
 
 
 def assert_result_failed(result, classification: str) -> None:
@@ -288,7 +322,7 @@ async def poll_crawl_completion(
     return response
 
 
-async def accepted_crawl(client, payload: dict[str, object]) -> dict[str, object]:
+async def accepted_crawl(client, payload: dict[str, JsonValue]) -> dict[str, JsonValue]:
     """POST a crawl that must be accepted for background execution.
 
     Asserts the 202/``accepted`` contract once, so a webhook or status-URL test
@@ -297,11 +331,12 @@ async def accepted_crawl(client, payload: dict[str, object]) -> dict[str, object
     response = await client.post("/v1/crawl", json=payload)
     assert response.status_code == 202, response.text
     body = response.json()
+    assert isinstance(body, dict)
     assert body["status"] == "accepted"
     return body
 
 
-async def completed_crawl(client, payload: dict[str, object]) -> dict[str, object]:
+async def completed_crawl(client, payload: dict[str, JsonValue]) -> dict[str, JsonValue]:
     """POST a crawl that must run synchronously and return its response body.
 
     The mirror of :func:`accepted_crawl`: 200 with results inline, so a
@@ -309,12 +344,14 @@ async def completed_crawl(client, payload: dict[str, object]) -> dict[str, objec
     """
     response = await client.post("/v1/crawl", json=payload)
     assert response.status_code == 200, response.text
-    return response.json()
+    body = response.json()
+    assert isinstance(body, dict)
+    return body
 
 
 async def submit_async_crawl(
     client,
-    payload: dict[str, object],
+    payload: dict[str, JsonValue],
     *,
     message: str = "Async crawl did not complete in time",
     on_pending=None,

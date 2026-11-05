@@ -16,11 +16,12 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from crawlutron.api import job_runner
+from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.result_record import ProducerEnvelope
 from crawlutron.storage.job_store import CrawlJobState, FrontierEntry, JobStatus, JobStore
-from crawlutron.storage.job_store_collections import OrderedUrlSet
+from crawlutron.storage.job_store_collections import JobKind, OrderedUrlSet
 from tests._policy_factories import canonical
 
 
@@ -28,9 +29,9 @@ def _make_state(frontier_pages: int = 10) -> CrawlJobState:
     """Build a live unlimited job with a populated frontier."""
     state = CrawlJobState(
         job_id="test-job",
-        kind="whole_site",
+        kind=JobKind.WHOLE_SITE,
         root_url="https://example.com/",
-        policy={},
+        policy=CrawlPolicy(),
         status=JobStatus.RUNNING,
     )
     state.host_policy = MagicMock()
@@ -88,7 +89,12 @@ class _SpyExecuteCrawl:
         self.call_count += 1
         idx = min(self.call_count - 1, len(self.batches) - 1)
         results = self.batches[idx] if self.batches else []
-        return {"results": results, "errors": []}
+        return {
+            "request_id": "spy-job",
+            "submitted_count": len(results),
+            "policy_schema_version": "1",
+            "results": results,
+        }
 
 
 def _loop_store(state: CrawlJobState) -> MagicMock:

@@ -9,6 +9,7 @@ from dataclasses import asdict, replace
 import httpx
 import pytest
 
+from crawlutron.models.classification_evidence import ClassificationEvidenceRecord
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
@@ -20,6 +21,7 @@ from tests._browser_doubles import _fake_browser
 from tests._chain_policies import chain_policy
 from tests._fetch_doubles import FetcherDouble
 from tests._fetcher_factories import run_chain
+from tests._policy_factories import canonical
 from tests._worker_doubles import (
     assert_coroutine_worker_is_awaited_directly,
     assert_sync_worker_returning_awaitable_is_named,
@@ -57,7 +59,7 @@ def test_primitive_builds_classified_failed_result():
     result = engine_result_from_exception(
         error=httpx.ConnectTimeout("boom"),
         original_url="https://a.example/x",
-        normalized_url="https://a.example/x",
+        normalized_url=canonical("https://a.example/x"),
         strategy="HTTP_DECLARED_CRAWLER",
     )
     assert isinstance(result, EngineCrawlResult)
@@ -73,7 +75,7 @@ def test_primitive_never_leaks_raw_exception_text():
     result = engine_result_from_exception(
         error=ValueError(secret),
         original_url="https://a.example/x",
-        normalized_url="https://a.example/x",
+        normalized_url=canonical("https://a.example/x"),
         strategy="HTTP_DECLARED_CRAWLER",
     )
     wire = asdict(result)
@@ -85,7 +87,7 @@ def test_primitive_marks_pool_exhaustion_as_not_attempted():
     result = engine_result_from_exception(
         error=BrowserPoolExhaustedError("none free"),
         original_url="https://a.example/x",
-        normalized_url="https://a.example/x",
+        normalized_url=canonical("https://a.example/x"),
         strategy=BROWSER_HEADLESS,
     )
     assert result.classification == "browser_pool_exhausted"
@@ -105,7 +107,7 @@ def test_exception_envelopes_never_carry_discovered_links(error):
     result = engine_result_from_exception(
         error=error,
         original_url="https://a.example/x",
-        normalized_url="https://a.example/x",
+        normalized_url=canonical("https://a.example/x"),
         strategy="HTTP_DECLARED_CRAWLER",
     )
     assert result.discovered_links == []
@@ -115,7 +117,7 @@ def test_primitive_default_classification_is_network_error():
     result = engine_result_from_exception(
         error=RuntimeError("x"),
         original_url="https://a.example/x",
-        normalized_url="https://a.example/x",
+        normalized_url=canonical("https://a.example/x"),
         strategy="HTTP_DECLARED_CRAWLER",
     )
     assert result.classification == "network_error"
@@ -187,7 +189,14 @@ class TestShapeAllGuardsPerItem:
         )
 
         good = _budget_item()
-        bad = replace(good, classification_evidence=[{"detail": object()}])
+        bad = replace(
+            good,
+            classification_evidence=[
+                ClassificationEvidenceRecord(
+                    classification="network_error", signature="s", source="engine", context="c"
+                )
+            ],
+        )
         # The bad item is a real result whose OPEN payload the wire model rejects, so shaping genuinely raises
         # on it.
 

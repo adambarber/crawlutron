@@ -45,7 +45,13 @@ class TestBrowserRenderer:
     async def test_browser_captures_xhr_and_fetch_endpoints(self, base_url):
         result = await self._render("/dynamic", base_url)
         intercepted = result.metadata.get("intercepted_xhr") or []
-        urls = [entry["url"] for entry in intercepted]
+        assert isinstance(intercepted, list)
+        urls = []
+        for entry in intercepted:
+            assert isinstance(entry, dict)
+            url = entry.get("url")
+            assert isinstance(url, str)
+            urls.append(url)
         assert any(url.endswith("/api/data") for url in urls), intercepted
         # The page appends the fetched JSON to the DOM, so the data appears in text.
         assert '"items"' in (result.text or "")

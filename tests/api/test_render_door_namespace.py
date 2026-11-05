@@ -12,6 +12,12 @@ from types import SimpleNamespace
 
 from crawlutron.api.identity_router import router as identity_router
 from crawlutron.api.keys_router import router as keys_router
+from crawlutron.models.taxonomy import Classification, CrawlStrategyName
+from tests._policy_factories import canonical
+from crawlutron.transport.browser import BrowserRenderer
+from crawlutron.transport.browser_pool import BrowserPool
+from crawlutron.transport.render_page import RenderPage
+from crawlutron.models.render_options import RenderOptions
 from tests._async_harnesses import issue_key
 from tests._quota_harness import service_client
 
@@ -29,8 +35,11 @@ class _HarvestingContext:
         pass
 
 
-class _HarvestingRenderer:
+class _HarvestingRenderer(BrowserRenderer):
     """A pool-bound renderer double that runs the real harvest, then renders."""
+
+    def __init__(self) -> None:
+        super().__init__(extract=_harvest_then_render)
 
     async def render(self, url, options, *, policy=None):
         from crawlutron.transport.browser_cookies import harvest_session_cookies
@@ -43,19 +52,14 @@ class _HarvestingRenderer:
         )
 
 
-class _HarvestingPool:
-    """A minimal pool double handing out the harvesting renderer."""
+async def _harvest_then_render(
+    render_page: RenderPage, render_options: RenderOptions
+) -> tuple[str | None, str | None, Classification, bool]:
+    from crawlutron.transport.browser_cookies import harvest_session_cookies
 
-    browser_strategy = "browser_headless"
-
-    async def acquire(self, timeout=None):
-        return _HarvestingRenderer()
-
-    def release(self, renderer) -> None:
-        pass
-
-    async def close(self) -> None:
-        pass
+    page = SimpleNamespace(context=_HarvestingContext())
+    await harvest_session_cookies(page, canonical(render_page.url))
+    return None, "t", "rendered", False
 
 
 @contextlib.asynccontextmanager
@@ -63,7 +67,8 @@ async def _render_client(tmp_path: Path):
     """The render/keys app wired to a browser pool serving one harvesting page."""
     from crawlutron.transport.browser_pool import set_browser_pool
 
-    previous = set_browser_pool(_HarvestingPool())
+    pool = BrowserPool.for_testing([_HarvestingRenderer()])
+    previous = set_browser_pool(pool)
     try:
         async with service_client(tmp_path, routers={"doors": identity_router, "keys": keys_router}) as (
             client,

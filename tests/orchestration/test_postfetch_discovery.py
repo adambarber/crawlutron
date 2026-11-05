@@ -15,7 +15,7 @@ from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
 from tests._assertions import install_to_thread_spy
-from tests._fetch_doubles import make_fetch
+from tests._fetch_doubles import FetcherDouble, make_fetch
 from tests._fetcher_factories import invoke_browser_strategy, invoke_http_strategy
 from tests._policy_factories import canonical, http_strategy_policy
 
@@ -86,8 +86,12 @@ async def test_http_post_fetch_block_runs_off_loop(monkeypatch):
     assert result.status == "success"
     assert "extract_post_fetch_discovery" in seen
     assert_extracted_discovery(result)
-    assert result.diagnostics["forms"][0]["normalized_action"] == "http://example.com/submit"
-    assert result.diagnostics["frames"][0]["normalized_url"] == "http://example.com/frame"
+    forms = result.diagnostics["forms"]
+    assert isinstance(forms, list) and isinstance(forms[0], dict)
+    assert forms[0]["normalized_action"] == "http://example.com/submit"
+    frames = result.diagnostics["frames"]
+    assert isinstance(frames, list) and isinstance(frames[0], dict)
+    assert frames[0]["normalized_url"] == "http://example.com/frame"
 
 
 async def test_browser_post_fetch_block_runs_off_loop(monkeypatch):
@@ -163,7 +167,7 @@ async def test_discovery_feeds_are_policy_filtered():
         policy=read_policy({"discovery": {"feeds": True}}),
         host_policy=HostPolicy.from_strings("allowed.test", "blocked.test"),
         headers={},
-        http_fetcher=lambda *args: None,
+        http_fetcher=FetcherDouble(lambda url, headers, *rest: (None, None, None)),
         engine_robots_sitemaps=[],
         robots_evaluated=True,
     )

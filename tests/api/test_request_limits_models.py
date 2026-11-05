@@ -3,7 +3,9 @@
 import pytest
 from pydantic import ValidationError
 
+from crawlutron.models.browser_profile_record import BrowserProfileRecord
 from crawlutron.models.crawl_strategy import CrawlStrategy
+from crawlutron.models.json_value import JsonValue
 
 
 class TestBrowserActionKeysAreClosed:
@@ -43,7 +45,9 @@ class TestBrowserActionKeysAreClosed:
             {"type": "scroll_bottom"},
         ):
             policy = CrawlPolicy(browser_profile={"actions": [action]})
-            assert policy.browser_profile["actions"][0]["type"] == action["type"]
+            actions = policy.browser_profile["actions"]
+            assert isinstance(actions, list) and isinstance(actions[0], dict)
+            assert actions[0]["type"] == action["type"]
 
     def test_the_chain_reads_exactly_the_declared_keys(self):
         """Drift guard: read off the chain's own ``action.get`` calls, because the
@@ -58,8 +62,9 @@ class TestBrowserActionKeysAreClosed:
         read: set[str] = set()
         for node, func in attribute_calls(ast.parse(source)):
             if func.attr == "get" and isinstance(func.value, ast.Name) and func.value.id == "action":
-                read.add(string_argument(node))
-        read.discard(None)
+                key = string_argument(node)
+                if key is not None:
+                    read.add(key)
 
         assert read == set(BROWSER_ACTION_KEYS), (
             f"the chain and the table disagree: chain-only={read - set(BROWSER_ACTION_KEYS)}, "
@@ -150,12 +155,15 @@ class TestCallerKnobsBehindClosedKeysAreCeilinged:
 
         # The knob still moves inside the ceiling: a clamp that pinned every value to the ceiling would pass
         # the same assertions.
-        assert driver.scroll_config_for({"lazy_scroll_steps": 7}) == (7, 0.5)
+        profile: BrowserProfileRecord = {"lazy_scroll_steps": 7, "lazy_scroll_delay_seconds": 0.5}
+        assert driver.scroll_config_for(profile) == (7, 0.5)
         assert driver.harvest_timeout_for({}) == 2.0
 
         # Garbage still falls back to the default rather than raising, as before.
-        assert driver.scroll_config_for({"lazy_scroll_steps": "not a number"}) == (3, 0.5)
-        assert driver.scroll_config_for({"lazy_scroll_steps": -5}) == (0, 0.5)
+        garbage: dict[str, object] = {"lazy_scroll_steps": "not a number", "lazy_scroll_delay_seconds": 0.5}
+        assert driver.scroll_config_for(garbage) == (3, 0.5)
+        negative: dict[str, object] = {"lazy_scroll_steps": -5, "lazy_scroll_delay_seconds": 0.5}
+        assert driver.scroll_config_for(negative) == (0, 0.5)
 
 
 class TestProfileStringsAreCeilinged:

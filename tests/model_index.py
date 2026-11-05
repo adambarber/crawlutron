@@ -43,6 +43,7 @@ def declared_types() -> dict[str, type]:
 def resolve_declared_type(name: str) -> type[_T]:
     """The class ``name`` names in ``crawlutron/models``, whatever file declares it."""
     try:
-        return declared_types()[name]  # type: ignore[return-value]
+        resolved: type[_T] = declared_types()[name]  # dict[str, type] narrows to type[_T]
     except KeyError:
         raise LookupError(f"{name} is not declared under crawlutron/models") from None
+    return resolved

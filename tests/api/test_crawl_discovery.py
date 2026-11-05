@@ -7,6 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from tests._assertions import assert_pool_unavailable
 from tests._browser_doubles import RaisingRendererPool
 from tests._job_harnesses import post_render_with_pool
+from tests._result_builders import engine_result
 
 
 class TestDiscoveryAndRenderApi:
@@ -24,13 +25,17 @@ class TestDiscoveryAndRenderApi:
     async def test_health_response_model_is_homed_under_models(self):
         # The /health wire model must live at its findable home in crawlutron/models
         # (memory #4740), not inline in the router module (#305).
+        from fastapi.routing import APIRoute
+
         from crawlutron.health.readiness import create_health_router
         from tests.model_index import resolve_declared_type
 
         router, _ = create_health_router()
-        health_route = next(route for route in router.routes if route.path == "/health")
+        health_route = next(
+            route for route in router.routes if isinstance(route, APIRoute) and route.path == "/health"
+        )
         model = health_route.response_model
-        homed = resolve_declared_type("HealthResponse")
+        homed: type = resolve_declared_type("HealthResponse")
         assert model is homed, f"/health uses {model}, but the homed wire model is {homed}"
         assert homed.__module__ == "crawlutron.models.health_response"
 
@@ -63,16 +68,7 @@ class TestDiscoveryAndRenderApi:
     async def test_build_unified_response(self):
         from crawlutron.api.response_shaping import build_unified_crawl_response
 
-        resp = build_unified_crawl_response(
-            [
-                {
-                    "original_url": "http://x/",
-                    "final_url": "http://x/",
-                    "status": "success",
-                    "classification": "rendered",
-                }
-            ]
-        )
+        resp = build_unified_crawl_response([engine_result("http://x/", "rendered")])
         assert resp.success is True
         assert resp.submitted_count == 1
 

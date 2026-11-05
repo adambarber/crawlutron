@@ -5,6 +5,7 @@ from __future__ import annotations
 import crawlutron.storage.job_store_collections as collections
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.storage.job_store import JobStore
+from crawlutron.storage.job_store_state import CrawlJobState
 from crawlutron.storage.job_store_collections import FrontierEntry
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 from tests._policy_factories import job_store as store_on
@@ -13,7 +14,7 @@ _RESTRICTED = "example.com"
 _OK_FRONTIER = ["https://example.com/", "https://example.com/ok"]
 
 
-def _job_with_frontier(store: JobStore, urls: list[str]) -> JobStore:
+def _job_with_frontier(store: JobStore, urls: list[str]) -> CrawlJobState:
     """A saved job whose frontier holds ``urls`` at depth 1."""
     job = store.create("https://example.com/", {"limits": {"max_pages": 0}})
     job.frontier.extend(FrontierEntry(url=canonical(url), depth=1) for url in urls)
@@ -21,14 +22,14 @@ def _job_with_frontier(store: JobStore, urls: list[str]) -> JobStore:
     return job
 
 
-def _with_hostile(store: JobStore, job: JobStore) -> JobStore:
+def _with_hostile(store: JobStore, job: CrawlJobState) -> CrawlJobState:
     """Append a private-address entry and save."""
     job.frontier.append(FrontierEntry(url=canonical("http://localhost:9/x"), depth=1))
     store.save(job)
     return job
 
 
-def _hostile_job_on(db) -> JobStore:
+def _hostile_job_on(db) -> CrawlJobState:
     """A saved job whose frontier holds one ok URL plus a private-address entry."""
     unrestricted = store_on(db, policy=UNRESTRICTED_HOST_POLICY)
     return _with_hostile(unrestricted, _job_with_frontier(unrestricted, ["https://example.com/ok"]))

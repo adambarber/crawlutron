@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+from collections.abc import Iterator
 
 from tests.chokepoint_walks import REPO_ROOT, functions, offender_at
 from tests.invariants._proof_paths import ELSEWHERE as _ELSEWHERE
@@ -167,7 +168,7 @@ def _from_imported_clocks(tree: ast.Module) -> set[str]:
     }
 
 
-def _clock_call_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
+def _clock_call_offenders(tree: ast.Module, path: pathlib.Path) -> Iterator[str]:
     """Every ``time.<member>(...)`` (or aliased-root) call in the WHOLE module
     AST (cycle 2: module-level calls outside any def were ungoverned); the
     sanctioned clock defaults are exempt -- the default EXPRESSION only, by
@@ -194,7 +195,7 @@ def _clock_call_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
             )
 
 
-def _from_import_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
+def _from_import_offenders(tree: ast.Module, path: pathlib.Path) -> Iterator[str]:
     """Bare-name calls of from-imported clock members, at ANY scope (cycle 2:
     ``from time import time; time()`` has no attribute node for the first
     sweep to see)."""
@@ -211,7 +212,7 @@ def _from_import_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
             )
 
 
-def _wall_default_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
+def _wall_default_offenders(tree: ast.Module, path: pathlib.Path) -> Iterator[str]:
     """Clock defaults of the wrong family: a wall default is the original #580
     defect in two tokens, invisible to any call-site sweep. Covers both
     spellings -- the dotted ``time.time`` and the from-imported alias used as
@@ -228,6 +229,7 @@ def _wall_default_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
             wrong_dotted = dotted is not None and dotted.startswith("time.") and dotted != "time.monotonic"
             aliased = isinstance(default, ast.Name) and default.id in imported
             if wrong_dotted or aliased:
+                assert isinstance(default, ast.expr)
                 yield offender_at(
                     path,
                     default,

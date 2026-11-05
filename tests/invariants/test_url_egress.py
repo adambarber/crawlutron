@@ -274,13 +274,13 @@ def _shared_admission_filter_offenders(tree: ast.AST, path: pathlib.Path) -> lis
     for node in nodes_of(tree):
         # The ladder answers as URL methods (is_analytics_host) or free predicates
         # (scope_allows): a twin may re-inline either shape.
-        names: list[str] = []
+        names: set[str] = set()
         if isinstance(node, ast.Attribute) and node.attr in filter_names:
-            names.append(node.attr)
+            names.add(node.attr)
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
             name = aliases.get(node.func.id, node.func.id)
             if name in filter_names:
-                names.append(name)
+                names.add(name)
         else:
             continue
         owner = enclosing_function(node, parents)

@@ -28,17 +28,24 @@ def _seeded_job(tmp_path, owner: str = "key_a") -> tuple[JobStore, CrawlJobState
     """One owned job carrying a visited page; tests add what they need on top."""
     store = _store(tmp_path)
     job = store.create("http://example.com/", CrawlPolicy(), owner=owner)
-    loaded = store.load(job.job_id)
+    loaded = _loaded(store, job.job_id)
     assert loaded is not None
     loaded.visited.add(canonical("http://example.com/page1"))
     store.save(loaded)
     return store, job
 
 
+def _loaded(store: JobStore, job_id: str) -> CrawlJobState:
+    """The job's full state, checked present: every caller saves it back after."""
+    loaded = store.load(job_id)
+    assert loaded is not None, job_id
+    return loaded
+
+
 def _seeded_job_with_results(tmp_path, owner: str = "key_a") -> tuple[JobStore, CrawlJobState]:
     """One owned job with a visited page and one result row; tests add frontier on top."""
     store, job = _seeded_job(tmp_path, owner=owner)
-    loaded = store.load(job.job_id)
+    loaded = _loaded(store, job.job_id)
     loaded.results = [{"url": "http://example.com/page1", "status": "success"}]
     store.save(loaded)
     return store, job
@@ -215,7 +222,7 @@ def test_foreign_delete_for_caller_leaves_history_intact(tmp_path):
     """A foreign caller must not destroy another caller's results + visited + frontier.
     The UPDATE decides ownership before any accumulator row is touched (#C1)."""
     store, job = _seeded_job(tmp_path)
-    loaded = store.load(job.job_id)
+    loaded = _loaded(store, job.job_id)
     loaded.visited.add(canonical("http://example.com/page2"))
     loaded.results = [{"url": "http://example.com/page1", "status": "success"}]
     loaded.frontier_removed.extend(entry.url for entry in loaded.frontier)
@@ -271,7 +278,7 @@ def test_concurrent_foreign_deletes_preserve_owner_history(tmp_path):
     """Concurrent foreign delete_for_caller calls are idempotent no-ops: each
     returns False and none destroys owner history (serialized by the lock)."""
     store, job = _seeded_job_with_results(tmp_path)
-    loaded = store.load(job.job_id)
+    loaded = _loaded(store, job.job_id)
     loaded.frontier_removed.extend(entry.url for entry in loaded.frontier)
     loaded.frontier_mark = 0
     loaded.frontier = frontier(["http://example.com/page2"], depth=1)
@@ -310,7 +317,7 @@ def test_owner_save_interleaved_with_foreign_deletes(tmp_path):
     """Owner ``save()`` interleaved with foreign deletes: foreign deletes return
     False and the owner's published state lands intact (history not destroyed)."""
     store, job = _seeded_job_with_results(tmp_path)
-    loaded = store.load(job.job_id)
+    loaded = _loaded(store, job.job_id)
     loaded.visited.add(canonical("http://example.com/page2"))
     store.save(loaded)
 
@@ -323,8 +330,7 @@ def test_owner_save_interleaved_with_foreign_deletes(tmp_path):
     # delete must be a no-op and the owner's state unchanged.
     for _ in range(4):
         foreign_delete()
-        loaded2 = store.load(job.job_id)
-        store.save(loaded2)
+        store.save(_loaded(store, job.job_id))
 
     assert all(r is False for r in results), "every foreign delete must return False"
     # Owner state unchanged by the foreign-delete storm.
@@ -348,7 +354,7 @@ class TestErrorStampingGatedOnTheFailedCas:
         # The concurrent transition lands between this path's load and its
         # CAS: the load sees RUNNING, but the FAILED write loses the race.
 
-        async def racing_aload(job_id: str):
+        async def racing_aload(job_id: str) -> CrawlJobState | None:
             return store.load(job_id)
 
         async def failing_aset_status(
@@ -356,13 +362,16 @@ class TestErrorStampingGatedOnTheFailedCas:
         ) -> bool:
             return False
 
-        store.aload = racing_aload
-        store.aset_status = failing_aset_status
+        # Instance overrides, not class edits: this store alone races.
+        object.__setattr__(store, "aload", racing_aload)
+        object.__setattr__(store, "aset_status", failing_aset_status)
 
         landed = await arecord_terminal_failure(store, "j1", "engine exploded")
 
         assert landed is False
-        assert store.load("j1").error is None, "the error was stamped on a row the FAILED CAS did not land on"
+        assert _loaded(store, "j1").error is None, (
+            "the error was stamped on a row the FAILED CAS did not land on"
+        )
 
     async def test_a_won_cas_stamps_the_error(self, tmp_path):
         from crawlutron.api.job_runner import arecord_terminal_failure
@@ -373,5 +382,6 @@ class TestErrorStampingGatedOnTheFailedCas:
         landed = await arecord_terminal_failure(store, "j1", "engine exploded")
 
         assert landed is True
-        assert store.load("j1").error == "engine exploded"
-        assert store.load("j1").status is JobStatus.FAILED
+        won = _loaded(store, "j1")
+        assert won.error == "engine exploded"
+        assert won.status is JobStatus.FAILED

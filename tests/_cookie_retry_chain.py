@@ -6,7 +6,7 @@ browser renders -- so it is written once (jscpd's zero clone-pairs) here.
 """
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from tests._browser_doubles import _fake_browser
 from tests._chain_policies import chain_policy
@@ -14,8 +14,7 @@ from tests._fetch_doubles import FetcherDouble
 from tests._fetcher_factories import run_chain
 
 if TYPE_CHECKING:
-    from crawlutron.models.http_fetcher import HttpFetcher
-    from crawlutron.models.json_value import JsonValue
+    pass
 
 #: A browser worker's success shape, which is what the strategy chain needs back once the cffi hop has the
 #: cookies.
@@ -37,22 +36,14 @@ def cffi_retry_chain(
     )
 
     return run_chain(
-        fetcher=cast("HttpFetcher", FetcherDouble(lambda url, sent_headers, *_: DENIED)),
-        cffi_fetcher=cast(
-            "HttpFetcher",
-            FetcherDouble(
-                lambda url, sent_headers, *_: (on_cffi or (lambda url, headers: DENIED))(url, sent_headers)
-            ),
-        ),
+        fetcher=FetcherDouble(lambda url, headers, *_: DENIED),
+        cffi_fetcher=FetcherDouble(lambda url, headers, *_: (on_cffi or (lambda u, h: DENIED))(url, headers)),
         browser_worker=lambda job: RENDERED(job),
-        policy=cast(
-            "dict[str, JsonValue]",
-            chain_policy(
-                HTTP_DECLARED_CRAWLER,
-                HTTP_CFFI_IMPERSONATE,
-                BROWSER_HEADLESS,
-                discovery={"robots": True},
-            ),
+        policy=chain_policy(
+            HTTP_DECLARED_CRAWLER,
+            HTTP_CFFI_IMPERSONATE,
+            BROWSER_HEADLESS,
+            discovery={"robots": True},
         ),
     )
 

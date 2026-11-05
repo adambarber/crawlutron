@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from tests._ratchet import (
+    _read,
     budget_is_tight,
     budget_not_exceeded,
     collection_is_deterministic,
@@ -70,27 +71,36 @@ def _has_subscript(node: ast.AST) -> bool:
     return any(isinstance(item, ast.Subscript) for item in nodes_of(node))
 
 
-def candidates(tree: ast.AST) -> Iterator[tuple[str, int, str]]:
+def candidates(tree: ast.AST) -> list[tuple[str, int, str]]:
     """Every (metric, lineno, annotation) this tree offers, counted or not. Three
     annotated positions carry what a caller is checked against; ``AnnAssign`` also
     covers dataclass fields (written `x: T = field(...)`), the most-checked type.
     """
+    return list(_candidates(tree))
+
+
+def _candidates(tree: ast.AST) -> Iterator[tuple[str, int, str]]:
     for node in nodes_of(tree):
+        lineno = getattr(node, "lineno", None)
+        if lineno is None:
+            continue
         annotations: list[ast.expr] = []
-        if isinstance(node, (ast.arg, ast.AnnAssign)):
+        if isinstance(node, ast.arg):
+            arg_annotation: ast.expr | None = node.annotation
+            if arg_annotation is not None:
+                annotations.append(arg_annotation)
+        elif isinstance(node, ast.AnnAssign):
             annotations.append(node.annotation)
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.returns is not None:
             annotations.append(node.returns)
         for annotation in annotations:
-            if annotation is None:
-                continue
             source = ast.unparse(annotation)
             # The annotation itself, never its spine: a Callable's parameter Any
             # is not an exit (the record test below pins that distinction).
             if isinstance(annotation, ast.Name) and annotation.id == "Any":
-                yield (_ANY, node.lineno, source)
+                yield (_ANY, lineno, source)
             if _is_record(annotation) and (not _has_subscript(annotation) or _mentions_any(annotation)):
-                yield (_METRIC, node.lineno, source)
+                yield (_METRIC, lineno, source)
 
 
 def offenders(metric: str) -> list[Offender]:
@@ -99,7 +109,11 @@ def offenders(metric: str) -> list[Offender]:
     Tree order because every entry is a position to edit, and a reader works
     down the list module by module rather than by how bad it is.
     """
-    return [Offender(where, detail) for candidate, where, detail in walk(candidates) if candidate == metric]
+    found: list[Offender] = []
+    for candidate, where, detail in walk(candidates):
+        if candidate == metric:
+            found.append(Offender(where, detail))
+    return found
 
 
 def measurement(metric: str) -> int:
@@ -107,7 +121,7 @@ def measurement(metric: str) -> int:
     return len(offenders(metric))
 
 
-def scripts_candidates(tree: ast.AST) -> Iterator[tuple[str, int, str]]:
+def scripts_candidates(tree: ast.AST) -> list[tuple[str, int, str]]:
     """Every candidate a scripts module offers, reusing the shared record detector."""
     return candidates(tree)
 
@@ -141,13 +155,10 @@ scripts_offenders, _scripts_measurement = _gate(REPO_ROOT / "scripts")
 
 
 def report() -> None:
-    ratchet_report(
-        _BUDGETS,
-        (measurement, offenders),
-        lambda metric, shown, budget: (
-            f"{metric:<18} {shown:>4} / budget {budget:<4} [{'OVER' if shown > budget else 'ok'}]"
-        ),
-    )
+    def headline(metric: str, shown: int, budget: int) -> str:
+        return f"{metric:<18} {shown:>4} / budget {budget:<4} [{'OVER' if shown > budget else 'ok'}]"
+
+    ratchet_report(_BUDGETS, _read((measurement, offenders)), headline=headline)
 
 
 _REMEDY = (
@@ -162,11 +173,11 @@ _REMEDY = (
 )
 
 test_budget_is_not_exceeded = budget_not_exceeded(
-    _BUDGETS, (measurement, offenders), subject="typing", remedy=_REMEDY
+    _BUDGETS, _read((measurement, offenders)), subject="typing", remedy=_REMEDY
 )
-test_budget_is_tight = budget_is_tight(_BUDGETS, (measurement, offenders), subject="typing")
+test_budget_is_tight = budget_is_tight(_BUDGETS, _read((measurement, offenders)), subject="typing")
 test_collection_is_deterministic = collection_is_deterministic(
-    _BUDGETS, (measurement, offenders), subject="typing"
+    _BUDGETS, _read((measurement, offenders)), subject="typing"
 )
 
 
@@ -220,15 +231,15 @@ _TESTS_REMEDY = (
 
 test_tests_budget_is_not_exceeded = budget_not_exceeded(
     _TEST_BUDGETS,
-    (suite_measurement, suite_offenders),
+    _read((suite_measurement, suite_offenders)),
     subject="tests typing",
     remedy=_TESTS_REMEDY,
 )
 test_tests_budget_is_tight = budget_is_tight(
-    _TEST_BUDGETS, (suite_measurement, suite_offenders), subject="tests typing"
+    _TEST_BUDGETS, _read((suite_measurement, suite_offenders)), subject="tests typing"
 )
 test_tests_collection_is_deterministic = collection_is_deterministic(
-    _TEST_BUDGETS, (suite_measurement, suite_offenders), subject="tests typing"
+    _TEST_BUDGETS, _read((suite_measurement, suite_offenders)), subject="tests typing"
 )
 
 

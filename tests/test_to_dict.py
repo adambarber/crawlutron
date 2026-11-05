@@ -37,16 +37,21 @@ def test_to_dict_json_safe_and_no_deepcopy():
     res = _Res(html=html, links=links, meta=cast("dict[str, object]", meta))
 
     d = to_dict(cast("EngineCrawlResult", res))
+    assert isinstance(d, dict)
     # Must serialize to JSON (nested dataclasses -> dicts).
     json.dumps(d)
     # Heavy string is shared by reference, not copied.
     assert d["html"] is html
     # Nested dataclass converted to a plain dict.
-    assert isinstance(d["links"][0], dict)
-    assert d["links"][0]["url"] == "http://a"
+    wire_links = d["links"]
+    assert isinstance(wire_links, list)
+    first_link = wire_links[0]
+    assert isinstance(first_link, dict) and first_link["url"] == "http://a"
     # Mutating the returned structure must NOT leak into the source dataclass (containers are rebuilt, leaves
     # shared).
-    d["meta"]["k2"] = "w"
+    meta_out = d["meta"]
+    assert isinstance(meta_out, dict)
+    meta_out["k2"] = "w"
     assert "k2" not in res.meta
 
 
@@ -76,7 +81,9 @@ def test_to_dict_handles_cyclic_link_graph():
     # Must terminate and be JSON-serializable.
     json.dumps(d)
     # The cyclic reference is broken (rendered as None) rather than recursing.
-    assert d["children"][0]["children"] == [None]
+    children = d["children"]
+    assert isinstance(children, list) and isinstance(children[0], dict)
+    assert children[0]["children"] == [None]
 
 
 def test_to_dict_breaks_a_cyclic_dict_graph():

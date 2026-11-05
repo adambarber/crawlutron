@@ -10,13 +10,15 @@ from collections.abc import Callable
 import pytest
 
 from crawlutron.runtime.resource_lifecycle import DeferredClose
+from crawlutron.transport.browser import BrowserRenderer
 from crawlutron.transport.browser_pool import BrowserPool, BrowserPoolExhaustedError
 
 
-class _SpyRenderer:
+class _SpyRenderer(BrowserRenderer):
     """A minimal renderer double: enough shape for the pool, a close recorder."""
 
     def __init__(self) -> None:
+        super().__init__()
         self.closed = 0
 
     async def close(self) -> None:
@@ -46,10 +48,11 @@ async def test_drain_joins_a_close_scheduled_while_draining():
     still gated when drain returns); only the committed ``while`` recheck
     follows the chain to the end and joins all three.
     """
-    owner = DeferredClose(aclose=lambda r: r.close())
+    owner: DeferredClose[_GatedRenderer] = DeferredClose(aclose=lambda r: r.close())
     first = _GatedRenderer()
     second = _GatedRenderer(on_close=lambda: owner.schedule(third))
     third = _GatedRenderer()
+    # the chained-close contract test; see the docstring above.
 
     owner.schedule(first)
     drain_task = asyncio.ensure_future(owner.drain())
@@ -74,7 +77,7 @@ async def test_drain_joins_a_close_scheduled_while_draining():
 
 async def test_drain_returns_immediately_when_nothing_is_pending():
     """The empty-drain contract close() relies on: no pending close, no await."""
-    owner = DeferredClose(aclose=lambda r: r.close())
+    owner: DeferredClose[_SpyRenderer] = DeferredClose(aclose=lambda r: r.close())
 
     await asyncio.wait_for(owner.drain(), timeout=0.1)
 
@@ -82,7 +85,7 @@ async def test_drain_returns_immediately_when_nothing_is_pending():
 async def test_schedule_outside_any_loop_declines_honestly():
     """No running loop: the owner declines (logged) instead of creating a loop
     or closing on a foreign thread; the caller's own teardown reclaims."""
-    owner = DeferredClose(aclose=lambda r: r.close())
+    owner: DeferredClose[_SpyRenderer] = DeferredClose(aclose=lambda r: r.close())
     spy = _SpyRenderer()
 
     await asyncio.get_running_loop().run_in_executor(None, owner.schedule, spy)
@@ -104,8 +107,8 @@ async def test_release_closes_a_renderer_retired_by_close():
     await pool.close()
     assert spy.closed == 0, "the pool closed a renderer that was checked out mid-render"
 
-    released = pool.release(checked_out)  # type: ignore[arg-type]
-    assert released is None, "release stays sync; the pool owns the retired close"
+    pool.release(checked_out)
+    # release stays sync; the pool owns the retired close.
     await pool.wait_for_retired_closes()
 
     assert spy.closed == 1, f"the checked-out-during-close renderer was leaked: closed={spy.closed} times"
@@ -119,8 +122,8 @@ async def test_a_second_release_of_a_retired_renderer_schedules_no_second_close(
 
     checked_out = await pool.acquire(timeout=1.0)
     await pool.close()
-    pool.release(checked_out)  # type: ignore[arg-type]
-    pool.release(checked_out)  # type: ignore[arg-type]
+    pool.release(checked_out)
+    pool.release(checked_out)
     await pool.wait_for_retired_closes()
 
     assert spy.closed == 1, f"the retired renderer was closed {spy.closed} times"
@@ -146,7 +149,7 @@ async def test_release_before_any_acquire_requeues_nothing():
     spy = _SpyRenderer()
     pool = BrowserPool.for_testing([spy])
 
-    pool.release(spy)  # type: ignore[arg-type]
+    pool.release(spy)
 
     await _assert_queue_holds_no_duplicate(pool)
 
@@ -164,7 +167,7 @@ async def test_close_reaps_every_retired_renderer_scheduled_after_the_drain():
     assert spy.closed == 1, "an idle renderer was not closed by the sweep"
 
 
-class _GatedRenderer:
+class _GatedRenderer(BrowserRenderer):
     """Renderer whose close blocks on an event, so the drain is observable.
 
     ``started`` fires once the close coroutine is running inside the owner's
@@ -174,6 +177,7 @@ class _GatedRenderer:
     """
 
     def __init__(self, on_close: Callable[[], None] | None = None) -> None:
+        super().__init__()
         self.closed = 0
         self.gate = asyncio.Event()
         self.started = asyncio.Event()

@@ -4,6 +4,7 @@ Uses a deterministic in-process fake fetcher (no real network I/O) plus one
 real-server smoke test.
 """
 
+from crawlutron.models.json_value import JsonValue
 from tests._crawl_runners import run_scoped_crawl
 from tests._fetcher_factories import (
     LINKED_PAIR_LIMITS,
@@ -32,7 +33,7 @@ class TestRecursiveCrawl:
         pages = site_linking_to("/a", "/b")
         out = await crawled_results(pages, limits=LINKED_PAIR_LIMITS)
         assert out["submitted_count"] == 1
-        urls = {r.normalized_url.raw for r in out["results"]}
+        urls = {r.normalized_url.raw for r in out["results"] if r.normalized_url is not None}
         assert "http://example.com/" in urls
         assert "http://example.com/a" in urls
         assert "http://example.com/b" in urls
@@ -51,7 +52,9 @@ class TestRecursiveCrawl:
         from crawlutron.admission.policy import validate_wire_policy
         from crawlutron.models.crawl_policy import CrawlPolicy as PolicyModel
 
-        assert PolicyModel.model_fields["limits"].annotation.model_fields["max_pages"].default == 0, (
+        limits_annotation = PolicyModel.model_fields["limits"].annotation
+        assert limits_annotation is not None
+        assert limits_annotation.model_fields["max_pages"].default == 0, (
             "the model default is the 'unbounded' sentinel this edge substitutes"
         )
         assert validate_wire_policy({"limits": {"max_pages": 0}}).limits.max_pages > 0
@@ -122,7 +125,7 @@ class TestRecursiveCrawlServer:
     async def test_real_server_recursive_follows_links(self, base_url):
         from tests._fetcher_factories import run_crawl_async
 
-        payload = {
+        payload: dict[str, JsonValue] = {
             "url": f"{base_url}/",
             "policy": {
                 "strategies": ["HTTP_DECLARED_CRAWLER"],
@@ -130,7 +133,7 @@ class TestRecursiveCrawlServer:
             },
         }
         response = await run_crawl_async(payload)
-        urls = {r.normalized_url.raw for r in response["results"]}
+        urls = {r.normalized_url.raw for r in response["results"] if r.normalized_url is not None}
         assert base_url + "/" in urls  # #520: the root slash survives on the raw
         assert base_url + "/page2" in urls
 

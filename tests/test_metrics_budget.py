@@ -7,14 +7,16 @@ from __future__ import annotations
 
 import ast
 import math
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
+from typing import Any
 
 from scripts.ast_scopes import is_scope_opener
 from scripts.jscpd_sweep import COMPOUND_NODES
 from tests._ratchet import (
+    _read,
     budget_is_tight,
     budget_not_exceeded,
     collection_is_deterministic,
@@ -136,7 +138,11 @@ def _candidates(tree: ast.AST) -> list[tuple[str, int, tuple[int, str]]]:
     return found
 
 
-def _build_gate(candidates, trees, budgets):
+def _build_gate(
+    candidates: Callable[[], Iterator[tuple[str, str, Any]]],
+    trees: Callable[[], Iterable[tuple[Path, ast.Module]]],
+    budgets: dict[str, int],
+) -> tuple[Callable[[str], list[Offender]], Callable[[str], int]]:
     """(offenders, measurement) for one walk + budget pair, written once.
     The app and scripts halves differ only in tree and table; the work-list
     filter and worse-class scan are shared, not duplicated per root."""
@@ -184,27 +190,27 @@ def _root_candidates(root: Path) -> Iterator[tuple[str, str, tuple[int, str]]]:
 
 
 def _root_gate(
-    root: Path, budgets: dict[str, int], *, exclude_class_trees: set[str] = frozenset()
+    root: Path, budgets: dict[str, int], *, exclude_class_trees: frozenset[str] = frozenset()
 ) -> tuple[Callable[[str], list[Offender]], Callable[[str], int]]:
     """The offenders/measurement pair one root gate builds, written once.
 
     ``exclude_class_trees`` names module paths whose classes are not counted
     (classless gate-tooling modules living beside the scripts tree)."""
 
-    def candidates() -> list[Offender]:
+    def candidates() -> Iterator[tuple[str, str, tuple[int, str]]]:
         return _root_candidates(root)
 
     def trees() -> dict[Path, ast.Module]:
-        return trees_under(root)
+        return dict(trees_under(root))
 
-    def class_trees() -> tuple[tuple[Path, ast.Module], ...]:
-        return tuple((p, t) for p, t in trees() if p.name not in exclude_class_trees)
+    def class_trees() -> Iterator[tuple[Path, ast.Module]]:
+        return iter((p, t) for p, t in trees().items() if p.name not in exclude_class_trees)
 
     return _build_gate(candidates, class_trees, budgets)
 
 
 scripts_offenders, scripts_measurement = _root_gate(
-    REPO_ROOT / "scripts", _SCRIPTS_BUDGETS, exclude_class_trees={"_jscpd_report_types.py"}
+    REPO_ROOT / "scripts", _SCRIPTS_BUDGETS, exclude_class_trees=frozenset({"_jscpd_report_types.py"})
 )
 
 
@@ -212,7 +218,7 @@ scripts_offenders, scripts_measurement = _root_gate(
 #: by #419 -- its row and ledger record are gone, the zero test is the gate.
 _TESTS_BUDGETS = {
     "abc size": 0,
-    "largest class": 306,
+    "largest class": 305,
     "block length": 0,
 }
 
@@ -233,7 +239,7 @@ def test_the_tests_budget_measurement_reaches_tests() -> None:
     over-long fn in tests/."""
     assert suite_measurement("abc size") == 0
     assert suite_measurement("block length") == 0
-    assert suite_measurement("largest class") == 306
+    assert suite_measurement("largest class") == 305
     _assert_overlong_fn()
 
 
@@ -247,14 +253,11 @@ def test_zero_long_functions_in_tests() -> None:
 
 
 def report() -> None:
-    ratchet_report(
-        _BUDGETS,
-        (measurement, offenders),
-        lambda metric, shown, budget: (
-            f"{metric:<16} {shown:>3}{'' if metric == 'largest class' else ' offenders /':<12}"
-            f" budget {budget:<3} [{'OVER' if shown > budget else 'ok'}]"
-        ),
-    )
+    def headline(metric: str, shown: int, budget: int) -> str:
+        unit = "" if metric == "largest class" else " offenders /"
+        return f"{metric:<16} {shown:>3}{unit:<12} budget {budget:<3} [{'OVER' if shown > budget else 'ok'}]"
+
+    ratchet_report(_BUDGETS, _read(_read((measurement, offenders))), headline=headline)
 
 
 _REMEDY = (
@@ -264,11 +267,11 @@ _REMEDY = (
 )
 
 test_budget_is_not_exceeded = budget_not_exceeded(
-    _BUDGETS, (measurement, offenders), subject="metrics", remedy=_REMEDY
+    _BUDGETS, _read((measurement, offenders)), subject="metrics", remedy=_REMEDY
 )
-test_budget_is_tight = budget_is_tight(_BUDGETS, (measurement, offenders), subject="metrics")
+test_budget_is_tight = budget_is_tight(_BUDGETS, _read((measurement, offenders)), subject="metrics")
 test_collection_is_deterministic = collection_is_deterministic(
-    _BUDGETS, (measurement, offenders), subject="metrics"
+    _BUDGETS, _read((measurement, offenders)), subject="metrics"
 )
 
 
@@ -311,15 +314,15 @@ _SCRIPTS_REMEDY = (
 
 test_scripts_budget_is_not_exceeded = budget_not_exceeded(
     _SCRIPTS_BUDGETS,
-    (scripts_measurement, scripts_offenders),
+    _read((scripts_measurement, scripts_offenders)),
     subject="scripts metrics",
     remedy=_SCRIPTS_REMEDY,
 )
 test_scripts_budget_is_tight = budget_is_tight(
-    _SCRIPTS_BUDGETS, (scripts_measurement, scripts_offenders), subject="scripts metrics"
+    _SCRIPTS_BUDGETS, _read((scripts_measurement, scripts_offenders)), subject="scripts metrics"
 )
 test_scripts_collection_is_deterministic = collection_is_deterministic(
-    _SCRIPTS_BUDGETS, (scripts_measurement, scripts_offenders), subject="scripts metrics"
+    _SCRIPTS_BUDGETS, _read((scripts_measurement, scripts_offenders)), subject="scripts metrics"
 )
 
 
@@ -334,15 +337,15 @@ _TESTS_REMEDY = (
 
 test_tests_budget_is_not_exceeded = budget_not_exceeded(
     _TESTS_BUDGETS,
-    (suite_measurement, suite_offenders),
+    _read((suite_measurement, suite_offenders)),
     subject="tests metrics",
     remedy=_TESTS_REMEDY,
 )
 test_tests_budget_is_tight = budget_is_tight(
-    _TESTS_BUDGETS, (suite_measurement, suite_offenders), subject="tests metrics"
+    _TESTS_BUDGETS, _read((suite_measurement, suite_offenders)), subject="tests metrics"
 )
 test_tests_collection_is_deterministic = collection_is_deterministic(
-    _TESTS_BUDGETS, (suite_measurement, suite_offenders), subject="tests metrics"
+    _TESTS_BUDGETS, _read((suite_measurement, suite_offenders)), subject="tests metrics"
 )
 
 
