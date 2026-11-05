@@ -51,15 +51,28 @@ async def _walk(body: str, max_urls: int) -> set[tuple[str, str | None]]:
 
 
 async def test_lastmod_association_is_linear_not_quadratic():
-    """4x the entries must not cost ~16x the work (#526)."""
-    small_started = time.process_time()
-    small = await _walk(_entries(2_048), 2_049)
-    small_elapsed = time.process_time() - small_started
-    large_started = time.process_time()
-    large = await _walk(_entries(2_048 * _GROW_STEP), 2_048 * _GROW_STEP + 1)
-    large_elapsed = time.process_time() - large_started
-    assert len(small) == 2_048 and len(large) == 2_048 * _GROW_STEP, "the walk dropped entries"
+    """4x the entries must not cost ~16x the work (#526).
+
+    Both walks are CPU-bound parsing/association work, so each side is warmed
+    then timed best-of-3 on process_time -- a descheduled process cannot read
+    as super-linear, and a 24ms baseline no longer flakes under the bound
+    (#611).
+    """
+    small_elapsed = await _best_of_three(_entries(2_048), 2_049)
+    large_elapsed = await _best_of_three(_entries(2_048 * _GROW_STEP), 2_048 * _GROW_STEP + 1)
     assert large_elapsed < small_elapsed * _RATIO_BOUND, "association cost grew super-linearly"
+
+
+async def _best_of_three(entries: str, max_urls: int, samples: int = 3) -> float:
+    """Warm the walk once, then return the cheapest of ``samples`` process_time runs."""
+    await _walk(entries, max_urls)
+    best = float("inf")
+    for _ in range(samples):
+        started = time.process_time()
+        walked = await _walk(entries, max_urls)
+        best = min(best, time.process_time() - started)
+    assert len(walked) == max_urls - 1, "the walk dropped entries"
+    return best
 
 
 async def test_pairing_semantics_unchanged():
