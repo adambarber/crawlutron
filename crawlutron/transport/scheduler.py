@@ -32,19 +32,16 @@ _STRATEGY_PIN_TTL_SECONDS = 300.0
 
 def jittered_delay(base_delay: float) -> float:
     """``base_delay`` with the crawl-delay jitter applied, or 0 for a zero base.
-    Module-level so the jitter band lives in exactly one place, tested directly
-    rather than re-derived out of ``run`` by tests that assert the re-derivation.
-    """
+    Module-level so the jitter band lives in one place, tested directly."""
     if base_delay <= 0:
         return 0.0
     return base_delay * _JITTER.uniform(_JITTER_LOW, _JITTER_HIGH)
 
 
 class ScheduledJob(Protocol):
-    """The structural contract ``DomainScheduler.run`` actually depends on: the crawl
-    and render pipelines submit different job shapes, and the reporting URL is
-    deliberately not a member (the shapes name it differently). Members are read-only properties.
-    """
+    """The structural contract ``DomainScheduler.run`` depends on: the crawl and
+    render pipelines submit different job shapes, and the reporting URL is
+    deliberately not a member. Members are read-only properties."""
 
     @property
     def index(self) -> int:
@@ -62,9 +59,8 @@ _Job = TypeVar("_Job", bound=ScheduledJob)
 
 class SchedulerResult(Protocol):
     """What the domain scheduler reads off a worker's result: ``.status`` and
-    ``.elapsed_ms``. A protocol (rather than naming either pipeline's type) keeps
-    ``run`` generic, and ``elapsed_ms`` is declared so a shape without it isn't silently skipped.
-    """
+    ``.elapsed_ms``. A protocol keeps ``run`` generic, and ``elapsed_ms`` is
+    declared so a shape without it isn't silently skipped."""
 
     @property
     def status(self) -> ResultStatus:
@@ -100,8 +96,7 @@ class TokenBucket:
         available). A short caller drives the balance negative, so overlapping
         callers queue behind what was taken (the max_rps herd)."""
         now = self._clock()
-        elapsed = now - self.last_refill
-        self.tokens = min(self.capacity, self.tokens + elapsed * self.rate)
+        self.tokens = min(self.capacity, self.tokens + (now - self.last_refill) * self.rate)
         self.last_refill = now
         self.tokens -= tokens
         return max(0.0, -self.tokens / self.rate)
@@ -302,9 +297,7 @@ class DomainScheduler:
 
     def record_latency(self, domain: str, latency_ms: float) -> None:
         """Feed observed response latency (ms) into the adaptive delay estimator.
-        Negative is the only rejected value -- it is a bad measurement, not a fast
-        response; there is no ``None`` case, the caller decides when nothing was measured.
-        """
+        Negative is rejected: a bad measurement, not a fast response."""
         if latency_ms < 0:
             return
         self._state(domain).feed_latency(
@@ -312,21 +305,18 @@ class DomainScheduler:
         )
 
     def get_pinned_strategy(self, domain: str) -> str | None:
-        """Return the strategy pinned for ``domain`` within this job, or None.
-        An expired pin re-evaluates: it is dropped and the domain re-climbs.
-        """
+        """The strategy pinned for ``domain`` within this job, or None. An expired
+        pin re-evaluates: it is dropped and the domain re-climbs."""
         return self._state(domain).get_pin(clock_now=self._clock(), ttl=_STRATEGY_PIN_TTL_SECONDS)
 
     def set_pinned_strategy(self, domain: str, strategy: str) -> None:
-        """Record the strategy that succeeded for ``domain`` so future fetches
-        in this job start at this strategy instead of re-climbing the ladder.
-        """
+        """Record the strategy that succeeded for ``domain`` so future fetches in
+        this job start at this strategy instead of re-climbing the ladder."""
         self._state(domain).set_pin(strategy, clock_now=self._clock())
 
     def clear_pinned_strategy(self, domain: str) -> None:
         """Drop the pin for ``domain``; used when the pinned strategy is no longer
-        viable (e.g. the browser pool is exhausted) so the fallback is tried.
-        """
+        viable (e.g. the browser pool is exhausted) so the fallback is tried."""
         self._state(domain).pin = None
 
     def _recompute_delay(self, domain: str) -> float:
@@ -500,9 +490,9 @@ class DomainScheduler:
 
     @property
     def global_limit(self) -> int:
-        """The configured global concurrency ceiling (the test read door for #633)."""
+        """Configured global concurrency ceiling: the test read door (#633)."""
         return self._global_limit
 
     def snapshot(self) -> dict[str, DomainState]:
-        """A read-only view of the per-domain records (the test read door for #633)."""
+        """A read-only view of the per-domain records: the test read door (#633)."""
         return dict(self._domain_state)
