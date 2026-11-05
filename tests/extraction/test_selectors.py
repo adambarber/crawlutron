@@ -2,6 +2,7 @@
 
 import logging
 import threading
+from contextlib import contextmanager
 
 import bs4
 from lxml import etree
@@ -26,26 +27,40 @@ def assert_selector_timed_out(result, caplog, flavour: str) -> None:
     )
 
 
+@contextmanager
+def _parked_stub_worker():
+    """Yield an Event parking a selector stub, always released on exit.
+
+    The deadline abandons the worker thread inside the stub; releasing here
+    keeps the executor shutdown from paying the full 30s wait (#566).
+    """
+    event = threading.Event()
+    try:
+        yield event
+    finally:
+        event.set()
+
+
 def test_css_selector_slow_must_not_hang(monkeypatch, caplog):
     """A selector that never returns must be bounded, not awaited.
 
     The stub blocks on an Event nothing ever sets, so the only thing that can
     end the wait is the selector deadline firing inside ``_eval_selector``.
     """
-    never_released = threading.Event()
-    monkeypatch.setattr(
-        bs4.BeautifulSoup,
-        "select",
-        lambda self, selector: never_released.wait(timeout=30) or [],
-    )
     html = "<html><body><p class='x'>hi</p></body></html>"
-    with caplog.at_level(logging.WARNING, logger="crawlutron.extraction.content"):
-        result = extract_selected(
-            html,
-            canonical("http://example.com/"),
-            selectors=Selectors(css=".x"),
-            settings=settings_with(extraction_selector_timeout=0.2),
+    with _parked_stub_worker() as never_released:
+        monkeypatch.setattr(
+            bs4.BeautifulSoup,
+            "select",
+            lambda self, selector: never_released.wait(timeout=30) or [],
         )
+        with caplog.at_level(logging.WARNING, logger="crawlutron.extraction.content"):
+            result = extract_selected(
+                html,
+                canonical("http://example.com/"),
+                selectors=Selectors(css=".x"),
+                settings=settings_with(extraction_selector_timeout=0.2),
+            )
     assert_selector_timed_out(result, caplog, "CSS")
 
 
@@ -72,14 +87,16 @@ def test_xpath_selector_slow_must_not_hang(caplog):
     the evaluation this function actually performs.
     """
     html = "<html><body><p>x</p></body></html>"
-    with caplog.at_level(logging.WARNING, logger="crawlutron.extraction.content"):
-        result = extract_selected(
-            html,
-            canonical("http://example.com/"),
-            selectors=Selectors(xpath="//p"),
-            settings=settings_with(extraction_selector_timeout=0.2),
-            tree=_SlowFakeTree(),
-        )
+    with _parked_stub_worker() as never_released:
+        _SlowFakeTree.never_released = never_released
+        with caplog.at_level(logging.WARNING, logger="crawlutron.extraction.content"):
+            result = extract_selected(
+                html,
+                canonical("http://example.com/"),
+                selectors=Selectors(xpath="//p"),
+                settings=settings_with(extraction_selector_timeout=0.2),
+                tree=_SlowFakeTree(),
+            )
     assert_selector_timed_out(result, caplog, "XPath")
 
 

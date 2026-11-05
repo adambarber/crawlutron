@@ -6,13 +6,12 @@ read for chunked / no-Content-Length responses.
 import asyncio
 import gzip
 import http.server
-import threading
 from contextlib import contextmanager
 
 from crawlutron.transport.fetchers import default_http_fetcher
 from tests._fetcher_factories import _spawn_fetch
 from tests._policy_factories import canonical
-from tests.helpers.server import SilentHandler
+from tests.helpers.server import SilentHandler, spawn_serve_forever_thread
 
 
 def _make_server():
@@ -55,8 +54,7 @@ def _running_server():
     """
     server = _make_server()
     port = server.server_address[1]
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
+    thread = spawn_serve_forever_thread(server)
     try:
         yield port
     finally:

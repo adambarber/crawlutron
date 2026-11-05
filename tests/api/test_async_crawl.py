@@ -20,7 +20,7 @@ from tests._assertions import (
 from tests._async_harnesses import crawl_api as _crawl_api
 from tests._fetcher_factories import make_crawl_payload
 from tests._job_harnesses import loaded_job, single_shot_job
-from tests.helpers.server import WEBHOOK_RECEIVED
+from tests.helpers.server import WEBHOOK_RECEIVED, spawn_serve_forever_thread
 
 # The client + origin + cleared webhook sink come from the shared fixture, so this module does not re-declare
 # the arrangement in a `setup` method. The alias-then-rebind is not ceremony.
@@ -247,8 +247,7 @@ class TestAsyncCrawlApi:
                 pass
 
         server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
+        thread = spawn_serve_forever_thread(server)
         try:
             url = f"http://127.0.0.1:{server.server_port}/"
             payload = make_crawl_payload(url, async_mode=True)

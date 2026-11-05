@@ -10,7 +10,9 @@ from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
 # Where the complexity claim lives: growth step and the ratio bound. Quadratic
 # on this step costs ~16x; the linear fix costs ~4x; the bound sits between.
-_GROW_STEP, _RATIO_BOUND = 4, 10
+_BASE, _GROW_STEP, _RATIO_BOUND = 9_216, 4, 10
+# The base is sized so the small walk's baseline clears ~100ms (#611).
+_SAMPLES = 2
 
 
 def _entries(n: int) -> str:
@@ -51,15 +53,29 @@ async def _walk(body: str, max_urls: int) -> set[tuple[str, str | None]]:
 
 
 async def test_lastmod_association_is_linear_not_quadratic():
-    """4x the entries must not cost ~16x the work (#526)."""
-    small_started = time.process_time()
-    small = await _walk(_entries(2_048), 2_049)
-    small_elapsed = time.process_time() - small_started
-    large_started = time.process_time()
-    large = await _walk(_entries(2_048 * _GROW_STEP), 2_048 * _GROW_STEP + 1)
-    large_elapsed = time.process_time() - large_started
-    assert len(small) == 2_048 and len(large) == 2_048 * _GROW_STEP, "the walk dropped entries"
+    """4x the entries must not cost ~16x the work (#526).
+
+    Both walks are CPU-bound parsing/association work, so each side is warmed
+    then timed best-of-N on process_time. The base input is scaled so the
+    small baseline clears ~100ms -- a 24ms denominator flaked under the 10x
+    bound once (#611) -- and the best-of-N sampling keeps a descheduled
+    process from reading as super-linear.
+    """
+    small_elapsed = await _warmed_best(_entries(_BASE), _BASE + 1)
+    large_elapsed = await _warmed_best(_entries(_BASE * _GROW_STEP), _BASE * _GROW_STEP + 1)
     assert large_elapsed < small_elapsed * _RATIO_BOUND, "association cost grew super-linearly"
+
+
+async def _warmed_best(entries: str, max_urls: int, samples: int = _SAMPLES) -> float:
+    """Warm the walk once, then return the cheapest of ``samples`` process_time runs."""
+    await _walk(entries, max_urls)
+    best = float("inf")
+    for _ in range(samples):
+        started = time.process_time()
+        walked = await _walk(entries, max_urls)
+        best = min(best, time.process_time() - started)
+    assert len(walked) == max_urls - 1, "the walk dropped entries"
+    return best
 
 
 async def test_pairing_semantics_unchanged():

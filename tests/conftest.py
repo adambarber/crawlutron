@@ -9,6 +9,7 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 from pathlib import Path
 from typing import TextIO
 from unittest.mock import patch
@@ -210,20 +211,35 @@ def _cleanup_extraction_executors():
 
 @pytest.fixture(autouse=True)
 def _document_pool_per_test(monkeypatch):
-    """Each test gets its own document pool.
+    """Each test that touches the document pool gets a fresh one, built lazily.
 
     The pool is a process global whose teardown is terminal: a test that ran
-    the lifespan closed it for every later test in the same worker.
+    the lifespan closed it for every later test in the same worker. Building
+    it eagerly for every test cost a spawn+teardown per test (#615), so the
+    patched global is a lazy proxy: the real pool is built on first attribute
+    use and torn down at fixture finalization if it was ever built.
     """
     import crawlutron.extraction.content as ext_mod
     import crawlutron.extraction.documents as docex
+    from crawlutron.extraction.doc_pool import DocExtractionPool
 
-    pool = docex.build_doc_pool()
-    monkeypatch.setattr(docex, "DOC_POOL", pool)
-    monkeypatch.setattr(ext_mod, "DOC_POOL", pool)
-    yield pool
-    # The pool this test used, and any worker it spawned, dies with the test.
-    pool.teardown()
+    built: list[DocExtractionPool] = []
+    build_lock = threading.Lock()
+
+    class _LazyDocPool:
+        def __getattr__(self, name):
+            with build_lock:
+                if not built:
+                    built.append(docex.build_doc_pool())
+            return getattr(built[0], name)
+
+    proxy = _LazyDocPool()
+    monkeypatch.setattr(docex, "DOC_POOL", proxy, raising=False)
+    monkeypatch.setattr(ext_mod, "DOC_POOL", proxy, raising=False)
+    yield
+    if built:
+        # The pool this test used, and any worker it spawned, dies with the test.
+        built[0].teardown()
 
 
 @pytest.fixture
