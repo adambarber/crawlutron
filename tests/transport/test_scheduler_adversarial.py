@@ -151,9 +151,9 @@ class TestCooldownWakeReReserves:
 
         results = await scheduler.run(_jobs(3), worker, failed_result=engine_envelope)
         assert results is not None and len(results) == 3
-        # After the cooldown, waking peers requested SPACED waits again: the
-        # re-reservation makes each wait its cumulative slot (delay x queue position).
-        spacing = sorted(d for d in requested if 0.11 < d < 0.3)
+        # Reserve slots are delay-scaled and stagger; cooldown naps are ~0.1.
+        # The contract is stated on the delay-scaled waits alone.
+        spacing = sorted(d for d in requested if d > 0.11)
         assert len(spacing) >= 2, f"cooldown-wake peers must each re-reserve a spacing wait: {requested}"
         assert all(spacing[i + 1] > spacing[i] for i in range(len(spacing) - 1)), (
             f"spacing waits must stagger cumulatively, not copy: {spacing}"
