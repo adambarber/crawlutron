@@ -45,9 +45,11 @@ def test_the_async_path_is_registered_too():
     registry, or the chokepoint's guarantee holds for only one of two paths
     (adversarial pass 5, confirmed defect)."""
     hold = threading.Event()
+    worker_returned = threading.Event()
 
     def parked():
         hold.wait(timeout=10.0)
+        worker_returned.set()
         return "never returned in time"
 
     async def scenario():
@@ -65,6 +67,9 @@ def test_the_async_path_is_registered_too():
     assert registered >= 1, (
         f"the async resolve path bypassed the saturation registry (in-flight: {registered})"
     )
+    # The discard runs in the completing worker thread: the worker's own last
+    # act gates the drain; the poll closes only the return-to-callback window.
+    assert worker_returned.wait(10.0), "the parked worker never completed"
     _join_via_polling()
     assert pt.dns_in_flight_resolves() == 0, "a completed worker stayed registered"
 
@@ -83,10 +88,12 @@ def test_a_timed_out_wait_still_counts_the_worker():
     law exists to close (wave-3 N1). Released via Events, no wall-clock sleeps."""
     started = threading.Event()
     hold = threading.Event()
+    worker_returned = threading.Event()
 
     def parked():
         started.set()
         hold.wait(timeout=10.0)
+        worker_returned.set()
         return "done"
 
     async def scenario():
@@ -111,5 +118,8 @@ def test_a_timed_out_wait_still_counts_the_worker():
             pt.dns_clear_saturation()
 
     asyncio.run(scenario())
+    # The discard runs in the completing worker thread: the worker's own last
+    # act gates the drain; the poll closes only the return-to-callback window.
+    assert worker_returned.wait(10.0), "the parked worker never completed"
     _join_via_polling()
     assert pt.dns_in_flight_resolves() == 0, "a completed worker stayed registered"
