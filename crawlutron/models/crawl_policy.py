@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, ClassVar, Final, cast
+from typing import Annotated, ClassVar, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 from pydantic.json_schema import JsonDict
@@ -20,15 +20,12 @@ from crawlutron.models.credential import Credential
 from crawlutron.models.discovery_config import DiscoveryConfig
 from crawlutron.models.request_profile_record import RequestProfileRecord
 from crawlutron.safety.header_values import reject_injectable_header_name, reject_injectable_header_values
-from crawlutron.vocabulary.limits import MAX_HEADER_VALUE_BYTES
+from crawlutron.vocabulary.limits import MAX_CRAWL_STRATEGIES, MAX_HEADER_VALUE_BYTES
 
 POLICY_SCHEMA_VERSION = "2026-06-23"
 
 
-MAX_CRAWL_STRATEGIES: Final[int] = 16
-
-
-__all__ = ["CrawlPolicy", "MAX_CRAWL_STRATEGIES", "POLICY_SCHEMA_VERSION"]
+__all__ = ["CrawlPolicy", "POLICY_SCHEMA_VERSION"]
 
 
 class CrawlPolicy(BaseModel):

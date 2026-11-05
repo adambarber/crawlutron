@@ -30,8 +30,6 @@ pytest_plugins = (
     "tests.fixtures.ssrf_guard_required",
     "tests.fixtures.fake_provider_http",
     "tests.fixtures.recording_worker",
-    "tests.fixtures.base_policy",
-    "tests.fixtures.job_store",
     "tests.fixtures.watch_store",
     "tests.fixtures.client",
     "tests.fixtures.real_http_servers",
@@ -312,10 +310,6 @@ def _clear_global_http_state() -> None:
     _reset_cgroup()
     # DNS cache + pending client close queue + cookie namespace contextvar isolation between tests
     pinned_mod.reset_process_state()
-    pool_mod.reset_process_state()
-    # Reset the per-request cookie namespace so a test that sets one does not leak into a subsequent
-    # test's request context.
-    cookie_mod.reset_process_state()
 
 
 _MODULE_GLOBAL_RESETS = (_clear_sitemap_cache, _clear_metrics, _clear_global_http_state)

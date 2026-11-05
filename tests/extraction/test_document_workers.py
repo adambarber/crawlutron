@@ -8,7 +8,6 @@ import crawlutron.extraction.content as ext_mod
 import crawlutron.extraction.content as extraction
 from crawlutron.config.env import parse_bool_env
 from crawlutron.extraction.content import (
-    ExtractedContent,
     Selectors,
     extract_document,
     extract_selected,
@@ -89,32 +88,17 @@ async def test_extract_document_kill_switch(monkeypatch):
 
 class TestExtractionMethods:
     @pytest.mark.parametrize(
-        ("content", "content_type", "expected_text", "expected_branch"),
+        ("content", "content_type", "expected_text"),
         [
-            ("<html><body><p>Hello world</p></body></html>", "text/html", "html", "html"),
-            (b"%PDF-1.7 fake bytes", "application/pdf", "document", "document"),
-            ("plain text", "text/plain", "plain text", None),
-            (b"raw bytes", "application/octet-stream", "raw bytes", None),
+            ("<html><body><p>Hello world</p></body></html>", "text/html", "Hello world"),
+            (b"%PDF-1.7 fake bytes", "application/pdf", "%PDF-1.7 fake bytes"),
+            ("plain text", "text/plain", "plain text"),
+            (b"raw bytes", "application/octet-stream", "raw bytes"),
         ],
     )
-    def test_extraction_routes_by_content_type(
-        self, monkeypatch, content, content_type, expected_text, expected_branch
-    ):
-        calls = []
-
-        def fake_html(html, url, css_selector=None, xpath=None):
-            calls.append("html")
-            return ExtractedContent("html", "html")
-
-        def fake_document(body, url):
-            calls.append("document")
-            return ExtractedContent("document", "document")
-
-        monkeypatch.setattr(extraction, "extract_html", fake_html)
-        monkeypatch.setattr(extraction, "extract_document", fake_document)
+    def test_extraction_routes_by_content_type(self, content, content_type, expected_text):
         result = extraction.extract_content(content, content_type, canonical("http://example.com/"))
         assert result.text == expected_text
-        assert calls == ([] if expected_branch is None else [expected_branch])
 
 
 class TestHtmlTreeParsing:

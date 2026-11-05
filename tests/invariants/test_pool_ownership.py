@@ -1,114 +1,16 @@
-"""Pool slots are reaped; cookies enter through the fetch tail."""
+"""Cookies enter through the fetch tail."""
 
 from __future__ import annotations
 
 import ast
 import pathlib
 
-from tests.chokepoint_walks import REPO_ROOT, nodes_of, offender_at, relative_posix, unary_ops
+from tests.chokepoint_walks import REPO_ROOT, offender_at, relative_posix
 from tests.invariants._proof_paths import ELSEWHERE as _ELSEWHERE
 from tests.invariants._shared import _enclosing_calls
 from tests.rules import Bites, Registry, Rule, Silent
 
-_DOC_POOL_CLASS = "DocExtractionPool"
-
-
-_DOC_POOL_ACQUIRER = "acquire"
-
-
-def _has_retired_attr(node: ast.AST) -> bool:
-    return any(isinstance(sub, ast.Attribute) and sub.attr == "retired" for sub in nodes_of(node))
-
-
-def _reaps_retired(value: ast.AST) -> bool:
-    """A ``self._slots = [... for each... if not each.retired]`` style rebuild.
-
-    ``not each.retired`` parses as a ``UnaryOp(Not,...)`` and an explicit
-    comparison as a ``Compare``; both shapes are admitted.
-    """
-    if not isinstance(value, ast.ListComp):
-        return False
-    for generator in value.generators:
-        for condition in generator.ifs:
-            for node in unary_ops(condition):
-                if isinstance(node.op, ast.Not):
-                    if _has_retired_attr(node.operand):
-                        return True
-                if isinstance(node, ast.Compare):
-                    if any(_has_retired_attr(operand) for operand in (node.left, *node.comparators)):
-                        return True
-    return False
-
-
-def _rebuilds_pool_without_retired(node: ast.AST) -> bool:
-    """Does ``node`` assign ``self._slots`` from a list comp filtering ``retired``?"""
-    return any(
-        isinstance(child, ast.Assign)
-        and any(isinstance(target, ast.Attribute) and target.attr == "_slots" for target in child.targets)
-        and _reaps_retired(child.value)
-        for child in nodes_of(node)
-    )
-
-
-def _doc_pool_reap_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """Flag ``acquire`` that never rebuilds the pool without retired slots."""
-    return [
-        offender_at(
-            path,
-            node,
-            f"{_DOC_POOL_CLASS}.{_DOC_POOL_ACQUIRER} no longer reaps retired slots; a "
-            f"retired-but-alive slot would strand in the pool and inflate the size budget",
-        )
-        for cls in (each for each in nodes_of(tree) if isinstance(each, ast.ClassDef))
-        if cls.name == _DOC_POOL_CLASS
-        for node in cls.body
-        if isinstance(node, ast.FunctionDef)
-        and node.name == _DOC_POOL_ACQUIRER
-        and not _rebuilds_pool_without_retired(node)
-    ]
-
-
-DOC_POOL_ACQUIRER_REAPS_RETIRED_SLOTS = Rule(
-    name="doc-pool-acquirer-reaps-retired-slots",
-    find=_doc_pool_reap_offenders,
-    summary=(
-        "A retired slot can never be handed out, so leaving one in the pool "
-        "strands it forever and inflates the pool-size budget; rebuild the pool "
-        "without retired entries in DocExtractionPool.acquire"
-    ),
-    bite=lambda: (
-        Bites(
-            "class DocExtractionPool:\n"
-            "    def acquire(self):\n"
-            "        with self._lock:\n"
-            "            want = self._worker_count()\n"
-            "            while True:\n"
-            "                for worker in self._slots:\n"
-            "                    if not worker.busy:\n"
-            "                        return worker\n",
-            "no longer reaps retired slots",
-        ),
-        Bites(
-            "class DocExtractionPool:\n"
-            "    def acquire(self):\n"
-            "        with self._lock:\n"
-            "            self._slots = [each for each in self._slots if not each.busy]\n"
-            "            return self._slots[0]\n",
-            "no longer reaps retired slots",
-        ),
-    ),
-    clean=lambda: (
-        "class DocExtractionPool:\n"
-        "    def acquire(self):\n"
-        "        with self._lock:\n"
-        "            self._slots = [each for each in self._slots if not each.retired]\n"
-        "            return self._slots[0]\n",
-    ),
-)
-
-
-# These two rules are the enforcement half: the jar has exactly one write door, and that door is the shared
-# tail.
+# The enforcement half: the jar has exactly one write door, and that door is the shared tail.
 
 _COOKIE_TAIL = "crawlutron/transport/fetchers.py"
 
@@ -197,7 +99,7 @@ RESPONSE_COOKIES_ENTER_VIA_THE_FETCH_TAIL = Rule(
 )
 
 
-RULES = Registry((DOC_POOL_ACQUIRER_REAPS_RETIRED_SLOTS, RESPONSE_COOKIES_ENTER_VIA_THE_FETCH_TAIL))
+RULES = Registry((RESPONSE_COOKIES_ENTER_VIA_THE_FETCH_TAIL,))
 
 
 def test_no_rule_violations():

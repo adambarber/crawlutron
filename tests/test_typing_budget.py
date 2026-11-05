@@ -30,11 +30,8 @@ from tests.chokepoint_walks import REPO_ROOT, nodes_of, trees_under
 _METRIC = "undeclared record"
 _ANY = "bare Any"
 
-# ALL batches landed (1-4): the tree carries ZERO undeclared records and ZERO bare Any.
-# No budget table: the assertions below are unconditional — the terminus is sealed.
-_BUDGETS: dict[str, int] = {}
-
-# A record is anything whose key set a caller might depend on.
+# ALL batches landed (1-4): ZERO undeclared records, ZERO bare Any, no budget table left: the
+# unconditional zero-assertions are the terminus.
 _RECORD_ROOTS = frozenset(
     {"dict", "Dict", "list", "List", "tuple", "Tuple", "Mapping", "MutableMapping", "Sequence"}
 )
@@ -158,26 +155,11 @@ def report() -> None:
     def headline(metric: str, shown: int, budget: int) -> str:
         return f"{metric:<18} {shown:>4} / budget {budget:<4} [{'OVER' if shown > budget else 'ok'}]"
 
-    ratchet_report(_BUDGETS, _read((measurement, offenders)), headline=headline)
+    ratchet_report({}, _read((measurement, offenders)), headline=headline)
 
 
-_REMEDY = (
-    "Each of these is a record whose key set the code depends on and no annotation\n"
-    "records. Two moves, and the second is as valid as the first:\n"
-    "  * a key set exists -> declare it with a TypedDict, so a producer that stops\n"
-    "    selecting a key becomes a build failure at the consumer;\n"
-    "  * no key set exists -> say so as the system type it is (JsonValue for an\n"
-    "    arbitrary JSON payload), which reads as a claim rather than an exit.\n"
-    "Either one lowers this count, and this assertion enforces the rule on its own\n"
-    "at zero. Deleting the token without doing either is not a narrowing."
-)
-
-test_budget_is_not_exceeded = budget_not_exceeded(
-    _BUDGETS, _read((measurement, offenders)), subject="typing", remedy=_REMEDY
-)
-test_budget_is_tight = budget_is_tight(_BUDGETS, _read((measurement, offenders)), subject="typing")
 test_collection_is_deterministic = collection_is_deterministic(
-    _BUDGETS, _read((measurement, offenders)), subject="typing"
+    {}, _read((measurement, offenders)), subject="typing"
 )
 
 

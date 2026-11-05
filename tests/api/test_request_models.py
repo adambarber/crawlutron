@@ -241,23 +241,16 @@ class TestRequestCollectionsAreBounded:
     """A caller-supplied collection with no ceiling is an unbounded fan-out.
 
     One collection carried ``max_length`` while its siblings were uncapped; the
-    ceilings are policy decisions, so they live beside the tests that pin them."""
-
-    #: Longest caller-supplied URL list accepted in one request. A whole-site job is the unbounded path -- it
-    #: exists precisely so this is bounded.
-    MAX_URLS = 500
-    #: Most validators in one request. Each is a conditional-request header pair.
-    MAX_VALIDATORS = 64
-    #: Most custom headers in one request.
-    MAX_HEADERS = 64
+    ceilings live with their models and are imported here, not restated."""
 
     def test_url_lists_are_capped(self):
         from crawlutron.models.crawl_request import CrawlRequest
+        from crawlutron.models.single_url_source_request import MAX_URLS_PER_REQUEST
 
-        at_ceiling = {"urls": [f"https://example.com/{index}" for index in range(self.MAX_URLS)]}
-        assert len(CrawlRequest(**at_ceiling).urls or []) == self.MAX_URLS
+        at_ceiling = {"urls": [f"https://example.com/{index}" for index in range(MAX_URLS_PER_REQUEST)]}
+        assert len(CrawlRequest(**at_ceiling).urls or []) == MAX_URLS_PER_REQUEST
         with pytest.raises(ValidationError):
-            CrawlRequest(urls=[f"https://example.com/{i}" for i in range(self.MAX_URLS + 1)])
+            CrawlRequest(urls=[f"https://example.com/{i}" for i in range(MAX_URLS_PER_REQUEST + 1)])
 
     def test_the_render_model_caps_urls_too_and_map_has_no_batch(self):
         """The cap must travel with the shared url-source base, not just CrawlRequest.
@@ -267,8 +260,9 @@ class TestRequestCollectionsAreBounded:
         urls key is forbidden outright, not capped."""
         from crawlutron.models.map_request import MapRequest
         from crawlutron.models.render_request import RenderRequest
+        from crawlutron.models.single_url_source_request import MAX_URLS_PER_REQUEST
 
-        too_many = [f"https://example.com/{index}" for index in range(self.MAX_URLS + 1)]
+        too_many = [f"https://example.com/{index}" for index in range(MAX_URLS_PER_REQUEST + 1)]
         with pytest.raises(ValidationError):
             RenderRequest(urls=too_many)
         # MapRequest's static shape has no urls key at all (extra=forbid), so the
@@ -277,25 +271,30 @@ class TestRequestCollectionsAreBounded:
             MapRequest.model_validate({"url": "https://example.com/", "urls": too_many})
 
     def test_validator_maps_are_capped(self):
-        from crawlutron.models.crawl_request import CrawlRequest
+        from crawlutron.models.crawl_request import MAX_VALIDATORS_PER_REQUEST, CrawlRequest
 
-        at_ceiling = {f"https://example.com/{i}": {"if_none_match": "x"} for i in range(self.MAX_VALIDATORS)}
+        at_ceiling = {
+            f"https://example.com/{i}": {"if_none_match": "x"} for i in range(MAX_VALIDATORS_PER_REQUEST)
+        }
         # A url source is required alongside it -- unrelated to the cap, but the model will not validate a
         # validators map on its own.
         assert (
             len(CrawlRequest(url="https://example.com/0", validators=at_ceiling).validators)
-            == self.MAX_VALIDATORS
+            == MAX_VALIDATORS_PER_REQUEST
         )
-        over = {f"https://example.com/{i}": {"if_none_match": "x"} for i in range(self.MAX_VALIDATORS + 1)}
+        over = {
+            f"https://example.com/{i}": {"if_none_match": "x"} for i in range(MAX_VALIDATORS_PER_REQUEST + 1)
+        }
         with pytest.raises(ValidationError):
             CrawlRequest(url="https://example.com/0", validators=over)
 
     def test_header_maps_are_capped(self):
         from crawlutron.models.crawl_policy import CrawlPolicy
+        from crawlutron.models.crawl_policy_vocabulary import MAX_HEADERS_PER_REQUEST
 
-        at_ceiling = {f"x-custom-{i}": "v" for i in range(self.MAX_HEADERS)}
-        assert len(CrawlPolicy(headers=at_ceiling).headers) == self.MAX_HEADERS
-        over = {f"x-custom-{i}": "v" for i in range(self.MAX_HEADERS + 1)}
+        at_ceiling = {f"x-custom-{i}": "v" for i in range(MAX_HEADERS_PER_REQUEST)}
+        assert len(CrawlPolicy(headers=at_ceiling).headers) == MAX_HEADERS_PER_REQUEST
+        over = {f"x-custom-{i}": "v" for i in range(MAX_HEADERS_PER_REQUEST + 1)}
         with pytest.raises(ValidationError):
             CrawlPolicy(headers=over)
 

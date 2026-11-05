@@ -76,8 +76,11 @@ def test_render_scheduler_builds_through_from_settings():
     )
     scheduler = _render_scheduler_of(settings)
     pipeline = DomainScheduler.from_settings(settings, global_limit=7, max_rps=0.0)
-    knobs = {knob: getattr(scheduler, knob) for knob in (*_KNOBS, "_global_limit", "_max_rps")}
-    assert knobs == {knob: getattr(pipeline, knob) for knob in (*_KNOBS, "_global_limit", "_max_rps")}, knobs
+    knobs = {knob: getattr(scheduler, knob) for knob in _KNOBS}
+    expected = {knob: getattr(pipeline, knob) for knob in _KNOBS}
+    expected.update({"_global_limit": pipeline.global_limit, "_max_rps": pipeline._max_rps})
+    knobs.update({"_global_limit": scheduler.global_limit, "_max_rps": scheduler._max_rps})
+    assert knobs == expected, knobs
 
 
 def test_render_scheduler_global_limit_reads_settings_home():
@@ -85,7 +88,7 @@ def test_render_scheduler_global_limit_reads_settings_home():
     re-defaulted getattr -- the settings default is the one number."""
     settings = CrawlerSettings(global_concurrency=9)
     scheduler = _render_scheduler_of(settings)
-    assert scheduler._global_limit == 9
+    assert scheduler.global_limit == 9
 
 
 def test_admission_global_limit_not_getattr_redefaulted():
@@ -93,7 +96,7 @@ def test_admission_global_limit_not_getattr_redefaulted():
     getattr(..., 4) re-default is the drift from_settings exists to stop."""
     settings = CrawlerSettings.from_mapping({"CRAWLUTRON_GLOBAL_CONCURRENCY": "6"})
     scheduler = _admission_scheduler({"limits": {"max_rps": 4.5}}, settings)
-    assert scheduler._global_limit == 6
+    assert scheduler.global_limit == 6
 
 
 def test_recovery_start_limit_not_getattr_redefaulted():
