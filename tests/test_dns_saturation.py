@@ -36,13 +36,33 @@ def test_a_saturated_resolver_fails_fast():
     pt.dns_seed_saturation(32)
     try:
         assert pt.dns_in_flight_resolves() >= 32
-        started = time.monotonic()
+        # The refusal is a pre-submit decision, so it is a fail-fast property:
+        # run it under a hang guard, not a stopwatch.
         with pytest.raises(pt.ResolverBudgetExceeded, match="saturated"):
-            pt.bounded_addrinfo("victim.test")
-        elapsed = time.monotonic() - started
-        assert elapsed < 1.0, f"the fast-fail took {elapsed:.2f}s -- it queued instead"
+            await_guarded(lambda: pt.bounded_addrinfo("victim.test"))
     finally:
         pt.dns_clear_saturation()
+
+
+def await_guarded(work, ceiling_seconds=1.0):
+    """Run a synchronous call on a thread under a tight purpose-bound ceiling:
+    the saturated refusal must return well inside it; a queued call fails the
+    is_alive check as a hang, never as merely slow."""
+    outcome = {}
+
+    def runner():
+        try:
+            outcome["value"] = work()
+        except BaseException as exc:  # re-raised in the caller below
+            outcome["error"] = exc
+
+    worker = threading.Thread(target=runner, daemon=True)
+    worker.start()
+    worker.join(timeout=ceiling_seconds)
+    assert not worker.is_alive(), "the saturated refusal did not return fast -- it queued"
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome.get("value")
 
 
 def test_the_accounting_door_reports_live_resolves():

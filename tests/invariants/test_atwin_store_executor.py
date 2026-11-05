@@ -17,7 +17,7 @@ from tests.chokepoint_walks import REPO_ROOT, attribute_call_on, call_offenders,
 _STORE = REPO_ROOT / "crawlutron" / "storage" / "coordination_store.py"
 
 
-def test_atwin_routes_to_store_executor_not_default() -> None:
+def test_async_store_calls_run_on_a_dedicated_executor() -> None:
     assert_detectors_clean(
         parsed(_STORE),
         path=_STORE,
