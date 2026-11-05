@@ -281,3 +281,43 @@ async def test_resolver_budget_timeout_is_a_resolution_failure_not_a_navigation_
 
     assert result.classification == "dns_error"
     assert result.error == "dns_error"
+
+
+async def test_https_navigation_dials_the_hostname_for_cert_verification(monkeypatch):
+    """The pin law at the render door: TLS cert identity must be verified against
+    the pinned hostname, so HTTPS navigation dials the hostname (real SNI), gated
+    by the fresh+stable double-resolve -- never an IP literal with a Host override.
+    """
+    block_private_targets(monkeypatch)
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda host, port, *a, **k: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port or 443))
+        ],
+    )
+    checks: list[str] = []
+    from crawlutron.transport import pinned_dns
+
+    pinned_dns.reset_process_state()
+    original = pinned_dns.check_ssrf_protection_stable
+
+    def spy(url):
+        checks.append(url.host)
+        original(url)
+
+    monkeypatch.setattr("crawlutron.transport.browser_targets.check_ssrf_protection_stable", spy)
+    from tests._browser_doubles import pinned_request
+
+    def recording_pin(url, headers, timeout_seconds=None):
+        return pinned_request(url, "https://1.2.3.4/", {"Host": url.host})
+
+    async def awaitable_pin(url, headers, timeout_seconds=None):
+        return recording_pin(url, headers, timeout_seconds=timeout_seconds)
+
+    pinned_url, headers = await resolve_browser_target(
+        canonical("https://example.com/path"), pin=awaitable_pin
+    )
+    assert pinned_url == "https://example.com/path"
+    assert headers == {}
+    assert checks == ["example.com"]
