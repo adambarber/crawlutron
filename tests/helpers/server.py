@@ -333,6 +333,17 @@ class EtagHandler(SilentHandler):
         self.send_body(200, self.body, **{"Content-Type": "text/html", "ETag": self.etag})
 
 
+def spawn_serve_forever_thread(server) -> threading.Thread:
+    """Start a daemon serve_forever thread with a 10ms poll.
+
+    The default poll_interval makes every shutdown() cost 0.5s (#631); the
+    daemon thread makes a tighter poll free of busy-wait concerns.
+    """
+    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
+    thread.start()
+    return thread
+
+
 def spawn_threaded_server(handler_cls) -> CountingHTTPServer:
     """Start a daemon-served threading HTTP server on an ephemeral port.
 
@@ -341,7 +352,7 @@ def spawn_threaded_server(handler_cls) -> CountingHTTPServer:
     """
     server = CountingHTTPServer(("127.0.0.1", 0), handler_cls)
     server.hits = 0
-    # poll_interval bounds shutdown() latency; 10ms is imperceptible for a
-    # daemon thread but cuts each teardown from ~0.5s to ~10ms (#631).
-    threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
+    # poll_interval bounds shutdown() latency; 10ms cuts each teardown from
+    # ~0.5s to ~10ms (#631). Lives in spawn_serve_forever_thread.
+    spawn_serve_forever_thread(server)
     return server
