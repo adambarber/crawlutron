@@ -234,7 +234,9 @@ class _Handler(BaseHTTPRequestHandler):
 class TestServer:
     def __init__(self) -> None:
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
-        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread = threading.Thread(
+            target=self._server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
+        )
 
     def start(self) -> TestServer:
         self._thread.start()
@@ -339,5 +341,7 @@ def spawn_threaded_server(handler_cls) -> CountingHTTPServer:
     """
     server = CountingHTTPServer(("127.0.0.1", 0), handler_cls)
     server.hits = 0
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    # poll_interval bounds shutdown() latency; 10ms is imperceptible for a
+    # daemon thread but cuts each teardown from ~0.5s to ~10ms (#631).
+    threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
     return server
