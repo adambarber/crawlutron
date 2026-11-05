@@ -4,6 +4,7 @@ The count->insert window let two concurrent posts pass a quota of one.
 """
 
 import asyncio
+import contextlib
 
 from tests._api_harnesses import keyed_quota_client as _keyedquota_client
 from tests._timing_harnesses import await_until
@@ -42,44 +43,52 @@ def _two_concurrent_posts(client, headers):
     ]
 
 
+def _instrument(store, original, pinned):
+    """Count-overlap detector plus a pinned crawl; returns (spy, overlapped getter)."""
+    state = {"counting": False, "overlapped": False}
+
+    async def instrumented_count(caller_id):
+        if state["counting"]:
+            state["overlapped"] = True
+        state["counting"] = True
+        try:
+            # Long enough that the loop definitely runs the other admit
+            # while this count is open; a serialized admit cannot overlap.
+            await asyncio.sleep(0.01)
+            return await original(caller_id)
+        finally:
+            state["counting"] = False
+
+    async def pinned_crawl(*args, **kwargs):
+        # Hold the first admit's row active through the second admit: a job
+        # that dies first would release its slot legitimately.
+        await pinned.wait()
+        return {}
+
+    return instrumented_count, pinned_crawl, state
+
+
 async def test_two_concurrent_async_posts_cannot_both_pass_a_quota_of_one(tmp_path, monkeypatch):
     """No two admits may count concurrently: the admit lock spans count->insert."""
     async with _keyedquota_client(tmp_path) as (client, store, tracker, issued):
-        original = store.aactive_count_for_caller
-        counting = False
-        overlapped = False
         pinned = asyncio.Event()
+        count_spy, pinned_crawl, state = _instrument(store, store.aactive_count_for_caller, pinned)
 
-        async def instrumented_count(caller_id):
-            nonlocal counting, overlapped
-            if counting:
-                overlapped = True
-            counting = True
-            try:
-                # Long enough that the loop definitely runs the other admit
-                # while this count is open; a serialized admit cannot overlap.
-                await asyncio.sleep(0.01)
-                return await original(caller_id)
-            finally:
-                counting = False
-
-        async def pinned_crawl(*args, **kwargs):
-            # Hold the first admit's row active through the second admit: a job
-            # that dies first would release its slot legitimately.
-            await pinned.wait()
-            return {}
-
-        monkeypatch.setattr(store, "aactive_count_for_caller", instrumented_count)
+        monkeypatch.setattr(store, "aactive_count_for_caller", count_spy)
         monkeypatch.setattr("crawlutron.api.async_crawl_runner.execute_crawl", pinned_crawl)
 
         posts = _two_concurrent_posts(client, {"X-API-Key": issued.secret})
         responses = [await asyncio.wait_for(t, timeout=10) for t in posts]
-        _assert_quota_outcome(responses, overlapped=overlapped, store=store, tracker=tracker, issued=issued)
-
-        # Release the pinned crawl and let its runner reach terminal so the
-        # harness closes with no straddling task.
-        pinned.set()
-        await await_until(
-            lambda: store.active_count_for_caller(issued.key_id) == 0,
-            "the pinned async crawl never reached terminal",
-        )
+        try:
+            _assert_quota_outcome(
+                responses, overlapped=state["overlapped"], store=store, tracker=tracker, issued=issued
+            )
+        finally:
+            # Always unblock the runner: a failed assertion must not leave it
+            # parked on the event, holding the webhook semaphore at teardown.
+            pinned.set()
+            with contextlib.suppress(AssertionError):
+                await await_until(
+                    lambda: store.active_count_for_caller(issued.key_id) == 0,
+                    "the pinned async crawl never reached terminal",
+                )
