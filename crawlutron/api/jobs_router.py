@@ -189,9 +189,7 @@ async def control_job(
     shutdown_event: ShutdownEventDep,
     caller: CallerDep,
 ) -> JobStatusResponse:
-    action = payload.action.lower()
-    if action not in {"pause", "resume", "cancel"}:
-        raise http_error(422, "invalid_action", f"Unknown action: {action}")
+    action = payload.action
     if not await job_store.aexists_for_caller(job_id, caller.caller_id):
         _raise_not_found(job_id)
 

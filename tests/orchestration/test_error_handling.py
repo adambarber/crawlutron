@@ -4,7 +4,7 @@ Pins the chokepoint contract: every strategy exception becomes a classified
 terminal result through one primitive, and pool exhaustion is re-queueable.
 """
 
-from dataclasses import asdict, replace
+from dataclasses import replace
 
 import httpx
 import pytest
@@ -13,6 +13,7 @@ from crawlutron.models.classification_evidence import ClassificationEvidenceReco
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.models.serialization import to_dict
 from crawlutron.transport.browser_pool import BrowserPoolExhaustedError
 from crawlutron.transport.classification import classify_error_code
 from crawlutron.transport.results import engine_result_from_exception
@@ -78,7 +79,7 @@ def test_primitive_never_leaks_raw_exception_text():
         normalized_url=canonical("https://a.example/x"),
         strategy="HTTP_DECLARED_CRAWLER",
     )
-    wire = asdict(result)
+    wire = to_dict(result)
     assert secret not in str(wire), "raw exception text reached the result"
 
 
@@ -110,7 +111,7 @@ def test_exception_envelopes_never_carry_discovered_links(error):
         normalized_url=canonical("https://a.example/x"),
         strategy="HTTP_DECLARED_CRAWLER",
     )
-    assert result.discovered_links == []
+    assert result.discovered_links == ()
 
 
 def test_primitive_default_classification_is_network_error():
@@ -191,11 +192,11 @@ class TestShapeAllGuardsPerItem:
         good = _budget_item()
         bad = replace(
             good,
-            classification_evidence=[
+            classification_evidence=(
                 ClassificationEvidenceRecord(
                     classification="network_error", signature="s", source="engine", context="c"
-                )
-            ],
+                ),
+            ),
         )
         # The bad item is a real result whose OPEN payload the wire model rejects, so shaping genuinely raises
         # on it.
@@ -281,7 +282,7 @@ class TestStrategyChainGuardsRaisingStrategies:
         assert result.classification == "network_error"
         # The stable code on the wire, and the primitive's redaction contract holds at this call site too.
         assert result.error == "network_error"
-        assert "internal-host.local" not in str(asdict(result))
+        assert "internal-host.local" not in str(to_dict(result))
 
     async def test_the_guard_does_not_re_wrap_the_http_strategy_sink(self):
         """The HTTP strategy already envelopes its own raise; the chain guard

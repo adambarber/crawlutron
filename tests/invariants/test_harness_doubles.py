@@ -369,7 +369,7 @@ def test_engine_result_carries_the_caller_s_link_records_once_each() -> None:
     ]
     result = engine_result(GRAPH_ROOT, "rendered", raw_links=links)
 
-    assert result.discovered_links == links, (
+    assert result.discovered_links == tuple(links), (
         "the builder must carry the caller's own link records, not re-derive them"
     )
     assert result.discovered_link_count == len(links), (

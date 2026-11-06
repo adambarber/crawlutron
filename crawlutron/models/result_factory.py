@@ -5,6 +5,8 @@ both layers import one owner instead of ``crawlutron.transport`` reaching into o
 
 from __future__ import annotations
 
+from types import MappingProxyType
+
 from crawlutron.models.classification_evidence import ClassificationEvidenceRecord
 from crawlutron.models.crawl_diagnostics import CrawlDiagnostics
 from crawlutron.models.crawl_result import CrawlResult, EngineCrawlResult
@@ -54,12 +56,8 @@ def build_engine_result(
     classification are read off ``attempt``, never re-stated by the caller."""
     if headers is None:
         headers = {}
-    if classification_evidence is None:
-        classification_evidence = []
     if diagnostics is None:
         diagnostics = {}
-    if discovered_links is None:
-        discovered_links = []
     return EngineCrawlResult(
         original_url=original_url,
         normalized_url=normalized_url,
@@ -67,20 +65,20 @@ def build_engine_result(
         status=attempt.status,
         classification=attempt.classification,
         selected_strategy=selected_strategy,
-        attempted_strategies=[attempt],
+        attempted_strategies=(attempt,),
         http_status=http_status,
-        headers=headers,
+        headers=MappingProxyType(dict(headers)),
         content_type=content_type,
         html=html,
         text=text,
         markdown=markdown,
         extraction_method=extraction_method,
         quality_score=quality_score,
-        classification_evidence=classification_evidence,
+        classification_evidence=tuple(classification_evidence or ()),
         diagnostics=diagnostics,
         discovered_link_count=discovered_link_count,
         discovered_links_truncated=discovered_links_truncated,
-        discovered_links=discovered_links,
+        discovered_links=tuple(discovered_links or ()),
         error=attempt.error,
         next_page_url=next_page_url,
         validators=validators or {},

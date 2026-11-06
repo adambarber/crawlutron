@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import cast
 
 from crawlutron.extraction.llm_format import (
@@ -74,7 +74,7 @@ def _coerce_strategy(value: CrawlStrategyName | None) -> CrawlStrategy | None:
     return CrawlStrategy(value) if value is not None else None
 
 
-def _attempt_models(attempts: list[CrawlStrategyAttempt]) -> list[StrategyAttempt]:
+def _attempt_models(attempts: Sequence[CrawlStrategyAttempt]) -> list[StrategyAttempt]:
     """The per-strategy attempt models, built from the dataclass's own attributes.
     ``from_attributes`` keeps this a conversion the checker can see, not a
     coercion performed on the way into a constructor.
@@ -82,12 +82,14 @@ def _attempt_models(attempts: list[CrawlStrategyAttempt]) -> list[StrategyAttemp
     return [StrategyAttempt.model_validate(attempt, from_attributes=True) for attempt in attempts]
 
 
-def _link_models(links: list[DiscoveredLink]) -> list[WireDiscoveredLink]:
+def _link_models(links: Sequence[DiscoveredLink]) -> list[WireDiscoveredLink]:
     """The discovered-link models. See :func:`_attempt_models`."""
     return [WireDiscoveredLink.model_validate(link, from_attributes=True) for link in links]
 
 
-def _evidence_models(evidence: list[ClassificationEvidenceRecord]) -> list[ClassificationEvidence]:
+def _evidence_models(
+    evidence: Sequence[ClassificationEvidenceRecord],
+) -> list[ClassificationEvidence]:
     """The classification-evidence models.
     The one conversion still taking a raw dict -- the producer still builds
     evidence as plain JSON -- and the honest place to point a future wave.
@@ -95,7 +97,7 @@ def _evidence_models(evidence: list[ClassificationEvidenceRecord]) -> list[Class
     return [ClassificationEvidence.model_validate(item) for item in evidence]
 
 
-def _validator_model(validators: dict[str, str]) -> ContentValidators | None:
+def _validator_model(validators: Mapping[str, str]) -> ContentValidators | None:
     """The origin-validator model, or None when the origin supplied none."""
     return ContentValidators.model_validate(validators) if validators else None
 

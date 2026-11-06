@@ -26,14 +26,15 @@ _UNSET = Unset()
 
 
 class _EngineResultOverrides(TypedDict, total=False):
-    """The subset of EngineCrawlResult fields tests may override."""
+    """The subset of EngineCrawlResult fields tests may override. Collection
+    fields stay lists/dicts in the TypedDict -- callers spell Python collections --
+    and the record's ``__post_init__`` coerces them at the construction edge."""
 
     # Submission identity
     original_url: str
     normalized_url: NormalizedUrl | None
     # Strategy selection
     selected_strategy: CrawlStrategyName | None
-    attempted_strategies: list[CrawlStrategyAttempt]
     # Response metadata
     http_status: int | None
     headers: dict[str, str]
@@ -45,7 +46,6 @@ class _EngineResultOverrides(TypedDict, total=False):
     # Quality
     quality_score: float
     # Discovery
-    discovered_links: list[DiscoveredLink]
     discovered_link_count: int
     # Error
     error: CrawlError | None
@@ -94,15 +94,15 @@ def _absent_result(
         status=derived,
         classification=classification,
         selected_strategy=None,
-        attempted_strategies=[
+        attempted_strategies=(
             terminal_attempt(
                 strategy=None,
                 status=derived,
                 classification=classification,
                 elapsed_ms=0,
                 error=None,
-            )
-        ],
+            ),
+        ),
         http_status=None,
         headers={},
         content_type=None,
@@ -110,7 +110,7 @@ def _absent_result(
         text=None,
         extraction_method=None,
         quality_score=0.0,
-        discovered_links=discovered,
+        discovered_links=tuple(discovered),
         discovered_link_count=len(discovered),
         error=None,
     )
@@ -123,6 +123,8 @@ def engine_result(
     status: ResultStatus | None = None,
     links: list[str] | None = None,
     raw_links: list[DiscoveredLink] | None = None,
+    attempted_strategies: list[CrawlStrategyAttempt] | None = None,
+    discovered_links: list[DiscoveredLink] | None = None,
     final_url: str | NormalizedUrl | None | Unset = _UNSET,
     **overrides: Unpack[_EngineResultOverrides],
 ):
@@ -136,7 +138,7 @@ def engine_result(
 
     if "discovered_link_count" in overrides:
         raise TypeError("discovered_link_count is derived from discovered_links; pass only the links")
-    links_arg = list(overrides.pop("discovered_links", []) or [])
+    links_arg = list(discovered_links or [])
     # ``normalized_url``/``final_url`` are the record's value fields; callers still name submission text, so
     # admission lives here at the one builder rather than at every call site.
     normalized_text = overrides.pop("normalized_url", url)
@@ -158,7 +160,18 @@ def engine_result(
         final_url_text=final_url_text,
         discovered=discovered,
     )
-    return replace(absent, **overrides) if overrides else absent
+    # The two collection overrides are typed parameters, not TypedDict keys: the
+    # record's tuple fields are normalized here, and replace() is checked per-field.
+    shaped = replace(absent, **overrides) if overrides else absent
+    return replace(
+        shaped,
+        attempted_strategies=(
+            tuple(attempted_strategies) if attempted_strategies is not None else shaped.attempted_strategies
+        ),
+        discovered_links=(
+            tuple(discovered_links) if discovered_links is not None else shaped.discovered_links
+        ),
+    )
 
 
 def skipped_result(

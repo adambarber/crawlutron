@@ -60,7 +60,7 @@ def _make_engine_result(url: str) -> EngineCrawlResult:
         status="success",
         classification="rendered",
         selected_strategy="HTTP_DECLARED_CRAWLER",
-        attempted_strategies=[],
+        attempted_strategies=(),
         http_status=200,
         headers={},
         content_type="text/html",
@@ -68,7 +68,7 @@ def _make_engine_result(url: str) -> EngineCrawlResult:
         text="test",
         extraction_method="trafilatura",
         quality_score=1.0,
-        discovered_links=[],
+        discovered_links=(),
         error=None,
     )
 

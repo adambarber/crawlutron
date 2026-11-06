@@ -255,7 +255,7 @@ class _ChainRun:
         state.attempts = [a for a in state.attempts if a.strategy != HTTP_CFFI_IMPERSONATE]
         state.attempts.extend(retry_result.attempted_strategies)
         if retry_result.status == "success" and retry_result.quality_score > 0:
-            return replace(retry_result, attempted_strategies=state.attempts)
+            return replace(retry_result, attempted_strategies=tuple(state.attempts))
         state.last_result = result
         return None
 
@@ -360,7 +360,7 @@ async def _walk_ladder(
         if _is_usable(result):
             if context.scheduler is not None:
                 context.scheduler.set_pinned_strategy(context.domain, strategy)
-            return replace(result, attempted_strategies=run.state.attempts)
+            return replace(result, attempted_strategies=tuple(run.state.attempts))
         # A pin-invalidating failure means the pinned strategy is no longer
         # viable: unpin and re-climb from the base instead of a failure loop.
         if (
@@ -375,7 +375,7 @@ async def _walk_ladder(
             continue
         index += 1
     last = cast("EngineCrawlResult", run.state.last_result)
-    return replace(last, attempted_strategies=run.state.attempts)
+    return replace(last, attempted_strategies=tuple(run.state.attempts))
 
 
 __all__ = ["execute_crawl_chain"]
