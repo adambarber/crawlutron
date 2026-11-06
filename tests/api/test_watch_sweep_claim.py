@@ -8,11 +8,10 @@ from __future__ import annotations
 
 import asyncio
 
-from crawlutron.api.watch_sweep import WatchSweeper
-from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.webhook_target import WebhookTarget
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 from tests._result_builders import engine_result
+from tests._watch_harnesses import default_sweeper, loopback_url
 
 NOW = 1_700_000_000.0
 INTERVAL = 3600
@@ -23,24 +22,13 @@ def _webhook() -> WebhookTarget:
     return WebhookTarget.admit(WEBHOOK, host_policy=UNRESTRICTED_HOST_POLICY)
 
 
-def origin_url(server) -> str:
-    """The loopback URL of a served fixture."""
-    return f"http://127.0.0.1:{server.server_port}/"
-
-
-def _sweeper(watch_store) -> WatchSweeper:
-    return WatchSweeper(
-        watch_store, host_policy=UNRESTRICTED_HOST_POLICY, settings=CrawlerSettings.from_mapping()
-    )
-
-
 async def test_two_concurrent_sweeps_deliver_one_webhook_not_two(watch_store, etag_server, monkeypatch):
     """Two sweeper processes over one due watch must fire the webhook once: the
     second sweeper's claim CAS loses and the row is skipped, not re-delivered."""
     from crawlutron.api import watch_sweep
 
     watch = watch_store.create(
-        canonical(origin_url(etag_server)),
+        canonical(loopback_url(etag_server)),
         webhook_url=_webhook(),
         interval_seconds=INTERVAL,
         now=0.0,
@@ -75,7 +63,7 @@ async def test_two_concurrent_sweeps_deliver_one_webhook_not_two(watch_store, et
     monkeypatch.setattr(watch_sweep, "execute_crawl", _parked_crawl)
     monkeypatch.setattr(watch_sweep, "start_webhook_delivery", _spawn)
 
-    first, second = _sweeper(watch_store), _sweeper(watch_store)
+    first, second = default_sweeper(watch_store), default_sweeper(watch_store)
     pass_one = asyncio.create_task(first.sweep_once(now=NOW))
     # The second sweeper starts while the first holds the watch mid-check.
     await asyncio.wait_for(first_in_check.wait(), timeout=10)
@@ -95,7 +83,7 @@ async def test_a_hanging_webhook_does_not_stall_the_sweep_pass(watch_store, etag
     from crawlutron.api.webhooks import drain_webhook_deliveries
 
     watch = watch_store.create(
-        canonical(origin_url(etag_server)),
+        canonical(loopback_url(etag_server)),
         webhook_url=_webhook(),
         interval_seconds=INTERVAL,
         now=0.0,
@@ -112,7 +100,7 @@ async def test_a_hanging_webhook_does_not_stall_the_sweep_pass(watch_store, etag
 
     monkeypatch.setattr(watch_sweep, "start_webhook_delivery", _spawn_hanging)
 
-    sweeper = _sweeper(watch_store)
+    sweeper = default_sweeper(watch_store)
     sweep = asyncio.create_task(sweeper.sweep_once(now=NOW))
 
     async def finish_sweep():
