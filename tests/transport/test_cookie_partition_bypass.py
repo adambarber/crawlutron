@@ -9,9 +9,10 @@ from tests._policy_factories import canonical
 
 def _planted_jar(namespace: str):
     """The process jar holding one hop cookie in ``namespace``; state reset around."""
-    from crawlutron.transport.cookie_jar import global_cookie_jar, reset_process_state
+    from crawlutron.runtime import process_state
+    from crawlutron.transport.cookie_jar import global_cookie_jar
 
-    reset_process_state()
+    process_state.reset_all_process_state()
     jar = global_cookie_jar()
     jar.add_cookie_header(canonical("http://b.example/"), "hop=1; Path=/", namespace=namespace)
     return jar
@@ -19,7 +20,8 @@ def _planted_jar(namespace: str):
 
 def _hop_under(namespace: str):
     """One redirect hop with ``namespace`` bound; the (url, headers) result."""
-    from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE, reset_process_state
+    from crawlutron.runtime import process_state
+    from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE
 
     _planted_jar(namespace)
     token = COOKIE_NAMESPACE.set(namespace)
@@ -27,7 +29,7 @@ def _hop_under(namespace: str):
         result = _run_redirect({"Cookie": "caller=private"})
     finally:
         COOKIE_NAMESPACE.reset(token)
-    reset_process_state()
+    process_state.reset_all_process_state()
     return result
 
 
@@ -64,9 +66,10 @@ def test_browser_harvest_keys_by_the_crawl_namespace():
     A keyed crawl's harvested session must never surface to an anonymous or
     other-tenant read: the store and the get are keyed by the same namespace.
     """
+    from crawlutron.runtime import process_state
     from crawlutron.transport import browser_cookies
 
-    browser_cookies.reset_process_state()
+    process_state.reset_all_process_state()
     try:
         page = _page_with_cookies([{"name": "sess", "value": "a-secret"}])
         _run_harvest(page, namespace="tenant-a")
@@ -77,7 +80,7 @@ def test_browser_harvest_keys_by_the_crawl_namespace():
         # ...and the shared default reads nothing either.
         assert browser_cookies.get_browser_cookies_for("example.com", namespace="") is None
     finally:
-        browser_cookies.reset_process_state()
+        process_state.reset_all_process_state()
 
 
 def test_browser_harvest_defaults_to_the_bound_contextvar_namespace():
@@ -85,10 +88,11 @@ def test_browser_harvest_defaults_to_the_bound_contextvar_namespace():
 
     release_page calls the harvest without an explicit namespace, so the default
     must be the bound crawl namespace -- not a hardcoded shared slot."""
+    from crawlutron.runtime import process_state
     from crawlutron.transport import browser_cookies
     from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE
 
-    browser_cookies.reset_process_state()
+    process_state.reset_all_process_state()
     try:
         page = _page_with_cookies([{"name": "sess", "value": "bound"}])
         token = COOKIE_NAMESPACE.set("tenant-a")
@@ -99,7 +103,7 @@ def test_browser_harvest_defaults_to_the_bound_contextvar_namespace():
         assert browser_cookies.get_browser_cookies_for("example.com", namespace="tenant-a") == "sess=bound"
         assert browser_cookies.get_browser_cookies_for("example.com", namespace="") is None
     finally:
-        browser_cookies.reset_process_state()
+        process_state.reset_all_process_state()
 
 
 def _page_with_cookies(cookies):

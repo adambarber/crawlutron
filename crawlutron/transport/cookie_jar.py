@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, TypedDict, cast
 
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.registrable_domain import is_public_suffix
+from crawlutron.runtime import process_state
 from crawlutron.storage.coordination_cookies import DEFAULT_MAX_HOSTS_PER_NAMESPACE
 from crawlutron.storage.coordination_store import atwin
 from crawlutron.transport.cookie_store import InMemoryCookieStore
@@ -54,8 +55,6 @@ __all__ = [
     "CookieJar",
     "global_cookie_jar",
     "set_global_cookie_jar",
-    "reset_process_state",
-    "has_process_state",
     "sendable_cookie_header",
     "RecordingSendPolicy",
     "cookie_from",
@@ -475,11 +474,8 @@ def set_global_cookie_jar(jar: CookieJar) -> None:
     _GLOBAL_COOKIE_JAR = jar
 
 
-def reset_process_state() -> None:
-    """Drop the process cookie jar and clear the per-request namespace.
-    One door for one piece of state: the jar and the namespace contextvar are
-    one unit, so resetting one without the other leaves a state production never reaches.
-    """
+def _reset() -> None:
+    """Drop the process cookie jar and clear the per-request namespace."""
     # Rebuild, not merely clear: a swapped-in double must not stay installed
     # after the reset -- the engine's reset door rebuilds its objects the same way.
     global _GLOBAL_COOKIE_JAR
@@ -487,8 +483,11 @@ def reset_process_state() -> None:
     COOKIE_NAMESPACE.set("")
 
 
-def has_process_state() -> bool:
+def _has() -> bool:
     """Whether the jar holds a cookie, or a request namespace is still selected."""
     # Not ``bool(_GLOBAL_COOKIE_JAR)``: the jar defines no ``__len__`` or
     # ``__bool__``, so truthiness is constant True; ask the medium instead.
     return len(_GLOBAL_COOKIE_JAR._inmemory) > 0 or COOKIE_NAMESPACE.get() != ""
+
+
+process_state.register(__name__, _reset, _has)

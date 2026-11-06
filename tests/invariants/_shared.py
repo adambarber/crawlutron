@@ -21,6 +21,7 @@ __all__ = [
     "app_names",
     "assert_trees_clean",
     "function_defs",
+    "module_level_bindings",
     "_module_definition_index",
     "_module_name",
 ]
@@ -86,6 +87,19 @@ def assert_trees_clean(
         hit for path, tree in (app_trees() if trees is None else trees) for hit in detector(tree, path)
     ]
     assert not offenders, f"{message}: {'; '.join(offenders)}"
+
+
+def module_level_bindings(module: ast.Module) -> set[str]:
+    """Names bound at the top level of ``module``: defs, classes, assigns, ``__all__``."""
+    bound: set[str] = set()
+    for node in module.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+        elif isinstance(node, ast.Assign):
+            bound.update(t.id for t in node.targets if isinstance(t, ast.Name))
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            bound.add(node.target.id)
+    return bound
 
 
 def _enclosing_nodes(tree: ast.AST, matches: Callable[[ast.AST], bool]) -> list[tuple[ast.AST, str]]:

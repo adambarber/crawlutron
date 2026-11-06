@@ -19,6 +19,7 @@ from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.http_fetch_result import HttpFetchResult as HttpFetchResult
 from crawlutron.models.http_fetcher import HttpFetcher as HttpFetcher
 from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.runtime import process_state
 from crawlutron.safety.bounded_ttl import BoundedTTLCache
 from crawlutron.transport.body_decode import decode_body
 from crawlutron.transport.decompression import decompress_body as _decompress_body
@@ -368,7 +369,7 @@ async def fetch_sitemap_urls(
     return page_urls
 
 
-def reset_process_state() -> None:
+def _reset() -> None:
     """Drop cached sitemap documents.
 
     The cache is process-wide and its TTL is hours, so a test that crawls a sitemap
@@ -377,6 +378,9 @@ def reset_process_state() -> None:
     SITEMAP_CACHE.clear()
 
 
-def has_process_state() -> bool:
+def _has() -> bool:
     """Whether any sitemap document is cached right now."""
     return bool(SITEMAP_CACHE)
+
+
+process_state.register(__name__, _reset, _has)

@@ -23,6 +23,7 @@ import httpx
 from crawlutron.config.env import EnvDecisionMemo, get_env_int, get_mapping_int
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.runtime import process_state
 from crawlutron.safety.bounded_io import BodyTooLarge, read_capped_async
 from crawlutron.transport.timeouts import Timeouts
 
@@ -73,6 +74,22 @@ def webhook_secret() -> str:
 def reset_plaintext_webhook_memo() -> None:
     """Drop the memoized plaintext-webhook env decision (tests)."""
     _PLAINTEXT_WEBHOOK_DECISION.reset()
+
+
+def _reset() -> None:
+    """Cancel in-flight deliveries, empty the tracked set, drop the env memo."""
+    reset_plaintext_webhook_memo()
+    for task in list(_DELIVERIES):
+        task.cancel()
+    _DELIVERIES.clear()
+
+
+def _has() -> bool:
+    """Whether any delivery task is tracked or the env decision is memoized."""
+    return bool(_DELIVERIES) or _PLAINTEXT_WEBHOOK_DECISION._decision is not None
+
+
+process_state.register(__name__, _reset, _has)
 
 
 def ensure_https_webhook_url(webhook_url: str) -> None:

@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Protocol, TypeVar, cast
 
 import httpx
 
+from crawlutron.runtime import process_state
 from crawlutron.runtime.resource_lifecycle import DeferredClose
 from crawlutron.transport.timeouts import Timeouts
 from crawlutron.vocabulary.identity import DEFAULT_USER_AGENT
@@ -42,9 +43,7 @@ __all__ = [
     "discard_if_unowned_loop",
     "drain_pending_client_closes",
     "get_async_http_client",
-    "has_process_state",
     "http_singleton",
-    "reset_process_state",
     "swap_pooled_builders",
 ]
 
@@ -358,7 +357,7 @@ def discard_if_unowned_loop(
         loop.run_until_complete(cast(Awaitable[object], close()))
 
 
-def reset_process_state() -> None:
+def _reset() -> None:
     """Release every process-wide object this module holds.
     The two lazily-created clients and the pending-close queue are one unit: a
     queue holding a released client outlives its loop, so resetting one without the rest leaves a wrong state.
@@ -374,9 +373,12 @@ def http_singleton() -> LoopBoundPooledClient:
     return _HTTP_CLIENT_SINGLETON
 
 
-def has_process_state() -> bool:
+def _has() -> bool:
     """Whether a lazily-created client or a queued close reference is still held."""
     return _DEFAULT_HTTP_CLIENT is not None or bool(_PENDING_CLIENT_CLOSE)
+
+
+process_state.register(__name__, _reset, _has)
 
 
 @contextmanager

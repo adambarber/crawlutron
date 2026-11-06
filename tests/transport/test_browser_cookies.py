@@ -6,7 +6,7 @@ from collections import OrderedDict
 import pytest
 
 import crawlutron.transport.browser_cookies as browser_cookies
-from crawlutron.transport import browser as browser_mod
+from crawlutron.runtime import process_state
 from crawlutron.transport.browser import get_browser_cookies_for
 from crawlutron.transport.browser_cookies import BROWSER_COOKIES_MAX, store_browser_cookies
 
@@ -19,11 +19,11 @@ def clean_cookie_store():
     the reason save-and-restore only ever worked by ``MutableMapping``.
     """
     store = browser_cookies.BROWSER_COOKIES_BY_DOMAIN
-    browser_mod.reset_process_state()
+    process_state.reset_all_process_state()
     try:
         yield store
     finally:
-        browser_mod.reset_process_state()
+        process_state.reset_all_process_state()
 
 
 def test_public_helpers_reach_the_guarded_store(clean_cookie_store):
@@ -181,9 +181,10 @@ async def test_cffi_session_does_not_replay_cookies_it_received(base_url):
     becomes tenant B's ``Cookie:`` header when the jar replays by domain.
     """
     pytest.importorskip("curl_cffi")
+    from crawlutron.runtime import process_state
     from crawlutron.transport import http_client_pool
 
-    http_client_pool.reset_process_state()
+    process_state.reset_all_process_state()
     session = http_client_pool.get_cffi_session()
     try:
         await session.get(base_url + "/set-cookie")

@@ -192,9 +192,9 @@ AGE_BASED_DELETION_CONSULTS_OWNERSHIP = Rule(
 #: The one holder name: it pairs the semaphore with the loop that built it.
 _SEMAPHORE_HOLDER_GLOBAL = "_SEMAPHORE_HOLDER"
 
-# The accessor rebinds the holder to the running loop; the public reset empties
+# The accessor rebinds the holder to the running loop; the registered reset empties
 # it so a test swapping the builder observes its patch immediately.
-_SEMAPHORE_WRITERS = frozenset({"async_crawl_semaphore", "reset_process_state"})
+_SEMAPHORE_WRITERS = frozenset({"async_crawl_semaphore", "_reset", "_has"})
 
 
 def _semaphore_holder_touch_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -244,10 +244,8 @@ SEMAPHORE_HOLDER_IS_SINGLE_AND_LOOP_BOUND = Rule(
         "    global _SEMAPHORE_HOLDER\n"
         "    _SEMAPHORE_HOLDER = _SemaphoreHolder(_build(), None)\n"
         "    return _SEMAPHORE_HOLDER.semaphore\n",
-        # The public reset is the other sanctioned writer: it empties the holder.
-        "def reset_process_state():\n"
-        "    global _SEMAPHORE_HOLDER\n"
-        "    _SEMAPHORE_HOLDER = _SemaphoreHolder()\n",
+        # The private registration reset is the other sanctioned writer: it empties the holder.
+        "def _reset():\n    global _SEMAPHORE_HOLDER\n    _SEMAPHORE_HOLDER = _SemaphoreHolder()\n",
     ),
 )
 
@@ -291,11 +289,12 @@ def test_the_holder_is_loop_bound_and_reset_clears_it():
     import asyncio
 
     import crawlutron.api.async_crawl_runner as runner
+    from crawlutron.runtime import process_state
 
     async def _accessor_on_this_loop():
         return runner.async_crawl_semaphore()
 
-    runner.reset_process_state()
+    process_state.reset_all_process_state()
     first = runner.async_crawl_semaphore()
     foreign = asyncio.new_event_loop()
     try:
@@ -303,5 +302,5 @@ def test_the_holder_is_loop_bound_and_reset_clears_it():
         assert rebuilt is not first, "a loop change must rebuild, not reuse"
     finally:
         foreign.close()
-    runner.reset_process_state()
+    process_state.reset_all_process_state()
     assert runner.async_crawl_semaphore() is not first, "post-reset access must rebuild"

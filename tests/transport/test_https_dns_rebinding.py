@@ -12,8 +12,8 @@ import httpcore
 import httpx
 import pytest
 
+from crawlutron.runtime import process_state
 from crawlutron.transport import http_client_pool as pool_mod
-from crawlutron.transport import pinned_dns as pinned
 from crawlutron.transport.fetchers import default_http_fetcher
 from tests._assertions import block_private_targets
 from tests._policy_factories import canonical
@@ -131,7 +131,7 @@ class TestHttpsDnsRebindingFetchIsBlocked:
         The private second-phase answer is never used -- it must appear in no connection.
         """
         block_private_targets(monkeypatch)
-        pinned.reset_process_state()
+        process_state.reset_all_process_state()
         backend = _RecordingBackend()
         _install_client(monkeypatch, backend)
         _two_phase_resolver(monkeypatch)
@@ -153,7 +153,7 @@ class TestHttpsDnsRebindingFetchIsBlocked:
         PIN TIME is private/loopback is refused before any connection (the SSRF
         guarantee the double-resolve used to surface one hop later)."""
         block_private_targets(monkeypatch)
-        pinned.reset_process_state()
+        process_state.reset_all_process_state()
         backend = _RecordingBackend()
         _install_client(monkeypatch, backend)
 
@@ -177,7 +177,7 @@ class TestHttpsDnsRebindingFetchIsBlocked:
         """Plain HTTP pins to a freshly validated IP, so a two-phase rebind cannot
         move the connection: every connect is the IP the pin itself validated."""
         block_private_targets(monkeypatch)
-        pinned.reset_process_state()
+        process_state.reset_all_process_state()
         backend = _RecordingBackend()
         _install_client(monkeypatch, backend)
         _two_phase_resolver(monkeypatch)
@@ -199,7 +199,7 @@ class TestHttpsSafeTargetFetchesWithSniPreserved:
         public IP, and preserves the original hostname for TLS SNI -- the pin must not
         block legitimate traffic or break real-site TLS routing."""
         block_private_targets(monkeypatch)
-        pinned.reset_process_state()
+        process_state.reset_all_process_state()
         backend = _RecordingBackend()
         _install_client(monkeypatch, backend)
         _stable_public_resolver(monkeypatch)

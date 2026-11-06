@@ -51,7 +51,7 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     # BrowserPool, SyncPool for DocExtractionPool -- so the surface is two protocols.
     "crawlutron/runtime/pool.py": (2, 2),
     # CookieJar transport module with equivalence pin for contributor derivation (#418).
-    "crawlutron/transport/cookie_jar.py": (13, 8),
+    "crawlutron/transport/cookie_jar.py": (11, 6),
     # #441 + #544/S3: the header wire law for names and values, shared by the
     # policy, credential, and transport edges.
     "crawlutron/safety/header_values.py": (3, 3),
@@ -62,13 +62,13 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     "crawlutron/orchestration/spill_sink.py": (2, 2),
     "crawlutron/transport/http_cache.py": (4, 4),
     "crawlutron/transport/http_classify.py": (3, 3),
-    "crawlutron/transport/pooled_clients.py": (13, 11),
+    "crawlutron/transport/pooled_clients.py": (11, 9),
     # #314/wave-2: JobAccumulators (one class) moved here whole from job_store_state
     # to hold the 500-line ceiling; the seam owns every accumulator table.
     "crawlutron/storage/job_store_accumulators.py": (1, 1),
     # #314/wave-3: DNS + SSRF split out of pinned_transport (500-line ceiling);
     # the seam owns every resolve-and-pin door plus the process-state reset pair.
-    "crawlutron/transport/pinned_dns.py": (15, 12),
+    "crawlutron/transport/pinned_dns.py": (13, 10),
 }
 
 # Former #215 exemptions: their __all__ deliberately does not enumerate every public
@@ -78,7 +78,7 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/_version.py": (3, 0),
     "crawlutron/admission/policy.py": (11, 6),
     "crawlutron/api/_depends_singletons.py": (2, 0),
-    "crawlutron/api/async_crawl_runner.py": (4, 3),
+    "crawlutron/api/async_crawl_runner.py": (3, 2),
     "crawlutron/api/caller_auth.py": (18, 15),
     "crawlutron/api/caller_concurrency.py": (1, 1),
     "crawlutron/api/crawl_executor.py": (1, 1),
@@ -132,9 +132,9 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/storage/migrations/ddl.py": (2, 2),
     "crawlutron/storage/watch_store.py": (1, 1),
     "crawlutron/transport/browser.py": (3, 2),
-    "crawlutron/transport/browser_cookies.py": (8, 5),
+    "crawlutron/transport/browser_cookies.py": (6, 3),
     "crawlutron/transport/browser_result.py": (1, 1),
     "crawlutron/transport/content_pipeline.py": (6, 4),
-    "crawlutron/transport/http_client_pool.py": (2, 2),
+    "crawlutron/transport/http_client_pool.py": (1, 1),
     "crawlutron/transport/strategy_request.py": (1, 0),
 }

@@ -1,20 +1,22 @@
-"""Every module holding state that outlives a call satisfies one protocol (six
-owners reachable through it, not sixteen private conftest names); the matcher is
-parameterized over the table and asserts shape, agreement, and idempotence -- not fabricated state.
+"""One registry owns every module holding state that outlives a call (#621).
+
+No module exports a hand-copied ``reset_process_state`` pair; each registers a
+private reset/probe with ``crawlutron.runtime.process_state``, and the harness
+drives the one seam. The matcher asserts registration shape, probe/reset
+agreement, and idempotence -- not fabricated state.
 """
 
 from __future__ import annotations
 
 import ast
 import importlib
-import pathlib
 
 import pytest
 
-from crawlutron.runtime.process_state import ProcessStateOwner
-from tests.chokepoint_walks import REPO_ROOT
+from crawlutron.runtime import process_state
 
-OWNERS: tuple[str, ...] = (
+# Registered owners the registry tests reach into directly.
+KNOWN = (
     "crawlutron.runtime.cgroup_sense",
     "crawlutron.orchestration.engine",
     "crawlutron.transport.fetch_helpers",
@@ -22,6 +24,10 @@ OWNERS: tuple[str, ...] = (
     "crawlutron.transport.cookie_jar",
     "crawlutron.transport.pooled_clients",
     "crawlutron.transport.pinned_dns",
+    "crawlutron.transport.pooled_cffi",
+    "crawlutron.api.webhooks",
+    "crawlutron.storage.sqlite_store",
+    "crawlutron.api.async_crawl_runner",
 )
 
 
@@ -32,91 +38,72 @@ def _module_level_state(module: ast.Module) -> set[str]:
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
             bound.update(t.id for t in targets if isinstance(t, ast.Name))
-        elif isinstance(node, ast.ClassDef):
-            bound.add(node.name)
     return bound
 
 
-def _names_read(fn: ast.FunctionDef) -> set[str]:
-    return {n.id for n in ast.walk(fn) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
+@pytest.mark.parametrize("module_path", KNOWN)
+def test_owner_registered_its_pair(module_path: str) -> None:
+    importlib.import_module(module_path)
+    process_state.owner_has_state(module_path)  # raises KeyError when unregistered
 
 
-@pytest.mark.parametrize("module_path", OWNERS)
-def test_owner_satisfies_the_protocol(module_path: str) -> None:
-    assert isinstance(importlib.import_module(module_path), ProcessStateOwner)
-
-
-@pytest.mark.parametrize("module_path", OWNERS)
-def test_probe_and_reset_agree_on_the_state(module_path: str) -> None:
-    """The probe reads what the reset empties: a live check needs real module state,
-    which means reaching into the private store, so the pair is checked structurally
-    instead -- disjoint names would disagree.
-    """
-    module = ast.parse((REPO_ROOT / f"{module_path.replace('.', '/')}.py").read_text(encoding="utf-8"))
-    functions = {n.name: n for n in module.body if isinstance(n, ast.FunctionDef)}
-    state = _module_level_state(module)
-    reset = _names_read(functions["reset_process_state"]) & state
-    probe = _names_read(functions["has_process_state"]) & state
-
-    assert reset, f"{module_path}.reset_process_state names no module-level state to empty"
-    assert reset & probe, (
-        f"{module_path}: reset empties {sorted(reset)} but has_process_state reads {sorted(probe)} "
-        f"-- disjoint, so the probe certifies a reset that emptied nothing"
-    )
-
-
-@pytest.mark.parametrize("module_path", OWNERS)
+@pytest.mark.parametrize("module_path", KNOWN)
 def test_reset_is_idempotent(module_path: str) -> None:
-    module = importlib.import_module(module_path)
-    module.reset_process_state()
-    module.reset_process_state()
-    assert not module.has_process_state(), (
-        f"{module_path}.has_process_state() is True on a module that was just reset -- "
-        f"a probe that can only say False satisfies every assertion in this file"
+    importlib.import_module(module_path)
+    process_state.reset_all_process_state()
+    process_state.reset_all_process_state()
+    assert not process_state.owner_has_state(module_path), (
+        f"{module_path} still holds process state right after the registry reset -- "
+        f"a probe that cannot say False certifies nothing"
     )
 
 
-def test_engine_reset_empties_the_shared_content_cache() -> None:
-    """The fourth process-global sits inside the reset/probe pair, not beside it.
-
-    #147: the shared content cache was emptied by nothing and seen by nothing.
-    A seeded entry survived both halves.
+def test_every_owner_registers_and_none_exports_the_pair() -> None:
+    """The registry is the declaration: a module with the reset shape must register,
+    and no app module may export the hand-copied pair -- the seam is the only door.
     """
-    import crawlutron.orchestration.engine as engine
+    from tests.invariants.test_reset_family import _hand_copied_pair_offenders
 
-    cache = engine.get_shared_content_cache()
-    cache.set("engine-reset-probe", {"data": "value"})
-    assert engine.has_process_state(), "a seeded content cache is live process state"
-    engine.reset_process_state()
-    assert not engine.has_process_state(), (
-        "the shared content cache outlived the reset that empties every shared cache"
+    offenders = _hand_copied_pair_offenders()
+    assert not offenders, (
+        f"modules hand-copying reset_process_state/has_process_state: {offenders} -- "
+        f"register with crawlutron.runtime.process_state instead"
     )
 
 
-def test_every_owner_is_listed() -> None:
-    """The table is the declaration; a new module must be added to it, asserted against
-    the tree rather than trusted -- an unnamed state holder conforms to nothing and is
-    checked by nothing, which is how the six undocumented reaches survived.
-    """
-    listed = {name.rpartition(".")[2] for name in OWNERS}
-    found: set[str] = set()
-    for path in sorted((REPO_ROOT / "crawlutron").rglob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        names = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
-        if {"reset_process_state", "has_process_state"} <= names:
-            found.add(pathlib.Path(*path.relative_to(REPO_ROOT).parts).stem)
-    assert found <= listed, f"modules conforming but not listed in OWNERS: {sorted(found - listed)}"
+def test_conformers_register() -> None:
+    """Modules holding reset-shaped state are all in the registry (bite of the inverse)."""
+    for module_path in KNOWN:
+        importlib.import_module(module_path)
+    assert process_state.registered_owners(), "the registry is empty: every owner went unregistered"
 
 
-def test_engine_reset_clears_the_spill_gc_cadence_stamp() -> None:
-    """#605: the cadence stamp gated the sweep across resets, so a reset process
-    skipped the first sweep of its new crawl lifetime. Reset drops the stamp.
-    """
-    import crawlutron.orchestration.engine as engine
+def test_registry_reset_actually_runs_every_registration() -> None:
+    """A registration the sweep skips is a reset that silently never happened."""
+    from crawlutron.runtime import process_state
 
-    engine.spill_gc_last_run = 1.0  # a stamp claiming the sweep just ran
-    engine.reset_process_state()
-    assert engine.spill_gc_last_run is None, (
-        "the spill GC cadence stamp outlived the reset that empties every shared "
-        "cache -- the next crawl skips the first sweep of its new lifetime"
-    )
+    calls: list[str] = []
+    process_state.register("test-fake-a", lambda: calls.append("a"), lambda: bool(calls))
+    process_state.register("test-fake-b", lambda: calls.append("b"), lambda: bool(calls))
+    process_state.reset_all_process_state()
+    assert calls == ["a", "b"], f"the registry reset ran {calls}, not every registration"
+
+
+def test_probe_agrees_with_reset() -> None:
+    """A probe that says False over populated state certifies a failed reset."""
+    from crawlutron.runtime import process_state
+
+    holder = {"k": 1}
+    process_state.register("test-fake-probe", lambda: holder.clear(), lambda: bool(holder))
+    assert process_state.owner_has_state("test-fake-probe"), "the probe lied about populated state"
+    process_state.reset_all_process_state()
+    assert not process_state.owner_has_state("test-fake-probe"), "the reset emptied nothing"
+
+
+def test_no_straggler_defines_the_pair() -> None:
+    """No app module may define reset_process_state/has_process_state at module level:
+    the pair lives once, in the registry module."""
+    from tests.invariants.test_reset_family import _hand_copied_pair_offenders
+
+    offenders = _hand_copied_pair_offenders()
+    assert not offenders, f"modules still defining the hand-copied pair: {offenders}"

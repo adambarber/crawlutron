@@ -10,6 +10,7 @@ from contextlib import contextmanager
 from typing import cast
 
 from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.runtime import process_state
 from crawlutron.transport import browser as browser_mod
 from crawlutron.transport.browser_cookies import harvest_session_cookies
 from crawlutron.transport.browser_driver import BrowserDriver
@@ -49,11 +50,11 @@ def isolated_browser_cookies(url: NormalizedUrl):
     per-key removal exists -- so the slot is detached by emptying the store.
     """
     domain = url.site
-    browser_mod.reset_process_state()
+    process_state.reset_all_process_state()
     try:
         yield domain
     finally:
-        browser_mod.reset_process_state()
+        process_state.reset_all_process_state()
 
 
 class TestCookieHarvestCompletes:

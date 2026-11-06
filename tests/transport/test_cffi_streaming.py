@@ -12,6 +12,7 @@ from curl_cffi.requests.models import STREAM_END
 
 import crawlutron.transport.http_client_pool as http_mod
 from crawlutron.models.http_fetcher import HttpFetcher
+from crawlutron.runtime import process_state
 from crawlutron.transport.fetchers import default_http_fetcher, impersonating_fetcher
 from crawlutron.vocabulary.strategies import HTTP_CFFI_IMPERSONATE
 from tests._fetch_doubles import FetcherDouble
@@ -122,7 +123,7 @@ def _clean_pooled_client_queue():
 
     Other suites leave entries behind; ``reset_process_state`` releases both
     pooled clients and clears the queue as the unit production releases."""
-    http_mod.reset_process_state()
+    process_state.reset_all_process_state()
 
 
 def _scheduled_closes():

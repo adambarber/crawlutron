@@ -14,6 +14,7 @@ from crawlutron.api.identity_router import router as identity_router
 from crawlutron.api.keys_router import router as keys_router
 from crawlutron.models.render_options import RenderOptions
 from crawlutron.models.taxonomy import Classification
+from crawlutron.runtime import process_state
 from crawlutron.transport.browser import BrowserRenderer
 from crawlutron.transport.browser_pool import BrowserPool
 from crawlutron.transport.render_page import RenderPage
@@ -84,7 +85,7 @@ async def test_keyed_render_harvest_lands_in_the_callers_namespace(tmp_path):
     """A keyed /v1/render stores its harvest under the caller's key id, not ""."""
     from crawlutron.transport import browser_cookies
 
-    browser_cookies.reset_process_state()
+    process_state.reset_all_process_state()
     try:
         async with _render_client(tmp_path) as (client, keys):
             secret = await issue_key(client)
@@ -100,4 +101,4 @@ async def test_keyed_render_harvest_lands_in_the_callers_namespace(tmp_path):
             assert keyed == "sess=render-secret", (keyed, shared)
             assert shared is None, "the keyed render's harvest leaked into the shared slot"
     finally:
-        browser_cookies.reset_process_state()
+        process_state.reset_all_process_state()

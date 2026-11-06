@@ -4,7 +4,8 @@ import asyncio
 
 import pytest
 
-from crawlutron.runtime.cgroup_sense import read_int, reset_process_state
+from crawlutron.runtime import process_state
+from crawlutron.runtime.cgroup_sense import read_int
 from crawlutron.runtime.pressure_memory import MemoryGate, ResourceGauge
 from crawlutron.runtime.pressure_sizing import LoopLagProbe
 from tests._lag_scheduling import lag_clock, scripted_sleep
@@ -81,12 +82,12 @@ async def test_wait_releases_once_drained():
 def test_cgroup_read_cache_memoizes_within_ttl(tmp_path):
     p = tmp_path / "val"
     p.write_text("100")
-    reset_process_state()
+    process_state.reset_all_process_state()
     assert read_int(str(p)) == 100
     # Mutate on disk; within the TTL the cached value is returned.
     p.write_text("200")
     assert read_int(str(p)) == 100
-    reset_process_state()
+    process_state.reset_all_process_state()
     assert read_int(str(p)) == 200
 
 
@@ -105,7 +106,7 @@ def test_leading_memory_signal_anticipates_climb(tmp_path, monkeypatch):
         return MemoryStats(total_bytes=100, used_bytes=int(v * 100))
 
     monkeypatch.setattr("crawlutron.runtime.pressure_memory.read_memory_stats", _fake_stats)
-    reset_process_state()
+    process_state.reset_all_process_state()
 
     ratios = [gate.leading_usage_ratio() for _ in range(len(values))]
     # The leading estimate at the end should track above the raw 0.82 because the series is rising.

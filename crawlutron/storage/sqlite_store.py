@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from crawlutron.storage.migrations.manifest import StoreSchema
 
+from crawlutron.runtime import process_state
+
 _BUSY_TIMEOUT_MS = 5000
 
 # `journal_mode=WAL` writes the header, so concurrent startups converting one fresh
@@ -123,15 +125,25 @@ def store_lock_key(db_path: str | Path, memory_name: str | None = None) -> str:
 
 
 def process_lock(key: str) -> threading.RLock:
-    """The one lock every writer and every migration on this database takes.
-    A store's own lock only serializes that instance, and a migration runs on its
-    own connection; one per-file lock shared by both makes the collision unrepresentable.
-    """
+    """The one lock every writer and every migration on this database takes."""
     with _PROCESS_LOCKS_GUARD:
         lock = _PROCESS_LOCKS.get(key)
         if lock is None:
             lock = _PROCESS_LOCKS[key] = threading.RLock()
         return lock
+
+
+def _reset() -> None:
+    """Drop the per-process file locks (test isolation)."""
+    _PROCESS_LOCKS.clear()
+
+
+def _has() -> bool:
+    """Whether any process-wide lock is cached right now."""
+    return bool(_PROCESS_LOCKS)
+
+
+process_state.register(__name__, _reset, _has)
 
 
 def connect_store(db_path: str | Path, *, schema: StoreSchema) -> tuple[sqlite3.Connection, str | None]:

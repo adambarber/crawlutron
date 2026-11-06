@@ -11,6 +11,7 @@ import asyncio
 import pytest
 
 from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.runtime import process_state
 from crawlutron.transport import cookie_jar
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 from tests.api._offload_doubles import LoopGuardSharedCookieStore
@@ -52,7 +53,7 @@ def guarded_jar(tmp_path):
     cookie_jar.set_global_cookie_jar(jar)
     yield jar
     cookie_jar.set_global_cookie_jar(previous)
-    cookie_jar.reset_process_state()
+    process_state.reset_all_process_state()
 
 
 async def test_storing_cookies_from_the_async_fetch_path_stays_off_the_loop(guarded_jar):

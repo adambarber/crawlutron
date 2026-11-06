@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, cast
 
 import curl_cffi.requests as cffi_requests
 
+from crawlutron.runtime import process_state
 from crawlutron.transport.pooled_clients import (
     LoopBoundPooledClient,
     PooledClientBuilder,
@@ -111,3 +112,11 @@ def close_queued_session() -> None:
 def session_singleton() -> LoopBoundPooledClient:
     """The pooled descriptor, for builder substitution at the shared seam."""
     return _CFFI_SESSION_SINGLETON
+
+
+def _reset() -> None:
+    """Release the pooled session, closing it only when no loop owns it."""
+    close_queued_session()
+
+
+process_state.register(__name__, _reset, owns_process_state)

@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 from crawlutron.config.env import EnvDecisionMemo
 from crawlutron.models.address_class import AddressClass, classify
+from crawlutron.runtime import process_state
 
 
 def _normalize_policy_host(host: str) -> str:
@@ -115,6 +116,19 @@ def reset_private_target_memo() -> None:
     verdict memo deliberately is not touched here.
     """
     _PRIVATE_TARGET_DECISION.reset()
+
+
+def _reset() -> None:
+    """Drop the memoized env decision (registry route, conftest)."""
+    reset_private_target_memo()
+
+
+def _has() -> bool:
+    """Whether an env decision is memoized right now."""
+    return _PRIVATE_TARGET_DECISION._decision is not None
+
+
+process_state.register(__name__, _reset, _has)
 
 
 @lru_cache(maxsize=8192)

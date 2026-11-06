@@ -6,6 +6,7 @@ from typing import Protocol
 import pytest
 
 import crawlutron.transport.http_client_pool as http_mod
+from crawlutron.runtime import process_state
 from crawlutron.transport.fetchers import cffi_fetch
 from tests._async_harnesses import run_loop_rebind_scenario
 from tests._policy_factories import canonical
@@ -17,12 +18,12 @@ from tests._pool_ws_doubles import bind_to_running_loop as _bind_to_running_loop
 def _clean_pooled_state():
     """Start and end each test with the pooled state production never holds.
 
-    ``reset_process_state`` releases both pooled clients and clears the queue
+    The registry reset releases both pooled clients and clears the queue
     as the unit production releases them."""
-    http_mod.reset_process_state()
+    process_state.reset_all_process_state()
     yield
-    http_mod.reset_process_state()
-    assert not http_mod.has_process_state(), "the pooled state outlived the test that used it"
+    process_state.reset_all_process_state()
+    assert not process_state.has_any_process_state(), "the pooled state outlived the test that used it"
 
 
 class _TrackedClient(Protocol):

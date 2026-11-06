@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.runtime import process_state
 from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE
 from crawlutron.transport.cookie_store import InMemoryCookieStore
 from crawlutron.transport.render_page import RenderPage
@@ -18,6 +19,19 @@ __all__ = [
     "harvest_session_cookies",
     "store_browser_cookies",
 ]
+
+
+def _reset() -> None:
+    """Drop every cookie the renderer has accumulated, in every namespace."""
+    BROWSER_COOKIES_BY_DOMAIN.clear()
+
+
+def _has() -> bool:
+    """Whether any namespace holds a cookie right now."""
+    return len(BROWSER_COOKIES_BY_DOMAIN) > 0
+
+
+process_state.register(__name__, _reset, _has)
 
 
 BROWSER_COOKIES_MAX = 500
@@ -71,20 +85,6 @@ class _LockedDomainCookieStore:
 
 
 BROWSER_COOKIES_BY_DOMAIN = _LockedDomainCookieStore(BROWSER_COOKIES_MAX)
-
-
-def reset_process_state() -> None:
-    """Drop every cookie the renderer has accumulated, in every namespace.
-
-    The store is process-wide and bounded, not cleared, so a browser test that
-    renders once leaves its domain's cookies for the next test to assert against.
-    """
-    BROWSER_COOKIES_BY_DOMAIN.clear()
-
-
-def has_process_state() -> bool:
-    """Whether any namespace holds a cookie right now."""
-    return len(BROWSER_COOKIES_BY_DOMAIN) > 0
 
 
 def store_browser_cookies(domain: str, header: str, *, namespace: str | None = None) -> None:

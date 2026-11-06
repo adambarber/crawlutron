@@ -16,7 +16,6 @@ from crawlutron.transport import pooled_clients as _core
 from crawlutron.transport.pooled_cffi import (
     build_pinned_cffi_session,
     close_cffi_session,
-    close_queued_session,
     get_cffi_session,
 )
 from crawlutron.transport.pooled_clients import (
@@ -24,10 +23,6 @@ from crawlutron.transport.pooled_clients import (
     PooledClientBuilder,
     close_async_http_client,
     get_async_http_client,
-    has_process_state,
-)
-from crawlutron.transport.pooled_clients import (
-    reset_process_state as _reset_http_pool_state,
 )
 from crawlutron.vocabulary.strategies import CFFI_IMPERSONATE_TARGET
 
@@ -45,12 +40,6 @@ def _swap_cffi_builder(builder: PooledClientBuilder) -> Generator[None, None, No
         yield
     finally:
         singleton.build = original
-
-
-def reset_process_state() -> None:
-    """Release every pooled client, across both pool modules."""
-    close_queued_session()
-    _reset_http_pool_state()
 
 
 @contextmanager
@@ -76,7 +65,5 @@ __all__ = [
     "close_cffi_session",
     "get_async_http_client",
     "get_cffi_session",
-    "has_process_state",
     "pooled_client_builders",
-    "reset_process_state",
 ]
