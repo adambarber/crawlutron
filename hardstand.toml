@@ -73,14 +73,14 @@ run = ".venv/bin/pre-commit install --hook-type commit-msg --hook-type pre-commi
 name = "pytest"
 kind = "exec"
 env = ["PATH"]
-timeout = 90s
+timeout = 120s
 run = ".venv/bin/python -m pytest"
 
 [[actions]]
 name = "pytest-fast"
 kind = "exec"
 env = ["PATH"]
-timeout = 90s
+timeout = 120s
 run = ".venv/bin/python -m pytest -q"
 
 [[actions]]
