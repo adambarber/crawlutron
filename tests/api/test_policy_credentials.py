@@ -33,6 +33,24 @@ class TestWireModel:
         with pytest.raises(ValueError):
             Credential(kind="basic", username="u")
 
+    def test_bearer_refuses_basic_fields(self):
+        """A bearer credential carrying username/password is a mis-paired
+        credential: the fields are refused, not ignored (#601)."""
+        with pytest.raises(ValueError, match="basic fields"):
+            Credential(kind="bearer", token="t", username="u", password="p")
+        with pytest.raises(ValueError, match="basic fields"):
+            Credential(kind="bearer", token="t", username="u")
+
+    def test_basic_refuses_a_bearer_token(self):
+        with pytest.raises(ValueError, match="bearer token"):
+            Credential(kind="basic", username="u", password="p", token="t")
+
+    def test_username_is_a_secret(self):
+        credential = Credential(kind="basic", username="secret-user", password="p")
+        assert "secret-user" not in repr(credential)
+        assert credential.username is not None
+        assert credential.username.get_secret_value() == "secret-user"
+
     def test_policy_accepts_origin_keyed_credentials(self):
         policy = CrawlPolicy(credentials={"https://private.example": {"kind": "bearer", "token": "t"}})
         token = policy.credentials["https://private.example"].token
