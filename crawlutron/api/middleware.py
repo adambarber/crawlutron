@@ -1,7 +1,8 @@
 """ASGI middleware: body-size cap and the DNS-rebinding Origin guard.
 
-``limit_request_body`` caps bodies at ``receive()``; ``reject_hostile_origin``
-refuses a present non-loopback browser Origin on every surface.
+``limit_request_body`` caps bodies at ``receive()`` and refuses a truncated
+declared body (#619); ``reject_hostile_origin`` refuses a present non-loopback
+browser Origin on every surface.
 """
 
 from __future__ import annotations
@@ -52,55 +53,110 @@ async def _drain_declared_body(original_receive: Receive, *, max_bytes: int) -> 
         drained += len(message.get("body", b"") or b"")
 
 
-async def limit_request_body(request: Request, call_next, *, max_bytes: int = MAX_REQUEST_BODY_BYTES):
-    """ASGI middleware: cap request bodies at ``max_bytes``."""
-    original_receive = request.receive
-    content_length = request.headers.get("content-length")
-    if content_length:
-        try:
-            if int(content_length) > max_bytes:
-                # Mirror the truncation path: drain the refused body before the
-                # 413, capped so a slow-post client cannot pin the task.
-                await _drain_declared_body(original_receive, max_bytes=max_bytes)
-                return JSONResponse(
-                    status_code=413,
-                    content=error_envelope(
-                        "request_too_large",
-                        "Request body exceeds the maximum allowed size",
-                        {"max_bytes": max_bytes},
-                    ),
-                    headers={"Connection": "close"},
-                )
-        except ValueError:
-            pass
-    bytes_delivered = 0
-    truncated = False
+def _error_413(max_bytes: int) -> JSONResponse:
+    """The one 413 the middleware answers, oversized or truncated alike."""
+    return JSONResponse(
+        status_code=413,
+        content=error_envelope(
+            "request_too_large",
+            "Request body exceeds the maximum allowed size",
+            {"max_bytes": max_bytes},
+        ),
+        headers={"Connection": "close"},
+    )
 
-    async def _capped_receive() -> Message:
+
+async def _collect_declared_body(original_receive: Receive, *, declared: int) -> list[Message] | None:
+    """Read a declared body up front, verifying the declared length arrives.
+
+    Returns the buffered messages for replay, or ``None`` when the stream ended
+    short -- truncation the app must never process (#619). The declared length
+    passed the cap pre-check, so the buffer is bounded by it.
+    """
+    buffered: list[Message] = []
+    received = 0
+    while received < declared:
+        message = await original_receive()
+        buffered.append(message)
+        if message.get("type") != "http.request":
+            continue
+        received += len(message.get("body", b"") or b"")
+        if received >= declared:
+            return buffered
+        if not message.get("more_body", False):
+            return None
+    return buffered
+
+
+def _replaying_receive(buffered: list[Message], original_receive: Receive) -> Receive:
+    """Serve the buffered declared body, then pass through to the live stream."""
+    replay = iter(buffered)
+
+    async def receive() -> Message:
+        for message in replay:
+            return message
+        return await original_receive()
+
+    return receive
+
+
+def _capped_receive_for(original_receive: Receive, *, max_bytes: int, truncated: list[bool]):
+    """The sticky cap for undeclared bodies: once truncating, every later
+    receive hands the app nothing while the socket still drains."""
+    bytes_delivered = 0
+
+    async def receive() -> Message:
         nonlocal bytes_delivered, truncated
         message = await original_receive()
         if message.get("type") != "http.request":
             return message
         # The truncating chunk is not charged to bytes_delivered, so a later
         # receive must not read a positive budget from it and admit more.
-        if truncated:
+        if truncated[0]:
             return {**message, "body": b"", "more_body": False}
         body = message.get("body", b"") or b""
         if not body:
             return message
         remaining = max_bytes - bytes_delivered
         if remaining <= 0:
-            truncated = True
+            truncated[0] = True
             return {**message, "body": b"", "more_body": False}
         if len(body) > remaining:
-            truncated = True
+            truncated[0] = True
             return {**message, "body": body[:remaining], "more_body": False}
         bytes_delivered += len(body)
         return message
 
-    request._receive = _capped_receive
+    return receive
+
+
+async def limit_request_body(request: Request, call_next, *, max_bytes: int = MAX_REQUEST_BODY_BYTES):
+    """ASGI middleware: cap request bodies at ``max_bytes``, and refuse a body
+    that never delivers its declared Content-Length (#619)."""
+    original_receive = request.receive
+    content_length = request.headers.get("content-length")
+    declared = 0
+    if content_length:
+        try:
+            declared = int(content_length)
+        except ValueError:
+            pass
+        if declared > max_bytes:
+            # Mirror the truncation path: drain the refused body before the
+            # 413, capped so a slow-post client cannot pin the task.
+            await _drain_declared_body(original_receive, max_bytes=max_bytes)
+            return _error_413(max_bytes)
+    if declared:
+        buffered = await _collect_declared_body(original_receive, declared=declared)
+        if buffered is None:
+            return _error_413(max_bytes)
+        request._receive = _replaying_receive(buffered, original_receive)
+        return await call_next(request)
+
+    truncating: list[bool] = [False]
+    request._receive = _capped_receive_for(original_receive, max_bytes=max_bytes, truncated=truncating)
     response = await call_next(request)
-    if truncated:
+    if truncating[0]:
         response.headers["Connection"] = "close"
     return response
 
