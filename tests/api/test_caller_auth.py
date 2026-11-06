@@ -193,3 +193,26 @@ def test_operator_token_fallback_reads_settings_home(monkeypatch):
 
     request = _request_with({})
     assert caller_auth.is_operator(request) is False
+
+
+def test_default_admin_token_parses_the_env_once(monkeypatch):
+    """#636: the env-default arm is memoized -- two fallback funnels, one from_mapping().
+
+    Without the memo every anonymous request re-parses the whole env.
+    """
+
+    import crawlutron.api.caller_auth as caller_auth
+
+    monkeypatch.setenv("CRAWLUTRON_KEY_ADMIN_TOKEN", "tok-fallback")
+    calls = []
+    real_from_mapping = caller_auth.CrawlerSettings.from_mapping
+
+    def counting_from_mapping(*args, **kwargs):
+        calls.append(1)
+        return real_from_mapping(*args, **kwargs)
+
+    monkeypatch.setattr(caller_auth.CrawlerSettings, "from_mapping", staticmethod(counting_from_mapping))
+    # No finally-clear needed: the registry reset (conftest) drops the memo per test.
+    assert caller_auth.is_operator(_request_with({"x-api-key": "tok-fallback"})) is True
+    assert caller_auth.is_operator(_request_with({"x-api-key": "tok-fallback"})) is True
+    assert len(calls) == 1, f"the fallback parsed the env {len(calls)} times, not once"

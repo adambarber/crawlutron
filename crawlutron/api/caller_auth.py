@@ -22,6 +22,7 @@ from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.caller_key import CallerKey
 from crawlutron.models.error_response import ErrorResponse
 from crawlutron.models.request_profile_record import RequestProfileRecord
+from crawlutron.runtime import process_state
 from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE
 from crawlutron.transport.request_profile import cookie_namespace_for
 
@@ -132,6 +133,19 @@ def key_admin_token(request: Request) -> str:
 def _default_admin_token() -> str:
     """The env-default token, memoized: from_mapping() parses the whole env."""
     return CrawlerSettings.from_mapping().key_admin_token
+
+
+def _reset() -> None:
+    """Drop the memoized env-default token (registry route, conftest)."""
+    _default_admin_token.cache_clear()
+
+
+def _has() -> bool:
+    """Whether an env-default token is memoized right now."""
+    return _default_admin_token.cache_info().currsize > 0
+
+
+process_state.register(__name__, _reset, _has)
 
 
 def _constant_time_eq(secret: str, token: str) -> bool:
