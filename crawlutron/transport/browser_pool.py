@@ -82,7 +82,6 @@ class BrowserPool:
 
     @classmethod
     def for_testing(cls, renderers: list[BrowserRenderer]) -> BrowserPool:
-        """A pool pre-loaded with doubles; the caller keeps its own typed refs."""
         """A pre-initialized pool over the GIVEN renderers -- the public door for
         tests that need a live pool without real browser processes. Not a
         production path: initialize() is where real renderers come from."""
@@ -169,14 +168,27 @@ class BrowserPool:
         )
 
     def release(self, worker: BrowserRenderer) -> None:
-        """The release state machine, exact on pool state: retired by close ->
-        the pool schedules its close once (the #C6 leak path); checked out while
-        closing -> the deferred close, owned at schedule time; checked out ->
-        back to the queue; anything else -> refused. ``_close_owned`` is the
-        ownership chokepoint the sweep also consults: membership means this
-        renderer's close is scheduled or done, never to run again (#589, #590)."""
+        """The release state machine, exact on pool state. ``_close_owned`` is
+        the ownership chokepoint the sweep also consults: if a renderer is
+        already in it (its close scheduled or done), release() refuses -- every
+        pool path closes a renderer exactly once (#589, #590, #641).
+
+        Otherwise: retired by close -> the pool schedules its close (the #C6
+        leak path) and the renderer leaves ``_checked_out`` at that moment --
+        ownership sets are disjoint, so a SECOND release can neither re-schedule
+        the close nor take the closing-branch path (the double-close during the
+        sweep window this guard pins); checked out while closing -> the deferred
+        close, owned at schedule time; checked out -> back to the queue;
+        anything else -> refused."""
+        if worker in self._close_owned:
+            logger.warning(
+                "browser_pool_release_refused_close_owned",
+                extra={"renderer": type(worker).__name__},
+            )
+            return
         if worker in self._retired:
             self._retired.discard(worker)
+            self._checked_out.discard(worker)
             self._close_owned.add(worker)
             self._retired_closes.schedule(worker)
             return

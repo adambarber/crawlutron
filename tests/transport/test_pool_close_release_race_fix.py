@@ -41,7 +41,12 @@ async def test_invariant_no_pool_path_closes_a_renderer_twice():
     can never be closed again by any pool path: no release re-schedules it, and
     the sweep skips it. Exercised at every release timing, with the close gated
     so ownership genuinely outlives close()'s return."""
-    for timing in ("before_close", "during_sweep", "after_close", "after_close_pending"):
+    for timing in (
+        "before_close",
+        "during_sweep",
+        "after_close",
+        "after_close_pending",
+    ):
         spy = GatedCloseRenderer("solo")
         pool = BrowserPool.for_testing([spy])
         holder = await pool.acquire(timeout=1.0)
@@ -65,6 +70,42 @@ async def test_invariant_no_pool_path_closes_a_renderer_twice():
         pool.release(holder)  # any later release must close nothing
         await pool.wait_for_retired_closes()
         assert spy.closed == 1, f"[{timing}] closed {spy.closed} times"
+
+
+async def test_double_release_during_sweep_closes_once():
+    """#590: two releases of the SAME checked-out renderer while the sweep is
+    blocked on another renderer's gated close. Release #1 takes the retired
+    path (schedules the close, but the old code left the renderer in
+    ``_checked_out``); release #2 then takes the closing branch and schedules a
+    SECOND close. The retired release must also discard ``_checked_out`` so the
+    second release falls through to the owned-guard."""
+    target, blocker = GatedCloseRenderer("target"), GatedCloseRenderer("blocker")
+    pool = BrowserPool.for_testing([target, blocker])
+
+    a = await pool.acquire(timeout=1.0)
+    b = await pool.acquire(timeout=1.0)
+    assert a is target and b is blocker
+    # Release the blocker first so the queue holds [blocker]: the sweep closes
+    # it (gated) and BLOCKS mid-await -- that await is the sweep window.
+    pool.release(b)
+    close_task = asyncio.ensure_future(pool.close())
+    # The sweep parks the checked-out target in _retired, then blocks on the
+    # blocker's gated close. Wait until target is parked.
+    while target not in pool._retired:
+        await asyncio.sleep(0)
+
+    pool.release(target)  # #1: retired path -- schedules the close, owns it
+    pool.release(target)  # #2: must NOT schedule a second close
+    blocker.gate.set()
+    target.gate.set()
+    await asyncio.wait_for(close_task, timeout=2.0)
+    await pool.wait_for_retired_closes()
+
+    assert target.closed == 1, (
+        f"target closed {target.closed} times: a double release during the "
+        "sweep re-scheduled the close the retired release already owned"
+    )
+    assert blocker.closed == 1, blocker.closed
 
 
 async def test_release_after_close_returns_still_closes_exactly_once():
