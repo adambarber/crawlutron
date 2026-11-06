@@ -27,6 +27,17 @@ def owned_browser_pool(pool: BrowserPool | None) -> Generator[None, None, None]:
         set_browser_pool(previous)
 
 
+class SpyRenderer(BrowserRenderer):
+    """A minimal renderer double: enough shape for the pool, a close recorder."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.closed = 0
+
+    async def close(self) -> None:
+        self.closed += 1
+
+
 class FakeBrowserPool(BrowserPool):
     """A browser pool that satisfies the engine's guard and refuses to render, by
     subclassing ``BrowserPool`` (whose no-I/O ``__init__`` is cheap) and raising in
