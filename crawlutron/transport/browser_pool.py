@@ -65,6 +65,9 @@ class BrowserPool:
         # -- never inferred from the initialized flag, which is how a second close
         # or a re-queue of a dead renderer used to slip through (#589).
         self._retired: set[BrowserRenderer] = set()
+        # Renderers whose close is scheduled: the single ownership chokepoint --
+        # neither release() nor the sweep may close one of these again (#590).
+        self._close_owned: set[BrowserRenderer] = set()
         self._retired_closes = DeferredClose[BrowserRenderer](aclose=lambda r: r.close())
         self._lock = asyncio.Lock()
         self._initialized = False
@@ -79,6 +82,7 @@ class BrowserPool:
 
     @classmethod
     def for_testing(cls, renderers: list[BrowserRenderer]) -> BrowserPool:
+        """A pool pre-loaded with doubles; the caller keeps its own typed refs."""
         """A pre-initialized pool over the GIVEN renderers -- the public door for
         tests that need a live pool without real browser processes. Not a
         production path: initialize() is where real renderers come from."""
@@ -165,21 +169,23 @@ class BrowserPool:
         )
 
     def release(self, worker: BrowserRenderer) -> None:
-        """The release state machine, exact on pool state: retired by close -> the
-        pool schedules its close once (the #C6 leak path); checked out -> back to
-        the queue; owned but idle -> a double or never-acquired release, refused;
-        anything else -> a foreign object, refused. The queue can never hold a
-        renderer twice, and a retired renderer is closed exactly once (#589).
-        """
+        """The release state machine, exact on pool state: retired by close ->
+        the pool schedules its close once (the #C6 leak path); checked out while
+        closing -> the deferred close, owned at schedule time; checked out ->
+        back to the queue; anything else -> refused. ``_close_owned`` is the
+        ownership chokepoint the sweep also consults: membership means this
+        renderer's close is scheduled or done, never to run again (#589, #590)."""
         if worker in self._retired:
             self._retired.discard(worker)
+            self._close_owned.add(worker)
             self._retired_closes.schedule(worker)
             return
         if self._closing.is_set() and worker in self._checked_out:
             # A release landing during close's sweep: the queue is already
             # drained, so the renderer is closed here, not enqueued into a dead
-            # pool (#590) -- exactly the retired close, scheduled once.
+            # pool (#590) -- owned at schedule time, so the sweep skips it too.
             self._checked_out.discard(worker)
+            self._close_owned.add(worker)
             self._retired_closes.schedule(worker)
             return
         if self._initialized and worker in self._checked_out:
@@ -217,10 +223,17 @@ class BrowserPool:
                 except asyncio.QueueEmpty:
                     break
             for renderer in self._renderers:
+                if renderer in self._close_owned:
+                    continue
                 if renderer in self._checked_out:
+                    # Not swept mid-render: release() owes this renderer its
+                    # close via the retired path, which the drain below joins.
                     self._retired.add(renderer)
                     continue
                 try:
+                    # Every close the pool performs enters the chokepoint, so a
+                    # renderer the sweep closed is owned from that moment.
+                    self._close_owned.add(renderer)
                     await renderer.close()
                 except Exception as e:
                     logger.warning("browser_pool_renderer_close_failed", extra={"error": str(e)})
@@ -228,17 +241,6 @@ class BrowserPool:
             self._checked_out.clear()
             self._initialized = False
             await self._retired_closes.drain()
-            # A release landing mid-drain requeued a renderer the sweep never saw;
-            # the closing flag routes no future release here, so this one is reaped.
-            while True:
-                try:
-                    late = self._available.get_nowait()
-                except asyncio.QueueEmpty:
-                    break
-                try:
-                    await late.close()
-                except Exception as e:
-                    logger.warning("browser_pool_renderer_close_failed", extra={"error": str(e)})
             logger.info("browser_pool_closed", extra={"available": self._available.qsize()})
 
     async def wait_for_retired_closes(self) -> None:

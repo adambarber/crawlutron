@@ -4,21 +4,19 @@ pool's lock.
 """
 
 import asyncio
+from typing import cast
 
 import pytest
 
-from crawlutron.transport.browser import BrowserRenderer
 from crawlutron.transport.browser_pool import BrowserPool, BrowserPoolExhaustedError
-from tests._browser_pool_doubles import SpyRenderer
-
-_SpyRenderer = SpyRenderer
+from tests._browser_pool_doubles import GatedCloseRenderer, SpyRenderer, close_mid_sweep
 
 
 async def test_close_never_hands_a_suspended_acquire_a_swept_renderer():
     """A release requeues its renderer and wakes a suspended waiter; close()'s
     sweep must not close that renderer into the waiter's hands. The waiter's
     wake is re-checked under the pool lock, so it gets a clean refusal."""
-    spy = _SpyRenderer()
+    spy = SpyRenderer()
     pool = BrowserPool.for_testing([spy])
 
     holder = await pool.acquire(timeout=1.0)
@@ -32,31 +30,14 @@ async def test_close_never_hands_a_suspended_acquire_a_swept_renderer():
     assert spy.closed == 1, "the requeued renderer was never reaped by the sweep"
 
 
-class _GatedCloseRenderer(BrowserRenderer):
-    """Renderer whose close blocks on an event, so the sweep is observable."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.closed = 0
-        self.gate = asyncio.Event()
-
-    async def close(self) -> None:
-        self.closed += 1
-        await self.gate.wait()
-
-
 async def test_close_reaps_a_renderer_released_during_its_sweep():
     """A release landing while close's sweep is running must not enqueue the
     renderer into a pool being torn down, nor leak it: the closing flag routes
     the release to the retired close, which close's own drain joins."""
-    spy = _GatedCloseRenderer()
+    spy = GatedCloseRenderer()
     pool = BrowserPool.for_testing([spy])
-
     holder = await pool.acquire(timeout=1.0)
-    close_task = asyncio.ensure_future(pool.close())
-    await asyncio.sleep(0.01)  # close holds the lock, mid-sweep
-    pool.release(holder)
-    spy.gate.set()
+    close_task = await close_mid_sweep(pool, cast(GatedCloseRenderer, holder))
 
     await close_task
     await pool.wait_for_retired_closes()
