@@ -15,6 +15,7 @@ from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.json_value import JsonValue as JsonValue
 from crawlutron.models.normalized_url import NormalizedUrl, admit_or_none
 from crawlutron.safety.safe_regex import BoundedPattern, UnsafePattern, compile_untrusted
+from crawlutron.safety.url_redaction import redact_url
 from crawlutron.storage.job_store import FrontierEntry
 
 #: The candidate shapes link admission accepts: the extraction record itself, a
@@ -385,7 +386,7 @@ async def gather_robots_decisions(
         except Exception:
             # One URL's robots fetch must not abort the whole batch: fail that URL
             # closed and let the rest of the decision set complete.
-            _logger.warning("robots_check_failed", extra={"url": url.raw})
+            _logger.warning("robots_check_failed", extra={"url": redact_url(url.raw)})
             return False, None
 
     decisions: list[tuple[bool, float | None]] = []

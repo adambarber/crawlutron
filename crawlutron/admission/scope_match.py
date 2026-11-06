@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 
 from crawlutron.safety.safe_regex import RegexTimeout, match_bounded
+from crawlutron.safety.url_redaction import redact_url
 
 logger = logging.getLogger(__name__)
 
@@ -22,5 +23,5 @@ def scope_allows(compiled, url: str) -> bool:
     try:
         return match_bounded(compiled, url) is not None
     except RegexTimeout:
-        logger.warning("scope_regex_timeout", extra={"url": url})
+        logger.warning("scope_regex_timeout", extra={"url": redact_url(url)})
         return False

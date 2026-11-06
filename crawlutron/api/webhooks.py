@@ -21,6 +21,7 @@ import httpx
 from crawlutron.config.env import get_env_int, get_mapping_int, parse_bool_env
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.safety.bounded_io import BodyTooLarge, read_capped_async
 from crawlutron.transport.timeouts import Timeouts
 
@@ -246,19 +247,18 @@ def _serialize_webhook_payload(payload: Mapping[str, object], cap: int) -> bytes
 
 
 async def post_webhook(
-    webhook_url: str,
+    target: WebhookTarget,
     payload: Mapping[str, object],
-    *,
-    host_policy: HostPolicy,
 ) -> None:
-    """POST a webhook (SSRF/IP pinned, HMAC-signed, size-capped) with backoff retries.
+    """POST a webhook (admitted, HMAC-signed, size-capped) with backoff retries.
     Best-effort: nothing raises -- a lost callback is logged, so it cannot corrupt
-    an already-recorded outcome; validation lives in the pin per attempt.
+    an already-recorded outcome; admission lived in the target's constructor.
     """
+    webhook_url = target.delivery_url()
     try:
         ensure_https_webhook_url(webhook_url)
     except ValueError:
-        logger.warning("webhook_plaintext_refused", extra={"url": webhook_url})
+        logger.warning("webhook_plaintext_refused", extra={"url": target.redacted()})
         return
     try:
         cap = max_webhook_size()
@@ -266,53 +266,49 @@ async def post_webhook(
     except (TypeError, ValueError) as exc:
         logger.warning(
             "webhook_payload_serialization_failed",
-            extra={"url": webhook_url, "error": str(exc)},
+            extra={"url": target.redacted(), "error": str(exc)},
         )
         return
     if payload_bytes is None:
         # The exact size is never materialised; the cap floor is what is known.
         logger.warning(
             "webhook_payload_too_large",
-            extra={"url": webhook_url, "size": cap},
+            extra={"url": target.redacted(), "size": cap},
         )
         return
     attempts = webhook_max_attempts()
     for attempt in range(attempts):
         try:
-            await deliver_pinned_webhook(webhook_url, payload_bytes, host_policy=host_policy)
+            await deliver_pinned_webhook(webhook_url, payload_bytes, host_policy=target.target.policy)
             return
         except Exception as exc:
             if not _should_retry(exc, attempt, attempts):
                 logger.warning(
                     "webhook_delivery_failed",
-                    extra={"url": webhook_url, "error": str(exc), "attempt": attempt + 1},
+                    extra={"url": target.redacted(), "error": str(exc), "attempt": attempt + 1},
                 )
                 return
             await _backoff_sleep(attempt, webhook_backoff_base_ms())
 
 
 def _tracked_delivery(
-    webhook_url: str,
+    target: WebhookTarget,
     payload: Mapping[str, object],
-    *,
-    host_policy: HostPolicy,
 ) -> asyncio.Task:
     """Spawn one delivery joined to the shutdown drain set, spawn site agnostic."""
-    task = asyncio.create_task(post_webhook(webhook_url, payload, host_policy=host_policy))
+    task = asyncio.create_task(post_webhook(target, payload))
     _DELIVERIES.add(task)
     task.add_done_callback(_DELIVERIES.discard)
     return task
 
 
 async def post_webhook_guarded(
-    webhook_url: str,
+    target: WebhookTarget,
     payload: Mapping[str, object],
-    *,
-    host_policy: HostPolicy,
 ) -> None:
     """Await ``post_webhook`` as a shielded, drained task: a runner cancelled at
     shutdown does not drop the callback whose terminal write already landed."""
-    task = _tracked_delivery(webhook_url, payload, host_policy=host_policy)
+    task = _tracked_delivery(target, payload)
     try:
         await asyncio.shield(task)
     except asyncio.CancelledError:
@@ -321,16 +317,14 @@ async def post_webhook_guarded(
 
 
 def start_webhook_delivery(
-    webhook_url: str,
+    target: WebhookTarget,
     payload: Mapping[str, object],
-    *,
-    host_policy: HostPolicy,
 ) -> asyncio.Task:
     """Spawn the delivery as a tracked background task and return at once.
 
     The sweep pass must not stall on a slow receiver; the task joins the
     same ``_DELIVERIES`` set, so shutdown drains it like any other callback."""
-    return _tracked_delivery(webhook_url, payload, host_policy=host_policy)
+    return _tracked_delivery(target, payload)
 
 
 def validate_webhook_url(webhook_url: str, *, host_policy: HostPolicy) -> None:

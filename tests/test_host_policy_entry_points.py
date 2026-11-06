@@ -242,18 +242,15 @@ async def _probe_response_shaping(monkeypatch, tmp_path):
 
 
 async def _probe_webhook(monkeypatch, tmp_path):
-    from crawlutron.api import webhooks
+    from crawlutron.models.webhook_target import WebhookTarget
 
     effects = _effects()
     monkeypatch_wire_guard(monkeypatch, effects)
-    # All three webhook entry points share one admission seam: the per-attempt pin
-    # (#450), failing closed before any client is built. Refusal is proven by the wire.
-    entries = (webhooks.post_webhook, webhooks.post_webhook_guarded, webhooks.start_webhook_delivery)
-    for entry in entries:
-        await _assert_refused(
-            entry(_BLOCKED_URL, {"status": "accepted"}, host_policy=_denied_policy()),
-            effects,
-        )
+    # The admission seam IS the target's constructor: a denied host never builds
+    # a target, so the delivery entries have nothing unsafe to accept.
+    with pytest.raises(ValueError, match="host_denied"):
+        WebhookTarget.admit(_BLOCKED_URL, host_policy=_denied_policy())
+    assert effects["wire"] == []
 
 
 async def _probe_webhook_delivery(monkeypatch, tmp_path):
@@ -344,9 +341,6 @@ _PROBES = {
     "crawlutron/api/watch_router.py:create_watch": _probe_watch_router,
     "crawlutron/api/policy_suggestions.py:policy_suggestions": _probe_policy_suggestions,
     "crawlutron/api/policy_suggestions.py:build_policy_suggestions": _probe_policy_suggestions,
-    "crawlutron/api/webhooks.py:post_webhook": _probe_webhook,
-    "crawlutron/api/webhooks.py:post_webhook_guarded": _probe_webhook,
-    "crawlutron/api/webhooks.py:start_webhook_delivery": _probe_webhook,
     "crawlutron/api/webhooks.py:deliver_pinned_webhook": _probe_webhook_delivery,
 }
 

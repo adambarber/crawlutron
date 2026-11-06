@@ -22,6 +22,7 @@ from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.watch_create_request import WatchCreateRequest
 from crawlutron.models.watch_list_response import WatchListResponse
 from crawlutron.models.watch_state import WatchState
+from crawlutron.models.webhook_target import WebhookTarget
 
 router = APIRouter(prefix="/v1/watches", tags=["Crawler"], responses=auth_denials())
 
@@ -68,8 +69,9 @@ async def create_watch(
     try:
         url = NormalizedUrl(payload.url, policy=host_policy)
         if payload.webhook_url is not None:
-            # An undeliverable URL is a configuration error the caller fixes now; delivery
-            # validates again regardless. ensure_https_webhook_url is the scheme law.
+            # The target admits through the ONE chokepoint: NormalizedUrl refuses
+            # userinfo (webhook auth is policy.credentials, never URL creds), and
+            # the pinned-request validation below is the same SSRF rule as pages.
             ensure_https_webhook_url(payload.webhook_url)
             await validate_webhook_url_async(payload.webhook_url, host_policy=host_policy)
     except ValueError as error:
@@ -87,7 +89,9 @@ async def create_watch(
         url,
         interval_seconds=payload.interval_seconds,
         now=time.time(),
-        webhook_url=payload.webhook_url,
+        webhook_url=WebhookTarget.admit(payload.webhook_url, host_policy=host_policy)
+        if payload.webhook_url is not None
+        else None,
         owner=owner,
     )
 

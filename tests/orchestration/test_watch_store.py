@@ -6,6 +6,8 @@ call, so no test (and no production path) depends on wall time.
 
 import pytest
 
+from crawlutron.models.host_policy import HostPolicy
+from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.vocabulary.taxonomy import CrawlClassification
 from tests._policy_factories import canonical
 
@@ -15,7 +17,8 @@ INTERVAL = 3600
 
 def register(store, url="https://example.com/feed.xml", *, at=NOW, interval=INTERVAL, webhook=None):
     """Create a watch through the production seam, admitted the way production admits."""
-    return store.create(canonical(url), webhook_url=webhook, interval_seconds=interval, now=at)
+    target = None if webhook is None else WebhookTarget.admit(webhook, host_policy=HostPolicy.unrestricted())
+    return store.create(canonical(url), webhook_url=target, interval_seconds=interval, now=at)
 
 
 def test_registration_round_trips_what_was_declared(watch_store):

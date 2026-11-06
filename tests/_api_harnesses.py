@@ -10,7 +10,7 @@ import asyncio
 import contextlib
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 from crawlutron.storage.job_store import JobStore
 
@@ -53,6 +53,7 @@ def spy_on_history_reads(monkeypatch):
 async def run_with_webhook(request_id, execute_fn, webhook_url, job_store, result_store):
     """One async crawl with a scripted executor and a captured webhook post."""
     from crawlutron.api.async_crawl_runner import run_async_crawl
+    from crawlutron.config.settings import CrawlerSettings
     from crawlutron.models.crawl_request import CrawlRequest
 
     with patch("crawlutron.api.async_crawl_runner.execute_crawl", new=execute_fn):
@@ -61,7 +62,7 @@ async def run_with_webhook(request_id, execute_fn, webhook_url, job_store, resul
                 request_id,
                 CrawlRequest.model_validate({"url": "http://example.com/"}),
                 webhook_url,
-                MagicMock(),
+                CrawlerSettings.from_mapping(),
                 job_store,
                 result_store,
                 asyncio.Event(),

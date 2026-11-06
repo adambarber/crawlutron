@@ -15,9 +15,10 @@ _OK: dict[str, list[object]] = {"results": []}
 async def _post_through_chokepoint(monkeypatch, *, url: str, payload) -> list[httpx.Request]:
     """One post_webhook drive for the contract tests; returns delivered requests."""
     from crawlutron.api import webhooks
+    from crawlutron.models.webhook_target import WebhookTarget
 
     delivered = record_webhook_delivery(monkeypatch)
-    await webhooks.post_webhook(url, payload, host_policy=HostPolicy.unrestricted())
+    await webhooks.post_webhook(WebhookTarget.admit(url, host_policy=HostPolicy.unrestricted()), payload)
     return delivered
 
 

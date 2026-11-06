@@ -235,14 +235,22 @@ async def _publish_success(
         logger.warning("crawl_result_store_failed", extra={"request_id": request_id})
     # The webhook rides with the terminal write in both branches, so it
     # means "finished" -- announcing a paused crawl hands back a dead one.
-    if webhook_url:
-        from crawlutron.api.webhooks import post_webhook_guarded
+    await _deliver_webhook(webhook_url, response_payload, webhook_policy=webhook_policy)
 
-        await post_webhook_guarded(
-            webhook_url,
-            response_payload,
-            host_policy=webhook_policy,
-        )
+
+async def _deliver_webhook(
+    webhook_url: str | None, payload: dict[str, object], *, webhook_policy: HostPolicy
+) -> None:
+    """One guarded delivery of an admitted target; admission lives at this edge."""
+    if webhook_url is None:
+        return
+    from crawlutron.api.webhooks import post_webhook_guarded
+    from crawlutron.models.webhook_target import WebhookTarget
+
+    await post_webhook_guarded(
+        WebhookTarget.admit(webhook_url, host_policy=webhook_policy),
+        payload,
+    )
 
 
 async def _record_failure(
@@ -268,10 +276,4 @@ async def _record_failure(
                     adapt=build_unified_result,
                 )
             ).model_dump()
-            from crawlutron.api.webhooks import post_webhook_guarded
-
-            await post_webhook_guarded(
-                webhook_url,
-                error_payload,
-                host_policy=webhook_policy,
-            )
+            await _deliver_webhook(webhook_url, error_payload, webhook_policy=webhook_policy)

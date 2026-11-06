@@ -29,6 +29,7 @@ from crawlutron.runtime.pressure_sizing import (
     default_admission_policy,
 )
 from crawlutron.safety.safe_regex import BoundedPattern
+from crawlutron.safety.url_redaction import redact_url
 from crawlutron.transport.results import failed_result_for
 from crawlutron.transport.scheduler import DomainScheduler
 from crawlutron.vocabulary.limits import ENGINE_BATCH_CONCURRENCY_MULTIPLIER
@@ -399,7 +400,7 @@ async def commit_recursive_results(
             # One job's link admission must not abort the whole dispatch loop:
             # drop that job's links and let the rest of the batch continue.
             url_attr = result.normalized_url.raw if result.normalized_url else "<unknown>"
-            logger.warning("link_admission_failed", extra={"url": url_attr})
+            logger.warning("link_admission_failed", extra={"url": redact_url(url_attr)})
 
 
 async def _start_recursive_state(

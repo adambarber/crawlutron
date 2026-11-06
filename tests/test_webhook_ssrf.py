@@ -15,6 +15,7 @@ from crawlutron.api.webhooks import (
     validate_webhook_url as _validate_webhook_url,
 )
 from crawlutron.models.host_policy import HostPolicy
+from crawlutron.models.webhook_target import WebhookTarget
 from tests._assertions import (
     block_private_targets,
     host_resolves_to,
@@ -124,9 +125,8 @@ class TestWebhookDeliveryPinning:
         delivered = record_webhook_delivery(monkeypatch)
         with host_resolves_to(monkeypatch, "8.8.8.8"):
             await _post_webhook(
-                "http://webhook.example.com/cb",
+                WebhookTarget.admit("http://webhook.example.com/cb", host_policy=HostPolicy.unrestricted()),
                 {"results": []},
-                host_policy=HostPolicy.unrestricted(),
             )
 
         _assert_pinned_delivery(delivered)
