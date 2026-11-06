@@ -77,9 +77,12 @@ async def _collect_declared_body(original_receive: Receive, *, declared: int) ->
     received = 0
     while received < declared:
         message = await original_receive()
-        buffered.append(message)
         if message.get("type") != "http.request":
-            continue
+            # A non-request message mid-collect is a disconnect (uvicorn
+            # re-delivers it forever): further receives can never produce the
+            # declared bytes, so the body is truncated (#619), not spinnable.
+            return None
+        buffered.append(message)
         received += len(message.get("body", b"") or b"")
         if received >= declared:
             return buffered
