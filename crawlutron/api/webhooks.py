@@ -1,6 +1,7 @@
 """Webhook delivery helpers (SSRF-safe, IP-pinned): every outbound callback
 routes through ``post_webhook``; deliveries are HMAC-signed, retried with
-backoff, and drained on shutdown so a finished job's callback is never dropped.
+backoff, and drained on shutdown so a finished job's callback survives the drain budget
+(one past-budget delivery is logged and abandoned, not silently dropped).
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import logging
 import os
 import time
 from collections.abc import Mapping
+from urllib.parse import urlparse
 
 import httpx
 
@@ -245,6 +247,16 @@ def _serialize_webhook_payload(payload: Mapping[str, object], cap: int) -> bytes
     return buffer.getvalue()
 
 
+def _redacted_webhook_url(url: str) -> str:
+    """Origin-only spelling for logs: a caller-supplied URL may carry query
+    credentials or a path worth hiding; the origin is what operators need."""
+    try:
+        parsed = urlparse(url)
+        return f"{parsed.scheme}://{parsed.netloc}"
+    except ValueError:
+        return "[unparseable-webhook-url]"
+
+
 async def post_webhook(
     webhook_url: str,
     payload: Mapping[str, object],
@@ -258,7 +270,7 @@ async def post_webhook(
     try:
         ensure_https_webhook_url(webhook_url)
     except ValueError:
-        logger.warning("webhook_plaintext_refused", extra={"url": webhook_url})
+        logger.warning("webhook_plaintext_refused", extra={"url": _redacted_webhook_url(webhook_url)})
         return
     try:
         cap = max_webhook_size()
@@ -266,14 +278,14 @@ async def post_webhook(
     except (TypeError, ValueError) as exc:
         logger.warning(
             "webhook_payload_serialization_failed",
-            extra={"url": webhook_url, "error": str(exc)},
+            extra={"url": _redacted_webhook_url(webhook_url), "error": str(exc)},
         )
         return
     if payload_bytes is None:
         # The exact size is never materialised; the cap floor is what is known.
         logger.warning(
             "webhook_payload_too_large",
-            extra={"url": webhook_url, "size": cap},
+            extra={"url": _redacted_webhook_url(webhook_url), "size": cap},
         )
         return
     attempts = webhook_max_attempts()
@@ -285,7 +297,11 @@ async def post_webhook(
             if not _should_retry(exc, attempt, attempts):
                 logger.warning(
                     "webhook_delivery_failed",
-                    extra={"url": webhook_url, "error": str(exc), "attempt": attempt + 1},
+                    extra={
+                        "url": _redacted_webhook_url(webhook_url),
+                        "error": str(exc),
+                        "attempt": attempt + 1,
+                    },
                 )
                 return
             await _backoff_sleep(attempt, webhook_backoff_base_ms())

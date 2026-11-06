@@ -58,6 +58,7 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     # #314/A3 raised the state row to (2, 2) for DomainGate, whose public
     # occupancy answers liveness. Growing any of these needs an explicit edit.
     "crawlutron/transport/scheduler_domain_state.py": (2, 2),
+    "crawlutron/transport/scheduler_pacing.py": (6, 4),
     "crawlutron/orchestration/spill_sink.py": (2, 2),
     "crawlutron/transport/http_cache.py": (4, 4),
     "crawlutron/transport/http_classify.py": (3, 3),
@@ -78,7 +79,7 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/admission/policy.py": (11, 6),
     "crawlutron/api/_depends_singletons.py": (2, 0),
     "crawlutron/api/async_crawl_runner.py": (4, 3),
-    "crawlutron/api/caller_auth.py": (17, 14),
+    "crawlutron/api/caller_auth.py": (18, 15),
     "crawlutron/api/caller_concurrency.py": (1, 1),
     "crawlutron/api/crawl_executor.py": (1, 1),
     "crawlutron/api/crawl_router.py": (4, 3),

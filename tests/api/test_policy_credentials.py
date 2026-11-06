@@ -33,6 +33,48 @@ class TestWireModel:
         with pytest.raises(ValueError):
             Credential(kind="basic", username="u")
 
+    def test_the_crawler_settings_arm_supplies_the_admin_token(self, monkeypatch):
+        """A state whose key_admin_token is unset falls through to its
+        crawler_settings member; the token is read from there, not the env (#636)."""
+        from types import SimpleNamespace
+
+        from fastapi import Request
+
+        from crawlutron.api.caller_auth import key_admin_token
+
+        monkeypatch.setenv("CRAWLUTRON_KEY_ADMIN_TOKEN", "env-token")
+        app = SimpleNamespace(
+            state=SimpleNamespace(
+                key_admin_token=None,
+                crawler_settings=SimpleNamespace(key_admin_token="settings-token"),
+            )
+        )
+        request = Request({"type": "http", "app": app, "state": {}})
+        assert key_admin_token(request) == "settings-token"
+
+    def test_the_default_arm_reads_the_env_once(self, monkeypatch):
+        """With no state token at all, the fallback reads the env default once,
+        memoized -- not a full from_mapping() parse per request (#636)."""
+        from types import SimpleNamespace
+
+        from fastapi import Request
+
+        from crawlutron.api import caller_auth
+        from crawlutron.config.settings import CrawlerSettings
+
+        calls = []
+        real_from_mapping = CrawlerSettings.from_mapping
+
+        def counting_from_mapping(values=None):
+            calls.append(1)
+            return real_from_mapping(values)
+
+        monkeypatch.setattr(CrawlerSettings, "from_mapping", staticmethod(counting_from_mapping))
+        app = SimpleNamespace(state=SimpleNamespace())
+        request = Request({"type": "http", "app": app, "state": {}})
+        assert caller_auth.key_admin_token(request) == caller_auth.key_admin_token(request)
+        assert len(calls) == 1, "the env-default token was re-derived per request"
+
     def test_bearer_refuses_basic_fields(self):
         """A bearer credential carrying username/password is a mis-paired
         credential: the fields are refused, not ignored (#601)."""

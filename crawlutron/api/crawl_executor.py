@@ -40,20 +40,18 @@ async def execute_crawl(
 ) -> ProducerEnvelope:
     """Run a crawl shared by every crawl entry point. ``payload`` is the declared
     :class:`CrawlRequest` model; an invalid URL surfaces as 422, a missing pool as
-    503 only for a browser-needed chain. ``url_pairs`` forwards the gate's batch."""
+    503 only for a browser-needed chain. ``url_pairs`` forwards the gate's batch.
+
+    crawl_request is the single admission: it validates URLs (422) and resolves
+    settings, so this wrapper only adds the pool guard -- no re-derived values.
+    """
     active_settings = settings or CrawlerSettings.from_mapping()
     host_policy = HostPolicy.from_settings(active_settings)
     if payload.url is not None:
         try:
             NormalizedUrl(payload.url, policy=host_policy)
-        except ValueError:
-            return await crawl_request(
-                payload,
-                settings=active_settings,
-                url_pairs=url_pairs,
-                browser_worker=None,
-                shutdown_event=shutdown_event,
-            )
+        except ValueError as error:
+            raise ValueError("invalid_url") from error
     pool = get_browser_pool()
     if pool is None and _request_needs_browser(payload.policy):
         raise browser_pool_unavailable()

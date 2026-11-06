@@ -141,8 +141,11 @@ _B64_CHUNK = 3 * 64 * 1024  # a multiple of 3: no chunk carries padding, so the 
 
 
 def _body_b64(body: bytes) -> str:
-    """The body as base64, encoded in chunks so the peak stays near body + output:
-    the one-shot encode held the b64 bytes and the ascii str alongside the body."""
+    """The body as base64, encoded in chunks so the peak stays near body + output.
+
+    The chunked ``str +=`` append relies on CPython's in-place string growth
+    (a parts list would double the output at join time); the peak IS the
+    contract here, and test_serialize_b64_peak pins it."""
     encoded = ""
     for start in range(0, len(body), _B64_CHUNK):
         encoded += base64.b64encode(body[start : start + _B64_CHUNK]).decode("ascii")

@@ -10,6 +10,7 @@ import secrets
 from collections.abc import AsyncGenerator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import TYPE_CHECKING, NoReturn, TypedDict
 
 from fastapi import Request
@@ -111,7 +112,7 @@ def quota_denials() -> dict[int | str, dict[str, object]]:
     return {k: dict(v) for k, v in QUOTA_DENIAL.items()}
 
 
-def _key_admin_token(request: Request) -> str:
+def key_admin_token(request: Request) -> str:
     """The configured operator token, or '' when unset (via the settings home)."""
     app = request.scope.get("app")
     state = getattr(app, "state", None) if app is not None else None
@@ -124,6 +125,12 @@ def _key_admin_token(request: Request) -> str:
             token = getattr(settings, "key_admin_token", None)
             if isinstance(token, str) and token:
                 return token
+    return _default_admin_token()
+
+
+@lru_cache(maxsize=1)
+def _default_admin_token() -> str:
+    """The env-default token, memoized: from_mapping() parses the whole env."""
     return CrawlerSettings.from_mapping().key_admin_token
 
 
@@ -145,7 +152,7 @@ async def get_keys_caller(request: Request) -> CallerIdentity:
     not a key-validity oracle, and an unconfigured token seals it (fail closed).
     """
     secret = _presented_key(request)
-    admin_token = _key_admin_token(request)
+    admin_token = key_admin_token(request)
     if not secret or not admin_token or not _constant_time_eq(secret, admin_token):
         _raise_invalid_api_key()
     return CallerIdentity(
@@ -182,7 +189,7 @@ def is_operator(request: Request) -> bool:
     secret = _presented_key(request)
     if not secret:
         return False
-    admin_token = _key_admin_token(request)
+    admin_token = key_admin_token(request)
     return bool(admin_token) and _constant_time_eq(secret, admin_token)
 
 
@@ -342,6 +349,7 @@ __all__ = [
     "get_keys_caller",
     "identity_for_key",
     "is_operator",
+    "key_admin_token",
     "quota_denials",
     "refuse_anonymous_cookie_namespace",
     "resolve_page_limit",

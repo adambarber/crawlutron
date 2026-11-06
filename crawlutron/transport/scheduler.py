@@ -5,11 +5,17 @@ import logging
 import math
 import time
 from collections.abc import Awaitable, Callable
-from secrets import SystemRandom
 from typing import TYPE_CHECKING, Protocol, TypeVar
 
 from crawlutron.transport.scheduler_domain_state import DomainGate, DomainState
 from crawlutron.transport.scheduler_exceptions import CircuitBreakerOpen
+from crawlutron.transport.scheduler_pacing import (
+    COOLDOWN_PURGE_INTERVAL,
+    MAX_COOLDOWN_WAIT,
+    TokenBucket,
+    jittered_delay,
+    sleep_out,
+)
 from crawlutron.vocabulary.taxonomy import DOMAIN_HEALTH_BY_STATUS, ResultStatus
 
 if TYPE_CHECKING:
@@ -17,25 +23,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Crawl-delay jitter draws from OS entropy, not Mersenne Twister: a predictable
-# per-domain delay pattern is a fingerprint, and the syscall is free here.
-_JITTER = SystemRandom()
-
-# The jitter band. A fixed delay would make a fleet retry a host in lockstep; the
-# band spreads the retries without changing the configured mean.
-_JITTER_LOW, _JITTER_HIGH = 0.8, 1.2
-
 #: How long a successful strategy pin stays authoritative before the domain
 #: re-evaluates the whole ladder; a browser-only page cannot pin forever.
 _STRATEGY_PIN_TTL_SECONDS = 300.0
-
-
-def jittered_delay(base_delay: float) -> float:
-    """``base_delay`` with the crawl-delay jitter applied, or 0 for a zero base.
-    Module-level so the jitter band lives in one place, tested directly."""
-    if base_delay <= 0:
-        return 0.0
-    return base_delay * _JITTER.uniform(_JITTER_LOW, _JITTER_HIGH)
 
 
 class ScheduledJob(Protocol):
@@ -79,50 +69,6 @@ _Result = TypeVar("_Result", bound=SchedulerResult)
 SchedulerWorker = Callable[[_Job], Awaitable[_Result]]
 
 
-class TokenBucket:
-    """Token bucket rate limiter: refills at ``rate`` tokens/sec, caps at ``capacity``."""
-
-    def __init__(
-        self, rate: float, capacity: int = 5, *, clock: Callable[[], float] = time.monotonic
-    ) -> None:
-        self.rate = rate
-        self.capacity = capacity
-        self.tokens = float(capacity)
-        self._clock = clock
-        self.last_refill = clock()
-
-    def consume(self, tokens: float = 1.0) -> float:
-        """Reserve ``tokens``, returning seconds to wait before firing (0 if
-        available). A short caller drives the balance negative, so overlapping
-        callers queue behind what was taken (the max_rps herd)."""
-        now = self._clock()
-        self.tokens = min(self.capacity, self.tokens + (now - self.last_refill) * self.rate)
-        self.last_refill = now
-        self.tokens -= tokens
-        return max(0.0, -self.tokens / self.rate)
-
-
-# Upper bound on any single cooldown/nap sleep -- bounds batch patience.
-MAX_COOLDOWN_WAIT = 300.0
-
-
-def _remaining_until(expiry: float | None, now: float) -> float:
-    """Seconds a stamped deadline still stands, capped; 0 when elapsed or absent.
-    The ONE remaining-computation for every nap in this package (#580): each
-    reader once compared its own clock family against the expiry."""
-    if expiry is None:
-        return 0.0
-    return max(0.0, min(expiry - now, MAX_COOLDOWN_WAIT))
-
-
-async def _sleep_out(expiry: float | None, now: Callable[[], float]) -> None:
-    """One capped nap on a standing deadline: the cap bounds the batch's
-    patience; successive runs walk a window longer than the cap down."""
-    remaining = _remaining_until(expiry, now())
-    if remaining > 0:
-        await asyncio.sleep(remaining)
-
-
 def _circuit_remaining(scheduler: DomainScheduler, domain: str) -> float:
     """Seconds left on the domain's open breaker window, 0 when closed/half-open."""
     return scheduler._state(domain).breaker_remaining(now=scheduler._clock())
@@ -158,11 +104,6 @@ async def _skip_if_breaker_open[Job: ScheduledJob, Result: SchedulerResult](
         await deliver(job.index, failed_result(job, skip))
         return True
     return False
-
-
-# Purge the per-domain records at most once per this many cooldown sets, so a
-# 429-heavy crawl does not rebuild the map per result. ``run`` purges up front.
-COOLDOWN_PURGE_INTERVAL = 100
 
 
 class DomainScheduler:
@@ -373,7 +314,9 @@ class DomainScheduler:
         """
         # Purge stale records up front so the map cannot grow without bound.
         self.purge_expired()
-        global_gate = asyncio.Semaphore(self._global_limit)
+        # Named for its scope: this semaphore is one batch's ceiling, not the
+        # scheduler's lifetime gate.
+        batch_gate = asyncio.Semaphore(self._global_limit)
         # Retain results in memory only when the caller needs them back;
         # with on_result set they spill per-job and never accumulate here.
         results: dict[int, _Result] = {}
@@ -394,8 +337,8 @@ class DomainScheduler:
         async def run_one(job: _Job) -> None:
             # Domain cooldown BEFORE the global semaphore, or one rate-limited
             # domain blocks every other domain's slot (cooldown deadlock).
-            await _sleep_out(self._state(job.domain).cooldown_until, self._clock)
-            if await self._run_one_gated(job, global_gate, deliver, worker, failed_result):
+            await sleep_out(self._state(job.domain).cooldown_until, self._clock)
+            if await self._run_one_gated(job, batch_gate, deliver, worker, failed_result):
                 return
 
         # return_exceptions=True: one job's failure must not cancel the others;
@@ -440,7 +383,7 @@ class DomainScheduler:
     async def _run_one_gated(
         self,
         job: _Job,
-        global_gate: asyncio.Semaphore,
+        batch_gate: asyncio.Semaphore,
         deliver: Callable[[int, _Result], Awaitable[None]],
         worker: SchedulerWorker[_Job, _Result],
         failed_result: Callable[[_Job, BaseException], _Result],
@@ -461,7 +404,7 @@ class DomainScheduler:
         # domain's next slot -- not shoulder-to-shoulder with peers waking
         # at the same expiry (the herd a raw sleep produced).
         expiry = self._state(job.domain).cooldown_until
-        await _sleep_out(expiry, self._clock)
+        await sleep_out(expiry, self._clock)
         if expiry is not None:
             # Reservation only: the bucket reserve was already spent.
             async with self._state(job.domain).gate:
@@ -469,7 +412,7 @@ class DomainScheduler:
             if reserve_wait > 0:
                 await asyncio.sleep(reserve_wait)
         async with self._state(job.domain).gate:
-            async with global_gate:
+            async with batch_gate:
                 try:
                     result = await worker(job)
                     self._record_result_health(job.domain, result)

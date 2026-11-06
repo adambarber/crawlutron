@@ -70,9 +70,7 @@ class Credential(BaseModel):
             if self.username is not None or self.password is not None:
                 raise ValueError("bearer credential must not carry basic fields (username/password)")
         if self.kind == "basic":
-            if not (
-                self.username and self.password and self.password.get_secret_value()
-            ):
+            if not (self.username and self.password and self.password.get_secret_value()):
                 raise ValueError("basic credential requires username and password")
             if self.token is not None:
                 raise ValueError("basic credential must not carry a bearer token")
