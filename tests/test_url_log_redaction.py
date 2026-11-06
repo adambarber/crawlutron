@@ -38,6 +38,58 @@ def test_a_clean_url_survives_unchanged():
     assert redact_url("https://example.com/hook") == "https://example.com/hook"
 
 
+BYPASS_SHAPES = [
+    "https://example.com/hook?ke%79=secret",
+    "https://example.com/hook?key%20=secret",
+    "https://example.com/hook?key[]=secret",
+    "https://example.com/hook?a=1;key=secret",
+]
+
+
+def test_redact_url_decodes_names_before_the_secret_check():
+    """Percent-encoded and bracketed names are the same secret parameter on the
+    wire; the membership test must run on the decoded name, not the raw text."""
+    for url in BYPASS_SHAPES[:3]:
+        assert "secret" not in redact_url(url), url
+
+
+def test_redact_url_treats_semicolon_pairs_as_separators():
+    """Browsers historically split ``;``-pairs like ``&``; a secret behind a
+    semicolon is still a secret in the log form."""
+    assert "secret" not in redact_url(BYPASS_SHAPES[3])
+
+
+def test_redact_url_drops_the_fragment_entirely():
+    """A fragment's contents never legitimately appear in a log form: the
+    client never sends it, so anything there is attacker- or secret-carried."""
+    redacted = redact_url("https://example.com/hook#token=secret")
+    assert "secret" not in redacted and "token" not in redacted
+
+
+def test_the_target_masks_every_bypass_shape():
+    """The object's projection inherits the same decoded-name law."""
+    for url in BYPASS_SHAPES:
+        target = WebhookTarget.admit(url, host_policy=HostPolicy.unrestricted())
+        assert "secret" not in target.redacted(), url
+        assert "secret" not in str(target), url
+
+
+def test_watchstate_serialization_masks_every_bypass_shape():
+    from crawlutron.models.watch_state import WatchState
+
+    for url in BYPASS_SHAPES:
+        watch = WatchState(
+            watch_id="w1",
+            url="https://example.com/",
+            webhook_url=url,
+            interval_seconds=60,
+            next_check_at=1.0,
+            created_at=0.0,
+            updated_at=0.0,
+        )
+        assert "secret" not in watch.model_dump_json(), url
+
+
 def test_a_malformed_url_returns_fully_masked():
     """An unparseable URL is exactly the shape whose credentials hide from
     parsing, so the log form is a placeholder, never the raw text."""
