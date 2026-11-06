@@ -51,23 +51,45 @@ def spy_on_history_reads(monkeypatch):
 
 
 async def run_with_webhook(request_id, execute_fn, webhook_url, job_store, result_store):
-    """One async crawl with a scripted executor and a captured webhook post."""
+    """One async crawl with a scripted executor and a captured webhook post.
+
+    ``webhook_url`` admits at this harness edge, the same conversion the API
+    door performs; delivery sees the target, never a raw string."""
     from crawlutron.api.async_crawl_runner import run_async_crawl
     from crawlutron.config.settings import CrawlerSettings
     from crawlutron.models.crawl_request import CrawlRequest
+    from crawlutron.models.webhook_target import WebhookTarget
 
+    target = None if webhook_url is None else WebhookTarget.admit(webhook_url, host_policy=_webhook_policy())
     with patch("crawlutron.api.async_crawl_runner.execute_crawl", new=execute_fn):
         with patch("crawlutron.api.webhooks.post_webhook", new_callable=AsyncMock) as post_webhook:
             await run_async_crawl(
                 request_id,
                 CrawlRequest.model_validate({"url": "http://example.com/"}),
-                webhook_url,
+                target,
                 CrawlerSettings.from_mapping(),
                 job_store,
                 result_store,
                 asyncio.Event(),
             )
     return post_webhook
+
+
+def _webhook_policy():
+    from crawlutron.config.settings import CrawlerSettings
+    from crawlutron.models.host_policy import HostPolicy
+
+    return HostPolicy.from_settings(CrawlerSettings.from_mapping())
+
+
+def admitted_webhook(raw: str):
+    """An admitted WebhookTarget for tests that pass a target to the runner."""
+    from crawlutron.config.settings import CrawlerSettings
+    from crawlutron.models.host_policy import HostPolicy
+    from crawlutron.models.webhook_target import WebhookTarget
+
+    policy = HostPolicy.from_settings(CrawlerSettings.from_mapping())
+    return WebhookTarget.admit(raw, host_policy=policy)
 
 
 def stored_request(store: JobStore, response):

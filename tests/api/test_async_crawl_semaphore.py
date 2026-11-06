@@ -13,6 +13,7 @@ from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.storage.job_store import JobStatus
 from crawlutron.storage.result_store import CrawlResultStore
+from tests._api_harnesses import admitted_webhook
 from tests._api_harnesses import run_with_webhook as _run_with_webhook
 
 
@@ -96,7 +97,7 @@ class TestSemaphoreHoldsTheCrawlOnly:
                 await run_async_crawl(
                     request_id,
                     CrawlRequest.model_validate({"url": "http://example.com/"}),
-                    "http://webhook.example.com/cb",
+                    admitted_webhook("http://webhook.example.com/cb"),
                     CrawlerSettings.from_mapping(),
                     job_store,
                     CrawlResultStore(tmp_path / "results.db"),

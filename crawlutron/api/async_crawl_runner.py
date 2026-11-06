@@ -23,8 +23,8 @@ from crawlutron.api.unified_shaping import build_unified_result
 from crawlutron.config.env import get_env_int
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_request import CrawlRequest
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.storage.job_store import TERMINAL_STATUSES, CrawlJobState, JobStatus
 
 logger = logging.getLogger(__name__)
@@ -85,7 +85,7 @@ def reset_process_state() -> None:
 async def run_async_crawl(
     request_id: str,
     payload: CrawlRequest,
-    webhook_url: str | None,
+    webhook_url: WebhookTarget | None,
     crawl_settings: CrawlerSettings,
     job_store,
     result_store,
@@ -95,7 +95,6 @@ async def run_async_crawl(
     """Run a single-shot crawl in the background, persisting results to job_store
     through PENDING -> RUNNING -> COMPLETED/FAILED and POSTing when ``webhook_url``
     is set. ``url_pairs`` carries the gate's admitted batch, never rebuilt."""
-    webhook_policy = HostPolicy.from_settings(crawl_settings)
     try:
         # Claim RUNNING only after the semaphore is ours; a queued job must
         # not read RUNNING nor count in aactive_count_for_caller while it waits.
@@ -115,10 +114,9 @@ async def run_async_crawl(
             response_payload=response_payload,
             owner=job.owner,
             webhook_url=webhook_url,
-            webhook_policy=webhook_policy,
         )
     except Exception as exc:
-        await _record_failure(request_id, job_store, str(exc), webhook_url, webhook_policy)
+        await _record_failure(request_id, job_store, str(exc), webhook_url)
 
 
 async def _claim_running(request_id: str, job_store) -> CrawlJobState | None:
@@ -205,8 +203,7 @@ async def _publish_success(
     result_store,
     response_payload: dict[str, object],
     owner,
-    webhook_url: str | None,
-    webhook_policy: HostPolicy,
+    webhook_url: WebhookTarget | None,
 ) -> None:
     """CAS COMPLETED, store the payload, and POST the webhook.
 
@@ -235,30 +232,23 @@ async def _publish_success(
         logger.warning("crawl_result_store_failed", extra={"request_id": request_id})
     # The webhook rides with the terminal write in both branches, so it
     # means "finished" -- announcing a paused crawl hands back a dead one.
-    await _deliver_webhook(webhook_url, response_payload, webhook_policy=webhook_policy)
+    await _deliver_webhook(webhook_url, response_payload)
 
 
-async def _deliver_webhook(
-    webhook_url: str | None, payload: dict[str, object], *, webhook_policy: HostPolicy
-) -> None:
-    """One guarded delivery of an admitted target; admission lives at this edge."""
+async def _deliver_webhook(webhook_url: WebhookTarget | None, payload: dict[str, object]) -> None:
+    """One guarded delivery of the admitted target; admission lived at the door."""
     if webhook_url is None:
         return
     from crawlutron.api.webhooks import post_webhook_guarded
-    from crawlutron.models.webhook_target import WebhookTarget
 
-    await post_webhook_guarded(
-        WebhookTarget.admit(webhook_url, host_policy=webhook_policy),
-        payload,
-    )
+    await post_webhook_guarded(webhook_url, payload)
 
 
 async def _record_failure(
     request_id: str,
     job_store,
     error: str,
-    webhook_url: str | None,
-    webhook_policy: HostPolicy,
+    webhook_url: WebhookTarget | None,
 ) -> None:
     """Record the terminal FAILED write and POST the error webhook when it won.
 
@@ -267,7 +257,7 @@ async def _record_failure(
     """
     logger.error("async_crawl_failed", extra={"request_id": request_id, "error": error})
     recorded = await arecord_terminal_failure(job_store, request_id, error)
-    if webhook_url and recorded:
+    if webhook_url is not None and recorded:
         with contextlib.suppress(Exception):
             error_payload = (
                 await abuild_unified_crawl_response(
@@ -276,4 +266,4 @@ async def _record_failure(
                     adapt=build_unified_result,
                 )
             ).model_dump()
-            await _deliver_webhook(webhook_url, error_payload, webhook_policy=webhook_policy)
+            await _deliver_webhook(webhook_url, error_payload)

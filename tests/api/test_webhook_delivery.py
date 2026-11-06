@@ -27,9 +27,11 @@ from tests._assertions import block_private_targets, host_resolves_to
 from tests._webhook_doubles import record_webhook_delivery
 
 
-def _webhook_target() -> str:
-    """The loopback-safe host the delivery tests agree on."""
-    return "http://webhook.example.com/cb"
+def _webhook_target():
+    """The loopback-safe host the delivery tests agree on, admitted."""
+    from tests._api_harnesses import admitted_webhook
+
+    return admitted_webhook("http://webhook.example.com/cb")
 
 
 async def _run_webhook_crawl(job_store, result_store, request_id) -> None:
@@ -52,7 +54,7 @@ async def _post_webhook(monkeypatch, *, status_code: int = 200) -> list[Request]
 
     delivered = record_webhook_delivery(monkeypatch, status_code=status_code)
     await webhooks.post_webhook(
-        WebhookTarget.admit(_webhook_target(), host_policy=HostPolicy.unrestricted()),
+        WebhookTarget.admit(_webhook_target().delivery_url(), host_policy=HostPolicy.unrestricted()),
         {"results": []},
     )
     return delivered

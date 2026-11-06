@@ -197,41 +197,6 @@ async def _probe_render(monkeypatch, tmp_path):
     )
 
 
-async def _probe_async_runner(monkeypatch, tmp_path):
-    import asyncio
-
-    from crawlutron.api import async_crawl_runner
-
-    effects = _effects()
-    # The REAL stores, not doubles: a hand-rolled `type("Store", ...)` drifted the moment a call site moved to
-    # the async twin and reported a contract change as an AttributeError, which is noise, not a finding.
-    from crawlutron.storage.result_store import CrawlResultStore
-    from tests._job_harnesses import make_job_store
-
-    job_store = make_job_store(str(tmp_path))
-    results_store = CrawlResultStore(tmp_path / "results.db")
-
-    async def denied_execute(*args, **kwargs):
-        return {"results": [], "request_id": "job", "submitted_count": 0, "policy_schema_version": ""}
-
-    monkeypatch.setattr(async_crawl_runner, "execute_crawl", denied_execute)
-    from crawlutron.models.crawl_request import CrawlRequest
-
-    request = CrawlRequest.model_validate({"url": _BLOCKED_URL})
-    await _assert_refused(
-        async_crawl_runner.run_async_crawl(
-            "job",
-            request,
-            _BLOCKED_URL,
-            _denied_settings(),
-            job_store,
-            results_store,
-            asyncio.Event(),
-        ),
-        effects,
-    )
-
-
 async def _probe_response_shaping(monkeypatch, tmp_path):
     from crawlutron.api.response_shaping import frontier_link_url
 
@@ -336,7 +301,6 @@ _PROBES = {
     "crawlutron/api/map_endpoint.py:map_site": _probe_map_endpoint,
     "crawlutron/api/site_map.py:build_site_map": _probe_site_map,
     "crawlutron/api/render.py:render_request": _probe_render,
-    "crawlutron/api/async_crawl_runner.py:run_async_crawl": _probe_async_runner,
     "crawlutron/api/response_shaping.py:frontier_link_url": _probe_response_shaping,
     "crawlutron/api/watch_router.py:create_watch": _probe_watch_router,
     "crawlutron/api/policy_suggestions.py:policy_suggestions": _probe_policy_suggestions,
