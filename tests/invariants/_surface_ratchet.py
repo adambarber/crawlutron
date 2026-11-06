@@ -16,7 +16,7 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     # RAISED to (14, 11) then LOWERED to (7, 6), (5, 5), (4, 4), then (2, 2): HostPolicy and
     # registrable_domain
     "crawlutron/safety/validation.py": (2, 2),
-    "crawlutron/config/env.py": (7, 5),
+    "crawlutron/config/env.py": (8, 6),
     # RAISED to (7, 6): failed_unified_result is the single failure projection.
     "crawlutron/api/response_shaping.py": (7, 6),
     "crawlutron/api/unified_shaping.py": (5, 5),

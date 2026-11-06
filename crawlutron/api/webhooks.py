@@ -20,7 +20,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from crawlutron.config.env import get_env_int, get_mapping_int, parse_bool_env
+from crawlutron.config.env import EnvDecisionMemo, get_env_int, get_mapping_int
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.safety.bounded_io import BodyTooLarge, read_capped_async
@@ -38,9 +38,23 @@ _WEBHOOK_BACKOFF_MS_DEFAULT = 200
 # runner that scheduled it was cancelled after its terminal write landed.
 _DELIVERIES: set[asyncio.Task] = set()
 
-# (raw env value, parsed decision) for CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK.
+# The memoized plaintext-webhook env decision, shared primitive (#621).
 # Value-keyed: an env change lands on the next call, an unchanged one skips it.
-_PLAINTEXT_WEBHOOK_DECISION: tuple[str | None, bool] | None = None
+_PLAINTEXT_WEBHOOK_DECISION = EnvDecisionMemo(
+    "CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK",
+    default=False,
+    logger_name="crawlutron.api.webhooks",
+    warning=(
+        "Plaintext-webhook guard DISABLED by CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK=%r: "
+        "HMAC signatures and crawl payloads ride unencrypted to caller-supplied "
+        "http:// webhook URLs. Unset it, or set it to 0, outside local development."
+    ),
+)
+
+
+def allow_plaintext_webhooks() -> bool:
+    """Memoized read of the plaintext-webhook escape hatch (inverted default)."""
+    return _PLAINTEXT_WEBHOOK_DECISION.decide()
 
 
 class DeliveryFailed(Exception):
@@ -58,30 +72,7 @@ def webhook_secret() -> str:
 
 def reset_plaintext_webhook_memo() -> None:
     """Drop the memoized plaintext-webhook env decision (tests)."""
-    global _PLAINTEXT_WEBHOOK_DECISION
-    _PLAINTEXT_WEBHOOK_DECISION = None
-
-
-def allow_plaintext_webhooks() -> bool:
-    """Memoized read of the plaintext-webhook escape hatch (inverted default)."""
-    global _PLAINTEXT_WEBHOOK_DECISION
-    raw = os.environ.get("CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK")
-    cached = _PLAINTEXT_WEBHOOK_DECISION
-    if cached is not None and cached[0] == raw:
-        return cached[1]
-    decision = parse_bool_env("CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK", default=False)
-    _PLAINTEXT_WEBHOOK_DECISION = (raw, decision)
-    if decision:
-        # Warned at the decision, not per call: the memo logs once per distinct
-        # env value instead of flooding every admission.
-        logger.warning(
-            "Plaintext-webhook guard DISABLED by CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK=%r: "
-            "HMAC signatures and crawl payloads ride unencrypted to caller-supplied "
-            "http:// webhook URLs. Unset it, or set it to 0, outside local development.",
-            raw,
-            extra={"env_name": "CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK", "env_value": raw},
-        )
-    return decision
+    _PLAINTEXT_WEBHOOK_DECISION.reset()
 
 
 def ensure_https_webhook_url(webhook_url: str) -> None:

@@ -36,6 +36,7 @@ _ENV_READER_NAMES = frozenset(
         "get_mapping_int",
         "parse_bool_env",
         "parse_bool_value",
+        "EnvDecisionMemo",
     }
 )
 

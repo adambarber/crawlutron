@@ -47,23 +47,24 @@ class TestNormalizationGuardMemoization:
     URL = "https://MEMO-T2-9E16C.TEST:443/path/?b=2&utm_source=x&a=1#frag"
 
     def _spy(self, monkeypatch):
+        import crawlutron.config.env as config_env
         import crawlutron.models.host_policy as host_policy
 
         counts = {"env": 0, "ip": 0}
 
         host_policy.reset_private_target_memo()
-        real_bool = host_policy.parse_bool_env
+        real_bool = config_env.parse_bool_value
         real_classify = host_policy.classify
 
-        def counting_bool(name, default=False):
+        def counting_bool(raw, default, *, env_name):
             counts["env"] += 1
-            return real_bool(name, default)
+            return real_bool(raw, default, env_name=env_name)
 
         def counting_classify(host):
             counts["ip"] += 1
             return real_classify(host)
 
-        monkeypatch.setattr(host_policy, "parse_bool_env", counting_bool)
+        monkeypatch.setattr(config_env, "parse_bool_value", counting_bool)
         # Spy on the classification primitive rather than on ``ipaddress``.
         monkeypatch.setattr(host_policy, "classify", counting_classify)
         return counts
