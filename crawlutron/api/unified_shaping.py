@@ -143,7 +143,7 @@ def build_unified_result(item: EngineCrawlResult) -> UnifiedCrawlResult:
         quality_score=item.quality_score,
         classification_evidence=_evidence_models(item.classification_evidence),
         http_status=item.http_status,
-        headers=item.headers,
+        headers=dict(item.headers),
         content_type=item.content_type,
         extraction_method=item.extraction_method,
         # to_dict is a declared dict[str, JsonValue] producer; this cast names

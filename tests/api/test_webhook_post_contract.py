@@ -27,29 +27,25 @@ async def _assert_https_delivers_once(monkeypatch) -> None:
 
 
 class TestPostWebhookSchemeLaw:
-    async def test_plaintext_url_is_refused_without_a_socket(self, monkeypatch, caplog):
+    async def _refused(self, monkeypatch, caplog, url):
+        """Post a refused plaintext URL; return delivered and the log."""
         from crawlutron.api import webhooks
 
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK", "0")
         webhooks.reset_plaintext_webhook_memo()
         with caplog.at_level(logging.WARNING, logger="crawlutron.api.webhooks"):
-            delivered = await _post_through_chokepoint(
-                monkeypatch, url="http://webhook.example.com/cb", payload=_OK
-            )
+            delivered = await _post_through_chokepoint(monkeypatch, url=url, payload=_OK)
+        return delivered
+
+    async def test_plaintext_url_is_refused_without_a_socket(self, monkeypatch, caplog):
+        delivered = await self._refused(monkeypatch, caplog, "http://webhook.example.com/cb")
         assert delivered == [], "post_webhook opened a socket to a plaintext http:// url"
         assert "webhook_plaintext_refused" in caplog.text
 
     async def test_the_refusal_log_carries_only_the_origin(self, monkeypatch, caplog):
         """A caller-supplied webhook URL can carry query credentials; the log
         names the origin only, never the raw URL (#636)."""
-        from crawlutron.api import webhooks
-
-        monkeypatch.setenv("CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK", "0")
-        webhooks.reset_plaintext_webhook_memo()
-        with caplog.at_level(logging.WARNING, logger="crawlutron.api.webhooks"):
-            await _post_through_chokepoint(
-                monkeypatch, url="http://webhook.example.com/cb?api_key=hunter2", payload=_OK
-            )
+        await self._refused(monkeypatch, caplog, "http://webhook.example.com/cb?api_key=hunter2")
         record = next(r for r in caplog.records if r.getMessage() == "webhook_plaintext_refused")
         assert record.url == "http://webhook.example.com", record.url
         assert "hunter2" not in caplog.text, "the raw webhook URL reached the log"

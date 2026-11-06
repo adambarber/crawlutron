@@ -487,6 +487,10 @@ def reset_process_state() -> None:
     # The lazy content cache is part of the same lifetime: empty it when built.
     if _SHARED_CONTENT_CACHE is not None:
         _SHARED_CONTENT_CACHE.clear()
+    # The cadence stamp gates the sweep on a process lifetime; a reset starts a
+    # new one, so the next spill must scan again instead of skipping it.
+    global spill_gc_last_run
+    spill_gc_last_run = None
 
 
 def has_process_state() -> bool:

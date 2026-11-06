@@ -106,3 +106,17 @@ def test_every_owner_is_listed() -> None:
         if {"reset_process_state", "has_process_state"} <= names:
             found.add(pathlib.Path(*path.relative_to(REPO_ROOT).parts).stem)
     assert found <= listed, f"modules conforming but not listed in OWNERS: {sorted(found - listed)}"
+
+
+def test_engine_reset_clears_the_spill_gc_cadence_stamp() -> None:
+    """#605: the cadence stamp gated the sweep across resets, so a reset process
+    skipped the first sweep of its new crawl lifetime. Reset drops the stamp.
+    """
+    import crawlutron.orchestration.engine as engine
+
+    engine.spill_gc_last_run = 1.0  # a stamp claiming the sweep just ran
+    engine.reset_process_state()
+    assert engine.spill_gc_last_run is None, (
+        "the spill GC cadence stamp outlived the reset that empties every shared "
+        "cache -- the next crawl skips the first sweep of its new lifetime"
+    )
