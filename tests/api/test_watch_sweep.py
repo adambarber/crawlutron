@@ -11,9 +11,10 @@ from crawlutron.api import watch_sweep
 from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
 from crawlutron.api.watch_sweep import WatchSweeper, sweep_watches_forever
 from crawlutron.config.settings import CrawlerSettings
+from crawlutron.models import watch_state
 from crawlutron.models.normalized_url import NormalizedUrl
-from crawlutron.models.watch_state import WatchState
 from crawlutron.models.watch_status import WatchStatus
+from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.storage.caller_key_store import CallerKeyStore
 from crawlutron.vocabulary.taxonomy import CrawlClassification
 from tests._assertions import block_private_targets
@@ -44,11 +45,11 @@ def announced(monkeypatch):
     seam; each call is awaited here so tests observe the completed delivery."""
     calls: list[tuple[str, dict[str, object]]] = []
 
-    async def _capture(url: str, payload: dict[str, object], *, host_policy) -> None:
-        calls.append((url, payload))
+    async def _capture(target: object, payload: dict[str, object]) -> None:
+        calls.append((str(target), payload))
 
-    def _spawn(url: str, payload: dict[str, object], *, host_policy):
-        return asyncio.create_task(_capture(url, payload, host_policy=host_policy))
+    def _spawn(target: object, payload: dict[str, object]):
+        return asyncio.create_task(_capture(target, payload))
 
     monkeypatch.setattr(watch_sweep, "start_webhook_delivery", _spawn)
     return calls
@@ -67,18 +68,21 @@ def origin_content():
     EtagHandler.etag, EtagHandler.body = saved
 
 
+_DEFAULT_TARGET = WebhookTarget.admit(WEBHOOK, host_policy=UNRESTRICTED_HOST_POLICY)
+
+
 def register(
     watch_store,
     url: NormalizedUrl,
     *,
     at: float = 0.0,
-    webhook: str | None = WEBHOOK,
+    target: WebhookTarget | None = _DEFAULT_TARGET,
     owner: str = "",
-) -> WatchState:
-    return watch_store.create(url, webhook_url=webhook, interval_seconds=INTERVAL, now=at, owner=owner)
+) -> watch_state.WatchState:
+    return watch_store.create(url, webhook_url=target, interval_seconds=INTERVAL, now=at, owner=owner)
 
 
-async def _prime(sweeper, watch_store, server, announced) -> WatchState:
+async def _prime(sweeper, watch_store, server, announced) -> watch_state.WatchState:
     """Register a watch against ``server``, run its first conditional check, and
     clear the announcement buffer so the follow-up check reports a fresh outcome.
     """
@@ -187,7 +191,7 @@ async def test_a_delivery_time_validation_failure_leaves_the_recorded_outcome_in
 async def test_a_poll_only_watch_is_checked_and_announces_to_nobody(
     sweeper, watch_store, etag_server, announced
 ):
-    register(watch_store, canonical(origin_url(etag_server)), webhook=None)
+    register(watch_store, canonical(origin_url(etag_server)), target=None)
 
     outcomes = await sweeper.sweep_once(now=NOW)
 

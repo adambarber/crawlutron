@@ -15,6 +15,7 @@ import pytest
 
 from crawlutron.api import webhooks
 from crawlutron.models.host_policy import HostPolicy
+from crawlutron.models.webhook_target import WebhookTarget
 
 
 def _payload(n_results: int) -> dict[str, object]:
@@ -28,15 +29,10 @@ def _payload(n_results: int) -> dict[str, object]:
 
 def _probe_peak(payload) -> tuple[int, int | None]:
     """Peak traced bytes over one ``post_webhook`` call, plus the delivered size."""
+    target = WebhookTarget.admit("https://webhook.example.com/cb", host_policy=HostPolicy.unrestricted())
     with mock.patch.object(webhooks, "deliver_pinned_webhook", mock.AsyncMock()) as deliver:
         tracemalloc.start()
-        asyncio.run(
-            webhooks.post_webhook(
-                "https://webhook.example.com/cb",
-                payload,
-                host_policy=HostPolicy.unrestricted(),
-            )
-        )
+        asyncio.run(webhooks.post_webhook(target, payload))
         _cur, peak = tracemalloc.get_traced_memory()
         tracemalloc.stop()
     args = deliver.await_args.args if deliver.await_args is not None else ()

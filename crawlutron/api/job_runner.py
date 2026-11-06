@@ -41,6 +41,7 @@ from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.normalized_url import NormalizedUrl, admit_or_none
 from crawlutron.models.result_record import ProducerEnvelope
+from crawlutron.safety.url_redaction import redact_url
 from crawlutron.storage.job_store import (
     CrawlJobState,
     FrontierEntry,
@@ -201,7 +202,7 @@ async def _entry_result(
         # One entry's link admission must not lose the whole job: drop its links
         # and let the remaining entries resolve.
         url_attr = item.normalized_url.raw if item.normalized_url else "<unknown>"
-        logger.warning("link_admission_failed", extra={"url": url_attr})
+        logger.warning("link_admission_failed", extra={"url": redact_url(url_attr)})
         admitted = AdmissionOutcome()
     known |= admitted.known_delta  # unioning the delta copies nothing whole
     job.stats["total_discovered"] = job.stats.get("total_discovered", 0) + admitted.accepted

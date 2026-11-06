@@ -419,7 +419,10 @@ async def _response(state: PipelineState) -> ProducerEnvelope:
         ),
     }
     if state.webhook_url is not None:
-        response["webhook_url"] = state.webhook_url
+        # The wire form is the redacted one: the raw URL is a delivery secret.
+        from crawlutron.safety.url_redaction import redact_url
+
+        response["webhook_url"] = redact_url(state.webhook_url)
     return response
 
 

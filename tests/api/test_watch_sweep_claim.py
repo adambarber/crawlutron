@@ -10,12 +10,17 @@ import asyncio
 
 from crawlutron.api.watch_sweep import WatchSweeper
 from crawlutron.config.settings import CrawlerSettings
+from crawlutron.models.webhook_target import WebhookTarget
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 from tests._result_builders import engine_result
 
 NOW = 1_700_000_000.0
 INTERVAL = 3600
 WEBHOOK = "http://watcher.example.com/hook"
+
+
+def _webhook() -> WebhookTarget:
+    return WebhookTarget.admit(WEBHOOK, host_policy=UNRESTRICTED_HOST_POLICY)
 
 
 def origin_url(server) -> str:
@@ -36,7 +41,7 @@ async def test_two_concurrent_sweeps_deliver_one_webhook_not_two(watch_store, et
 
     watch = watch_store.create(
         canonical(origin_url(etag_server)),
-        webhook_url=WEBHOOK,
+        webhook_url=_webhook(),
         interval_seconds=INTERVAL,
         now=0.0,
     )
@@ -61,11 +66,11 @@ async def test_two_concurrent_sweeps_deliver_one_webhook_not_two(watch_store, et
         await release.wait()
         return _envelope(payload.url)
 
-    async def _capture(url, payload, *, host_policy):
-        deliveries.append(url)
+    async def _capture(target, payload):
+        deliveries.append(str(target))
 
-    def _spawn(url, payload, *, host_policy):
-        return asyncio.create_task(_capture(url, payload, host_policy=host_policy))
+    def _spawn(target, payload):
+        return asyncio.create_task(_capture(target, payload))
 
     monkeypatch.setattr(watch_sweep, "execute_crawl", _parked_crawl)
     monkeypatch.setattr(watch_sweep, "start_webhook_delivery", _spawn)
@@ -91,19 +96,19 @@ async def test_a_hanging_webhook_does_not_stall_the_sweep_pass(watch_store, etag
 
     watch = watch_store.create(
         canonical(origin_url(etag_server)),
-        webhook_url=WEBHOOK,
+        webhook_url=_webhook(),
         interval_seconds=INTERVAL,
         now=0.0,
     )
     started = asyncio.Event()
     release = asyncio.Event()
 
-    async def _hanging_delivery(url, payload, *, host_policy):
+    async def _hanging_delivery(target, payload):
         started.set()
         await release.wait()
 
-    def _spawn_hanging(url, payload, *, host_policy):
-        return asyncio.create_task(_hanging_delivery(url, payload, host_policy=host_policy))
+    def _spawn_hanging(target, payload):
+        return asyncio.create_task(_hanging_delivery(target, payload))
 
     monkeypatch.setattr(watch_sweep, "start_webhook_delivery", _spawn_hanging)
 

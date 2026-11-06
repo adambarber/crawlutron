@@ -12,6 +12,7 @@ from crawlutron.models.content_validators import ContentValidators
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.watch_state import WatchState
 from crawlutron.models.watch_status import WatchStatus
+from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.storage.coordination_store import CoordinationStore, atwin
 from crawlutron.storage.ids import new_watch_id
 from crawlutron.storage.migrations import StoreSchema
@@ -44,7 +45,7 @@ class WatchStore(CoordinationStore):
         *,
         interval_seconds: int,
         now: float,
-        webhook_url: str | None = None,
+        webhook_url: WebhookTarget | None = None,
         owner: str = "",
     ) -> WatchState:
         """Register a watch, scheduled for its first check one interval out. The
@@ -55,7 +56,7 @@ class WatchStore(CoordinationStore):
             watch_id=new_watch_id(),
             owner=owner,
             url=url.raw,
-            webhook_url=webhook_url,
+            webhook_url=None if webhook_url is None else webhook_url.delivery_url(),
             interval_seconds=interval_seconds,
             next_check_at=now + interval_seconds,
             created_at=now,
@@ -73,7 +74,7 @@ class WatchStore(CoordinationStore):
                     state.watch_id,
                     state.owner,
                     state.url,
-                    state.webhook_url,
+                    webhook_url.delivery_url() if webhook_url is not None else None,
                     state.interval_seconds,
                     state.status,
                     state.validators.model_dump_json(exclude_none=True),

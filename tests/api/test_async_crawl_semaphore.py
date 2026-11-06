@@ -4,14 +4,16 @@ Claim is post-acquire (#462); delivery is post-release (#463).
 """
 
 import asyncio
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from crawlutron.api.async_crawl_runner import run_async_crawl
+from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.storage.job_store import JobStatus
 from crawlutron.storage.result_store import CrawlResultStore
+from tests._api_harnesses import admitted_webhook
 from tests._api_harnesses import run_with_webhook as _run_with_webhook
 
 
@@ -86,7 +88,7 @@ class TestSemaphoreHoldsTheCrawlOnly:
         # raises, so an in-watcher assert would never surface.
         delivery_seen_inside = True
 
-        async def watching_delivery(url, payload, *, host_policy):
+        async def watching_delivery(target, payload):
             nonlocal delivery_seen_inside
             delivery_seen_inside = async_crawl_semaphore().locked()
 
@@ -95,8 +97,8 @@ class TestSemaphoreHoldsTheCrawlOnly:
                 await run_async_crawl(
                     request_id,
                     CrawlRequest.model_validate({"url": "http://example.com/"}),
-                    "http://webhook.example.com/cb",
-                    MagicMock(),
+                    admitted_webhook("http://webhook.example.com/cb"),
+                    CrawlerSettings.from_mapping(),
                     job_store,
                     CrawlResultStore(tmp_path / "results.db"),
                     asyncio.Event(),

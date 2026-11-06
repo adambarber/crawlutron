@@ -281,3 +281,86 @@ async def test_resolver_budget_timeout_is_a_resolution_failure_not_a_navigation_
 
     assert result.classification == "dns_error"
     assert result.error == "dns_error"
+
+
+async def test_https_navigation_dials_the_hostname_for_cert_verification(monkeypatch):
+    """The pin law at the render door: TLS cert identity must be verified against
+    the pinned hostname, so HTTPS navigation dials the hostname (real SNI), gated
+    by the fresh+stable double-resolve -- never an IP literal with a Host override.
+    """
+    block_private_targets(monkeypatch)
+    _stub_dns_to_example_com(monkeypatch)
+    checks: list[str] = []
+    from crawlutron.transport import pinned_dns
+
+    pinned_dns.reset_process_state()
+    original = pinned_dns.check_ssrf_protection_stable
+
+    def spy(url):
+        checks.append(url.host)
+        original(url)
+
+    monkeypatch.setattr("crawlutron.transport.browser_targets.check_ssrf_protection_stable", spy)
+    from tests._browser_doubles import pinned_request
+
+    def recording_pin(url, headers, timeout_seconds=None):
+        return pinned_request(url, "https://1.2.3.4/", {"Host": url.host})
+
+    async def awaitable_pin(url, headers, timeout_seconds=None):
+        return recording_pin(url, headers, timeout_seconds=timeout_seconds)
+
+    pinned_url, headers = await resolve_browser_target(
+        canonical("https://example.com/path"), pin=awaitable_pin
+    )
+    assert pinned_url == "https://example.com/path"
+    assert headers == {}
+    assert checks == ["example.com"]
+
+
+def _stub_dns_to_example_com(monkeypatch):
+    """Resolve every host to a fixed address, standing in for real DNS."""
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda host, port, *a, **k: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port or 443))
+        ],
+    )
+
+
+class _CertMismatchPage(BrowserFakePage):
+    """A page whose navigation hits a certificate whose identity does not match
+    the pinned hostname -- Playwright's real refusal shape, surfaced verbatim."""
+
+    async def goto(self, url, wait_until="load", **kwargs):
+        raise Exception("net::ERR_CERT_COMMON_NAME_INVALID at https://example.com/")
+
+
+async def test_a_cert_identity_mismatch_is_a_classified_refusal_not_silence(monkeypatch):
+    """The pin law observed, not assumed: when the presented certificate's
+    identity does not match the pinned hostname, the render ends in a terminal
+    ``tls_error`` classification reaching the caller -- never a silent success
+    and never an unclassified unknown. Hostname dialing is what makes the
+    browser's default cert verification bind the pinned identity; this test
+    proves the mismatch path is visible when it fires."""
+    block_private_targets(monkeypatch)
+    _stub_dns_to_example_com(monkeypatch)
+    from crawlutron.transport.browser_targets import resolve_browser_target as _resolve
+
+    pinned_url, _headers = await _resolve(
+        canonical("https://example.com/path"),
+        pin=stub_pinned_request(("https://example.com/path", {})),
+    )
+    assert pinned_url.startswith("https://example.com"), pinned_url
+
+    page = _CertMismatchPage()
+    renderer = build_pinned_renderer(page, pin=stub_pinned_request(("https://example.com/path", {})))
+    from crawlutron.models.render_options import RenderOptions
+
+    result = await renderer.render(
+        canonical("https://example.com/"),
+        RenderOptions(timeout_seconds=2, max_retries=0),
+        policy=UNRESTRICTED_HOST_POLICY,
+    )
+    assert result.classification == "tls_error", result.classification
+    assert result.status != "success", result.status
