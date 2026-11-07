@@ -328,16 +328,18 @@ async def _dispatch_paced(
     """
     admission = _build_admission(state)
     remaining = list(jobs)
+    floor = admission.saturated_dispatch_floor()
     while remaining:
         http_jobs, browser_jobs = _bucket_tasks_by_tier(scheduler, remaining, state.policy)
         admit_http, admit_browser = await admission.admit(len(http_jobs), len(browser_jobs))
         take_http = http_jobs[:admit_http] if admit_http else []
         take_browser = browser_jobs[:admit_browser] if admit_browser else []
-        # Saturated gate: bounded progress floor -- dispatch one job so a pinned
-        # gate cannot leave the batch in flight forever.
+        # Saturated gate: bounded progress floor -- dispatch k jobs (a fraction of
+        # the HTTP ramp) so a pinned gate cannot leave the batch in flight forever
+        # while the pass cost stays a fraction of the batch, not one cycle per job.
         if not take_http and not take_browser and remaining:
             if http_jobs:
-                take_http = http_jobs[:1]
+                take_http = http_jobs[:floor]
             elif browser_jobs:
                 take_browser = browser_jobs[:1]
         chunk = take_http + take_browser

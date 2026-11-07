@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import asyncio
 
+from crawlutron.models.result_record import ProducerEnvelope
 from crawlutron.runtime.pressure_sizing import ResourceGate
 
-__all__ = ["PinnedGate", "pinned_resource_gate", "no_crawl_delay"]
+__all__ = ["PinnedGate", "pinned_resource_gate", "no_crawl_delay", "simple_page_route", "run_sync_batch"]
 
 
 async def no_crawl_delay(url: str) -> float | None:
@@ -77,3 +78,35 @@ class PinnedGate(ResourceGate):
 
     def cpu_ratio(self):
         return self._cpu
+
+
+def simple_page_route(url, sent_headers, timeout, max_content_length):
+    """The one 200-HTML answer the admission/dispatch tests share."""
+    return {
+        "status": 200,
+        "body": b"<html><body>hello world, enough text to render</body></html>",
+        "ctype": "text/html; charset=utf-8",
+    }
+
+
+async def run_sync_batch(
+    monkeypatch, *, n_urls: int, policy: dict[str, object], total_bytes: int = 64 << 30, prefix: str = "site"
+) -> ProducerEnvelope:
+    """Crawl ``n_urls`` pages of one host through the real sync pipeline, with the
+    RAM/batch mocks the admission tests share, and return the result envelope."""
+    from crawlutron.orchestration import request_pipeline as rp
+    from crawlutron.orchestration.engine import crawl_request
+    from crawlutron.runtime.pressure_memory import MemoryStats
+
+    monkeypatch.setattr(rp, "read_memory_stats", lambda: MemoryStats(total_bytes=total_bytes, used_bytes=0))
+    monkeypatch.setattr(rp, "derive_browser_pool_size", lambda: 2)
+    from tests._fetch_doubles import FetcherDouble
+
+    fetcher = FetcherDouble(simple_page_route)
+    urls = [f"http://{prefix}{i}.example/page" for i in range(n_urls)]
+    return await crawl_request(
+        {"urls": urls, "policy": policy},
+        http_fetcher=fetcher,
+        cffi_fetcher=fetcher,
+        browser_worker=None,
+    )
