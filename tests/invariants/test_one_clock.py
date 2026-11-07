@@ -37,6 +37,7 @@ _DELEGATED_WALL_CONSUMERS = frozenset(
         "browser_pool.py",
         "browser_render_phases.py",
         "cookie_jar.py",
+        "fetch_policy.py",
         "fetchers.py",
         "freshness.py",
         "http.py",

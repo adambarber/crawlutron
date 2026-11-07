@@ -76,6 +76,7 @@ class CallerKeyStore(CoordinationStore):
             raise ValueError("key quotas must be zero (unbounded) or positive")
         key_id = f"key_{secrets.token_hex(_KEY_ID_BYTES)}"
         secret = f"ck_{secrets.token_urlsafe(_SECRET_BYTES)}"
+        # wall: persisted row stamps anchor to wall so they survive restarts.
         created_at = time.time()
         with self._lock:
             self._conn.execute(

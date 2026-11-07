@@ -90,7 +90,7 @@ class ContentCache:
         self.cache_dir = Path(cache_dir)
         self.default_ttl = default_ttl
         self.namespace = namespace
-        self.clock = clock
+        self._clock = clock
         self.max_entries = max_entries
         self.max_entry_bytes = max_entry_bytes
         # ``None`` means "no total-bytes cap" and ``_over_limits`` branches on
@@ -205,7 +205,7 @@ class ContentCache:
                     self._drop_locked(key, doomed)
                     return None
                 expires = resolve_expiry(envelope)
-                if is_expired(self.clock(), expires):
+                if is_expired(self._clock(), expires):
                     # Free the byte accounting too: phantom bytes would keep
                     # ``_over_limits`` true and evict LIVE entries later.
                     self._drop_locked(key, doomed)
@@ -236,7 +236,7 @@ class ContentCache:
         if key not in self._memory_cache:
             return None
         expires, value = self._memory_cache[key]
-        if is_expired(self.clock(), expires):
+        if is_expired(self._clock(), expires):
             self._memory_cache.pop(key, None)
             return None
         self._memory_cache.move_to_end(key)
@@ -280,7 +280,7 @@ class ContentCache:
             entry = self._index_cached_at.get(key)
             if entry is not None:
                 expires, cached_at = entry
-                if not is_expired(self.clock(), expires):
+                if not is_expired(self._clock(), expires):
                     return cached_at
         envelope = self._read_envelope(key)
         return envelope.get("cached_at") if envelope is not None else None
@@ -292,7 +292,7 @@ class ContentCache:
         effective_ttl = self.default_ttl if ttl is None else ttl
         # cached_at records when this entry was written so callers can compare a
         # remote "last modified" signal against our local fetch time.
-        now = self.clock()
+        now = self._clock()
         expires = expiry_for(now, float(effective_ttl))
         return {"expires": expires, "value": value, "cached_at": now}, expires
 
@@ -366,7 +366,7 @@ class ContentCache:
 
     def prune(self) -> int:
         """Delete expired entries; return the number removed."""
-        now = self.clock()
+        now = self._clock()
         expired, surviving = scan_cache_dir(self.cache_dir, self.namespace, resolve_expiry, now)
 
         doomed: list[tuple[str | None, Path]] = []

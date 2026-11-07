@@ -143,6 +143,7 @@ async def deliver_pinned_webhook(
     request_headers = {"Content-Type": "application/json", **pinned.headers}
     secret = webhook_secret()
     if secret:
+        # wall: the HMAC replay window is the receiver's wall clock.
         timestamp = str(int(time.time()))
         request_headers[_SIGNATURE_HEADER] = _signature(payload_bytes, secret, timestamp)
         request_headers[_TIMESTAMP_HEADER] = timestamp

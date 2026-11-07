@@ -122,6 +122,7 @@ def parse_lastmod(lastmod: str | None) -> float | None:
     if ts is None:
         return None
     skew = get_env_int("CRAWLUTRON_SITEMAP_LASTMOD_FUTURE_SKEW_SECONDS", 86400, lo=0)
+    # wall: lastmod is the origin's published instant, freshness vs its TTL.
     if ts > time.time() + skew:
         return None
     return ts
@@ -491,8 +492,7 @@ def _reset() -> None:
 
 def _has() -> bool:
     """Whether any shared cache still holds an entry."""
-    # ``_SHARED_HTTP_CACHE`` defines no ``__len__``: bool() is constant True, so
-    # read the entry mapping instead, or the probe reports state after every reset.
+    # No __len__ on _SHARED_HTTP_CACHE: read the entry mapping, not bool().
     content_holds = _SHARED_CONTENT_CACHE is not None and bool(_SHARED_CONTENT_CACHE._index)
     return bool(robots_cache) or bool(_SHARED_HTTP_CACHE._data) or content_holds
 

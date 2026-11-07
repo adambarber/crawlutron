@@ -344,6 +344,7 @@ def _expiry(attrs: dict[str, str | None]) -> float | None:
     if isinstance(max_age, str):
         seconds = _max_age_seconds(max_age)
         if seconds is not None:
+            # wall: RFC 6265 cookie epochs are wall instants by spec.
             return 0.0 if seconds <= 0 else _capped_expiry(time.time() + seconds)
     expires = attrs.get("expires")
     if isinstance(expires, (int, float)):

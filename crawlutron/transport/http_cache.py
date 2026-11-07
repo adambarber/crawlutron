@@ -213,6 +213,7 @@ async def store_http_caches(ctx: HttpStrategyContext, resp: FetchedResponse) -> 
         # 5.2.2.1), and max-age beats a conflicting Expires (5.3).
         origin_ttl = max_age_seconds(resp.headers)
         if origin_ttl is None:
+            # wall: HTTP-date Expires is a wall instant by RFC 7234.
             origin_ttl = expires_seconds(resp.headers, now=time.time())
         ttl = int(min(ctx.content_cache.default_ttl, origin_ttl)) if origin_ttl is not None else None
         if ttl is not None and ttl <= 0:
