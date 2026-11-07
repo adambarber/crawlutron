@@ -29,8 +29,9 @@ WORKFLOW_ROOT_CONFIG = CONFIG_PATH.relative_to(SERVICE_ROOT).as_posix()
 
 ENFORCEMENT_COMMAND = f"pre-commit run --all-files --config {WORKFLOW_ROOT_CONFIG}"
 
-# Every job that reports a result the aggregate must depend on.
-REPORTING_JOBS = {"enforcement", "test-fast", "test-browser"}
+# Every job that reports a result the aggregate must depend on. `audit` and
+# `secret-scan` are the supply-chain gates added by #623.
+REPORTING_JOBS = {"enforcement", "test-fast", "test-browser", "audit", "secret-scan"}
 
 # GitHub's template form for an errexit shell. The required aggregate is a chain of `test` lines, so its exit
 # code is its last line's without errexit.
@@ -214,6 +215,24 @@ def _assert_failure_propagation(workflow: str) -> None:
             assert completed.returncode != 0, (
                 f"needs.{job}.result = {outcome} still passed the required aggregate:\n{completed.stdout}"
             )
+
+
+def _job_run_steps(workflow: str) -> list[tuple[str, str]]:
+    """Every `run:` step in the workflow as `(job, script)` pairs, skipping steps
+    that carry no run string -- the shared sweep both run-based contract checks
+    iterate, extracted so the loops cannot become jscpd clone-pairs.
+    """
+    found: list[tuple[str, str]] = []
+    for name, job in _jobs(workflow).items():
+        steps = job.get("steps")
+        assert isinstance(steps, list)
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            run = step.get("run")
+            if isinstance(run, str):
+                found.append((name, run))
+    return found
 
 
 def _hook_blocks(config: str) -> list[tuple[str, dict[str, object]]]:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 import pytest
+import yaml
 
 from scripts import jscpd_gate as gate
 from tests._ci_contract import (
@@ -15,9 +16,11 @@ from tests._ci_contract import (
     WORKFLOW_PATH,
     _assert_failure_propagation,
     _assert_no_config_exclude,
+    _assert_no_continue_on_error,
     _entry,
     _field,
     _hook_blocks,
+    _job_run_steps,
     _jobs,
     _require_exactly_one_jscpd_gate,
     _required_needs,
@@ -65,12 +68,91 @@ def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
 
     assert workflow.count(ENFORCEMENT_COMMAND) == 1
     assert "scripts/jscpd_gate.py" not in workflow
+    _assert_frozen_lock_install(workflow)
     required = _required_needs(workflow)
     assert required == REPORTING_JOBS
-    # The enforcement job builds its venv from ``-e .[dev]`` alone; re-installing
-    # a specific tool on top would reintroduce a second, drifting declaration.
-    assert ".[dev]" in workflow
+    # The enforcement job builds its venv from the frozen lock's dev extra;
+    # re-installing a specific tool on top reintroduces a drifting declaration.
+    assert "--extra dev" in workflow
+    assert "pip install" not in workflow
     _assert_failure_propagation(workflow)
+
+
+def _assert_frozen_lock_install(workflow: str) -> None:
+    """Every job that installs dependencies installs from the frozen lock via uv
+    (#622): a bare `pip install -e .[dev]` re-resolves the transitive graph at
+    install time, so CI tests against versions the lock never froze.
+    """
+    runs = _job_run_steps(workflow)
+    for name, run in runs:
+        assert "pip install" not in run, (
+            f"job {name} installs with pip: the lock freezes the graph and "
+            "pip re-resolves it; install with `uv sync --frozen --extra dev`"
+        )
+    for name, run in runs:
+        if "uv sync" in run:
+            assert "--frozen" in run, f"job {name} syncs without --frozen"
+    installs = [run for _, run in runs if "uv sync" in run]
+    assert len(installs) >= 2, f"expected the install jobs to sync from the lock, found {len(installs)}"
+    assert "uv.lock" in workflow, "CI must key its cache on uv.lock"
+
+
+def test_ci_runs_a_dependency_audit_and_secret_scan() -> None:
+    """#623: supply-chain gates. pip-audit against the frozen lock's export
+    catches known CVEs; gitleaks catches committed secrets. Both run as jobs
+    the required aggregate depends on, so skipping one is not green.
+    """
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    jobs = _jobs(workflow)
+    for job in ("audit", "secret-scan"):
+        assert job in jobs, f"CI must declare the {job} job"
+        _assert_no_continue_on_error(jobs[job], job)
+
+    required = _required_needs(workflow)
+    assert {"audit", "secret-scan"} <= required, (
+        "the required aggregate must depend on the audit and secret-scan jobs"
+    )
+
+    def job_runs(job: dict[str, object]) -> str:
+        steps = job.get("steps")
+        assert isinstance(steps, list)
+        return " ".join(str(step.get("run")) for step in steps if isinstance(step, dict) and "run" in step)
+
+    audit_runs = job_runs(jobs["audit"])
+    assert "uv export --frozen" in audit_runs, "audit must export the frozen lock, not live deps"
+    assert "pip-audit" in audit_runs, "audit must run pip-audit"
+
+    assert "gitleaks.io" not in workflow, "workflow must not use a mutable gitleaks.io ref"
+
+
+def test_every_action_is_sha_pinned_and_permissions_are_declared() -> None:
+    """#624: mutable tags (`@v4`) are repointable; every `uses:` must pin a
+    full-length commit SHA, and the workflow must declare its permissions so
+    the default write-all token scope cannot leak into a compromised step.
+    """
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    document = yaml.safe_load(workflow)
+    assert isinstance(document, dict)
+    permissions = document.get("permissions")
+    assert permissions == "read-all", (
+        f"CI must declare top-level permissions: read-all, found {permissions!r}"
+    )
+
+    def walk(value: object) -> None:
+        if isinstance(value, dict):
+            uses = value.get("uses")
+            if isinstance(uses, str) and "@" in uses:
+                ref = uses.rsplit("@", 1)[1]
+                assert re.fullmatch(r"[0-9a-f]{40}", ref), (
+                    f"action ref {uses!r} is not a full-length commit SHA"
+                )
+            for child in value.values():
+                walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+
+    walk(document.get("jobs"))
 
 
 def test_no_ci_job_reruns_a_precommit_hook_command() -> None:
@@ -107,18 +189,10 @@ def assert_no_hook_command_rerun(workflow: str, hook_tools) -> None:
     the gate are two copies of one check, only the edited one drifts -- the error names
     the job so the step is findable from the failure alone.
     """
-    for name, job in _jobs(workflow).items():
-        steps = job.get("steps")
-        assert isinstance(steps, list)
-        for step in steps:
-            if not isinstance(step, dict):
-                continue
-            run = step.get("run")
-            if not isinstance(run, str):
-                continue
-            for tool in hook_tools:
-                assert tool not in run, (
-                    f"job {name} re-runs a pre-commit hook command ({tool!r}): "
-                    "enforcement already runs it; a duplicate is a second copy "
-                    "that can drift from the gate"
-                )
+    for name, run in _job_run_steps(workflow):
+        for tool in hook_tools:
+            assert tool not in run, (
+                f"job {name} re-runs a pre-commit hook command ({tool!r}): "
+                "enforcement already runs it; a duplicate is a second copy "
+                "that can drift from the gate"
+            )
