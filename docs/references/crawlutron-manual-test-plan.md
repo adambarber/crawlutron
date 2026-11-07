@@ -29,7 +29,7 @@ exposed via the API contract.
 ## 2. Prerequisites
 
 - Docker / OrbStack with BuildKit enabled.
-- Ability to `docker compose build` and `up` the `crawlutron` service (profile `crawlutron`).
+- Ability to `docker compose build` and `up` the `crawlutron` service.
 - Outbound internet access from the container (the crawler fetches public URLs).
 - `curl` + `jq` on the host for executing cases.
 - For SSRF/private-target cases: default deny behavior (no `CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1`).
@@ -56,11 +56,9 @@ exposed via the API contract.
 
 ```bash
 # From repo root
-docker compose -f docker-compose.yml -f docker-compose.municipal.yml \
-  --profile crawlutron build crawlutron
+docker compose build crawlutron
 
-docker compose -f docker-compose.yml -f docker-compose.municipal.yml \
-  --profile crawlutron up -d crawlutron
+docker compose up -d crawlutron
 
 # Wait for liveness
 for i in $(seq 1 30); do
