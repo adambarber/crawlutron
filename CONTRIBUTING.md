@@ -10,7 +10,7 @@ mechanics of submitting a change.
 git clone https://github.com/adambarber/crawlutron.git
 cd crawlutron
 
-# Install dependencies in a virtualenv (Python 3.11+)
+# Install dependencies in a virtualenv (Python 3.12+)
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
@@ -55,7 +55,7 @@ them has no side effects, and the keyed checks only run when
 
 ## Coding Style
 
-- Python 3.11+ syntax; ruff enforces import order, pyupgrade, and the
+- Python 3.12+ syntax; ruff enforces import order, pyupgrade, and the
   baseline PEP 8 checks (see `pyproject.toml`).
 - 110-char line limit.
 - Public functions take keyword arguments where the call site benefits.

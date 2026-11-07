@@ -281,7 +281,7 @@ and `output_format`. The request/browsing profile knobs — `request_profile`, `
       "max_discovered_links": 10,
       "respect_robots": true
     },
-    "request_profile": { "user_agent_family": "declared_crawler" },
+    "request_profile": { "user_agent_family": "generic_crawler" },
     "browser_profile": { "resource_mode": "full" },
     "discovery": { "robots": true, "sitemaps": true, "feeds": true }
   }
@@ -400,8 +400,8 @@ defaults shown):
 | `CRAWLUTRON_GLOBAL_CONCURRENCY` | `4` (env-overridable floor) | Concurrency floor for the recursive dispatcher. Real concurrency is self-managed by the resource guard; `/ready` no longer keys off this value. |
 | `CRAWLUTRON_PER_DOMAIN_CONCURRENCY` | `2` | Max concurrent tasks per host. |
 | `CRAWLUTRON_PER_DOMAIN_DELAY_MS` | `500` | Delay between requests to the same host. |
-| `CRAWLUTRON_HTTP_MAX_CONNECTIONS` | _(RAM-derived; ~139 at 3 GiB)_ | Max concurrent HTTP connections. Derived from the cgroup memory limit and capped at 512; override only to shrink. Bound to the weighted admission's HTTP concurrency so the pool can't starve or over-provision. |
-| `CRAWLUTRON_HTTP_MAX_KEEPALIVE` | _(RAM-derived; ~69 at 3 GiB)_ | Max idle keep-alive connections (≈ half of the connection ceiling). |
+| `CRAWLUTRON_HTTP_MAX_CONNECTIONS` | _(RAM-derived; floor 100, cap 512)_ | Max concurrent HTTP connections. The pool default is the floor of 100; the weighted admission derives the real HTTP concurrency from the cgroup limit as `(limit − browser-pool reserve − doc-pool reserve) / 48 MiB per HTTP task` — ~34 at 3 GiB with the 2-instance browser pool (~700 MiB each), ~22 with the default 2 doc workers (300 MiB each). Bound to the weighted admission's HTTP concurrency so the pool can't starve or over-provision. |
+| `CRAWLUTRON_HTTP_MAX_KEEPALIVE` | _(RAM-derived; floor 20)_ | Max idle keep-alive connections (≈ half of the connection ceiling, bounded to [20, 128]). |
 | `CRAWLUTRON_BROWSER_POOL_SIZE` | _(RAM-derived; 2 at 3 GiB)_ | Explicit browser-pool size override. Default is derived from the cgroup limit (reserves ≤50% of RAM for browsers); raising it multiplies RAM use and risks OOM. |
 | `CRAWLUTRON_SEARCH_PROVIDER` | `auto` | Search backend: `auto` (first configured keyed provider) or explicit `tavily` / `brave` / `serper` / `duckduckgo`. |
 | `CRAWLUTRON_TAVILY_API_KEY` | `""` | Tavily Search API key (activates the `tavily` provider). |
@@ -417,7 +417,7 @@ defaults shown):
 | `CRAWLUTRON_ALLOWED_HOSTS` | `""` | Optional host allowlist (comma-separated suffix match; case, IDNA, and port normalized). |
 | `CRAWLUTRON_DENIED_HOSTS` | `""` | Optional host denylist (comma-separated suffix match; deny wins over allow). |
 | `CRAWLUTRON_LOG_LEVEL` | `info` | Log verbosity. |
-| `CRAWLUTRON_LOG_FILE` | `/app/logs/crawlutron.jsonl` | Structured JSONL log path. |
+| `CRAWLUTRON_LOG_FILE` | `./logs/crawlutron.jsonl` (repo-relative; the container image overrides it to `/app/logs/crawlutron.jsonl`) | Structured JSONL log path. |
 | `CRAWLUTRON_LOG_MAX_BYTES` | `10485760` | Log rotation size. |
 | `CRAWLUTRON_LOG_BACKUP_COUNT` | `3` | Number of rotated log files to keep. |
 

@@ -1,5 +1,7 @@
 # Adversarial performance review — second pass
 
+> **Historical document.** This review is dated 2026-09-15 and describes the tree as it stood then — including paths (e.g. `app/`) that no longer exist after later restructuring. It is retained as a record of what was reviewed, not as a description of the current layout.
+
 All findings below are **new**; nothing from the first review is repeated. Items are prioritized by throughput impact.
 
 ---

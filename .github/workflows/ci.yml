@@ -7,7 +7,7 @@ name: CI
 # the extraction is a file copy and a prefix naming a directory that will not
 # exist there is the one thing a copy cannot carry. The jobs need no
 # `working-directory` for the same reason -- the root is already the service.
-# tests/test_precommit_ci_contract.py asserts both.
+# tests/test_ci_enforcement.py (via tests/_ci_contract.py) asserts both.
 
 on:
   push:
