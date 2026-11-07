@@ -9,14 +9,35 @@ from __future__ import annotations
 
 import asyncio
 
+from crawlutron.orchestration import request_pipeline
+from crawlutron.runtime.pressure_memory import MemoryStats
 from crawlutron.runtime.pressure_sizing import ResourceGate
 
-__all__ = ["PinnedGate", "pinned_resource_gate", "no_crawl_delay"]
+__all__ = ["PinnedGate", "pinned_resource_gate", "no_crawl_delay", "page_route", "pin_small_box"]
 
 
 async def no_crawl_delay(url: str) -> float | None:
     """A host that states no Crawl-delay, so a scenario about capacity can pass one."""
     return None
+
+
+def page_route(url, sent_headers, timeout, max_content_length):
+    """A minimal 200 HTML route for a fetch double driving a sync batch."""
+    return {
+        "status": 200,
+        "body": b"<html><body>hello world, enough text to render</body></html>",
+        "ctype": "text/html; charset=utf-8",
+    }
+
+
+def pin_small_box(monkeypatch) -> None:
+    """Derive a tiny RAM ceiling so the admission gate clearly binds the batch."""
+    monkeypatch.setattr(
+        request_pipeline,
+        "read_memory_stats",
+        lambda: MemoryStats(total_bytes=1 << 30, used_bytes=0),
+    )
+    monkeypatch.setattr(request_pipeline, "derive_browser_pool_size", lambda: 2)
 
 
 def pinned_resource_gate(monkeypatch, *, cpu_ratio, memory_ratio, max_wait_seconds=0.05):

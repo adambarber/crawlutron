@@ -12,6 +12,7 @@ from crawlutron.admission.admission import normalize_sitemap_candidates
 from crawlutron.admission.admission_links import gather_robots_decisions
 from crawlutron.admission.policy import DiscoveryFlags, discovery_flags
 from crawlutron.admission.render_options import policy_wants_html
+from crawlutron.config.env import get_env_int
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_extraction_method import CrawlExtractionMethod
 from crawlutron.models.crawl_policy import POLICY_SCHEMA_VERSION, CrawlPolicy
@@ -49,6 +50,11 @@ from crawlutron.transport.results import (
 from crawlutron.transport.robots import FetchAndDecode, RobotsRules
 from crawlutron.transport.scheduler import DomainScheduler
 from crawlutron.vocabulary.strategies import BROWSER_STRATEGIES
+
+# Saturated-gate dispatch floor: when admission admits nothing, one pass still
+# dispatches this many jobs so a pinned gate cannot serial a batch into N
+# full re-bucket + admit cycles (#618). >=1 keeps the no-progress guard honest.
+_SATURATED_DISPATCH_FLOOR = get_env_int("CRAWLUTRON_SATURATED_DISPATCH_FLOOR", 4, lo=1)
 
 if TYPE_CHECKING:
     from crawlutron.models.http_fetcher import HttpFetcher
@@ -333,13 +339,13 @@ async def _dispatch_paced(
         admit_http, admit_browser = await admission.admit(len(http_jobs), len(browser_jobs))
         take_http = http_jobs[:admit_http] if admit_http else []
         take_browser = browser_jobs[:admit_browser] if admit_browser else []
-        # Saturated gate: bounded progress floor -- dispatch one job so a pinned
-        # gate cannot leave the batch in flight forever.
+        # Saturated gate: bounded progress floor -- dispatch a floor-sized chunk so
+        # a pinned gate cannot serial the batch into one cycle per job (#618).
         if not take_http and not take_browser and remaining:
             if http_jobs:
-                take_http = http_jobs[:1]
+                take_http = http_jobs[:_SATURATED_DISPATCH_FLOOR]
             elif browser_jobs:
-                take_browser = browser_jobs[:1]
+                take_browser = browser_jobs[:_SATURATED_DISPATCH_FLOOR]
         chunk = take_http + take_browser
         remaining = http_jobs[len(take_http) :] + browser_jobs[len(take_browser) :]
         await scheduler.run(

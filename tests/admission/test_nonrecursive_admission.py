@@ -4,29 +4,10 @@ against a 256-connection hardcode (#350)."""
 
 import pytest
 
-from crawlutron.orchestration import request_pipeline
 from crawlutron.orchestration.engine import crawl_request
-from crawlutron.runtime.pressure_memory import MemoryStats
 from crawlutron.runtime.pressure_sizing import WeightedAdmission
+from tests._admission_doubles import page_route, pin_small_box
 from tests._fetch_doubles import FetcherDouble
-
-
-def _page_route(url, sent_headers, timeout, max_content_length):
-    return {
-        "status": 200,
-        "body": b"<html><body>hello world, enough text to render</body></html>",
-        "ctype": "text/html; charset=utf-8",
-    }
-
-
-def _pin_small_box(monkeypatch) -> None:
-    """Derive a tiny RAM ceiling so the admission gate clearly binds the batch."""
-    monkeypatch.setattr(
-        request_pipeline,
-        "read_memory_stats",
-        lambda: MemoryStats(total_bytes=1 << 30, used_bytes=0),
-    )
-    monkeypatch.setattr(request_pipeline, "derive_browser_pool_size", lambda: 2)
 
 
 async def _admission_spy(monkeypatch):
@@ -59,9 +40,9 @@ async def test_nonrecursive_admission_charge_matches_policy_chain(
     """#595: the non-recursive batch is admitted per tier per the policy chain,
     so browser-capable jobs are not silently lumped into HTTP admission."""
     admits = await _admission_spy(monkeypatch)
-    _pin_small_box(monkeypatch)
+    pin_small_box(monkeypatch)
 
-    fetcher = FetcherDouble(_page_route)
+    fetcher = FetcherDouble(page_route)
     urls = [f"http://site{i}.example/page" for i in range(3)]
     out = await crawl_request(
         {"urls": urls, "policy": policy},
