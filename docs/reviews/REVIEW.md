@@ -6,6 +6,21 @@
 
 ---
 
+## 0. Status Addendum (2026-11-07)
+
+Four P1 findings below were marked fix-before-release; all four are **RESOLVED** in the
+current tree, verified against live code (issue #606). History sections are preserved
+as written.
+
+| Finding | Status | Fix mechanism (live code) |
+|---|---|---|
+| Redirect-chain advance capture (cookie state of a redirect hop) | **RESOLVED** | `_RedirectChain.advance` captures `served_url = self.url` BEFORE stepping to the next hop, so a redirect response's cookie state belongs to the origin that sent it (#571) — `crawlutron/transport/pinned_transport.py:201-223`; the cffi twin stores the pending hop only after the next pin admits (`fetchers.py:338-342`). |
+| `render()` closing the driver on a page exception | **RESOLVED** | `BrowserRenderer._render_with_page_unlocked` wraps the render body in `try/finally` with `release_page(...)` (bounded best-effort cookie harvest → `safe_close_page` → `note_render` for ALL attempts), so a page exception releases the page without tearing down the shared driver — `crawlutron/transport/browser.py:280-288`, `browser_render_phases.py:242-257`. |
+| cffi TLS-impersonation SNI (§2.5) | **RESOLVED** | The RESOLVE-table fix from the review's own sketch landed: `cffi_resolve_entry` builds the `host:port:ip` CURLOPT_RESOLVE mapping (`crawlutron/transport/pinned_transport.py:255-268`) and `_handle_cffi_hop` dials a one-shot session on the logical hostname so SNI and cert verification attest to it (#574) — `crawlutron/transport/fetchers.py:294-332`; an `SSLError` now raises visibly instead of degrading silently (`fetchers.py:323-326`). |
+| namespace-scoped cookie reads (§2.2) | **RESOLVED** | The browser-cookie store is keyed by `(namespace, domain)`: `store_browser_cookies`/`get_browser_cookies_for` resolve an explicit namespace or defer to the crawl's `COOKIE_NAMESPACE` contextvar (`crawlutron/transport/browser_cookies.py:50-101`), so one caller's harvested session never surfaces to another caller's jar. |
+
+---
+
 ## 1. Executive Summary
 
 **Overall verdict: this codebase is unusually well-defended for its size, and is closer to open-source-ready than most services at this stage — but it must not ship until a short list of P1 items is fixed.** No P0 (remotely exploitable, secret-exposing, or data-destroying) vulnerability was found anywhere in 26k lines. The SSRF core — per-fetch DNS resolution with IP pinning, manual one-hop redirects re-validated per hop, fresh pins with `use_cache=False`, IP-literal de-obfuscation (decimal/hex/octal/IPv4-in-IPv6/Teredo/6to4), bounded decompression, hash-only caller-key storage, fully parameterized SQL — survived dedicated adversarial reading. That is rare and worth saying plainly.
