@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from crawlutron.models.crawl_result import EngineCrawlResult
+from crawlutron.runtime import process_state
 
 if TYPE_CHECKING:
     from crawlutron.storage.coordination_counters import CoordinationCounters
@@ -413,6 +414,19 @@ def _gauge_and_throttle_lines(record: CountersSnapshot, store: MetricsStore) -> 
 
 
 metrics = MetricsStore()
+
+
+def _reset() -> None:
+    """Empty the process-local metrics store (registry route, conftest)."""
+    metrics.reset()
+
+
+def _has() -> bool:
+    """Whether the metrics store holds any recorded counter right now."""
+    return bool(metrics._source())
+
+
+process_state.register(__name__, _reset, _has)
 
 
 def get_metrics() -> MetricsStore:

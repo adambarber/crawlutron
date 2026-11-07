@@ -6,10 +6,25 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 
+from crawlutron.runtime import process_state
+
 logger = logging.getLogger(__name__)
 
 
 _tasks: dict[str, asyncio.Task] = {}
+
+
+def _reset() -> None:
+    """Cancel every registered task and empty the registry (registry route)."""
+    cancel_all_tasks()
+
+
+def _has() -> bool:
+    """Whether any task is still registered."""
+    return bool(_tasks)
+
+
+process_state.register(__name__, _reset, _has)
 
 
 def is_running(job_id: str) -> bool:

@@ -95,6 +95,7 @@ class CallerKeyStore(CoordinationStore):
         key_id = f"key_{secrets.token_hex(_KEY_ID_BYTES)}"
         body = secrets.token_urlsafe(_SECRET_BODY_BYTES)
         secret = f"ck_{key_id[len('key_') :]}.{body}"
+        # wall: persisted row stamps anchor to wall so they survive restarts.
         created_at = time.time()
         with self._lock:
             self._conn.execute(

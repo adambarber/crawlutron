@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 
 from tests._policy_factories import canonical
@@ -131,22 +133,12 @@ def test_generic_membership_subsumes_the_per_field_detectors():
     )
 
 
-def test_result_construction_enforces_membership_at_the_dataclass():
-    """A result dataclass built ANYWHERE rejects a non-member value.
-
-    Every dataclass validates its Literal fields in ``__post_init__``, so no
-    build site can escape membership checking; a bad direct construction raises."""
-    from dataclasses import asdict
-
-    from crawlutron.models.crawl_result import CrawlResult, EngineCrawlResult
+def _member_crawl_result():
+    """Built, not spelled: each value goes to the field's own type."""
+    from crawlutron.models.crawl_result import CrawlResult
     from crawlutron.models.crawl_strategy_attempt import CrawlStrategyAttempt
-    from tests._result_builders import engine_result
 
-    # The all-member baseline, named once and DERIVED rather than restated.
-    member_engine_result = asdict(engine_result("http://a/", "rendered"))
-    # Built, not spelled. Constructing the result directly hands each value to the field's own type, so the
-    # all-member build is checked against the taxonomy it is a sample of.
-    member_crawl_result = CrawlResult(
+    return CrawlResult(
         url=canonical("http://a/"),
         attempt=CrawlStrategyAttempt(
             strategy="BROWSER_HEADLESS",
@@ -162,7 +154,29 @@ def test_result_construction_enforces_membership_at_the_dataclass():
         attempts=1,
         domain="example.com",
     )
-    member_crawl_result_fields = asdict(member_crawl_result)
+
+
+def test_result_construction_enforces_membership_at_the_dataclass():
+    """A result dataclass built ANYWHERE rejects a non-member value.
+
+    Every dataclass validates its Literal fields in ``__post_init__``, so no
+    build site can escape membership checking; a bad direct construction raises."""
+    from crawlutron.models.crawl_result import EngineCrawlResult
+    from crawlutron.models.crawl_strategy_attempt import CrawlStrategyAttempt
+    from crawlutron.models.serialization import from_wire, to_dict
+    from crawlutron.models.taxonomy import Classification, CrawlError, CrawlStrategyName
+    from crawlutron.vocabulary.taxonomy import ResultStatus
+    from tests._policy_factories import UNRESTRICTED_HOST_POLICY
+    from tests._result_builders import engine_result
+
+    # The all-member baseline is DERIVED, not restated; from_wire rebuilds the
+    # JSON-shaped dict into the record's typed collections.
+    baseline = engine_result("http://a/", "rendered")
+    member_engine_result = to_dict(baseline)
+    rebuilt_engine_result = from_wire(
+        EngineCrawlResult, member_engine_result, policy=UNRESTRICTED_HOST_POLICY
+    )
+    member_crawl_result_fields = to_dict(_member_crawl_result())
 
     # A direct construction with all-member values is accepted: the gate must not reject legitimate direct
     # builds (tests and the primitives both do it).
@@ -174,18 +188,33 @@ def test_result_construction_enforces_membership_at_the_dataclass():
         content_type=None,
         elapsed_ms=0,
     )
-    EngineCrawlResult(**member_engine_result)
-    # A non-member on each Literal axis raises at construction.
+    assert rebuilt_engine_result == baseline
+    # A non-member on each Literal axis raises at the wire rebuild too.
     for field, invented in (
         ("status", "Bogus"),
         ("classification", "Bogus"),
         ("selected_strategy", "BROWSER_INVENTED"),
     ):
         with pytest.raises(ValueError, match=f".{field}="):
-            EngineCrawlResult(**{**member_engine_result, field: invented})
+            from_wire(
+                EngineCrawlResult,
+                {**member_engine_result, field: invented},
+                policy=UNRESTRICTED_HOST_POLICY,
+            )
     # CrawlError axis: a stable code outside the declared taxonomy is rejected.
+    attempt_record = member_crawl_result_fields["attempt"]
+    assert isinstance(attempt_record, dict)
+    attempt_values = cast("dict[str, object]", attempt_record)
     with pytest.raises(ValueError, match=r"\.error="):
-        CrawlStrategyAttempt(**{**member_crawl_result_fields["attempt"], "error": "worker_failed"})
+        CrawlStrategyAttempt(
+            strategy=cast("CrawlStrategyName | None", attempt_values["strategy"]),
+            status=cast("ResultStatus", attempt_values["status"]),
+            classification=cast("Classification", attempt_values["classification"]),
+            http_status=cast("int | None", attempt_values["http_status"]),
+            content_type=cast("str | None", attempt_values["content_type"]),
+            elapsed_ms=cast("int", attempt_values["elapsed_ms"]),
+            error=cast("CrawlError", "worker_failed"),
+        )
 
 
 # =========================================================================== NAMED-CONSTANT provenance

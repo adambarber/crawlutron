@@ -63,7 +63,7 @@ def test_memory_ttl_honored(tmp_path):
     c = _make(tmp_path)
     c.set("k", "v", ttl=60)  # expires at 1060
     assert c.get("k") == "v"
-    c.clock = lambda: 2000.0
+    c._clock = lambda: 2000.0
     assert c.get("k") is None
 
 

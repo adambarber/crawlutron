@@ -39,11 +39,11 @@ class TestSemaphoreHoldsTheCrawlOnly:
     def _width_one(self, monkeypatch):
         """Pin the semaphore to width 1 so one held slot blocks the next crawl."""
         monkeypatch.setenv("CRAWLUTRON_MAX_WEBHOOK_CONCURRENCY", "1")
-        from crawlutron.api.async_crawl_runner import reset_process_state
+        from crawlutron.runtime import process_state
 
-        reset_process_state()
+        process_state.reset_all_process_state()
         yield
-        reset_process_state()
+        process_state.reset_all_process_state()
 
     async def test_a_queued_job_is_not_claimed_running_while_waiting_for_the_slot(self, job_store, tmp_path):
         """While the semaphore is held by another crawl, the queued row stays PENDING."""

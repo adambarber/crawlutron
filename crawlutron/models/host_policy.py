@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import logging
-import os
 from dataclasses import dataclass
 from functools import lru_cache
 from urllib.parse import urlparse
 
-from crawlutron.config.env import parse_bool_env
+from crawlutron.config.env import EnvDecisionMemo
 from crawlutron.models.address_class import AddressClass, classify
+from crawlutron.runtime import process_state
 
 
 def _normalize_policy_host(host: str) -> str:
@@ -88,34 +87,26 @@ _PRIVATE_HOSTS = frozenset({"localhost", "host.docker.internal"})
 
 #: (raw env value, parsed decision) for CRAWLUTRON_ALLOW_PRIVATE_TARGETS.
 #: Value-keyed: an env change lands on the next call, an unchanged one skips it.
-_PRIVATE_TARGET_DECISION: tuple[str | None, bool] | None = None
+_PRIVATE_TARGET_DECISION = EnvDecisionMemo(
+    "CRAWLUTRON_ALLOW_PRIVATE_TARGETS",
+    default=False,
+    logger_name="crawlutron.models.host_policy",
+    warning=(
+        "SSRF private-target guard DISABLED by CRAWLUTRON_ALLOW_PRIVATE_TARGETS=%r: "
+        "caller-supplied URLs may now reach private, loopback, and link-local "
+        "addresses, including cloud metadata endpoints. Unset it, or set it to 0, "
+        "outside local development."
+    ),
+)
 
 
 def allow_private_targets() -> bool:
     """Memoized read of the private-target escape hatch (inverted default).
 
-    The raw env value is the cache key: unrecognized values keep resolving to
-    ``False`` (guard ON) via ``parse_bool_env``, and every distinct change honors immediately.
+    Host verdicts are a pure function of the host and never go stale; the env
+    decision memo warns once per distinct value, not per call.
     """
-    global _PRIVATE_TARGET_DECISION
-    raw = os.environ.get("CRAWLUTRON_ALLOW_PRIVATE_TARGETS")
-    cached = _PRIVATE_TARGET_DECISION
-    if cached is not None and cached[0] == raw:
-        return cached[1]
-    decision = parse_bool_env("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", default=False)
-    _PRIVATE_TARGET_DECISION = (raw, decision)
-    if decision:
-        # Warned at the decision, not per call: this is the per-fetch SSRF path,
-        # so the memo logs once per distinct env value instead of flooding.
-        logging.getLogger(__name__).warning(
-            "SSRF private-target guard DISABLED by CRAWLUTRON_ALLOW_PRIVATE_TARGETS=%r: "
-            "caller-supplied URLs may now reach private, loopback, and link-local "
-            "addresses, including cloud metadata endpoints. Unset it, or set it to 0, "
-            "outside local development.",
-            raw,
-            extra={"env_name": "CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "env_value": raw},
-        )
-    return decision
+    return _PRIVATE_TARGET_DECISION.decide()
 
 
 def reset_private_target_memo() -> None:
@@ -124,8 +115,20 @@ def reset_private_target_memo() -> None:
     Host verdicts are a pure function of the host and never go stale, so the
     verdict memo deliberately is not touched here.
     """
-    global _PRIVATE_TARGET_DECISION
-    _PRIVATE_TARGET_DECISION = None
+    _PRIVATE_TARGET_DECISION.reset()
+
+
+def _reset() -> None:
+    """Drop the memoized env decision (registry route, conftest)."""
+    reset_private_target_memo()
+
+
+def _has() -> bool:
+    """Whether an env decision is memoized right now."""
+    return _PRIVATE_TARGET_DECISION._decision is not None
+
+
+process_state.register(__name__, _reset, _has)
 
 
 @lru_cache(maxsize=8192)

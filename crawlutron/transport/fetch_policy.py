@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import datetime
 import inspect
 import re
 from collections.abc import Iterable
@@ -40,14 +41,38 @@ def retry_backoff_seconds(attempt: int) -> float:
     return min(_RETRY_BACKOFF_CAP_SECONDS, _RETRY_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1)))
 
 
+# An HTTP-date Retry-After is a politeness cooldown like the integer form, so
+# it rides the same hostile-value clamp: an unbounded date would park scheduler
+# coroutines in cooldown sleep for years.
+_RETRY_AFTER_MAX_SECONDS = 300
+
+
 def retry_after_seconds(headers: dict[str, str]) -> int | None:
+    """The Retry-After cooldown, from the delay-seconds or the HTTP-date form.
+
+    The date form converts against the wall clock (an HTTP-date IS a wall instant);
+    a past date clamps to 0, and both forms clamp to the hostile-value ceiling.
+    """
     value = headers.get("retry-after")
     if not value:
         return None
     try:
         # Clamp hostile values: an unbounded Retry-After would park scheduler
         # coroutines in cooldown sleep for years.
-        return min(300, max(0, int(value.strip())))
+        return min(_RETRY_AFTER_MAX_SECONDS, max(0, int(value.strip())))
+    except ValueError:
+        pass
+    instant = _parsed_http_date(value.strip())
+    if instant is None:
+        return None
+    remaining = (instant - datetime.datetime.now(datetime.UTC)).total_seconds()
+    return min(_RETRY_AFTER_MAX_SECONDS, max(0, int(remaining)))
+
+
+def _parsed_http_date(value: str) -> datetime.datetime | None:
+    """The RFC 7231 IMF-fixdate (the only form Retry-After carries), or None."""
+    try:
+        return datetime.datetime.strptime(value, "%a, %d %b %Y %H:%M:%S GMT").replace(tzinfo=datetime.UTC)
     except ValueError:
         return None
 

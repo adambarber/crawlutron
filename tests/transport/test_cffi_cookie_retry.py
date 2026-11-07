@@ -1,6 +1,7 @@
 """Cookie bootstrap: after browser renders a blocked domain, retry cffi with
 the browser-minted session cookies before accepting the render result."""
 
+from crawlutron.runtime import process_state
 from crawlutron.transport import browser_cookies
 from crawlutron.vocabulary.strategies import BROWSER_HEADLESS, HTTP_CFFI_IMPERSONATE, HTTP_DECLARED_CRAWLER
 from tests._browser_doubles import _fake_browser
@@ -55,7 +56,6 @@ async def test_harvested_cookies_never_cross_callers_in_the_chain():
     Caller A's browser-minted session must not ride caller B's cffi retry:
     each crawl's harvest and replay are keyed by its own cookie namespace.
     """
-    from crawlutron.transport import browser_cookies
     from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE
 
     denied = (403, b"denied", "text/plain")
@@ -94,7 +94,7 @@ async def test_harvested_cookies_never_cross_callers_in_the_chain():
             COOKIE_NAMESPACE.reset(token)
         return calls, result
 
-    browser_cookies.reset_process_state()
+    process_state.reset_all_process_state()
     try:
         # Caller A's crawl: its own browser session unblocks its own retry.
         calls_a, result_a = await tenant_crawl("tenant-a", [{"name": "sess", "value": marker}])
@@ -108,4 +108,4 @@ async def test_harvested_cookies_never_cross_callers_in_the_chain():
         assert not leaked, f"caller B's retry carried caller A's session: {leaked!r}"
         assert result_b.classification == "rendered", result_b
     finally:
-        browser_cookies.reset_process_state()
+        process_state.reset_all_process_state()

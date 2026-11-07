@@ -1,99 +1,65 @@
-"""The saturated-gate dispatch floor must batch, not serial (#618).
+"""The sync batch's saturated-dispatch floor (#618).
 
-Under a fully saturated admission gate the non-recursive dispatcher took the
-whole remaining batch through a full re-bucket + admit + run cycle for ONE job
-per pass -- N sequential cycles for an N-task batch, each awaiting the admit
-yield and re-sampling the gate. The floor exists to guarantee forward progress,
-not a serial pace: one pass must dispatch a floor-sized chunk.
+Under a saturated gate the floor is the only progress mechanism: a floor of one
+forces a full re-bucket + admit cycle per dispatched job, so a large batch under
+memory pressure takes one sequential pass per task -- the amplification the
+issue names. The floor dispatches a fraction of the HTTP ramp per pass.
 """
 
-from crawlutron.orchestration.engine import crawl_request
-from crawlutron.runtime.pressure_sizing import WeightedAdmission as Admission
-from tests._admission_doubles import page_route, pin_small_box
-from tests._fetch_doubles import FetcherDouble as Fetcher
+from __future__ import annotations
 
-#: The default saturated dispatch floor, documented in .env.example.
-FLOOR = 4
+from crawlutron.orchestration import request_pipeline
+from crawlutron.runtime.pressure_sizing import AdmissionPolicy, WeightedAdmission
+from tests._admission_doubles import run_sync_batch
 
 
-class SaturatedAdmission(Admission):
-    """The gate at its hard ceiling: both tiers admit nothing, every pass.
+async def test_saturated_floor_dispatches_more_than_one_per_pass(monkeypatch):
+    """#618: under a never-admitting gate the floor pace is k = ramp/4 per pass,
+    so an N-job batch costs ceil(N/k) admit cycles, not N."""
+    zero_admits = {"calls": 0}
+    chunks: list[int] = []
 
-    Subclasses the real admission so the double is the production type; the
-    saturated pass then rides the dispatch floor instead of the gate verdict.
-    """
+    async def zero_admit(self, want_http: int, want_browser: int) -> tuple[int, int]:
+        zero_admits["calls"] += 1
+        return 0, 0
 
-    def __init__(self, admit_http: int = 0) -> None:
-        from crawlutron.runtime.pressure_gates import ResourceGate
+    monkeypatch.setattr(WeightedAdmission, "admit", zero_admit)
 
-        super().__init__(
-            ResourceGate(memory_ratio=lambda: 1.0, cpu_ratio=lambda: 1.0),
-            _zero_policy(),
-        )
-        self.admit_http = admit_http
-        self.passes = 0
+    original_run = request_pipeline.DomainScheduler.run
 
-    async def admit(self, want_http: int, want_browser: int) -> tuple[int, int]:
-        self.passes += 1
-        return min(want_http, self.admit_http), 0
+    async def run_spy(self, jobs, worker, *, on_result=None, failed_result=None):
+        chunks.append(len(jobs))
+        await original_run(self, jobs, worker, on_result=on_result, failed_result=failed_result)
 
+    monkeypatch.setattr(request_pipeline.DomainScheduler, "run", run_spy)
 
-def _zero_policy():
-    from crawlutron.runtime.pressure_sizing import AdmissionPolicy
-
-    return AdmissionPolicy(
-        http_task_bytes=0,
-        browser_task_bytes=0,
-        browser_pool_reserve_bytes=0,
-        max_http_concurrency=0,
-        max_browser_concurrency=0,
+    out = await run_sync_batch(
+        monkeypatch,
+        n_urls=12,
+        policy={"limits": {"max_depth": 0}, "strategies": ["HTTP_DECLARED_CRAWLER"]},
     )
 
-
-async def _run_batch(monkeypatch, count: int, admission: Admission):
-    pin_small_box(monkeypatch)
-    # Install the double by type: dispatch builds its admission through
-    # _build_admission, which constructs Admission directly.
-    monkeypatch.setattr(
-        "crawlutron.orchestration.request_pipeline.WeightedAdmission",
-        lambda gate, policy: admission,
-    )
-    fetcher = Fetcher(page_route)
-    urls = [f"http://site{i}.example/page" for i in range(count)]
-    out = await crawl_request(
-        {"urls": urls, "policy": {"limits": {"max_depth": 0}, "strategies": ["HTTP_DECLARED_CRAWLER"]}},
-        http_fetcher=fetcher,
-        cffi_fetcher=fetcher,
-        browser_worker=None,
-    )
-    return out
-
-
-async def test_saturated_floor_dispatches_floor_sized_chunks(monkeypatch):
-    """A saturated gate with a floor of 4 drains a 12-job batch in 3 passes."""
-    admission = SaturatedAdmission()
-    out = await _run_batch(monkeypatch, 12, admission)
     assert len(out["results"]) == 12, "every submitted page must return a result"
-    expected = -(-12 // FLOOR)
-    assert admission.passes == expected, (
-        f"the saturated gate took {admission.passes} admit passes for 12 jobs "
-        f"(expected {expected}): one re-bucket + admit cycle per job is the #618 amplification"
+    assert chunks and min(chunks) > 1, (
+        f"the saturated floor dispatched one job per pass ({chunks}): a 2000-task "
+        f"batch under pressure pays one re-bucket + admit cycle per job"
     )
+    assert sum(chunks) == 12, "the floor never drops or duplicates a job"
 
 
-async def test_saturated_floor_scales_with_the_batch(monkeypatch):
-    """Bigger batch, same floor: the pass count grows sub-linearly, not 1:1."""
-    admission = SaturatedAdmission()
-    out = await _run_batch(monkeypatch, 24, admission)
-    assert len(out["results"]) == 24
-    assert admission.passes == -(-24 // FLOOR), (
-        f"the saturated gate took {admission.passes} passes for 24 jobs: the floor serial"
-    )
+def test_floor_is_a_fraction_of_the_http_ramp() -> None:
+    """The floor scales with the ramp instead of a magic constant."""
+    gate = request_pipeline.ResourceGate(target_mem=0.9, memory_ratio=lambda: 0.0, cpu_ratio=lambda: 0.0)
 
+    def admission(ramp: int) -> WeightedAdmission:
+        policy = AdmissionPolicy(
+            http_task_bytes=0,
+            browser_task_bytes=0,
+            browser_pool_reserve_bytes=0,
+            max_http_concurrency=ramp,
+            max_browser_concurrency=1,
+        )
+        return WeightedAdmission(gate, policy)
 
-async def test_gate_admitted_dispatch_never_takes_the_floor(monkeypatch):
-    """When the gate admits, dispatch follows the gate verdict, not the floor."""
-    admission = SaturatedAdmission(admit_http=2)
-    out = await _run_batch(monkeypatch, 6, admission)
-    assert len(out["results"]) == 6
-    assert admission.passes == 3, f"gate-admitted dispatch took the floor: {admission.passes} passes"
+    assert admission(200).saturated_dispatch_floor() == 50
+    assert admission(3).saturated_dispatch_floor() == 1

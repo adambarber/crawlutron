@@ -137,10 +137,22 @@ def _cpu_gate(monkeypatch, *, target=0.90):
     only its two sensors are replaced, so the arithmetic is production's.
     """
     clock, usage = [0.0], [0.0]
-    monkeypatch.setattr("crawlutron.runtime.pressure_gates.time.monotonic", lambda: clock[0])
     monkeypatch.setattr("crawlutron.runtime.pressure_gates.read_cpu_usage_seconds", lambda root="": usage[0])
     monkeypatch.setattr("crawlutron.runtime.pressure_gates.read_cpu_quota", lambda root="": 2.0)
-    return CpuGate(target=target), clock, usage
+    return CpuGate(target=target, clock=lambda: clock[0]), clock, usage
+
+
+def test_cpu_gate_sampling_paces_by_the_injected_clock(monkeypatch):
+    """#581: the CPU-rate sampling window reads the injected clock, not a hard
+    monotonic() -- advancing the clock alone (no monkeypatch of time.monotonic)
+    must age the sample window."""
+    gate, clock, usage = _cpu_gate(monkeypatch)
+    gate.batch_scale_factor()  # initialize sample at clock 0.0
+    clock[0], usage[0] = 0.5, 0.6  # 0.6 CPU-seconds over 0.5 wall-seconds on 2 CPUs -> 0.6 utilization
+    assert gate.cpu_ratio() == 0.6, (
+        "the sampling window ignored the injected clock: the smoothed ratio never moved "
+        "even though the fake clock crossed min_window_seconds"
+    )
 
 
 @pytest.mark.parametrize(

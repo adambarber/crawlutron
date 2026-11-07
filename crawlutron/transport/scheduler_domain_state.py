@@ -6,7 +6,7 @@ import asyncio
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from crawlutron.transport.scheduler import TokenBucket
+    from crawlutron.transport.scheduler_pacing import TokenBucket
 
 __all__ = ["DomainGate", "DomainState"]
 

@@ -40,7 +40,11 @@ def authorization_value(credential: Credential) -> str:
     if pwd is None:
         raise ValueError("basic credential must have password")
     pwd_secret = pwd.get_secret_value() if hasattr(pwd, "get_secret_value") else pwd
-    raw = f"{credential.username}:{pwd_secret}".encode()
+    user = credential.username
+    if user is None:
+        raise ValueError("basic credential must have username")
+    username_secret = user.get_secret_value() if hasattr(user, "get_secret_value") else user
+    raw = f"{username_secret}:{pwd_secret}".encode()
     return f"Basic {base64.b64encode(raw).decode()}"
 
 

@@ -1,26 +1,57 @@
-"""The contract a module accepts when it holds state that outlives one call.
+"""The one process-state seam (#621).
 
-The owner publishes the reset, and the protocol is two members -- ``reset_process_state``
-plus the testable ``has_process_state`` (a one-member protocol is satisfied by a ``pass`` double).
+Modules holding state that outlives one call register a private reset/probe
+pair here at import; the harness drives :func:`reset_all_process_state` instead
+of importing a hand-copied ``reset_process_state`` from every owner. Scope:
+stateful containers and singletons with observable behavior. Bounded pure-function
+memo caches (``lru_cache`` on total functions) and in-flight registries emptied by
+drain are not members: their entries are value-keyed and never go stale.
 """
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+import threading
+from collections.abc import Callable
+
+_Entry = tuple[str, Callable[[], None], Callable[[], bool]]
+
+_ENTRIES: list[_Entry] = []
+_LOCK = threading.Lock()
 
 
-@runtime_checkable
-class ProcessStateOwner(Protocol):
-    """A module holding state that a later caller would otherwise inherit."""
+def register(owner: str, reset: Callable[[], None], has: Callable[[], bool]) -> None:
+    """Register ``owner``'s private reset/probe pair (re-registration replaces).
 
-    def reset_process_state(self) -> None:
-        """Drop everything this module holds that outlives a single call."""
-        ...
+    The probe must read what the reset empties: a probe that says ``False`` over
+    a populated store certifies a reset that failed.
+    """
+    with _LOCK:
+        for index, (name, _, _) in enumerate(_ENTRIES):
+            if name == owner:
+                _ENTRIES[index] = (owner, reset, has)
+                return
+        _ENTRIES.append((owner, reset, has))
 
-    def has_process_state(self) -> bool:
-        """Whether anything is currently held.
 
-        Honest in both directions: a module reporting ``False`` while holding a populated
-        cache is worse than no probe, because conformance then certifies a reset that failed.
-        """
-        ...
+def reset_all_process_state() -> None:
+    """Every registered module drops its state, in registration order."""
+    for _, reset, _ in list(_ENTRIES):
+        reset()
+
+
+def has_any_process_state() -> bool:
+    """Whether any registered owner still holds state."""
+    return any(has() for _, _, has in list(_ENTRIES))
+
+
+def owner_has_state(owner: str) -> bool:
+    """The probe of one registered owner, for tests asserting one module's state."""
+    for name, _, has in list(_ENTRIES):
+        if name == owner:
+            return has()
+    raise KeyError(f"{owner} never registered a process-state pair")
+
+
+def registered_owners() -> tuple[str, ...]:
+    """Every registered owner's module name, in registration order."""
+    return tuple(name for name, _, _ in list(_ENTRIES))

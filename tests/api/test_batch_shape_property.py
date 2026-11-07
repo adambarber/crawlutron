@@ -116,7 +116,7 @@ def _poison(kind: str, index: int) -> object:
     if kind == "bad_evidence":
         # A poison classification feeds the OPEN payload field, never `error=` (a declared Literal).
         evidence = cast("list[ClassificationEvidenceRecord]", [{"detail": 42}])
-        return replace(healthy, classification_evidence=evidence)
+        return replace(healthy, classification_evidence=tuple(evidence))
     if kind == "bad_validators":
         bad = cast("dict[str, str]", {"etag": {"not": "a string"}})
         return replace(healthy, validators=bad)

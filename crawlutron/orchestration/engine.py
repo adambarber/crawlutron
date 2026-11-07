@@ -33,6 +33,7 @@ from crawlutron.orchestration.request_pipeline import (
     PipelineState,
     run_crawl_request,
 )
+from crawlutron.runtime import process_state
 from crawlutron.runtime.pressure_gates import ResourceGate
 from crawlutron.transport import robots as _robots_policy
 from crawlutron.transport.cache import HttpCache
@@ -46,16 +47,15 @@ if TYPE_CHECKING:
     from crawlutron.models.http_fetcher import HttpFetcher
     from crawlutron.models.normalized_url import NormalizedUrl
     from crawlutron.models.result_record import ProducerEnvelope
+    from crawlutron.models.webhook_target import WebhookTarget
 
 logger = logging.getLogger(__name__)
-
 robots_cache = _robots_policy.robots_cache
 RobotsMatcher = _robots_policy.RobotsMatcher
 load_robots_rules = _robots_policy.load_robots_rules
 cached_sitemaps = _robots_policy.cached_sitemaps
 
-# The shared admission gate; read it via resource_gate() so the reference
-# cannot be captured before reset_process_state() swaps the instance.
+# Read the gate via resource_gate(): do not capture the reference before the reset swaps it.
 _resource_gate = ResourceGate()
 
 # Shared conditional cache so repeated crawls can leverage 304 responses.
@@ -122,6 +122,7 @@ def parse_lastmod(lastmod: str | None) -> float | None:
     if ts is None:
         return None
     skew = get_env_int("CRAWLUTRON_SITEMAP_LASTMOD_FUTURE_SKEW_SECONDS", 86400, lo=0)
+    # wall: lastmod is the origin's published instant, freshness vs its TTL.
     if ts > time.time() + skew:
         return None
     return ts
@@ -408,7 +409,7 @@ async def crawl_request(
     cffi_fetcher: HttpFetcher | None = None,
     cache: HttpCache | None = None,
     content_cache: ContentCache | None = None,
-    webhook_url: str | None = None,
+    webhook_url: WebhookTarget | None = None,
     shutdown_event: asyncio.Event | None = None,
     spill_path: str | None = None,
     fetch_and_decode: FetchAndDecode | None = None,
@@ -474,11 +475,8 @@ def _pipeline_dependencies(
     )
 
 
-def reset_process_state() -> None:
-    """Rebuild every process-wide cache the engine shares across crawls.
-    The robots cache, HTTP cache, resource gate and content cache are one unit
-    of crawl lifetime -- partial resets hide stale state and surviving entries.
-    """
+def _reset() -> None:
+    """Rebuild every process-wide cache the engine shares across crawls."""
     robots_cache.clear()
     global _SHARED_HTTP_CACHE, _resource_gate
     _SHARED_HTTP_CACHE = HttpCache()
@@ -487,14 +485,16 @@ def reset_process_state() -> None:
     # The lazy content cache is part of the same lifetime: empty it when built.
     if _SHARED_CONTENT_CACHE is not None:
         _SHARED_CONTENT_CACHE.clear()
+    # A reset starts a new process lifetime, so the next spill must scan again.
+    global spill_gc_last_run
+    spill_gc_last_run = None
 
 
-def has_process_state() -> bool:
-    """Whether any shared cache still holds an entry.
-    The resource gate is reset too but is not in the probe, deliberately: a
-    fresh gate is unsampled, not empty, with no predicate to ask; its memoized reading lives in cgroup_sense.
-    """
-    # ``_SHARED_HTTP_CACHE`` defines no ``__len__``, so bool() is constant True;
-    # read the entry mapping instead, or the probe reports state after every reset.
+def _has() -> bool:
+    """Whether any shared cache still holds an entry."""
+    # No __len__ on _SHARED_HTTP_CACHE: read the entry mapping, not bool().
     content_holds = _SHARED_CONTENT_CACHE is not None and bool(_SHARED_CONTENT_CACHE._index)
     return bool(robots_cache) or bool(_SHARED_HTTP_CACHE._data) or content_holds
+
+
+process_state.register(__name__, _reset, _has)

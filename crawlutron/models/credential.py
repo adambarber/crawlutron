@@ -32,7 +32,7 @@ class Credential(BaseModel):
         ),
     ] = None
     username: Annotated[
-        str | None,
+        SecretStr | None,
         Field(
             min_length=1,
             max_length=256,
@@ -64,10 +64,14 @@ class Credential(BaseModel):
 
     @model_validator(mode="after")
     def _match_kind(self) -> Credential:
-        if self.kind == "bearer" and not (self.token and self.token.get_secret_value()):
-            raise ValueError("bearer credential requires a token")
-        if self.kind == "basic" and not (
-            self.username and self.password and self.password.get_secret_value()
-        ):
-            raise ValueError("basic credential requires username and password")
+        if self.kind == "bearer":
+            if not (self.token and self.token.get_secret_value()):
+                raise ValueError("bearer credential requires a token")
+            if self.username is not None or self.password is not None:
+                raise ValueError("bearer credential must not carry basic fields (username/password)")
+        if self.kind == "basic":
+            if not (self.username and self.password and self.password.get_secret_value()):
+                raise ValueError("basic credential requires username and password")
+            if self.token is not None:
+                raise ValueError("basic credential must not carry a bearer token")
         return self

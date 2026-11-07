@@ -21,7 +21,7 @@ from tests.chokepoint_walks import (
     resolved_expr_name,
     trees_under,
 )
-from tests.invariants._shared import _private_from_import_names
+from tests.invariants._shared import _private_from_import_names, module_level_bindings
 from tests.rules import Bites, Registry, Rule
 
 _TESTS_DIR = REPO_ROOT / "tests"
@@ -328,18 +328,7 @@ def _declared_all(tree: ast.Module) -> set[str]:
 
 def _module_public_names(tree: ast.Module) -> frozenset[str]:
     """Names a module itself publishes: top-level bindings plus ``__all__``."""
-    bound = {
-        node.name
-        for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-    }
-    bound |= _declared_all(tree)
-    for node in tree.body:
-        if isinstance(node, ast.Assign):
-            bound.update(t.id for t in node.targets if isinstance(t, ast.Name))
-        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            bound.add(node.target.id)
-    return frozenset(bound)
+    return frozenset(module_level_bindings(tree) | _declared_all(tree))
 
 
 def _owner_public_names() -> dict[str, frozenset[str]]:

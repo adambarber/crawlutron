@@ -68,12 +68,13 @@ def _to_jsonable_impl(value: object, seen: set[int]) -> JsonValue:
         return value.raw
     if is_dataclass(value) and not isinstance(value, type):
         return _build_guarded(value, seen, _render_dataclass)
-    if isinstance(value, dict):
+    if isinstance(value, Mapping):
         return _build_guarded(
             value,
             seen,
             lambda node, path: {
-                key: _to_jsonable_impl(item, path) for key, item in cast(dict[str, JsonValue], node).items()
+                key: _to_jsonable_impl(item, path)
+                for key, item in cast(Mapping[str, JsonValue], node).items()
             },
         )
     if isinstance(value, (list, tuple)):
@@ -113,6 +114,12 @@ def _rebuild_value(annotation: object, value: object, *, policy: HostPolicy) -> 
         args = get_args(annotation)
         (item,) = args if len(args) == 1 else (object,)
         return [_rebuild_value(item, element, policy=policy) for element in value]
+    if origin is tuple and isinstance(value, (list, tuple)):
+        args = get_args(annotation)
+        if len(args) == 2 and args[1] is Ellipsis:
+            (item,) = (args[0],)
+            return tuple(_rebuild_value(item, element, policy=policy) for element in value)
+        return value
     if origin in (Union, types.UnionType) and value is not None:
         members = [member for member in get_args(annotation) if member is not type(None)]
         if len(members) == 1:

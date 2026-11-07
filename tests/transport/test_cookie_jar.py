@@ -12,6 +12,7 @@ import tempfile
 from http.cookiejar import CookieJar as StdCookieJar
 from unittest.mock import patch
 
+from crawlutron.runtime import process_state
 from crawlutron.transport.cookie_jar import (
     CookieJar,
     RecordingSendPolicy,
@@ -143,7 +144,7 @@ class TestCookieJarHeaderHandling:
         global_cookie_jar().add_cookie_header(canonical("http://x.example/"), "http://example.com/")
 
 
-def test_reset_process_state_rebinds_a_fresh_default_jar():
+def test_reset_rebinds_a_fresh_default_jar():
     """Reset must drop the installed jar object, not just its contents.
 
         A test that swaps the process global for a guarded double and resets left that
@@ -157,13 +158,13 @@ def test_reset_process_state_rebinds_a_fresh_default_jar():
     sentinel = _SentinelJar()
     cookie_jar.set_global_cookie_jar(sentinel)
     try:
-        cookie_jar.reset_process_state()
+        process_state.reset_all_process_state()
         assert cookie_jar.global_cookie_jar() is not sentinel, (
-            "reset_process_state left the swapped-in jar installed as the process global"
+            "the registry reset left the swapped-in jar installed as the process global"
         )
         assert type(cookie_jar.global_cookie_jar()) is cookie_jar.CookieJar
     finally:
-        cookie_jar.reset_process_state()
+        process_state.reset_all_process_state()
 
 
 def test_cookie_jar_read_refreshes_only_the_slots_it_carried():

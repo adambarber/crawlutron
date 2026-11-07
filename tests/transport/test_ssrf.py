@@ -202,9 +202,9 @@ class TestSSRFProtection:
 
         The process-global DNS cache is cleared first, so a prior test cannot
         serve this call from cache and report 0 getaddrinfo calls."""
-        from crawlutron.transport.pinned_dns import reset_process_state
+        from crawlutron.runtime import process_state
 
-        reset_process_state()
+        process_state.reset_all_process_state()
         with host_resolves_to(monkeypatch, "8.8.8.8") as resolved:
             check_ssrf_protection(canonical("http://example.com:8080/"))
         assert resolved == ["example.com"]

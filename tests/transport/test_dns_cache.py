@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
+from crawlutron.runtime import process_state
 from crawlutron.transport import pinned_dns as http_mod
 from tests._policy_factories import canonical
 from tests._thread_fanout import run_thread_fanout
@@ -30,7 +31,7 @@ def test_ssrf_check_caches_within_ttl(monkeypatch):
     monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     host = f"a-{uuid.uuid4().hex}.example.com"
     calls, fake = _counting_resolver()
-    http_mod.reset_process_state()
+    process_state.reset_all_process_state()
     with patch("socket.getaddrinfo", side_effect=fake):
         http_mod.check_ssrf_protection(canonical(f"http://{host}/p"))
         http_mod.check_ssrf_protection(canonical(f"http://{host}/q"))
@@ -42,7 +43,7 @@ def test_resolve_pin_host_resolves_fresh_each_call(monkeypatch):
     monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     host = f"b-{uuid.uuid4().hex}.example.com"
     calls, fake = _counting_resolver()
-    http_mod.reset_process_state()
+    process_state.reset_all_process_state()
     with patch("socket.getaddrinfo", side_effect=fake):
         h1, ip1 = http_mod.resolve_and_pin_host(canonical(f"http://{host}/p"))
         h2, ip2 = http_mod.resolve_and_pin_host(canonical(f"http://{host}/q"))
@@ -54,7 +55,7 @@ def test_resolve_pin_host_resolves_fresh_each_call(monkeypatch):
 def test_ssrf_check_uses_cache_and_still_blocks_private(monkeypatch):
     monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     host = f"c-{uuid.uuid4().hex}.example.com"
-    http_mod.reset_process_state()
+    process_state.reset_all_process_state()
     with patch(
         "socket.getaddrinfo",
         return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 80))],

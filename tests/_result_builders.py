@@ -33,7 +33,7 @@ class _EngineResultOverrides(TypedDict, total=False):
     normalized_url: NormalizedUrl | None
     # Strategy selection
     selected_strategy: CrawlStrategyName | None
-    attempted_strategies: list[CrawlStrategyAttempt]
+    attempted_strategies: tuple[CrawlStrategyAttempt, ...]
     # Response metadata
     http_status: int | None
     headers: dict[str, str]
@@ -45,7 +45,7 @@ class _EngineResultOverrides(TypedDict, total=False):
     # Quality
     quality_score: float
     # Discovery
-    discovered_links: list[DiscoveredLink]
+    discovered_links: tuple[DiscoveredLink, ...]
     # Derived, never passed: the builder raises if a caller tries
     discovered_link_count: int
     # Error
@@ -95,15 +95,15 @@ def _absent_result(
         status=derived,
         classification=classification,
         selected_strategy=None,
-        attempted_strategies=[
+        attempted_strategies=(
             terminal_attempt(
                 strategy=None,
                 status=derived,
                 classification=classification,
                 elapsed_ms=0,
                 error=None,
-            )
-        ],
+            ),
+        ),
         http_status=None,
         headers={},
         content_type=None,
@@ -111,7 +111,7 @@ def _absent_result(
         text=None,
         extraction_method=None,
         quality_score=0.0,
-        discovered_links=discovered,
+        discovered_links=tuple(discovered),
         discovered_link_count=len(discovered),
         error=None,
     )
@@ -151,7 +151,7 @@ def engine_result(
         # A rendered page's final_url follows its own URL, as a real response would.
         final_url_text = _text(url)
     derived = status_for_classification(classification) if status is None else status
-    discovered = links_arg + [_link(link, _text(url)) for link in links or []] + (raw_links or [])
+    discovered = [*links_arg, *(_link(link, _text(url)) for link in links or []), *(raw_links or [])]
     absent = _absent_result(
         url,
         classification,

@@ -291,9 +291,10 @@ async def test_https_navigation_dials_the_hostname_for_cert_verification(monkeyp
     block_private_targets(monkeypatch)
     _stub_dns_to_example_com(monkeypatch)
     checks: list[str] = []
+    from crawlutron.runtime import process_state
     from crawlutron.transport import pinned_dns
 
-    pinned_dns.reset_process_state()
+    process_state.reset_all_process_state()
     original = pinned_dns.check_ssrf_protection_stable
 
     def spy(url):

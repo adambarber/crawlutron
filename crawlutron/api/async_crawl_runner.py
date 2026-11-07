@@ -25,6 +25,7 @@ from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.webhook_target import WebhookTarget
+from crawlutron.runtime import process_state
 from crawlutron.storage.job_store import TERMINAL_STATUSES, CrawlJobState, JobStatus
 
 logger = logging.getLogger(__name__)
@@ -72,14 +73,18 @@ def async_crawl_semaphore() -> asyncio.Semaphore:
     return holder.semaphore
 
 
-def reset_process_state() -> None:
-    """Drop the webhook-crawl semaphore holder.
-
-    The semaphore is process-wide: a test that swaps the builder needs the
-    cache cleared, exactly as the pooled clients clear their session cache.
-    """
+def _reset() -> None:
+    """Drop the webhook-crawl semaphore holder."""
     global _SEMAPHORE_HOLDER
     _SEMAPHORE_HOLDER = None
+
+
+def _has() -> bool:
+    """Whether a webhook-crawl semaphore holder is cached right now."""
+    return _SEMAPHORE_HOLDER is not None
+
+
+process_state.register(__name__, _reset, _has)
 
 
 async def run_async_crawl(

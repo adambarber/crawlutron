@@ -159,7 +159,7 @@ class TestHttpStrategy:
         assert "Example Org" in (result.text or "")
         assert "Example Org" in (result.markdown or "")
         assert result.discovered_link_count == 0
-        assert result.discovered_links == []
+        assert result.discovered_links == ()
         assert result.next_page_url == canonical(f"{base_url}/page2")
         assert result.http_status == 200
 

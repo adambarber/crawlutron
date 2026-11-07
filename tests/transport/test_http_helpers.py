@@ -1,6 +1,7 @@
 """Validation, headers, retries and parsing stay pure and total."""
 
 import asyncio
+import datetime
 from collections.abc import Callable
 
 import pytest
@@ -117,6 +118,26 @@ class TestValidationHelpers:
         assert retry_after_seconds({"retry-after": "notanint"}) is None
         assert retry_after_seconds({"retry-after": "30"}) == 30
         assert retry_after_seconds({}) is None
+
+    def test_retry_after_seconds_http_date_yields_a_cooldown(self) -> None:
+        """#581: the HTTP-date form must produce a politeness cooldown, not be dropped.
+
+        ``int(value)`` silently discarded it (ValueError -> None), so a 503 that
+        answers 'retry at <date>' got zero cooldown and was hammered.
+        """
+        future = (datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=60)).strftime(
+            "%a, %d %b %Y %H:%M:%S GMT"
+        )
+        cooldown = retry_after_seconds({"retry-after": future})
+        assert cooldown is not None and 0 < cooldown <= 300, (
+            f"an HTTP-date Retry-After produced {cooldown!r}: dropped, not converted"
+        )
+
+    def test_retry_after_seconds_past_http_date_clamps_to_zero(self) -> None:
+        past = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=60)).strftime(
+            "%a, %d %b %Y %H:%M:%S GMT"
+        )
+        assert retry_after_seconds({"retry-after": past}) == 0
 
 
 class TestHeaderHelpers:

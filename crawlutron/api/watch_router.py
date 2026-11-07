@@ -6,7 +6,6 @@ belongs to the sweep (:mod:`crawlutron.api.watch_sweep`). This router owns regis
 
 from __future__ import annotations
 
-import time
 from typing import NoReturn
 
 from fastapi import APIRouter, Response
@@ -23,6 +22,7 @@ from crawlutron.models.watch_create_request import WatchCreateRequest
 from crawlutron.models.watch_list_response import WatchListResponse
 from crawlutron.models.watch_state import WatchState
 from crawlutron.models.webhook_target import WebhookTarget
+from crawlutron.transport.freshness import default_clock
 
 router = APIRouter(prefix="/v1/watches", tags=["Crawler"], responses=auth_denials())
 
@@ -88,7 +88,7 @@ async def create_watch(
     return await watch_store.acreate(
         url,
         interval_seconds=payload.interval_seconds,
-        now=time.time(),
+        now=default_clock(),
         webhook_url=WebhookTarget.admit(payload.webhook_url, host_policy=host_policy)
         if payload.webhook_url is not None
         else None,

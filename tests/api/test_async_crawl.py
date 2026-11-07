@@ -6,6 +6,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from crawlutron.api import job_runner
+from crawlutron.runtime import process_state
 from crawlutron.runtime.metrics import get_metrics
 from tests._assertions import (
     accepted_crawl,
@@ -233,9 +234,8 @@ class TestAsyncCrawlApi:
         in-flight request at a time, never three overlapping fetches.
         """
         monkeypatch.setenv("CRAWLUTRON_MAX_WEBHOOK_CONCURRENCY", "1")
-        async_crawl_runner = __import__("crawlutron.api.async_crawl_runner", fromlist=["x"])
         # The cached loop-bound semaphore is rebuilt from the new width.
-        async_crawl_runner.reset_process_state()
+        process_state.reset_all_process_state()
 
         active = 0
         peak = 0

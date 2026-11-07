@@ -14,6 +14,7 @@ from collections.abc import Callable
 
 from crawlutron.models.host_policy import allow_private_targets
 from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.runtime import process_state
 from crawlutron.safety.bounded_ttl import BoundedTTLCache
 from crawlutron.safety.validation import is_public_ip_value
 
@@ -29,9 +30,7 @@ __all__ = [
     "dns_in_flight_resolves",
     "dns_seed_saturation",
     "dns_wait_for",
-    "has_process_state",
     "is_private_or_loopback_ip",
-    "reset_process_state",
     "resolve_and_pin_host",
 ]
 
@@ -233,15 +232,21 @@ def resolve_and_pin_host(url: NormalizedUrl) -> tuple[str, str]:
     return hostname, ips[0]
 
 
-def reset_process_state() -> None:
+def _reset() -> None:
     """Drop every memoized DNS resolution: the cache is process-wide with a 60s
     TTL, so a test that resolves once is served the same answer all session."""
     _DNS_CACHE.clear()
+    for future in list(_dns_futures):
+        future.cancel()
+    _dns_futures.clear()
 
 
-def has_process_state() -> bool:
+def _has() -> bool:
     """Whether any hostname's resolution is memoized right now."""
-    return bool(_DNS_CACHE)
+    return bool(_DNS_CACHE) or bool(_dns_futures)
+
+
+process_state.register(__name__, _reset, _has)
 
 
 def dns_in_flight_resolves() -> int:

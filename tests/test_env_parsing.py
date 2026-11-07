@@ -38,6 +38,40 @@ class TestGetEnvInt:
         assert get_env_int("CRAWLUTRON_TEST_INT", 42) == 7
         assert get_env_float("CRAWLUTRON_TEST_FLOAT", 0.5) == 0.25
 
+
+class TestEnvDecisionMemo:
+    """The one memoized env-decision primitive the twins must share (#621)."""
+
+    def test_memo_class_exists_and_reuses_unchanged_env(self, monkeypatch):
+        from crawlutron.config.env import EnvDecisionMemo
+
+        monkeypatch.setenv("CRAWLUTRON_TEST_MEMO", "1")
+        memo = EnvDecisionMemo("CRAWLUTRON_TEST_MEMO", default=False, logger_name=__name__, warning="w %r")
+        assert memo.decide() is True
+        assert memo.decide() is True
+
+    def test_memo_honors_env_change_immediately(self, monkeypatch):
+        from crawlutron.config.env import EnvDecisionMemo
+
+        memo = EnvDecisionMemo("CRAWLUTRON_TEST_MEMO", default=False, logger_name=__name__, warning="w %r")
+        monkeypatch.setenv("CRAWLUTRON_TEST_MEMO", "0")
+        assert memo.decide() is False
+
+    def test_both_twins_delegate_to_the_shared_memo(self, monkeypatch):
+        """Breaking the shared parse breaks both twins: neither carries its own copy."""
+        import crawlutron.config.env as config_env
+        from crawlutron.api import webhooks
+        from crawlutron.models import host_policy
+
+        def exploded(raw, default, *, env_name):
+            raise AssertionError("twin parsed outside the shared memo")
+
+        monkeypatch.setattr(config_env, "parse_bool_value", exploded)
+        with pytest.raises(AssertionError):
+            host_policy.allow_private_targets()
+        with pytest.raises(AssertionError):
+            webhooks.allow_plaintext_webhooks()
+
     def test_typo_falls_back_to_default(self, monkeypatch, caplog):
         monkeypatch.setenv("CRAWLUTRON_TEST_INT", "four")
         with caplog.at_level(logging.WARNING):

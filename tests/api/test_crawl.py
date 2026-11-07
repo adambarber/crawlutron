@@ -301,7 +301,9 @@ class TestJobApi(_AsgiEndpointTests):
         """
         resp_bad = await self.client.post(f"/v1/jobs/{job_id}/control", json={"action": "invalid"})
         assert resp_bad.status_code == 422
-        assert resp_bad.json()["code"] == "invalid_action"
+        # The Literal at the model refuses the action before the handler runs, so the
+        # code is the wire validator's, not the router's former "invalid_action".
+        assert resp_bad.json()["code"] == "validation_error"
         resp_after = await self.client.get(f"/v1/jobs/{job_id}")
         assert resp_after.json()["status"] == expected_status
 

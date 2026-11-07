@@ -26,6 +26,7 @@ from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.watch_announcement import WatchAnnouncement
 from crawlutron.models.watch_state import WatchState
 from crawlutron.storage.watch_store import WatchStore
+from crawlutron.transport.freshness import default_clock
 from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from crawlutron.vocabulary.taxonomy import CrawlClassification, status_for_classification
 
@@ -258,7 +259,7 @@ async def sweep_watches_forever(
     settings: CrawlerSettings,
     shutdown_event: asyncio.Event,
     interval_seconds: float = WATCH_SWEEP_INTERVAL_SECONDS,
-    clock: Callable[[], float] = time.time,
+    clock: Callable[[], float] = default_clock,
     key_store=None,
     concurrency_tracker: CallerConcurrencyTracker | None = None,
     job_store: JobStore | None = None,

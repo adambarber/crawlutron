@@ -40,6 +40,48 @@ def parse_bool_env(name: str, default: bool = False) -> bool:
     return parse_bool_value(os.environ.get(name), default, env_name=name)
 
 
+class EnvDecisionMemo:
+    """One memoized escape-hatch env read, shared by every twin (#621).
+
+    The raw env value is the cache key: an unchanged value skips the parse, an
+    env change lands on the next call, and an enabled decision warns once per
+    distinct value through the owner's logger and message, not per call.
+    """
+
+    def __init__(
+        self,
+        env_name: str,
+        *,
+        default: bool,
+        logger_name: str,
+        warning: str,
+    ) -> None:
+        self._env_name = env_name
+        self._default = default
+        self._logger_name = logger_name
+        self._warning = warning
+        self._decision: tuple[str | None, bool] | None = None
+
+    def decide(self) -> bool:
+        raw = os.environ.get(self._env_name)
+        cached = self._decision
+        if cached is not None and cached[0] == raw:
+            return cached[1]
+        decision = parse_bool_value(raw, self._default, env_name=self._env_name)
+        self._decision = (raw, decision)
+        if decision:
+            logging.getLogger(self._logger_name).warning(
+                self._warning,
+                raw,
+                extra={"env_name": self._env_name, "env_value": raw},
+            )
+        return decision
+
+    def reset(self) -> None:
+        """Drop the memoized decision (tests that count parse calls)."""
+        self._decision = None
+
+
 def _clamp(value, lo, hi):
     """Bound ``value`` to ``[lo, hi]`` when the bounds are provided."""
     if lo is not None and value < lo:
@@ -203,6 +245,7 @@ get_env_float = partial(get_mapping_float, os.environ)
 
 
 __all__ = [
+    "EnvDecisionMemo",
     "get_env_float",
     "get_env_int",
     "get_mapping_float",

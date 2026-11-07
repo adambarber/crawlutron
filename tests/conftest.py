@@ -257,62 +257,21 @@ def job_store(tmp_path):
     return make_job_store(str(tmp_path))
 
 
-def _clear_sitemap_cache() -> None:
-    """Clear the module-level sitemap TTL cache.
-
-    Tests inject fake fetchers serving different content for the same
-    sitemap URLs; without this the shared cache leaks across tests.
-    """
-    import crawlutron.transport.fetch_helpers as fh
-
-    fh.reset_process_state()
-
-
-def _clear_metrics() -> None:
-    """Reset the process-local metrics store.
-
-    Without it, metric assertions become order-dependent: a later test could
-    observe utilization left by an earlier crawl."""
-    from crawlutron.runtime.metrics import get_metrics
-
-    get_metrics().reset()
-
-
 def _clear_global_http_state() -> None:
-    """Reset crawler global singletons.
+    """Reset every registered process-state owner through the one seam (#621).
 
     Dead-loop-bound pooled clients leak sockets, cookies and cache state across
     tests; the close is loop-aware (drop for GC) to avoid running a second loop."""
     import asyncio
 
-    from crawlutron.orchestration import engine as _engine_mod
-    from crawlutron.runtime.cgroup_sense import reset_process_state as _reset_cgroup
-    from crawlutron.transport import cookie_jar as cookie_mod
-    from crawlutron.transport import http_client_pool as pool_mod
-    from crawlutron.transport import pinned_dns as pinned_mod
+    from crawlutron.runtime import process_state
 
-    cookie_mod.reset_process_state()
-    # The renderer's per-domain cookie store is module-global and bounded, not cleared, so a test that
-    # harvests once leaves its domain's cookies for the next test to assert against.
-    from crawlutron.transport import browser as browser_mod
-
-    browser_mod.reset_process_state()
-    # The pool decides per client whether it may be closed or must simply be dropped: a client owned by an
-    # already-finished loop cannot be awaited from the next one, and only the pool knows which loop owns it.
-    pool_mod.reset_process_state()
+    process_state.reset_all_process_state()
     # The real app's shutdown event is module-global and shared by every ASGI test.
     service_app().state.shutdown_event = asyncio.Event()
-    # Tests reuse origins with different robots.txt bodies, so clear it between tests for isolation.
-    # Production keeps it shared (a given origin always serves the same robots.txt).
-    _engine_mod.reset_process_state()
-    # Drop any memoized cgroup reads so a test that asserts fresh sensing (e.g. writes a new fake cgroup
-    # file) is not served a stale value.
-    _reset_cgroup()
-    # DNS cache + pending client close queue + cookie namespace contextvar isolation between tests
-    pinned_mod.reset_process_state()
 
 
-_MODULE_GLOBAL_RESETS = (_clear_sitemap_cache, _clear_metrics, _clear_global_http_state)
+_MODULE_GLOBAL_RESETS = (_clear_global_http_state,)
 
 
 @pytest.fixture(autouse=True)

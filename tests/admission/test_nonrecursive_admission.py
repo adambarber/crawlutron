@@ -4,10 +4,8 @@ against a 256-connection hardcode (#350)."""
 
 import pytest
 
-from crawlutron.orchestration.engine import crawl_request
 from crawlutron.runtime.pressure_sizing import WeightedAdmission
-from tests._admission_doubles import page_route, pin_small_box
-from tests._fetch_doubles import FetcherDouble
+from tests._admission_doubles import run_sync_batch
 
 
 async def _admission_spy(monkeypatch):
@@ -40,18 +38,10 @@ async def test_nonrecursive_admission_charge_matches_policy_chain(
     """#595: the non-recursive batch is admitted per tier per the policy chain,
     so browser-capable jobs are not silently lumped into HTTP admission."""
     admits = await _admission_spy(monkeypatch)
-    pin_small_box(monkeypatch)
 
-    fetcher = FetcherDouble(page_route)
-    urls = [f"http://site{i}.example/page" for i in range(3)]
-    out = await crawl_request(
-        {"urls": urls, "policy": policy},
-        http_fetcher=fetcher,
-        cffi_fetcher=fetcher,
-        browser_worker=None,
-    )
+    out = await run_sync_batch(monkeypatch, n_urls=3, policy=policy, total_bytes=1 << 30)
 
-    assert len(out["results"]) == len(urls), "every submitted page must return a result"
+    assert len(out["results"]) == 3, "every submitted page must return a result"
     assert admits, "the sync batch must consult the WeightedAdmission gate"
     if want_http_must_be_zero:
         assert all(want_http == 0 for want_http, _ in admits), (

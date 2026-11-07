@@ -40,6 +40,7 @@ class CpuGate(ResourceGauge):
         cpu_budget: float | None = None,
         cgroup_root: str = "/sys/fs/cgroup",
         usage_ratio: Callable[[], float] | None = None,
+        clock: Callable[[], float] | None = None,
     ):
         # CpuGate adds only the sample knobs; the resource gauge params it forwards
         # are declared here, typed, instead of an opaque kwargs bag.
@@ -52,6 +53,9 @@ class CpuGate(ResourceGauge):
         )
         self.sample_seconds = sample_seconds
         self.min_window_seconds = min_window_seconds
+        # The injected clock also paces the CPU-rate sampling window (#581): a test
+        # that controls the wait deadline controls the sampling clock too.
+        self._clock: Callable[[], float] = clock or time.monotonic
         self._cpu_budget = cpu_budget if cpu_budget is not None else DEFAULT_CPU_BUDGET
         self._last_usage: float | None = None
         self._last_wall: float | None = None
@@ -78,7 +82,7 @@ class CpuGate(ResourceGauge):
         if quota is None or quota <= 0:
             return None
         usage = read_cpu_usage_seconds(self.cgroup_root)
-        now = time.monotonic()
+        now = self._clock()
         if usage is None:
             return None
         if self._last_usage is None or self._last_wall is None:
@@ -158,6 +162,7 @@ class ResourceGate:
             sample_seconds=sample_seconds,
             cpu_budget=cpu_budget,
             usage_ratio=cpu_ratio,
+            clock=clock,
         )
         self._poll_seconds = poll_seconds
         # Opt-in throttle signal (module probe above); injected, not global, so

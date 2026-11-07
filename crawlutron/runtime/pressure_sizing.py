@@ -246,3 +246,9 @@ class WeightedAdmission:
         if h + b == 0 and (want_http + want_browser) > 0:
             await asyncio.sleep(_ADMIT_YIELD_SECONDS)
         return h, b
+
+    def saturated_dispatch_floor(self) -> int:
+        """The per-pass dispatch floor under a saturated gate (#618): a quarter of
+        the HTTP ramp, minimum one. A floor of one made a large batch under memory
+        pressure pay one re-bucket + admit cycle per dispatched job."""
+        return max(1, self._p.max_http_concurrency // 4)

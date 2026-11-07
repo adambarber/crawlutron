@@ -215,6 +215,31 @@ def test_validator_values_honor_the_header_value_law():
         FetchValidators(if_none_match='"a\x00b"')
 
 
+class TestJobControlActionIsALiteral:
+    """The action is one of three words, validated at the model edge.
+
+    The router's set check alone let any string reach the handler; the type
+    itself must refuse what the API refuses (#602)."""
+
+    def test_invalid_action_refused_at_the_model(self):
+        from crawlutron.models.job_control_request import JobControlRequest
+
+        with pytest.raises(ValidationError, match="action"):
+            JobControlRequest(action="explode")
+
+    def test_valid_actions_accepted(self):
+        from crawlutron.models.job_control_request import JobControlRequest
+
+        for action in ("pause", "resume", "cancel"):
+            assert JobControlRequest(action=action).action == action
+
+    def test_action_case_is_normalized(self):
+        """The wire contract has been case-insensitive; the literal keeps that."""
+        from crawlutron.models.job_control_request import JobControlRequest
+
+        assert JobControlRequest(action="PAUSE").action == "pause"
+
+
 def _sample_field(model: type[BaseModel]) -> dict[str, object]:
     """One minimal valid instance of ``model``, for the extra-key assertions.
 

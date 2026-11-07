@@ -6,12 +6,13 @@ connection. Payloads store keyed by ``request_id`` with TTL + count + byte guard
 from __future__ import annotations
 
 import json
-import time
+from collections.abc import Callable
 from pathlib import Path
 
 from crawlutron.models.json_value import JsonValue
 from crawlutron.storage.coordination_store import CoordinationStore, atwin
 from crawlutron.storage.migrations import StoreSchema
+from crawlutron.transport.freshness import default_clock
 
 # The write-edge byte cap: one retained row is a whole crawl response, so
 # without a byte bound the entry cap bounds rows, never retained bytes.
@@ -37,13 +38,13 @@ class CrawlResultStore(CoordinationStore):
         ttl_seconds: float = 3600.0,
         max_entries: int = 1000,
         max_payload_bytes: int = _MAX_PAYLOAD_BYTES,
-        clock=None,
+        clock: Callable[[], float] | None = None,
     ) -> None:
         super().__init__(db_path)
         self._ttl_seconds = max(0.0, float(ttl_seconds))
         self._max_entries = max(1, int(max_entries))
         self._max_payload_bytes = max(1, int(max_payload_bytes))
-        self._clock = clock or time.time
+        self._clock = clock or default_clock
 
     def put(self, request_id: str, payload: JsonValue, *, owner: str = "") -> None:
         """Store a completed response; ``owner=""`` is the shared anonymous bucket."""

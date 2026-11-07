@@ -21,8 +21,6 @@ from crawlutron.models.result_factory import terminal_crawl_result
 from crawlutron.transport.browser_cookies import (
     BROWSER_COOKIES_MAX,
     get_browser_cookies_for,
-    has_process_state,
-    reset_process_state,
     store_browser_cookies,
 )
 from crawlutron.transport.browser_driver import BrowserDriver
@@ -54,12 +52,10 @@ __all__ = [
     "BROWSER_COOKIES_MAX",
     "store_browser_cookies",
     "get_browser_cookies_for",
-    "has_process_state",
     "make_response_handler",
     "make_ssrf_route_handler",
     "make_ssrf_websocket_handler",
     "looks_like_pdf",
-    "reset_process_state",
     "resolve_browser_target",
 ]
 from crawlutron.transport.document import default_document_text_extractor
