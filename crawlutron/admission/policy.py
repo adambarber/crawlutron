@@ -28,7 +28,6 @@ __all__ = [
     "read_policy",
     "stored_policy",
     "validate_wire_policy",
-    "wire_policy",
 ]
 
 # 0 is the model's own legal value (unbounded, whole-site runner), so the
@@ -257,32 +256,6 @@ def stored_policy(policy: PolicyLike | None) -> dict[str, JsonValue]:
     rather than a second spelling; nothing downstream of read_policy sees this shape.
     """
     return read_policy(policy).model_dump()
-
-
-def wire_policy(
-    *,
-    strategies: list[str] | None = None,
-    limits: dict[str, JsonValue] | None = None,
-    discovery: dict[str, JsonValue] | None = None,
-    scope_regex: str | None = None,
-    extraction: str | None = None,
-) -> dict[str, JsonValue]:
-    """The one caller-side wire shape: each block is a named keyword, so a
-    typo'd name is a ``TypeError``. The model's own defaults apply at
-    ``read_policy``; absent blocks stay absent (the safe direction)."""
-    from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
-
-    policy: dict[str, JsonValue] = {
-        "strategies": list(strategies) if strategies is not None else [HTTP_DECLARED_CRAWLER],
-        "limits": {} if limits is None else dict(limits),
-    }
-    if discovery is not None:
-        policy["discovery"] = discovery
-    if scope_regex is not None:
-        policy["scope_regex"] = scope_regex
-    if extraction is not None:
-        policy["extraction"] = extraction
-    return policy
 
 
 def validate_wire_policy(raw: PolicyLike | None, tier: PolicyTier | None = None) -> CrawlPolicy:

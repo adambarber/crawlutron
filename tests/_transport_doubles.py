@@ -3,6 +3,9 @@ curl_cffi fetcher in an isolated spawned interpreter (in-process curl_cffi
 busy-spins the GIL). Why and how: ``docs/testing.md`` -> Transport doubles."""
 
 import multiprocessing
+import socket
+import threading
+import time
 from collections.abc import Awaitable, Callable, Sequence
 from multiprocessing.process import BaseProcess
 from multiprocessing.queues import Queue
@@ -121,7 +124,55 @@ def allow_scripted_egress(monkeypatch, ip: str = "1.2.3.4") -> None:
     from crawlutron.transport import pinned_dns as pinned_mod
 
     monkeypatch.setattr(pinned_mod, "check_ssrf_protection", lambda url: None)
+    monkeypatch.setattr(pinned_mod, "check_ssrf_protection", lambda url: None)
     monkeypatch.setattr(pinned_mod, "resolve_and_pin_host", lambda url: (url.host, ip))
+
+
+class ParkedResolver:
+    """Parked DNS workers: the saturation registry is seeded through the real
+    resolve door, so the module needs no production test-door symbols.
+
+    Each ``occupy``d slot is one ``bounded_addrinfo`` call whose getaddrinfo
+    parks on an event -- the future registers exactly as a real resolve's;
+    ``release`` lets every parked worker return.
+    """
+
+    def __init__(self, monkeypatch) -> None:
+        self._hold = threading.Event()
+
+        def parked_getaddrinfo(hostname, *args, **kwargs):
+            self._hold.wait(timeout=10.0)
+            raise socket.gaierror("parked resolver released")
+
+        monkeypatch.setattr(socket, "getaddrinfo", parked_getaddrinfo)
+        self._callers: list[threading.Thread] = []
+
+    def occupy(self, pinned_dns, count: int) -> None:
+        """Park ``count`` resolver workers and wait until all are registered."""
+
+        def call():
+            try:
+                pinned_dns.bounded_addrinfo("parked.test")
+            except Exception as failure:  # the budget expiry after release; nothing to report
+                _ = failure
+
+        for _ in range(count):
+            worker = threading.Thread(target=call, daemon=True)
+            worker.start()
+            self._callers.append(worker)
+        deadline = time.monotonic() + 5.0
+        while pinned_dns.dns_in_flight_resolves() < count and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert pinned_dns.dns_in_flight_resolves() >= count, "parked workers never registered"
+
+    def release(self, pinned_dns) -> None:
+        """Let every parked worker return, and wait until the registry drains."""
+        self._hold.set()
+        for worker in self._callers:
+            worker.join(timeout=10.0)
+        deadline = time.monotonic() + 5.0
+        while pinned_dns.dns_in_flight_resolves() and time.monotonic() < deadline:
+            time.sleep(0.01)
 
 
 def patch_http_fetcher_transport(

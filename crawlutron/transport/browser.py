@@ -18,11 +18,6 @@ from crawlutron.extraction.classify import classify_page
 from crawlutron.models.crawl_result import CrawlResult
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.result_factory import terminal_crawl_result
-from crawlutron.transport.browser_cookies import (
-    BROWSER_COOKIES_MAX,
-    get_browser_cookies_for,
-    store_browser_cookies,
-)
 from crawlutron.transport.browser_driver import BrowserDriver
 from crawlutron.transport.browser_render_phases import (
     ReleasePlan,
@@ -49,9 +44,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BrowserRenderer",
-    "BROWSER_COOKIES_MAX",
-    "store_browser_cookies",
-    "get_browser_cookies_for",
     "make_response_handler",
     "make_ssrf_route_handler",
     "make_ssrf_websocket_handler",

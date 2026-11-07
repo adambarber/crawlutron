@@ -26,8 +26,8 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     # chokepoint outside configure_store_connection, backing the table-trust digest.
     "crawlutron/storage/sqlite_store.py": (10, 8),
     "crawlutron/safety/safe_regex.py": (7, 2),
-    # robots_pattern_to_regex is public (#190) -- robots_allows itself calls it -- so the
-    # parity/per-host tests drive that real contract; the matcher class behind it stays private.
+    # robots_pattern_to_regex is public (#190) -- robots_allows itself calls it; the matcher class
+    # behind it stays private, and RobotsMatcher stays public as the function's return type.
     "crawlutron/transport/robots.py": (13, 4),
     "crawlutron/safety/bounded_io.py": (4, 2),
     "crawlutron/transport/decompression.py": (5, 2),
@@ -36,8 +36,7 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     # RAISED to (2, 2): `payload_policy` was `_payload_policy` until the layout put its only production caller
     # (the engine) in another package.
     "crawlutron/admission/payload_helpers.py": (2, 2),
-    # RAISED to (10, 9): terminal_attempt became public when CrawlResult stopped copying four axes out of the
-    # attempt it holds.
+    # LOWERED to (3, 2): terminal_attempt moved to crawlutron/models/result_factory.py (#160).
     "crawlutron/transport/classification.py": (3, 2),
     # Designed RAISE: engine and render result funnels were merged per #324; LOWERED
     # to (8, 7) when the pure constructors moved to crawlutron/models/result_factory.py (#160).
@@ -69,8 +68,8 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     # to hold the 500-line ceiling; the seam owns every accumulator table.
     "crawlutron/storage/job_store_accumulators.py": (1, 1),
     # #314/wave-3: DNS + SSRF split out of pinned_transport (500-line ceiling);
-    # the seam owns every resolve-and-pin door plus the process-state reset pair.
-    "crawlutron/transport/pinned_dns.py": (13, 10),
+    # the seam owns every resolve-and-pin door plus the reset pair. No test doors:
+    "crawlutron/transport/pinned_dns.py": (11, 8),  # saturation via the real resolve door (ParkedResolver)
 }
 
 # Former #215 exemptions: their __all__ deliberately does not enumerate every public
@@ -78,7 +77,7 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
 DECLARED_SURFACE_RATCHET = {
     # Generated at build time by the hatch-vcs hook (#561); never hand-edited.
     "crawlutron/_version.py": (3, 0),
-    "crawlutron/admission/policy.py": (11, 6),
+    "crawlutron/admission/policy.py": (10, 5),
     "crawlutron/api/_depends_singletons.py": (2, 0),
     "crawlutron/api/async_crawl_runner.py": (3, 2),
     "crawlutron/api/caller_auth.py": (18, 15),

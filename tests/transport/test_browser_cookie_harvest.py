@@ -11,8 +11,7 @@ from typing import cast
 
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.runtime import process_state
-from crawlutron.transport import browser as browser_mod
-from crawlutron.transport.browser_cookies import harvest_session_cookies
+from crawlutron.transport.browser_cookies import get_browser_cookies_for, harvest_session_cookies
 from crawlutron.transport.browser_driver import BrowserDriver
 from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE
 from crawlutron.vocabulary.browser import BrowserAction
@@ -63,7 +62,7 @@ class TestCookieHarvestCompletes:
         with isolated_browser_cookies(url) as domain:
             await harvest_session_cookies(_page_with_context(), url)
             # The synchronous read the cffi retry performs must see cookies NOW.
-            assert browser_mod.get_browser_cookies_for(domain) == "sess=abc123"
+            assert get_browser_cookies_for(domain) == "sess=abc123"
 
 
 class TestHarvestIsPartitionedByCookieNamespace:
@@ -84,13 +83,13 @@ class TestHarvestIsPartitionedByCookieNamespace:
 
             other_token = COOKIE_NAMESPACE.set("caller-b")
             try:
-                leaked = browser_mod.get_browser_cookies_for(domain)
+                leaked = get_browser_cookies_for(domain)
             finally:
                 COOKIE_NAMESPACE.reset(other_token)
 
             own_token = COOKIE_NAMESPACE.set("caller-a")
             try:
-                own = browser_mod.get_browser_cookies_for(domain)
+                own = get_browser_cookies_for(domain)
             finally:
                 COOKIE_NAMESPACE.reset(own_token)
 
@@ -148,7 +147,7 @@ class TestHarvestWaitBounded:
             # The harvest cap fired; page close still happened afterwards.
             assert close_calls == [page]
             # No cookies were stored from the wedged context.
-            assert browser_mod.get_browser_cookies_for(domain) is None
+            assert get_browser_cookies_for(domain) is None
 
 
 class TestActionChainFailuresAreVisible:

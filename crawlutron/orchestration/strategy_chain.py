@@ -235,7 +235,7 @@ class _ChainRun:
         ):
             return None
         state.cffi_retry_done = True
-        from crawlutron.transport.browser import get_browser_cookies_for
+        from crawlutron.transport.browser_cookies import get_browser_cookies_for
         from crawlutron.transport.request_profile import cookie_namespace_for
 
         # The crawl's own namespace, from the policy ``crawl_request`` bound
