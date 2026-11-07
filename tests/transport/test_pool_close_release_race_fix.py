@@ -78,7 +78,7 @@ async def test_double_release_during_sweep_closes_once():
     path (schedules the close, but the old code left the renderer in
     ``_checked_out``); release #2 then takes the closing branch and schedules a
     SECOND close. The retired release must also discard ``_checked_out`` so the
-    second release falls through to the owned-guard."""
+    second release falls through to the not-checked-out refusal."""
     target, blocker = GatedCloseRenderer("target"), GatedCloseRenderer("blocker")
     pool = BrowserPool.for_testing([target, blocker])
 
@@ -89,10 +89,20 @@ async def test_double_release_during_sweep_closes_once():
     # it (gated) and BLOCKS mid-await -- that await is the sweep window.
     pool.release(b)
     close_task = asyncio.ensure_future(pool.close())
-    # The sweep parks the checked-out target in _retired, then blocks on the
-    # blocker's gated close. Wait until target is parked.
-    while target not in pool._retired:
-        await asyncio.sleep(0)
+    # Wait (bounded, hang-safe) until the sweep parks the checked-out target
+    # in _retired: a parking regression must FAIL the bound, not hang to 120s.
+
+    async def wait_parked() -> None:
+        while target not in pool._retired:
+            await asyncio.sleep(0)
+
+    try:
+        await asyncio.wait_for(wait_parked(), timeout=2.0)
+    except TimeoutError:
+        raise AssertionError(
+            "the sweep never parked the checked-out renderer in _retired; "
+            "the double-release arrange could not be built"
+        ) from None
 
     pool.release(target)  # #1: retired path -- schedules the close, owns it
     pool.release(target)  # #2: must NOT schedule a second close

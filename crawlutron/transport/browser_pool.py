@@ -168,24 +168,18 @@ class BrowserPool:
         )
 
     def release(self, worker: BrowserRenderer) -> None:
-        """The release state machine, exact on pool state. ``_close_owned`` is
-        the ownership chokepoint the sweep also consults: if a renderer is
-        already in it (its close scheduled or done), release() refuses -- every
-        pool path closes a renderer exactly once (#589, #590, #641).
+        """The release state machine, exact on pool state. Renderer closes have
+        one ownership chokepoint: the ``_close_owned`` set plus disjoint
+        ownership sets -- a renderer leaving ``_retired`` also leaves
+        ``_checked_out`` at that same moment, so any SECOND release finds it in
+        no closable state and falls to a refusal; the sweep also skips anything
+        in ``_close_owned``. Every pool path closes a renderer exactly once
+        (#589, #590, #641).
 
-        Otherwise: retired by close -> the pool schedules its close (the #C6
-        leak path) and the renderer leaves ``_checked_out`` at that moment --
-        ownership sets are disjoint, so a SECOND release can neither re-schedule
-        the close nor take the closing-branch path (the double-close during the
-        sweep window this guard pins); checked out while closing -> the deferred
-        close, owned at schedule time; checked out -> back to the queue;
-        anything else -> refused."""
-        if worker in self._close_owned:
-            logger.warning(
-                "browser_pool_release_refused_close_owned",
-                extra={"renderer": type(worker).__name__},
-            )
-            return
+        Branches: retired by close -> the pool schedules its close (the #C6
+        leak path); checked out while closing -> the deferred close, owned at
+        schedule time; checked out -> back to the queue; anything else ->
+        refused."""
         if worker in self._retired:
             self._retired.discard(worker)
             self._checked_out.discard(worker)
@@ -251,6 +245,12 @@ class BrowserPool:
                     logger.warning("browser_pool_renderer_close_failed", extra={"error": str(e)})
             self._renderers.clear()
             self._checked_out.clear()
+            # _retired is deliberately NOT cleared: entries parked here owe
+            # their close to a LATER release (the #C6 leak path survives pool
+            # death), so the set is live state until that release consumes it,
+            # not stale bookkeeping. It is dead state only once a release has
+            # drained it or its renderer never releases -- exactness lives in
+            # the disjoint-set invariant, not in teardown clearing.
             self._initialized = False
             await self._retired_closes.drain()
             logger.info("browser_pool_closed", extra={"available": self._available.qsize()})
