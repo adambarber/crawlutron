@@ -6,6 +6,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Security
+- **Wave-3 summary: the #599–#618 security/correctness wave plus #621/#638/#639/#642
+  invariants landed mid-cycle.** Highlights, each verified against the live tree at merge
+  time: webhook secrets leave redacted projections only (`WebhookTarget` object-invariant
+  redaction, #599); `Credential` refuses cross-kind fields and keeps `username` secret
+  (#601); `JobControlRequest.action` is pinned to a `Literal` with case normalization
+  (#602); `EngineCrawlResult` carries immutable collection fields (#603); O(1) key
+  verification via id-embedding (#616/#600); HTTPS browser navigation dials the hostname
+  so TLS cert verification attests the pinned identity (#617); the redirect-chain advance
+  capture and cffi RESOLVE-table SNI fixes closed the silent-impersonation and
+  cross-redirect cookie bugs (#571/#574); a truncated declared request body and a
+  mid-collect `http.disconnect` both answer 413 instead of spinning (#619); render batch
+  robots fallback fails closed (#620); the reset-family is registry-owned with no
+  hand-copied pairs (#621); the zero-suppressor law (no `# noqa` / `# type: ignore`) is
+  enforced tree-wide by a gate (#638); the zero-exemption URL-secrets law is gated (#639);
+  the parallel suite is regression-guarded on test count and wall time (#642). Full
+  per-ticket narratives live in the merge history and the dispatch doctrine (`AGENTS.md`).
 - **Anonymous callers may no longer declare a cookie namespace (#559).**
   `request_profile.cookie_namespace` was honored verbatim for anonymous
   crawls, so any anonymous caller could name a tenant's jar (e.g.
