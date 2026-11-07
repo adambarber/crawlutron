@@ -261,7 +261,7 @@ async def test_pool_exhaustion_requeue_does_not_consume_a_max_pages_slot():
                 error="browser_pool_exhausted",
                 # Links from an eternally-exhausted URL are expanded only when its result is recorded, so the
                 # real page rides on the seed's final permanent failure, not on any re-queue.
-                discovered_links=[_link("http://a/real")],
+                discovered_links=(_link("http://a/real"),),
             )
         return engine_result(job.normalized_url, "rendered")
 

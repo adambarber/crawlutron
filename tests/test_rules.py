@@ -8,7 +8,7 @@ from __future__ import annotations
 import ast
 import pathlib
 from collections.abc import Callable, Iterable, Sequence
-from typing import TypedDict, Unpack
+from typing import TypedDict, Unpack, cast
 
 import pytest
 
@@ -62,13 +62,17 @@ class TestBiteIsRequiredByConstruction:
     """The framework's central claim, tested rather than asserted in a docstring."""
 
     def test_a_rule_without_a_bite_cannot_be_constructed(self):
+        # The deliberate omission IS the subject: the Callable[..., Rule] view of
+        # the constructor documents the intent, so no suppression is needed.
+        omitting_ctor = cast("Callable[..., Rule]", Rule)
         with pytest.raises(TypeError):
-            Rule(name="no_bite", find=_calls_urljoin)  # type: ignore[call-arg]
+            omitting_ctor(name="no_bite", find=_calls_urljoin)
 
     def test_the_missing_argument_is_named(self):
         """A bare TypeError does not say which of the two required fields was absent."""
+        omitting_ctor = cast("Callable[..., Rule]", Rule)
         with pytest.raises(TypeError, match="bite"):
-            Rule(name="no_bite", find=_calls_urljoin)  # type: ignore[call-arg]
+            omitting_ctor(name="no_bite", find=_calls_urljoin)
 
     def test_passing_bite_positionally_is_enough(self):
         rule = Rule("no_raw_urljoin", _calls_urljoin, lambda: "urljoin(a, b)\n")

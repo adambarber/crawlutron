@@ -77,7 +77,9 @@ async def _robots_allow_set(
     """
     if not options.respect_robots:
         return [(True, _ALLOWED_POLICY)] * len(urls)
-    _DENYING = RobotsRules([(False, "/")], [], None, RobotsSource.unreachable)
+    # An unresolved origin fails closed as refused: the law is never to continue
+    # past an unresolved denial, and refused names that posture to the caller.
+    _DENYING = RobotsRules([(False, "/")], [], None, RobotsSource.refused)
 
     async def one(url: NormalizedUrl) -> tuple[bool, RobotsRules]:
         try:

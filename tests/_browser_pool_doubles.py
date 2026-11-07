@@ -1,6 +1,9 @@
+"""The resource lifecycle doubles: renderers that record or gate their closes."""
+
+import asyncio
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager
-from typing import NoReturn
+from typing import NoReturn, Protocol, cast
 
 from crawlutron.models.browser_profile_record import BrowserProfileRecord
 from crawlutron.transport.browser import BrowserRenderer
@@ -25,6 +28,58 @@ def owned_browser_pool(pool: BrowserPool | None) -> Generator[None, None, None]:
         yield
     finally:
         set_browser_pool(previous)
+
+
+class SpyRenderer(BrowserRenderer):
+    """A minimal renderer double: enough shape for the pool, a close recorder."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.closed = 0
+
+    async def close(self) -> None:
+        self.closed += 1
+
+
+class GatedCloseRenderer(BrowserRenderer):
+    """Renderer whose close blocks on an event, so the sweep is observable."""
+
+    def __init__(self, name: str = "solo") -> None:
+        super().__init__()
+        self.name = name
+        self.closed = 0
+        self.gate = asyncio.Event()
+
+    async def close(self) -> None:
+        self.closed += 1
+        await self.gate.wait()
+
+
+class _GateOwner(Protocol):
+    """Anything a shared #590 arrange can open: the gated close's event."""
+
+    gate: asyncio.Event
+
+
+def _as_gate_owner(worker: BrowserRenderer) -> _GateOwner:
+    """Test doubles double as gate owners: constructed with a gate, handed to
+    close_mid_sweep only after acquire handed them out as BrowserRenderer."""
+    return cast(_GateOwner, worker)
+
+
+async def close_mid_sweep(pool: BrowserPool, holder: BrowserRenderer) -> asyncio.Task[None]:
+    """The shared #590 arrange: start close(), let it go mid-sweep holding the
+    lock, release the holder into the sweep, then open the close gate.
+
+    holder must own a gate -- that's true of every pool a test builds here
+    (enforced by construction, not by the pool's type), so the cast below is
+    provenance-documented, not assumed."""
+    gated = _as_gate_owner(holder)
+    close_task = asyncio.ensure_future(pool.close())
+    await asyncio.sleep(0.01)  # close holds the lock, mid-sweep
+    pool.release(holder)
+    gated.gate.set()
+    return close_task
 
 
 class FakeBrowserPool(BrowserPool):

@@ -19,6 +19,7 @@ from httpx import Request
 from crawlutron.api.async_crawl_runner import run_async_crawl
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.host_policy import HostPolicy
+from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.storage.job_store import JobStatus, JobStore
 from crawlutron.storage.result_store import CrawlResultStore
 from tests._api_harnesses import run_with_webhook as _run_with_webhook
@@ -26,9 +27,11 @@ from tests._assertions import block_private_targets, host_resolves_to
 from tests._webhook_doubles import record_webhook_delivery
 
 
-def _webhook_target() -> str:
-    """The loopback-safe host the delivery tests agree on."""
-    return "http://webhook.example.com/cb"
+def _webhook_target():
+    """The loopback-safe host the delivery tests agree on, admitted."""
+    from tests._api_harnesses import admitted_webhook
+
+    return admitted_webhook("http://webhook.example.com/cb")
 
 
 async def _run_webhook_crawl(job_store, result_store, request_id) -> None:
@@ -47,12 +50,12 @@ async def _run_webhook_crawl(job_store, result_store, request_id) -> None:
 async def _post_webhook(monkeypatch, *, status_code: int = 200) -> list[Request]:
     """POST the canonical webhook payload and return the delivered requests."""
     from crawlutron.api import webhooks
+    from crawlutron.models.webhook_target import WebhookTarget
 
     delivered = record_webhook_delivery(monkeypatch, status_code=status_code)
     await webhooks.post_webhook(
-        _webhook_target(),
+        WebhookTarget.admit(_webhook_target().delivery_url(), host_policy=HostPolicy.unrestricted()),
         {"results": []},
-        host_policy=HostPolicy.unrestricted(),
     )
     return delivered
 
@@ -96,8 +99,8 @@ class TestAsyncCrawlFailureWebhookDelivery:
             "webhook is silently undelivered"
         )
         assert post_webhook.await_args is not None, "the webhook was awaited; the call is recorded"
-        delivered_url, payload = post_webhook.await_args.args
-        assert delivered_url == webhook_url, delivered_url
+        delivered_target, payload = post_webhook.await_args.args
+        assert delivered_target.delivery_url() == webhook_url, delivered_target
         # Payload must be a real UnifiedCrawlResponse shape, not a coroutine.
         assert isinstance(payload, dict), f"payload must be a dict, got {type(payload)}"
         assert payload["request_id"] == request_id, payload
@@ -182,9 +185,8 @@ class TestWebhookValidationRunsOffLoop:
         delivered = record_webhook_delivery(monkeypatch)
 
         await post_webhook(
-            "http://public.example.com/cb",
+            WebhookTarget.admit("http://public.example.com/cb", host_policy=HostPolicy.unrestricted()),
             {"results": []},
-            host_policy=HostPolicy.unrestricted(),
         )
 
         assert delivered, "delivery never ran; the test is not exercising the pin path"
@@ -218,7 +220,6 @@ class TestWebhookValidationRunsOffLoop:
             b"{}",
             host_policy=HostPolicy.unrestricted(),
         )
-
         assert delivered, "delivery never ran; the test is not exercising the delivery path"
         assert resolver_threads, "socket.getaddrinfo was never called during delivery"
         loop_thread = threading.current_thread()
@@ -256,11 +257,7 @@ class TestDeliveryTimeValidationFailureStaysBestEffort:
         monkeypatch.setattr(webhooks, "validate_webhook_url_async", resolver_blip)
         record_webhook_delivery(monkeypatch)
         with host_resolves_to(monkeypatch, "8.8.8.8"):
-            await webhooks.post_webhook(
-                _webhook_target(),
-                {"results": []},
-                host_policy=HostPolicy.unrestricted(),
-            )
+            await _post_webhook(monkeypatch)
 
 
 class TestErrorBranchTerminalCasGatesPublish:
@@ -394,7 +391,7 @@ class TestShutdownDrainsInFlightWebhookDelivery:
         completed = asyncio.Event()
         release = asyncio.Event()
 
-        async def slow_delivery(url, payload, *, host_policy):
+        async def slow_delivery(target, payload, *, host_policy=None):
             started.set()
             await release.wait()
             completed.set()
@@ -404,9 +401,8 @@ class TestShutdownDrainsInFlightWebhookDelivery:
 
         task = asyncio.create_task(
             webhooks.post_webhook_guarded(
-                "http://webhook.example.com/cb",
+                WebhookTarget.admit("http://webhook.example.com/cb", host_policy=HostPolicy.unrestricted()),
                 {"results": []},
-                host_policy=HostPolicy.unrestricted(),
             )
         )
         await started.wait()
@@ -431,16 +427,15 @@ class TestShutdownDrainIsBounded:
         started = asyncio.Event()
         never = asyncio.Event()
 
-        async def hung_delivery(url, payload, *, host_policy):
+        async def hung_delivery(target, payload, *, host_policy=None):
             started.set()
             await never.wait()
 
         monkeypatch.setattr(webhooks, "deliver_pinned_webhook", hung_delivery)
 
         webhooks.start_webhook_delivery(
-            "http://webhook.example.com/cb",
+            WebhookTarget.admit("http://webhook.example.com/cb", host_policy=HostPolicy.unrestricted()),
             {"results": []},
-            host_policy=HostPolicy.unrestricted(),
         )
         await started.wait()
 

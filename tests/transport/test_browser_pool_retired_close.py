@@ -12,17 +12,9 @@ import pytest
 from crawlutron.runtime.resource_lifecycle import DeferredClose
 from crawlutron.transport.browser import BrowserRenderer
 from crawlutron.transport.browser_pool import BrowserPool, BrowserPoolExhaustedError
+from tests._browser_pool_doubles import SpyRenderer
 
-
-class _SpyRenderer(BrowserRenderer):
-    """A minimal renderer double: enough shape for the pool, a close recorder."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.closed = 0
-
-    async def close(self) -> None:
-        self.closed += 1
+_SpyRenderer = SpyRenderer
 
 
 async def _assert_queue_holds_no_duplicate(pool: BrowserPool) -> None:

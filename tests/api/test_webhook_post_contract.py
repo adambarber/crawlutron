@@ -15,9 +15,10 @@ _OK: dict[str, list[object]] = {"results": []}
 async def _post_through_chokepoint(monkeypatch, *, url: str, payload) -> list[httpx.Request]:
     """One post_webhook drive for the contract tests; returns delivered requests."""
     from crawlutron.api import webhooks
+    from crawlutron.models.webhook_target import WebhookTarget
 
     delivered = record_webhook_delivery(monkeypatch)
-    await webhooks.post_webhook(url, payload, host_policy=HostPolicy.unrestricted())
+    await webhooks.post_webhook(WebhookTarget.admit(url, host_policy=HostPolicy.unrestricted()), payload)
     return delivered
 
 
@@ -44,10 +45,11 @@ class TestPostWebhookSchemeLaw:
 
     async def test_the_refusal_log_carries_only_the_origin(self, monkeypatch, caplog):
         """A caller-supplied webhook URL can carry query credentials; the log
-        names the origin only, never the raw URL (#636)."""
+        masks the secret value, never the raw URL (#636 via main's #639 law)."""
         await self._refused(monkeypatch, caplog, "http://webhook.example.com/cb?api_key=hunter2")
         record = next(r for r in caplog.records if r.getMessage() == "webhook_plaintext_refused")
-        assert record.url == "http://webhook.example.com", record.url
+        assert "hunter2" not in record.url, record.url
+        assert record.url.startswith("http://webhook.example.com"), record.url
         assert "hunter2" not in caplog.text, "the raw webhook URL reached the log"
 
     async def test_https_url_is_unaffected(self, monkeypatch):

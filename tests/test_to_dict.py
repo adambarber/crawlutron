@@ -117,7 +117,7 @@ def test_a_result_survives_the_serialization_round_trip_unchanged():
     result = engine_result(
         "https://example.test/a",
         "rendered",
-        attempted_strategies=[
+        attempted_strategies=(
             CrawlStrategyAttempt(
                 strategy=HTTP_DECLARED_CRAWLER,
                 status="success",
@@ -126,9 +126,9 @@ def test_a_result_survives_the_serialization_round_trip_unchanged():
                 content_type="text/html",
                 elapsed_ms=12,
                 error=None,
-            )
-        ],
-        discovered_links=[_link("https://example.test/b", "https://example.test/a")],
+            ),
+        ),
+        discovered_links=(_link("https://example.test/b", "https://example.test/a"),),
         llm_metadata={"title": "T"},
         validators={"etag": "W/1"},
     )

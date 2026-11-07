@@ -76,7 +76,9 @@ class _SlowFakeTree(etree.ElementBase):
 
     never_released = threading.Event()
 
-    def xpath(self, expr):  # type: ignore[override]  # the double's whole point: it overrides _Element
+    def xpath(self, *args: object, **kwargs: object) -> list[object] | bool:
+        # The double's whole point: it overrides _Element's xpath and blocks past
+        # the deadline; the narrowed signature is honest at its own call boundary.
         return self.never_released.wait(timeout=30) or []
 
 

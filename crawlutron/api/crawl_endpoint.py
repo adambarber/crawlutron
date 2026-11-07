@@ -29,6 +29,7 @@ from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.result_record import ProducerEnvelope
 from crawlutron.models.trace_response import TraceResponse
 from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
+from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.runtime.metrics import get_metrics
 from crawlutron.storage.ids import new_request_id
 from crawlutron.storage.job_store import TERMINAL_STATUSES, FrontierEntry, JobKind, JobStore
@@ -108,7 +109,9 @@ async def crawl(
             host_policy=host_policy,
             checked_pairs=checked_pairs,
             request=request,
-            webhook_url=payload.webhook_url,
+            webhook_url=None
+            if payload.webhook_url is None
+            else WebhookTarget.admit(payload.webhook_url, host_policy=host_policy),
         )
 
 
@@ -124,7 +127,7 @@ async def _admitted_crawl(
     host_policy: HostPolicy,
     checked_pairs: list[tuple[str, NormalizedUrl]],
     request: Request | None,
-    webhook_url: str | None,
+    webhook_url: WebhookTarget | None,
 ) -> JSONResponse | Response | UnifiedCrawlResponse:
     """One admission for both doors: sync holds a slot for the crawl's life; async
     persists a durable job row. Admit and dispatch stay one block; the readiness
@@ -182,19 +185,16 @@ async def _accepted_async(
     host_policy: HostPolicy,
     checked: list[tuple[str, NormalizedUrl]],
     owner: str,
-    webhook_url: str | None,
+    webhook_url: WebhookTarget | None,
 ) -> JSONResponse:
     """The 202 door: validate the webhook, persist the job row, start the runner."""
-    if webhook_url and (
-        not isinstance(webhook_url, str) or not webhook_url.startswith(("http://", "https://"))
-    ):
-        raise http_error(422, "validation_error", "Invalid webhook_url")
-    if webhook_url:
+    if webhook_url is not None:
+        delivery = webhook_url.delivery_url()
         try:
-            ensure_https_webhook_url(webhook_url)
+            ensure_https_webhook_url(delivery)
         except ValueError as error:
             raise http_error(422, "validation_error", str(error)) from error
-        await validate_webhook_url_async(webhook_url, host_policy=host_policy)
+        await validate_webhook_url_async(delivery, host_policy=host_policy)
     request_id = new_request_id()
     # The store's tier, not ``settings``: the row is read back with the
     # store's tier, and two tier sources drift apart the moment they differ.
@@ -224,7 +224,7 @@ async def _accepted_async(
             "status": "accepted",
             "request_id": request_id,
             "status_url": f"/v1/crawl/{request_id}",
-            "webhook_url": webhook_url,
+            "webhook_url": None if webhook_url is None else webhook_url.redacted(),
         },
     )
 

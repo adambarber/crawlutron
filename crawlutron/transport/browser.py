@@ -78,11 +78,14 @@ logger = logging.getLogger(__name__)
 def _render_classification(error: BaseException) -> Classification:
     """The attempt verdict for a failed render. A bounded-resolver timeout is a
     resolution failure (dns_error), never a navigation one: the request
-    never got to navigate."""
+    never got to navigate. A browser cert refusal (identity mismatch) is the
+    pin law working: tls_error, visibly classified, never a silent success."""
     if isinstance(error, ResolverBudgetExceeded):
         return "dns_error"
     if isinstance(error, TimeoutError):
         return "navigation_timeout"
+    if "ERR_CERT_" in str(error) or "ERR_SSL" in str(error):
+        return "tls_error"
     return "unknown_error"
 
 

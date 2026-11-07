@@ -6,6 +6,8 @@ reports was written by the sweep, so tests write via the store, read via the API
 import pytest
 from httpx import Response
 
+from crawlutron.models.host_policy import HostPolicy
+from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.vocabulary.taxonomy import CrawlClassification
 from tests._assertions import block_private_targets, plaintext_webhook_refusal
 from tests._policy_factories import canonical
@@ -143,7 +145,10 @@ async def test_an_unknown_watch_is_not_found(watch_store):
 
 async def test_deleting_a_watch_stops_it_being_checked(watch_store):
     registered = watch_store.create(
-        canonical(TARGET), interval_seconds=INTERVAL, now=0.0, webhook_url=WEBHOOK
+        canonical(TARGET),
+        interval_seconds=INTERVAL,
+        now=0.0,
+        webhook_url=WebhookTarget.admit(WEBHOOK, host_policy=HostPolicy.unrestricted()),
     )
 
     async with watch_client(watch_store) as client:

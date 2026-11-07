@@ -10,8 +10,24 @@ from httpx import ASGITransport, AsyncClient
 
 from crawlutron.api.dependencies import get_settings, get_watch_store
 from crawlutron.api.watch_router import router as watch_router
+from crawlutron.api.watch_sweep import WatchSweeper
 from crawlutron.config.settings import CrawlerSettings
 from tests._app_factory import service_app
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY
+
+
+def loopback_url(server) -> str:
+    """The loopback URL of a served fixture."""
+    return f"http://127.0.0.1:{server.server_port}/"
+
+
+def default_sweeper(watch_store) -> WatchSweeper:
+    """A sweeper over this test's store, under the unrestricted host policy."""
+    return WatchSweeper(
+        watch_store,
+        host_policy=UNRESTRICTED_HOST_POLICY,
+        settings=CrawlerSettings.from_mapping(),
+    )
 
 
 def watch_client(store) -> AsyncClient:
@@ -37,8 +53,10 @@ __all__ = [
     "AsyncClient",
     "CrawlerSettings",
     "FastAPI",
+    "default_sweeper",
     "get_settings",
     "get_watch_store",
+    "loopback_url",
     "service_app",
     "watch_client",
     "watch_router",

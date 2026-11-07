@@ -4,39 +4,24 @@ admitted more bytes -- ``truncated`` is now sticky and short-circuits each.
 """
 
 import pytest
-from starlette.requests import Request
 from starlette.responses import Response
 
 from crawlutron.api.middleware import MAX_REQUEST_BODY_BYTES, limit_request_body
+from tests._asgi_request import make_request, pass_through
 
 CAP = 10
 
 
-def _make_request(messages: list[dict[str, object]], headers: list[tuple[bytes, bytes]] | None = None):
-    """A Request whose receive() pops the scripted ASGI message list."""
-
-    async def receive():
-        return messages.pop(0)
-
-    scope = {
-        "type": "http",
-        "method": "POST",
-        "path": "/",
-        "headers": headers or [],
-        "query_string": b"",
-    }
-    return Request(scope, receive=receive)
-
-
-def _one_chunk(body: bytes = b"", headers: list[tuple[bytes, bytes]] | None = None) -> Request:
-    return _make_request(
+def _one_chunk(body: bytes = b"", headers: list[tuple[bytes, bytes]] | None = None):
+    return make_request(
         [{"type": "http.request", "body": body, "more_body": False}],
         headers=headers,
     )
 
 
-async def _pass_through(request):
-    return Response("")
+def _one_declared_chunk(declared: int):
+    """A body that delivers exactly what its Content-Length declares (#619)."""
+    return _one_chunk(b"x" * declared, headers=[(b"content-length", str(declared).encode())])
 
 
 async def _read_body_and_probe(request) -> bytes:
@@ -61,7 +46,7 @@ def small_cap():
 async def test_no_bytes_admitted_after_truncating_final_chunk(small_cap):
     """The truncating chunk ends the body (more_body=False); a later receive()
     must not fall through to a still-positive ``remaining`` and hand over more."""
-    request = _make_request(
+    request = make_request(
         [
             {"type": "http.request", "body": b"AAAA", "more_body": True},
             {"type": "http.request", "body": b"B" * 24, "more_body": False},
@@ -91,7 +76,7 @@ async def test_drain_still_empties_the_client_stream(small_cap):
         {"type": "http.request", "body": b"C" * 24, "more_body": True},
         {"type": "http.request", "body": b"", "more_body": False},
     ]
-    request = _make_request(messages)
+    request = make_request(messages)
     seen = {}
 
     async def call_next(req):
@@ -131,7 +116,7 @@ async def test_declared_body_over_the_cap_is_refused_before_the_app_sees_it():
 
 async def _refused_response(messages: list[dict[str, object]], *, declared: int) -> Response:
     """Drive the middleware with a declared-oversized body; the app must not run."""
-    request = _make_request(messages, headers=[(b"content-length", str(declared).encode())])
+    request = make_request(messages, headers=[(b"content-length", str(declared).encode())])
 
     async def call_next(req):
         raise AssertionError("the app must not run for a body already refused")
@@ -170,8 +155,8 @@ async def test_oversized_drain_is_capped_and_aborts_past_it():
 async def test_declared_body_within_the_cap_is_admitted(declared):
     """The pre-check rejects only what it says it rejects: a declared body at
     exactly the cap is not 'over' it."""
-    request = _one_chunk(headers=[(b"content-length", str(declared).encode())])
-    response = await limit_request_body(request, _pass_through, max_bytes=CAP)
+    request = _one_declared_chunk(declared)
+    response = await limit_request_body(request, pass_through, max_bytes=CAP)
     assert response.status_code == 200
 
 
@@ -180,7 +165,7 @@ async def test_refusal_reports_the_cap_it_enforced():
     import json
 
     request = _one_chunk(headers=[(b"content-length", b"4096")])
-    response = await limit_request_body(request, _pass_through, max_bytes=CAP)
+    response = await limit_request_body(request, pass_through, max_bytes=CAP)
     assert json.loads(bytes(response.body)) == {
         "code": "request_too_large",
         "message": "Request body exceeds the maximum allowed size",
@@ -192,7 +177,7 @@ async def test_unparsable_content_length_falls_through_to_the_wrapper():
     """A malformed CL header cannot be compared to a cap, and refusing on it
     would let a header decide. The wrapper is the enforcement, so the request
     proceeds and is truncated there instead."""
-    request = _make_request(
+    request = make_request(
         [
             {"type": "http.request", "body": b"Z" * 40, "more_body": False},
             {"type": "http.request", "body": b"", "more_body": False},
@@ -214,7 +199,7 @@ async def test_unparsable_content_length_falls_through_to_the_wrapper():
 async def test_truncation_preserves_the_chunks_own_keys():
     """A chunk's metadata is forwarded verbatim; only its body is cut. A wrapper
     that rebuilt the message would drop the keys a streaming reader needs."""
-    request = _make_request(
+    request = make_request(
         [{"type": "http.request", "body": b"A" * 40, "more_body": False, "trailer": "x-checksum"}]
     )
     seen = {}

@@ -204,6 +204,19 @@ class TestAsyncCrawlApi:
         assert resp.status_code == 422
         assert resp.json()["code"] == "validation_error"
 
+    async def test_v1_crawl_202_envelope_webhook_url_is_redacted(self, crawl_api):
+        """The 202 accepted envelope echoes the webhook REDACTED (#599): the
+        raw form is a delivery secret and must never ride a response body."""
+        resp = await crawl_api.client.post(
+            "/v1/crawl",
+            json=crawl_api.payload(
+                async_mode=True, webhook_url=f"{crawl_api.base}/webhook_sink?token=secret"
+            ),
+        )
+        assert resp.status_code == 202, resp.text
+        assert "secret" not in resp.text
+        assert "[REDACTED]" in resp.json()["webhook_url"]
+
     async def test_v1_crawl_plaintext_webhook_refused(self, crawl_api, monkeypatch):
         """A plaintext http:// webhook rides the signature and payload TLS-less (#499).
         The door refuses it unless the operator opted out; this test opts out."""

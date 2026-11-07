@@ -34,7 +34,7 @@ def _crawl_response(
                     "robots": {"allowed": True, "evaluation": "allowed", "sitemaps": list(sitemaps)},
                     "discovery": {"sitemap_urls": list(sitemaps), "feeds": list(feeds)},
                 },
-                discovered_links=[_link(link, original_url) for link in links],
+                discovered_links=tuple(_link(link, original_url) for link in links),
             )
         ],
     }
@@ -88,7 +88,7 @@ def test_build_site_map_handles_dataclass_links():
                 "http://r/",
                 "rendered",
                 final_url="http://r/",
-                discovered_links=[link],
+                discovered_links=(link,),
             )
         ],
     }

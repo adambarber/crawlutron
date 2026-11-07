@@ -85,3 +85,51 @@ def test_issued_keys_carry_distinct_secrets(tmp_path):
     assert first.secret != second.secret
     assert store.verify_key(first.secret) is not None
     assert store.verify_key(second.secret) is not None
+
+
+def test_verification_embeds_the_key_id_in_the_secret(tmp_path):
+    store = CallerKeyStore(tmp_path / "keys.db")
+
+    issued = store.issue_key("agent-a")
+
+    assert issued.secret.startswith("ck_")
+    assert issued.key_id[len("key_") :] in issued.secret
+
+
+def test_verification_cost_is_constant_in_key_count(tmp_path):
+    from crawlutron.storage import caller_key_store
+
+    store = CallerKeyStore(tmp_path / "keys.db")
+    for index in range(5):
+        store.issue_key(f"agent-{index}")
+
+    before = caller_key_store.pbkdf2_calls
+    store.verify_key("ck_0000000000000000.not-a-real-secret")
+
+    assert caller_key_store.pbkdf2_calls - before == 1
+
+
+def test_unknown_key_id_miss_costs_one_pbkdf2(tmp_path):
+    from crawlutron.storage import caller_key_store
+
+    store = CallerKeyStore(tmp_path / "keys.db")
+    store.issue_key("agent-a")
+
+    before = caller_key_store.pbkdf2_calls
+    assert store.verify_key("ck_deadbeefdeadbeef.absent-secret") is None
+
+    assert caller_key_store.pbkdf2_calls - before == 1
+
+
+def test_a_secret_without_an_embedded_key_id_is_refused(tmp_path):
+    store = CallerKeyStore(tmp_path / "keys.db")
+    store.issue_key("agent-a")
+
+    assert store.verify_key("ck_" + "a" * 43) is None
+
+
+def test_a_wrong_secret_for_a_real_key_id_verifies_to_none(tmp_path):
+    store = CallerKeyStore(tmp_path / "keys.db")
+    issued = store.issue_key("agent-a")
+
+    assert store.verify_key(f"ck_{issued.key_id[4:]}.wrong-body") is None

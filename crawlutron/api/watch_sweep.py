@@ -135,7 +135,7 @@ class WatchSweeper:
                 # co-scheduled watches: record the failure and reschedule anyway.
                 logger.exception(
                     "watch_check_failed",
-                    extra={"watch_id": watch.watch_id, "url": watch.url},
+                    extra={"watch_id": watch.watch_id, "url": watch.redacted_url()},
                 )
                 try:
                     await self._store.arecord_check(
@@ -193,18 +193,28 @@ class WatchSweeper:
             return classification
         # A delivered change is what a webhook exists to say: any success-status
         # classification except "not_modified" (a 304 that proved freshness).
-        webhook_url = watch.webhook_url
+        # The target is RE-admitted here against the live host policy: the row's
+        # durable text is an identity, not a standing permission.
         if (
             status_for_classification(classification) == "success"
             and classification != CrawlClassification.not_modified
-            and webhook_url is not None
+            and watch.webhook_url is not None
         ):
+            try:
+                target = watch.target(self._host_policy)
+            except ValueError:
+                logger.warning(
+                    "watch_webhook_admission_failed",
+                    extra={"watch_id": watch.watch_id, "url": watch.redacted_webhook_url()},
+                )
+                return classification
+            if target is None:
+                return classification
             # Backgrounded, not awaited: a slow receiver must not stall the pass;
             # the delivery rides the tracked set and shutdown drains it.
             start_webhook_delivery(
-                webhook_url,
+                target,
                 _announcement(watch, outcome=classification, checked_at=now),
-                host_policy=self._host_policy,
             )
         return classification
 

@@ -41,10 +41,20 @@ async def resolve_browser_target(
     pin: Callable[..., Awaitable[PinnedRequest]],
     timeout_seconds: float | None = None,
 ) -> tuple[str, dict[str, str]]:
-    """SSRF-check and IP-pin ``url`` for browser navigation: the browser connects
-    to the resolved IP (no DNS rebinding) while keeping the original ``Host``;
-    unsafe targets raise. Async because pinning resolves DNS; ``pin`` is required.
+    """SSRF-check ``url`` for browser navigation, per scheme (#617).
+
+    HTTPS keeps the hostname so TLS SNI and cert verification attest the pinned
+    identity (an IP literal with a Host override never checks the cert) -- gated
+    by the fresh+stable double-resolve the route and websocket guards share.
+    Plain HTTP pins the resolved IP with the original Host: no TLS to verify.
+    Unsafe targets raise. Async because pinning resolves DNS.
     """
+    if url.scheme == "https":
+        await _BOUNDED(
+            lambda: check_ssrf_protection_stable(url),
+            timeout_seconds=timeout_seconds,
+        )
+        return url.raw, {}
     pinned = await pin(url, {}, timeout_seconds=timeout_seconds)
     host = pinned.headers.get("Host")
     return pinned.connect_url, ({"Host": host} if host else {})

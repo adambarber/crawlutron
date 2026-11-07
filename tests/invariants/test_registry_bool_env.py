@@ -7,6 +7,7 @@ import pathlib
 
 from tests.chokepoint_walks import app_trees, has_method_call, local_subtree, nodes_of, offender
 from tests.invariants._registry_machinery import (
+    _OBSERVERS,
     _PROPERTY_MODULES,
     _module_aware,
     _observed_property_count,
@@ -169,6 +170,4 @@ def test_bool_env_registry_is_not_empty():
 
 # The registry's observation dispatch: this module owns the bool-env walk, the
 # machinery owns the lookup; registering keeps the import graph one-directional.
-from tests.invariants._registry_machinery import _OBSERVERS  # noqa: E402
-
 _OBSERVERS["bool-env"] = _bool_env_observations

@@ -2,8 +2,8 @@
 
 The secret is shown once at issuance and never stored; verification hashes
 what the caller presents (PBKDF2-SHA256, per-key salt) and compares digests
-only. Legacy rows written by the old bare-SHA-256 writer no longer match and
-are re-mintable by the operator via /v1/keys -- the documented one-way reset.
+only. The issued secret embeds its public key id so verification is one
+primary-key lookup and one PBKDF2, never a per-key scan.
 """
 
 from __future__ import annotations
@@ -19,16 +19,22 @@ from crawlutron.storage.coordination_store import CoordinationStore, atwin
 from crawlutron.storage.migrations.manifest import StoreSchema
 
 _KEY_ID_BYTES = 8
-_SECRET_BYTES = 32
+_SECRET_BODY_BYTES = 32
+_SALT_BYTES = 16
 
 # PBKDF2-SHA256 at 210k: the OWASP 600k floor is the comfortable choice, but keys
 # verify at the request door, so the documented 210k step ( OWASP's accelerated
 # hardware floor ) keeps lookup sub-20ms on the reference machine. Measure before raising.
 PBKDF2_ITERATIONS = 210_000
-_SALT_BYTES = 16
+
+#: How many times the door has run the PBKDF2 derivation; the O(1) contract is
+#: ONE per verify_key call, hit or miss. Counted here so the suite can pin it.
+pbkdf2_calls = 0
 
 
 def _hash_secret(secret: str, salt: bytes) -> str:
+    global pbkdf2_calls
+    pbkdf2_calls += 1
     return hashlib.pbkdf2_hmac("sha256", secret.encode("utf-8"), salt, PBKDF2_ITERATIONS).hex()
 
 
@@ -37,13 +43,6 @@ def _store_hash(secret: str) -> str:
     needs no schema change, and the UNIQUE index keeps holding one row per key."""
     salt = secrets.token_bytes(_SALT_BYTES)
     return f"{salt.hex()}${_hash_secret(secret, salt)}"
-
-
-def _stored_hash_matches(secret: str, stored: str) -> bool:
-    salt_hex, _, digest_hex = stored.partition("$")
-    if not salt_hex or not digest_hex:
-        return False
-    return secrets.compare_digest(_hash_secret(secret, bytes.fromhex(salt_hex)), digest_hex)
 
 
 def _record_from_row(row: tuple[str, str, str, int, int, float]) -> CallerKey:
@@ -57,6 +56,25 @@ def _record_from_row(row: tuple[str, str, str, int, int, float]) -> CallerKey:
         max_concurrency=max_concurrency,
         created_at=created_at,
     )
+
+
+_DUMMY_SALT = b"crawlutron-dummy-salt"
+_DUMMY_VERIFIER = f"{_DUMMY_SALT.hex()}${_hash_secret('', _DUMMY_SALT)}"
+
+
+def _secret_id(secret: str) -> str | None:
+    """The key id embedded in a ``ck_<id-hex>.<body>`` secret, or None."""
+    prefix, sep, rest = secret.partition(".")
+    if not sep or not prefix.startswith("ck_") or "." in rest:
+        return None
+    id_hex = prefix[len("ck_") :]
+    if len(id_hex) != 2 * _KEY_ID_BYTES:
+        return None
+    try:
+        bytes.fromhex(id_hex)
+    except ValueError:
+        return None
+    return f"key_{id_hex}"
 
 
 class CallerKeyStore(CoordinationStore):
@@ -75,14 +93,15 @@ class CallerKeyStore(CoordinationStore):
         if max_pages < 0 or max_concurrency < 0:
             raise ValueError("key quotas must be zero (unbounded) or positive")
         key_id = f"key_{secrets.token_hex(_KEY_ID_BYTES)}"
-        secret = f"ck_{secrets.token_urlsafe(_SECRET_BYTES)}"
+        body = secrets.token_urlsafe(_SECRET_BODY_BYTES)
+        secret = f"ck_{key_id[len('key_') :]}.{body}"
         # wall: persisted row stamps anchor to wall so they survive restarts.
         created_at = time.time()
         with self._lock:
             self._conn.execute(
                 "INSERT INTO caller_keys (key_id, label, key_hash, max_pages, max_concurrency,"
                 " created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (key_id, name, _store_hash(secret), max_pages, max_concurrency, created_at),
+                (key_id, name, _store_hash(body), max_pages, max_concurrency, created_at),
             )
             self._conn.commit()
         return IssuedKey(
@@ -92,17 +111,30 @@ class CallerKeyStore(CoordinationStore):
     def verify_key(self, secret: str) -> CallerKey | None:
         """The record for ``secret``, or None when it names no live key.
 
-        PBKDF2's per-key salt breaks hash-equality lookup, so the door scans the
-        (small) live key set and compares each salted digest in constant time.
+        The secret embeds its key id, so the door is one primary-key lookup plus
+        ONE salted PBKDF2 for the candidate -- O(1) per request, never a scan;
+        a miss burns the same PBKDF2 on a fixed dummy so timing stays uniform.
         """
+        key_id = _secret_id(secret)
+        body = secret.split(".", 1)[1] if key_id is not None else ""
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT key_id, label, key_hash, max_pages, max_concurrency, created_at FROM caller_keys"
-            ).fetchall()
-        for row in rows:
-            if _stored_hash_matches(secret, row[2]):
-                return _record_from_row(row)
-        return None
+            row = (
+                self._conn.execute(
+                    "SELECT key_id, label, key_hash, max_pages, max_concurrency, created_at"
+                    " FROM caller_keys WHERE key_id = ?",
+                    (key_id,),
+                ).fetchone()
+                if key_id is not None
+                else None
+            )
+        # One PBKDF2 per request, hit or miss: a miss verifies against a fixed
+        # dummy digest, so timing says nothing about whether the id existed.
+        stored = row[2] if row is not None else _DUMMY_VERIFIER
+        salt_hex, _, digest_hex = stored.partition("$")
+        computed = _hash_secret(body, bytes.fromhex(salt_hex))
+        if row is None or not secrets.compare_digest(computed, digest_hex):
+            return None
+        return _record_from_row(row)
 
     def list_keys(self) -> list[CallerKey]:
         """Every live key record, oldest first."""
