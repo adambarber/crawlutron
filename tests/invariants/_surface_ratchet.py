@@ -26,8 +26,8 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     # chokepoint outside configure_store_connection, backing the table-trust digest.
     "crawlutron/storage/sqlite_store.py": (10, 8),
     "crawlutron/safety/safe_regex.py": (7, 2),
-    # robots_pattern_to_regex is public (#190) -- robots_allows itself calls it -- so the
-    # parity/per-host tests drive that real contract; the matcher class behind it stays private.
+    # robots_pattern_to_regex is public (#190) -- robots_allows itself calls it; the matcher class
+    # behind it stays private, and RobotsMatcher stays public as the function's return type.
     "crawlutron/transport/robots.py": (13, 4),
     "crawlutron/safety/bounded_io.py": (4, 2),
     "crawlutron/transport/decompression.py": (5, 2),
@@ -36,8 +36,7 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     # RAISED to (2, 2): `payload_policy` was `_payload_policy` until the layout put its only production caller
     # (the engine) in another package.
     "crawlutron/admission/payload_helpers.py": (2, 2),
-    # RAISED to (10, 9): terminal_attempt became public when CrawlResult stopped copying four axes out of the
-    # attempt it holds.
+    # LOWERED to (3, 2): terminal_attempt moved to crawlutron/models/result_factory.py (#160).
     "crawlutron/transport/classification.py": (3, 2),
     # Designed RAISE: engine and render result funnels were merged per #324; LOWERED
     # to (8, 7) when the pure constructors moved to crawlutron/models/result_factory.py (#160).
