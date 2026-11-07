@@ -145,10 +145,13 @@ def _search_fields(settings: CrawlerSettings) -> SearchCapabilitiesRecord:
 
 
 def _mcp_fields() -> McpCapabilitiesRecord:
-    """The MCP surface's endpoint and the protocol versions it speaks."""
+    """The MCP surface's endpoint, protocol versions, and the tools it serves."""
+    from crawlutron.mcp.registry import TOOL_SPECS
+
     return {
         "endpoint": "/mcp",
         "protocol_versions": ["2026-07-28"],
+        "tools": [spec.name for spec in TOOL_SPECS],
     }
 
 

@@ -280,6 +280,8 @@ class TestDiscover:
             "crawl_and_extract",
             "map",
             "render",
+            "read_crawl_result",
+            "read_crawl_trace",
         ]
         ttl = result["ttlMs"]
         assert isinstance(ttl, int) and ttl > 0
@@ -391,9 +393,9 @@ class TestToolsCall:
         async def refuse(*args, **kwargs):
             raise ValueError("host_denied")
 
-        monkeypatch.setattr(f"crawlutron.mcp.tools.{handler_name}", refuse)
+        monkeypatch.setattr(f"crawlutron.mcp.handlers.{handler_name}", refuse)
         if name == "render":
-            monkeypatch.setattr("crawlutron.mcp.tools.get_browser_pool", lambda: object())
+            monkeypatch.setattr("crawlutron.mcp.handlers.get_browser_pool", lambda: object())
         resp, payload = await _call_tool(async_client, name, arguments)
 
         assert resp.status_code == 200 and "error" not in payload

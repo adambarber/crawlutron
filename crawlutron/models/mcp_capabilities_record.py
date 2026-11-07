@@ -8,3 +8,4 @@ class McpCapabilitiesRecord(TypedDict):
 
     endpoint: str
     protocol_versions: list[str]
+    tools: list[str]

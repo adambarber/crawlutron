@@ -66,9 +66,11 @@ GUIDANCE = [
     "created under a key are readable only under it. Anonymous requests crawl as a shared bounded identity. "
     "Key issuance/revocation (POST /v1/keys) is operator-gated and not available to callers.",
     "Use POST /mcp for MCP (2026-07-28, stateless streamable HTTP): server/discover lists supported protocol "
-    "versions and capabilities, and tools/list exposes search, crawl, crawl_and_extract, map, and render. "
-    "crawl_and_extract is the crawl response projected to per-page content. The MCP tools mirror "
-    "the REST endpoints exactly.",
+    "versions and capabilities, and tools/list exposes search, crawl, crawl_and_extract, map, render, "
+    "read_crawl_result, and read_crawl_trace. crawl_and_extract is the crawl response projected to per-page "
+    "content; read_crawl_result reads back a stored crawl response (status: running while the crawl is still "
+    "running -- poll it), and read_crawl_trace its diagnostic spine. The MCP tools mirror the REST endpoints "
+    "exactly.",
     "Use discovered_link_count and discovered_links_truncated to decide whether to request a higher "
     "max_discovered_links limit.",
     "Do not bypass Cloudflare, WAF, CAPTCHA, login, paywall, or access-denied controls; report those "

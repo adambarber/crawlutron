@@ -22,6 +22,7 @@ from crawlutron.api.webhooks import ensure_https_webhook_url, validate_webhook_u
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.extraction.output_formats import serialize_results
 from crawlutron.models.caller_identity import CallerIdentity
+from crawlutron.models.crawl_pending import CrawlPendingError
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.json_value import JsonValue
@@ -279,13 +280,12 @@ async def _stored_response_payload(
     """
     job = await job_store.aload_for_caller(request_id, caller_id)
     if job is not None and job.status not in TERMINAL_STATUSES:
-        raise http_error(
-            202,
-            "pending",
-            f"Job {request_id} is still {job.status.value}",
-            {"status": job.status.value},
-        )
-    stored = await result_store.aget_for_caller(request_id, caller_id)
+        # Typed, not an HTTP status: REST converts it to the 202 below, and the
+        # MCP read tools answer it as a structured non-error result.
+        raise CrawlPendingError(request_id, job.status.value)
+    # The MCP read door passes no store when the app has none wired; the job
+    # row below is then the only source, which is the durable copy anyway.
+    stored = None if result_store is None else await result_store.aget_for_caller(request_id, caller_id)
     if stored is not None:
         return stored
     if job is not None and job.kind == JobKind.SINGLE_SHOT and job.results:
@@ -306,10 +306,48 @@ async def _stored_payload_or_not_found(
     Both replay doors answer the same miss the same way, and the second copy of
     the check is a second place the message shape can drift.
     """
+    try:
+        payload = await _stored_response_payload(request_id, job_store, result_store, caller_id)
+    except CrawlPendingError as error:
+        raise http_error(
+            202,
+            "pending",
+            f"Job {error.request_id} is still {error.job_status}",
+            {"status": str(error.job_status)},
+        ) from error
+    if payload is None:
+        raise http_error(404, "not_found", f"Unknown or expired request_id: {request_id}")
+    return payload
+
+
+async def read_crawl_result_record(
+    request_id: str,
+    job_store,
+    result_store,
+    caller_id: str = "",
+) -> JsonValue:
+    """The stored crawl response for the MCP read tool, as stored.
+
+    Reads the same rows the replay door serves, without re-admitting URL
+    fields: the record is the wire mapping already, and admission is the
+    constructor's ingress job, not the cache's. A running job raises the typed
+    :class:`CrawlPendingError` so the tool door can answer it non-error.
+    """
     payload = await _stored_response_payload(request_id, job_store, result_store, caller_id)
     if payload is None:
         raise http_error(404, "not_found", f"Unknown or expired request_id: {request_id}")
     return payload
+
+
+async def read_crawl_trace_record(
+    request_id: str,
+    job_store,
+    result_store,
+    caller_id: str = "",
+) -> TraceResponse:
+    """The stored record read as a trace, for the MCP read tool."""
+    payload = await read_crawl_result_record(request_id, job_store, result_store, caller_id)
+    return TraceResponse.model_validate(payload)
 
 
 async def get_crawl_result(
@@ -345,4 +383,11 @@ async def get_crawl_trace(
     return TraceResponse.model_validate(payload)
 
 
-__all__ = ["await_or_client_gone", "crawl", "get_crawl_result", "get_crawl_trace"]
+__all__ = [
+    "await_or_client_gone",
+    "crawl",
+    "get_crawl_result",
+    "get_crawl_trace",
+    "read_crawl_result_record",
+    "read_crawl_trace_record",
+]
