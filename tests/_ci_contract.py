@@ -216,6 +216,24 @@ def _assert_failure_propagation(workflow: str) -> None:
             )
 
 
+def _job_run_steps(workflow: str) -> list[tuple[str, str]]:
+    """Every `run:` step in the workflow as `(job, script)` pairs, skipping steps
+    that carry no run string -- the shared sweep both run-based contract checks
+    iterate, extracted so the loops cannot become jscpd clone-pairs.
+    """
+    found: list[tuple[str, str]] = []
+    for name, job in _jobs(workflow).items():
+        steps = job.get("steps")
+        assert isinstance(steps, list)
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            run = step.get("run")
+            if isinstance(run, str):
+                found.append((name, run))
+    return found
+
+
 def _hook_blocks(config: str) -> list[tuple[str, dict[str, object]]]:
     """Every hook in the config as `(id, hook)` pairs, read like pre-commit reads
     them (YAML, not a raw-text regex) -- a quoted id was once invisible here,

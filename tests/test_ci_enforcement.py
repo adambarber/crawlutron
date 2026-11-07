@@ -18,7 +18,7 @@ from tests._ci_contract import (
     _entry,
     _field,
     _hook_blocks,
-    _jobs,
+    _job_run_steps,
     _require_exactly_one_jscpd_gate,
     _required_needs,
 )
@@ -65,12 +65,33 @@ def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
 
     assert workflow.count(ENFORCEMENT_COMMAND) == 1
     assert "scripts/jscpd_gate.py" not in workflow
+    _assert_frozen_lock_install(workflow)
     required = _required_needs(workflow)
     assert required == REPORTING_JOBS
-    # The enforcement job builds its venv from ``-e .[dev]`` alone; re-installing
-    # a specific tool on top would reintroduce a second, drifting declaration.
-    assert ".[dev]" in workflow
+    # The enforcement job builds its venv from the frozen lock's dev extra;
+    # re-installing a specific tool on top reintroduces a drifting declaration.
+    assert "--extra dev" in workflow
+    assert "pip install" not in workflow
     _assert_failure_propagation(workflow)
+
+
+def _assert_frozen_lock_install(workflow: str) -> None:
+    """Every job that installs dependencies installs from the frozen lock via uv
+    (#622): a bare `pip install -e .[dev]` re-resolves the transitive graph at
+    install time, so CI tests against versions the lock never froze.
+    """
+    runs = _job_run_steps(workflow)
+    for name, run in runs:
+        assert "pip install" not in run, (
+            f"job {name} installs with pip: the lock freezes the graph and "
+            "pip re-resolves it; install with `uv sync --frozen --extra dev`"
+        )
+    for name, run in runs:
+        if "uv sync" in run:
+            assert "--frozen" in run, f"job {name} syncs without --frozen"
+    installs = [run for _, run in runs if "uv sync" in run]
+    assert len(installs) >= 2, f"expected the install jobs to sync from the lock, found {len(installs)}"
+    assert "uv.lock" in workflow, "CI must key its cache on uv.lock"
 
 
 def test_no_ci_job_reruns_a_precommit_hook_command() -> None:
@@ -107,18 +128,10 @@ def assert_no_hook_command_rerun(workflow: str, hook_tools) -> None:
     the gate are two copies of one check, only the edited one drifts -- the error names
     the job so the step is findable from the failure alone.
     """
-    for name, job in _jobs(workflow).items():
-        steps = job.get("steps")
-        assert isinstance(steps, list)
-        for step in steps:
-            if not isinstance(step, dict):
-                continue
-            run = step.get("run")
-            if not isinstance(run, str):
-                continue
-            for tool in hook_tools:
-                assert tool not in run, (
-                    f"job {name} re-runs a pre-commit hook command ({tool!r}): "
-                    "enforcement already runs it; a duplicate is a second copy "
-                    "that can drift from the gate"
-                )
+    for name, run in _job_run_steps(workflow):
+        for tool in hook_tools:
+            assert tool not in run, (
+                f"job {name} re-runs a pre-commit hook command ({tool!r}): "
+                "enforcement already runs it; a duplicate is a second copy "
+                "that can drift from the gate"
+            )
