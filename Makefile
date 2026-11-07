@@ -2,7 +2,7 @@
 # Convenience entrypoints that mirror scripts/run-tests.sh without
 # requiring zsh.
 
-PYTHON ?= python3
+PYTHON ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,python3)
 SUITE_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 HOOK_CONFIG := $(SUITE_DIR)/.pre-commit-config.yaml
 
