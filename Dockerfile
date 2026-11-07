@@ -83,10 +83,14 @@ RUN uv pip install --no-cache-dir --python /usr/local/bin/python \
 # the mount (distinct from the raw fetch cache) so camoufox owns a real dir and
 # the mount only persists the finished install across rebuilds.
 #
-# OFFLINE SEED (option B): `--build-context seed=<dir>` (a real camoufox cache,
+# OFFLINE SEED (option B): a named `seed` build context (a real camoufox cache,
 # e.g. ~/Library/Caches/camoufox) is bound directly by its name and copied into
-# the mount so the fetch short-circuits without the network; absent the seed the
-# RUN fetches over the wire exactly as before.
+# the mount so the fetch short-circuits without the network; an empty seed dir
+# (compose's default) hits the `if [ -d /seed ]` guard and the RUN fetches over
+# the wire exactly as before. The context is MANDATORY: a build without
+# --build-context seed= makes BuildKit resolve docker.io/library/seed and fail
+# before this RUN starts (#625, probed live) -- compose supplies
+# .dockerseed by default; bare builds pass --build-context seed=<dir>.
 RUN --mount=type=cache,target=/root/.cache/camoufox-mount,sharing=locked \
     --mount=type=bind,from=seed,target=/seed \
     sh -c 'if [ -d /seed ]; then mkdir -p /root/.cache/camoufox-mount && (cp -a /seed/camoufox /root/.cache/camoufox-mount/ 2>/dev/null || cp -a /seed/. /root/.cache/camoufox-mount/camoufox/); fi; PYTHONPATH=/camoufox-deps XDG_CACHE_HOME=/root/.cache/camoufox-mount python -m camoufox fetch; test -d /root/.cache/camoufox-mount/camoufox && mkdir -p /camoufox-bundle && cp -a /root/.cache/camoufox-mount/camoufox/. /camoufox-bundle/'
