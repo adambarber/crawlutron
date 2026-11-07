@@ -117,17 +117,48 @@ jobs:
         # out keeps the rest of the configuration intact.
         run: python3 -m pytest -m "not slow"
 
+  # #623: dependency audit against the frozen lock. The export/pip-audit tools
+  # install inside CI's runner (owner-bandwidth is irrelevant there); the DB
+  # fetch is GitHub's advisory DB on their side.
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Audit the frozen lock
+        run: |
+          uv export --frozen --no-dev --no-emit-project --format requirements-txt -o /tmp/lock.txt
+          uv tool run pip-audit -r /tmp/lock.txt --strict
+
+  # #623: secret scanning over the whole tree and its history.
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   # One required check. A repository ruleset should require exactly
   # this job: GitHub treats a skipped job as success, so the individual jobs
   # stay unconditional and this aggregate fails if any of them did not succeed.
   # The gate-carrying jobs are enforcement (every pre-commit hook), test-fast
-  # (the suite) and test-browser (the Camoufox suite); there is no separate lint
+  # (the suite), test-browser (the Camoufox suite), audit and secret-scan (#623); there is no separate lint
   # or typecheck job because pre-commit already runs ruff, mypy and basedpyright
   # inside `enforcement`.
   required:
     name: Required quality gate
     if: ${{ always() }}
-    needs: [enforcement, test-fast, test-browser]
+    needs: [enforcement, test-fast, test-browser, audit, secret-scan]
     runs-on: ubuntu-latest
     steps:
       - name: Require every gate to have succeeded
@@ -142,3 +173,5 @@ jobs:
           test "${{ needs.enforcement.result }}" = "success"
           test "${{ needs.test-fast.result }}" = "success"
           test "${{ needs.test-browser.result }}" = "success"
+          test "${{ needs.audit.result }}" = "success"
+          test "${{ needs.secret-scan.result }}" = "success"

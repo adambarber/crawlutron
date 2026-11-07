@@ -15,10 +15,12 @@ from tests._ci_contract import (
     WORKFLOW_PATH,
     _assert_failure_propagation,
     _assert_no_config_exclude,
+    _assert_no_continue_on_error,
     _entry,
     _field,
     _hook_blocks,
     _job_run_steps,
+    _jobs,
     _require_exactly_one_jscpd_gate,
     _required_needs,
 )
@@ -92,6 +94,34 @@ def _assert_frozen_lock_install(workflow: str) -> None:
     installs = [run for _, run in runs if "uv sync" in run]
     assert len(installs) >= 2, f"expected the install jobs to sync from the lock, found {len(installs)}"
     assert "uv.lock" in workflow, "CI must key its cache on uv.lock"
+
+
+def test_ci_runs_a_dependency_audit_and_secret_scan() -> None:
+    """#623: supply-chain gates. pip-audit against the frozen lock's export
+    catches known CVEs; gitleaks catches committed secrets. Both run as jobs
+    the required aggregate depends on, so skipping one is not green.
+    """
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    jobs = _jobs(workflow)
+    for job in ("audit", "secret-scan"):
+        assert job in jobs, f"CI must declare the {job} job"
+        _assert_no_continue_on_error(jobs[job], job)
+
+    required = _required_needs(workflow)
+    assert {"audit", "secret-scan"} <= required, (
+        "the required aggregate must depend on the audit and secret-scan jobs"
+    )
+
+    def job_runs(job: dict[str, object]) -> str:
+        steps = job.get("steps")
+        assert isinstance(steps, list)
+        return " ".join(str(step.get("run")) for step in steps if isinstance(step, dict) and "run" in step)
+
+    audit_runs = job_runs(jobs["audit"])
+    assert "uv export --frozen" in audit_runs, "audit must export the frozen lock, not live deps"
+    assert "pip-audit" in audit_runs, "audit must run pip-audit"
+
+    assert "gitleaks.io" not in workflow, "workflow must not use a mutable gitleaks.io ref"
 
 
 def test_no_ci_job_reruns_a_precommit_hook_command() -> None:

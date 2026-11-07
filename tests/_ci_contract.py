@@ -29,8 +29,9 @@ WORKFLOW_ROOT_CONFIG = CONFIG_PATH.relative_to(SERVICE_ROOT).as_posix()
 
 ENFORCEMENT_COMMAND = f"pre-commit run --all-files --config {WORKFLOW_ROOT_CONFIG}"
 
-# Every job that reports a result the aggregate must depend on.
-REPORTING_JOBS = {"enforcement", "test-fast", "test-browser"}
+# Every job that reports a result the aggregate must depend on. `audit` and
+# `secret-scan` are the supply-chain gates added by #623.
+REPORTING_JOBS = {"enforcement", "test-fast", "test-browser", "audit", "secret-scan"}
 
 # GitHub's template form for an errexit shell. The required aggregate is a chain of `test` lines, so its exit
 # code is its last line's without errexit.
