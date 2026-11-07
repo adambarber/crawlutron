@@ -5,6 +5,7 @@ shape; the protocol names it, and this gate keeps the implementers conforming.
 """
 
 import ast
+from typing import cast
 
 from crawlutron.runtime.resource_lifecycle import ResourceLifecycle
 from tests.chokepoint_walks import app_trees, offender_at
@@ -72,7 +73,9 @@ def test_the_eight_declared_implementers_are_still_the_eight():
 def test_the_protocol_names_the_release_shape():
     """The protocol's own contract: one method, ``close``, awaited-able or not --
     the SpillSink spelling the tree already proved out."""
-    members = ResourceLifecycle.__protocol_attrs__  # type: ignore[attr-defined]
+    # __protocol_attrs__ is a runtime introspection hook outside typing's declared
+    # surface; the class __dict__ lookup keeps the access honest, un-suppressed.
+    members = cast("set[str]", ResourceLifecycle.__dict__["__protocol_attrs__"])
     assert members == {"close"}, f"the protocol grew beyond the release shape: {members}"
 
 

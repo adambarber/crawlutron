@@ -181,7 +181,7 @@ def test_get_async_http_client_reuses_same_instance():
     assert a is b
 
 
-def test_hot_path_client_reuse_skips_env_scan():
+def test_hot_path_client_reuse_skips_env_scan(monkeypatch):
     # Throughput (perf review 1.1): the per-fetch get_async_http_client() call must not pay a full
     # CrawlerSettings.from_mapping() env walk when the pooled client is alive on the current loop.
     scans = {"count": 0}
@@ -191,25 +191,18 @@ def test_hot_path_client_reuse_skips_env_scan():
         scans["count"] += 1
         return original(*args, **kwargs)
 
-    # The module-function swap is the deliberate global seam for one test; a
-    # plain assignment triggers mypy's method-assign, so go through a def alias.
+    # monkeypatch is the seam-swap mechanism: it writes the class attribute the
+    # runtime way and restores the original after the test.
+    monkeypatch.setattr(settings_mod.CrawlerSettings, "from_mapping", staticmethod(_counting_from_mapping))
 
-    def _swap(replacement: object) -> None:
-        setattr(settings_mod.CrawlerSettings, "from_mapping", replacement)  # noqa: B010 - the seam is the subject
+    async def inner():
+        first = get_async_http_client()
+        reuse_calls = scans["count"]
+        second = get_async_http_client()
+        third = get_async_http_client()
+        return first, second is first, third is first, reuse_calls, scans["count"]
 
-    _swap(staticmethod(_counting_from_mapping))
-    try:
-
-        async def inner():
-            first = get_async_http_client()
-            reuse_calls = scans["count"]
-            second = get_async_http_client()
-            third = get_async_http_client()
-            return first, second is first, third is first, reuse_calls, scans["count"]
-
-        first, reuses_second, reuses_third, reuse_calls, total = asyncio.run(inner())
-    finally:
-        _swap(staticmethod(original))
+    first, reuses_second, reuses_third, reuse_calls, total = asyncio.run(inner())
     assert first is not None
     assert reuses_second and reuses_third
     # Construction walked the env exactly once; the two reuse calls added nothing.

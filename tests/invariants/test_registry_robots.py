@@ -15,6 +15,7 @@ from tests.chokepoint_walks import (
     resolved_call_name,
 )
 from tests.invariants._registry_machinery import (
+    _OBSERVERS,
     _PROPERTY_MODULES,
     _module_aware,
     _observed_property_count,
@@ -329,6 +330,4 @@ def _observe_robots_policy(tree: ast.AST, path: pathlib.Path, prop: Property) ->
 
 
 # The registry's observation dispatch: this module owns the robots-policy walk.
-from tests.invariants._registry_machinery import _OBSERVERS  # noqa: E402
-
 _OBSERVERS["robots-policy"] = _observe_robots_policy

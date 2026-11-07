@@ -7,6 +7,7 @@ import pathlib
 
 from tests.chokepoint_walks import REPO_ROOT, app_trees, local_subtree, nodes_of, offender, resolved_call_name
 from tests.invariants._registry_machinery import (
+    _OBSERVERS,
     _PROPERTY_MODULES,
     _module_aware,
     _observed_property_count,
@@ -114,6 +115,4 @@ def _observe_public_target(tree: ast.AST, path: pathlib.Path, prop: Property) ->
 
 
 # The registry's observation dispatch: this module owns the public-target walk.
-from tests.invariants._registry_machinery import _OBSERVERS  # noqa: E402
-
 _OBSERVERS["public-target"] = _observe_public_target
