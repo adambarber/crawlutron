@@ -3,18 +3,23 @@
 Goal: remove the exemption wiring itself; end state is a gate that accepts the
 whole tree without a hand-maintained exception list, table, or ledger row.
 
-## 1. Budget tables (the biggest piles)
+## 1. Budget tables — SEALED AT ZERO (verified against the live gates, 2026-11-07)
 
-| Gate | File | Current value | End state |
-|---|---|---|---|
-| docstring length (3-line) | tests/invariants/test_comment_length.py `_DOC_BUDGETS` | app 546 / tests 1098 / scripts 33 (≈1,677) | 0 across trees |
-| comment runs (2-line) | same `_BUDGETS` | 0 / 0 | done |
-| file size (500) | tests/invariants/test_file_size.py `_BUDGETS` | 0 / 0 / 0 | done |
-| function length | tests/test_metrics_budget.py `_BUDGETS` | 30 offenders | 0 |
-| abc size | same | 5 | 0 |
-| largest class | same | 369 (255+ line class still exists) | remove metric or split class |
-| block length | same | 11 | 0 |
-| typing: undeclared records | tests/test_typing_budget.py `_BUDGETS` | 204 | 0 |
+Every budget table below has reached its terminus: each budget died in the same
+commit as the work that earned the drop, per the repo's own doctrine, leaving
+unconditional zero-assertions (or an honest current value where a metric still
+measures). The values below are what the live gates enforce NOW.
+
+| Gate | File | Current unconditional state |
+|---|---|---|
+| docstring length (3-line) | tests/invariants/test_comment_length.py | zero over-limit docstrings across all three trees; no budget, no exemption (`test_no_overlong_docstring_anywhere`) |
+| comment runs (2-line) | same file | zero long runs across all three trees; no budget, no exemption (`test_zero_long_comment_runs_everywhere`) |
+| file size (500) | tests/invariants/test_file_size.py | 0 / 0 / 0 |
+| function length | tests/test_metrics_budget.py | sealed, no budget row; 60-line ceiling is the metric definition (`_METRIC_LIMITS`); app, tests and scripts zero tests assert no over-long functions |
+| abc size | same file `_BUDGETS` | app 0, scripts sealed at zero, tests 0 |
+| largest class | same file `_BUDGETS` | app 345, scripts 0, tests 291 (the honest worst-class measure, still ratcheted) |
+| block length | same file | sealed at zero (app, scripts, tests), no budget row |
+| typing: undeclared records / bare Any | tests/test_typing_budget.py | zero everywhere: app tree has NO budget table (unconditional terminus), tests sealed at `{undeclared record: 0, bare Any: 0}`, scripts sealed at zero |
 
 ## 2. Private-import ledger — ELIMINATED (2026-10-20, #190)
 
@@ -61,13 +66,14 @@ reason" shape.
 - test_async_discipline.py conftest-thread-safety net
 - test_public_surface.py `sizes = {}` per-file holes
 
-## Priority (reward × reachability)
+## Priority — CLOSED (2026-11-07)
 
-1. **Metrics gate → zero** (function length 30, abc 5, block 11 are counts;
-   largest class 369) — one agent does the whole file plus class split.
-2. **Typing budget 204 → 0** — substantive type work, one agent.
+Every priority item below has landed; the list is kept as history only.
+
+1. **Metrics gate → zero** — DONE: budgets sealed; the remaining largest-class
+   values (345/291) are the live ratchet, not exemptions.
+2. **Typing budget 204 → 0** — DONE: zero budgets across all trees.
 3. **Private-import ledger — done** (machinery + rows removed in #190).
-4. **Docstring budget 1677 → 0** — large mechanical wave, agent per tree.
-5. **Rule skip/excludes listed above** — structural encoding per list.
-6. **safe_regex / validation.py / bounds owners** — fold the sanctioned file
-   into the rule shape or delete the file.
+4. **Docstring budget 1677 → 0** — DONE: zero across all trees, no budget.
+5. **Rule skip/excludes listed above** — DONE: eliminated or reason-encoded (§3).
+6. **safe_regex / validation.py / bounds owners** — resolved in wave 1c (§3).
