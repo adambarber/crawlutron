@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 import pytest
+import yaml
 
 from scripts import jscpd_gate as gate
 from tests._ci_contract import (
@@ -122,6 +123,36 @@ def test_ci_runs_a_dependency_audit_and_secret_scan() -> None:
     assert "pip-audit" in audit_runs, "audit must run pip-audit"
 
     assert "gitleaks.io" not in workflow, "workflow must not use a mutable gitleaks.io ref"
+
+
+def test_every_action_is_sha_pinned_and_permissions_are_declared() -> None:
+    """#624: mutable tags (`@v4`) are repointable; every `uses:` must pin a
+    full-length commit SHA, and the workflow must declare its permissions so
+    the default write-all token scope cannot leak into a compromised step.
+    """
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    document = yaml.safe_load(workflow)
+    assert isinstance(document, dict)
+    permissions = document.get("permissions")
+    assert permissions == "read-all", (
+        f"CI must declare top-level permissions: read-all, found {permissions!r}"
+    )
+
+    def walk(value: object) -> None:
+        if isinstance(value, dict):
+            uses = value.get("uses")
+            if isinstance(uses, str) and "@" in uses:
+                ref = uses.rsplit("@", 1)[1]
+                assert re.fullmatch(r"[0-9a-f]{40}", ref), (
+                    f"action ref {uses!r} is not a full-length commit SHA"
+                )
+            for child in value.values():
+                walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+
+    walk(document.get("jobs"))
 
 
 def test_no_ci_job_reruns_a_precommit_hook_command() -> None:
