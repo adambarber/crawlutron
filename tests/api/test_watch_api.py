@@ -9,13 +9,13 @@ from httpx import Response
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.vocabulary.taxonomy import CrawlClassification
-from tests._assertions import block_private_targets, plaintext_webhook_refusal
+from tests._assertions import block_private_targets
 from tests._policy_factories import canonical
 from tests._watch_harnesses import watch_client
 
 TARGET = "http://example.com/feed.xml"
 INTERVAL = 900
-WEBHOOK = "http://127.0.0.1:9/hook"
+WEBHOOK = "https://127.0.0.1:9/hook"
 
 
 async def _register(watch_store, **payload) -> Response:
@@ -66,16 +66,15 @@ async def test_a_webhook_this_deployment_cannot_deliver_to_is_refused(watch_stor
     assert watch_store.list_watches() == []
 
 
-async def test_a_plaintext_webhook_is_refused(watch_store, monkeypatch):
-    """A plaintext http:// webhook delivers the change notification TLS-less (#499):
-    refused at registration unless the operator opted out; this test opts out."""
-    with plaintext_webhook_refusal(monkeypatch):
-        response = await _register(
-            watch_store,
-            url=TARGET,
-            interval_seconds=INTERVAL,
-            webhook_url="http://receiver.example/hook",
-        )
+async def test_an_http_webhook_is_refused(watch_store):
+    """A non-https callback target would deliver the change notification
+    TLS-less; registration requires https:// (#651)."""
+    response = await _register(
+        watch_store,
+        url=TARGET,
+        interval_seconds=INTERVAL,
+        webhook_url="http://receiver.example/hook",
+    )
     assert response.status_code == 422, response.text
     assert watch_store.list_watches() == []
 

@@ -146,7 +146,7 @@ class TestCrawlRequestWebhook:
             settings=CrawlerSettings.from_mapping(),
             browser_worker=browser_worker,
             shutdown_event=asyncio.Event(),
-            webhook_url=WebhookTarget.admit("http://webhook.invalid", host_policy=HostPolicy.unrestricted()),
+            webhook_url=WebhookTarget.admit("https://webhook.invalid", host_policy=HostPolicy.unrestricted()),
         )
         assert "webhook_url" in result
 

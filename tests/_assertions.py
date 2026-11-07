@@ -26,19 +26,6 @@ def block_private_targets(monkeypatch) -> None:
 
 
 @contextmanager
-def plaintext_webhook_refusal(monkeypatch):
-    """The closed #499 door for one call: drop the plaintext opt-in and its memo."""
-    monkeypatch.delenv("CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK", raising=False)
-    from crawlutron.api.webhooks import reset_plaintext_webhook_memo
-
-    reset_plaintext_webhook_memo()
-    try:
-        yield
-    finally:
-        reset_plaintext_webhook_memo()
-
-
-@contextmanager
 def host_resolves_to(monkeypatch, ip: str, *, resolver=None):
     """The precondition for a resolution-dependent SSRF verdict: ``name`` resolves to ``ip``.
 
@@ -297,7 +284,10 @@ async def poll_webhook_delivery(records, *, timeout: float = 10.0, interval: flo
         interval=interval,
         message="Webhook not delivered in time",
     )
-    return json.loads(records[0].decode("utf-8"))
+    delivered = records[0]
+    if not isinstance(delivered, bytes):
+        delivered = delivered.content
+    return json.loads(delivered.decode("utf-8"))
 
 
 async def poll_crawl_completion(

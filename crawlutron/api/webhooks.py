@@ -20,7 +20,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from crawlutron.config.env import EnvDecisionMemo, get_env_int, get_mapping_int
+from crawlutron.config.env import get_env_int, get_mapping_int
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.webhook_target import WebhookTarget
@@ -40,24 +40,6 @@ _WEBHOOK_BACKOFF_MS_DEFAULT = 200
 # runner that scheduled it was cancelled after its terminal write landed.
 _DELIVERIES: set[asyncio.Task] = set()
 
-# The memoized plaintext-webhook env decision, shared primitive (#621).
-# Value-keyed: an env change lands on the next call, an unchanged one skips it.
-_PLAINTEXT_WEBHOOK_DECISION = EnvDecisionMemo(
-    "CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK",
-    default=False,
-    logger_name="crawlutron.api.webhooks",
-    warning=(
-        "Plaintext-webhook guard DISABLED by CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK=%r: "
-        "HMAC signatures and crawl payloads ride unencrypted to caller-supplied "
-        "http:// webhook URLs. Unset it, or set it to 0, outside local development."
-    ),
-)
-
-
-def allow_plaintext_webhooks() -> bool:
-    """Memoized read of the plaintext-webhook escape hatch (inverted default)."""
-    return _PLAINTEXT_WEBHOOK_DECISION.decide()
-
 
 class DeliveryFailed(Exception):
     """A webhook POST failed and either can be retried or is permanent."""
@@ -72,38 +54,27 @@ def webhook_secret() -> str:
     return os.environ.get("CRAWLUTRON_WEBHOOK_SECRET", "")
 
 
-def reset_plaintext_webhook_memo() -> None:
-    """Drop the memoized plaintext-webhook env decision (tests)."""
-    _PLAINTEXT_WEBHOOK_DECISION.reset()
-
-
 def _reset() -> None:
-    """Cancel in-flight deliveries, empty the tracked set, drop the env memo."""
-    reset_plaintext_webhook_memo()
+    """Cancel in-flight deliveries and empty the tracked set."""
     for task in list(_DELIVERIES):
         task.cancel()
     _DELIVERIES.clear()
 
 
 def _has() -> bool:
-    """Whether any delivery task is tracked or the env decision is memoized."""
-    return bool(_DELIVERIES) or _PLAINTEXT_WEBHOOK_DECISION._decision is not None
+    return bool(_DELIVERIES)
 
 
 process_state.register(__name__, _reset, _has)
 
 
 def ensure_https_webhook_url(webhook_url: str) -> None:
-    """The one scheme law for both webhook doors: plaintext http:// is
-    refused unless CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK=1; raises ValueError."""
+    """The one scheme law for both webhook doors: https-only (#651);
+    raises ValueError."""
     if not webhook_url.lower().startswith("http://"):
         return
-    if allow_plaintext_webhooks():
-        return
     raise ValueError(
-        "webhook_url must use https:// -- the HMAC signature and payload would ride "
-        "plaintext http:// unencrypted (set CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK=1 to "
-        "allow plaintext webhooks in local development)"
+        "webhook_url must use https:// -- the HMAC signature and payload would ride an unencrypted hop"
     )
 
 
@@ -279,7 +250,7 @@ async def post_webhook(
     try:
         ensure_https_webhook_url(webhook_url)
     except ValueError:
-        logger.warning("webhook_plaintext_refused", extra={"url": target.redacted()})
+        logger.warning("webhook_http_refused", extra={"url": target.redacted()})
         return
     try:
         cap = max_webhook_size()
@@ -377,7 +348,6 @@ __all__ = [
     "ensure_https_webhook_url",
     "max_webhook_size",
     "post_webhook",
-    "reset_plaintext_webhook_memo",
     "validate_webhook_url",
     "validate_webhook_url_async",
 ]

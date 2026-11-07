@@ -23,7 +23,6 @@ from tests._assertions import (
 from tests._fetcher_factories import make_crawl_payload
 from tests._policy_factories import crawl_policy
 from tests.api._asgi_base import _AsgiEndpointTests
-from tests.helpers.server import WEBHOOK_RECEIVED
 
 #: Discovery turned fully on. Three tests assert on what robots, sitemaps and feeds contributed, and spelling
 #: the triple at each is how one of them kept asking for feeds the fixture never served.
@@ -110,7 +109,10 @@ class TestCrawlApi(_AsgiEndpointTests):
                 f"discovered link {normalized!r} matches the scope; fixture is on loopback"
             )
 
-    async def test_v1_crawl_webhook_returns_202_and_delivers(self):
+    async def test_v1_crawl_webhook_returns_202_and_delivers(self, monkeypatch):
+        from tests._webhook_doubles import recorded_webhook_posts
+
+        recorded = recorded_webhook_posts(monkeypatch)
         body = await accepted_crawl(
             self.client,
             {
@@ -119,13 +121,13 @@ class TestCrawlApi(_AsgiEndpointTests):
                     "strategies": [HTTP_DECLARED_CRAWLER],
                     "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50},
                 },
-                "webhook_url": f"{self.base}/webhook_sink",
+                "webhook_url": "https://webhook.example.com/sink",
             },
         )
         assert "status_url" in body
         # The accepted envelope is a promise that the work outlives the request, so the delivery is polled for
         # rather than assumed to have already happened by the time the 202 came back.
-        delivered = await poll_webhook_delivery(WEBHOOK_RECEIVED)
+        delivered = await poll_webhook_delivery(recorded)
         assert delivered["submitted_count"] == 1
         assert "results" in delivered
 

@@ -19,7 +19,6 @@ from crawlutron.models.webhook_target import WebhookTarget
 from tests._assertions import (
     block_private_targets,
     host_resolves_to,
-    plaintext_webhook_refusal,
 )
 from tests._webhook_doubles import assert_delivered_once, record_webhook_delivery
 
@@ -65,55 +64,17 @@ class TestWebhookUrlValidation:
             )
 
 
-class TestPlaintextWebhookRefusal:
-    """#499: the HMAC scheme protects integrity, not confidentiality, so a
-    plaintext http:// webhook rides signature AND payload TLS-less. Doors
-    refuse it unless the operator opted out."""
+class TestHttpsOnlyWebhookRefusal:
+    """#651: the HMAC scheme protects integrity, not confidentiality, so a
+    webhook callback is an https-only hop -- no configuration surface."""
 
-    def test_a_plaintext_webhook_url_is_refused(self, monkeypatch):
-        with plaintext_webhook_refusal(monkeypatch), pytest.raises(ValueError, match="https://"):
+    def test_an_http_webhook_url_is_refused(self):
+        """Refused unconditionally (#651), with or without any env var set."""
+        with pytest.raises(ValueError, match="https://"):
             ensure_https_webhook_url("http://receiver.example/hook")
 
     def test_an_https_webhook_url_is_accepted(self):
         ensure_https_webhook_url("https://receiver.example/hook")
-
-    def test_the_operator_opt_in_admits_plaintext(self, monkeypatch):
-        from crawlutron.api.webhooks import reset_plaintext_webhook_memo
-
-        monkeypatch.setenv("CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK", "1")
-        try:
-            ensure_https_webhook_url("http://receiver.example/hook")
-        finally:
-            reset_plaintext_webhook_memo()
-
-    def test_the_opt_in_warns_once_per_distinct_env_value(self, monkeypatch, caplog):
-        """The memo warns once per distinct env value, not per call, and an env
-        change (or removal) lands on the very next call (#499 residual)."""
-        import logging
-
-        from crawlutron.api import webhooks
-
-        webhooks.reset_plaintext_webhook_memo()
-        try:
-            with caplog.at_level(logging.WARNING, logger="crawlutron.api.webhooks"):
-                monkeypatch.setenv("CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK", "1")
-                assert webhooks.allow_plaintext_webhooks() is True
-                assert webhooks.allow_plaintext_webhooks() is True
-                assert len(caplog.records) == 1, "the memo must warn once, not per call"
-
-                monkeypatch.setenv("CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK", "true")
-                assert webhooks.allow_plaintext_webhooks() is True
-                assert len(caplog.records) == 2, "a changed env value must warn its new decision"
-
-                monkeypatch.delenv("CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK")
-                assert webhooks.allow_plaintext_webhooks() is False
-                assert len(caplog.records) == 2, "an override must land on the next call"
-
-                monkeypatch.setenv("CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK", "1")
-                assert webhooks.allow_plaintext_webhooks() is True
-                assert len(caplog.records) == 3, "the next distinct value warns again"
-        finally:
-            webhooks.reset_plaintext_webhook_memo()
 
 
 class TestWebhookDeliveryPinning:
@@ -125,7 +86,7 @@ class TestWebhookDeliveryPinning:
         delivered = record_webhook_delivery(monkeypatch)
         with host_resolves_to(monkeypatch, "8.8.8.8"):
             await _post_webhook(
-                WebhookTarget.admit("http://webhook.example.com/cb", host_policy=HostPolicy.unrestricted()),
+                WebhookTarget.admit("https://webhook.example.com/cb", host_policy=HostPolicy.unrestricted()),
                 {"results": []},
             )
 
@@ -161,7 +122,7 @@ class TestWebhookDeliveryPinning:
         with host_resolves_to(monkeypatch, "8.8.8.8"):
             with caplog.at_level(logging.WARNING, logger="crawlutron.api.webhooks"):
                 await deliver_pinned_webhook(
-                    "http://webhook.example.com/cb",
+                    "https://webhook.example.com/cb",
                     b"{}",
                     host_policy=HostPolicy.unrestricted(),
                 )

@@ -11,7 +11,6 @@ from crawlutron.runtime.metrics import get_metrics
 from tests._assertions import (
     accepted_crawl,
     completed_crawl,
-    plaintext_webhook_refusal,
     poll_crawl_completion,
     poll_webhook_delivery,
     submit_async_crawl,
@@ -21,7 +20,15 @@ from tests._assertions import (
 from tests._async_harnesses import crawl_api as _crawl_api
 from tests._fetcher_factories import make_crawl_payload
 from tests._job_harnesses import loaded_job, single_shot_job
-from tests.helpers.server import WEBHOOK_RECEIVED, spawn_serve_forever_thread
+from tests.helpers.server import spawn_serve_forever_thread
+
+
+def recorded_webhook_posts(monkeypatch):
+    """Record only the webhook POSTs; the crawl's own fetches hit the real server."""
+    from tests._webhook_doubles import recorded_webhook_posts as shared
+
+    return shared(monkeypatch)
+
 
 # The client + origin + cleared webhook sink come from the shared fixture, so this module does not re-declare
 # the arrangement in a `setup` method. The alias-then-rebind is not ceremony.
@@ -111,16 +118,18 @@ class TestAsyncCrawlApi:
         assert row.stats["total_crawled"] == 1
         assert row.stats["total_failed"] == 0
 
-    async def test_v1_crawl_async_mode_with_webhook_delivers(self, crawl_api):
+    async def test_v1_crawl_async_mode_with_webhook_delivers(self, crawl_api, monkeypatch):
         """Async_mode with webhook_url delivers result to webhook on completion."""
+
+        recorded = recorded_webhook_posts(monkeypatch)
         resp = await crawl_api.client.post(
             "/v1/crawl",
-            json=crawl_api.payload(async_mode=True, webhook_url=f"{crawl_api.base}/webhook_sink"),
+            json=crawl_api.payload(async_mode=True, webhook_url="https://webhook.example.com/sink"),
         )
         assert resp.status_code == 202, resp.text
         request_id = resp.json()["request_id"]
 
-        delivered = await poll_webhook_delivery(WEBHOOK_RECEIVED)
+        delivered = await poll_webhook_delivery(recorded)
         assert delivered["request_id"] == request_id
         assert delivered["success"] is True
         assert len(delivered["results"]) == 1
@@ -186,13 +195,16 @@ class TestAsyncCrawlApi:
         assert body["submitted_count"] == 2
         assert len(body["results"]) == 2
 
-    async def test_v1_crawl_webhook_backward_compat(self, crawl_api):
+    async def test_v1_crawl_webhook_backward_compat(self, crawl_api, monkeypatch):
         """Webhook_url without async_mode still works (backward compat)."""
-        payload = crawl_api.payload(webhook_url=f"{crawl_api.base}/webhook_sink")
+
+        recorded = recorded_webhook_posts(monkeypatch)
+        payload = crawl_api.payload(webhook_url="https://webhook.example.com/sink")
         body = await accepted_crawl(crawl_api.client, payload)
         assert "request_id" in body
 
-        delivered = await poll_webhook_delivery(WEBHOOK_RECEIVED)
+        delivered = await poll_webhook_delivery(recorded)
+        delivered = await poll_webhook_delivery(recorded)
         assert delivered["success"] is True
 
     async def test_v1_crawl_async_mode_invalid_webhook_rejected(self, crawl_api):
@@ -204,27 +216,29 @@ class TestAsyncCrawlApi:
         assert resp.status_code == 422
         assert resp.json()["code"] == "validation_error"
 
-    async def test_v1_crawl_202_envelope_webhook_url_is_redacted(self, crawl_api):
+    async def test_v1_crawl_202_envelope_webhook_url_is_redacted(self, crawl_api, monkeypatch):
         """The 202 accepted envelope echoes the webhook REDACTED (#599): the
         raw form is a delivery secret and must never ride a response body."""
+
+        recorded = recorded_webhook_posts(monkeypatch)
         resp = await crawl_api.client.post(
             "/v1/crawl",
             json=crawl_api.payload(
-                async_mode=True, webhook_url=f"{crawl_api.base}/webhook_sink?token=secret"
+                async_mode=True, webhook_url="https://webhook.example.com/sink?token=secret"
             ),
         )
         assert resp.status_code == 202, resp.text
         assert "secret" not in resp.text
         assert "[REDACTED]" in resp.json()["webhook_url"]
+        assert list(recorded) == []
 
-    async def test_v1_crawl_plaintext_webhook_refused(self, crawl_api, monkeypatch):
-        """A plaintext http:// webhook rides the signature and payload TLS-less (#499).
-        The door refuses it unless the operator opted out; this test opts out."""
-        with plaintext_webhook_refusal(monkeypatch):
-            resp = await crawl_api.client.post(
-                "/v1/crawl",
-                json=crawl_api.payload(async_mode=True, webhook_url="http://receiver.example/hook"),
-            )
+    async def test_v1_crawl_http_webhook_refused(self, crawl_api):
+        """A non-https callback target would ride the signature and payload
+        TLS-less; the door requires https:// (#651)."""
+        resp = await crawl_api.client.post(
+            "/v1/crawl",
+            json=crawl_api.payload(async_mode=True, webhook_url="http://receiver.example/hook"),
+        )
         assert resp.status_code == 422, resp.text
         assert resp.json()["code"] == "validation_error"
 

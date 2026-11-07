@@ -9,7 +9,7 @@ import httpx
 
 from tests._transport_doubles import MockResponse
 
-__all__ = ["record_webhook_delivery"]
+__all__ = ["record_webhook_delivery", "recorded_webhook_posts"]
 
 
 def record_webhook_delivery(
@@ -38,6 +38,30 @@ def record_webhook_delivery(
 
     monkeypatch.setattr(httpx, "AsyncClient", _scripted_client)
     return requests
+
+
+def recorded_webhook_posts(monkeypatch):
+    """Record only the webhook POSTs: the same transport double, filtered live so
+    a crawl's own fetches (served by the real helper server) never enter the poll."""
+    recorded = record_webhook_delivery(monkeypatch)
+
+    class _WebhookPosts:
+        """A live, filter-shaped view: reads narrow ``recorded`` to the webhook POSTs."""
+
+        @staticmethod
+        def _posts():
+            return [r for r in recorded if "webhook.example.com" in str(r.url) and r.method == "POST"]
+
+        def __iter__(self):
+            return iter(self._posts())
+
+        def __len__(self) -> int:
+            return len(self._posts())
+
+        def __getitem__(self, index: int):
+            return self._posts()[index]
+
+    return _WebhookPosts()
 
 
 def assert_delivered_once(delivered) -> None:

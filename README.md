@@ -60,7 +60,6 @@ live settings/env code — `crawlutron/models/host_policy.py`,
 | Variable | Default | Weakened when | Effect |
 | -------- | ------- | ------------- | ------ |
 | `CRAWLUTRON_ALLOW_PRIVATE_TARGETS` | unset | `1` | Disables the SSRF private-target guard: caller URLs may reach private, loopback, and link-local addresses including cloud metadata endpoints. Logs a `SSRF private-target guard DISABLED` WARNING. |
-| `CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK` | unset | `1` | Allows `http://` webhook targets, so result payloads leave over unencrypted HTTP. Logs a `Plaintext-webhook guard DISABLED` WARNING. |
 | `CRAWLUTRON_RESPECT_ROBOTS` | `true` | `false` | Stops robots.txt enforcement; disallowed targets crawl instead of returning `robots_disallowed`. |
 | `CRAWLUTRON_HEADLESS` | `true` | `false` | Runs the browser headed. Not a safety guard, but changes the automation surface. |
 

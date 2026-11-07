@@ -67,7 +67,8 @@ It is a powerful SSRF-enabled service that:
 The README's "Dangerous environment escape hatches" table is the single
 source (derived from the live settings/env code) for every `CRAWLUTRON_*`
 variable that weakens a safety default. Keep `CRAWLUTRON_RESPECT_ROBOTS` and
-the two `ALLOW_*` hatches unset in production.
+`CRAWLUTRON_ALLOW_PRIVATE_TARGETS` unset in production. Webhook delivery is
+https-only (#651): both webhook doors refuse `http://` callback targets.
 
 ## Operational Guidance
 

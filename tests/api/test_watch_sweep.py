@@ -23,7 +23,7 @@ from tests.helpers.server import EtagHandler
 
 NOW = 1_700_000_000.0
 INTERVAL = 3600
-WEBHOOK = "http://watcher.example.com/hook"
+WEBHOOK = "https://watcher.example.com/hook"
 DEAD_ORIGIN = "http://127.0.0.1:9/"
 
 
