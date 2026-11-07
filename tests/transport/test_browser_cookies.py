@@ -7,8 +7,11 @@ import pytest
 
 import crawlutron.transport.browser_cookies as browser_cookies
 from crawlutron.runtime import process_state
-from crawlutron.transport.browser import get_browser_cookies_for
-from crawlutron.transport.browser_cookies import BROWSER_COOKIES_MAX, store_browser_cookies
+from crawlutron.transport.browser_cookies import (
+    BROWSER_COOKIES_MAX,
+    get_browser_cookies_for,
+    store_browser_cookies,
+)
 
 
 @pytest.fixture
