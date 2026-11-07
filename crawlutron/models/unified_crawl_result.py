@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Annotated
 
 from pydantic import BaseModel, Field
@@ -79,7 +80,7 @@ class UnifiedCrawlResult(BaseModel):
     classification_evidence: list[ClassificationEvidence] = Field(default_factory=list)
     # 5. HTTP Details
     http_status: int | None = None
-    headers: dict[str, str] = Field(default_factory=dict)
+    headers: Mapping[str, str] = Field(default_factory=dict)
     content_type: str | None = None
     extraction_method: Annotated[
         str | None,
