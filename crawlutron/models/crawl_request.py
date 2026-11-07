@@ -44,8 +44,7 @@ class CrawlRequest(SingleUrlSourceRequest):
     webhook_url: Annotated[
         str | None,
         Field(
-            description="Optional callback URL (https:// required unless the operator sets "
-            "CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK=1). When provided with async_mode, the crawl "
+            description="Optional callback URL (https:// required). When provided with async_mode, the crawl "
             "is accepted (202) and the UnifiedCrawlResponse is POSTed to this URL when complete.",
         ),
     ] = None

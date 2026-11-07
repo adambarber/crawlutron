@@ -60,7 +60,6 @@ class TestEnvDecisionMemo:
     def test_both_twins_delegate_to_the_shared_memo(self, monkeypatch):
         """Breaking the shared parse breaks both twins: neither carries its own copy."""
         import crawlutron.config.env as config_env
-        from crawlutron.api import webhooks
         from crawlutron.models import host_policy
 
         def exploded(raw, default, *, env_name):
@@ -69,8 +68,6 @@ class TestEnvDecisionMemo:
         monkeypatch.setattr(config_env, "parse_bool_value", exploded)
         with pytest.raises(AssertionError):
             host_policy.allow_private_targets()
-        with pytest.raises(AssertionError):
-            webhooks.allow_plaintext_webhooks()
 
     def test_typo_falls_back_to_default(self, monkeypatch, caplog):
         monkeypatch.setenv("CRAWLUTRON_TEST_INT", "four")

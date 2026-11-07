@@ -137,12 +137,10 @@ async def test_webhook_log_paths_never_emit_a_secret(caplog, monkeypatch):
     from crawlutron.api import webhooks
 
     target = WebhookTarget.admit("https://example.com/hook?key=secret", host_policy=HostPolicy.unrestricted())
-    monkeypatch.setenv("CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK", "0")
-    webhooks.reset_plaintext_webhook_memo()
     monkeypatch.setattr(webhooks, "webhook_max_attempts", lambda: 1)
     monkeypatch.setattr(webhooks, "webhook_backoff_base_ms", lambda: 0)
     with caplog.at_level(logging.WARNING, logger="crawlutron.api.webhooks"):
-        # Plaintext-refusal path logs the redacted URL.
+        # Non-https refusal path logs the redacted URL.
         await webhooks.post_webhook(
             WebhookTarget.admit("http://example.com/hook?key=secret", host_policy=HostPolicy.unrestricted()),
             {},

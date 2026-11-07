@@ -6,6 +6,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Security
+- **Webhook delivery is https-only.** Both webhook doors (crawl and watch
+  registration) require `https://` callback targets; `http://` targets are
+  refused. The HMAC signature scheme protects integrity, not confidentiality,
+  so a callback target is never an unencrypted hop.
 - **Wave-3 summary: the #599–#618 security/correctness wave plus #621/#638/#639/#642
   invariants landed mid-cycle.** Highlights, each verified against the live tree at merge
   time: webhook secrets leave redacted projections only (`WebhookTarget` object-invariant
@@ -42,17 +46,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   in `tests/api/test_caller_isolation.py` (unit flip, crawl/map/jobs door 422s,
   shared-jar isolation, and the #537 end-to-end test tightened to the door
   refusal); the walk-past (refusal disabled) failed all six guard tests.
-- **Webhook doors refuse plaintext `http://` (#499).** `webhook_url` was accepted
-  at both doors -- the crawl 202 path and watch registration -- with any
-  `http://` scheme: the HMAC signature scheme protects integrity, not
-  confidentiality, so the signature AND the full crawl payload (possibly
-  including extracted page text) rode to a plaintext callback unencrypted. One
-  law now governs both doors (`ensure_https_webhook_url` in `webhooks.py`):
-  `https://` is required unless the operator opts out with
-  `CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK=1`, mirroring the
-  `CRAWLUTRON_ALLOW_PRIVATE_TARGETS` escape-hatch shape (value-keyed memo,
-  default fail-closed, one warning per distinct env value). Refused at
-  admission with the existing 422 `validation_error` envelope in
+- **Webhook doors are https-only (#499).** The HMAC signature scheme protects
+  integrity, not confidentiality, so a `http://` callback target rode both the
+  signature AND the full crawl payload (possibly including extracted page
+  text) unencrypted. One law now governs both doors
+  (`ensure_https_webhook_url` in `webhooks.py`): `https://` is required.
+  Refused at admission with the existing 422 `validation_error` envelope in
   `tests/test_webhook_ssrf.py` (unit) and both door suites. `webhook_url` never
   fired at a target the caller chose less than crawl targets do, so the trust
   position is identical and both fail closed.

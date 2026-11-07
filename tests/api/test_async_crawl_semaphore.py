@@ -97,7 +97,7 @@ class TestSemaphoreHoldsTheCrawlOnly:
                 await run_async_crawl(
                     request_id,
                     CrawlRequest.model_validate({"url": "http://example.com/"}),
-                    admitted_webhook("http://webhook.example.com/cb"),
+                    admitted_webhook("https://webhook.example.com/cb"),
                     CrawlerSettings.from_mapping(),
                     job_store,
                     CrawlResultStore(tmp_path / "results.db"),

@@ -15,7 +15,7 @@ from tests._watch_harnesses import default_sweeper, loopback_url
 
 NOW = 1_700_000_000.0
 INTERVAL = 3600
-WEBHOOK = "http://watcher.example.com/hook"
+WEBHOOK = "https://watcher.example.com/hook"
 
 
 def _webhook() -> WebhookTarget:

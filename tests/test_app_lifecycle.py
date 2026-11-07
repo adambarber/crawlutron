@@ -163,12 +163,13 @@ class TestAppLifecycleEdges:
         monkeypatch.setattr(async_crawl_runner, "execute_crawl", _failing_crawl)
         with caplog.at_level(logging.WARNING, logger="crawlutron.api.webhooks"):
             resp = await async_client.post(
-                "/v1/crawl", json={"url": "http://example.com/", "webhook_url": "http://unreachable.invalid/"}
+                "/v1/crawl",
+                json={"url": "http://example.com/", "webhook_url": "https://unreachable.invalid/"},
             )
         assert resp.status_code == 202, f"webhook_url accepts for background delivery, got {resp.status_code}"
         body = resp.json()
         assert body["status"] == "accepted", body
-        assert body["webhook_url"] == "http://unreachable.invalid/", body
+        assert body["webhook_url"] == "https://unreachable.invalid/", body
 
         # #513: await the runner task itself (the 202 body carries its request_id) --
         # the failure webhook posts inline inside it, so no dispatch race is possible.

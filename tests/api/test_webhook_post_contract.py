@@ -29,25 +29,21 @@ async def _assert_https_delivers_once(monkeypatch) -> None:
 
 class TestPostWebhookSchemeLaw:
     async def _refused(self, monkeypatch, caplog, url):
-        """Post a refused plaintext URL; return delivered and the log."""
-        from crawlutron.api import webhooks
-
-        monkeypatch.setenv("CRAWLUTRON_ALLOW_PLAINTEXT_WEBHOOK", "0")
-        webhooks.reset_plaintext_webhook_memo()
+        """Post a refused non-https URL; return delivered and the log."""
         with caplog.at_level(logging.WARNING, logger="crawlutron.api.webhooks"):
             delivered = await _post_through_chokepoint(monkeypatch, url=url, payload=_OK)
         return delivered
 
-    async def test_plaintext_url_is_refused_without_a_socket(self, monkeypatch, caplog):
+    async def test_an_http_webhook_url_is_refused_without_a_socket(self, monkeypatch, caplog):
         delivered = await self._refused(monkeypatch, caplog, "http://webhook.example.com/cb")
-        assert delivered == [], "post_webhook opened a socket to a plaintext http:// url"
-        assert "webhook_plaintext_refused" in caplog.text
+        assert delivered == [], "post_webhook opened a socket to a non-https webhook url"
+        assert "webhook_http_refused" in caplog.text
 
     async def test_the_refusal_log_carries_only_the_origin(self, monkeypatch, caplog):
         """A caller-supplied webhook URL can carry query credentials; the log
         masks the secret value, never the raw URL (#636 via main's #639 law)."""
         await self._refused(monkeypatch, caplog, "http://webhook.example.com/cb?api_key=hunter2")
-        record = next(r for r in caplog.records if r.getMessage() == "webhook_plaintext_refused")
+        record = next(r for r in caplog.records if r.getMessage() == "webhook_http_refused")
         assert "hunter2" not in record.url, record.url
         assert record.url.startswith("http://webhook.example.com"), record.url
         assert "hunter2" not in caplog.text, "the raw webhook URL reached the log"

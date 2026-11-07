@@ -31,7 +31,7 @@ def _webhook_target():
     """The loopback-safe host the delivery tests agree on, admitted."""
     from tests._api_harnesses import admitted_webhook
 
-    return admitted_webhook("http://webhook.example.com/cb")
+    return admitted_webhook("https://webhook.example.com/cb")
 
 
 async def _run_webhook_crawl(job_store, result_store, request_id) -> None:
@@ -85,7 +85,7 @@ class TestAsyncCrawlFailureWebhookDelivery:
         request_id = "crawl_c3_failure"
         job_store.create_single_shot(request_id, "http://example.com/", {"url": "http://example.com/"})
 
-        webhook_url = "http://webhook.example.com/cb"
+        webhook_url = "https://webhook.example.com/cb"
         result_store = CrawlResultStore(tmp_path / "results.db")
 
         async def _boom(*args, **kwargs):
@@ -140,7 +140,7 @@ class TestAsyncCrawlTerminalCasControlsWhatIsPublished:
         post_webhook = await _run_with_webhook(
             request_id,
             execute,
-            "http://webhook.example.com/cb",
+            "https://webhook.example.com/cb",
             job_store,
             result_store,
         )
@@ -185,7 +185,7 @@ class TestWebhookValidationRunsOffLoop:
         delivered = record_webhook_delivery(monkeypatch)
 
         await post_webhook(
-            WebhookTarget.admit("http://public.example.com/cb", host_policy=HostPolicy.unrestricted()),
+            WebhookTarget.admit("https://public.example.com/cb", host_policy=HostPolicy.unrestricted()),
             {"results": []},
         )
 
@@ -216,7 +216,7 @@ class TestWebhookValidationRunsOffLoop:
         delivered = record_webhook_delivery(monkeypatch)
 
         await deliver_pinned_webhook(
-            "http://public.example.com/cb",
+            "https://public.example.com/cb",
             b"{}",
             host_policy=HostPolicy.unrestricted(),
         )
@@ -401,7 +401,7 @@ class TestShutdownDrainsInFlightWebhookDelivery:
 
         task = asyncio.create_task(
             webhooks.post_webhook_guarded(
-                WebhookTarget.admit("http://webhook.example.com/cb", host_policy=HostPolicy.unrestricted()),
+                WebhookTarget.admit("https://webhook.example.com/cb", host_policy=HostPolicy.unrestricted()),
                 {"results": []},
             )
         )
@@ -434,7 +434,7 @@ class TestShutdownDrainIsBounded:
         monkeypatch.setattr(webhooks, "deliver_pinned_webhook", hung_delivery)
 
         webhooks.start_webhook_delivery(
-            WebhookTarget.admit("http://webhook.example.com/cb", host_policy=HostPolicy.unrestricted()),
+            WebhookTarget.admit("https://webhook.example.com/cb", host_policy=HostPolicy.unrestricted()),
             {"results": []},
         )
         await started.wait()
