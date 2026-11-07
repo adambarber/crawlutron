@@ -8,6 +8,7 @@ import pytest
 import crawlutron.transport.http_client_pool as http_mod
 from crawlutron.runtime import process_state
 from crawlutron.transport.fetchers import cffi_fetch
+from crawlutron.transport.pooled_clients import drain_pending_client_closes
 from tests._async_harnesses import run_loop_rebind_scenario
 from tests._policy_factories import canonical
 from tests._pool_harnesses import builder_for as _builder_for
@@ -22,8 +23,30 @@ def _clean_pooled_state():
     as the unit production releases them."""
     process_state.reset_all_process_state()
     yield
-    process_state.reset_all_process_state()
+    _drain_then_reset()
     assert not process_state.has_any_process_state(), "the pooled state outlived the test that used it"
+
+
+async def _drain_bounded(guard: float = 2.0) -> None:
+    """Drain queued and in-flight superseded closes, bounded so a stuck close
+    fails the assert instead of hanging the worker."""
+    try:
+        await asyncio.wait_for(drain_pending_client_closes(), timeout=guard)
+    except TimeoutError:
+        pass
+
+
+def _drain_then_reset() -> None:
+    """Release what a dying loop abandoned, THEN reset, THEN the caller asserts.
+
+    A live running loop cannot host a nested run, so the sync reset is the only
+    honest move there; otherwise the drain releases queued clients whose close
+    task died with its loop before reset clears the queue."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(_drain_bounded())
+    process_state.reset_all_process_state()
 
 
 class _TrackedClient(Protocol):
@@ -238,6 +261,18 @@ def test_cffi_session_superseded_by_a_failing_rebuild_is_still_queued(stub_build
 
     asyncio.run(_recover_through_teardown())
     assert second.closed is True, "a superseded session was dropped when the rebuild failed"
+
+
+@pytest.mark.parametrize("seam,getter,fake", SINGLETONS)
+def test_teardown_releases_a_queued_close_the_loop_abandoned(stub_builder, seam, getter, fake):
+    """#643 red, named honestly: a drain-then-reset ordering unit, not an xdist
+    reproduction. The superseded client's close task died with its loop; only
+    the queue still holds it, and teardown must release it before resetting."""
+    first, _second = _supersede_without_loop(stub_builder, seam, getter, fake)
+    assert first.closed is False
+    # The drain-then-reset teardown: release, then reset, no abandoned client.
+    _drain_then_reset()
+    assert first.closed is True, f"{getter}: teardown cleared the queue without releasing the client"
 
 
 def test_cffi_transport_releases_a_queued_session(stub_builder):
