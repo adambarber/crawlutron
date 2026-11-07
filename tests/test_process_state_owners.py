@@ -60,6 +60,20 @@ def test_reset_is_idempotent(module_path: str) -> None:
     )
 
 
+def test_engine_reset_clears_the_spill_gc_cadence_stamp() -> None:
+    """#605: the cadence stamp gated the sweep across resets, so a reset process
+    skipped the first sweep of its new crawl lifetime. Reset drops the stamp.
+    """
+    import crawlutron.orchestration.engine as engine
+
+    engine.spill_gc_last_run = 1.0  # a stamp claiming the sweep just ran
+    process_state.reset_all_process_state()
+    assert engine.spill_gc_last_run is None, (
+        "the spill GC cadence stamp outlived the registry reset -- the next crawl "
+        "skips the first sweep of its new lifetime"
+    )
+
+
 def test_every_owner_registers_and_none_exports_the_pair() -> None:
     """The registry is the declaration: a module with the reset shape must register,
     and no app module may export the hand-copied pair -- the seam is the only door.
