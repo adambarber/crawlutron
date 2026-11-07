@@ -58,9 +58,15 @@ It is a powerful SSRF-enabled service that:
 - **S4 — credential origins ride the egress guard.** Credential origins pass
   the same SSRF egress check as crawl targets: a private/loopback credential
   origin requires `CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1`.
-- **S5 — caller keys hash with plain SHA-256.** Unsalted SHA-256 is acceptable
-  only because key secrets are `secrets.token_urlsafe(32)` (256-bit entropy);
-  a digest table adds nothing to attack against an unguessable secret.
+- **S5 — caller key secrets are verified with salted PBKDF2-SHA256.** Issued
+  secrets embed their key id (`ck_<key_id>.<body>`, 256-bit-entropy body via
+  `secrets.token_urlsafe(32)`). At rest the key row stores a salted
+  PBKDF2-SHA256 digest (210,000 iterations, per-key 16-byte salt,
+  `crawlutron/storage/caller_key_store.py`); verification is one primary-key
+  lookup plus one PBKDF2 run, with a miss burning the same derivation against
+  a fixed dummy digest so timing is uniform. Residual: entropy of the secret,
+  not the KDF, is the real guard; do not reuse this pattern for human-chosen
+  secrets.
 
 ### Dangerous environment escape hatches
 
