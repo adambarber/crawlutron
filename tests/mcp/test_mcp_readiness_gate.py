@@ -14,7 +14,7 @@ import pytest
 from crawlutron.api import main_helpers
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.health.readiness import ReadinessState
-from crawlutron.mcp.tools import handle_crawl, handle_map, handle_render, handle_search
+from crawlutron.mcp.handlers import handle_crawl, handle_map, handle_render, handle_search
 from crawlutron.models.crawl_request import CrawlRequest as CrawlRequest
 from crawlutron.models.json_value import JsonValue
 from crawlutron.models.map_request import MapRequest as MapRequest
@@ -110,8 +110,8 @@ async def _invoke(monkeypatch, *, cap: int | None, label: str, prefill: int = 0)
     held: list[int] = []
     exec_stub = _stub_for(label, _active, held)
     for name, value in extra.items():
-        monkeypatch.setattr(f"crawlutron.mcp.tools.{name}", value)
-    monkeypatch.setattr(f"crawlutron.mcp.tools.{target}", exec_stub)
+        monkeypatch.setattr(f"crawlutron.mcp.handlers.{name}", value)
+    monkeypatch.setattr(f"crawlutron.mcp.handlers.{target}", exec_stub)
     settings = CrawlerSettings.from_mapping({})
     shutdown = asyncio.Event()
     result = await typed_handler(payload, settings, shutdown)

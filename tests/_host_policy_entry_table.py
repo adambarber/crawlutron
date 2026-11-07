@@ -6,8 +6,14 @@ __all__ = ["host_policy_entry_table"]
 
 
 def host_policy_entry_table() -> set[str]:
-    """Every module:symbol entry point the host policy must guard."""
+    """Every module:symbol entry point the host policy must guard.
+
+    #645: handle_crawl/_and_extract left as closures, and handle_map/render/search
+    left with the split -- AST discovery keys `handler=` to the defining module
+    (registry.py), so none are discoverable; the policy seams stay guarded.
+    """
     return {
+        "crawlutron/api/admit_endpoint.py:admit_url",
         "crawlutron/api/crawl_endpoint.py:crawl",
         "crawlutron/api/crawl_executor.py:execute_crawl",
         "crawlutron/api/job_runner.py:run_job",
@@ -22,9 +28,4 @@ def host_policy_entry_table() -> set[str]:
         # post_webhook* left the table: they take an admitted WebhookTarget, whose
         # constructor IS the policy seam (probed via deliver_pinned_webhook).
         "crawlutron/api/webhooks.py:deliver_pinned_webhook",
-        "crawlutron/mcp/tools.py:handle_crawl",
-        "crawlutron/mcp/tools.py:handle_crawl_and_extract",
-        "crawlutron/mcp/tools.py:handle_map",
-        "crawlutron/mcp/tools.py:handle_render",
-        "crawlutron/mcp/tools.py:handle_search",
     }

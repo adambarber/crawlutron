@@ -63,6 +63,7 @@ class TestCapabilitiesPayload:
             "browser_profiles",
             "web_search",
             "mcp",
+            "pre_flight_admission",
             "async_mode",
             "captcha_solving",
             "proxy_rotation",

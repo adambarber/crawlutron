@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from fastapi.routing import APIRoute
 
 from crawlutron.api.router_registry import ROUTER_MODULES
-from crawlutron.mcp.tools import TOOL_SPECS
+from crawlutron.mcp.registry import TOOL_SPECS
 
 
 @dataclass(frozen=True)

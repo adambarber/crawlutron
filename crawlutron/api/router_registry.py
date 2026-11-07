@@ -22,6 +22,7 @@ _ROUTER_MODULE_NAMES = (
     "crawlutron.api.watch_router",
     "crawlutron.api.crawl_router",
     "crawlutron.api.policy_router",
+    "crawlutron.api.admit_router",
 )
 
 ROUTER_MODULES: tuple[APIRouter, ...] = tuple(import_module(name).router for name in _ROUTER_MODULE_NAMES)

@@ -91,6 +91,7 @@ class TestWebhookUrlValidation:
 #: The models FastAPI binds a request body to. Everything reachable from one of these is caller-supplied,
 #: which is the property that decides ``extra``.
 _BOUND_REQUEST_BODIES = (
+    "AdmitRequest",
     "CrawlRequest",
     "JobCreateRequest",
     "JobControlRequest",

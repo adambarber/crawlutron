@@ -270,7 +270,7 @@ class NormalizedUrl:
         return {"type": "string"}
 
 
-__all__ = ["NormalizedUrl", "admit_or_none"]
+__all__ = ["NormalizedUrl", "admit_or_none", "admit_with_reason"]
 
 
 def admit_or_none(candidate: str | NormalizedUrl | None, *, policy: HostPolicy) -> NormalizedUrl | None:
@@ -290,3 +290,17 @@ def admit_or_none(candidate: str | NormalizedUrl | None, *, policy: HostPolicy) 
         return NormalizedUrl(candidate.strip(), policy=policy)
     except ValueError:
         return None
+
+
+def admit_with_reason(candidate: str, *, policy: HostPolicy) -> tuple[NormalizedUrl | None, str | None]:
+    """Admit ``candidate`` and surface the constructor's refusal reason as data.
+
+    One wrapper over the one constructor, so a pre-flight door cannot drift from
+    the checks admission itself performs; the reason is the ValueError text.
+    """
+    if not candidate or not candidate.strip():
+        return None, "invalid_url"
+    try:
+        return NormalizedUrl(candidate.strip(), policy=policy), None
+    except ValueError as error:
+        return None, str(error)
