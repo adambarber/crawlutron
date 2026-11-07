@@ -55,6 +55,14 @@ class ToolResult:
 
 
 @dataclass(frozen=True)
+class RestRoute:
+    """The REST door an MCP tool provides parity coverage for."""
+
+    method: str
+    path: str
+
+
+@dataclass(frozen=True)
 class ToolSpec:
     """A registered MCP tool definition plus its handler. ``request_model`` is
     the source of truth for the advertised ``inputSchema`` and argument
@@ -68,6 +76,7 @@ class ToolSpec:
     handler: Handler
     title: str = ""
     unsupported_fields: Collection[str] = ()
+    rest_route: RestRoute | None = None
 
     @property
     def input_schema(self) -> dict[str, JsonValue]:
@@ -341,6 +350,7 @@ TOOL_SPECS: list[ToolSpec] = [
         request_model=SearchRequest,
         output_schema=_schema(SearchResponse),
         handler=handle_search,
+        rest_route=RestRoute("POST", "/v1/search"),
     ),
     ToolSpec(
         name="crawl",
@@ -359,6 +369,7 @@ TOOL_SPECS: list[ToolSpec] = [
         unsupported_fields=_UNSUPPORTED_CRAWL_FIELDS,
         output_schema=_schema(UnifiedCrawlResponse),
         handler=handle_crawl,
+        rest_route=RestRoute("POST", "/v1/crawl"),
     ),
     ToolSpec(
         name="crawl_and_extract",
@@ -374,6 +385,8 @@ TOOL_SPECS: list[ToolSpec] = [
         unsupported_fields=_UNSUPPORTED_CRAWL_FIELDS,
         output_schema=_schema(CrawlAndExtractResponse),
         handler=handle_crawl_and_extract,
+        # Projection of POST /v1/crawl's response, not a distinct REST door.
+        rest_route=None,
     ),
     ToolSpec(
         name="map",
@@ -387,6 +400,7 @@ TOOL_SPECS: list[ToolSpec] = [
         request_model=MapRequest,
         output_schema=_schema(SiteMapResponse),
         handler=handle_map,
+        rest_route=RestRoute("POST", "/v1/map"),
     ),
     ToolSpec(
         name="render",
@@ -400,6 +414,7 @@ TOOL_SPECS: list[ToolSpec] = [
         request_model=RenderRequest,
         output_schema=_schema(UnifiedCrawlResponse),
         handler=handle_render,
+        rest_route=RestRoute("POST", "/v1/render"),
     ),
 ]
 
@@ -408,6 +423,7 @@ TOOLS_BY_NAME: dict[str, ToolSpec] = {spec.name: spec for spec in TOOL_SPECS}
 __all__ = [
     "TOOLS_BY_NAME",
     "TOOL_SPECS",
+    "RestRoute",
     "ToolResult",
     "ToolSpec",
     "handle_crawl",

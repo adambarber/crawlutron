@@ -106,7 +106,10 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/mcp/protocol.py": (6, 6),
     "crawlutron/mcp/router.py": (2, 1),
     "crawlutron/mcp/server.py": (6, 5),
-    "crawlutron/mcp/tools.py": (13, 8),
+    # #644: RAISED to (14, 8): RestRoute joins the declared surface.
+    "crawlutron/mcp/tools.py": (14, 8),
+    # #644: the one declaration of the module-level feature routers.
+    "crawlutron/api/router_registry.py": (1, 0),
     "crawlutron/orchestration/admission_stall.py": (5, 3),
     "crawlutron/orchestration/recursive.py": (11, 7),
     "crawlutron/orchestration/request_pipeline.py": (5, 3),
