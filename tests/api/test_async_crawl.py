@@ -204,7 +204,6 @@ class TestAsyncCrawlApi:
         assert "request_id" in body
 
         delivered = await poll_webhook_delivery(recorded)
-        delivered = await poll_webhook_delivery(recorded)
         assert delivered["success"] is True
 
     async def test_v1_crawl_async_mode_invalid_webhook_rejected(self, crawl_api):
