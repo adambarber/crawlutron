@@ -43,9 +43,8 @@ class KeyVerifyThrottle:
     """Fail-closed cooldown over failed key verifications, one chokepoint.
 
     Buckets are keyed on the presented credential's parseable key id; anything
-    unparseable pools into one fixed ``unknown`` bucket, so varying garbage
-    cannot mint buckets. LRU-bounded at ``_MAX_BUCKETS`` -- memory is not
-    attacker-shaped beyond that bound.
+    unparseable or overlong pools into one fixed ``unknown`` bucket, so varying
+    garbage cannot mint buckets. LRU eviction resets ledgers, favoring victims.
     """
 
     MAX_FAILURES = 5
@@ -83,7 +82,7 @@ class KeyVerifyThrottle:
 
     def _key_for(self, presented: str) -> str:
         prefix, sep, rest = presented.partition(".")
-        if sep and prefix.startswith("ck_") and "." not in rest:
+        if sep and prefix.startswith("ck_") and len(prefix) <= 64 and "." not in rest:
             return prefix
         return self.UNKNOWN_BUCKET
 
