@@ -134,6 +134,8 @@ class TestCrawlRequestWebhook:
         import asyncio
 
         from crawlutron.config.settings import CrawlerSettings
+        from crawlutron.models.host_policy import HostPolicy
+        from crawlutron.models.webhook_target import WebhookTarget
         from crawlutron.orchestration.engine import crawl_request
 
         async def browser_worker(job):
@@ -144,7 +146,7 @@ class TestCrawlRequestWebhook:
             settings=CrawlerSettings.from_mapping(),
             browser_worker=browser_worker,
             shutdown_event=asyncio.Event(),
-            webhook_url="http://webhook.invalid",
+            webhook_url=WebhookTarget.admit("http://webhook.invalid", host_policy=HostPolicy.unrestricted()),
         )
         assert "webhook_url" in result
 
