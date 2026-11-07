@@ -69,8 +69,8 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     # to hold the 500-line ceiling; the seam owns every accumulator table.
     "crawlutron/storage/job_store_accumulators.py": (1, 1),
     # #314/wave-3: DNS + SSRF split out of pinned_transport (500-line ceiling);
-    # the seam owns every resolve-and-pin door plus the process-state reset pair.
-    "crawlutron/transport/pinned_dns.py": (13, 10),
+    # the seam owns every resolve-and-pin door plus the reset pair. No test doors:
+    "crawlutron/transport/pinned_dns.py": (11, 8),  # saturation via the real resolve door (ParkedResolver)
 }
 
 # Former #215 exemptions: their __all__ deliberately does not enumerate every public

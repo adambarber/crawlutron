@@ -4,6 +4,10 @@ A RUNNING getaddrinfo cannot be cancelled -- the thread stays occupied. A
 hostile or slow DNS server can therefore occupy all 32 DNS_EXECUTOR workers,
 and every later resolve waits the full budget before its timeout: the request
 path is hostage to the queue. The saturation chokepoint fails fast instead.
+
+Saturation is driven through the real resolve door (parked getaddrinfo calls
+via tests._transport_doubles.ParkedResolver), never a production test door:
+the verdict is proven at the same entry point a hostile resolver would hit.
 """
 
 import asyncio
@@ -13,6 +17,7 @@ import time
 import pytest
 
 import crawlutron.transport.pinned_dns as pt
+from tests._transport_doubles import ParkedResolver
 
 
 @pytest.fixture(autouse=True)
@@ -25,23 +30,20 @@ def _hermetic_registry():
         time.sleep(0.01)
     assert pt.dns_in_flight_resolves() == 0, "a prior test leaked registered DNS futures"
     yield
+    assert pt.dns_in_flight_resolves() == 0, "this test leaked registered DNS futures"
 
 
-def test_a_saturated_resolver_fails_fast():
+def test_a_saturated_resolver_fails_fast(monkeypatch):
     """When every resolver worker is inside a live resolve, a new resolve must
     raise the classifiable ResolverBudgetExceeded in ~no time, NOT queue the
-    full budget behind uncancellable threads. Seeded through the module's own
-    test door -- the shared executor may carry lingering threads from earlier
-    tests, so the verdict is proven at its decision input."""
-    pt.dns_seed_saturation(32)
-    try:
-        assert pt.dns_in_flight_resolves() >= 32
-        # The refusal is a pre-submit decision, so it is a fail-fast property:
-        # run it under a hang guard, not a stopwatch.
-        with pytest.raises(pt.ResolverBudgetExceeded, match="saturated"):
-            await_guarded(lambda: pt.bounded_addrinfo("victim.test"))
-    finally:
-        pt.dns_clear_saturation()
+    full budget behind uncancellable threads."""
+    parked = ParkedResolver(monkeypatch)
+    parked.occupy(pt, pt.DNS_WORKERS)
+    # The refusal is a pre-submit decision, so it is a fail-fast property:
+    # run it under a hang guard, not a stopwatch.
+    with pytest.raises(pt.ResolverBudgetExceeded, match="saturated"):
+        await_guarded(lambda: pt.bounded_addrinfo("victim.test"))
+    parked.release(pt)
 
 
 def await_guarded(work, ceiling_seconds=1.0):
@@ -113,7 +115,7 @@ def _join_via_polling(seconds: float = 5.0) -> None:
         time.sleep(0.01)
 
 
-def test_a_timed_out_wait_still_counts_the_worker():
+def test_a_timed_out_wait_still_counts_the_worker(monkeypatch):
     """The registry must hold a future until the RESOLVER THREAD completes, not
     until the caller's wait times out: a getaddrinfo still running inside its
     worker after the wait expires is exactly the blind window the saturation
@@ -137,7 +139,8 @@ def test_a_timed_out_wait_still_counts_the_worker():
                 break
             await asyncio.sleep(0.01)
         assert pt.dns_in_flight_resolves() >= 1, "the parked resolve never registered"
-        pt.dns_seed_saturation(pt.DNS_WORKERS - 1)
+        occupied = ParkedResolver(monkeypatch)
+        occupied.occupy(pt, pt.DNS_WORKERS - 1)
         try:
             with pytest.raises(pt.ResolverBudgetExceeded, match="budget"):
                 await task  # the caller's wait expires; the WORKER is still parked
@@ -147,7 +150,7 @@ def test_a_timed_out_wait_still_counts_the_worker():
                 pt.bounded_addrinfo("victim.test")
             hold.set()
         finally:
-            pt.dns_clear_saturation()
+            occupied.release(pt)
 
     asyncio.run(scenario())
     # The discard runs in the completing worker thread: the worker's own last

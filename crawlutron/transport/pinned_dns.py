@@ -26,9 +26,7 @@ __all__ = [
     "bounded_thread_resolve",
     "check_ssrf_protection",
     "check_ssrf_protection_stable",
-    "dns_clear_saturation",
     "dns_in_flight_resolves",
-    "dns_seed_saturation",
     "dns_wait_for",
     "is_private_or_loopback_ip",
     "resolve_and_pin_host",
@@ -250,24 +248,14 @@ process_state.register(__name__, _reset, _has)
 
 
 def dns_in_flight_resolves() -> int:
-    """Public door over the saturation accounting: live resolver workers now."""
+    """Public door over the saturation accounting: live resolver workers now.
+
+    Tests drive saturation through the real resolve door (a parked getaddrinfo,
+    see tests._transport_doubles.ParkedResolver); this door only observes.
+    """
     # The callback may discard from the completing thread mid-iteration, so
     # the accounting iterates over a snapshot.
     return sum(1 for f in tuple(_dns_futures) if not f.done())
-
-
-def dns_seed_saturation(workers: int) -> None:
-    """TEST DOOR: seed the registry to full capacity so the saturation verdict
-    is provable without real network resolves. Pairs with dns_clear_saturation."""
-    _dns_futures.update({concurrent.futures.Future() for _ in range(workers)})
-
-
-def dns_clear_saturation() -> None:
-    """TEST DOOR: drop the seeded placeholders -- a never-started Future cancels
-    (True); a real in-flight resolve does not (False) and stays accounted."""
-    for future in list(_dns_futures):
-        if future.cancel():
-            _dns_futures.discard(future)
 
 
 # The DNS wait posture: the ceiling on the resolver wait, derived from
