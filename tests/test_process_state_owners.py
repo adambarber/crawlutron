@@ -15,7 +15,8 @@ import pytest
 
 from crawlutron.runtime import process_state
 
-# Registered owners the registry tests reach into directly.
+# Registered owners the registry tests reach into directly (the third invariant
+# drives exhaustive membership from registered_owners(); these pin the names).
 KNOWN = (
     "crawlutron.runtime.cgroup_sense",
     "crawlutron.orchestration.engine",
@@ -29,7 +30,9 @@ KNOWN = (
     "crawlutron.storage.sqlite_store",
     "crawlutron.api.async_crawl_runner",
     "crawlutron.api.caller_auth",
+    "crawlutron.api.job_lifecycle",
     "crawlutron.models.host_policy",
+    "crawlutron.runtime.metrics",
 )
 
 
@@ -88,10 +91,15 @@ def test_every_owner_registers_and_none_exports_the_pair() -> None:
 
 
 def test_conformers_register() -> None:
-    """Modules holding reset-shaped state are all in the registry (bite of the inverse)."""
+    """Modules holding reset-shaped state are all in the registry (bite of the inverse):
+    every known owner name appears in registered_owners(), so a 14th owner cannot
+    be silently missed -- the registry's membership is checked against this list."""
     for module_path in KNOWN:
         importlib.import_module(module_path)
-    assert process_state.registered_owners(), "the registry is empty: every owner went unregistered"
+    registered = process_state.registered_owners()
+    assert registered, "the registry is empty: every owner went unregistered"
+    missing = set(KNOWN) - set(registered)
+    assert not missing, f"known owners never registered: {sorted(missing)}"
 
 
 def test_registry_reset_actually_runs_every_registration() -> None:

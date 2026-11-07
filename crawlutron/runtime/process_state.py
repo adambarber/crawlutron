@@ -2,7 +2,10 @@
 
 Modules holding state that outlives one call register a private reset/probe
 pair here at import; the harness drives :func:`reset_all_process_state` instead
-of importing a hand-copied ``reset_process_state`` from every owner.
+of importing a hand-copied ``reset_process_state`` from every owner. Scope:
+stateful containers and singletons with observable behavior. Bounded pure-function
+memo caches (``lru_cache`` on total functions) and in-flight registries emptied by
+drain are not members: their entries are value-keyed and never go stale.
 """
 
 from __future__ import annotations

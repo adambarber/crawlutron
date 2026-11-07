@@ -59,17 +59,12 @@ def _receives_mutation(node: ast.AST, containers: set[str]) -> str | None:
     return None
 
 
-def _mutated_without_reset_door_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
-    """Every mutated module-level container no module-level function ever empties.
-
-    Only a ``.clear()`` call counts: ``pop``/``discard`` remove one element and a
-    rebind is invisible to holders of the old object. The registry module itself
-    is the recursion base case -- its table IS the reset family's spine."""
-    if path.name == "process_state.py":
-        return []
+def _mutations_by_line(tree: ast.Module) -> dict[str, int]:
+    """Mutated module-level container -> first line mutating it, from the module's
+    own functions. Shared by both detectors: the mutation sweep is one walk."""
     containers = _module_level_containers(tree)
     if not containers:
-        return []
+        return {}
     mutated: dict[str, int] = {}
     for fn in function_defs(tree):
         for node in nodes_of(fn):
@@ -78,6 +73,18 @@ def _mutated_without_reset_door_offenders(tree: ast.Module, path: pathlib.Path) 
             hit = _receives_mutation(node, containers)
             if hit is not None and node.lineno != fn.lineno:
                 mutated.setdefault(hit, node.lineno)
+    return mutated
+
+
+def _mutated_without_reset_door_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
+    """Every mutated module-level container no module-level function ever empties.
+
+    Only a ``.clear()`` call counts: ``pop``/``discard`` remove one element and a
+    rebind is invisible to holders of the old object. The registry module itself
+    is the recursion base case -- its table IS the reset family's spine."""
+    if path.name == "process_state.py":
+        return []
+    mutated = _mutations_by_line(tree)
     if not mutated:
         return []
     emptied: set[str] = set()
@@ -163,3 +170,60 @@ def test_no_module_hand_copies_the_reset_pair():
         f"the reset family is registry-owned (#621); hand-copied pairs: {offenders} -- "
         f"register private closures with crawlutron.runtime.process_state instead"
     )
+
+
+def _reset_shaped_but_unregistered_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
+    """Modules with a reset-shaped door (a function emptying a mutated module-level
+    container) that never call ``process_state.register(...)`` in their own body.
+    The call IS the registration: the runtime membership cross-check lives in
+    test_process_state_owners.test_conformers_register over the live registry.
+    """
+    if path.name == "process_state.py":
+        return []
+    if _mutated_without_reset_door_offenders(tree, path):
+        return []  # the door rule already owns this file
+    mutated = _mutations_by_line(tree)
+    if not mutated:
+        return []
+    for node in nodes_of(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr == "register" and isinstance(node.func.value, ast.Name):
+                if node.func.value.id == "process_state":
+                    return []
+    assert mutated
+    return [
+        offender(
+            path,
+            min(mutated.values()),
+            f"this module holds reset-shaped module state ({', '.join(sorted(mutated))}) but never "
+            f"calls process_state.register -- register a reset/probe pair so the reset family owns it",
+        )
+    ]
+
+
+RESET_SHAPED_STATE_IS_REGISTERED = Rule(
+    name="reset-shaped-state-is-registered",
+    find=_reset_shaped_but_unregistered_offenders,
+    summary=(
+        "a module with a reset door for module-level state must register that state with "
+        "crawlutron.runtime.process_state -- an unregistered reset is invisible to the seam"
+    ),
+    bite=lambda: (
+        Bites(
+            "STATE = {}\n\n\ndef fill():\n    STATE['k'] = 1\n\n\ndef _reset():\n    STATE.clear()\n",
+            "never calls process_state.register",
+        ),
+    ),
+    clean=lambda: (
+        # No mutated state, no registration duty.
+        "TABLE = {}\n\n\ndef lookup(k):\n    return TABLE.get(k)\n",
+    ),
+)
+
+
+def test_reset_shaped_state_is_registered():
+    RESET_SHAPED_STATE_IS_REGISTERED.scan()
+
+
+def test_reset_shaped_registration_bites():
+    RESET_SHAPED_STATE_IS_REGISTERED.check_bites()

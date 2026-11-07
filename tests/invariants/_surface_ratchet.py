@@ -16,6 +16,8 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     # RAISED to (14, 11) then LOWERED to (7, 6), (5, 5), (4, 4), then (2, 2): HostPolicy and
     # registrable_domain
     "crawlutron/safety/validation.py": (2, 2),
+    # RAISED to (8, 6) by #621: EnvDecisionMemo is the one shared env-decision memo
+    # (it replaced two hand-copied lumps; net surface across the memo modules went DOWN).
     "crawlutron/config/env.py": (8, 6),
     # RAISED to (7, 6): failed_unified_result is the single failure projection.
     "crawlutron/api/response_shaping.py": (7, 6),

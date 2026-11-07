@@ -257,16 +257,6 @@ def job_store(tmp_path):
     return make_job_store(str(tmp_path))
 
 
-def _clear_metrics() -> None:
-    """Reset the process-local metrics store.
-
-    Without it, metric assertions become order-dependent: a later test could
-    observe utilization left by an earlier crawl."""
-    from crawlutron.runtime.metrics import get_metrics
-
-    get_metrics().reset()
-
-
 def _clear_global_http_state() -> None:
     """Reset every registered process-state owner through the one seam (#621).
 
@@ -281,7 +271,7 @@ def _clear_global_http_state() -> None:
     service_app().state.shutdown_event = asyncio.Event()
 
 
-_MODULE_GLOBAL_RESETS = (_clear_metrics, _clear_global_http_state)
+_MODULE_GLOBAL_RESETS = (_clear_global_http_state,)
 
 
 @pytest.fixture(autouse=True)
