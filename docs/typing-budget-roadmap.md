@@ -1,5 +1,14 @@
 # Typing-budget reduction roadmap (undeclared records) — as of c5ab69d
 
+> **SUPERSEDED (2026-11-07):** the typing budget reached ZERO and the budget
+> table itself is gone — `tests/test_typing_budget.py` now carries no `_BUDGETS`
+> for the app tree; its unconditional zero-assertions are the terminus (see the
+> in-file comment "ALL batches landed (1-4): ZERO undeclared records, ZERO bare
+> Any, no budget table left"). This roadmap is HISTORICAL: the "Remaining 198
+> offenders" below counted app/ paths that no longer exist (the tree is now
+> `crawlutron/`), and the blockers section describes a tree state that has long
+> since been resolved. Kept for history only — do not work from this list.
+
 Baseline measured on a detached worktree at HEAD: **204/204**. After the first
 verified increment (error envelope + discovery payload records), measurement is
 **198/198** (budget lowered in the same commit). Work was done in a detached
