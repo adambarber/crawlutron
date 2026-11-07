@@ -136,16 +136,37 @@ def test_result_construction_enforces_membership_at_the_dataclass():
 
     Every dataclass validates its Literal fields in ``__post_init__``, so no
     build site can escape membership checking; a bad direct construction raises."""
-    from dataclasses import asdict
-
-    from crawlutron.models.crawl_result import CrawlResult, EngineCrawlResult
-    from crawlutron.models.crawl_strategy_attempt import CrawlStrategyAttempt
+    from crawlutron.models.crawl_result import EngineCrawlResult
+    from crawlutron.models.serialization import from_wire, to_dict
+    from tests._policy_factories import UNRESTRICTED_HOST_POLICY
     from tests._result_builders import engine_result
 
-    # The all-member baseline, named once and DERIVED rather than restated.
-    member_engine_result = asdict(engine_result("http://a/", "rendered"))
-    # Built, not spelled. Constructing the result directly hands each value to the field's own type, so the
+    # The all-member baseline, named once and DERIVED rather than restated. to_dict,
+    # not asdict: the Mapping fields are not copyable, and the wire record is the truth.
+    member_engine_result = dict(to_dict(engine_result("http://a/", "rendered")))
+    # A wire-shaped record rebuilds through the same constructor (from_wire), so the
     # all-member build is checked against the taxonomy it is a sample of.
+    assert from_wire(EngineCrawlResult, member_engine_result, policy=UNRESTRICTED_HOST_POLICY)
+
+    # A non-member on each Literal axis raises at construction.
+    for field, invented in (
+        ("status", "Bogus"),
+        ("classification", "Bogus"),
+        ("selected_strategy", "BROWSER_INVENTED"),
+    ):
+        poisoned = dict(member_engine_result)
+        poisoned[field] = invented
+        with pytest.raises(ValueError, match=f".{field}="):
+            from_wire(EngineCrawlResult, poisoned, policy=UNRESTRICTED_HOST_POLICY)
+
+
+def test_the_crawl_result_attempt_rejects_bad_error_codes():
+    """The CrawlError axis: a stable code outside the declared taxonomy is rejected."""
+    from dataclasses import asdict
+
+    from crawlutron.models.crawl_result import CrawlResult
+    from crawlutron.models.crawl_strategy_attempt import CrawlStrategyAttempt
+
     member_crawl_result = CrawlResult(
         url=canonical("http://a/"),
         attempt=CrawlStrategyAttempt(
@@ -162,30 +183,9 @@ def test_result_construction_enforces_membership_at_the_dataclass():
         attempts=1,
         domain="example.com",
     )
-    member_crawl_result_fields = asdict(member_crawl_result)
-
-    # A direct construction with all-member values is accepted: the gate must not reject legitimate direct
-    # builds (tests and the primitives both do it).
-    CrawlStrategyAttempt(
-        strategy="BROWSER_HEADLESS",
-        status="success",
-        classification="rendered",
-        http_status=200,
-        content_type=None,
-        elapsed_ms=0,
-    )
-    EngineCrawlResult(**member_engine_result)
-    # A non-member on each Literal axis raises at construction.
-    for field, invented in (
-        ("status", "Bogus"),
-        ("classification", "Bogus"),
-        ("selected_strategy", "BROWSER_INVENTED"),
-    ):
-        with pytest.raises(ValueError, match=f".{field}="):
-            EngineCrawlResult(**{**member_engine_result, field: invented})
-    # CrawlError axis: a stable code outside the declared taxonomy is rejected.
-    with pytest.raises(ValueError, match=r"\.error="):
-        CrawlStrategyAttempt(**{**member_crawl_result_fields["attempt"], "error": "worker_failed"})
+    attempt_fields = asdict(member_crawl_result)["attempt"]
+    with pytest.raises(ValueError, match=r".error="):
+        CrawlStrategyAttempt(**{**attempt_fields, "error": "worker_failed"})
 
 
 # =========================================================================== NAMED-CONSTANT provenance

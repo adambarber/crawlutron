@@ -6,7 +6,9 @@ error vocabularies, so they are declared together here and each stays findable.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from types import MappingProxyType
 
 from crawlutron.models.classification_evidence import ClassificationEvidenceRecord
 from crawlutron.models.crawl_diagnostics import CrawlDiagnostics
@@ -77,28 +79,40 @@ class EngineCrawlResult(LiteralChecked):
     status: ResultStatus
     classification: Classification
     selected_strategy: CrawlStrategyName | None
-    attempted_strategies: list[CrawlStrategyAttempt]
+    attempted_strategies: Sequence[CrawlStrategyAttempt]
     http_status: int | None
-    headers: dict[str, str]
+    headers: Mapping[str, str]
     content_type: str | None
     html: str | None
     text: str | None
     extraction_method: str | None
     quality_score: float
-    classification_evidence: list[ClassificationEvidenceRecord] = field(default_factory=list)
+    classification_evidence: Sequence[ClassificationEvidenceRecord] = ()
     diagnostics: CrawlDiagnostics = field(default_factory=CrawlDiagnostics)
     discovered_link_count: int = 0
     discovered_links_truncated: bool = False
-    discovered_links: list[DiscoveredLink] = field(default_factory=list)
+    discovered_links: Sequence[DiscoveredLink] = ()
     error: CrawlError | None = None
     markdown: str | None = None
     next_page_url: NormalizedUrl | None = None
     # Origin validators ("etag"/"last_modified") for conditional revalidation;
     # empty when the origin supplied none.
-    validators: dict[str, str] = field(default_factory=dict)
+    validators: Mapping[str, str] = field(default_factory=dict)
     # Page metadata from the engine's discovery tree; None when no tree existed.
     # Persisted in the spill, never on the wire (shaping maps it).
     llm_metadata: PageMetadata | None = None
+
+    def __post_init__(self) -> None:
+        # #603: the frozen record's collections are immutable at the construction
+        # edge -- callers pass list/dict, the record stores tuple/Mapping views.
+        super().__post_init__()
+        object.__setattr__(self, "attempted_strategies", tuple(self.attempted_strategies))
+        object.__setattr__(self, "classification_evidence", tuple(self.classification_evidence))
+        object.__setattr__(self, "discovered_links", tuple(self.discovered_links))
+        if not isinstance(self.headers, Mapping) or hasattr(self.headers, "__setitem__"):
+            object.__setattr__(self, "headers", MappingProxyType(dict(self.headers)))
+        if not isinstance(self.validators, Mapping) or hasattr(self.validators, "__setitem__"):
+            object.__setattr__(self, "validators", MappingProxyType(dict(self.validators)))
 
     @property
     def elapsed_ms(self) -> int:

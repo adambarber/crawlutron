@@ -6,8 +6,9 @@ from_wire reads the same annotations, so a changed field moves both at once.
 from __future__ import annotations
 
 import types
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import MISSING, fields, is_dataclass
+from types import MappingProxyType
 from typing import Union, cast, get_args, get_origin, get_type_hints
 
 from crawlutron.models.freezable_record import FreezableRecord
@@ -68,12 +69,13 @@ def _to_jsonable_impl(value: object, seen: set[int]) -> JsonValue:
         return value.raw
     if is_dataclass(value) and not isinstance(value, type):
         return _build_guarded(value, seen, _render_dataclass)
-    if isinstance(value, dict):
+    if isinstance(value, Mapping):
         return _build_guarded(
             value,
             seen,
             lambda node, path: {
-                key: _to_jsonable_impl(item, path) for key, item in cast(dict[str, JsonValue], node).items()
+                key: _to_jsonable_impl(item, path)
+                for key, item in cast(Mapping[str, JsonValue], node).items()
             },
         )
     if isinstance(value, (list, tuple)):
@@ -113,6 +115,24 @@ def _rebuild_value(annotation: object, value: object, *, policy: HostPolicy) -> 
         args = get_args(annotation)
         (item,) = args if len(args) == 1 else (object,)
         return [_rebuild_value(item, element, policy=policy) for element in value]
+    if origin in (tuple, Sequence) and isinstance(value, list):
+        args = get_args(annotation)
+        (item,) = (args[0],) if args and isinstance(args[0], type) else (object,)
+        # The record stores tuples (#603), so the rebuild returns the declared truth.
+        return tuple(_rebuild_value(item, element, policy=policy) for element in value)
+    if origin is tuple and isinstance(value, list):
+        args = get_args(annotation)
+        (item,) = args[:-1] if len(args) == 2 else (object,)
+        return tuple(_rebuild_value(item, element, policy=policy) for element in value)
+    if origin in (Mapping, dict) and isinstance(value, dict):
+        (value_type,) = get_args(annotation)[-1:]
+        return (
+            MappingProxyType(
+                {key: _rebuild_value(value_type, item, policy=policy) for key, item in value.items()}
+            )
+            if value_type is not object
+            else MappingProxyType(dict(value))
+        )
     if origin in (Union, types.UnionType) and value is not None:
         members = [member for member in get_args(annotation) if member is not type(None)]
         if len(members) == 1:

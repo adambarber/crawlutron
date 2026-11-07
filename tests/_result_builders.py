@@ -1,7 +1,9 @@
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import TypedDict, Unpack
 from urllib.parse import urljoin
 
+from crawlutron.models.classification_evidence import ClassificationEvidenceRecord
 from crawlutron.models.crawl_diagnostics import CrawlDiagnostics
 from crawlutron.models.crawl_job import CrawlJob
 from crawlutron.models.crawl_result import CrawlResult, EngineCrawlResult
@@ -33,11 +35,11 @@ class _EngineResultOverrides(TypedDict, total=False):
     normalized_url: NormalizedUrl | None
     # Strategy selection
     selected_strategy: CrawlStrategyName | None
-    attempted_strategies: list[CrawlStrategyAttempt]
-    # Response metadata
+    attempted_strategies: Sequence[CrawlStrategyAttempt]  # Response metadata
     http_status: int | None
-    headers: dict[str, str]
+    headers: Mapping[str, str]
     content_type: str | None
+    classification_evidence: Sequence[ClassificationEvidenceRecord]
     # Content
     html: str | None
     text: str | None
@@ -45,8 +47,7 @@ class _EngineResultOverrides(TypedDict, total=False):
     # Quality
     quality_score: float
     # Discovery
-    discovered_links: list[DiscoveredLink]
-    # Derived, never passed: the builder raises if a caller tries
+    discovered_links: Sequence[DiscoveredLink]  # Derived, never passed: the builder raises if a caller tries
     discovered_link_count: int
     # Error
     error: CrawlError | None
@@ -54,7 +55,7 @@ class _EngineResultOverrides(TypedDict, total=False):
     markdown: str | None
     diagnostics: CrawlDiagnostics
     llm_metadata: PageMetadata | None
-    validators: dict[str, str]
+    validators: Mapping[str, str]
 
 
 def make_job(index: int, url: str, *, options: RenderOptions | None = None) -> CrawlJob:
@@ -95,15 +96,15 @@ def _absent_result(
         status=derived,
         classification=classification,
         selected_strategy=None,
-        attempted_strategies=[
+        attempted_strategies=(
             terminal_attempt(
                 strategy=None,
                 status=derived,
                 classification=classification,
                 elapsed_ms=0,
                 error=None,
-            )
-        ],
+            ),
+        ),
         http_status=None,
         headers={},
         content_type=None,
@@ -111,7 +112,7 @@ def _absent_result(
         text=None,
         extraction_method=None,
         quality_score=0.0,
-        discovered_links=discovered,
+        discovered_links=tuple(discovered),
         discovered_link_count=len(discovered),
         error=None,
     )
@@ -160,7 +161,11 @@ def engine_result(
         final_url_text=final_url_text,
         discovered=discovered,
     )
-    return replace(absent, **overrides) if overrides else absent
+    if overrides:
+        # The record's __post_init__ normalizes sequences/mappings, and replace()
+        # re-enters __init__, so raw overrides are checked at construction.
+        return replace(absent, **overrides)
+    return absent
 
 
 def skipped_result(

@@ -210,7 +210,7 @@ async def test_browser_result_carries_the_shared_builder_shape(monkeypatch):
     assert "page one with enough words" in result.text
     assert isinstance(result.markdown, str)
     assert isinstance(result.extraction_method, str)
-    assert result.classification_evidence == []
+    assert result.classification_evidence == ()
     assert_extracted_discovery(result)
     assert result.diagnostics["next_page_url"] == NEXT_PAGE_URL
     # One attempt, matching the HTTP path's single-attempt shape.
