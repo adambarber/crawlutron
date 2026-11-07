@@ -78,7 +78,7 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
 DECLARED_SURFACE_RATCHET = {
     # Generated at build time by the hatch-vcs hook (#561); never hand-edited.
     "crawlutron/_version.py": (3, 0),
-    "crawlutron/admission/policy.py": (11, 6),
+    "crawlutron/admission/policy.py": (10, 5),
     "crawlutron/api/_depends_singletons.py": (2, 0),
     "crawlutron/api/async_crawl_runner.py": (3, 2),
     "crawlutron/api/caller_auth.py": (18, 15),

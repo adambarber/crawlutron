@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from crawlutron.admission.admission_links import admit_discovered_links
 from crawlutron.admission.payload_helpers import payload_policy
-from crawlutron.admission.policy import PolicyTier, read_policy, wire_policy
+from crawlutron.admission.policy import PolicyTier, read_policy
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
@@ -24,6 +24,31 @@ if TYPE_CHECKING:
     from crawlutron.models.json_value import JsonValue
 
 UNRESTRICTED_HOST_POLICY = HostPolicy.unrestricted()
+
+
+def wire_policy(
+    *,
+    strategies: list[str] | None = None,
+    limits: dict[str, JsonValue] | None = None,
+    discovery: dict[str, JsonValue] | None = None,
+    scope_regex: str | None = None,
+    extraction: str | None = None,
+) -> dict[str, JsonValue]:
+    """The test-side wire shape: each block is a named keyword, so a typo'd name
+    is a ``TypeError``. The model's own defaults apply at ``read_policy``."""
+    from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
+
+    policy: dict[str, JsonValue] = {
+        "strategies": list(strategies) if strategies is not None else [HTTP_DECLARED_CRAWLER],
+        "limits": {} if limits is None else dict(limits),
+    }
+    if discovery is not None:
+        policy["discovery"] = discovery
+    if scope_regex is not None:
+        policy["scope_regex"] = scope_regex
+    if extraction is not None:
+        policy["extraction"] = extraction
+    return policy
 
 
 def canonical(url: str | NormalizedUrl) -> NormalizedUrl:
@@ -159,7 +184,7 @@ __all__ = [
 def crawl_policy(strategies=None, **over: JsonValue) -> dict[str, JsonValue]:
     """The wire policy a test fixture sends: the live-server limits by default,
     any wire block overridden through ``over``. The grammar lives in
-    ``crawlutron.admission.policy.wire_policy``; this names a profile only."""
+    ``tests._policy_factories.wire_policy``; this names a profile only."""
     return {**wire_policy(strategies=strategies, limits=crawl_limits()), **over}
 
 
