@@ -44,10 +44,14 @@ guards them stated:
 - **S4 — credential origins ride the egress guard.** Credential origins pass
   the same SSRF egress check as crawl targets: a private/loopback credential
   origin requires `CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1`.
-- **S5 — caller keys hash with plain SHA-256.** Unsalted SHA-256 is not a
-  password-hashing KDF; it is acceptable here only because key secrets are
-  `secrets.token_urlsafe(32)` (256-bit entropy) — unguessable, so a digest
-  table adds nothing to attack. Do not reuse this pattern for human-chosen
+- **S5 — caller key secrets are verified with salted PBKDF2-SHA256.** Issued
+  secrets are `ck_<key_id>.<body>` where the body is `secrets.token_urlsafe(32)`
+  (256-bit entropy). At rest the key row stores a salted PBKDF2-SHA256 digest
+  (210,000 iterations, per-key 16-byte salt,
+  `crawlutron/storage/caller_key_store.py`); verification is one primary-key
+  lookup plus one PBKDF2 run, with a miss burning the same derivation against
+  a fixed dummy digest so timing is uniform. Residual: entropy of the secret,
+  not the KDF, is the real guard; do not reuse this pattern for human-chosen
   secrets.
 
 ### Dangerous environment escape hatches
@@ -60,8 +64,18 @@ live settings/env code — `crawlutron/models/host_policy.py`,
 | Variable | Default | Weakened when | Effect |
 | -------- | ------- | ------------- | ------ |
 | `CRAWLUTRON_ALLOW_PRIVATE_TARGETS` | unset | `1` | Disables the SSRF private-target guard: caller URLs may reach private, loopback, and link-local addresses including cloud metadata endpoints. Logs a `SSRF private-target guard DISABLED` WARNING. |
-| `CRAWLUTRON_RESPECT_ROBOTS` | `true` | `false` | Stops robots.txt enforcement; disallowed targets crawl instead of returning `robots_disallowed`. |
-| `CRAWLUTRON_HEADLESS` | `true` | `false` | Runs the browser headed. Not a safety guard, but changes the automation surface. |
+
+### Ordinary operational knobs
+
+Two variables are sometimes mistaken for safety hatches; they are not. They
+change operational behavior only and are listed in the Configuration table
+below:
+
+- `CRAWLUTRON_RESPECT_ROBOTS` (default `true`) — turns robots.txt
+  enforcement off. Robots compliance is a crawler courtesy/policy choice, not
+  a security boundary of this service.
+- `CRAWLUTRON_HEADLESS` (default `true`) — runs the browser headed instead
+  of headless. Changes the automation surface, weakens no guard.
 
 See `SECURITY.md` for the threat model and reporting process, and
 `docs/reviews/ADVERSARIAL_REVIEW_BROWSER_CRAWLER.md` for the dated adversarial review of
@@ -410,6 +424,15 @@ defaults shown):
 | `CRAWLUTRON_SEARCH_LIMIT_MAX` | `20` | Hard cap on results per search. |
 | `CRAWLUTRON_SEARCH_TIMEOUT_SECONDS` | `15` | Provider call timeout. |
 | `CRAWLUTRON_MAX_BATCH_SIZE` | `50` | Max URLs per batch request. |
+| `CRAWLUTRON_WARMUP_URLS` | `""` | Comma-separated URLs fetched once at browser startup to warm engine caches (`browser.py`). Warmup URLs are normalized through the same public-URL policy as crawl targets. |
+
+Two DNS posture values are **not** env-tunable — they are module constants in
+`crawlutron/transport/pinned_dns.py`: `DNS_WORKERS = 32` (the dedicated DNS
+resolver thread pool) and `DNS_WAIT_SECONDS = 5.0` (the ceiling on a resolver
+wait; a request's own timeout tightens it further). They implement the
+pinned-DNS saturation law: when every worker is inside a live resolve, a new
+resolve refuses fast (`ResolverBudgetExceeded`, classifiable as `dns_error`)
+instead of queueing behind an uncancellable `getaddrinfo`.
 | `CRAWLUTRON_DEFAULT_TIMEOUT_SECONDS` | `30` | Default per-request timeout. |
 | `CRAWLUTRON_DEFAULT_MAX_RETRIES` | `5` | Default retry count. |
 | `CRAWLUTRON_RESPECT_ROBOTS` | `true` | Respect robots.txt by default. |
