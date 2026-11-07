@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from fastapi.routing import APIRoute
 
 from crawlutron.api.router_registry import ROUTER_MODULES
-from crawlutron.mcp.tools import TOOL_SPECS
+from crawlutron.mcp.registry import TOOL_SPECS
 
 
 @dataclass(frozen=True)
@@ -26,8 +26,6 @@ class ParityRow:
 #: ACCIDENT rows are temporary gaps: each is deleted in the same commit as the
 #: tool that lands. The ratchet constant below must move DOWN only.
 ACCIDENT_ROWS: tuple[ParityRow, ...] = (
-    ParityRow("GET", "/v1/crawl/{request_id}", "read_crawl_result"),
-    ParityRow("GET", "/v1/crawl/{request_id}/trace", "read_crawl_trace"),
     ParityRow("POST", "/v1/jobs", "create_job"),
     ParityRow("GET", "/v1/jobs", "list_jobs"),
     ParityRow("GET", "/v1/jobs/{job_id}", "get_job"),
@@ -40,7 +38,7 @@ ACCIDENT_ROWS: tuple[ParityRow, ...] = (
 )
 
 #: Pinned literal: rows and this count move DOWN together, same commit.
-ACCIDENT_ROW_COUNT: int = 11
+ACCIDENT_ROW_COUNT: int = 9
 
 #: PRINCIPLED rows are permanent, deliberate absences with a stated reason.
 PRINCIPLED_ROWS: tuple[ParityRow, ...] = (

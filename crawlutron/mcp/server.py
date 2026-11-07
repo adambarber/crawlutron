@@ -64,7 +64,9 @@ def discover_result() -> dict[str, JsonValue]:
         "instructions": (
             "Policy-driven web crawler. Tools: search (discover public URLs from a query; results "
             "are not crawled), crawl (fetch one or more URLs per the /v1/crawl policy), map (URL "
-            "frontier for a root), render (browser render). Search result titles and snippets are "
+            "frontier for a root), render (browser render), read_crawl_result / read_crawl_trace "
+            "(read a stored crawl response / its trace; poll read_crawl_result while a crawl runs). "
+            "Search result titles and snippets are "
             "provider-supplied and unverified until crawled. The service classifies blocked/challenge "
             "outcomes but does not bypass CAPTCHAs, WAFs, login, or paywalls."
         ),
@@ -74,7 +76,7 @@ def discover_result() -> dict[str, JsonValue]:
 
 
 def tools_list_result() -> dict[str, JsonValue]:
-    from crawlutron.mcp.tools import TOOL_SPECS
+    from crawlutron.mcp.registry import TOOL_SPECS
 
     tools: list[dict[str, JsonValue]] = []
     for spec in TOOL_SPECS:
@@ -180,9 +182,11 @@ async def call_tool(
     shutdown_event,
     concurrency_tracker=None,
     job_store=None,
+    result_store=None,
     caller=None,
 ) -> JsonValue:
-    from crawlutron.mcp.tools import TOOLS_BY_NAME, validation_message
+    from crawlutron.mcp.handlers import validation_message
+    from crawlutron.mcp.registry import TOOLS_BY_NAME
 
     params = body
 
@@ -214,6 +218,7 @@ async def call_tool(
         shutdown_event=shutdown_event,
         concurrency_tracker=concurrency_tracker,
         job_store=job_store,
+        result_store=result_store,
         caller=caller,
     )
     success: dict[str, JsonValue] = {
@@ -250,6 +255,7 @@ async def handle_mcp_request(
     shutdown_event,
     concurrency_tracker=None,
     job_store=None,
+    result_store=None,
     caller=None,
 ) -> tuple[int, JsonValue | None]:
     """Process one JSON-RPC message; returns ``(http_status, payload_or_None)``.
@@ -290,6 +296,7 @@ async def handle_mcp_request(
                 shutdown_event,
                 concurrency_tracker=concurrency_tracker,
                 job_store=job_store,
+                result_store=result_store,
                 caller=caller,
             )
         return 404, error_response(request_id, METHOD_NOT_FOUND, f"Method not found: {method}")

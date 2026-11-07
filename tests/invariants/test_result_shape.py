@@ -107,7 +107,7 @@ _ENVELOPE_BUILDERS = ("abuild_unified_crawl_response", "build_unified_crawl_resp
 
 
 _ENVELOPE_ADAPTER_EXEMPT = frozenset(
-    {"crawlutron/api/async_crawl_runner.py", "crawlutron/mcp/tools.py"}  # adapters, not wire endpoints
+    {"crawlutron/api/async_crawl_runner.py", "crawlutron/mcp/handlers.py"}  # adapters, not wire endpoints
 )
 
 

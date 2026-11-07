@@ -47,7 +47,7 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     # The two latest surface modules: the gate must not silently drop a module
     # added since the list was pinned (these prune handlers/helpers via __all__).
     "crawlutron/api/keys_router.py": (4, 3),
-    "crawlutron/api/crawl_endpoint.py": (4, 4),
+    "crawlutron/api/crawl_endpoint.py": (6, 6),  # #645: RAISED, the two read cores joined.
     # #127: the pool concept splits on a real async/sync axis -- AsyncPool for
     # BrowserPool, SyncPool for DocExtractionPool -- so the surface is two protocols.
     "crawlutron/runtime/pool.py": (2, 2),
@@ -108,8 +108,10 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/mcp/protocol.py": (6, 6),
     "crawlutron/mcp/router.py": (2, 1),
     "crawlutron/mcp/server.py": (6, 5),
-    # #644: RAISED to (14, 8): RestRoute joins the declared surface.
-    "crawlutron/mcp/tools.py": (14, 8),
+    # #645: tools.py split into registry + handlers (500-line ceiling); the read
+    # tools joined. Closures lowered both entry counts.
+    "crawlutron/mcp/registry.py": (4, 1),
+    "crawlutron/mcp/handlers.py": (12, 5),
     # #644: the one declaration of the module-level feature routers.
     "crawlutron/api/router_registry.py": (1, 0),
     "crawlutron/orchestration/admission_stall.py": (5, 3),

@@ -14,9 +14,9 @@ from fastapi.responses import JSONResponse, Response
 from crawlutron.api.caller_auth import get_caller_identity
 from crawlutron.api.dependencies import get_settings, get_shutdown_event
 from crawlutron.mcp.constants import INVALID_API_KEY, INVALID_REQUEST, PARSE_ERROR
+from crawlutron.mcp.handlers import http_exception_message
 from crawlutron.mcp.protocol import error_response
 from crawlutron.mcp.server import handle_mcp_request
-from crawlutron.mcp.tools import http_exception_message
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.error_response import ErrorResponse
 
@@ -76,6 +76,7 @@ async def mcp_endpoint(
         shutdown_event=shutdown_event,
         concurrency_tracker=getattr(request.app.state, "concurrency_tracker", None),
         job_store=getattr(request.app.state, "job_store", None),
+        result_store=getattr(request.app.state, "result_store", None),
         caller=caller,
     )
     if payload is None:

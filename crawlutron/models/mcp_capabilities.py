@@ -8,3 +8,4 @@ class McpCapabilities(BaseModel):
 
     endpoint: str = Field(description="The MCP streamable-HTTP endpoint path.")
     protocol_versions: list[str] = Field(description="MCP protocol versions the server implements.")
+    tools: list[str] = Field(description="Tool names the MCP tools/list surface serves.")
