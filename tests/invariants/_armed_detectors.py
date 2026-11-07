@@ -28,11 +28,19 @@ def _observed(name: str) -> Callable[[], None]:
     prop = PROPERTY_BY_NAME[name]
 
     def premise() -> None:
-        # Observer walks register in _OBSERVERS at import; importing the detector
-        # modules here guarantees the premise never audits an unregistered property.
-        import tests.invariants.test_registry_bool_env  # noqa: F401
-        import tests.invariants.test_registry_robots  # noqa: F401
-        import tests.invariants.test_registry_targets  # noqa: F401
+        # Observer walks register in _OBSERVERS at import: importing the detector
+        # modules keeps the LOAD explicit, without the unused-name lint an import earns.
+        import importlib
+
+        loaded = {
+            importlib.import_module(name).__name__
+            for name in (
+                "tests.invariants.test_registry_bool_env",
+                "tests.invariants.test_registry_robots",
+                "tests.invariants.test_registry_targets",
+            )
+        }
+        assert len(loaded) == 3, f"detector modules failed to load: {loaded}"
         from tests.invariants._registry_machinery import _observed_property_count
 
         assert _observed_property_count(prop) > 0, (

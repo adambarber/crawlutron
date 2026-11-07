@@ -218,10 +218,14 @@ ignore = [
 # fails the build rather than accumulating.
 #
 # `ruff format --check` runs as a hook beside `ruff check`. E501 is enforced
-# and the tree carries ZERO `# noqa` comments: every former suppression has been
-# paid for by shortening or reflowing the offending lines. RUF100 remains
-# selected, so any future inline suppression that suppresses nothing is itself
-# a lint error -- and PGH004 forces any that does suppress to name its rule.
+# and the tree carries zero inline suppressors: every former suppression was
+# paid for by shortening or reflowing the offending lines, and the #638 wave
+# cleared the rest (test doubles, admission harnesses, registry imports). The
+# whole-tree assertion lives in tests/invariants/test_no_inline_suppressions.py,
+# which scans crawlutron/ and tests/ token-precisely and fails naming file+line.
+# RUF100 remains selected, so any future inline suppression that suppresses
+# nothing is itself a lint error -- and PGH004 forces any that does suppress to
+# name its rule.
 #
 # B008: FastAPI dependency injection passes Depends(...) as a default argument
 # by design; calls listed here are recognized as immutable by bugbear.

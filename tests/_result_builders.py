@@ -46,6 +46,7 @@ class _EngineResultOverrides(TypedDict, total=False):
     quality_score: float
     # Discovery
     discovered_links: list[DiscoveredLink]
+    # Derived, never passed: the builder raises if a caller tries
     discovered_link_count: int
     # Error
     error: CrawlError | None
@@ -140,8 +141,9 @@ def engine_result(
     # ``normalized_url``/``final_url`` are the record's value fields; callers still name submission text, so
     # admission lives here at the one builder rather than at every call site.
     normalized_text = overrides.pop("normalized_url", url)
-    # ``final_url`` is no longer in the overrides TypedDict: the named parameter owns it.
-    final_url_text: str | NormalizedUrl | None = overrides.pop("final_url", None)  # type: ignore[typeddict-item]
+    # ``final_url`` binds to the named parameter; a caller-supplied ``final_url=``
+    # can never land in ``overrides``, so no override tolerance is needed here.
+    final_url_text: str | NormalizedUrl | None = None
     if not isinstance(final_url, Unset):
         # A named ``final_url`` wins, ``None`` included (an absent field).
         final_url_text = _text(final_url) if final_url is not None else None

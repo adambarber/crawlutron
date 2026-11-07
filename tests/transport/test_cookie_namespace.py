@@ -4,6 +4,9 @@ Without isolation the shared jar leaks cookies across tenants; the namespace
 contextvar is set per ``crawl_request`` from ``cookie_namespace``, keying jars.
 """
 
+from typing import cast
+
+from crawlutron.models.request_profile_record import RequestProfileRecord
 from crawlutron.storage.coordination_cookies import DEFAULT_MAX_HOSTS_PER_NAMESPACE
 from crawlutron.transport.cookie_jar import COOKIE_JAR_MAX_HOSTS_PER_NAMESPACE, COOKIE_NAMESPACE, CookieJar
 from crawlutron.transport.request_profile import cookie_namespace_for
@@ -83,10 +86,10 @@ def test_cookie_namespace_for_helper_reads_profile():
     assert cookie_namespace_for({"cookie_namespace": "tenant_a"}) == "tenant_a"
     assert cookie_namespace_for({"cookie_namespace": "  tenant_b  "}) == "tenant_b"
     assert cookie_namespace_for({}) == ""
-    # A non-str namespace is ignored; an object mapping is the honest spelling
-    # of "deliberately wrong value type".
-    invalid: object = {"cookie_namespace": 42}
-    assert cookie_namespace_for(invalid) == ""  # type: ignore[arg-type]
+    # A non-str namespace is ignored; the wrong-typed value goes through a
+    # provenance-documented cast of the record shape (only that key is read).
+    invalid = cast("RequestProfileRecord", {"cookie_namespace": 42})
+    assert cookie_namespace_for(invalid) == ""
 
 
 def test_cookie_namespace_contextvar_default_is_empty():

@@ -1,8 +1,11 @@
 """Request profiles stay inside the cookie namespace with typed values."""
 
+from typing import cast
+
 import pytest
 from pydantic import ValidationError
 
+from crawlutron.models.request_profile_record import RequestProfileRecord
 from tests.chokepoint_walks import APP_ROOT
 
 
@@ -104,7 +107,7 @@ class TestRequestProfileCookiesCannotBypassTheNamespaceChokepoint:
     #: Most cookies in one host's map.
     MAX_COOKIE_PAIRS = 32
 
-    def _profile(self, cookies: dict[str, dict[str, str]]):
+    def _profile(self, cookies: object):
         from crawlutron.models.crawl_policy import CrawlPolicy
 
         return CrawlPolicy(
@@ -129,12 +132,15 @@ class TestRequestProfileCookiesCannotBypassTheNamespaceChokepoint:
     def test_a_non_mapping_cookie_map_is_refused(self):
         """Refused as a refusal. A ``TypeError`` here is a 500, not a 422."""
         for bad in ([1, 2], "session=1", 5):
+            # A deliberately wrong value type via the provenance-documented cast.
+            wrong = cast("RequestProfileRecord", bad)
             with pytest.raises(ValidationError):
-                self._profile(bad)  # type: ignore[arg-type]
+                self._profile(wrong)
 
     def test_a_host_entry_that_is_not_a_mapping_is_refused(self):
+        wrong_entry = cast("RequestProfileRecord", {"h.example": "session=1"})
         with pytest.raises(ValidationError):
-            self._profile({"h.example": "session=1"})  # type: ignore[dict-item]
+            self._profile(wrong_entry)
 
     def test_the_un_namespaced_single_tenant_path_still_works(self):
         """One caller, one session, no namespace -- the path ``cookie_jar`` promises to keep.
