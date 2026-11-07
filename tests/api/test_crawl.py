@@ -301,7 +301,9 @@ class TestJobApi(_AsgiEndpointTests):
         """
         resp_bad = await self.client.post(f"/v1/jobs/{job_id}/control", json={"action": "invalid"})
         assert resp_bad.status_code == 422
-        assert resp_bad.json()["code"] == "invalid_action"
+        # #602: the refusal moved to the model admission edge (Literal), so the
+        # wire code is pydantic's validation_error, not the router's invalid_action.
+        assert resp_bad.json()["code"] == "validation_error"
         resp_after = await self.client.get(f"/v1/jobs/{job_id}")
         assert resp_after.json()["status"] == expected_status
 

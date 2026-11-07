@@ -39,6 +39,37 @@ def test_exactly_one_url_source_accepted(model):
     assert model(urls=["http://example.com/"]).urls == ["http://example.com/"]
 
 
+def test_job_control_request_refuses_unknown_actions_at_the_model_edge():
+    """#602: the model, not the router, is the admission edge for the action set.
+
+    The only consumer of ``action`` is control_job, which supports exactly
+    {pause, resume, cancel}; an unknown action must 422 at validation before
+    the router sees it."""
+    from crawlutron.models.job_control_request import JobControlRequest
+
+    with pytest.raises(ValidationError, match="action"):
+        JobControlRequest(action="explode")
+    assert JobControlRequest(action="pause").action == "pause"
+    assert JobControlRequest(action="resume").action == "resume"
+    assert JobControlRequest(action="cancel").action == "cancel"
+
+
+def test_job_control_action_advertises_the_enum_on_the_wire():
+    """#602: the OpenAPI schema must name the three valid actions.
+
+    An agent reading /openapi.json sees only the model's declared type; a
+    plain ``str`` advertises everything."""
+    from crawlutron.models.job_control_request import JobControlRequest
+
+    schema = JobControlRequest.model_json_schema()["properties"]["action"]
+    assert schema == {
+        "title": "Action",
+        "description": "One of: pause, resume, cancel.",
+        "enum": ["pause", "resume", "cancel"],
+        "type": "string",
+    }
+
+
 @pytest.mark.parametrize("model", [CrawlRequest, RenderRequest])
 def test_empty_urls_list_with_url_rejected(model):
     """Urls=[] is not "absent" -- exclude_none dumps it, _payload_urls

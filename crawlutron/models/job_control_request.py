@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -8,4 +10,4 @@ class JobControlRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    action: str = Field(..., description="One of: pause, resume, cancel.")
+    action: Literal["pause", "resume", "cancel"] = Field(..., description="One of: pause, resume, cancel.")
