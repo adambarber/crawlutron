@@ -93,6 +93,8 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/api/map_endpoint.py": (2, 1),
     "crawlutron/api/metrics_router.py": (2, 1),
     "crawlutron/api/middleware.py": (3, 2),
+    # #653: the key-verify meter (one class + the shared instance accessor).
+    "crawlutron/api/key_throttle.py": (2, 2),
     "crawlutron/api/policy_defaults.py": (2, 0),
     "crawlutron/api/policy_router.py": (2, 1),
     "crawlutron/api/policy_suggestions.py": (3, 2),

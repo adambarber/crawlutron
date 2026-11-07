@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, NoReturn, TypedDict
 from fastapi import Request
 
 from crawlutron.admission.policy import DEFAULT_MAX_PAGES
+from crawlutron.api import key_throttle
 from crawlutron.api.exceptions import http_error
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.caller_identity import CallerIdentity
@@ -178,11 +179,19 @@ async def get_keys_caller(request: Request) -> CallerIdentity:
 
 
 async def _caller_from_secret(request: Request, secret: str) -> CallerIdentity:
-    """Resolve a presented secret to an identity or raise 401."""
+    """Resolve a presented secret to an identity or raise 401.
+
+    The meter runs BEFORE the PBKDF2: a credential in cooldown refuses without
+    burning another derivation (#653). The meter is the single per-entry-point
+    chokepoint, not per-door."""
+    throttle = key_throttle.shared_throttle()
+    throttle.check(secret)
     store = getattr(request.app.state, "caller_key_store", None)
     record = await store.averify_key(secret) if store is not None else None
     if record is None:
+        throttle.record_failure(secret)
         _raise_invalid_api_key()
+    throttle.record_success(secret)
     return identity_for_key(record)
 
 

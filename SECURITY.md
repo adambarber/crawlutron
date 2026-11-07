@@ -64,9 +64,13 @@ It is a powerful SSRF-enabled service that:
   PBKDF2-SHA256 digest (210,000 iterations, per-key 16-byte salt,
   `crawlutron/storage/caller_key_store.py`); verification is one primary-key
   lookup plus one PBKDF2 run, with a miss burning the same derivation against
-  a fixed dummy digest so timing is uniform. Residual: entropy of the secret,
-  not the KDF, is the real guard; do not reuse this pattern for human-chosen
-  secrets.
+  a fixed dummy digest so timing is uniform. That derivation is **metered**
+  (#653): five consecutive failed verifications from the same presented
+  credential — or from any unparseable credential pooling into one shared
+  bucket — trip a 60-second fail-closed cooldown that answers `429
+  key_verify_throttled` without running the PBKDF2 again. Residual: entropy
+  of the secret, not the KDF, is the real guard; do not reuse this pattern
+  for human-chosen secrets.
 
 ### Dangerous environment escape hatches
 

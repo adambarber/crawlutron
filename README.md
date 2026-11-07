@@ -92,8 +92,12 @@ default. Callers authenticate with an API key presented as `X-API-Key` or
 `Authorization: Bearer` — jobs and results created under a key are readable
 only under it, and key issuance/revocation is operator-gated
 (`CRAWLUTRON_KEY_ADMIN_TOKEN` via `/v1/keys`). Keyless requests crawl as a
-shared anonymous identity with bounded default quotas. Expose it beyond
-localhost only behind an authenticated reverse proxy.
+shared anonymous identity with bounded default quotas. Key verification is
+rate-limited (#653): five consecutive failed verifications from the same
+presented credential trip a 60-second cooldown that refuses further attempts
+with `429 key_verify_throttled` before the PBKDF2 derivation runs again, so
+the expensive pre-auth hash cannot be invoked for free in a loop. Expose it
+beyond localhost only behind an authenticated reverse proxy.
 
 What the SSRF defenses cover:
 
