@@ -421,7 +421,7 @@ defaults shown):
 | `CRAWLUTRON_LOG_MAX_BYTES` | `10485760` | Log rotation size. |
 | `CRAWLUTRON_LOG_BACKUP_COUNT` | `3` | Number of rotated log files to keep. |
 
-Host policy is applied at the shared public-URL chokepoint before the SSRF/private-target check. Entries are normalized as case-insensitive IDNA hostnames and may include a port; a denied host wins over an allowed host, while an empty allowlist permits every otherwise-valid public host.
+Host policy is applied at the shared public-URL chokepoint before the SSRF/private-target check. Entries are normalized as case-insensitive IDNA hostnames (`_policy_host_entry` in `crawlutron/models/host_policy.py` parses each value via `urlparse(...).hostname`); a port in a config value is stripped during normalization and never matched — an entry is a hostname, not a `host:port` pair. A denied host wins over an allowed host, while an empty allowlist permits every otherwise-valid public host.
 
 > The container's production command also reads `CRAWLUTRON_WORKERS` (uvicorn worker count). **Keep this at `1`.** The browser pool is a single global pool sized to the container RAM budget; running more than one uvicorn worker multiplies the browser-pool count across workers (e.g. 4 workers × pool_size 2 = 8 Camoufox processes ≈ 5+ GiB) and blows the 3 GiB memory limit. Do not raise it.
 
