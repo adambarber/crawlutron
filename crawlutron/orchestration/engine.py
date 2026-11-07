@@ -46,9 +46,9 @@ if TYPE_CHECKING:
     from crawlutron.models.http_fetcher import HttpFetcher
     from crawlutron.models.normalized_url import NormalizedUrl
     from crawlutron.models.result_record import ProducerEnvelope
+    from crawlutron.models.webhook_target import WebhookTarget
 
 logger = logging.getLogger(__name__)
-
 robots_cache = _robots_policy.robots_cache
 RobotsMatcher = _robots_policy.RobotsMatcher
 load_robots_rules = _robots_policy.load_robots_rules
@@ -408,7 +408,7 @@ async def crawl_request(
     cffi_fetcher: HttpFetcher | None = None,
     cache: HttpCache | None = None,
     content_cache: ContentCache | None = None,
-    webhook_url: str | None = None,
+    webhook_url: WebhookTarget | None = None,
     shutdown_event: asyncio.Event | None = None,
     spill_path: str | None = None,
     fetch_and_decode: FetchAndDecode | None = None,

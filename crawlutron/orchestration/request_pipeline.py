@@ -52,6 +52,7 @@ from crawlutron.vocabulary.strategies import BROWSER_STRATEGIES
 
 if TYPE_CHECKING:
     from crawlutron.models.http_fetcher import HttpFetcher
+    from crawlutron.models.webhook_target import WebhookTarget
     from crawlutron.orchestration.engine import SeedCache
 
 
@@ -82,7 +83,7 @@ class PipelineState:
     browser_worker: CrawlWorker | None
     cache: HttpCache | None
     content_cache: ContentCache | None
-    webhook_url: str | None
+    webhook_url: WebhookTarget | None
     spill_path: str | None
     dependencies: PipelineDependencies
     jobs: list[CrawlTask] = field(default_factory=list)
@@ -420,9 +421,7 @@ async def _response(state: PipelineState) -> ProducerEnvelope:
     }
     if state.webhook_url is not None:
         # The wire form is the redacted one: the raw URL is a delivery secret.
-        from crawlutron.safety.url_redaction import redact_url
-
-        response["webhook_url"] = redact_url(state.webhook_url)
+        response["webhook_url"] = state.webhook_url.redacted()
     return response
 
 
