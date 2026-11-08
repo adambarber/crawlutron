@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 from crawlutron.storage.caller_key_store import CallerKeyStore
 
 
@@ -73,6 +75,31 @@ async def test_async_twins_round_trip_off_the_loop(tmp_path):
     assert [record.key_id for record in await store.alist_keys()] == [issued.key_id]
     assert await store.arevoke_key(issued.key_id) is True
     assert await store.averify_key(issued.secret) is None
+
+
+def test_two_mints_carry_different_hashes(tmp_path):
+    """Per-key salt: two issued keys never share a stored hash."""
+    store = CallerKeyStore(tmp_path / "keys.db")
+    first = store.issue_key("agent-a")
+    second = store.issue_key("agent-b")
+    first_record = store.get_for_id(first.key_id)
+    second_record = store.get_for_id(second.key_id)
+    assert first_record is not None and second_record is not None
+    assert first_record.key_hash != second_record.key_hash
+
+
+def test_a_tampered_hash_does_not_verify(tmp_path):
+    """A row hash mutated through the wire turns verification to None."""
+    store = CallerKeyStore(tmp_path / "keys.db")
+    issued = store.issue_key("agent-a")
+    record = store.get_for_id(issued.key_id)
+    assert record is not None
+    salt, digest = record.key_hash.split("$", 1)
+    flipped = f"{salt}{'0' if digest[0] != '0' else '1'}{digest[1:]}"
+    with sqlite3.connect(tmp_path / "keys.db") as conn:
+        conn.execute("UPDATE caller_keys SET key_hash = ?", (flipped,))
+        conn.commit()
+    assert store.verify_key(issued.secret) is None
 
 
 def test_issued_keys_carry_distinct_secrets(tmp_path):
