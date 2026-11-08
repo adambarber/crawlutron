@@ -182,6 +182,55 @@ def _frozen_clock():
     return state, clock
 
 
+def test_window_roll_sweeps_lapsed_failed_buckets():
+    """#663: a failure-only flood's buckets must not accumulate forever -- when
+    the mint window rolls, a lapsed non-cooling bucket is swept, so its ladder
+    resets: the key needs a FULL fresh ladder to cool again."""
+    state, clock = _frozen_clock()
+    throttle = KeyVerifyThrottle(clock=clock)
+    flood = [f"ck_{i:016x}.flood" for i in range(KeyVerifyThrottle.MAX_FAILURES * 100)]
+    for key in flood:
+        throttle.record_failure(key)
+    before = throttle.residence()
+
+    state["now"] += 301.0
+    throttle.record_failure("ck_ffffffffffffffff.fresh")
+    # Swept: only the fresh bucket remains; every lapsed non-cooling ledger
+    # row from the flood is gone.
+    assert throttle.residence() == 1, before
+    # And the refusal door shows the cooling shape is unreachable for them:
+    # re-minting one needs a full fresh ladder (no cooled residue).
+    remint = flood[0]
+    throttle.record_failure(remint)
+    throttle.check(remint)
+    for _ in range(KeyVerifyThrottle.MAX_FAILURES - 2):
+        throttle.record_failure(remint)
+        throttle.check(remint)
+    throttle.record_failure(remint)
+    _refuses(throttle, remint)
+
+
+def test_cooldown_survives_the_mint_window_roll():
+    """#663 retention side: a cooling bucket must survive the sweep -- a flood
+    cannot ride a window roll to launder a cooldown victim."""
+    state, clock = _frozen_clock()
+    throttle = KeyVerifyThrottle(clock=clock)
+    victim = "ck_0123456789abcdef.victim"
+    for _ in range(KeyVerifyThrottle.MAX_FAILURES):
+        throttle.record_failure(victim)
+    _refuses(throttle, victim)
+
+    # Re-cool just before the roll so the cooldown outlives it.
+    state["now"] += 260.0
+    for _ in range(KeyVerifyThrottle.MAX_FAILURES):
+        throttle.record_failure(victim)
+
+    state["now"] += 41.0
+    throttle.record_failure("ck_ffffffffffffffff.fresh")
+    # The victim's bucket survived the sweep, so its cooldown still refuses.
+    _refuses(throttle, victim)
+
+
 def test_cooldown_expiry_rearms_the_bucket():
     """#661: after a cooldown elapses, ONE wrong guess must not re-trip an
     instant re-cooldown -- the expired cooldown clears the failure ladder, so

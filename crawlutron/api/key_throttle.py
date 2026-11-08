@@ -7,7 +7,9 @@ a fail-closed cooldown. It is process state like every other holder (#621).
 
 #659 anti-laundering control: the global MINT BUDGET. A distinct-credential
 flood cannot mint unlimited buckets (512 per 300s), so it can never push a
-cooldown victim's bucket out of the ledger -- there is no eviction at all.
+cooldown victim's bucket out of the ledger. #663 bounds residence: when the
+mint window rolls, buckets whose failure window AND cooldown have both lapsed
+are swept -- one window's worth of live+cooling buckets is the steady state.
 Accepted shared fate: once the budget is spent, EVERY first-time caller for
 the window remainder is 429-refused -- fail-closed by choice.
 """
@@ -56,8 +58,9 @@ class KeyVerifyThrottle:
     unparseable or overlong pools into one fixed ``unknown`` bucket, so varying
     garbage cannot mint buckets. There is NO eviction (#659): the global mint
     budget is the anti-laundering control -- a flood cannot mint enough new
-    buckets to displace a cooldown victim's ledger, because minting refuses
-    long before the ledger could need eviction.
+    buckets to displace a cooldown victim's ledger (#659), and #663 sweeps
+    lapsed non-cooling buckets at each mint-window roll, so residence is
+    capped at one window's live+cooling buckets.
     """
 
     MAX_FAILURES = 5
@@ -112,6 +115,7 @@ class KeyVerifyThrottle:
         if now - self._mint_window_started > _MINT_WINDOW_SECONDS:
             self._mint_window_started = now
             self._minted = 0
+            self._sweep_lapsed(now)
         if self._minted >= _MINT_BUDGET:
             raise _throttled()
         self._minted += 1
@@ -119,6 +123,22 @@ class KeyVerifyThrottle:
         bucket.window_started = now
         self._buckets[key] = bucket
         return bucket
+
+    def residence(self) -> int:
+        """Live bucket count: the ledger residence #663 caps (test/probe door)."""
+        with self._lock:
+            return len(self._buckets)
+
+    def _sweep_lapsed(self, now: float) -> None:
+        """#663 residence cap: drop buckets whose failure window AND cooldown
+        have both lapsed; cooling victims are retained (#659)."""
+        lapsed = [
+            key
+            for key, bucket in self._buckets.items()
+            if bucket.cooldown_until < now and now - bucket.window_started > _FAILURE_WINDOW_SECONDS
+        ]
+        for key in lapsed:
+            del self._buckets[key]
 
     def _check_bucket(self, key: str) -> None:
         with self._lock:
