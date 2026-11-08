@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING
 from crawlutron.admission.admission_links import admit_discovered_links
 from crawlutron.admission.payload_helpers import payload_policy
 from crawlutron.admission.policy import PolicyTier, read_policy
-from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.storage.job_store import CrawlJobState, JobStore
@@ -59,6 +58,18 @@ def canonical(url: str | NormalizedUrl) -> NormalizedUrl:
     if isinstance(url, NormalizedUrl):
         return url
     return NormalizedUrl(url, policy=UNRESTRICTED_HOST_POLICY)
+
+
+def admitted(url: str, *, policy: HostPolicy) -> NormalizedUrl:
+    """A URL admitted under a policy the test names, through the production
+    constructor -- the same one production builds every page identity with."""
+    return NormalizedUrl(url, policy=policy)
+
+
+def host_policy_for(allowed: str, blocked: str) -> HostPolicy:
+    """The restricted admission policy a test pins, built through the model's
+    own factory -- not a re-derived allow/deny pair."""
+    return HostPolicy.from_strings(allowed, blocked)
 
 
 BOOL_ENV_CASES = (
@@ -173,8 +184,11 @@ __all__ = [
     "UNRESTRICTED_HOST_POLICY",
     "_policy",
     "admit",
+    "admitted",
+    "canonical",
     "crawl_limits",
     "crawl_policy",
+    "host_policy_for",
     "http_strategy_policy",
     "make_base_policy",
     "payload_policy",
@@ -205,6 +219,8 @@ def deployment_tier(**overrides: str) -> PolicyTier:
 
     Required at ``JobStore``: without it, omitted limits resolve to model
     defaults. Tests that do not care about the tier default to those defaults."""
+    from crawlutron.config.settings import CrawlerSettings
+
     return PolicyTier.from_settings(CrawlerSettings.from_mapping(overrides))
 
 

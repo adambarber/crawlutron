@@ -8,11 +8,10 @@ from collections.abc import (
     Awaitable,
     Callable,
 )
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.intercepted_xhr_record import InterceptedXhrRecord
-from crawlutron.models.json_value import JsonValue
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.safety.json_safe import json_default
 from crawlutron.transport.pinned_dns import (
@@ -20,6 +19,9 @@ from crawlutron.transport.pinned_dns import (
     check_ssrf_protection_stable,
 )
 from crawlutron.transport.pinned_transport import PinnedRequest
+
+if TYPE_CHECKING:
+    from crawlutron.models.json_value import JsonValue
 
 # The resolve bound is the pinned transport's own: one implementation for both families.
 _BOUNDED = bounded_thread_resolve
@@ -238,7 +240,7 @@ def make_response_handler(
             entry["payload_truncated"] = True
         else:
             # Parsed JSON is a JsonValue by construction; the record says so.
-            entry["payload"] = cast(JsonValue, payload)
+            entry["payload"] = cast("JsonValue", payload)
         collected.append(entry)
 
     return on_response

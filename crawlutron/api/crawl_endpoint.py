@@ -6,6 +6,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Awaitable
+from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, Response
@@ -25,16 +26,20 @@ from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.crawl_pending import CrawlPendingError
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.json_value import JsonValue
-from crawlutron.models.normalized_url import NormalizedUrl
-from crawlutron.models.result_record import ProducerEnvelope
 from crawlutron.models.trace_response import TraceResponse
-from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
 from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.runtime.metrics import get_metrics
 from crawlutron.storage.ids import new_request_id
 from crawlutron.storage.job_store import TERMINAL_STATUSES, FrontierEntry, JobKind, JobStore
 from crawlutron.storage.result_store import CrawlResultStore
+
+if TYPE_CHECKING:
+    # Annotation-only vocabulary: the endpoint's signatures name the shared record
+    # types; none of these is constructed or called at runtime here.
+    from crawlutron.models.json_value import JsonValue
+    from crawlutron.models.normalized_url import NormalizedUrl
+    from crawlutron.models.result_record import ProducerEnvelope
+    from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
 
 _logger = logging.getLogger(__name__)
 

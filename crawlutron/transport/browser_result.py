@@ -9,7 +9,6 @@ from crawlutron.models.crawl_diagnostics import CrawlDiagnostics
 from crawlutron.models.crawl_job import CrawlJob
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.crawl_strategy_attempt import CrawlStrategyAttempt
-from crawlutron.models.json_value import JsonValue
 from crawlutron.models.result_factory import build_engine_result
 from crawlutron.models.taxonomy import CrawlStrategyName
 from crawlutron.runtime.worker_dispatch import call_worker
@@ -31,6 +30,7 @@ if TYPE_CHECKING:
     from crawlutron.models.crawl_worker import CrawlWorker
     from crawlutron.models.host_policy import HostPolicy
     from crawlutron.models.intercepted_xhr_record import InterceptedXhrRecord
+    from crawlutron.models.json_value import JsonValue
     from crawlutron.models.normalized_url import NormalizedUrl
     from crawlutron.models.render_options import RenderOptions
     from crawlutron.models.screenshot_diagnostics import ScreenshotDiagnostics

@@ -8,12 +8,11 @@ import crawlutron.transport.http_client_pool as pool_mod
 import crawlutron.transport.pinned_dns as pinned_mod
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.extraction.content import extract_post_fetch_discovery
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.orchestration.engine import crawl_request
 from tests._browser_doubles import _fake_browser
 from tests._fetch_doubles import FetcherDouble, make_fetch
-from tests._policy_factories import canonical
+from tests._policy_factories import canonical, host_policy_for
 
 
 def _settings(*, allowed: str = "", denied: str = "") -> CrawlerSettings:
@@ -138,7 +137,7 @@ async def test_redirect_to_policy_blocked_host_is_refused_before_fetch(monkeypat
     # HTTPS is pinned like plain HTTP: the connect host is the validated IP.
     monkeypatch.setattr(pinned_mod, "resolve_and_pin_host", lambda url: (url.host, "93.184.216.34"))
 
-    policy = HostPolicy.from_strings("allowed.test", "blocked.test")
+    policy = host_policy_for("allowed.test", "blocked.test")
     with pytest.raises(ValueError, match="refused admission"):
         await fetchers_mod.default_http_fetcher(
             NormalizedUrl("https://allowed.test/", policy=policy),
@@ -175,7 +174,7 @@ async def test_render_request_never_invokes_worker_for_policy_blocked_host():
 
 def test_js_endpoint_extraction_filters_private_targets_on_real_discovery_path(monkeypatch):
     monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
-    policy = HostPolicy.from_strings("", "")
+    policy = host_policy_for("", "")
     html = "<script>fetch('/api/public'); fetch('http://127.0.0.1/private');</script>"
 
     discovered = extract_post_fetch_discovery(

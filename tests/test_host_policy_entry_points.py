@@ -334,7 +334,6 @@ def test_host_policy_probes_cover_the_full_api_entry_table():
 
 async def test_render_probe_fails_when_policy_enforcement_is_removed(monkeypatch, tmp_path):
     from crawlutron.admission import payload_helpers
-    from crawlutron.api import render
 
     def allow(url, *, policy):
         from crawlutron.models.host_policy import HostPolicy
@@ -342,7 +341,8 @@ async def test_render_probe_fails_when_policy_enforcement_is_removed(monkeypatch
 
         return NormalizedUrl(url, policy=HostPolicy.unrestricted())
 
+    # The render handler's only admission edge is the shared payload gate, so the
+    # mutation lands on that consumer's bound name -- render itself holds none.
     monkeypatch.setattr(payload_helpers, "NormalizedUrl", allow)
-    monkeypatch.setattr(render, "NormalizedUrl", allow)
     with pytest.raises(AssertionError):
         await _probe_render(monkeypatch, tmp_path)

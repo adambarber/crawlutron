@@ -8,12 +8,11 @@ from dataclasses import replace
 
 import pytest
 
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.json_value import JsonValue
-from crawlutron.models.normalized_url import NormalizedUrl
 from tests._fetch_doubles import FetcherDouble
 from tests._fetcher_factories import run_http_strategy
 from tests._parse_budget import ParseBudget
+from tests._policy_factories import canonical
 
 HTML = (
     "<html><head><title>T</title></head><body>"
@@ -104,9 +103,7 @@ async def test_shaping_never_reparses_engine_produced_items(parse_budget):
     _markdown, metadata = format_crawl_item(item)
     assert parse_budget.parses == 0, "shaping rebuilt an lxml tree from the carried item"
     # Byte-for-byte the same computation site output the metadata replaced.
-    assert metadata == extract_llm_metadata(
-        META_HTML, NormalizedUrl("http://example.com/", policy=HostPolicy.unrestricted())
-    )
+    assert metadata == extract_llm_metadata(META_HTML, canonical("http://example.com/"))
 
 
 async def test_engine_item_without_a_tree_still_shapes_once(parse_budget):

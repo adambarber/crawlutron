@@ -7,11 +7,13 @@ construct crawl results.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from crawlutron.models.crawl_policy import CrawlPolicy
-from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.normalized_url import NormalizedUrl
-from crawlutron.models.taxonomy import CrawlStrategyName
+if TYPE_CHECKING:
+    from crawlutron.models.crawl_policy import CrawlPolicy
+    from crawlutron.models.host_policy import HostPolicy
+    from crawlutron.models.normalized_url import NormalizedUrl
+    from crawlutron.models.taxonomy import CrawlStrategyName
 
 
 @dataclass(frozen=True)

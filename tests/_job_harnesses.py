@@ -3,8 +3,11 @@
 The waits are EDGE-triggered, not a poll racing a deadline: ``set_status`` is
 the complete edge set, so the wait returns the instant the status is committed."""
 
+from __future__ import annotations
+
 import asyncio
 from collections.abc import Collection
+from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
@@ -12,11 +15,14 @@ from httpx import ASGITransport, AsyncClient
 from crawlutron.admission.policy import PolicyLike
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.json_value import JsonValue
-from crawlutron.models.normalized_url import NormalizedUrl
-from crawlutron.models.result_record import ProducerEnvelope
 from crawlutron.models.taxonomy import Classification
 from crawlutron.storage.job_store import TERMINAL_STATUSES, JobStatus, JobStore
 from tests._dependency_overrides import bind_base_overrides
+
+if TYPE_CHECKING:
+    from crawlutron.models.normalized_url import NormalizedUrl
+    from crawlutron.models.result_record import ProducerEnvelope
+
 from tests._job_drivers import (
     _create_api_job,
     _seed_job,

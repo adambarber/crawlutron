@@ -13,7 +13,6 @@ from crawlutron.api.exceptions import browser_pool_unavailable
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
-from crawlutron.models.result_record import ProducerEnvelope
 from crawlutron.orchestration.engine import crawl_request
 from crawlutron.transport.browser_pool import PooledBrowserWorker, get_browser_pool
 from crawlutron.vocabulary.strategies import BROWSER_STRATEGIES
@@ -21,6 +20,7 @@ from crawlutron.vocabulary.strategies import BROWSER_STRATEGIES
 if TYPE_CHECKING:
     from crawlutron.models.crawl_policy import CrawlPolicy
     from crawlutron.models.crawl_request import CrawlRequest
+    from crawlutron.models.result_record import ProducerEnvelope
 
 
 def _request_needs_browser(policy: CrawlPolicy) -> bool:

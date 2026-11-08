@@ -1,12 +1,12 @@
 """Browser worker contract: returns classified results, re-queues capacity failures."""
 
 from collections import deque
+from typing import TYPE_CHECKING
 
 import pytest
 
 from crawlutron.models.crawl_job import CrawlJob
 from crawlutron.models.crawl_result import CrawlResult
-from crawlutron.models.json_value import JsonValue
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.render_options import RenderOptions
 from crawlutron.transport.browser_pool import BrowserPool, PooledBrowserWorker
@@ -14,6 +14,9 @@ from crawlutron.vocabulary.strategies import BROWSER_HEADLESS
 from tests._assertions import assert_result_failed
 from tests._browser_doubles import ExhaustedPool, RaisingRendererPool
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, crawl_policy
+
+if TYPE_CHECKING:
+    from crawlutron.models.json_value import JsonValue
 
 
 def _guard_job() -> CrawlJob:
