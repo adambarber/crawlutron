@@ -20,6 +20,7 @@ from crawlutron.mcp.handlers import (
     handle_control_job,
     handle_crawl,
     handle_crawl_and_extract,
+    handle_create_job,
     handle_delete_job,
     handle_get_job,
     handle_list_jobs,
@@ -35,6 +36,8 @@ from crawlutron.models.crawl_and_extract_response import CrawlAndExtractResponse
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.crawl_result_request import CrawlResultRequest
 from crawlutron.models.job_control_tool_request import JobControlToolRequest
+from crawlutron.models.job_create_request import JobCreateRequest
+from crawlutron.models.job_create_response import JobCreateResponse
 from crawlutron.models.job_deleted_response import JobDeletedResponse
 from crawlutron.models.job_id_request import JobIdRequest
 from crawlutron.models.job_list_request import JobListRequest
@@ -223,6 +226,23 @@ TOOL_SPECS: list[ToolSpec] = [
         output_schema=_schema(TraceResponse),
         handler=handle_read_crawl_trace,
         rest_route=RestRoute("GET", "/v1/crawl/{request_id}/trace"),
+    ),
+    ToolSpec(
+        name="create_job",
+        title="Create a whole-site crawl job",
+        description=(
+            "Persist a resumable whole-site crawl job and immediately start executing it -- the "
+            "same creation POST /v1/jobs runs. The durable runner owns depth-aware canonical "
+            "frontier admission (scope, documents, analytics, robots, and max_pages); a keyed "
+            "caller's job is visible only to that caller. The job is admitted against the same "
+            "page and concurrency quotas as REST; max_pages rides the policy's limits and is "
+            "resolved against the caller's bound. Poll get_job for live state; control_job to "
+            "pause, resume, or cancel; delete_job to remove it."
+        ),
+        request_model=JobCreateRequest,
+        output_schema=_schema(JobCreateResponse),
+        handler=handle_create_job,
+        rest_route=RestRoute("POST", "/v1/jobs"),
     ),
     ToolSpec(
         name="list_jobs",

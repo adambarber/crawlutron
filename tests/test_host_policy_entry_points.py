@@ -16,7 +16,6 @@ from tests._host_policy_probes import (
     _record_probe_fetch,
     monkeypatch_wire_guard,
 )
-from tests._http_test_helpers import minimal_request
 from tests._policy_factories import canonical
 
 
@@ -68,6 +67,7 @@ async def _probe_crawl_executor(monkeypatch, tmp_path):
 
 async def _probe_jobs_router(monkeypatch, tmp_path):
     from crawlutron.api import jobs_router
+    from crawlutron.api.caller_auth import Tracking
     from crawlutron.models.caller_identity import CallerIdentity
     from crawlutron.models.job_create_request import JobCreateRequest
 
@@ -90,7 +90,9 @@ async def _probe_jobs_router(monkeypatch, tmp_path):
             # ``asyncio.Event``.
             shutdown_event=asyncio.Event(),
             caller=CallerIdentity(),
-            request=minimal_request("/v1/jobs"),
+            # The handler refuses before admission reads the tracker; the door still
+            # resolves it, because the core's signature refuses an absent one.
+            tracking=Tracking(job_store=job_store),
         ),
         effects,
     )
@@ -310,7 +312,7 @@ _PROBES = {
     "crawlutron/api/admit_endpoint.py:admit_url": _probe_admit_endpoint,
     "crawlutron/api/crawl_executor.py:execute_crawl": _probe_crawl_executor,
     "crawlutron/api/job_runner.py:run_job": _probe_job_runner,
-    "crawlutron/api/jobs_router.py:create_job": _probe_jobs_router,
+    "crawlutron/api/job_cores.py:create_job_core": _probe_jobs_router,
     "crawlutron/api/map_endpoint.py:map_site": _probe_map_endpoint,
     "crawlutron/api/site_map.py:build_site_map": _probe_site_map,
     "crawlutron/api/render.py:render_request": _probe_render,

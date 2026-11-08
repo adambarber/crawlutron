@@ -17,7 +17,7 @@ def host_policy_entry_table() -> set[str]:
         "crawlutron/api/crawl_endpoint.py:crawl",
         "crawlutron/api/crawl_executor.py:execute_crawl",
         "crawlutron/api/job_runner.py:run_job",
-        "crawlutron/api/jobs_router.py:create_job",
+        "crawlutron/api/job_cores.py:create_job_core",
         "crawlutron/api/map_endpoint.py:map_site",
         "crawlutron/api/render.py:render_request",
         "crawlutron/api/response_shaping.py:frontier_link_url",

@@ -1,4 +1,4 @@
-"""MCP job tools (list_jobs, get_job, control_job, delete_job) over the job store.
+"""MCP job tools (create_job, list_jobs, get_job, control_job, delete_job) over the job store.
 
 The tools mirror the /v1/jobs REST doors: the same caller scoping, the same
 store reads, and -- for the reads and the control action -- the same JSON the
@@ -10,17 +10,24 @@ from __future__ import annotations
 import contextlib
 import json
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
+
+from crawlutron.api import job_runner
 from crawlutron.api.jobs_router import router as jobs_router
 from crawlutron.api.keys_router import router as keys_router
 from crawlutron.mcp.router import router as mcp_router
 from crawlutron.models.json_value import JsonValue
 from crawlutron.storage.job_store import JobStatus
 from tests._async_harnesses import issue_key
+from tests._job_harnesses import ScriptedExecute, _execution_policy, post_api_job
+from tests._policy_factories import canonical
 from tests._quota_harness import service_client
+from tests._result_builders import engine_result
 
 if TYPE_CHECKING:
     from httpx import AsyncClient
@@ -91,6 +98,13 @@ async def _tool_error_text(
     result = await _tool_call(client, tool, arguments, key=key)
     assert result["isError"] is True, result
     return str(result["content"][0]["text"])
+
+
+@pytest.fixture(autouse=True)
+def _fresh_runner():
+    job_runner.reset_job_runner()
+    yield
+    job_runner.reset_job_runner()
 
 
 @dataclass(frozen=True)
@@ -180,6 +194,29 @@ class TestControlJobTool:
             assert "pause" in text
 
 
+@asynccontextmanager
+async def created_over_mcp(tmp_path):
+    """A harness with one scripted-execution job created via the create_job tool.
+
+    Every creation test needs the runner shim and the same tool call; yield
+    ``(harness, response)`` so each test reads back only what it asserts."""
+    job_runner.install_execute_crawl(
+        ScriptedExecute(results=[engine_result("http://example.com/", "rendered")])
+    )
+    async with job_harness(tmp_path) as h:
+        yield (
+            h,
+            await h.structured(
+                "create_job", {"root_url": "http://example.com/", "policy": _execution_policy(None)}
+            ),
+        )
+
+
+async def other_caller(h: JobHarness) -> JobHarness:
+    """A second keyed caller on the same harness client (the cross-visibility actor)."""
+    return JobHarness(client=h.client, job_store=h.job_store, secret=await issue_key(h.client))
+
+
 class TestDeleteJobTool:
     async def test_the_tool_deletes_the_job_and_reports_it(self, tmp_path):
         async with job_harness(tmp_path, seeded=1) as h:
@@ -195,11 +232,44 @@ class TestDeleteJobTool:
             assert "job-none" in text
 
 
+class TestCreateJobTool:
+    async def test_the_tool_creates_a_job_the_rest_door_answers(self, tmp_path):
+        async with created_over_mcp(tmp_path) as (h, structured):
+            assert structured["status"] == "pending"
+            assert structured["root_url"] == canonical("http://example.com/").raw
+            rest_job = await h.rest_json("get", f"/v1/jobs/{structured['job_id']}")
+            assert rest_job["job_id"] == structured["job_id"]
+
+    async def test_the_response_is_the_shape_rest_creates(self, tmp_path):
+        async with created_over_mcp(tmp_path) as (h, mcp_created):
+            rest = await post_api_job(h.client, "http://example.com/")
+
+            assert rest.status_code == 200, rest.text
+            assert list(mcp_created) == list(rest.json())
+
+    async def test_an_invalid_root_url_is_a_tool_error(self, tmp_path):
+        async with job_harness(tmp_path) as h:
+            text = await h.error_text("create_job", {"root_url": "not-a-url"})
+
+            assert "url" in text.lower()
+
+
+class TestCreateJobCallerScoping:
+    async def test_a_job_created_over_mcp_is_invisible_to_another_caller(self, tmp_path):
+        async with created_over_mcp(tmp_path) as (h, structured):
+            other = await other_caller(h)
+
+            listed = await other.structured("list_jobs", {})
+            text = await other.error_text("get_job", {"job_id": structured["job_id"]})
+
+            assert listed == {"jobs": [], "total": 0}
+            assert structured["job_id"] in text
+
+
 class TestJobToolCallerScoping:
     async def test_another_callers_job_is_invisible_to_every_job_tool(self, tmp_path):
         async with job_harness(tmp_path, seeded=1) as h:
-            other_secret = await issue_key(h.client)
-            other = JobHarness(client=h.client, job_store=h.job_store, secret=other_secret)
+            other = await other_caller(h)
 
             listed = await other.structured("list_jobs", {})
             get_text = await other.error_text("get_job", {"job_id": "job-0"})
@@ -216,4 +286,5 @@ class TestJobToolDiscovery:
 
         guidance = " ".join(agent_hints_payload()["guidance"])
         assert "list_jobs" in guidance
+        assert "create_job" in guidance
         assert "delete_job" in guidance

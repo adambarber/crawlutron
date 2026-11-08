@@ -67,12 +67,13 @@ GUIDANCE = [
     "Callers authenticate with an API key: present X-API-Key (or Authorization: Bearer); jobs and results "
     "created under a key are readable only under it. Anonymous requests crawl as a shared bounded identity. "
     "Key issuance/revocation (POST /v1/keys) is operator-gated and not available to callers.",
-    "Whole-site crawl jobs are managed over MCP too: list_jobs pages your jobs, get_job reads one "
+    "Whole-site crawl jobs are managed over MCP too: create_job starts one (same admission and "
+    "caller scoping as POST /v1/jobs), list_jobs pages your jobs, get_job reads one "
     "job's live state, control_job pauses/resumes/cancels it, and delete_job removes it -- the same "
     "caller-scoped doors the /v1/jobs REST routes serve.",
     "Use POST /mcp for MCP (2026-07-28, stateless streamable HTTP): server/discover lists supported protocol "
     "versions and capabilities, and tools/list exposes search, crawl, crawl_and_extract, map, render, "
-    "read_crawl_result, read_crawl_trace, and the job tools list_jobs, get_job, control_job, and "
+    "read_crawl_result, read_crawl_trace, and the job tools create_job, list_jobs, get_job, control_job, and "
     "delete_job. crawl_and_extract is the crawl response projected to per-page "
     "content; read_crawl_result reads back a stored crawl response (status: running while the crawl is still "
     "running -- poll it), and read_crawl_trace its diagnostic spine. The MCP tools mirror the REST endpoints "
