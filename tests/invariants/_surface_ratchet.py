@@ -124,6 +124,8 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/api/job_cores.py": (5, 5),
     # #644: the one declaration of the module-level feature routers.
     "crawlutron/api/router_registry.py": (1, 0),
+    # #664: the auth+metering layer (three guards + the two router factories).
+    "crawlutron/api/route_layer.py": (8, 5),
     "crawlutron/orchestration/admission_stall.py": (5, 3),
     "crawlutron/orchestration/recursive.py": (11, 7),
     "crawlutron/orchestration/request_pipeline.py": (5, 3),

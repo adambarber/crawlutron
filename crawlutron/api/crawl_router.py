@@ -6,10 +6,10 @@ Pure router: binds :func:`crawlutron.api.crawl_endpoint.crawl` and
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Body, Depends, Request
+from fastapi import Body, Depends, Request
 from fastapi.responses import Response
 
-from crawlutron.api.caller_auth import auth_denials, quota_denials
+from crawlutron.api.caller_auth import quota_denials
 from crawlutron.api.crawl_endpoint import crawl as crawl_handler
 from crawlutron.api.crawl_endpoint import get_crawl_result as get_crawl_result_handler
 from crawlutron.api.crawl_endpoint import get_crawl_trace as get_crawl_trace_handler
@@ -21,13 +21,14 @@ from crawlutron.api.dependencies import (
     get_shutdown_event,
 )
 from crawlutron.api.policy_defaults import BROWSER_FALLBACK_POLICY, DOCUMENT_EXTRACTION_POLICY
+from crawlutron.api.route_layer import guarded_router
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.error_response import ErrorResponse
 from crawlutron.models.trace_response import TraceResponse
 from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
 from crawlutron.vocabulary.limits import LARGE_CRAWL_GUIDANCE
 
-router = APIRouter(tags=["Crawler"], responses=auth_denials())
+router = guarded_router(tags=["Crawler"])
 
 
 #: The two replay reads (result and trace) share one response surface: the async-202

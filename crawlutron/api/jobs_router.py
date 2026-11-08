@@ -8,11 +8,10 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import Query
 
 from crawlutron.api import job_runner
 from crawlutron.api.caller_auth import (
-    auth_denials,
     quota_denials,
 )
 from crawlutron.api.dependencies import CallerDep, JobStoreDep, SettingsDep, ShutdownEventDep, TrackingDep
@@ -20,6 +19,7 @@ from crawlutron.api.exceptions import validation_http_error
 from crawlutron.api.job_control import control_job_core, raise_job_not_found
 from crawlutron.api.job_cores import create_job_core
 from crawlutron.api.main_helpers import build_job_status
+from crawlutron.api.route_layer import guarded_router
 from crawlutron.models.error_response import ErrorResponse
 from crawlutron.models.job_control_request import JobControlRequest
 from crawlutron.models.job_create_request import JobCreateRequest
@@ -29,7 +29,7 @@ from crawlutron.models.job_list_response import JobListResponse
 from crawlutron.models.job_status_response import JobStatusResponse
 from crawlutron.vocabulary.limits import DEFAULT_JOB_LIST_LIMIT, MAX_JOB_LIST_LIMIT
 
-router = APIRouter(prefix="/v1/jobs", tags=["Crawler"], responses=auth_denials())
+router = guarded_router(prefix="/v1/jobs", tags=["Crawler"])
 
 
 @router.post(

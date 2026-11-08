@@ -6,18 +6,16 @@ them. The operator token is the only credential these routes accept.
 
 from __future__ import annotations
 
-from fastapi import APIRouter
-
-from crawlutron.api.caller_auth import auth_denials
-from crawlutron.api.dependencies import CallerKeyStoreDep, KeysCallerDep
+from crawlutron.api.dependencies import CallerKeyStoreDep
 from crawlutron.api.exceptions import http_error
+from crawlutron.api.route_layer import admin_guarded_router
 from crawlutron.models.error_response import ErrorResponse
 from crawlutron.models.issued_key import IssuedKey
 from crawlutron.models.key_create_request import KeyCreateRequest
 from crawlutron.models.key_summary import KeySummary
 from crawlutron.models.revoked_key import RevokedKey
 
-router = APIRouter(prefix="/v1/keys", tags=["Crawler"], responses=auth_denials())
+router = admin_guarded_router(prefix="/v1/keys", tags=["Crawler"])
 
 
 @router.post(
@@ -37,7 +35,6 @@ router = APIRouter(prefix="/v1/keys", tags=["Crawler"], responses=auth_denials()
 async def issue_key(
     payload: KeyCreateRequest,
     key_store: CallerKeyStoreDep,
-    _caller: KeysCallerDep,
 ) -> IssuedKey:
     return await key_store.aissue_key(
         payload.label, max_pages=payload.max_pages, max_concurrency=payload.max_concurrency
@@ -56,7 +53,6 @@ async def issue_key(
 )
 async def list_keys(
     key_store: CallerKeyStoreDep,
-    _caller: KeysCallerDep,
 ) -> list[KeySummary]:
     return [KeySummary.from_record(record) for record in await key_store.alist_keys()]
 
@@ -76,7 +72,6 @@ async def list_keys(
 async def revoke_key(
     key_id: str,
     key_store: CallerKeyStoreDep,
-    _caller: KeysCallerDep,
 ) -> RevokedKey:
     if not await key_store.arevoke_key(key_id):
         raise http_error(404, "not_found", f"Unknown key_id: {key_id}")
