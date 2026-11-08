@@ -32,10 +32,12 @@ def test_webhook_module_has_no_dependency_wiring_state():
     for name in ISLAND_NAMES:
         assert not hasattr(wm, name), f"dead-island name reappeared: {name}"
     assert set(wm.__all__) == {
+        "DELIVERIES_CAP",
         "deliver_pinned_webhook",
         "ensure_https_webhook_url",
         "max_webhook_size",
         "post_webhook",
+        "tracked_delivery_count",
         "validate_webhook_url",
         "validate_webhook_url_async",
     }

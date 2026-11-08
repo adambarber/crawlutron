@@ -38,6 +38,9 @@ _WEBHOOK_BACKOFF_MS_DEFAULT = 200
 
 # In-flight delivery tasks, tracked so shutdown drains a callback even when the
 # runner that scheduled it was cancelled after its terminal write landed.
+#: Hard cap on tracked in-flight deliveries: a flooded set refuses (logs, best-effort
+#: per delivery) rather than growing without limit (#655).
+DELIVERIES_CAP = 1024
 _DELIVERIES: set[asyncio.Task] = set()
 
 #: One-time flag: the first delivery under an unset secret warns once (#655),
@@ -311,8 +314,17 @@ async def post_webhook(
 def _tracked_delivery(
     target: WebhookTarget,
     payload: Mapping[str, object],
-) -> asyncio.Task:
-    """Spawn one delivery joined to the shutdown drain set, spawn site agnostic."""
+) -> asyncio.Task | None:
+    """Spawn one delivery joined to the shutdown drain set, spawn site agnostic.
+
+    At the cap the delivery is refused (logged, best-effort) instead of
+    tracked -- an unbounded set would grow without limit (#655)."""
+    if len(_DELIVERIES) >= DELIVERIES_CAP:
+        logger.warning(
+            "webhook_delivery_refused_at_cap",
+            extra={"cap": DELIVERIES_CAP, "url": target.redacted()},
+        )
+        return None
     task = asyncio.create_task(post_webhook(target, payload))
     _DELIVERIES.add(task)
     task.add_done_callback(_DELIVERIES.discard)
@@ -326,6 +338,8 @@ async def post_webhook_guarded(
     """Await ``post_webhook`` as a shielded, drained task: a runner cancelled at
     shutdown does not drop the callback whose terminal write already landed."""
     task = _tracked_delivery(target, payload)
+    if task is None:
+        return
     try:
         await asyncio.shield(task)
     except asyncio.CancelledError:
@@ -336,12 +350,18 @@ async def post_webhook_guarded(
 def start_webhook_delivery(
     target: WebhookTarget,
     payload: Mapping[str, object],
-) -> asyncio.Task:
+) -> asyncio.Task | None:
     """Spawn the delivery as a tracked background task and return at once.
 
     The sweep pass must not stall on a slow receiver; the task joins the
-    same ``_DELIVERIES`` set, so shutdown drains it like any other callback."""
+    same ``_DELIVERIES`` set, so shutdown drains it like any other callback.
+    ``None``: refused at the in-flight cap (#655)."""
     return _tracked_delivery(target, payload)
+
+
+def tracked_delivery_count() -> int:
+    """How many deliveries are tracked in flight right now (public probe, #655)."""
+    return len(_DELIVERIES)
 
 
 def validate_webhook_url(webhook_url: str, *, host_policy: HostPolicy) -> None:
@@ -365,10 +385,12 @@ async def validate_webhook_url_async(webhook_url: str, *, host_policy: HostPolic
 
 
 __all__ = [
+    "DELIVERIES_CAP",
     "deliver_pinned_webhook",
     "ensure_https_webhook_url",
     "max_webhook_size",
     "post_webhook",
+    "tracked_delivery_count",
     "validate_webhook_url",
     "validate_webhook_url_async",
 ]

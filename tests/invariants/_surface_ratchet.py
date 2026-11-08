@@ -103,7 +103,9 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/api/render.py": (3, 3),
     "crawlutron/api/render_endpoint.py": (3, 2),
     "crawlutron/api/watch_sweep.py": (4, 2),
-    "crawlutron/api/webhooks.py": (15, 14),
+    # RAISED to (17, 15) by #655: DELIVERIES_CAP + tracked_delivery_count are the
+    # public cap/probe pair for the bounded delivery set.
+    "crawlutron/api/webhooks.py": (17, 15),
     "crawlutron/extraction/content.py": (4, 4),
     "crawlutron/extraction/llm_format.py": (4, 4),
     "crawlutron/mcp/constants.py": (18, 0),
