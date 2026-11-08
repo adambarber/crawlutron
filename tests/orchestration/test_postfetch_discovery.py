@@ -5,7 +5,7 @@ builders, so it must move to ``asyncio.to_thread`` and return plain data.
 """
 
 import asyncio
-from typing import get_type_hints
+from typing import TYPE_CHECKING, get_type_hints
 
 from lxml import etree
 
@@ -14,6 +14,9 @@ from crawlutron.extraction.content import extract_post_fetch_discovery
 from tests._assertions import install_to_thread_spy
 from tests._fetch_doubles import FetcherDouble, make_fetch
 from tests._fetcher_factories import invoke_browser_strategy, invoke_http_strategy
+
+if TYPE_CHECKING:
+    from crawlutron.models.crawl_policy import CrawlPolicy
 from tests._policy_factories import (
     UNRESTRICTED_HOST_POLICY,
     admitted,
@@ -56,7 +59,7 @@ NEXT_PAGE_URL = "http://example.com/next"
 BROWSER_TEXT = "page one page two next page body copy"
 
 
-def _full_discovery_policy():
+def _full_discovery_policy() -> "CrawlPolicy":
     """Full extraction with discovery on: the policy that makes the post-fetch
     block have something to find, for whichever strategy is under test."""
     return http_strategy_policy(extraction="full", discovery=True)
