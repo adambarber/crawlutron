@@ -19,6 +19,10 @@ __all__ = ["KeyVerifyThrottle", "shared_throttle"]
 _MAX_BUCKETS = 1024
 _FAILURE_WINDOW_SECONDS = 300.0
 _COOLDOWN_SECONDS = 60.0
+#: Global bucket-mint pricing (#659): at most this many NEW buckets per window
+#: before minting is refused, so a distinct-id flood is priced, not free.
+_MINT_BUDGET = 512
+_MINT_WINDOW_SECONDS = 300.0
 
 
 def _throttled() -> Exception:
@@ -44,7 +48,10 @@ class KeyVerifyThrottle:
 
     Buckets are keyed on the presented credential's parseable key id; anything
     unparseable or overlong pools into one fixed ``unknown`` bucket, so varying
-    garbage cannot mint buckets. LRU eviction resets ledgers, favoring victims.
+    garbage cannot mint buckets. Eviction never discards a bucket that is in
+    cooldown (#659): flooding fresh ids cannot launder a victim's lockout, and
+    minting NEW buckets pays against a global budget so the flood itself is
+    priced.
     """
 
     MAX_FAILURES = 5
@@ -54,6 +61,8 @@ class KeyVerifyThrottle:
         self._clock = clock
         self._buckets: OrderedDict[str, _Bucket] = OrderedDict()
         self._lock = threading.Lock()
+        self._mint_window_started = clock()
+        self._minted = 0
 
     def check(self, presented: str) -> None:
         """Refuse while the credential's bucket is cooling; a caller-readable
@@ -89,14 +98,32 @@ class KeyVerifyThrottle:
     def _bucket_for(self, presented: str) -> _Bucket:
         key = self._key_for(presented)
         with self._lock:
+            now = self._clock()
             bucket = self._buckets.get(key)
             if bucket is None:
+                if now - self._mint_window_started > _MINT_WINDOW_SECONDS:
+                    self._mint_window_started = now
+                    self._minted = 0
+                if self._minted >= _MINT_BUDGET:
+                    raise _throttled()
+                self._minted += 1
                 bucket = _Bucket()
+                bucket.window_started = now
                 self._buckets[key] = bucket
             self._buckets.move_to_end(key)
             while len(self._buckets) > _MAX_BUCKETS:
-                self._buckets.popitem(last=False)
+                self._evict_cooling_last(now)
         return bucket
+
+    def _evict_cooling_last(self, now: float) -> None:
+        """Pop the LRU tail, skipping buckets still in cooldown (#659)."""
+        scan = list(self._buckets.items())
+        for victim_key, victim_bucket in reversed(scan):
+            if victim_bucket.cooldown_until <= now:
+                del self._buckets[victim_key]
+                return
+        if self._buckets:
+            self._buckets.popitem(last=False)
 
     def _reset(self) -> None:
         self._buckets.clear()
