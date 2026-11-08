@@ -23,7 +23,13 @@ from crawlutron.storage.job_store import JobStatus, JobStore
 from crawlutron.storage.result_store import CrawlResultStore
 from tests._api_harnesses import stored_request as _stored_request
 from tests._async_harnesses import expect_quota_refused
-from tests.factories.client import isolation_client, post_crawl, quota_client
+from tests.factories.client import (
+    isolation_client,
+    keyed_quota_crawl,
+    keyed_zero_bound,
+    post_crawl,
+    quota_client,
+)
 from tests.factories.store import complete_job, seed_owned_job
 from tests.factories.store import job_store as make_store
 
@@ -472,21 +478,16 @@ async def test_keyed_crawl_keeps_an_explicit_zero_page_limit(tmp_path):
     """#593: /v1/crawl resolves an explicit ``max_pages=0`` to the bounded
     service default (DEFAULT_MAX_PAGES) and persists that value -- stored ==
     enforced, so the engine never silently re-expands it to a different cap."""
-    async with quota_client(tmp_path) as (client, store, results, keys):
-        issued = keys.issue_key("agent-a", max_pages=0)
-        response = await post_crawl(client, max_pages=0, key=issued.secret)
-        stored = _stored_request(store, response)
-        assert stored.policy.limits.max_pages == DEFAULT_MAX_PAGES
+    async with keyed_quota_crawl(tmp_path, key_max_pages=0) as (store, _, _, response):
+        assert keyed_zero_bound(store, response).policy.limits.max_pages == DEFAULT_MAX_PAGES
 
 
 async def test_keyed_crawl_zero_limit_enforced_as_stored(tmp_path):
     """#593 execution-level: the bound the engine enforces equals the stored
     bound, so validate_wire_policy is a no-op on max_pages==DEFAULT_MAX_PAGES."""
-    async with quota_client(tmp_path) as (client, store, results, keys):
-        issued = keys.issue_key("agent-b", max_pages=0)
-        response = await post_crawl(client, max_pages=0, key=issued.secret)
+    async with keyed_quota_crawl(tmp_path, key_max_pages=0, label="agent-b") as (store, _, _, response):
         assert response.status_code == 202, response.text
-        stored = _stored_request(store, response)
+        stored = keyed_zero_bound(store, response)
         wire = stored.policy.model_dump()
         enforced = validate_wire_policy(wire)
         assert enforced.limits.max_pages == DEFAULT_MAX_PAGES

@@ -18,7 +18,7 @@ from tests._api_harnesses import mount_tracker as _mount_tracker
 from tests._api_harnesses import stored_request as _stored_request
 from tests._async_harnesses import expect_quota_refused
 from tests._policy_factories import job_store as make_store
-from tests.factories.client import post_crawl, quota_client
+from tests.factories.client import keyed_quota_crawl, post_crawl, quota_client
 
 
 def _keyed_headers(key: str) -> dict[str, str]:
@@ -34,13 +34,7 @@ async def _stored_crawl(client, store, *, key: str, max_pages: int = 0):
 
 async def test_keyed_crawl_stores_the_key_bound_when_limits_omitted(tmp_path):
     """A key declaring ``max_pages=1`` caps an omitted limits block in the stored policy."""
-    async with quota_client(tmp_path) as (client, store, results, keys):
-        issued = keys.issue_key("agent-a", max_pages=1)
-        response = await client.post(
-            "/v1/crawl",
-            headers=_keyed_headers(issued.secret),
-            json={"url": "http://example.com/", "async_mode": True},
-        )
+    async with keyed_quota_crawl(tmp_path, key_max_pages=1, body_max_pages=None) as (store, _, _, response):
         stored = _stored_request(store, response)
         assert stored.policy.limits.max_pages == 1
 
@@ -144,9 +138,8 @@ async def test_keyed_explicit_max_pages_over_the_ceiling_is_429(tmp_path):
     bypass the key's ceiling (#194).
     """
 
-    async with quota_client(tmp_path) as (client, store, results, keys):
-        issued = keys.issue_key("agent-a", max_pages=3)
-        expect_quota_refused(await post_crawl(client, max_pages=100, key=issued.secret))
+    async with keyed_quota_crawl(tmp_path, key_max_pages=3, body_max_pages=100) as (_, _, _, response):
+        expect_quota_refused(response)
 
 
 async def test_anonymous_sync_concurrency_is_bounded_at_four(tmp_path, monkeypatch):

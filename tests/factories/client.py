@@ -12,6 +12,7 @@ from httpx import AsyncClient
 
 from crawlutron.api.dependencies import get_job_store, get_result_store, get_settings, get_shutdown_event
 from crawlutron.config.settings import CrawlerSettings
+from crawlutron.models.json_value import JsonValue
 from crawlutron.storage import caller_key_store, job_store, result_store
 from tests._async_harnesses import serve
 from tests._quota_harness import keyed_client, stores
@@ -74,15 +75,56 @@ async def quota_client(
         yield client, store, results, keys
 
 
-async def post_crawl(client: AsyncClient, *, max_pages: int, key: str | None = None):
-    """POST one /v1/crawl for a caller; anonymous when no key is given."""
+async def post_crawl(client: AsyncClient, *, max_pages: int | None = 0, key: str | None = None):
+    """POST one /v1/crawl for a caller; anonymous when no key is given.
+
+    ``max_pages=None`` omits the limits block entirely -- the shape a key's
+    own ceiling must bind (#194)."""
     headers = {"X-API-Key": key} if key else None
-    return await client.post(
-        "/v1/crawl",
-        headers=headers,
-        json={
-            "url": "http://example.com/",
-            "async_mode": True,
-            "policy": {"limits": {"max_pages": max_pages}},
-        },
-    )
+    body: dict[str, JsonValue] = {"url": "http://example.com/", "async_mode": True}
+    if max_pages is not None:
+        body["policy"] = {"limits": {"max_pages": max_pages}}
+    return await client.post("/v1/crawl", headers=headers, json=body)
+
+
+async def keyed_crawl(
+    client: AsyncClient,
+    keys: caller_key_store.CallerKeyStore,
+    *,
+    key_max_pages: int,
+    body_max_pages: int | None = 0,
+    label: str = "agent-a",
+):
+    """One quota scenario: issue a key bound at ``key_max_pages``, POST as it.
+
+    The arrange triplet (issue key + present secret + crawl POST) stated once;
+    the response (and the caller's own assertion about it) stays with the test."""
+    issued = keys.issue_key(label, max_pages=key_max_pages)
+    response = await post_crawl(client, max_pages=body_max_pages, key=issued.secret)
+    return issued, response
+
+
+def keyed_zero_bound(store: job_store.JobStore, response):
+    """The stored policy of a #593 crawl: an explicit zero resolves to the bound."""
+    from tests._api_harnesses import stored_request as _stored_request
+
+    return _stored_request(store, response)
+
+
+@contextlib.asynccontextmanager
+async def keyed_quota_crawl(
+    tmp_path: Path,
+    *,
+    key_max_pages: int,
+    body_max_pages: int | None = 0,
+    label: str = "agent-a",
+):
+    """The full keyed-quota scenario: a served client, an issued key, one POST.
+
+    Yields ``(store, keys, issued, response)``; the caller asserts on the
+    response or the stored row -- the arrange is stated once here."""
+    async with quota_client(tmp_path) as (client, store, results, keys):
+        issued, response = await keyed_crawl(
+            client, keys, key_max_pages=key_max_pages, body_max_pages=body_max_pages, label=label
+        )
+        yield store, keys, issued, response
