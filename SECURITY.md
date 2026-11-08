@@ -62,10 +62,14 @@ It is a powerful SSRF-enabled service that:
   Playwright route handler (`crawlutron/transport/browser_targets.py`, wired via
   `wire_ssrf_guards`) blocks navigation and subresource loads to private hosts,
   but JavaScript a hostile rendered page runs (XHR/fetch/`WebSocket` from page
-  code, service workers, or non-http schemes) can attempt same-origin and
-  blocked-then-retried requests the route layer sees only per-request; treat a
-  rendered page as able to make requests from the browser's own network
-  position, not solely through the main fetch's admission door.
+  code, service workers, or non-http schemes) can attempt requests the route
+  layer evaluates per-request only -- each request is judged independently, so
+  per-request blocks do not form a session-level policy; treat a rendered page
+  as able to make requests from the browser's own network position, not solely
+  through the main fetch's admission door. Related residual: a webhook
+  announcement whose in-flight delivery set is at `DELIVERIES_CAP` is dropped
+  (logged `webhook_delivery_refused_at_cap`) and not retried until the watch's
+  state changes again.
 - **S5 — caller key secrets are verified with salted PBKDF2-SHA256.** Issued
   secrets embed their key id (`ck_<key_id>.<body>`, 256-bit-entropy body via
   `secrets.token_urlsafe(32)`). At rest the key row stores a salted
