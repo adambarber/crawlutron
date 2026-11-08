@@ -195,6 +195,13 @@ def test_cooldown_expiry_rearms_the_bucket():
     _refuses(throttle, presented)
 
     state["now"] += 61.0
-    # The cooldown has expired; one wrong guess must NOT re-arm it.
+    # The cooldown has expired; one wrong guess must NOT re-arm it...
     throttle.record_failure(presented)
     throttle.check(presented)
+    # ...and the full ladder must survive: MAX_FAILURES-1 more guesses stay
+    # admitted, the MAX_FAILURES-th re-cools.
+    for _ in range(KeyVerifyThrottle.MAX_FAILURES - 2):
+        throttle.record_failure(presented)
+        throttle.check(presented)
+    throttle.record_failure(presented)
+    _refuses(throttle, presented)

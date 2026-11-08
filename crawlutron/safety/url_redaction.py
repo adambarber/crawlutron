@@ -68,8 +68,13 @@ def _is_secret_name(name: str) -> bool:
         return True
     # #662: compound names hide secrets in their segments -- a name that
     # ends with a vocabulary word or carries one as a delimited segment
-    # (private_key, api-key, deploy.token) is a secret by name.
-    segments = [s for s in stripped.replace(".", "_").replace("-", "_").split("_") if s]
+    # (private_key, api-key, deploy.token) is a secret by name. Brackets are
+    # delimiters too (Rails-style key[s][], pass[word][]).
+    segments = [
+        s
+        for s in stripped.replace(".", "_").replace("-", "_").replace("[", "_").replace("]", "_").split("_")
+        if s
+    ]
     return bool(segments) and any(s in _SECRET_QUERY_KEYS for s in segments)
 
 
