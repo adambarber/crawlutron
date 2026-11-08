@@ -45,6 +45,11 @@ _SECRET_QUERY_KEYS = frozenset(
         "sig",
         "session",
         "username",
+        "passphrase",
+        "private_key",
+        "access_key",
+        "api-key",
+        "signing_key",
     }
 )
 
@@ -56,10 +61,16 @@ _REDACTED = "[REDACTED]"
 
 
 def _is_secret_name(name: str) -> bool:
-    stripped = name.strip().lower()
+    stripped = name.strip().lower().rstrip("[]").rstrip()
     if any(word in stripped for word in _SECRET_NAME_SUBSTRINGS):
         return True
-    return stripped in _SECRET_QUERY_KEYS or stripped.rstrip("[]").rstrip() in _SECRET_QUERY_KEYS
+    if stripped in _SECRET_QUERY_KEYS:
+        return True
+    # #662: compound names hide secrets in their segments -- a name that
+    # ends with a vocabulary word or carries one as a delimited segment
+    # (private_key, api-key, deploy.token) is a secret by name.
+    segments = [s for s in stripped.replace(".", "_").replace("-", "_").split("_") if s]
+    return bool(segments) and any(s in _SECRET_QUERY_KEYS for s in segments)
 
 
 def is_secret_name(name: str) -> bool:

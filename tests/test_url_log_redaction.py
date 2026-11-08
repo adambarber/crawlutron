@@ -13,7 +13,7 @@ import pytest
 
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.webhook_target import WebhookTarget
-from crawlutron.safety.url_redaction import redact_url
+from crawlutron.safety.url_redaction import is_secret_name, redact_url
 
 SECRET_QUERY_URLS = [
     "https://example.com/hook?key=secret",
@@ -193,3 +193,120 @@ def test_redaction_vocabulary_covers_credential_secret_fields():
         if not is_secret:
             continue
         assert is_secret_name(name), f"Credential secret field {name!r} is not redaction vocabulary"
+
+
+# Probe-derived #662 matrix: leaking compounds must MASK, benign stay CLEAN.
+LEAKING_COMPOUND_NAMES = [
+    "private_key",
+    "access_key",
+    "passphrase",
+    "api-key",
+    "signing_key",
+    "deploy.token",
+    "acct-password",
+]
+
+BENIGN_NAMES = [
+    "design",
+    "monkey",
+    "author",
+    "monkeywrench",
+    "kindergarten",
+    "apex",
+]
+
+
+@pytest.mark.parametrize("name", LEAKING_COMPOUND_NAMES)
+def test_compound_secret_names_are_masked(name):
+    """#662: a compound name ending in a secret word or carrying one as a
+    delimited segment must be masked, not leak its value verbatim."""
+    redacted = redact_url(f"https://example.com/hook?{name}=s3cret-value")
+    assert "s3cret-value" not in redacted, f"{name} leaked verbatim: {redacted}"
+
+
+@pytest.mark.parametrize("name", BENIGN_NAMES)
+def test_benign_compound_names_stay_clean(name):
+    """#662: interior-only or unrelated single segments are not secrets."""
+    url = f"https://example.com/hook?{name}=ordinary&ok=1"
+    redacted = redact_url(url)
+    assert "ordinary" in redacted, f"{name} over-redacted: {redacted}"
+
+
+def _SECRET_VOCABULARY() -> frozenset[str]:
+    """The property test's OWN opinion of secret vocabulary, not production's.
+
+    Deliberately inline (owner-directed #662): if it read is_secret_name, it
+    would restate the table and be structurally unable to catch its gaps.
+    """
+    return frozenset(
+        {
+            "secret",
+            "token",
+            "password",
+            "passwd",
+            "pwd",
+            "apikey",
+            "api_key",
+            "pass",
+            "key",
+            "auth",
+            "sig",
+            "signature",
+            "session",
+            "username",
+            "passphrase",
+            "private_key",
+            "access_key",
+            "api-key",
+            "signing_key",
+        }
+    )
+
+
+def _compound_words() -> list[str]:
+    """Vocabulary words that combine into compound parameter names."""
+    return ["key", "token", "secret", "password", "pwd", "auth", "passphrase"]
+
+
+def _benign_words() -> list[str]:
+    """Words that look secret-adjacent but are not, in any position."""
+    return ["design", "monkey", "author", "wrench", "apex", "kinder"]
+
+
+_DELIMITERS = ["_", "-", "."]
+
+
+@pytest.mark.parametrize("word", _compound_words())
+@pytest.mark.parametrize("delimiter", _DELIMITERS)
+@pytest.mark.parametrize("position", ["prefix", "suffix", "only"])
+def test_invariant_compound_secret_names_mask_property_shaped(word, delimiter, position):
+    """#662 INVARIANT (property-shaped): for every vocabulary word x delimiter
+    x position, a compound name whose secret word is the whole final segment
+    (or a full delimited segment) must mask. Reads the module's own vocabulary,
+    never is_secret_name, so it fails independently of the production table."""
+    word_for_name = word.replace("_", delimiter) if delimiter != "_" else word
+    if position == "prefix":
+        name = f"{word_for_name}{delimiter}id"
+    elif position == "suffix":
+        name = f"user{delimiter}{word_for_name}"
+    else:
+        name = word_for_name
+    assert is_secret_name(name), f"compound secret name {name!r} escaped the mask"
+    value = "v4lue-leak"
+    redacted = redact_url(f"https://example.com/hook?{name}={value}")
+    assert value not in redacted, f"{name} leaked verbatim: {redacted}"
+
+
+@pytest.mark.parametrize("word", _benign_words())
+@pytest.mark.parametrize("delimiter", _DELIMITERS)
+@pytest.mark.parametrize("position", ["prefix", "suffix", "interior"])
+def test_invariant_benign_compound_names_stay_clean_property_shaped(word, delimiter, position):
+    """#662 INVARIANT (negative property): interior-only or unrelated single
+    segments are not secrets -- bounding the false-positive cost by design."""
+    if position == "prefix":
+        name = f"{word}{delimiter}id"
+    elif position == "suffix":
+        name = f"user{delimiter}{word}"
+    else:
+        name = f"a{delimiter}{word}{delimiter}z"
+    assert not is_secret_name(name), f"benign name {name!r} was over-masked"
