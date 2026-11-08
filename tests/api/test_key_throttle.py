@@ -119,15 +119,15 @@ def _flood_failures(throttle: KeyVerifyThrottle, count: int) -> int:
 
 
 def test_flood_cannot_evict_a_cooldown_victim():
-    """#659: LRU eviction never discards a bucket that is in cooldown, so a
-    bucket flood cannot launder a victim out of its fail-closed lockout."""
+    """#659: a distinct-id flood cannot launder a victim out of its cooldown --
+    the mint budget caps bucket creation, so the victim's ledger survives."""
     throttle = KeyVerifyThrottle()
     victim = "ck_0123456789abcdef.victim"
     for _ in range(KeyVerifyThrottle.MAX_FAILURES):
         throttle.record_failure(victim)
     _refuses(throttle, victim)
 
-    # Mint pricing may refuse part of the flood; only 429s are legal.
+    # Mint pricing refuses part of the flood; only 429s are legal.
     _flood_failures(throttle, 1100)
     _refuses(throttle, victim)
 

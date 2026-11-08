@@ -4,6 +4,12 @@ Every request presenting an ``X-API-Key`` costs one PBKDF2-SHA256 at 210k
 iterations -- the service's most expensive pre-auth operation. This module
 meters it: consecutive failed verifies from the same presented credential trip
 a fail-closed cooldown. It is process state like every other holder (#621).
+
+#659 anti-laundering control: the global MINT BUDGET. A distinct-credential
+flood cannot mint unlimited buckets (512 per 300s), so it can never push a
+cooldown victim's bucket out of the ledger -- there is no eviction at all.
+Accepted shared fate: once the budget is spent, EVERY first-time caller for
+the window remainder is 429-refused -- fail-closed by choice.
 """
 
 from __future__ import annotations
@@ -16,11 +22,11 @@ from crawlutron.runtime import process_state
 
 __all__ = ["KeyVerifyThrottle", "shared_throttle"]
 
-_MAX_BUCKETS = 1024
 _FAILURE_WINDOW_SECONDS = 300.0
 _COOLDOWN_SECONDS = 60.0
-#: Global bucket-mint pricing (#659): at most this many NEW buckets per window
-#: before minting is refused, so a distinct-id flood is priced, not free.
+#: Global bucket-mint pricing (#659) -- THE anti-laundering control: at most
+#: this many NEW buckets per window, so a distinct-id flood is priced, not
+#: free, and bucket count stays bounded below the (deleted) eviction cap.
 _MINT_BUDGET = 512
 _MINT_WINDOW_SECONDS = 300.0
 
@@ -48,17 +54,21 @@ class KeyVerifyThrottle:
 
     Buckets are keyed on the presented credential's parseable key id; anything
     unparseable or overlong pools into one fixed ``unknown`` bucket, so varying
-    garbage cannot mint buckets. Eviction never discards a bucket that is in
-    cooldown (#659): flooding fresh ids cannot launder a victim's lockout, and
-    minting NEW buckets pays against a global budget so the flood itself is
-    priced.
+    garbage cannot mint buckets. There is NO eviction (#659): the global mint
+    budget is the anti-laundering control -- a flood cannot mint enough new
+    buckets to displace a cooldown victim's ledger, because minting refuses
+    long before the ledger could need eviction.
     """
 
     MAX_FAILURES = 5
     UNKNOWN_BUCKET = "unknown"
     #: The dedicated bucket every /v1/keys admin-token guess meters against
     #: (#659): one shared ledger, so per-credential bucket minting cannot
-    #: dilute the admin door's pacing.
+    #: dilute the admin door's pacing. Accepted griefing risk: 5 wrong
+    #: guesses lock the OPERATOR's correct token out for 60s (refreshable) --
+    #: the alternative, per-source buckets, would re-mint unbounded bucket
+    #: space on the one door that must not be dilutable, and a mint flood
+    #: would then block admin failure-recording entirely.
     ADMIN_BUCKET = "admin"
 
     def __init__(self, *, clock=time.monotonic) -> None:
@@ -145,26 +155,6 @@ class KeyVerifyThrottle:
         if sep and prefix.startswith("ck_") and len(prefix) <= 64 and "." not in rest:
             return prefix
         return self.UNKNOWN_BUCKET
-
-    def _bucket_for(self, presented: str) -> _Bucket:
-        key = self._key_for(presented)
-        with self._lock:
-            now = self._clock()
-            bucket = self._locked_get_or_mint(key, now)
-            self._buckets.move_to_end(key)
-            while len(self._buckets) > _MAX_BUCKETS:
-                self._evict_cooling_last(now)
-        return bucket
-
-    def _evict_cooling_last(self, now: float) -> None:
-        """Pop the LRU tail, skipping buckets still in cooldown (#659)."""
-        scan = list(self._buckets.items())
-        for victim_key, victim_bucket in reversed(scan):
-            if victim_bucket.cooldown_until <= now:
-                del self._buckets[victim_key]
-                return
-        if self._buckets:
-            self._buckets.popitem(last=False)
 
     def _reset(self) -> None:
         self._buckets.clear()

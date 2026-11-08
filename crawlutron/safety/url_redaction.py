@@ -4,6 +4,11 @@ A URL with credentials -- userinfo (``user:pass@host``) or query secrets
 (``?key=...``) -- must never reach any log line. Objects whose projections can
 carry a URL (WebhookTarget, WatchState) route every log/serial form through
 :func:`redact_url`; per-site string munging is forbidden.
+
+Accepted limit (#659): the chokepoint decodes each parameter name ONCE.
+Double-encoded secrets (``%2573ecret=x``) pass the mask uncaught; a second
+decode layer would corrupt benign percent-encoded params, so the leak survives
+only where a downstream consumer decodes again.
 """
 
 from __future__ import annotations
