@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import pathlib
 import re
+import typing
 
 from tests.chokepoint_walks import (
     REPO_ROOT,
@@ -159,6 +160,21 @@ RULES = Registry(
         EVERY_MCP_TOOL_DECLARES_THE_MODEL_THAT_VALIDATES_ITS_ARGUMENTS,
     )
 )
+
+
+def test_discovery_response_fields_match_the_payload_declaration():
+    """The validated twin's field set cannot drift from ``DiscoveryPayload``.
+
+    The payload is the declaration of record; the response model redeclares its
+    fields for pydantic, and this invariant proves the redeclaration agrees.
+    """
+    from crawlutron.models.discovery_response import DiscoveryPayload, DiscoveryResponse
+
+    payload_hints = typing.get_type_hints(DiscoveryPayload)
+    response_hints = typing.get_type_hints(DiscoveryResponse)
+    assert set(response_hints) == set(payload_hints)
+    for name, annotation in payload_hints.items():
+        assert response_hints[name] == annotation, name
 
 
 def test_no_rule_violations():
