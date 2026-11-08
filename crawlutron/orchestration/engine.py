@@ -27,6 +27,8 @@ from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.json_value import JsonValue
+from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.models.result_record import ProducerEnvelope
 from crawlutron.models.serialization import from_wire, to_dict
 from crawlutron.orchestration.request_pipeline import (
     PipelineDependencies,
@@ -45,8 +47,6 @@ if TYPE_CHECKING:
     from crawlutron.models.crawl_policy import CrawlPolicy
     from crawlutron.models.crawl_worker import CrawlWorker
     from crawlutron.models.http_fetcher import HttpFetcher
-    from crawlutron.models.normalized_url import NormalizedUrl
-    from crawlutron.models.result_record import ProducerEnvelope
     from crawlutron.models.webhook_target import WebhookTarget
 
 logger = logging.getLogger(__name__)

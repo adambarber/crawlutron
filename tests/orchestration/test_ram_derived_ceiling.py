@@ -5,7 +5,6 @@ import asyncio
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_policy import CrawlPolicy as ProbeCrawlPolicy
 from crawlutron.models.crawl_request import CrawlRequest
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.orchestration.request_pipeline import (
     PipelineDependencies,
     PipelineState,
@@ -23,6 +22,7 @@ from crawlutron.transport.browser_pool import derive_browser_pool_size
 from crawlutron.transport.cache import HttpCache
 from crawlutron.transport.content_cache import ContentCache
 from tests._fetch_doubles import FetcherDouble
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 from tests._result_builders import Spill
 
 
@@ -80,7 +80,7 @@ def _ceiling_probe_state() -> PipelineState:
         # and answer the same 200 twice so neither arm ever re-derives.
         fetcher=FetcherDouble(lambda *_: (200, b"", "text/html")),
         cffi=FetcherDouble(lambda *_: (200, b"", "text/html")),
-        host_policy=HostPolicy.unrestricted(),
+        host_policy=UNRESTRICTED_HOST_POLICY,
         shutdown_event=asyncio.Event(),
         browser_worker=None,
         cache=None,

@@ -13,14 +13,13 @@ from typing_extensions import TypedDict
 from crawlutron.api.crawl_endpoint import read_crawl_result_record, read_crawl_trace_record
 from crawlutron.mcp.handlers import ToolResult, handle_read_crawl_result, handle_read_crawl_trace
 from crawlutron.models.crawl_result_request import CrawlResultRequest
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.json_value import JsonValue
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
 from crawlutron.models.unified_crawl_result import UnifiedCrawlResult
 from crawlutron.storage.job_store import JobStatus
 from tests._assertions import completed_crawl
 from tests._fetcher_factories import make_crawl_payload
+from tests._policy_factories import canonical
 from tests.mcp.test_mcp import _META, _body
 
 
@@ -184,9 +183,7 @@ class TestNoRevalidationOnTheReplayPath:
                 results=[
                     UnifiedCrawlResult(
                         original_url="http://admitted.example/",
-                        normalized_url=NormalizedUrl(
-                            "http://admitted.example/", policy=HostPolicy.unrestricted()
-                        ),
+                        normalized_url=canonical("http://admitted.example/"),
                         status="success",
                         classification="rendered",
                         attempted_strategies=[],

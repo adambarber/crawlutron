@@ -14,7 +14,6 @@ from crawlutron.config.settings import CrawlerSettings
 from crawlutron.extraction.document_text import format_extracted_document_text
 from crawlutron.extraction.trees import FrameCollector, frames_from, walkable
 from crawlutron.models.crawl_request import CrawlRequest
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.json_value import JsonValue
 from crawlutron.models.render_request import RenderRequest
 from crawlutron.transport.fetch_policy import (
@@ -36,7 +35,7 @@ from tests._fetch_doubles import FetcherDouble, make_fetch
 from tests._fetcher_factories import run_chain
 from tests._http_fetch_doubles import diagnostics_for_failed_probes as _diagnostics_for_failed_probes
 from tests._http_fetch_doubles import run_http_result as _run_http_result
-from tests._policy_factories import canonical, make_base_policy
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, make_base_policy
 
 
 def _raise_fetcher(url, *_):
@@ -49,7 +48,7 @@ def _ok_fetcher(url, *_):
 
 class TestValidationHelpers:
     def test_checked_payload_urls_errors(self) -> None:
-        pairs = checked_payload_urls(CrawlRequest(url="http://x/"), 10, host_policy=HostPolicy.unrestricted())
+        pairs = checked_payload_urls(CrawlRequest(url="http://x/"), 10, host_policy=UNRESTRICTED_HOST_POLICY)
         assert [text for text, _ in pairs] == ["http://x/"]
 
     @pytest.mark.parametrize(
@@ -64,7 +63,7 @@ class TestValidationHelpers:
         pairs = checked_payload_urls(
             CrawlRequest(urls=raw_urls),
             10,
-            host_policy=HostPolicy.unrestricted(),
+            host_policy=UNRESTRICTED_HOST_POLICY,
         )
         assert [text for text, _ in pairs] == expected
 
@@ -80,7 +79,7 @@ class TestValidationHelpers:
             "https://a.gov/y?b=2&a=1",  # param order only -> same page
             "https://a.gov/z",
         ]
-        pairs = checked_payload_urls(CrawlRequest(urls=urls), 10, host_policy=HostPolicy.unrestricted())
+        pairs = checked_payload_urls(CrawlRequest(urls=urls), 10, host_policy=UNRESTRICTED_HOST_POLICY)
         assert [text for text, _ in pairs] == [
             "https://a.gov/x",
             "https://a.gov/x/#section",

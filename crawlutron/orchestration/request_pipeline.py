@@ -20,8 +20,7 @@ from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.crawl_task import CrawlTask
 from crawlutron.models.crawl_worker import CrawlWorker
 from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.normalized_url import NormalizedUrl, admit_or_none
-from crawlutron.models.result_record import ProducerEnvelope
+from crawlutron.models.normalized_url import admit_or_none
 from crawlutron.orchestration.recursive import run_recursive_crawl
 from crawlutron.orchestration.spill_sink import SpillSink, write_spill
 from crawlutron.orchestration.strategy_chain import execute_crawl_chain
@@ -52,6 +51,8 @@ from crawlutron.vocabulary.strategies import BROWSER_STRATEGIES
 
 if TYPE_CHECKING:
     from crawlutron.models.http_fetcher import HttpFetcher
+    from crawlutron.models.normalized_url import NormalizedUrl
+    from crawlutron.models.result_record import ProducerEnvelope
     from crawlutron.models.webhook_target import WebhookTarget
     from crawlutron.orchestration.engine import SeedCache
 

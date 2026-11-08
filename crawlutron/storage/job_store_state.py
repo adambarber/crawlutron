@@ -15,7 +15,6 @@ from crawlutron.admission.policy import PolicyTier, read_policy
 from crawlutron.admission.policy import stored_policy as _stored_policy
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.json_value import JsonValue
 from crawlutron.models.normalized_url import NormalizedUrl, admit_or_none
 from crawlutron.safety.json_safe import json_default
 
@@ -32,6 +31,8 @@ from .job_store_collections import (
 )
 
 if TYPE_CHECKING:
+    from crawlutron.models.json_value import JsonValue
+
     from .job_store import JobStore
 
 _STATS_KEYS = ("total_crawled", "total_failed", "cap_truncated", "cap_overcommitted")

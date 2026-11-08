@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
 
 from crawlutron.admission.policy import read_policy
 from crawlutron.config.settings import CrawlerSettings
-from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.orchestration import engine as engine_mod
 from crawlutron.orchestration.engine import crawl_request
 from crawlutron.safety.bounded_ttl import BoundedTTLCache
@@ -31,15 +30,16 @@ from tests._http_fetch_doubles import fake_fetcher as _fake_fetcher
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, crawl_policy
 from tests._timing_harnesses import cpu_seconds
 
+if TYPE_CHECKING:
+    from crawlutron.models.host_policy import HostPolicy
+
 
 def robots_entry_key(origin: str) -> tuple[str, HostPolicy]:
-    """The key production writes a robots cache entry under.
-
-    load_robots_rules reads and ``_load_uncached`` writes the same
+    """The key production writes a robots cache entry under: the
     ``(canonical_origin, policy)`` pair; a bare origin is never a cache key."""
     # ``robots_origin`` retired with the flip: the canonical origin of a raw origin text is now the admitted
     # value's own ``.origin``.
-    return (NormalizedUrl(origin, policy=UNRESTRICTED_HOST_POLICY).origin, UNRESTRICTED_HOST_POLICY)
+    return (canonical(origin).origin, UNRESTRICTED_HOST_POLICY)
 
 
 class TestRobotsCacheLocking:
@@ -471,7 +471,7 @@ async def _run_diag(calls, *, engine_robots_sitemaps):
         http_fetcher=_fake_fetcher(calls),
         engine_robots_sitemaps=engine_robots_sitemaps,
         robots_evaluated=True,
-        host_policy=HostPolicy.unrestricted(),
+        host_policy=UNRESTRICTED_HOST_POLICY,
     )
 
 

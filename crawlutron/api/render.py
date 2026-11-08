@@ -19,8 +19,6 @@ from crawlutron.models.crawl_job import CrawlJob
 from crawlutron.models.crawl_policy import POLICY_SCHEMA_VERSION
 from crawlutron.models.crawl_result import CrawlResult
 from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.json_value import JsonValue
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.render_request import RenderRequest
 from crawlutron.models.result_factory import terminal_crawl_result
 from crawlutron.runtime.worker_dispatch import call_worker
@@ -43,6 +41,8 @@ _ALLOWED_POLICY = RobotsRules([], [], None, RobotsSource.policy)
 if TYPE_CHECKING:
     from crawlutron.models.crawl_result import EngineCrawlResult
     from crawlutron.models.crawl_worker import CrawlWorker
+    from crawlutron.models.json_value import JsonValue
+    from crawlutron.models.normalized_url import NormalizedUrl
     from crawlutron.models.render_options import RenderOptions
     from crawlutron.models.result_record import RenderEnvelope
 

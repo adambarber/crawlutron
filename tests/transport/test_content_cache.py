@@ -9,9 +9,7 @@ from collections.abc import Callable, Generator
 import pytest
 
 import crawlutron.transport.content_cache as cc
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.json_value import JsonValue
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.transport.cache import HttpCache
 from crawlutron.transport.content_cache import ContentCache
 from crawlutron.transport.fetchers import default_http_fetcher
@@ -20,6 +18,7 @@ from tests._cache_fixtures import _make_cache, counting_entry_reads, on_disk_byt
 from tests._fetch_doubles import FetcherDouble
 from tests._fetcher_factories import clocked_cache, crawled_results, run_http_strategy
 from tests._lock_scope_walks import calls_inside_self_lock
+from tests._policy_factories import canonical
 from tests.helpers.server import EtagHandler
 
 
@@ -215,9 +214,7 @@ async def test_http_strategy_result_uses_content_cache(base_url, tmp_path):
     first = await run()
     second = await run()
     assert first.status == "success" and second.status == "success"
-    assert fetched == [
-        NormalizedUrl(f"{base_url}/", policy=HostPolicy.unrestricted()).raw
-    ]  # the cache prevented the second real fetch
+    assert fetched == [canonical(f"{base_url}/").raw]  # the cache prevented the second real fetch
 
 
 async def test_content_cache_revalidates_etagged_url(etag_server, tmp_path):

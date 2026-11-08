@@ -12,9 +12,7 @@ from crawlutron.extraction.content import forms_from
 from crawlutron.extraction.document_text import format_extracted_document_text
 from crawlutron.extraction.trees import walkable
 from crawlutron.models.crawl_request import CrawlRequest as _CrawlRequestModel
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.json_value import JsonValue
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.request_profile_record import RequestProfileRecord
 from crawlutron.orchestration.engine import crawl_request
 from crawlutron.transport.cache import HttpCache
@@ -36,7 +34,7 @@ from tests._http_test_helpers import (
     decompress_body,
     quality_score,
 )
-from tests._policy_factories import canonical, make_base_policy
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, make_base_policy
 from tests._worker_doubles import (
     assert_coroutine_worker_is_awaited_directly,
     assert_sync_worker_runs_once_in_a_thread,
@@ -64,24 +62,24 @@ class TestCrawlRequest:
         within = _CrawlRequestModel(
             urls=["http://example.com/a", "http://example.com/a", "http://example.com/b"]
         )
-        pairs = checked_payload_urls(within, 10, host_policy=HostPolicy.unrestricted())
+        pairs = checked_payload_urls(within, 10, host_policy=UNRESTRICTED_HOST_POLICY)
         assert [text for text, _ in pairs] == ["http://example.com/a", "http://example.com/b"]
         oversized = _CrawlRequestModel(urls=[f"http://example.com/{i}" for i in range(11)])
         with pytest.raises(ValueError, match=r"^batch_size_exceeded$"):
             checked_payload_urls(
                 oversized,
                 10,
-                host_policy=HostPolicy.unrestricted(),
+                host_policy=UNRESTRICTED_HOST_POLICY,
             )
 
     def test_checked_payload_urls_accepts_a_forwarded_batch_without_rederiving(self) -> None:
         """Tier-2 the endpoint gate's result may be handed to the engine so
         the batch is parsed once per request. A forwarded batch is returned as
         the job set without re-deriving from the payload..."""
-        policy = HostPolicy.unrestricted()
+        policy = UNRESTRICTED_HOST_POLICY
         forwarded = [
-            ("http://example.com/a", NormalizedUrl("http://example.com/a", policy=policy)),
-            ("http://example.com/b", NormalizedUrl("http://example.com/b", policy=policy)),
+            ("http://example.com/a", canonical("http://example.com/a")),
+            ("http://example.com/b", canonical("http://example.com/b")),
         ]
         oversized_payload = _CrawlRequestModel(urls=[f"http://example.com/{i}" for i in range(11)])
         outcome = checked_payload_urls(
@@ -95,11 +93,8 @@ class TestCrawlRequest:
     def test_forwarded_batch_still_faces_the_cap(self) -> None:
         """...but the cap still applies to a forwarded batch (invariant: the
         engine-internal ceiling cannot be bypassed by supplying url_pairs)."""
-        policy = HostPolicy.unrestricted()
-        forwarded = [
-            (f"http://example.com/{i}", NormalizedUrl(f"http://example.com/{i}", policy=policy))
-            for i in range(11)
-        ]
+        policy = UNRESTRICTED_HOST_POLICY
+        forwarded = [(f"http://example.com/{i}", canonical(f"http://example.com/{i}")) for i in range(11)]
         with pytest.raises(ValueError, match=r"^batch_size_exceeded$"):
             checked_payload_urls(
                 _CrawlRequestModel(url="http://example.com/x"),
@@ -121,7 +116,7 @@ class TestCrawlRequest:
         )
         forwarded_pair = (
             "http://example.com/a",
-            NormalizedUrl("http://example.com/a", policy=HostPolicy.unrestricted()),
+            canonical("http://example.com/a"),
         )
         result = await crawl_request(
             {"urls": ["http://example.com/a", "http://example.com/a/?utm_source=tw"], "policy": policy},

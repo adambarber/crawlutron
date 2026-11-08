@@ -11,13 +11,16 @@ from lxml import etree
 
 from crawlutron.admission.policy import read_policy
 from crawlutron.extraction.content import extract_post_fetch_discovery
-from crawlutron.models.crawl_policy import CrawlPolicy
-from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.normalized_url import NormalizedUrl
 from tests._assertions import install_to_thread_spy
 from tests._fetch_doubles import FetcherDouble, make_fetch
 from tests._fetcher_factories import invoke_browser_strategy, invoke_http_strategy
-from tests._policy_factories import canonical, http_strategy_policy
+from tests._policy_factories import (
+    UNRESTRICTED_HOST_POLICY,
+    admitted,
+    canonical,
+    host_policy_for,
+    http_strategy_policy,
+)
 
 HTML = (
     "<html><head><title>T</title></head><body>"
@@ -53,7 +56,7 @@ NEXT_PAGE_URL = "http://example.com/next"
 BROWSER_TEXT = "page one page two next page body copy"
 
 
-def _full_discovery_policy() -> CrawlPolicy:
+def _full_discovery_policy():
     """Full extraction with discovery on: the policy that makes the post-fetch
     block have something to find, for whichever strategy is under test."""
     return http_strategy_policy(extraction="full", discovery=True)
@@ -116,7 +119,7 @@ async def test_no_lxml_tree_escapes_to_loop(monkeypatch):
         include_diagnostics=True,
         include_links=True,
         include_js_endpoints=True,
-        host_policy=HostPolicy.unrestricted(),
+        host_policy=UNRESTRICTED_HOST_POLICY,
     )
 
     def _has_element(value):
@@ -138,8 +141,8 @@ def test_html_diagnostics_omit_policy_blocked_frame_and_private_form(monkeypatch
     html = '<iframe src="https://blocked.test/frame"></iframe><form action="http://127.0.0.1/admin"></form>'
     # The source carries the policy under test: its own ``resolve`` is the filter, so admitting it under an
     # unrestricted policy would defeat the very contract this test pins.
-    policy = HostPolicy.from_strings("allowed.test", "blocked.test")
-    source = NormalizedUrl("https://allowed.test/page", policy=policy)
+    policy = host_policy_for("allowed.test", "blocked.test")
+    source = admitted("https://allowed.test/page", policy=policy)
     result = extract_post_fetch_discovery(
         html,
         source,
@@ -160,12 +163,12 @@ async def test_discovery_feeds_are_policy_filtered():
     # The page value carries the job policy: its own ``resolve`` is what keeps the blocked-host and private
     # feeds out of the answer.
     result = await discovery_diagnostics(
-        normalized_url=NormalizedUrl(
-            "https://allowed.test/page", policy=HostPolicy.from_strings("allowed.test", "blocked.test")
+        normalized_url=admitted(
+            "https://allowed.test/page", policy=host_policy_for("allowed.test", "blocked.test")
         ),
         html=html,
         policy=read_policy({"discovery": {"feeds": True}}),
-        host_policy=HostPolicy.from_strings("allowed.test", "blocked.test"),
+        host_policy=host_policy_for("allowed.test", "blocked.test"),
         headers={},
         http_fetcher=FetcherDouble(lambda url, headers, *rest: (None, None, None)),
         engine_robots_sitemaps=[],
