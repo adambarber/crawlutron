@@ -10,19 +10,57 @@ from __future__ import annotations
 
 from urllib.parse import parse_qsl, quote, urlsplit
 
-# Query parameters whose values are secrets by name; a listed name's value is
-# masked regardless of the host. Membership runs on the DECODED name: a
-# percent-encoded or bracketed spelling is the same parameter on the wire.
+# Query parameters whose values are secrets by name (#659): a parameter whose
+# DECODED name carries one of these SUBSTRINGS (case-insensitive) is masked
+# regardless of host -- substring semantics so the vocabulary cannot age by
+# enumeration (client_secret, access_token, id_token, pwd, session all fell
+# through the old exact-name list). Exact-name additions are made only where
+# a substring would over-redact a legitimate parameter:
+# - "session": substring would redact benign names like "session_id" -- but
+#   session ids are themselves bearer-adjacent, so it is masked wholesale; the
+#   exact entry documents that ruling.
+# - "sig"/"signature": "sig" as a substring would over-redact e.g. "design";
+#   kept as exact names.
+# - "auth": substring would over-redact "author"; kept as an exact name.
+# - "username": Credential's basic username is a SecretStr, but "user" as a
+#   substring would over-redact user-agent/user-id style parameters; masked as
+#   an exact name.
 _SECRET_QUERY_KEYS = frozenset(
-    {"key", "token", "secret", "password", "passwd", "pass", "api_key", "apikey", "auth", "signature", "sig"}
+    {
+        "key",
+        "token",
+        "secret",
+        "password",
+        "passwd",
+        "pass",
+        "api_key",
+        "apikey",
+        "auth",
+        "signature",
+        "sig",
+        "session",
+        "username",
+    }
 )
+
+#: Substring vocabulary: a decoded parameter name containing any of these
+#: (case-insensitive) carries a secret by name.
+_SECRET_NAME_SUBSTRINGS = ("secret", "token", "password", "passwd", "pwd", "apikey", "api_key")
 
 _REDACTED = "[REDACTED]"
 
 
 def _is_secret_name(name: str) -> bool:
     stripped = name.strip().lower()
+    if any(word in stripped for word in _SECRET_NAME_SUBSTRINGS):
+        return True
     return stripped in _SECRET_QUERY_KEYS or stripped.rstrip("[]").rstrip() in _SECRET_QUERY_KEYS
+
+
+def is_secret_name(name: str) -> bool:
+    """The public door: whether this decoded query parameter name is secret
+    vocabulary (#659). The invariant test reads the same opinion callers run."""
+    return _is_secret_name(name)
 
 
 def _redact_query(query: str) -> str:

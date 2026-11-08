@@ -21,6 +21,23 @@ SECRET_QUERY_URLS = [
     "https://example.com/hook?api_key=z&ok=1",
 ]
 
+# Probe-derived (#659): every name that leaked verbatim through the
+# exact-name vocabulary into redacted projections.
+AGED_SECRET_QUERY_URLS = [
+    "https://example.com/hook?client_secret=s1",
+    "https://example.com/hook?access_token=t1",
+    "https://example.com/hook?pwd=p1",
+    "https://example.com/hook?session=s%3As1",
+    "https://example.com/hook?id_token=i1",
+]
+
+
+@pytest.mark.parametrize("url", AGED_SECRET_QUERY_URLS, ids=lambda u: u.split("?")[1])
+def test_redact_url_masks_the_aged_vocabulary(url):
+    name, _, value = url.split("?")[1].partition("=")
+    redacted = redact_url(url)
+    assert value not in redacted, f"{name} leaked verbatim: {redacted}"
+
 
 @pytest.mark.parametrize("url", SECRET_QUERY_URLS, ids=lambda u: u[:34])
 def test_redact_url_masks_secret_query_values(url):
@@ -157,3 +174,22 @@ async def test_webhook_log_paths_never_emit_a_secret(caplog, monkeypatch):
         await webhooks.post_webhook(target, {})
     for record in caplog.records:
         assert "secret" not in str(record.__dict__), record.getMessage()
+
+
+def test_redaction_vocabulary_covers_credential_secret_fields():
+    """#659: the redaction vocabulary and Credential's secret field names are
+    one opinion -- every field Credential admits as a SecretStr is masked by
+    name in the redaction chokepoint, so the two cannot diverge silently."""
+    from typing import get_args
+
+    from pydantic import SecretStr
+
+    from crawlutron.models.credential import Credential
+    from crawlutron.safety.url_redaction import is_secret_name
+
+    for name, field in Credential.model_fields.items():
+        candidates = (field.annotation, *get_args(field.annotation))
+        is_secret = any(isinstance(a, type) and issubclass(a, SecretStr) for a in candidates)
+        if not is_secret:
+            continue
+        assert is_secret_name(name), f"Credential secret field {name!r} is not redaction vocabulary"
