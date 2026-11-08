@@ -165,11 +165,22 @@ async def get_keys_caller(request: Request) -> CallerIdentity:
 
     A caller key never enters, valid or not; no store lookup, so the door is
     not a key-validity oracle, and an unconfigured token seals it (fail closed).
+    Failed guesses meter through the shared KeyVerifyThrottle's dedicated
+    ``admin`` bucket (#659): guess-pacing, not CPU protection --
+    compare_digest is cheap, so the meter's value is pacing the door away
+    from unlimited online guessing. 5 misses/300s -> 60s fail-closed
+    cooldown BEFORE any comparison work beyond the digest.
     """
     secret = _presented_key(request)
     admin_token = key_admin_token(request)
-    if not secret or not admin_token or not _constant_time_eq(secret, admin_token):
+    if not secret or not admin_token:
         _raise_invalid_api_key()
+    throttle = key_throttle.shared_throttle()
+    throttle.check_admin()
+    if not _constant_time_eq(secret, admin_token):
+        throttle.record_admin_failure()
+        _raise_invalid_api_key()
+    throttle.record_admin_success()
     return CallerIdentity(
         caller_id="admin",
         authenticated=True,

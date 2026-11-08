@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from starlette.requests import Request
 
+from crawlutron.api.key_throttle import KeyVerifyThrottle
 from crawlutron.storage.caller_key_store import CallerKeyStore
 from tests._async_harnesses import issue_key
 from tests.factories.client import isolation_client, post_crawl, quota_client
@@ -147,6 +148,32 @@ async def test_a_valid_caller_key_cannot_list_keys(tmp_path):
         listed = await client.get("/v1/keys", headers={"X-API-Key": secret})
 
         _assert_401(listed)
+
+
+async def test_wrong_admin_token_guesses_trip_the_cooldown(tmp_path):
+    """#659: failed admin-token guesses on /v1/keys meter through the shared
+    KeyVerifyThrottle's dedicated 'admin' bucket -- guess-pacing, not CPU
+    protection (compare_digest is cheap); after MAX_FAILURES misses the door
+    refuses 429 before spending any comparison work."""
+    async with isolation_client(tmp_path) as (client, _store, _results, _keys):
+        for i in range(KeyVerifyThrottle.MAX_FAILURES):
+            response = await client.get("/v1/keys", headers={"X-API-Key": f"wrong-guess-{i}"})
+            assert response.status_code == 401, response.text
+        throttled = await client.get("/v1/keys", headers={"X-API-Key": "wrong-guess-999"})
+        assert throttled.status_code == 429, throttled.text
+        assert throttled.json()["detail"]["code"] == "key_verify_throttled"
+
+
+async def test_correct_admin_token_still_admits_after_metering(tmp_path):
+    """#659: the meter paces guesses, not the operator -- a correct token
+    presented under the MAX-failure bar still mints normally."""
+    async with isolation_client(tmp_path) as (client, _store, _results, _keys):
+        for i in range(KeyVerifyThrottle.MAX_FAILURES - 1):
+            await client.get("/v1/keys", headers={"X-API-Key": f"wrong-{i}"})
+        issued = await client.post(
+            "/v1/keys", json={"label": "agent-a"}, headers={"X-API-Key": "test-admin-token"}
+        )
+        assert issued.status_code == 201, issued.text
 
 
 async def test_keys_door_is_sealed_when_no_operator_token_is_configured(tmp_path, monkeypatch):

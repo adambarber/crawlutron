@@ -105,12 +105,13 @@ def _refuses(throttle: KeyVerifyThrottle, presented: str) -> None:
     _assert_429(raised.value)
 
 
-def _flood(throttle: KeyVerifyThrottle, count: int) -> int:
-    """Send `count` distinct parseable ids; return how many were 429-refused."""
+def _flood_failures(throttle: KeyVerifyThrottle, count: int) -> int:
+    """Record one failure on `count` distinct parseable ids; return how many
+    mint attempts were 429-refused."""
     refused = 0
     for i in range(count):
         try:
-            throttle.check(f"ck_{i:016x}.flood")
+            throttle.record_failure(f"ck_{i:016x}.flood")
         except Exception as exc:
             _assert_429(exc)
             refused += 1
@@ -127,7 +128,7 @@ def test_flood_cannot_evict_a_cooldown_victim():
     _refuses(throttle, victim)
 
     # Mint pricing may refuse part of the flood; only 429s are legal.
-    _flood(throttle, 1100)
+    _flood_failures(throttle, 1100)
     _refuses(throttle, victim)
 
 
@@ -135,8 +136,10 @@ def test_bucket_minting_pays_against_a_global_rate():
     """#659: minting fresh buckets is metered against a global rate, so the
     flood itself is priced instead of consuming unbounded meter state."""
     throttle = KeyVerifyThrottle()
-    assert _flood(throttle, 1100) > 0, "a 1100-bucket flood minted every bucket unpriced"
-    _refuses(throttle, "ck_ffffffffffffffff.fresh")
+    assert _flood_failures(throttle, 1100) > 0, "a 1100-bucket flood minted every bucket unpriced"
+    with pytest.raises(Exception) as raised:
+        throttle.record_failure("ck_ffffffffffffffff.fresh")
+    _assert_429(raised.value)
 
 
 async def test_door_refuses_throttled_key_without_pbkdf2(tmp_path):

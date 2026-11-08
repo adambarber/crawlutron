@@ -56,6 +56,10 @@ class KeyVerifyThrottle:
 
     MAX_FAILURES = 5
     UNKNOWN_BUCKET = "unknown"
+    #: The dedicated bucket every /v1/keys admin-token guess meters against
+    #: (#659): one shared ledger, so per-credential bucket minting cannot
+    #: dilute the admin door's pacing.
+    ADMIN_BUCKET = "admin"
 
     def __init__(self, *, clock=time.monotonic) -> None:
         self._clock = clock
@@ -67,27 +71,74 @@ class KeyVerifyThrottle:
     def check(self, presented: str) -> None:
         """Refuse while the credential's bucket is cooling; a caller-readable
         429-shaped refusal, raised by the auth wrapper, not the store."""
-        bucket = self._bucket_for(presented)
-        now = self._clock()
-        if bucket.cooldown_until > now:
-            raise _throttled()
+        self._check_bucket(self._key_for(presented))
 
     def record_failure(self, presented: str) -> None:
         """Count one failed verify; the Nth consecutive failure within the
         window starts the cooldown (fail-closed: even the live key refuses)."""
-        bucket = self._bucket_for(presented)
-        now = self._clock()
+        self._record_bucket_failure(self._key_for(presented))
+
+    def record_success(self, presented: str) -> None:
+        """A hit clears the bucket: one fat-finger is not a hair-trigger."""
+        with self._lock:
+            self._buckets.pop(self._key_for(presented), None)
+
+    def check_admin(self) -> None:
+        """Refuse while the dedicated admin bucket is cooling (#659)."""
+        self._check_bucket(self.ADMIN_BUCKET)
+
+    def record_admin_failure(self) -> None:
+        """Count one failed admin-token guess against the shared admin bucket."""
+        self._record_bucket_failure(self.ADMIN_BUCKET)
+
+    def record_admin_success(self) -> None:
+        """A correct admin token clears the admin bucket (not a hair-trigger)."""
+        with self._lock:
+            self._buckets.pop(self.ADMIN_BUCKET, None)
+
+    def _mint_bucket(self, key: str, now: float) -> _Bucket:
+        """Mint a NEW bucket against the global budget (#659); a refused mint
+        raises the shared 429 shape, so a distinct-id flood is priced."""
+        if now - self._mint_window_started > _MINT_WINDOW_SECONDS:
+            self._mint_window_started = now
+            self._minted = 0
+        if self._minted >= _MINT_BUDGET:
+            raise _throttled()
+        self._minted += 1
+        bucket = _Bucket()
+        bucket.window_started = now
+        self._buckets[key] = bucket
+        return bucket
+
+    def _check_bucket(self, key: str) -> None:
+        with self._lock:
+            bucket = self._buckets.get(key)
+            if bucket is None:
+                return
+            now = self._clock()
+        if bucket.cooldown_until > now:
+            raise _throttled()
+
+    def _locked_get_or_mint(self, key: str, now: float) -> _Bucket:
+        """Under the lock: the bucket for key, or a mint-priced new one."""
+        bucket = self._buckets.get(key)
+        if bucket is None:
+            bucket = self._mint_bucket(key, now)
+        return bucket
+
+    def _record_bucket_failure(self, key: str) -> None:
+        with self._lock:
+            now = self._clock()
+            bucket = self._locked_get_or_mint(key, now)
+        self._record_failure_into(bucket, now)
+
+    def _record_failure_into(self, bucket: _Bucket, now: float) -> None:
         if now - bucket.window_started > _FAILURE_WINDOW_SECONDS:
             bucket.failures = 0
             bucket.window_started = now
         bucket.failures += 1
         if bucket.failures >= self.MAX_FAILURES:
             bucket.cooldown_until = now + _COOLDOWN_SECONDS
-
-    def record_success(self, presented: str) -> None:
-        """A hit clears the bucket: one fat-finger is not a hair-trigger."""
-        with self._lock:
-            self._buckets.pop(self._key_for(presented), None)
 
     def _key_for(self, presented: str) -> str:
         prefix, sep, rest = presented.partition(".")
@@ -99,17 +150,7 @@ class KeyVerifyThrottle:
         key = self._key_for(presented)
         with self._lock:
             now = self._clock()
-            bucket = self._buckets.get(key)
-            if bucket is None:
-                if now - self._mint_window_started > _MINT_WINDOW_SECONDS:
-                    self._mint_window_started = now
-                    self._minted = 0
-                if self._minted >= _MINT_BUDGET:
-                    raise _throttled()
-                self._minted += 1
-                bucket = _Bucket()
-                bucket.window_started = now
-                self._buckets[key] = bucket
+            bucket = self._locked_get_or_mint(key, now)
             self._buckets.move_to_end(key)
             while len(self._buckets) > _MAX_BUCKETS:
                 self._evict_cooling_last(now)
