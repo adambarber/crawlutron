@@ -160,3 +160,46 @@ def test_webhook_size_cap_keeps_the_unit_floor(monkeypatch):
 
     monkeypatch.setenv("CRAWLUTRON_MAX_WEBHOOK_SIZE", "not-an-int")
     assert webhooks.max_webhook_size() == 10_485_760, "a garbage value must fall back, not raise"
+
+
+async def _deliver_once(monkeypatch, *, secret: str | None):
+    """One real delivery against the mocked transport, with the secret set or not."""
+    from crawlutron.api.webhooks import deliver_pinned_webhook
+
+    if secret is None:
+        monkeypatch.delenv("CRAWLUTRON_WEBHOOK_SECRET", raising=False)
+    else:
+        monkeypatch.setenv("CRAWLUTRON_WEBHOOK_SECRET", secret)
+    record_webhook_delivery(monkeypatch)
+    await deliver_pinned_webhook(
+        "https://webhook.example.com/cb",
+        b"{}",
+        host_policy=HostPolicy.unrestricted(),
+    )
+
+
+class TestWebhookNoSecretWarning:
+    """#655: an unsigned delivery must say so -- a one-time WARNING naming the
+    env var, at the first unsigned delivery; delivery itself stays best-effort."""
+
+    async def test_first_unsigned_delivery_warns_once_naming_the_env_var(self, monkeypatch, caplog):
+        import logging
+
+        from crawlutron.runtime import process_state
+
+        process_state.reset_all_process_state()
+        with caplog.at_level(logging.WARNING, logger="crawlutron.api.webhooks"):
+            await _deliver_once(monkeypatch, secret=None)
+            await _deliver_once(monkeypatch, secret=None)
+
+        warnings = [r for r in caplog.records if "webhook_unsigned_delivery" in r.message]
+        assert len(warnings) == 1, f"expected exactly one one-time warning, saw {len(warnings)}"
+        assert "CRAWLUTRON_WEBHOOK_SECRET" in warnings[0].getMessage()
+
+    async def test_signed_delivery_does_not_warn(self, monkeypatch, caplog):
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="crawlutron.api.webhooks"):
+            await _deliver_once(monkeypatch, secret="test-secret")
+
+        assert not [r for r in caplog.records if "webhook_unsigned_delivery" in r.message]

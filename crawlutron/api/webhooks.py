@@ -40,6 +40,10 @@ _WEBHOOK_BACKOFF_MS_DEFAULT = 200
 # runner that scheduled it was cancelled after its terminal write landed.
 _DELIVERIES: set[asyncio.Task] = set()
 
+#: One-time flag: the first delivery under an unset secret warns once (#655),
+#: not once per delivery -- an unsigned deployment would otherwise flood the log.
+_UNSIGNED_WARNING_EMITTED = False
+
 
 class DeliveryFailed(Exception):
     """A webhook POST failed and either can be retried or is permanent."""
@@ -56,9 +60,11 @@ def webhook_secret() -> str:
 
 def _reset() -> None:
     """Cancel in-flight deliveries and empty the tracked set."""
+    global _UNSIGNED_WARNING_EMITTED
     for task in list(_DELIVERIES):
         task.cancel()
     _DELIVERIES.clear()
+    _UNSIGNED_WARNING_EMITTED = False
 
 
 def _has() -> bool:
@@ -119,6 +125,8 @@ async def deliver_pinned_webhook(
         timestamp = str(int(time.time()))
         request_headers[_SIGNATURE_HEADER] = _signature(payload_bytes, secret, timestamp)
         request_headers[_TIMESTAMP_HEADER] = timestamp
+    else:
+        _warn_unsigned_once()
     # Deliberate one-per-delivery cost: pooling would re-resolve by hostname (defeating
     # the pin) or cache the IP across deliveries (reopening the rebinding window).
     async with httpx.AsyncClient(timeout=Timeouts.defaults().as_httpx()) as client:
@@ -145,6 +153,19 @@ async def deliver_pinned_webhook(
                 raise DeliveryFailed(f"transient webhook status {status}", retryable=True)
             if status >= 400:
                 raise DeliveryFailed(f"webhook receiver refused ({status})", retryable=False)
+
+
+def _warn_unsigned_once() -> None:
+    """One WARNING naming the env var at the first unsigned delivery (#655); the
+    delivery itself never fails closed -- signing is opt-in configuration."""
+    global _UNSIGNED_WARNING_EMITTED
+    if _UNSIGNED_WARNING_EMITTED:
+        return
+    _UNSIGNED_WARNING_EMITTED = True
+    logger.warning(
+        "webhook_unsigned_delivery: %s unset; signature headers omitted",
+        "CRAWLUTRON_WEBHOOK_SECRET",
+    )
 
 
 def _signature(payload_bytes: bytes, secret: str, timestamp: str) -> str:
