@@ -140,6 +140,12 @@ class KeyVerifyThrottle:
         with self._lock:
             now = self._clock()
             bucket = self._locked_get_or_mint(key, now)
+            # #661: an EXPIRED cooldown re-arms the ladder -- clear the bucket
+            # under the lock, so one stale failure cannot re-cool instantly.
+            if bucket.cooldown_until and bucket.cooldown_until <= now:
+                bucket.failures = 0
+                bucket.window_started = now
+                bucket.cooldown_until = 0.0
         self._record_failure_into(bucket, now)
 
     def _record_failure_into(self, bucket: _Bucket, now: float) -> None:

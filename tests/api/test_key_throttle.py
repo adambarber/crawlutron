@@ -170,3 +170,31 @@ async def test_door_refuses_throttled_key_without_pbkdf2(tmp_path):
         assert throttled.json()["detail"]["code"] == "key_verify_throttled"
         after = caller_key_store.pbkdf2_calls - calls_before
         assert after == KeyVerifyThrottle.MAX_FAILURES, f"burned {after} PBKDF2 calls"
+
+
+def _frozen_clock():
+    """An injected monotonic-shaped clock a test can advance."""
+    state = {"now": 100.0}
+
+    def clock() -> float:
+        return state["now"]
+
+    return state, clock
+
+
+def test_cooldown_expiry_rearms_the_bucket():
+    """#661: after a cooldown elapses, ONE wrong guess must not re-trip an
+    instant re-cooldown -- the expired cooldown clears the failure ladder, so
+    the next MAX_FAILURES guesses are needed before cooling again."""
+    state, clock = _frozen_clock()
+    throttle = KeyVerifyThrottle(clock=clock)
+    presented = "ck_0123456789abcdef.cooldown"
+
+    for _ in range(KeyVerifyThrottle.MAX_FAILURES):
+        throttle.record_failure(presented)
+    _refuses(throttle, presented)
+
+    state["now"] += 61.0
+    # The cooldown has expired; one wrong guess must NOT re-arm it.
+    throttle.record_failure(presented)
+    throttle.check(presented)
