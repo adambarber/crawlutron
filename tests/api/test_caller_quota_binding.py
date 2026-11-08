@@ -83,23 +83,16 @@ def test_tracker_reserves_and_releases_per_caller():
 
 async def test_sync_crawl_counts_toward_concurrency(tmp_path, monkeypatch):
     """The second of two concurrent sync crawls is a 429 for ``max_concurrency=1``."""
-    from crawlutron.api import crawl_endpoint
-    from tests._concurrency_probe import assert_second_concurrent_refused, make_blocking_callable
+    from tests._concurrency_probe import block_sync_crawl, crawl_then_second_refused
 
-    blocker, entered, released = make_blocking_callable(
-        result={"request_id": "sync", "results": [], "submitted_count": 0, "policy_schema_version": ""}
-    )
-    monkeypatch.setattr(crawl_endpoint, "execute_crawl", blocker)
+    blocker, entered, released = block_sync_crawl(monkeypatch)
     async with _keyedquota_client(tmp_path) as (client, store, tracker, issued):
         headers = _keyed_headers(issued.secret)
-        await assert_second_concurrent_refused(
+        await crawl_then_second_refused(
             client,
-            url="/v1/crawl",
             headers=headers,
-            body={"url": "http://example.com/"},
             entered=entered,
             released=released,
-            first_ok=(200, 201),
         )
 
 
@@ -121,6 +114,7 @@ async def test_sync_crawl_releases_the_slot_when_the_engine_fails(tmp_path, monk
 async def test_keyed_job_stores_the_key_bound_when_limits_omitted(tmp_path, monkeypatch):
     """The /v1/jobs door stores the key's ceiling, not the unbounded read edge."""
     from crawlutron.api import jobs_router
+    from crawlutron.api.caller_auth import Tracking
     from crawlutron.models.job_create_request import JobCreateRequest
 
     store = make_store(tmp_path / "jobs.db")
@@ -136,6 +130,7 @@ async def test_keyed_job_stores_the_key_bound_when_limits_omitted(tmp_path, monk
         settings=CrawlerSettings.from_mapping({}),
         shutdown_event=asyncio.Event(),
         caller=caller,
+        tracking=Tracking(job_store=store),
     )
 
     job = store.load(response.job_id)

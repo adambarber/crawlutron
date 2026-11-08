@@ -15,7 +15,7 @@ from crawlutron.api.caller_auth import (
     auth_denials,
     quota_denials,
 )
-from crawlutron.api.dependencies import CallerDep, JobStoreDep, SettingsDep, ShutdownEventDep
+from crawlutron.api.dependencies import CallerDep, JobStoreDep, SettingsDep, ShutdownEventDep, TrackingDep
 from crawlutron.api.exceptions import validation_http_error
 from crawlutron.api.job_control import control_job_core, raise_job_not_found
 from crawlutron.api.job_cores import create_job_core
@@ -53,9 +53,17 @@ async def create_job(
     settings: SettingsDep,
     shutdown_event: ShutdownEventDep,
     caller: CallerDep,
+    tracking: TrackingDep,
 ) -> JobCreateResponse:
     try:
-        return await create_job_core(payload, job_store, settings, shutdown_event, caller)
+        return await create_job_core(
+            payload,
+            job_store,
+            settings,
+            shutdown_event,
+            caller,
+            concurrency_tracker=tracking.concurrency_tracker,
+        )
     except ValueError as error:
         raise validation_http_error(error) from error
 

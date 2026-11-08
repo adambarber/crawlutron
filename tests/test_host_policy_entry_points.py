@@ -67,6 +67,7 @@ async def _probe_crawl_executor(monkeypatch, tmp_path):
 
 async def _probe_jobs_router(monkeypatch, tmp_path):
     from crawlutron.api import jobs_router
+    from crawlutron.api.caller_auth import Tracking
     from crawlutron.models.caller_identity import CallerIdentity
     from crawlutron.models.job_create_request import JobCreateRequest
 
@@ -89,6 +90,9 @@ async def _probe_jobs_router(monkeypatch, tmp_path):
             # ``asyncio.Event``.
             shutdown_event=asyncio.Event(),
             caller=CallerIdentity(),
+            # The handler refuses before admission reads the tracker; the door still
+            # resolves it, because the core's signature refuses an absent one.
+            tracking=Tracking(job_store=job_store),
         ),
         effects,
     )

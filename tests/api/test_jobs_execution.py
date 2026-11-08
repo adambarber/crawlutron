@@ -14,7 +14,7 @@ from httpx import ASGITransport, AsyncClient
 from crawlutron.admission.policy import PolicyLike, read_policy
 from crawlutron.api import dependencies, job_runner, jobs_router
 from crawlutron.api.caller_auth import get_caller_identity
-from crawlutron.api.dependencies import get_job_store, get_settings, get_shutdown_event
+from crawlutron.api.dependencies import get_job_store, get_settings, get_shutdown_event, get_tracking
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.crawl_request import CrawlRequest
@@ -98,11 +98,11 @@ def test_every_job_endpoint_declares_its_providers_through_an_alias():
                 )
 
 
-def test_creating_and_controlling_a_job_need_the_same_providers():
+def test_creating_and_controlling_a_job_need_the_same_core_providers():
     """The identity claim behind the shared aliases, checked against signatures:
-    ``create_job`` and ``control_job`` now name the same four providers, so a
-    fifth needed by one and not the other is what this says.
-    """
+    create_job and control_job name the same four core providers; create_job
+    alone adds get_tracking, because only creation enters the concurrency
+    register (control's transition is admission-free by design)."""
 
     def _providers(handler) -> dict[str, Callable[..., object]]:
         declared: dict[str, Callable[..., object]] = {}
@@ -117,13 +117,9 @@ def test_creating_and_controlling_a_job_need_the_same_providers():
     created = _providers(jobs_router.create_job)
     controlled = _providers(jobs_router.control_job)
 
-    assert created == controlled
-    assert set(created.values()) == {
-        get_job_store,
-        get_settings,
-        get_shutdown_event,
-        get_caller_identity,
-    }
+    core = {get_job_store, get_settings, get_shutdown_event, get_caller_identity}
+    assert set(created.values()) == core | {get_tracking}
+    assert set(controlled.values()) == core
 
 
 class TestCrashRecovery:

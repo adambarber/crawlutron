@@ -47,7 +47,7 @@ async def create_job_core(
     shutdown_event,
     caller: CallerIdentity,
     *,
-    concurrency_tracker=None,
+    concurrency_tracker,
 ) -> JobCreateResponse:
     """Persist one whole-site crawl job for ``caller`` and start its runner."""
     host_policy = HostPolicy.from_settings(settings)

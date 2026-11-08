@@ -432,6 +432,8 @@ async def _create_job_tool(
     must not wrap it in admit a second time -- one request is one slot (#576)."""
     if job_store is None:
         raise ValueError("create_job requires an initialized job store")
+    if concurrency_tracker is None:
+        raise ValueError("create_job requires the caller's concurrency tracker")
     return await _tool_result(
         create_job_core(
             payload,
