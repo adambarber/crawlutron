@@ -282,6 +282,7 @@ class TestDiscover:
             "render",
             "read_crawl_result",
             "read_crawl_trace",
+            "create_job",
             "list_jobs",
             "get_job",
             "control_job",

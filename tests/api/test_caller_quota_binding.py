@@ -17,7 +17,6 @@ from tests._api_harnesses import keyed_quota_client as _keyedquota_client
 from tests._api_harnesses import mount_tracker as _mount_tracker
 from tests._api_harnesses import stored_request as _stored_request
 from tests._async_harnesses import expect_quota_refused
-from tests._http_test_helpers import minimal_request
 from tests._policy_factories import job_store as make_store
 from tests.factories.client import post_crawl, quota_client
 
@@ -137,7 +136,6 @@ async def test_keyed_job_stores_the_key_bound_when_limits_omitted(tmp_path, monk
         settings=CrawlerSettings.from_mapping({}),
         shutdown_event=asyncio.Event(),
         caller=caller,
-        request=minimal_request("/v1/jobs"),
     )
 
     job = store.load(response.job_id)
