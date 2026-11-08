@@ -5,7 +5,14 @@ Admission refuses hosts it cannot encode; matching sites catch and passthrough.
 
 from __future__ import annotations
 
-__all__ = ["idna_host"]
+__all__ = ["idna_host", "punycode_host"]
+
+
+def punycode_host(value: str) -> str:
+    """The one IDNA encode: punycode, lower, strip the trailing FQDN dot.
+    Raises ``UnicodeError`` when the host cannot be encoded; callers own the
+    posture (refuse at admission, passthrough for policy matching)."""
+    return value.encode("idna").decode("ascii").lower().rstrip(".")
 
 
 def idna_host(host: str) -> str:
@@ -15,6 +22,6 @@ def idna_host(host: str) -> str:
     """
     value = host.strip().lower().rstrip(".")
     try:
-        return value.encode("idna").decode("ascii").lower().rstrip(".")
+        return punycode_host(value)
     except UnicodeError as error:
         raise ValueError("invalid_idn_host") from error
