@@ -293,8 +293,21 @@ async def _probe_job_runner(monkeypatch, tmp_path):
     )
 
 
+async def _probe_admit_endpoint(monkeypatch, tmp_path):
+    from crawlutron.api.admit_endpoint import admit_url
+    from crawlutron.models.admit_request import AdmitRequest
+
+    effects = _effects()
+    monkeypatch_wire_guard(monkeypatch, effects)
+    response = await admit_url(AdmitRequest(url=_BLOCKED_URL), settings=_denied_settings())
+    assert response.admitted is False
+    assert response.classification == "host_denied"
+    assert all(not values for values in effects.values())
+
+
 _PROBES = {
     "crawlutron/api/crawl_endpoint.py:crawl": _probe_crawl_endpoint,
+    "crawlutron/api/admit_endpoint.py:admit_url": _probe_admit_endpoint,
     "crawlutron/api/crawl_executor.py:execute_crawl": _probe_crawl_executor,
     "crawlutron/api/job_runner.py:run_job": _probe_job_runner,
     "crawlutron/api/jobs_router.py:create_job": _probe_jobs_router,

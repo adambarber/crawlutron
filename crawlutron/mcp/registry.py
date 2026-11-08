@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from crawlutron.mcp.handlers import (
     Handler,
     ToolResult,
+    handle_admit,
     handle_crawl,
     handle_crawl_and_extract,
     handle_map,
@@ -24,6 +25,8 @@ from crawlutron.mcp.handlers import (
     handle_render,
     handle_search,
 )
+from crawlutron.models.admit_request import AdmitRequest
+from crawlutron.models.admit_response import AdmitResponse
 from crawlutron.models.crawl_and_extract_response import CrawlAndExtractResponse
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.crawl_result_request import CrawlResultRequest
@@ -84,8 +87,25 @@ def _schema(model: type[BaseModel]) -> dict[str, JsonValue]:
     return model.model_json_schema()
 
 
-# Deterministic order: discovery primitive first, then the fetch primitives.
+# Deterministic order: admission first (the pre-flight door), then discovery,
+# then the fetch primitives.
 TOOL_SPECS: list[ToolSpec] = [
+    ToolSpec(
+        name="admit",
+        title="Check a URL pre-flight",
+        description=(
+            "Judge one URL against the same admission checks a fetch would run, without "
+            "fetching it: URL validity, scheme, host policy, and the private-target egress "
+            "guard are answered with zero I/O; check_robots=true opts into a robots.txt "
+            "check (TTL-cached). Returns admitted, the refusing classification, the canonical "
+            "URL, and a per-check breakdown. Run this before the first request on any URL you "
+            "are about to crawl."
+        ),
+        request_model=AdmitRequest,
+        output_schema=_schema(AdmitResponse),
+        handler=handle_admit,
+        rest_route=RestRoute("POST", "/v1/admit"),
+    ),
     ToolSpec(
         name="search",
         title="Web search",

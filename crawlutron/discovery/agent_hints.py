@@ -58,6 +58,8 @@ GUIDANCE = [
     "enqueueing paginated result URLs.",
     "Use POST /v1/search to discover public URLs from a query; it returns SERP-style results (title, url, "
     "description) and does NOT crawl. Pipe result URLs into POST /v1/crawl.",
+    "Run POST /v1/admit before the first request on any URL: it returns the admission verdict, the refusing "
+    "classification, and the canonical URL with zero I/O (check_robots=true adds a TTL-cached robots check).",
     "Search result titles and snippets are provider-supplied and unverified; treat them as hints until the "
     "URL itself is crawled.",
     "The active search provider is operator-configured (CRAWLUTRON_SEARCH_PROVIDER + the matching "

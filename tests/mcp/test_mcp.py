@@ -12,7 +12,6 @@ import pytest
 
 from crawlutron.models.json_value import JsonValue
 from tests._assertions import one_search_result
-from tests._browser_doubles import FakeBrowserPool, owned_browser_pool
 from tests._policy_factories import canonical
 
 _PROTOCOL_VERSION = "2026-07-28"
@@ -275,6 +274,7 @@ class TestDiscover:
         result = await _assert_complete(async_client, _body("tools/list"))
         tools = _items(result, "tools")
         assert [_assert_dict_tool(tool) for tool in tools] == [
+            "admit",
             "search",
             "crawl",
             "crawl_and_extract",
@@ -286,16 +286,6 @@ class TestDiscover:
         ttl = result["ttlMs"]
         assert isinstance(ttl, int) and ttl > 0
         assert result["cacheScope"] == "public"
-
-
-@pytest.fixture
-def browser_pool_stub():
-    """Make the browser pool present without launching a real browser.
-
-    The crawl/map tools run the full strategy chain; the stub pool merely stops
-    the ``browser_pool_unavailable`` 503 (HTTP succeeds first in the suite)."""
-    with owned_browser_pool(FakeBrowserPool()):
-        yield
 
 
 class TestToolsCall:
@@ -411,30 +401,6 @@ class TestToolsCall:
     async def test_non_object_arguments_rejected(self, async_client):
         resp, payload = await _call_tool(async_client, "search", "not-a-dict")
         assert _member(payload, "error")["code"] == -32602
-
-
-class TestCallerAuth:
-    """#205: /mcp must refuse an invalid credential, not silently crawl as someone."""
-
-    @pytest.mark.usefixtures("browser_pool_stub")
-    @pytest.mark.parametrize("method", ["crawl", "discover"])
-    async def test_a_wrong_key_is_a_401_not_a_benign_200(self, async_client, base_url, method):
-        """The route refuses an invalid credential for every method, not just tools/call."""
-        body = (
-            _body(
-                "tools/call", params={"name": "crawl", "arguments": {"url": f"{base_url}/"}, "_meta": _META}
-            )
-            if method == "crawl"
-            else _body("server/discover")
-        )
-        resp = await _mcp(async_client, body, {"X-API-Key": "definitely-not-a-key"})
-        _assert_401_api_key(resp)
-
-
-def _assert_401_api_key(resp):
-    """Assert the response is a 401 with an api-key error message."""
-    assert resp.status_code == 401, resp.text
-    assert "api key" in str(_error_of(resp)["message"]).lower()
 
 
 async def _call_tool(

@@ -13,6 +13,7 @@ def host_policy_entry_table() -> set[str]:
     (registry.py), so none are discoverable; the policy seams stay guarded.
     """
     return {
+        "crawlutron/api/admit_endpoint.py:admit_url",
         "crawlutron/api/crawl_endpoint.py:crawl",
         "crawlutron/api/crawl_executor.py:execute_crawl",
         "crawlutron/api/job_runner.py:run_job",

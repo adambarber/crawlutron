@@ -106,6 +106,8 @@ def _feature_flag_fields() -> dict[str, bool]:
         "browser_profiles": True,
         "web_search": True,
         "mcp": True,
+        # The pre-flight door: query the failure contract before any fetch.
+        "pre_flight_admission": True,
         "async_mode": True,
         "captcha_solving": False,
         "proxy_rotation": False,

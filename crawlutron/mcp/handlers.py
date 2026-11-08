@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, cast
 from fastapi import HTTPException
 from pydantic import BaseModel, ValidationError
 
+from crawlutron.api.admit_endpoint import admit_url
 from crawlutron.api.caller_auth import Tracking, admit, bound_render_cookie_namespace
 from crawlutron.api.crawl_endpoint import read_crawl_result_record, read_crawl_trace_record
 from crawlutron.api.crawl_executor import execute_crawl
@@ -25,6 +26,7 @@ from crawlutron.api.main_helpers import request_gate
 from crawlutron.api.map_endpoint import map_site
 from crawlutron.api.render_endpoint import render as render_endpoint_handler
 from crawlutron.api.response_shaping import aunified_response_from_result
+from crawlutron.models.admit_request import AdmitRequest
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.crawl_and_extract_response import CrawlAndExtractResponse
 from crawlutron.models.crawl_pending import CrawlPendingError
@@ -290,6 +292,14 @@ async def handle_render(
         )
 
 
+async def handle_admit(
+    payload: AdmitRequest, settings, shutdown_event, concurrency_tracker=None, caller=None, job_store=None
+) -> ToolResult:
+    # The pre-flight check spends no quota and no concurrency slot: it is a pure
+    # verdict (robots opt-in aside), so it does not enter the admission gate.
+    return await _tool_result(admit_url(payload, settings=settings))
+
+
 async def handle_search(
     payload: SearchRequest,
     settings,
@@ -369,6 +379,7 @@ handle_read_crawl_trace = _read_tool_handler(read_crawl_trace_record)
 
 __all__ = [
     "Handler",
+    "handle_admit",
     "handle_crawl",
     "handle_crawl_and_extract",
     "handle_map",

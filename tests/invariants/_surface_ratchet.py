@@ -94,6 +94,8 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/api/metrics_router.py": (2, 1),
     "crawlutron/api/middleware.py": (3, 2),
     # #653: the key-verify meter (one class + the shared instance accessor).
+    "crawlutron/api/admit_router.py": (2, 1),
+    "crawlutron/api/admit_endpoint.py": (2, 1),
     "crawlutron/api/key_throttle.py": (2, 2),
     "crawlutron/api/policy_defaults.py": (2, 0),
     "crawlutron/api/policy_router.py": (2, 1),
@@ -111,7 +113,8 @@ DECLARED_SURFACE_RATCHET = {
     # #645: tools.py split into registry + handlers (500-line ceiling); the read
     # tools joined. Closures lowered both entry counts.
     "crawlutron/mcp/registry.py": (4, 1),
-    "crawlutron/mcp/handlers.py": (12, 5),
+    # RAISED 12,5 -> 13,6 (#654): handle_admit is the mandated pre-flight tool's handler.
+    "crawlutron/mcp/handlers.py": (13, 6),
     # #644: the one declaration of the module-level feature routers.
     "crawlutron/api/router_registry.py": (1, 0),
     "crawlutron/orchestration/admission_stall.py": (5, 3),
