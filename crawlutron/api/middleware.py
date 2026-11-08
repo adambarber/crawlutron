@@ -34,7 +34,9 @@ async def reject_hostile_origin(request: Request, call_next):
             )
         return JSONResponse(
             status_code=403,
-            content=error_envelope("origin_not_allowed", "Origin not allowed", {"origin": origin}),
+            # The Origin header is attacker-controlled: the envelope names the
+            # refusal, never echoing the caller's text back (#655).
+            content=error_envelope("origin_not_allowed", "Origin not allowed"),
         )
     return await call_next(request)
 
