@@ -18,11 +18,13 @@ from typing import TYPE_CHECKING, cast
 from fastapi import HTTPException
 from pydantic import BaseModel, ValidationError
 
+from crawlutron.api import job_runner
 from crawlutron.api.admit_endpoint import admit_url
 from crawlutron.api.caller_auth import Tracking, admit, bound_render_cookie_namespace
 from crawlutron.api.crawl_endpoint import read_crawl_result_record, read_crawl_trace_record
 from crawlutron.api.crawl_executor import execute_crawl
-from crawlutron.api.main_helpers import request_gate
+from crawlutron.api.job_control import control_job_core, raise_job_not_found
+from crawlutron.api.main_helpers import build_job_status, request_gate
 from crawlutron.api.map_endpoint import map_site
 from crawlutron.api.render_endpoint import render as render_endpoint_handler
 from crawlutron.api.response_shaping import aunified_response_from_result
@@ -32,13 +34,20 @@ from crawlutron.models.crawl_and_extract_response import CrawlAndExtractResponse
 from crawlutron.models.crawl_pending import CrawlPendingError
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.extracted_page import ExtractedPage
+from crawlutron.models.job_control_tool_request import JobControlToolRequest
+from crawlutron.models.job_deleted_response import JobDeletedResponse
+from crawlutron.models.job_list_response import JobListResponse
 from crawlutron.models.json_value import JsonValue
 from crawlutron.safety.json_safe import json_default
 from crawlutron.search.endpoint import search as search_endpoint_handler
 from crawlutron.transport.browser_pool import get_browser_pool
+from crawlutron.vocabulary.limits import DEFAULT_JOB_LIST_LIMIT
 
 if TYPE_CHECKING:
     from crawlutron.models.crawl_result_request import CrawlResultRequest
+    from crawlutron.models.job_id_request import JobIdRequest
+    from crawlutron.models.job_list_request import JobListRequest
+    from crawlutron.models.job_status_response import JobStatusResponse
     from crawlutron.models.map_request import MapRequest
     from crawlutron.models.render_request import RenderRequest
     from crawlutron.models.search_request import SearchRequest
@@ -377,11 +386,89 @@ def _read_tool_handler(read) -> Handler:
 handle_read_crawl_result = _read_tool_handler(read_crawl_result_record)
 handle_read_crawl_trace = _read_tool_handler(read_crawl_trace_record)
 
+
+def _job_tool_handler(core) -> Handler:
+    """One job-tool handler over a store-read core: the four job tools differ only
+    by the core they run, so the handler-signature boilerplate is spelled once
+    here rather than cloned per tool. Job doors are store reads, not fetch
+    executors -- the caller scope is the resolved caller, ungated by quota."""
+
+    async def handler(
+        payload,
+        settings,
+        shutdown_event,
+        caller=None,
+        job_store=None,
+        result_store=None,
+        concurrency_tracker=None,
+    ) -> ToolResult:
+        return await _tool_result(
+            core(
+                payload,
+                job_store,
+                settings,
+                shutdown_event,
+                _caller_for(caller),
+            )
+        )
+
+    return handler
+
+
+async def _list_jobs_core(
+    payload: JobListRequest, job_store, settings, shutdown_event, caller: CallerIdentity
+) -> JobListResponse:
+    caller_id = caller.caller_id
+    page_limit = payload.limit if payload.limit is not None else DEFAULT_JOB_LIST_LIMIT
+    jobs = await job_store.alist_for_caller(caller_id, limit=page_limit, offset=payload.offset)
+    total = await job_store.acount_for_caller(caller_id)
+    return JobListResponse(jobs=[build_job_status(row) for row in jobs], total=total)
+
+
+async def _delete_job_core(
+    payload: JobIdRequest, job_store, settings, shutdown_event, caller: CallerIdentity
+) -> JobDeletedResponse:
+    """The REST delete door's cancel-then-tombstone, as a typed body."""
+    if not await job_store.aexists_for_caller(payload.job_id, caller.caller_id):
+        raise_job_not_found(payload.job_id)
+    if job_runner.is_running(payload.job_id):
+        job_runner.cancel_job_task(payload.job_id)
+    if not await job_store.adelete_for_caller(payload.job_id, caller.caller_id):
+        raise_job_not_found(payload.job_id)
+    return JobDeletedResponse(deleted=True, job_id=payload.job_id)
+
+
+async def _get_job_core(
+    payload: JobIdRequest, job_store, settings, shutdown_event, caller: CallerIdentity
+) -> JobStatusResponse:
+    """The owned status view GET /v1/jobs/{job_id} answers."""
+    row = await job_store.astatus_for_caller(payload.job_id, caller.caller_id)
+    if row is None:
+        raise_job_not_found(payload.job_id)
+    return build_job_status(row)
+
+
+async def _control_job_core(
+    payload: JobControlToolRequest, job_store, settings, shutdown_event, caller: CallerIdentity
+) -> JobStatusResponse:
+    """The pause/resume/cancel transition POST /v1/jobs/{job_id}/control runs."""
+    return await control_job_core(payload.job_id, payload.action, job_store, settings, shutdown_event, caller)
+
+
+handle_list_jobs = _job_tool_handler(_list_jobs_core)
+handle_get_job = _job_tool_handler(_get_job_core)
+handle_control_job = _job_tool_handler(_control_job_core)
+handle_delete_job = _job_tool_handler(_delete_job_core)
+
 __all__ = [
     "Handler",
     "handle_admit",
+    "handle_control_job",
     "handle_crawl",
     "handle_crawl_and_extract",
+    "handle_delete_job",
+    "handle_get_job",
+    "handle_list_jobs",
     "handle_map",
     "handle_read_crawl_result",
     "handle_read_crawl_trace",

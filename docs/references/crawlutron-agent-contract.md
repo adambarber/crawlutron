@@ -280,7 +280,7 @@ headers that MUST match the body.
 
 - `server/discover` (required by the spec) — lists supported protocol
   versions, capabilities, and server identity.
-- `tools/list` — exposes `search`, `crawl`, `map`, `render` with JSON-Schema
+- `tools/list` — exposes `search`, `crawl`, `map`, `render`, the stored-crawl read tools, and the job tools `list_jobs` / `get_job` / `control_job` / `delete_job` with JSON-Schema
   inputs. The tools mirror the REST endpoints exactly and delegate to the same
   handlers, so **all four strategies and every extraction method are available
   through MCP**; the crawl/map tools accept the full default strategy chain.

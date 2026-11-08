@@ -268,7 +268,7 @@ version and client capabilities in `_meta`, and the transport validates the
 `MCP-Protocol-Version`, `Mcp-Method`, and `Mcp-Name` headers against the body.
 
 - `server/discover` — supported protocol versions, capabilities, server identity.
-- `tools/list` — the four tools with JSON-Schema inputs.
+- `tools/list` — the fetch, read, and job tools with JSON-Schema inputs.
 - `tools/call` — invokes a tool; returns text `content` plus
   `structuredContent`, with `isError` set for execution failures.
 - The tools mirror the REST endpoints and delegate to the same handlers, so

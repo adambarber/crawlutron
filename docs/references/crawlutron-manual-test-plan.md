@@ -281,7 +281,7 @@ A keyed provider returning non-200 → `502 search_provider_error` with the prov
 `POST /mcp` with a JSON-RPC `server/discover` request plus `MCP-Protocol-Version` / `Mcp-Method` headers → `200`, `result.resultType == "complete"`, `supportedVersions` contains `2026-07-28`, `capabilities.tools`, and `_meta.serverInfo`.
 
 ### TC-MCP-02 — tools/list and tools/call
-`tools/list` → tools `search, crawl, crawl_and_extract, map, render` (each with `description` + `inputSchema`). `tools/call` for each primitive returns `resultType: "complete"` with `content` and (for crawl/map/search) `structuredContent`. The crawl tool accepts the full default strategy chain (all four strategies) and the engine picks the first working one.
+`tools/list` → tools `search, crawl, crawl_and_extract, map, render, read_crawl_result, read_crawl_trace, list_jobs, get_job, control_job, delete_job` (each with `description` + `inputSchema`). `tools/call` for each primitive returns `resultType: "complete"` with `content` and (for crawl/map/search) `structuredContent`. The crawl tool accepts the full default strategy chain (all four strategies) and the engine picks the first working one.
 
 ### TC-MCP-03 — Request metadata validation
 Missing/mismatched `MCP-Protocol-Version`, `Mcp-Method`, or `Mcp-Name` → `400` with `-32020` (`HeaderMismatch`) or `-32022` (`UnsupportedProtocolVersion`); missing `_meta` → `400 -32602`; unknown method → `404 -32601`; non-loopback `Origin` → `403`.

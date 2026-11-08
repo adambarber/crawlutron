@@ -330,7 +330,7 @@ class TestJobApi(_AsgiEndpointTests):
 
         resp_del = await self.client.delete(f"/v1/jobs/{job_id}")
         assert resp_del.status_code == 200
-        assert resp_del.json()["status"] == "deleted"
+        assert resp_del.json() == {"deleted": True, "job_id": job_id}
 
         # Verify deleted
         resp_get = await self.client.get(f"/v1/jobs/{job_id}")
