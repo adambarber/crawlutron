@@ -116,7 +116,10 @@ DECLARED_SURFACE_RATCHET = {
     # tools joined. Closures lowered both entry counts.
     "crawlutron/mcp/registry.py": (4, 1),
     # RAISED 12,5 -> 13,6 (#654): handle_admit is the mandated pre-flight tool's handler.
-    "crawlutron/mcp/handlers.py": (13, 6),
+    # RAISED 13,6 -> 17,6 by #646: the four job-tool handlers joined via _job_tool_handler.
+    "crawlutron/mcp/handlers.py": (17, 6),
+    # #646: the one control-plane transition both job doors run, plus its shared 404/409 raisers.
+    "crawlutron/api/job_control.py": (3, 3),
     # #644: the one declaration of the module-level feature routers.
     "crawlutron/api/router_registry.py": (1, 0),
     "crawlutron/orchestration/admission_stall.py": (5, 3),

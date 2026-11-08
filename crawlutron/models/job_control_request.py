@@ -9,7 +9,7 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 _ALLOWED_ACTIONS = ("pause", "resume", "cancel")
 
 
-def _normalize_action(value: object) -> object:
+def normalize_job_action(value: object) -> object:
     return value.lower() if isinstance(value, str) else value
 
 
@@ -20,6 +20,6 @@ class JobControlRequest(BaseModel):
 
     action: Annotated[
         Literal["pause", "resume", "cancel"],
-        BeforeValidator(_normalize_action),
+        BeforeValidator(normalize_job_action),
         Field(description="One of: pause, resume, cancel."),
     ]

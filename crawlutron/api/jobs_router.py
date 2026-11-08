@@ -6,7 +6,7 @@ frontier; list/get/delete stay direct JobStore operations.
 
 from __future__ import annotations
 
-from typing import Annotated, NoReturn, cast
+from typing import Annotated, cast
 
 from fastapi import APIRouter, Query, Request
 
@@ -23,7 +23,8 @@ from crawlutron.api.caller_auth import (
     resolve_page_limit,
 )
 from crawlutron.api.dependencies import CallerDep, JobStoreDep, SettingsDep, ShutdownEventDep
-from crawlutron.api.exceptions import http_error, validation_http_error
+from crawlutron.api.exceptions import validation_http_error
+from crawlutron.api.job_control import control_job_core, raise_job_not_found
 from crawlutron.api.main_helpers import build_job_status
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.error_response import ErrorResponse
@@ -31,6 +32,7 @@ from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.job_control_request import JobControlRequest
 from crawlutron.models.job_create_request import JobCreateRequest
 from crawlutron.models.job_create_response import JobCreateResponse
+from crawlutron.models.job_deleted_response import JobDeletedResponse
 from crawlutron.models.job_list_response import JobListResponse
 from crawlutron.models.job_status_response import JobStatusResponse
 from crawlutron.storage.job_store import JobStatusView
@@ -38,16 +40,6 @@ from crawlutron.transport.request_profile import cookie_namespace_for
 from crawlutron.vocabulary.limits import DEFAULT_JOB_LIST_LIMIT, MAX_JOB_LIST_LIMIT
 
 router = APIRouter(prefix="/v1/jobs", tags=["Crawler"], responses=auth_denials())
-
-
-# ``NoReturn``, not ``None``: both of these always raise, and saying so lets the
-# checker narrow past the call site instead of demanding a downstream assert.
-def _raise_not_found(job_id: str) -> NoReturn:
-    raise http_error(404, "not_found", f"Unknown job_id: {job_id}")
-
-
-def _raise_conflict(message: str) -> NoReturn:
-    raise http_error(409, "invalid_state", message)
 
 
 @router.post(
@@ -160,7 +152,7 @@ async def list_jobs(
 async def get_job(job_id: str, job_store: JobStoreDep, caller: CallerDep) -> JobStatusResponse:
     row = await job_store.astatus_for_caller(job_id, caller.caller_id)
     if row is None:
-        _raise_not_found(job_id)
+        raise_job_not_found(job_id)
     return build_job_status(row)
 
 
@@ -190,24 +182,7 @@ async def control_job(
     caller: CallerDep,
 ) -> JobStatusResponse:
     action = payload.action
-    if not await job_store.aexists_for_caller(job_id, caller.caller_id):
-        _raise_not_found(job_id)
-
-    if action == "pause":
-        outcome = await job_runner.pause_job(job_id, job_store)
-    elif action == "resume":
-        outcome = await job_runner.resume_job(job_id, job_store, settings, shutdown_event)
-    else:
-        outcome = await job_runner.cancel_job(job_id, job_store)
-
-    if outcome == "missing":
-        _raise_not_found(job_id)
-    if outcome == "conflict":
-        _raise_conflict(f"Action '{action}' is not valid for the job's current state.")
-    row = await job_store.astatus_for_caller(job_id, caller.caller_id)
-    # `aexists` above established the row, and the control path only reads it.
-    row = cast("JobStatusView", row)
-    return build_job_status(row)
+    return await control_job_core(job_id, action, job_store, settings, shutdown_event, caller)
 
 
 @router.delete(
@@ -219,14 +194,14 @@ async def control_job(
         404: {"model": ErrorResponse, "description": "Job not found."},
     },
 )
-async def delete_job(job_id: str, job_store: JobStoreDep, caller: CallerDep) -> dict[str, str]:
+async def delete_job(job_id: str, job_store: JobStoreDep, caller: CallerDep) -> JobDeletedResponse:
     if not await job_store.aexists_for_caller(job_id, caller.caller_id):
-        _raise_not_found(job_id)
+        raise_job_not_found(job_id)
     if job_runner.is_running(job_id):
         job_runner.cancel_job_task(job_id)
     if not await job_store.adelete_for_caller(job_id, caller.caller_id):
-        _raise_not_found(job_id)
-    return {"status": "deleted", "job_id": job_id}
+        raise_job_not_found(job_id)
+    return JobDeletedResponse(deleted=True, job_id=job_id)
 
 
 __all__ = ["router"]

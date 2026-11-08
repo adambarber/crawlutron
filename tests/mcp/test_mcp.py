@@ -282,6 +282,10 @@ class TestDiscover:
             "render",
             "read_crawl_result",
             "read_crawl_trace",
+            "list_jobs",
+            "get_job",
+            "control_job",
+            "delete_job",
         ]
         ttl = result["ttlMs"]
         assert isinstance(ttl, int) and ttl > 0

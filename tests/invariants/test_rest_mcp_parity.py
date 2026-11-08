@@ -27,10 +27,6 @@ class ParityRow:
 #: tool that lands. The ratchet constant below must move DOWN only.
 ACCIDENT_ROWS: tuple[ParityRow, ...] = (
     ParityRow("POST", "/v1/jobs", "create_job"),
-    ParityRow("GET", "/v1/jobs", "list_jobs"),
-    ParityRow("GET", "/v1/jobs/{job_id}", "get_job"),
-    ParityRow("POST", "/v1/jobs/{job_id}/control", "control_job"),
-    ParityRow("DELETE", "/v1/jobs/{job_id}", "delete_job"),
     ParityRow("POST", "/v1/watches", "create_watch"),
     ParityRow("GET", "/v1/watches", "list_watches"),
     ParityRow("GET", "/v1/watches/{watch_id}", "get_watch"),
@@ -38,7 +34,8 @@ ACCIDENT_ROWS: tuple[ParityRow, ...] = (
 )
 
 #: Pinned literal: rows and this count move DOWN together, same commit.
-ACCIDENT_ROW_COUNT: int = 9
+#: #646: the four job-tool rows landed (list/get/control/delete); 9 -> 5.
+ACCIDENT_ROW_COUNT: int = 5
 
 #: PRINCIPLED rows are permanent, deliberate absences with a stated reason.
 PRINCIPLED_ROWS: tuple[ParityRow, ...] = (

@@ -17,8 +17,12 @@ from crawlutron.mcp.handlers import (
     Handler,
     ToolResult,
     handle_admit,
+    handle_control_job,
     handle_crawl,
     handle_crawl_and_extract,
+    handle_delete_job,
+    handle_get_job,
+    handle_list_jobs,
     handle_map,
     handle_read_crawl_result,
     handle_read_crawl_trace,
@@ -30,6 +34,12 @@ from crawlutron.models.admit_response import AdmitResponse
 from crawlutron.models.crawl_and_extract_response import CrawlAndExtractResponse
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.crawl_result_request import CrawlResultRequest
+from crawlutron.models.job_control_tool_request import JobControlToolRequest
+from crawlutron.models.job_deleted_response import JobDeletedResponse
+from crawlutron.models.job_id_request import JobIdRequest
+from crawlutron.models.job_list_request import JobListRequest
+from crawlutron.models.job_list_response import JobListResponse
+from crawlutron.models.job_status_response import JobStatusResponse
 from crawlutron.models.json_value import JsonValue
 from crawlutron.models.map_request import MapRequest
 from crawlutron.models.render_request import RenderRequest
@@ -213,6 +223,61 @@ TOOL_SPECS: list[ToolSpec] = [
         output_schema=_schema(TraceResponse),
         handler=handle_read_crawl_trace,
         rest_route=RestRoute("GET", "/v1/crawl/{request_id}/trace"),
+    ),
+    ToolSpec(
+        name="list_jobs",
+        title="List crawl jobs",
+        description=(
+            "List the caller's whole-site crawl jobs with live status, newest first -- the same "
+            "page GET /v1/jobs answers. limit pages the result, offset skips rows, and total "
+            "reports the caller's full row count across every page. Use get_job for one job's "
+            "full state and control_job to pause, resume, or cancel it."
+        ),
+        request_model=JobListRequest,
+        output_schema=_schema(JobListResponse),
+        handler=handle_list_jobs,
+        rest_route=RestRoute("GET", "/v1/jobs"),
+    ),
+    ToolSpec(
+        name="get_job",
+        title="Get crawl job state and results",
+        description=(
+            "Return one crawl job's current status, frontier/visited/result counts, stats, and "
+            "the persisted cap_truncated signal -- the same record GET /v1/jobs/{job_id} answers, "
+            "visible only to the caller that owns the job."
+        ),
+        request_model=JobIdRequest,
+        output_schema=_schema(JobStatusResponse),
+        handler=handle_get_job,
+        rest_route=RestRoute("GET", "/v1/jobs/{job_id}"),
+    ),
+    ToolSpec(
+        name="control_job",
+        title="Control a running crawl job",
+        description=(
+            "Pause, resume, or cancel a crawl job you own -- the same transition "
+            "POST /v1/jobs/{job_id}/control runs. Pause stops the runner at the next batch "
+            "boundary with the frontier retained; resume respawns the runner task from the "
+            "persisted frontier; cancel is terminal. Returns the job's fresh status."
+        ),
+        request_model=JobControlToolRequest,
+        output_schema=_schema(JobStatusResponse),
+        handler=handle_control_job,
+        rest_route=RestRoute("POST", "/v1/jobs/{job_id}/control"),
+    ),
+    ToolSpec(
+        name="delete_job",
+        title="Delete a crawl job",
+        description=(
+            "Permanently remove a crawl job you own and its data -- the same cancel-then-"
+            "tombstone "
+            "DELETE /v1/jobs/{job_id} runs; deleting a running job cancels its runner first. "
+            "Reports whether the row was removed."
+        ),
+        request_model=JobIdRequest,
+        output_schema=_schema(JobDeletedResponse),
+        handler=handle_delete_job,
+        rest_route=RestRoute("DELETE", "/v1/jobs/{job_id}"),
     ),
 ]
 
