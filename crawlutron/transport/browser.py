@@ -328,7 +328,8 @@ class BrowserRenderer:
         """The page's serialized HTML, or empty string if the page will not say."""
         try:
             return await page.content()
-        except Exception:
+        except Exception as exc:
+            logger.warning("html_capture_failed: %s", type(exc).__name__)
             return ""
 
     @staticmethod
@@ -339,7 +340,8 @@ class BrowserRenderer:
         """
         try:
             text = await page.evaluate("() => document.body ? document.body.innerText: ''")
-        except Exception:
+        except Exception as exc:
+            logger.warning("text_capture_failed: %s", type(exc).__name__)
             return ""
         return text if isinstance(text, str) else ""
 
