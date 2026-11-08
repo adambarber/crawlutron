@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 from crawlutron.config.env import EnvDecisionMemo
 from crawlutron.models.address_class import AddressClass, classify
+from crawlutron.models.host_canonical import punycode_host
 from crawlutron.runtime import process_state
 
 
@@ -16,7 +17,7 @@ def _normalize_policy_host(host: str) -> str:
     if value.startswith("[") and value.endswith("]"):
         value = value[1:-1]
     try:
-        return value.encode("idna").decode("ascii").lower().rstrip(".")
+        return punycode_host(value)
     except UnicodeError:
         return value
 

@@ -54,6 +54,13 @@ def decode_body(body: bytes | bytearray | memoryview, content_type: str | None) 
     return body.decode("utf-8", errors="replace")
 
 
+def _measured_lengths(text: str | None, html: str | None) -> tuple[int, int, str]:
+    """The measured prologue both scorers share: text/html lengths and the
+    lowercased html the frameset sniff reads."""
+    normalized_html = (html or "").lower()
+    return len((text or "").strip()), len((html or "").strip()), normalized_html
+
+
 def quality_score(
     status: str,
     classification: str,
@@ -72,10 +79,9 @@ def quality_score(
         # nothing falls back to the same strip the None arm does.
         text_length = content_metrics.get("visible_text_length", len((text or "").strip()))
         html_length = content_metrics.get("html_length", len((html or "").strip()))
+        normalized_html = (html or "").lower()
     else:
-        text_length = len((text or "").strip())
-        html_length = len((html or "").strip())
-    normalized_html = (html or "").lower()
+        text_length, html_length, normalized_html = _measured_lengths(text, html)
     has_frameset = "<frameset" in normalized_html or "<frame" in normalized_html
     score = 0.45
     if http_status and 200 <= http_status < 300:
@@ -97,18 +103,17 @@ _CONTENT_TAG_RE = re.compile(r"<(a|iframe|frame|frameset|form)\b", re.IGNORECASE
 
 
 def content_metrics(text: str | None, html: str | None) -> ContentMetrics:
-    visible_text_length = len((text or "").strip())
-    html_length = len((html or "").strip())
+    text_length, html_length, _ = _measured_lengths(text, html)
     counts = {"a": 0, "iframe": 0, "frame": 0, "frameset": 0, "form": 0}
     for match in _CONTENT_TAG_RE.finditer(html or ""):
         counts[match.group(1).lower()] += 1
     return {
-        "visible_text_length": visible_text_length,
+        "visible_text_length": text_length,
         "html_length": html_length,
         "link_count": counts["a"],
         # frame_count historically combines <iframe> and <frame>.
         "frame_count": counts["iframe"] + counts["frame"],
         "form_count": counts["form"],
         "has_frameset": counts["frameset"] > 0,
-        "text_to_html_ratio": round(visible_text_length / html_length, 4) if html_length else 0.0,
+        "text_to_html_ratio": round(text_length / html_length, 4) if html_length else 0.0,
     }

@@ -18,7 +18,12 @@ from crawlutron.models.normalized_url import NormalizedUrl, admit_or_none
 from crawlutron.safety.bounded_io import BodyTooLarge, read_capped_async
 from crawlutron.transport.http_client_pool import get_async_http_client
 from crawlutron.transport.pinned_dns import ResolverBudgetExceeded, bounded_thread_resolve
-from crawlutron.transport.pinned_transport import PinnedRequest, build_pinned_request
+from crawlutron.transport.pinned_transport import (
+    PinnedBody,
+    PinnedRequest,
+    build_pinned_request,
+    open_pinned_request,
+)
 from crawlutron.transport.timeouts import Timeouts
 
 if TYPE_CHECKING:
@@ -115,14 +120,12 @@ async def provider_http(
         )
     pinned = await _pinned_provider_request(request_url, headers, timeout_seconds)
     try:
-        async with client.stream(
+        async with open_pinned_request(
+            client,
             method,
-            pinned.connect_url,
-            json=json_body,
-            data=data,
-            headers=pinned.headers,
+            pinned,
             timeout=timeout,
-            extensions={"sni_hostname": sni} if (sni := pinned.tls_hostname) else None,
+            body=PinnedBody(json_value=json_body, form=data),
         ) as response:
             try:
                 raw = await read_capped_async(response.aiter_bytes(), _SEARCH_RESPONSE_MAX_BYTES)

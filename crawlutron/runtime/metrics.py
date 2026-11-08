@@ -127,6 +127,16 @@ class MetricsStore:
 
     # -- the only counter write paths --------------------------------------
 
+    def _record_caller_series(self, prefix: str, caller_id: str) -> None:
+        """Account the call under its caller key, under the series cap.
+        Decision and insert hold one lock: a check-then-insert split across
+        them races past the series cap."""
+        if not caller_id:
+            return
+        with self._write_lock:
+            series = self._caller_series(self._source(), prefix, caller_id)
+            self._add(prefix + series, 1)
+
     def observe_crawl(
         self,
         *,
@@ -137,12 +147,7 @@ class MetricsStore:
         caller_id: str = "",
     ) -> None:
         self._add("crawl_requests_total", 1)
-        if caller_id:
-            # Decision and insert under one lock: a check-then-insert split
-            # across them races past the series cap.
-            with self._write_lock:
-                series = self._caller_series(self._source(), _CALLER_PREFIX, caller_id)
-                self._add(_CALLER_PREFIX + series, 1)
+        self._record_caller_series(_CALLER_PREFIX, caller_id)
         if accepted:
             self._add("crawl_requests_accepted_total", 1)
         if results:
@@ -175,10 +180,7 @@ class MetricsStore:
         self._add("search_errors_total", errors)
         if provider:
             self._add(_PROVIDER_PREFIX + provider, results)
-        if caller_id:
-            with self._write_lock:
-                series = self._caller_series(self._source(), _SEARCH_CALLER_PREFIX, caller_id)
-                self._add(_SEARCH_CALLER_PREFIX + series, 1)
+        self._record_caller_series(_SEARCH_CALLER_PREFIX, caller_id)
         self._add("search_total_elapsed_ms", elapsed_ms)
 
     def record_throttle(self) -> None:

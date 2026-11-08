@@ -60,6 +60,14 @@ def _owner_statement(
     return statement, () if owner is None else (owner,)
 
 
+def _fetch_owner_row(
+    conn: sqlite3.Connection, statement: str, params: tuple[object, ...]
+) -> sqlite3.Row | None:
+    """One owner-filtered row fetch: execute and fetchone, None on miss.
+    The idiom the read sites share; each site owns its own transaction posture."""
+    return conn.execute(statement, params).fetchone()
+
+
 logger = logging.getLogger(__name__)
 
 #: The admitted batch seeded at a single-shot job's birth (None = single URL).
@@ -243,7 +251,7 @@ class JobStore:
             with self._lock:
                 self._conn.execute("BEGIN")
                 try:
-                    row = self._conn.execute(statement, (job_id, *params)).fetchone()
+                    row = _fetch_owner_row(self._conn, statement, (job_id, *params))
                     if row is None:
                         self._conn.execute("COMMIT")
                         return None
@@ -363,7 +371,7 @@ class JobStore:
         """One job's status view, or None when no row matches the owner filter."""
         with self._lock:
             statement, params = _owner_statement(_JOB_STATUS_PROJECTION, True, "", owner)
-            row = self._conn.execute(statement, (job_id, *params)).fetchone()
+            row = _fetch_owner_row(self._conn, statement, (job_id, *params))
             if row is None:
                 return None
             visited, results = self._accumulators.counts_for(job_id)
@@ -394,7 +402,7 @@ class JobStore:
         """Whether a row matches, filtered to ``owner`` when one is given."""
         with self._lock:
             statement, params = _owner_statement("SELECT 1 FROM crawl_jobs", True, "", owner)
-            row = self._conn.execute(statement, (job_id, *params)).fetchone()
+            row = _fetch_owner_row(self._conn, statement, (job_id, *params))
         return row is not None
 
     def close(self) -> None:

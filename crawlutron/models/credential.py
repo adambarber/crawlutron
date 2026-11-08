@@ -1,8 +1,4 @@
-"""A scoped HTTP credential, keyed by canonical origin (scheme://host[:port]).
-
-The per-hop redirect scrub then enforces "credentials never cross host boundaries"
-for free; values are secrets, never logged or echoed in diagnostics.
-"""
+"""The scoped HTTP credential record."""
 
 from __future__ import annotations
 

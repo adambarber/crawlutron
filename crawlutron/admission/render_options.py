@@ -8,16 +8,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, TypedDict, cast
 
 from crawlutron.models.crawl_policy import CrawlPolicy
-from crawlutron.models.crawl_policy_vocabulary import close_browser_profile_vocabulary
+from crawlutron.models.crawl_policy_vocabulary import (
+    bounded_knob_table,
+    close_browser_profile_vocabulary,
+)
 from crawlutron.models.json_value import JsonValue
 from crawlutron.models.render_options import RenderOptions
-from crawlutron.vocabulary.limits import (
-    MAX_COOKIE_HARVEST_TIMEOUT_SECONDS,
-    MAX_HTTP_TIMEOUT_SECONDS,
-    MAX_LAZY_SCROLL_DELAY_SECONDS,
-    MAX_LAZY_SCROLL_STEPS,
-    MAX_RETRIES,
-)
+from crawlutron.vocabulary.limits import MAX_HTTP_TIMEOUT_SECONDS, MAX_RETRIES
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -91,11 +88,7 @@ def resolve_render_options(
     # A string-shaped knob slips the authority's numeric refusal (the consumers
     # coerce it, so the ceiling applies here before it crosses); a non-numeric
     # string is caller garbage and refuses like every other off-boundary value.
-    for key, ceiling in (
-        ("lazy_scroll_steps", MAX_LAZY_SCROLL_STEPS),
-        ("lazy_scroll_delay_seconds", MAX_LAZY_SCROLL_DELAY_SECONDS),
-        ("cookie_harvest_timeout_seconds", MAX_COOKIE_HARVEST_TIMEOUT_SECONDS),
-    ):
+    for key, ceiling in bounded_knob_table():
         if isinstance(knob := profile.get(key), str):
             try:
                 profile[key] = min(float(knob), ceiling)

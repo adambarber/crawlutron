@@ -117,7 +117,11 @@ async def deliver_pinned_webhook(
     """
     # one place) rather than urlparse/check/pin inline -- manual composition is the
     # shape that produced the redirect findings, and this closes validation's window.
-    from crawlutron.transport.pinned_transport import build_pinned_request_async
+    from crawlutron.transport.pinned_transport import (
+        PinnedBody,
+        build_pinned_request_async,
+        open_pinned_request,
+    )
 
     normalized = NormalizedUrl(webhook_url, policy=host_policy)
     pinned = await build_pinned_request_async(normalized, {}, timeout_seconds=Timeouts.defaults().read)
@@ -133,12 +137,12 @@ async def deliver_pinned_webhook(
     # Deliberate one-per-delivery cost: pooling would re-resolve by hostname (defeating
     # the pin) or cache the IP across deliveries (reopening the rebinding window).
     async with httpx.AsyncClient(timeout=Timeouts.defaults().as_httpx()) as client:
-        async with client.stream(
+        async with open_pinned_request(
+            client,
             "POST",
-            pinned.connect_url,
-            content=payload_bytes,
+            pinned,
+            body=PinnedBody(content=payload_bytes),
             headers=request_headers,
-            extensions={"sni_hostname": sni} if (sni := pinned.tls_hostname) else None,
         ) as response:
             try:
                 # The webhook RESPONSE is attacker-controlled: drain it through

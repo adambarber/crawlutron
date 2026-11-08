@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from crawlutron.models.json_value import JsonValue
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.safety.header_values import reject_injectable_header_values
 from crawlutron.transport import pinned_dns as _dns
@@ -82,7 +83,55 @@ def apinned_stream(
         headers=request.headers,
         timeout=timeout,
         follow_redirects=False,
-        extensions={"sni_hostname": sni} if (sni := request.tls_hostname) else None,
+        extensions=_sni_extensions(request),
+    )
+
+
+def _sni_extensions(request: PinnedRequest) -> dict[str, str] | None:
+    """The SNI extension mapping for a pinned request: the logical hostname.
+    ``None`` when the hop has nothing to pin (plain HTTP or the local-dev posture)."""
+    return {"sni_hostname": sni} if (sni := request.tls_hostname) else None
+
+
+@dataclass(frozen=True, slots=True)
+class PinnedBody:
+    """The request body a pinned call sends: exactly one arm is set.
+
+    One record instead of three parallel optional parameters, so no call site
+    mirrors a helper's argument list to send a body.
+    """
+
+    content: bytes | None = None
+    json_value: dict[str, JsonValue] | None = None
+    form: dict[str, str] | None = None
+
+    def __post_init__(self) -> None:
+        if sum(arm is not None for arm in (self.content, self.json_value, self.form)) > 1:
+            raise ValueError("PinnedBody carries at most one body arm")
+
+
+def open_pinned_request(
+    client: httpx.AsyncClient,
+    method: str,
+    request: PinnedRequest,
+    *,
+    timeout: httpx.Timeout | None = None,
+    headers: dict[str, str] | None = None,
+    body: PinnedBody | None = None,
+) -> typing.AsyncContextManager[httpx.Response]:
+    """Open one SSRF-pinned httpx stream by method: the connect URL is the
+    validated IP and TLS SNI stays on the logical hostname. The CALLER owns the
+    response drain -- a body read inside the context -- so each site keeps its
+    own cap posture (webhook warns-and-continues, search refuses)."""
+    return client.stream(
+        method,
+        request.connect_url,
+        headers=headers if headers is not None else request.headers,
+        timeout=timeout,
+        content=body.content if body else None,
+        json=body.json_value if body else None,
+        data=body.form if body else None,
+        extensions=_sni_extensions(request),
     )
 
 
