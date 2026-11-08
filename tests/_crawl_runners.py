@@ -64,17 +64,19 @@ def make_crawl_payload(
     max_discovered_links: int = 50,
     **extra: JsonValue,
 ) -> dict[str, JsonValue]:
-    payload: dict[str, JsonValue] = {
-        "url": url,
-        "policy": {
-            "strategies": list(strategies) if strategies is not None else [HTTP_DECLARED_CRAWLER],
-            "limits": {
-                "timeout_seconds": timeout_seconds,
-                "max_retries": max_retries,
-                "max_discovered_links": max_discovered_links,
-            },
+    """The single-URL crawl wire body: full limits, default strategies.
+
+    Delegates to :func:`build_payload` so the wire shape has one owner; the
+    limit knobs are the named defaults a test never re-states."""
+    payload = build_payload(
+        url=url,
+        strategies=[HTTP_DECLARED_CRAWLER] if strategies is None else strategies,
+        limits={
+            "timeout_seconds": timeout_seconds,
+            "max_retries": max_retries,
+            "max_discovered_links": max_discovered_links,
         },
-    }
+    )
     payload.update(extra)
     return payload
 
