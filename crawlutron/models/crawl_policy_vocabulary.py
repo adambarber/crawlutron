@@ -9,11 +9,27 @@ from crawlutron.vocabulary.request_profiles import REQUEST_PROFILE_KEYS
 
 __all__ = [
     "REQUEST_PROFILE_KEYS_JSON",
+    "bounded_knob_table",
     "close_browser_profile_vocabulary",
     "close_request_profile_vocabulary",
     "narrows_credential_scope",
     "refuse_oversized_profile_strings",
 ]
+
+
+def bounded_knob_table() -> tuple[tuple[str, float], ...]:
+    """The (key, ceiling) table every bounded browser knob is judged against."""
+    from crawlutron.vocabulary.limits import (
+        MAX_COOKIE_HARVEST_TIMEOUT_SECONDS,
+        MAX_LAZY_SCROLL_DELAY_SECONDS,
+        MAX_LAZY_SCROLL_STEPS,
+    )
+
+    return (
+        ("lazy_scroll_steps", MAX_LAZY_SCROLL_STEPS),
+        ("lazy_scroll_delay_seconds", MAX_LAZY_SCROLL_DELAY_SECONDS),
+        ("cookie_harvest_timeout_seconds", MAX_COOKIE_HARVEST_TIMEOUT_SECONDS),
+    )
 
 
 def close_browser_profile_vocabulary(profile: Mapping[str, object]) -> Mapping[str, object]:
@@ -60,18 +76,9 @@ def _refuse_over_ceiling_knobs(profile: Mapping[str, object]) -> None:
     The closed vocabulary bounds which keys exist, not how large their values may
     be, and the consumers only clamp -- so this is the tell, not a silent early-finish render.
     """
-    from crawlutron.vocabulary.limits import (
-        MAX_COOKIE_HARVEST_TIMEOUT_SECONDS,
-        MAX_LAZY_SCROLL_DELAY_SECONDS,
-        MAX_LAZY_SCROLL_STEPS,
-        MAX_SCREENSHOT_SELECTORS,
-    )
+    from crawlutron.vocabulary.limits import MAX_SCREENSHOT_SELECTORS
 
-    for key, ceiling in (
-        ("lazy_scroll_steps", MAX_LAZY_SCROLL_STEPS),
-        ("lazy_scroll_delay_seconds", MAX_LAZY_SCROLL_DELAY_SECONDS),
-        ("cookie_harvest_timeout_seconds", MAX_COOKIE_HARVEST_TIMEOUT_SECONDS),
-    ):
+    for key, ceiling in bounded_knob_table():
         value = profile.get(key)
         if isinstance(value, (int, float)) and not isinstance(value, bool) and value > ceiling:
             raise ValueError(f"browser_profile {key} may be at most {ceiling}, got {value}")
