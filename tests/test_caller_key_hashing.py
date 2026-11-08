@@ -44,12 +44,15 @@ def test_the_stored_hash_is_not_a_bare_digest_of_the_secret(tmp_path):
     import hashlib
 
     store = CallerKeyStore(tmp_path / "keys.db")
-    assert store.issue_key("agent-a") is not None
-    # The stored digest came from salted PBKDF2, so the raw SHA-256 of the
-    # secret differs from every stored hash by construction.
+    issued = store.issue_key("agent-a")
+    body = issued.secret.partition(".")[2]
+    # The stored digest came from salted PBKDF2, so neither the raw secret nor a
+    # bare SHA-256 of the issued secret (or its embedded body) may be stored.
     with sqlite3.connect(tmp_path / "keys.db") as conn:
         stored_hash = conn.execute("SELECT key_hash FROM caller_keys").fetchone()[0]
-    assert stored_hash != hashlib.sha256(b"x").hexdigest()
+    assert stored_hash != issued.secret
+    assert stored_hash != hashlib.sha256(issued.secret.encode("utf-8")).hexdigest()
+    assert stored_hash != hashlib.sha256(body.encode("utf-8")).hexdigest()
 
 
 @pytest.mark.parametrize("iteration_constant", [210_000], ids=["pbkdf2-iterations"])
