@@ -34,11 +34,17 @@ def truncate_html_input(html: str | None) -> str:
     """Bound an HTML document to :data:`MAX_HTML_INPUT_BYTES`, truncating rather
     than raising: a partial document still yields usable text, so a refused page
     would lose the result entirely. Callers keep the "why"; this owns "how much".
+    Truncation is byte-accurate (#655): the cut lands on a UTF-8 character
+    boundary, so the result never exceeds the byte budget.
     """
     body = html or ""
-    if len(body) > MAX_HTML_INPUT_BYTES:
-        return body[:MAX_HTML_INPUT_BYTES]
-    return body
+    encoded = body.encode("utf-8")
+    if len(encoded) <= MAX_HTML_INPUT_BYTES:
+        return body
+    truncated = encoded[:MAX_HTML_INPUT_BYTES]
+    # Drop any partial multibyte character the cut split; decoded strictly, a
+    # truncated tail either ends cleanly or has incomplete bytes to shed.
+    return truncated.decode("utf-8", errors="ignore")
 
 
 __all__ = [
