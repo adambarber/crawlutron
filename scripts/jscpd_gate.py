@@ -64,7 +64,7 @@ def _require_configured_floor(args: argparse.Namespace) -> None:
     laxer = (args.min_lines > min_lines, args.min_tokens > min_tokens, args.threshold > threshold)
     if any(laxer):
         raise ValueError(
-            f"scanning at ({args.min_lines} lines / {args.min_tokens} tokens / {threshold}%) is "
+            f"scanning at ({args.min_lines} lines / {args.min_tokens} tokens / {args.threshold}%) is "
             f"laxer than the enforced floor ({min_lines} / {min_tokens} / {threshold}%) in "
             f"{resolver.PRECOMMIT_CONFIG_PATH.name}: a clean result would only mean the clone is "
             f"below the number asked for. Scan stricter to measure a candidate floor."

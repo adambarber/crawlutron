@@ -53,13 +53,18 @@ def test_the_jscpd_gate_helpers_live_in_the_helper_namespace() -> None:
 
 
 def test_a_laxer_floor_is_refused_because_it_cannot_report_the_truth() -> None:
-    """A run handed a looser floor than the hook enforces fails instead of passing."""
+    """A run handed a looser floor than the hook enforces fails, naming the run's numbers."""
     laxer = _args_for(
         min_lines=_CONFIGURED_MIN_LINES + 1,
         min_tokens=_CONFIGURED_MIN_TOKENS + 1,
+        threshold=100.0,
     )
-    with pytest.raises(ValueError, match="laxer than the enforced floor"):
+    with pytest.raises(ValueError, match="laxer than the enforced floor") as exc:
         gate._require_configured_floor(laxer)
+    message = str(exc.value)
+    assert "100.0%" in message, "the refusal must name the RUN's threshold, not the floor's"
+    assert f"{_CONFIGURED_MIN_LINES + 1} lines" in message
+    assert f"{_CONFIGURED_MIN_TOKENS + 1} tokens" in message
 
 
 def test_the_enforced_floor_and_a_stricter_one_are_both_accepted() -> None:
