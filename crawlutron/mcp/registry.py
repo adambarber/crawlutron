@@ -54,18 +54,19 @@ from crawlutron.models.watch_list_request import WatchListRequest
 from crawlutron.models.watch_list_response import WatchListResponse
 from crawlutron.models.watch_state import WatchState
 
-#: The request fields the crawl tool advertises *and* rejects from one list, so
-#: the schema cannot offer a field the handler then refuses.
-_UNSUPPORTED_CRAWL_FIELDS = frozenset({"async_mode", "webhook_url", "output_format"})
+#: The declared MCP-side delivery refusal both crawl doors answer (keyed on
+#: the fields' effective VALUE by dispatch: an explicit no-op is accepted).
+_DELIVERY_REFUSAL_FIELDS = ("async_mode", "webhook_url", "output_format")
 
-#: The declared MCP-side delivery refusal both crawl doors answer (keyed on the
-#: fields' effective VALUE by dispatch: an explicit no-op is accepted).
+#: The schema drop-list is DERIVED from the refusal vocabulary -- one owner,
+#: so the schema can never advertise a field the handler refuses.
+_UNSUPPORTED_CRAWL_FIELDS = frozenset(_DELIVERY_REFUSAL_FIELDS)
+
 _DELIVERY_REFUSAL = ToolResult(
     text="async_mode, webhook_url and output_format are not supported over MCP; "
     "use POST /v1/crawl for webhook/async delivery or output formats.",
     is_error=True,
 )
-_DELIVERY_REFUSAL_FIELDS = ("async_mode", "webhook_url", "output_format")
 
 #: The poll-only watch refusal: webhook delivery is admitted through REST only.
 _WEBHOOK_REFUSAL = ToolResult(
