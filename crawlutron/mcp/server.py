@@ -7,6 +7,7 @@ Stateless protocol: headers validated against the body, ``server/discover`` /
 from __future__ import annotations
 
 import logging
+from inspect import signature
 from typing import cast
 from urllib.parse import urlsplit
 
@@ -67,7 +68,8 @@ def discover_result() -> dict[str, JsonValue]:
             "frontier for a root), render (browser render), read_crawl_result / read_crawl_trace "
             "(read a stored crawl response / its trace; poll read_crawl_result while a crawl runs), "
             "and the job tools create_job / list_jobs / get_job / control_job / delete_job (whole-site "
-            "crawl jobs over /v1/jobs). "
+            "crawl jobs over /v1/jobs), and the watch tools register_watch / list_watches / get_watch / "
+            "delete_watch (poll-only URL revalidation watches over /v1/watches). "
             "Search result titles and snippets are "
             "provider-supplied and unverified until crawled. The service classifies blocked/challenge "
             "outcomes but does not bypass CAPTCHAs, WAFs, login, or paywalls."
@@ -184,6 +186,7 @@ async def call_tool(
     shutdown_event,
     concurrency_tracker=None,
     job_store=None,
+    watch_store=None,
     result_store=None,
     caller=None,
 ) -> JsonValue:
@@ -222,6 +225,7 @@ async def call_tool(
         job_store=job_store,
         result_store=result_store,
         caller=caller,
+        **({"watch_store": watch_store} if "watch_store" in signature(spec.handler).parameters else {}),
     )
     success: dict[str, JsonValue] = {
         "resultType": "complete",
@@ -247,6 +251,39 @@ def _envelope_rejection(body: dict[str, JsonValue]) -> tuple[int, JsonValue] | N
     return None
 
 
+async def _dispatch_method(
+    request_id: int | str,
+    method: object,
+    params: dict[str, JsonValue],
+    settings,
+    shutdown_event,
+    *,
+    concurrency_tracker,
+    job_store,
+    watch_store,
+    result_store,
+    caller,
+) -> tuple[int, JsonValue | None]:
+    """Route one validated method; an unknown method is a 404."""
+    if method == "server/discover":
+        return 200, result_response(request_id, discover_result())
+    if method == "tools/list":
+        return 200, result_response(request_id, tools_list_result())
+    if method == "tools/call":
+        return 200, await call_tool(
+            request_id,
+            params,
+            settings,
+            shutdown_event,
+            concurrency_tracker=concurrency_tracker,
+            job_store=job_store,
+            watch_store=watch_store,
+            result_store=result_store,
+            caller=caller,
+        )
+    return 404, error_response(request_id, METHOD_NOT_FOUND, f"Method not found: {method}")
+
+
 async def handle_mcp_request(
     body: dict[str, JsonValue],
     *,
@@ -257,6 +294,7 @@ async def handle_mcp_request(
     shutdown_event,
     concurrency_tracker=None,
     job_store=None,
+    watch_store=None,
     result_store=None,
     caller=None,
 ) -> tuple[int, JsonValue | None]:
@@ -286,22 +324,18 @@ async def handle_mcp_request(
             method_header,
             name_header,
         )
-        if method == "server/discover":
-            return 200, result_response(request_id, discover_result())
-        if method == "tools/list":
-            return 200, result_response(request_id, tools_list_result())
-        if method == "tools/call":
-            return 200, await call_tool(
-                request_id,
-                params,
-                settings,
-                shutdown_event,
-                concurrency_tracker=concurrency_tracker,
-                job_store=job_store,
-                result_store=result_store,
-                caller=caller,
-            )
-        return 404, error_response(request_id, METHOD_NOT_FOUND, f"Method not found: {method}")
+        return await _dispatch_method(
+            request_id,
+            method,
+            params,
+            settings,
+            shutdown_event,
+            concurrency_tracker=concurrency_tracker,
+            job_store=job_store,
+            watch_store=watch_store,
+            result_store=result_store,
+            caller=caller,
+        )
     except ProtocolValidationError as error:
         return error.status_code, error.payload
     except Exception:

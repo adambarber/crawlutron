@@ -30,6 +30,12 @@ from crawlutron.mcp.handlers import (
     handle_render,
     handle_search,
 )
+from crawlutron.mcp.watch_handlers import (
+    handle_delete_watch,
+    handle_get_watch,
+    handle_list_watches,
+    handle_register_watch,
+)
 from crawlutron.models.admit_request import AdmitRequest
 from crawlutron.models.admit_response import AdmitResponse
 from crawlutron.models.crawl_and_extract_response import CrawlAndExtractResponse
@@ -51,6 +57,12 @@ from crawlutron.models.search_response import SearchResponse
 from crawlutron.models.site_map_response import SiteMapResponse
 from crawlutron.models.trace_response import TraceResponse
 from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
+from crawlutron.models.watch_create_request import WatchCreateRequest
+from crawlutron.models.watch_deleted_response import WatchDeletedResponse
+from crawlutron.models.watch_id_request import WatchIdRequest
+from crawlutron.models.watch_list_request import WatchListRequest
+from crawlutron.models.watch_list_response import WatchListResponse
+from crawlutron.models.watch_state import WatchState
 
 #: The request fields the crawl tool advertises *and* rejects from one list, so
 #: the schema cannot offer a field the handler then refuses.
@@ -298,6 +310,60 @@ TOOL_SPECS: list[ToolSpec] = [
         output_schema=_schema(JobDeletedResponse),
         handler=handle_delete_job,
         rest_route=RestRoute("DELETE", "/v1/jobs/{job_id}"),
+    ),
+    ToolSpec(
+        name="register_watch",
+        title="Register a URL watch",
+        description=(
+            "Persist a poll-only watch: revalidate one URL on an interval -- the same "
+            "registration POST /v1/watches runs. The sweep rechecks each due watch with "
+            "the validators it already holds, so an unchanged page costs one conditional "
+            "request and no body. Webhook delivery is not available over MCP: register "
+            "the watch here poll-only, or use POST /v1/watches with webhook_url. Poll "
+            "list_watches or get_watch for the watch's state."
+        ),
+        request_model=WatchCreateRequest,
+        output_schema=_schema(WatchState),
+        handler=handle_register_watch,
+        rest_route=RestRoute("POST", "/v1/watches"),
+    ),
+    ToolSpec(
+        name="list_watches",
+        title="List registered watches",
+        description=(
+            "List the caller's registered watches with the state of each watch's most "
+            "recent check -- the same listing GET /v1/watches answers, visible only to "
+            "the caller that registered them."
+        ),
+        request_model=WatchListRequest,
+        output_schema=_schema(WatchListResponse),
+        handler=handle_list_watches,
+        rest_route=RestRoute("GET", "/v1/watches"),
+    ),
+    ToolSpec(
+        name="get_watch",
+        title="Get one watch's revalidation state",
+        description=(
+            "Return one watch's schedule, the validators the next check will send, and "
+            "what its last check concluded -- the same record GET /v1/watches/{watch_id} "
+            "answers, visible only to the caller that owns the watch."
+        ),
+        request_model=WatchIdRequest,
+        output_schema=_schema(WatchState),
+        handler=handle_get_watch,
+        rest_route=RestRoute("GET", "/v1/watches/{watch_id}"),
+    ),
+    ToolSpec(
+        name="delete_watch",
+        title="Delete a registered watch",
+        description=(
+            "Stop checking a URL you watch: remove the row and its revalidation "
+            "history -- the same deletion DELETE /v1/watches/{watch_id} runs."
+        ),
+        request_model=WatchIdRequest,
+        output_schema=_schema(WatchDeletedResponse),
+        handler=handle_delete_watch,
+        rest_route=RestRoute("DELETE", "/v1/watches/{watch_id}"),
     ),
 ]
 

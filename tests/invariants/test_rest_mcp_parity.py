@@ -24,17 +24,12 @@ class ParityRow:
 
 
 #: ACCIDENT rows are temporary gaps: each is deleted in the same commit as the
-#: tool that lands. The ratchet constant below must move DOWN only.
-ACCIDENT_ROWS: tuple[ParityRow, ...] = (
-    ParityRow("POST", "/v1/watches", "create_watch"),
-    ParityRow("GET", "/v1/watches", "list_watches"),
-    ParityRow("GET", "/v1/watches/{watch_id}", "get_watch"),
-    ParityRow("DELETE", "/v1/watches/{watch_id}", "delete_watch"),
-)
+#: tool that lands; the ratchet moves DOWN only. #648 sealed it shut at zero.
+ACCIDENT_ROWS: tuple[ParityRow, ...] = ()
 
 #: Pinned literal: rows and this count move DOWN together, same commit.
-#: #647: create_job landed; the POST /v1/jobs row deleted; 5 -> 4.
-ACCIDENT_ROW_COUNT: int = 4
+#: #647: create_job landed; 5 -> 4. #648: the watch tools landed; 4 -> 0 (sealed).
+ACCIDENT_ROW_COUNT: int = 0
 
 #: PRINCIPLED rows are permanent, deliberate absences with a stated reason.
 PRINCIPLED_ROWS: tuple[ParityRow, ...] = (

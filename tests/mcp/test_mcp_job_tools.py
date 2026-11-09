@@ -8,7 +8,6 @@ REST door answers with.
 from __future__ import annotations
 
 import contextlib
-import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -21,13 +20,11 @@ from crawlutron.api import job_runner
 from crawlutron.api.jobs_router import router as jobs_router
 from crawlutron.api.keys_router import router as keys_router
 from crawlutron.mcp.router import router as mcp_router
-from crawlutron.models.json_value import JsonValue
-from crawlutron.storage.job_store import JobStatus
-from tests._async_harnesses import issue_key
 from tests._job_harnesses import ScriptedExecute, _execution_policy, post_api_job
 from tests._policy_factories import canonical
 from tests._quota_harness import service_client
 from tests._result_builders import engine_result
+from tests.mcp._tool_calls import issue_key
 
 if TYPE_CHECKING:
     from httpx import AsyncClient
@@ -35,13 +32,7 @@ if TYPE_CHECKING:
     from crawlutron.storage.caller_key_store import CallerKeyStore
     from crawlutron.storage.job_store import JobStore
 
-PROTOCOL = "2026-07-28"
-
-_META: dict[str, JsonValue] = {
-    "io.modelcontextprotocol/protocolVersion": PROTOCOL,
-    "io.modelcontextprotocol/clientInfo": {"name": "test", "version": "1"},
-    "io.modelcontextprotocol/clientCapabilities": {},
-}
+from tests.mcp._tool_calls import KeyedToolCaller
 
 
 @contextlib.asynccontextmanager
@@ -56,50 +47,6 @@ async def _job_mcp_client(
         yield client, job_store, keys
 
 
-def _mcp_headers(*, key: str, tool: str) -> dict[str, str]:
-    return {
-        "MCP-Protocol-Version": PROTOCOL,
-        "Mcp-Method": "tools/call",
-        "Mcp-Name": tool,
-        "Accept": "application/json, text/event-stream",
-        "X-API-Key": key,
-    }
-
-
-def _call_body(tool: str, arguments: dict[str, JsonValue]) -> dict[str, JsonValue]:
-    return {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "tools/call",
-        "params": {"name": tool, "arguments": arguments, "_meta": _META},
-    }
-
-
-async def _tool_call(client: AsyncClient, tool: str, arguments: dict[str, JsonValue], *, key: str):
-    """One keyed tools/call; returns the raw JSON-RPC result object."""
-    response = await client.post(
-        "/mcp",
-        json=json.loads(json.dumps(_call_body(tool, arguments))),
-        headers=_mcp_headers(key=key, tool=tool),
-    )
-    assert response.status_code == 200, response.text
-    return response.json()["result"]
-
-
-async def _tool_structured(client: AsyncClient, tool: str, arguments: dict[str, JsonValue], *, key: str):
-    result = await _tool_call(client, tool, arguments, key=key)
-    assert result["isError"] is False, result
-    return result["structuredContent"]
-
-
-async def _tool_error_text(
-    client: AsyncClient, tool: str, arguments: dict[str, JsonValue], *, key: str
-) -> str:
-    result = await _tool_call(client, tool, arguments, key=key)
-    assert result["isError"] is True, result
-    return str(result["content"][0]["text"])
-
-
 @pytest.fixture(autouse=True)
 def _fresh_runner():
     job_runner.reset_job_runner()
@@ -108,29 +55,19 @@ def _fresh_runner():
 
 
 @dataclass(frozen=True)
-class JobHarness:
+class JobHarness(KeyedToolCaller):
     """One keyed harness: the client, the store, and the caller's secret."""
 
     client: AsyncClient
     job_store: object
     secret: str
 
-    async def structured(self, tool: str, arguments: dict[str, JsonValue]):
-        return await _tool_structured(self.client, tool, arguments, key=self.secret)
-
-    async def error_text(self, tool: str, arguments: dict[str, JsonValue]) -> str:
-        return await _tool_error_text(self.client, tool, arguments, key=self.secret)
-
-    async def rest_json(self, method: str, path: str):
-        """The REST door's JSON for one path, asserted 200 first."""
-        rest = await getattr(self.client, method)(path, headers={"X-API-Key": self.secret})
-        assert rest.status_code == 200, rest.text
-        return rest.json()
-
 
 @contextlib.asynccontextmanager
 async def job_harness(tmp_path: Path, *, seeded: int = 0, running: bool = False):
     """A keyed harness with ``seeded`` single-shot jobs owned by the caller."""
+    from crawlutron.storage.job_store import JobStatus
+
     async with _job_mcp_client(tmp_path) as (client, job_store, keys):
         secret = await issue_key(client)
         record = keys.verify_key(secret)

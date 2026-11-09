@@ -99,7 +99,7 @@ def _tool_success(value: BaseModel | Mapping[str, object]) -> ToolResult:
     return ToolResult(text=json.dumps(dump, default=json_default), structured=dump)
 
 
-async def _tool_result(coro: Awaitable[BaseModel | Mapping[str, object]]) -> ToolResult:
+async def tool_result(coro: Awaitable[BaseModel | Mapping[str, object]]) -> ToolResult:
     """Cross the MCP boundary for one tool call: run it, or turn the endpoint's
     ``HTTPException``/``ValueError`` into a tool error rather than a traceback.
     """
@@ -110,7 +110,7 @@ async def _tool_result(coro: Awaitable[BaseModel | Mapping[str, object]]) -> Too
     return _tool_success(result)
 
 
-def _caller_for(caller: CallerIdentity | None) -> CallerIdentity:
+def caller_for(caller: CallerIdentity | None) -> CallerIdentity:
     """The identity to enforce against: the resolved caller, else anonymous."""
     return caller if caller is not None else CallerIdentity()
 
@@ -222,7 +222,7 @@ async def _guard_then_crawl(
         pages,
         payload=payload,
         tracking=tracking,
-        work=lambda: _tool_result(_projected(_crawled(payload, settings, shutdown_event), projection)),
+        work=lambda: tool_result(_projected(_crawled(payload, settings, shutdown_event), projection)),
     )
 
 
@@ -271,7 +271,7 @@ async def handle_map(
         payload.policy.limits.max_pages,
         payload=payload,
         tracking=Tracking(job_store=job_store, concurrency_tracker=concurrency_tracker),
-        work=lambda: _tool_result(map_site(payload, settings=settings, shutdown_event=shutdown_event)),
+        work=lambda: tool_result(map_site(payload, settings=settings, shutdown_event=shutdown_event)),
     )
 
 
@@ -292,12 +292,12 @@ async def handle_render(
     requested = len(payload.urls) if payload.urls is not None else 1
     # The namespace binds around the whole admit, so the gate and the work
     # both run under it; an MCP render's harvest keys by the caller's key id.
-    async with bound_render_cookie_namespace(_caller_for(caller)):
+    async with bound_render_cookie_namespace(caller_for(caller)):
         return await _admit_tool(
             caller,
             requested,
             tracking=Tracking(job_store=job_store, concurrency_tracker=concurrency_tracker),
-            work=lambda: _tool_result(render_endpoint_handler(payload, settings=settings)),
+            work=lambda: tool_result(render_endpoint_handler(payload, settings=settings)),
         )
 
 
@@ -306,7 +306,7 @@ async def handle_admit(
 ) -> ToolResult:
     # The pre-flight check spends no quota and no concurrency slot: it is a pure
     # verdict (robots opt-in aside), so it does not enter the admission gate.
-    return await _tool_result(admit_url(payload, settings=settings))
+    return await tool_result(admit_url(payload, settings=settings))
 
 
 async def handle_search(
@@ -324,8 +324,8 @@ async def handle_search(
         caller,
         0,
         tracking=Tracking(job_store=job_store, concurrency_tracker=concurrency_tracker),
-        work=lambda: _tool_result(
-            search_endpoint_handler(payload, settings=settings, caller=_caller_for(caller))
+        work=lambda: tool_result(
+            search_endpoint_handler(payload, settings=settings, caller=caller_for(caller))
         ),
     )
 
@@ -353,7 +353,7 @@ async def _read_stored_tool(
     the 404 miss the replay doors report."""
     try:
         return _tool_success(
-            await read(payload.request_id, job_store, result_store, caller_id=_caller_for(caller).caller_id)
+            await read(payload.request_id, job_store, result_store, caller_id=caller_for(caller).caller_id)
         )
     except CrawlPendingError as pending:
         return _running_result(pending)
@@ -395,22 +395,15 @@ def _job_tool_handler(core) -> Handler:
     ungated by quota. (create_job is an admitted door and carries its own
     handler below.)"""
 
-    async def handler(
-        payload,
-        settings,
-        shutdown_event,
-        caller=None,
-        job_store=None,
-        result_store=None,
-        concurrency_tracker=None,
-    ) -> ToolResult:
-        return await _tool_result(
+    async def handler(payload, settings, shutdown_event, **door) -> ToolResult:
+        door.setdefault("caller", None)
+        return await tool_result(
             core(
                 payload,
-                job_store,
+                door.get("job_store"),
                 settings,
                 shutdown_event,
-                _caller_for(caller),
+                caller_for(door["caller"]),
             )
         )
 
@@ -434,13 +427,13 @@ async def _create_job_tool(
         raise ValueError("create_job requires an initialized job store")
     if concurrency_tracker is None:
         raise ValueError("create_job requires the caller's concurrency tracker")
-    return await _tool_result(
+    return await tool_result(
         create_job_core(
             payload,
             job_store,
             settings,
             shutdown_event,
-            _caller_for(caller),
+            caller_for(caller),
             concurrency_tracker=concurrency_tracker,
         )
     )
@@ -452,8 +445,10 @@ handle_control_job = _job_tool_handler(control_job)
 handle_delete_job = _job_tool_handler(delete_job_core)
 handle_create_job = _create_job_tool
 
+
 __all__ = [
     "Handler",
+    "caller_for",
     "handle_admit",
     "handle_control_job",
     "handle_create_job",
@@ -468,5 +463,6 @@ __all__ = [
     "handle_render",
     "handle_search",
     "http_exception_message",
+    "tool_result",
     "validation_message",
 ]

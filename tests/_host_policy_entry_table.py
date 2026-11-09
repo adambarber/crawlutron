@@ -22,6 +22,7 @@ def host_policy_entry_table() -> set[str]:
         "crawlutron/api/render.py:render_request",
         "crawlutron/api/response_shaping.py:frontier_link_url",
         "crawlutron/api/watch_router.py:create_watch",
+        "crawlutron/api/watch_cores.py:register_watch_core",
         "crawlutron/api/policy_suggestions.py:policy_suggestions",
         "crawlutron/api/site_map.py:build_site_map",
         "crawlutron/api/policy_suggestions.py:build_policy_suggestions",

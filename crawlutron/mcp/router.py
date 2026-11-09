@@ -76,6 +76,7 @@ async def mcp_endpoint(
         shutdown_event=shutdown_event,
         concurrency_tracker=getattr(request.app.state, "concurrency_tracker", None),
         job_store=getattr(request.app.state, "job_store", None),
+        watch_store=getattr(request.app.state, "watch_store", None),
         result_store=getattr(request.app.state, "result_store", None),
         caller=caller,
     )
