@@ -17,6 +17,10 @@ from crawlutron.models.normalized_url import NormalizedUrl
 AdmitReason = Literal[
     "invalid_url",
     "unsupported_scheme",
+    "userinfo_refused",
+    "ipvfuture_refused",
+    "invalid_port",
+    "invalid_idn_host",
     "host_denied",
     "host_not_allowed",
     "private_network_target",

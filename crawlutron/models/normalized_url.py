@@ -72,6 +72,26 @@ def _is_tracking_param(key: str) -> bool:
     return k.startswith("utm_") or k in _TRACKING_PARAM_EXACT
 
 
+#: The refusal-shaped literals ``_canonical_parts`` legitimately raises: a
+#: ValueError carrying one of these IS an admission refusal; anything else
+#: exiting the constructor is foreign (mapped at the boundary, never leaked).
+_REFUSAL_LITERALS = frozenset(
+    {
+        "unsupported_scheme",
+        "invalid_url",
+        "userinfo_refused",
+        "ipvfuture_refused",
+        "invalid_port",
+        "invalid_idn_host",
+        # Variable-held verdicts the policy/egress arms raise through the
+        # constructor (``raise ValueError(reason)`` at _canonical_parts:101).
+        "host_denied",
+        "host_not_allowed",
+        "private_network_target",
+    }
+)
+
+
 def _bracketed_netloc(host: str, port: int | None) -> str:
     """Netloc with IPv6 literals re-bracketed; bare colons parse as host:port pairs."""
     host_part = f"[{host}]" if ":" in host else host
@@ -80,7 +100,12 @@ def _bracketed_netloc(host: str, port: int | None) -> str:
 
 def _canonical_parts(url: str, *, policy: HostPolicy) -> tuple[str, str, str, str, int | None, str, str]:
     """(canonical, scheme, host, site, port, path, query), or raise with the refusal reason."""
-    parsed = urlparse(url)
+    try:
+        parsed = urlparse(url)
+    except ValueError as error:
+        # Malformed brackets raise urllib's non-literal "Invalid IPv6 URL"
+        # before any structural check runs; map it explicitly, never leak it.
+        raise ValueError("invalid_url") from error
     if parsed.scheme not in {"http", "https"}:
         raise ValueError("unsupported_scheme")
     if not parsed.hostname:
@@ -101,7 +126,12 @@ def _canonical_parts(url: str, *, policy: HostPolicy) -> tuple[str, str, str, st
         raise ValueError(reason)
 
     default_port = 80 if scheme == "http" else 443
-    port = parsed.port
+    try:
+        port = parsed.port
+    except ValueError as error:
+        # urllib's message is attacker-influenced text; the wire carries the
+        # classification, never str(error).
+        raise ValueError("invalid_port") from error
     if port == default_port:
         port = None
     netloc = _bracketed_netloc(host, port)
@@ -128,7 +158,16 @@ class NormalizedUrl:
     __slots__ = ("_host", "_path", "_policy", "_port", "_query", "_raw", "_scheme", "_site")
 
     def __init__(self, raw: str, *, policy: HostPolicy) -> None:
-        canonical, scheme, host, site, port, path, query = _canonical_parts(raw, policy=policy)
+        try:
+            canonical, scheme, host, site, port, path, query = _canonical_parts(raw, policy=policy)
+        except ValueError as error:
+            # The constructor boundary: only a refusal-shaped literal leaves as
+            # itself; a foreign ValueError (a shape the structural checks have
+            # not been wrapped into a named refusal) is mapped EXPLICITLY to
+            # "invalid_url" here, so urllib or a future refactor can never
+            # leak its own message into the wire vocabulary. A non-ValueError
+            # programming error still raises -- admission never swallows it.
+            raise ValueError(_refusal_literal(str(error))) from error
         self._raw = canonical
         self._scheme = scheme
         self._host = host
@@ -270,7 +309,18 @@ class NormalizedUrl:
         return {"type": "string"}
 
 
-__all__ = ["NormalizedUrl", "admit_or_none", "admit_with_reason"]
+__all__ = ["NormalizedUrl", "admit_or_none", "admit_with_reason", "refusal_literals"]
+
+
+def refusal_literals() -> frozenset[str]:
+    """The refusal-shaped constructor vocabulary -- the boundary's public door."""
+    return frozenset(_REFUSAL_LITERALS)
+
+
+def _refusal_literal(reason: str) -> str:
+    """Pass a refusal-shaped literal through; map a foreign one to ``invalid_url``
+    explicitly (the constructor boundary's mapping, tested by the fuzz sweep)."""
+    return reason if reason in _REFUSAL_LITERALS else "invalid_url"
 
 
 def admit_or_none(candidate: str | NormalizedUrl | None, *, policy: HostPolicy) -> NormalizedUrl | None:

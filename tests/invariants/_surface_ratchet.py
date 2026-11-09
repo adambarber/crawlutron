@@ -108,7 +108,8 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/api/middleware.py": (3, 2),
     # #653: the key-verify meter (one class + the shared instance accessor).
     "crawlutron/api/admit_router.py": (2, 1),
-    "crawlutron/api/admit_endpoint.py": (2, 1),
+    # #677: known_reasons is the public door the producer->table loop gate reads.
+    "crawlutron/api/admit_endpoint.py": (3, 2),
     "crawlutron/api/key_throttle.py": (2, 2),
     "crawlutron/api/policy_defaults.py": (2, 0),
     "crawlutron/api/policy_router.py": (2, 1),

@@ -260,6 +260,8 @@ def _check_dotted_symbol(name: str, candidate: str, app_root: pathlib.Path) -> l
     parts = candidate.replace("/", ".").split(".")
     if len(parts) < 3:
         return []
+    if _module_file(app_root, parts).exists():
+        return []
     symbol = parts[-1]
     module_path = app_root / "crawlutron" / pathlib.Path(*parts[1:-1]).with_suffix(".py")
     if not module_path.exists():
@@ -268,6 +270,11 @@ def _check_dotted_symbol(name: str, candidate: str, app_root: pathlib.Path) -> l
     if not _symbol_defined_in(tree, symbol):
         return [f"{name}: `{candidate}` symbol not defined in {module_path.relative_to(app_root)}"]
     return []
+
+
+def _module_file(app_root: pathlib.Path, parts: list[str]) -> pathlib.Path:
+    """The citation read as a MODULE path: crawlutron/<pkg...>/<name>.py."""
+    return (app_root / "crawlutron").joinpath(*parts[1:]).with_suffix(".py")
 
 
 def _check_bare_symbol(name: str, candidate: str, symbols: dict[str, frozenset[str]]) -> list[str]:
@@ -464,3 +471,17 @@ def test_doc_symbol_detector_spared_clean_references(tmp_path):
         encoding="utf-8",
     )
     assert _doc_symbol_offenders(root=tmp_path, documents=["CONTRIBUTING.md"], symbols=symbols) == []
+
+
+def test_a_dotted_citation_naming_a_real_nested_module_passes(tmp_path):
+    """crawlutron.<pkg>.<module> cites a module file, not a symbol in one.
+
+    RED against the join bug: parts[1:-1] built <pkg>.py, refusing the true
+    module crawlutron/config/settings.py (found by the #677 reviewer's skill
+    prose). The last dotted part may BE the module."""
+    (tmp_path / "probe.md").write_text(
+        "Build it via ``crawlutron/config/settings.CrawlerSettings``; module: "
+        "``crawlutron/config/settings``.\n",
+        encoding="utf-8",
+    )
+    assert _doc_symbol_offenders(root=tmp_path, documents=["probe.md"]) == []

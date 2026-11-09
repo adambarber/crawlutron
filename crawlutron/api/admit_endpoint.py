@@ -21,13 +21,26 @@ logger = logging.getLogger(__name__)
 _CHECK_KEYS = ("url", "host_policy", "egress", "robots")
 
 #: The constructor's structural refusals, which name the url check itself.
-_URL_CHECK_REASONS = frozenset({"invalid_url", "unsupported_scheme"})
+_URL_CHECK_REASONS = frozenset(
+    {
+        "invalid_url",
+        "unsupported_scheme",
+        "userinfo_refused",
+        "ipvfuture_refused",
+        "invalid_port",
+        "invalid_idn_host",
+    }
+)
 
 #: The reason vocabulary, as a table: an unknown reason is a KeyError, not a
 #: silently widened value -- the breakdown cannot name anything un-declared.
 _REASON_TABLE: dict[str, AdmitReason] = {
     "invalid_url": "invalid_url",
     "unsupported_scheme": "unsupported_scheme",
+    "userinfo_refused": "userinfo_refused",
+    "ipvfuture_refused": "ipvfuture_refused",
+    "invalid_port": "invalid_port",
+    "invalid_idn_host": "invalid_idn_host",
     "host_denied": "host_denied",
     "host_not_allowed": "host_not_allowed",
     "private_network_target": "private_network_target",
@@ -37,6 +50,12 @@ _REASON_TABLE: dict[str, AdmitReason] = {
 
 def _reason(reason: str) -> AdmitReason:
     return _REASON_TABLE[reason]
+
+
+def known_reasons() -> frozenset[str]:
+    """The closed refusal vocabulary this endpoint reports -- the public door
+    the producer->table loop gate reads instead of the private table."""
+    return frozenset(_REASON_TABLE)
 
 
 def _blank_checks() -> AdmitChecks:
@@ -99,4 +118,4 @@ async def admit_url(payload: AdmitRequest, *, settings) -> AdmitResponse:
     return AdmitResponse(admitted=True, classification=None, canonical_url=normalized, checks=checks)
 
 
-__all__ = ["admit_url"]
+__all__ = ["admit_url", "known_reasons"]
