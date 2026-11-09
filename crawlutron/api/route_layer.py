@@ -125,16 +125,41 @@ LAYER_EXEMPT_RATCHET: tuple[ExemptRow, ...] = (
         "caller's identity and the key-verify throttle.",
     ),
 )
-EXEMPT_ROW_COUNT: int = 7
+PENDING_METERING_ROWS: tuple[ExemptRow, ...] = (
+    # #664 follow-up: each row below is served and externally reachable but NOT
+    # yet metered; removing a PENDING row requires landing its metering first.
+    ExemptRow(
+        "post",
+        "/mcp",
+        "PENDING-METERING: the MCP transport endpoint; the follow-up ticket owns "
+        "its caller-identity + metering scope decision.",
+    ),
+    ExemptRow(
+        "get",
+        "/docs",
+        "PENDING-METERING: FastAPI's Swagger UI, a static HTML read of the spec; "
+        "follow-up ticket decides meter vs. pin.",
+    ),
+    ExemptRow(
+        "get",
+        "/docs/oauth2-redirect",
+        "PENDING-METERING: FastAPI's OAuth redirect helper page; pure static HTML.",
+    ),
+    ExemptRow(
+        "get",
+        "/redoc",
+        "PENDING-METERING: FastAPI's ReDoc UI, a static HTML read of the spec.",
+    ),
+)
 
 
 __all__ = [
     "ADMIN_GUARD_NAME",
-    "EXEMPT_ROW_COUNT",
     "GUARD_NAME",
     "LAYER_EXEMPT_RATCHET",
     "LAYER_GUARDS",
     "OPERATOR_GUARD_NAME",
+    "PENDING_METERING_ROWS",
     "ExemptRow",
     "admin_guarded_router",
     "guard_admin_request",

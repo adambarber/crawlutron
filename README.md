@@ -234,7 +234,7 @@ $EDITOR crawlutron/storage/migrations/0001_crawl_jobs_initial.py
 | `GET`  | `/v1/agent-hints` | Machine-readable guidance for agents/bots (request shapes, caveats). |
 | `GET`  | `/.well-known/crawler-service` | Service discovery descriptor (links to OpenAPI, agent hints, capabilities). |
 | `POST`/`GET`/`DELETE` | `/v1/keys` | Caller API keys: issue, list, revoke (operator token required). Callers present the key as `X-API-Key`. |
-| `GET` | `/metrics` | Prometheus-format metrics. |
+| `GET` | `/metrics` | Prometheus-format metrics. Per-caller detail families require the operator token (`X-API-Key: CRAWLUTRON_KEY_ADMIN_TOKEN`); a presented but wrong token records an admin-bucket failure (paced 5/300s), so scrape-guessing griefs the operator doors' cooldown too. |
 | `GET` | `/v1/policy-suggestions` | Candidate host policy rules rolled up from blocked-attempt evidence (proposal only; never applied). |
 
 ---
