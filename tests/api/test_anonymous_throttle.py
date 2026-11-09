@@ -141,6 +141,19 @@ def process_state_reset() -> None:
     process_state.reset_all_process_state()
 
 
+async def _assert_next_unit_refuses(client: httpx.AsyncClient) -> None:
+    """The one-unit probe tail: the next request refuses with the envelope."""
+    refused = await client.get("/health")
+    assert refused.status_code == 429, "the rejection must have consumed one unit"
+    assert refused.json()["code"] == "anonymous_throttled"
+
+
+async def _fill_baseline(client: httpx.AsyncClient) -> None:
+    """Consume MAX-1 anonymous units so a probe burns exactly one more."""
+    for _ in range(MAX_REQUESTS_PER_WINDOW - 1):
+        await client.get("/health")
+
+
 async def test_404_route_miss_is_metered_and_carries_both_discovery_links():
     """The 404 oracle is metered: the second burst past the anonymous budget
     429s, and within budget the details carry BOTH discovery doors."""
@@ -229,15 +242,74 @@ async def test_healthcheck_hits_consume_the_same_ip_budget():
         assert (await client.get("/ready")).status_code == 429
 
 
-async def test_validation_422_on_a_matched_route_is_not_anonymously_metered():
-    """F4's boundary: a 422 from a MATCHED route (validation error on a real
-    endpoint) stays caller-metered, never anonymously metered -- the response
-    stage only meters when NO route matched."""
+async def test_validation_422_consumes_exactly_one_anonymous_unit():
+    """Single-count law: a 422 from a MATCHED route consumes ONE anonymous
+    unit at the request stage (no response-stage double count) -- from a
+    MAX-1 baseline, the next request refuses. Rejected requests are work."""
     process_state_reset()
     async with _app_client() as client:
-        for _ in range(MAX_REQUESTS_PER_WINDOW + 2):
+        for _ in range(MAX_REQUESTS_PER_WINDOW):
             resp = await client.post("/v1/crawl", json={})
             assert resp.status_code == 422, resp.status_code
+        refused = await client.post("/v1/crawl", json={})
+        assert refused.status_code == 429, "422 consumed MAX units; the next refuses"
+
+
+async def test_405_on_a_caller_metered_route_is_anonymously_metered():
+    """HIGH-1 (old pin: response-stage gated on scope['route'] ABSENCE -- but
+    FastAPI sets scope['route'] to the PARTIALLY-matched route on a method
+    mismatch, so OPTIONS /v1/crawl burst was a free method-enumeration oracle).
+    The law: every request consumes one anonymous unit at the REQUEST stage,
+    so a 405 -- caller's key or not -- burns the anonymous IP bucket; an
+    unmatched method is not caller work. Red-first: failed at MAX+1 (no 429)
+    before the fix."""
+    process_state_reset()
+    async with _app_client() as client:
+        for _ in range(MAX_REQUESTS_PER_WINDOW):
+            resp = await client.options("/v1/crawl")
+            assert resp.status_code == 405, resp.status_code
+        refused = await client.options("/v1/crawl")
+        assert refused.status_code == 429, "405 enumeration oracle must meter"
+        assert refused.json()["code"] == "anonymous_throttled"
+
+
+async def test_oversized_body_413_consumes_exactly_one_anonymous_unit():
+    """HIGH-2: middleware ordering made the throttle INNERMOST, so the 413/403
+    short-circuited before it saw the request -- the docstring claimed rejected
+    requests consume budget and the code disagreed. Fix: the throttle is now
+    OUTERMOST (last registered). One 413 burns exactly one unit."""
+    process_state_reset()
+    async with _app_client() as client:
+        await _fill_baseline(client)
+        oversized = await client.post(
+            "/v1/crawl", content=b"x" * 17 * 1024 * 1024, headers={"content-type": "application/json"}
+        )
+        assert oversized.status_code == 413, oversized.status_code
+        await _assert_next_unit_refuses(client)
+
+
+async def test_origin_rejected_403_consumes_exactly_one_anonymous_unit():
+    """HIGH-2, origin arm: a hostile-Origin request is rejected 403 and still
+    burns exactly one anonymous unit from the MAX-1 baseline."""
+    process_state_reset()
+    async with _app_client() as client:
+        await _fill_baseline(client)
+        rejected = await client.get("/v1/capabilities", headers={"origin": "http://evil.example"})
+        assert rejected.status_code == 403, rejected.status_code
+        await _assert_next_unit_refuses(client)
+
+
+async def test_presented_credential_mcp_still_skips_after_reorder():
+    """HIGH-2 regression walk: after the throttle moved OUTERMOST, /mcp with a
+    presented credential still skips the anonymous bucket entirely (the #664
+    layer meters it); MAX+5 credential requests never refuse."""
+    process_state_reset()
+    async with _app_client() as client:
+        for _ in range(MAX_REQUESTS_PER_WINDOW + 5):
+            resp = await client.post(
+                "/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "ping"}, headers={"x-api-key": "some-key"}
+            )
+            assert resp.status_code != 429, resp.status_code
 
 
 @pytest.mark.parametrize(

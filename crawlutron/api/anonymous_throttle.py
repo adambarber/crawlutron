@@ -111,37 +111,26 @@ METERED_EXACT = ("/mcp",)
 async def throttle_anonymous_surfaces(request, call_next):
     """HTTP middleware meter over every surface with no caller to key on.
 
+    Registered OUTERMOST (last) and counting at the REQUEST stage: every
+    request consumes exactly ONE anonymous unit, including 413 body-size and
+    403 origin rejections -- REJECTED requests are still work (the pinning
+    probes prove one unit each from a MAX-1 baseline). One stage means one
+    count per request: no double-metering anywhere.
+
     Presented-credential /mcp traffic is skipped: it resolves a caller identity
-    inline and meters through the caller's own quota (the #664 layer); the
-    anonymous bucket is for traffic with no caller to key on. A response whose
-    scope carries no matched route -- a 404 route-miss, a 405 method-mismatch
-    oracle, or any other status -- meters on the response stage like every
-    other unguarded surface. Body-size-rejected (413) and origin-rejected (403)
-    requests consume anonymous budget too: REJECTED requests are still work.
+    inline and meters through the caller's own quota (the #664 layer). Caller
+    semantics for everything else: the caller plane has no request-count quota
+    (page/concurrency only), so requests to caller-guarded routes consume the
+    anonymous IP bucket too -- one request, one unit, whatever the response.
     """
     path = request.url.path
     if path in METERED_EXACT and _presents_credential(request):
         return await call_next(request)
-    if path in METERED_EXACT or path.startswith(METERED_PREFIXES) or _in_anonymous_ratchet(path):
-        try:
-            shared_anonymous_throttle().check(_remote(request))
-        except Throttled as throttled:
-            return _refuse(path, throttled)
-    response = await call_next(request)
-    if "route" not in request.scope:
-        try:
-            shared_anonymous_throttle().check(_remote(request))
-        except Throttled as throttled:
-            return _refuse(path, throttled)
-    return response
-
-
-def _in_anonymous_ratchet(path: str) -> bool:
-    """Whether path is declared in ANONYMOUS_METERED (method-agnostic on
-    purpose: the ratchet row carries the method; this gate only widens)."""
-    from crawlutron.api.route_layer import ANONYMOUS_METERED
-
-    return any(row.path == path for row in ANONYMOUS_METERED)
+    try:
+        shared_anonymous_throttle().check(_remote(request))
+    except Throttled as throttled:
+        return _refuse(path, throttled)
+    return await call_next(request)
 
 
 def _presents_credential(request) -> bool:

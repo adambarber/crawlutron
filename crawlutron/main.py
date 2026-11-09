@@ -226,9 +226,12 @@ def _install_error_surface(app) -> None:
     from crawlutron.api.exceptions import http_exception_handler, validation_exception_handler
     from crawlutron.api.middleware import limit_request_body, reject_hostile_origin
 
-    app.middleware("http")(throttle_anonymous_surfaces)
     app.middleware("http")(reject_hostile_origin)
     app.middleware("http")(limit_request_body)
+    # LAST registered = OUTERMOST (#668 HIGH-2): the anonymous meter must see
+    # every request -- including 413/403-rejected ones -- or rejected requests
+    # escape the budget (rejected requests are still work).
+    app.middleware("http")(throttle_anonymous_surfaces)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
     # Framework-level 404/405 raise Starlette's base HTTPException (parent of
     # FastAPI's); register on the base + Exception for the last-resort 500.
