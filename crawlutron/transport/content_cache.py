@@ -423,10 +423,6 @@ class ContentCache:
 
 # Process-lifetime shared content cache (the engine's former module global): built lazily so
 # importing this module has no filesystem side effects; tests swap the binding.
-
-
-# Process-lifetime shared content cache (engine's former module global): lazily
-# built so importing this module has no filesystem side effects; tests swap it.
 _SHARED_CONTENT_CACHE: ContentCache | None = None
 
 

@@ -25,6 +25,8 @@ from crawlutron.runtime import process_state
 KNOWN = (
     "crawlutron.runtime.cgroup_sense",
     "crawlutron.orchestration.engine",
+    "crawlutron.transport.cache",
+    "crawlutron.transport.content_cache",
     "crawlutron.transport.fetch_helpers",
     "crawlutron.transport.browser_cookies",
     "crawlutron.transport.cookie_jar",

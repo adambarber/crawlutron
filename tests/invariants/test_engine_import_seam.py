@@ -1,10 +1,16 @@
-"""The engine holds no module-level shared-cache globals and no in-function
+"""The engine binds no transport cache instance at module level and no in-function
 transport imports (external architecture review, #684 family).
 
 The engine's shared caches are registry-owned transport singletons handed down
-through the pipeline; a module-level ``_SHARED_*`` binding (or a ``global``
-rebind of one) or a function-level ``from crawlutron.transport... import``
-reintroduces the seam the collapse removed, so each reds naming the line.
+through the pipeline; a module-level binding or ``global`` rebind of a cache
+instance (whatever the name -- the prefix check alone had a rename-shaped
+bypass) or a function-level ``crawlutron.transport`` import reintroduces the
+seam the collapse removed, so each reds naming the line.
+
+Residual blind shape: a cache instance obtained without a direct constructor
+call (``_C = factory()`` where factory lives elsewhere) is not seen by the
+binding detector; the global-rebind detector still catches any ``global`` on
+the name once it is module-bound by any means.
 """
 
 from __future__ import annotations
@@ -18,25 +24,53 @@ from tests.invariants.test_harness_doubles import node_names
 
 _ENGINE = REPO_ROOT / "crawlutron" / "orchestration" / "engine.py"
 
-#: Module-level bindings the engine must never own again (the cache seam).
-_FORBIDDEN_GLOBAL_PREFIX = "_SHARED_"
+#: The transport cache modules whose instances the engine must never own.
+_TRANSPORT_CACHE_MODULES = {
+    "crawlutron.transport.cache",
+    "crawlutron.transport.content_cache",
+}
 
 
-def _forbidden(name: str) -> bool:
-    return name.startswith(_FORBIDDEN_GLOBAL_PREFIX)
+def _imported_from_transport_cache(tree: ast.Module) -> set[str]:
+    """Local names bound to a transport cache type by a top-level from-import."""
+    bound: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and node.module in _TRANSPORT_CACHE_MODULES:
+            bound.update(alias.asname or alias.name for alias in node.names)
+    return bound
 
 
-def _module_level_cache_globals(tree: ast.Module) -> list[tuple[str, int]]:
-    return [(name, node.lineno) for node in tree.body for name in node_names(node) if _forbidden(name)]
+def _module_level_cache_bindings(tree: ast.Module) -> list[tuple[str, int]]:
+    """Module-level bindings whose RHS constructs or aliases a transport cache.
+
+    Direct ``HttpCache()``/``ContentCache()`` calls and aliases of an imported
+    cache class both bind an engine-owned cache instance, whatever the name."""
+    cache_names = _imported_from_transport_cache(tree)
+    hits: list[tuple[str, int]] = []
+    for node in tree.body:
+        for name in node_names(node):
+            value = node.value if isinstance(node, (ast.Assign, ast.AnnAssign)) else None
+            if value is None:
+                continue
+            constructs = any(
+                isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in cache_names
+                for n in ast.walk(value)
+            )
+            aliases = isinstance(value, ast.Name) and value.id in cache_names
+            if constructs or aliases:
+                hits.append((name, node.lineno))
+    return hits
 
 
-def _global_rebinds_in_functions(tree: ast.Module) -> list[tuple[str, int]]:
+def _global_rebinds_of_cache_bindings(tree: ast.Module) -> list[tuple[str, int]]:
+    """``global`` statements naming a module-bound cache instance (any name)."""
+    bound = {name for name, _ in _module_level_cache_bindings(tree)}
     return [
         (name, node.lineno)
         for node in ast.walk(tree)
         if isinstance(node, ast.Global)
         for name in node.names
-        if _forbidden(name)
+        if name in bound
     ]
 
 
@@ -60,7 +94,11 @@ def _function_level_transport_imports(tree: ast.Module) -> list[tuple[str, int]]
 
 @pytest.mark.parametrize(
     "detector",
-    [_module_level_cache_globals, _global_rebinds_in_functions, _function_level_transport_imports],
+    [
+        _module_level_cache_bindings,
+        _global_rebinds_of_cache_bindings,
+        _function_level_transport_imports,
+    ],
 )
 def test_engine_import_seam_is_collapsed(detector) -> None:
     offenders = detector(ast.parse(_ENGINE.read_text(encoding="utf-8")))
