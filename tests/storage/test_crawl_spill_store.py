@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import sqlite3
 
+import pytest
+
 from crawlutron.storage.result_store import CrawlResultStore, CrawlSpillStore, PayloadTooLargeError
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 from tests._result_builders import engine_result
@@ -138,6 +140,22 @@ def test_a_live_crawls_rows_survive_a_sweep(tmp_path):
         store.gc_stale_spills(3600.0)
         out = store.load_ordered("r1", policy=UNRESTRICTED_HOST_POLICY)
         assert [r.original_url for r in out] == ["https://spill.test/0"]
+    finally:
+        store.close()
+
+
+def test_an_undecodable_row_raises_strict_not_serves_n_minus_one(tmp_path):
+    """The pinned degradation ruling: a corrupt payload row is a defect or
+    tampering -- the reassembly raises, it never silently serves N-1 of N."""
+    store = make_spill_store(tmp_path)
+    try:
+        store.put("r1", 0, engine_result("https://spill.test/0", "rendered"))
+        store.put("r1", 1, engine_result("https://spill.test/1", "rendered"))
+        with sqlite3.connect(tmp_path / "spills.db") as conn:
+            conn.execute("UPDATE crawl_spills SET payload = ? WHERE sequence = 1", ("not json",))
+            conn.commit()
+        with pytest.raises(json.JSONDecodeError):
+            store.load_ordered("r1", policy=UNRESTRICTED_HOST_POLICY)
     finally:
         store.close()
 

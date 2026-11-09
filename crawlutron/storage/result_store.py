@@ -243,9 +243,17 @@ class CrawlSpillStore(_PayloadStoreGuardrails):
             self._conn.commit()
 
     def load_ordered(self, request_id: str, *, policy: HostPolicy) -> list[EngineCrawlResult]:
-        """Reassemble one crawl's spilled results in submission order; a row is
-        atomic in SQLite, so the corrupt-record skip the file spill needed has no
-        successor here.
+        """Reassemble one crawl's spilled results in submission order.
+
+        Degradation ruling (supersedes the deleted file spill's corrupt-line
+        skip, #C8): two corruption classes existed there. A crash-TORN NDJSON
+        line was the class the skip served -- row atomicity kills it here, so
+        the skip has no successor. A corrupt PAYLOAD row makes this reassembly
+        raise rather than silently serve N-1 of N results: this table is
+        store-owned with a single writer (the engine's ``put``), so an
+        undecodable row means a defect or manual tampering, both of which must
+        surface, not mask. The strict behavior is pinned in
+        tests/storage/test_crawl_spill_store.py.
         """
         with self._lock:
             rows = self._conn.execute(
