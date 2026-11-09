@@ -237,13 +237,9 @@ def test_the_tests_typing_budget_reaches_tests() -> None:
     _assert_undeclared_record_fires()
 
 
-#: crawlutron/ production sealed at zero (#701): the nine bare-Any offenders
-#: named at file:line by this reach proof; commits 2 and 3 type them down to [].
-_CRAWLUTRON_OFFENDERS = [
-    "crawlutron/api/route_layer.py:68",
-    "crawlutron/api/route_layer.py:73",
-    "crawlutron/mcp/handlers.py:412",
-]
+#: crawlutron/ production sealed at zero (#701): commits 2 and 3 typed the nine
+#: bare-Any offenders down to this unconditional [].
+_CRAWLUTRON_OFFENDERS: list[str] = []
 
 
 def test_the_crawlutron_typing_budget_reaches_crawlutron() -> None:

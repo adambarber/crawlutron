@@ -17,7 +17,7 @@ import logging
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum, auto
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, NotRequired, Protocol, TypedDict, Unpack, cast
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ValidationError
@@ -156,31 +156,50 @@ class DoorEnv(Protocol):
     """The door environment every kind's body receives: seven typed slots."""
 
     @property
-    def settings(self) -> CrawlerSettings: ...
+    def settings(self) -> CrawlerSettings | None: ...
     @property
-    def shutdown_event(self) -> asyncio.Event: ...
+    def shutdown_event(self) -> asyncio.Event | None: ...
     @property
     def caller(self) -> CallerIdentity | None: ...
     @property
-    def job_store(self) -> JobStore: ...
+    def job_store(self) -> JobStore | None: ...
     @property
-    def watch_store(self) -> WatchStore: ...
+    def watch_store(self) -> WatchStore | None: ...
     @property
-    def result_store(self) -> CrawlResultStore: ...
+    def result_store(self) -> CrawlResultStore | None: ...
     @property
-    def concurrency_tracker(self) -> CallerConcurrencyTracker: ...
+    def concurrency_tracker(self) -> CallerConcurrencyTracker | None: ...
+
+
+class _DoorKwargs(TypedDict, total=False):
+    """The keyword set dispatch consumes to build one door: the seven DoorEnv slots.
+
+    Each defaults to None at runtime; doors built with a subset of keys still
+    construct; bodies guard None where a callee requires a value.
+    """
+
+    settings: NotRequired[CrawlerSettings | None]
+    shutdown_event: NotRequired[asyncio.Event | None]
+    job_store: NotRequired[JobStore | None]
+    watch_store: NotRequired[WatchStore | None]
+    result_store: NotRequired[CrawlResultStore | None]
+    concurrency_tracker: NotRequired[CallerConcurrencyTracker | None]
+    caller: NotRequired[CallerIdentity | None]
 
 
 @dataclass(frozen=True)
 class _ToolDoor:
-    """The per-call door environment dispatch threads to every kind's body."""
+    """The per-call door environment dispatch threads to every kind's body.
 
-    settings: CrawlerSettings
-    shutdown_event: asyncio.Event
-    job_store: JobStore
-    watch_store: WatchStore
-    result_store: CrawlResultStore
-    concurrency_tracker: CallerConcurrencyTracker
+    Same slots as before #701; every slot defaults to None.
+    """
+
+    settings: CrawlerSettings | None = None
+    shutdown_event: asyncio.Event | None = None
+    job_store: JobStore | None = None
+    watch_store: WatchStore | None = None
+    result_store: CrawlResultStore | None = None
+    concurrency_tracker: CallerConcurrencyTracker | None = None
     caller: CallerIdentity | None = None
 
 
@@ -335,6 +354,9 @@ async def _render_door(payload: BaseModel, door: DoorEnv) -> ToolResult:
             text="Browser pool is not initialized; the service is starting up or shutting down.",
             is_error=True,
         )
+    settings = door.settings
+    if settings is None:
+        raise ValueError("render requires initialized settings")
     requested = len(render_payload.urls) if render_payload.urls is not None else 1
     # The namespace binds around the whole admit, so the gate and the work
     # both run under it; an MCP render's harvest keys by the caller's key id.
@@ -343,7 +365,7 @@ async def _render_door(payload: BaseModel, door: DoorEnv) -> ToolResult:
             door.caller,
             requested,
             tracking=_tracking(door),
-            work=lambda: tool_result(render_endpoint_handler(render_payload, settings=door.settings)),
+            work=lambda: tool_result(render_endpoint_handler(render_payload, settings=settings)),
         )
 
 
@@ -409,7 +431,7 @@ async def _suggestions_door(payload: BaseModel, door: DoorEnv, door_data: DoorBi
     return await tool_result(run())
 
 
-async def dispatch(spec, payload: BaseModel, **door: Any) -> ToolResult:
+async def dispatch(spec, payload: BaseModel, **door: Unpack[_DoorKwargs]) -> ToolResult:
     """The one tool-door dispatch: the declared refusal first, then the kind's body."""
     door_data = spec.door
     if door_data.refusal is not None and any(
@@ -450,11 +472,14 @@ async def _create_job_tool(payload: BaseModel, door: DoorEnv) -> ToolResult:
         raise ValueError("create_job requires an initialized job store")
     if door.concurrency_tracker is None:
         raise ValueError("create_job requires the caller's concurrency tracker")
+    settings = door.settings
+    if settings is None:
+        raise ValueError("create_job requires initialized settings")
     return await tool_result(
         create_job_core(
             cast("JobCreateRequest", payload),
             door.job_store,
-            door.settings,
+            settings,
             door.shutdown_event,
             caller_for(door.caller),
             concurrency_tracker=door.concurrency_tracker,
