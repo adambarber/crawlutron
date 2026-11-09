@@ -112,11 +112,6 @@ LAYER_EXEMPT_RATCHET: tuple[ExemptRow, ...] = (
         "Static agent guidance payload; pure, no store, no egress.",
     ),
     ExemptRow(
-        "get",
-        "/openapi.json",
-        "The API contract itself; tools generate clients from it before holding a key.",
-    ),
-    ExemptRow(
         "post",
         "/v1/admit:check_robots=false",
         "The PURE base admission check is I/O-free by construction (no fetch, no "
@@ -152,6 +147,39 @@ ANONYMOUS_METERED: tuple[ExemptRow, ...] = (
         "get",
         "/redoc",
         "FastAPI's ReDoc UI: a static HTML read, metered per remote IP.",
+    ),
+    ExemptRow(
+        "get",
+        "/health",
+        "Liveness, metered per remote IP on the same 120/60s anonymous budget: "
+        "the Docker healthcheck curls localhost every 30s (2 hits/window, 1.7% "
+        "of budget -- no collision, no budget-class row needed).",
+    ),
+    ExemptRow(
+        "get",
+        "/ready",
+        "Readiness, metered per remote IP on the same 120/60s anonymous budget "
+        "as every other anonymous surface.",
+    ),
+    ExemptRow(
+        "get",
+        "/.well-known/crawler-service",
+        "The machine discovery door; agents negotiate here before holding a key.",
+    ),
+    ExemptRow(
+        "get",
+        "/v1/capabilities",
+        "Capability advertisement; a settings read, metered per remote IP.",
+    ),
+    ExemptRow(
+        "get",
+        "/v1/agent-hints",
+        "Static agent guidance payload; metered per remote IP.",
+    ),
+    ExemptRow(
+        "get",
+        "/openapi.json",
+        "The API contract; client generation reads, metered per remote IP.",
     ),
 )
 

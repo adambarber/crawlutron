@@ -7,6 +7,7 @@ accepts the same-commit justification.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from pathlib import Path
 
 from fastapi.routing import APIRoute
 
@@ -31,8 +32,14 @@ def _guarded_keys() -> set[tuple[str, str]]:
     return keys
 
 
-def _served_routes() -> set[tuple[str, str]]:
-    """Every (method, path) the real app serves, factory routers included."""
+def _served_routes(*, include_foreign: bool = False) -> set[tuple[str, str]]:
+    """Every (method, path) the real app serves, factory routers included.
+
+    ``include_foreign`` keeps framework-owned routes (FastAPI's docs closures
+    live in site-packages) for EXISTENCE checks -- a declared metered surface
+    must exist as a route even when its code is not ours. The package filter
+    stays on for ownership tests (the converse, offender naming).
+    """
     keys: set[tuple[str, str]] = set()
 
     def collect(route: object) -> None:
@@ -41,17 +48,24 @@ def _served_routes() -> set[tuple[str, str]]:
         if path and methods:
             keys.update((method.lower(), path) for method in methods)
 
-    _walk_served(collect)
+    _walk_served(collect, include_foreign=include_foreign)
     return keys
 
 
-def _walk_served(visit: Callable[[object], None]) -> None:
+def _walk_served(visit: Callable[[object], None], *, include_foreign: bool = False) -> None:
     """Depth-first over the real app's production routes.
 
     Test-added routes (a door probe mounting /boom on the shared app) are
     pollution, not service surface: only endpoints whose code object lives
-    under ``crawlutron/`` count -- a mutant planted there is still caught.
+    inside the crawlutron PACKAGE count -- a mutant planted there is still
+    caught. The boundary is a Path comparison against the package root, not a
+    checkout-path substring: a checkout not named crawlutron still greens
+    honestly (review F3 artifact, mutation-proven). ``include_foreign`` adds
+    framework-owned routes for existence checks only.
     """
+    import crawlutron
+
+    package_root = Path(crawlutron.__file__).resolve().parent
     from tests._app_factory import service_app
 
     app = service_app()
@@ -65,7 +79,10 @@ def _walk_served(visit: Callable[[object], None]) -> None:
                 continue
             endpoint = getattr(route, "endpoint", None)
             code = getattr(endpoint, "__code__", None)
-            if code is not None and "crawlutron/" in code.co_filename:
+            if code is None:
+                continue
+            ours = package_root in Path(code.co_filename).resolve().parents
+            if ours or include_foreign:
                 visit(route)
 
     walk(app.router.routes)
@@ -82,8 +99,8 @@ def test_exempt_rows_match_real_routes():
 
 def test_exempt_ratchet_never_increases():
     """The pinned literal only moves down, in the commit that earns it."""
-    assert len(LAYER_EXEMPT_RATCHET) == 7, (
-        "LAYER_EXEMPT_RATCHET is pinned at 7; adding a row demands the owner "
+    assert len(LAYER_EXEMPT_RATCHET) == 6, (
+        "LAYER_EXEMPT_RATCHET is pinned at 6; adding a row demands the owner "
         "accept the row's justification in the same commit and lower/raise this "
         "literal deliberately -- an uncommented bump is the evasion this test exists for"
     )
@@ -118,16 +135,20 @@ def test_every_served_route_is_guarded_or_exempt():
 
 def test_anonymous_rows_match_real_routes():
     """A stale anonymous-metered row (renamed or deleted route) fails the gate."""
-    routes = _served_routes()
+    routes = _served_routes(include_foreign=True)
     for row in ANONYMOUS_METERED:
         key = (row.method, row.path)
         assert key in routes, f"anonymous-metered row {key} no longer matches a served route"
 
 
 def test_anonymous_ratchet_never_increases():
-    """The pinned literal only moves down, in the commit that earns it."""
-    assert len(ANONYMOUS_METERED) == 4, (
-        "ANONYMOUS_METERED is pinned at 4; adding a row demands the metering "
+    """The pinned literal moves only in the commit that earns it (#668 fix-up:
+    4 -> 10 is the review's completeness LANDING of the enumerated exempt GETs
+    (six: health, ready, well-known, capabilities, agent-hints, openapi.json --
+    the directive's "five" count was off by one against its own list) -- a
+    scope-completion move, authorized in the commit body, not a budget raise)."""
+    assert len(ANONYMOUS_METERED) == 10, (
+        "ANONYMOUS_METERED is pinned at 10; adding a row demands the metering "
         "landed in the same commit and this literal lowered/raised deliberately"
     )
 

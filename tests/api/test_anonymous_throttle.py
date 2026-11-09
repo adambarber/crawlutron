@@ -1,5 +1,6 @@
 """Anonymous IP-bucket metering (#668): the rate-limit law over the unguarded
-surfaces -- the docs GETs, /mcp anonymous traffic, and the 404 route-miss."""
+surfaces -- every exempt GET, the docs GETs, /mcp anonymous traffic, the
+route-miss oracle, and any response with no matched route."""
 
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ from crawlutron.api.anonymous_throttle import (
     BUCKET_CAPACITY,
     MAX_REQUESTS_PER_WINDOW,
     AnonymousThrottle,
+    Throttled,
     shared_anonymous_throttle,
 )
 
@@ -26,8 +28,7 @@ def _burst(throttle: AnonymousThrottle, remote: str | None, count: int) -> int:
     for _ in range(count):
         try:
             throttle.check(remote)
-        except Exception as exc:
-            assert getattr(exc, "status_code", None) == 429, exc
+        except Throttled:
             refused += 1
     return refused
 
@@ -75,9 +76,9 @@ def test_lru_eviction_is_bounded_and_never_resets_an_active_ip():
     assert _burst(throttle, "10.0.0.1", MAX_REQUESTS_PER_WINDOW) == 0
     for i in range(BUCKET_CAPACITY):
         throttle.check(f"10.1.{i // 256}.{i % 256}")
-        with pytest.raises(Exception) as raised:
+        with pytest.raises(Throttled) as raised:
             throttle.check("10.0.0.1")
-        assert getattr(raised.value, "status_code", None) == 429
+        assert raised.value.refusal_status == 429
     assert throttle.residence() <= BUCKET_CAPACITY
 
 
@@ -169,13 +170,74 @@ async def test_conforming_404s_keep_their_exact_shape():
         assert resp.json()["details"] == {}
 
 
-async def test_405_is_not_anonymously_metered_shape_change():
-    """A 405 on a known route keeps its exact existing envelope shape."""
+async def test_405_route_miss_is_metered_and_shape_unchanged_within_budget():
+    """F4 widened law (old pin: 405 shape only, metering unpinned -- the
+    enumeration-oracle gap the review named): a 405 on a known route keeps
+    its exact envelope shape within budget AND meters -- over budget the
+    refusal is JSON-RPC RATE_LIMITED-shaped... envelope here (REST surface)."""
     process_state_reset()
     async with _app_client() as client:
         resp = await client.post("/health")
         assert resp.status_code == 405
         assert resp.json()["details"] == {"status_code": 405}
+        for _ in range(MAX_REQUESTS_PER_WINDOW):
+            await client.post("/health")
+        refused = await client.post("/health")
+        assert refused.status_code == 429
+        assert refused.json()["code"] == "anonymous_throttled"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/health",
+        "/ready",
+        "/.well-known/crawler-service",
+        "/v1/capabilities",
+        "/v1/agent-hints",
+        "/openapi.json",
+    ],
+)
+async def test_every_exempt_get_is_metered(path):
+    """F1: the five exempt GETs have no free surfaces -- over budget each
+    refuses with the envelope, within budget each answers normally."""
+    process_state_reset()
+    async with _app_client() as client:
+        first = await client.get(path)
+        assert first.status_code == 200, path
+        for _ in range(MAX_REQUESTS_PER_WINDOW):
+            await client.get(path)
+        refused = await client.get(path)
+        assert refused.status_code == 429, path
+        assert refused.json()["code"] == "anonymous_throttled", path
+
+
+async def test_healthcheck_hits_consume_the_same_ip_budget():
+    """Owner ruling option (a): /health and /ready meter on the SAME per-IP
+    anonymous budget as everything else (measured cadence: Docker HEALTHCHECK
+    interval=30s = 2 hits/window = 1.7% of 120 -- no collision, so no
+    budget-class ratchet row). A healthcheck from a busy host IP shares that
+    host's budget: the law, never a shadow exemption."""
+    process_state_reset()
+    async with _app_client() as client:
+        for _ in range(MAX_REQUESTS_PER_WINDOW):
+            assert (await client.get("/health")).status_code == 200
+        refused = await client.get("/health")
+        assert refused.status_code == 429
+        assert refused.json()["code"] == "anonymous_throttled"
+        # The refusal is total: /ready on the same bucket refuses too.
+        assert (await client.get("/ready")).status_code == 429
+
+
+async def test_validation_422_on_a_matched_route_is_not_anonymously_metered():
+    """F4's boundary: a 422 from a MATCHED route (validation error on a real
+    endpoint) stays caller-metered, never anonymously metered -- the response
+    stage only meters when NO route matched."""
+    process_state_reset()
+    async with _app_client() as client:
+        for _ in range(MAX_REQUESTS_PER_WINDOW + 2):
+            resp = await client.post("/v1/crawl", json={})
+            assert resp.status_code == 422, resp.status_code
 
 
 @pytest.mark.parametrize(

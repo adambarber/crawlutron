@@ -1,8 +1,9 @@
 """Anonymous IP-bucket metering (#668): the surfaces outside the auth layer.
 
-The rate-limit law: every externally reachable surface is metered. The five
-exempt GETs, POST /mcp anonymous traffic, and the 404 route-miss have no
-caller credential to key a bucket on, so they meter per remote IP here.
+The rate-limit law: every externally reachable surface is metered. The exempt
+GETs (discovery, docs, health), POST /mcp anonymous traffic, and the route-miss
+oracle have no caller credential to key a bucket on, so they meter per remote
+IP here.
 
 #659/#663 inheritance: buckets are LRU-bounded, the clock is monotonic, and
 the meter is registered process state (#621).
@@ -16,7 +17,7 @@ from fastapi.responses import JSONResponse
 
 from crawlutron.api.meter_ledger import MeterLedger, register_shared_meter
 
-__all__ = ["AnonymousThrottle", "shared_anonymous_throttle"]
+__all__ = ["AnonymousThrottle", "Throttled", "shared_anonymous_throttle"]
 
 #: The anonymous budget: these surfaces cost route matching plus envelope
 #: construction (and, on /mcp, the pure tools/list arm) -- no fetch, no egress.
@@ -31,12 +32,22 @@ WINDOW_SECONDS = 60.0
 BUCKET_CAPACITY = 1024
 NO_CLIENT_BUCKET = "unknown"
 
+#: The accepted 2x boundary burst: a bucket that hit exactly MAX within the
+#: window admits one more request (count > MAX refuses), so a client racing
+#: the boundary sees at most 2*MAX-1 successes before steady 429s.
 
-def _throttled() -> Exception:
-    """The caller-visible metering refusal: a 429-shaped HTTPException."""
-    from crawlutron.api.exceptions import http_error
 
-    return http_error(429, "anonymous_throttled", "Too many requests; retry later")
+class Throttled(Exception):
+    """The meter's own typed refusal: no getattr dance at the refuse site.
+
+    Field names avoid ``status`` (the job-store plane's reserved word).
+    """
+
+    def __init__(self, refusal_status: int, refusal_code: str, refusal_message: str) -> None:
+        super().__init__(refusal_message)
+        self.refusal_status = refusal_status
+        self.refusal_code = refusal_code
+        self.refusal_message = refusal_message
 
 
 class _Bucket:
@@ -71,7 +82,7 @@ class AnonymousThrottle(MeterLedger):
                 self._buckets[key] = bucket
             bucket.count += 1
             if bucket.count > MAX_REQUESTS_PER_WINDOW:
-                raise _throttled()
+                raise Throttled(429, "anonymous_throttled", "Too many requests; retry later")
 
     def _evict_or_mint(self, now: float) -> _Bucket:
         """Mint a bucket, evicting the least-recently-used one at capacity."""
@@ -91,36 +102,46 @@ def shared_anonymous_throttle() -> AnonymousThrottle:
 register_shared_meter(__name__, _SHARED)
 
 #: The paths this meter gates: MCP anonymous traffic and FastAPI's static docs
-#: pages. The 404 route-miss meters inside http_exception_handler (it has no
-#: route object and must carry the discovery links there).
+#: pages. The exempt GETs (health, ready, discovery, capabilities, agent-hints,
+#: openapi.json) meter through ANONYMOUS_METERED's route-driven gate below.
 METERED_PREFIXES = ("/docs", "/redoc")
 METERED_EXACT = ("/mcp",)
 
 
 async def throttle_anonymous_surfaces(request, call_next):
-    """HTTP middleware meter over the unauthenticated docs surfaces and /mcp.
+    """HTTP middleware meter over every surface with no caller to key on.
 
     Presented-credential /mcp traffic is skipped: it resolves a caller identity
     inline and meters through the caller's own quota (the #664 layer); the
-    anonymous bucket is for traffic with no caller to key on. A 404 whose
-    response carries no matched route is a ROUTE MISS -- the 404 oracle -- and
-    meters on the response stage like every other unguarded surface.
+    anonymous bucket is for traffic with no caller to key on. A response whose
+    scope carries no matched route -- a 404 route-miss, a 405 method-mismatch
+    oracle, or any other status -- meters on the response stage like every
+    other unguarded surface. Body-size-rejected (413) and origin-rejected (403)
+    requests consume anonymous budget too: REJECTED requests are still work.
     """
     path = request.url.path
     if path in METERED_EXACT and _presents_credential(request):
         return await call_next(request)
-    if path in METERED_EXACT or path.startswith(METERED_PREFIXES):
+    if path in METERED_EXACT or path.startswith(METERED_PREFIXES) or _in_anonymous_ratchet(path):
         try:
             shared_anonymous_throttle().check(_remote(request))
-        except Exception as throttled:
+        except Throttled as throttled:
             return _refuse(path, throttled)
     response = await call_next(request)
-    if response.status_code == 404 and "route" not in request.scope:
+    if "route" not in request.scope:
         try:
             shared_anonymous_throttle().check(_remote(request))
-        except Exception as throttled:
+        except Throttled as throttled:
             return _refuse(path, throttled)
     return response
+
+
+def _in_anonymous_ratchet(path: str) -> bool:
+    """Whether path is declared in ANONYMOUS_METERED (method-agnostic on
+    purpose: the ratchet row carries the method; this gate only widens)."""
+    from crawlutron.api.route_layer import ANONYMOUS_METERED
+
+    return any(row.path == path for row in ANONYMOUS_METERED)
 
 
 def _presents_credential(request) -> bool:
@@ -138,16 +159,14 @@ def _remote(request) -> str | None:
     return client.host if client else None
 
 
-def _refuse(path: str, throttled: Exception) -> JSONResponse:
+def _refuse(path: str, throttled: Throttled) -> JSONResponse:
     """The refusal in the surface's shape: JSON-RPC on /mcp, envelope elsewhere."""
-    from crawlutron.api.exceptions import error_envelope_from_detail
+    from crawlutron.api.exceptions import error_envelope
     from crawlutron.mcp.constants import RATE_LIMITED
     from crawlutron.mcp.protocol import error_response
 
-    detail = getattr(throttled, "detail", None)
-    status = getattr(throttled, "status_code", 429)
     if path in METERED_EXACT:
-        content: object = error_response(None, RATE_LIMITED, "Too many requests; retry later")
+        content: object = error_response(None, RATE_LIMITED, throttled.refusal_message)
     else:
-        content = error_envelope_from_detail(detail, status)
-    return JSONResponse(status_code=status, content=content)
+        content = error_envelope(throttled.refusal_code, throttled.refusal_message)
+    return JSONResponse(status_code=throttled.refusal_status, content=content)

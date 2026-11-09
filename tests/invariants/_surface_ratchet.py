@@ -135,7 +135,7 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/api/route_layer.py": (12, 5),
     # #668: the anonymous IP-bucket meter over the docs surfaces, /mcp
     # anonymous traffic, and the 404 route-miss (metered on the response stage).
-    "crawlutron/api/anonymous_throttle.py": (9, 3),
+    "crawlutron/api/anonymous_throttle.py": (10, 4),
     # #668: the shared process-meter skeleton the two throttles compose (the
     # jscpd logic gate's extraction, replacing two hand-copied ledger triples).
     "crawlutron/api/meter_ledger.py": (2, 2),
