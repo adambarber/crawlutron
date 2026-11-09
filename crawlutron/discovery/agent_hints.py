@@ -27,6 +27,53 @@ STRATEGY_DESCRIPTIONS = {
     ),
 }
 
+
+def _mcp_tool_guidance() -> str:
+    """The MCP guidance entry, with the tool list DERIVED from TOOL_SPECS."""
+    from crawlutron.mcp.registry import TOOL_SPECS
+
+    names = ", ".join(spec.name for spec in TOOL_SPECS)
+    return (
+        "Use POST /mcp for MCP (2026-07-28, stateless streamable HTTP): server/discover lists "
+        "supported protocol versions and capabilities, and tools/list exposes every "
+        f"registered tool: {names}. "
+        "crawl_and_extract is the crawl response projected to per-page content; "
+        "read_crawl_result reads back a stored crawl response (status: running while the "
+        "crawl is still running -- poll it), and read_crawl_trace its diagnostic spine. "
+        "The MCP tools mirror the REST endpoints exactly."
+    )
+
+
+def _family_guidance(intro: str, names: tuple[str, ...], door: str) -> str:
+    """One derived sentence naming a tool family and its REST door."""
+    enumerated = ", ".join(names)
+    return f"{intro}: {enumerated} -- the same caller-scoped doors the {door} REST routes serve."
+
+
+def _job_guidance() -> str:
+    """Job-tool guidance derived from TOOL_SPECS."""
+    from crawlutron.mcp.registry import TOOL_SPECS
+
+    return _family_guidance(
+        "Whole-site crawl jobs are managed over MCP too (create_job starts one, same admission and "
+        "caller scoping as POST /v1/jobs)",
+        tuple(spec.name for spec in TOOL_SPECS if spec.name.endswith(("_job", "_jobs"))),
+        "/v1/jobs",
+    )
+
+
+def _watch_guidance() -> str:
+    """Watch-tool guidance derived from TOOL_SPECS; webhook delivery is REST-only."""
+    from crawlutron.mcp.registry import TOOL_SPECS
+
+    return _family_guidance(
+        "URL watches are managed over MCP too (register_watch starts a poll-only revalidation watch, "
+        "same registration as POST /v1/watches, webhook delivery is REST-only)",
+        tuple(spec.name for spec in TOOL_SPECS if spec.name.endswith(("_watch", "_watches"))),
+        "/v1/watches",
+    )
+
+
 GUIDANCE = [
     "Use GET /health for lightweight process liveness and Docker healthchecks.",
     "Use GET /ready for crawl capacity/readiness; HTTP 503 means saturated backpressure, not necessarily "
@@ -67,22 +114,9 @@ GUIDANCE = [
     "Callers authenticate with an API key: present X-API-Key (or Authorization: Bearer); jobs and results "
     "created under a key are readable only under it. Anonymous requests crawl as a shared bounded identity. "
     "Key issuance/revocation (POST /v1/keys) is operator-gated and not available to callers.",
-    "Whole-site crawl jobs are managed over MCP too: create_job starts one (same admission and "
-    "caller scoping as POST /v1/jobs), list_jobs pages your jobs, get_job reads one "
-    "job's live state, control_job pauses/resumes/cancels it, and delete_job removes it -- the same "
-    "caller-scoped doors the /v1/jobs REST routes serve.",
-    "URL watches are managed over MCP too: register_watch starts a poll-only revalidation "
-    "watch (same registration as POST /v1/watches, webhook delivery is REST-only), "
-    "list_watches lists your watches, get_watch reads one watch's revalidation state, and "
-    "delete_watch removes it -- the same caller-scoped doors the /v1/watches REST routes serve.",
-    "Use POST /mcp for MCP (2026-07-28, stateless streamable HTTP): server/discover lists supported protocol "
-    "versions and capabilities, and tools/list exposes search, crawl, crawl_and_extract, map, render, "
-    "read_crawl_result, read_crawl_trace, the job tools create_job, list_jobs, get_job, control_job, and "
-    "delete_job, and the watch tools register_watch, list_watches, get_watch, and delete_watch. "
-    "crawl_and_extract is the crawl response projected to per-page "
-    "content; read_crawl_result reads back a stored crawl response (status: running while the crawl is still "
-    "running -- poll it), and read_crawl_trace its diagnostic spine. The MCP tools mirror the REST endpoints "
-    "exactly.",
+    _job_guidance(),
+    _watch_guidance(),
+    _mcp_tool_guidance(),
     "Use discovered_link_count and discovered_links_truncated to decide whether to request a higher "
     "max_discovered_links limit.",
     "Do not bypass Cloudflare, WAF, CAPTCHA, login, paywall, or access-denied controls; report those "

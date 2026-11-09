@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from crawlutron.api.router_identity import router_module
 from crawlutron.api.router_registry import ROUTER_MODULES
 from tests._app_factory import service_app
 
@@ -33,15 +34,8 @@ _FRAMEWORK_ROUTE_MODULES = frozenset({"starlette.routing", "fastapi.routing"})
 
 
 def _router_module(router: object) -> str:
-    """A router's identity: the module its endpoints' code lives in."""
-    modules = {
-        route.endpoint.__module__
-        for route in getattr(router, "routes", ())
-        if getattr(route, "endpoint", None) is not None
-    }
-    if len(modules) == 1:
-        return next(iter(modules))
-    return type(router).__module__
+    """Test alias of the production router-identity resolver."""
+    return router_module(router)
 
 
 def _mounted_routers() -> list[tuple[str, int]]:

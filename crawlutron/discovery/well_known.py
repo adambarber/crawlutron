@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.discovery.links import OPENAPI_DOCS_LINK
+from crawlutron.discovery.recommended import recommended_endpoints
 from crawlutron.models.discovery_response import DiscoveryPayload, DiscoveryResponse
 from crawlutron.models.service_identity import SERVICE_IDENTITY
 
@@ -29,33 +30,7 @@ def discovery_payload(settings: CrawlerSettings) -> DiscoveryPayload:
             "policy_suggestions": "/v1/policy-suggestions",
             "mcp": "/mcp",
         },
-        "recommended_endpoints": [
-            "GET /health",
-            "GET /ready",
-            "GET /v1/capabilities",
-            "GET /v1/agent-hints",
-            "POST /v1/admit",
-            "POST /v1/crawl",
-            "POST /v1/map",
-            "POST /v1/render",
-            "POST /v1/search",
-            "POST /v1/jobs",
-            "GET /v1/jobs",
-            "GET /v1/jobs/{job_id}",
-            "POST /v1/jobs/{job_id}/control",
-            "DELETE /v1/jobs/{job_id}",
-            "POST /v1/keys",
-            "GET /v1/keys",
-            "DELETE /v1/keys/{key_id}",
-            "POST /v1/watches",
-            "GET /v1/watches",
-            "GET /v1/watches/{watch_id}",
-            "DELETE /v1/watches/{watch_id}",
-            "GET /v1/crawl/{request_id}",
-            "GET /v1/crawl/{request_id}/trace",
-            "GET /v1/policy-suggestions",
-            "POST /mcp",
-        ],
+        "recommended_endpoints": recommended_endpoints(),
         "description": "Policy-driven universal crawler execution service.",
         "auth": {
             "caller_keys": "Present X-API-Key (or Authorization: Bearer) on crawl/job/result requests; "
