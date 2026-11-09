@@ -15,6 +15,7 @@ from crawlutron.api.crawl_endpoint import get_crawl_result as get_crawl_result_h
 from crawlutron.api.crawl_endpoint import get_crawl_trace as get_crawl_trace_handler
 from crawlutron.api.dependencies import (
     CallerDep,
+    TrackerDep,
     get_job_store,
     get_result_store,
     get_settings,
@@ -118,6 +119,7 @@ _REPLAY_RESPONSES: dict[int | str, dict[str, object]] = {
 async def crawl(
     request: Request,
     caller: CallerDep,
+    tracker: TrackerDep,
     payload: CrawlRequest = Body(
         ...,
         examples=[
@@ -140,7 +142,7 @@ async def crawl(
         shutdown_event=shutdown_event,
         request=request,
         caller=caller,
-        concurrency_tracker=getattr(request.app.state, "concurrency_tracker", None),
+        concurrency_tracker=tracker,
     )
 
 
