@@ -428,7 +428,7 @@ defaults shown):
 | `CRAWLUTRON_SEARCH_LIMIT_MAX` | `20` | Hard cap on results per search. |
 | `CRAWLUTRON_SEARCH_TIMEOUT_SECONDS` | `15` | Provider call timeout. |
 | `CRAWLUTRON_MAX_BATCH_SIZE` | `50` | Max URLs per batch request. |
-| `CRAWLUTRON_WARMUP_URLS` | `""` | Comma-separated URLs fetched once at browser startup to warm engine caches (`browser.py`). Warmup URLs are normalized through the same public-URL policy as crawl targets. |
+| `CRAWLUTRON_WARMUP_URLS` | `""` | Comma-separated URLs fetched once at browser startup to warm engine caches (`browser.py`). Warmup URLs are normalized through the same public-URL policy as crawl targets. Related: `browser_profile.storage_state` paths are honored only under `CRAWLUTRON_CACHE_DIR` (the allowlist root); without a cache dir no storage_state is accepted. |
 
 Two DNS posture values are **not** env-tunable — they are module constants in
 `crawlutron/transport/pinned_dns.py`: `DNS_WORKERS = 32` (the dedicated DNS
