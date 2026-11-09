@@ -26,6 +26,7 @@ from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.runtime import process_state
 from crawlutron.safety.bounded_io import BodyTooLarge, read_capped_async
+from crawlutron.safety.url_redaction import redact_urls_in_text
 from crawlutron.transport.timeouts import Timeouts
 
 logger = logging.getLogger(__name__)
@@ -212,7 +213,7 @@ async def drain_webhook_deliveries() -> None:
             pass
         except Exception as exc:
             # The delivery already logged its loss; a re-raised error is drained.
-            logger.warning("webhook_drain_error", extra={"error": str(exc)})
+            logger.warning("webhook_drain_error", extra={"error": redact_urls_in_text(str(exc))})
 
 
 def _should_retry(delivery_exc: Exception, attempt: int, attempts: int) -> bool:
@@ -286,7 +287,7 @@ async def post_webhook(
     except (TypeError, ValueError) as exc:
         logger.warning(
             "webhook_payload_serialization_failed",
-            extra={"url": target.redacted(), "error": str(exc)},
+            extra={"url": target.redacted(), "error": redact_urls_in_text(str(exc))},
         )
         return
     if payload_bytes is None:
@@ -307,7 +308,7 @@ async def post_webhook(
                     "webhook_delivery_failed",
                     extra={
                         "url": target.redacted(),
-                        "error": str(exc),
+                        "error": redact_urls_in_text(str(exc)),
                         "attempt": attempt + 1,
                     },
                 )

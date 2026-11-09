@@ -13,6 +13,7 @@ only where a downstream consumer decodes again.
 
 from __future__ import annotations
 
+import re
 from urllib.parse import parse_qsl, quote, urlsplit
 
 # Query parameters whose values are secrets by name (#659): a parameter whose
@@ -134,3 +135,44 @@ def redact_url(url: str) -> str:
     netloc = _masked_netloc(parts.netloc)
     suffix = f"?{masked_query}" if masked_query else ""
     return f"{parts.scheme}://{netloc}{parts.path}{suffix}"
+
+
+_SECRET_PARAM_SPAN = re.compile(r"[?&]([^=&\s]+)=([^&\s]*)")
+
+
+def _redact_secret_params_in_text(text: str) -> str:
+    """Free text with every secret-named query value masked (#660).
+
+    Raised-into-a-log shapes can carry a query outside any ``scheme://``
+    span (a refused ``javascript:`` Location, a bare ``?token=...``); the
+    same decoded-name door decides, so prose never gets masked, only
+    credential-shaped pairs.
+    """
+    from urllib.parse import unquote
+
+    def _sub(match: re.Match[str]) -> str:
+        name = unquote(match.group(1))
+        if is_secret_name(name):
+            return f"{match.group(0)[:1]}{match.group(1)}={_REDACTED}"
+        return match.group(0)
+
+    return _SECRET_PARAM_SPAN.sub(_sub, text)
+
+
+def redact_urls_in_text(text: str) -> str:
+    """Every URL's log-safe form inside free exception text (#660).
+
+    Raised-into-a-log shapes carry URLs outside any ``url`` extra key; the
+    mask runs at the shared sink, not at each raise site. Only
+    ``scheme://``-prefixed spans are rewritten, so error prose and
+    non-URL detail pass through untouched.
+    """
+    pieces: list[str] = []
+    pos = 0
+    for match in re.finditer(r"[A-Za-z][A-Za-z0-9+.-]*://\S+", text):
+        span = match.group(0)
+        pieces.append(text[pos : match.start()])
+        pieces.append(redact_url(span))
+        pos = match.end()
+    pieces.append(text[pos:])
+    return _redact_secret_params_in_text("".join(pieces))

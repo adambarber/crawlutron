@@ -1,10 +1,61 @@
 """Unit tests for the shared manual-redirect decision helper (both fetchers)."""
 
+import logging
+
 import httpx
 import pytest
 
 from crawlutron.transport.pinned_transport import MAX_REDIRECT_HOPS, redirect_target
 from tests._policy_factories import canonical
+
+
+class _RecordSink(logging.Handler):
+    """Collect records from the classification logger during one assertion."""
+
+    def __init__(self, records: list[logging.LogRecord]) -> None:
+        super().__init__()
+        self._records = records
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self._records.append(record)
+
+
+def _classified_detail(exc: BaseException) -> str:
+    """Run the failure primitive once and return its log's error_detail."""
+    from crawlutron.transport.classification import classify_and_log
+
+    records: list[logging.LogRecord] = []
+    logger = logging.getLogger("crawlutron.transport.classification")
+    handler = _RecordSink(records)
+    logger.addHandler(handler)
+    try:
+        classify_and_log(exc, event="strategy_result_error", strategy="HTTP_DECLARED_CRAWLER")
+    finally:
+        logger.removeHandler(handler)
+    assert records, "the failure primitive did not log"
+    return records[0].__dict__["error_detail"]
+
+
+async def test_the_exhaustion_exception_text_carries_the_redacted_url():
+    """#660: the hop-exhaustion message's URL reaches logs only redacted.
+
+    classify_and_log strings the exception into error_detail; a secret query
+    in the walked URL must not ride along in the raw spelling."""
+    with pytest.raises(httpx.TooManyRedirects) as caught:
+        await redirect_target(
+            canonical("http://a.com/feed?api_key=sk-live-9"), {}, 301, "/y", MAX_REDIRECT_HOPS
+        )
+    detail = _classified_detail(caught.value)
+    assert "sk-live-9" not in detail, detail
+    assert "api_key=[REDACTED]" in detail, detail
+
+
+async def test_the_refused_location_exception_text_carries_no_secret():
+    """#660: a refused redirect Location reaches logs only through the mask."""
+    with pytest.raises(ValueError, match="refused admission") as caught:
+        await redirect_target(canonical("http://a.com/x"), {}, 302, "javascript:fetch/?token=x", 0)
+    detail = _classified_detail(caught.value)
+    assert "token=x" not in detail, detail
 
 
 async def test_redirect_target_follows_in_budget_redirect():

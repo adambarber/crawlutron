@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, NamedTuple, Protocol, cast
 from crawlutron.config.env import get_env_int
 from crawlutron.models.browser_profile_record import BrowserProfileRecord
 from crawlutron.models.screenshot_diagnostics import ScreenshotDiagnostics
+from crawlutron.safety.url_redaction import redact_url, redact_urls_in_text
 from crawlutron.transport.driver_config import (
     ACTION_WAIT_MS,
     LAZY_SCROLL_DELAY_SECONDS,
@@ -346,11 +347,11 @@ class BrowserDriver:
                 logger.warning(
                     "browser_action_failed",
                     extra={
-                        "url": url,
+                        "url": redact_url(url),
                         "action": action_type,
                         "selector": action.get("selector"),
                         "wait_ms": action.get("timeout"),
-                        "error": str(error),
+                        "error": redact_urls_in_text(str(error)),
                     },
                 )
 
