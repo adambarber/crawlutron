@@ -97,7 +97,7 @@ def _duckduckgo_target(href: str, *, policy: HostPolicy) -> str | None:
     """Resolve a DDG result link: unwrap the ``//duckduckgo.com/l/?uddg=<enc>``
     wrapper to the encoded target when present, else admit ``href`` itself."""
     if href.startswith(DUCKDUCKGO_REDIRECT):
-        parsed = urlsplit(href)
+        parsed = urlsplit(href.removeprefix(DUCKDUCKGO_REDIRECT))
         uddg = parse_qs(parsed.query).get("uddg")
         if uddg:
             return normalize_result_url(unquote(uddg[0]), policy=policy)

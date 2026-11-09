@@ -87,7 +87,7 @@ class MetricsStore:
         return self._counters.snapshot() if self._counters is not None else self._local
 
     def _labelled(self, source: dict[str, float], prefix: str) -> dict[str, float]:
-        return {key[len(prefix) :]: value for key, value in source.items() if key.startswith(prefix)}
+        return {key.removeprefix(prefix): value for key, value in source.items() if key.startswith(prefix)}
 
     def _caller_series(self, source: dict[str, float], prefix: str, caller_id: str) -> str:
         """The series a caller id is written under, bounded by an overflow fold.
