@@ -4,6 +4,11 @@ No module exports a hand-copied ``reset_process_state`` pair; each registers a
 private reset/probe with ``crawlutron.runtime.process_state``, and the harness
 drives the one seam. The matcher asserts registration shape, probe/reset
 agreement, and idempotence -- not fabricated state.
+
+Disposition of the #643 chain-abort hardening: the completing-reset-chain fix
+in ``crawlutron.runtime.process_state`` is LATENT HARDENING. The raising site
+behind the observed pooled-supersede teardown signatures is UNIDENTIFIED and
+stays open in the flake ledger; no registered reset is known to raise today.
 """
 
 from __future__ import annotations
@@ -122,6 +127,48 @@ def test_probe_agrees_with_reset() -> None:
     assert process_state.owner_has_state("test-fake-probe"), "the probe lied about populated state"
     process_state.reset_all_process_state()
     assert not process_state.owner_has_state("test-fake-probe"), "the reset emptied nothing"
+
+
+def test_one_failing_reset_cannot_strand_the_rest() -> None:
+    """Latent hardening (#643 family): a failing owner's reset must abort nothing.
+
+    The chain completes so later owners' state can never be stranded; the
+    failure still surfaces, attributed. No registered reset is known to raise
+    today -- the observed teardown signatures' raising site remains open."""
+    seen: list[str] = []
+
+    def _boom() -> None:
+        raise RuntimeError("closed loop in teardown")
+
+    process_state.register("test-fake-failing", _boom, lambda: False)
+    process_state.register("test-fake-later", lambda: seen.append("later"), lambda: bool(seen))
+    raised: RuntimeError | None = None
+    try:
+        process_state.reset_all_process_state()
+    except RuntimeError as e:
+        raised = e
+    finally:
+        process_state.unregister("test-fake-failing")
+        process_state.unregister("test-fake-later")
+    assert "test-fake-failing" not in process_state.registered_owners(), (
+        "the probe left its fake owners registered -- registry pollution"
+    )
+    assert raised is not None, "a failing owner's reset vanished instead of surfacing"
+    assert seen == ["later"], "a failing owner's reset stranded every later owner's state"
+    assert "test-fake-failing" in str(raised), f"the failure named no owner: {raised}"
+
+
+def test_unregister_drops_only_its_owner() -> None:
+    """Red for the unregister door: registration is gone after, siblings stay."""
+    process_state.register("test-fake-gone", lambda: None, lambda: False)
+    process_state.register("test-fake-stays", lambda: None, lambda: True)
+    try:
+        assert process_state.unregister("test-fake-gone") is True
+        assert process_state.unregister("test-fake-gone") is False
+        registered = process_state.registered_owners()
+    finally:
+        process_state.unregister("test-fake-stays")
+    assert "test-fake-gone" not in registered and "test-fake-stays" in registered
 
 
 def test_no_straggler_defines_the_pair() -> None:

@@ -75,6 +75,9 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
 # Former #215 exemptions: their __all__ deliberately does not enumerate every public
 # symbol, so these are counts-only rows pinned at measured counts; only-down from here.
 DECLARED_SURFACE_RATCHET = {
+    # #643: unregister joins the registry's public door set so test probes can
+    # drop their fake owners (registered_owners exhaustiveness must stay true).
+    "crawlutron/runtime/process_state.py": (6, 6),
     # Generated at build time by the hatch-vcs hook (#561); never hand-edited.
     "crawlutron/_version.py": (3, 0),
     "crawlutron/admission/policy.py": (10, 5),
