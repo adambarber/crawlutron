@@ -35,6 +35,12 @@ def test_getaddrinfo_of_a_dns_name_is_refused_naming_the_destination():
         socket.getaddrinfo("crawlutron-guard-bite.invalid", None)
 
 
+def test_dot_local_mdns_name_is_refused_by_the_guard():
+    assert is_installed()
+    with pytest.raises(pytest.fail.Exception, match="x.local"):
+        socket.getaddrinfo("x.local", None)
+
+
 def test_ip_literal_getaddrinfo_passes_parsed_not_resolved():
     assert is_installed()
     answers = socket.getaddrinfo("127.0.0.1", 0, socket.AF_INET)

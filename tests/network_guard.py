@@ -23,7 +23,7 @@ def is_installed() -> bool:
 def _loopback(host: object) -> bool:
     if not isinstance(host, str):
         return True
-    return host in _ALLOWED_HOSTS or host.startswith("127.") or host.endswith(".local")
+    return host in _ALLOWED_HOSTS or host.startswith("127.")
 
 
 def _is_ip_literal(host: str) -> bool:
