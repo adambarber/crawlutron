@@ -242,13 +242,7 @@ def test_the_tests_typing_budget_reaches_tests() -> None:
 _CRAWLUTRON_OFFENDERS = [
     "crawlutron/api/route_layer.py:68",
     "crawlutron/api/route_layer.py:73",
-    "crawlutron/mcp/handlers.py:153",
-    "crawlutron/mcp/handlers.py:154",
-    "crawlutron/mcp/handlers.py:156",
-    "crawlutron/mcp/handlers.py:157",
-    "crawlutron/mcp/handlers.py:158",
-    "crawlutron/mcp/handlers.py:159",
-    "crawlutron/mcp/handlers.py:387",
+    "crawlutron/mcp/handlers.py:412",
 ]
 
 

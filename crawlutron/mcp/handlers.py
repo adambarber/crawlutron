@@ -11,24 +11,27 @@ Behavior is data-driven: every ToolSpec declares a DoorBinding, and ONE
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum, auto
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ValidationError
 
 from crawlutron.api.admit_endpoint import admit_url
 from crawlutron.api.caller_auth import Tracking, admit, bound_render_cookie_namespace
+from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
 from crawlutron.api.crawl_executor import execute_crawl
 from crawlutron.api.job_cores import create_job_core
 from crawlutron.api.main_helpers import request_gate
 from crawlutron.api.map_endpoint import map_site
 from crawlutron.api.render_endpoint import render as render_endpoint_handler
 from crawlutron.api.response_shaping import aunified_response_from_result
+from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.crawl_and_extract_response import CrawlAndExtractResponse
 from crawlutron.models.crawl_pending import CrawlPendingError
@@ -37,6 +40,9 @@ from crawlutron.models.json_value import JsonValue
 from crawlutron.models.policy_suggestions_response import PolicySuggestionsResponse
 from crawlutron.safety.json_safe import json_default
 from crawlutron.search.endpoint import search as search_endpoint_handler
+from crawlutron.storage.job_store import JobStore
+from crawlutron.storage.result_store import CrawlResultStore
+from crawlutron.storage.watch_store import WatchStore
 from crawlutron.transport.browser_pool import get_browser_pool
 
 if TYPE_CHECKING:
@@ -146,17 +152,36 @@ class DoorBinding:
     refusal_fields: tuple[str, ...] = ()
 
 
+class DoorEnv(Protocol):
+    """The door environment every kind's body receives: seven typed slots."""
+
+    @property
+    def settings(self) -> CrawlerSettings: ...
+    @property
+    def shutdown_event(self) -> asyncio.Event: ...
+    @property
+    def caller(self) -> CallerIdentity | None: ...
+    @property
+    def job_store(self) -> JobStore: ...
+    @property
+    def watch_store(self) -> WatchStore: ...
+    @property
+    def result_store(self) -> CrawlResultStore: ...
+    @property
+    def concurrency_tracker(self) -> CallerConcurrencyTracker: ...
+
+
 @dataclass(frozen=True)
 class _ToolDoor:
     """The per-call door environment dispatch threads to every kind's body."""
 
-    settings: Any = None
-    shutdown_event: Any = None
+    settings: CrawlerSettings
+    shutdown_event: asyncio.Event
+    job_store: JobStore
+    watch_store: WatchStore
+    result_store: CrawlResultStore
+    concurrency_tracker: CallerConcurrencyTracker
     caller: CallerIdentity | None = None
-    job_store: Any = None
-    watch_store: Any = None
-    result_store: Any = None
-    concurrency_tracker: Any = None
 
 
 async def _admit_tool(
@@ -244,7 +269,7 @@ async def _guarded_crawl(
     )
 
 
-def _tracking(door: _ToolDoor) -> Tracking:
+def _tracking(door: DoorEnv) -> Tracking:
     """The caller tracking every admitted door composes."""
     return Tracking(job_store=door.job_store, concurrency_tracker=door.concurrency_tracker)
 
@@ -269,7 +294,7 @@ async def _running_answer(payload, job_store, result_store, caller, read) -> Too
         return _tool_error(error)
 
 
-async def _store_tool(payload: BaseModel, door: _ToolDoor, door_data: DoorBinding) -> ToolResult:
+async def _store_tool(payload: BaseModel, door: DoorEnv, door_data: DoorBinding) -> ToolResult:
     """One store-read/write door over its declared core: the caller scope is the
     resolved caller, ungated by quota."""
     store_name = door_data.store
@@ -289,7 +314,7 @@ async def _store_tool(payload: BaseModel, door: _ToolDoor, door_data: DoorBindin
     return await tool_result(core(*args, **door_data.core_kwargs))
 
 
-async def _crawl_door(payload: BaseModel, door: _ToolDoor, projection: _Unified) -> ToolResult:
+async def _crawl_door(payload: BaseModel, door: DoorEnv, projection: _Unified) -> ToolResult:
     """Either crawl door: the same guarded, admitted crawl, differing only by projection."""
     return await _guarded_crawl(
         cast("CrawlRequest", payload),
@@ -302,7 +327,7 @@ async def _crawl_door(payload: BaseModel, door: _ToolDoor, projection: _Unified)
     )
 
 
-async def _render_door(payload: BaseModel, door: _ToolDoor) -> ToolResult:
+async def _render_door(payload: BaseModel, door: DoorEnv) -> ToolResult:
     """The render door: browser-pool guard, the caller's cookie namespace, admission."""
     render_payload = cast("RenderRequest", payload)
     if get_browser_pool() is None:
@@ -322,7 +347,7 @@ async def _render_door(payload: BaseModel, door: _ToolDoor) -> ToolResult:
         )
 
 
-async def _search_door(payload: BaseModel, door: _ToolDoor) -> ToolResult:
+async def _search_door(payload: BaseModel, door: DoorEnv) -> ToolResult:
     """The search door: caller-bound through the concurrency register every sync door uses."""
     caller: CallerIdentity | None = door.caller
     return await _admit_tool(
@@ -339,7 +364,7 @@ async def _search_door(payload: BaseModel, door: _ToolDoor) -> ToolResult:
     )
 
 
-async def _map_door(payload: BaseModel, door: _ToolDoor) -> ToolResult:
+async def _map_door(payload: BaseModel, door: DoorEnv) -> ToolResult:
     """The map door: admission over the policy's page limit, then the frontier walk."""
     map_payload = cast("MapRequest", payload)
     return await _admit_tool(
@@ -353,7 +378,7 @@ async def _map_door(payload: BaseModel, door: _ToolDoor) -> ToolResult:
     )
 
 
-async def _read_door(payload: BaseModel, door: _ToolDoor, door_data: DoorBinding) -> ToolResult:
+async def _read_door(payload: BaseModel, door: DoorEnv, door_data: DoorBinding) -> ToolResult:
     """The stored-record read doors: admitted, shaped from the typed pending state."""
     return await _admit_tool(
         door.caller,
@@ -363,7 +388,7 @@ async def _read_door(payload: BaseModel, door: _ToolDoor, door_data: DoorBinding
     )
 
 
-async def _suggestions_door(payload: BaseModel, door: _ToolDoor, door_data: DoorBinding) -> ToolResult:
+async def _suggestions_door(payload: BaseModel, door: DoorEnv, door_data: DoorBinding) -> ToolResult:
     """The policy-suggestions read door: the REST twin's caller scoping -- a keyed
     caller's rollup covers only its own records; anonymous is refused (the REST
     door answers 401, the tool a tool error) -- with the operator's cross-tenant
@@ -416,7 +441,7 @@ async def dispatch(spec, payload: BaseModel, **door: Any) -> ToolResult:
     raise ValueError(f"unsupported door kind: {kind}")
 
 
-async def _create_job_tool(payload: BaseModel, door: _ToolDoor) -> ToolResult:
+async def _create_job_tool(payload: BaseModel, door: DoorEnv) -> ToolResult:
     """The admitted job-creation door: the REST create's request_gate-free twin.
 
     create_job_core itself enters admit (quota + concurrency), so the door
@@ -439,6 +464,7 @@ async def _create_job_tool(payload: BaseModel, door: _ToolDoor) -> ToolResult:
 
 __all__ = [
     "DoorBinding",
+    "DoorEnv",
     "DoorKind",
     "ToolResult",
     "caller_for",
