@@ -26,6 +26,16 @@ ORDER_PINNING_CONFIGS = (
 _ORDER_PINNING_FLAGS = ("no:randomly", "randomly-dont-reorganize", "randomly-dont-reset-seed")
 
 
+def _seed_pinned_by_argv(argv) -> str | None:
+    """Return the pinning token if argv pins the order via the seed sentinel."""
+    for index, token in enumerate(argv):
+        if token == "--randomly-seed=last":
+            return token
+        if token == "--randomly-seed" and index + 1 < len(argv) and argv[index + 1] == "last":
+            return "--randomly-seed last"
+    return None
+
+
 def test_this_run_was_randomized(pytestconfig: pytest.Config) -> None:
     """Fail unless the running process is actually varying test order: ``randomly_seed``
     defaults to ``"default"`` when the plugin loads and is absent under `-p no:randomly`,
@@ -44,6 +54,13 @@ def test_this_run_was_randomized(pytestconfig: pytest.Config) -> None:
             "this run was seeded but its order was left as declared, so the seed "
             "varied and the ordering did not. That is the flag that looks like it "
             "is enabling randomization."
+        )
+    pinned = _seed_pinned_by_argv(pytestconfig.invocation_params.args)
+    if pinned is not None:
+        pytest.fail(
+            f"this run pinned its order via {pinned!r}: the seed is replayed, not "
+            "fresh, so the order did not vary. Repro runs deselect this test by "
+            "NAME, never with a last-seed flag."
         )
 
 
