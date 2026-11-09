@@ -21,6 +21,7 @@ from curl_cffi.requests.models import STREAM_END
 from crawlutron.models.http_fetch_result import HttpFetchResult
 from crawlutron.models.http_fetcher import HttpFetcher
 from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.runtime.resource_lifecycle import record_declined_close
 from crawlutron.safety.url_redaction import redact_url
 from crawlutron.transport import http_client_pool, pinned_transport, pooled_clients
 from crawlutron.transport.decompression import DecompressionError, DecompressionTooLargeError
@@ -74,7 +75,7 @@ class _CffiHop:
                 if self.release_stream_noblock is not None:
                     self.release_stream_noblock(response)
                 else:
-                    _release_stream_noblock(response)
+                    release_stream_noblock(response)
         if early_result is not None:
             return early_result
         # STREAM_END means the producer is done, so awaiting close is safe -- and
@@ -400,7 +401,21 @@ def http_413(url: NormalizedUrl, final_url: NormalizedUrl, started: float) -> Ht
     )
 
 
-def _release_stream_noblock(response: CffiResponse) -> None:
+def _stream_close_failure_recorder(response: CffiResponse) -> Callable[[asyncio.Task[None]], None]:
+    """The done callback: retrieve (warning suppression stays load-bearing) and
+    record a failed close in the #643 decline record; a cancelled close is a
+    handled state, not evidence.
+    """
+    kind = type(response).__name__
+
+    def record(task: asyncio.Task[None]) -> None:
+        if not task.cancelled() and task.exception() is not None:
+            record_declined_close("stream_close_failed", kind)
+
+    return record
+
+
+def release_stream_noblock(response: CffiResponse) -> None:
     """Schedule a best-effort stream close without awaiting it -- the caller is
     abandoning a live or wedged producer, and awaiting ``aclose`` would join that
     task and hang. The done callback swallows a failed close.
@@ -412,4 +427,4 @@ def _release_stream_noblock(response: CffiResponse) -> None:
         task = asyncio.ensure_future(aclose())
     except RuntimeError:  # no running loop (tests driving the helper raw)
         return
-    task.add_done_callback(lambda done: done.exception() if not done.cancelled() else None)
+    task.add_done_callback(_stream_close_failure_recorder(response))

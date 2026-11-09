@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Protocol, TypeVar, cast
 import httpx
 
 from crawlutron.runtime import process_state
-from crawlutron.runtime.resource_lifecycle import DeferredClose
+from crawlutron.runtime.resource_lifecycle import DeferredClose, record_declined_close
 from crawlutron.transport.timeouts import Timeouts
 from crawlutron.vocabulary.identity import DEFAULT_USER_AGENT
 
@@ -44,6 +44,7 @@ __all__ = [
     "drain_pending_client_closes",
     "get_async_http_client",
     "http_singleton",
+    "safe_aclose",
     "swap_pooled_builders",
 ]
 
@@ -133,7 +134,7 @@ async def drain_pending_client_closes() -> None:
             if not _PENDING_CLIENT_CLOSE:
                 return
             client = _PENDING_CLIENT_CLOSE.pop(0)
-        await _safe_aclose(client)
+        await safe_aclose(client)
 
 
 def _client_is_closed(client: PooledClient) -> bool:
@@ -242,7 +243,7 @@ class LoopBoundPooledClient:
         current = self.current
         self._set_current(None)
         if current is not None:
-            await _safe_aclose(current)
+            await safe_aclose(current)
 
 
 # The two pooled clients, described once and managed by the code above.
@@ -318,19 +319,22 @@ def _loop_bound_to(client: PooledClient) -> asyncio.AbstractEventLoop | None:
     return getattr(client, "_bound_loop", None)
 
 
-async def _safe_aclose(client: PooledClient) -> None:
-    """Await a pooled client's async close, swallowing failures -- the client is
-    being replaced (its loop changed), so any close error is irrelevant during
-    shutdown. Shared by every kind: httpx ``aclose`` and curl_cffi ``close`` are both coroutines.
+async def safe_aclose(client: PooledClient) -> None:
+    """Await a pooled client's async close, recording any failure -- the client is
+    being replaced (its loop changed), so a close error is non-fatal but leaves
+    evidence in the #643 decline record. Shared by every kind: httpx ``aclose``
+    and curl_cffi ``close`` are both coroutines.
     """
-    with contextlib.suppress(Exception):
+    try:
         # curl_cffi's AsyncSession closes through ``close()`` (a coroutine),
         # httpx through ``aclose()``; either handle satisfies the await here.
         close = client.aclose if hasattr(client, "aclose") else client.close
         await close()
+    except Exception:
+        record_declined_close("aclose_failed", type(client).__name__)
 
 
-_SUPERSEDED_CLOSE: DeferredClose[PooledClient] = DeferredClose(aclose=_safe_aclose)
+_SUPERSEDED_CLOSE: DeferredClose[PooledClient] = DeferredClose(aclose=safe_aclose)
 
 
 T = TypeVar("T")

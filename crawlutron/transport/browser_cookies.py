@@ -6,6 +6,7 @@ import logging
 
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.runtime import process_state
+from crawlutron.runtime.resource_lifecycle import record_declined_close
 from crawlutron.safety.url_redaction import redact_urls_in_text
 from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE
 from crawlutron.transport.cookie_store import InMemoryCookieStore
@@ -116,7 +117,8 @@ async def harvest_session_cookies(
             store_browser_cookies(url.site, header, namespace=namespace)
             logger.info("browser_cookies_harvested", extra={"domain": url.site, "count": len(cookies)})
     except Exception as error:
-        logger.debug(
+        record_declined_close("harvest_failed", type(error).__name__)
+        logger.warning(
             "browser_cookies_harvest_failed",
             extra={"error": redact_urls_in_text(str(error))},
         )

@@ -63,7 +63,7 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     "crawlutron/orchestration/spill_sink.py": (2, 2),
     "crawlutron/transport/http_cache.py": (4, 4),
     "crawlutron/transport/http_classify.py": (3, 3),
-    "crawlutron/transport/pooled_clients.py": (11, 9),
+    "crawlutron/transport/pooled_clients.py": (12, 10),
     # #314/wave-2: JobAccumulators (one class) moved here whole from job_store_state
     # to hold the 500-line ceiling; the seam owns every accumulator table.
     "crawlutron/storage/job_store_accumulators.py": (1, 1),
