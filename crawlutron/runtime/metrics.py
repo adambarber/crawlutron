@@ -51,6 +51,10 @@ class CountersSnapshot:
     search_total_elapsed_ms: float = 0.0
     resource_throttle_batches_total: float = 0.0
     extraction_doc_pool_unavailable_total: float = 0.0
+    auth_refusals_total: float = 0.0
+    key_verify_throttle_trips_total: float = 0.0
+    anonymous_throttle_refusals_total: float = 0.0
+    admin_auth_failures_total: float = 0.0
     strategy_counts: dict[str, float] = field(default_factory=dict)
     classification_counts: dict[str, float] = field(default_factory=dict)
     search_provider_counts: dict[str, float] = field(default_factory=dict)
@@ -118,6 +122,10 @@ class MetricsStore:
             search_total_elapsed_ms=source.get("search_total_elapsed_ms", 0.0),
             resource_throttle_batches_total=source.get("resource_throttle_batches_total", 0.0),
             extraction_doc_pool_unavailable_total=source.get("extraction_doc_pool_unavailable_total", 0.0),
+            auth_refusals_total=source.get("auth_refusals_total", 0.0),
+            key_verify_throttle_trips_total=source.get("key_verify_throttle_trips_total", 0.0),
+            anonymous_throttle_refusals_total=source.get("anonymous_throttle_refusals_total", 0.0),
+            admin_auth_failures_total=source.get("admin_auth_failures_total", 0.0),
             strategy_counts=self._labelled(source, _STRATEGY_PREFIX),
             classification_counts=self._labelled(source, _CLASSIFICATION_PREFIX),
             search_provider_counts=self._labelled(source, _PROVIDER_PREFIX),
@@ -196,6 +204,22 @@ class MetricsStore:
         The doc-pool wedge alert -- a warning log alone is invisible.
         """
         self._add("extraction_doc_pool_unavailable_total", 1)
+
+    def record_auth_refusal(self) -> None:
+        """Count one 401-class credential refusal at the single auth funnel."""
+        self._add("auth_refusals_total", 1)
+
+    def record_key_verify_throttle_trip(self) -> None:
+        """Count one 429 refusal from the key-verify meter's cooldown check."""
+        self._add("key_verify_throttle_trips_total", 1)
+
+    def record_anonymous_throttle_refusal(self) -> None:
+        """Count one anonymous-IP 429 refusal past the anonymous budget."""
+        self._add("anonymous_throttle_refusals_total", 1)
+
+    def record_admin_auth_failure(self) -> None:
+        """Count one failed admin-token guess against the shared admin bucket."""
+        self._add("admin_auth_failures_total", 1)
 
     @property
     def counters(self) -> CoordinationCounters | None:
@@ -281,6 +305,26 @@ _FAMILIES: tuple[_Family, ...] = (
         "crawler_extraction_doc_pool_unavailable_total",
         "Document-extraction acquisitions degraded: no pool worker was available within the budget.",
         field="extraction_doc_pool_unavailable_total",
+    ),
+    _Family(
+        "crawler_anonymous_throttle_refusals_total",
+        "Anonymous-IP requests refused past the anonymous budget (429).",
+        field="anonymous_throttle_refusals_total",
+    ),
+    _Family(
+        "crawler_auth_refusals_total",
+        "Credential refusals (HTTP 401) at the single auth funnel.",
+        field="auth_refusals_total",
+    ),
+    _Family(
+        "crawler_key_verify_throttle_trips_total",
+        "Requests refused by the key-verify meter's fail-closed cooldown (429).",
+        field="key_verify_throttle_trips_total",
+    ),
+    _Family(
+        "crawler_admin_auth_failures_total",
+        "Failed admin-token guesses against the shared admin bucket (#659 lockout ladder).",
+        field="admin_auth_failures_total",
     ),
     _Family(
         "crawler_search_results_by_provider_total",

@@ -81,6 +81,9 @@ def presented_key(request: Request) -> str | None:
 
 def _raise_invalid_api_key() -> NoReturn:
     """Shared 401 for any failed /v1/keys credential."""
+    from crawlutron.runtime.metrics import get_metrics
+
+    get_metrics().record_auth_refusal()
     raise http_error(401, "invalid_api_key", "Unknown or revoked API key")
 
 

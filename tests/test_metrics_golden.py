@@ -50,6 +50,22 @@ _COUNTS_BLOCK = (
     " degraded: no pool worker was available within the budget.\n"
     "# TYPE crawler_extraction_doc_pool_unavailable_total counter\n"
     "crawler_extraction_doc_pool_unavailable_total 1.0\n"
+    "# HELP crawler_anonymous_throttle_refusals_total Anonymous-IP requests refused"
+    " past the anonymous budget (429).\n"
+    "# TYPE crawler_anonymous_throttle_refusals_total counter\n"
+    "crawler_anonymous_throttle_refusals_total 0.0\n"
+    "# HELP crawler_auth_refusals_total Credential refusals (HTTP 401) at the"
+    " single auth funnel.\n"
+    "# TYPE crawler_auth_refusals_total counter\n"
+    "crawler_auth_refusals_total 0.0\n"
+    "# HELP crawler_key_verify_throttle_trips_total Requests refused by the"
+    " key-verify meter's fail-closed cooldown (429).\n"
+    "# TYPE crawler_key_verify_throttle_trips_total counter\n"
+    "crawler_key_verify_throttle_trips_total 0.0\n"
+    "# HELP crawler_admin_auth_failures_total Failed admin-token guesses against"
+    " the shared admin bucket (#659 lockout ladder).\n"
+    "# TYPE crawler_admin_auth_failures_total counter\n"
+    "crawler_admin_auth_failures_total 0.0\n"
 )
 
 _PROVIDER_BLOCK = """\
@@ -166,6 +182,10 @@ def test_every_plain_counter_family_is_declared_in_the_registry():
         "crawler_search_results_total",
         "crawler_search_errors_total",
         "crawler_extraction_doc_pool_unavailable_total",
+        "crawler_anonymous_throttle_refusals_total",
+        "crawler_auth_refusals_total",
+        "crawler_key_verify_throttle_trips_total",
+        "crawler_admin_auth_failures_total",
         "crawler_search_seconds_total",
         "crawler_crawl_seconds_total",
         "crawler_resource_throttle_batches_total",
