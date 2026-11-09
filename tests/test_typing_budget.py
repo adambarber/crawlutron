@@ -243,9 +243,9 @@ _CRAWLUTRON_OFFENDERS: list[str] = []
 
 
 def test_the_crawlutron_typing_budget_reaches_crawlutron() -> None:
-    """Reach proof: the bare-Any gate now sweeps crawlutron/ production (#701).
-    On the current tree it names exactly the nine offenders at file:line;
-    commits 2 (_ToolDoor -> DoorEnv) and 3 (router/dispatch) drive it to [].
+    """Reach proof: the bare-Any gate sweeps crawlutron/ production (#701).
+    Commits 2 (_ToolDoor -> DoorEnv) and 3 (router/dispatch) typed the nine
+    pre-#701 offenders down to this unconditional [].
     """
     found = crawlutron_offenders(_ANY)
     assert [o.where for o in found] == _CRAWLUTRON_OFFENDERS, (
