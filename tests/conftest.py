@@ -167,6 +167,32 @@ def fast_sleeps(request):
 
 
 @pytest.fixture(autouse=True)
+def stub_robots_fetch(request, monkeypatch):
+    """No external robots.txt fetch in tests: the decode default is the door."""
+    if request.node.get_closest_marker("real_cffi"):
+        return
+    import crawlutron.transport.fetchers as fetchers_module
+    import crawlutron.transport.robots as robots_module
+
+    real_decode = robots_module.default_fetch_and_decode
+
+    def _loopback(url: object) -> bool:
+        host = str(getattr(url, "host", "") or "").lower()
+        return host in {"127.0.0.1", "localhost", "::1"} or host.startswith("127.")
+
+    async def _no_external_robots(fetcher, url, headers, timeout_seconds):
+        # Doubles and loopback fetches are the caller's own wire: pass through.
+        # An external production-fetcher name gets RFC 9309's no-answer: disallow.
+        if fetcher is not fetchers_module.default_http_fetcher or _loopback(url):
+            return await real_decode(fetcher, url, headers, timeout_seconds)
+        return None, None
+
+    # Line-level door: the decode default is bound exactly when the caller
+    # supplied none, so this intercepts every real-dial path; seam stubs pass.
+    monkeypatch.setattr(robots_module, "default_fetch_and_decode", _no_external_robots)
+
+
+@pytest.fixture(autouse=True)
 def stub_cffi_fetcher(request, monkeypatch):
     """Replace the real curl_cffi TLS-impersonation fetcher in tests.
 

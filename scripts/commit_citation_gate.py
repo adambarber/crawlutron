@@ -46,7 +46,8 @@ def main(argv: list[str]) -> int:
         print("usage: python -m scripts.commit_citation_gate <commit-msg-file>", file=sys.stderr)
         return 2
     try:
-        message = open(argv[0], encoding="utf-8").read()
+        with open(argv[0], encoding="utf-8") as handle:
+            message = handle.read()
     except OSError as error:
         print(f"commit_citation_gate: cannot read {argv[0]}: {error}", file=sys.stderr)
         return 2

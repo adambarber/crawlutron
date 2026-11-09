@@ -7,6 +7,7 @@ import pytest
 
 import crawlutron.transport.http_client_pool as http_mod
 from crawlutron.runtime import process_state
+from crawlutron.transport import pooled_clients as pc
 from crawlutron.transport.fetchers import cffi_fetch
 from crawlutron.transport.pooled_clients import drain_pending_client_closes
 from tests._async_harnesses import run_loop_rebind_scenario
@@ -293,3 +294,40 @@ def test_cffi_transport_releases_a_queued_session(stub_builder):
         )
 
     asyncio.run(_attempt())
+
+
+class _LoopBoundFake:
+    """Minimal loop-bound client whose aclose records completion."""
+
+    def __init__(self) -> None:
+        self.closed = False
+        self._bound_loop = None
+
+    async def aclose(self) -> None:
+        await asyncio.sleep(0)
+        self.closed = True
+
+
+def test_a_closed_current_loop_never_poisons_the_reset_chain(stub_builder):
+    """#643 red, raising site named: discard_if_unowned_loop. A closed loop left
+    as the thread's current loop answers get_event_loop happily, then
+    run_until_complete raises inside the reset; the chain re-raises, the queue
+    clear never runs, and the state survives into the next test."""
+    fake = _LoopBoundFake()
+    stub_builder("http", lambda settings=None: fake)
+
+    async def _acquire_on_a_live_loop():
+        return pc.get_async_http_client()
+
+    asyncio.run(_acquire_on_a_live_loop())
+    dead = asyncio.new_event_loop()
+    asyncio.set_event_loop(dead)
+    dead.close()
+    try:
+        process_state.reset_all_process_state()
+    finally:
+        asyncio.set_event_loop(None)
+    assert not process_state.has_any_process_state(), "the closed current loop poisoned the reset"
+    # A closed loop can never host the aclose: the honest release is the same
+    # reference drop the no-current-loop branch gives. The raise must not happen.
+    assert fake.closed is False, "a closed loop unexpectedly hosted the close"
