@@ -15,6 +15,15 @@ from collections.abc import Callable
 
 _Entry = tuple[str, Callable[[], None], Callable[[], bool]]
 
+__all__ = [
+    "has_any_process_state",
+    "owner_has_state",
+    "register",
+    "registered_owners",
+    "reset_all_process_state",
+    "unregister",
+]
+
 _ENTRIES: list[_Entry] = []
 _LOCK = threading.Lock()
 
@@ -55,6 +64,20 @@ def reset_all_process_state() -> None:
 def has_any_process_state() -> bool:
     """Whether any registered owner still holds state."""
     return any(has() for _, _, has in list(_ENTRIES))
+
+
+def unregister(owner: str) -> bool:
+    """Drop one owner's registration; True when it was present.
+
+    Test probes must unregister their fake owners: a leftover registration
+    pollutes ``registered_owners()`` and lies to the exhaustiveness invariants.
+    """
+    with _LOCK:
+        for index, (name, _, _) in enumerate(_ENTRIES):
+            if name == owner:
+                del _ENTRIES[index]
+                return True
+    return False
 
 
 def owner_has_state(owner: str) -> bool:
