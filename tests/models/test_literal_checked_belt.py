@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import cast
 
 import pytest
 
@@ -29,17 +29,17 @@ def test_a_subclass_that_forgets_super_still_rejects_a_non_member():
     so the taxonomy check runs after the subclass's own work either way.
     """
     # The hostile value arrives at runtime through an untyped boundary (a wire
-    # body, an env var); reproduce that here with a cast-free untyped Any door.
-    hostile: Any = "not-a-status"
+    # body, an env var); build the out-of-taxonomy str at that boundary's type.
+    hostile = "not-" + "a-status"
     with pytest.raises(ValueError, match="not a member"):
-        _ForgetfulResult(status=hostile, classification="rendered")
+        _ForgetfulResult(status=cast(ResultStatus, hostile), classification=Classification.rendered)
 
 
 def test_a_subclass_that_forgets_super_still_rejects_a_disagreeing_pair():
     with pytest.raises(ValueError, match="disagrees"):
-        _ForgetfulResult(status="success", classification="network_error")
+        _ForgetfulResult(status="success", classification=Classification.network_error)
 
 
 def test_valid_values_still_construct_through_the_belt():
-    record = _ForgetfulResult(status="success", classification="rendered")
+    record = _ForgetfulResult(status="success", classification=Classification.rendered)
     assert record.status == "success"

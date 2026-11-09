@@ -168,7 +168,7 @@ def not_modified_result(ctx: HttpStrategyContext, resp: FetchedResponse) -> Engi
     elapsed_ms = int((time.monotonic() - ctx.started) * 1000)
     # The label is spelled once and the status is asked for, so the attempt and
     # the result cannot disagree about it the day the taxonomy moves a default.
-    classification: Classification = "not_modified"
+    classification: Classification = Classification.not_modified
     status = status_for_classification(classification)
     attempt = CrawlStrategyAttempt(
         strategy=ctx.strategy,

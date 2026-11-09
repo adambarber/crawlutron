@@ -158,11 +158,11 @@ def binary_no_text_result(
     attempt = CrawlStrategyAttempt(
         strategy=strategy,
         status="failed",
-        classification="binary_no_text",
+        classification=Classification.binary_no_text,
         http_status=http_status,
         content_type=content_type,
         elapsed_ms=elapsed_ms,
-        error="binary_no_text",
+        error=Classification.binary_no_text,
     )
     return build_engine_result(
         original_url=original_url,

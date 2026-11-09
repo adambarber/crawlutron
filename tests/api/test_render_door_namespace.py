@@ -60,7 +60,7 @@ async def _harvest_then_render(
 
     page = SimpleNamespace(context=_HarvestingContext())
     await harvest_session_cookies(page, canonical(render_page.url))
-    return None, "t", "rendered", False
+    return None, "t", Classification.rendered, False
 
 
 @contextlib.asynccontextmanager

@@ -218,6 +218,8 @@ def _taxonomy_members(enum: type[StrEnum]) -> set[str]:
 
 
 def literal_members(alias: object) -> set[str]:
+    if isinstance(alias, type) and issubclass(alias, StrEnum):
+        return {member.value for member in alias}
     return set(get_args(alias))
 
 
@@ -278,12 +280,14 @@ def test_the_internal_and_wire_taxonomies_name_the_same_members():
     """
     from crawlutron.models.crawl_status import CrawlStatus
     from crawlutron.models.crawl_strategy import CrawlStrategy
-    from crawlutron.models.taxonomy import Classification, CrawlStrategyName
+    from crawlutron.models.taxonomy import CrawlStrategyName
     from crawlutron.vocabulary.taxonomy import CrawlClassification, ResultStatus
 
     for axis, internal, wire in (
         ("status", literal_members(ResultStatus), _taxonomy_members(CrawlStatus)),
-        ("classification", literal_members(Classification), _taxonomy_members(CrawlClassification)),
+        # The classification axis IS one declaration now: the alias equals the
+        # wire enum, so the pair-comparison is the member-set self-check.
+        ("classification", literal_members(CrawlClassification), _taxonomy_members(CrawlClassification)),
         ("strategy", literal_members(CrawlStrategyName), _taxonomy_members(CrawlStrategy)),
     ):
         assert internal == wire, (

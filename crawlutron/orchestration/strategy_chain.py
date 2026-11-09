@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, cast, get_args
 
 from crawlutron.models.cooldown_diagnostics import CooldownDiagnostics
 from crawlutron.models.crawl_strategy import CrawlStrategy
-from crawlutron.models.taxonomy import CrawlStrategyName
+from crawlutron.models.taxonomy import Classification, CrawlStrategyName
 from crawlutron.transport.browser_cookies import get_browser_cookies_for
 from crawlutron.transport.browser_result import browser_strategy_result
 from crawlutron.transport.cache import HttpCache
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from crawlutron.models.host_policy import HostPolicy
     from crawlutron.models.http_fetcher import HttpFetcher
     from crawlutron.models.normalized_url import NormalizedUrl
-    from crawlutron.models.taxonomy import Classification, CrawlError
+    from crawlutron.models.taxonomy import CrawlError
     from crawlutron.transport.scheduler import DomainScheduler
 
 from crawlutron.vocabulary.taxonomy import (
@@ -194,7 +194,7 @@ class _ChainRun:
         if context.browser_worker is None:
             return self.terminal_failure(
                 strategy,
-                classification="browser_crash",
+                classification=Classification.browser_crash,
                 error="browser_worker_unavailable",
                 diagnostics={
                     "browser_profile": context.policy.browser_profile,
@@ -278,7 +278,7 @@ class _ChainRun:
             )
         return self.terminal_failure(
             strategy,
-            classification="unknown_error",
+            classification=Classification.unknown_error,
             error="unsupported_strategy",
         )
 

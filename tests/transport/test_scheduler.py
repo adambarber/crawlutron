@@ -5,6 +5,7 @@ import pytest
 from crawlutron.models.crawl_job import CrawlJob
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.crawl_task import CrawlTask
+from crawlutron.models.taxonomy import Classification
 from crawlutron.transport.scheduler import DomainScheduler, jittered_delay
 from tests._policy_factories import canonical
 from tests._result_builders import engine_result, make_job
@@ -200,7 +201,7 @@ class TestObservedLatencyCrossesPipelines:
             attempt=terminal_attempt(
                 strategy=None,
                 status="success",
-                classification="rendered",
+                classification=Classification.rendered,
                 elapsed_ms=elapsed_ms,
                 error=None,
             ),
@@ -223,7 +224,7 @@ class TestObservedLatencyCrossesPipelines:
             attempt=CrawlStrategyAttempt(
                 strategy="HTTP_DECLARED_CRAWLER",
                 status="success",
-                classification="rendered",
+                classification=Classification.rendered,
                 http_status=200,
                 content_type="text/html",
                 elapsed_ms=elapsed_ms,

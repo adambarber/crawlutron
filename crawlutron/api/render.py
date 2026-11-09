@@ -21,6 +21,7 @@ from crawlutron.models.crawl_result import CrawlResult
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.render_request import RenderRequest
 from crawlutron.models.result_factory import terminal_crawl_result
+from crawlutron.models.taxonomy import Classification
 from crawlutron.runtime.worker_dispatch import call_worker
 from crawlutron.storage.ids import new_request_id
 from crawlutron.transport import robots as _robots_policy
@@ -200,7 +201,7 @@ def _terminal_robot_refusals(
         by_index[index] = terminal_crawl_result(
             url=url,
             status="skipped",
-            classification="robots_disallowed",
+            classification=Classification.robots_disallowed,
             attempts=0,
             elapsed_ms=int((time.monotonic() - started) * 1000),
             domain=url.origin,
@@ -291,11 +292,15 @@ def _fill_missing_results(
         by_index[index] = terminal_crawl_result(
             url=urls[index],
             status="failed",
-            classification="site_error",
+            classification=Classification.site_error,
             attempts=0,
             elapsed_ms=int((time.monotonic() - started) * 1000),
             domain="",
-            error=classify_error_code(worker_error) if worker_error is not None else "unknown_error",
+            error=(
+                classify_error_code(worker_error)
+                if worker_error is not None
+                else Classification.unknown_error
+            ),
         )
 
 

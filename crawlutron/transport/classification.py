@@ -28,21 +28,21 @@ __all__ = ["CLASSIFICATION_BY_EXCEPTION", "classify_and_log", "classify_error_co
 
 
 CLASSIFICATION_BY_EXCEPTION: tuple[tuple[tuple[type[BaseException], ...], Classification], ...] = (
-    ((BrowserPoolExhaustedError,), "browser_pool_exhausted"),
+    ((BrowserPoolExhaustedError,), Classification.browser_pool_exhausted),
     # Capacity, not a page failure: the URL was never attempted, which is why it
     # stays distinct from the transport rows below and stays retryable.
-    ((CircuitBreakerOpen,), "circuit_breaker_open"),
-    ((DecompressionTooLargeError,), "payload_too_large"),
+    ((CircuitBreakerOpen,), Classification.circuit_breaker_open),
+    ((DecompressionTooLargeError,), Classification.payload_too_large),
     # The declared encoding did not decode; its ValueError base is a zlib
     # detail, so without this row a transient fault reads as terminal.
-    ((DecompressionError,), "http_error"),
-    ((httpx.TooManyRedirects,), "too_many_redirects"),
+    ((DecompressionError,), Classification.http_error),
+    ((httpx.TooManyRedirects,), Classification.too_many_redirects),
     # Name resolution never got off the host; without this row it read as
     # "connection_error" and the declared dns_error member had no producer.
-    ((socket.gaierror, socket.herror), "dns_error"),
+    ((socket.gaierror, socket.herror), Classification.dns_error),
     # The bounded resolver's own verdict: the resolve outlasted the
     # request's budget -- a resolution failure, not a navigation or connection one.
-    ((ResolverBudgetExceeded,), "dns_error"),
+    ((ResolverBudgetExceeded,), Classification.dns_error),
     (
         (
             httpx.ConnectTimeout,
@@ -61,17 +61,17 @@ CLASSIFICATION_BY_EXCEPTION: tuple[tuple[tuple[type[BaseException], ...], Classi
             TimeoutError,
             asyncio.TimeoutError,
         ),
-        "connection_error",
+        Classification.connection_error,
     ),
-    ((httpx.HTTPStatusError,), "http_status_error"),
-    ((httpx.HTTPError,), "http_error"),
+    ((httpx.HTTPStatusError,), Classification.http_status_error),
+    ((httpx.HTTPError,), Classification.http_error),
     # curl_cffi's TLS failures are classified tls_error too -- they share
     # the row below; it must precede the OSError row (SSLError's base IS OSError).
-    ((ssl.SSLError, CffiSSLError, CertificateVerifyError), "tls_error"),
-    ((ValueError,), "value_error"),
+    ((ssl.SSLError, CffiSSLError, CertificateVerifyError), Classification.tls_error),
+    ((ValueError,), Classification.value_error),
     # OSError is the base of every network fault (a degraded resolver raises bare
     # timeout/OSError); the table's closing catch-all keeps every verdict terminal.
-    ((OSError,), "connection_error"),
+    ((OSError,), Classification.connection_error),
 )
 
 
@@ -83,7 +83,7 @@ def classify_error_code(exc: BaseException) -> Classification:
     for types, classification in CLASSIFICATION_BY_EXCEPTION:
         if isinstance(exc, types):
             return classification
-    return "network_error"
+    return Classification.network_error
 
 
 def classify_and_log(

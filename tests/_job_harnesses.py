@@ -119,7 +119,9 @@ class ScriptedExecute:
             self._scripts = {canonical(url).raw: list(seq) for url, seq in scripts.items()}
         else:
             self._scripts = {r.original_url: [r] for r in results or []}
-        self._default: Classification = "rendered" if scripts is not None else "site_error"
+        self._default: Classification = (
+            Classification.rendered if scripts is not None else Classification.site_error
+        )
         self._hang = hang
         self.attempts: dict[str, int] = {}
 

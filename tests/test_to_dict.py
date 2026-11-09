@@ -12,6 +12,7 @@ from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.crawl_strategy_attempt import CrawlStrategyAttempt
 from crawlutron.models.discovered_link import DiscoveredLink
 from crawlutron.models.serialization import from_wire, to_dict
+from crawlutron.models.taxonomy import Classification
 from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 from tests._result_builders import _link, engine_result
@@ -121,7 +122,7 @@ def test_a_result_survives_the_serialization_round_trip_unchanged():
             CrawlStrategyAttempt(
                 strategy=HTTP_DECLARED_CRAWLER,
                 status="success",
-                classification="rendered",
+                classification=Classification.rendered,
                 http_status=200,
                 content_type="text/html",
                 elapsed_ms=12,

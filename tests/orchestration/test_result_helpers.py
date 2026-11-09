@@ -1,5 +1,6 @@
 """Result helpers: blocked, binary, failed and skipped engine results."""
 
+from crawlutron.models.taxonomy import Classification
 from tests._policy_factories import canonical
 from tests._result_builders import skipped_result
 
@@ -39,7 +40,7 @@ class TestFunnelDerivesAxes:
         attempt = CrawlStrategyAttempt(
             strategy="HTTP_DECLARED_CRAWLER",
             status="success",
-            classification="rendered",
+            classification=Classification.rendered,
             http_status=200,
             content_type="text/html",
             elapsed_ms=12,
@@ -88,8 +89,8 @@ class TestTerminalResultContract:
                 original_url="http://a/",
                 normalized_url=canonical("http://a/"),
                 strategy="HTTP_DECLARED_CRAWLER",
-                classification="network_error",
-                error="connection_error",
+                classification=Classification.network_error,
+                error=Classification.connection_error,
                 http_status=502,
                 final_url=canonical("http://a/final"),
                 diagnostics={"error_code": "k"},
@@ -139,11 +140,11 @@ class TestTerminalCrawlResult:
         result = terminal_crawl_result(
             url=canonical("http://x/page"),
             status="failed",
-            classification="site_error",
+            classification=Classification.site_error,
             attempts=2,
             elapsed_ms=42,
             domain="x",
-            error="network_error",
+            error=Classification.network_error,
         )
         assert result.url == canonical("http://x/page")
         assert result.status == "failed"

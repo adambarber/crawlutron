@@ -80,7 +80,7 @@ def _text(url: str | NormalizedUrl) -> str:
 
 def _absent_result(
     url: str | NormalizedUrl,
-    classification: Classification,
+    classification: str,
     *,
     derived: ResultStatus,
     normalized_text: str | NormalizedUrl | None,
@@ -93,13 +93,13 @@ def _absent_result(
         normalized_url=canonical(normalized_text) if normalized_text is not None else None,
         final_url=canonical(final_url_text) if final_url_text is not None else None,
         status=derived,
-        classification=classification,
+        classification=Classification(classification),
         selected_strategy=None,
         attempted_strategies=(
             terminal_attempt(
                 strategy=None,
                 status=derived,
-                classification=classification,
+                classification=Classification(classification),
                 elapsed_ms=0,
                 error=None,
             ),
@@ -119,7 +119,7 @@ def _absent_result(
 
 def engine_result(
     url: str | NormalizedUrl,
-    classification: Classification,
+    classification: str,
     *,
     status: ResultStatus | None = None,
     links: list[str] | None = None,
@@ -165,7 +165,7 @@ def engine_result(
 
 def skipped_result(
     url: str,
-    classification: Classification,
+    classification: str,
     *,
     strategy: CrawlStrategyName,
     error: CrawlError,
@@ -185,7 +185,7 @@ def skipped_result(
             original_url=url,
             normalized_url=canonical(normalized_url or url),
             strategy=strategy,
-            classification=classification,
+            classification=Classification(classification),
             error=error,
         )
     )
@@ -201,7 +201,7 @@ def crawl_result(url: str | NormalizedUrl, domain: str | None = None) -> CrawlRe
         attempt=terminal_attempt(
             strategy=None,
             status="success",
-            classification="rendered",
+            classification=Classification.rendered,
             elapsed_ms=0,
             error=None,
         ),

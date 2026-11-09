@@ -6,14 +6,14 @@ from crawlutron.models.classification_evidence import ClassificationEvidenceReco
 from crawlutron.models.taxonomy import Classification
 from crawlutron.safety.bounded_io import truncate_html_input
 
-# Final[Classification], not bare literals: a literal in return position widens
-# to ``str`` and hands the caller a plain string that merely spells a member.
-_BINARY_NO_TEXT: Final[Classification] = "binary_no_text"
-_RENDERED: Final[Classification] = "rendered"
+# Named Classification members, not bare literals: a literal in return position
+# widens to ``str`` and hands the caller a plain string that merely spells a member.
+_BINARY_NO_TEXT = Classification.binary_no_text
+_RENDERED = Classification.rendered
 
 CLASSIFICATION_SIGNATURES: tuple[tuple[Classification, tuple[str, ...]], ...] = (
     (
-        "login_required",
+        Classification.login_required,
         (
             "sign in to continue",
             "log in to continue",
@@ -23,7 +23,7 @@ CLASSIFICATION_SIGNATURES: tuple[tuple[Classification, tuple[str, ...]], ...] = 
         ),
     ),
     (
-        "captcha_detected",
+        Classification.captcha_detected,
         (
             "verify you are human",
             "human verification",
@@ -34,7 +34,7 @@ CLASSIFICATION_SIGNATURES: tuple[tuple[Classification, tuple[str, ...]], ...] = 
         ),
     ),
     (
-        "bot_challenge_detected",
+        Classification.bot_challenge_detected,
         (
             "just a moment",
             "attention required",
@@ -46,7 +46,7 @@ CLASSIFICATION_SIGNATURES: tuple[tuple[Classification, tuple[str, ...]], ...] = 
         ),
     ),
     (
-        "cookie_consent_required",
+        Classification.cookie_consent_required,
         (
             "this site uses cookies to",
             "by continuing you agree",
@@ -56,25 +56,28 @@ CLASSIFICATION_SIGNATURES: tuple[tuple[Classification, tuple[str, ...]], ...] = 
             "manage preferences",
         ),
     ),
-    ("javascript_required", ("javascript is required", "enable javascript to view", "requires javascript")),
     (
-        "unsupported_browser",
+        Classification.javascript_required,
+        ("javascript is required", "enable javascript to view", "requires javascript"),
+    ),
+    (
+        Classification.unsupported_browser,
         ("browser is not supported", "unsupported browser", "please update your browser"),
     ),
     (
-        "geolocation_blocked",
+        Classification.geolocation_blocked,
         ("not available in your location", "unavailable in your region", "location restricted"),
     ),
     (
-        "waf_challenge_detected",
+        Classification.waf_challenge_detected,
         ("web application firewall", "incident id", "request blocked by web application firewall"),
     ),
     (
-        "rate_limited",
+        Classification.rate_limited,
         ("too many requests", "rate limit exceeded", "rate-limited", "throttled", "quota exceeded"),
     ),
     (
-        "paywall_detected",
+        Classification.paywall_detected,
         (
             "subscription required to",
             "paywall",
@@ -86,15 +89,15 @@ CLASSIFICATION_SIGNATURES: tuple[tuple[Classification, tuple[str, ...]], ...] = 
         ),
     ),
     (
-        "access_denied",
+        Classification.access_denied,
         ("access denied", "request has been blocked", "security rules", "403 forbidden"),
     ),
     (
-        "not_found",
+        Classification.not_found,
         ("custom404", "404. the page/url requested", "404 not found", "page not found"),
     ),
-    ("site_error", ("runtime error", "server error in '/' application", "application error")),
-    ("gone", ("410 gone",)),
+    (Classification.site_error, ("runtime error", "server error in '/' application", "application error")),
+    (Classification.gone, ("410 gone",)),
 )
 
 
@@ -107,7 +110,7 @@ def classify_page(html: str | None, text: str | None, *, title: str | None = Non
 # carry Cloudflare/captcha plumbing); one hit suffices. NOTICE carries the MIT lines.
 STRONG_CLASSIFICATION_MARKERS: tuple[tuple[Classification, tuple[str, ...]], ...] = (
     (
-        "bot_challenge_detected",
+        Classification.bot_challenge_detected,
         (
             "_cf_chl_opt",
             "cf_chl_prog",
@@ -121,7 +124,7 @@ STRONG_CLASSIFICATION_MARKERS: tuple[tuple[Classification, tuple[str, ...]], ...
         ),
     ),
     (
-        "captcha_detected",
+        Classification.captcha_detected,
         (
             "g-recaptcha",
             "grecaptcha.render",
@@ -136,9 +139,9 @@ STRONG_CLASSIFICATION_MARKERS: tuple[tuple[Classification, tuple[str, ...]], ...
 # value our privacy"): a single hit must be corroborated or benign pages flip.
 SOFT_SINGLE_SIGNAL_CLASSIFICATIONS = frozenset(
     {
-        "rate_limited",
-        "cookie_consent_required",
-        "paywall_detected",
+        Classification.rate_limited,
+        Classification.cookie_consent_required,
+        Classification.paywall_detected,
     }
 )
 
@@ -152,7 +155,7 @@ def classify_page_with_evidence(
     if not (text or "").strip() and not (title or "").strip() and _html_has_no_user_visible_content(html):
         return _BINARY_NO_TEXT, [
             ClassificationEvidenceRecord(
-                classification="binary_no_text",
+                classification=_BINARY_NO_TEXT,
                 signature="empty_visible_content",
                 source="visible_text",
                 context="",

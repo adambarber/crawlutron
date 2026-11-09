@@ -8,6 +8,7 @@ import asyncio
 import pytest
 
 from crawlutron.models.crawl_task import CrawlTask
+from crawlutron.models.taxonomy import Classification
 from crawlutron.orchestration.admission_stall import AdmissionStallGuard
 from crawlutron.orchestration.recursive import admit_recursive_batch
 from crawlutron.runtime.metrics import get_metrics
@@ -258,7 +259,7 @@ async def test_pool_exhaustion_requeue_does_not_consume_a_max_pages_slot():
             return engine_result(
                 job.normalized_url,
                 "browser_pool_exhausted",
-                error="browser_pool_exhausted",
+                error=Classification.browser_pool_exhausted,
                 # Links from an eternally-exhausted URL are expanded only when its result is recorded, so the
                 # real page rides on the seed's final permanent failure, not on any re-queue.
                 discovered_links=(_link("http://a/real"),),

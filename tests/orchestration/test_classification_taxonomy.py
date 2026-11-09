@@ -344,11 +344,11 @@ class TestStatusAgreesWithClassification:
         result = terminal_crawl_result(
             url=canonical("http://example.com/"),
             status="retry_exhausted",
-            classification="navigation_timeout",
+            classification=CrawlClassification.navigation_timeout,
             attempts=2,
             elapsed_ms=10,
             domain="example.com",
-            error="navigation_timeout",
+            error=CrawlClassification.navigation_timeout,
         )
         assert result.status == status_for_classification("navigation_timeout") == "retry_exhausted"
 
@@ -377,8 +377,8 @@ class TestStatusAgreesWithClassification:
                     strategy=None,
                     # robots_disallowed's taxonomy status is "skipped", so a builder asserting "failed" for it
                     # is exactly the disagreement the guard exists to reject.
-                    classification="robots_disallowed",
-                    error="robots_disallowed",
+                    classification=CrawlClassification.robots_disallowed,
+                    error=CrawlClassification.robots_disallowed,
                 )
             )
 

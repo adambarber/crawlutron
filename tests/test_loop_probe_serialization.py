@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.models.taxonomy import Classification
 from crawlutron.storage.result_store import CrawlSpillStore
 from crawlutron.transport.content_cache import ContentCache
 from tests._fetch_doubles import FetcherDouble
@@ -103,7 +104,7 @@ class TestSpillWriteDictOffTheEventLoop:
         attempt = CrawlStrategyAttempt(
             strategy="HTTP_DECLARED_CRAWLER",
             status="success",
-            classification="rendered",
+            classification=Classification.rendered,
             http_status=200,
             content_type="text/html",
             elapsed_ms=1,

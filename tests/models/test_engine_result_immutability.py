@@ -10,6 +10,7 @@ from typing import cast
 import pytest
 
 from crawlutron.models.crawl_result import EngineCrawlResult
+from crawlutron.models.taxonomy import Classification
 from tests._result_builders import _link, engine_result
 
 
@@ -52,7 +53,7 @@ def test_constructors_accept_sequences_and_store_immutable_views():
         normalized_url=None,
         final_url=None,
         status="success",
-        classification="rendered",
+        classification=Classification.rendered,
         selected_strategy=None,
         attempted_strategies=(),
         http_status=None,
