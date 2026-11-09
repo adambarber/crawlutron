@@ -51,7 +51,7 @@ async def execute_crawl(
         try:
             NormalizedUrl(payload.url, policy=host_policy)
         except ValueError as error:
-            raise ValueError("invalid_url") from error
+            raise ValueError(str(error)) from error
     pool = get_browser_pool()
     if pool is None and _request_needs_browser(payload.policy):
         raise browser_pool_unavailable()

@@ -100,6 +100,16 @@ def origin_url(server) -> str:
     return f"http://127.0.0.1:{server.server_port}/"
 
 
+def _stub_transient_failure(monkeypatch) -> None:
+    """Stub execute_crawl to a transport-level failure: the transient shape the
+    watch must ride out (no admission verdict at all, so nothing deactivates)."""
+
+    async def _fail(payload, *, settings, shutdown_event, urls=None):
+        raise ConnectionError("the origin is down")
+
+    monkeypatch.setattr(watch_sweep, "execute_crawl", _fail)
+
+
 async def test_a_first_check_records_what_the_origin_returned_and_announces_it(
     sweeper, watch_store, etag_server, announced
 ):
@@ -204,7 +214,8 @@ async def test_a_failed_check_keeps_what_it_knew_and_announces_nothing(
 ):
     """A check that reached no verdict is a failure, not a change: the stored
     validators survive and the streak grows, but it is not announced and is not
-    deactivated (that is for a terminal robots-txt refusal, #335)."""
+    deactivated (that is for a terminal refusal, #335). The crawl is stubbed so
+    the failure is genuinely transient -- no admission verdict at all."""
     watch = register(watch_store, canonical(DEAD_ORIGIN))
     watch_store.record_check(
         watch.watch_id,
@@ -214,7 +225,7 @@ async def test_a_failed_check_keeps_what_it_knew_and_announces_nothing(
         etag='"v1"',
     )
 
-    block_private_targets(monkeypatch)
+    _stub_transient_failure(monkeypatch)
     outcomes = await sweeper.sweep_once(now=INTERVAL)
 
     assert outcomes == [CrawlClassification.unknown_error]
@@ -225,17 +236,39 @@ async def test_a_failed_check_keeps_what_it_knew_and_announces_nothing(
     assert announced == []
 
 
-async def test_a_watch_the_live_policy_no_longer_admits_fails_its_check(
+async def test_a_watch_the_live_policy_no_longer_admits_is_deactivated(
     sweeper, watch_store, etag_server, announced, monkeypatch
 ):
-    """The row holds text identity, so the check re-admits against the policy now in force."""
+    """The row holds text identity, so the check re-admits against the policy now in
+    force; a host the deployment now refuses is terminal, not a transient failure."""
     watch = register(watch_store, canonical(origin_url(etag_server)))
 
     block_private_targets(monkeypatch)
     outcomes = await sweeper.sweep_once(now=NOW)
 
+    assert outcomes == [CrawlClassification.private_network_target]
+    reloaded = watch_store.get(watch.watch_id)
+    assert reloaded.status is WatchStatus.DEACTIVATED
+    assert reloaded.last_outcome is CrawlClassification.private_network_target
+    assert announced == []
+    assert watch_store.due(NOW + INTERVAL) == []
+
+
+async def test_a_transient_check_failure_is_not_a_deactivation(sweeper, watch_store, announced, monkeypatch):
+    """A transport-level failure keeps the watch active: only an admission refusal
+    is terminal, so a dead origin stays scheduled for its next interval."""
+    watch = register(watch_store, canonical(DEAD_ORIGIN))
+
+    async def _transport_failure(payload, *, settings, shutdown_event, urls=None):
+        raise ConnectionError("the origin is down")
+
+    monkeypatch.setattr(watch_sweep, "execute_crawl", _transport_failure)
+    outcomes = await sweeper.sweep_once(now=NOW)
+
     assert outcomes == [CrawlClassification.unknown_error]
-    assert watch_store.get(watch.watch_id).consecutive_failures == 1
+    reloaded = watch_store.get(watch.watch_id)
+    assert reloaded.status is WatchStatus.ACTIVE
+    assert reloaded.consecutive_failures == 1
     assert announced == []
 
 
@@ -250,10 +283,11 @@ async def test_the_sweep_loop_passes_on_the_injected_clock_and_stops_on_the_even
     watch_store, announced, monkeypatch
 ):
     """The loop ends when the deployment is told to, not when a timer happens to expire.
-    The watch fails transiently (not a terminal robots refusal) so the streak drives
+    The watch fails transiently (not a terminal refusal) so the streak drives
     the injected clock to the stop event (#335)."""
     watch = register(watch_store, canonical(DEAD_ORIGIN))
-    block_private_targets(monkeypatch)
+
+    _stub_transient_failure(monkeypatch)
     stop = asyncio.Event()
 
     def clock() -> float:
@@ -308,8 +342,9 @@ async def test_a_pass_that_raises_does_not_end_the_sweep(watch_store, monkeypatc
 
     assert len(attempts) == 3
     # The per-watch isolation rescheduled and flagged the raising watch rather than
-    # leaving it due forever or ending the registry.
-    assert watch_store.get(watch_store.list_watches()[0].watch_id).consecutive_failures == 3
+    # leaving it due forever; a transient raise is not a refusal, so it stays active.
+    reloaded = watch_store.get(watch_store.list_watches()[0].watch_id)
+    assert (reloaded.consecutive_failures, reloaded.status) == (3, WatchStatus.ACTIVE)
 
 
 async def test_a_raising_watch_does_not_starve_a_co_scheduled_watch(sweeper, watch_store, monkeypatch):
@@ -353,8 +388,7 @@ async def test_a_revoked_owner_watch_is_deactivated_by_the_sweep(watch_store, tm
     # The anonymous watch, by contrast, has no key to revoke and keeps checking.
     anonymous = register(watch_store, canonical(DEAD_ORIGIN))
     keys.revoke_key(record.key_id)
-    block_private_targets(monkeypatch)
-
+    _stub_transient_failure(monkeypatch)
     sweeper = WatchSweeper(
         watch_store,
         host_policy=UNRESTRICTED_HOST_POLICY,

@@ -111,45 +111,68 @@ class WatchSweeper:
         # skips them, so two sweeps never double-fire a webhook.
         due = await self._store.aclaim_due(now, self._claim_token, claim_seconds=_CLAIM_SECONDS)
         for watch in due:
-            revoked = (
-                self._key_store is not None
-                and watch.owner
-                and not await self._key_store.aexists_key(watch.owner)
-            )
-            if revoked:
-                # A revoked owner's watch must not issue checks under a dead
-                # identity: deactivate it, terminal, and move on.
-                logger.warning(
-                    "watch_owner_revoked_deactivated",
-                    extra={"watch_id": watch.watch_id, "owner": watch.owner},
-                )
-                await self._store.adeactivate(
-                    watch.watch_id, now=now, next_check_at=now + watch.interval_seconds
-                )
-                outcomes.append(CrawlClassification.site_error)
-                continue
-            try:
-                outcome = await self._check(watch, now=now)
-            except Exception:
-                # One watch that raises must not end the pass nor starve its
-                # co-scheduled watches: record the failure and reschedule anyway.
-                logger.exception(
-                    "watch_check_failed",
-                    extra={"watch_id": watch.watch_id, "url": watch.redacted_url()},
-                )
-                try:
-                    await self._store.arecord_check(
-                        watch.watch_id,
-                        outcome=CrawlClassification.unknown_error,
-                        now=now,
-                        next_check_at=now + watch.interval_seconds,
-                    )
-                except Exception:
-                    logger.exception("watch_check_record_failed", extra={"watch_id": watch.watch_id})
-                outcomes.append(CrawlClassification.unknown_error)
-            else:
-                outcomes.append(outcome)
+            outcomes.append(await self._one_watch(watch, now=now))
         return outcomes
+
+    async def _one_watch(self, watch: WatchState, *, now: float) -> CrawlClassification:
+        """One due watch's conclusion, isolated: a raising watch neither ends the
+        pass nor starves the watches sorted after it in the due list.
+        """
+        revoked = (
+            self._key_store is not None and watch.owner and not await self._key_store.aexists_key(watch.owner)
+        )
+        if revoked:
+            # A revoked owner's watch must not issue checks under a dead
+            # identity: deactivate it, terminal, and move on.
+            logger.warning(
+                "watch_owner_revoked_deactivated",
+                extra={"watch_id": watch.watch_id, "owner": watch.owner},
+            )
+            await self._store.adeactivate(watch.watch_id, now=now, next_check_at=now + watch.interval_seconds)
+            return CrawlClassification.site_error
+        try:
+            outcome = await self._check(watch, now=now)
+        except ValueError as error:
+            return await self._deactivate_refused(watch, error, now=now)
+        except Exception:
+            # One watch that raises must not end the pass nor starve its
+            # co-scheduled watches: record the failure and reschedule anyway.
+            logger.exception(
+                "watch_check_failed",
+                extra={"watch_id": watch.watch_id, "url": watch.redacted_url()},
+            )
+            try:
+                await self._store.arecord_check(
+                    watch.watch_id,
+                    outcome=CrawlClassification.unknown_error,
+                    now=now,
+                    next_check_at=now + watch.interval_seconds,
+                )
+            except Exception:
+                logger.exception("watch_check_record_failed", extra={"watch_id": watch.watch_id})
+            return CrawlClassification.unknown_error
+        return outcome
+
+    async def _deactivate_refused(
+        self, watch: WatchState, error: ValueError, *, now: float
+    ) -> CrawlClassification:
+        """A watch the live policy no longer admits is terminal: the deployment has
+        permanently refused this URL's host, so re-admitting every interval burns a
+        full admit cycle for the same verdict. Same lifecycle as a revoked owner:
+        deactivate with the reason recorded, matching the robots-refusal shape.
+        """
+        reason = CrawlClassification(str(error))
+        logger.warning(
+            "watch_admission_refused_deactivated",
+            extra={"watch_id": watch.watch_id, "url": watch.redacted_url(), "reason": reason.value},
+        )
+        await self._store.adeactivate(
+            watch.watch_id,
+            now=now,
+            next_check_at=now + watch.interval_seconds,
+            reason=reason,
+        )
+        return reason
 
     async def _owner_identity(self, owner: str) -> CallerIdentity:
         """The owner as a caller identity, so a check is metered against the owner's
