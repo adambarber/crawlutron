@@ -7,63 +7,39 @@ import asyncio
 from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
 
 
-class TestCallerConcurrencyTrackerEviction:
-    """#511: the per-caller lock dict must not leak; locks for idle callers
-    are evicted on release."""
+class TestCallerConcurrencyTrackerLocks:
+    """#665: per-caller slot locks persist for the tracker's lifetime.
 
-    def test_evicts_lock_on_release_to_zero(self):
+    The admit path serializes count->insert through the caller's lock; a
+    release must never evict it, or a concurrent admit that already fetched
+    the lock ends up serialized against a DIFFERENT lock than the next admit.
+    """
+
+    def test_lock_identity_is_stable_across_release_to_zero(self):
         tracker = CallerConcurrencyTracker()
         caller = "test-caller"
-        # Real usage: slot_lock() called first (admit), then reserve()
-        tracker.slot_lock(caller)
-        tracker.reserve(caller)
-        assert tracker.has_slot_lock(caller)
-        tracker.release(caller)
-        # #511: a caller at zero with an idle lock must not leave the lock behind
-        assert not tracker.has_slot_lock(caller)
-
-    def test_keeps_lock_while_in_flight(self):
-        tracker = CallerConcurrencyTracker()
-        caller = "test-caller"
-        tracker.slot_lock(caller)
-        tracker.reserve(caller)
         lock = tracker.slot_lock(caller)
-        assert not lock.locked()
-        # The lock stays while count > 0
-        assert tracker.has_slot_lock(caller)
+        tracker.reserve(caller)
         tracker.release(caller)
-        assert not tracker.has_slot_lock(caller)
+        assert tracker.slot_lock(caller) is lock
 
-    def test_keeps_lock_when_still_in_flight(self):
-        """A second reserve before release keeps the lock."""
+    def test_lock_persists_while_in_flight(self):
         tracker = CallerConcurrencyTracker()
         caller = "test-caller"
         tracker.slot_lock(caller)
         tracker.reserve(caller)
         tracker.reserve(caller)
         tracker.release(caller)  # count drops to 1
-        assert tracker.has_slot_lock(caller)
         assert tracker.sync_in_flight(caller) == 1
+        assert tracker.has_slot_lock(caller)
 
-    def test_evicts_only_idle_lock(self):
-        """An actively held lock is NOT evicted on release; it evicts when
-        release runs AFTER the lock is released (real usage pattern)."""
+    def test_release_to_zero_keeps_lock_registered(self):
         tracker = CallerConcurrencyTracker()
         caller = "test-caller"
         tracker.slot_lock(caller)
         tracker.reserve(caller)
-        lock = tracker.slot_lock(caller)
-
-        # Real usage: hold the lock for admit, then release it, then tracker.release()
-        async def admit_then_release():
-            async with lock:
-                pass  # admit window
-            # Lock is now released; tracker.release() runs outside the lock
-            tracker.release(caller)
-            # Lock is idle -> eviction must happen
-            assert not tracker.has_slot_lock(caller)
-
-        asyncio.run(admit_then_release())
+        tracker.release(caller)
+        assert tracker.has_slot_lock(caller)
 
 
 class TestCallerConcurrencyTrackerRace:
@@ -75,3 +51,22 @@ class TestCallerConcurrencyTrackerRace:
         lock1 = tracker.slot_lock(caller)
         lock2 = tracker.slot_lock(caller)
         assert lock1 is lock2
+
+    def test_eviction_races_concurrent_admit_window(self):
+        """The #665 interleaving: admit B fetched the lock but has not entered
+        it yet; caller A's release-to-zero evicts it; admit C then mints a
+        second lock and admits concurrently with B -- the budget undercounts."""
+
+        async def interleave() -> bool:
+            tracker = CallerConcurrencyTracker()
+            caller = "test-caller"
+            tracker.slot_lock(caller)
+            tracker.reserve(caller)
+            lock_b = tracker.slot_lock(caller)  # B's admit path fetched the lock
+            # B is preempted before entering. A completes: release to zero.
+            tracker.release(caller)
+            async with lock_b:  # B enters the (unregistered) lock: its admit window
+                lock_c = tracker.slot_lock(caller)  # C arrives
+                return lock_c is lock_b
+
+        assert asyncio.run(interleave())
