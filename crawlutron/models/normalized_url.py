@@ -11,6 +11,7 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 from crawlutron.models.host_canonical import idna_host
 from crawlutron.models.host_policy import HostPolicy, host_egress_reason, host_policy_reason
 from crawlutron.models.registrable_domain import registrable_domain
+from crawlutron.runtime.resource_lifecycle import record_mapped_value_error
 
 #: Tracking/ad/social-feed infrastructure: recorded as links, never enqueued; apex
 #: or any subdomain. Dotted-suffix tuple so ``endswith`` is one C-level call.
@@ -110,6 +111,15 @@ def _canonical_parts(url: str, *, policy: HostPolicy) -> tuple[str, str, str, st
         raise ValueError("unsupported_scheme")
     if not parsed.hostname:
         raise ValueError("invalid_url")
+    # Whitespace in the authority is not a host: urlparse drops control
+    # characters and tolerates spaces, so the check rides the raw text.
+    start = url.lower().find(f"{parsed.scheme}://")
+    if start >= 0:
+        rest = url[start + len(parsed.scheme) + 3 :]
+        cuts = [i for i in (rest.find(c) for c in "/?#") if i >= 0]
+        authority = rest[: min(cuts)] if cuts else rest
+        if any(ch.isspace() for ch in authority):
+            raise ValueError("invalid_url")
     if parsed.username or parsed.password:
         # Userinfo is not a crawlable identity: credentials belong in
         # policy.credentials (origin-scoped), never in the URL itself.
@@ -167,7 +177,13 @@ class NormalizedUrl:
             # "invalid_url" here, so urllib or a future refactor can never
             # leak its own message into the wire vocabulary. A non-ValueError
             # programming error still raises -- admission never swallows it.
-            raise ValueError(_refusal_literal(str(error))) from error
+            # A non-ValueError programming error still raises -- admission
+            # never swallows it. The mapping itself is recorded (bounded,
+            # structured fields only), so it is never a silent 422.
+            reason = _refusal_literal(str(error))
+            if reason != str(error):
+                record_mapped_value_error(str(error))
+            raise ValueError(reason) from error
         self._raw = canonical
         self._scheme = scheme
         self._host = host
