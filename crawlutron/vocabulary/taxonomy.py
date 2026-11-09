@@ -56,6 +56,14 @@ class CrawlClassification(StrEnum):
     invalid_url = "invalid_url"
     unsupported_scheme = "unsupported_scheme"
     private_network_target = "private_network_target"
+    # Live host-policy refusals: the deployment denied (or de-allowed) a host
+    # while a watch still pointed at it. Terminal for a watch, so the sweep can
+    # record the exact reason instead of a generic error (#674).
+    host_denied = "host_denied"
+    host_not_allowed = "host_not_allowed"
+    # The constructor refuses a URL carrying its own credentials (userinfo is
+    # not a crawlable identity); a watch holding one is refused the same way.
+    userinfo_refused = "userinfo_refused"
     unknown_error = "unknown_error"
     not_modified = "not_modified"
 
@@ -159,6 +167,10 @@ CLASSIFICATION_STATUS_BY_LABEL: dict[str, ResultStatus] = {
     "invalid_url": "disallowed",
     "unsupported_scheme": "disallowed",
     "private_network_target": "disallowed",
+    # Live host-policy refusals (#674): the same caller-visible refusal family.
+    "host_denied": "disallowed",
+    "host_not_allowed": "disallowed",
+    "userinfo_refused": "disallowed",
     # The browser retry loop spent its attempts: the page may be renderable
     # later -- the verdict describes the attempt, not the page.
     "navigation_timeout": "retry_exhausted",
@@ -218,6 +230,9 @@ NON_TRANSIENT_CLASSIFICATIONS: frozenset[str] = (
         CrawlClassification.invalid_url,
         CrawlClassification.unsupported_scheme,
         CrawlClassification.private_network_target,
+        CrawlClassification.host_denied,
+        CrawlClassification.host_not_allowed,
+        CrawlClassification.userinfo_refused,
     )
     # Not failures at all: a page that rendered, and a page the caller's own
     # validators proved fresh.

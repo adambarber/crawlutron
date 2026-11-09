@@ -5,15 +5,26 @@ the store-offload guard need the same app.
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from crawlutron.api import watch_sweep
 from crawlutron.api.dependencies import get_settings, get_watch_store
 from crawlutron.api.watch_router import router as watch_router
 from crawlutron.api.watch_sweep import WatchSweeper
 from crawlutron.config.settings import CrawlerSettings
+from crawlutron.models import watch_state
+from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.models.webhook_target import WebhookTarget
 from tests._app_factory import service_app
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
+
+WATCH_INTERVAL = 3600
+WATCH_WEBHOOK = "https://watcher.example.com/hook"
+# The default registration target; passing target=None means a poll-only watch.
+DEFAULT_TARGET = WebhookTarget.admit(WATCH_WEBHOOK, host_policy=UNRESTRICTED_HOST_POLICY)
 
 
 def loopback_url(server) -> str:
@@ -28,6 +39,43 @@ def default_sweeper(watch_store) -> WatchSweeper:
         host_policy=UNRESTRICTED_HOST_POLICY,
         settings=CrawlerSettings.from_mapping(),
     )
+
+
+def register_watch(
+    watch_store,
+    url: NormalizedUrl,
+    *,
+    at: float = 0.0,
+    target: WebhookTarget | None = DEFAULT_TARGET,
+    owner: str = "",
+) -> watch_state.WatchState:
+    """One watch row at the suite's standard interval, through the real store."""
+    return watch_store.create(url, webhook_url=target, interval_seconds=WATCH_INTERVAL, now=at, owner=owner)
+
+
+def stub_transient_failure(monkeypatch) -> None:
+    """Stub execute_crawl to a transport-level failure: the transient shape the
+    watch must ride out (no admission verdict at all, so nothing deactivates)."""
+
+    async def _fail(payload, *, settings, shutdown_event, urls=None):
+        raise ConnectionError("the origin is down")
+
+    monkeypatch.setattr(watch_sweep, "execute_crawl", _fail)
+
+
+def capture_announcements(monkeypatch):
+    """The announcements a pass handed the delivery funnel, in order; the spawn
+    seam is stubbed so tests observe the completed delivery."""
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def _capture(target: object, payload: dict[str, object]) -> None:
+        calls.append((str(target), payload))
+
+    def _spawn(target: object, payload: dict[str, object]):
+        return asyncio.create_task(_capture(target, payload))
+
+    monkeypatch.setattr(watch_sweep, "start_webhook_delivery", _spawn)
+    return calls
 
 
 def watch_client(store) -> AsyncClient:
@@ -53,11 +101,17 @@ __all__ = [
     "AsyncClient",
     "CrawlerSettings",
     "FastAPI",
+    "WATCH_INTERVAL",
+    "WATCH_WEBHOOK",
+    "DEFAULT_TARGET",
+    "capture_announcements",
     "default_sweeper",
     "get_settings",
     "get_watch_store",
     "loopback_url",
+    "register_watch",
     "service_app",
+    "stub_transient_failure",
     "watch_client",
     "watch_router",
 ]
