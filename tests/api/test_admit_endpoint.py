@@ -275,6 +275,7 @@ class TestStructuralRefusals:
             ("http://example.com:abc/", "invalid_port"),
             ("http://example.com:99999/", "invalid_port"),
             ("http://" + "a" * 64 + ".example/", "invalid_idn_host"),
+            ("http://[::1", "invalid_url"),
         ],
     )
     async def test_structural_refusal_is_wire_data(self, admit_settings, url, reason):
@@ -335,16 +336,29 @@ def _producer_files(normalized_url_path: Path) -> list[Path]:
     return sorted(seeds)
 
 
-def _producers_missing_rows(endpoint_path: Path, known: frozenset[str]) -> list[str]:
-    """Raisable producer reasons with no table row, as file:line findings."""
-    normalized_url_path = endpoint_path.parents[1] / "models" / "normalized_url.py"
+def _producer_set(normalized_url_path: Path) -> list[tuple[Path, Callable[[Path], list[tuple[int, str]]]]]:
+    """(file, collector) for the derived producer set plus the verdict functions."""
     producers: list[tuple[Path, Callable[[Path], list[tuple[int, str]]]]] = [
         (path, _raise_reasons) for path in _producer_files(normalized_url_path)
     ]
     producers.append((normalized_url_path.parent / "host_policy.py", _reason_return_literals))
+    return producers
+
+
+def _raisable_producer_reasons(normalized_url_path: Path) -> set[str]:
+    """Every refusal literal the derived producer set can raise or return."""
+    reasons: set[str] = set()
+    for path, collect in _producer_set(normalized_url_path):
+        reasons.update(reason for _, reason in collect(path))
+    return reasons
+
+
+def _producers_missing_rows(endpoint_path: Path, known: frozenset[str]) -> list[str]:
+    """Raisable producer reasons with no table row, as file:line findings."""
+    normalized_url_path = endpoint_path.parents[1] / "models" / "normalized_url.py"
     return [
         f"{path}:{lineno}: {reason!r} is raisable but has no _REASON_TABLE row"
-        for path, collect in producers
+        for path, collect in _producer_set(normalized_url_path)
         for lineno, reason in collect(path)
         if reason not in known
     ]
@@ -356,14 +370,16 @@ class TestProducerVocabularyLoop:
     Derives the raisable vocabulary from the live raise/return sites by AST, so a
     new producer refusal without a _REASON_TABLE row reds here naming file+line.
 
-    Boundary (the derivation's known blind shapes): only ValueError raise sites
-    with a LITERAL first arg are seen -- non-literal messages (urllib port parse)
-    must be structurally wrapped into a literal refusal at the producer, a
-    variable-held reason (``raise ValueError(reason)``) is visible only if its
-    assigned literals flow through a scanned host_*_reason return, f-string/
-    concatenation composition is invisible, and the producer set is derived
-    (normalized_url + its models imports), so an UNIMPORTED raising file is
-    unseen -- importing producers is what joins the scan.
+    Boundary: only ValueError raise sites with a LITERAL first arg are seen.
+    Non-literal messages (urllib's port parse, "Invalid IPv6 URL") are NOT a
+    live blind shape anymore -- the constructor boundary in NormalizedUrl.__init__
+    maps any foreign ValueError explicitly to a named refusal -- but the wrap is
+    the closure, not the scan: the derivation still cannot SEE a non-literal
+    raise, it only cannot LEAK one. The producer closure is ONE hop deep
+    (normalized_url + its models imports); a two-hop chain raising its own
+    refusals is unscanned. host_policy verdicts are found by NAMING CONVENTION
+    (``host_*_reason`` return literals); a variable-form raise outside that
+    pattern goes blind silently.
     """
 
     def test_every_producer_reason_has_a_table_row(self):
@@ -371,3 +387,50 @@ class TestProducerVocabularyLoop:
 
         missing = _producers_missing_rows(Path(endpoint_module.__file__), endpoint_module.known_reasons())
         assert missing == [], "producer->table loop broken:\n" + "\n".join(missing)
+
+    def test_the_boundary_refusal_set_matches_the_constructor_vocabulary(self):
+        """One vocabulary in both directions: every raisable constructor literal is
+        in the boundary pass-through set (else it is remapped to invalid_url, and
+        its table row is dead), and every set entry is table-mapped (else the
+        boundary passes a value the wire cannot name)."""
+        import crawlutron.api.admit_endpoint as endpoint_module
+        from crawlutron.models.normalized_url import refusal_literals
+
+        endpoint_path = Path(endpoint_module.__file__)
+        models_dir = endpoint_path.parents[1] / "models"
+        raisable = _raisable_producer_reasons(models_dir / "normalized_url.py")
+        boundary_gaps = raisable - refusal_literals()
+        table_gaps = refusal_literals() - set(endpoint_module.known_reasons())
+        assert not boundary_gaps, f"constructor raisables outside the boundary set: {sorted(boundary_gaps)}"
+        assert not table_gaps, f"boundary set entries with no table row: {sorted(table_gaps)}"
+
+
+class TestHostileInputSweep:
+    """No raise escapes admit_url: every hostile shape is wire data or a 401/422."""
+
+    HOSTILE_URLS = (
+        "http://[::1",  # malformed bracket: urllib's non-literal ValueError
+        "http://[::1]:99999/",  # bracket + out-of-range port
+        "http://example.com:/",  # empty port
+        "http:example.com",  # scheme-relative, no authority
+        "//example.com",  # network-path reference, no scheme
+        "http://example.com/#a#b",  # fragment tricks
+        "http://exa%zzmple.com/",  # invalid percent-escape in host
+        "http://example.com/%zz",  # invalid percent-escape in path
+        "http://[fe80::1%25eth0]/",  # IPv6 with zone id
+        "http://user@/path",  # userinfo, empty host
+        "http://:@example.com/",  # empty userinfo pair
+        "http://.example.com/",  # dot host
+        "http://example.com..../",  # trailing dots
+        "http://example.com:0/",  # port zero
+        "https://[v7.x]/",  # IPvFuture
+    )
+
+    @pytest.mark.parametrize("url", HOSTILE_URLS)
+    async def test_no_raise_escapes_the_door(self, admit_settings, url):
+        async with serve_admit(_admit_app(admit_settings)) as client:
+            response = await client.post("/v1/admit", json={"url": url})
+        assert response.status_code in {200, 401, 422}, response.text
+        body = json.loads(response.text)
+        if response.status_code == 200:
+            assert body["classification"] is not None or body["admitted"] is True
