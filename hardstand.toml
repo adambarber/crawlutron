@@ -116,7 +116,14 @@ name = "typecheck"
 kind = "exec"
 env = ["PATH"]
 timeout = 60s
-run = ".venv/bin/make typecheck"
+run = ".venv/bin/python -m mypy"
+
+[[actions]]
+name = "mypy"
+kind = "exec"
+env = ["PATH"]
+timeout = 60s
+run = ".venv/bin/python -m mypy"
 
 [[actions]]
 name = "basedpyright"
