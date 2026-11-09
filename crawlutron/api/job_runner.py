@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import replace
 
@@ -63,6 +64,14 @@ BATCH_SIZE = 8
 ExecuteCrawl = Callable[..., Awaitable[ProducerEnvelope]]
 
 
+_URL_IN_TEXT = re.compile(r"https?://[^\s'\"<>]+")
+
+
+def _scrubbed(error: str) -> str:
+    """Every URL embedded in the text through the redaction chokepoint."""
+    return _URL_IN_TEXT.sub(lambda m: redact_url(m.group(0)), error)
+
+
 _execute_crawl: ExecuteCrawl = _real_execute_crawl
 
 
@@ -73,14 +82,19 @@ def install_execute_crawl(fn: ExecuteCrawl) -> None:
 
 
 async def arecord_terminal_failure(job_store: JobStore, job_id: str, error: str) -> bool:
-    """Flip a RUNNING job to FAILED with ``error`` in the same CAS write; True iff
-    it landed. A job past RUNNING is left as-is and reports False: no partial
-    stamp, so a lost CAS cannot leave the error on a non-FAILED row.
+    """Flip a RUNNING job to FAILED with a scrubbed ``error`` in the same CAS
+    write; True iff it landed. A job past RUNNING is left as-is and reports
+    False: no partial stamp, so a lost CAS cannot leave the error on a
+    non-FAILED row. The scrub goes through the #599 redaction chokepoint:
+    str(exc) embeds REDIRECT-TARGET URLs whose userinfo and secret queries
+    must never reach the durable error field the status wire reads (#666).
     """
     job = await job_store.aload(job_id)
     if job is None or job.status is not JobStatus.RUNNING:
         return False
-    return await job_store.aset_status(job_id, JobStatus.FAILED, expected=JobStatus.RUNNING, error=error)
+    return await job_store.aset_status(
+        job_id, JobStatus.FAILED, expected=JobStatus.RUNNING, error=_scrubbed(error)
+    )
 
 
 def reset_execute_crawl() -> None:

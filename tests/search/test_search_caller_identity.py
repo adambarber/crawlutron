@@ -18,6 +18,7 @@ from crawlutron.config.settings import CrawlerSettings
 from crawlutron.storage.caller_key_store import CallerKeyStore
 from tests._async_harnesses import expect_quota_refused, issue_key, serve
 from tests._policy_factories import job_store as make_job_store
+from tests._quota_harness import grant_test_admin_token
 
 
 @contextlib.asynccontextmanager
@@ -34,7 +35,7 @@ async def _search_client(
     app.include_router(identity_router)
     app.include_router(keys_router)
     app.state.caller_key_store = keys
-    app.state.key_admin_token = "test-admin-token"
+    grant_test_admin_token(app)
     # ONE per-caller register, named like the service's: the search door counts
     # against the same in-flight ceiling as the caller's sync crawls.
     app.state.concurrency_tracker = CallerConcurrencyTracker()

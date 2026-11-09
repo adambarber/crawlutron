@@ -8,6 +8,7 @@ from __future__ import annotations
 from starlette.requests import Request
 
 from crawlutron.api.key_throttle import KeyVerifyThrottle
+from crawlutron.config.settings import CrawlerSettings
 from crawlutron.storage.caller_key_store import CallerKeyStore
 from tests._async_harnesses import issue_key
 from tests.factories.client import isolation_client, post_crawl, quota_client
@@ -95,7 +96,10 @@ async def test_non_ascii_key_on_keys_door_is_401(tmp_path):
         # A real gateway decodes a latin-1 header byte to a non-ASCII str.
         "headers": [(b"x-api-key", "cafééé".encode("latin-1"))],
         "app": SimpleNamespace(
-            state=SimpleNamespace(key_admin_token="test-admin-token", caller_key_store=keys)
+            state=SimpleNamespace(
+                crawler_settings=CrawlerSettings(key_admin_token="test-admin-token"),
+                caller_key_store=keys,
+            )
         ),
     }
     with pytest.raises(HTTPException) as raised:
@@ -189,7 +193,7 @@ async def test_keys_door_is_sealed_when_no_operator_token_is_configured(tmp_path
     monkeypatch.delenv("CRAWLUTRON_KEY_ADMIN_TOKEN", raising=False)
     store, results, keys = stores(tmp_path)
     app = isolation_app(store, results, keys)
-    app.state.key_admin_token = ""
+    app.state.crawler_settings = CrawlerSettings.from_mapping({"CRAWLUTRON_KEY_ADMIN_TOKEN": ""})
     async with serve(app) as client:
         issued = keys.issue_key("tenant-a")
 
@@ -205,41 +209,72 @@ def _request_with(headers: dict[str, str]) -> Request:
     return Request(scope={"type": "http", "headers": [(k.encode(), v.encode()) for k, v in headers.items()]})
 
 
-def test_operator_token_fallback_reads_settings_home(monkeypatch):
-    """#142: with no app state, the operator token resolves through
-    CrawlerSettings (the declared home), not a raw os.environ get."""
+def test_operator_token_rotation_is_honored_not_memoized():
+    """#666: the operator token has ONE home, the settings object.
+
+    The old lru_cache'd env fallback kept authenticating the rotated-away
+    token (and refusing the new one) for the process lifetime -- a rotation
+    was not a rotation. The red: after re-setting the env, the old token still
+    authenticated and the new one was refused.
+    """
+    from types import SimpleNamespace
+
+    import crawlutron.api.caller_auth as caller_auth
+
+    settings = SimpleNamespace(key_admin_token="tok-old")
+    scope = {
+        "type": "http",
+        "headers": [],
+        "app": SimpleNamespace(state=SimpleNamespace(crawler_settings=settings)),
+    }
+
+    def request_with(token: str) -> Request:
+        scope["headers"] = [(b"x-api-key", token.encode())]
+        return Request(scope)
+
+    assert caller_auth.is_operator(request_with("tok-old")) is True
+
+    settings.key_admin_token = "tok-new"
+    assert caller_auth.is_operator(request_with("tok-old")) is False
+    assert caller_auth.is_operator(request_with("tok-new")) is True
+
+
+def test_with_no_settings_home_the_door_is_sealed(monkeypatch):
+    """#666: the token's ONE home is the settings object; with no settings on
+    app.state the door is sealed (fail closed), whatever the env says -- an
+    env-var fallback was the memoized second home that broke rotation."""
 
     import crawlutron.api.caller_auth as caller_auth
 
     monkeypatch.setenv("CRAWLUTRON_KEY_ADMIN_TOKEN", "tok-from-env")
-
-    # State carries no token and no settings: the fallback lands on the funnel.
-    presenting = {"x-api-key": "tok-from-env"}
-    request = _request_with(presenting)
-    assert caller_auth.is_operator(request) is True
-
-    request = _request_with({})
+    request = _request_with({"x-api-key": "tok-from-env"})
     assert caller_auth.is_operator(request) is False
 
 
-def test_default_admin_token_parses_the_env_once(monkeypatch):
-    """#636: the env-default arm is memoized -- two fallback funnels, one from_mapping().
-
-    Without the memo every anonymous request re-parses the whole env.
+def test_the_settings_home_is_read_not_rederived(monkeypatch):
+    """#636 successor: the one home is the state's settings object, read per
+    request with no env parse -- rotation lands on the next request, and the
+    operator door never re-derives the whole settings object to answer.
     """
+    from types import SimpleNamespace
 
     import crawlutron.api.caller_auth as caller_auth
+    from crawlutron.config.settings import CrawlerSettings
 
-    monkeypatch.setenv("CRAWLUTRON_KEY_ADMIN_TOKEN", "tok-fallback")
     calls = []
-    real_from_mapping = caller_auth.CrawlerSettings.from_mapping
+    real_from_mapping = CrawlerSettings.from_mapping
 
     def counting_from_mapping(*args, **kwargs):
         calls.append(1)
         return real_from_mapping(*args, **kwargs)
 
-    monkeypatch.setattr(caller_auth.CrawlerSettings, "from_mapping", staticmethod(counting_from_mapping))
-    # No finally-clear needed: the registry reset (conftest) drops the memo per test.
-    assert caller_auth.is_operator(_request_with({"x-api-key": "tok-fallback"})) is True
-    assert caller_auth.is_operator(_request_with({"x-api-key": "tok-fallback"})) is True
-    assert len(calls) == 1, f"the fallback parsed the env {len(calls)} times, not once"
+    monkeypatch.setattr(CrawlerSettings, "from_mapping", staticmethod(counting_from_mapping))
+    settings = SimpleNamespace(key_admin_token="tok-settings")
+    scope = {
+        "type": "http",
+        "headers": [(b"x-api-key", b"tok-settings")],
+        "app": SimpleNamespace(state=SimpleNamespace(crawler_settings=settings)),
+    }
+    assert caller_auth.is_operator(Request(scope)) is True
+    assert caller_auth.is_operator(Request(scope)) is True
+    assert calls == [], "the door re-derived settings to answer a request"

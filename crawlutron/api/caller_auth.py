@@ -10,7 +10,6 @@ import secrets
 from collections.abc import AsyncGenerator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from functools import lru_cache
 from typing import TYPE_CHECKING, NoReturn, TypedDict
 
 from fastapi import Request
@@ -18,12 +17,10 @@ from fastapi import Request
 from crawlutron.admission.policy import DEFAULT_MAX_PAGES
 from crawlutron.api import key_throttle
 from crawlutron.api.exceptions import http_error
-from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.caller_key import CallerKey
 from crawlutron.models.error_response import ErrorResponse
 from crawlutron.models.request_profile_record import RequestProfileRecord
-from crawlutron.runtime import process_state
 from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE
 from crawlutron.transport.request_profile import cookie_namespace_for
 
@@ -115,38 +112,15 @@ def quota_denials() -> dict[int | str, dict[str, object]]:
 
 
 def key_admin_token(request: Request) -> str:
-    """The configured operator token, or '' when unset (via the settings home)."""
+    """The configured operator token, or '' when unset -- ONE home: the settings
+    object stashed on app.state (#666). No env fallback, no memo: a memoized
+    second home authenticated a rotated-away token for the process lifetime.
+    """
     app = request.scope.get("app")
     state = getattr(app, "state", None) if app is not None else None
-    if state is not None:
-        token = getattr(state, "key_admin_token", None)
-        if isinstance(token, str) and token:
-            return token
-        settings = getattr(state, "crawler_settings", None)
-        if settings is not None:
-            token = getattr(settings, "key_admin_token", None)
-            if isinstance(token, str) and token:
-                return token
-    return _default_admin_token()
-
-
-@lru_cache(maxsize=1)
-def _default_admin_token() -> str:
-    """The env-default token, memoized: from_mapping() parses the whole env."""
-    return CrawlerSettings.from_mapping().key_admin_token
-
-
-def _reset() -> None:
-    """Drop the memoized env-default token (registry route, conftest)."""
-    _default_admin_token.cache_clear()
-
-
-def _has() -> bool:
-    """Whether an env-default token is memoized right now."""
-    return _default_admin_token.cache_info().currsize > 0
-
-
-process_state.register(__name__, _reset, _has)
+    settings = getattr(state, "crawler_settings", None) if state is not None else None
+    token = getattr(settings, "key_admin_token", None)
+    return token if isinstance(token, str) else ""
 
 
 def _constant_time_eq(secret: str, token: str) -> bool:

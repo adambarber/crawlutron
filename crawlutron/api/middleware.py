@@ -48,7 +48,7 @@ async def _drain_declared_body(original_receive: Receive, *, max_bytes: int) -> 
     Connection: close aborts the remainder.
     """
     drained = 0
-    while drained <= max_bytes:
+    while drained < max_bytes:
         message = await original_receive()
         if not message.get("more_body", False):
             break
@@ -93,14 +93,18 @@ async def _collect_declared_body(original_receive: Receive, *, declared: int) ->
     return buffered
 
 
-def _replaying_receive(buffered: list[Message], original_receive: Receive) -> Receive:
-    """Serve the buffered declared body, then pass through to the live stream."""
+def _replaying_receive(buffered: list[Message], original_receive: Receive, *, max_bytes: int) -> Receive:
+    """Serve the buffered declared body, then pass through to the capped stream:
+    the fall-through stays under the cap, or a client that declared small and
+    streams big hands downstream readers an uncapped firehose (#666)."""
     replay = iter(buffered)
+    declared = sum(len(message.get("body", b"") or b"") for message in buffered)
+    capped = _capped_receive_for(original_receive, max_bytes=max_bytes - declared, truncated=[False])
 
     async def receive() -> Message:
         for message in replay:
             return message
-        return await original_receive()
+        return await capped()
 
     return receive
 
@@ -155,7 +159,7 @@ async def limit_request_body(request: Request, call_next, *, max_bytes: int = MA
         buffered = await _collect_declared_body(original_receive, declared=declared)
         if buffered is None:
             return _error_413(max_bytes)
-        request._receive = _replaying_receive(buffered, original_receive)
+        request._receive = _replaying_receive(buffered, original_receive, max_bytes=max_bytes)
         return await call_next(request)
 
     truncating: list[bool] = [False]

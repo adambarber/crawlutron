@@ -15,7 +15,7 @@ from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.json_value import JsonValue
 from crawlutron.storage import caller_key_store, job_store, result_store
 from tests._async_harnesses import serve
-from tests._quota_harness import keyed_client, stores
+from tests._quota_harness import grant_test_admin_token, keyed_client, stores
 
 # The isolated-stores result both harness clients yield: HTTP client plus the
 # store trio, unpacked as ``(client, store, results, keys)`` at call sites.
@@ -40,7 +40,7 @@ def isolation_app(
     app.include_router(crawl_router)
     app.include_router(keys_router)
     app.state.caller_key_store = keys
-    app.state.key_admin_token = "test-admin-token"
+    grant_test_admin_token(app)
     app.dependency_overrides[get_job_store] = lambda: store
     app.dependency_overrides[get_result_store] = lambda: results
     return app

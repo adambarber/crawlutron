@@ -87,14 +87,13 @@ def worker_count() -> int:
 
 def doc_worker_count() -> int:
     """Persistent markitdown worker count *for this process* -- the single home,
-    so the spawned pool and the RAM reservation can't drift. A malformed value
-    falls back to the default; the count is a fleet total, each worker spawning its own pool.
+    so the spawned pool and the RAM reservation can't drift. The knob is per
+    process (a fleet total is configured x worker_count(), exactly).
     """
     try:
-        configured = get_env_int("CRAWLUTRON_EXTRACTION_DOC_WORKERS", _DEFAULT_DOC_WORKERS, lo=1)
+        return get_env_int("CRAWLUTRON_EXTRACTION_DOC_WORKERS", _DEFAULT_DOC_WORKERS, lo=1)
     except ValueError:
-        configured = _DEFAULT_DOC_WORKERS
-    return max(1, configured // worker_count())
+        return _DEFAULT_DOC_WORKERS
 
 
 def derive_browser_pool_size(limit_bytes: int | None = None) -> int:

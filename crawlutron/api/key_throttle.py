@@ -12,6 +12,11 @@ mint window rolls, buckets whose failure window AND cooldown have both lapsed
 are swept -- one window's worth of live+cooling buckets is the steady state.
 Accepted shared fate: once the budget is spent, EVERY first-time caller for
 the window remainder is 429-refused -- fail-closed by choice.
+
+Per-process meter contract (#666): the ledger is process state, so N uvicorn
+workers carry N independent mint budgets (the fleet spends Nx512/window);
+the compose deployment pins CRAWLUTRON_WORKERS=1, making the per-process
+budget the fleet budget in production.
 """
 
 from __future__ import annotations

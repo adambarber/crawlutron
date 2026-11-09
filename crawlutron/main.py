@@ -208,7 +208,6 @@ def _stash_state(app, settings, job_store, result_store, watch_store, caller_key
     app.state.result_store = result_store
     app.state.watch_store = watch_store
     app.state.caller_key_store = caller_key_store
-    app.state.key_admin_token = settings.key_admin_token
     # ONE per-process register of in-flight sync work (crawl/map/render/search)
     # so every sync door counts against the caller's one concurrency ceiling.
     from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
