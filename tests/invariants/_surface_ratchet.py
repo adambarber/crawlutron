@@ -60,7 +60,6 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     # occupancy answers liveness. Growing any of these needs an explicit edit.
     "crawlutron/transport/scheduler_domain_state.py": (2, 2),
     "crawlutron/transport/scheduler_pacing.py": (6, 4),
-    "crawlutron/orchestration/spill_sink.py": (2, 2),
     "crawlutron/transport/http_cache.py": (4, 4),
     "crawlutron/transport/http_classify.py": (3, 3),
     "crawlutron/transport/pooled_clients.py": (12, 10),
@@ -93,7 +92,7 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/api/crawl_router.py": (4, 3),
     # #656 raised 16,7 -> 18,8: get_concurrency_tracker + TrackerDep make the
     # app-state stash load-bearing (the getattr-None scatter is refused loudly).
-    "crawlutron/api/dependencies.py": (18, 8),
+    "crawlutron/api/dependencies.py": (20, 9),
     "crawlutron/api/exceptions.py": (10, 7),
     # #668: the single-homed discovery-link constants the 404 details reuse.
     "crawlutron/discovery/links.py": (3, 0),
@@ -153,7 +152,7 @@ DECLARED_SURFACE_RATCHET = {
     # #668: the shared process-meter skeleton the two throttles compose (the
     # jscpd logic gate's extraction, replacing two hand-copied ledger triples).
     "crawlutron/api/meter_ledger.py": (2, 2),
-    "crawlutron/orchestration/admission_stall.py": (5, 3),
+    "crawlutron/orchestration/admission_stall.py": (6, 4),
     "crawlutron/orchestration/recursive.py": (11, 7),
     "crawlutron/orchestration/request_pipeline.py": (5, 3),
     "crawlutron/transport/robots_parse.py": (6, 6),

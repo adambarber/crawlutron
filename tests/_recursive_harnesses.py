@@ -103,6 +103,7 @@ async def drive_recursive_crawl(
             "robots_allows": allows,
             "robots_crawl_delay": crawl_delay,
             "spill": the_spill,
+            "request_id": "r-recursive-probe",
             "scheduler": the_scheduler,
             "resource_gate": the_gate,
             "admission": admission,

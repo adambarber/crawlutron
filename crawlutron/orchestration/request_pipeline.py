@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import functools
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, cast
@@ -22,7 +21,6 @@ from crawlutron.models.crawl_worker import CrawlWorker
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import admit_or_none
 from crawlutron.orchestration.recursive import run_recursive_crawl
-from crawlutron.orchestration.spill_sink import SpillSink, write_spill
 from crawlutron.orchestration.strategy_chain import execute_crawl_chain
 from crawlutron.runtime.pressure_gates import ResourceGate
 from crawlutron.runtime.pressure_memory import read_memory_stats
@@ -36,6 +34,7 @@ from crawlutron.runtime.pressure_sizing import (
 )
 from crawlutron.safety.safe_regex import BoundedPattern
 from crawlutron.storage.ids import new_request_id
+from crawlutron.storage.result_store import CrawlSpillStore
 from crawlutron.transport import robots as robots_policy
 from crawlutron.transport.cache import HttpCache
 from crawlutron.transport.content_cache import ContentCache
@@ -60,7 +59,6 @@ if TYPE_CHECKING:
 @dataclass(frozen=True)
 class PipelineDependencies:
     get_content_cache: Callable[[], ContentCache]
-    make_spill: Callable[[str | None], SpillSink]
     compile_scope_regex_safe: Callable[[str | None], BoundedPattern | None]
     stale_seeds: Callable[
         [Iterable[tuple[NormalizedUrl, str | None]], SeedCache | None, CrawlPolicy],
@@ -85,7 +83,7 @@ class PipelineState:
     cache: HttpCache | None
     content_cache: ContentCache | None
     webhook_url: WebhookTarget | None
-    spill_path: str | None
+    spill_store: CrawlSpillStore
     dependencies: PipelineDependencies
     jobs: list[CrawlTask] = field(default_factory=list)
     scheduler: DomainScheduler | None = None
@@ -97,7 +95,8 @@ class PipelineState:
     want_document_bodies: bool = False
     scope_pattern: BoundedPattern | None = None
     discovery: DiscoveryFlags = DiscoveryFlags(False, False, False)
-    spill: SpillSink | None = None
+    request_id: str = ""
+    spill: CrawlSpillStore | None = None
 
 
 def build_jobs(state: PipelineState) -> list[CrawlTask]:
@@ -281,9 +280,12 @@ async def _worker(state: PipelineState, job: CrawlTask) -> EngineCrawlResult:
 
 
 async def _spill_one(state: PipelineState, index: int, result: EngineCrawlResult) -> None:
+    """One page result to the crawl's spill rows; the store is bound before dispatch."""
+    if state.spill is None:
+        raise TypeError("spill must be bound before dispatch writes results")
     if not state.include_html:
         result = replace(result, html=None, text=None)
-    await write_spill(state.spill, index, result)
+    await state.spill.aput(state.request_id, index, result)
 
 
 def _build_admission(state: PipelineState) -> WeightedAdmission:
@@ -374,7 +376,7 @@ async def _run_nonrecursive(state: PipelineState) -> None:
     allowed_jobs: list[CrawlTask] = []
     for job, (allowed, crawl_delay) in zip(state.jobs, decisions, strict=True):
         if state.respect_robots and not allowed:
-            await write_spill(state.spill, job.index, await _robots_disallowed(state, job))
+            await _spill_one(state, job.index, await _robots_disallowed(state, job))
             continue
         if state.respect_robots and crawl_delay and crawl_delay > 0:
             scheduler.set_domain_min_delay(job.domain, crawl_delay)
@@ -395,6 +397,7 @@ async def _run_recursive(state: PipelineState) -> None:
         robots_disallowed=lambda job: _robots_disallowed(state, job),
         sitemap_seeds=lambda: _sitemap_seed_urls(state),
         spill=state.spill,
+        request_id=state.request_id,
         shutdown_event=state.shutdown_event,
         max_depth=state.max_depth,
         max_pages=state.max_pages,
@@ -415,12 +418,10 @@ async def _response(state: PipelineState) -> ProducerEnvelope:
     if state.spill is None:
         raise TypeError("spill must be set before the response is assembled")
     response: ProducerEnvelope = {
-        "request_id": new_request_id(),
+        "request_id": state.request_id,
         "submitted_count": len(state.url_pairs),
         "policy_schema_version": POLICY_SCHEMA_VERSION,
-        "results": await asyncio.to_thread(
-            functools.partial(state.spill.load_ordered, policy=state.host_policy)
-        ),
+        "results": await state.spill.aload_ordered(state.request_id, policy=state.host_policy),
     }
     if state.webhook_url is not None:
         # The wire form is the redacted one: the raw URL is a delivery secret.
@@ -440,19 +441,13 @@ async def _run(state: PipelineState) -> ProducerEnvelope:
     state.discovery = discovery_flags(state.policy)
     state.scope_pattern = state.dependencies.compile_scope_regex_safe(state.policy.scope_regex)
     state.want_document_bodies = state.policy.extraction is CrawlExtractionMethod.DOCUMENT
-    state.spill = state.dependencies.make_spill(state.spill_path)
-    try:
-        if state.max_depth > 0:
-            await _run_recursive(state)
-        else:
-            await _run_nonrecursive(state)
-        response = await _response(state)
-    finally:
-        # The spill must release its lock on the WHOLE body, not only response
-        # assembly; the earlier fix had covered just the _response arm.
-        if state.spill is not None:
-            state.spill.close()
-    return response
+    state.request_id = new_request_id()
+    state.spill = state.spill_store
+    if state.max_depth > 0:
+        await _run_recursive(state)
+    else:
+        await _run_nonrecursive(state)
+    return await _response(state)
 
 
 async def run_crawl_request(state: PipelineState) -> ProducerEnvelope:

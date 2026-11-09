@@ -12,6 +12,7 @@ from crawlutron.models.http_fetch_result import HttpFetchResult
 from crawlutron.models.json_value import JsonValue
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.orchestration.engine import crawl_request
+from crawlutron.storage.result_store import CrawlSpillStore
 from crawlutron.transport.cache import HttpCache
 from crawlutron.transport.content_cache import CONTENT_CACHE_MAX_TOTAL_BYTES, ContentCache
 from crawlutron.transport.fetchers import default_http_fetcher
@@ -157,7 +158,7 @@ async def crawled_results(
     url: str = "http://example.com/",
     limits: Limits | None = None,
     policy: dict[str, JsonValue] | None = None,
-    spill_path: str | None = None,
+    spill_store: CrawlSpillStore | None = None,
     content_cache: ContentCache | None = None,
     calls: list[str] | None = None,
     resource_gate: ResourceGate | None = None,
@@ -192,7 +193,7 @@ async def crawled_results(
         # empty body would otherwise ride the REAL curl_cffi transport (not hermetic).
         cffi_fetcher=fetcher,
         cache=HttpCache(),
-        spill_path=spill_path,
+        spill_store=spill_store,
         content_cache=content_cache,
         resource_gate=resource_gate,
     )

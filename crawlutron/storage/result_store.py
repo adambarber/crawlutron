@@ -9,7 +9,10 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
+from crawlutron.models.crawl_result import EngineCrawlResult
+from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.json_value import JsonValue
+from crawlutron.models.serialization import from_wire, to_dict
 from crawlutron.storage.coordination_store import CoordinationStore, atwin
 from crawlutron.storage.migrations import StoreSchema
 from crawlutron.transport.freshness import default_clock
@@ -23,7 +26,31 @@ class PayloadTooLargeError(ValueError):
     """A serialized payload past the store's byte cap, refused before persistence."""
 
 
-class CrawlResultStore(CoordinationStore):
+class _PayloadStoreGuardrails(CoordinationStore):
+    """The guardrails both payload stores share: bounded byte cap, defaulted clock.
+    Abstract intermediate: a concrete subclass declares ``schema``.
+    """
+
+    _max_payload_bytes: int
+    _clock: Callable[[], float]
+    # The live-writer fence: spill writers set it, the sweep reads it. A store
+    # that never fences (the results store) holds the empty set, unread.
+    _live_requests: set[str]
+
+    def __init__(
+        self,
+        db_path: str | Path,
+        *,
+        max_payload_bytes: int = _MAX_PAYLOAD_BYTES,
+        clock: Callable[[], float] | None = None,
+    ) -> None:
+        super().__init__(db_path)
+        self._max_payload_bytes = max(1, int(max_payload_bytes))
+        self._clock = clock or default_clock
+        self._live_requests = set()
+
+
+class CrawlResultStore(_PayloadStoreGuardrails):
     """SQLite-backed store of completed crawl responses keyed by request id. The
     connection, PRAGMAs, lock, and ``close`` are the base's; this store once
     opened its own, drifting from the shared WAL config and duplicating ``close``.
@@ -37,14 +64,12 @@ class CrawlResultStore(CoordinationStore):
         *,
         ttl_seconds: float = 3600.0,
         max_entries: int = 1000,
-        max_payload_bytes: int = _MAX_PAYLOAD_BYTES,
-        clock: Callable[[], float] | None = None,
+        **guardrails,
     ) -> None:
-        super().__init__(db_path)
+        """``max_payload_bytes`` and ``clock`` ride the shared guardrails base."""
+        super().__init__(db_path, **guardrails)
         self._ttl_seconds = max(0.0, float(ttl_seconds))
         self._max_entries = max(1, int(max_entries))
-        self._max_payload_bytes = max(1, int(max_payload_bytes))
-        self._clock = clock or default_clock
 
     def put(self, request_id: str, payload: JsonValue, *, owner: str = "") -> None:
         """Store a completed response; ``owner=""`` is the shared anonymous bucket."""
@@ -180,3 +205,94 @@ class CrawlResultStore(CoordinationStore):
         if self._ttl_seconds <= 0:
             return
         self._conn.execute("DELETE FROM results WHERE stored_at < ?", (now - self._ttl_seconds,))
+
+
+class CrawlSpillStore(_PayloadStoreGuardrails):
+    """SQLite spill of page results keyed by (request_id, sequence): the engine
+    writes one row per result as its batch finishes, reassembly is one ordered
+    SELECT, and reclamation is a DELETE by age. Replaces the file-based spill
+    (mkstemp + flock + NDJSON + process-local GC): same write/read shape, the
+    database owns durability and GC.
+
+    Ownership: age alone is not permission. The deleted file spill refused to
+    reclaim a file its writer held a flock on, because a crawl slower than the
+    GC age loses its early rows before reassembly. The store re-derives that
+    safety itself: every ``put`` fences its request_id as a live writer, and the
+    crawl's own teardown releases the fence once its rows are served or its
+    crawl has ended -- so the age sweep never touches a live request's rows and
+    a dead request's fence cannot leak.
+    """
+
+    schema = StoreSchema.CRAWL_SPILLS
+
+    def put(self, request_id: str, sequence: int, result: EngineCrawlResult) -> None:
+        """Store one page result at its submission index; the encode-and-dump is
+        this method's whole body, so the atwin runs the multi-MB walk off the loop.
+        """
+        blob = json.dumps({"i": sequence, "r": to_dict(result)})
+        if len(blob) > self._max_payload_bytes:
+            raise PayloadTooLargeError(
+                f"serialized payload is {len(blob)} bytes; the cap is {self._max_payload_bytes}"
+            )
+        with self._lock:
+            self._live_requests.add(request_id)
+            self._conn.execute(
+                "INSERT INTO crawl_spills (request_id, sequence, payload, created_at) VALUES (?, ?, ?, ?)",
+                (request_id, sequence, blob, self._clock()),
+            )
+            self._conn.commit()
+
+    def load_ordered(self, request_id: str, *, policy: HostPolicy) -> list[EngineCrawlResult]:
+        """Reassemble one crawl's spilled results in submission order.
+
+        Degradation ruling (supersedes the deleted file spill's corrupt-line
+        skip, #C8): two corruption classes existed there. A crash-TORN NDJSON
+        line was the class the skip served -- row atomicity kills it here, so
+        the skip has no successor. A corrupt PAYLOAD row makes this reassembly
+        raise rather than silently serve N-1 of N results: this table is
+        store-owned with a single writer (the engine's ``put``), so an
+        undecodable row means a defect or manual tampering, both of which must
+        surface, not mask. The strict behavior is pinned in
+        tests/storage/test_crawl_spill_store.py.
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT payload FROM crawl_spills WHERE request_id = ? ORDER BY sequence",
+                (request_id,),
+            ).fetchall()
+        return [from_wire(EngineCrawlResult, json.loads(blob)["r"], policy=policy) for (blob,) in rows]
+
+    def release_spill(self, request_id: str) -> None:
+        """The writer's release: this request's rows are served or its crawl has
+        ended, so they are age-reclaimable again. The fence lives only for the
+        crawl's lifetime, so a dead crawl's rows cannot be fenced forever."""
+        with self._lock:
+            self._live_requests.discard(request_id)
+
+    def gc_stale_spills(self, max_age_seconds: float) -> int:
+        """Delete rows older than ``max_age_seconds`` EXCEPT a live writer's; the
+        return is the row count reclaimed. Rows are request-scoped and the fence
+        is set by the writer itself, so the sweep is one DELETE plus the fence,
+        never a filesystem walk and never a second registry.
+        """
+        cutoff = self._clock() - max(0.0, max_age_seconds)
+        with self._lock:
+            # The live-writer fence rides a temp table so the DELETE stays one
+            # parameterized statement -- no string-built IN-list, no drift.
+            self._conn.execute("CREATE TEMP TABLE IF NOT EXISTS _spill_fenced (request_id TEXT PRIMARY KEY)")
+            self._conn.execute("DELETE FROM _spill_fenced")
+            self._conn.executemany(
+                "INSERT INTO _spill_fenced (request_id) VALUES (?)",
+                ((request_id,) for request_id in self._live_requests),
+            )
+            cursor = self._conn.execute(
+                "DELETE FROM crawl_spills WHERE created_at < ? "
+                "AND request_id NOT IN (SELECT request_id FROM _spill_fenced)",
+                (cutoff,),
+            )
+            self._conn.commit()
+        return cursor.rowcount
+
+    aput = atwin(put)
+    aload_ordered = atwin(load_ordered)
+    agc_stale_spills = atwin(gc_stale_spills)

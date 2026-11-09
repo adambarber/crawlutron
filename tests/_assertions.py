@@ -3,15 +3,12 @@ import contextlib
 import functools
 import inspect
 import json
-import logging
 import os
 from contextlib import contextmanager
 
 import pytest
 
-from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.json_value import JsonValue
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 
 def set_optional_env(monkeypatch, name: str, value: str | None) -> None:
@@ -96,19 +93,6 @@ def assert_dns_pinning_uses_first_resolution(monkeypatch, rebound_ip, public_ip=
 def assert_result_success(result, classification: str = "rendered") -> None:
     assert result.status == "success"
     assert result.classification == classification
-
-
-def load_spill_checked(caplog, spill):
-    """The #C8 reassembly read under the engine logger's WARNING capture."""
-    with caplog.at_level(logging.WARNING, logger="crawlutron.orchestration.engine"):
-        return spill.load_ordered(policy=UNRESTRICTED_HOST_POLICY)
-
-
-def assert_skipped_spill_line(caplog, *, served: list[EngineCrawlResult], expected: list[str]) -> None:
-    """The #C8 contract in one assertion: the good results still serve and the
-    corrupt line is logged, not silent -- the two spellings restated it."""
-    assert [r.original_url for r in served] == expected, f"results lost: {served}"
-    assert any("skipping corrupt spill line" in m for m in caplog.messages), caplog.messages
 
 
 def _field(result, name: str):

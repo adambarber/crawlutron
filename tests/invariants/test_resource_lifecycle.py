@@ -49,7 +49,7 @@ def test_every_close_implementer_conforms_to_the_lifecycle_protocol():
 
 
 def test_the_eight_declared_implementers_are_still_the_eight():
-    """The protocol's census: the tree's public close implementers are the eight
+    """The protocol's census: the tree's public close implementers are the seven
     the issue names, so a new resource class cannot grow a private release path
     without this gate seeing it."""
     implementers = {
@@ -66,13 +66,11 @@ def test_the_eight_declared_implementers_are_still_the_eight():
         "HttpCache",
         "JobStore",
         "ResourceGate",
-        "ResultSpill",
     }, f"the close-implementer census drifted: {sorted(implementers)}"
 
 
 def test_the_protocol_names_the_release_shape():
-    """The protocol's own contract: one method, ``close``, awaited-able or not --
-    the SpillSink spelling the tree already proved out."""
+    """The protocol's own contract: one method, ``close``, awaited-able or not."""
     # __protocol_attrs__ is a runtime introspection hook outside typing's declared
     # surface; the class __dict__ lookup keeps the access honest, un-suppressed.
     members = cast("set[str]", ResourceLifecycle.__dict__["__protocol_attrs__"])

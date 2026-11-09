@@ -6,7 +6,6 @@ itself keeps advancing -- while the blocking work is in flight."""
 from __future__ import annotations
 
 import asyncio
-import fcntl
 import json
 import threading
 from pathlib import Path
@@ -18,8 +17,8 @@ from crawlutron.api.job_runner import run_job
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.result_record import ProducerEnvelope
-from crawlutron.orchestration.engine import ResultSpill
 from crawlutron.storage.job_store import JobStatus
+from crawlutron.storage.result_store import CrawlSpillStore
 from crawlutron.transport.content_cache import ContentCache
 from tests._cache_fixtures import (
     counting_entry_reads,
@@ -310,30 +309,36 @@ class TestAsyncCrawlRunnerSavesOffTheEventLoop:
 
 
 class TestSpillAssemblyOffTheEventLoop:
-    """``run_crawl_request`` reassembles the spilled results with
-    ``load_ordered``: a full file scan plus a ``json.loads`` per line. That is
-    blocking work and must not run on the event loop."""
+    """``run_crawl_request`` reassembles the spilled results through the
+    store's ``aload_ordered`` twin: the blocking SELECT + decode runs on the
+    store executor, never the event loop."""
 
-    async def test_load_ordered_does_not_block_the_event_loop(self, monkeypatch) -> None:
+    async def test_aload_ordered_does_not_block_the_event_loop(self, tmp_path, monkeypatch) -> None:
         liveness = _LoopLiveness()
         observed: list[int] = [-1]  # loop progress seen by the blocking read-back
-        real_load = ResultSpill.load_ordered
+        real_load = CrawlSpillStore.load_ordered
 
-        def slow_load(self, *, policy):
+        def slow_load(self, request_id, *, policy):
             observed[0] = liveness.wait_for_progress()
-            return real_load(self, policy=policy)
+            return real_load(self, request_id, policy=policy)
 
-        monkeypatch.setattr(ResultSpill, "load_ordered", slow_load)
+        monkeypatch.setattr(CrawlSpillStore, "load_ordered", slow_load)
 
         pages = {"/": (200, "<html><body>hello</body></html>", "text/html")}
+        store = CrawlSpillStore(tmp_path / "spills.db")
+        try:
 
-        async def scenario() -> ProducerEnvelope:
-            # The crawl is scheduled, not awaited inline: the point is what the event loop does while the
-            # spilled results are read back.
-            crawl = asyncio.ensure_future(crawled_results(pages, limits={"max_depth": 1, "max_pages": 5}))
-            return await asyncio.wait_for(crawl, timeout=15)
+            async def scenario() -> ProducerEnvelope:
+                # The crawl is scheduled, not awaited inline: the point is what the
+                # event loop does while the spilled results are read back.
+                crawl = asyncio.ensure_future(
+                    crawled_results(pages, limits={"max_depth": 1, "max_pages": 5}, spill_store=store)
+                )
+                return await asyncio.wait_for(crawl, timeout=15)
 
-        out = await liveness.run_with_heartbeat(scenario, timeout=20)
+            out = await liveness.run_with_heartbeat(scenario, timeout=20)
+        finally:
+            store.close()
         assert observed[0] >= liveness.needed, (
             f"the event loop made {observed[0]} heartbeat ticks while the spilled results were read back"
         )
@@ -363,59 +368,22 @@ class TestSpillAssemblyOffTheEventLoop:
             assert cache.get("k") == {"v": "old"}
             assert reads == [1]
 
-    async def test_corrupt_spill_line_closes_the_spill_and_propagates(self, monkeypatch, tmp_path) -> None:
-        """A corrupt spill row that makes ``_response`` raise must still close
-        the spill and release its lock before the error propagates.
+    async def test_a_failed_crawl_still_closes_its_private_spill_store(self, monkeypatch, tmp_path) -> None:
+        """A raise in the crawl BODY must still close the crawl's private
+        in-memory spill store; the caller-supplied store is never closed here
+        (it outlives the crawl), so the private one is the close-on-error path
+        the old file spill's close-on-error guard pinned (#221).
         """
-        from crawlutron.orchestration.engine import ResultSpill
-
-        spill_path = str(tmp_path / "crawl.spill.ndjson")
-        raised: list[BaseException] = []
-
-        def corrupt_load(self, *, policy):
-            # Simulate ``from_wire`` failing on a corrupt spill line read back out.
-            raise ValueError("corrupt spill line")
-
-        monkeypatch.setattr(ResultSpill, "load_ordered", corrupt_load)
-
-        async def scenario():
-            try:
-                await crawled_results(
-                    {"/": (200, "<html><body>hello</body></html>", "text/html")},
-                    spill_path=spill_path,
-                )
-            except ValueError as exc:
-                raised.append(exc)
-                return
-            raise AssertionError("the corrupt spill line must propagate out of run_crawl_request")
-
-        await scenario()
-        assert raised, "the error must not be swallowed"
-        # The spill must still be closed (lock released) despite the raise.
-        with open(spill_path) as fh:
-            try:
-                fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except OSError:
-                raise AssertionError("spill is still locked: close() was skipped on the error path") from None
-            finally:
-                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
-
-    async def test_crawl_body_raise_still_closes_the_spill(self, monkeypatch, tmp_path):
-        """A raise in the crawl BODY (after the spill is created) must still close the
-        spill and release its lock; the old guard only wrapped ``_response`` (#221).
-        """
-        import crawlutron.orchestration.engine as engine
         import crawlutron.orchestration.request_pipeline as pipeline
 
-        # GC releasing the lock is not the contract -- an explicit close() is. Track the call.
         closed: list[bool] = []
-        real_close = engine.ResultSpill.close
+        real_close = CrawlSpillStore.close
 
         def _recording_close(self):
             closed.append(True)
             return real_close(self)
 
-        monkeypatch.setattr(engine.ResultSpill, "close", _recording_close)
+        monkeypatch.setattr(CrawlSpillStore, "close", _recording_close)
 
         async def _raise_crawl(**kwargs):
             raise RuntimeError("crawl body failed")
@@ -427,11 +395,10 @@ class TestSpillAssemblyOffTheEventLoop:
                 await crawled_results(
                     {"/": (200, "<html><body>hello</body></html>", "text/html")},
                     limits={"max_depth": 1, "max_pages": 5},
-                    spill_path=str(tmp_path / "crawl.body.spill.ndjson"),
                 )
             except RuntimeError:
                 return
             raise AssertionError("the crawl-body error must propagate")
 
         await scenario()
-        assert closed, "close() was not called on the spill when the crawl body raised"
+        assert closed, "the private spill store was not closed when the crawl body raised"

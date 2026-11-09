@@ -20,6 +20,7 @@ from crawlutron.api.dependencies import (
     get_result_store,
     get_settings,
     get_shutdown_event,
+    get_spill_store,
 )
 from crawlutron.api.policy_defaults import BROWSER_FALLBACK_POLICY, DOCUMENT_EXTRACTION_POLICY
 from crawlutron.api.route_layer import guarded_router
@@ -132,6 +133,7 @@ async def crawl(
     settings=Depends(get_settings),
     job_store=Depends(get_job_store),
     result_store=Depends(get_result_store),
+    spill_store=Depends(get_spill_store),
     shutdown_event=Depends(get_shutdown_event),
 ):
     return await crawl_handler(
@@ -139,6 +141,7 @@ async def crawl(
         settings=settings,
         job_store=job_store,
         result_store=result_store,
+        spill_store=spill_store,
         shutdown_event=shutdown_event,
         request=request,
         caller=caller,

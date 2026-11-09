@@ -135,9 +135,9 @@ to defeat:
   headers, body-size drain after truncation, the rule that no further bytes are
   admitted once a chunk trips the cap, and the 413 the shipped app returns on a
   body over the cap.
-- **File-descriptor ownership** (`tests/test_spill_stream.py`,
-  `tests/invariants/test_ownership.py`) — `_ResultSpill` deletes the file it
-  owns and leaves the one it borrowed.
+- **File-descriptor ownership** (`tests/invariants/test_ownership.py`) — scratch
+  files are owned by the work writing them; the SQLite spill store replaced the
+  file spill (`tests/storage/test_crawl_spill_store.py`).
 - **Cache locking** (`tests/transport/test_dns_cache.py`,
   `tests/transport/test_robots_policy_consolidation.py`) — concurrent access to
   the DNS and robots caches, including that robots reads go through the one

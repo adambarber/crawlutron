@@ -13,10 +13,10 @@ from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.orchestration.request_pipeline import PipelineDependencies, PipelineState, build_jobs
 from crawlutron.runtime.pressure_gates import ResourceGate
+from crawlutron.storage.result_store import CrawlSpillStore
 from crawlutron.transport.cache import HttpCache
 from crawlutron.transport.content_cache import ContentCache
 from tests._fetch_doubles import FetcherDouble
-from tests._result_builders import Spill
 
 
 def _idle_gate() -> ResourceGate:
@@ -99,12 +99,11 @@ class TestBuildJobsConsumesPairs:
             cache=None,
             content_cache=None,
             webhook_url=None,
-            spill_path=None,
+            spill_store=CrawlSpillStore(":memory:"),
             # build_jobs reads only url_pairs; the defaults never fire here, so
             # the bag is built through a lambda distinct from any other file's.
             dependencies=PipelineDependencies(
                 get_content_cache=lambda: ContentCache(url_pairs and "" or ""),
-                make_spill=lambda _spill_dir: Spill(),
                 compile_scope_regex_safe=lambda compiled: None,
                 stale_seeds=lambda seed, cache, policy: set(),
                 fetch_and_decode=None,

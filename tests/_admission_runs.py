@@ -16,7 +16,6 @@ from crawlutron.models.discovered_link import DiscoveredLink
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.orchestration.recursive import CrawlRun
-from crawlutron.orchestration.spill_sink import SpillSink
 from crawlutron.runtime.pressure_gates import ResourceGate
 from crawlutron.runtime.pressure_sizing import WeightedAdmission
 from crawlutron.transport.scheduler import DomainScheduler
@@ -115,10 +114,6 @@ async def _must_not_sitemap_seeds() -> list[NormalizedUrl]:
     raise AssertionError("the admission path dispatched on sitemap_seeds")
 
 
-async def _must_not_spill_write(sink: SpillSink | None, index: int, result: EngineCrawlResult) -> None:
-    raise AssertionError("the admission path wrote a spill")
-
-
 def _minimum_admission_state(frontier, *, batch_pages: int):
     """The batch state shape the dispatch loop's ``_take_and_bucket`` reads."""
     return type(
@@ -156,6 +151,7 @@ def minimum_admission_run(frontier, *, http_quota, browser_quota, batch_pages=10
         robots_disallowed=_must_not_robots_disallowed,
         sitemap_seeds=_must_not_sitemap_seeds,
         spill=None,
+        request_id="r-admission-probe",
         max_depth=0,
         max_pages=batch_pages,
         respect_robots=False,
@@ -169,6 +165,5 @@ def minimum_admission_run(frontier, *, http_quota, browser_quota, batch_pages=10
         host_policy=HostPolicy.unrestricted(),
         ramp_max=128,
         http_heavy_lookahead=128 * ENGINE_BATCH_CONCURRENCY_MULTIPLIER,
-        spill_write=_must_not_spill_write,
     )
     return run_state, _minimum_admission_state(frontier, batch_pages=batch_pages), admission

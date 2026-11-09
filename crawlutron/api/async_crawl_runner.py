@@ -27,6 +27,7 @@ from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.runtime import process_state
 from crawlutron.storage.job_store import TERMINAL_STATUSES, CrawlJobState, JobStatus
+from crawlutron.storage.result_store import CrawlSpillStore
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +97,7 @@ async def run_async_crawl(
     result_store,
     shutdown_event: asyncio.Event,
     url_pairs: list[tuple[str, NormalizedUrl]] | None = None,
+    spill_store: CrawlSpillStore | None = None,
 ) -> None:
     """Run a single-shot crawl in the background, persisting results to job_store
     through PENDING -> RUNNING -> COMPLETED/FAILED and POSTing when ``webhook_url``
@@ -108,7 +110,14 @@ async def run_async_crawl(
             if job is None:
                 return
             response_payload = await _crawl_and_build_response(
-                request_id, payload, crawl_settings, shutdown_event, url_pairs, job, job_store
+                request_id,
+                payload,
+                crawl_settings,
+                shutdown_event,
+                url_pairs,
+                job,
+                job_store,
+                spill_store=spill_store,
             )
         # Deliver outside the semaphore -- a retrying webhook (up to 60s
         # of backoff) must not gate another caller's crawl capacity.
@@ -151,6 +160,8 @@ async def _crawl_and_build_response(
     url_pairs: list[tuple[str, NormalizedUrl]] | None,
     job,
     job_store,
+    *,
+    spill_store: CrawlSpillStore | None = None,
 ) -> dict[str, object]:
     """Execute the crawl, observe metrics, and build the unified response.
 
@@ -163,6 +174,7 @@ async def _crawl_and_build_response(
         settings=crawl_settings,
         shutdown_event=shutdown_event,
         url_pairs=url_pairs,
+        spill_store=spill_store,
     )
     result["request_id"] = request_id
     record_crawl_completion(

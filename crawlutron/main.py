@@ -18,7 +18,7 @@ from crawlutron.vocabulary.identity import SERVICE_ID, SERVICE_VERSION
 from .config.settings import CrawlerSettings
 from .storage.caller_key_store import CallerKeyStore
 from .storage.job_store import JobStore
-from .storage.result_store import CrawlResultStore
+from .storage.result_store import CrawlResultStore, CrawlSpillStore
 from .storage.watch_store import WatchStore
 from .transport.browser_pool import (
     close_browser_pool,
@@ -87,6 +87,7 @@ def create_app(settings: CrawlerSettings | None = None) -> FastAPI:
         ttl_seconds=get_env_float("CRAWLUTRON_RESULT_TTL_SECONDS", 3600.0),
         max_entries=get_env_int("CRAWLUTRON_RESULT_MAX_ENTRIES", 1000),
     )
+    spill_store = CrawlSpillStore(database_path)
     watch_store = WatchStore(database_path)
     caller_key_store = CallerKeyStore(database_path)
     _configure_logging(settings)
@@ -101,6 +102,7 @@ def create_app(settings: CrawlerSettings | None = None) -> FastAPI:
         settings,
         job_store=job_store,
         result_store=result_store,
+        spill_store=spill_store,
         watch_store=watch_store,
         caller_key_store=caller_key_store,
         lifespan=lifespan,
@@ -143,6 +145,7 @@ def _build_app(
     *,
     job_store,
     result_store,
+    spill_store,
     watch_store,
     caller_key_store,
     lifespan,
@@ -169,7 +172,7 @@ def _build_app(
         license_info={"name": "MIT License"},
         openapi_tags=_openapi_tags(),
     )
-    _stash_state(app, settings, job_store, result_store, watch_store, caller_key_store)
+    _stash_state(app, settings, job_store, result_store, spill_store, watch_store, caller_key_store)
     _install_error_surface(app)
     _include_routers(app)
     return app
@@ -201,11 +204,12 @@ def _openapi_tags() -> list[dict[str, str]]:
     ]
 
 
-def _stash_state(app, settings, job_store, result_store, watch_store, caller_key_store) -> None:
+def _stash_state(app, settings, job_store, result_store, spill_store, watch_store, caller_key_store) -> None:
     """Stash shared dependencies on ``app.state`` for the router dependencies."""
     app.state.crawler_settings = settings
     app.state.job_store = job_store
     app.state.result_store = result_store
+    app.state.spill_store = spill_store
     app.state.watch_store = watch_store
     app.state.caller_key_store = caller_key_store
     # ONE per-process register of in-flight sync work (crawl/map/render/search)

@@ -31,7 +31,7 @@ from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.runtime.metrics import get_metrics
 from crawlutron.storage.ids import new_request_id
 from crawlutron.storage.job_store import TERMINAL_STATUSES, FrontierEntry, JobKind, JobStore
-from crawlutron.storage.result_store import CrawlResultStore
+from crawlutron.storage.result_store import CrawlResultStore, CrawlSpillStore
 
 if TYPE_CHECKING:
     # Annotation-only vocabulary: the endpoint's signatures name the shared record
@@ -88,6 +88,7 @@ async def crawl(
     settings: CrawlerSettings,
     job_store: JobStore,
     result_store: CrawlResultStore,
+    spill_store: CrawlSpillStore,
     shutdown_event: asyncio.Event,
     request: Request | None = None,
     caller: CallerIdentity | None = None,
@@ -110,6 +111,7 @@ async def crawl(
             settings=settings,
             job_store=job_store,
             result_store=result_store,
+            spill_store=spill_store,
             concurrency_tracker=concurrency_tracker,
             shutdown_event=shutdown_event,
             host_policy=host_policy,
@@ -128,6 +130,7 @@ async def _admitted_crawl(
     settings: CrawlerSettings,
     job_store,
     result_store: CrawlResultStore,
+    spill_store: CrawlSpillStore | None,
     concurrency_tracker: CallerConcurrencyTracker | None,
     shutdown_event: asyncio.Event,
     host_policy: HostPolicy,
@@ -151,7 +154,11 @@ async def _admitted_crawl(
             None
             if async_door
             else execute_crawl(
-                payload, settings=settings, shutdown_event=shutdown_event, url_pairs=checked_pairs
+                payload,
+                settings=settings,
+                shutdown_event=shutdown_event,
+                url_pairs=checked_pairs,
+                spill_store=spill_store,
             )
         )
         if async_door:
@@ -160,6 +167,7 @@ async def _admitted_crawl(
                 settings=settings,
                 job_store=job_store,
                 result_store=result_store,
+                spill_store=spill_store,
                 shutdown_event=shutdown_event,
                 host_policy=host_policy,
                 checked=checked_pairs,
@@ -187,6 +195,7 @@ async def _accepted_async(
     settings: CrawlerSettings,
     job_store: JobStore,
     result_store: CrawlResultStore,
+    spill_store: CrawlSpillStore | None,
     shutdown_event: asyncio.Event,
     host_policy: HostPolicy,
     checked: list[tuple[str, NormalizedUrl]],
@@ -221,6 +230,7 @@ async def _accepted_async(
             result_store,
             shutdown_event,
             url_pairs=checked,
+            spill_store=spill_store,
         ),
     )
     get_metrics().observe_crawl(accepted=True, caller_id=owner)

@@ -216,15 +216,15 @@ def crawl_result(url: str | NormalizedUrl, domain: str | None = None) -> CrawlRe
 
 
 class Spill:
-    """The in-RAM ``SpillSink`` double; writes carry the record production carries."""
+    """The in-RAM spill double; writes carry the record production carries."""
 
     def __init__(self):
         self.writes: dict[int, EngineCrawlResult] = {}
 
-    def write(self, index: int, result: EngineCrawlResult) -> None:
+    async def aput(self, _request_id: str, index: int, result: EngineCrawlResult) -> None:
         self.writes[index] = result
 
-    def load_ordered(self, *, policy: HostPolicy) -> list[EngineCrawlResult]:
+    async def aload_ordered(self, _request_id: str, *, policy: HostPolicy) -> list[EngineCrawlResult]:
         """Reassembly in write order, as the real sink reads it back out."""
         del policy
         return [self.writes[index] for index in sorted(self.writes)]

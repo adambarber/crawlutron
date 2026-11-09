@@ -18,7 +18,7 @@ from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.storage.caller_key_store import CallerKeyStore
 from crawlutron.storage.job_store import JobStore
-from crawlutron.storage.result_store import CrawlResultStore
+from crawlutron.storage.result_store import CrawlResultStore, CrawlSpillStore
 from crawlutron.storage.watch_store import WatchStore
 
 
@@ -40,6 +40,13 @@ def get_job_store(request: Request) -> JobStore:
 def get_result_store(request: Request) -> CrawlResultStore:
     """FastAPI dependency: return the :class:`CrawlResultStore` for the running app."""
     return request.app.state.result_store
+
+
+def get_spill_store(request: Request) -> CrawlSpillStore | None:
+    """FastAPI dependency: the running app's :class:`CrawlSpillStore`, or None
+    when the app wires none -- the engine then spills to its own private
+    per-crawl store, the same per-crawl lifetime the deleted file spill had."""
+    return getattr(request.app.state, "spill_store", None)
 
 
 def get_watch_store(request: Request) -> WatchStore:
@@ -82,6 +89,7 @@ SettingsDep = Annotated[CrawlerSettings, Depends(get_settings)]
 ShutdownEventDep = Annotated[asyncio.Event, Depends(get_shutdown_event)]
 JobStoreDep = Annotated[JobStore, Depends(get_job_store)]
 ResultStoreDep = Annotated[CrawlResultStore, Depends(get_result_store)]
+SpillStoreDep = Annotated[CrawlSpillStore | None, Depends(get_spill_store)]
 WatchStoreDep = Annotated[WatchStore, Depends(get_watch_store)]
 TrackingDep = Annotated[Tracking, Depends(get_tracking)]
 TrackerDep = Annotated[CallerConcurrencyTracker, Depends(get_concurrency_tracker)]
@@ -95,6 +103,7 @@ __all__ = [
     "ResultStoreDep",
     "SettingsDep",
     "ShutdownEventDep",
+    "SpillStoreDep",
     "TrackerDep",
     "WatchStoreDep",
     "TrackingDep",
@@ -102,6 +111,7 @@ __all__ = [
     "get_concurrency_tracker",
     "get_job_store",
     "get_result_store",
+    "get_spill_store",
     "get_settings",
     "get_shutdown_event",
     "get_tracking",
