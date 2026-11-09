@@ -11,7 +11,7 @@ import contextlib
 import datetime
 import inspect
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import cast
 
 from crawlutron.admission.policy import DiscoveryFlags, discovery_flags
@@ -47,7 +47,7 @@ def retry_backoff_seconds(attempt: int) -> float:
 _RETRY_AFTER_MAX_SECONDS = 300
 
 
-def retry_after_seconds(headers: dict[str, str]) -> int | None:
+def retry_after_seconds(headers: Mapping[str, str]) -> int | None:
     """The Retry-After cooldown, from the delay-seconds or the HTTP-date form.
 
     The date form converts against the wall clock (an HTTP-date IS a wall instant);
