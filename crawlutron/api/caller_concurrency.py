@@ -27,14 +27,14 @@ class CallerConcurrencyTracker:
         self._in_flight[caller_id] += 1
 
     def release(self, caller_id: str) -> None:
-        """Mark one sync crawl done; a caller at zero is dropped, never clamped."""
+        """Mark one sync crawl done; a caller at zero is dropped, never clamped.
+
+        The slot lock persists for the tracker's lifetime (#665): evicting it
+        races a concurrent admit that already fetched the lock.
+        """
         count = self._in_flight.get(caller_id, 0) - 1
         if count <= 0:
             self._in_flight.pop(caller_id, None)
-            lock = self._slot_locks.get(caller_id)
-            # Evict a fully idle lock (not held, no waiters).
-            if lock is not None and not lock.locked() and not getattr(lock, "_waiters", ()):
-                del self._slot_locks[caller_id]
         else:
             self._in_flight[caller_id] = count
 
