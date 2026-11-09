@@ -385,3 +385,22 @@ class TestErrorStampingGatedOnTheFailedCas:
         won = _loaded(store, "j1")
         assert won.error == "engine exploded"
         assert won.status is JobStatus.FAILED
+
+    async def test_a_persisted_error_never_carries_a_credentialed_url(self, tmp_path):
+        """#666: str(exc) lands raw httpx error text -- including REDIRECT-TARGET
+        URLs carrying userinfo or secret queries -- in the durable error field
+        the status wire reads. The persist door scrubs through the redaction
+        chokepoint; the red: a credentialed URL survived verbatim.
+        """
+        from crawlutron.api.job_runner import arecord_terminal_failure
+
+        store = make_job_store(tmp_path)
+        _running_job(store)
+        raw = "Server error '500 Internal Server Error' for url 'https://user:pass@secret.example/x?key=apikey-value'"
+
+        landed = await arecord_terminal_failure(store, "j1", raw)
+
+        assert landed is True
+        error = _loaded(store, "j1").error or ""
+        assert "user:pass" not in error, error
+        assert "apikey-value" not in error, error
