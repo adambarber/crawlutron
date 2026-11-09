@@ -62,19 +62,19 @@ _DUMMY_SALT = b"crawlutron-dummy-salt"
 _DUMMY_VERIFIER = f"{_DUMMY_SALT.hex()}${_hash_secret('', _DUMMY_SALT)}"
 
 
-def _secret_id(secret: str) -> str | None:
-    """The key id embedded in a ``ck_<id-hex>.<body>`` secret, or None."""
-    prefix, sep, rest = secret.partition(".")
-    if not sep or not prefix.startswith("ck_") or "." in rest:
+def _secret_id_and_body(secret: str) -> tuple[str, str] | None:
+    """Split a ``ck_<id-hex>.<body>`` secret into (key_id, body), or None."""
+    dot = secret.find(".")
+    if dot < 0 or not secret.startswith("ck_") or "." in secret[dot + 1 :]:
         return None
-    id_hex = prefix[len("ck_") :]
+    id_hex = secret[3:dot]
     if len(id_hex) != 2 * _KEY_ID_BYTES:
         return None
     try:
         bytes.fromhex(id_hex)
     except ValueError:
         return None
-    return f"key_{id_hex}"
+    return f"key_{id_hex}", secret[dot + 1 :]
 
 
 class CallerKeyStore(CoordinationStore):
@@ -115,8 +115,9 @@ class CallerKeyStore(CoordinationStore):
         ONE salted PBKDF2 for the candidate -- O(1) per request, never a scan;
         a miss burns the same PBKDF2 on a fixed dummy so timing stays uniform.
         """
-        key_id = _secret_id(secret)
-        body = secret.split(".", 1)[1] if key_id is not None else ""
+        parsed = _secret_id_and_body(secret)
+        key_id = parsed[0] if parsed is not None else None
+        body = parsed[1] if parsed is not None else ""
         with self._lock:
             row = (
                 self._conn.execute(

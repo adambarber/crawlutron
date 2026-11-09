@@ -160,3 +160,26 @@ def test_a_wrong_secret_for_a_real_key_id_verifies_to_none(tmp_path):
     issued = store.issue_key("agent-a")
 
     assert store.verify_key(f"ck_{issued.key_id[4:]}.wrong-body") is None
+
+
+def test_the_secret_format_has_one_parser(tmp_path):
+    """#666: the ck_<id>.<body> format has ONE parser; verify_key's body
+    extraction and the id extraction cannot drift into two spellings.
+
+    Red note: the deleted second spelling (verify_key's raw split) was found
+    behaviorally EQUIVALENT on the live tree -- the id parser refuses any
+    secret whose body carries a dot, so both spellings always agreed. The
+    defect was drift exposure, not live divergence; the mutation proof is a
+    wrong-body-extraction mutant in _parse_secret, which reds the round-trip
+    clause below (only one body spelling can satisfy it).
+    """
+    store = CallerKeyStore(tmp_path / "keys.db")
+    issued = store.issue_key("agent-a")
+
+    # The parser and the store agree on every well-formed secret: the round
+    # trip through issue -> verify lands on the live row.
+    assert store.verify_key(issued.secret) is not None
+
+    # A two-dot secret (a dot inside the body) is refused whole -- not split
+    # at the first dot with the remainder verified as a body.
+    assert store.verify_key(f"{issued.secret}.extra") is None
