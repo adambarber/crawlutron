@@ -22,6 +22,9 @@ __all__ = [
     "clear_declined_closes",
     "declined_closes",
     "record_declined_close",
+    "clear_mapped_value_errors",
+    "mapped_value_errors",
+    "record_mapped_value_error",
 ]
 
 _logger = logging.getLogger(__name__)
@@ -46,6 +49,28 @@ def declined_closes() -> dict[tuple[str, str], int]:
 def clear_declined_closes() -> None:
     """The record's reset door: tests and the reset family empty it between cases."""
     _DECLINED_CLOSES.clear()
+
+
+#: Mapped foreign ValueErrors, ``(foreign_message,)`` -> count. The constructor
+#: belt remaps a foreign ValueError to ``invalid_url``; this is the bounded
+#: record of WHEN that happened, so a programming bug is not silently 422.
+_MAPPED_VALUE_ERRORS: dict[tuple[str], int] = {}
+
+
+def record_mapped_value_error(foreign_message: str) -> None:
+    """Count one foreign-ValueError mapping; structured fields only, never a sink."""
+    key = (foreign_message,)
+    _MAPPED_VALUE_ERRORS[key] = _MAPPED_VALUE_ERRORS.get(key, 0) + 1
+
+
+def mapped_value_errors() -> tuple[tuple[str, ...], ...]:
+    """The mapping record, for tests asserting a foreign error was mapped."""
+    return tuple(sorted(_MAPPED_VALUE_ERRORS))
+
+
+def clear_mapped_value_errors() -> None:
+    """The record's reset door: tests and the reset family empty it between cases."""
+    _MAPPED_VALUE_ERRORS.clear()
 
 
 @runtime_checkable

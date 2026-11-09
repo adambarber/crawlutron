@@ -276,6 +276,12 @@ class TestStructuralRefusals:
             ("http://example.com:99999/", "invalid_port"),
             ("http://" + "a" * 64 + ".example/", "invalid_idn_host"),
             ("http://[::1", "invalid_url"),
+            ("http://exa mple.com/", "invalid_url"),  # space in the host
+            ("http://exa\tmple.com/", "invalid_url"),  # tab folds in urlparse
+            ("http://exa\nmple.com/", "invalid_url"),  # newline folds in urlparse
+            ("http:// example.com/", "invalid_url"),  # leading space
+            ("http://example.com /", "invalid_url"),  # trailing space
+            ("http://exa mple.com:8080/", "invalid_url"),  # space with a port
         ],
     )
     async def test_structural_refusal_is_wire_data(self, admit_settings, url, reason):
