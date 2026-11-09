@@ -307,16 +307,22 @@ class TestTokenBucketConcurrency:
         ``run``'s fan-out, must request SERIALLY increasing waits -- never the
         same deficit twice. #577's reservation folds in as a max(): the waits
         are nondecreasing and spaced, whichever debt is larger.
+
+        The clock is frozen: real wall time between the two queued consumes
+        refills the bucket (a 1.6ms gap at rate 1 erodes a 1s wait past the
+        1e-3 tolerance) -- a timing artifact, not the ordering claim.
         """
         sleeps = recorder(monkeypatch)
-        scheduler = make_scheduler(global_limit=10, per_domain_limit=10, max_rps=1.0, adaptive=False)
+        scheduler = make_scheduler(
+            global_limit=10, per_domain_limit=10, max_rps=1.0, adaptive=False, clock=lambda: 0.0
+        )
         # capacity=5: the first five are free bucket-wise; the 6th and 7th queue
         # behind the refill at rate 1 (zero base delay here, so the bucket dominates).
         jobs = [make_job(i, "https://example.com/p") for i in range(7)]
         ret = await scheduler.run(jobs, ok_worker, failed_result=engine_envelope)
         assert ret is not None
         waits = sorted(sleeps.in_range(0.9, 3.0))
-        assert waits == [pytest.approx(1.0, abs=1e-3), pytest.approx(2.0, abs=1e-3)], (
+        assert waits == [pytest.approx(1.0, abs=1e-9), pytest.approx(2.0, abs=1e-9)], (
             f"the burst did not serialize its reserves behind the free tokens: {waits}"
         )
         # Nothing invented: every requested wait is a real debt (bucket refill),
@@ -327,9 +333,13 @@ class TestTokenBucketConcurrency:
 
     async def test_drained_bucket_serializes_two_gathered_consumes(self, monkeypatch):
         """Two gathered consumers on a drained bucket must wait SERIALLY: the
-        second observes what the first reserved and waits ~1/rate longer."""
+        second observes what the first reserved and waits ~1/rate longer.
+
+        Frozen clock, same reason as the burst test: wall-time refill between
+        the two consumes erodes the waits past the tolerance.
+        """
         sleeps = recorder(monkeypatch)
-        bucket = TokenBucket(rate=2.0, capacity=0)
+        bucket = TokenBucket(rate=2.0, capacity=0, clock=lambda: 0.0)
         taken: list[float] = []
 
         async def one() -> None:
@@ -338,10 +348,8 @@ class TestTokenBucketConcurrency:
             await asyncio.sleep(wait)  # the real caller's shape: fire after the wait
 
         await asyncio.gather(one(), one())
-        # A real monotonic clock refills microseconds between the two takes, so
-        # the equality is to a millisecond, not an exact float.
-        assert taken == [pytest.approx(0.5, abs=1e-3), pytest.approx(1.0, abs=1e-3)], taken
+        assert taken == [pytest.approx(0.5, abs=1e-9), pytest.approx(1.0, abs=1e-9)], taken
         assert sorted(sleeps.delays) == [
-            pytest.approx(0.5, abs=1e-3),
-            pytest.approx(1.0, abs=1e-3),
+            pytest.approx(0.5, abs=1e-9),
+            pytest.approx(1.0, abs=1e-9),
         ], sleeps.delays
