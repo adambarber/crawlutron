@@ -7,7 +7,6 @@ Stateless protocol: headers validated against the body, ``server/discover`` /
 from __future__ import annotations
 
 import logging
-from inspect import signature
 from typing import cast
 from urllib.parse import urlsplit
 
@@ -190,7 +189,7 @@ async def call_tool(
     result_store=None,
     caller=None,
 ) -> JsonValue:
-    from crawlutron.mcp.handlers import validation_message
+    from crawlutron.mcp.handlers import dispatch, validation_message
     from crawlutron.mcp.registry import TOOLS_BY_NAME
 
     params = body
@@ -217,15 +216,16 @@ async def call_tool(
                 "isError": True,
             },
         )
-    result = await spec.handler(
+    result = await dispatch(
+        spec,
         payload,
         settings=settings,
         shutdown_event=shutdown_event,
         concurrency_tracker=concurrency_tracker,
         job_store=job_store,
+        watch_store=watch_store,
         result_store=result_store,
         caller=caller,
-        **({"watch_store": watch_store} if "watch_store" in signature(spec.handler).parameters else {}),
     )
     success: dict[str, JsonValue] = {
         "resultType": "complete",

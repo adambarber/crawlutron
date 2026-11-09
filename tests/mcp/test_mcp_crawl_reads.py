@@ -11,7 +11,9 @@ import pytest
 from typing_extensions import TypedDict
 
 from crawlutron.api.crawl_endpoint import read_crawl_result_record, read_crawl_trace_record
-from crawlutron.mcp.handlers import ToolResult, handle_read_crawl_result, handle_read_crawl_trace
+from crawlutron.mcp.handlers import ToolResult
+from crawlutron.mcp.handlers import dispatch as tool_dispatch
+from crawlutron.mcp.registry import TOOLS_BY_NAME
 from crawlutron.models.crawl_result_request import CrawlResultRequest
 from crawlutron.models.json_value import JsonValue
 from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
@@ -93,14 +95,22 @@ async def _seed_completed_job(job_store, request_id: str, stored: UnifiedCrawlRe
 
 
 async def _read_result(request_id: str, job_store) -> ToolResult:
-    return await handle_read_crawl_result(
-        CrawlResultRequest(request_id=request_id), settings=None, shutdown_event=None, job_store=job_store
+    return await tool_dispatch(
+        TOOLS_BY_NAME["read_crawl_result"],
+        CrawlResultRequest(request_id=request_id),
+        settings=None,
+        shutdown_event=None,
+        job_store=job_store,
     )
 
 
 async def _read_trace(request_id: str, job_store) -> ToolResult:
-    return await handle_read_crawl_trace(
-        CrawlResultRequest(request_id=request_id), settings=None, shutdown_event=None, job_store=job_store
+    return await tool_dispatch(
+        TOOLS_BY_NAME["read_crawl_trace"],
+        CrawlResultRequest(request_id=request_id),
+        settings=None,
+        shutdown_event=None,
+        job_store=job_store,
     )
 
 
