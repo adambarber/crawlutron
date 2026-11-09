@@ -27,7 +27,7 @@ from crawlutron.storage.migrations import (
     stamp_store,
 )
 from crawlutron.storage.migrations.runner import LegacySchemaMismatch, migrate_store
-from crawlutron.storage.result_store import CrawlResultStore
+from crawlutron.storage.result_store import CrawlResultStore, CrawlSpillStore
 from crawlutron.storage.watch_store import WatchStore
 from tests._policy_factories import canonical, job_store
 
@@ -36,7 +36,15 @@ _BOOKKEEPING_TABLES = {"_yoyo_log", "_yoyo_migration", "_yoyo_version", "yoyo_lo
 
 def _open_store(
     schema: StoreSchema, db_path: Path
-) -> JobStore | CrawlResultStore | CoordinationCounters | SharedCookieStore | WatchStore | CallerKeyStore:
+) -> (
+    JobStore
+    | CrawlResultStore
+    | CoordinationCounters
+    | SharedCookieStore
+    | WatchStore
+    | CallerKeyStore
+    | CrawlSpillStore
+):
     if schema is StoreSchema.CRAWL_JOBS:
         return job_store(db_path)
     if schema is StoreSchema.RESULTS:
@@ -49,6 +57,8 @@ def _open_store(
         return WatchStore(db_path)
     if schema is StoreSchema.CALLER_KEYS:
         return CallerKeyStore(db_path)
+    if schema is StoreSchema.CRAWL_SPILLS:
+        return CrawlSpillStore(db_path)
     # The parametrization above is derived from StoreSchema, so it grows whenever a schema is added.
     raise AssertionError(f"no store opener declared for {schema.value}")
 

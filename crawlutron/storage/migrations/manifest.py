@@ -17,6 +17,7 @@ class StoreSchema(StrEnum):
     COORDINATION_COOKIES = "coordination_cookies"
     WATCHES = "watches"
     CALLER_KEYS = "caller_keys"
+    CRAWL_SPILLS = "crawl_spills"
 
 
 @dataclass(frozen=True)
@@ -197,6 +198,20 @@ CALLER_KEYS_SCHEMA = TableSchema(
     indexes=(IndexSchema("caller_keys_by_hash", ("key_hash",), unique=True),),
 )
 
+# One row per spilled page result: the engine's incremental write target. The
+# (request_id, sequence) key is the spill's ordering, so reassembly is one
+# ordered SELECT; rows are reclaimed by age, never by a process-local sweep.
+CRAWL_SPILLS_SCHEMA = TableSchema(
+    name="crawl_spills",
+    columns=(
+        ColumnSchema("request_id", "TEXT", False, None, 1),
+        ColumnSchema("sequence", "INTEGER", False, None, 2),
+        ColumnSchema("payload", "TEXT", True, None),
+        ColumnSchema("created_at", "REAL", True, None),
+    ),
+    indexes=(IndexSchema("crawl_spills_created_at", ("created_at",)),),
+)
+
 CURRENT_SCHEMAS = {
     StoreSchema.CRAWL_JOBS: CRAWL_JOBS_SCHEMA,
     StoreSchema.RESULTS: RESULTS_SCHEMA,
@@ -204,6 +219,7 @@ CURRENT_SCHEMAS = {
     StoreSchema.COORDINATION_COOKIES: COORDINATION_COOKIES_SCHEMA,
     StoreSchema.WATCHES: WATCHES_SCHEMA,
     StoreSchema.CALLER_KEYS: CALLER_KEYS_SCHEMA,
+    StoreSchema.CRAWL_SPILLS: CRAWL_SPILLS_SCHEMA,
 }
 
 LEGACY_COLUMNS = {
@@ -221,6 +237,7 @@ LEGACY_COLUMNS = {
     StoreSchema.COORDINATION_COOKIES: (),
     StoreSchema.WATCHES: (),
     StoreSchema.CALLER_KEYS: (),
+    StoreSchema.CRAWL_SPILLS: (),
 }
 
 MIGRATION_SEQUENCES = {
@@ -237,6 +254,7 @@ MIGRATION_SEQUENCES = {
     StoreSchema.COORDINATION_COOKIES: ("0001_coordination_cookies_initial",),
     StoreSchema.WATCHES: ("0001_watches_initial", "0002_watches_add_owner", "0003_watches_add_claimed_at"),
     StoreSchema.CALLER_KEYS: ("0001_caller_keys_initial",),
+    StoreSchema.CRAWL_SPILLS: ("0001_crawl_spills_initial",),
 }
 
 MIGRATION_IDS = {schema: sequence[-1] for schema, sequence in MIGRATION_SEQUENCES.items()}
