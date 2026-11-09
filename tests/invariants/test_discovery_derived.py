@@ -9,6 +9,7 @@ staleness tests, which only caught advertised-but-dead entries.
 from __future__ import annotations
 
 from crawlutron.config.settings import CrawlerSettings
+from crawlutron.discovery.recommended_surface import OPERATOR_EXCLUSIONS
 from crawlutron.discovery.well_known import discovery_payload
 from crawlutron.mcp.registry import TOOL_SPECS
 
@@ -25,13 +26,19 @@ def _live_surface() -> set[str]:
 
 
 def _discovery_exclusions() -> set[str]:
-    """Surfaces deliberately outside the recommendation list: the operator trust
-    plane (keys are minted by the operator, not self-served) and metrics."""
+    """Derived from the production trust plane plus the self-door (test-only)."""
     return {
-        "GET /metrics",
-        "POST /v1/keys",
-        "GET /v1/keys",
-        "DELETE /v1/keys/{key_id}",
+        *OPERATOR_EXCLUSIONS,
+        "GET /.well-known/crawler-service",
+    }
+
+
+def test_discovery_exclusions_are_derived_from_the_production_trust_plane():
+    """The test-side exclusion set is production's OPERATOR_EXCLUSIONS plus only
+    the self-door: a hand-edited addition silently drops live routes from the
+    coverage check, so the set is pinned by equality."""
+    assert set(_discovery_exclusions()) == {
+        *OPERATOR_EXCLUSIONS,
         "GET /.well-known/crawler-service",
     }
 
@@ -67,6 +74,49 @@ def test_recommended_endpoints_are_derived_not_hand_listed():
         "recommended_endpoints are hand-listed in well_known.py; derive them from "
         f"the served surface: {sorted(endpoint_literals)}"
     )
+
+
+def test_no_hand_listed_endpoints_in_the_discovery_package():
+    """The no-hand-list scan covers every discovery module EXCEPT
+    recommended_surface.py -- the declared derivation input, where the doors
+    and the operator trust plane legitimately live. A hand list planted in
+    well_known.py, recommended.py, or agent_hints.py REDS here."""
+    import ast
+    import pathlib
+
+    import crawlutron.discovery as discovery_pkg
+
+    exempt = {"recommended_surface.py"}
+    offenders: list[str] = []
+    for path in sorted(pathlib.Path(discovery_pkg.__file__).parent.glob("*.py")):
+        if path.name in exempt:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+                continue
+            parts = node.value.split()
+            if len(parts) == 2 and parts[0] in {"GET", "POST", "DELETE", "PUT"}:
+                offenders.append(f"{path.name}:{node.lineno} {node.value!r}")
+    assert not offenders, (
+        "hand-listed endpoints in the discovery package; derive from the "
+        f"served surface or recommended_surface: {offenders}"
+    )
+
+
+def test_crawl_refusal_fields_never_exceed_the_schema_drop_list():
+    """ToolSpec defense-in-depth: no door may refuse a field its schema still
+    advertises -- unsupported_fields owns the vocabulary and refusal_fields
+    must stay within it (the #670 drift assert)."""
+    from crawlutron.mcp.registry import TOOL_SPECS
+
+    for spec in TOOL_SPECS:
+        refusal = spec.door.refusal_fields if spec.door else ()
+        unrefused = set(refusal) - set(spec.unsupported_fields)
+        assert not unrefused, (
+            f"tool {spec.name!r} refuses fields the schema still advertises "
+            f"(absent from unsupported_fields): {sorted(unrefused)}"
+        )
 
 
 def test_mcp_guidance_names_every_registered_tool():
