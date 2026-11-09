@@ -351,7 +351,13 @@ def discard_if_unowned_loop(
     except RuntimeError:
         namespace[slot] = None
         return
-    if loop.is_running():
+    if loop.is_running() or loop.is_closed():
+        # A running loop owns the object's lifetime decisions (it may still be
+        # used there). A CLOSED loop can never host the close -- and raising
+        # into the reset chain poisoned every later teardown in the worker (#643:
+        # pytest-asyncio leaves a closed loop as current after some async tests);
+        # the loop's own close already killed its transports, so the reference
+        # drop is the honest release, matching the no-loop branch.
         namespace[slot] = None
     else:
         loop.run_until_complete(cast(Awaitable[object], close()))
