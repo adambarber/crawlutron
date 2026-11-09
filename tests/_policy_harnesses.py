@@ -15,6 +15,7 @@ from crawlutron.api.caller_auth import get_caller_identity
 from crawlutron.api.crawl_router import router as crawl_router
 from crawlutron.api.dependencies import get_result_store
 from crawlutron.api.policy_router import router as policy_router
+from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.json_value import JsonValue
 from tests._app_factory import service_app
@@ -42,7 +43,9 @@ def policy_client(
     if caller is not None:
         app.dependency_overrides[get_caller_identity] = lambda: caller
     if key_admin_token is not None:
-        app.state.key_admin_token = key_admin_token
+        app.state.crawler_settings = CrawlerSettings.from_mapping(
+            {"CRAWLUTRON_KEY_ADMIN_TOKEN": key_admin_token}
+        )
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
