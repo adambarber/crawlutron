@@ -93,6 +93,10 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/api/exceptions.py": (10, 7),
     # #668: the single-homed discovery-link constants the 404 details reuse.
     "crawlutron/discovery/links.py": (3, 0),
+    # #649: derived discovery -- one thin re-export and one surface walk.
+    "crawlutron/discovery/recommended.py": (1, 1),
+    "crawlutron/discovery/recommended_surface.py": (3, 1),
+    "crawlutron/api/router_identity.py": (1, 1),
     "crawlutron/api/identity_router.py": (5, 3),
     "crawlutron/api/job_runner.py": (15, 12),
     "crawlutron/api/jobs_router.py": (6, 5),
