@@ -34,9 +34,22 @@ def register(owner: str, reset: Callable[[], None], has: Callable[[], bool]) -> 
 
 
 def reset_all_process_state() -> None:
-    """Every registered module drops its state, in registration order."""
-    for _, reset, _ in list(_ENTRIES):
-        reset()
+    """Every registered module drops its state, in registration order.
+
+    One owner's failure never strands the rest: each reset runs, the first
+    failure is re-raised with its owner named after the whole chain completes
+    -- an aborted chain left later owners' state held into the next test (#643).
+    """
+    first_failure: tuple[str, BaseException] | None = None
+    for owner, reset, _ in list(_ENTRIES):
+        try:
+            reset()
+        except Exception as e:
+            if first_failure is None:
+                first_failure = (owner, e)
+    if first_failure is not None:
+        failing_owner, error = first_failure
+        raise RuntimeError(f"process-state reset failed for {failing_owner}") from error
 
 
 def has_any_process_state() -> bool:

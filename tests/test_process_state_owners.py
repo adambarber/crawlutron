@@ -124,6 +124,30 @@ def test_probe_agrees_with_reset() -> None:
     assert not process_state.owner_has_state("test-fake-probe"), "the reset emptied nothing"
 
 
+def test_one_failing_reset_cannot_strand_the_rest() -> None:
+    """#643 family: one owner's failing reset aborted the chain, leaving every later
+    owner's state held into the next test -- the pooled-supersede teardown assert
+    tripped over state it never created. The chain must always complete."""
+    seen: list[str] = []
+
+    def _boom() -> None:
+        raise RuntimeError("closed loop in teardown")
+
+    process_state.register("test-fake-failing", _boom, lambda: False)
+    process_state.register("test-fake-later", lambda: seen.append("later"), lambda: bool(seen))
+    raised: RuntimeError | None = None
+    try:
+        process_state.reset_all_process_state()
+    except RuntimeError as e:
+        raised = e
+    finally:
+        process_state.register("test-fake-failing", lambda: None, lambda: False)
+        process_state.register("test-fake-later", lambda: None, lambda: False)
+    assert raised is not None, "a failing owner's reset vanished instead of surfacing"
+    assert seen == ["later"], "a failing owner's reset stranded every later owner's state"
+    assert "test-fake-failing" in str(raised), f"the failure named no owner: {raised}"
+
+
 def test_no_straggler_defines_the_pair() -> None:
     """No app module may define reset_process_state/has_process_state at module level:
     the pair lives once, in the registry module."""
