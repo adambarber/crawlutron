@@ -259,3 +259,84 @@ class TestDiscovery:
         guidance = " ".join(agent_hints_payload()["guidance"])
         assert "/v1/admit" in guidance
         assert "before the first request" in guidance
+
+
+class TestStructuralRefusals:
+    """The constructor's structural refusals surface as url-check data, never a 500."""
+
+    @pytest.mark.parametrize(
+        ("url", "reason"),
+        [
+            ("http://user:pass@example.com/", "userinfo_refused"),
+            ("http://[v7.future]/x", "ipvfuture_refused"),
+        ],
+    )
+    async def test_structural_refusal_is_wire_data(self, admit_settings, url, reason):
+        async with serve_admit(_admit_app(admit_settings)) as client:
+            body = await _post_admit(client, {"url": url})
+        assert body["admitted"] is False
+        assert body["classification"] == reason
+        assert _check(body, "url") == reason
+        assert body["canonical_url"] is None
+
+
+class TestProducerVocabularyLoop:
+    """Every ValueError reason the admission producers can raise has a table row.
+
+    Derives the raisable vocabulary from the live raise/return sites by AST, so a
+    new producer refusal without a _REASON_TABLE row reds here naming file+line.
+    """
+
+    def test_every_producer_reason_has_a_table_row(self):
+        import ast
+        from pathlib import Path
+
+        import crawlutron.api.admit_endpoint as endpoint_module
+        import crawlutron.models.host_policy as host_policy_module
+        import crawlutron.models.normalized_url as normalized_url_module
+
+        known = endpoint_module.known_reasons()
+
+        def _str_constants(node: ast.AST) -> list[tuple[int, str]]:
+            return [
+                (sub.lineno, sub.value)
+                for sub in ast.walk(node)
+                if isinstance(sub, ast.Constant) and isinstance(sub.value, str)
+            ]
+
+        def _raise_reasons(path: Path) -> list[tuple[int, str]]:
+            tree = ast.parse(path.read_text())
+            return [
+                (node.lineno, sub.value)
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Raise)
+                and isinstance(node.exc, ast.Call)
+                and isinstance(node.exc.func, ast.Name)
+                and node.exc.func.id == "ValueError"
+                for sub in node.exc.args
+                if isinstance(sub, ast.Constant) and isinstance(sub.value, str)
+            ]
+
+        def _reason_return_literals(path: Path) -> list[tuple[int, str]]:
+            tree = ast.parse(path.read_text())
+            found: list[tuple[int, str]] = []
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and (
+                    node.name.startswith("host_") and node.name.endswith("_reason")
+                ):
+                    for sub in ast.walk(node):
+                        if isinstance(sub, ast.Return):
+                            found.extend(_str_constants(sub))
+            return found
+
+        producers = [
+            (Path(normalized_url_module.__file__), _raise_reasons),
+            (Path(host_policy_module.__file__), _reason_return_literals),
+        ]
+        missing = [
+            f"{path}:{lineno}: {reason!r} is raisable but has no _REASON_TABLE row"
+            for path, collect in producers
+            for lineno, reason in collect(path)
+            if reason not in known
+        ]
+        assert missing == [], "producer->table loop broken:\n" + "\n".join(missing)
