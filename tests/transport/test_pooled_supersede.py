@@ -9,7 +9,11 @@ import crawlutron.transport.http_client_pool as http_mod
 from crawlutron.runtime import process_state
 from crawlutron.transport import pooled_clients as pc
 from crawlutron.transport.fetchers import cffi_fetch
-from crawlutron.transport.pooled_clients import drain_pending_client_closes
+from crawlutron.transport.pooled_clients import (
+    PooledClient,
+    discard_if_unowned_loop,
+    drain_pending_client_closes,
+)
 from tests._async_harnesses import run_loop_rebind_scenario
 from tests._policy_factories import canonical
 from tests._pool_harnesses import builder_for as _builder_for
@@ -359,6 +363,26 @@ def test_discard_if_unowned_loop_closes_client_on_closed_loop(monkeypatch):
     dead.close()
     closed = _discard_probe(monkeypatch, dead)
     assert closed, "client was dropped without being closed on a closed loop"
+
+
+async def test_discard_if_unowned_loop_closes_client_on_running_loop():
+    """A pooled client must be closed, not merely dropped, when the current
+    loop is running (teardown runs while the test loop is still alive).
+    Dropping it orphaned its transports; they surfaced later as ResourceWarning
+    on a random victim test (socket-leak unraisable family)."""
+    closed: list[bool] = []
+
+    async def _close() -> None:
+        closed.append(True)
+
+    namespace: dict[str, PooledClient | None] = {"_slot": _NeverClosedClient()}
+
+    # Async test: the current loop is running, so discard_if_unowned_loop
+    # hits the running-loop branch and must close, not drop, the reference.
+    discard_if_unowned_loop(_close, "_slot", namespace)
+
+    assert closed, "client was dropped without being closed on a running loop"
+    assert namespace["_slot"] is None
 
 
 def test_a_closed_current_loop_never_poisons_the_reset_chain(stub_builder):

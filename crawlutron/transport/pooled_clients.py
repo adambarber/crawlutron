@@ -341,18 +341,40 @@ T = TypeVar("T")
 
 
 def _close_on_fresh_loop(close: Callable[[], Awaitable[object]]) -> None:
-    """Run an async close on a freshly created event loop.
-
-    asyncio.run() cannot be used here: pytest-asyncio may hold a running loop
-    on the thread, and asyncio.run() refuses to start a nested one. A manually
-    created loop is used instead, then torn down.
-    """
+    """Close on a fresh loop, torn down after; unsafe when another loop runs
+    on this thread (run_until_complete cannot nest or run a foreign loop)."""
     _fresh_loop = asyncio.new_event_loop()
     try:
         asyncio.set_event_loop(_fresh_loop)
         _fresh_loop.run_until_complete(close())
     finally:
         _fresh_loop.close()
+
+
+def _close_on_thread(close: Callable[[], Awaitable[object]]) -> None:
+    """Close on a fresh loop hosted by a background thread when another loop
+    runs here (run_until_complete cannot host a foreign loop)."""
+    exc: list[BaseException | None] = [None]
+    done = threading.Event()
+
+    def _run() -> None:
+        try:
+            _fresh_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(_fresh_loop)
+            try:
+                _fresh_loop.run_until_complete(close())
+            finally:
+                _fresh_loop.close()
+        except Exception as e:  # surface close failures to the caller
+            exc[0] = e
+        finally:
+            done.set()
+
+    thread = threading.Thread(target=_run)
+    thread.start()
+    done.wait(timeout=30)
+    if exc[0] is not None:
+        raise exc[0]
 
 
 def discard_if_unowned_loop(
@@ -376,8 +398,9 @@ def discard_if_unowned_loop(
         namespace[slot] = None
         return
     if loop.is_running():
-        # A running loop owns the object's lifetime decisions (it may still be
-        # used there).
+        # Reset tears down on a live loop: close on a fresh loop hosted by a
+        # background thread instead of dropping it (socket-leak family).
+        _close_on_thread(cast(Callable[[], Awaitable[object]], close))
         namespace[slot] = None
         return
     if loop.is_closed():
@@ -397,6 +420,12 @@ def _reset() -> None:
     """
     if _DEFAULT_HTTP_CLIENT is not None:
         discard_if_unowned_loop(close_async_http_client, "_DEFAULT_HTTP_CLIENT", globals())
+    # Failed rebuild can leave current=None with a queued superseded client;
+    # close it on a fresh loop instead of dropping it (socket-leak family).
+    with _PENDING_CLIENT_CLOSE_LOCK:
+        queued = bool(_PENDING_CLIENT_CLOSE)
+    if queued:
+        _close_on_fresh_loop(drain_pending_client_closes)
     with _PENDING_CLIENT_CLOSE_LOCK:
         _PENDING_CLIENT_CLOSE.clear()
 
