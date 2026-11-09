@@ -1,6 +1,7 @@
 """Anonymous IP-bucket metering (#668): the rate-limit law over the unguarded
-surfaces -- every exempt GET, the docs GETs, /mcp anonymous traffic, the
-route-miss oracle, and any response with no matched route."""
+surfaces -- every ex-exempt GET, the docs GETs, /mcp anonymous traffic, the
+route-miss oracle, and any response with no matched route: one request-stage
+unit each."""
 
 from __future__ import annotations
 

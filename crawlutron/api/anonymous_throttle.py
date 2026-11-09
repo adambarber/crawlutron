@@ -1,9 +1,9 @@
 """Anonymous IP-bucket metering (#668): the surfaces outside the auth layer.
 
-The rate-limit law: every externally reachable surface is metered. The exempt
-GETs (discovery, docs, health), POST /mcp anonymous traffic, and the route-miss
-oracle have no caller credential to key a bucket on, so they meter per remote
-IP here.
+The rate-limit law: every externally reachable surface is metered. The
+former exempt GETs (discovery, docs, health), POST /mcp anonymous traffic,
+and the route-miss oracle have no caller credential to key a bucket on, so
+they meter per remote IP here.
 
 #659/#663 inheritance: buckets are LRU-bounded, the clock is monotonic, and
 the meter is registered process state (#621).
@@ -102,8 +102,9 @@ def shared_anonymous_throttle() -> AnonymousThrottle:
 register_shared_meter(__name__, _SHARED)
 
 #: The paths this meter gates: MCP anonymous traffic and FastAPI's static docs
-#: pages. The exempt GETs (health, ready, discovery, capabilities, agent-hints,
-#: openapi.json) meter through ANONYMOUS_METERED's route-driven gate below.
+#: pages. The former exempt GETs (health, ready, discovery, capabilities,
+#: agent-hints, openapi.json) meter through the middleware below this table;
+#: ANONYMOUS_METERED carries them as the ratchet's path inventory.
 METERED_PREFIXES = ("/docs", "/redoc")
 METERED_EXACT = ("/mcp",)
 
