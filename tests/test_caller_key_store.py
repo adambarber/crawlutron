@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import secrets
 import sqlite3
+import time
 
 from crawlutron.storage.caller_key_store import CallerKeyStore
 
@@ -183,3 +185,88 @@ def test_the_secret_format_has_one_parser(tmp_path):
     # A two-dot secret (a dot inside the body) is refused whole -- not split
     # at the first dot with the remainder verified as a body.
     assert store.verify_key(f"{issued.secret}.extra") is None
+
+
+def _rotated_secret_for(key_id: str) -> str:
+    """A presentable secret for ``key_id``: ck_<id-hex>.<body>.
+
+    Rotation re-issues under the same key id, so the new secret must embed it.
+    """
+    return f"ck_{key_id[4:]}.{secrets.token_urlsafe(32)}"
+
+
+def _rotated_key(tmp_path):
+    store = CallerKeyStore(tmp_path / "keys.db")
+    issued = store.issue_key("agent-a")
+    new_secret = _rotated_secret_for(issued.key_id)
+    assert store.rotate_key(issued.key_id, new_secret) is True
+    return store, issued, new_secret
+
+
+def test_rotated_previous_key_verifies_within_grace_window(tmp_path):
+    store, issued, new_secret = _rotated_key(tmp_path)
+    assert store.verify_key(issued.secret) is not None  # previous still valid
+    assert store.verify_key(new_secret) is not None  # current valid
+
+
+def test_previous_key_stops_verifying_after_grace_window(tmp_path):
+    store, issued, new_secret = _rotated_key(tmp_path)
+    with sqlite3.connect(tmp_path / "keys.db") as conn:
+        conn.execute("UPDATE caller_keys SET previous_rotated_at = ?", (time.time() - 400,))
+        conn.commit()
+
+    assert store.verify_key(issued.secret) is None  # previous expired
+    assert store.verify_key(new_secret) is not None  # current still valid
+
+
+def test_current_key_still_verifies_after_rotation(tmp_path):
+    store, issued, new_secret = _rotated_key(tmp_path)
+    assert store.verify_key(new_secret) is not None
+
+
+def test_revocation_clears_current_and_previous(tmp_path):
+    """Invariant: revoking a rotated key clears both slots."""
+    store, issued, new_secret = _rotated_key(tmp_path)
+    assert store.revoke_key(issued.key_id) is True
+
+    assert store.verify_key(issued.secret) is None
+    assert store.verify_key(new_secret) is None
+    assert store.exists_key(issued.key_id) is False
+
+
+def test_rotating_an_unknown_key_is_refused(tmp_path):
+    store = CallerKeyStore(tmp_path / "keys.db")
+    key_id = "key_" + "a" * 32
+    assert store.rotate_key(key_id, _rotated_secret_for(key_id)) is False
+
+
+def test_rotation_rejects_a_secret_for_another_key_id(tmp_path):
+    store = CallerKeyStore(tmp_path / "keys.db")
+    issued = store.issue_key("agent-a")
+    other = store.issue_key("agent-b")
+    assert store.rotate_key(issued.key_id, _rotated_secret_for(other.key_id)) is False
+    assert store.verify_key(issued.secret) is not None  # untouched
+
+
+def test_verify_cost_one_pbkdf2_on_current_hit_two_on_previous_hit(tmp_path):
+    from crawlutron.storage import caller_key_store
+
+    store, issued, new_secret = _rotated_key(tmp_path)
+
+    before = caller_key_store.pbkdf2_calls
+    assert store.verify_key(new_secret) is not None
+    assert caller_key_store.pbkdf2_calls - before == 1
+
+    before = caller_key_store.pbkdf2_calls
+    assert store.verify_key(issued.secret) is not None
+    assert caller_key_store.pbkdf2_calls - before == 2
+
+
+async def test_async_rotate_twin_moves_current_to_previous(tmp_path):
+    store = CallerKeyStore(tmp_path / "keys.db")
+    issued = await store.aissue_key("agent-a")
+    new_secret = _rotated_secret_for(issued.key_id)
+
+    assert await store.arotate_key(issued.key_id, new_secret) is True
+    assert await store.averify_key(issued.secret) is not None
+    assert await store.averify_key(new_secret) is not None

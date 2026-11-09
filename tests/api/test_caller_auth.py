@@ -5,6 +5,9 @@ Regression pins for the auth paths that had zero coverage (#199).
 
 from __future__ import annotations
 
+import secrets
+
+from httpx import AsyncClient, Response
 from starlette.requests import Request
 
 from crawlutron.api.key_throttle import KeyVerifyThrottle
@@ -34,6 +37,23 @@ def _assert_401(response) -> None:
     assert response.json()["detail"]["code"] == "invalid_api_key"
 
 
+async def _issue_key_as_admin(client: AsyncClient) -> Response:
+    """Issue one key as the operator; return the issued response."""
+    admin = {"X-API-Key": "test-admin-token"}
+    issued = await client.post("/v1/keys", json={"label": "agent-a"}, headers=admin)
+    assert issued.status_code == 201, issued.text
+    return issued
+
+
+async def _post_crawl(client: AsyncClient, secret: str) -> Response:
+    """POST a crawl as the given caller secret."""
+    return await client.post(
+        "/v1/crawl",
+        headers={"X-API-Key": secret},
+        json={"url": "http://example.com/", "async_mode": True},
+    )
+
+
 async def test_missing_key_on_keys_door_is_401(tmp_path):
     """#199: no credential on /v1/keys is a 401, unauthenticated, not anonymous."""
     async with isolation_client(tmp_path) as (client, _store, _results, _keys):
@@ -53,17 +73,11 @@ async def test_wrong_key_on_keys_door_is_401(tmp_path):
 async def test_revoked_key_is_401(tmp_path):
     """#199: a key revoked after issuance can no longer crawl as itself."""
     async with isolation_client(tmp_path) as (client, _store, _results, _keys):
-        admin = {"X-API-Key": "test-admin-token"}
-        issued = await client.post("/v1/keys", json={"label": "agent-a"}, headers=admin)
-        assert issued.status_code == 201, issued.text
+        issued = await _issue_key_as_admin(client)
         key_id = issued.json()["key_id"]
-        revoked = await client.delete(f"/v1/keys/{key_id}", headers=admin)
+        revoked = await client.delete(f"/v1/keys/{key_id}", headers={"X-API-Key": "test-admin-token"})
         assert revoked.status_code == 200, revoked.text
-        crawl = await client.post(
-            "/v1/crawl",
-            headers={"X-API-Key": issued.json()["secret"]},
-            json={"url": "http://example.com/", "async_mode": True},
-        )
+        crawl = await _post_crawl(client, issued.json()["secret"])
         _assert_401(crawl)
 
 
@@ -278,3 +292,15 @@ def test_the_settings_home_is_read_not_rederived(monkeypatch):
     assert caller_auth.is_operator(Request(scope)) is True
     assert caller_auth.is_operator(Request(scope)) is True
     assert calls == [], "the door re-derived settings to answer a request"
+
+
+async def test_rotated_previous_key_crawls_within_grace_window(tmp_path):
+    """A key rotated away still crawls within the grace window (verify path only)."""
+    async with quota_client(tmp_path) as (client, _store, _results, keys):
+        issued = await _issue_key_as_admin(client)
+        key_id = issued.json()["key_id"]
+        new_secret = f"ck_{key_id[4:]}.{secrets.token_urlsafe(32)}"
+        assert await keys.arotate_key(key_id, new_secret) is True
+
+        crawl = await _post_crawl(client, issued.json()["secret"])
+        assert crawl.status_code == 202, crawl.text  # previous still valid within grace

@@ -17,3 +17,5 @@ class CallerKey(BaseModel):
     max_pages: int = 0
     max_concurrency: int = 0
     created_at: float = 0.0
+    previous_hash: str = ""
+    previous_rotated_at: float = 0.0

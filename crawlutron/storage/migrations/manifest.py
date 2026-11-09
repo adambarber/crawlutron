@@ -210,6 +210,8 @@ CALLER_KEYS_SCHEMA = TableSchema(
         ColumnSchema("max_pages", "INTEGER", True, "0"),
         ColumnSchema("max_concurrency", "INTEGER", True, "0"),
         ColumnSchema("created_at", "REAL", True, None),
+        ColumnSchema("previous_hash", "TEXT", False, None),
+        ColumnSchema("previous_rotated_at", "REAL", False, None),
     ),
     indexes=(IndexSchema("caller_keys_by_hash", ("key_hash",), unique=True),),
 )
@@ -271,7 +273,7 @@ MIGRATION_SEQUENCES = {
     StoreSchema.COORDINATION_COUNTERS: ("0001_coordination_counters_initial",),
     StoreSchema.COORDINATION_COOKIES: ("0001_coordination_cookies_initial",),
     StoreSchema.WATCHES: ("0001_watches_initial", "0002_watches_add_owner", "0003_watches_add_claimed_at"),
-    StoreSchema.CALLER_KEYS: ("0001_caller_keys_initial",),
+    StoreSchema.CALLER_KEYS: ("0001_caller_keys_initial", "0002_caller_keys_add_previous"),
     StoreSchema.CRAWL_SPILLS: ("0001_crawl_spills_initial",),
     StoreSchema.KEY_ADMIN_EVENTS: ("0001_key_admin_events_initial",),
 }

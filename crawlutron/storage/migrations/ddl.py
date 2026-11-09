@@ -6,6 +6,7 @@ a migration file declares *which* schema it creates, never re-spells the SQL.
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Iterable
 
 from crawlutron.storage.migrations.manifest import TableSchema, create_index_sql, create_table_sql
@@ -34,11 +35,19 @@ def add_column_step(table_name: str, column_ddl: str) -> Iterable:
     database already carrying the column no-ops the upgrade, and the rollback
     drops it only when the migration added it (the guard was re-spelled 3x)."""
 
-    column_name = column_ddl.split()[0]
+    column_name = column_ddl.split()[0].strip('"')
 
     def apply_step(conn) -> None:
         if not table_has_column(conn, table_name, column_name):
-            conn.execute(f"ALTER TABLE {_quote(table_name)} ADD COLUMN {column_ddl}")
+            try:
+                conn.execute(f"ALTER TABLE {_quote(table_name)} ADD COLUMN {column_ddl}")
+            except sqlite3.OperationalError as exc:
+                # Concurrent migrations can both pass the guard: a duplicate-column
+                # error means a sibling already added it, so the state we need is
+                # present -- treat as applied rather than aborting the battery.
+                if "duplicate column" in str(exc).lower():
+                    return
+                raise
 
     def rollback_step(conn) -> None:
         if table_has_column(conn, table_name, column_name):

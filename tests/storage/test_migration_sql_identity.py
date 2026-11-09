@@ -80,6 +80,10 @@ _ADD_COLUMN_SQL: dict[str, list[tuple[str, str, str]]] = {
     ],
     "0004_crawl_jobs_add_owner": [("crawl_jobs", "owner", "owner TEXT NOT NULL DEFAULT ''")],
     "0005_crawl_jobs_add_deleted_at": [("crawl_jobs", "deleted_at", "deleted_at REAL")],
+    "0002_caller_keys_add_previous": [
+        ("caller_keys", "previous_hash", "previous_hash TEXT"),
+        ("caller_keys", "previous_rotated_at", "previous_rotated_at REAL"),
+    ],
 }
 
 #: The table each add-column migration's target table belongs to.
@@ -87,6 +91,7 @@ _BASE_TABLE_SQL: dict[str, str] = {
     "results": create_table_sql(RESULTS_SCHEMA),
     "watches": create_table_sql(WATCHES_SCHEMA),
     "crawl_jobs": create_table_sql(CRAWL_JOBS_SCHEMA),
+    "caller_keys": create_table_sql(CALLER_KEYS_SCHEMA),
 }
 
 #: Migrations this module does not pin, and why: the shared helpers never

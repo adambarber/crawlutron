@@ -28,10 +28,12 @@ _SALT_BYTES = 16
 # hardware floor ) keeps lookup sub-20ms on the reference machine. Measure before raising.
 PBKDF2_ITERATIONS = 210_000
 
-#: How many times the door has run the PBKDF2 derivation; the O(1) contract is
-#: ONE per verify_key call, hit or miss. Counted here so the suite can pin it.
-#: The increment is LOCKED: verify_key runs on the store executor's worker
-#: threads (atwin), so an unsynchronized += can lose updates.
+#: Grace window in seconds: a rotated-away key still verifies against the
+#: previous slot while now - previous_rotated_at <= GRACE_WINDOW_SECONDS.
+GRACE_WINDOW_SECONDS = 300.0
+
+#: PBKDF2 derivations per verify_key call, hit or miss: one for current, plus
+#: one more for previous inside the grace window (at most two total, locked).
 pbkdf2_calls = 0
 _pbkdf2_calls_lock = threading.Lock()
 
@@ -50,9 +52,18 @@ def _store_hash(secret: str) -> str:
     return f"{salt.hex()}${_hash_secret(secret, salt)}"
 
 
-def _record_from_row(row: tuple[str, str, str, int, int, float]) -> CallerKey:
+def _record_from_row(row: tuple) -> CallerKey:
     """One key record from its selected columns, in select order."""
-    key_id, label, key_hash, max_pages, max_concurrency, created_at = row
+    (
+        key_id,
+        label,
+        key_hash,
+        max_pages,
+        max_concurrency,
+        created_at,
+        previous_hash,
+        previous_rotated_at,
+    ) = row
     return CallerKey(
         key_id=key_id,
         label=label,
@@ -60,6 +71,8 @@ def _record_from_row(row: tuple[str, str, str, int, int, float]) -> CallerKey:
         max_pages=max_pages,
         max_concurrency=max_concurrency,
         created_at=created_at,
+        previous_hash=previous_hash or "",
+        previous_rotated_at=previous_rotated_at or 0.0,
     )
 
 
@@ -101,6 +114,12 @@ class CallerKeyStore(CoordinationStore):
         """
         self._audit = audit
 
+    def _commit_and_audit(self, action: str, key_id: str) -> None:
+        """Commit the in-flight write and record one admin audit row."""
+        self._conn.commit()
+        if self._audit is not None:
+            self._audit.record_event(actor="admin", action=action, target_key_id=key_id, outcome="granted")
+
     def issue_key(self, label: str, *, max_pages: int = 0, max_concurrency: int = 0) -> IssuedKey:
         """Mint a key for ``label``; the secret is returned once, never stored."""
         name = label.strip()
@@ -116,14 +135,11 @@ class CallerKeyStore(CoordinationStore):
         with self._lock:
             self._conn.execute(
                 "INSERT INTO caller_keys (key_id, label, key_hash, max_pages, max_concurrency,"
-                " created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (key_id, name, _store_hash(body), max_pages, max_concurrency, created_at),
+                " created_at, previous_hash, previous_rotated_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (key_id, name, _store_hash(body), max_pages, max_concurrency, created_at, None, None),
             )
-            self._conn.commit()
-        if self._audit is not None:
-            self._audit.record_event(
-                actor="admin", action="key_mint", target_key_id=key_id, outcome="granted"
-            )
+            self._commit_and_audit("key_mint", key_id)
         return IssuedKey(
             key_id=key_id, label=name, secret=secret, max_pages=max_pages, max_concurrency=max_concurrency
         )
@@ -131,9 +147,8 @@ class CallerKeyStore(CoordinationStore):
     def verify_key(self, secret: str) -> CallerKey | None:
         """The record for ``secret``, or None when it names no live key.
 
-        The secret embeds its key id, so the door is one primary-key lookup plus
-        ONE salted PBKDF2 for the candidate -- O(1) per request, never a scan;
-        a miss burns the same PBKDF2 on a fixed dummy so timing stays uniform.
+        Current first, then ``previous`` inside the grace window: one PBKDF2
+        for current, at most one more for previous; a miss burns a fixed dummy.
         """
         parsed = _secret_id_and_body(secret)
         key_id = parsed[0] if parsed is not None else None
@@ -141,27 +156,34 @@ class CallerKeyStore(CoordinationStore):
         with self._lock:
             row = (
                 self._conn.execute(
-                    "SELECT key_id, label, key_hash, max_pages, max_concurrency, created_at"
+                    "SELECT key_id, label, key_hash, max_pages, max_concurrency,"
+                    " created_at, previous_hash, previous_rotated_at"
                     " FROM caller_keys WHERE key_id = ?",
                     (key_id,),
                 ).fetchone()
                 if key_id is not None
                 else None
             )
-        # One PBKDF2 per request, hit or miss: a miss verifies against a fixed
-        # dummy digest, so timing says nothing about whether the id existed.
+        # Current first: one PBKDF2; on a miss, ``previous`` inside the grace
+        # window gets one more -- at most two derivations, body-independent timing.
         stored = row[2] if row is not None else _DUMMY_VERIFIER
         salt_hex, _, digest_hex = stored.partition("$")
         computed = _hash_secret(body, bytes.fromhex(salt_hex))
-        if row is None or not secrets.compare_digest(computed, digest_hex):
-            return None
-        return _record_from_row(row)
+        if row is not None and secrets.compare_digest(computed, digest_hex):
+            return _record_from_row(row)
+        if row is not None and row[6] and row[7] is not None and time.time() - row[7] <= GRACE_WINDOW_SECONDS:
+            salt_hex, _, digest_hex = row[6].partition("$")
+            computed = _hash_secret(body, bytes.fromhex(salt_hex))
+            if secrets.compare_digest(computed, digest_hex):
+                return _record_from_row(row)
+        return None
 
     def list_keys(self) -> list[CallerKey]:
         """Every live key record, oldest first."""
         with self._lock:
             rows = self._conn.execute(
-                "SELECT key_id, label, key_hash, max_pages, max_concurrency, created_at"
+                "SELECT key_id, label, key_hash, max_pages, max_concurrency,"
+                " created_at, previous_hash, previous_rotated_at"
                 " FROM caller_keys ORDER BY created_at ASC"
             ).fetchall()
         if self._audit is not None:
@@ -182,13 +204,37 @@ class CallerKeyStore(CoordinationStore):
             )
         return cur.rowcount > 0
 
+    def rotate_key(self, key_id: str, new_secret: str) -> bool:
+        """Rotate ``key_id`` to ``new_secret``: current becomes ``previous``
+        (stamped with ``previous_rotated_at``) and ``new_secret`` becomes
+        current. True iff a live key existed; unknown ids write nothing.
+        """
+        parsed = _secret_id_and_body(new_secret)
+        if parsed is None or parsed[0] != key_id:
+            return False
+        now = time.time()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT key_hash FROM caller_keys WHERE key_id = ?", (key_id,)
+            ).fetchone()
+            if row is None:
+                return False
+            self._conn.execute(
+                "UPDATE caller_keys SET key_hash = ?, previous_hash = ?,"
+                " previous_rotated_at = ? WHERE key_id = ?",
+                (_store_hash(parsed[1]), row[0], now, key_id),
+            )
+            self._commit_and_audit("key_rotate", key_id)
+        return True
+
     def get_for_id(self, key_id: str) -> CallerKey | None:
         """The record for ``key_id``, or None when no live key has that id; the
         watch sweep uses it to meter an owner's check against their concurrency.
         """
         with self._lock:
             row = self._conn.execute(
-                "SELECT key_id, label, key_hash, max_pages, max_concurrency, created_at"
+                "SELECT key_id, label, key_hash, max_pages, max_concurrency,"
+                " created_at, previous_hash, previous_rotated_at"
                 " FROM caller_keys WHERE key_id = ?",
                 (key_id,),
             ).fetchone()
@@ -210,3 +256,4 @@ class CallerKeyStore(CoordinationStore):
     arevoke_key = atwin(revoke_key)
     aexists_key = atwin(exists_key)
     aget_for_id = atwin(get_for_id)
+    arotate_key = atwin(rotate_key)
