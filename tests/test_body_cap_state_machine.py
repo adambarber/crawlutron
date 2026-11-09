@@ -4,11 +4,19 @@ admitted more bytes -- ``truncated`` is now sticky and short-circuits each.
 """
 
 import pytest
+from starlette.requests import Request
 from starlette.responses import Response
 from starlette.types import Message
 
 from crawlutron.api.middleware import MAX_REQUEST_BODY_BYTES, limit_request_body
-from tests._asgi_request import body_reader_call_next, make_request, pass_through
+from tests._asgi_request import (
+    body_reader_call_next,
+    make_request,
+    pass_through,
+    refuse_appends_to,
+    refuse_never,
+    two_chunk_request,
+)
 
 CAP = 10
 
@@ -91,13 +99,9 @@ async def test_declared_body_over_the_cap_is_refused_before_the_app_sees_it():
     """A declared body over the cap costs nothing: the request never reaches the
     app and no receive is spent on a body that will be turned away."""
     request = _one_chunk(b"", headers=[(b"content-length", b"4096")])
-    called = []
+    called: list[Request] = []
 
-    async def call_next(req):
-        called.append(req)
-        return Response("")
-
-    response = await limit_request_body(request, call_next, max_bytes=CAP)
+    response = await limit_request_body(request, refuse_appends_to(called), max_bytes=CAP)
 
     assert response.status_code == 413
     assert not called, "the app was invoked for a body already refused"
@@ -162,23 +166,22 @@ async def test_refusal_reports_the_cap_it_enforced():
     }
 
 
-async def test_unparsable_content_length_falls_through_to_the_wrapper():
-    """A malformed CL header cannot be compared to a cap, and refusing on it
-    would let a header decide. The wrapper is the enforcement, so the request
-    proceeds and is truncated there instead."""
-    request = make_request(
-        [
-            {"type": "http.request", "body": b"Z" * 40, "more_body": False},
-            {"type": "http.request", "body": b"", "more_body": False},
-        ],
-        headers=[(b"content-length", b"not-a-number")],
-    )
+async def test_unparsable_content_length_is_refused_with_the_malformed_posture():
+    """A malformed CL header refuses 413 (#675 unification). OLD PIN (#619
+    posture, deleted by the #675 order): fall through to the wrapper and
+    truncate -- 'a malformed CL cannot be compared to a cap'. The #675 ticket
+    names that swallow a DIFFERENT wrong posture (a negative CL serves an
+    empty body, a non-int CL silently truncates) and orders ONE refusal shape
+    for every malformed declaration -- the new pin is strictly stronger."""
+    request = two_chunk_request([(b"content-length", b"not-a-number")])
     seen: dict[str, bytes] = {}
 
-    response = await limit_request_body(request, body_reader_call_next(seen), max_bytes=CAP)
+    response = await limit_request_body(
+        request, refuse_never("a malformed Content-Length must never reach the app"), max_bytes=CAP
+    )
 
-    assert response.status_code == 200
-    assert len(seen["body"]) == CAP
+    assert response.status_code == 413
+    assert seen == {}, "the app ran for a refused request"
 
 
 async def test_truncation_preserves_the_chunks_own_keys():

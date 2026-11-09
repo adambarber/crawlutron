@@ -141,16 +141,25 @@ def _capped_receive_for(original_receive: Receive, *, max_bytes: int, truncated:
 
 async def limit_request_body(request: Request, call_next, *, max_bytes: int = MAX_REQUEST_BODY_BYTES):
     """ASGI middleware: cap request bodies at ``max_bytes``, and refuse a body
-    that never delivers its declared Content-Length (#619)."""
+    that never delivers its declared Content-Length (#619). A nonempty
+    Content-Length that is not a plain non-negative decimal integer refuses
+    413 like an oversized one (#675): a negative value would serve an empty
+    body (the declared collect loops zero times) and a non-int value would
+    silently fall into the undeclared truncation path -- one refusal shape
+    for every malformed declaration."""
     original_receive = request.receive
     content_length = request.headers.get("content-length")
     declared = 0
-    if content_length:
+    if content_length is not None:
+        # A nonempty header that is not a plain non-negative decimal integer
+        # refuses (#675): a negative value would serve an empty body (the
+        # declared collect loops zero times) and a non-int value would
+        # silently fall into the undeclared truncation path.
         try:
             declared = int(content_length)
         except ValueError:
-            pass
-        if declared > max_bytes:
+            return _error_413(max_bytes)
+        if not content_length.isascii() or not content_length.isdigit() or declared > max_bytes:
             # Mirror the truncation path: drain the refused body before the
             # 413, capped so a slow-post client cannot pin the task.
             await _drain_declared_body(original_receive, max_bytes=max_bytes)

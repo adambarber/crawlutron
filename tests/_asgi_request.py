@@ -46,6 +46,38 @@ def make_request(messages: _Messages, headers: list[tuple[bytes, bytes]] | None 
     return Request(scope, receive=receive)
 
 
+def two_chunk_request(headers: list[tuple[bytes, bytes]], body: bytes = b"Z" * 40) -> Request:
+    """A request carrying one body chunk plus the terminator message -- the
+    arrange the declared-body refusal suites share (drainable, not empty)."""
+    return make_request(
+        [
+            {"type": "http.request", "body": body, "more_body": False},
+            {"type": "http.request", "body": b"", "more_body": False},
+        ],
+        headers=headers,
+    )
+
+
+def refuse_appends_to(ran: list[Request]):
+    """A call_next double that records invocation -- the app-must-not-run
+    assertion reads the list empty afterward."""
+
+    async def call_next(req: Request) -> Response:
+        ran.append(req)
+        return Response("")
+
+    return call_next
+
+
+def refuse_never(caller):
+    """A call_next double whose invocation fails the test immediately."""
+
+    async def call_next(req: Request) -> Response:
+        raise AssertionError(caller)
+
+    return call_next
+
+
 async def pass_through(request: Request) -> Response:
     """The call_next double that never reads the body."""
     return Response("")
