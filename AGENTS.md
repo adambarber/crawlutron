@@ -8,6 +8,8 @@ This file provides guidance to agents working in this repository.
 
 ## Agent dispatch rules (process)
 
+- **Dispatched agents load the onboarding skill first (owner directive 2026-11-08).** Child sessions never auto-load skills. Every dispatch prompt's first instruction is: load the `agent-onboarding` skill (`~/Projects/crawlutron/.opencode/skills/agent-onboarding.md`) before any work; every workspace brief's first line repeats the instruction (dispatchers use `.opencode/skills/dispatch-agent.md` for the complete dispatch procedure). Dispatchers: keep all lanes full; the next priority-ordered unit dispatches immediately when a lane settles.
+
 - **Pre-development review before any feature or fix.** Read the ticket, the modules it touches, and the gates that govern them; state how the change fits the current architecture before writing code. A ticket whose body cites stale paths must be re-grounded from the live tree first.
 - **Architectural review gate on tickets.** A GitHub ticket must carry an architectural review (its reach, its design choice, its walk-past plan) before an implementation agent picks it up. A quick `scripts/ticket_arch_review.sh <issue>` check assists the reviewer; it does not replace the review.
 - **All development is TDD.** Red first for every behavior; record the red output; then green; then refactor. Budgets and ratchets move DOWN only, in the same commit as the work that earns them.
