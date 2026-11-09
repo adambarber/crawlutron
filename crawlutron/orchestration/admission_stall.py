@@ -21,7 +21,7 @@ from crawlutron.transport.results import TerminalResult, failed_engine_result
 from crawlutron.vocabulary.taxonomy import CrawlClassification
 
 if TYPE_CHECKING:
-    from crawlutron.orchestration.recursive import RecursiveRunState, RecursiveState
+    from crawlutron.orchestration.recursive import CrawlRun, CrawlState
 
 # How long a recursion tolerates admission making NO progress before it stops.
 NO_PROGRESS_STALL_SECONDS: float = 60.0
@@ -76,15 +76,13 @@ async def fail_remaining_frontier(
         )
 
 
-type _AdmitFn = Callable[
-    [RecursiveRunState, RecursiveState, MetricsStore], Awaitable[list[tuple[int, CrawlTask]]]
-]
+type _AdmitFn = Callable[[CrawlRun, CrawlState, MetricsStore], Awaitable[list[tuple[int, CrawlTask]]]]
 type _CrawlFn = Callable[
-    [RecursiveRunState, list[tuple[int, CrawlTask]]],
+    [CrawlRun, list[tuple[int, CrawlTask]]],
     Awaitable[dict[int, EngineCrawlResult] | None],
 ]
 type _CommitFn = Callable[
-    [RecursiveRunState, RecursiveState, list[tuple[int, CrawlTask]], dict[int, EngineCrawlResult] | None],
+    [CrawlRun, CrawlState, list[tuple[int, CrawlTask]], dict[int, EngineCrawlResult] | None],
     Awaitable[None],
 ]
 
@@ -98,8 +96,8 @@ class BatchStages(NamedTuple):
 
 
 async def crawl_batches(
-    run: RecursiveRunState,
-    state: RecursiveState,
+    run: CrawlRun,
+    state: CrawlState,
     stall_guard: AdmissionStallGuard,
     shutdown_event: asyncio.Event,
     metrics: MetricsStore,
