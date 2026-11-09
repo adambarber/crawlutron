@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import secrets
+import threading
 import time
 from pathlib import Path
 
@@ -29,12 +30,16 @@ PBKDF2_ITERATIONS = 210_000
 
 #: How many times the door has run the PBKDF2 derivation; the O(1) contract is
 #: ONE per verify_key call, hit or miss. Counted here so the suite can pin it.
+#: The increment is LOCKED: verify_key runs on the store executor's worker
+#: threads (atwin), so an unsynchronized += can lose updates.
 pbkdf2_calls = 0
+_pbkdf2_calls_lock = threading.Lock()
 
 
 def _hash_secret(secret: str, salt: bytes) -> str:
     global pbkdf2_calls
-    pbkdf2_calls += 1
+    with _pbkdf2_calls_lock:
+        pbkdf2_calls += 1
     return hashlib.pbkdf2_hmac("sha256", secret.encode("utf-8"), salt, PBKDF2_ITERATIONS).hex()
 
 

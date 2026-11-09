@@ -96,7 +96,13 @@ shared anonymous identity with bounded default quotas. Key verification is
 rate-limited (#653): five consecutive failed verifications from the same
 presented credential trip a 60-second cooldown that refuses further attempts
 with `429 key_verify_throttled` before the PBKDF2 derivation runs again, so
-the expensive pre-auth hash cannot be invoked for free in a loop. Expose it
+the expensive pre-auth hash cannot be invoked for free in a loop. Buckets
+key on a hash of the full presented secret (#675), so garbage under another
+caller's key id cannot lock the rightful owner out. Anonymous surface
+metering keys on the REMOTE ADDRESS the ASGI transport reports (`client.host`):
+behind a reverse proxy every request shares the PROXY's address and its one
+bucket — when fronting the service with a proxy, run the metering at the
+proxy or deploy as a single-tenant front. Expose it
 beyond localhost only behind an authenticated reverse proxy.
 
 What the SSRF defenses cover:
