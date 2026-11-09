@@ -167,9 +167,9 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/storage/job_store_collections.py": (11, 6),
     "crawlutron/storage/job_store_read.py": (3, 2),
     "crawlutron/storage/job_store_state.py": (2, 1),
-    "crawlutron/runtime/resource_lifecycle.py": (2, 2),
-    # RAISED to (2, 2) by #589: DeferredClose is the shared deferred-close owner
-    # (BrowserPool + pooled HTTP clients); two hand-rolled copies deleted.
+    "crawlutron/runtime/resource_lifecycle.py": (5, 5),
+    # RAISED to (5, 5) by #643: the deferred-close decline record replaced two
+    # printed warnings with a handled state the reset family owns.
     "crawlutron/storage/migrations/runner.py": (5, 4),
     "crawlutron/storage/migrations/ddl.py": (2, 2),
     "crawlutron/storage/watch_store.py": (1, 1),

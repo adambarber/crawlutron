@@ -14,9 +14,38 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Protocol, runtime_checkable
 
-__all__ = ["DeferredClose", "ResourceLifecycle"]
+from crawlutron.runtime import process_state
+
+__all__ = [
+    "DeferredClose",
+    "ResourceLifecycle",
+    "clear_declined_closes",
+    "declined_closes",
+    "record_declined_close",
+]
 
 _logger = logging.getLogger(__name__)
+
+#: Declined close attempts, ``(reason, resource_kind)`` -> count. A decline is a
+#: handled state, not a warning: production callers reclaim via their own teardown,
+#: and tests assert on this record instead of parsing printed noise (#643).
+_DECLINED_CLOSES: dict[tuple[str, str], int] = {}
+
+
+def record_declined_close(reason: str, resource_kind: str) -> None:
+    """Count one declined schedule attempt; the record replaces the printed warning."""
+    key = (reason, resource_kind)
+    _DECLINED_CLOSES[key] = _DECLINED_CLOSES.get(key, 0) + 1
+
+
+def declined_closes() -> dict[tuple[str, str], int]:
+    """The decline record, for tests asserting a close was declined and why."""
+    return dict(_DECLINED_CLOSES)
+
+
+def clear_declined_closes() -> None:
+    """The record's reset door: tests and the reset family empty it between cases."""
+    _DECLINED_CLOSES.clear()
 
 
 @runtime_checkable
@@ -51,16 +80,19 @@ class DeferredClose[T]:
 
     def schedule(self, resource: T, *, skip_if_closed: bool = True) -> None:
         """Schedule ``aclose(resource)`` on the running loop; no loop, or a loop
-        mid-shutdown, declines honestly -- the caller's own teardown reclaims."""
+        mid-shutdown, declines honestly -- the caller's own teardown reclaims.
+        Declines are RECORDED, not printed: a decline is a handled state the
+        tests assert on, not a warning (#643 warning-zero).
+        """
         if skip_if_closed and self._is_closed(resource):
             return
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            self._log.warning("deferred_close_no_loop", extra={"resource": type(resource).__name__})
+            record_declined_close("no_loop", type(resource).__name__)
             return
         if loop.is_closed():
-            self._log.warning("deferred_close_loop_closed", extra={"resource": type(resource).__name__})
+            record_declined_close("loop_closed", type(resource).__name__)
             return
         task = loop.create_task(self._guarded(resource))
         self._pending.add(task)
@@ -85,3 +117,16 @@ class DeferredClose[T]:
         while self._pending:
             await asyncio.gather(*list(self._pending), return_exceptions=True)
             await asyncio.sleep(0)
+
+
+def _reset_declines() -> None:
+    """The registry reset: empty the decline record."""
+    _DECLINED_CLOSES.clear()
+
+
+def _has_declines() -> bool:
+    """The registry probe: whether any decline is still recorded."""
+    return bool(_DECLINED_CLOSES)
+
+
+process_state.register(__name__, _reset_declines, _has_declines)

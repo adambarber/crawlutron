@@ -219,10 +219,12 @@ class TestGcNeverUnlinksASpillStillInUse:
         with open(path, "w", encoding="utf-8") as handle:
             handle.write('{"i":0}\n')
         self._age(path, 7200)
+        sweeper = ResultSpill()
         try:
-            ResultSpill().gc_stale_spills(1.0)
+            sweeper.gc_stale_spills(1.0)
             assert not os.path.exists(path), "GC kept a spill nobody owns"
         finally:
+            sweeper.close()
             if os.path.exists(path):
                 os.unlink(path)
 
@@ -260,7 +262,11 @@ class TestGcNeverUnlinksASpillStillInUse:
             fcntl.flock(foreign.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             self._age(path, 7200)
 
-            ResultSpill().gc_stale_spills(1.0)
+            sweeper = ResultSpill()
+            try:
+                sweeper.gc_stale_spills(1.0)
+            finally:
+                sweeper.close()
 
             assert os.path.exists(path), "GC unlinked a spill another process owns"
         finally:
