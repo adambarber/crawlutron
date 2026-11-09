@@ -101,7 +101,12 @@ def _canonical_parts(url: str, *, policy: HostPolicy) -> tuple[str, str, str, st
         raise ValueError(reason)
 
     default_port = 80 if scheme == "http" else 443
-    port = parsed.port
+    try:
+        port = parsed.port
+    except ValueError as error:
+        # urllib's message is attacker-influenced text; the wire carries the
+        # classification, never str(error).
+        raise ValueError("invalid_port") from error
     if port == default_port:
         port = None
     netloc = _bracketed_netloc(host, port)

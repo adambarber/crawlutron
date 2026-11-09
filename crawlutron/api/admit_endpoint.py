@@ -21,7 +21,16 @@ logger = logging.getLogger(__name__)
 _CHECK_KEYS = ("url", "host_policy", "egress", "robots")
 
 #: The constructor's structural refusals, which name the url check itself.
-_URL_CHECK_REASONS = frozenset({"invalid_url", "unsupported_scheme", "userinfo_refused", "ipvfuture_refused"})
+_URL_CHECK_REASONS = frozenset(
+    {
+        "invalid_url",
+        "unsupported_scheme",
+        "userinfo_refused",
+        "ipvfuture_refused",
+        "invalid_port",
+        "invalid_idn_host",
+    }
+)
 
 #: The reason vocabulary, as a table: an unknown reason is a KeyError, not a
 #: silently widened value -- the breakdown cannot name anything un-declared.
@@ -30,6 +39,8 @@ _REASON_TABLE: dict[str, AdmitReason] = {
     "unsupported_scheme": "unsupported_scheme",
     "userinfo_refused": "userinfo_refused",
     "ipvfuture_refused": "ipvfuture_refused",
+    "invalid_port": "invalid_port",
+    "invalid_idn_host": "invalid_idn_host",
     "host_denied": "host_denied",
     "host_not_allowed": "host_not_allowed",
     "private_network_target": "private_network_target",
