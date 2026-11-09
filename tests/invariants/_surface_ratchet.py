@@ -63,7 +63,7 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     "crawlutron/orchestration/spill_sink.py": (2, 2),
     "crawlutron/transport/http_cache.py": (4, 4),
     "crawlutron/transport/http_classify.py": (3, 3),
-    "crawlutron/transport/pooled_clients.py": (11, 9),
+    "crawlutron/transport/pooled_clients.py": (12, 10),
     # #314/wave-2: JobAccumulators (one class) moved here whole from job_store_state
     # to hold the 500-line ceiling; the seam owns every accumulator table.
     "crawlutron/storage/job_store_accumulators.py": (1, 1),
@@ -85,9 +85,11 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/api/async_crawl_runner.py": (3, 2),
     # #664 raised 18,15 -> 19,16: verify_admin_secret is the public constant-time
     # admin-token door the layer's soft gate meters through.
-    "crawlutron/api/caller_auth.py": (19, 16),
+    "crawlutron/api/caller_auth.py": (20, 17),
     "crawlutron/api/caller_concurrency.py": (1, 1),
-    "crawlutron/api/crawl_executor.py": (1, 1),
+    # #674 raised 1,1 -> 2,2: CrawlRefusalError is the typed refusal carrier the
+    # sweep's deactivation arm reads (reason as an enum member, not boundary text).
+    "crawlutron/api/crawl_executor.py": (2, 2),
     "crawlutron/api/crawl_router.py": (4, 3),
     # #656 raised 16,7 -> 18,8: get_concurrency_tracker + TrackerDep make the
     # app-state stash load-bearing (the getattr-None scatter is refused loudly).
