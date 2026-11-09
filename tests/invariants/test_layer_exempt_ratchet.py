@@ -10,7 +10,7 @@ from collections.abc import Sequence
 
 from fastapi.routing import APIRoute
 
-from crawlutron.api.route_layer import EXEMPT_ROW_COUNT, LAYER_EXEMPT_RATCHET, ExemptRow
+from crawlutron.api.route_layer import LAYER_EXEMPT_RATCHET, ExemptRow
 from crawlutron.api.router_registry import ROUTER_MODULES
 
 
@@ -66,9 +66,10 @@ def test_exempt_rows_match_real_routes():
 
 def test_exempt_ratchet_never_increases():
     """The pinned literal only moves down, in the commit that earns it."""
-    assert len(LAYER_EXEMPT_RATCHET) == EXEMPT_ROW_COUNT, (
-        f"EXEMPT_ROW_COUNT is pinned at {EXEMPT_ROW_COUNT}; adding a row demands "
-        "the owner accepts the row's justification in the same commit"
+    assert len(LAYER_EXEMPT_RATCHET) == 7, (
+        "LAYER_EXEMPT_RATCHET is pinned at 7; adding a row demands the owner "
+        "accept the row's justification in the same commit and lower/raise this "
+        "literal deliberately -- an uncommented bump is the evasion this test exists for"
     )
 
 

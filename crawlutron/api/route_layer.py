@@ -56,6 +56,7 @@ async def operator_guard(request: Request) -> bool:
         throttle.record_admin_success()
     else:
         throttle.record_admin_failure()
+    request.state.caller = matched
     return matched
 
 
