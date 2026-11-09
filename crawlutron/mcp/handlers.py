@@ -395,15 +395,25 @@ def _job_tool_handler(core) -> Handler:
     ungated by quota. (create_job is an admitted door and carries its own
     handler below.)"""
 
-    async def handler(payload, settings, shutdown_event, **door) -> ToolResult:
-        door.setdefault("caller", None)
+    async def handler(
+        payload,
+        settings,
+        shutdown_event,
+        caller=None,
+        job_store=None,
+        result_store=None,
+        watch_store=None,
+        concurrency_tracker=None,
+    ) -> ToolResult:
+        if job_store is None:
+            raise ValueError("job tools require an initialized job store")
         return await tool_result(
             core(
                 payload,
-                door.get("job_store"),
+                job_store,
                 settings,
                 shutdown_event,
-                caller_for(door["caller"]),
+                caller_for(caller),
             )
         )
 

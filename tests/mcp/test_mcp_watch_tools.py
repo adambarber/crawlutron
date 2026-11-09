@@ -17,6 +17,7 @@ from fastapi import FastAPI, Request
 
 from crawlutron.api.dependencies import get_settings, get_shutdown_event, get_watch_store
 from crawlutron.config.settings import CrawlerSettings
+from crawlutron.mcp.registry import TOOLS_BY_NAME
 from crawlutron.mcp.router import router as mcp_router
 from tests._async_harnesses import issue_key
 from tests._quota_harness import keyed_client, stores
@@ -162,3 +163,17 @@ class TestWatchToolDiscovery:
         guidance = " ".join(agent_hints_payload()["guidance"])
         assert "register_watch" in guidance
         assert "list_watches" in guidance
+
+
+class TestRegisterWatchSchemaHonesty:
+    def test_the_advertised_schema_does_not_offer_the_field_the_handler_refuses(self):
+        """registry.py's own doctrine: the schema cannot offer a field the
+        handler then refuses (#648 review F1) -- an agent sending what the
+        tools/list schema advertises must not get a refusal."""
+        spec = TOOLS_BY_NAME["register_watch"]
+        properties = cast("dict[str, object]", spec.input_schema.get("properties", {}))
+        required = cast("list[object]", spec.input_schema.get("required", []))
+        assert "webhook_url" not in properties
+        assert "webhook_url" not in required
+        # The runtime refusal stays: defense in depth for direct callers.
+        assert "webhook_url" in spec.unsupported_fields

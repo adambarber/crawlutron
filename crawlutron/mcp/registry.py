@@ -323,6 +323,9 @@ TOOL_SPECS: list[ToolSpec] = [
             "list_watches or get_watch for the watch's state."
         ),
         request_model=WatchCreateRequest,
+        # Poll-only: the advertised schema must not offer the field the handler
+        # refuses (#648 review F1); the runtime refusal stays as defense in depth.
+        unsupported_fields=("webhook_url",),
         output_schema=_schema(WatchState),
         handler=handle_register_watch,
         rest_route=RestRoute("POST", "/v1/watches"),
