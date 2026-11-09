@@ -308,6 +308,59 @@ class _LoopBoundFake:
         self.closed = True
 
 
+class _NeverClosedClient:
+    """A PooledClient-shaped fake whose close does nothing observable here."""
+
+    async def close(self) -> None:
+        return None
+
+    async def aclose(self) -> None:
+        return None
+
+
+def _discard_probe(monkeypatch, loop_replacement) -> list[bool]:
+    """Run discard_if_unowned_loop with a dead/missing loop; return whether close was called."""
+    from crawlutron.transport.pooled_clients import PooledClient, discard_if_unowned_loop
+
+    closed: list[bool] = []
+
+    async def _close():
+        closed.append(True)
+
+    namespace: dict[str, PooledClient | None] = {"_slot": _NeverClosedClient()}
+
+    if loop_replacement is None:
+        # Simulate pytest-asyncio leaving no current event loop after a test.
+        monkeypatch.setattr(
+            asyncio, "get_event_loop", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no loop"))
+        )
+    else:
+        monkeypatch.setattr(asyncio, "get_event_loop", lambda *a, **k: loop_replacement)
+
+    discard_if_unowned_loop(_close, "_slot", namespace)
+
+    assert namespace["_slot"] is None
+    return closed
+
+
+def test_discard_if_unowned_loop_closes_client_without_usable_loop(monkeypatch):
+    """A pooled client must be closed, not merely dropped, when no usable
+    event loop exists at teardown. Dropping it leaves its transports open and
+    they surface later as random ResourceWarning errors on unrelated tests
+    (the socket-leak unraisable family)."""
+    closed = _discard_probe(monkeypatch, None)
+    assert closed, "client was dropped without being closed on a dead loop"
+
+
+def test_discard_if_unowned_loop_closes_client_on_closed_loop(monkeypatch):
+    """When the current event loop is closed (pytest-asyncio teardown), the
+    pooled client must still be closed on a fresh loop, not silently dropped."""
+    dead = asyncio.new_event_loop()
+    dead.close()
+    closed = _discard_probe(monkeypatch, dead)
+    assert closed, "client was dropped without being closed on a closed loop"
+
+
 def test_a_closed_current_loop_never_poisons_the_reset_chain(stub_builder):
     """#643 red, raising site named: discard_if_unowned_loop. A closed loop left
     as the thread's current loop answers get_event_loop happily, then
@@ -328,6 +381,6 @@ def test_a_closed_current_loop_never_poisons_the_reset_chain(stub_builder):
     finally:
         asyncio.set_event_loop(None)
     assert not process_state.has_any_process_state(), "the closed current loop poisoned the reset"
-    # A closed loop can never host the aclose: the honest release is the same
-    # reference drop the no-current-loop branch gives. The raise must not happen.
-    assert fake.closed is False, "a closed loop unexpectedly hosted the close"
+    # The client must still be released on a fresh loop: a closed loop can't
+    # host the close, so we close on a new loop instead of dropping it.
+    assert fake.closed is True, "a closed loop's client was dropped without closing"

@@ -340,6 +340,21 @@ _SUPERSEDED_CLOSE: DeferredClose[PooledClient] = DeferredClose(aclose=safe_aclos
 T = TypeVar("T")
 
 
+def _close_on_fresh_loop(close: Callable[[], Awaitable[object]]) -> None:
+    """Run an async close on a freshly created event loop.
+
+    asyncio.run() cannot be used here: pytest-asyncio may hold a running loop
+    on the thread, and asyncio.run() refuses to start a nested one. A manually
+    created loop is used instead, then torn down.
+    """
+    _fresh_loop = asyncio.new_event_loop()
+    try:
+        asyncio.set_event_loop(_fresh_loop)
+        _fresh_loop.run_until_complete(close())
+    finally:
+        _fresh_loop.close()
+
+
 def discard_if_unowned_loop(
     close: Callable[[], Awaitable[object] | object], slot: str, namespace: dict[str, PooledClient | None]
 ) -> None:
@@ -353,18 +368,26 @@ def discard_if_unowned_loop(
     try:
         loop = asyncio.get_event_loop()
     except RuntimeError:
+        # No current event loop (pytest-asyncio cleared it): close on a fresh
+        # loop so the client's transports are released instead of orphaned for
+        # GC to surface later as random ResourceWarning errors on unrelated
+        # tests (socket-leak unraisable family).
+        _close_on_fresh_loop(cast(Callable[[], Awaitable[object]], close))
         namespace[slot] = None
         return
-    if loop.is_running() or loop.is_closed():
+    if loop.is_running():
         # A running loop owns the object's lifetime decisions (it may still be
-        # used there). A CLOSED loop can never host the close -- and raising
-        # into the reset chain poisoned every later teardown in the worker (#643:
-        # pytest-asyncio leaves a closed loop as current after some async tests);
-        # the loop's own close already killed its transports, so the reference
-        # drop is the honest release, matching the no-loop branch.
+        # used there).
         namespace[slot] = None
-    else:
-        loop.run_until_complete(cast(Awaitable[object], close()))
+        return
+    if loop.is_closed():
+        # pytest-asyncio leaves a closed loop as current after some async
+        # tests (#643). Closing on the dead loop raises, so close on a fresh
+        # loop instead so transports are released rather than leaked.
+        _close_on_fresh_loop(cast(Callable[[], Awaitable[object]], close))
+        namespace[slot] = None
+        return
+    loop.run_until_complete(cast(Awaitable[object], close()))
 
 
 def _reset() -> None:
