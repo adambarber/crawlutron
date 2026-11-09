@@ -49,6 +49,11 @@ Classification = Literal[
     "invalid_url",
     "unsupported_scheme",
     "private_network_target",
+    # Live host-policy refusals: terminal for a watch row the deployment now
+    # refuses (#674); carried in the same result-record taxonomy.
+    "host_denied",
+    "host_not_allowed",
+    "userinfo_refused",
     "unknown_error",
     "not_modified",
     # A browser renderer slot was unavailable within the acquire bound, so the

@@ -13,7 +13,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from crawlutron.api.caller_auth import Tracking, admit, anonymous_caller, identity_for_key
-from crawlutron.api.crawl_executor import execute_crawl
+from crawlutron.api.crawl_executor import CrawlRefusalError, execute_crawl
 from crawlutron.api.webhooks import start_webhook_delivery
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.caller_identity import CallerIdentity
@@ -132,8 +132,8 @@ class WatchSweeper:
             return CrawlClassification.site_error
         try:
             outcome = await self._check(watch, now=now)
-        except ValueError as error:
-            return await self._deactivate_refused(watch, error, now=now)
+        except CrawlRefusalError as error:
+            return await self._deactivate_refused(watch, error.reason, now=now)
         except Exception:
             # One watch that raises must not end the pass nor starve its
             # co-scheduled watches: record the failure and reschedule anyway.
@@ -154,14 +154,13 @@ class WatchSweeper:
         return outcome
 
     async def _deactivate_refused(
-        self, watch: WatchState, error: ValueError, *, now: float
+        self, watch: WatchState, reason: CrawlClassification, *, now: float
     ) -> CrawlClassification:
         """A watch the live policy no longer admits is terminal: the deployment has
         permanently refused this URL's host, so re-admitting every interval burns a
         full admit cycle for the same verdict. Same lifecycle as a revoked owner:
         deactivate with the reason recorded, matching the robots-refusal shape.
         """
-        reason = CrawlClassification(str(error))
         logger.warning(
             "watch_admission_refused_deactivated",
             extra={"watch_id": watch.watch_id, "url": watch.redacted_url(), "reason": reason.value},

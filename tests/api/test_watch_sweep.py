@@ -1,6 +1,7 @@
 """The origin is a real HTTP server answering genuine ``304``s, so revalidation
 is answered by the wire; the delivery call is the one stub here (the sweeper's
-decision), while the funnel it rides is ``crawlutron.api.webhooks``' contract.
+scheduling/announcement decisions), while the funnel is ``webhooks``' contract.
+Terminal-refusal deactivations live in test_watch_refusal_deactivation.py.
 """
 
 import asyncio
@@ -12,47 +13,38 @@ from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
 from crawlutron.api.watch_sweep import WatchSweeper, sweep_watches_forever
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models import watch_state
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.watch_status import WatchStatus
-from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.storage.caller_key_store import CallerKeyStore
 from crawlutron.vocabulary.taxonomy import CrawlClassification
-from tests._assertions import block_private_targets
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
+from tests._watch_harnesses import (
+    DEFAULT_TARGET,
+    WATCH_INTERVAL,
+    WATCH_WEBHOOK,
+    capture_announcements,
+    default_sweeper,
+    loopback_url,
+    register_watch,
+    stub_transient_failure,
+)
 from tests.helpers.server import EtagHandler
 
 NOW = 1_700_000_000.0
-INTERVAL = 3600
-WEBHOOK = "https://watcher.example.com/hook"
+INTERVAL = WATCH_INTERVAL
+WEBHOOK = WATCH_WEBHOOK
 DEAD_ORIGIN = "http://127.0.0.1:9/"
 
 
 @pytest.fixture
 def sweeper(watch_store):
     """A sweeper over this test's store."""
-    return WatchSweeper(
-        watch_store,
-        host_policy=UNRESTRICTED_HOST_POLICY,
-        settings=CrawlerSettings.from_mapping(),
-    )
+    return default_sweeper(watch_store)
 
 
 @pytest.fixture
 def announced(monkeypatch):
-    """The announcements a pass handed the delivery funnel, in order.
-
-    The sweep backgrounded its deliveries (#528), so the stub is the spawn
-    seam; each call is awaited here so tests observe the completed delivery."""
-    calls: list[tuple[str, dict[str, object]]] = []
-
-    async def _capture(target: object, payload: dict[str, object]) -> None:
-        calls.append((str(target), payload))
-
-    def _spawn(target: object, payload: dict[str, object]):
-        return asyncio.create_task(_capture(target, payload))
-
-    monkeypatch.setattr(watch_sweep, "start_webhook_delivery", _spawn)
-    return calls
+    """The announcements a pass handed the delivery funnel, in order."""
+    return capture_announcements(monkeypatch)
 
 
 @pytest.fixture
@@ -68,18 +60,21 @@ def origin_content():
     EtagHandler.etag, EtagHandler.body = saved
 
 
-_DEFAULT_TARGET = WebhookTarget.admit(WEBHOOK, host_policy=UNRESTRICTED_HOST_POLICY)
+_UNSET = object()
 
 
 def register(
     watch_store,
-    url: NormalizedUrl,
+    url,
     *,
     at: float = 0.0,
-    target: WebhookTarget | None = _DEFAULT_TARGET,
+    target=_UNSET,
     owner: str = "",
-) -> watch_state.WatchState:
-    return watch_store.create(url, webhook_url=target, interval_seconds=INTERVAL, now=at, owner=owner)
+):
+    """The suite's register; omit ``target`` for the standard webhook target,
+    pass None for a poll-only watch."""
+    resolved = DEFAULT_TARGET if target is _UNSET else target
+    return register_watch(watch_store, url, at=at, target=resolved, owner=owner)
 
 
 async def _prime(sweeper, watch_store, server, announced) -> watch_state.WatchState:
@@ -97,17 +92,11 @@ async def _prime(sweeper, watch_store, server, announced) -> watch_state.WatchSt
 
 def origin_url(server) -> str:
     """The loopback URL of a served fixture."""
-    return f"http://127.0.0.1:{server.server_port}/"
+    return loopback_url(server)
 
 
 def _stub_transient_failure(monkeypatch) -> None:
-    """Stub execute_crawl to a transport-level failure: the transient shape the
-    watch must ride out (no admission verdict at all, so nothing deactivates)."""
-
-    async def _fail(payload, *, settings, shutdown_event, urls=None):
-        raise ConnectionError("the origin is down")
-
-    monkeypatch.setattr(watch_sweep, "execute_crawl", _fail)
+    return stub_transient_failure(monkeypatch)
 
 
 async def test_a_first_check_records_what_the_origin_returned_and_announces_it(
@@ -233,42 +222,6 @@ async def test_a_failed_check_keeps_what_it_knew_and_announces_nothing(
     assert reloaded.validators.etag == '"v1"'
     assert reloaded.consecutive_failures == 1
     assert reloaded.status is WatchStatus.ACTIVE
-    assert announced == []
-
-
-async def test_a_watch_the_live_policy_no_longer_admits_is_deactivated(
-    sweeper, watch_store, etag_server, announced, monkeypatch
-):
-    """The row holds text identity, so the check re-admits against the policy now in
-    force; a host the deployment now refuses is terminal, not a transient failure."""
-    watch = register(watch_store, canonical(origin_url(etag_server)))
-
-    block_private_targets(monkeypatch)
-    outcomes = await sweeper.sweep_once(now=NOW)
-
-    assert outcomes == [CrawlClassification.private_network_target]
-    reloaded = watch_store.get(watch.watch_id)
-    assert reloaded.status is WatchStatus.DEACTIVATED
-    assert reloaded.last_outcome is CrawlClassification.private_network_target
-    assert announced == []
-    assert watch_store.due(NOW + INTERVAL) == []
-
-
-async def test_a_transient_check_failure_is_not_a_deactivation(sweeper, watch_store, announced, monkeypatch):
-    """A transport-level failure keeps the watch active: only an admission refusal
-    is terminal, so a dead origin stays scheduled for its next interval."""
-    watch = register(watch_store, canonical(DEAD_ORIGIN))
-
-    async def _transport_failure(payload, *, settings, shutdown_event, urls=None):
-        raise ConnectionError("the origin is down")
-
-    monkeypatch.setattr(watch_sweep, "execute_crawl", _transport_failure)
-    outcomes = await sweeper.sweep_once(now=NOW)
-
-    assert outcomes == [CrawlClassification.unknown_error]
-    reloaded = watch_store.get(watch.watch_id)
-    assert reloaded.status is WatchStatus.ACTIVE
-    assert reloaded.consecutive_failures == 1
     assert announced == []
 
 
@@ -458,17 +411,3 @@ async def test_a_owner_watch_check_releases_the_slot_after_a_check(watch_store, 
 
     # A check that completed released its owner slot rather than leaking it.
     assert tracker.sync_in_flight(record.key_id) == 0
-
-
-async def test_a_robots_disallowed_watch_is_deactivated(sweeper, watch_store, announced):
-    """A target robots txt now refuses is a terminal watch outcome: the sweep
-    deactivates the watch instead of growing its failure streak forever (#335)."""
-    watch = register(watch_store, canonical(DEAD_ORIGIN))
-
-    outcomes = await sweeper.sweep_once(now=NOW)
-
-    assert outcomes == [CrawlClassification.robots_disallowed]
-    reloaded = watch_store.get(watch.watch_id)
-    assert reloaded.status is WatchStatus.DEACTIVATED
-    # A deactivated watch is no longer swept: it is not due next interval.
-    assert watch_store.due(NOW + INTERVAL) == []

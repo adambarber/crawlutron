@@ -13,14 +13,29 @@ from crawlutron.api.exceptions import browser_pool_unavailable
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.models.taxonomy import as_classification
 from crawlutron.orchestration.engine import crawl_request
 from crawlutron.transport.browser_pool import PooledBrowserWorker, get_browser_pool
 from crawlutron.vocabulary.strategies import BROWSER_STRATEGIES
+from crawlutron.vocabulary.taxonomy import CrawlClassification
 
 if TYPE_CHECKING:
     from crawlutron.models.crawl_policy import CrawlPolicy
     from crawlutron.models.crawl_request import CrawlRequest
     from crawlutron.models.result_record import ProducerEnvelope
+
+
+class CrawlRefusalError(ValueError):
+    """An admission refusal the executor raised onward: the refusal reason is a
+    member of the vocabulary the deactivation records, not attacker-influenced text.
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        # The membership closure: a member keeps its name, a foreign reason
+        # degrades to the NAMED unknown_error fallback -- never a cast of text
+        # from the boundary into the strict enum.
+        self.reason = CrawlClassification(as_classification(reason))
 
 
 def _request_needs_browser(policy: CrawlPolicy) -> bool:
@@ -51,7 +66,7 @@ async def execute_crawl(
         try:
             NormalizedUrl(payload.url, policy=host_policy)
         except ValueError as error:
-            raise ValueError(str(error)) from error
+            raise CrawlRefusalError(str(error)) from error
     pool = get_browser_pool()
     if pool is None and _request_needs_browser(payload.policy):
         raise browser_pool_unavailable()
@@ -65,4 +80,4 @@ async def execute_crawl(
     )
 
 
-__all__ = ["_request_needs_browser", "execute_crawl"]
+__all__ = ["_request_needs_browser", "CrawlRefusalError", "execute_crawl"]
