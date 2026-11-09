@@ -47,9 +47,5 @@ class CallerConcurrencyTracker:
         """How many sync crawls ``caller_id`` currently has running (0 when none)."""
         return self._in_flight.get(caller_id, 0)
 
-    def has_slot_lock(self, caller_id: str) -> bool:
-        """Whether ``caller_id``'s admit lock is still registered (the read door)."""
-        return caller_id in self._slot_locks
-
 
 __all__ = ["CallerConcurrencyTracker"]

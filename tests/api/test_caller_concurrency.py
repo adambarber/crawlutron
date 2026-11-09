@@ -23,23 +23,17 @@ class TestCallerConcurrencyTrackerLocks:
         tracker.release(caller)
         assert tracker.slot_lock(caller) is lock
 
-    def test_lock_persists_while_in_flight(self):
+    def test_release_to_zero_keeps_lock_identity(self):
         tracker = CallerConcurrencyTracker()
         caller = "test-caller"
-        tracker.slot_lock(caller)
+        lock = tracker.slot_lock(caller)
         tracker.reserve(caller)
         tracker.reserve(caller)
         tracker.release(caller)  # count drops to 1
         assert tracker.sync_in_flight(caller) == 1
-        assert tracker.has_slot_lock(caller)
-
-    def test_release_to_zero_keeps_lock_registered(self):
-        tracker = CallerConcurrencyTracker()
-        caller = "test-caller"
-        tracker.slot_lock(caller)
-        tracker.reserve(caller)
-        tracker.release(caller)
-        assert tracker.has_slot_lock(caller)
+        tracker.release(caller)  # count drops to 0: the eviction trigger
+        assert tracker.sync_in_flight(caller) == 0
+        assert tracker.slot_lock(caller) is lock
 
 
 class TestCallerConcurrencyTrackerRace:

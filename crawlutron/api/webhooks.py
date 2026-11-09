@@ -353,11 +353,6 @@ def start_webhook_delivery(
     return _tracked_delivery(target, payload)
 
 
-def tracked_delivery_count() -> int:
-    """How many deliveries are tracked in flight right now (public probe, #655)."""
-    return len(_DELIVERIES)
-
-
 def validate_webhook_url(webhook_url: str, *, host_policy: HostPolicy) -> None:
     """Validate a webhook URL against SSRF: resolves the hostname and rejects any
     that maps to a private/loopback address (DNS-rebinding class), implemented
@@ -384,7 +379,6 @@ __all__ = [
     "ensure_https_webhook_url",
     "max_webhook_size",
     "post_webhook",
-    "tracked_delivery_count",
     "validate_webhook_url",
     "validate_webhook_url_async",
 ]
