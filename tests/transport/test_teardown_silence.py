@@ -9,8 +9,6 @@ import asyncio
 import logging
 from typing import cast
 
-from curl_cffi.requests.models import Response as CffiResponse
-
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.runtime.resource_lifecycle import (
     clear_declined_closes,
@@ -18,7 +16,7 @@ from crawlutron.runtime.resource_lifecycle import (
 )
 from crawlutron.transport.browser_cookies import harvest_session_cookies
 from crawlutron.transport.browser_render_phases import ReleasePlan, release_page
-from crawlutron.transport.fetchers import release_stream_noblock
+from crawlutron.transport.cffi_transport import release_stream_noblock
 from crawlutron.transport.pooled_clients import safe_aclose
 from crawlutron.transport.render_page import RenderPage
 from tests._policy_factories import canonical
@@ -27,10 +25,10 @@ from tests._policy_factories import canonical
 class _FailingClose:
     """A pooled client whose aclose raises (both protocol handles present)."""
 
-    async def aclose(self) -> object:
+    async def aclose(self) -> None:
         raise RuntimeError("close failed")
 
-    async def close(self) -> object:
+    async def close(self) -> None:
         raise RuntimeError("close failed")
 
 
@@ -40,7 +38,7 @@ class _FailingStream:
     def __init__(self) -> None:
         self.calls = 0
 
-    async def aclose(self) -> object:
+    async def aclose(self) -> None:
         self.calls += 1
         raise RuntimeError("stream close failed")
 
@@ -80,7 +78,7 @@ async def test_a_failed_stream_close_records_the_decline():
     """N2: the retrieved-then-dropped task exception is recorded."""
     clear_declined_closes()
     stream = _FailingStream()
-    release_stream_noblock(cast("CffiResponse", stream))
+    release_stream_noblock(stream)
     await _drain()
     assert _decline("stream_close_failed"), (
         f"the stream close failure was not recorded: {declined_closes()!r}"
@@ -91,10 +89,10 @@ async def test_a_successful_stream_close_records_nothing():
     clear_declined_closes()
 
     class _Stream:
-        async def aclose(self) -> object:
+        async def aclose(self) -> None:
             pass
 
-    release_stream_noblock(cast("CffiResponse", _Stream()))
+    release_stream_noblock(_Stream())
     await _drain()
     assert declined_closes() == {}, f"a successful close was recorded: {declined_closes()!r}"
 

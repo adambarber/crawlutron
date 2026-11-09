@@ -27,6 +27,9 @@ class _FakeStream:
     async def aiter_raw(self):
         yield self._body
 
+    async def aclose(self) -> None:
+        return None
+
 
 def test_final_url_uses_hostname_not_pinned_ip():
     from crawlutron.transport.pinned_transport import PinnedRequest

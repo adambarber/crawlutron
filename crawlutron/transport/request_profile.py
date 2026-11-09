@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import os
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Protocol, runtime_checkable
 
 from crawlutron.admission.credentials import apply_credentials as apply_credentials
@@ -67,7 +67,7 @@ class TransportHeaders(Protocol):
 
 async def store_set_cookies(
     url: NormalizedUrl,
-    response_headers: TransportHeaders | dict[str, str],
+    response_headers: TransportHeaders | Mapping[str, str],
     *,
     namespace: str | None = None,
 ) -> None:

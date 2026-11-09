@@ -77,7 +77,7 @@ def _run_kwargs(fetcher):
 
 class TestHttpStrategy:
     async def test_fetch_boundary_lowercases_response_headers(self):
-        """The fetch boundary lowercases response headers (pins `_finish_fetch`
+        """The fetch boundary lowercases response headers (pins `finish_fetch`
         and `FetchedResponse.of`); unit test pins expires_seconds."""
 
         # Serve a response with mixed-case headers including ETag (required for cache store)

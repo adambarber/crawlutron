@@ -37,11 +37,15 @@ _DELEGATED_WALL_CONSUMERS = frozenset(
         "browser_pool.py",
         "browser_render_phases.py",
         "cookie_jar.py",
+        "cffi_transport.py",  # elapsed_ms timing for fetch telemetry (#685)
+        "httpx_transport.py",  # elapsed_ms timing for fetch telemetry (#685)
         "fetch_policy.py",
         "fetchers.py",
         "freshness.py",
         "http.py",
         "http_cache.py",
+        "redirect_walker.py",  # started= default for elapsed_ms (#685)
+        "transport.py",  # http_413 elapsed_ms (#685)
     }
 )
 

@@ -23,7 +23,7 @@ _COOKIE_HELPER = "crawlutron/transport/request_profile.py"
 _COOKIE_DOOR = "crawlutron/transport/cookie_jar.py"
 
 
-_COOKIE_TAIL_FN = "_finish_fetch"
+_COOKIE_TAIL_FN = "_store_hop_cookies"
 
 
 # The redirect-hop door: a 302's Set-Cookie persists ONLY through this named helper,
@@ -60,12 +60,12 @@ RESPONSE_COOKIES_ENTER_VIA_THE_FETCH_TAIL = Rule(
     summary=(
         "The httpx and curl_cffi fetchers each carried their own cookie tail and "
         "had already drifted, so a third fetch path growing its own handling is a "
-        "silently missing cookie; persist through fetchers._finish_fetch"
+        "silently missing cookie; persist through fetchers._store_hop_cookies"
     ),
     bite=lambda: (
         Bites(
             "import x\nx.store_set_cookies(url, headers)\n",
-            "store_set_cookies() outside _finish_fetch()",
+            "store_set_cookies() outside _store_hop_cookies()",
         ),
         Bites(
             "import jar\njar.add_cookie_header(url, cookie)\n",
@@ -76,9 +76,9 @@ RESPONSE_COOKIES_ENTER_VIA_THE_FETCH_TAIL = Rule(
         # else.
         Bites(
             "from crawlutron.transport.request_profile import store_set_cookies\n"
-            "def _finish_fetch(**kwargs):\n"
-            "    return store_set_cookies(kwargs)\n",
-            "store_set_cookies() outside _finish_fetch()",
+            "def _store_hop_cookies(hop_url, response_headers):\n"
+            "    return store_set_cookies(hop_url, response_headers)\n",
+            "store_set_cookies() outside _store_hop_cookies()",
             at=_ELSEWHERE,
         ),
     ),
@@ -86,8 +86,8 @@ RESPONSE_COOKIES_ENTER_VIA_THE_FETCH_TAIL = Rule(
         # The sanctioned two-hop chain, spared at the paths that own it.
         Silent(
             "from crawlutron.transport.request_profile import store_set_cookies\n"
-            "def _finish_fetch(**kwargs):\n"
-            "    return store_set_cookies(kwargs)\n",
+            "def _store_hop_cookies(hop_url, response_headers):\n"
+            "    return store_set_cookies(hop_url, response_headers)\n",
             at=REPO_ROOT / _COOKIE_TAIL,
         ),
         Silent(

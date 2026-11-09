@@ -71,7 +71,7 @@ def build_pinned_request(url: NormalizedUrl, headers: dict[str, str]) -> PinnedR
 
 def apinned_stream(
     client: httpx.AsyncClient,
-    chain: _RedirectChain,
+    chain: RedirectChain,
     request: PinnedRequest,
     timeout: httpx.Timeout,
 ) -> typing.AsyncContextManager[httpx.Response]:
@@ -211,7 +211,7 @@ async def _stripped_credentials(headers: dict[str, str], new_url: NormalizedUrl)
     return stripped
 
 
-class _RedirectChain:
+class RedirectChain:
     """One hop-by-hop redirect walk: its state, and the decision that advances it.
 
     Both transports follow redirects by hand (automatic would connect to an
@@ -278,7 +278,7 @@ async def apinned_hops(
     *,
     pin: PinRule | None = None,
     timeout_seconds: float | None = None,
-) -> AsyncIterator[tuple[_RedirectChain, PinnedRequest]]:
+) -> AsyncIterator[tuple[RedirectChain, PinnedRequest]]:
     """Yield each hop of the manual redirect walk, already SSRF-checked and re-pinned.
 
     The body receives ``(chain, pinned_request)``, sends, then leaves;
@@ -287,7 +287,7 @@ async def apinned_hops(
     # timeout_seconds is the request budget; it bounds the resolver wait.
     # The shared wire edge: a value that can start another header is refused here.
     reject_injectable_header_values(headers)
-    chain = _RedirectChain(url, headers, pin=pin or build_pinned_request, timeout_seconds=timeout_seconds)
+    chain = RedirectChain(url, headers, pin=pin or build_pinned_request, timeout_seconds=timeout_seconds)
     while True:
         pinned = await chain.pin()
         # Service-built additions (Host, hop cookies) ride the same law.
