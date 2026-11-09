@@ -83,12 +83,23 @@ def _secret_id_and_body(secret: str) -> tuple[str, str] | None:
 
 
 class CallerKeyStore(CoordinationStore):
-    """SQLite-backed store of inbound caller key records keyed by key id."""
+    """SQLite-backed store of inbound caller key records keyed by key id.
+
+    With an audit sink attached, every mint, list, and revoke appends one
+    structured row -- the single write site per admin action (#697).
+    """
 
     schema = StoreSchema.CALLER_KEYS
 
     def __init__(self, db_path: str | Path) -> None:
         super().__init__(db_path)
+        self._audit = None
+
+    def attach_audit(self, audit) -> None:
+        """Wire the audit sink; a store without one stays unrecorded (tests).
+        Production wiring always attaches, so an omission is visible at review.
+        """
+        self._audit = audit
 
     def issue_key(self, label: str, *, max_pages: int = 0, max_concurrency: int = 0) -> IssuedKey:
         """Mint a key for ``label``; the secret is returned once, never stored."""
@@ -109,6 +120,10 @@ class CallerKeyStore(CoordinationStore):
                 (key_id, name, _store_hash(body), max_pages, max_concurrency, created_at),
             )
             self._conn.commit()
+        if self._audit is not None:
+            self._audit.record_event(
+                actor="admin", action="key_mint", target_key_id=key_id, outcome="granted"
+            )
         return IssuedKey(
             key_id=key_id, label=name, secret=secret, max_pages=max_pages, max_concurrency=max_concurrency
         )
@@ -149,6 +164,8 @@ class CallerKeyStore(CoordinationStore):
                 "SELECT key_id, label, key_hash, max_pages, max_concurrency, created_at"
                 " FROM caller_keys ORDER BY created_at ASC"
             ).fetchall()
+        if self._audit is not None:
+            self._audit.record_event(actor="admin", action="key_list", target_key_id=None, outcome="granted")
         return [_record_from_row(row) for row in rows]
 
     def revoke_key(self, key_id: str) -> bool:
@@ -156,6 +173,13 @@ class CallerKeyStore(CoordinationStore):
         with self._lock:
             cur = self._conn.execute("DELETE FROM caller_keys WHERE key_id = ?", (key_id,))
             self._conn.commit()
+        if self._audit is not None:
+            self._audit.record_event(
+                actor="admin",
+                action="key_revoke",
+                target_key_id=key_id,
+                outcome="granted" if cur.rowcount > 0 else "refused",
+            )
         return cur.rowcount > 0
 
     def get_for_id(self, key_id: str) -> CallerKey | None:

@@ -7,11 +7,18 @@ Every feature route carries these by default; the routers are built through
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from enum import Enum
+from typing import TypedDict, Unpack
 
 from fastapi import APIRouter, Depends, Request
 
-from crawlutron.api.caller_auth import auth_denials, get_keys_caller, presented_key, verify_admin_secret
+from crawlutron.api.caller_auth import (
+    auth_denials,
+    get_keys_caller,
+    presented_key,
+    record_operator_auth_failure,
+    verify_admin_secret,
+)
 from crawlutron.api.dependencies import CallerDep
 from crawlutron.api.key_throttle import shared_throttle
 from crawlutron.models.caller_identity import CallerIdentity
@@ -25,6 +32,20 @@ _LAYER_GUARDS = frozenset({GUARD_NAME, ADMIN_GUARD_NAME, OPERATOR_GUARD_NAME})
 
 #: The public door the invariant walks read: every resolver name the layer owns.
 LAYER_GUARDS: frozenset[str] = _LAYER_GUARDS
+
+
+class _RouterKwargs(TypedDict, total=False):
+    """The keyword arguments callers actually pass to these router factories.
+
+    Installed FastAPI 0.162's APIRouter.__init__ takes no ``**kwargs``, so the
+    bare ``**kwargs: Any`` annotation was a lie: it forwarded nothing the
+    constructor accepts. The factories fix ``dependencies`` and ``responses``
+    themselves; callers pass only ``prefix`` and/or ``tags``. Typed against the
+    real keyword set instead of widened at every call site.
+    """
+
+    prefix: str
+    tags: list[str | Enum] | None
 
 
 async def guard_request(caller: CallerDep) -> CallerIdentity:
@@ -54,16 +75,17 @@ async def operator_guard(request: Request) -> bool:
         throttle.record_admin_success()
     else:
         throttle.record_admin_failure()
+        record_operator_auth_failure(getattr(getattr(request.app, "state", None), "audit_store", None))
     request.state.caller = matched
     return matched
 
 
-def guarded_router(**kwargs: Any) -> APIRouter:
+def guarded_router(**kwargs: Unpack[_RouterKwargs]) -> APIRouter:
     """A feature router with the layer guard and the 401 declaration wired."""
     return APIRouter(dependencies=[Depends(guard_request)], responses=auth_denials(), **kwargs)
 
 
-def admin_guarded_router(**kwargs: Any) -> APIRouter:
+def admin_guarded_router(**kwargs: Unpack[_RouterKwargs]) -> APIRouter:
     """The operator trust plane's router: the admin guard, fail closed."""
     return APIRouter(dependencies=[Depends(guard_admin_request)], responses=auth_denials(), **kwargs)
 

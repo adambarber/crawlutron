@@ -14,6 +14,7 @@ from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.serialization import to_dict
+from crawlutron.models.taxonomy import Classification
 from crawlutron.transport.browser_pool import BrowserPoolExhaustedError
 from crawlutron.transport.classification import classify_error_code
 from crawlutron.transport.results import engine_result_from_exception
@@ -151,7 +152,7 @@ def _budget_item() -> EngineCrawlResult:
         original_url="https://a.example/slow",
         normalized_url=NormalizedUrl("https://a.example/slow", policy=HostPolicy.unrestricted()),
         strategy="HTTP_DECLARED_CRAWLER",
-        known_classification="url_budget_exceeded",
+        known_classification=Classification.url_budget_exceeded,
         extra_diagnostics={"url_budget_seconds": 30},
     )
     return result

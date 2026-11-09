@@ -20,6 +20,7 @@ from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.result_record import ProducerEnvelope
+from crawlutron.models.taxonomy import Classification
 from crawlutron.storage.job_store import CrawlJobState, FrontierEntry, JobStatus, JobStore
 from crawlutron.storage.job_store_collections import JobKind, OrderedUrlSet
 from tests._policy_factories import canonical
@@ -58,7 +59,7 @@ def _make_engine_result(url: str) -> EngineCrawlResult:
         normalized_url=canonical(url),
         final_url=canonical(url),
         status="success",
-        classification="rendered",
+        classification=Classification.rendered,
         selected_strategy="HTTP_DECLARED_CRAWLER",
         attempted_strategies=(),
         http_status=200,
@@ -203,9 +204,9 @@ async def test_transient_requeue_survives_known_threading(tmp_path):
     resolved = {entry.url: _make_engine_result(entry.url.raw)}
     resolved[entry.url] = replace(
         _make_engine_result(entry.url.raw),
-        classification="connection_error",  # transient
+        classification=Classification.connection_error,  # transient
         status="failed",
-        error="connection_error",
+        error=Classification.connection_error,
     )
     state.in_flight = [entry]
     known = {entry.url, canonical("https://example.com/other")}

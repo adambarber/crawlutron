@@ -205,21 +205,12 @@ class TestClassifyHtmlComments:
 
 
 def test_wire_classification_literal_matches_the_enum():
-    """The ``Classification`` Literal is a hand-maintained second copy of the enum.
+    """``Classification`` IS the enum now -- one declaration, no second copy.
 
-    A member added to the enum but forgotten in the Literal passes CI -- the
-    detector checks call-site literals -- which produced the original defect.
+    The historical shape (a hand-maintained Literal that could drift) died in
+    the unification: the alias is the class itself, so drift is unrepresentable.
     """
-    import typing
-
     from crawlutron.models.taxonomy import Classification
 
-    args = typing.get_args(Classification)
-    enum_values = {m.value for m in CrawlClassification}
-    literal_values = set(args)
-
-    assert literal_values == enum_values, (
-        f"Classification Literal drifted from CrawlClassification: "
-        f"missing from Literal={sorted(enum_values - literal_values)} "
-        f"stale in Literal={sorted(literal_values - enum_values)}"
-    )
+    assert Classification is CrawlClassification
+    assert {member.value for member in Classification} == {m.value for m in CrawlClassification}

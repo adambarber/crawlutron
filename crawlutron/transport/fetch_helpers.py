@@ -173,7 +173,7 @@ async def single_flight[K, T](
 async def fetch_text(
     fetcher: HttpFetcher,
     url: NormalizedUrl,
-    cond_headers: dict[str, str] | None,
+    cond_headers: Mapping[str, str] | None,
     timeout_seconds: int,
 ) -> tuple[str | None, str | None, str | None, bool]:
     """Fetch + decode a sitemap body: ``(text, etag, last_modified, not_modified)``.
@@ -257,7 +257,7 @@ async def _recurse_sitemap(
     walk: _SitemapWalk,
     current_url: NormalizedUrl,
     depth: int,
-    cond_headers: dict[str, str] | None,
+    cond_headers: Mapping[str, str] | None,
 ) -> tuple[str | None, str | None]:
     """Resolve one sitemap node into ``walk.page_urls``, recursing into indexes.
 

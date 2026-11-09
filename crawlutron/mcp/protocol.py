@@ -125,7 +125,7 @@ def decode_header_value(value: str) -> str:
     """
     if value.startswith("=?base64?") and value.endswith("?="):
         try:
-            return base64.b64decode(value[len("=?base64?") : -2]).decode("utf-8")
+            return base64.b64decode(value.removeprefix("=?base64?").removesuffix("?=")).decode("utf-8")
         except (ValueError, UnicodeDecodeError):
             return value
     return value

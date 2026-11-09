@@ -20,6 +20,7 @@ from crawlutron.models.crawl_task import CrawlTask
 from crawlutron.models.crawl_worker import CrawlWorker
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import admit_or_none
+from crawlutron.models.taxonomy import Classification
 from crawlutron.orchestration.recursive import run_recursive_crawl
 from crawlutron.orchestration.strategy_chain import execute_crawl_chain
 from crawlutron.runtime.pressure_gates import ResourceGate
@@ -191,7 +192,7 @@ async def _run_job(state: PipelineState, job: CrawlTask) -> tuple[int, EngineCra
             original_url=job.original_url,
             normalized_url=job.normalized_url,
             strategy=None,
-            known_classification="url_budget_exceeded",
+            known_classification=Classification.url_budget_exceeded,
             extra_diagnostics={"url_budget_seconds": budget},
         )
     return job.index, result
@@ -229,7 +230,7 @@ async def _robots_disallowed(state: PipelineState, job: CrawlTask) -> EngineCraw
             original_url=job.original_url,
             normalized_url=job.normalized_url,
             strategy=None,
-            classification="robots_disallowed",
+            classification=Classification.robots_disallowed,
             error=loaded.source.error_code,
             diagnostics={
                 "robots": {

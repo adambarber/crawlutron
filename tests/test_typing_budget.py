@@ -203,6 +203,8 @@ _TEST_BUDGETS = {_METRIC: 0, _ANY: 0}
 
 suite_offenders, suite_measurement = _gate(REPO_ROOT / "tests")
 
+crawlutron_offenders, _crawlutron_measurement = _gate(REPO_ROOT / "crawlutron")
+
 
 _TESTS_REMEDY = (
     "tests/ records: declare the key set (a test-local TypedDict or the production "
@@ -233,6 +235,23 @@ def test_the_tests_typing_budget_reaches_tests() -> None:
     assert suite_measurement(_METRIC) == 0, "the tests typing budget stopped reaching the real tree"
     assert suite_measurement(_ANY) == 0, "the bare-Any budget stopped reaching the real tree"
     _assert_undeclared_record_fires()
+
+
+#: crawlutron/ production sealed at zero (#701): commits 2 and 3 typed the nine
+#: bare-Any offenders down to this unconditional [].
+_CRAWLUTRON_OFFENDERS: list[str] = []
+
+
+def test_the_crawlutron_typing_budget_reaches_crawlutron() -> None:
+    """Reach proof: the bare-Any gate sweeps crawlutron/ production (#701).
+    Commits 2 (_ToolDoor -> DoorEnv) and 3 (router/dispatch) typed the nine
+    pre-#701 offenders down to this unconditional [].
+    """
+    found = crawlutron_offenders(_ANY)
+    assert [o.where for o in found] == _CRAWLUTRON_OFFENDERS, (
+        "the gate must reach crawlutron/ and name each offender at file:line: "
+        + "; ".join(str(o) for o in found)
+    )
 
 
 def _walked() -> dict[str, int]:

@@ -18,6 +18,7 @@ from crawlutron.extraction.classify import classify_page
 from crawlutron.models.crawl_result import CrawlResult
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.result_factory import terminal_crawl_result
+from crawlutron.models.taxonomy import Classification
 from crawlutron.transport.browser_driver import BrowserDriver
 from crawlutron.transport.browser_render_phases import (
     ReleasePlan,
@@ -40,7 +41,7 @@ from crawlutron.transport.render_page import RenderPage
 if TYPE_CHECKING:
     from crawlutron.models.host_policy import HostPolicy
     from crawlutron.models.render_options import RenderOptions
-    from crawlutron.models.taxonomy import Classification, CrawlError
+    from crawlutron.models.taxonomy import CrawlError
 
 __all__ = [
     "BrowserRenderer",
@@ -73,12 +74,12 @@ def _render_classification(error: BaseException) -> Classification:
     never got to navigate. A browser cert refusal (identity mismatch) is the
     pin law working: tls_error, visibly classified, never a silent success."""
     if isinstance(error, ResolverBudgetExceeded):
-        return "dns_error"
+        return Classification.dns_error
     if isinstance(error, TimeoutError):
-        return "navigation_timeout"
+        return Classification.navigation_timeout
     if "ERR_CERT_" in str(error) or "ERR_SSL" in str(error):
-        return "tls_error"
-    return "unknown_error"
+        return Classification.tls_error
+    return Classification.unknown_error
 
 
 def _render_failure_status(classification: Classification) -> ResultStatus:
@@ -217,7 +218,9 @@ class BrowserRenderer:
                     return self._failure_result(url, status, classification, attempts, started, last_error)
                 await self._async_sleep(min(2 ** (attempts - 1), 5))
 
-        return self._failure_result(url, "failed", "unknown_error", attempts, started, last_error)
+        return self._failure_result(
+            url, "failed", Classification.unknown_error, attempts, started, last_error
+        )
 
     async def close(self) -> None:
         """Release the reused browser instance at service shutdown."""

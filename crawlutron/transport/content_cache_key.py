@@ -7,6 +7,7 @@ It must not fetch, decode, extract, or construct crawl results.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 
 from crawlutron.config.env import get_env_int
 from crawlutron.models.crawl_policy_limits import CrawlPolicyLimits
@@ -19,7 +20,7 @@ from crawlutron.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 def build_content_cache_key(
     normalized_url: NormalizedUrl,
     strategy: str,
-    base_headers: dict[str, str],
+    base_headers: Mapping[str, str],
     extraction: str | None,
     css_selector: str | None,
     xpath: str | None,

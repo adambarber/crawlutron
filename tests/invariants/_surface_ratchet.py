@@ -84,7 +84,7 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/api/async_crawl_runner.py": (3, 2),
     # #664 raised 18,15 -> 19,16: verify_admin_secret is the public constant-time
     # admin-token door the layer's soft gate meters through.
-    "crawlutron/api/caller_auth.py": (20, 17),
+    "crawlutron/api/caller_auth.py": (21, 18),
     "crawlutron/api/caller_concurrency.py": (1, 1),
     # #674 raised 1,1 -> 2,2: CrawlRefusalError is the typed refusal carrier the
     # sweep's deactivation arm reads (reason as an enum member, not boundary text).
@@ -118,9 +118,7 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/api/render.py": (3, 3),
     "crawlutron/api/render_endpoint.py": (3, 2),
     "crawlutron/api/watch_sweep.py": (4, 2),
-    # RAISED to (17, 15) by #655: DELIVERIES_CAP + tracked_delivery_count are the
-    # public cap/probe pair for the bounded delivery set.
-    "crawlutron/api/webhooks.py": (17, 15),
+    "crawlutron/api/webhooks.py": (16, 14),
     "crawlutron/extraction/content.py": (4, 4),
     "crawlutron/extraction/llm_format.py": (4, 4),
     # #668 raised 18,0 -> 19,0: RATE_LIMITED is the JSON-RPC code the anonymous
@@ -134,7 +132,7 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/mcp/registry.py": (4, 1),
     # #646: the four job-tool handlers joined via _job_tool_handler. #647: create_job.
     # ARCH-1: factory collapse (data-driven dispatch) deleted the factories + watch_handlers.py.
-    "crawlutron/mcp/handlers.py": (8, 5),
+    "crawlutron/mcp/handlers.py": (9, 6),  # RAISED to (9, 6) by #701: DoorEnv is the typed door environment.
     # #646: the one control-plane transition both job doors run, plus its shared 404/409 raisers.
     "crawlutron/api/job_control.py": (3, 3),
     # #647: the typed job cores both doors run (create/list/get/control/delete).
@@ -164,6 +162,7 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/search/providers.py": (21, 9),
     "crawlutron/search/providers_api.py": (5, 5),
     "crawlutron/search/providers_html.py": (1, 1),
+    "crawlutron/storage/admin_audit_store.py": (4, 1),
     "crawlutron/storage/coordination_cookies.py": (2, 1),
     "crawlutron/storage/coordination_counters.py": (1, 1),
     "crawlutron/storage/coordination_store.py": (4, 2),

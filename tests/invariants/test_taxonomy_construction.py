@@ -6,6 +6,7 @@ from typing import cast
 
 import pytest
 
+from crawlutron.models.taxonomy import Classification
 from tests._policy_factories import canonical
 from tests.chokepoint_walks import app_offenders
 
@@ -34,26 +35,17 @@ def test_crawl_strategy_name_members_match_vocabulary():
     assert set(get_args(CrawlStrategyName)) == declared
 
 
-def test_classification_literal_covers_the_enum_exactly():
-    """``Classification`` and ``CrawlClassification`` name the same taxonomy.
+def test_classification_alias_is_the_enum_itself():
+    """``Classification`` and ``CrawlClassification`` are ONE declaration.
 
-    mypy evaluates neither inside ``Literal``, so both are spelled out and this
-    alone says they are one set."""
-    from typing import get_args
-
+    The dual-declaration drift pin (get_args equality both directions) died
+    with the unification: the alias IS the class, so drift is unrepresentable.
+    The pin survives as an identity assert so a future re-split reds here.
+    """
     from crawlutron.models.taxonomy import Classification
     from crawlutron.vocabulary.taxonomy import CrawlClassification
 
-    declared = set(get_args(Classification))
-    enum = {member.value for member in CrawlClassification}
-    assert enum - declared == set(), (
-        "every CrawlClassification member needs a Classification Literal member:"
-        f" missing {sorted(enum - declared)} (crawlutron/models/taxonomy.py)"
-    )
-    assert declared - enum == set(), (
-        "a Classification member with no CrawlClassification member is downgraded"
-        f" to site_error at response shaping: unknown {sorted(declared - enum)}"
-    )
+    assert Classification is CrawlClassification
 
 
 def test_crawl_error_is_the_pipeline_additions_over_classification():
@@ -143,7 +135,7 @@ def _member_crawl_result():
         attempt=CrawlStrategyAttempt(
             strategy="BROWSER_HEADLESS",
             status="success",
-            classification="rendered",
+            classification=Classification.rendered,
             http_status=200,
             content_type=None,
             elapsed_ms=0,
@@ -183,7 +175,7 @@ def test_result_construction_enforces_membership_at_the_dataclass():
     CrawlStrategyAttempt(
         strategy="BROWSER_HEADLESS",
         status="success",
-        classification="rendered",
+        classification=Classification.rendered,
         http_status=200,
         content_type=None,
         elapsed_ms=0,

@@ -4,6 +4,7 @@ import pytest
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 
+from crawlutron.models.taxonomy import Classification
 from tests._assertions import assert_pool_unavailable
 from tests._browser_doubles import RaisingRendererPool
 from tests._job_harnesses import post_render_with_pool
@@ -169,7 +170,7 @@ class TestDiscoveryAndRenderApi:
                     attempt=terminal_attempt(
                         strategy=None,
                         status="success",
-                        classification="rendered",
+                        classification=Classification.rendered,
                         elapsed_ms=1,
                         error=None,
                     ),

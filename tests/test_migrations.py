@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.storage.admin_audit_store import AdminAuditStore
 from crawlutron.storage.caller_key_store import CallerKeyStore
 from crawlutron.storage.coordination_cookies import SharedCookieStore
 from crawlutron.storage.coordination_counters import CoordinationCounters
@@ -44,6 +45,7 @@ def _open_store(
     | WatchStore
     | CallerKeyStore
     | CrawlSpillStore
+    | AdminAuditStore
 ):
     if schema is StoreSchema.CRAWL_JOBS:
         return job_store(db_path)
@@ -59,6 +61,8 @@ def _open_store(
         return CallerKeyStore(db_path)
     if schema is StoreSchema.CRAWL_SPILLS:
         return CrawlSpillStore(db_path)
+    if schema is StoreSchema.KEY_ADMIN_EVENTS:
+        return AdminAuditStore(db_path)
     # The parametrization above is derived from StoreSchema, so it grows whenever a schema is added.
     raise AssertionError(f"no store opener declared for {schema.value}")
 

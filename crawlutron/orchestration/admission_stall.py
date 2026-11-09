@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, NamedTuple, cast
 
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.crawl_task import CrawlTask
-from crawlutron.models.taxonomy import Classification, CrawlError
+from crawlutron.models.taxonomy import CrawlError
 from crawlutron.runtime.metrics import MetricsStore
 from crawlutron.transport.results import TerminalResult, failed_engine_result
 from crawlutron.vocabulary.taxonomy import CrawlClassification
@@ -76,7 +76,7 @@ async def fail_remaining_frontier(run: CrawlRun, frontier: deque[tuple[int, Craw
                     original_url=job.original_url,
                     normalized_url=job.normalized_url,
                     strategy=None,
-                    classification=cast("Classification", CrawlClassification.browser_pool_exhausted),
+                    classification=CrawlClassification.browser_pool_exhausted,
                     error=cast("CrawlError", CrawlClassification.browser_pool_exhausted),
                 )
             ),

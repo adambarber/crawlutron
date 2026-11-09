@@ -6,7 +6,7 @@ import asyncio
 import re
 import threading
 from collections import OrderedDict
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
 from crawlutron.models.host_policy import HostPolicy
@@ -42,7 +42,7 @@ class RobotsRules:
 
 
 FetchAndDecode = Callable[
-    [HttpFetcher, NormalizedUrl, dict[str, str], int], Awaitable[tuple[str | None, int | None]]
+    [HttpFetcher, NormalizedUrl, Mapping[str, str], int], Awaitable[tuple[str | None, int | None]]
 ]
 
 robots_cache: BoundedTTLCache[tuple[str, HostPolicy], RobotsRules] = BoundedTTLCache(

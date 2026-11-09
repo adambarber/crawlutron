@@ -16,6 +16,7 @@ from crawlutron.runtime.pressure_sizing import default_executor_workers
 from crawlutron.vocabulary.identity import SERVICE_ID, SERVICE_VERSION
 
 from .config.settings import CrawlerSettings
+from .storage.admin_audit_store import AdminAuditStore
 from .storage.caller_key_store import CallerKeyStore
 from .storage.job_store import JobStore
 from .storage.result_store import CrawlResultStore, CrawlSpillStore
@@ -90,6 +91,8 @@ def create_app(settings: CrawlerSettings | None = None) -> FastAPI:
     spill_store = CrawlSpillStore(database_path)
     watch_store = WatchStore(database_path)
     caller_key_store = CallerKeyStore(database_path)
+    audit_store = AdminAuditStore(database_path)
+    caller_key_store.attach_audit(audit_store)
     _configure_logging(settings)
 
     @asynccontextmanager
@@ -105,6 +108,7 @@ def create_app(settings: CrawlerSettings | None = None) -> FastAPI:
         spill_store=spill_store,
         watch_store=watch_store,
         caller_key_store=caller_key_store,
+        audit_store=audit_store,
         lifespan=lifespan,
     )
 
@@ -148,6 +152,7 @@ def _build_app(
     spill_store,
     watch_store,
     caller_key_store,
+    audit_store,
     lifespan,
 ) -> FastAPI:
     """Construct the FastAPI app: state, middleware, handlers, and routers."""
@@ -172,7 +177,16 @@ def _build_app(
         license_info={"name": "MIT License"},
         openapi_tags=_openapi_tags(),
     )
-    _stash_state(app, settings, job_store, result_store, spill_store, watch_store, caller_key_store)
+    _stash_state(
+        app,
+        settings,
+        job_store,
+        result_store,
+        spill_store,
+        watch_store,
+        caller_key_store,
+        audit_store,
+    )
     _install_error_surface(app)
     _include_routers(app)
     return app
@@ -204,7 +218,16 @@ def _openapi_tags() -> list[dict[str, str]]:
     ]
 
 
-def _stash_state(app, settings, job_store, result_store, spill_store, watch_store, caller_key_store) -> None:
+def _stash_state(
+    app,
+    settings,
+    job_store,
+    result_store,
+    spill_store,
+    watch_store,
+    caller_key_store,
+    audit_store,
+) -> None:
     """Stash shared dependencies on ``app.state`` for the router dependencies."""
     app.state.crawler_settings = settings
     app.state.job_store = job_store
@@ -212,6 +235,7 @@ def _stash_state(app, settings, job_store, result_store, spill_store, watch_stor
     app.state.spill_store = spill_store
     app.state.watch_store = watch_store
     app.state.caller_key_store = caller_key_store
+    app.state.audit_store = audit_store
     # ONE per-process register of in-flight sync work (crawl/map/render/search)
     # so every sync door counts against the caller's one concurrency ceiling.
     from crawlutron.api.caller_concurrency import CallerConcurrencyTracker

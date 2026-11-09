@@ -28,8 +28,7 @@ def _policy_host_entry(entry: str) -> str:
         return ""
     parsed = urlparse(value if "://" in value else f"//{value}")
     host = parsed.hostname or value.split("/", 1)[0].split(":", 1)[0]
-    if host.startswith("*."):
-        host = host[2:]
+    host = host.removeprefix("*.")
     return _normalize_policy_host(host)
 
 

@@ -163,7 +163,7 @@ def _classify_http_content(
     """
     classification, classification_evidence = classify_extracted_content(ctx, resp, extracted)
     if ctx.revalidated_304:
-        return "not_modified", [], True
+        return Classification.not_modified, [], True
     return classification, classification_evidence, False
 
 

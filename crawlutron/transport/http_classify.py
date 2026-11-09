@@ -99,13 +99,13 @@ def _status_evidence(
 # The status overrides as one table: (status, classification, signature). 403
 # only bites when the page classifier read the page as rendered.
 _STATUS_OVERRIDES: tuple[tuple[int, Classification, str], ...] = (
-    (403, "access_denied", "403"),
-    (404, "not_found", "404"),
-    (410, "gone", "410"),
-    (429, "rate_limited", "429"),
+    (403, Classification.access_denied, "403"),
+    (404, Classification.not_found, "404"),
+    (410, Classification.gone, "410"),
+    (429, Classification.rate_limited, "429"),
     # A 413 is a size refusal, not a body verdict: both transports emit
     # the synthetic octet-stream shape, so it must not read as binary_no_text.
-    (413, "payload_too_large", "413"),
+    (413, Classification.payload_too_large, "413"),
 )
 
 
@@ -119,7 +119,7 @@ def classify_extracted_content(
     status = resp.status_code
     override: tuple[int, Classification, str] | None = next(
         (row for row in _STATUS_OVERRIDES if row[0] == status),
-        (status, "site_error", str(status)) if status >= 500 else None,
+        (status, Classification.site_error, str(status)) if status >= 500 else None,
     )
     if override is not None and (status != 403 or classification == "rendered"):
         classification = override[1]
@@ -127,11 +127,11 @@ def classify_extracted_content(
     if ctx.extraction == EXTRACTION_TRAFILATURA and extracted.html is None and classification == "rendered":
         evidence = [
             ClassificationEvidenceRecord(
-                classification="binary_no_text",
+                classification=Classification.binary_no_text,
                 signature="non_html_body",
                 source="content_type",
                 context=extracted.content_type or "",
             )
         ]
-        classification = "binary_no_text"
+        classification = Classification.binary_no_text
     return classification, evidence

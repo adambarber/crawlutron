@@ -35,12 +35,12 @@ HEALTHY_PROBABILITY = 0.5
 #: Real classifications the engine legitimately emits at these status tiers, deliberately excluding site_error
 #: so "healthy items keep their real classification" also pins "healthy items are never reclassified".
 HEALTHY_CLASSIFICATIONS: tuple[Classification, ...] = (
-    "rendered",
-    "not_modified",
-    "captcha_detected",
-    "network_error",
-    "not_found",
-    "robots_disallowed",
+    Classification.rendered,
+    Classification.not_modified,
+    Classification.captcha_detected,
+    Classification.network_error,
+    Classification.not_found,
+    Classification.robots_disallowed,
 )
 
 POISON_KINDS = ("not_a_result", "boom_mapping", "bad_evidence", "bad_validators", "none", "scalar")
@@ -86,7 +86,7 @@ def _healthy_render(index: int) -> CrawlResult:
         attempt=terminal_attempt(
             strategy=None,
             status="success",
-            classification="rendered",
+            classification=Classification.rendered,
             elapsed_ms=25,
             error=None,
         ),
@@ -108,7 +108,7 @@ def _poison(kind: str, index: int) -> object:
     """
     # `error=` is a declared CrawlError Literal; a healthy classification's error is None, so the
     # non-Literal poison classifications flow through `classification_evidence`/`validators` instead.
-    healthy = _healthy(index, "rendered")
+    healthy = _healthy(index, Classification.rendered)
     if kind == "not_a_result":
         return {}
     if kind == "boom_mapping":
@@ -238,7 +238,7 @@ class TestPoisonDegradesLoudly:
         # Same boundary lie as the sweep loops: poison enters via one cast, the guard absorbs it.
         batch = cast(
             list[EngineCrawlResult],
-            [_healthy(0, "rendered"), {}, _poison("wrong_types", 1), None, _BoomMapping()],
+            [_healthy(0, Classification.rendered), {}, _poison("wrong_types", 1), None, _BoomMapping()],
         )
         with caplog.at_level("WARNING", logger="crawlutron.api.response_shaping"):
             build_unified_crawl_response(batch)

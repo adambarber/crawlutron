@@ -50,7 +50,7 @@ def _resolver_numeric_part(part: str) -> int | None:
         return None
     lowered = part.lower()
     if lowered.startswith("0x"):
-        digits = lowered[2:]
+        digits = lowered.removeprefix("0x")
         if not digits or any(c not in "0123456789abcdef" for c in digits):
             return None
         return int(digits, 16)

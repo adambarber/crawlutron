@@ -14,10 +14,12 @@ from crawlutron.models.crawl_result import CrawlResult
 from crawlutron.models.json_value import JsonValue
 from crawlutron.models.result_factory import terminal_attempt
 from crawlutron.models.serialization import to_dict
+from crawlutron.models.taxonomy import Classification
 from crawlutron.transport.browser import BrowserRenderer
 from crawlutron.transport.scheduler import DomainScheduler
 from crawlutron.vocabulary.extraction import EXTRACTION_DOCUMENT, EXTRACTION_TRAFILATURA
 from crawlutron.vocabulary.strategies import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
+from crawlutron.vocabulary.taxonomy import CrawlClassification
 from tests._assertions import browser_available
 from tests._browser_doubles import _fake_browser
 from tests._fetch_doubles import FetcherDouble
@@ -155,16 +157,17 @@ class TestEngineChainEdges:
     # Uses the module-level _fake_browser worker factory.
 
     def test_result_dict(self):
+        attempt = terminal_attempt(
+            strategy=None,
+            status="success",
+            classification=Classification.rendered,
+            elapsed_ms=1,
+            error=None,
+        )
         d = to_dict(
             CrawlResult(
                 url=canonical("http://x/"),
-                attempt=terminal_attempt(
-                    strategy=None,
-                    status="success",
-                    classification="rendered",
-                    elapsed_ms=1,
-                    error=None,
-                ),
+                attempt=attempt,
                 final_url=canonical("http://x/"),
                 html=None,
                 text="t",
@@ -368,7 +371,7 @@ class TestEngineScopeEdges:
                 # A disallow precedes any strategy attempt, so the recorded strategy is None, never a label
                 # that implies an HTTP fetch happened.
                 strategy=None,
-                classification="robots_disallowed",
+                classification=CrawlClassification.robots_disallowed,
                 error="robots_txt_disallowed",
             )
         )
