@@ -202,10 +202,12 @@ class TestMcpParity:
         assert "admit" in names
 
     async def _tool_verdict(self, admit_settings, url: str) -> object:
-        from crawlutron.mcp.handlers import handle_admit
+        from crawlutron.mcp.handlers import dispatch as tool_dispatch
+        from crawlutron.mcp.registry import TOOLS_BY_NAME
         from crawlutron.models.admit_request import AdmitRequest
 
-        result = await handle_admit(
+        result = await tool_dispatch(
+            TOOLS_BY_NAME["admit"],
             AdmitRequest(url=url),
             settings=admit_settings,
             shutdown_event=None,

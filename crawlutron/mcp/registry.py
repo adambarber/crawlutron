@@ -13,29 +13,16 @@ from dataclasses import dataclass
 
 from pydantic import BaseModel
 
-from crawlutron.mcp.handlers import (
-    Handler,
-    ToolResult,
-    handle_admit,
-    handle_control_job,
-    handle_crawl,
-    handle_crawl_and_extract,
-    handle_create_job,
-    handle_delete_job,
-    handle_get_job,
-    handle_list_jobs,
-    handle_map,
-    handle_read_crawl_result,
-    handle_read_crawl_trace,
-    handle_render,
-    handle_search,
+from crawlutron.api.crawl_endpoint import read_crawl_result_record, read_crawl_trace_record
+from crawlutron.api.job_cores import control_job, delete_job_core, get_job_core, list_jobs_core
+from crawlutron.api.watch_cores import (
+    delete_watch_core,
+    get_watch_core,
+    list_watches_core,
+    register_watch_core,
 )
-from crawlutron.mcp.watch_handlers import (
-    handle_delete_watch,
-    handle_get_watch,
-    handle_list_watches,
-    handle_register_watch,
-)
+from crawlutron.api.watch_router import WATCH_INTERVAL_MIN_SECONDS
+from crawlutron.mcp.handlers import DoorBinding, DoorKind, ToolResult
 from crawlutron.models.admit_request import AdmitRequest
 from crawlutron.models.admit_response import AdmitResponse
 from crawlutron.models.crawl_and_extract_response import CrawlAndExtractResponse
@@ -68,6 +55,23 @@ from crawlutron.models.watch_state import WatchState
 #: the schema cannot offer a field the handler then refuses.
 _UNSUPPORTED_CRAWL_FIELDS = frozenset({"async_mode", "webhook_url", "output_format"})
 
+#: The declared MCP-side delivery refusal both crawl doors answer (keyed on the
+#: fields' effective VALUE by dispatch: an explicit no-op is accepted).
+_DELIVERY_REFUSAL = ToolResult(
+    text="async_mode, webhook_url and output_format are not supported over MCP; "
+    "use POST /v1/crawl for webhook/async delivery or output formats.",
+    is_error=True,
+)
+_DELIVERY_REFUSAL_FIELDS = ("async_mode", "webhook_url", "output_format")
+
+#: The poll-only watch refusal: webhook delivery is admitted through REST only.
+_WEBHOOK_REFUSAL = ToolResult(
+    text="webhook_url is not supported over MCP: webhook delivery is admitted "
+    "through the REST door POST /v1/watches only; use it without webhook_url "
+    "for a poll-only watch.",
+    is_error=True,
+)
+
 
 @dataclass(frozen=True)
 class RestRoute:
@@ -79,16 +83,17 @@ class RestRoute:
 
 @dataclass(frozen=True)
 class ToolSpec:
-    """A registered MCP tool definition plus its handler. ``request_model`` is
+    """A registered MCP tool definition plus its declared door data. ``request_model`` is
     the source of truth for the advertised ``inputSchema`` and argument
-    validation; ``unsupported_fields`` is the same list the handler rejects on.
+    validation; ``unsupported_fields`` is the same list the door refuses on;
+    ``door`` carries the behavior data ``handlers.dispatch`` binds from.
     """
 
     name: str
     description: str
     request_model: type[BaseModel]
     output_schema: dict[str, JsonValue] | None
-    handler: Handler
+    door: DoorBinding
     title: str = ""
     unsupported_fields: Collection[str] = ()
     rest_route: RestRoute | None = None
@@ -128,7 +133,7 @@ TOOL_SPECS: list[ToolSpec] = [
         ),
         request_model=AdmitRequest,
         output_schema=_schema(AdmitResponse),
-        handler=handle_admit,
+        door=DoorBinding(kind=DoorKind.admit),
         rest_route=RestRoute("POST", "/v1/admit"),
     ),
     ToolSpec(
@@ -142,7 +147,7 @@ TOOL_SPECS: list[ToolSpec] = [
         ),
         request_model=SearchRequest,
         output_schema=_schema(SearchResponse),
-        handler=handle_search,
+        door=DoorBinding(kind=DoorKind.search),
         rest_route=RestRoute("POST", "/v1/search"),
     ),
     ToolSpec(
@@ -162,7 +167,11 @@ TOOL_SPECS: list[ToolSpec] = [
         request_model=CrawlRequest,
         unsupported_fields=_UNSUPPORTED_CRAWL_FIELDS,
         output_schema=_schema(UnifiedCrawlResponse),
-        handler=handle_crawl,
+        door=DoorBinding(
+            kind=DoorKind.crawl,
+            refusal=_DELIVERY_REFUSAL,
+            refusal_fields=_DELIVERY_REFUSAL_FIELDS,
+        ),
         rest_route=RestRoute("POST", "/v1/crawl"),
     ),
     ToolSpec(
@@ -178,7 +187,11 @@ TOOL_SPECS: list[ToolSpec] = [
         request_model=CrawlRequest,
         unsupported_fields=_UNSUPPORTED_CRAWL_FIELDS,
         output_schema=_schema(CrawlAndExtractResponse),
-        handler=handle_crawl_and_extract,
+        door=DoorBinding(
+            kind=DoorKind.crawl_and_extract,
+            refusal=_DELIVERY_REFUSAL,
+            refusal_fields=_DELIVERY_REFUSAL_FIELDS,
+        ),
         # Projection of POST /v1/crawl's response, not a distinct REST door.
         rest_route=None,
     ),
@@ -193,7 +206,7 @@ TOOL_SPECS: list[ToolSpec] = [
         ),
         request_model=MapRequest,
         output_schema=_schema(SiteMapResponse),
-        handler=handle_map,
+        door=DoorBinding(kind=DoorKind.map),
         rest_route=RestRoute("POST", "/v1/map"),
     ),
     ToolSpec(
@@ -207,7 +220,7 @@ TOOL_SPECS: list[ToolSpec] = [
         ),
         request_model=RenderRequest,
         output_schema=_schema(UnifiedCrawlResponse),
-        handler=handle_render,
+        door=DoorBinding(kind=DoorKind.render),
         rest_route=RestRoute("POST", "/v1/render"),
     ),
     ToolSpec(
@@ -222,7 +235,7 @@ TOOL_SPECS: list[ToolSpec] = [
         ),
         request_model=CrawlResultRequest,
         output_schema=_schema(UnifiedCrawlResponse),
-        handler=handle_read_crawl_result,
+        door=DoorBinding(kind=DoorKind.read, core=read_crawl_result_record),
         rest_route=RestRoute("GET", "/v1/crawl/{request_id}"),
     ),
     ToolSpec(
@@ -236,7 +249,7 @@ TOOL_SPECS: list[ToolSpec] = [
         ),
         request_model=CrawlResultRequest,
         output_schema=_schema(TraceResponse),
-        handler=handle_read_crawl_trace,
+        door=DoorBinding(kind=DoorKind.read, core=read_crawl_trace_record),
         rest_route=RestRoute("GET", "/v1/crawl/{request_id}/trace"),
     ),
     ToolSpec(
@@ -253,7 +266,7 @@ TOOL_SPECS: list[ToolSpec] = [
         ),
         request_model=JobCreateRequest,
         output_schema=_schema(JobCreateResponse),
-        handler=handle_create_job,
+        door=DoorBinding(kind=DoorKind.create_job),
         rest_route=RestRoute("POST", "/v1/jobs"),
     ),
     ToolSpec(
@@ -267,7 +280,7 @@ TOOL_SPECS: list[ToolSpec] = [
         ),
         request_model=JobListRequest,
         output_schema=_schema(JobListResponse),
-        handler=handle_list_jobs,
+        door=DoorBinding(kind=DoorKind.store, core=list_jobs_core, store="job", wants_shutdown_event=True),
         rest_route=RestRoute("GET", "/v1/jobs"),
     ),
     ToolSpec(
@@ -280,7 +293,7 @@ TOOL_SPECS: list[ToolSpec] = [
         ),
         request_model=JobIdRequest,
         output_schema=_schema(JobStatusResponse),
-        handler=handle_get_job,
+        door=DoorBinding(kind=DoorKind.store, core=get_job_core, store="job", wants_shutdown_event=True),
         rest_route=RestRoute("GET", "/v1/jobs/{job_id}"),
     ),
     ToolSpec(
@@ -294,7 +307,7 @@ TOOL_SPECS: list[ToolSpec] = [
         ),
         request_model=JobControlToolRequest,
         output_schema=_schema(JobStatusResponse),
-        handler=handle_control_job,
+        door=DoorBinding(kind=DoorKind.store, core=control_job, store="job", wants_shutdown_event=True),
         rest_route=RestRoute("POST", "/v1/jobs/{job_id}/control"),
     ),
     ToolSpec(
@@ -308,7 +321,7 @@ TOOL_SPECS: list[ToolSpec] = [
         ),
         request_model=JobIdRequest,
         output_schema=_schema(JobDeletedResponse),
-        handler=handle_delete_job,
+        door=DoorBinding(kind=DoorKind.store, core=delete_job_core, store="job", wants_shutdown_event=True),
         rest_route=RestRoute("DELETE", "/v1/jobs/{job_id}"),
     ),
     ToolSpec(
@@ -327,7 +340,14 @@ TOOL_SPECS: list[ToolSpec] = [
         # refuses (#648 review F1); the runtime refusal stays as defense in depth.
         unsupported_fields=("webhook_url",),
         output_schema=_schema(WatchState),
-        handler=handle_register_watch,
+        door=DoorBinding(
+            kind=DoorKind.store,
+            core=register_watch_core,
+            store="watch",
+            core_kwargs={"webhook_url": None, "interval_floor": WATCH_INTERVAL_MIN_SECONDS},
+            refusal=_WEBHOOK_REFUSAL,
+            refusal_fields=("webhook_url",),
+        ),
         rest_route=RestRoute("POST", "/v1/watches"),
     ),
     ToolSpec(
@@ -340,7 +360,7 @@ TOOL_SPECS: list[ToolSpec] = [
         ),
         request_model=WatchListRequest,
         output_schema=_schema(WatchListResponse),
-        handler=handle_list_watches,
+        door=DoorBinding(kind=DoorKind.store, core=list_watches_core, store="watch"),
         rest_route=RestRoute("GET", "/v1/watches"),
     ),
     ToolSpec(
@@ -353,7 +373,7 @@ TOOL_SPECS: list[ToolSpec] = [
         ),
         request_model=WatchIdRequest,
         output_schema=_schema(WatchState),
-        handler=handle_get_watch,
+        door=DoorBinding(kind=DoorKind.store, core=get_watch_core, store="watch"),
         rest_route=RestRoute("GET", "/v1/watches/{watch_id}"),
     ),
     ToolSpec(
@@ -365,11 +385,11 @@ TOOL_SPECS: list[ToolSpec] = [
         ),
         request_model=WatchIdRequest,
         output_schema=_schema(WatchDeletedResponse),
-        handler=handle_delete_watch,
+        door=DoorBinding(kind=DoorKind.store, core=delete_watch_core, store="watch"),
         rest_route=RestRoute("DELETE", "/v1/watches/{watch_id}"),
     ),
 ]
 
 TOOLS_BY_NAME: dict[str, ToolSpec] = {spec.name: spec for spec in TOOL_SPECS}
 
-__all__ = ["TOOLS_BY_NAME", "TOOL_SPECS", "Handler", "RestRoute", "ToolResult", "ToolSpec"]
+__all__ = ["TOOLS_BY_NAME", "TOOL_SPECS", "RestRoute", "ToolResult", "ToolSpec"]
