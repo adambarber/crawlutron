@@ -19,6 +19,7 @@ from crawlutron.transport.browser_render_phases import ReleasePlan, release_page
 from crawlutron.transport.cffi_transport import release_stream_noblock
 from crawlutron.transport.pooled_clients import safe_aclose
 from crawlutron.transport.render_page import RenderPage
+from crawlutron.transport.transport import Closeable
 from tests._policy_factories import canonical
 
 
@@ -41,6 +42,13 @@ class _FailingStream:
     async def aclose(self) -> None:
         self.calls += 1
         raise RuntimeError("stream close failed")
+
+
+class _CancelledStream:
+    """A stream double whose aclose fails with cancellation."""
+
+    async def aclose(self) -> object:
+        raise asyncio.CancelledError()
 
 
 def _decline(reason: str) -> bool:
@@ -95,6 +103,40 @@ async def test_a_successful_stream_close_records_nothing():
     release_stream_noblock(_Stream())
     await _drain()
     assert declined_closes() == {}, f"a successful close was recorded: {declined_closes()!r}"
+
+
+async def test_a_cancelled_stream_close_records_nothing():
+    """N2: a cancelled close is not evidence -- the task.cancelled() guard."""
+    clear_declined_closes()
+    loop = asyncio.get_running_loop()
+    previous_handler = loop.get_exception_handler()
+    captured: list[object] = []
+
+    def capture(_loop: object, context: object) -> None:
+        captured.append(context)
+
+    loop.set_exception_handler(capture)
+    try:
+        stream = _CancelledStream()
+        release_stream_noblock(cast("Closeable", stream))
+        await _drain()
+    finally:
+        loop.set_exception_handler(previous_handler)
+    assert not captured, f"a cancelled close let task.exception() escape into the loop: {captured!r}"
+    assert declined_closes() == {}, f"a cancelled close was recorded: {declined_closes()!r}"
+
+
+async def test_an_uncancelled_failing_stream_close_records_exactly_one_entry():
+    """N2: a failing close that was not cancelled records exactly one entry."""
+    clear_declined_closes()
+    stream = _FailingStream()
+    release_stream_noblock(cast("Closeable", stream))
+    await _drain()
+    record = declined_closes()
+    assert len(record) == 1, f"exactly one decline expected: {record!r}"
+    assert ("stream_close_failed", "_FailingStream") in record, (
+        f"the entry is not the stream close decline: {record!r}"
+    )
 
 
 class _RouteContext:

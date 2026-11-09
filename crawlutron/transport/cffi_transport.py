@@ -60,11 +60,9 @@ async def _cffi_chunks(response: _CffiResponse, timeout_seconds: int) -> AsyncIt
 
 
 def _stream_close_failure_recorder(response: Closeable) -> Callable[[asyncio.Task[None]], None]:
-    kind = type(response).__name__
-
     def record(task: asyncio.Task[None]) -> None:
         if not task.cancelled() and task.exception() is not None:
-            record_declined_close("stream_close_failed", kind)
+            record_declined_close("stream_close_failed", type(response).__name__)
 
     return record
 
