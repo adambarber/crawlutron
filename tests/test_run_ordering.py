@@ -5,6 +5,10 @@ both sides -- the live run and the gate configs -- because an ad-hoc opt-out is 
 
 from __future__ import annotations
 
+import os
+import shlex
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -36,6 +40,20 @@ def _seed_pinned_by_argv(argv) -> str | None:
     return None
 
 
+def _effective_argv(pytestconfig: pytest.Config) -> list[str]:
+    """Every way pytest assembles its command line: argv, PYTEST_ADDOPTS, ini addopts.
+    A pin delivered anywhere but argv is invisible to invocation_params.args.
+    """
+    sources: list[str] = list(pytestconfig.invocation_params.args)
+    sources.append(os.environ.get("PYTEST_ADDOPTS", ""))
+    try:
+        addopts = pytestconfig.getini("addopts")
+    except (KeyError, ValueError):
+        addopts = ""
+    sources.extend(addopts if isinstance(addopts, list) else shlex.split(str(addopts)))
+    return sources
+
+
 def test_this_run_was_randomized(pytestconfig: pytest.Config) -> None:
     """Fail unless the running process is actually varying test order: ``randomly_seed``
     defaults to ``"default"`` when the plugin loads and is absent under `-p no:randomly`,
@@ -55,12 +73,37 @@ def test_this_run_was_randomized(pytestconfig: pytest.Config) -> None:
             "varied and the ordering did not. That is the flag that looks like it "
             "is enabling randomization."
         )
-    pinned = _seed_pinned_by_argv(pytestconfig.invocation_params.args)
+    pinned = _seed_pinned_by_argv(_effective_argv(pytestconfig))
     if pinned is not None:
         pytest.fail(
             f"this run pinned its order via {pinned!r}: the seed is replayed, not "
             "fresh, so the order did not vary. Repro runs deselect this test by "
             "NAME, never with a last-seed flag."
+        )
+
+
+def test_addopts_delivered_seed_pins_are_seen(tmp_path, monkeypatch) -> None:
+    """A pin smuggled through PYTEST_ADDOPTS or ini addopts must red the gate the
+    same way an argv pin does: the effective command line, not argv alone, decides."""
+    gate = (
+        "import sys\n"
+        f"sys.path.insert(0, {str(Path(__file__).resolve().parent)!r})\n"
+        "from tests.test_run_ordering import test_this_run_was_randomized\n"
+    )
+    service_root = Path(__file__).resolve().parent.parent
+    (tmp_path / "probe_test.py").write_text(gate)
+    for channel in ("env", "ini"):
+        command = [sys.executable, "-m", "pytest", str(tmp_path / "probe_test.py")]
+        environ = dict(os.environ, PYTHONPATH=str(service_root))
+        if channel == "env":
+            environ["PYTEST_ADDOPTS"] = "--randomly-seed=last"
+        else:
+            (tmp_path / "pytest.ini").write_text("[pytest]\naddopts = --randomly-seed=last\n")
+        result = subprocess.run(
+            command, env=environ, capture_output=True, text=True, timeout=100, cwd=tmp_path
+        )
+        assert "pinned its order via" in result.stdout + result.stderr, (
+            f"{channel}-delivered --randomly-seed=last escaped the ordering gate"
         )
 
 
