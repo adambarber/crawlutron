@@ -87,9 +87,11 @@ def _bind_singleton(tmp_path) -> None:
 
 
 async def _metrics_client(*, admin_token: str):
+    from crawlutron.config.settings import CrawlerSettings
+
     app = FastAPI()
     app.include_router(metrics_router)
-    app.state.key_admin_token = admin_token
+    app.state.crawler_settings = CrawlerSettings.from_mapping({"CRAWLUTRON_KEY_ADMIN_TOKEN": admin_token})
     transport = ASGITransport(app=app)
     return AsyncClient(transport=transport, base_url="http://test")
 

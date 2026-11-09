@@ -34,7 +34,6 @@ KNOWN = (
     "crawlutron.api.webhooks",
     "crawlutron.storage.sqlite_store",
     "crawlutron.api.async_crawl_runner",
-    "crawlutron.api.caller_auth",
     "crawlutron.api.job_lifecycle",
     "crawlutron.models.host_policy",
     "crawlutron.runtime.metrics",

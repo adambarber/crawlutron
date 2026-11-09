@@ -19,7 +19,7 @@ def test_create_app_returns_a_wired_app():
     assert app.state.result_store is not None
     assert app.state.watch_store is not None
     assert app.state.caller_key_store is not None
-    assert app.state.key_admin_token == app.state.crawler_settings.key_admin_token
+    assert not hasattr(app.state, "key_admin_token"), "ONE home: the settings object (#666)"
     assert app.router.lifespan_context is not None
 
 
@@ -29,7 +29,7 @@ def test_create_app_accepts_settings():
     settings = CrawlerSettings.from_mapping({"CRAWLUTRON_KEY_ADMIN_TOKEN": "secret"})
     app = create_app(settings)
     assert app.state.crawler_settings is settings
-    assert app.state.key_admin_token == "secret"
+    assert app.state.crawler_settings.key_admin_token == "secret"
 
 
 def test_import_configures_nothing(tmp_path):

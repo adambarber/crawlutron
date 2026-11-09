@@ -38,6 +38,14 @@ def stores(tmp_path: Path) -> tuple[JobStore, CrawlResultStore, CallerKeyStore]:
     )
 
 
+TEST_ADMIN_TOKEN = "test-admin-token"
+
+
+def grant_test_admin_token(app: FastAPI, token: str = TEST_ADMIN_TOKEN) -> None:
+    """Wire the ONE operator-token home (the settings object) for a test app."""
+    app.state.crawler_settings = CrawlerSettings.from_mapping({"CRAWLUTRON_KEY_ADMIN_TOKEN": token})
+
+
 @contextlib.asynccontextmanager
 async def keyed_client(
     app: FastAPI,
@@ -48,7 +56,7 @@ async def keyed_client(
     """Configure ``app`` as a keyed service and serve it with an in-process client."""
     app.state.concurrency_tracker = CallerConcurrencyTracker()
     app.state.caller_key_store = keys
-    app.state.key_admin_token = "test-admin-token"
+    grant_test_admin_token(app)
     for dependency, factory in (overrides or {}).items():
         app.dependency_overrides[dependency] = factory
     async with serve(app) as client:
