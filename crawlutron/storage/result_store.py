@@ -33,6 +33,9 @@ class _PayloadStoreGuardrails(CoordinationStore):
 
     _max_payload_bytes: int
     _clock: Callable[[], float]
+    # The live-writer fence: spill writers set it, the sweep reads it. A store
+    # that never fences (the results store) holds the empty set, unread.
+    _live_requests: set[str]
 
     def __init__(
         self,
@@ -44,6 +47,7 @@ class _PayloadStoreGuardrails(CoordinationStore):
         super().__init__(db_path)
         self._max_payload_bytes = max(1, int(max_payload_bytes))
         self._clock = clock or default_clock
+        self._live_requests = set()
 
 
 class CrawlResultStore(_PayloadStoreGuardrails):
@@ -209,6 +213,14 @@ class CrawlSpillStore(_PayloadStoreGuardrails):
     SELECT, and reclamation is a DELETE by age. Replaces the file-based spill
     (mkstemp + flock + NDJSON + process-local GC): same write/read shape, the
     database owns durability and GC.
+
+    Ownership: age alone is not permission. The deleted file spill refused to
+    reclaim a file its writer held a flock on, because a crawl slower than the
+    GC age loses its early rows before reassembly. The store re-derives that
+    safety itself: every ``put`` fences its request_id as a live writer, and the
+    crawl's own teardown releases the fence once its rows are served or its
+    crawl has ended -- so the age sweep never touches a live request's rows and
+    a dead request's fence cannot leak.
     """
 
     schema = StoreSchema.CRAWL_SPILLS
@@ -223,6 +235,7 @@ class CrawlSpillStore(_PayloadStoreGuardrails):
                 f"serialized payload is {len(blob)} bytes; the cap is {self._max_payload_bytes}"
             )
         with self._lock:
+            self._live_requests.add(request_id)
             self._conn.execute(
                 "INSERT INTO crawl_spills (request_id, sequence, payload, created_at) VALUES (?, ?, ?, ?)",
                 (request_id, sequence, blob, self._clock()),
@@ -241,14 +254,34 @@ class CrawlSpillStore(_PayloadStoreGuardrails):
             ).fetchall()
         return [from_wire(EngineCrawlResult, json.loads(blob)["r"], policy=policy) for (blob,) in rows]
 
+    def release_spill(self, request_id: str) -> None:
+        """The writer's release: this request's rows are served or its crawl has
+        ended, so they are age-reclaimable again. The fence lives only for the
+        crawl's lifetime, so a dead crawl's rows cannot be fenced forever."""
+        with self._lock:
+            self._live_requests.discard(request_id)
+
     def gc_stale_spills(self, max_age_seconds: float) -> int:
-        """Delete this crawl's spilled rows older than ``max_age_seconds``; the
-        return is the row count reclaimed. Rows are request-scoped, so the sweep
-        is one DELETE, never a filesystem walk.
+        """Delete rows older than ``max_age_seconds`` EXCEPT a live writer's; the
+        return is the row count reclaimed. Rows are request-scoped and the fence
+        is set by the writer itself, so the sweep is one DELETE plus the fence,
+        never a filesystem walk and never a second registry.
         """
         cutoff = self._clock() - max(0.0, max_age_seconds)
         with self._lock:
-            cursor = self._conn.execute("DELETE FROM crawl_spills WHERE created_at < ?", (cutoff,))
+            # The live-writer fence rides a temp table so the DELETE stays one
+            # parameterized statement -- no string-built IN-list, no drift.
+            self._conn.execute("CREATE TEMP TABLE IF NOT EXISTS _spill_fenced (request_id TEXT PRIMARY KEY)")
+            self._conn.execute("DELETE FROM _spill_fenced")
+            self._conn.executemany(
+                "INSERT INTO _spill_fenced (request_id) VALUES (?)",
+                ((request_id,) for request_id in self._live_requests),
+            )
+            cursor = self._conn.execute(
+                "DELETE FROM crawl_spills WHERE created_at < ? "
+                "AND request_id NOT IN (SELECT request_id FROM _spill_fenced)",
+                (cutoff,),
+            )
             self._conn.commit()
         return cursor.rowcount
 

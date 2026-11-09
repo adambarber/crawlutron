@@ -255,6 +255,7 @@ async def crawl_request(
     # cannot leak through the shared jar; "" keeps single-tenant callers unchanged.
     _cookie_token = _set_cookie_namespace(policy)
     spill, private_spill = _bind_spill(spill_store)
+    state: PipelineState | None = None
     try:
         state = PipelineState(
             payload=payload,
@@ -275,8 +276,19 @@ async def crawl_request(
         return await run_crawl_request(state)
     finally:
         _reset_cookie_namespace(_cookie_token)
-        if private_spill:
-            spill.close()
+        _teardown_spill(spill, state, private_spill)
+
+
+def _teardown_spill(spill: CrawlSpillStore, state: PipelineState | None, private_spill: bool) -> None:
+    """The crawl's spill teardown: the writer's own release -- once the crawl has
+    ended its rows are served or dead, so the store may age-reclaim them (its
+    live-writer fence drops) -- then the private store's close, never the shared
+    one's."""
+    minted = state.request_id if state is not None else None
+    if minted is not None:
+        spill.release_spill(minted)
+    if private_spill:
+        spill.close()
 
 
 def _pipeline_dependencies(

@@ -75,8 +75,46 @@ def test_a_payload_past_the_cap_is_refused_before_persistence(tmp_path):
         store.close()
 
 
+def _backdate_all_rows(tmp_path, created_at: float) -> None:
+    with sqlite3.connect(tmp_path / "spills.db") as conn:
+        conn.execute("UPDATE crawl_spills SET created_at = ?", (created_at,))
+        conn.commit()
+
+
+def test_a_backdated_row_of_a_live_request_survives_the_sweep(tmp_path):
+    """Age alone is not permission: a crawl slower than the GC age keeps its early
+    rows until its reassembly releases them -- the file spill's ownership rule,
+    re-derived as the store's live-writer fence."""
+    now = 1000.0
+    store = _backdated_store(tmp_path, now)
+    try:
+        store.put("r-live", 0, engine_result("https://spill.test/0", "rendered"))
+        _backdate_all_rows(tmp_path, now - 7200)
+        assert store.gc_stale_spills(3600.0) == 0, "the sweep reclaimed a live crawl's rows"
+        out = store.load_ordered("r-live", policy=UNRESTRICTED_HOST_POLICY)
+        assert [r.original_url for r in out] == ["https://spill.test/0"]
+    finally:
+        store.close()
+
+
+def test_a_released_requests_rows_are_reclaimed_by_age(tmp_path):
+    """The fence is the reassembly's release: once the crawl has served its rows
+    they are garbage like any other aged row, not held forever."""
+    now = 1000.0
+    store = _backdated_store(tmp_path, now)
+    try:
+        store.put("r-done", 0, engine_result("https://spill.test/0", "rendered"))
+        _backdate_all_rows(tmp_path, now - 7200)
+        store.release_spill("r-done")
+        assert store.gc_stale_spills(3600.0) == 1
+        assert _row_count(tmp_path) == 0
+    finally:
+        store.close()
+
+
 def test_gc_deletes_only_rows_older_than_the_age(tmp_path):
-    """Age is the reclamation rule; a row's age comes from the store's own clock."""
+    """Age is the reclamation rule for a RELEASED request; a row's age comes from
+    the store's own clock. A live request's rows are fenced (the probe above)."""
     now = 1000.0
     store = _backdated_store(tmp_path, now)
     try:
@@ -84,6 +122,8 @@ def test_gc_deletes_only_rows_older_than_the_age(tmp_path):
         with sqlite3.connect(tmp_path / "spills.db") as conn:
             conn.execute("UPDATE crawl_spills SET created_at = ?", (now - 7200,))
             conn.commit()
+        assert store.gc_stale_spills(3600.0) == 0, "the fence must hold before the release"
+        store.release_spill("r1")
         assert store.gc_stale_spills(3600.0) == 1
         assert _row_count(tmp_path) == 0
     finally:
@@ -91,6 +131,7 @@ def test_gc_deletes_only_rows_older_than_the_age(tmp_path):
 
 
 def test_a_live_crawls_rows_survive_a_sweep(tmp_path):
+    """A fresh row survives on age alone; the fence covers it too."""
     store = _backdated_store(tmp_path, 1000.0)
     try:
         store.put("r1", 0, engine_result("https://spill.test/0", "rendered"))
