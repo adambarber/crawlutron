@@ -51,6 +51,16 @@ def _mounted_routers() -> list[tuple[str, int]]:
     return sorted(routers.items())
 
 
+def _mounted_router_copies() -> list[tuple[str, object]]:
+    """Every mounted route's (identity module, backing router object), with repeats."""
+    app = service_app()
+    return [
+        (_router_module(inner), inner)
+        for route in app.router.routes
+        if (inner := getattr(route, "original_router", None)) is not None
+    ]
+
+
 def test_every_mounted_router_is_accounted_for():
     """The registry + the named factory modules cover everything the app mounts."""
     registered = {_router_module(router) for router in ROUTER_MODULES}
@@ -80,3 +90,21 @@ def test_factory_router_set_matches_direct_mounts():
         f"extra {sorted(factory_modules - _DIRECT_FACTORY_ROUTERS)}"
     )
     assert not EXPECTED_DIRECT_MOUNTS
+
+
+def test_each_module_is_backed_by_one_router_object():
+    """A module served by two distinct router objects is a double-mount (factory called twice)."""
+    backing: dict[str, set[int]] = {}
+    for module, router in _mounted_router_copies():
+        backing.setdefault(module, set()).add(id(router))
+    duplicated = {m: len(ids) for m, ids in backing.items() if len(ids) != 1}
+    assert not duplicated, f"modules mounted via multiple distinct router objects: {duplicated}"
+
+
+def test_each_router_object_is_mounted_exactly_once():
+    """One route-object entry per mounted module; a second entry is a re-mounted router."""
+    counts: dict[str, int] = {}
+    for module, _ in _mounted_router_copies():
+        counts[module] = counts.get(module, 0) + 1
+    remounted = {m: n for m, n in counts.items() if n != 1}
+    assert not remounted, f"router objects mounted more than once: {remounted}"
