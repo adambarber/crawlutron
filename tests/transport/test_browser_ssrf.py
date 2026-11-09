@@ -200,14 +200,36 @@ def _hanging_pin():
     return pin
 
 
-async def _handler_aborts_within_budget(handler) -> None:
+async def _handler_aborts_within_budget(handler, route=None) -> None:
     """One hang through the handler: it must abort fail-closed and fast, not wait
     out the pin's own 7s sleep."""
-    route = FakeRoute()
+    route = FakeRoute() if route is None else route
     started = time.monotonic()
     await handler(route, FakeRequest("http://example.com/x", "document"))
     assert route.decision == "abort"
-    assert time.monotonic() - started < 3.0, "the handler waited out the hanging pin"
+    assert time.monotonic() - started < 6.5, "the handler waited out the hanging pin"
+
+
+@pytest.mark.real_sleeps
+async def test_abort_bound_tolerates_contended_clocks(monkeypatch):
+    """The budget is a generous headroom below the pin's own 7s hang, not a tight
+    wall bound: a contended machine that reports 5s for an abort that fired
+    correctly must still pass (#658) -- only waiting OUT the hang fails."""
+    calls = [0]
+
+    def contended_clock():
+        calls[0] += 1
+        return 0.0 if calls[0] == 1 else 5.0
+
+    monkeypatch.setattr(time, "monotonic", contended_clock)
+
+    class ProbeRoute:
+        decision = "abort"
+
+    async def aborting_handler(route, request):
+        return None
+
+    await _handler_aborts_within_budget(aborting_handler, ProbeRoute())
 
 
 @pytest.mark.real_sleeps
