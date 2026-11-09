@@ -18,6 +18,7 @@ class StoreSchema(StrEnum):
     WATCHES = "watches"
     CALLER_KEYS = "caller_keys"
     CRAWL_SPILLS = "crawl_spills"
+    KEY_ADMIN_EVENTS = "key_admin_events"
 
 
 @dataclass(frozen=True)
@@ -185,6 +186,21 @@ WATCHES_SCHEMA = TableSchema(
     ),
 )
 
+# One row per admin action at the key doors: the append-only audit trail. The
+# (sequence) key is the append order; rows are structured fields only and are
+# reclaimed by the store's roll, never rewritten.
+KEY_ADMIN_EVENTS_SCHEMA = TableSchema(
+    name="key_admin_events",
+    columns=(
+        ColumnSchema("sequence", "INTEGER", False, None, 1),
+        ColumnSchema("recorded_at", "REAL", True, None),
+        ColumnSchema("actor", "TEXT", True, "''"),
+        ColumnSchema("action", "TEXT", True, None),
+        ColumnSchema("target_key_id", "TEXT", False, None),
+        ColumnSchema("outcome", "TEXT", True, "granted"),
+    ),
+)
+
 CALLER_KEYS_SCHEMA = TableSchema(
     name="caller_keys",
     columns=(
@@ -220,6 +236,7 @@ CURRENT_SCHEMAS = {
     StoreSchema.WATCHES: WATCHES_SCHEMA,
     StoreSchema.CALLER_KEYS: CALLER_KEYS_SCHEMA,
     StoreSchema.CRAWL_SPILLS: CRAWL_SPILLS_SCHEMA,
+    StoreSchema.KEY_ADMIN_EVENTS: KEY_ADMIN_EVENTS_SCHEMA,
 }
 
 LEGACY_COLUMNS = {
@@ -238,6 +255,7 @@ LEGACY_COLUMNS = {
     StoreSchema.WATCHES: (),
     StoreSchema.CALLER_KEYS: (),
     StoreSchema.CRAWL_SPILLS: (),
+    StoreSchema.KEY_ADMIN_EVENTS: (),
 }
 
 MIGRATION_SEQUENCES = {
@@ -255,6 +273,7 @@ MIGRATION_SEQUENCES = {
     StoreSchema.WATCHES: ("0001_watches_initial", "0002_watches_add_owner", "0003_watches_add_claimed_at"),
     StoreSchema.CALLER_KEYS: ("0001_caller_keys_initial",),
     StoreSchema.CRAWL_SPILLS: ("0001_crawl_spills_initial",),
+    StoreSchema.KEY_ADMIN_EVENTS: ("0001_key_admin_events_initial",),
 }
 
 MIGRATION_IDS = {schema: sequence[-1] for schema, sequence in MIGRATION_SEQUENCES.items()}
