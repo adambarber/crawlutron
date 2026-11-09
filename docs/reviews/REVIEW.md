@@ -8,7 +8,7 @@
 
 ## 0. Status Addendum (2026-11-07)
 
-Four P1 findings below were marked fix-before-release; all four are **RESOLVED** in the
+Five P1 findings below were marked fix-before-release; all five are **RESOLVED** in the
 current tree, verified against live code (issue #606). History sections are preserved
 as written.
 
@@ -18,6 +18,7 @@ as written.
 | `render()` closing the driver on a page exception | **RESOLVED** | `BrowserRenderer._render_with_page_unlocked` wraps the render body in `try/finally` with `release_page(...)` (bounded best-effort cookie harvest → `safe_close_page` → `note_render` for ALL attempts), so a page exception releases the page without tearing down the shared driver — `crawlutron/transport/browser.py:280-288`, `browser_render_phases.py:242-257`. |
 | cffi TLS-impersonation SNI (§2.5) | **RESOLVED** | The RESOLVE-table fix from the review's own sketch landed: `cffi_resolve_entry` builds the `host:port:ip` CURLOPT_RESOLVE mapping (`crawlutron/transport/pinned_transport.py:255-268`) and `_handle_cffi_hop` dials a one-shot session on the logical hostname so SNI and cert verification attest to it (#574) — `crawlutron/transport/fetchers.py:294-332`; an `SSLError` now raises visibly instead of degrading silently (`fetchers.py:323-326`). |
 | namespace-scoped cookie reads (§2.2) | **RESOLVED** | The browser-cookie store is keyed by `(namespace, domain)`: `store_browser_cookies`/`get_browser_cookies_for` resolve an explicit namespace or defer to the crawl's `COOKIE_NAMESPACE` contextvar (`crawlutron/transport/browser_cookies.py:50-101`), so one caller's harvested session never surfaces to another caller's jar. |
+| `/v1/keys` escalation (§2.1) | **RESOLVED** | The `/v1/keys` routes now mount on `admin_guarded_router`, so `guard_admin_request` → `get_keys_caller` requires the operator token and fails closed (401 `invalid_api_key` when unset or wrong) — `crawlutron/api/keys_router.py:18`, `crawlutron/api/route_layer.py:88-90`, `crawlutron/api/caller_auth.py:155-175` (#653, #659, #666, #676, #664); no caller key can mint, revoke, or list another caller's keys. |
 
 ---
 
@@ -42,7 +43,7 @@ What the review did find:
 | Area | Rating | Notes |
 |---|---|---|
 | SSRF / egress control | **Strong** | Pinned, fresh-resolved, per-hop re-validated; bypass hunt came up empty. Two documented residuals (browser https-subresource TOCTOU, zone-id hosts at admission) noted below. |
-| AuthN/AuthZ | **One real hole** | `/v1/keys` escalation; everything else (key hashing, constant-time compares, owner-scoped reads, 404-not-403) is solid. |
+| AuthN/AuthZ | **Strong** | `/v1/keys` escalation closed — routes are operator-token-only and fail closed; the rest (key hashing, constant-time compares, owner-scoped reads, 404-not-403) was already solid. |
 | Cookie/credential hygiene | **Two holes + leaks** | Global browser-cookie store; public-suffix `Domain=` acceptance; `Credential` repr-enabled; raw webhook URLs in logs. |
 | Resource bounds | **Mostly bounded, 3 gaps** | Render options unbounded, result-store payloads unbounded, quadratic HTML regex. |
 | Robots/politeness | **Correct, one split-brain** | REP matcher is spec-faithful; but the scheduler keys two entry paths by host vs registrable site, fragmenting politeness. |
@@ -90,6 +91,8 @@ async def get_keys_caller(request: Request) -> CallerIdentity:
 
 …or, if self-service issuance is the intent: clamp `payload.max_pages/max_concurrency` to the *issuing* identity's quotas inside `issue_key`, and scope `revoke_key`/`list_keys` to `caller.caller_id`. Related (P2): with the operator-only fix, an *unset* `key_admin_token` (the settings default is `""`, `caller_auth.py:80-93` silently skips the admin branch) should hard-fail `/v1/keys` with 503 rather than silently widening access — today "no token configured" and "any key wins" are indistinguishable.
 
+**Status — RESOLVED** (live tree, verified for this sweep; added to the Status Addendum above). The `/v1/keys` routes now mount on `admin_guarded_router` (`crawlutron/api/keys_router.py:18`), so `guard_admin_request` → `get_keys_caller` requires the operator token and fails closed — `crawlutron/api/route_layer.py:88-90`, `crawlutron/api/caller_auth.py:155-175` (#653, #659, #666, #676, #664). A presented caller key no longer passes the operator check; minting, revoking, and listing keys require `X-API-Key: CRAWLUTRON_KEY_ADMIN_TOKEN`. Cross-checked with `git log`.
+
 ### 2.2 [P1] Browser-harvested cookies are stored process-global and replayed across callers
 
 **Where:** `crawlutron/transport/browser_cookies.py:20-43` (store keyed `("", domain)` at `:31`; harvest at `:63-66`), consumer `crawlutron/orchestration/strategy_chain.py:214-215` (cffi retry injects `get_browser_cookies_for(site)` as `Cookie`).
@@ -104,6 +107,8 @@ store_browser_cookies(url.site, header)  # keyed by registrable domain, no calle
 ```
 
 The codebase is otherwise scrupulous about cookie partitioning — the namespaced jar pins keyed callers to `key_id` namespaces, and `effective_cookie_namespace` (`caller_auth.py:139-146`) exists precisely so one caller can't claim another's jar. **This store bypasses all of it.** A browser render that solves a challenge, runs a `fill`-based login, or merely receives `Set-Cookie: session=…` harvests *every* cookie (HttpOnly included) into a process-global LRU keyed only by registrable domain. The next job against the same site — different caller, different namespace — has that header injected into its cffi retry. Concretely: job B fetches origin A's *authenticated* content and returns it as B's result body.
+
+**Status — RESOLVED** (live tree, per the Status Addendum). The harvest store is keyed by `(namespace, site)`: `store_browser_cookies`/`get_browser_cookies_for` take an explicit `namespace` or defer to the crawl's `COOKIE_NAMESPACE` contextvar, and `_LockedDomainCookieStore.store` puts `put(namespace, domain, ...)` — `crawlutron/transport/browser_cookies.py:52-103`. One caller's harvested session no longer surfaces to another caller's jar.
 
 **Fix:** key the store by `(namespace, site)` and thread the caller's namespace through the harvest/retry, or delete the process-global entirely and carry the harvested header on the render result so the retry uses session-local state:
 
@@ -184,6 +189,8 @@ response = await client.get(
 ```
 
 This also makes the `sni_extension` hack unnecessary on the httpx path (unify both paths on `resolve=`), and add an observability line when the cffi attempt fails so degradation is visible (`cffi_handshake_failed` warning — today `except Exception: return None` is mute).
+
+**Status — RESOLVED** (live tree, per the Status Addendum). The curl_cffi path now pins the connection through the pinned IP while the URL keeps the logical hostname, so SNI and certificate verification attest to the host (`PinnedRequest` carries the hostname — `crawlutron/transport/pinned_transport.py`, `crawlutron/transport/fetchers.py`; #574). TLS impersonation completes on normal HTTPS sites instead of silently degrading to httpx.
 
 ### 2.6 [P1] Quadratic regex over attacker-controlled HTML in `text_from_html`
 
