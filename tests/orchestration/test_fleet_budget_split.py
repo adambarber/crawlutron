@@ -83,13 +83,30 @@ def test_http_concurrency_is_split_across_workers(monkeypatch):
     assert per_worker >= 1
 
 
-def test_doc_workers_are_split_across_workers(monkeypatch):
-    """2 markitdown workers per process is 2N of them, each 100-300 MiB."""
-    monkeypatch.setenv("CRAWLUTRON_EXTRACTION_DOC_WORKERS", "8")
-    monkeypatch.setenv("CRAWLUTRON_WORKERS", "1")
-    assert rp.doc_worker_count() == 8
+def test_doc_worker_count_is_a_per_process_knob_whose_fleet_total_is_exact(monkeypatch):
+    """The knob is per process: the fleet spends knob x workers, exactly.
 
-    monkeypatch.setenv("CRAWLUTRON_WORKERS", "4")
+    The old floor-division made the fleet total drift: 2 configured across 3
+    workers spawned 3 pools (2 // 3 floored to 1, x3 workers), and 3 across 2
+    workers under-delivered the operator's knob (#666). The honest derivation
+    reads the knob per process; the fleet total is knob x worker_count().
+    """
+    for knob, workers in ((2, 3), (3, 2), (2, 1), (5, 4)):
+        monkeypatch.setenv("CRAWLUTRON_EXTRACTION_DOC_WORKERS", str(knob))
+        monkeypatch.setenv("CRAWLUTRON_WORKERS", str(workers))
+        assert rp.doc_worker_count() == knob, (knob, workers)
+        assert rp.doc_worker_count() * rp.worker_count() == knob * workers, (knob, workers)
+
+
+def test_doc_worker_count_defaults_to_two_per_process(monkeypatch):
+    """The shipped single-worker deployment runs the 2-worker default.
+
+    CRAWLUTRON_WORKERS is pinned to 1 in compose, so the default knob is both
+    the per-process count and the fleet total there.
+    """
+    monkeypatch.delenv("CRAWLUTRON_EXTRACTION_DOC_WORKERS", raising=False)
+    monkeypatch.setenv("CRAWLUTRON_WORKERS", "1")
+
     assert rp.doc_worker_count() == 2
 
 
