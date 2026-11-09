@@ -85,7 +85,7 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/api/async_crawl_runner.py": (3, 2),
     # #664 raised 18,15 -> 19,16: verify_admin_secret is the public constant-time
     # admin-token door the layer's soft gate meters through.
-    "crawlutron/api/caller_auth.py": (19, 16),
+    "crawlutron/api/caller_auth.py": (20, 17),
     "crawlutron/api/caller_concurrency.py": (1, 1),
     # #674 raised 1,1 -> 2,2: CrawlRefusalError is the typed refusal carrier the
     # sweep's deactivation arm reads (reason as an enum member, not boundary text).
