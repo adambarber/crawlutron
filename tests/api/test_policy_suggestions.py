@@ -4,6 +4,7 @@ result store (the rollup reads every record), and nothing here applies one
 """
 
 import logging
+from typing import cast
 
 import pytest
 
@@ -16,6 +17,7 @@ from tests._assertions import completed_crawl
 from tests._fetcher_factories import make_crawl_payload
 from tests._policy_factories import canonical
 from tests._policy_harnesses import policy_client
+from tests._policy_harnesses import stored_trace as _stored_trace
 
 
 @pytest.fixture
@@ -170,19 +172,6 @@ async def test_an_expired_record_is_not_offered_as_evidence(tmp_path):
     assert await store.apayloads_page(limit=10) == []
 
 
-def _stored_trace(request_id: str, url: str) -> dict[str, JsonValue]:
-    """A minimal retained row that parses as a blocked TraceResponse."""
-    page: dict[str, JsonValue] = {
-        "normalized_url": url,
-        "status": "blocked",
-        "classification": "access_denied",
-        "selected_strategy": None,
-        "attempted_strategies": [],
-        "classification_evidence": [],
-    }
-    return {"request_id": request_id, "results": [page]}
-
-
 class _PagingStore(CrawlResultStore):
     """The real store, recording the bounded page reads the rollup makes."""
 
@@ -280,7 +269,7 @@ _FOREIGN_TRACE_NAME = "crawl_foreign"
 
 
 def _foreign_row() -> dict[str, JsonValue]:
-    return _stored_trace(_FOREIGN_TRACE_NAME, "https://foreign.test/blocked")
+    return cast("dict[str, JsonValue]", _stored_trace(_FOREIGN_TRACE_NAME, "https://foreign.test/blocked"))
 
 
 async def test_a_keyed_caller_does_not_see_another_callers_evidence(result_store, job_store):

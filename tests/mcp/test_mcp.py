@@ -287,6 +287,7 @@ class TestDiscover:
             "get_job",
             "control_job",
             "delete_job",
+            "policy_suggestions",
             "register_watch",
             "list_watches",
             "get_watch",
