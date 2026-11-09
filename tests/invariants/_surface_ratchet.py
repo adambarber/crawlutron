@@ -121,13 +121,18 @@ DECLARED_SURFACE_RATCHET = {
     # #645: tools.py split into registry + handlers (500-line ceiling); the read
     # tools joined. Closures lowered both entry counts.
     "crawlutron/mcp/registry.py": (4, 1),
-    # RAISED 13,6 -> 17,6 by #646: the four job-tool handlers joined via _job_tool_handler.
-    # RAISED 17,6 -> 18,6 by #647: handle_create_job (the admitted creation door).
-    "crawlutron/mcp/handlers.py": (18, 6),
+    # #646: the four job-tool handlers joined via _job_tool_handler. #647: create_job.
+    # #648: caller_for/tool_result are the public seams watch_handlers.py consumes.
+    "crawlutron/mcp/handlers.py": (20, 8),
     # #646: the one control-plane transition both job doors run, plus its shared 404/409 raisers.
     "crawlutron/api/job_control.py": (3, 3),
     # #647: the typed job cores both doors run (create/list/get/control/delete).
     "crawlutron/api/job_cores.py": (5, 5),
+    # #648: the typed watch cores both doors run (register/list/get/delete).
+    "crawlutron/api/watch_cores.py": (4, 4),
+    # #648: the watch-tool handlers (500-line ceiling split from handlers.py);
+    # the four handles are factory closures, so only the public factory counts.
+    "crawlutron/mcp/watch_handlers.py": (5, 1),
     # #644: the one declaration of the module-level feature routers.
     "crawlutron/api/router_registry.py": (1, 0),
     # #664: the auth+metering layer (guards, router factories, ratchet row).

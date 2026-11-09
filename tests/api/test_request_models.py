@@ -102,6 +102,8 @@ _BOUND_REQUEST_BODIES = (
     "MapRequest",
     "RenderRequest",
     "SearchRequest",
+    "WatchIdRequest",
+    "WatchListRequest",
     "DiscoveryConfig",
 )
 

@@ -119,13 +119,9 @@ async def _probe_map_endpoint(monkeypatch, tmp_path):
     )
 
 
-async def _probe_watch_router(monkeypatch, tmp_path):
-    from crawlutron.api import watch_router
-    from crawlutron.models.caller_identity import CallerIdentity
-    from crawlutron.models.watch_create_request import WatchCreateRequest
-
-    effects = _effects()
-    watch_store = type(
+def _watch_probe_store(effects):
+    """A recording watch-store double: acreate records, count reads zero."""
+    return type(
         "Store",
         (),
         {
@@ -133,12 +129,41 @@ async def _probe_watch_router(monkeypatch, tmp_path):
             "acount_for_owner": lambda self, *args, **kwargs: 0,
         },
     )()
+
+
+async def _probe_watch_router(monkeypatch, tmp_path):
+    from crawlutron.api import watch_router
+    from crawlutron.models.caller_identity import CallerIdentity
+    from crawlutron.models.watch_create_request import WatchCreateRequest
+
+    effects = _effects()
     await _assert_refused(
         watch_router.create_watch(
             WatchCreateRequest(url=_BLOCKED_URL, interval_seconds=60),
-            watch_store=watch_store,
+            watch_store=_watch_probe_store(effects),
             settings=_denied_settings(),
             caller=CallerIdentity(),
+        ),
+        effects,
+    )
+
+
+async def _probe_watch_cores(monkeypatch, tmp_path):
+    """The MCP-facing register core must consult live policy itself: the MCP
+    caller has no other admission edge, so the core is the probe's subject."""
+    from crawlutron.api import watch_cores
+    from crawlutron.models.caller_identity import CallerIdentity
+    from crawlutron.models.watch_create_request import WatchCreateRequest
+
+    effects = _effects()
+    await _assert_refused(
+        watch_cores.register_watch_core(
+            WatchCreateRequest(url=_BLOCKED_URL, interval_seconds=60),
+            _watch_probe_store(effects),
+            _denied_settings(),
+            CallerIdentity(),
+            webhook_url=None,
+            interval_floor=60,
         ),
         effects,
     )
@@ -318,6 +343,7 @@ _PROBES = {
     "crawlutron/api/render.py:render_request": _probe_render,
     "crawlutron/api/response_shaping.py:frontier_link_url": _probe_response_shaping,
     "crawlutron/api/watch_router.py:create_watch": _probe_watch_router,
+    "crawlutron/api/watch_cores.py:register_watch_core": _probe_watch_cores,
     "crawlutron/api/policy_suggestions.py:policy_suggestions": _probe_policy_suggestions,
     "crawlutron/api/policy_suggestions.py:build_policy_suggestions": _probe_policy_suggestions,
     "crawlutron/api/webhooks.py:deliver_pinned_webhook": _probe_webhook_delivery,

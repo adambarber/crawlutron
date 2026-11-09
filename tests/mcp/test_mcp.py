@@ -287,6 +287,10 @@ class TestDiscover:
             "get_job",
             "control_job",
             "delete_job",
+            "register_watch",
+            "list_watches",
+            "get_watch",
+            "delete_watch",
         ]
         ttl = result["ttlMs"]
         assert isinstance(ttl, int) and ttl > 0
