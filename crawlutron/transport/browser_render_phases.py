@@ -22,6 +22,7 @@ from crawlutron.models.json_value import JsonValue
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.result_factory import terminal_attempt
 from crawlutron.models.screenshot_diagnostics import ScreenshotDiagnostics
+from crawlutron.runtime.resource_lifecycle import record_declined_close
 from crawlutron.transport.browser_cookies import harvest_session_cookies
 from crawlutron.transport.browser_driver import BrowserDriver
 from crawlutron.transport.browser_targets import (
@@ -250,7 +251,7 @@ async def release_page(
     try:
         await asyncio.wait_for(harvest_session_cookies(plan.page, plan.url), timeout=harvest_timeout)
     except TimeoutError:
-        pass
+        record_declined_close("harvest_timeout", type(plan.page).__name__)
     await close_page(plan.page)
     # Increment render count for ALL attempts (success or failure) so
     # browser recycle logic bounds total attempts per browser instance.
