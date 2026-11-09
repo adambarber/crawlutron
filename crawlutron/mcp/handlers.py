@@ -1,9 +1,12 @@
-"""The MCP tool handlers: every ``tools/call`` entry point and the machinery
-that turns one endpoint call into a ``ToolResult``. Each handler delegates to
-the same pydantic models and endpoint functions the REST doors use; webhook/async
+"""The MCP tool dispatch: every ``tools/call`` door and the machinery that
+turns one endpoint call into a ``ToolResult``. Each door delegates to the same
+pydantic models and endpoint functions the REST doors use; webhook/async
 delivery is deliberately rejected over MCP (no out-of-band callback), and the
 stored-record read tools answer a still-running job as a structured non-error
 shaped from the typed pending state, never the HTTPException catch-all.
+
+Behavior is data-driven: every ToolSpec declares a DoorBinding, and ONE
+``dispatch`` switches on the declared kind -- no per-family handler factories.
 """
 
 from __future__ import annotations
@@ -11,50 +14,39 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum, auto
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ValidationError
 
 from crawlutron.api.admit_endpoint import admit_url
 from crawlutron.api.caller_auth import Tracking, admit, bound_render_cookie_namespace
-from crawlutron.api.crawl_endpoint import read_crawl_result_record, read_crawl_trace_record
 from crawlutron.api.crawl_executor import execute_crawl
-from crawlutron.api.job_cores import (
-    control_job,
-    create_job_core,
-    delete_job_core,
-    get_job_core,
-    list_jobs_core,
-)
+from crawlutron.api.job_cores import create_job_core
 from crawlutron.api.main_helpers import request_gate
 from crawlutron.api.map_endpoint import map_site
 from crawlutron.api.render_endpoint import render as render_endpoint_handler
 from crawlutron.api.response_shaping import aunified_response_from_result
-from crawlutron.models.admit_request import AdmitRequest
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.crawl_and_extract_response import CrawlAndExtractResponse
 from crawlutron.models.crawl_pending import CrawlPendingError
-from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.extracted_page import ExtractedPage
-from crawlutron.models.job_create_request import JobCreateRequest
 from crawlutron.models.json_value import JsonValue
 from crawlutron.safety.json_safe import json_default
 from crawlutron.search.endpoint import search as search_endpoint_handler
-from crawlutron.storage.job_store import JobStore
 from crawlutron.transport.browser_pool import get_browser_pool
 
 if TYPE_CHECKING:
-    from crawlutron.models.crawl_result_request import CrawlResultRequest
+    from crawlutron.models.admit_request import AdmitRequest
+    from crawlutron.models.crawl_request import CrawlRequest
+    from crawlutron.models.job_create_request import JobCreateRequest
     from crawlutron.models.map_request import MapRequest
     from crawlutron.models.render_request import RenderRequest
     from crawlutron.models.search_request import SearchRequest
 
-logger = logging.getLogger(__name__)
-
-Handler = Callable[..., Awaitable["ToolResult"]]
+_logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -115,6 +107,56 @@ def caller_for(caller: CallerIdentity | None) -> CallerIdentity:
     return caller if caller is not None else CallerIdentity()
 
 
+#: One projection of a crawl response, chosen by the door the caller came through.
+class _Unified(StrEnum):
+    from_crawl = auto()
+    from_extract = auto()
+
+
+class DoorKind(StrEnum):
+    """The door behavior dispatch binds from; one kind per distinct body."""
+
+    admit = auto()
+    crawl = auto()
+    crawl_and_extract = auto()
+    map = auto()
+    render = auto()
+    search = auto()
+    read = auto()
+    store = auto()
+    create_job = auto()
+
+
+@dataclass(frozen=True)
+class DoorBinding:
+    """The declared door data a ToolSpec carries instead of a handler.
+
+    Per-tool injectables live here as declared, checked values (core, store,
+    static refusal), never as **kwargs widened at call sites.
+    """
+
+    kind: DoorKind
+    core: Callable[..., Awaitable[Any]] | None = None
+    store: str | None = None
+    wants_shutdown_event: bool = False
+    core_kwargs: dict[str, Any] = field(default_factory=dict)
+    refusal: ToolResult | None = None
+    refusal_fields: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class _ToolDoor:
+    """The per-call door environment dispatch threads to every kind's body."""
+
+    settings: Any = None
+    shutdown_event: Any = None
+    caller: CallerIdentity | None = None
+    job_store: Any = None
+    watch_store: Any = None
+    result_store: Any = None
+    concurrency_tracker: Any = None
+
+
 async def _admit_tool(
     caller: CallerIdentity | None,
     pages: int,
@@ -131,7 +173,7 @@ async def _admit_tool(
     # request_gate OUTER, admit INNER: the count takes the slot first, so a quota-
     # rejected request holds it only for the brief admission (the HTTP door order).
     try:
-        with request_gate("mcp_request_rejected", logger=logger):
+        with request_gate("mcp_request_rejected", logger=_logger):
             async with admit(caller, pages, tracking=tracking, payload=payload):
                 return await work()
     except HTTPException as error:
@@ -139,7 +181,7 @@ async def _admit_tool(
 
 
 async def _crawled(payload: CrawlRequest, settings, shutdown_event):
-    """Run the crawl endpoint and shape it, so the handler owns only the boundary."""
+    """Run the crawl endpoint and shape it, so the door owns only the boundary."""
     return await aunified_response_from_result(
         await execute_crawl(
             payload,
@@ -147,29 +189,6 @@ async def _crawled(payload: CrawlRequest, settings, shutdown_event):
             shutdown_event=shutdown_event,
         )
     )
-
-
-def _delivery_refusal(payload: CrawlRequest) -> ToolResult | None:
-    """The one refusal both crawl tools make: delivery/format is REST-only.
-
-    Keyed on the effective VALUE, not field presence: an explicit no-op
-    (async_mode=false, webhook_url=null, output_format=null) is accepted.
-    """
-    fields = ("async_mode", "webhook_url", "output_format")
-    meaningful = [field for field in fields if getattr(payload, field, None) not in (None, False)]
-    if meaningful:
-        return ToolResult(
-            text="async_mode, webhook_url and output_format are not supported over MCP; "
-            "use POST /v1/crawl for webhook/async delivery or output formats.",
-            is_error=True,
-        )
-    return None
-
-
-#: One projection of a crawl response, chosen by the door the caller came through.
-class _Unified(StrEnum):
-    from_crawl = auto()
-    from_extract = auto()
 
 
 async def _projected(crawled: Awaitable, projection: _Unified) -> BaseModel:
@@ -198,7 +217,7 @@ async def _extracted(response) -> CrawlAndExtractResponse:
     )
 
 
-async def _guard_then_crawl(
+async def _guarded_crawl(
     payload: CrawlRequest,
     settings,
     shutdown_event,
@@ -212,9 +231,6 @@ async def _guard_then_crawl(
     Both doors refuse webhook/async over MCP for the same reason, and the two
     refusals spelled out twice are two places a new door can forget the check.
     """
-    refusal = _delivery_refusal(payload)
-    if refusal is not None:
-        return refusal
     pages = payload.policy.limits.max_pages
     tracking = Tracking(job_store=job_store, concurrency_tracker=concurrency_tracker)
     return await _admit_tool(
@@ -226,129 +242,12 @@ async def _guard_then_crawl(
     )
 
 
-def _crawl_tool_handler(projection: _Unified) -> Handler:
-    """Both crawl doors run the same guarded, admitted crawl; they differ only
-    by the projection the shared guard renders, so the boilerplate is spelled
-    once here rather than cloned per tool."""
-
-    async def handler(
-        payload: CrawlRequest,
-        settings,
-        shutdown_event,
-        concurrency_tracker=None,
-        caller=None,
-        job_store=None,
-        result_store=None,
-    ) -> ToolResult:
-        return await _guard_then_crawl(
-            payload,
-            settings,
-            shutdown_event,
-            projection,
-            caller=caller,
-            concurrency_tracker=concurrency_tracker,
-            job_store=job_store,
-        )
-
-    return handler
+def _tracking(door: _ToolDoor) -> Tracking:
+    """The caller tracking every admitted door composes."""
+    return Tracking(job_store=door.job_store, concurrency_tracker=door.concurrency_tracker)
 
 
-handle_crawl = _crawl_tool_handler(_Unified.from_crawl)
-handle_crawl_and_extract = _crawl_tool_handler(_Unified.from_extract)
-
-
-async def handle_map(
-    payload: MapRequest,
-    settings,
-    shutdown_event,
-    concurrency_tracker=None,
-    caller=None,
-    job_store=None,
-    result_store=None,
-) -> ToolResult:
-    return await _admit_tool(
-        caller,
-        payload.policy.limits.max_pages,
-        payload=payload,
-        tracking=Tracking(job_store=job_store, concurrency_tracker=concurrency_tracker),
-        work=lambda: tool_result(map_site(payload, settings=settings, shutdown_event=shutdown_event)),
-    )
-
-
-async def handle_render(
-    payload: RenderRequest,
-    settings,
-    shutdown_event,
-    concurrency_tracker=None,
-    caller=None,
-    job_store=None,
-    result_store=None,
-) -> ToolResult:
-    if get_browser_pool() is None:
-        return ToolResult(
-            text="Browser pool is not initialized; the service is starting up or shutting down.",
-            is_error=True,
-        )
-    requested = len(payload.urls) if payload.urls is not None else 1
-    # The namespace binds around the whole admit, so the gate and the work
-    # both run under it; an MCP render's harvest keys by the caller's key id.
-    async with bound_render_cookie_namespace(caller_for(caller)):
-        return await _admit_tool(
-            caller,
-            requested,
-            tracking=Tracking(job_store=job_store, concurrency_tracker=concurrency_tracker),
-            work=lambda: tool_result(render_endpoint_handler(payload, settings=settings)),
-        )
-
-
-async def handle_admit(
-    payload: AdmitRequest, settings, shutdown_event, concurrency_tracker=None, caller=None, job_store=None
-) -> ToolResult:
-    # The pre-flight check spends no quota and no concurrency slot: it is a pure
-    # verdict (robots opt-in aside), so it does not enter the admission gate.
-    return await tool_result(admit_url(payload, settings=settings))
-
-
-async def handle_search(
-    payload: SearchRequest,
-    settings,
-    shutdown_event,
-    concurrency_tracker=None,
-    caller=None,
-    job_store=None,
-    result_store=None,
-) -> ToolResult:
-    # The search door is caller-bound through the one
-    # concurrency register every sync door uses; a keyed caller keeps its identity.
-    return await _admit_tool(
-        caller,
-        0,
-        tracking=Tracking(job_store=job_store, concurrency_tracker=concurrency_tracker),
-        work=lambda: tool_result(
-            search_endpoint_handler(payload, settings=settings, caller=caller_for(caller))
-        ),
-    )
-
-
-def _running_result(pending: CrawlPendingError) -> ToolResult:
-    """The structured NON-ERROR answer to a read that raced a running job."""
-    return ToolResult(
-        text=f"crawl {pending.request_id} is still {pending.job_status}; poll again with this tool",
-        structured={
-            "status": "running",
-            "request_id": pending.request_id,
-            "crawl_status": pending.job_status,
-        },
-    )
-
-
-async def _read_stored_tool(
-    payload: CrawlResultRequest,
-    job_store,
-    result_store,
-    caller: CallerIdentity | None,
-    read,
-) -> ToolResult:
+async def _running_answer(payload, job_store, result_store, caller, read) -> ToolResult:
     """Shape the read's three outcomes: the record, the typed pending state, and
     the 404 miss the replay doors report."""
     try:
@@ -356,122 +255,169 @@ async def _read_stored_tool(
             await read(payload.request_id, job_store, result_store, caller_id=caller_for(caller).caller_id)
         )
     except CrawlPendingError as pending:
-        return _running_result(pending)
+        return ToolResult(
+            text=f"crawl {pending.request_id} is still {pending.job_status}; poll again with this tool",
+            structured={
+                "status": "running",
+                "request_id": pending.request_id,
+                "crawl_status": pending.job_status,
+            },
+        )
     except HTTPException as error:
         return _tool_error(error)
 
 
-def _read_tool_handler(read) -> Handler:
-    """One admitted read-tool handler over a stored-record core: the two read
-    tools differ only by which core they read, so the admission boilerplate is
-    spelled once here rather than cloned per tool."""
+async def _store_tool(payload: BaseModel, door: _ToolDoor, door_data: DoorBinding) -> ToolResult:
+    """One store-read/write door over its declared core: the caller scope is the
+    resolved caller, ungated by quota."""
+    store_name = door_data.store
+    if store_name is None:
+        raise ValueError("a store door declares its store")
+    stores = {"job": door.job_store, "watch": door.watch_store}
+    store = stores.get(store_name)
+    if store is None:
+        raise ValueError(f"{store_name} tools require an initialized {store_name} store")
+    core = door_data.core
+    if core is None:
+        raise ValueError("a store door declares its core")
+    args: list[object] = [payload, store, door.settings]
+    if door_data.wants_shutdown_event:
+        args.append(door.shutdown_event)
+    args.append(caller_for(door.caller))
+    return await tool_result(core(*args, **door_data.core_kwargs))
 
-    async def handler(payload: CrawlResultRequest, settings, shutdown_event, **door) -> ToolResult:
-        door.setdefault("caller", None)
-        tracking = Tracking(
-            job_store=door.get("job_store"), concurrency_tracker=door.get("concurrency_tracker")
+
+async def _crawl_door(payload: BaseModel, door: _ToolDoor, projection: _Unified) -> ToolResult:
+    """Either crawl door: the same guarded, admitted crawl, differing only by projection."""
+    return await _guarded_crawl(
+        cast("CrawlRequest", payload),
+        door.settings,
+        door.shutdown_event,
+        projection,
+        caller=door.caller,
+        concurrency_tracker=door.concurrency_tracker,
+        job_store=door.job_store,
+    )
+
+
+async def _render_door(payload: BaseModel, door: _ToolDoor) -> ToolResult:
+    """The render door: browser-pool guard, the caller's cookie namespace, admission."""
+    render_payload = cast("RenderRequest", payload)
+    if get_browser_pool() is None:
+        return ToolResult(
+            text="Browser pool is not initialized; the service is starting up or shutting down.",
+            is_error=True,
         )
+    requested = len(render_payload.urls) if render_payload.urls is not None else 1
+    # The namespace binds around the whole admit, so the gate and the work
+    # both run under it; an MCP render's harvest keys by the caller's key id.
+    async with bound_render_cookie_namespace(caller_for(door.caller)):
         return await _admit_tool(
-            door["caller"],
-            0,
-            tracking=tracking,
-            work=lambda: _read_stored_tool(
-                payload, door.get("job_store"), door.get("result_store"), door["caller"], read
-            ),
+            door.caller,
+            requested,
+            tracking=_tracking(door),
+            work=lambda: tool_result(render_endpoint_handler(render_payload, settings=door.settings)),
         )
 
-    return handler
 
-
-handle_read_crawl_result = _read_tool_handler(read_crawl_result_record)
-handle_read_crawl_trace = _read_tool_handler(read_crawl_trace_record)
-
-
-def _job_tool_handler(core) -> Handler:
-    """One job-tool handler over a store-read core: the read/control/delete job
-    tools differ only by the core they run, so the handler-signature boilerplate
-    is spelled once here rather than cloned per tool. Those job doors are store
-    reads, not fetch executors -- the caller scope is the resolved caller,
-    ungated by quota. (create_job is an admitted door and carries its own
-    handler below.)"""
-
-    async def handler(
-        payload,
-        settings,
-        shutdown_event,
-        caller=None,
-        job_store=None,
-        result_store=None,
-        watch_store=None,
-        concurrency_tracker=None,
-    ) -> ToolResult:
-        if job_store is None:
-            raise ValueError("job tools require an initialized job store")
-        return await tool_result(
-            core(
-                payload,
-                job_store,
-                settings,
-                shutdown_event,
-                caller_for(caller),
+async def _search_door(payload: BaseModel, door: _ToolDoor) -> ToolResult:
+    """The search door: caller-bound through the concurrency register every sync door uses."""
+    caller: CallerIdentity | None = door.caller
+    return await _admit_tool(
+        caller,
+        0,
+        tracking=_tracking(door),
+        work=lambda: tool_result(
+            search_endpoint_handler(
+                cast("SearchRequest", payload),
+                settings=door.settings,
+                caller=caller_for(caller),
             )
-        )
+        ),
+    )
 
-    return handler
+
+async def _map_door(payload: BaseModel, door: _ToolDoor) -> ToolResult:
+    """The map door: admission over the policy's page limit, then the frontier walk."""
+    map_payload = cast("MapRequest", payload)
+    return await _admit_tool(
+        door.caller,
+        map_payload.policy.limits.max_pages,
+        payload=map_payload,
+        tracking=_tracking(door),
+        work=lambda: tool_result(
+            map_site(map_payload, settings=door.settings, shutdown_event=door.shutdown_event)
+        ),
+    )
 
 
-async def _create_job_tool(
-    payload: JobCreateRequest,
-    settings,
-    shutdown_event,
-    caller=None,
-    job_store: JobStore | None = None,
-    result_store=None,
-    concurrency_tracker=None,
-) -> ToolResult:
+async def _read_door(payload: BaseModel, door: _ToolDoor, door_data: DoorBinding) -> ToolResult:
+    """The stored-record read doors: admitted, shaped from the typed pending state."""
+    return await _admit_tool(
+        door.caller,
+        0,
+        tracking=_tracking(door),
+        work=lambda: _running_answer(payload, door.job_store, door.result_store, door.caller, door_data.core),
+    )
+
+
+async def dispatch(spec, payload: BaseModel, **door: Any) -> ToolResult:
+    """The one tool-door dispatch: the declared refusal first, then the kind's body."""
+    door_data = spec.door
+    if door_data.refusal is not None and any(
+        getattr(payload, f, None) not in (None, False) for f in door_data.refusal_fields
+    ):
+        return door_data.refusal
+    tool_door = _ToolDoor(**door)
+    kind = door_data.kind
+    if kind is DoorKind.admit:
+        return await tool_result(admit_url(cast("AdmitRequest", payload), settings=tool_door.settings))
+    if kind is DoorKind.crawl:
+        return await _crawl_door(payload, tool_door, _Unified.from_crawl)
+    if kind is DoorKind.crawl_and_extract:
+        return await _crawl_door(payload, tool_door, _Unified.from_extract)
+    if kind is DoorKind.map:
+        return await _map_door(payload, tool_door)
+    if kind is DoorKind.render:
+        return await _render_door(payload, tool_door)
+    if kind is DoorKind.search:
+        return await _search_door(payload, tool_door)
+    if kind is DoorKind.read:
+        return await _read_door(payload, tool_door, door_data)
+    if kind is DoorKind.store:
+        return await _store_tool(payload, tool_door, door_data)
+    if kind is DoorKind.create_job:
+        return await _create_job_tool(payload, tool_door)
+    raise ValueError(f"unsupported door kind: {kind}")
+
+
+async def _create_job_tool(payload: BaseModel, door: _ToolDoor) -> ToolResult:
     """The admitted job-creation door: the REST create's request_gate-free twin.
 
-    create_job_core itself enters admit (quota + concurrency), so the handler
+    create_job_core itself enters admit (quota + concurrency), so the door
     must not wrap it in admit a second time -- one request is one slot (#576)."""
-    if job_store is None:
+    if door.job_store is None:
         raise ValueError("create_job requires an initialized job store")
-    if concurrency_tracker is None:
+    if door.concurrency_tracker is None:
         raise ValueError("create_job requires the caller's concurrency tracker")
     return await tool_result(
         create_job_core(
-            payload,
-            job_store,
-            settings,
-            shutdown_event,
-            caller_for(caller),
-            concurrency_tracker=concurrency_tracker,
+            cast("JobCreateRequest", payload),
+            door.job_store,
+            door.settings,
+            door.shutdown_event,
+            caller_for(door.caller),
+            concurrency_tracker=door.concurrency_tracker,
         )
     )
 
 
-handle_list_jobs = _job_tool_handler(list_jobs_core)
-handle_get_job = _job_tool_handler(get_job_core)
-handle_control_job = _job_tool_handler(control_job)
-handle_delete_job = _job_tool_handler(delete_job_core)
-handle_create_job = _create_job_tool
-
-
 __all__ = [
-    "Handler",
+    "DoorBinding",
+    "DoorKind",
+    "ToolResult",
     "caller_for",
-    "handle_admit",
-    "handle_control_job",
-    "handle_create_job",
-    "handle_crawl",
-    "handle_crawl_and_extract",
-    "handle_delete_job",
-    "handle_get_job",
-    "handle_list_jobs",
-    "handle_map",
-    "handle_read_crawl_result",
-    "handle_read_crawl_trace",
-    "handle_render",
-    "handle_search",
+    "dispatch",
     "http_exception_message",
     "tool_result",
     "validation_message",
