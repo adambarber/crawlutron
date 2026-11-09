@@ -52,7 +52,7 @@ def _effective_argv(pytestconfig: pytest.Config) -> list[str]:
     A pin delivered anywhere but argv is invisible to invocation_params.args.
     """
     sources: list[str] = list(pytestconfig.invocation_params.args)
-    sources.append(os.environ.get("PYTEST_ADDOPTS", ""))
+    sources.extend(shlex.split(os.environ.get("PYTEST_ADDOPTS", "")))
     try:
         addopts = pytestconfig.getini("addopts")
     except (KeyError, ValueError):
@@ -128,9 +128,21 @@ def _gate_refused(output: str) -> bool:
 def test_numeric_seed_pins_are_seen(tmp_path) -> None:
     """A fixed numeric seed replays one interleaving as surely as `last` does: the
     plugin's unset default is a fresh draw, so ANY explicit value pins the order."""
-    for pin in (("env", "--randomly-seed=12345"), "--randomly-seed=12345"):
+    for pin in (
+        ("env", "--randomly-seed=12345"),
+        ("env", "--randomly-seed 12345"),
+        "--randomly-seed=12345",
+    ):
         output = _subprocess_gate_run(tmp_path, pin)
         assert "pinned its order via" in output, f"{pin!r} numeric seed escaped the gate"
+
+
+def test_space_form_seed_in_env_is_tokenized_like_pytest_does(tmp_path) -> None:
+    """PYTEST_ADDOPTS is a raw shell-ish string: pytest shlex-splits it before
+    use, so the gate must too — `--randomly-seed 12345` unsplit is one token no
+    matcher branch can see."""
+    output = _subprocess_gate_run(tmp_path, ("env", "--randomly-seed 12345"))
+    assert "pinned its order via" in output, "space-form seed in PYTEST_ADDOPTS escaped"
 
 
 def test_order_pinning_flags_are_seen(tmp_path) -> None:
