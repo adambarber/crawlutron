@@ -33,7 +33,6 @@ ACCIDENT_ROW_COUNT: int = 0
 
 #: PRINCIPLED rows are permanent, deliberate absences with a stated reason.
 PRINCIPLED_ROWS: tuple[ParityRow, ...] = (
-    ParityRow("GET", "/v1/policy-suggestions", "policy-suggestions pending stretch scope"),
     ParityRow("POST", "/v1/keys", "keys are the operator trust plane"),
     ParityRow("GET", "/v1/keys", "keys are the operator trust plane"),
     ParityRow("DELETE", "/v1/keys/{key_id}", "keys are the operator trust plane"),

@@ -34,6 +34,7 @@ from crawlutron.models.crawl_and_extract_response import CrawlAndExtractResponse
 from crawlutron.models.crawl_pending import CrawlPendingError
 from crawlutron.models.extracted_page import ExtractedPage
 from crawlutron.models.json_value import JsonValue
+from crawlutron.models.policy_suggestions_response import PolicySuggestionsResponse
 from crawlutron.safety.json_safe import json_default
 from crawlutron.search.endpoint import search as search_endpoint_handler
 from crawlutron.transport.browser_pool import get_browser_pool
@@ -124,6 +125,7 @@ class DoorKind(StrEnum):
     search = auto()
     read = auto()
     store = auto()
+    suggestions = auto()
     create_job = auto()
 
 
@@ -361,6 +363,27 @@ async def _read_door(payload: BaseModel, door: _ToolDoor, door_data: DoorBinding
     )
 
 
+async def _suggestions_door(payload: BaseModel, door: _ToolDoor, door_data: DoorBinding) -> ToolResult:
+    """The policy-suggestions read door: the REST twin's caller scoping -- a keyed
+    caller's rollup covers only its own records; anonymous is refused (the REST
+    door answers 401, the tool a tool error) -- with the operator's cross-tenant
+    view unavailable over MCP (operator wiring is REST-only; the keyed scope is
+    the MCP door's)."""
+    core = door_data.core
+    if core is None:
+        raise ValueError("a suggestions door declares its core")
+    if door.result_store is None:
+        raise ValueError("policy_suggestions requires an initialized result store")
+    caller = caller_for(door.caller)
+
+    async def run() -> PolicySuggestionsResponse:
+        if not caller.authenticated:
+            raise ValueError("an API key is required for policy_suggestions")
+        return await core(result_store=door.result_store, settings=door.settings, owner=caller.caller_id)
+
+    return await tool_result(run())
+
+
 async def dispatch(spec, payload: BaseModel, **door: Any) -> ToolResult:
     """The one tool-door dispatch: the declared refusal first, then the kind's body."""
     door_data = spec.door
@@ -384,6 +407,8 @@ async def dispatch(spec, payload: BaseModel, **door: Any) -> ToolResult:
         return await _search_door(payload, tool_door)
     if kind is DoorKind.read:
         return await _read_door(payload, tool_door, door_data)
+    if kind is DoorKind.suggestions:
+        return await _suggestions_door(payload, tool_door, door_data)
     if kind is DoorKind.store:
         return await _store_tool(payload, tool_door, door_data)
     if kind is DoorKind.create_job:

@@ -50,6 +50,19 @@ def _family_guidance(intro: str, names: tuple[str, ...], door: str) -> str:
     return f"{intro}: {enumerated} -- the same caller-scoped doors the {door} REST routes serve."
 
 
+def _suggestions_guidance() -> str:
+    """Policy-suggestions guidance derived from TOOL_SPECS."""
+    from crawlutron.mcp.registry import TOOL_SPECS
+
+    return _family_guidance(
+        "Self-tuning policy review is available over MCP too (policy_suggestions proposes candidate "
+        "denied_hosts rules from the caller's blocked attempts, same rollup as GET /v1/policy-suggestions; "
+        "proposals are never applied)",
+        tuple(spec.name for spec in TOOL_SPECS if spec.name == "policy_suggestions"),
+        "/v1/policy-suggestions",
+    )
+
+
 def _job_guidance() -> str:
     """Job-tool guidance derived from TOOL_SPECS."""
     from crawlutron.mcp.registry import TOOL_SPECS
@@ -87,6 +100,7 @@ GUIDANCE = [
     "Preserve raw evidence and provenance in downstream artifacts.",
     "Do not mutate host policy automatically from a crawl result.",
     "Use attempt history to generate reviewable policy suggestions.",
+    _suggestions_guidance(),
     "Treat discovered_links as bounded extraction output only; the service dedupes within a request by "
     "canonical page identity but callers still own cross-request frontier queueing and persistence.",
     "Per-domain concurrency, delays, and circuit breakers are enforced within one request (each request "

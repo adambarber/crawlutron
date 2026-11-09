@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from crawlutron.api.crawl_endpoint import read_crawl_result_record, read_crawl_trace_record
 from crawlutron.api.job_cores import control_job, delete_job_core, get_job_core, list_jobs_core
+from crawlutron.api.policy_suggestions import policy_suggestions as policy_suggestions_core
 from crawlutron.api.watch_cores import (
     delete_watch_core,
     get_watch_core,
@@ -38,6 +39,8 @@ from crawlutron.models.job_list_response import JobListResponse
 from crawlutron.models.job_status_response import JobStatusResponse
 from crawlutron.models.json_value import JsonValue
 from crawlutron.models.map_request import MapRequest
+from crawlutron.models.policy_suggestions_request import PolicySuggestionsRequest
+from crawlutron.models.policy_suggestions_response import PolicySuggestionsResponse
 from crawlutron.models.render_request import RenderRequest
 from crawlutron.models.search_request import SearchRequest
 from crawlutron.models.search_response import SearchResponse
@@ -323,6 +326,21 @@ TOOL_SPECS: list[ToolSpec] = [
         output_schema=_schema(JobDeletedResponse),
         door=DoorBinding(kind=DoorKind.store, core=delete_job_core, store="job", wants_shutdown_event=True),
         rest_route=RestRoute("DELETE", "/v1/jobs/{job_id}"),
+    ),
+    ToolSpec(
+        name="policy_suggestions",
+        title="Propose candidate host policy rules",
+        description=(
+            "Roll up the blocked attempts across the caller's retained crawl records and propose "
+            "candidate host policy rules, each with the classifications, evidence signatures and a "
+            "bounded evidence sample behind it -- the same per-tenant rollup GET /v1/policy-suggestions "
+            "answers. Proposal only: the service never applies a rule; review the evidence before "
+            "changing host policy."
+        ),
+        request_model=PolicySuggestionsRequest,
+        output_schema=_schema(PolicySuggestionsResponse),
+        door=DoorBinding(kind=DoorKind.suggestions, core=policy_suggestions_core),
+        rest_route=RestRoute("GET", "/v1/policy-suggestions"),
     ),
     ToolSpec(
         name="register_watch",

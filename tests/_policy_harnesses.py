@@ -16,6 +16,7 @@ from crawlutron.api.crawl_router import router as crawl_router
 from crawlutron.api.dependencies import get_result_store
 from crawlutron.api.policy_router import router as policy_router
 from crawlutron.models.caller_identity import CallerIdentity
+from crawlutron.models.json_value import JsonValue
 from tests._app_factory import service_app
 from tests._dependency_overrides import bind_base_overrides
 
@@ -45,4 +46,17 @@ def policy_client(
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
-__all__ = ["policy_client"]
+def stored_trace(request_id: str, url: str) -> JsonValue:
+    """A minimal retained row that parses as a blocked TraceResponse."""
+    page: dict[str, JsonValue] = {
+        "normalized_url": url,
+        "status": "blocked",
+        "classification": "access_denied",
+        "selected_strategy": None,
+        "attempted_strategies": [],
+        "classification_evidence": [],
+    }
+    return {"request_id": request_id, "results": [page]}
+
+
+__all__ = ["policy_client", "stored_trace"]
