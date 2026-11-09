@@ -361,7 +361,7 @@ class DomainScheduler:
         state.next_fire = fire_at + jittered_delay(self.current_delay(domain))
         return fire_at - now
 
-    async def _fire_wait(self, job: _Job) -> None:
+    async def _fire_wait(self, job: ScheduledJob) -> None:
         """One sleep for both pacing debts: the bucket reserve (arrival-ordered)
         and the fire-time reservation, never summed -- politeness gaps do not
         double-count. Zero-delay domains reserve nothing and owe no sleep.
