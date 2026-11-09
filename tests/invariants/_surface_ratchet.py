@@ -80,7 +80,9 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/admission/policy.py": (10, 5),
     "crawlutron/api/_depends_singletons.py": (2, 0),
     "crawlutron/api/async_crawl_runner.py": (3, 2),
-    "crawlutron/api/caller_auth.py": (18, 15),
+    # #664 raised 18,15 -> 19,16: verify_admin_secret is the public constant-time
+    # admin-token door the layer's soft gate meters through.
+    "crawlutron/api/caller_auth.py": (19, 16),
     "crawlutron/api/caller_concurrency.py": (1, 1),
     "crawlutron/api/crawl_executor.py": (1, 1),
     "crawlutron/api/crawl_router.py": (4, 3),
@@ -124,8 +126,9 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/api/job_cores.py": (5, 5),
     # #644: the one declaration of the module-level feature routers.
     "crawlutron/api/router_registry.py": (1, 0),
-    # #664: the auth+metering layer (three guards + the two router factories).
-    "crawlutron/api/route_layer.py": (8, 5),
+    # #664: the auth+metering layer (three guards, two router factories, the
+    # public guard-name set, and the exemption ratchet row).
+    "crawlutron/api/route_layer.py": (12, 5),
     "crawlutron/orchestration/admission_stall.py": (5, 3),
     "crawlutron/orchestration/recursive.py": (11, 7),
     "crawlutron/orchestration/request_pipeline.py": (5, 3),
