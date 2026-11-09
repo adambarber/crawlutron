@@ -34,6 +34,10 @@ _QUOTA_ROUTES = frozenset(
 #: A 429 that is not a quota refusal: the caller's watch-count cap.
 _WATCH_LIMIT_ROUTE = ("post", "/v1/watches")
 
+#: A 429 that is not a caller quota: the key-verify cooldown metering the
+#: robots arm once the admit route inherits the auth+metering layer (#664).
+_ADMIT_ROBOTS_ROUTE = ("post", "/v1/admit")
+
 
 def _is_auth_route(route: APIRoute) -> bool:
     """Whether ``route`` resolves caller identity (and can refuse a wrong key)."""
@@ -89,4 +93,4 @@ async def test_only_quota_spending_routes_declare_429(async_client):
     """
     responses = _spec_responses()
     declared = {op for op, codes in responses.items() if "429" in codes}
-    assert declared == _QUOTA_ROUTES | {_WATCH_LIMIT_ROUTE}
+    assert declared == _QUOTA_ROUTES | {_WATCH_LIMIT_ROUTE, _ADMIT_ROBOTS_ROUTE}

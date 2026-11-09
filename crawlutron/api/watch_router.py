@@ -8,11 +8,11 @@ from __future__ import annotations
 
 from typing import NoReturn
 
-from fastapi import APIRouter, Response
+from fastapi import Response
 
-from crawlutron.api.caller_auth import auth_denials
 from crawlutron.api.dependencies import CallerDep, SettingsDep, WatchStoreDep
 from crawlutron.api.exceptions import http_error, validation_http_error
+from crawlutron.api.route_layer import guarded_router
 from crawlutron.api.watch_sweep import WATCH_SWEEP_INTERVAL_SECONDS
 from crawlutron.api.webhooks import ensure_https_webhook_url, validate_webhook_url_async
 from crawlutron.models.error_response import ErrorResponse
@@ -24,7 +24,7 @@ from crawlutron.models.watch_state import WatchState
 from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.transport.freshness import default_clock
 
-router = APIRouter(prefix="/v1/watches", tags=["Crawler"], responses=auth_denials())
+router = guarded_router(prefix="/v1/watches", tags=["Crawler"])
 
 
 # The minimum registration interval: the sweep cadence is the natural politeness

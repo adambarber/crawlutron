@@ -6,15 +6,16 @@ router stays trivial and the rollup is testable without FastAPI machinery.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import Depends, Request
 
-from crawlutron.api.caller_auth import auth_denials, is_operator
+from crawlutron.api.caller_auth import is_operator
 from crawlutron.api.dependencies import CallerDep, get_result_store, get_settings
 from crawlutron.api.exceptions import http_error
 from crawlutron.api.policy_suggestions import policy_suggestions as policy_suggestions_handler
+from crawlutron.api.route_layer import guarded_router
 from crawlutron.models.policy_suggestions_response import PolicySuggestionsResponse
 
-router = APIRouter(tags=["Crawler"], responses=auth_denials())
+router = guarded_router(tags=["Crawler"])
 
 
 @router.get(

@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Depends, Request, Response
 
-from crawlutron.api.caller_auth import is_operator
+from crawlutron.api.route_layer import operator_guard
 from crawlutron.runtime.metrics import get_metrics
 
-router = APIRouter(tags=["Health"])
+router = APIRouter(tags=["Health"], dependencies=[Depends(operator_guard)])
 
 
 @router.get(
@@ -26,7 +26,7 @@ async def metrics_endpoint(request: Request) -> Response:
     # ``as_prometheus`` reads the shared coordination counters -- a dozen SQLite
     # reads per scrape. Run it off the loop so a scrape cannot stall on the store.
     return Response(
-        await asyncio.to_thread(metrics.as_prometheus, caller_detail=is_operator(request)),
+        await asyncio.to_thread(metrics.as_prometheus, caller_detail=getattr(request.state, "caller", False)),
         media_type="text/plain; version=0.0.4",
     )
 

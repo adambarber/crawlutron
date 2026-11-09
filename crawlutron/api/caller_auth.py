@@ -214,6 +214,12 @@ async def get_caller_identity(request: Request) -> CallerIdentity:
     return await _caller_from_secret(request, secret)
 
 
+def verify_admin_secret(secret: str, request: Request) -> bool:
+    """Constant-time admin-token check, public for the layer's soft gate."""
+    admin_token = key_admin_token(request)
+    return bool(admin_token) and _constant_time_eq(secret, admin_token)
+
+
 def is_operator(request: Request) -> bool:
     """Whether the presented credential is the configured operator token.
 
@@ -387,4 +393,5 @@ __all__ = [
     "quota_denials",
     "refuse_anonymous_cookie_namespace",
     "resolve_page_limit",
+    "verify_admin_secret",
 ]

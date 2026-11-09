@@ -1,7 +1,7 @@
 """The identity-guarded door plane: map, render and search share one router.
 
-Each door wraps caller admission in request_gate (readiness OUTER) then admits
-via the single register (INNER); the ``*_request_rejected`` events log here.
+Caller identity rides the auth+metering layer (#664); each door keeps its own
+request_gate/admit wrap with the event names and reject hooks the wire pins.
 """
 
 from __future__ import annotations
@@ -9,15 +9,14 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from fastapi import APIRouter
-
 from crawlutron.api._depends_singletons import settings_dep, shutdown_event_dep
-from crawlutron.api.caller_auth import admit, auth_denials, bound_render_cookie_namespace, quota_denials
+from crawlutron.api.caller_auth import admit, bound_render_cookie_namespace, quota_denials
 from crawlutron.api.dependencies import CallerDep, TrackingDep
 from crawlutron.api.main_helpers import request_gate
 from crawlutron.api.map_endpoint import map_site
 from crawlutron.api.render_endpoint import render as render_handler
 from crawlutron.api.render_endpoint import render_rejection
+from crawlutron.api.route_layer import guarded_router
 from crawlutron.models import map_request, render_request, search_request
 from crawlutron.models.error_response import ErrorResponse
 from crawlutron.models.search_response import SearchResponse
@@ -30,7 +29,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["Crawler"], responses=auth_denials())
+router = guarded_router(tags=["Crawler"])
 
 
 @router.post(
@@ -59,12 +58,7 @@ async def map(
     # Request_gate OUTER (the readiness count includes quota-
     # rejected requests), admit INNER -- the one order every door shares.
     with request_gate("map_request_rejected", logger=logger):
-        async with admit(
-            caller,
-            payload.policy.limits.max_pages,
-            tracking=tracking,
-            payload=payload,
-        ):
+        async with admit(caller, payload.policy.limits.max_pages, tracking=tracking, payload=payload):
             return await map_site(payload, settings=settings, shutdown_event=shutdown_event)
 
 
