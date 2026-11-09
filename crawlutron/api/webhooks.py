@@ -16,7 +16,6 @@ import logging
 import os
 import time
 from collections.abc import Mapping
-from urllib.parse import urlparse
 
 import httpx
 
@@ -255,16 +254,6 @@ def _serialize_webhook_payload(payload: Mapping[str, object], cap: int) -> bytes
         if buffer.tell() > cap:
             return None
     return buffer.getvalue()
-
-
-def _redacted_webhook_url(url: str) -> str:
-    """Origin-only spelling for logs: a caller-supplied URL may carry query
-    credentials or a path worth hiding; the origin is what operators need."""
-    try:
-        parsed = urlparse(url)
-        return f"{parsed.scheme}://{parsed.netloc}"
-    except ValueError:
-        return "[unparseable-webhook-url]"
 
 
 async def post_webhook(
