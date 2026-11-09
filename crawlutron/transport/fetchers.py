@@ -406,11 +406,10 @@ def _stream_close_failure_recorder(response: CffiResponse) -> Callable[[asyncio.
     record a failed close in the #643 decline record; a cancelled close is a
     handled state, not evidence.
     """
-    kind = type(response).__name__
 
     def record(task: asyncio.Task[None]) -> None:
         if not task.cancelled() and task.exception() is not None:
-            record_declined_close("stream_close_failed", kind)
+            record_declined_close("stream_close_failed", type(response).__name__)
 
     return record
 
