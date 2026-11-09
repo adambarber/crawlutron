@@ -1,4 +1,4 @@
-"""S3 (#600): caller-key hashing PROPERTIES -- salt uniqueness, no bare secrets."""
+"""S3 (#600): the PBKDF2 floor pin for caller-key hashing."""
 
 from __future__ import annotations
 
