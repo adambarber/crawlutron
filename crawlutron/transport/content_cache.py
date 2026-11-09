@@ -14,8 +14,10 @@ from collections import OrderedDict
 from collections.abc import Callable
 from pathlib import Path
 
+from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.cache_envelope import CacheEnvelope
 from crawlutron.models.json_value import JsonValue
+from crawlutron.runtime import process_state
 from crawlutron.transport.content_cache_internals import (
     TMP_ORPHAN_MAX_AGE_SECONDS,
     atomic_write,
@@ -417,3 +419,38 @@ class ContentCache:
             self._memory_cache.clear()
         doomed.extend((None, path) for path in paths if path not in indexed)
         return self._unlink_doomed(doomed)
+
+
+# Process-lifetime shared content cache (the engine's former module global): built lazily so
+# importing this module has no filesystem side effects; tests swap the binding.
+
+
+# Process-lifetime shared content cache (engine's former module global): lazily
+# built so importing this module has no filesystem side effects; tests swap it.
+_SHARED_CONTENT_CACHE: ContentCache | None = None
+
+
+def shared_content_cache() -> ContentCache:
+    """The process-wide content cache, built once from settings on first use."""
+    global _SHARED_CONTENT_CACHE
+    if _SHARED_CONTENT_CACHE is None:
+        settings = CrawlerSettings.from_mapping()
+        _SHARED_CONTENT_CACHE = ContentCache(
+            cache_dir=settings.cache_dir,
+            default_ttl=settings.cache_ttl_seconds,
+        )
+    return _SHARED_CONTENT_CACHE
+
+
+def _reset() -> None:
+    """Empty the shared cache when built; a reset starts a new process lifetime."""
+    global _SHARED_CONTENT_CACHE
+    if _SHARED_CONTENT_CACHE is not None:
+        _SHARED_CONTENT_CACHE.clear()
+
+
+def _has() -> bool:
+    return _SHARED_CONTENT_CACHE is not None and bool(_SHARED_CONTENT_CACHE._index)
+
+
+process_state.register(__name__, _reset, _has)

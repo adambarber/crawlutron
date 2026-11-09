@@ -65,9 +65,9 @@ class TestContentCacheOverwrite:
 
 class TestSharedContentCache:
     def test_engine_shared_content_cache(self):
-        from crawlutron.orchestration.engine import get_shared_content_cache
+        from crawlutron.transport.content_cache import shared_content_cache
 
-        cache = get_shared_content_cache()
+        cache = shared_content_cache()
         assert isinstance(cache, ContentCache)
 
 

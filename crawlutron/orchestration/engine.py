@@ -38,9 +38,12 @@ from crawlutron.orchestration.request_pipeline import (
 from crawlutron.runtime import process_state
 from crawlutron.runtime.pressure_gates import ResourceGate
 from crawlutron.transport import robots as _robots_policy
-from crawlutron.transport.cache import HttpCache
-from crawlutron.transport.content_cache import ContentCache
+from crawlutron.transport.cache import HttpCache, shared_http_cache
+from crawlutron.transport.content_cache import ContentCache, shared_content_cache
+from crawlutron.transport.content_cache_key import build_content_cache_key
+from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE
 from crawlutron.transport.fetchers import default_http_fetcher, impersonating_fetcher
+from crawlutron.transport.request_profile import cookie_namespace_for, headers_for_strategy
 from crawlutron.transport.robots import FetchAndDecode
 
 if TYPE_CHECKING:
@@ -58,28 +61,10 @@ cached_sitemaps = _robots_policy.cached_sitemaps
 # Read the gate via resource_gate(): do not capture the reference before the reset swaps it.
 _resource_gate = ResourceGate()
 
-# Shared conditional cache so repeated crawls can leverage 304 responses.
-_SHARED_HTTP_CACHE = HttpCache()
-
-# Lazy, disk-backed content cache. Created on first use so importing
-# this module has no filesystem side effects (tests can pass their own).
-_SHARED_CONTENT_CACHE: ContentCache | None = None
-
 
 def resource_gate() -> ResourceGate:
     """The process admission gate the engine reserves against."""
     return _resource_gate
-
-
-def get_shared_content_cache() -> ContentCache:
-    global _SHARED_CONTENT_CACHE
-    if _SHARED_CONTENT_CACHE is None:
-        settings = CrawlerSettings.from_mapping()
-        _SHARED_CONTENT_CACHE = ContentCache(
-            cache_dir=settings.cache_dir,
-            default_ttl=settings.cache_ttl_seconds,
-        )
-    return _SHARED_CONTENT_CACHE
 
 
 def purge_robots_cache(now: float | None = None) -> int:
@@ -153,12 +138,8 @@ def seed_is_fresh(
     extraction = policy.extraction
     css = policy.css_selector
     xp = policy.xpath
-    # Lazy import avoids a module cycle (engine <-> http).
-    from crawlutron.transport.content_cache_key import build_content_cache_key
-    from crawlutron.transport.request_profile import headers_for_strategy
-
-    # Default to the real strategy chain: the old placeholder's cache keys never
-    # matched stored entries, so freshness was never detected through this path.
+    # The engine's cache keys use the real strategy chain: the old placeholder's keys
+    # never matched stored entries, so freshness was never detected through this path.
     for strategy in policy.strategies:
         key = build_content_cache_key(
             url,
@@ -387,15 +368,10 @@ class ResultSpill:
 
 
 def _set_cookie_namespace(policy: CrawlPolicy):
-    from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE
-    from crawlutron.transport.request_profile import cookie_namespace_for
-
     return COOKIE_NAMESPACE.set(cookie_namespace_for(policy.request_profile))
 
 
 def _reset_cookie_namespace(token: Token[str]) -> None:
-    from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE
-
     COOKIE_NAMESPACE.reset(token)
 
 
@@ -465,36 +441,30 @@ def _pipeline_dependencies(
 ) -> PipelineDependencies:
     """The process-wide dependencies a crawl binds: shared caches, spill, gate."""
     return PipelineDependencies(
-        get_content_cache=get_shared_content_cache,
+        get_content_cache=shared_content_cache,
         make_spill=ResultSpill,
         compile_scope_regex_safe=compile_scope_pattern,
         stale_seeds=stale_seeds,
         fetch_and_decode=fetch_and_decode,
-        shared_http_cache=_SHARED_HTTP_CACHE,
+        shared_http_cache=shared_http_cache(),
         resource_gate=resource_gate if resource_gate is not None else _resource_gate,
     )
 
 
 def _reset() -> None:
-    """Rebuild every process-wide cache the engine shares across crawls."""
+    """Rebuild every process-wide resource the engine shares across crawls."""
     robots_cache.clear()
-    global _SHARED_HTTP_CACHE, _resource_gate
-    _SHARED_HTTP_CACHE = HttpCache()
+    global _resource_gate
     # The shared admission gate, reset with the caches; see :func:`resource_gate`.
     _resource_gate = ResourceGate()
-    # The lazy content cache is part of the same lifetime: empty it when built.
-    if _SHARED_CONTENT_CACHE is not None:
-        _SHARED_CONTENT_CACHE.clear()
     # A reset starts a new process lifetime, so the next spill must scan again.
     global spill_gc_last_run
     spill_gc_last_run = None
 
 
 def _has() -> bool:
-    """Whether any shared cache still holds an entry."""
-    # No __len__ on _SHARED_HTTP_CACHE: read the entry mapping, not bool().
-    content_holds = _SHARED_CONTENT_CACHE is not None and bool(_SHARED_CONTENT_CACHE._index)
-    return bool(robots_cache) or bool(_SHARED_HTTP_CACHE._data) or content_holds
+    """Whether the engine's own shared resource still holds state."""
+    return bool(robots_cache)
 
 
 process_state.register(__name__, _reset, _has)
