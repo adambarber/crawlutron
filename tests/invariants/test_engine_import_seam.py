@@ -7,10 +7,13 @@ instance (whatever the name -- the prefix check alone had a rename-shaped
 bypass) or a function-level ``crawlutron.transport`` import reintroduces the
 seam the collapse removed, so each reds naming the line.
 
-Residual blind shape: a cache instance obtained without a direct constructor
-call (``_C = factory()`` where factory lives elsewhere) is not seen by the
-binding detector; the global-rebind detector still catches any ``global`` on
-the name once it is module-bound by any means.
+Residual blind shapes, exact: the binding detector sees only a direct
+constructor call (``HttpCache()``) or a class alias of an imported cache
+type on the RHS. A binding via a factory call (``_C = _factory()``) is
+invisible, and the rebind detector is DERIVED from the binding set, so it
+inherits that blind spot -- a `global` on a factory-bound name also passes.
+Stacked-mutant discipline: the rebind detector's proof must be isolated
+against its feeder's blind shape, never presented as independent reach.
 """
 
 from __future__ import annotations
