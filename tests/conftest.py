@@ -90,20 +90,12 @@ def _remove_test_cache_dir():
         shutil.rmtree(_SCRATCH_CACHE_DIR, ignore_errors=True)
 
 
-_TEST_STRICT_SSRF = os.environ.get("CRAWLUTRON_TEST_STRICT_SSRF", "0") == "1"
-
-
 @pytest.fixture(scope="session", autouse=True)
 def _enable_loopback_for_test_suite():
-    """Enable private targets (loopback crawling) for the test session.
-
-    The only path that flips the secure default; strict-SSRF runs leave it on
-    and each loopback test opts in per test."""
-    if not _TEST_STRICT_SSRF:
-        os.environ["CRAWLUTRON_ALLOW_PRIVATE_TARGETS"] = "1"
+    """Enable private targets (loopback crawling) for the test session."""
+    os.environ["CRAWLUTRON_ALLOW_PRIVATE_TARGETS"] = "1"
     yield
-    if not _TEST_STRICT_SSRF:
-        os.environ["CRAWLUTRON_ALLOW_PRIVATE_TARGETS"] = "0"
+    os.environ["CRAWLUTRON_ALLOW_PRIVATE_TARGETS"] = "0"
 
 
 # Per-xdist-worker paths: when running under pytest-xdist each worker gets its own log/cache files so parallel
