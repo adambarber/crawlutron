@@ -6,7 +6,7 @@ a second copy is a second place a new action can miss the conflict mapping.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, NoReturn, cast
+from typing import TYPE_CHECKING, Literal, NoReturn, cast
 
 from crawlutron.api import job_runner
 from crawlutron.api.exceptions import http_error
@@ -17,6 +17,9 @@ from crawlutron.storage.job_store import JobStatusView
 if TYPE_CHECKING:
     from crawlutron.models.caller_identity import CallerIdentity
     from crawlutron.storage.job_store import JobStore
+
+_JobAction = Literal["pause", "resume", "cancel"]
+"""The exhaustive control-action vocabulary both doors validate before dispatch."""
 
 
 def raise_job_not_found(job_id: str) -> NoReturn:
@@ -30,7 +33,7 @@ def raise_job_conflict(message: str) -> NoReturn:
 
 async def control_job_core(
     job_id: str,
-    action: str,
+    action: _JobAction,
     job_store: JobStore,
     settings,
     shutdown_event,
@@ -40,12 +43,13 @@ async def control_job_core(
     if not await job_store.aexists_for_caller(job_id, caller.caller_id):
         raise_job_not_found(job_id)
 
-    if action == "pause":
-        outcome = await job_runner.pause_job(job_id, job_store)
-    elif action == "resume":
-        outcome = await job_runner.resume_job(job_id, job_store, settings, shutdown_event)
-    else:
-        outcome = await job_runner.cancel_job(job_id, job_store)
+    match action:
+        case "pause":
+            outcome = await job_runner.pause_job(job_id, job_store)
+        case "resume":
+            outcome = await job_runner.resume_job(job_id, job_store, settings, shutdown_event)
+        case "cancel":
+            outcome = await job_runner.cancel_job(job_id, job_store)
 
     if outcome == "missing":
         raise_job_not_found(job_id)
