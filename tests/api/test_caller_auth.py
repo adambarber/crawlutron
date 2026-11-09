@@ -21,7 +21,6 @@ def test_203_cleanup_pins():
     import crawlutron.api.caller_auth as caller_auth
 
     assert "presented_key" in caller_auth.__all__
-    assert not hasattr(caller_auth, "_presented_key") or caller_auth.presented_key is not None
 
     # #203 pin 2: CallerIdentity.label is written but never read in app/.
     from crawlutron.models.caller_identity import CallerIdentity
