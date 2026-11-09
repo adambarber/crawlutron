@@ -26,17 +26,24 @@ ORDER_PINNING_CONFIGS = (
     ".github/workflows/ci.yml",
 )
 
-#: The ways a run can be pinned to a fixed order.
-_ORDER_PINNING_FLAGS = ("no:randomly", "randomly-dont-reorganize", "randomly-dont-reset-seed")
+#: Ways a run can be pinned: any explicit --randomly-seed value (the plugin's
+#: unset default "default" is a fresh random draw), plus the order flags.
+_PINNING_SEED_DEFAULT = "default"
+_ORDER_PINNING_FLAGS = ("--randomly-dont-reorganize", "--randomly-dont-reset-seed")
 
 
 def _seed_pinned_by_argv(argv) -> str | None:
-    """Return the pinning token if argv pins the order via the seed sentinel."""
+    """Return the pinning token if argv pins the order via an explicit seed or flag."""
     for index, token in enumerate(argv):
-        if token == "--randomly-seed=last":
+        if token.startswith("--randomly-seed="):
+            value = token.split("=", 1)[1]
+            if value != _PINNING_SEED_DEFAULT:
+                return token
+        elif token == "--randomly-seed":
+            if index + 1 < len(argv) and argv[index + 1] != _PINNING_SEED_DEFAULT:
+                return f"--randomly-seed {argv[index + 1]}"
+        elif token in _ORDER_PINNING_FLAGS:
             return token
-        if token == "--randomly-seed" and index + 1 < len(argv) and argv[index + 1] == "last":
-            return "--randomly-seed last"
     return None
 
 
@@ -76,35 +83,77 @@ def test_this_run_was_randomized(pytestconfig: pytest.Config) -> None:
     pinned = _seed_pinned_by_argv(_effective_argv(pytestconfig))
     if pinned is not None:
         pytest.fail(
-            f"this run pinned its order via {pinned!r}: the seed is replayed, not "
+            f"this run pinned its order via {pinned!r}: the seed is fixed, not "
             "fresh, so the order did not vary. Repro runs deselect this test by "
-            "NAME, never with a last-seed flag."
+            "NAME, never with a seed or order flag."
         )
 
 
-def test_addopts_delivered_seed_pins_are_seen(tmp_path, monkeypatch) -> None:
-    """A pin smuggled through PYTEST_ADDOPTS or ini addopts must red the gate the
-    same way an argv pin does: the effective command line, not argv alone, decides."""
+def _subprocess_gate_run(tmp_path, pin) -> str:
+    """Run the gate test in a subprocess, delivering the pin via env or ini addopts."""
     gate = (
         "import sys\n"
         f"sys.path.insert(0, {str(Path(__file__).resolve().parent)!r})\n"
         "from tests.test_run_ordering import test_this_run_was_randomized\n"
     )
-    service_root = Path(__file__).resolve().parent.parent
-    (tmp_path / "probe_test.py").write_text(gate)
-    for channel in ("env", "ini"):
-        command = [sys.executable, "-m", "pytest", str(tmp_path / "probe_test.py")]
-        environ = dict(os.environ, PYTHONPATH=str(service_root))
-        if channel == "env":
-            environ["PYTEST_ADDOPTS"] = "--randomly-seed=last"
-        else:
-            (tmp_path / "pytest.ini").write_text("[pytest]\naddopts = --randomly-seed=last\n")
-        result = subprocess.run(
-            command, env=environ, capture_output=True, text=True, timeout=100, cwd=tmp_path
-        )
-        assert "pinned its order via" in result.stdout + result.stderr, (
-            f"{channel}-delivered --randomly-seed=last escaped the ordering gate"
-        )
+    probe = tmp_path / "probe_test.py"
+    probe.write_text(gate)
+    environ = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parent.parent))
+    if isinstance(pin, tuple) and pin[0] == "env":
+        environ["PYTEST_ADDOPTS"] = pin[1]
+        pin = None
+    if isinstance(pin, str):
+        ini = "[pytest]\naddopts = " + pin + "\n"
+        (tmp_path / "pytest.ini").write_text(ini)
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", str(probe)],
+        env=environ,
+        capture_output=True,
+        text=True,
+        timeout=100,
+        cwd=tmp_path,
+    )
+    return result.stdout + result.stderr
+
+
+def _gate_refused(output: str) -> bool:
+    """Any of the gate's refusal doors: explicit pin, no-reorganize, no-plugin."""
+    return (
+        "pinned its order via" in output
+        or "order was left as declared" in output
+        or "loaded no random-order plugin" in output
+    )
+
+
+def test_numeric_seed_pins_are_seen(tmp_path) -> None:
+    """A fixed numeric seed replays one interleaving as surely as `last` does: the
+    plugin's unset default is a fresh draw, so ANY explicit value pins the order."""
+    for pin in (("env", "--randomly-seed=12345"), "--randomly-seed=12345"):
+        output = _subprocess_gate_run(tmp_path, pin)
+        assert "pinned its order via" in output, f"{pin!r} numeric seed escaped the gate"
+
+
+def test_order_pinning_flags_are_seen(tmp_path) -> None:
+    """--randomly-dont-reorganize and --randomly-dont-reset-seed are named bans in
+    AGENTS.md; a smuggled copy must red the gate through any channel."""
+    for flag in ("--randomly-dont-reorganize", "--randomly-dont-reset-seed"):
+        for pin in (("env", flag), flag):
+            output = _subprocess_gate_run(tmp_path, pin)
+            assert _gate_refused(output), f"{flag} via {pin!r} escaped the gate"
+
+
+def test_list_valued_ini_addopts_pin_is_seen(tmp_path) -> None:
+    """getini returns addopts as a list; a list-typed pin channel must be swept
+    element-wise, not stringified (str(list) breaks the token match)."""
+    (tmp_path / "pytest.ini").write_text("[pytest]\naddopts = --randomly-seed=last -x\n")
+    output = _subprocess_gate_run(tmp_path, None)
+    assert "pinned its order via" in output, "multi-token ini addopts pin escaped the gate"
+
+
+def test_default_seed_word_stays_legal(tmp_path) -> None:
+    """--randomly-seed=default is the plugin's own unset form: it must NOT red."""
+    output = _subprocess_gate_run(tmp_path, ("env", "--randomly-seed=default"))
+    assert "pinned its order via" not in output, "--randomly-seed=default wrongly banned"
 
 
 def test_no_enforcement_config_pins_the_order() -> None:
