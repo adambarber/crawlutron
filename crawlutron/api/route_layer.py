@@ -112,11 +112,6 @@ LAYER_EXEMPT_RATCHET: tuple[ExemptRow, ...] = (
         "Static agent guidance payload; pure, no store, no egress.",
     ),
     ExemptRow(
-        "get",
-        "/openapi.json",
-        "The API contract itself; tools generate clients from it before holding a key.",
-    ),
-    ExemptRow(
         "post",
         "/v1/admit:check_robots=false",
         "The PURE base admission check is I/O-free by construction (no fetch, no "
@@ -125,41 +120,77 @@ LAYER_EXEMPT_RATCHET: tuple[ExemptRow, ...] = (
         "caller's identity and the key-verify throttle.",
     ),
 )
-PENDING_METERING_ROWS: tuple[ExemptRow, ...] = (
-    # #664 follow-up: each row below is served and externally reachable but NOT
-    # yet metered; removing a PENDING row requires landing its metering first.
+
+
+#: The anonymous-metered surfaces (#668): externally reachable, outside the
+#: layer (no caller identity), and metered per remote IP through
+#: api/anonymous_throttle.py's middleware + the 404 handler's bucket check.
+#: The list moves DOWN only; adding a row demands landing metering first.
+ANONYMOUS_METERED: tuple[ExemptRow, ...] = (
     ExemptRow(
         "post",
         "/mcp",
-        "PENDING-METERING: the MCP transport endpoint; the follow-up ticket owns "
-        "its caller-identity + metering scope decision.",
+        "MCP transport; anonymous traffic meters through the anonymous IP bucket, "
+        "presented-credential traffic through the caller's own quota.",
     ),
     ExemptRow(
         "get",
         "/docs",
-        "PENDING-METERING: FastAPI's Swagger UI, a static HTML read of the spec; "
-        "follow-up ticket decides meter vs. pin.",
+        "FastAPI's Swagger UI: a static HTML read, metered per remote IP.",
     ),
     ExemptRow(
         "get",
         "/docs/oauth2-redirect",
-        "PENDING-METERING: FastAPI's OAuth redirect helper page; pure static HTML.",
+        "FastAPI's OAuth redirect helper page: pure static HTML, metered per IP.",
     ),
     ExemptRow(
         "get",
         "/redoc",
-        "PENDING-METERING: FastAPI's ReDoc UI, a static HTML read of the spec.",
+        "FastAPI's ReDoc UI: a static HTML read, metered per remote IP.",
+    ),
+    ExemptRow(
+        "get",
+        "/health",
+        "Liveness, metered per remote IP on the same 120/60s anonymous budget: "
+        "the Docker healthcheck curls localhost every 30s (2 hits/window, 1.7% "
+        "of budget -- no collision, no budget-class row needed).",
+    ),
+    ExemptRow(
+        "get",
+        "/ready",
+        "Readiness, metered per remote IP on the same 120/60s anonymous budget "
+        "as every other anonymous surface.",
+    ),
+    ExemptRow(
+        "get",
+        "/.well-known/crawler-service",
+        "The machine discovery door; agents negotiate here before holding a key.",
+    ),
+    ExemptRow(
+        "get",
+        "/v1/capabilities",
+        "Capability advertisement; a settings read, metered per remote IP.",
+    ),
+    ExemptRow(
+        "get",
+        "/v1/agent-hints",
+        "Static agent guidance payload; metered per remote IP.",
+    ),
+    ExemptRow(
+        "get",
+        "/openapi.json",
+        "The API contract; client generation reads, metered per remote IP.",
     ),
 )
 
 
 __all__ = [
     "ADMIN_GUARD_NAME",
+    "ANONYMOUS_METERED",
     "GUARD_NAME",
     "LAYER_EXEMPT_RATCHET",
     "LAYER_GUARDS",
     "OPERATOR_GUARD_NAME",
-    "PENDING_METERING_ROWS",
     "ExemptRow",
     "admin_guarded_router",
     "guard_admin_request",

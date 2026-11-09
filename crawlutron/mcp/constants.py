@@ -22,6 +22,7 @@ INTERNAL_ERROR = -32603
 HEADER_MISMATCH = -32020
 UNSUPPORTED_PROTOCOL_VERSION = -32022
 INVALID_API_KEY = -32001
+RATE_LIMITED = -32029
 
 # Per-request / per-result metadata keys (see ``_meta`` in the spec).
 META_PROTOCOL_VERSION = "io.modelcontextprotocol/protocolVersion"
@@ -49,6 +50,7 @@ __all__ = [
     "META_SERVER_INFO",
     "METHOD_NOT_FOUND",
     "PARSE_ERROR",
+    "RATE_LIMITED",
     "SUPPORTED_PROTOCOL_VERSIONS",
     "UNSUPPORTED_PROTOCOL_VERSION",
 ]

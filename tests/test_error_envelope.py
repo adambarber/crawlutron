@@ -137,23 +137,24 @@ class TestEnvelopeFromDetail:
             "details": {},
         }
 
-    async def test_unknown_route_404_is_the_envelope_not_fastapi_detail(self, async_client):
-        """A route-miss is a framework-level starlette HTTPException, outside the
-        fastapi.HTTPException MRO match; it must still surface as the envelope."""
+    async def test_unknown_route_404_reports_the_malformed_synthetic_code(self, async_client):
+        """#668 wire-shape EVOLUTION (owner's 404 ruling): a route-miss surfaces as
+        the not_found envelope metered through the anonymous bucket, with BOTH
+        discovery links in details -- a 404 oracle is a route-enumeration tool,
+        never an exemption. Old pin: code == malformed_error_detail +
+        {"status_code": 404}. Surviving owner of the deleted weaker sibling
+        test_unknown_route_404_is_the_envelope_not_fastapi_detail: this pin's
+        set(body) assertion (envelope family, never FastAPI's bare detail).
+        """
         resp = await async_client.get("/v1/definitely-not-a-route")
         assert resp.status_code == 404
         body = resp.json()
         assert set(body) == {"code", "message", "details"}, body
-        assert "detail" not in body, body
-
-    async def test_unknown_route_404_reports_the_malformed_synthetic_code(self, async_client):
-        """Starlette's route-miss detail is the opaque string 'Not Found', so it takes
-        the declared synthetic code, never a laundered http_404."""
-        from crawlutron.api.exceptions import MALFORMED_DETAIL_CODE
-
-        resp = await async_client.get("/v1/definitely-not-a-route")
-        assert resp.json()["code"] == MALFORMED_DETAIL_CODE
-        assert resp.json()["details"] == {"status_code": 404}
+        assert body["code"] == "not_found"
+        assert body["details"] == {
+            "capabilities": "/.well-known/crawler-service",
+            "docs": "/docs",
+        }
 
     async def test_method_not_allowed_405_is_the_envelope(self, async_client):
         """A 405 on a known route is also a framework-level starlette HTTPException and
