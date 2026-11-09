@@ -82,6 +82,9 @@ class AnonymousThrottle(MeterLedger):
                 self._buckets[key] = bucket
             bucket.count += 1
             if bucket.count > MAX_REQUESTS_PER_WINDOW:
+                from crawlutron.runtime.metrics import get_metrics
+
+                get_metrics().record_anonymous_throttle_refusal()
                 raise Throttled(429, "anonymous_throttled", "Too many requests; retry later")
 
     def _evict_or_mint(self, now: float) -> _Bucket:

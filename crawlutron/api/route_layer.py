@@ -11,7 +11,13 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 
-from crawlutron.api.caller_auth import auth_denials, get_keys_caller, presented_key, verify_admin_secret
+from crawlutron.api.caller_auth import (
+    auth_denials,
+    get_keys_caller,
+    presented_key,
+    record_operator_auth_failure,
+    verify_admin_secret,
+)
 from crawlutron.api.dependencies import CallerDep
 from crawlutron.api.key_throttle import shared_throttle
 from crawlutron.models.caller_identity import CallerIdentity
@@ -54,6 +60,7 @@ async def operator_guard(request: Request) -> bool:
         throttle.record_admin_success()
     else:
         throttle.record_admin_failure()
+        record_operator_auth_failure(getattr(getattr(request.app, "state", None), "audit_store", None))
     request.state.caller = matched
     return matched
 

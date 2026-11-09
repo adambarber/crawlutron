@@ -87,6 +87,9 @@ class KeyVerifyThrottle(MeterLedger[_Bucket]):
 
     def record_admin_failure(self) -> None:
         """Count one failed admin-token guess against the shared admin bucket."""
+        from crawlutron.runtime.metrics import get_metrics
+
+        get_metrics().record_admin_auth_failure()
         self._record_bucket_failure(self.ADMIN_BUCKET)
 
     def record_admin_success(self) -> None:
@@ -107,6 +110,9 @@ class KeyVerifyThrottle(MeterLedger[_Bucket]):
             self._buckets.move_to_end(key)
             now = self._clock()
         if bucket.cooldown_until > now:
+            from crawlutron.runtime.metrics import get_metrics
+
+            get_metrics().record_key_verify_throttle_trip()
             raise _throttled()
 
     def _locked_get_or_mint(self, key: str, now: float) -> _Bucket:

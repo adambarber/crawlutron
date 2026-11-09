@@ -79,8 +79,20 @@ def presented_key(request: Request) -> str | None:
     return _presented_key(request)
 
 
+def record_operator_auth_failure(audit, *, actor: str = "anonymous") -> None:
+    """One durable audit row per failed operator authentication (#697); the
+    #696 counter stays the metric, this is the durable record -- never both
+    wired at separate sites. No-op when no audit store is wired (tests)."""
+    if audit is None:
+        return
+    audit.record_event(actor=actor, action="operator_auth_failure", target_key_id=None, outcome="refused")
+
+
 def _raise_invalid_api_key() -> NoReturn:
     """Shared 401 for any failed /v1/keys credential."""
+    from crawlutron.runtime.metrics import get_metrics
+
+    get_metrics().record_auth_refusal()
     raise http_error(401, "invalid_api_key", "Unknown or revoked API key")
 
 
@@ -159,6 +171,7 @@ async def get_keys_caller(request: Request) -> CallerIdentity:
     throttle.check_admin()
     if not _constant_time_eq(secret, admin_token):
         throttle.record_admin_failure()
+        record_operator_auth_failure(_audit_store(request))
         _raise_invalid_api_key()
     throttle.record_admin_success()
     return CallerIdentity(
@@ -192,6 +205,14 @@ async def get_caller_identity(request: Request) -> CallerIdentity:
     if not secret:
         return anonymous_caller()
     return await _caller_from_secret(request, secret)
+
+
+def _audit_store(request: Request):
+    """The app's audit trail, or None when unwired (fail-open recording only:
+    an audit outage must not take the auth door down)."""
+    return getattr(getattr(request, "app", None), "state", None) and getattr(
+        request.app.state, "audit_store", None
+    )
 
 
 def verify_admin_secret(secret: str, request: Request) -> bool:
@@ -372,6 +393,7 @@ __all__ = [
     "key_admin_token",
     "presented_key",
     "quota_denials",
+    "record_operator_auth_failure",
     "refuse_anonymous_cookie_namespace",
     "resolve_page_limit",
     "verify_admin_secret",
