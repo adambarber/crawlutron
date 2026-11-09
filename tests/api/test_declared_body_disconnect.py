@@ -5,10 +5,9 @@ the middleware with a 413, and a slow under-cap drip must still be delivered.
 import asyncio
 
 import pytest
-from starlette.responses import Response
 
 from crawlutron.api.middleware import limit_request_body
-from tests._asgi_request import make_request
+from tests._asgi_request import body_reader_call_next, make_request
 
 
 def _disconnecting_receive(disconnect_after: int):
@@ -55,19 +54,11 @@ async def test_slow_declared_body_under_the_cap_is_delivered_intact():
         {"type": "http.request", "body": b"C" * 5, "more_body": False},
     ]
     request = make_request(drip, headers=[(b"content-length", b"15")])
-    seen = {}
+    seen: dict[str, bytes] = {}
 
-    async def call_next(req):
-        body = bytearray()
-        while True:
-            message = await req.receive()
-            body += message.get("body", b"")
-            if not message.get("more_body", False):
-                break
-        seen["body"] = bytes(body)
-        return Response("ok")
-
-    response = await asyncio.wait_for(limit_request_body(request, call_next), timeout=2.0)
+    response = await asyncio.wait_for(
+        limit_request_body(request, body_reader_call_next(seen, probe=False)), timeout=2.0
+    )
     assert response.status_code == 200
     assert seen["body"] == b"AAAAABBBBBCCCCC", seen["body"]
 

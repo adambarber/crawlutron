@@ -5,9 +5,10 @@ admitted more bytes -- ``truncated`` is now sticky and short-circuits each.
 
 import pytest
 from starlette.responses import Response
+from starlette.types import Message
 
 from crawlutron.api.middleware import MAX_REQUEST_BODY_BYTES, limit_request_body
-from tests._asgi_request import make_request, pass_through
+from tests._asgi_request import body_reader_call_next, make_request, pass_through
 
 CAP = 10
 
@@ -24,46 +25,34 @@ def _one_declared_chunk(declared: int):
     return _one_chunk(b"x" * declared, headers=[(b"content-length", str(declared).encode())])
 
 
-async def _read_body_and_probe(request) -> bytes:
-    """Read the body the app sees, then probe once more -- the shape of a
-    streaming reader that checks for a trailing chunk after ``more_body``."""
-    seen = bytearray()
-    while True:
-        message = await request.receive()
-        seen += message.get("body", b"")
-        if not message.get("more_body", False):
-            break
-    extra = await request.receive()
-    seen += extra.get("body", b"")
-    return bytes(seen)
-
-
 @pytest.fixture()
 def small_cap():
     return CAP
 
 
+def _declared_then_stream(request_stream: list[dict[str, object]], declared: int):
+    """A declared body plus the chunks that follow it -- the arrange the
+    post-replay and truncation tests share."""
+    return make_request(request_stream, headers=[(b"content-length", str(declared).encode())])
+
+
 async def test_no_bytes_admitted_after_truncating_final_chunk(small_cap):
     """The truncating chunk ends the body (more_body=False); a later receive()
     must not fall through to a still-positive ``remaining`` and hand over more."""
-    request = make_request(
+    request = _declared_then_stream(
         [
             {"type": "http.request", "body": b"AAAA", "more_body": True},
             {"type": "http.request", "body": b"B" * 24, "more_body": False},
             # The app's post-final probe carries a fresh oversized payload.
             {"type": "http.request", "body": b"C" * 24, "more_body": False},
-        ]
+        ],
+        declared=4,
     )
-    seen = {}
-
-    async def call_next(req):
-        seen["body"] = await _read_body_and_probe(req)
-        return Response("")
-
-    await limit_request_body(request, call_next, max_bytes=small_cap)
-
-    assert len(seen["body"]) == small_cap, len(seen["body"])
-    assert seen["body"] == b"AAAA" + b"B" * (small_cap - 4)
+    seen: dict[str, bytes] = {}
+    await limit_request_body(request, body_reader_call_next(seen), max_bytes=small_cap)
+    delivered: bytes = seen["body"]
+    assert len(delivered) == small_cap, len(delivered)
+    assert delivered == b"AAAA" + b"B" * (small_cap - 4)
 
 
 async def test_drain_still_empties_the_client_stream(small_cap):
@@ -77,7 +66,7 @@ async def test_drain_still_empties_the_client_stream(small_cap):
         {"type": "http.request", "body": b"", "more_body": False},
     ]
     request = make_request(messages)
-    seen = {}
+    seen: dict[str, bytes] = {}
 
     async def call_next(req):
         body = bytearray()
@@ -184,13 +173,9 @@ async def test_unparsable_content_length_falls_through_to_the_wrapper():
         ],
         headers=[(b"content-length", b"not-a-number")],
     )
-    seen = {}
+    seen: dict[str, bytes] = {}
 
-    async def call_next(req):
-        seen["body"] = await _read_body_and_probe(req)
-        return Response("")
-
-    response = await limit_request_body(request, call_next, max_bytes=CAP)
+    response = await limit_request_body(request, body_reader_call_next(seen), max_bytes=CAP)
 
     assert response.status_code == 200
     assert len(seen["body"]) == CAP
@@ -202,7 +187,7 @@ async def test_truncation_preserves_the_chunks_own_keys():
     request = make_request(
         [{"type": "http.request", "body": b"A" * 40, "more_body": False, "trailer": "x-checksum"}]
     )
-    seen = {}
+    seen: dict[str, Message] = {}
 
     async def call_next(req):
         seen["message"] = await req.receive()
@@ -210,8 +195,9 @@ async def test_truncation_preserves_the_chunks_own_keys():
 
     await limit_request_body(request, call_next, max_bytes=CAP)
 
-    assert seen["message"]["trailer"] == "x-checksum"
-    assert seen["message"]["more_body"] is False
+    message = seen["message"]
+    assert message["trailer"] == "x-checksum"
+    assert message["more_body"] is False
 
 
 def test_default_cap_is_sixteen_mib():
@@ -243,3 +229,37 @@ async def test_cap_is_enforced_on_the_app_that_serves_traffic():
     assert oversized.status_code == 413, oversized.status_code
     # Not a 413 for every request: a cap that refuses everything is not a cap.
     assert within.status_code != 413, within.status_code
+
+
+async def test_post_replay_pass_through_is_capped(small_cap):
+    """After the buffered declared body replays, the live stream stays capped:
+    a client that declared small and streams big cannot hand the app an
+    uncapped firehose (#666)."""
+    request = _declared_then_stream(
+        [
+            {"type": "http.request", "body": b"AB", "more_body": True},
+            {"type": "http.request", "body": b"C" * 40, "more_body": True},
+            {"type": "http.request", "body": b"D" * 40, "more_body": False},
+        ],
+        declared=2,
+    )
+    seen: dict[str, bytes] = {}
+    await limit_request_body(request, body_reader_call_next(seen), max_bytes=small_cap)
+    delivered = seen["body"]
+    assert delivered == b"AB" + b"C" * (small_cap - 2) and len(delivered) == small_cap, delivered
+
+
+async def test_drain_stops_at_the_cap_not_one_chunk_past(small_cap):
+    """The 413 drain stops once the cap is drained: ``<=`` read one chunk past
+    a drain that landed exactly on the cap (#666)."""
+    # Cap 10: two 5-byte chunks land the drain exactly ON the cap; the third
+    # 5-byte chunk is the one the old `<=` guard admitted.
+
+    def chunk(body: bytes) -> dict[str, object]:
+        return {"type": "http.request", "body": body, "more_body": True}
+
+    messages = [chunk(b"X" * 5), chunk(b"Y" * 5), chunk(b"") | {"more_body": False}]
+    response = await _refused_response(messages, declared=4096)
+
+    assert response.status_code == 413
+    assert len(messages) == 1, "the drain read past the cap it had reached"
