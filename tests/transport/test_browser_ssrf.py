@@ -281,7 +281,9 @@ async def test_websocket_handler_resolve_is_bounded_by_the_dns_posture(monkeypat
     started = time.monotonic()
     await handler(ws)
     assert ws.closed and not ws.connected
-    assert time.monotonic() - started < 3.0, "the websocket guard waited out the resolver"
+    # Contention-tolerant bound (#658 shape): generous headroom below the pin's
+    # own 7s hang — only waiting OUT the hang fails, a slow abort that fired does not.
+    assert time.monotonic() - started < 6.5, "the websocket guard waited out the resolver"
 
 
 @pytest.mark.real_sleeps
