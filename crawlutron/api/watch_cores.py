@@ -9,6 +9,7 @@ refuses webhook_url (no tool-delivered URL may bypass WebhookTarget/NormalizedUr
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, NoReturn
+from urllib.parse import parse_qsl, urlsplit
 
 from crawlutron.api.exceptions import http_error, validation_http_error
 from crawlutron.models.host_policy import HostPolicy
@@ -16,6 +17,7 @@ from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.watch_deleted_response import WatchDeletedResponse
 from crawlutron.models.watch_list_response import WatchListResponse
 from crawlutron.models.watch_state import WatchState
+from crawlutron.safety.url_redaction import is_secret_name
 from crawlutron.transport.freshness import default_clock
 
 if TYPE_CHECKING:
@@ -27,6 +29,24 @@ if TYPE_CHECKING:
     from crawlutron.storage.watch_store import WatchStore
 
 __all__ = ["delete_watch_core", "get_watch_core", "list_watches_core", "register_watch_core"]
+
+
+def _refuse_credential_shaped_query(url: str) -> None:
+    """Refuse a watch URL whose query carries a credential-shaped parameter (#660).
+
+    The raw spelling is echoed to webhook receivers, so a secret-named query
+    value would leave at delivery time; refusal at creation keeps it out.
+    """
+    names = [name for name, _ in parse_qsl(urlsplit(url).query, keep_blank_values=True)]
+    secret = next((name for name in names if is_secret_name(name)), None)
+    if secret:
+        msg = f"watch URL query parameter {secret!r} carries credential-shaped vocabulary and is refused"
+        raise http_error(
+            422,
+            "validation_error",
+            "Request validation failed",
+            {"errors": [{"msg": msg}]},
+        )
 
 
 def _raise_not_found(watch_id: str) -> NoReturn:
@@ -58,6 +78,7 @@ async def register_watch_core(
         url = NormalizedUrl(payload.url, policy=host_policy)
     except ValueError as error:
         raise validation_http_error(error) from error
+    _refuse_credential_shaped_query(url.raw)
     owner = caller.caller_id
     if await watch_store.acount_for_owner(owner) >= settings.max_watches_per_caller:
         raise http_error(

@@ -106,6 +106,13 @@ https-only (#651): both webhook doors refuse `http://` callback targets.
 - Run behind a reverse proxy that strips `Server` headers and adds
   request-id logging.
 
+## Watch URLs
+
+- Watch URLs carrying credential-shaped query parameters (names matching the
+  secret-vocabulary door, e.g. `token`, `api_key`, `password`) are refused at
+  creation with a 422 naming the parameter. Watch URLs are echoed verbatim to
+  webhook receivers on change, so the raw spelling never carries a secret.
+
 ## Audit Trail
 
 - `docs/reviews/ADVERSARIAL_REVIEW_BROWSER_CRAWLER.md` tracks the findings and

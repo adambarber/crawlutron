@@ -158,3 +158,17 @@ async def test_deleting_a_watch_stops_it_being_checked(watch_store):
     assert read.status_code == 404, read.text
     # The row is gone, so a sweep cannot find a watch nobody is watching.
     assert watch_store.due(10_000.0) == []
+
+
+async def test_a_watch_url_with_a_credential_shaped_query_param_is_refused(watch_store):
+    """#660: watch URLs carrying credential-shaped query parameters are refused
+    at creation, naming the parameter."""
+    response = await _register(
+        watch_store,
+        url="https://watcher.example.com/feed?token=x",
+        interval_seconds=INTERVAL,
+    )
+
+    assert response.status_code == 422, response.text
+    assert "token" in response.text, response.text
+    assert watch_store.list_watches() == []
