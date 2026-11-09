@@ -25,7 +25,7 @@ from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.map_request import MapRequest
 from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
 from crawlutron.runtime.metrics import get_metrics
-from crawlutron.storage.result_store import CrawlResultStore
+from crawlutron.storage.result_store import CrawlResultStore, CrawlSpillStore
 from tests._job_harnesses import ScriptedExecute, make_job_store
 from tests._result_builders import engine_result
 
@@ -79,6 +79,14 @@ async def test_gate_releases_the_slot_when_the_body_fails_outright():
     assert _active() == before
 
 
+def _real_stores(tmpdir: str):
+    """The real store pair the production ``crawl`` signature promises."""
+    return (
+        CrawlResultStore(pathlib.Path(tmpdir) / "results.db"),
+        CrawlSpillStore(pathlib.Path(tmpdir) / "spills.db"),
+    )
+
+
 async def test_rejected_crawl_hands_its_slot_back_and_still_counts_the_error(caplog):
     """The real /v1/crawl handler refusing a batch over the cap exercises the whole
     gate: the shared 422 envelope, the operator warning, and /v1/crawl's own error
@@ -91,11 +99,13 @@ async def test_rejected_crawl_hands_its_slot_back_and_still_counts_the_error(cap
     # promises it will be handed.
     with tempfile.TemporaryDirectory() as tmpdir:
         with caplog.at_level(logging.WARNING), pytest.raises(HTTPException) as exc_info:
+            result_store, spill_store = _real_stores(tmpdir)
             await crawl(
                 CrawlRequest(urls=["http://example.com/", "http://example.com/2"]),
                 _denied_by_batch_cap(),
                 make_job_store(tmpdir),
-                CrawlResultStore(pathlib.Path(tmpdir) / "results.db"),
+                result_store,
+                spill_store,
                 asyncio.Event(),
             )
 
@@ -185,11 +195,13 @@ async def _run_crawl(
     payload: CrawlRequest, tmpdir: str, job_store
 ) -> JSONResponse | Response | UnifiedCrawlResponse:
     """The public crawl() door over one real per-test store pair."""
+    result_store, spill_store = _real_stores(tmpdir)
     return await crawl(
         payload,
         CrawlerSettings.from_mapping(),
         job_store,
-        CrawlResultStore(pathlib.Path(tmpdir) / "results.db"),
+        result_store,
+        spill_store,
         asyncio.Event(),
     )
 
@@ -202,7 +214,7 @@ async def test_crawl_holds_exactly_one_slot_for_the_whole_request(monkeypatch):
     """
     held: list[int] = []
 
-    async def _record_slot(payload_dict, *, settings, shutdown_event, url_pairs=None):
+    async def _record_slot(payload_dict, *, settings, shutdown_event, url_pairs=None, spill_store=None):
         held.append(_active())
         return await ScriptedExecute(results=[])(
             payload_dict, settings=settings, shutdown_event=shutdown_event
@@ -252,7 +264,7 @@ async def test_crawl_succeeds_at_a_cap_of_one(monkeypatch):
     """
     monkeypatch.setattr(main_helpers, "readiness_state", ReadinessState(max_active_requests=1))
 
-    async def _execute(payload_dict, *, settings, shutdown_event, url_pairs=None):
+    async def _execute(payload_dict, *, settings, shutdown_event, url_pairs=None, spill_store=None):
         return await ScriptedExecute(results=[engine_result("http://example.test/", "rendered")])(
             payload_dict, settings=settings, shutdown_event=shutdown_event
         )

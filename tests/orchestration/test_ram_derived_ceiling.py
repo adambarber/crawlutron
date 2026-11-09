@@ -18,12 +18,12 @@ from crawlutron.runtime.pressure_sizing import (
     doc_worker_count,
     max_http_concurrency_for,
 )
+from crawlutron.storage.result_store import CrawlSpillStore
 from crawlutron.transport.browser_pool import derive_browser_pool_size
 from crawlutron.transport.cache import HttpCache
 from crawlutron.transport.content_cache import ContentCache
 from tests._fetch_doubles import FetcherDouble
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
-from tests._result_builders import Spill
 
 
 def test_ram_derived_scheduler_ceiling_accounts_for_doc_workers():
@@ -52,13 +52,17 @@ def test_ram_derived_ceiling_matches_admission_policy():
     assert compute_ram_derived_concurrency(_ceiling_probe_state()) == admission.max_http_concurrency
 
 
+def _spill_store_never_used() -> CrawlSpillStore:
+    """A store the ceiling never opens rows for; in-memory, closed by the test."""
+    return CrawlSpillStore(":memory:")
+
+
 def _never_read_dependencies() -> PipelineDependencies:
     """A dependencies bag the ceiling never consults; every reader defaults."""
     # Spelled with distinct lambda parameter names so this module's bag is not
     # a textual clone of another test's (each consumer owns its own defaults).
     return PipelineDependencies(
         get_content_cache=lambda: ContentCache(""),  # the ceiling never reads it
-        make_spill=lambda _spill_path: Spill(),
         compile_scope_regex_safe=lambda _compiled: None,
         stale_seeds=lambda _seed, _cache, _policy: set(),
         fetch_and_decode=None,
@@ -86,6 +90,6 @@ def _ceiling_probe_state() -> PipelineState:
         cache=None,
         content_cache=None,
         webhook_url=None,
-        spill_path=None,
+        spill_store=_spill_store_never_used(),
         dependencies=_never_read_dependencies(),
     )

@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from crawlutron.storage.result_store import CrawlResultStore
+from crawlutron.storage.result_store import CrawlResultStore, CrawlSpillStore
 from tests._host_policy_entry_table import host_policy_entry_table as _table_entries
 from tests._host_policy_probes import (
     _BLOCKED_URL,
@@ -36,6 +36,7 @@ async def _probe_crawl_endpoint(monkeypatch, tmp_path):
             job_store,
             # A real result store, not ``object()``.
             CrawlResultStore(tmp_path / "host-policy-results.db"),
+            CrawlSpillStore(tmp_path / "host-policy-spills.db"),
             asyncio.Event(),
         ),
         effects,

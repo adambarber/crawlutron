@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, NamedTuple, cast
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.crawl_task import CrawlTask
 from crawlutron.models.taxonomy import Classification, CrawlError
-from crawlutron.orchestration.spill_sink import SpillSink
 from crawlutron.runtime.metrics import MetricsStore
 from crawlutron.transport.results import TerminalResult, failed_engine_result
 from crawlutron.vocabulary.taxonomy import CrawlClassification
@@ -25,6 +24,18 @@ if TYPE_CHECKING:
 
 # How long a recursion tolerates admission making NO progress before it stops.
 NO_PROGRESS_STALL_SECONDS: float = 60.0
+
+
+def spill_result(run: RecursiveRunState, index: int, result: EngineCrawlResult) -> Awaitable[None]:
+    """One result to the crawl's spill rows; a None spill drops it (a caller that
+    disabled spilling owns that answer)."""
+    if run.spill is None:
+        return _noop()
+    return run.spill.aput(run.request_id, index, result)
+
+
+async def _noop() -> None:
+    return None
 
 
 class AdmissionStallGuard:
@@ -50,19 +61,15 @@ class AdmissionStallGuard:
         return self._clock() - self._last_progress >= self._bound
 
 
-async def fail_remaining_frontier(
-    spill: SpillSink,
-    spill_write: Callable[[SpillSink | None, int, EngineCrawlResult], Awaitable[None]],
-    frontier: deque[tuple[int, CrawlTask]],
-) -> None:
+async def fail_remaining_frontier(run: RecursiveRunState, frontier: deque[tuple[int, CrawlTask]]) -> None:
     """Report every frontier URL as a capacity-stalled failure.
 
     The URLs were never dispatched, so dropping them would mask the stall.
     """
     while frontier:
         _depth, job = frontier.popleft()
-        await spill_write(
-            spill,
+        await spill_result(
+            run,
             job.index,
             failed_engine_result(
                 TerminalResult(
@@ -114,7 +121,7 @@ async def crawl_batches(
         allowed_jobs = await stages.start_runner(run, state, metrics)
         if not allowed_jobs and stall_guard.stalled():
             if run.spill is not None:
-                await fail_remaining_frontier(run.spill, run.spill_write, state.frontier)
+                await fail_remaining_frontier(run, state.frontier)
             return
         if not allowed_jobs:
             # Zero-admission pass: yield the turn -- never hot-spin the gates.
@@ -132,4 +139,5 @@ __all__ = [
     "NO_PROGRESS_STALL_SECONDS",
     "crawl_batches",
     "fail_remaining_frontier",
+    "spill_result",
 ]

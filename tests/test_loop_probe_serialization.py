@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_policy import CrawlPolicy
-from crawlutron.orchestration.engine import ResultSpill
+from crawlutron.storage.result_store import CrawlSpillStore
 from crawlutron.transport.content_cache import ContentCache
 from tests._fetch_doubles import FetcherDouble
 from tests._loop_liveness import LoopLiveness as _LoopLiveness
@@ -76,14 +76,13 @@ class TestContentCacheStoreSerializationOffTheEventLoop:
 
 
 class TestSpillWriteDictOffTheEventLoop:
-    """``ResultSpill.write`` offloads ``json.dumps``, but the dict literal --
-    ``to_dict(result)`` walking a multi-MB result -- must be built inside the
-    offloaded call too (#536)."""
+    """``CrawlSpillStore.put`` serializes inside the atwin's worker thread:
+    the ``to_dict`` walk of a multi-MB result must never run on the loop (#536)."""
 
     async def test_large_result_spill_write_does_not_block_the_event_loop(
         self, tmp_path, monkeypatch
     ) -> None:
-        import crawlutron.orchestration.engine as engine
+        import crawlutron.storage.result_store as result_store_module
         from crawlutron.models.crawl_strategy_attempt import CrawlStrategyAttempt
         from crawlutron.models.host_policy import HostPolicy
         from crawlutron.models.normalized_url import NormalizedUrl
@@ -91,13 +90,13 @@ class TestSpillWriteDictOffTheEventLoop:
 
         liveness = _LoopLiveness()
         observed: list[int] = [-1]  # loop progress seen by the to_dict walk
-        real_to_dict = engine.to_dict
+        real_to_dict = result_store_module.to_dict
 
         def slow_to_dict(result):
             observed[0] = liveness.wait_for_progress()
             return real_to_dict(result)
 
-        monkeypatch.setattr(engine, "to_dict", slow_to_dict)
+        monkeypatch.setattr(result_store_module, "to_dict", slow_to_dict)
 
         host_policy = HostPolicy.from_settings(CrawlerSettings.from_mapping())
         normalized = NormalizedUrl("http://example.com/", policy=host_policy)
@@ -118,16 +117,16 @@ class TestSpillWriteDictOffTheEventLoop:
             headers={"content-type": "text/html"},
             text="y" * (2 * 1024 * 1024),
         )
-        spill = ResultSpill(str(tmp_path / "probe.spill.ndjson"))
+        store = CrawlSpillStore(tmp_path / "probe.spills.db")
         try:
 
             async def scenario() -> None:
-                await spill.write(0, result)
+                await store.aput("r-probe", 0, result)
 
             await liveness.run_with_heartbeat(scenario, timeout=30)
         finally:
-            spill.close()
+            store.close()
         assert observed[0] >= liveness.needed, (
             f"the event loop made {observed[0]} heartbeat ticks while a multi-MB "
-            "result was dict-walked for the spill line"
+            "result was dict-walked for the spill row"
         )

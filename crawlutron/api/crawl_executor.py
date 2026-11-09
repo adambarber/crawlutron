@@ -15,6 +15,7 @@ from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.taxonomy import as_classification
 from crawlutron.orchestration.engine import crawl_request
+from crawlutron.storage.result_store import CrawlSpillStore
 from crawlutron.transport.browser_pool import PooledBrowserWorker, get_browser_pool
 from crawlutron.vocabulary.strategies import BROWSER_STRATEGIES
 from crawlutron.vocabulary.taxonomy import CrawlClassification
@@ -52,6 +53,7 @@ async def execute_crawl(
     settings,
     shutdown_event: asyncio.Event | None,
     url_pairs: list[tuple[str, NormalizedUrl]] | None = None,
+    spill_store: CrawlSpillStore | None = None,
 ) -> ProducerEnvelope:
     """Run a crawl shared by every crawl entry point. ``payload`` is the declared
     :class:`CrawlRequest` model; an invalid URL surfaces as 422, a missing pool as
@@ -77,6 +79,7 @@ async def execute_crawl(
         url_pairs=url_pairs,
         browser_worker=pooled_worker,
         shutdown_event=shutdown_event,
+        spill_store=spill_store,
     )
 
 

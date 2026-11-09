@@ -20,8 +20,12 @@ from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.crawl_task import CrawlTask
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
-from crawlutron.orchestration.admission_stall import AdmissionStallGuard, BatchStages, crawl_batches
-from crawlutron.orchestration.spill_sink import SpillSink, write_spill
+from crawlutron.orchestration.admission_stall import (
+    AdmissionStallGuard,
+    BatchStages,
+    crawl_batches,
+    spill_result,
+)
 from crawlutron.runtime.metrics import MetricsStore, get_metrics
 from crawlutron.runtime.pressure_gates import ResourceGate
 from crawlutron.runtime.pressure_sizing import (
@@ -30,6 +34,7 @@ from crawlutron.runtime.pressure_sizing import (
 )
 from crawlutron.safety.safe_regex import BoundedPattern
 from crawlutron.safety.url_redaction import redact_url
+from crawlutron.storage.result_store import CrawlSpillStore
 from crawlutron.transport.results import failed_result_for
 from crawlutron.transport.scheduler import DomainScheduler
 from crawlutron.vocabulary.limits import ENGINE_BATCH_CONCURRENCY_MULTIPLIER
@@ -64,7 +69,8 @@ class RecursiveRunState:
     robots_crawl_delay: Callable[[NormalizedUrl], Awaitable[float | None]] | None
     robots_disallowed: Callable[[CrawlTask], Awaitable[EngineCrawlResult]]
     sitemap_seeds: Callable[[], Awaitable[list[NormalizedUrl]]]
-    spill: SpillSink | None
+    spill: CrawlSpillStore | None
+    request_id: str
     max_depth: int
     max_pages: int
     respect_robots: bool
@@ -78,7 +84,6 @@ class RecursiveRunState:
     host_policy: HostPolicy
     ramp_max: int
     http_heavy_lookahead: int
-    spill_write: Callable[[SpillSink | None, int, EngineCrawlResult], Awaitable[None]]
     robots_timeout_seconds: float = 30.0
 
 
@@ -163,7 +168,7 @@ async def _robots_admitted_batch(ctx: _BatchContext, batch: list[_Admitted]) -> 
     allowed_jobs: list[_Admitted] = []
     for (depth, job), (allowed, delay) in zip(pending, decisions, strict=True):
         if run.respect_robots and not allowed:
-            await run.spill_write(run.spill, job.index, await run.robots_disallowed(job))
+            await spill_result(run, job.index, await run.robots_disallowed(job))
             state.visited.add(job.normalized_url)
             state.page_count += 1
             continue
@@ -348,7 +353,7 @@ async def _commit_recursive_result(
         return False
     if not run.include_html:
         result = replace(result, html=None, text=None)
-    await run.spill_write(run.spill, job.index, result)
+    await spill_result(run, job.index, result)
     state.page_count += 1
     return True
 
@@ -429,7 +434,8 @@ async def run_recursive_crawl(
     robots_crawl_delay: Callable[[NormalizedUrl], Awaitable[float | None]] | None = None,
     robots_disallowed: Callable[[CrawlTask], Awaitable[EngineCrawlResult]],
     sitemap_seeds: Callable[[], Awaitable[list[NormalizedUrl]]],
-    spill: SpillSink | None,
+    spill: CrawlSpillStore | None,
+    request_id: str,
     shutdown_event: asyncio.Event,
     max_depth: int,
     max_pages: int,
@@ -453,6 +459,7 @@ async def run_recursive_crawl(
         robots_disallowed=robots_disallowed,
         sitemap_seeds=sitemap_seeds,
         spill=spill,
+        request_id=request_id,
         max_depth=max_depth,
         max_pages=max_pages,
         respect_robots=respect_robots,
@@ -467,7 +474,6 @@ async def run_recursive_crawl(
         robots_timeout_seconds=robots_timeout_seconds,
         ramp_max=RECURSIVE_RAMP_MAX,
         http_heavy_lookahead=_HTTP_HEAVY_LOOKAHEAD,
-        spill_write=write_spill,
     )
     state = await _start_recursive_state(run, jobs)
     await crawl_batches(
