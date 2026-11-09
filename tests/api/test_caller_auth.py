@@ -16,11 +16,12 @@ from tests.factories.store import complete_job
 
 
 def test_203_cleanup_pins():
-    # #203 pin 1: presented_key has all call sites in caller_auth.py, so it stays private.
+    # #676 inverted pin 1: the credential funnel is ONE parsing path, so guards read it
+    # through the public door presented_key() (#203's private-only posture predates it).
     import crawlutron.api.caller_auth as caller_auth
 
-    assert "presented_key" not in caller_auth.__all__
-    assert not hasattr(caller_auth, "presented_key")
+    assert "presented_key" in caller_auth.__all__
+    assert not hasattr(caller_auth, "_presented_key") or caller_auth.presented_key is not None
 
     # #203 pin 2: CallerIdentity.label is written but never read in app/.
     from crawlutron.models.caller_identity import CallerIdentity

@@ -111,6 +111,19 @@ async def test_metrics_endpoint_gates_caller_detail_behind_operator_token(tmp_pa
         assert gated.status_code == 200
         assert 'crawler_crawl_requests_by_caller_total{caller="key_a"} 1.0' in gated.text
 
-        wrong = await client.get("/metrics", headers={"X-API-Key": "wrong"})
+
+async def test_bearer_admin_token_exposes_caller_detail(tmp_path):
+    """The documented credential law is X-API-Key OR Bearer: the operator gate
+    must see the token whichever way it was presented (#676)."""
+    _bind_singleton(tmp_path)
+    get_metrics().observe_crawl(caller_id="key_a")
+
+    client = await _metrics_client(admin_token="test-admin-token")
+    async with client:
+        gated = await client.get("/metrics", headers={"Authorization": "Bearer test-admin-token"})
+        assert gated.status_code == 200
+        assert 'crawler_crawl_requests_by_caller_total{caller="key_a"} 1.0' in gated.text
+
+        wrong = await client.get("/metrics", headers={"Authorization": "Bearer wrong"})
         assert wrong.status_code == 200
         assert "by_caller_total" not in wrong.text

@@ -268,6 +268,14 @@ async def test_an_unauthenticated_request_is_refused(result_store, job_store):
 _FOREIGN_TRACE_NAME = "crawl_foreign"
 
 
+def _assert_cross_tenant(response) -> None:
+    """The operator verdict: 200, the foreign record examined, its host suggested."""
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["records_examined"] == 1
+    assert [s["host"] for s in body["suggestions"]] == [canonical("https://foreign.test/blocked").site]
+
+
 def _foreign_row() -> dict[str, JsonValue]:
     return cast("dict[str, JsonValue]", _stored_trace(_FOREIGN_TRACE_NAME, "https://foreign.test/blocked"))
 
@@ -283,19 +291,29 @@ async def test_a_keyed_caller_does_not_see_another_callers_evidence(result_store
     assert body["records_examined"] == 0
 
 
-async def test_the_operator_token_sees_the_cross_tenant_rollup(result_store, job_store):
-    """#514: the full rollup is operator-tier, mirroring the /metrics detail gate."""
+async def _operator_rollup(result_store, job_store, *, bearer: bool):
+    """One operator rollup over the foreign record; the credential law's two
+    presentations are the parameter -- the verdict is the same either way."""
     await result_store.aput(_FOREIGN_TRACE_NAME, _foreign_row(), owner="key_b")
-
+    headers = {"Authorization": "Bearer test-admin-token"} if bearer else {"X-API-Key": "test-admin-token"}
     async with policy_client(
         result_store,
         job_store,
         caller=KEY_A,
         key_admin_token="test-admin-token",
     ) as client:
-        response = await client.get("/v1/policy-suggestions", headers={"X-API-Key": "test-admin-token"})
+        return await client.get("/v1/policy-suggestions", headers=headers)
 
-    assert response.status_code == 200, response.text
-    body = response.json()
-    assert body["records_examined"] == 1
-    assert [s["host"] for s in body["suggestions"]] == [canonical("https://foreign.test/blocked").site]
+
+async def test_the_operator_token_sees_the_cross_tenant_rollup(result_store, job_store):
+    """#514: the full rollup is operator-tier, mirroring the /metrics detail gate."""
+    response = await _operator_rollup(result_store, job_store, bearer=False)
+    _assert_cross_tenant(response)
+
+
+async def test_the_bearer_presented_operator_token_sees_the_cross_tenant_rollup(result_store, job_store):
+    """#676: the credential law is X-API-Key OR Bearer; the split-brain operator
+    parse only saw x-api-key, so a Bearer admin token silently got the scoped
+    per-tenant view instead of the cross-tenant one."""
+    response = await _operator_rollup(result_store, job_store, bearer=True)
+    _assert_cross_tenant(response)

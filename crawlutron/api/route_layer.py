@@ -11,7 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 
-from crawlutron.api.caller_auth import auth_denials, get_keys_caller
+from crawlutron.api.caller_auth import auth_denials, get_keys_caller, presented_key, verify_admin_secret
 from crawlutron.api.dependencies import CallerDep
 from crawlutron.api.key_throttle import shared_throttle
 from crawlutron.models.caller_identity import CallerIdentity
@@ -44,9 +44,7 @@ async def operator_guard(request: Request) -> bool:
     token is paced BEFORE the compare and its outcome is recorded, mirroring
     the keys door (#659) while keeping the soft 200-on-miss contract (#209).
     """
-    from crawlutron.api.caller_auth import verify_admin_secret
-
-    secret = request.headers.get("x-api-key", "").strip()
+    secret = presented_key(request)
     if not secret:
         return False
     throttle = shared_throttle()

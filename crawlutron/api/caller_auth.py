@@ -73,6 +73,12 @@ def _presented_key(request: Request) -> str | None:
     return None
 
 
+def presented_key(request: Request) -> str | None:
+    """The one credential-parsing funnel's public door: every guard that extracts
+    a presented secret reads it here, never re-parses headers itself."""
+    return _presented_key(request)
+
+
 def _raise_invalid_api_key() -> NoReturn:
     """Shared 401 for any failed /v1/keys credential."""
     raise http_error(401, "invalid_api_key", "Unknown or revoked API key")
@@ -364,6 +370,7 @@ __all__ = [
     "identity_for_key",
     "is_operator",
     "key_admin_token",
+    "presented_key",
     "quota_denials",
     "refuse_anonymous_cookie_namespace",
     "resolve_page_limit",
