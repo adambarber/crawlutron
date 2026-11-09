@@ -95,6 +95,7 @@ __all__ = [
     "ResultStoreDep",
     "SettingsDep",
     "ShutdownEventDep",
+    "TrackerDep",
     "WatchStoreDep",
     "TrackingDep",
     "get_caller_key_store",
