@@ -21,6 +21,7 @@ from curl_cffi.requests.models import STREAM_END
 from crawlutron.models.http_fetch_result import HttpFetchResult
 from crawlutron.models.http_fetcher import HttpFetcher
 from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.safety.url_redaction import redact_url
 from crawlutron.transport import http_client_pool, pinned_transport, pooled_clients
 from crawlutron.transport.decompression import DecompressionError, DecompressionTooLargeError
 from crawlutron.transport.decompression import decompress_body as _decompress_body
@@ -286,7 +287,7 @@ async def cffi_fetch(
     except Exception as error:  # other cffi failures fall back, but visibly
         logger.warning(
             "cffi_fetch_fallback",
-            extra={"url": url.raw, "error_code": type(error).__name__},
+            extra={"url": redact_url(url.raw), "error_code": type(error).__name__},
         )
         return None
 
