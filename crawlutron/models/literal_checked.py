@@ -60,6 +60,19 @@ def check_taxonomy_agreement(obj: object) -> None:
 class LiteralChecked:
     """Base for a dataclass whose fields carry taxonomy ``Literal`` annotations."""
 
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        super().__init_subclass__(**kwargs)
+        own_post_init = cls.__dict__.get("__post_init__")
+        if own_post_init is None:
+            return
+
+        def _belted(self: LiteralChecked, _own=own_post_init) -> None:
+            _own(self)
+            check_literal_fields(self)
+            check_taxonomy_agreement(self)
+
+        type.__setattr__(cls, "__post_init__", _belted)
+
     def __post_init__(self) -> None:
         check_literal_fields(self)
         check_taxonomy_agreement(self)
