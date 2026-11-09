@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 
 from crawlutron.api.dependencies import get_settings
 from crawlutron.config.settings import CrawlerSettings
+from crawlutron.discovery.links import OPENAPI_DOCS_LINK
 from crawlutron.models.auth_capabilities_record import AuthCapabilitiesRecord
 from crawlutron.models.capabilities_response import CapabilitiesPayload, CapabilitiesResponse
 from crawlutron.models.crawl_extraction_method import CrawlExtractionMethod
@@ -59,8 +60,8 @@ def capabilities_payload(settings: CrawlerSettings) -> CapabilitiesPayload:
         "search": _search_fields(settings),
         "mcp": _mcp_fields(),
         "crawl_timing": _crawl_timing_fields(),
-        "openapi_url": "/openapi.json",
-        "swagger_ui_url": "/docs",
+        "openapi_url": OPENAPI_DOCS_LINK,
+        "swagger_ui_url": OPENAPI_DOCS_LINK,
     }
 
 

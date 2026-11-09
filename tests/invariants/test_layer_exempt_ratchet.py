@@ -10,7 +10,7 @@ from collections.abc import Callable, Sequence
 
 from fastapi.routing import APIRoute
 
-from crawlutron.api.route_layer import LAYER_EXEMPT_RATCHET, PENDING_METERING_ROWS, ExemptRow
+from crawlutron.api.route_layer import ANONYMOUS_METERED, LAYER_EXEMPT_RATCHET, ExemptRow
 from crawlutron.api.router_registry import ROUTER_MODULES
 from tests.invariants.test_route_layer import _offender_module
 
@@ -92,26 +92,50 @@ def test_exempt_ratchet_never_increases():
 def test_every_served_route_is_guarded_or_exempt():
     """The converse: nothing the app serves escapes the layer silently.
 
-    served - guarded - exempt - pending must be empty; removing a PENDING
-    row REQUIRES landing its metering -- deletion is not an exit, it is the fix.
+    served - guarded - exempt must be empty. The #664 PENDING table was sealed
+    at zero (#668): every previously-pending surface meters through the
+    anonymous bucket (api/anonymous_throttle.py), so the table and its pins
+    are gone -- this unconditional assertion is the converse guard.
     """
     guarded = _guarded_keys()
     exempt = {(row.method, row.path.split(":")[0]) for row in LAYER_EXEMPT_RATCHET}
-    pending = {(row.method, row.path) for row in PENDING_METERING_ROWS}
+    anonymous = {(row.method, row.path) for row in ANONYMOUS_METERED}
     # Starlette derives HEAD from every GET route, so HEAD mirrors GET here.
     raw = _served_routes()
     served = raw - {("head", path) for _, path in raw} | {
         ("get", path) for method, path in raw if method == "head"
     }
     ungoverned = []
-    for method, path in sorted(served - guarded - exempt - pending):
+    for method, path in sorted(served - guarded - exempt - anonymous):
         for route in _routes_with_key((method, path)):
             ungoverned.append(f"{route}:{method.upper()} {path}")
     assert not ungoverned, (
         "served routes outside the auth+metering layer and the exemption ratchet "
-        "(add a PENDING-METERING row to track one, or land its metering; removing "
-        "a PENDING row requires landing its metering): " + ", ".join(ungoverned)
+        "(land its metering; the PENDING table is sealed shut at zero -- a new "
+        "unmetered surface needs an owner-reviewed row): " + ", ".join(ungoverned)
     )
+
+
+def test_anonymous_rows_match_real_routes():
+    """A stale anonymous-metered row (renamed or deleted route) fails the gate."""
+    routes = _served_routes()
+    for row in ANONYMOUS_METERED:
+        key = (row.method, row.path)
+        assert key in routes, f"anonymous-metered row {key} no longer matches a served route"
+
+
+def test_anonymous_ratchet_never_increases():
+    """The pinned literal only moves down, in the commit that earns it."""
+    assert len(ANONYMOUS_METERED) == 4, (
+        "ANONYMOUS_METERED is pinned at 4; adding a row demands the metering "
+        "landed in the same commit and this literal lowered/raised deliberately"
+    )
+
+
+def test_anonymous_rows_carry_a_justification():
+    """A metered-surface declaration without a stated reason is not an explicit act."""
+    for row in ANONYMOUS_METERED:
+        assert isinstance(row, ExemptRow) and len(row.reason) > 20, f"row {row} lacks a real justification"
 
 
 def _routes_with_key(key: tuple[str, str]) -> list[str]:
@@ -130,12 +154,6 @@ def _routes_with_key(key: tuple[str, str]) -> list[str]:
 
     _walk_served(collect)
     return [h for h in hits if h and h != "None"]
-
-
-def test_pending_rows_carry_the_pending_marker():
-    """A PENDING row must say so: removing one requires landing its metering."""
-    for row in PENDING_METERING_ROWS:
-        assert "PENDING-METERING" in row.reason, f"row {row} is not marked PENDING-METERING"
 
 
 def test_every_row_carries_a_justification():

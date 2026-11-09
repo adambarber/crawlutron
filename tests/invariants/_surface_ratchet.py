@@ -88,6 +88,8 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/api/crawl_router.py": (4, 3),
     "crawlutron/api/dependencies.py": (16, 7),
     "crawlutron/api/exceptions.py": (10, 7),
+    # #668: the single-homed discovery-link constants the 404 details reuse.
+    "crawlutron/discovery/links.py": (3, 0),
     "crawlutron/api/identity_router.py": (5, 3),
     "crawlutron/api/job_runner.py": (15, 12),
     "crawlutron/api/jobs_router.py": (6, 5),
@@ -110,7 +112,9 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/api/webhooks.py": (17, 15),
     "crawlutron/extraction/content.py": (4, 4),
     "crawlutron/extraction/llm_format.py": (4, 4),
-    "crawlutron/mcp/constants.py": (18, 0),
+    # #668 raised 18,0 -> 19,0: RATE_LIMITED is the JSON-RPC code the anonymous
+    # meter's /mcp refusal answers with.
+    "crawlutron/mcp/constants.py": (19, 0),
     "crawlutron/mcp/protocol.py": (6, 6),
     "crawlutron/mcp/router.py": (2, 1),
     "crawlutron/mcp/server.py": (6, 5),
@@ -126,9 +130,15 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/api/job_cores.py": (5, 5),
     # #644: the one declaration of the module-level feature routers.
     "crawlutron/api/router_registry.py": (1, 0),
-    # #664: the auth+metering layer (three guards, two router factories, the
-    # public guard-name set, and the exemption ratchet row).
+    # #664: the auth+metering layer (guards, router factories, ratchet row).
+    # #668: PENDING sealed at zero and left; ANONYMOUS_METERED joined (12, 5).
     "crawlutron/api/route_layer.py": (12, 5),
+    # #668: the anonymous IP-bucket meter over the docs surfaces, /mcp
+    # anonymous traffic, and the 404 route-miss (metered on the response stage).
+    "crawlutron/api/anonymous_throttle.py": (9, 3),
+    # #668: the shared process-meter skeleton the two throttles compose (the
+    # jscpd logic gate's extraction, replacing two hand-copied ledger triples).
+    "crawlutron/api/meter_ledger.py": (2, 2),
     "crawlutron/orchestration/admission_stall.py": (5, 3),
     "crawlutron/orchestration/recursive.py": (11, 7),
     "crawlutron/orchestration/request_pipeline.py": (5, 3),

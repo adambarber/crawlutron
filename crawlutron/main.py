@@ -222,9 +222,11 @@ def _install_error_surface(app) -> None:
     # crawlutron/api/middleware.py for how truncation and keep-alive are handled).
     from starlette.exceptions import HTTPException as StarletteHTTPException
 
+    from crawlutron.api.anonymous_throttle import throttle_anonymous_surfaces
     from crawlutron.api.exceptions import http_exception_handler, validation_exception_handler
     from crawlutron.api.middleware import limit_request_body, reject_hostile_origin
 
+    app.middleware("http")(throttle_anonymous_surfaces)
     app.middleware("http")(reject_hostile_origin)
     app.middleware("http")(limit_request_body)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)

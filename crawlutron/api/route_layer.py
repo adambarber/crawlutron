@@ -125,41 +125,44 @@ LAYER_EXEMPT_RATCHET: tuple[ExemptRow, ...] = (
         "caller's identity and the key-verify throttle.",
     ),
 )
-PENDING_METERING_ROWS: tuple[ExemptRow, ...] = (
-    # #664 follow-up: each row below is served and externally reachable but NOT
-    # yet metered; removing a PENDING row requires landing its metering first.
+
+
+#: The anonymous-metered surfaces (#668): externally reachable, outside the
+#: layer (no caller identity), and metered per remote IP through
+#: api/anonymous_throttle.py's middleware + the 404 handler's bucket check.
+#: The list moves DOWN only; adding a row demands landing metering first.
+ANONYMOUS_METERED: tuple[ExemptRow, ...] = (
     ExemptRow(
         "post",
         "/mcp",
-        "PENDING-METERING: the MCP transport endpoint; the follow-up ticket owns "
-        "its caller-identity + metering scope decision.",
+        "MCP transport; anonymous traffic meters through the anonymous IP bucket, "
+        "presented-credential traffic through the caller's own quota.",
     ),
     ExemptRow(
         "get",
         "/docs",
-        "PENDING-METERING: FastAPI's Swagger UI, a static HTML read of the spec; "
-        "follow-up ticket decides meter vs. pin.",
+        "FastAPI's Swagger UI: a static HTML read, metered per remote IP.",
     ),
     ExemptRow(
         "get",
         "/docs/oauth2-redirect",
-        "PENDING-METERING: FastAPI's OAuth redirect helper page; pure static HTML.",
+        "FastAPI's OAuth redirect helper page: pure static HTML, metered per IP.",
     ),
     ExemptRow(
         "get",
         "/redoc",
-        "PENDING-METERING: FastAPI's ReDoc UI, a static HTML read of the spec.",
+        "FastAPI's ReDoc UI: a static HTML read, metered per remote IP.",
     ),
 )
 
 
 __all__ = [
     "ADMIN_GUARD_NAME",
+    "ANONYMOUS_METERED",
     "GUARD_NAME",
     "LAYER_EXEMPT_RATCHET",
     "LAYER_GUARDS",
     "OPERATOR_GUARD_NAME",
-    "PENDING_METERING_ROWS",
     "ExemptRow",
     "admin_guarded_router",
     "guard_admin_request",

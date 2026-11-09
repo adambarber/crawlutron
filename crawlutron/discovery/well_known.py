@@ -1,9 +1,9 @@
-"""Well-known discovery endpoint."""
+"""Well-known discovery endpoint (the machine door the 404 details advertise)."""
 
 from fastapi import APIRouter, Depends
 
-from crawlutron.api.dependencies import get_settings
 from crawlutron.config.settings import CrawlerSettings
+from crawlutron.discovery.links import OPENAPI_DOCS_LINK
 from crawlutron.models.discovery_response import DiscoveryPayload, DiscoveryResponse
 from crawlutron.models.service_identity import SERVICE_IDENTITY
 
@@ -13,7 +13,7 @@ def discovery_payload(settings: CrawlerSettings) -> DiscoveryPayload:
         **SERVICE_IDENTITY,
         "links": {
             "openapi": "/openapi.json",
-            "swagger_ui": "/docs",
+            "swagger_ui": OPENAPI_DOCS_LINK,
             "liveness": "/health",
             "readiness": "/ready",
             "capabilities": "/v1/capabilities",
@@ -70,11 +70,14 @@ def discovery_payload(settings: CrawlerSettings) -> DiscoveryPayload:
 
 def create_well_known_router() -> APIRouter:
     """Create well-known discovery router."""
+    from crawlutron.api.dependencies import get_settings
+
+    _settings_dep = get_settings
     router = APIRouter(tags=["Discovery"])
 
     @router.get("/.well-known/crawler-service", response_model=DiscoveryResponse)
     async def well_known_crawler_service(
-        settings: CrawlerSettings = Depends(get_settings),
+        settings: CrawlerSettings = Depends(_settings_dep),
     ) -> DiscoveryPayload:
         """Discover crawler service contracts."""
         return discovery_payload(settings)

@@ -16,11 +16,9 @@ the window remainder is 429-refused -- fail-closed by choice.
 
 from __future__ import annotations
 
-import threading
 import time
-from collections import OrderedDict
 
-from crawlutron.runtime import process_state
+from crawlutron.api.meter_ledger import MeterLedger, register_shared_meter
 
 __all__ = ["KeyVerifyThrottle", "shared_throttle"]
 
@@ -51,7 +49,7 @@ class _Bucket:
         self.cooldown_until = 0.0
 
 
-class KeyVerifyThrottle:
+class KeyVerifyThrottle(MeterLedger[_Bucket]):
     """Fail-closed cooldown over failed key verifications, one chokepoint.
 
     Buckets are keyed on the presented credential's parseable key id; anything
@@ -75,9 +73,7 @@ class KeyVerifyThrottle:
     ADMIN_BUCKET = "admin"
 
     def __init__(self, *, clock=time.monotonic) -> None:
-        self._clock = clock
-        self._buckets: OrderedDict[str, _Bucket] = OrderedDict()
-        self._lock = threading.Lock()
+        super().__init__(clock=clock)
         self._mint_window_started = clock()
         self._minted = 0
 
@@ -185,9 +181,6 @@ class KeyVerifyThrottle:
     def _reset(self) -> None:
         self._buckets.clear()
 
-    def _has(self) -> bool:
-        return bool(self._buckets)
-
 
 _SHARED = KeyVerifyThrottle()
 
@@ -197,12 +190,4 @@ def shared_throttle() -> KeyVerifyThrottle:
     return _SHARED
 
 
-def _reset_shared() -> None:
-    _SHARED._reset()
-
-
-def _has_shared() -> bool:
-    return _SHARED._has()
-
-
-process_state.register(__name__, _reset_shared, _has_shared)
+register_shared_meter(__name__, _SHARED)
