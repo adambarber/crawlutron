@@ -89,7 +89,9 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/api/caller_concurrency.py": (1, 1),
     "crawlutron/api/crawl_executor.py": (1, 1),
     "crawlutron/api/crawl_router.py": (4, 3),
-    "crawlutron/api/dependencies.py": (16, 7),
+    # #656 raised 16,7 -> 18,8: get_concurrency_tracker + TrackerDep make the
+    # app-state stash load-bearing (the getattr-None scatter is refused loudly).
+    "crawlutron/api/dependencies.py": (18, 8),
     "crawlutron/api/exceptions.py": (10, 7),
     # #668: the single-homed discovery-link constants the 404 details reuse.
     "crawlutron/discovery/links.py": (3, 0),

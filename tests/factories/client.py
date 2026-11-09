@@ -33,6 +33,7 @@ def isolation_app(
     keys: caller_key_store.CallerKeyStore,
 ) -> FastAPI:
     """A test app with the crawl and key routers over isolated stores."""
+    from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
     from crawlutron.api.crawl_router import router as crawl_router
     from crawlutron.api.keys_router import router as keys_router
 
@@ -40,6 +41,7 @@ def isolation_app(
     app.include_router(crawl_router)
     app.include_router(keys_router)
     app.state.caller_key_store = keys
+    app.state.concurrency_tracker = CallerConcurrencyTracker()
     grant_test_admin_token(app)
     app.dependency_overrides[get_job_store] = lambda: store
     app.dependency_overrides[get_result_store] = lambda: results

@@ -12,6 +12,8 @@ from typing import Annotated
 from fastapi import Depends, Request
 
 from crawlutron.api.caller_auth import Tracking, get_caller_identity, get_keys_caller
+from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
+from crawlutron.api.exceptions import http_error
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.storage.caller_key_store import CallerKeyStore
@@ -50,9 +52,24 @@ def get_caller_key_store(request: Request) -> CallerKeyStore:
     return request.app.state.caller_key_store
 
 
-def get_tracking(request: Request, job_store: JobStoreDep) -> Tracking:
-    """FastAPI dependency: the one per-caller register plus the job store for admission."""
+def get_concurrency_tracker(request: Request) -> CallerConcurrencyTracker:
+    """FastAPI dependency: the per-caller concurrency tracker the app stashed.
+
+    The stash is load-bearing: an app that forgot the attribute is a wiring
+    defect and is refused here, never silently degraded to rows-only quota.
+    """
     tracker = getattr(request.app.state, "concurrency_tracker", None)
+    if tracker is None:
+        raise http_error(
+            500,
+            "tracker_missing",
+            "the service's concurrency tracker is not wired into app.state",
+        )
+    return tracker
+
+
+def get_tracking(request: Request, job_store: JobStoreDep, tracker: TrackerDep) -> Tracking:
+    """FastAPI dependency: the one per-caller register plus the job store for admission."""
     return Tracking(job_store=job_store, concurrency_tracker=tracker)
 
 
@@ -67,6 +84,7 @@ JobStoreDep = Annotated[JobStore, Depends(get_job_store)]
 ResultStoreDep = Annotated[CrawlResultStore, Depends(get_result_store)]
 WatchStoreDep = Annotated[WatchStore, Depends(get_watch_store)]
 TrackingDep = Annotated[Tracking, Depends(get_tracking)]
+TrackerDep = Annotated[CallerConcurrencyTracker, Depends(get_concurrency_tracker)]
 
 
 __all__ = [
@@ -80,6 +98,7 @@ __all__ = [
     "WatchStoreDep",
     "TrackingDep",
     "get_caller_key_store",
+    "get_concurrency_tracker",
     "get_job_store",
     "get_result_store",
     "get_settings",
