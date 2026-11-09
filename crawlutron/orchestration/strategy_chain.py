@@ -9,10 +9,12 @@ from typing import TYPE_CHECKING, cast, get_args
 from crawlutron.models.cooldown_diagnostics import CooldownDiagnostics
 from crawlutron.models.crawl_strategy import CrawlStrategy
 from crawlutron.models.taxonomy import CrawlStrategyName
+from crawlutron.transport.browser_cookies import get_browser_cookies_for
 from crawlutron.transport.browser_result import browser_strategy_result
 from crawlutron.transport.cache import HttpCache
 from crawlutron.transport.content_cache import ContentCache
 from crawlutron.transport.http import http_strategy_result
+from crawlutron.transport.request_profile import cookie_namespace_for
 from crawlutron.transport.results import (
     TerminalResult,
     engine_result_from_exception,
@@ -235,9 +237,6 @@ class _ChainRun:
         ):
             return None
         state.cffi_retry_done = True
-        from crawlutron.transport.browser_cookies import get_browser_cookies_for
-        from crawlutron.transport.request_profile import cookie_namespace_for
-
         # The crawl's own namespace, from the policy ``crawl_request`` bound
         # it from: another caller's session never rides this retry.
         namespace = cookie_namespace_for(self.context.policy.request_profile)

@@ -10,6 +10,7 @@ import threading
 from collections.abc import Callable
 
 from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.runtime import process_state
 from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE
 from crawlutron.transport.freshness import default_clock, expiry_for, is_expired, stores_for_ttl
 
@@ -105,3 +106,26 @@ class HttpCache:
     @property
     def is_closed(self) -> bool:
         return self._closed
+
+
+# Process-lifetime shared conditional cache (the engine's former module global):
+# repeated crawls replay 304 validators through this one instance.
+_SHARED_HTTP_CACHE = HttpCache()
+
+
+def shared_http_cache() -> HttpCache:
+    """The process-wide conditional cache; reset rebuilds it (new process lifetime)."""
+    return _SHARED_HTTP_CACHE
+
+
+def _reset() -> None:
+    global _SHARED_HTTP_CACHE
+    _SHARED_HTTP_CACHE = HttpCache()
+
+
+def _has() -> bool:
+    # No __len__: read the entry mapping, not bool().
+    return bool(_SHARED_HTTP_CACHE._data)
+
+
+process_state.register(__name__, _reset, _has)
