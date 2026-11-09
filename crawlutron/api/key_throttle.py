@@ -5,22 +5,17 @@ iterations -- the service's most expensive pre-auth operation. This module
 meters it: consecutive failed verifies from the same presented credential trip
 a fail-closed cooldown. It is process state like every other holder (#621).
 
-#659 anti-laundering control: the global MINT BUDGET. A distinct-credential
-flood cannot mint unlimited buckets (512 per 300s), so it can never push a
-cooldown victim's bucket out of the ledger. #663 bounds residence: when the
-mint window rolls, buckets whose failure window AND cooldown have both lapsed
-are swept -- one window's worth of live+cooling buckets is the steady state.
-Accepted shared fate: once the budget is spent, EVERY first-time caller for
-the window remainder is 429-refused -- fail-closed by choice.
-
-Per-process meter contract (#666): the ledger is process state, so N uvicorn
-workers carry N independent mint budgets (the fleet spends Nx512/window);
-the compose deployment pins CRAWLUTRON_WORKERS=1, making the per-process
-budget the fleet budget in production.
+#675 owner ruling: buckets key on a SHA-256 of the FULL presented secret, so
+garbage bodies under a victim's public key id cool their own buckets and
+third-party lockout dies. The #659 mint budget is replaced by an LRU capacity
+cap (#668 precedent): bucket minting is bounded by memory, never 429-priced.
+A cooling bucket is exempt from eviction, so a flood cannot launder a cooldown
+victim's ledger; the ledger may exceed the cap by the live-cooldown count.
 """
 
 from __future__ import annotations
 
+import hashlib
 import time
 
 from crawlutron.api.meter_ledger import MeterLedger, register_shared_meter
@@ -29,11 +24,10 @@ __all__ = ["KeyVerifyThrottle", "shared_throttle"]
 
 _FAILURE_WINDOW_SECONDS = 300.0
 _COOLDOWN_SECONDS = 60.0
-#: Global bucket-mint pricing (#659) -- THE anti-laundering control: at most
-#: this many NEW buckets per window, so a distinct-id flood is priced, not
-#: free, and bucket count stays bounded below the (deleted) eviction cap.
-_MINT_BUDGET = 512
-_MINT_WINDOW_SECONDS = 300.0
+#: The LRU bound (#675, AnonymousThrottle precedent): distinct-garbage minting
+#: is bounded by capacity, not by a 429-priced budget. Cooling buckets are
+#: eviction-exempt, so worst-case residence is capacity plus live cooldowns.
+_BUCKET_CAPACITY = 1024
 
 
 def _throttled() -> Exception:
@@ -57,17 +51,12 @@ class _Bucket:
 class KeyVerifyThrottle(MeterLedger[_Bucket]):
     """Fail-closed cooldown over failed key verifications, one chokepoint.
 
-    Buckets are keyed on the presented credential's parseable key id; anything
-    unparseable or overlong pools into one fixed ``unknown`` bucket, so varying
-    garbage cannot mint buckets. There is NO eviction (#659): the global mint
-    budget is the anti-laundering control -- a flood cannot mint enough new
-    buckets to displace a cooldown victim's ledger (#659), and #663 sweeps
-    lapsed non-cooling buckets at each mint-window roll, so residence is
-    capped at one window's live+cooling buckets.
+    Buckets key on a hash of the FULL presented secret (#675): distinct
+    garbage hashes to distinct buckets, so poisoning requires the victim's
+    secret itself. The ledger is LRU-capped; a cooling bucket is never evicted.
     """
 
     MAX_FAILURES = 5
-    UNKNOWN_BUCKET = "unknown"
     #: The dedicated bucket every /v1/keys admin-token guess meters against
     #: (#659): one shared ledger, so per-credential bucket minting cannot
     #: dilute the admin door's pacing. Accepted griefing risk: 5 wrong
@@ -76,11 +65,6 @@ class KeyVerifyThrottle(MeterLedger[_Bucket]):
     #: space on the one door that must not be dilutable, and a mint flood
     #: would then block admin failure-recording entirely.
     ADMIN_BUCKET = "admin"
-
-    def __init__(self, *, clock=time.monotonic) -> None:
-        super().__init__(clock=clock)
-        self._mint_window_started = clock()
-        self._minted = 0
 
     def check(self, presented: str) -> None:
         """Refuse while the credential's bucket is cooling; a caller-readable
@@ -110,52 +94,44 @@ class KeyVerifyThrottle(MeterLedger[_Bucket]):
         with self._lock:
             self._buckets.pop(self.ADMIN_BUCKET, None)
 
-    def _mint_bucket(self, key: str, now: float) -> _Bucket:
-        """Mint a NEW bucket against the global budget (#659); a refused mint
-        raises the shared 429 shape, so a distinct-id flood is priced."""
-        if now - self._mint_window_started > _MINT_WINDOW_SECONDS:
-            self._mint_window_started = now
-            self._minted = 0
-            self._sweep_lapsed(now)
-        if self._minted >= _MINT_BUDGET:
-            raise _throttled()
-        self._minted += 1
-        bucket = _Bucket()
-        bucket.window_started = now
-        self._buckets[key] = bucket
-        return bucket
-
     def residence(self) -> int:
-        """Live bucket count: the ledger residence #663 caps (test/probe door)."""
+        """Live bucket count: the bounded-ledger probe door (test/probe)."""
         with self._lock:
             return len(self._buckets)
-
-    def _sweep_lapsed(self, now: float) -> None:
-        """#663 residence cap: drop buckets whose failure window AND cooldown
-        have both lapsed; cooling victims are retained (#659)."""
-        lapsed = [
-            key
-            for key, bucket in self._buckets.items()
-            if bucket.cooldown_until < now and now - bucket.window_started > _FAILURE_WINDOW_SECONDS
-        ]
-        for key in lapsed:
-            del self._buckets[key]
 
     def _check_bucket(self, key: str) -> None:
         with self._lock:
             bucket = self._buckets.get(key)
             if bucket is None:
                 return
+            self._buckets.move_to_end(key)
             now = self._clock()
         if bucket.cooldown_until > now:
             raise _throttled()
 
     def _locked_get_or_mint(self, key: str, now: float) -> _Bucket:
-        """Under the lock: the bucket for key, or a mint-priced new one."""
+        """Under the lock: the bucket for key, or an LRU-priced new one."""
         bucket = self._buckets.get(key)
-        if bucket is None:
-            bucket = self._mint_bucket(key, now)
+        if bucket is not None:
+            self._buckets.move_to_end(key)
+            return bucket
+        self._evict_lru(now)
+        bucket = _Bucket()
+        bucket.window_started = now
+        self._buckets[key] = bucket
         return bucket
+
+    def _evict_lru(self, now: float) -> None:
+        """Drop least-recently-used buckets at capacity; cooling buckets are
+        exempt, so a flood can never launder a cooldown victim's ledger."""
+        while len(self._buckets) >= _BUCKET_CAPACITY:
+            lru_key = next(
+                (k for k, b in self._buckets.items() if b.cooldown_until <= now),
+                None,
+            )
+            if lru_key is None:
+                return
+            del self._buckets[lru_key]
 
     def _record_bucket_failure(self, key: str) -> None:
         with self._lock:
@@ -178,13 +154,8 @@ class KeyVerifyThrottle(MeterLedger[_Bucket]):
             bucket.cooldown_until = now + _COOLDOWN_SECONDS
 
     def _key_for(self, presented: str) -> str:
-        prefix, sep, rest = presented.partition(".")
-        if sep and prefix.startswith("ck_") and len(prefix) <= 64 and "." not in rest:
-            return prefix
-        return self.UNKNOWN_BUCKET
-
-    def _reset(self) -> None:
-        self._buckets.clear()
+        """The bucket key: a SHA-256 of the FULL presented secret (#675)."""
+        return hashlib.sha256(presented.encode("utf-8")).hexdigest()
 
 
 _SHARED = KeyVerifyThrottle()

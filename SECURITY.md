@@ -78,9 +78,17 @@ It is a powerful SSRF-enabled service that:
   lookup plus one PBKDF2 run, with a miss burning the same derivation against
   a fixed dummy digest so timing is uniform. That derivation is **metered**
   (#653): five consecutive failed verifications from the same presented
-  credential — or from any unparseable credential pooling into one shared
-  bucket — trip a 60-second fail-closed cooldown that answers `429
-  key_verify_throttled` without running the PBKDF2 again. Residual: entropy
+  credential trip a 60-second fail-closed cooldown that answers `429
+  key_verify_throttled` without running the PBKDF2 again. Buckets key on a
+  SHA-256 of the FULL presented secret (#675): garbage bodies under a
+  victim's public key id cool their own buckets, never the victim's, so
+  third-party lockout requires the victim's secret itself. The bucket ledger
+  is LRU-capped at 1024 entries (cooling buckets are eviction-exempt); an
+  attacker can still fill the ledger with distinct garbage (bounded memory,
+  no service refusal), and a caller who genuinely forgets their own secret
+  5x still locks THEMSELVES out for 60s. The /v1/keys admin door keeps one
+  shared bucket (#659): 5 wrong operator-token guesses lock the operator's
+  correct token out for 60s -- accepted griefing, refreshable. Residual: entropy
   of the secret, not the KDF, is the real guard; do not reuse this pattern
   for human-chosen secrets.
 

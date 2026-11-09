@@ -67,19 +67,6 @@ def test_successful_verify_resets_the_counter(tmp_path):
     throttle.check(issued.secret)
 
 
-def test_garbage_keys_share_one_unknown_bucket():
-    """Unparseable credentials pool into the fixed 'unknown' bucket, so an
-    attacker cannot mint unlimited buckets by varying garbage."""
-    throttle = KeyVerifyThrottle()
-
-    for i in range(KeyVerifyThrottle.MAX_FAILURES):
-        throttle.record_failure(f"garbage-{i}")
-
-    with pytest.raises(Exception) as raised:
-        throttle.check("garbage-fresh-never-seen")
-    assert getattr(raised.value, "status_code", None) == 429
-
-
 def test_throttle_state_is_registered_process_state():
     """The meter is process state like every other holder (#621): it registers
     a reset/probe pair with the registry."""
@@ -102,43 +89,6 @@ def _refuses(throttle: KeyVerifyThrottle, presented: str) -> None:
     """The presented credential's next verify raises the 429 refusal."""
     with pytest.raises(Exception) as raised:
         throttle.check(presented)
-    _assert_429(raised.value)
-
-
-def _flood_failures(throttle: KeyVerifyThrottle, count: int) -> int:
-    """Record one failure on `count` distinct parseable ids; return how many
-    mint attempts were 429-refused."""
-    refused = 0
-    for i in range(count):
-        try:
-            throttle.record_failure(f"ck_{i:016x}.flood")
-        except Exception as exc:
-            _assert_429(exc)
-            refused += 1
-    return refused
-
-
-def test_flood_cannot_evict_a_cooldown_victim():
-    """#659: a distinct-id flood cannot launder a victim out of its cooldown --
-    the mint budget caps bucket creation, so the victim's ledger survives."""
-    throttle = KeyVerifyThrottle()
-    victim = "ck_0123456789abcdef.victim"
-    for _ in range(KeyVerifyThrottle.MAX_FAILURES):
-        throttle.record_failure(victim)
-    _refuses(throttle, victim)
-
-    # Mint pricing refuses part of the flood; only 429s are legal.
-    _flood_failures(throttle, 1100)
-    _refuses(throttle, victim)
-
-
-def test_bucket_minting_pays_against_a_global_rate():
-    """#659: minting fresh buckets is metered against a global rate, so the
-    flood itself is priced instead of consuming unbounded meter state."""
-    throttle = KeyVerifyThrottle()
-    assert _flood_failures(throttle, 1100) > 0, "a 1100-bucket flood minted every bucket unpriced"
-    with pytest.raises(Exception) as raised:
-        throttle.record_failure("ck_ffffffffffffffff.fresh")
     _assert_429(raised.value)
 
 
@@ -182,37 +132,10 @@ def _frozen_clock():
     return state, clock
 
 
-def test_window_roll_sweeps_lapsed_failed_buckets():
-    """#663: a failure-only flood's buckets must not accumulate forever -- when
-    the mint window rolls, a lapsed non-cooling bucket is swept, so its ladder
-    resets: the key needs a FULL fresh ladder to cool again."""
-    state, clock = _frozen_clock()
-    throttle = KeyVerifyThrottle(clock=clock)
-    flood = [f"ck_{i:016x}.flood" for i in range(KeyVerifyThrottle.MAX_FAILURES * 100)]
-    for key in flood:
-        throttle.record_failure(key)
-    before = throttle.residence()
-
-    state["now"] += 301.0
-    throttle.record_failure("ck_ffffffffffffffff.fresh")
-    # Swept: only the fresh bucket remains; every lapsed non-cooling ledger
-    # row from the flood is gone.
-    assert throttle.residence() == 1, before
-    # And the refusal door shows the cooling shape is unreachable for them:
-    # re-minting one needs a full fresh ladder (no cooled residue).
-    remint = flood[0]
-    throttle.record_failure(remint)
-    throttle.check(remint)
-    for _ in range(KeyVerifyThrottle.MAX_FAILURES - 2):
-        throttle.record_failure(remint)
-        throttle.check(remint)
-    throttle.record_failure(remint)
-    _refuses(throttle, remint)
-
-
-def test_cooldown_survives_the_mint_window_roll():
-    """#663 retention side: a cooling bucket must survive the sweep -- a flood
-    cannot ride a window roll to launder a cooldown victim."""
+def test_cooldown_survives_a_capacity_flood():
+    """#675: an active cooldown survives the LRU cap -- a flood cannot launder
+    a cooldown victim's ledger (the surviving owner of the #663 retention pin,
+    whose sweep mechanism was deleted with the mint budget)."""
     state, clock = _frozen_clock()
     throttle = KeyVerifyThrottle(clock=clock)
     victim = "ck_0123456789abcdef.victim"
@@ -220,14 +143,8 @@ def test_cooldown_survives_the_mint_window_roll():
         throttle.record_failure(victim)
     _refuses(throttle, victim)
 
-    # Re-cool just before the roll so the cooldown outlives it.
-    state["now"] += 260.0
-    for _ in range(KeyVerifyThrottle.MAX_FAILURES):
-        throttle.record_failure(victim)
-
-    state["now"] += 41.0
-    throttle.record_failure("ck_ffffffffffffffff.fresh")
-    # The victim's bucket survived the sweep, so its cooldown still refuses.
+    for i in range(1200):
+        throttle.record_failure(f"ck_{i:016x}.flood-{i}")
     _refuses(throttle, victim)
 
 
