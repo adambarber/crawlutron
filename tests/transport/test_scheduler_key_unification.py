@@ -8,7 +8,7 @@ from collections import deque
 from crawlutron.admission.admission_links import AdmittedLink
 from crawlutron.models.discovered_link import DiscoveredLink
 from crawlutron.models.normalized_url import NormalizedUrl
-from crawlutron.orchestration.recursive import RecursiveState
+from crawlutron.orchestration.recursive import CrawlState
 from tests._policy_factories import canonical
 
 
@@ -29,8 +29,8 @@ def _link(page_url: str, source: NormalizedUrl) -> DiscoveredLink:
     )
 
 
-def _empty_state(next_index: int = 0, known: set[NormalizedUrl] | None = None) -> RecursiveState:
-    return RecursiveState(
+def _empty_state(next_index: int = 0, known: set[NormalizedUrl] | None = None) -> CrawlState:
+    return CrawlState(
         frontier=deque(),
         visited=set(),
         next_index=next_index,

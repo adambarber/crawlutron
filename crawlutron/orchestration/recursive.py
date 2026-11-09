@@ -8,7 +8,7 @@ from collections import deque
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field, replace
 from itertools import islice
-from typing import NamedTuple, Protocol, cast
+from typing import Protocol, cast
 
 from crawlutron.admission.admission_links import (
     AdmittedLink,
@@ -45,17 +45,12 @@ MAX_TRANSIENT_REQUEUES = 3
 type _Admitted = tuple[int, CrawlTask]
 
 
-class _BatchState(Protocol):
-    frontier: deque[tuple[int, CrawlTask]]
-    visited: set[NormalizedUrl]
-    ramp: float
-    page_count: int
+@dataclass(frozen=True, slots=True)
+class CrawlRun:
+    """One recursive crawl's fixed configuration and wiring, frozen at start.
 
-
-@dataclass
-class RecursiveRunState:
-    """Everything one recursive crawl carries while running.
-    Admission is the consumer that defines what a run offers -- dispatch reads the same object.
+    Per-batch state lives in ``CrawlState``; the two never mix, so a stage
+    signature ``(run, state, ...)`` says which values it may rewrite.
     """
 
     scheduler: DomainScheduler
@@ -80,17 +75,6 @@ class RecursiveRunState:
     http_heavy_lookahead: int
     spill_write: Callable[[SpillSink | None, int, EngineCrawlResult], Awaitable[None]]
     robots_timeout_seconds: float = 30.0
-
-
-class _BatchContext(NamedTuple):
-    """Everything a batch-admission stage is allowed to see -- the ``(run, state,
-    metrics)`` triple bundled so a stage can never be wired to one run's gate and
-    another run's bookkeeping; built once by ``admit_recursive_batch``.
-    """
-
-    run: RecursiveRunState
-    state: _BatchState
-    metrics: MetricsStore
 
 
 class _PinProvider(Protocol):
@@ -142,8 +126,11 @@ def _take_and_bucket(
     return http_items, browser_items
 
 
-async def _robots_admitted_batch(ctx: _BatchContext, batch: list[_Admitted]) -> list[_Admitted]:
-    run, state = ctx.run, ctx.state
+async def _robots_admitted_batch(
+    run: CrawlRun,
+    state: CrawlState,
+    batch: list[_Admitted],
+) -> list[_Admitted]:
     pending: list[_Admitted] = []
     seen_in_batch: set[NormalizedUrl] = set()
     for depth, job in batch:
@@ -175,20 +162,19 @@ async def _robots_admitted_batch(ctx: _BatchContext, batch: list[_Admitted]) -> 
 
 
 async def admit_recursive_batch(
-    run: RecursiveRunState,
-    state: _BatchState,
+    run: CrawlRun,
+    state: CrawlState,
     metrics: MetricsStore,
 ) -> list[_Admitted]:
-    """Resource-gate the frontier, then robots-filter whatever survived -- the
-    only place the batch-admission context is assembled, so the stage protocol is
-    stated once instead of re-spelled per stage.
-    """
-    ctx = _BatchContext(run, state, metrics)
-    return await _robots_admitted_batch(ctx, await _resource_admitted_batch(ctx))
+    """Resource-gate the frontier, then robots-filter whatever survived."""
+    return await _robots_admitted_batch(run, state, await _resource_admitted_batch(run, state, metrics))
 
 
-async def _resource_admitted_batch(ctx: _BatchContext) -> list[_Admitted]:
-    run, state, metrics = ctx
+async def _resource_admitted_batch(
+    run: CrawlRun,
+    state: CrawlState,
+    metrics: MetricsStore,
+) -> list[_Admitted]:
     scale = run.resource_gate.batch_scale_factor()
     metrics.resource_memory_utilization = run.resource_gate.memory_ratio()
     metrics.resource_cpu_utilization = run.resource_gate.cpu_ratio()
@@ -275,8 +261,10 @@ RECURSIVE_RAMP_MAX: int = 128
 _HTTP_HEAVY_LOOKAHEAD: int = RECURSIVE_RAMP_MAX * ENGINE_BATCH_CONCURRENCY_MULTIPLIER
 
 
-@dataclass
-class RecursiveState:
+@dataclass(slots=True)
+class CrawlState:
+    """The only mutable carrier of one recursive crawl: rewritten per batch."""
+
     frontier: deque[tuple[int, CrawlTask]]
     visited: set[NormalizedUrl]
     next_index: int
@@ -298,8 +286,8 @@ class RecursiveState:
 
 
 async def _seed_recursive_frontier(
-    run: RecursiveRunState,
-    state: RecursiveState,
+    run: CrawlRun,
+    state: CrawlState,
     frontier: deque[tuple[int, CrawlTask]],
     seed_identities: set[NormalizedUrl],
 ) -> None:
@@ -319,7 +307,7 @@ async def _seed_recursive_frontier(
 
 
 async def crawl_recursive_batch(
-    run: RecursiveRunState,
+    run: CrawlRun,
     allowed_jobs: list[tuple[int, CrawlTask]],
 ) -> dict[int, EngineCrawlResult] | None:
     if not allowed_jobs:
@@ -332,8 +320,8 @@ async def crawl_recursive_batch(
 
 
 async def _commit_recursive_result(
-    run: RecursiveRunState,
-    state: RecursiveState,
+    run: CrawlRun,
+    state: CrawlState,
     job: CrawlTask,
     depth: int,
     result: EngineCrawlResult,
@@ -354,8 +342,8 @@ async def _commit_recursive_result(
 
 
 async def _expand_recursive_result(
-    run: RecursiveRunState,
-    state: RecursiveState,
+    run: CrawlRun,
+    state: CrawlState,
     depth: int,
     result: EngineCrawlResult,
 ) -> None:
@@ -382,8 +370,8 @@ async def _expand_recursive_result(
 
 
 async def commit_recursive_results(
-    run: RecursiveRunState,
-    state: RecursiveState,
+    run: CrawlRun,
+    state: CrawlState,
     allowed_jobs: list[tuple[int, CrawlTask]],
     scheduled_results: dict[int, EngineCrawlResult] | None,
 ) -> None:
@@ -404,11 +392,11 @@ async def commit_recursive_results(
 
 
 async def _start_recursive_state(
-    run: RecursiveRunState,
+    run: CrawlRun,
     jobs: list[CrawlTask],
-) -> RecursiveState:
+) -> CrawlState:
     seed_identities: set[NormalizedUrl] = {job.normalized_url for job in jobs}
-    state = RecursiveState(
+    state = CrawlState(
         frontier=deque((0, job) for job in jobs),
         visited=set(),
         next_index=len(jobs),
@@ -445,7 +433,7 @@ async def run_recursive_crawl(
     robots_timeout_seconds: float = 30.0,
     stall_guard: AdmissionStallGuard | None = None,
 ) -> None:
-    run = RecursiveRunState(
+    run = CrawlRun(
         scheduler=scheduler,
         worker=worker,
         robots_allows=robots_allows,
@@ -483,8 +471,8 @@ async def run_recursive_crawl(
 
 __all__ = [
     "RECURSIVE_RAMP_MAX",
-    "RecursiveRunState",
-    "RecursiveState",
+    "CrawlRun",
+    "CrawlState",
     "admit_recursive_batch",
     "batch_is_http_heavy",
     "commit_recursive_results",

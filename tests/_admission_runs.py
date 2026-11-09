@@ -15,7 +15,7 @@ from crawlutron.models.crawl_task import CrawlTask
 from crawlutron.models.discovered_link import DiscoveredLink
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
-from crawlutron.orchestration.recursive import RecursiveRunState
+from crawlutron.orchestration.recursive import CrawlRun
 from crawlutron.orchestration.spill_sink import SpillSink
 from crawlutron.runtime.pressure_gates import ResourceGate
 from crawlutron.runtime.pressure_sizing import WeightedAdmission
@@ -148,7 +148,7 @@ def minimum_admission_run(frontier, *, http_quota, browser_quota, batch_pages=10
 
     # FixedAdmission and ContentionFreeGate satisfy the two admission fields
     # structurally; the casts are the provenance-documented-double pattern.
-    run_state = RecursiveRunState(
+    run_state = CrawlRun(
         scheduler=scheduler,
         worker=_must_not_worker,
         robots_allows=_must_not_robots_allows,
