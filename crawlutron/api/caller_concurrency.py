@@ -19,7 +19,12 @@ class CallerConcurrencyTracker:
         self._slot_locks: dict[str, asyncio.Lock] = {}
 
     def slot_lock(self, caller_id: str) -> asyncio.Lock:
-        """The admit mutex for ``caller_id``; one per caller, lazily created."""
+        """The admit mutex for ``caller_id``; one per caller, lazily created.
+
+        Locks persist for the tracker's lifetime (#665): bounded by the
+        keyed-caller population; eviction/refcounting/sweep timers are
+        refused as a second mechanism per owner ruling.
+        """
         return self._slot_locks.setdefault(caller_id, asyncio.Lock())
 
     def reserve(self, caller_id: str) -> None:
