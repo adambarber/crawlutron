@@ -217,6 +217,21 @@ async def test_pinned_dial_failure_closes_session_once(monkeypatch, stub_builder
     assert session.close_count == 1
 
 
+async def test_pinned_dial_cancelled_closes_session_once(monkeypatch, stub_builder) -> None:
+    """CancelledError during the pinned dial closes the session once and propagates."""
+    transport, request, session, response = _pinned_hop(
+        monkeypatch,
+        stub_builder,
+        [EXPECTED_BODY],
+        dial_error=asyncio.CancelledError(),
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await transport.fetch(request, max_bytes=1 << 20)
+
+    assert session.close_count == 1
+
+
 async def test_pinned_request_exception_mid_stream_closes_session_once(monkeypatch, stub_builder) -> None:
     """A RequestException raised mid-stream closes the session once and propagates."""
     transport, request, session, response = _pinned_hop(

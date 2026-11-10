@@ -107,13 +107,8 @@ class CffiTransport:
     async def _dial(
         self, request: FetchRequest
     ) -> tuple[_CffiResponse, Callable[[_CffiResponse], Awaitable[None]]]:
-        """Dial one cffi hop and return the response plus its release callable.
-
-        The one-shot pinned session (when ``resolve_entry`` is set) is deliberately
-        NOT closed here: its curl multi feeds the response queue, and closing it
-        would abort the in-flight transfer before the body is drained. The caller's
-        release callable closes the one-shot exactly once, after the terminal body
-        is fully consumed, on every exit path.
+        """Dial one pinned hop; return the response and its release callable.
+        Dial-phase failures close the one-shot session once before propagating.
         """
         await pooled_clients.drain_pending_client_closes()
         client = http_client_pool.get_cffi_session()
@@ -152,6 +147,11 @@ class CffiTransport:
         except Exception:
             # Transport failure: the caller falls back to httpx. No in-flight
             # stream survived the failed dial, so release the one-shot session.
+            await close_one_shot()
+            raise
+        except asyncio.CancelledError:
+            # Dial-phase cancel: nothing drained the stream yet, so close the
+            # one-shot session once and let the cancel propagate.
             await close_one_shot()
             raise
 
