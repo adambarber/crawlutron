@@ -10,10 +10,11 @@ log/metric/error paths) is redacted; the raw admitted URL escapes only via
 from __future__ import annotations
 
 from dataclasses import dataclass
+from urllib.parse import parse_qsl, urlsplit
 
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
-from crawlutron.safety.url_redaction import redact_url
+from crawlutron.safety.url_redaction import is_secret_name, redact_url
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,8 +33,19 @@ class WebhookTarget:
 
         Userinfo (``user:pass@host``) is refused by NormalizedUrl's own
         ``userinfo_refused`` law; webhook auth is policy.credentials, never
-        credentials in the URL.
+        credentials in the URL. A secret-named query parameter is refused too:
+        it would persist plaintext at rest and leave at delivery time.
         """
+        parsed = urlsplit(raw)
+        secret = next(
+            (name for name, _ in parse_qsl(parsed.query, keep_blank_values=True) if is_secret_name(name)),
+            None,
+        )
+        if secret:
+            raise ValueError(
+                f"webhook URL query parameter {secret!r} carries credential-shaped vocabulary"
+                " and is refused; webhook auth is policy credentials, never URL params"
+            )
         return cls(target=NormalizedUrl(raw, policy=host_policy))
 
     def delivery_url(self) -> str:

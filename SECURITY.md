@@ -72,8 +72,13 @@ It is a powerful SSRF-enabled service that:
   material — the marker value is REFUSED at the credential read edge (typed
   ValueError naming the field), so a resumed job fails loud and typed instead
   of crawling with `Authorization: Bearer [REDACTED]`; re-supply the caller's
-  credentials to resume a credentialed crawl. This covers the policy column
-  only; the `watches.webhook_url` column question is tracked separately.
+  credentials to resume a credentialed crawl. The `watches.webhook_url`
+  column is covered by the same law: `WebhookTarget.admit` refuses a webhook
+  URL whose query carries a credential-shaped parameter name (typed ValueError
+  → 422 at the create door), so a secret can never enter the column to persist.
+  Secrets reach the webhook receiver in the HMAC-signed POST body, never URL
+  params. Pre-existing rows from before this refusal carry it unredacted
+  (dev-stage stores are disposable; no migration).
 - **S6 — browser-initiated XHR/fetch is not fully host-policy-gated.** The
   Playwright route handler (`crawlutron/transport/browser_targets.py`, wired via
   `wire_ssrf_guards`) blocks navigation and subresource loads to private hosts,
