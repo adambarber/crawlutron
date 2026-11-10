@@ -20,34 +20,27 @@ from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
 from crawlutron.storage.result_store import CrawlResultStore, CrawlSpillStore
 from tests._job_harnesses import ScriptedExecute, make_job_store, scripted_engine
 from tests._result_builders import engine_result
+from tests.delta._door_harness import assert_removed_summary, baseline_row, delta_stores, seed_baseline_row
 
 URL = "http://example.com/"
 ETAG_V1 = '"v1"'
+ALIAS_URL = "HTTP://EXAMPLE.COM/page"
+ALIAS_NORMALIZED = "http://example.com/page"
+ALIAS_URL = "HTTP://EXAMPLE.COM/page"
+ALIAS_NORMALIZED = "http://example.com/page"
 
 
 def _stores(tmpdir: str):
-    return (
-        CrawlResultStore(pathlib.Path(tmpdir) / "results.db"),
-        CrawlSpillStore(pathlib.Path(tmpdir) / "spills.db"),
-    )
+    return delta_stores(tmpdir)
 
 
 def _seed_baseline(result_store, request_id: str, caller_id: str, *, markdown: str) -> None:
     """Store a baseline response payload the delta loader will read back."""
-    result_store.put(
+    seed_baseline_row(
+        result_store,
         request_id,
-        {
-            "request_id": request_id,
-            "results": [
-                {
-                    "original_url": URL,
-                    "normalized_url": URL,
-                    "validators": {"etag": ETAG_V1},
-                    "markdown": markdown,
-                }
-            ],
-        },
         owner=caller_id,
+        results=[baseline_row((URL, URL), markdown=markdown)],
     )
 
 
@@ -58,9 +51,13 @@ async def _run(
     *,
     results=None,
     caller_id: str = "caller-a",
+    result_store: CrawlResultStore | None = None,
 ) -> UnifiedCrawlResponse:
     """Run the sync crawl() door over real stores with a scripted engine."""
-    result_store, spill_store = _stores(tmpdir)
+    if result_store is None:
+        result_store, spill_store = _stores(tmpdir)
+    else:
+        spill_store = CrawlSpillStore(pathlib.Path(tmpdir) / "spills.db")
     scripted = ScriptedExecute(results=results or [])
     scripted_engine(monkeypatch, _crawl_endpoint_mod, scripted)
     response = await crawl(
@@ -136,22 +133,10 @@ async def test_shape_change_between_baseline_and_recrawl_is_not_fingerprint_chan
     shape B (include_html) must not classify changed via fingerprint_diff."""
     tmpdir = str(tmp_path)
     result_store, _ = _stores(tmpdir)
-    result_store.put(
+    seed_baseline_row(
+        result_store,
         "baseline-1",
-        {
-            "request_id": "baseline-1",
-            "results": [
-                {
-                    "original_url": URL,
-                    "normalized_url": URL,
-                    "validators": {"etag": ETAG_V1},
-                    "markdown": "one",
-                    "html": None,
-                    "text": None,
-                }
-            ],
-        },
-        owner="caller-a",
+        results=[baseline_row((URL, URL), markdown="one")],
     )
     payload = CrawlRequest(url=URL, baseline_request_id="baseline-1")
     response = await _run(
@@ -219,3 +204,58 @@ async def _scoped_run(
         results=[_result(classification="not_modified", http_status=304, markdown="one")],
         caller_id=caller_id,
     )
+
+
+async def test_baseline_url_absent_from_run_is_removed(monkeypatch, tmp_path):
+    """A baseline URL this run never answers is the removed verdict: the summary
+    counts it and skipped carries why=not_in_admitted_set for it."""
+    tmpdir = str(tmp_path)
+    removed_url = "http://example.com/gone/"
+    result_store, _ = _stores(tmpdir)
+    seed_baseline_row(
+        result_store,
+        "baseline-1",
+        results=[
+            baseline_row((URL, URL), markdown="one"),
+            baseline_row((removed_url, removed_url), markdown="two"),
+        ],
+    )
+    response = await _run(
+        monkeypatch,
+        CrawlRequest(url=URL, baseline_request_id="baseline-1"),
+        tmpdir,
+        results=[_result(markdown="one")],
+        result_store=result_store,
+    )
+    assert response.delta_summary is not None
+    assert_removed_summary(response.delta_summary, removed_url)
+
+
+async def test_baseline_alias_spelling_answered_is_not_removed(monkeypatch, tmp_path):
+    """A baseline page whose ORIGINAL text differs from the resubmitted spelling
+    is served when the run answers any of its identities: removed stays 0 and
+    the page is never listed as not_in_admitted_set."""
+    tmpdir = str(tmp_path)
+    result_store, _ = _stores(tmpdir)
+    seed_baseline_row(
+        result_store,
+        "baseline-1",
+        results=[baseline_row((ALIAS_URL, ALIAS_NORMALIZED), markdown="one")],
+    )
+    response = await _run(
+        monkeypatch,
+        CrawlRequest(url=ALIAS_NORMALIZED, baseline_request_id="baseline-1"),
+        tmpdir,
+        results=[_result(markdown="one")],
+        result_store=result_store,
+    )
+    summary = response.delta_summary
+    assert summary is not None
+    assert summary["removed"] == 0
+    skipped = summary["skipped"]
+    assert isinstance(skipped, list)
+    # Skipped shape: the one answered page appears at most once, and never
+    # under a removal contradiction.
+    removals = [row for row in skipped if row.get("why") == "not_in_admitted_set"]
+    assert removals == []
+    assert len([row for row in skipped if row.get("url") in (ALIAS_URL, ALIAS_NORMALIZED)]) <= 1

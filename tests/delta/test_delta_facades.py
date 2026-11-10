@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import pathlib
 
 import httpx
 
@@ -17,9 +16,9 @@ from crawlutron.discovery.capabilities import OUTPUT_FIELDS, capabilities_payloa
 from crawlutron.mcp.handlers import dispatch as tool_dispatch
 from crawlutron.mcp.registry import TOOLS_BY_NAME
 from crawlutron.models.crawl_request import CrawlRequest
-from crawlutron.storage.result_store import CrawlResultStore, CrawlSpillStore
 from tests._job_harnesses import ScriptedExecute, make_job_store, scripted_engine
 from tests._result_builders import engine_result
+from tests.delta._door_harness import assert_removed_summary, delta_stores
 
 URL = "http://example.com/"
 CHANGED_SINCE = 1_735_689_600.0
@@ -45,29 +44,34 @@ def test_mcp_crawl_schema_advertises_delta_knobs():
 
 
 def _stores(tmpdir: str):
-    root = pathlib.Path(tmpdir)
-    return (
-        CrawlResultStore(root / "results.db"),
-        CrawlSpillStore(root / "spills.db"),
+    return delta_stores(tmpdir)
+
+
+def _seed_baseline(result_store, request_id: str, markdown: str, *, extra_urls=()) -> None:
+    results = [
+        {
+            "original_url": URL,
+            "normalized_url": URL,
+            "validators": {"etag": '"v1"'},
+            "markdown": markdown,
+            "html": markdown,
+            "text": markdown,
+        }
+    ]
+    results.extend(
+        {
+            "original_url": url,
+            "normalized_url": url,
+            "validators": {"etag": '"v1"'},
+            "markdown": markdown,
+            "html": markdown,
+            "text": markdown,
+        }
+        for url in extra_urls
     )
-
-
-def _seed_baseline(result_store, request_id: str, markdown: str) -> None:
     result_store.put(
         request_id,
-        {
-            "request_id": request_id,
-            "results": [
-                {
-                    "original_url": URL,
-                    "normalized_url": URL,
-                    "validators": {"etag": '"v1"'},
-                    "markdown": markdown,
-                    "html": markdown,
-                    "text": markdown,
-                }
-            ],
-        },
+        {"request_id": request_id, "results": results},
         owner="",
     )
 
@@ -79,11 +83,14 @@ def _mcp_engine(monkeypatch, scripted: ScriptedExecute) -> None:
     scripted_engine(monkeypatch, handlers_mod, scripted)
 
 
-async def _mcp_crawl(monkeypatch, tmpdir: str, payload: CrawlRequest) -> dict[str, object]:
+async def _mcp_crawl(
+    monkeypatch, tmpdir: str, payload: CrawlRequest, *, result_store=None
+) -> dict[str, object]:
     """Run the MCP crawl tool dispatch over real stores with a scripted engine."""
-    result_store, spill_store = _stores(tmpdir)
-    if payload.baseline_request_id is not None:
-        _seed_baseline(result_store, payload.baseline_request_id, "one")
+    if result_store is None:
+        result_store, _ = _stores(tmpdir)
+        if payload.baseline_request_id is not None:
+            _seed_baseline(result_store, payload.baseline_request_id, "one")
     scripted = ScriptedExecute(
         results=[engine_result(URL, "not_modified", http_status=304, markdown="one", validators={})]
     )
@@ -125,6 +132,24 @@ async def test_mcp_crawl_without_knobs_stays_delta_free(monkeypatch, tmp_path):
     response = await _mcp_crawl(monkeypatch, str(tmp_path), CrawlRequest(url=URL))
     assert _first_result(response)["delta_classification"] is None
     assert response["delta_summary"] is None
+
+
+async def test_mcp_crawl_reports_removed_baseline_url(monkeypatch, tmp_path):
+    """A baseline URL the MCP run never answers is reported removed, matching
+    the REST door's removed semantics (one shared shaping home)."""
+    tmpdir = str(tmp_path)
+    removed_url = "http://example.com/gone/"
+    result_store, _ = _stores(tmpdir)
+    _seed_baseline(result_store, "baseline-1", "one", extra_urls=(removed_url,))
+    response = await _mcp_crawl(
+        monkeypatch,
+        tmpdir,
+        CrawlRequest(url=URL, baseline_request_id="baseline-1"),
+        result_store=result_store,
+    )
+    summary = response["delta_summary"]
+    assert isinstance(summary, dict)
+    assert_removed_summary(summary, removed_url)
 
 
 # --- CLI: flags map 1:1 to wire fields, omitted when unset ---
