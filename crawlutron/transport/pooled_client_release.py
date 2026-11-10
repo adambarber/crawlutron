@@ -53,10 +53,8 @@ _LIVE_LOOP_CLOSE_TASKS: set[asyncio.Task[None]] = set()
 
 
 async def safe_aclose(client: PooledClient) -> None:
-    """Await a pooled client's async close, recording any failure -- the client is
-    being replaced (its loop changed), so a close error is non-fatal but leaves
-    evidence in the #643 decline record. Shared by every kind: httpx ``aclose``
-    and curl_cffi ``close`` are both coroutines.
+    """Await a pooled client's async close, recording any failure in the #643
+    decline record -- the client is being replaced, so a close error is non-fatal.
     """
     from crawlutron.runtime.resource_lifecycle import record_declined_close
 
@@ -140,11 +138,6 @@ def _close_captured_and_queue(client: PooledClient) -> Coroutine[object, object,
             await safe_aclose(stale)
 
     return _run()
-
-
-def _drain_on_running_loop(close: Callable[[], Awaitable[object]]) -> None:
-    """Host ``close`` without a fresh loop while one runs on this thread."""
-    close_on_thread(close)
 
 
 def _schedule_on_owning_loop(bound: asyncio.AbstractEventLoop, client: PooledClient) -> None:
@@ -232,6 +225,8 @@ async def drain_pending_client_closes() -> None:
     # inside the owning loop): they own the pooled transports. The task
     # draining right now (a close task re-entering here) is excluded, or the
     # gather would wait on itself forever.
+    # The join is also the backstop under the reset abort net: _reset_release_state
+    # reclaims sockets stranded by a task that dies with its loop.
     me = asyncio.current_task()
     while pending := {
         t for t in _LIVE_LOOP_CLOSE_TASKS if t is not me and t.get_loop() is asyncio.get_running_loop()
@@ -252,10 +247,9 @@ def clear_live_loop_close_tasks() -> None:
 def _reset_release_state() -> None:
     """Release this module's reset-shaped state.
 
-    A tracked close task still pending belongs to a loop that may already be
-    gone -- no drain can join it from here, so its sockets are aborted
-    directly (loop-free fd close) before the containers empty; dropping the
-    task alone would strand the socket for GC (the unraisable __del__ family).
+    A still-pending tracked task belongs to a loop that may be gone, so its
+    sockets are aborted loop-free first; dropping the task alone would strand
+    the socket for GC (the unraisable __del__ family).
     """
     from crawlutron.transport.pooled_socket_abort import abort_transport_sockets
 
