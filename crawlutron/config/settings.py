@@ -233,7 +233,7 @@ def _core_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> _Core
         "per_domain_delay_ms": get_mapping_int(
             source, "CRAWLUTRON_PER_DOMAIN_DELAY_MS", cls.per_domain_delay_ms
         ),
-        "max_batch_size": get_mapping_int(source, "CRAWLUTRON_MAX_BATCH_SIZE", cls.max_batch_size),
+        "max_batch_size": get_mapping_int(source, "CRAWLUTRON_MAX_BATCH_SIZE", cls.max_batch_size, lo=1),
         "default_timeout_seconds": get_mapping_int(
             source,
             "CRAWLUTRON_DEFAULT_TIMEOUT_SECONDS",
