@@ -34,6 +34,24 @@ def test_fast_mode_zeroes_sleeps_for_unmarked_tests():
     assert asyncio.sleep is cf._dispatched_asyncio_sleep, asyncio.sleep
 
 
+def test_sibling_time_sleep_monkeypatch_cannot_starve_the_real_one(monkeypatch):
+    """The time.sleep half of the chokepoint: a sibling's monkeypatch captures
+    the dispatcher too, and its restore must not leave fast mode stuck ON."""
+
+    def fake_sleep(delay=None):
+        pass
+
+    monkeypatch.setattr(time, "sleep", fake_sleep)
+
+
+@pytest.mark.real_sleeps
+def test_time_sleep_is_real_after_a_sibling_monkeypatch():
+    # Boundary: fast mode OFF means real time.sleep, not a no-op left bound.
+    started = time.monotonic()
+    time.sleep(0.01)
+    assert time.monotonic() - started >= 0.005, "time.sleep did not sleep"
+
+
 @pytest.mark.real_sleeps
 async def test_deadline_refusal_survives_a_sibling_sleep_monkeypatch(monkeypatch):
     """The real victim shape, run AFTER a sibling patched asyncio.sleep: the
