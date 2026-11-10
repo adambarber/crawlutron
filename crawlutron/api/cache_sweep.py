@@ -21,11 +21,9 @@ __all__ = ["CACHE_MAINTENANCE_INTERVAL_SECONDS", "cache_maintenance_once", "swee
 
 
 def cache_maintenance_once(cache: ContentCache | None = None, now: float | None = None) -> int:
-    """One maintenance pass over the shared caches; return the removed count.
-
-    ``cache``/``now`` are the injected seams: the default cache is the same
-    ``shared_content_cache()`` instance the engine's crawls read, so the sweep
-    prunes exactly the directory production serves from.
+    """Prune the shared content cache and expired robots rules once; return the
+    removed count. ``cache``/``now`` are injected seams so the sweep reaps the
+    directory production serves from.
     """
     removed = (cache if cache is not None else shared_content_cache()).prune()
     return removed + purge_robots_cache(now=now)
@@ -37,11 +35,9 @@ async def sweep_cache_forever(
     interval_seconds: float = CACHE_MAINTENANCE_INTERVAL_SECONDS,
     clock: Callable[[], float] = default_clock,
 ) -> None:
-    """Run the maintenance pass until told to stop, on a bounded cadence.
+    """Run ``cache_maintenance_once`` on a bounded cadence until shutdown.
 
-    The wait rides the shutdown event so a stopping process leaves at once; a
-    raising pass is logged and the loop continues -- one failed prune must not
-    wedge the maintenance loop (fail-open sweep law).
+    A failing pass is logged and the loop continues (fail-open sweep law).
     """
     while not shutdown_event.is_set():
         try:
