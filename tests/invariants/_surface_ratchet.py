@@ -180,4 +180,10 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/transport/content_pipeline.py": (6, 4),
     "crawlutron/transport/http_client_pool.py": (1, 1),
     "crawlutron/transport/strategy_request.py": (1, 0),
+    # Issue #710: crawl CLI facade. Counts derived by running the gate, not
+    # predicted.
+    "crawlutron/cli/__main__.py": (11, 2),
+    "crawlutron/cli/client.py": (3, 1),
+    "crawlutron/cli/docker.py": (11, 1),
+    "crawlutron/cli/output.py": (1, 1),
 }

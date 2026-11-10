@@ -49,7 +49,7 @@ def test_every_close_implementer_conforms_to_the_lifecycle_protocol():
 
 
 def test_the_eight_declared_implementers_are_still_the_eight():
-    """The protocol's census: the tree's public close implementers are the seven
+    """The protocol's census: the tree's public close implementers are the eight
     the issue names, so a new resource class cannot grow a private release path
     without this gate seeing it."""
     implementers = {
@@ -63,6 +63,7 @@ def test_the_eight_declared_implementers_are_still_the_eight():
         "BrowserPool",
         "BrowserRenderer",
         "CoordinationStore",
+        "CrawlClient",
         "HttpCache",
         "JobStore",
         "ResourceGate",
