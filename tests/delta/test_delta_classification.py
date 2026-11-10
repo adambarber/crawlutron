@@ -174,6 +174,33 @@ def test_content_fingerprint_empty_is_none():
         assert (value is None) == (not markdown)
 
 
+def test_baseline_fingerprint_fields_record_what_was_hashed():
+    """extract_baseline records which content fields fed the fingerprint, so a
+    re-crawl at a different output shape compares over the same field set."""
+    stored: dict[str, object] = {"results": [{"original_url": URL, "markdown": "body", "html": None}]}
+    evidence = extract_baseline(stored)[URL]
+    assert evidence.fingerprint_fields == ("markdown",)
+
+
+def test_fingerprint_compared_over_baseline_field_set_not_whole_result():
+    """The current result carries extra content fields the baseline stripped:
+    the comparison hashes only the baseline's fields, so shape B vs shape A is
+    unchanged when the shared fields match, and None-field incomparability
+    degrades to validators, never a shifted-hash changed."""
+    fingerprint = content_fingerprint(engine_result(URL, "rendered", markdown="body"))
+    baseline = replace(_baseline_evidence(fingerprint=fingerprint)[URL], fingerprint_fields=("markdown",))
+    evidence_dict = {URL: baseline}
+    shape_b = engine_result(URL, "rendered", http_status=200, markdown="body", html="<p>body</p>")
+    classification, evidence = _classified(shape_b, baseline=evidence_dict)
+    assert (classification, evidence["why"]) == (UNCHANGED, "same_fingerprint")
+
+    stripped = engine_result(URL, "rendered", http_status=200, validators={"etag": '"v2"'})
+    fingerprint = content_fingerprint(engine_result(URL, "rendered", markdown="body"))
+    missing = {URL: replace(baseline, fingerprint=fingerprint, fingerprint_fields=("markdown", "html"))}
+    classification, evidence = _classified(stripped, baseline=missing)
+    assert (classification, evidence["why"]) == (CHANGED, "validators_diff")
+
+
 def test_removed_urls_for_delta():
     cases = [(["a", "b", "c"], ["a", "c"], ("b",)), ([], ["a"], ()), (["a"], [], ("a",))]
     for submitted, admitted, expected in cases:

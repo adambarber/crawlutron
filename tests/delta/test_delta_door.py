@@ -44,8 +44,6 @@ def _seed_baseline(result_store, request_id: str, caller_id: str, *, markdown: s
                     "normalized_url": URL,
                     "validators": {"etag": ETAG_V1},
                     "markdown": markdown,
-                    "html": markdown,
-                    "text": markdown,
                 }
             ],
         },
@@ -83,6 +81,7 @@ def _result(
     *,
     http_status: int = 200,
     markdown: str | None = None,
+    html: str | None = None,
     headers: dict[str, str] | None = None,
     validators: dict[str, str] | None = None,
 ):
@@ -91,6 +90,7 @@ def _result(
         classification,
         http_status=http_status,
         markdown=markdown,
+        html=html,
         headers=headers or {},
         validators=validators or {},
     )
@@ -129,6 +129,44 @@ async def test_changed_fingerprint_is_changed(monkeypatch, tmp_path):
     assert evidence is not None and evidence["why"] == "fingerprint_diff"
     summary = response.delta_summary
     assert summary is not None and summary["changed"] == 1
+
+
+async def test_shape_change_between_baseline_and_recrawl_is_not_fingerprint_changed(monkeypatch, tmp_path):
+    """A baseline stored at shape A (html stripped) compared against a re-crawl at
+    shape B (include_html) must not classify changed via fingerprint_diff."""
+    tmpdir = str(tmp_path)
+    result_store, _ = _stores(tmpdir)
+    result_store.put(
+        "baseline-1",
+        {
+            "request_id": "baseline-1",
+            "results": [
+                {
+                    "original_url": URL,
+                    "normalized_url": URL,
+                    "validators": {"etag": ETAG_V1},
+                    "markdown": "one",
+                    "html": None,
+                    "text": None,
+                }
+            ],
+        },
+        owner="caller-a",
+    )
+    payload = CrawlRequest(url=URL, baseline_request_id="baseline-1")
+    response = await _run(
+        monkeypatch,
+        payload,
+        tmpdir,
+        results=[_result(markdown="one", html="one", validators={"etag": ETAG_V1})],
+    )
+    result = response.results[0]
+    evidence = result.delta_evidence
+    assert not (
+        result.delta_classification == CHANGED
+        and evidence is not None
+        and evidence["why"] == "fingerprint_diff"
+    )
 
 
 def _baseline_run(monkeypatch, tmpdir: str, *, markdown: str, caller_id: str = "caller-a"):

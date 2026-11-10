@@ -35,11 +35,15 @@ class BaselineEvidence:
 
     ``etag``/``last_modified`` are origin validators a conditional revalidation
     can be sent against; ``fingerprint`` is the content fingerprint, or None.
+    ``fingerprint_fields`` names the content fields that fed ``fingerprint``, so
+    a re-crawl at a different output shape recomputes over the same fields
+    instead of a shifted hash (policy-invariant comparison).
     """
 
     etag: str | None = None
     last_modified: str | None = None
     fingerprint: str | None = None
+    fingerprint_fields: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,10 +79,32 @@ def content_fingerprint(item: EngineCrawlResult) -> str | None:
 
 
 def _content_fingerprint(markdown: str | None, html: str | None, text: str | None) -> str | None:
-    parts = [part for part in (markdown, html, text) if part]
-    if not parts:
+    return _fingerprint_over_fields((("markdown", markdown), ("html", html), ("text", text)))
+
+
+def _fingerprint_over_fields(
+    fields: Iterable[tuple[str, str | None]],
+) -> str | None:
+    values = [value for _, value in fields if value]
+    if not values:
         return None
-    return sha256("\x00".join(parts).encode("utf-8")).hexdigest()
+    return sha256("\x00".join(values).encode("utf-8")).hexdigest()
+
+
+def _fingerprint_matching_baseline(item: EngineCrawlResult, baseline: BaselineEvidence) -> str | None:
+    """The current result's hash over the baseline's fingerprinted fields, or None.
+
+    A re-crawl at a different output shape cannot reproduce the baseline's
+    field set: an incomparable fingerprint reports None so validators or the
+    ``evidence_incomplete`` degradation decide, never a shifted-hash "changed".
+    """
+    if baseline.fingerprint is None or not baseline.fingerprint_fields:
+        return content_fingerprint(item)
+    available = {"markdown": item.markdown, "html": item.html, "text": item.text}
+    missing = [name for name in baseline.fingerprint_fields if not available.get(name)]
+    if missing:
+        return None
+    return _fingerprint_over_fields([(name, available[name]) for name in baseline.fingerprint_fields])
 
 
 def _http_date_epoch(value: str | None) -> float | None:
@@ -141,7 +167,7 @@ def _classify_validated_200(
     context: DeltaContext,
 ) -> tuple[str, dict[str, object]]:
     """A 200 against a baseline: fingerprints decide, validators confirm."""
-    current_hash = content_fingerprint(item)
+    current_hash = _fingerprint_matching_baseline(item, baseline)
     if current_hash is not None and baseline.fingerprint is not None:
         if current_hash == baseline.fingerprint:
             return UNCHANGED, _evidence("same_fingerprint", item, baseline=baseline, context=context)
@@ -269,6 +295,15 @@ def extract_baseline(stored_payload: dict[str, object]) -> dict[str, BaselineEvi
         markdown = result.get("markdown")
         html = result.get("html")
         text = result.get("text")
+        fields = tuple(
+            name
+            for name, value in (
+                ("markdown", markdown),
+                ("html", html),
+                ("text", text),
+            )
+            if isinstance(value, str) and value
+        )
         evidence = BaselineEvidence(
             etag=etag,
             last_modified=last_modified,
@@ -277,6 +312,7 @@ def extract_baseline(stored_payload: dict[str, object]) -> dict[str, BaselineEvi
                 html if isinstance(html, str) else None,
                 text if isinstance(text, str) else None,
             ),
+            fingerprint_fields=fields,
         )
         for key in keys:
             baseline[key] = evidence
