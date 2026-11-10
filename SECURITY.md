@@ -41,7 +41,12 @@ It is a powerful SSRF-enabled service that:
   bounded anonymous identity, and key issuance is operator-gated via `/v1/keys`
   (`CRAWLUTRON_KEY_ADMIN_TOKEN`). Any exposure beyond localhost must still add
   a transport authentication layer
-  (recommendation: Caddy basic-auth or an upstream reverse proxy).
+  (recommendation: Caddy basic-auth or an upstream reverse proxy). Built-in
+  per-caller auth is the caller security boundary: API keys issued and
+  revoked through `/v1/keys` (`X-API-Key` / `Authorization: Bearer`),
+  key-isolated jobs and results, and rate-limited key verification (#653).
+  The proxy is transport-layer hardening (TLS termination, `Server` header
+  stripping, request-id logging), not a substitute for caller auth.
 
 ### What it deliberately does **not** do
 

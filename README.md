@@ -3,6 +3,8 @@
 A policy-driven, self-hosted web crawler and content-extraction service built around
 FastAPI. It exposes a single, machine-readable crawl contract that supports:
 
+**Positioning.** crawlutron is a self-hosted, policy-driven crawler for public pages. Its caller security boundary is built-in per-caller authentication (API keys issued and revoked through `/v1/keys`, operator-token gated; keyed jobs and results are readable only under their key, anonymous crawls share a bounded identity). SSRF is architecture, not an add-on: every egress target is classified, fresh-resolved, IP-pinned, and re-validated per hop and per browser subresource — `when the private-target guard is enabled`, warned once per enabled value at first use (`crawlutron/models/host_policy.py:88-100`). A transport-auth reverse proxy is recommended when exposing beyond localhost (TLS termination, `Server` header stripping, request-id logging), but built-in per-caller auth is the caller security boundary; the proxy is transport hardening, not a substitute for it. The rule framework (`tests/invariants/`) arms and bites every rule, and the pre-commit hook chain gates every commit. See `docs/architecture-ssrf.md`, `docs/architecture-governance.md`, and `SECURITY.md`.
+
 - **HTTP fetch strategies** — transparent declared-crawler HTTP and TLS-fingerprint
   impersonation (curl_cffi).
 - **Browser rendering** — headless/headed Firefox via [Camoufox](https://github.com/daijro/camoufox)
@@ -83,7 +85,7 @@ the crawler.
 
 The service is intended to be deployed as a Docker container. A standalone
 `docker-compose.yml` lives at the repository root for local development;
-production deployments typically front it with an authenticated reverse proxy.
+production deployments typically front it with a transport-auth reverse proxy (TLS termination, `Server` header stripping, request-id logging); built-in per-caller auth (`/v1/keys`, `X-API-Key`/`Authorization: Bearer`) is the caller security boundary, and the proxy is transport hardening, not a substitute for it.
 
 ## Security Posture
 
@@ -103,7 +105,9 @@ metering keys on the REMOTE ADDRESS the ASGI transport reports (`client.host`):
 behind a reverse proxy every request shares the PROXY's address and its one
 bucket — when fronting the service with a proxy, run the metering at the
 proxy or deploy as a single-tenant front. Expose it
-beyond localhost only behind an authenticated reverse proxy.
+beyond localhost only behind a transport-auth reverse proxy; built-in per-caller
+auth (`/v1/keys`) is the caller security boundary, and the proxy is transport
+hardening, not a substitute for it.
 
 What the SSRF defenses cover:
 
@@ -164,6 +168,13 @@ to defeat:
 This is unusually thorough for an open-source project. New attack
 classes should land alongside a dedicated adversarial test that fails
 without the fix.
+
+**Coverage is measured, not a badge.** No coverage badge or coverage
+ratchet is claimed. The pre-push coverage hook is measured-descriptive
+only — no threshold, no fail-under, no ratchet until the owner rules one
+(`.pre-commit-config.yaml:244-252`). The safety boundary is the invariant
+suite and the fail-closed SSRF/auth guards, not a coverage percentage.
+See `docs/architecture-governance.md`.
 
 ---
 
