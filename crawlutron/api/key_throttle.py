@@ -149,9 +149,13 @@ class KeyVerifyThrottle(MeterLedger[_Bucket]):
                 bucket.failures = 0
                 bucket.window_started = now
                 bucket.cooldown_until = 0.0
-        self._record_failure_into(bucket, now)
+            self._record_failure_into(bucket, now)
 
     def _record_failure_into(self, bucket: _Bucket, now: float) -> None:
+        """Mutate one bucket's failure ladder under ``self._lock``.
+
+        Pure bucket+now mutation (no I/O, no await) -- safe under the lock;
+        concurrent failures share one bucket, so the lock must cover it."""
         if now - bucket.window_started > _FAILURE_WINDOW_SECONDS:
             bucket.failures = 0
             bucket.window_started = now

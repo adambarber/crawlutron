@@ -6,6 +6,9 @@ cooldown at the single chokepoint (get_caller_identity's wrapper), not per-door.
 
 from __future__ import annotations
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 
 from crawlutron.api.key_throttle import KeyVerifyThrottle
@@ -171,3 +174,77 @@ def test_cooldown_expiry_rearms_the_bucket():
         throttle.check(presented)
     throttle.record_failure(presented)
     _refuses(throttle, presented)
+
+
+class _RacyThrottle(KeyVerifyThrottle):
+    """Pre-fix shape: bucket resolved under the lock, mutation outside it --
+    the lost-update window #703 closed. A gate barrier makes every worker
+    read before any worker stores; the lock is released first: no deadlock."""
+
+    def __init__(self, *, clock, gate):
+        super().__init__(clock=clock)
+        self._read_gate = gate
+
+    def _record_bucket_failure(self, key: str) -> None:
+        # Pre-fix shape: resolve under the lock, then mutate outside it.
+        with self._lock:
+            bucket = self._locked_get_or_mint(key, self._clock())
+        self._record_failure_into(bucket, self._clock())
+
+    def _record_failure_into(self, bucket, now):
+        current = bucket.failures
+        # Rendezvous: every worker reads before any worker stores.
+        self._read_gate.wait()
+        bucket.failures = current + 1
+
+
+def _run_concurrent(throttle: KeyVerifyThrottle, key: str, count: int) -> None:
+    """Run `count` concurrent record_failure calls on `key`, asserting every
+    worker completes without raising; the caller-provided throttle's gate
+    drives the interleaving under test."""
+    outcomes: list[Exception | None] = []
+
+    def worker() -> None:
+        try:
+            throttle.record_failure(key)
+        except Exception as exc:
+            outcomes.append(exc)
+        else:
+            outcomes.append(None)
+
+    with ThreadPoolExecutor(max_workers=count) as pool:
+        [pool.submit(worker) for _ in range(count)]
+    assert len(outcomes) == count, outcomes
+    assert not any(outcomes), outcomes
+
+
+def test_concurrent_record_failure_loses_increments_without_lock():
+    """#703 bug class, deterministic: without the lock every worker reads
+    failures == 0 and stores 1, so the counter ends at 1, never reaching
+    MAX_FAILURES or cooling; no deadlock, no sleeps, no GIL timing."""
+    count = KeyVerifyThrottle.MAX_FAILURES
+    key = "ck_0123456789abcdef.racy"
+    state, clock = _frozen_clock()
+    gate = threading.Barrier(count)
+    throttle = _RacyThrottle(clock=clock, gate=gate)
+
+    _run_concurrent(throttle, key, count)
+
+    # Barriered reads all see 0, so exactly one increment survives; no cooldown.
+    throttle.check(key)
+
+
+def test_concurrent_failures_reach_cooldown_threshold():
+    """N concurrent failures on one credential serialize under the lock and
+    reach the cooldown threshold; no increment is lost. The fix makes it."""
+    count = KeyVerifyThrottle.MAX_FAILURES
+    key = "ck_0123456789abcdef.concurrent"
+    state, clock = _frozen_clock()
+    throttle = KeyVerifyThrottle(clock=clock)
+
+    _run_concurrent(throttle, key, count)
+
+    # All N failures landed: bucket at threshold, fail-closed.
+    with pytest.raises(Exception) as raised:
+        throttle.check(key)
+    assert getattr(raised.value, "status_code", None) == 429
