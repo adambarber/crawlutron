@@ -51,3 +51,16 @@ pre-automation history verbatim.
   on the next merge to main. Until then it is inert.
 - Deploy, fleet concerns, and the Homebrew / npx channels are deferred
   per the #561 owner ruling.
+
+## Release artifacts
+
+#699: when release-please publishes a release, the release-please workflow
+adds one step, gated on `steps.release.outputs.release_created == 'true'`,
+that exports the frozen lock
+(`uv export --frozen --no-dev --no-emit-project --format requirements-txt`,
+the same export CI's audit job uses), builds a CycloneDX 1.6 JSON SBOM
+from it with cyclonedx-bom 8.0.1
+(`uv tool run --from cyclonedx-bom==8.0.1 cyclonedx-py requirements ... --of json`),
+and uploads `sbom.cdx.json` as an asset on the release
+(`gh release upload "$TAG" sbom.cdx.json --clobber`). No provenance
+attestation is generated; the SBOM step is the #699 closing change.
