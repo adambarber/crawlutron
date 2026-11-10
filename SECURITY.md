@@ -63,12 +63,17 @@ It is a powerful SSRF-enabled service that:
 - **S4 — credential origins ride the egress guard.** Credential origins pass
   the same SSRF egress check as crawl targets: a private/loopback credential
   origin requires `CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1`.
-- **S7 — secrets are never written at rest.** Stored policy rows
-  (`crawl_jobs.policy`) are REDACTED: the JSON serializer masks every
-  `SecretStr` value (`[REDACTED]`), so credential material lives only in the
-  live process (and the caller's request). An at-rest row proves WHICH policy
-  governed a job, not its secrets; a policy row carrying plaintext credential
-  values is a defect.
+- **S7 — secrets are never written at rest, and refuse to reload as plaintext.**
+  Stored policy rows (`crawl_jobs.policy`) are REDACTED: the JSON serializer
+  masks every `SecretStr` value (`[REDACTED]`), so credential material lives
+  only in the live process (and the caller's request). A row carrying plaintext
+  credential values is a defect. The contract is bidirectional: because the
+  stored row holds no secrets, a PAUSED job resumed from it has no credential
+  material — the marker value is REFUSED at the credential read edge (typed
+  ValueError naming the field), so a resumed job fails loud and typed instead
+  of crawling with `Authorization: Bearer [REDACTED]`; re-supply the caller's
+  credentials to resume a credentialed crawl. This covers the policy column
+  only; the `watches.webhook_url` column question is tracked separately.
 - **S6 — browser-initiated XHR/fetch is not fully host-policy-gated.** The
   Playwright route handler (`crawlutron/transport/browser_targets.py`, wired via
   `wire_ssrf_guards`) blocks navigation and subresource loads to private hosts,
@@ -136,9 +141,3 @@ https-only (#651): both webhook doors refuse `http://` callback targets.
 
 - `docs/reviews/ADVERSARIAL_REVIEW_BROWSER_CRAWLER.md` tracks the findings and
   remediation of past adversarial reviews (last updated 2026-08-21).
-- **S7 — secrets are never written at rest.** Stored policy rows
-  (`crawl_jobs.policy`) are REDACTED: the JSON serializer masks every
-  `SecretStr` value (`[REDACTED]`), so credential material lives only in the
-  live process (and the caller's request). An at-rest row proves WHICH policy
-  governed a job, not its secrets; a policy row carrying plaintext credential
-  values is a defect.

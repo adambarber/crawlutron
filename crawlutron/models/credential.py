@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationInfo, field_validator, model_validator
 
 from crawlutron.safety.header_values import reject_injectable_header_value
+from crawlutron.safety.url_redaction import redacted_marker
 
 
 class Credential(BaseModel):
@@ -55,6 +56,11 @@ class Credential(BaseModel):
         """
         if value is not None and info.field_name is not None:
             secret = value.get_secret_value() if isinstance(value, SecretStr) else value
+            if redacted_marker() in secret:
+                raise ValueError(
+                    f"{info.field_name}: redacted marker is not a live credential value"
+                    " -- re-supply the caller's credential to resume"
+                )
             reject_injectable_header_value(info.field_name, secret)
         return value
 
