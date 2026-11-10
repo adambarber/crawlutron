@@ -330,14 +330,28 @@ def _dribble_receive(interval: float):
     return dribble
 
 
-@pytest.mark.real_sleeps
 async def test_slow_collect_client_is_refused_within_the_deadline(monkeypatch):
     """A dribbling client that never delivers the declared length holds
     _collect open; the deadline refuses the truncated body instead of
-    pinning the task."""
+    pinning the task. The dribble holds on an Event, not sleeps: fast_sleeps
+    would otherwise deliver the declared bytes instantly and flip the
+    assertion (the #769 flake class)."""
+    import asyncio
+
     import crawlutron.api.middleware as mw
 
     monkeypatch.setattr(mw, "BODY_DEADLINE_SECONDS", 0.05)
 
-    request = make_request([], headers=[(b"content-length", b"100")], receive=_dribble_receive(0.01))
+    stalled = asyncio.Event()
+    delivered = 0
+
+    async def dribble_then_stall() -> Message:
+        nonlocal delivered
+        if delivered < 3:
+            delivered += 1
+            return {"type": "http.request", "body": b"X", "more_body": True}
+        await stalled.wait()
+        raise AssertionError("unreachable: the deadline must fire first")
+
+    request = make_request([], headers=[(b"content-length", b"100")], receive=dribble_then_stall)
     await _refused_within_deadline(request, max_bytes=1024)

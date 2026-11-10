@@ -22,6 +22,10 @@ RENDER_PHASE_FLOOR_SECONDS = 1.0
 #: NO default deadline, so a wedged renderer would hold the pooled page forever.
 MAX_EVALUATE_TIMEOUT_SECONDS = 5.0
 
+#: Test-only injection point: when set, page reads bound at this ceiling
+#: instead of the production constant. Never set in production wiring.
+EVALUATE_CEILING_SECONDS_OVERRIDE: float | None = None
+
 
 def render_phase_seconds(timeout_seconds: float) -> float:
     """The one render-phase budget, floored at 1s. Navigation has
@@ -30,10 +34,18 @@ def render_phase_seconds(timeout_seconds: float) -> float:
     return max(RENDER_PHASE_FLOOR_SECONDS, float(timeout_seconds))
 
 
+def _bounded_read_seconds() -> float:
+    """The effective ceiling: the test override when set, else production."""
+    override = EVALUATE_CEILING_SECONDS_OVERRIDE
+    if override is None:
+        return MAX_EVALUATE_TIMEOUT_SECONDS
+    return float(override)
+
+
 async def bounded_read(op: Awaitable[object]) -> object:
     """One page read under the evaluate ceiling. Raises TimeoutError when the
     ceiling trips; callers decide whether a wedged read degrades or fails."""
-    return await asyncio.wait_for(op, timeout=MAX_EVALUATE_TIMEOUT_SECONDS)
+    return await asyncio.wait_for(op, timeout=_bounded_read_seconds())
 
 
 async def bounded_evaluate(page: RenderPage, expression: str) -> object:

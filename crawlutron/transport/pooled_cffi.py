@@ -12,11 +12,11 @@ from typing import TYPE_CHECKING, cast
 import curl_cffi.requests as cffi_requests
 
 from crawlutron.runtime import process_state
+from crawlutron.transport.pooled_client_release import discard_if_unowned_loop
 from crawlutron.transport.pooled_clients import (
     LoopBoundPooledClient,
     PooledClientBuilder,
     bind_to_running_loop,
-    discard_if_unowned_loop,
 )
 
 if TYPE_CHECKING:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import threading
-from collections.abc import Awaitable, Callable, Coroutine, Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from http.cookiejar import CookieJar as _StdlibCookieJar
 from typing import TYPE_CHECKING, Protocol, TypeVar, cast
@@ -13,7 +13,17 @@ from typing import TYPE_CHECKING, Protocol, TypeVar, cast
 import httpx
 
 from crawlutron.runtime import process_state
-from crawlutron.runtime.resource_lifecycle import DeferredClose, record_declined_close
+from crawlutron.runtime.resource_lifecycle import DeferredClose
+from crawlutron.transport.pooled_client_release import (
+    PENDING_CLIENT_CLOSE,
+    PENDING_CLIENT_CLOSE_LOCK,
+    PooledClient,
+    close_on_fresh_loop,
+    close_on_thread,
+    discard_if_unowned_loop,
+    drain_pending_client_closes,
+    safe_aclose,
+)
 from crawlutron.transport.timeouts import Timeouts
 from crawlutron.vocabulary.identity import DEFAULT_USER_AGENT
 
@@ -21,30 +31,17 @@ if TYPE_CHECKING:
     from crawlutron.config.settings import CrawlerSettings
 
 
-class PooledClient(Protocol):
-    """What the pooled-client lifecycle actually asks of a pooled object: a close
-    handle and the loop-stamp this module installs. Both real kinds (httpx,
-    curl_cffi) satisfy it structurally; the closed predicate stays per-descriptor.
-    """
-
-    def close(self) -> Awaitable[object]: ...
-    async def aclose(self) -> object: ...
-
-
 PooledClientBuilder = Callable[["CrawlerSettings | None"], PooledClient]
 
 __all__ = [
     "LoopBoundPooledClient",
-    "PooledClient",
+    "PENDING_CLIENT_CLOSE_MAX",
     "PooledClientBuilder",
     "T",
     "bind_to_running_loop",
     "close_async_http_client",
-    "discard_if_unowned_loop",
-    "drain_pending_client_closes",
     "get_async_http_client",
     "http_singleton",
-    "safe_aclose",
     "swap_pooled_builders",
 ]
 
@@ -78,12 +75,10 @@ def _build_async_client(settings: CrawlerSettings | None = None) -> httpx.AsyncC
 
 
 # Superseded loop-bound pooled clients awaiting a loop to close on -- one bounded
-# backlog and reaper cover both httpx and curl_cffi kinds.
-_PENDING_CLIENT_CLOSE: list[PooledClient] = []
+# backlog and reaper cover both httpx and curl_cffi kinds. The queue itself lives
+# in pooled_client_release (one backlog across the release helpers).
 
-_PENDING_CLIENT_CLOSE_MAX = 32
-
-_PENDING_CLIENT_CLOSE_LOCK = threading.Lock()
+PENDING_CLIENT_CLOSE_MAX = 32
 
 
 def _queue_superseded_close(old_client: PooledClient) -> PooledClient | None:
@@ -92,12 +87,12 @@ def _queue_superseded_close(old_client: PooledClient) -> PooledClient | None:
     race cannot pop two distinct entries. The caller releases the displaced object *outside* the lock.
     """
     stale_to_release: PooledClient | None = None
-    with _PENDING_CLIENT_CLOSE_LOCK:
-        already_queued = old_client in _PENDING_CLIENT_CLOSE
+    with PENDING_CLIENT_CLOSE_LOCK:
+        already_queued = old_client in PENDING_CLIENT_CLOSE
         if not already_queued:
-            if len(_PENDING_CLIENT_CLOSE) >= _PENDING_CLIENT_CLOSE_MAX:
-                stale_to_release = _PENDING_CLIENT_CLOSE.pop(0)
-            _PENDING_CLIENT_CLOSE.append(old_client)
+            if len(PENDING_CLIENT_CLOSE) >= PENDING_CLIENT_CLOSE_MAX:
+                stale_to_release = PENDING_CLIENT_CLOSE.pop(0)
+            PENDING_CLIENT_CLOSE.append(old_client)
     return stale_to_release
 
 
@@ -121,20 +116,6 @@ def _release_dropped_client(
         stale_to_release,
         is_closed=_client_is_closed if is_closed is None else is_closed,
     )
-
-
-async def drain_pending_client_closes() -> None:
-    """Close any superseded pooled clients on the current (live) loop.
-
-    Schedule fires on the *dying* loop, where the task is cancelled before
-    aclose completes (every asyncio.run exit), so draining here actually releases the sockets.
-    """
-    while True:
-        with _PENDING_CLIENT_CLOSE_LOCK:
-            if not _PENDING_CLIENT_CLOSE:
-                return
-            client = _PENDING_CLIENT_CLOSE.pop(0)
-        await safe_aclose(client)
 
 
 def _client_is_closed(client: PooledClient) -> bool:
@@ -238,8 +219,15 @@ class LoopBoundPooledClient:
             return self._rebuild(settings, current)
 
     async def shutdown(self) -> None:
-        """Release the pooled client, and anything still queued, on teardown."""
-        await drain_pending_client_closes()
+        """Release the pooled client and the queued superseded clients: the
+        queue MUST empty here, or a sync reset later sees it non-empty and
+        tries to host a fresh loop on a thread whose loop still runs."""
+        while True:
+            with PENDING_CLIENT_CLOSE_LOCK:
+                if not PENDING_CLIENT_CLOSE:
+                    break
+                client = PENDING_CLIENT_CLOSE.pop(0)
+            await safe_aclose(client)
         current = self.current
         self._set_current(None)
         if current is not None:
@@ -311,7 +299,7 @@ def bind_to_running_loop[T](client: T) -> T:
     return client
 
 
-def _loop_bound_to(client: PooledClient) -> asyncio.AbstractEventLoop | None:
+def _loop_bound_to(client: object) -> asyncio.AbstractEventLoop | None:
     """The loop a pooled client was built on, or None if never bound. Read with a
     default because the reader must tolerate objects this module didn't build (a
     test double, or a pre-attribute client), yet typed so the comparison is a loop-identity check.
@@ -319,126 +307,9 @@ def _loop_bound_to(client: PooledClient) -> asyncio.AbstractEventLoop | None:
     return getattr(client, "_bound_loop", None)
 
 
-async def safe_aclose(client: PooledClient) -> None:
-    """Await a pooled client's async close, recording any failure -- the client is
-    being replaced (its loop changed), so a close error is non-fatal but leaves
-    evidence in the #643 decline record. Shared by every kind: httpx ``aclose``
-    and curl_cffi ``close`` are both coroutines.
-    """
-    try:
-        # curl_cffi's AsyncSession closes through ``close()`` (a coroutine),
-        # httpx through ``aclose()``; either handle satisfies the await here.
-        close = client.aclose if hasattr(client, "aclose") else client.close
-        await close()
-    except Exception:
-        record_declined_close("aclose_failed", type(client).__name__)
-
-
 _SUPERSEDED_CLOSE: DeferredClose[PooledClient] = DeferredClose(aclose=safe_aclose)
 
-
 T = TypeVar("T")
-
-
-def _close_on_fresh_loop(close: Callable[[], Awaitable[object]]) -> None:
-    """Close on a fresh loop, torn down after; the previous current loop is
-    restored so a closed loop is never left as this thread's current loop."""
-    try:
-        previous = asyncio.get_event_loop()
-    except RuntimeError:
-        previous = None
-    _fresh_loop = asyncio.new_event_loop()
-    try:
-        asyncio.set_event_loop(_fresh_loop)
-        _fresh_loop.run_until_complete(close())
-    finally:
-        _fresh_loop.close()
-        if previous is not None:
-            asyncio.set_event_loop(previous)
-        else:
-            asyncio.set_event_loop(None)
-
-
-def _close_on_thread(close: Callable[[], Awaitable[object]]) -> None:
-    """Close on a daemon thread's fresh loop when another loop runs here.
-
-    BaseException is captured and re-raised to the caller; a wait that never
-    wakes within 30s raises TimeoutError instead of returning silently.
-    """
-    exc: list[BaseException | None] = [None]
-    done = threading.Event()
-
-    def _run() -> None:
-        try:
-            _fresh_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(_fresh_loop)
-            try:
-                _fresh_loop.run_until_complete(close())
-            finally:
-                _fresh_loop.close()
-        except BaseException as e:  # surface close failures to the caller
-            exc[0] = e
-        finally:
-            done.set()
-
-    thread = threading.Thread(target=_run, daemon=True)
-    thread.start()
-    if not done.wait(timeout=30):
-        raise TimeoutError("close on background thread did not complete within 30s")
-    if exc[0] is not None:
-        raise exc[0]
-
-
-def discard_if_unowned_loop(
-    close: Callable[[], Awaitable[object] | object], slot: str, namespace: dict[str, PooledClient | None]
-) -> None:
-    """Release ``slot``'s object, closing it on its owning loop when it has one.
-
-    ``namespace`` holds the pooled object; one helper serves every pool module.
-    A bound, open loop owns the close; a None or closed bound loop falls
-    through to the cross-loop branches below.
-    """
-    client = namespace[slot]
-    if client is None:
-        return
-    bound = _loop_bound_to(client)
-    if bound is not None and not bound.is_closed():
-        # A real pooled client is loop-bound: close on its loop instead of
-        # whichever loop happens to be current at teardown.
-        if bound.is_running():
-            # The owning loop lives on another thread: schedule the close
-            # there and wait -- run_until_complete cannot host a foreign loop.
-            asyncio.run_coroutine_threadsafe(cast(Coroutine[object, object, object], close()), bound).result(
-                timeout=30
-            )
-        else:
-            bound.run_until_complete(cast(Awaitable[object], close()))
-        namespace[slot] = None
-        return
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        # No current event loop (pytest-asyncio cleared it): close on a fresh
-        # loop so the client's transports are released instead of orphaned for
-        # GC to surface later as random ResourceWarning errors on unrelated
-        # tests (socket-leak unraisable family).
-        _close_on_fresh_loop(cast(Callable[[], Awaitable[object]], close))
-        namespace[slot] = None
-        return
-    if loop.is_running():
-        # Reset tears down on a live loop: close on a fresh loop hosted by a
-        # background thread instead of dropping it (socket-leak family).
-        _close_on_thread(cast(Callable[[], Awaitable[object]], close))
-        namespace[slot] = None
-        return
-    if loop.is_closed():
-        # pytest-asyncio leaves a closed loop as current after some async
-        # tests (#643). Closing on the dead loop raises, so close on a fresh
-        # loop instead so transports are released rather than leaked.
-        _close_on_fresh_loop(cast(Callable[[], Awaitable[object]], close))
-        namespace[slot] = None
-        return
-    loop.run_until_complete(cast(Awaitable[object], close()))
 
 
 def _reset() -> None:
@@ -446,16 +317,37 @@ def _reset() -> None:
     The two lazily-created clients and the pending-close queue are one unit: a
     queue holding a released client outlives its loop, so resetting one without the rest leaves a wrong state.
     """
+    from crawlutron.transport.pooled_client_release import (
+        clear_live_loop_close_tasks,
+        clear_pending_client_closes,
+    )
+    from crawlutron.transport.pooled_socket_abort import abort_transport_sockets
+
+    clear_live_loop_close_tasks()
     if _DEFAULT_HTTP_CLIENT is not None:
+        bound = _loop_bound_to(_DEFAULT_HTTP_CLIENT)
+        if bound is not None and bound.is_closed():
+            # The owning loop is dead: no loop can complete its transports'
+            # close, so abort the sockets directly instead of queuing a close
+            # no loop will ever run (the unraisable __del__ flake family).
+            abort_transport_sockets()
         discard_if_unowned_loop(close_async_http_client, "_DEFAULT_HTTP_CLIENT", globals())
     # Failed rebuild can leave current=None with a queued superseded client;
-    # close it on a fresh loop instead of dropping it (socket-leak family).
-    with _PENDING_CLIENT_CLOSE_LOCK:
-        queued = bool(_PENDING_CLIENT_CLOSE)
+    # close it instead of dropping it (socket-leak family). A loop running on
+    # this thread cannot host the fresh loop the drain would need: close on a
+    # background thread's fresh loop there.
+    with PENDING_CLIENT_CLOSE_LOCK:
+        queued = bool(PENDING_CLIENT_CLOSE)
     if queued:
-        _close_on_fresh_loop(drain_pending_client_closes)
-    with _PENDING_CLIENT_CLOSE_LOCK:
-        _PENDING_CLIENT_CLOSE.clear()
+        try:
+            running = asyncio.get_running_loop() is not None
+        except RuntimeError:
+            running = False
+        if running:
+            close_on_thread(drain_pending_client_closes)
+        else:
+            close_on_fresh_loop(drain_pending_client_closes)
+    clear_pending_client_closes()
 
 
 def http_singleton() -> LoopBoundPooledClient:
@@ -465,7 +357,7 @@ def http_singleton() -> LoopBoundPooledClient:
 
 def _has() -> bool:
     """Whether a lazily-created client or a queued close reference is still held."""
-    return _DEFAULT_HTTP_CLIENT is not None or bool(_PENDING_CLIENT_CLOSE)
+    return _DEFAULT_HTTP_CLIENT is not None or bool(PENDING_CLIENT_CLOSE)
 
 
 process_state.register(__name__, _reset, _has)
