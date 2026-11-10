@@ -176,6 +176,22 @@ class WatchStore(CoordinationStore):
             ).fetchall()
         return [_row_to_state(row) for row in rows]
 
+    def renew_claim(self, watch_id: str, token: str, *, now: float, claim_seconds: float) -> bool:
+        """Re-stamp ``claimed_at`` while ``token`` still owns the row: a live
+        sweep's lease survives a pass longer than the claim window. ``False``
+        means ownership was lost -- the caller must skip the row, never rework it.
+        """
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                UPDATE watches SET claimed_at = ?
+                WHERE watch_id = ? AND claimed_by = ? AND status = ?
+                """,
+                (now, watch_id, token, WatchStatus.ACTIVE),
+            )
+            self._conn.commit()
+        return cursor.rowcount == 1
+
     def record_check(
         self,
         watch_id: str,
@@ -264,6 +280,7 @@ class WatchStore(CoordinationStore):
     acreate = atwin(create)
     arecord_check = atwin(record_check)
     aclaim_due = atwin(claim_due)
+    arenew_claim = atwin(renew_claim)
     adeactivate = atwin(deactivate)
     aget = atwin(get)
     aget_for_caller = atwin(get_for_caller)
