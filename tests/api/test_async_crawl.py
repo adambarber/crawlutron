@@ -3,7 +3,7 @@
 import asyncio
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 
 from crawlutron.api import job_runner
 from crawlutron.runtime import process_state
@@ -20,7 +20,7 @@ from tests._assertions import (
 from tests._async_harnesses import crawl_api as _crawl_api
 from tests._fetcher_factories import make_crawl_payload
 from tests._job_harnesses import loaded_job, single_shot_job
-from tests.helpers.server import spawn_serve_forever_thread
+from tests.helpers.server import spawn_threaded_server
 
 
 def recorded_webhook_posts(monkeypatch):
@@ -33,6 +33,44 @@ def recorded_webhook_posts(monkeypatch):
 # The client + origin + cleared webhook sink come from the shared fixture, so this module does not re-declare
 # the arrangement in a `setup` method. The alias-then-rebind is not ceremony.
 crawl_api = _crawl_api
+
+
+class OverlapProbeHandler(BaseHTTPRequestHandler):
+    """Serves the concurrency probe: page fetches park until the test releases
+    them, and the in-flight peak is recorded under a lock."""
+
+    lock = threading.Lock()
+    release = threading.Event()
+    active = 0
+    peak = 0
+    parked = 0
+
+    @classmethod
+    def reset(cls):
+        """Zero the counters and re-arm the hold for the next test."""
+        with cls.lock:
+            cls.active = cls.peak = cls.parked = 0
+        cls.release = threading.Event()
+
+    def do_GET(self):
+        cls = type(self)
+        with cls.lock:
+            cls.active += 1
+            cls.peak = max(cls.peak, cls.active)
+        try:
+            if self.path == "/":
+                with cls.lock:
+                    cls.parked += 1
+                cls.release.wait(timeout=5)
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"<html>slow</html>")
+        finally:
+            with cls.lock:
+                cls.active -= 1
+
+    def log_message(self, *args):
+        pass
 
 
 class TestAsyncCrawlApi:
@@ -258,46 +296,30 @@ class TestAsyncCrawlApi:
         monkeypatch.setenv("CRAWLUTRON_MAX_WEBHOOK_CONCURRENCY", "1")
         # The cached loop-bound semaphore is rebuilt from the new width.
         process_state.reset_all_process_state()
-
-        active = 0
-        peak = 0
-        lock = threading.Lock()
-
-        class _Handler(BaseHTTPRequestHandler):
-            def do_GET(self):
-                nonlocal active, peak
-                with lock:
-                    active += 1
-                    peak = max(peak, active)
-                try:
-                    time.sleep(0.05)
-                    self.send_response(200)
-                    self.end_headers()
-                    self.wfile.write(b"<html>slow</html>")
-                finally:
-                    with lock:
-                        active -= 1
-
-            def log_message(self, *args):
-                pass
-
-        server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
-        thread = spawn_serve_forever_thread(server)
+        server = spawn_threaded_server(OverlapProbeHandler)
         try:
-            url = f"http://127.0.0.1:{server.server_port}/"
-            payload = make_crawl_payload(url, async_mode=True)
-            completed = await asyncio.gather(
-                *(submit_async_crawl(crawl_api.client, payload) for _ in range(3))
-            )
+            payload = make_crawl_payload(f"http://127.0.0.1:{server.server_port}/", async_mode=True)
+            submitted = await asyncio.gather(*(accepted_crawl(crawl_api.client, payload) for _ in range(3)))
+            # Hold page fetches open until a second one has actually parked
+            # (broken bound -> overlap certain) or the deadline expires.
+            deadline = time.monotonic() + 0.5
+            while time.monotonic() < deadline and OverlapProbeHandler.parked < 2:
+                await asyncio.sleep(0.01)
+            OverlapProbeHandler.release.set()
+            request_ids = [str(body["request_id"]) for body in submitted]
+            completed = [
+                (request_id, await poll_crawl_completion(crawl_api.client, request_id))
+                for request_id in request_ids
+            ]
 
-            assert peak <= 1, f"bound not honoured: peak {peak} concurrent crawls"
+            assert OverlapProbeHandler.peak <= 1, "bound not honoured: overlapping crawls"
             for _request_id, response in completed:
                 assert response.status_code == 200
                 assert response.json()["success"] is True
         finally:
             server.shutdown()
-            thread.join(timeout=5)
             server.server_close()
+            OverlapProbeHandler.reset()
 
 
 class TestAsyncCrawlJobStoreIntegration:

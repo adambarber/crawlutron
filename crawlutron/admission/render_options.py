@@ -66,12 +66,18 @@ def resolve_render_options(
     # operator/policy-owned and ceilinged by its own validators already.
     timeout = request.get("timeout_seconds")
     if isinstance(timeout, (int, float, str)):
-        kwargs["timeout_seconds"] = min(int(timeout), MAX_HTTP_TIMEOUT_SECONDS)
+        seconds = int(timeout)
+        if seconds < 1:
+            raise ValueError(f"timeout_seconds must be >= 1, got {seconds}")
+        kwargs["timeout_seconds"] = min(seconds, MAX_HTTP_TIMEOUT_SECONDS)
     elif isinstance(base_timeout := base.get("timeout_seconds"), (int, float, str)):
         kwargs["timeout_seconds"] = int(base_timeout)
     retries = request.get("max_retries")
     if isinstance(retries, (int, float, str)):
-        kwargs["max_retries"] = min(int(retries), MAX_RETRIES)
+        count = int(retries)
+        if count < 0:
+            raise ValueError(f"max_retries must be >= 0, got {count}")
+        kwargs["max_retries"] = min(count, MAX_RETRIES)
     elif isinstance(base_retries := base.get("max_retries"), (int, float, str)):
         kwargs["max_retries"] = int(base_retries)
     for key in ("respect_robots", "include_html", "include_text"):

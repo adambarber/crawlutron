@@ -3,6 +3,7 @@ result store (the rollup reads every record), and nothing here applies one
 -- the service proposes, a caller owns host policy.
 """
 
+import contextlib
 import logging
 from typing import cast
 
@@ -18,6 +19,7 @@ from tests._fetcher_factories import make_crawl_payload
 from tests._policy_factories import canonical
 from tests._policy_harnesses import policy_client
 from tests._policy_harnesses import stored_trace as _stored_trace
+from tests._quota_harness import TEST_ADMIN_TOKEN, keyed_result_client
 
 
 @pytest.fixture
@@ -317,3 +319,70 @@ async def test_the_bearer_presented_operator_token_sees_the_cross_tenant_rollup(
     per-tenant view instead of the cross-tenant one."""
     response = await _operator_rollup(result_store, job_store, bearer=True)
     _assert_cross_tenant(response)
+
+
+@contextlib.asynccontextmanager
+async def _real_door_client(tmp_path):
+    """The REAL /v1/policy-suggestions door: a live key store and settings, no
+    identity override -- every credential class resolves through get_caller_identity."""
+    from crawlutron.api.keys_router import router as keys_router
+    from crawlutron.api.policy_router import router as policy_router
+
+    async with keyed_result_client(tmp_path, (policy_router, keys_router)) as (client, results, keys):
+        yield client, keys, results
+
+
+async def test_the_operator_token_reaches_the_cross_tenant_rollup_through_the_real_door(tmp_path):
+    """The operator token on the real CallerDep door: 200 with the cross-tenant
+    rollup. Before the operator arm existed in the identity resolver, this very
+    request 401'd (invalid_api_key) -- the documented operator view was
+    unreachable by anyone."""
+    async with _real_door_client(tmp_path) as (client, keys, results):
+        await results.aput(_FOREIGN_TRACE_NAME, _foreign_row(), owner="key_b")
+
+        response = await client.get("/v1/policy-suggestions", headers={"X-API-Key": TEST_ADMIN_TOKEN})
+
+    _assert_cross_tenant(response)
+
+
+async def test_a_live_caller_key_still_gets_the_per_tenant_rollup(tmp_path):
+    """Boundary class 2: a live caller key through the real door is 200 with its
+    own records only -- the operator arm must not disturb the keyed path."""
+    async with _real_door_client(tmp_path) as (client, keys, results):
+        issued = keys.issue_key("key_a")
+        await results.aput(_FOREIGN_TRACE_NAME, _foreign_row(), owner="key_b")
+
+        response = await client.get("/v1/policy-suggestions", headers={"X-API-Key": issued.secret})
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["suggestions"] == [], "a foreign caller's evidence leaked into the rollup"
+    assert body["records_examined"] == 0
+
+
+async def test_no_credential_is_401_through_the_real_door(tmp_path):
+    """Boundary class 1: no credential is refused exactly as before."""
+    async with _real_door_client(tmp_path) as (client, _keys, _results):
+        response = await client.get("/v1/policy-suggestions")
+
+    _assert_401_envelope(response)
+
+
+async def test_a_wrong_credential_is_401_through_the_real_door(tmp_path):
+    """Boundary class 4: a presented credential that is neither the operator
+    token nor a stored caller key is a 401 -- wrong scheme (Basic), garbage
+    key, and the operator token with no token configured all refuse."""
+    async with _real_door_client(tmp_path) as (client, _keys, _results):
+        basic = await client.get("/v1/policy-suggestions", headers={"Authorization": "Basic dXNlcjpwYXNz"})
+        garbage = await client.get("/v1/policy-suggestions", headers={"X-API-Key": "not-any-key"})
+        # The bearer form of a garbage credential refuses too.
+        bearer = await client.get("/v1/policy-suggestions", headers={"Authorization": "Bearer not-any-key"})
+
+    for response in (basic, garbage, bearer):
+        _assert_401_envelope(response)
+
+
+def _assert_401_envelope(response) -> None:
+    """The 401 refusal shape every unauthenticated caller reads."""
+    assert response.status_code == 401, response.text
+    assert response.json()["detail"]["code"] == "invalid_api_key"

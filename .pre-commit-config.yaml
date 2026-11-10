@@ -245,7 +245,7 @@ repos:
         name: coverage (measured-descriptive, pre-push)
         entry: >-
           bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
-          .venv/bin/python -m pytest -q -o addopts="" -n auto --dist worksteal --cov=crawlutron --cov-report=
+          .venv/bin/python -m pytest -q -o addopts="" -n 4 --dist worksteal --cov=crawlutron --cov-report=
         language: system
         files: ^(crawlutron|tests)/
         pass_filenames: false

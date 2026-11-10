@@ -17,18 +17,20 @@ class RenderOptionsRequest(BaseModel):
     timeout_seconds: Annotated[
         int | None,
         Field(
+            ge=1,
             description=(
-                "Per-render navigation timeout in seconds; values above "
-                f"{MAX_HTTP_TIMEOUT_SECONDS} are clamped to it."
+                "Per-render navigation timeout in seconds; below 1 is refused and values "
+                f"above {MAX_HTTP_TIMEOUT_SECONDS} are clamped to it."
             ),
         ),
     ] = None
     max_retries: Annotated[
         int | None,
         Field(
+            ge=0,
             description=(
-                "Maximum retries for a transient render failure; values above "
-                f"{MAX_RETRIES} are clamped to it."
+                "Maximum retries for a transient render failure; negative counts are "
+                f"refused and values above {MAX_RETRIES} are clamped to it."
             ),
         ),
     ] = None
