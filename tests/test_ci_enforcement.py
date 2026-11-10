@@ -212,3 +212,25 @@ def test_browser_job_selects_only_browser_marked_tests() -> None:
         )
     )
     assert browser_step.strip() == 'python3 -m pytest -m "browser"', browser_step
+
+
+def test_enforcement_job_caches_gate_state() -> None:
+    """Gate-state caches (.mypy_cache/.ruff_cache/.gate_fanout) skip cold-start
+    re-work on warm runs; keyed on the lock + pyproject so dependency bumps
+    invalidate."""
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    steps = _jobs(workflow)["enforcement"].get("steps")
+    assert isinstance(steps, list)
+    caches = [
+        step
+        for step in steps
+        if isinstance(step, dict) and str(step.get("name", "")).startswith("Cache gate state")
+    ]
+    assert len(caches) == 1, f"exactly one gate-state cache step expected, found {len(caches)}"
+    with_block = caches[0].get("with")
+    assert isinstance(with_block, dict)
+    paths = str(with_block["path"])
+    for expected in (".mypy_cache", ".ruff_cache", ".gate_fanout"):
+        assert expected in paths, f"gate-state cache missing {expected}"
+    key = str(with_block["key"])
+    assert "hashFiles('uv.lock', 'pyproject.toml')" in key, key
