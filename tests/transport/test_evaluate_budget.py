@@ -14,6 +14,7 @@ import pytest
 from crawlutron.models.crawl_result import CrawlResult
 from crawlutron.models.render_options import RenderOptions
 from crawlutron.transport import driver_pages
+from crawlutron.transport import timeouts as transport_timeouts
 from crawlutron.transport.browser import BrowserDriver
 from tests._browser_doubles import (
     BrowserFakePage,
@@ -24,6 +25,13 @@ from tests._browser_doubles import (
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
 _HANG_GUARD_SECONDS = 8.0
+
+
+@pytest.fixture(autouse=True)
+def _injected_ceiling(monkeypatch):
+    """Bound page reads at 0.1s: the wedges cancel by the seam, not by
+    waiting out the real 5s ceiling (30s of battery tail removed)."""
+    monkeypatch.setattr(transport_timeouts, "EVALUATE_CEILING_SECONDS_OVERRIDE", 0.1)
 
 
 class _WedgedReadPage(BrowserFakePage):
