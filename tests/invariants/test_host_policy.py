@@ -25,7 +25,7 @@ _HOST_POLICY_VALIDATORS = frozenset(
     {
         "admit_or_none",
         "filter_js_endpoints",
-        "NormalizedUrl",
+        "normalizedurl",
         "_validated_url",
     }
 )
@@ -45,7 +45,7 @@ _HOST_POLICY_NAMES = frozenset({"policy", "host_policy"})
 
 
 #: Attribute spellings that hold a ``HostPolicy``.
-_HOST_POLICY_ATTRS = frozenset({"policy", "host_policy", "_host_policy"})
+_HOST_POLICY_ATTRS = frozenset({"policy", "host_policy", "_host_policy", "_policy"})
 
 
 def _url_parameter_name(name: str) -> bool:
@@ -421,6 +421,10 @@ URL_RETURNING_HELPERS_REQUIRE_HOST_POLICY = Rule(
         ),
         Bites(
             "from urllib.parse import urlunsplit\ndef rebuild(parts):\n    return urlunsplit(parts)\n",
+            "returns URLs without required HostPolicy",
+        ),
+        Bites(
+            "def hand_back(url): return NormalizedUrl(url)\n",
             "returns URLs without required HostPolicy",
         ),
         # Two helper shapes at once, each its own finding: a bare passthrough and a comprehension
