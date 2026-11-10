@@ -134,7 +134,11 @@ source = "vcs"
 version-file = "crawlutron/_version.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["crawlutron"]
+# crawlutron_sdk ships in the same wheel as crawlutron (one hatchling project,
+# one build). A truly separate `crawlutron-sdk` wheel would require a second
+# hatchling project/pyproject.toml plus CI/release changes -- broader
+# restructuring than this ticket; see the #711 report for the tradeoff note.
+packages = ["crawlutron", "crawlutron_sdk"]
 
 # Coverage engine config -- the ONE declaration the pre-push coverage hook and
 # any future CI consumer read. `core = "sysmon"` (PEP 669 sys.monitoring) is
