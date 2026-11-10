@@ -155,7 +155,7 @@ to defeat:
 - **Decompression bomb tests** — a real gzip bomb (`~1 KB` compressed →
   `1 MB` expanded), plus deflate and brotli bomb cases, verify the decompression
   guard rejects over-cap output before OOM.
-- **SSRF tests** (`tests/test_ssrf_*`, `tests/transport/test_ssrf_*`) — DNS
+- **SSRF tests** (`tests/test_ssrf_route_subresources.py`, `tests/transport/test_dns_cache.py`, `tests/transport/test_redirect_target.py`, `tests/transport/test_browser_target_stability.py`) — DNS
   pinning, route-level interception, WebSocket guard, hostname pinning
   even after a redirect chain, IPv6 private range blocking.
 - **Classification corroboration tests** — soft phrases (e.g. "blocked")

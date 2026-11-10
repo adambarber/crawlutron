@@ -153,7 +153,7 @@ admitted and the SSRF boundary is intentionally relaxed.
 
 | Guarantee | Where it lives | Test proving it |
 |---|---|---|
-| Address classification incl. IPv4-mapped/6to4/Teredo, resolver-numeric forms | `crawlutron/models/address_class.py:28-164` | `tests/test_ssrf_*`, `tests/transport/test_ssrf_*` |
+| Address classification incl. IPv4-mapped/6to4/Teredo, resolver-numeric forms | `crawlutron/models/address_class.py:28-164` | `tests/test_ssrf_route_subresources.py`, `tests/transport/test_dns_cache.py` |
 | Per-fetch fresh pin; validation cached, pin never cached | `crawlutron/transport/pinned_dns.py:206`, `:174`, `:189` | `tests/transport/test_dns_cache.py:30-52` |
 | Redirect re-anchor, hop budget `MAX_REDIRECT_HOPS = 5`, credential strip | `crawlutron/transport/pinned_transport.py:172`, `:163`, `:201` | `tests/transport/test_redirect_target.py:61-142` |
 | Browser Host-rewrite pin, stable-answer double resolve | `crawlutron/transport/browser_targets.py:40`, `:70` | `tests/transport/test_browser_target_stability.py:22-72` |

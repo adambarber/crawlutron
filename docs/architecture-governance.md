@@ -39,7 +39,7 @@ compares against are collected and checked against `app_names()`
 All gates run whole-tree through `scripts/gate_fanout`, which starts every
 gate child at once and lets each wait only on its own child, so wall time is
 the slowest gate, not the sum; each child is hard-killed after 60 s
-(`.pre-commit-config.yaml:1-5`). The declared hooks
+(`scripts/gate_fanout.py:21`). The declared hooks
 (`.pre-commit-config.yaml:86-268`):
 
 - `ruff check crawlutron tests scripts` — whole-tree style/safety lint; inline `noqa` is banned by project rule (`:89-97`).
