@@ -74,11 +74,10 @@ def read_memory_stats(
 
     # An unknowable ceiling fails CLOSED (#C11): the conservative floor keeps
     # the gate a gate; total_ram==0 here is sensor refusal, not "no memory".
-    # The USAGE side must be honest too (adversarial pass 5): used_bytes=0 on
-    # this branch left the ratio at 0.0 -- a fully-open gate with a nonzero
-    # denominator. The process's own RSS is the one usage source the kernel
-    # still reports without /proc or cgroups.
-    return MemoryStats(total_bytes=total_ram or _CONSERVATIVE_CEILING_BYTES, used_bytes=_own_rss_bytes())
+    total_bytes = total_ram or _CONSERVATIVE_CEILING_BYTES
+    # Usage never exceeds the ceiling it is measured against: an honest fraction
+    # of total_bytes, even when RSS rides above the conservative constant under load.
+    return MemoryStats(total_bytes=total_bytes, used_bytes=min(_own_rss_bytes(), total_bytes))
 
 
 def batch_scale(used: float, total: float, target: float, hard: float | None = None) -> float:
