@@ -83,9 +83,9 @@ jobs:
     # reflects a real browser rather than a double. The suite costs ~20s here
     # and a Camoufox fetch, which is cheap enough to pay on every push.
     #
-    # It widens the marker filter instead of clearing addopts: the fast suite's
-    # default marker set deselects `browser`, and `-m "not slow"` reaches it while
-    # leaving the rest of the configuration intact.
+    # It selects ONLY the `browser` marker: the job exists to run the
+    # browser suite, and any wider filter re-runs the fast suite (~3,400
+    # tests) on every push.
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -112,15 +112,12 @@ jobs:
       - name: Install Camoufox browser binary
         run: python3 -m camoufox fetch
       - name: Run pytest (browser)
-        # Widens the marker filter to admit `browser`, and only that. The
-        # previous `-o addopts=` blanked the entire addopts string to get there,
-        # which also dropped `--strict-markers` (a misspelled marker would
-        # silently select nothing), `-m "not slow"` (the slow suite, which the
-        # fast job deliberately excludes and which no browser test needs), and
-        # `-n auto --dist worksteal` -- running the whole 2200-test suite
-        # serially in a job that exists to add one marker. Spelling the filter
-        # out keeps the rest of the configuration intact.
-        run: python3 -m pytest -m "not slow"
+    # Selects the `browser` marker, and only that. The previous `-m "not
+    # slow"` admitted the whole fast suite (the fast job already runs it),
+    # re-running ~3,400 tests per push in a job that exists to add one
+    # marker. This still keeps `--strict-markers` and the rest of the
+    # addopts configuration intact.
+        run: python3 -m pytest -m "browser"
 
   # #623: dependency audit against the frozen lock. The export/pip-audit tools
   # install inside CI's runner (owner-bandwidth is irrelevant there); the DB

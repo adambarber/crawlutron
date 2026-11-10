@@ -196,3 +196,19 @@ def assert_no_hook_command_rerun(workflow: str, hook_tools) -> None:
                 "enforcement already runs it; a duplicate is a second copy "
                 "that can drift from the gate"
             )
+
+
+def test_browser_job_selects_only_browser_marked_tests() -> None:
+    """The browser job exists to run the browser suite: a filter that admits
+    anything else re-runs the fast suite (~3,400 tests) on every push."""
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    steps = _jobs(workflow)["test-browser"].get("steps")
+    assert isinstance(steps, list)
+    browser_step = str(
+        next(
+            step.get("run")
+            for step in steps
+            if isinstance(step, dict) and "Run pytest (browser)" == str(step.get("name"))
+        )
+    )
+    assert browser_step.strip() == 'python3 -m pytest -m "browser"', browser_step
