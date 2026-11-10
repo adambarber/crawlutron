@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from typing import Protocol, cast
 
 from curl_cffi.requests.exceptions import RequestException, SSLError
@@ -104,8 +104,17 @@ class CffiTransport:
         response, release = await self._dial(request)
         return await self._handle_response(response, request, started, max_bytes, release)
 
-    async def _dial(self, request: FetchRequest) -> tuple[_CffiResponse, Callable[[_CffiResponse], None]]:
-        """Dial one cffi hop and return the response plus its release callable."""
+    async def _dial(
+        self, request: FetchRequest
+    ) -> tuple[_CffiResponse, Callable[[_CffiResponse], Awaitable[None]]]:
+        """Dial one cffi hop and return the response plus its release callable.
+
+        The one-shot pinned session (when ``resolve_entry`` is set) is deliberately
+        NOT closed here: its curl multi feeds the response queue, and closing it
+        would abort the in-flight transfer before the body is drained. The caller's
+        release callable closes the one-shot exactly once, after the terminal body
+        is fully consumed, on every exit path.
+        """
         await pooled_clients.drain_pending_client_closes()
         client = http_client_pool.get_cffi_session()
 
@@ -119,6 +128,14 @@ class CffiTransport:
             # verification attest to it while curl connects to the pinned IP.
             wire_url = request.url.raw
 
+        async def close_one_shot() -> None:
+            """Close the one-shot pinned session exactly once, idempotently."""
+            nonlocal one_shot
+            if one_shot is not None:
+                session = one_shot
+                one_shot = None
+                await session.close()
+
         try:
             response = await dial_client.get(
                 wire_url,
@@ -128,15 +145,24 @@ class CffiTransport:
                 timeout=Timeouts.for_request(request.timeout_seconds).read,
             )
         except SSLError:
+            # The handshake never completed, so there is no in-flight stream to
+            # protect: release the one-shot session here and let SSLError propagate.
+            await close_one_shot()
             raise
         except Exception:
-            # Transport failure: the caller falls back to httpx.
+            # Transport failure: the caller falls back to httpx. No in-flight
+            # stream survived the failed dial, so release the one-shot session.
+            await close_one_shot()
             raise
-        finally:
-            if one_shot is not None:
-                await one_shot.close()
 
-        release = self._release_stream_noblock or release_stream_noblock
+        async def release(response: _CffiResponse) -> None:
+            """Release this hop: close the one-shot pinned session exactly once.
+
+            The session stays alive until the terminal body is fully consumed, so
+            this runs only after the drain (or abandon) is complete.
+            """
+            await close_one_shot()
+
         return response, release
 
     async def _handle_response(
@@ -145,40 +171,53 @@ class CffiTransport:
         request: FetchRequest,
         started: float,
         max_bytes: int,
-        release: Callable[[_CffiResponse], None],
+        release: Callable[[_CffiResponse], Awaitable[None]],
     ) -> FetchResult:
-        """Content-length gate, redirect, or terminal body read for one cffi hop."""
+        """Content-length gate, redirect, or terminal body read for one cffi hop.
+
+        The one-shot pinned session stays alive until the terminal body is fully
+        consumed; ``release`` closes it exactly once on every exit path, after the
+        drain (or abandon) is complete.
+        """
+        stream_release = self._release_stream_noblock or release_stream_noblock
         try:
             content_length = response.headers.get("content-length")
             if pinned_transport.declared_length_exceeds(content_length, max_bytes):
                 await response.aclose()  # release the curl handle
+                await release(response)  # close the one-shot session exactly once
                 return http_413(request.url, request.url, started)
 
             status_code, location = response.status_code, response.headers.get("location")
             if 300 <= status_code < 400 and location is not None:
                 # Redirect: do not read the body; the walker advances the hop.
                 await response.aclose()  # release the curl handle
+                await release(response)  # close the one-shot session exactly once
                 return redirect_from_headers(request, status_code, started, response.headers)
 
             # Terminal: cap the body via read_capped_async (one cap, both transports).
             try:
                 raw = await read_capped_async(_cffi_chunks(response, request.timeout_seconds), max_bytes)
             except BodyTooLarge:
-                release(response)
+                stream_release(response)
+                await release(response)
                 raise
             except (RequestException, asyncio.CancelledError):
-                release(response)
+                stream_release(response)
+                await release(response)
                 raise
 
-            return await terminal_from_response(
+            result = await terminal_from_response(
                 response, request, started, max_bytes, response.headers, raw, status_code
             )
+            await release(response)  # close the one-shot session exactly once
+            return result
         except (BodyTooLarge, RequestException, asyncio.CancelledError):
             # Already released by the inner handler; just propagate.
             raise
         except Exception:
             # Best-effort release on any unexpected error.
-            release(response)
+            stream_release(response)
+            await release(response)
             with contextlib.suppress(Exception):
                 await response.aclose()
             raise
