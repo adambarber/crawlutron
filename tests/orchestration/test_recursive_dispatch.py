@@ -7,7 +7,9 @@ import asyncio
 
 import pytest
 
+from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.crawl_task import CrawlTask
+from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.taxonomy import Classification
 from crawlutron.orchestration.admission_stall import AdmissionStallGuard
 from crawlutron.orchestration.recursive import admit_recursive_batch
@@ -173,6 +175,102 @@ async def test_robots_disallows_initial_job_as_skip(recording_worker):
     spill, _, _ = await _run(jobs, worker, robots_allows=allows, respect_robots=True)
     assert seen == []  # worker never invoked
     assert set(spill.writes[i].normalized_url for i in spill.writes) == {canonical("http://a/blocked")}
+
+
+def _ok_refusal_crawl():
+    """The worker and robots pair for a crawl that allows only ``http://a/ok/*``."""
+
+    fetched: list[str] = []
+
+    async def worker(job: CrawlTask) -> EngineCrawlResult:
+        fetched.append(job.normalized_url.raw)
+        return engine_result(job.normalized_url, "rendered")
+
+    async def allows(url: NormalizedUrl) -> bool:
+        return url.raw.startswith("http://a/ok/")
+
+    async def robots_disallowed(job: CrawlTask) -> EngineCrawlResult:
+        return engine_result(job.normalized_url, "robots_disallowed", status="skipped")
+
+    return fetched, worker, allows, robots_disallowed
+
+
+async def test_robots_refused_pages_spend_none_of_the_page_cap():
+    """Robots-refused pages spill as verdicts but never consume max_pages.
+
+    Pre-fix both cap slots burn on refusals; the fix crawls both allowed pages.
+    """
+    fetched, worker, allows, robots_disallowed = _ok_refusal_crawl()
+
+    jobs = [_task(f"http://a/deny/{i}", index=i) for i in (1, 2)] + [
+        _task(f"http://a/ok/{i}", index=2 + i) for i in (1, 2)
+    ]
+
+    spill, _scheduler, _gate = await _run(
+        jobs,
+        worker,
+        robots_allows=allows,
+        robots_disallowed=robots_disallowed,
+        respect_robots=True,
+        max_pages=2,
+    )
+
+    # Both refusals are recorded as verdicts -- the spill stays, only the budget
+    # increment goes -- and they never reached the worker.
+    assert {spill.writes[1].normalized_url.raw, spill.writes[2].normalized_url.raw} == {
+        "http://a/deny/1",
+        "http://a/deny/2",
+    }
+    assert spill.writes[1].classification == spill.writes[2].classification == "robots_disallowed"
+    assert fetched == ["http://a/ok/1", "http://a/ok/2"]
+    assert set(spill.writes) == {1, 2, 3, 4}
+
+
+@pytest.mark.parametrize(
+    ("frontier", "max_pages", "expected_fetched"),
+    (
+        # Two refusals ahead of two allowed pages under max_pages=2: pre-fix both
+        # cap slots burn on refusals; the fix crawls both allowed pages.
+        (["deny", "deny", "ok", "ok"], 2, ("http://a/ok/3", "http://a/ok/4")),
+        # One refusal ahead of one allowed page under max_pages=1: the refusal is free.
+        (["deny", "ok"], 1, ("http://a/ok/2",)),
+        # The unbounded sentinel crawls past refusals either way.
+        (["deny", "ok", "ok"], 0, ("http://a/ok/2", "http://a/ok/3")),
+        # All refused: verdicts recorded, cap untouched, loop drains honestly.
+        (["deny", "deny"], 2, ()),
+        # A refusal mid-frontier does not block a later allowed page within the cap.
+        (["ok", "deny", "ok"], 2, ("http://a/ok/1", "http://a/ok/3")),
+    ),
+    ids=(
+        "two_refusals_then_two_pages_max_pages_2",
+        "one_refusal_max_pages_1",
+        "unbounded_sentinel",
+        "all_refused_drains",
+        "refusal_mid_frontier",
+    ),
+)
+async def test_robots_refusals_never_consume_the_page_cap(frontier, max_pages, expected_fetched):
+    """Refusals are verdicts, not pages: the cap pays only for real fetches."""
+
+    fetched, worker, allows, robots_disallowed = _ok_refusal_crawl()
+
+    jobs = [_task(f"http://a/{kind}/{i}", index=i) for i, kind in enumerate(frontier, start=1)]
+    deny_indexes = [i for i, kind in enumerate(frontier, start=1) if kind == "deny"]
+
+    spill, _scheduler, _gate = await _run(
+        jobs,
+        worker,
+        robots_allows=allows,
+        robots_disallowed=robots_disallowed,
+        respect_robots=True,
+        max_pages=max_pages,
+    )
+
+    assert fetched == list(expected_fetched)
+    assert {spill.writes[i].normalized_url.raw for i in deny_indexes} == {
+        f"http://a/deny/{i}" for i in deny_indexes
+    }
+    assert all(spill.writes[i].classification == "robots_disallowed" for i in deny_indexes)
 
 
 # --------------------------------------------------------------------------- Result alignment: the spill

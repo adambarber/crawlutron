@@ -41,6 +41,7 @@ async def run(
     global_concurrency=4,
     seed_sitemaps=False,
     robots_allows=None,
+    robots_disallowed=None,
     scheduler=None,
 ):
     """These tests default to ``max_depth=2``; the harness default is 0.
@@ -60,6 +61,7 @@ async def run(
         max_pages=max_pages,
         global_concurrency=global_concurrency,
         seed_sitemaps=seed_sitemaps,
+        robots_disallowed=robots_disallowed,
     )
 
 

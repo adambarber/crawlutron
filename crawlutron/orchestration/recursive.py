@@ -157,7 +157,6 @@ async def _robots_admitted_batch(
         if run.respect_robots and not allowed:
             await spill_result(run, job.index, await run.robots_disallowed(job))
             state.visited.add(job.normalized_url)
-            state.page_count += 1
             continue
         if run.respect_robots and delay and delay > 0:
             run.scheduler.set_domain_min_delay(job.domain, delay)
