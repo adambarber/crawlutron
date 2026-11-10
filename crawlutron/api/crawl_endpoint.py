@@ -88,7 +88,7 @@ async def crawl(
     settings: CrawlerSettings,
     job_store: JobStore,
     result_store: CrawlResultStore,
-    spill_store: CrawlSpillStore,
+    spill_store: CrawlSpillStore | None,
     shutdown_event: asyncio.Event,
     request: Request | None = None,
     caller: CallerIdentity | None = None,
