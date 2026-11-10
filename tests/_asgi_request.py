@@ -30,11 +30,16 @@ def body_reader_call_next(seen: dict[str, bytes], *, probe: bool = True):
     return call_next
 
 
-def make_request(messages: _Messages, headers: list[tuple[bytes, bytes]] | None = None) -> Request:
-    """A Request whose receive() pops the scripted ASGI message list."""
+def make_request(
+    messages: _Messages, headers: list[tuple[bytes, bytes]] | None = None, *, receive=None
+) -> Request:
+    """A Request whose receive() pops the scripted ASGI message list, or a
+    caller-supplied receive double for the slow-client suites."""
 
-    async def receive() -> Message:
-        return messages.pop(0)
+    if receive is None:
+
+        async def receive() -> Message:
+            return messages.pop(0)
 
     scope = {
         "type": "http",

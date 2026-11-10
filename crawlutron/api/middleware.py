@@ -7,6 +7,9 @@ browser Origin on every surface.
 
 from __future__ import annotations
 
+import asyncio
+import time
+
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.types import Message, Receive
@@ -17,6 +20,11 @@ from crawlutron.mcp.protocol import error_response
 from crawlutron.mcp.server import origin_allowed
 
 MAX_REQUEST_BODY_BYTES = 16 * 1024 * 1024
+
+# Flat wall-clock bound on each body-handling loop: a slow-post client that
+# dribbles bytes must not pin a middleware task indefinitely. Simpler and
+# more predictable than deriving from the declared length.
+BODY_DEADLINE_SECONDS = 30.0
 
 
 async def reject_hostile_origin(request: Request, call_next):
@@ -45,11 +53,15 @@ async def _drain_declared_body(original_receive: Receive, *, max_bytes: int) -> 
     """Discard a refused declared body up to ``max_bytes`` -- never unbounded.
 
     Past the cap the client is streaming forever or lying; the 413's
-    Connection: close aborts the remainder.
+    Connection: close aborts the remainder. The wall-clock deadline bounds
+    how long a slow-post client can hold this loop open.
     """
     drained = 0
     while drained < max_bytes:
-        message = await original_receive()
+        try:
+            message = await asyncio.wait_for(original_receive(), BODY_DEADLINE_SECONDS)
+        except TimeoutError:
+            return
         if not message.get("more_body", False):
             break
         drained += len(message.get("body", b"") or b"")
@@ -77,8 +89,14 @@ async def _collect_declared_body(original_receive: Receive, *, declared: int) ->
     """
     buffered: list[Message] = []
     received = 0
+    deadline = time.monotonic() + BODY_DEADLINE_SECONDS
     while received < declared:
-        message = await original_receive()
+        if time.monotonic() >= deadline:
+            return None
+        try:
+            message = await asyncio.wait_for(original_receive(), deadline - time.monotonic())
+        except TimeoutError:
+            return None
         if message.get("type") != "http.request":
             # A non-request message mid-collect is a disconnect (uvicorn
             # re-delivers it forever): further receives can never produce the
@@ -161,7 +179,8 @@ async def limit_request_body(request: Request, call_next, *, max_bytes: int = MA
             return _error_413(max_bytes)
         if not content_length.isascii() or not content_length.isdigit() or declared > max_bytes:
             # Mirror the truncation path: drain the refused body before the
-            # 413, capped so a slow-post client cannot pin the task.
+            # 413, capped by bytes and by the wall-clock deadline so a
+            # slow-post client cannot pin the task.
             await _drain_declared_body(original_receive, max_bytes=max_bytes)
             return _error_413(max_bytes)
     if declared:
@@ -179,4 +198,4 @@ async def limit_request_body(request: Request, call_next, *, max_bytes: int = MA
     return response
 
 
-__all__ = ["MAX_REQUEST_BODY_BYTES", "limit_request_body", "reject_hostile_origin"]
+__all__ = ["BODY_DEADLINE_SECONDS", "MAX_REQUEST_BODY_BYTES", "limit_request_body", "reject_hostile_origin"]

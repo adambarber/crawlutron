@@ -266,3 +266,58 @@ async def test_drain_stops_at_the_cap_not_one_chunk_past(small_cap):
 
     assert response.status_code == 413
     assert len(messages) == 1, "the drain read past the cap it had reached"
+
+
+async def _refused_within_deadline(request: Request, *, max_bytes: int) -> Response:
+    """Drive the middleware against a refused body under the 1s outer bound:
+    the deadline must answer 413 + close before the probe times out."""
+    import asyncio
+
+    async def probe():
+        msg = "refused bodies never reach the app"
+        return await limit_request_body(request, refuse_never(msg), max_bytes=max_bytes)
+
+    response = await asyncio.wait_for(probe(), timeout=1.0)
+    assert response.status_code == 413
+    assert response.headers["Connection"] == "close"
+    return response
+
+
+@pytest.mark.real_sleeps
+async def test_slow_drain_client_is_refused_within_the_deadline(monkeypatch):
+    """A slow-post client that stalls inside an over-cap declared body must be
+    refused with the 413 within the body deadline -- byte caps alone pin the
+    middleware task forever when receive() never returns."""
+    import asyncio
+
+    import crawlutron.api.middleware as mw
+
+    monkeypatch.setattr(mw, "BODY_DEADLINE_SECONDS", 0.05)
+
+    stalled = asyncio.Event()
+
+    async def stalled_receive() -> Message:
+        await stalled.wait()
+        raise AssertionError("unreachable: the deadline must fire first")
+
+    request = make_request([], headers=[(b"content-length", b"4096")], receive=stalled_receive)
+    await _refused_within_deadline(request, max_bytes=CAP)
+
+
+@pytest.mark.real_sleeps
+async def test_slow_collect_client_is_refused_within_the_deadline(monkeypatch):
+    """A dribbling client that never delivers the declared length holds
+    _collect open; the deadline refuses the truncated body instead of
+    pinning the task."""
+    import asyncio
+
+    import crawlutron.api.middleware as mw
+
+    monkeypatch.setattr(mw, "BODY_DEADLINE_SECONDS", 0.05)
+
+    async def endless_dribble() -> Message:
+        await asyncio.sleep(0.01)
+        return {"type": "http.request", "body": b"X", "more_body": True}
+
+    request = make_request([], headers=[(b"content-length", b"100")], receive=endless_dribble)
+    await _refused_within_deadline(request, max_bytes=1024)
