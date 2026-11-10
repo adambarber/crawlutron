@@ -1,0 +1,29 @@
+{
+  "request_id": "r-golden-1",
+  "submitted_count": 1,
+  "success": true,
+  "policy_schema_version": 1,
+  "results": [
+    {
+      "url": "http://127.0.0.1/page",
+      "status_code": 200,
+      "error": null,
+      "markdown": "# Example Org\n\nSome real content for extraction.",
+      "discovered_link_count": 0,
+      "discovered_links": [],
+      "next_page_url": "http://127.0.0.1/page2"
+    }
+  ],
+  "diagnostics": {
+    "content_metrics": {}
+  },
+  "metadata": {
+    "json_ld": [
+      {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "Example Org"
+      }
+    ]
+  }
+}

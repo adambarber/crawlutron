@@ -60,6 +60,11 @@ dependencies = [
     "publicsuffixlist==1.1.2.20261101",
 ]
 
+[project.scripts]
+# Thin HTTP client facade for the crawl service (Spike A, issue #710).
+# No SSRF/policy/URL validation here; the service is the single source of truth.
+crawl = "crawlutron.cli.__main__:main"
+
 [project.optional-dependencies]
 # Lint and type tools are PINNED, not ranged. These are gates: a floating
 # version means a new release can turn a build red with no repository change,
@@ -321,5 +326,13 @@ max-statements = 87
 "scripts/**" = [
     "S404",
     "S603",
+]
+# crawlutron/cli/docker.py shells out to the docker CLI to start the service
+# (crawl up, Spike A, issue #710). The argv is built from the operator's explicit
+# --image/--tag (never caller input, never credentials), so importing and invoking
+# subprocess is intentional, not a bypassable sink.
+"crawlutron/cli/docker.py" = [
+    "S404",  # intentional: the docker CLI is the only way to start the service
+    "S603",  # intentional: argv is operator-supplied image/tag, never caller credentials
 ]
 "**/__pycache__/**" = ["ALL"]
