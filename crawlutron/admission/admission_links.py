@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from collections.abc import Awaitable, Callable, Iterable, Iterator, MutableSequence
 from dataclasses import dataclass
 from typing import TypeVar
@@ -321,7 +320,7 @@ def compile_scope_pattern(scope_regex: str | JsonValue | None) -> BoundedPattern
         return None
     try:
         return compile_untrusted(scope_regex, max_len=_MAX_SCOPE_PATTERN_LEN)
-    except (UnsafePattern, re.error) as exc:
+    except UnsafePattern as exc:
         raise ValueError(f"scope_regex does not compile: {exc}") from exc
 
 
