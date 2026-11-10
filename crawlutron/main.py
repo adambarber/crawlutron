@@ -375,6 +375,7 @@ async def _recover_jobs_and_start_sweep(_app: FastAPI, settings: CrawlerSettings
     The shutdown event is minted in the lifespan, not at import: an import-time
     event is set by the first teardown and cancels every later run's crawls.
     """
+    from .api.cache_sweep import sweep_cache_forever
     from .api.job_recovery import recover_and_start_pending_jobs
     from .api.job_runner import start_job
     from .api.watch_sweep import sweep_watches_forever
@@ -382,6 +383,7 @@ async def _recover_jobs_and_start_sweep(_app: FastAPI, settings: CrawlerSettings
     shutdown_event = asyncio.Event()
     _app.state.shutdown_event = shutdown_event
     await recover_and_start_pending_jobs(_app.state.job_store, settings, shutdown_event, start_job)
+    _app.state.cache_maintenance_task = asyncio.create_task(sweep_cache_forever(shutdown_event))
     _app.state.watch_sweep_task = asyncio.create_task(
         sweep_watches_forever(
             _app.state.watch_store,
@@ -462,11 +464,17 @@ async def _drain_watch_sweep(_app: FastAPI) -> None:
     The sweep is cancelled while the key store is still open: a pass that
     consults it for liveness must not race a closed handle.
     """
-    watch_sweep_task = getattr(_app.state, "watch_sweep_task", None)
-    if watch_sweep_task is None:
+    await _drain_task(_app, "cache_maintenance_task")
+    await _drain_task(_app, "watch_sweep_task")
+
+
+async def _drain_task(_app, name: str) -> None:
+    """Cancel and await one lifespan-created background task."""
+    task = getattr(_app.state, name, None)
+    if task is None:
         return
-    watch_sweep_task.cancel()
+    task.cancel()
     try:
-        await watch_sweep_task
+        await task
     except asyncio.CancelledError:
         pass
