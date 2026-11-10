@@ -221,3 +221,47 @@ async def test_baseline_url_absent_from_run_is_removed(monkeypatch, tmp_path):
     )
     assert response.delta_summary is not None
     assert_removed_summary(response.delta_summary, removed_url)
+
+
+ALIAS_URL = "HTTP://EXAMPLE.COM/page"
+ALIAS_NORMALIZED = "http://example.com/page"
+
+
+async def test_baseline_alias_spelling_answered_is_not_removed(monkeypatch, tmp_path):
+    """A baseline page whose ORIGINAL text differs from the resubmitted spelling
+    is served when the run answers any of its identities: removed stays 0 and
+    the page is never listed as not_in_admitted_set."""
+    tmpdir = str(tmp_path)
+    result_store, _ = _stores(tmpdir)
+    result_store.put(
+        "baseline-1",
+        {
+            "request_id": "baseline-1",
+            "results": [
+                {
+                    "original_url": ALIAS_URL,
+                    "normalized_url": ALIAS_NORMALIZED,
+                    "validators": {"etag": ETAG_V1},
+                    "markdown": "one",
+                }
+            ],
+        },
+        owner="caller-a",
+    )
+    response = await _run(
+        monkeypatch,
+        CrawlRequest(url=ALIAS_NORMALIZED, baseline_request_id="baseline-1"),
+        tmpdir,
+        results=[_result(markdown="one")],
+        result_store=result_store,
+    )
+    summary = response.delta_summary
+    assert summary is not None
+    assert summary["removed"] == 0
+    skipped = summary["skipped"]
+    assert isinstance(skipped, list)
+    # Skipped shape: the one answered page appears at most once, and never
+    # under a removal contradiction.
+    removals = [row for row in skipped if row.get("why") == "not_in_admitted_set"]
+    assert removals == []
+    assert len([row for row in skipped if row.get("url") in (ALIAS_URL, ALIAS_NORMALIZED)]) <= 1

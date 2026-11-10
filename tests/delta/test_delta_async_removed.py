@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 from crawlutron.api.async_crawl_runner import run_async_crawl
 from crawlutron.config.settings import CrawlerSettings
-from crawlutron.delta import DeltaContext
+from crawlutron.delta import DeltaContext, extract_baseline, extract_baseline_entries
 from crawlutron.models.crawl_request import CrawlRequest
 from tests._job_harnesses import make_job_store
 from tests._result_builders import engine_result
@@ -25,14 +25,29 @@ def _stores(tmpdir: str):
 async def test_async_run_reports_baseline_url_absent_from_run(monkeypatch, tmp_path) -> None:
     tmpdir = str(tmp_path)
     result_store, spill_store = _stores(tmpdir)
+    stored: dict[str, object] = {
+        "request_id": "baseline-1",
+        "results": [
+            {
+                "original_url": URL,
+                "normalized_url": URL,
+                "validators": {"etag": '"v1"'},
+                "markdown": "one",
+            },
+            {
+                "original_url": REMOVED_URL,
+                "normalized_url": REMOVED_URL,
+                "validators": {"etag": '"v1"'},
+                "markdown": "two",
+            },
+        ],
+    }
     baseline = DeltaContext(
         changed_since=None,
         baseline_request_id="baseline-1",
-        baseline={
-            URL: _evidence("one"),
-            REMOVED_URL: _evidence("two"),
-        },
+        baseline=extract_baseline(stored),
         baseline_expired=False,
+        entries=extract_baseline_entries(stored),
     )
     scripted = AsyncMock(return_value={"request_id": "r1", "results": [_result()], "submitted_count": 1})
     payload = CrawlRequest(url=URL)
@@ -60,12 +75,6 @@ async def test_async_run_reports_baseline_url_absent_from_run(monkeypatch, tmp_p
     summary = payload_row["delta_summary"]
     assert isinstance(summary, dict)
     assert_removed_summary(summary, REMOVED_URL)
-
-
-def _evidence(markdown: str):
-    from crawlutron.delta import BaselineEvidence
-
-    return BaselineEvidence(etag='"v1"', fingerprint=markdown)
 
 
 def _result():

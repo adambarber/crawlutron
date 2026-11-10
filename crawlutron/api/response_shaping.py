@@ -15,7 +15,7 @@ from crawlutron.api.unified_shaping import (
     build_unified_result,
     render_result_to_unified,
 )
-from crawlutron.delta import DeltaContext, delta_summary_for, removed_urls_for
+from crawlutron.delta import DeltaContext, delta_summary_for, removed_entry_keys
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.crawl_status import CrawlStatus
 from crawlutron.models.host_policy import HostPolicy
@@ -66,9 +66,9 @@ class EnvelopeOptions:
 
 
 def _removed_urls(shaped: list[UnifiedCrawlResult], delta_context: DeltaContext | None) -> tuple[str, ...]:
-    """Baseline identities this run never answered: the removed set.
-    A baseline key counts as served when EITHER of its result identities
-    (normalized or original) answered, so one run spelling cannot fake a removal.
+    """Baseline entries this run never answered: the removed set.
+    An entry is served when ANY of its identities (normalized or original)
+    answered, so an alias spelling cannot report an answered page removed.
     """
     if delta_context is None:
         return ()
@@ -78,7 +78,7 @@ def _removed_urls(shaped: list[UnifiedCrawlResult], delta_context: DeltaContext 
             served.add(str(result.normalized_url))
         if result.original_url:
             served.add(result.original_url)
-    return removed_urls_for(delta_context.baseline, served)
+    return removed_entry_keys(delta_context.entries, served)
 
 
 def _response_envelope(

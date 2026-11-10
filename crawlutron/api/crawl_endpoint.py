@@ -21,7 +21,13 @@ from crawlutron.api.main_helpers import record_crawl_completion, request_gate
 from crawlutron.api.response_shaping import aunified_response_from_result
 from crawlutron.api.webhooks import ensure_https_webhook_url, validate_webhook_url_async
 from crawlutron.config.settings import CrawlerSettings
-from crawlutron.delta import BaselineEvidence, DeltaContext, extract_baseline
+from crawlutron.delta import (
+    BaselineEntry,
+    BaselineEvidence,
+    DeltaContext,
+    extract_baseline,
+    extract_baseline_entries,
+)
 from crawlutron.extraction.output_formats import serialize_results
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.crawl_pending import CrawlPendingError
@@ -88,6 +94,7 @@ async def delta_context_for(payload: CrawlRequest, caller_id: str, result_store)
         return None
     baseline_request_id = payload.baseline_request_id
     baseline: dict[str, BaselineEvidence] = {}
+    entries: tuple[BaselineEntry, ...] = ()
     baseline_expired = False
     if baseline_request_id is not None:
         stored = (
@@ -99,11 +106,13 @@ async def delta_context_for(payload: CrawlRequest, caller_id: str, result_store)
             baseline_expired = True
         else:
             baseline = extract_baseline(stored)
+            entries = extract_baseline_entries(stored)
     return DeltaContext(
         changed_since=payload.changed_since,
         baseline_request_id=baseline_request_id,
         baseline=baseline,
         baseline_expired=baseline_expired,
+        entries=entries,
     )
 
 

@@ -56,6 +56,18 @@ class DeltaContext:
     baseline_request_id: str | None
     baseline: dict[str, BaselineEvidence]
     baseline_expired: bool
+    #: The baseline's results as identity GROUPS: one entry per stored result
+    #: with every key that row answers under. Removal is decided per entry, so
+    #: an alias spelling answered by this run does not report the page removed.
+    entries: tuple[BaselineEntry, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class BaselineEntry:
+    """One stored baseline result: every identity key it answers under."""
+
+    keys: tuple[str, ...]
+    evidence: BaselineEvidence
 
 
 def _url_key(item: EngineCrawlResult) -> str:
@@ -244,18 +256,31 @@ def extract_baseline(stored_payload: dict[str, object]) -> dict[str, BaselineEvi
 
     Keys are every identity the stored result carried (normalized URL first,
     then the caller's original text) so a later crawl matches whichever identity
-    its result answers under.
+    its result answers under. The flat view over :func:`extract_baseline_entries`.
     """
     baseline: dict[str, BaselineEvidence] = {}
+    for entry in extract_baseline_entries(stored_payload):
+        for key in entry.keys:
+            baseline[key] = entry.evidence
+    return baseline
+
+
+def extract_baseline_entries(stored_payload: dict[str, object]) -> tuple[BaselineEntry, ...]:
+    """The stored baseline as identity GROUPS, one entry per result row.
+
+    Classification looks evidence up per key (the flat view above); removal is
+    decided per ENTRY: served when ANY key answered, removed only with zero hits.
+    """
+    entries: list[BaselineEntry] = []
     results = stored_payload.get("results")
     if not isinstance(results, list):
-        return baseline
+        return ()
     for result in results:
         if not isinstance(result, dict):
             continue
         normalized = result.get("normalized_url")
         original = result.get("original_url")
-        keys = [key for key in (normalized, original) if isinstance(key, str) and key]
+        keys = tuple(key for key in (normalized, original) if isinstance(key, str) and key)
         if not keys:
             continue
         validators = result.get("validators")
@@ -278,23 +303,33 @@ def extract_baseline(stored_payload: dict[str, object]) -> dict[str, BaselineEvi
                 text if isinstance(text, str) else None,
             ),
         )
-        for key in keys:
-            baseline[key] = evidence
-    return baseline
+        entries.append(BaselineEntry(keys=keys, evidence=evidence))
+    return tuple(entries)
+
+
+def removed_entry_keys(entries: tuple[BaselineEntry, ...], served: set[str]) -> tuple[str, ...]:
+    """Keys of baseline entries this run never answered, per ENTRY not per key.
+
+    An entry is served when ANY of its identities answered, so an alias
+    spelling answered by the run cannot report the page removed; a removed
+    entry reports under its first (normalized-first) key.
+    """
+    return tuple(entry.keys[0] for entry in entries if removed_urls_for(entry.keys, served) == entry.keys)
 
 
 def removed_urls_for(submitted_urls: Iterable[str], admitted_identities: Iterable[str]) -> tuple[str, ...]:
-    """Submitted URLs absent from this run's admitted set.
+    """Submitted URLs absent from this run's admitted set, flat per-key subtraction.
 
-    Only honest when ``submitted_urls`` is a bounded set and admission decides
-    per URL; the delta summary feeds it the baseline keys and the run's served
-    identities, so a baseline URL this run never answered is reported removed.
+    Only honest when ``submitted_urls`` is ONE entry's bounded identity set (or
+    an equivalent grouping the caller guarantees); the delta summary removes per
+    ENTRY via :func:`removed_entry_keys` so an alias spelling cannot fake one.
     """
     admitted = set(admitted_identities)
     return tuple(url for url in submitted_urls if url not in admitted)
 
 
 __all__ = [
+    "BaselineEntry",
     "BaselineEvidence",
     "CHANGED",
     "DeltaContext",
@@ -305,5 +340,7 @@ __all__ = [
     "content_fingerprint",
     "delta_summary_for",
     "extract_baseline",
+    "extract_baseline_entries",
+    "removed_entry_keys",
     "removed_urls_for",
 ]
