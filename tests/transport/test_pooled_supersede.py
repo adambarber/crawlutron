@@ -33,24 +33,18 @@ def _clean_pooled_state():
 
 
 async def _drain_bounded(guard: float = 2.0) -> None:
-    """Drain queued and in-flight superseded closes, bounded so a stuck close
-    fails the assert instead of hanging the worker."""
-    try:
-        await asyncio.wait_for(drain_pending_client_closes(), timeout=guard)
-    except TimeoutError:
-        pass
+    """Drain queued and in-flight superseded closes bounded.
+
+    A stuck close raises TimeoutError: teardown must fail, never swallow it."""
+    await asyncio.wait_for(drain_pending_client_closes(), timeout=guard)
 
 
 def _drain_then_reset() -> None:
-    """Release what a dying loop abandoned, THEN reset, THEN the caller asserts.
+    """Drain queued closes bounded, then reset, then the caller asserts.
 
-    A live running loop cannot host a nested run, so the sync reset is the only
-    honest move there; otherwise the drain releases queued clients whose close
-    task died with its loop before reset clears the queue."""
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        asyncio.run(_drain_bounded())
+    The drain always runs before the reset: no running-loop short-circuit, so
+    a live loop never skips the release and a stuck close fails teardown."""
+    asyncio.run(_drain_bounded())
     process_state.reset_all_process_state()
 
 
