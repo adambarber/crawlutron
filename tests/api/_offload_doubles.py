@@ -173,6 +173,10 @@ class LoopGuardWatchStore(WatchStore):
         _refuse_on_loop("WatchStore.claim_due")
         return super().claim_due(now, token, **kwargs)
 
+    def renew_claim(self, watch_id, token, **kwargs):
+        _refuse_on_loop("WatchStore.renew_claim")
+        return super().renew_claim(watch_id, token, **kwargs)
+
     # Inherited from ``CoordinationStore`` rather than written here, and still covered: the base's ``close``
     # takes the same file-wide lock as a write.
     def close(self):

@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 WATCH_SWEEP_INTERVAL_SECONDS = 60.0
 
 # How long a sweep's claim on a due watch stays fresh: a sweeper that died
-# mid-check releases the row to the next pass after this.
+# mid-check releases the row to the next pass after its LAST live touch.
 _CLAIM_SECONDS = 300.0
 """How often the process sweeps the registry.
 
@@ -91,6 +91,7 @@ class WatchSweeper:
         key_store=None,
         concurrency_tracker: CallerConcurrencyTracker | None = None,
         job_store: JobStore | None = None,
+        clock: Callable[[], float] = default_clock,
     ) -> None:
         self._store = store
         self._host_policy = host_policy
@@ -100,6 +101,7 @@ class WatchSweeper:
         self._concurrency_tracker = concurrency_tracker
         self._job_store = job_store
         self._claim_token = f"{id(self)}-{time.monotonic_ns()}"
+        self._clock = clock
 
     async def sweep_once(self, now: float) -> list[CrawlClassification]:
         """Recheck every watch due at ``now``; one conclusion per due watch, in
@@ -111,13 +113,21 @@ class WatchSweeper:
         # skips them, so two sweeps never double-fire a webhook.
         due = await self._store.aclaim_due(now, self._claim_token, claim_seconds=_CLAIM_SECONDS)
         for watch in due:
-            outcomes.append(await self._one_watch(watch, now=now))
+            outcome = await self._one_watch(watch, now=now)
+            if outcome is not None:
+                outcomes.append(outcome)
         return outcomes
 
-    async def _one_watch(self, watch: WatchState, *, now: float) -> CrawlClassification:
+    async def _one_watch(self, watch: WatchState, *, now: float) -> CrawlClassification | None:
         """One due watch's conclusion, isolated: a raising watch neither ends the
-        pass nor starves the watches sorted after it in the due list.
+        pass nor starves the watches sorted after it in the due list. The lease
+        is re-stamped at the check's start, so a slow pass cannot lose the row
+        mid-check; a lost renewal (a second sweeper re-claimed it) skips the row.
         """
+        if not await self._store.arenew_claim(watch.watch_id, self._claim_token, now=self._clock()):
+            # Ownership was already lost -- working the row would be the
+            # duplicate fire the claim exists to prevent.
+            return None
         revoked = (
             self._key_store is not None and watch.owner and not await self._key_store.aexists_key(watch.owner)
         )
@@ -298,6 +308,7 @@ async def sweep_watches_forever(
         key_store=key_store,
         concurrency_tracker=concurrency_tracker,
         job_store=job_store,
+        clock=clock,
     )
     while not shutdown_event.is_set():
         try:
