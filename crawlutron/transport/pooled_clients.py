@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import threading
-from collections.abc import Awaitable, Callable, Generator
+from collections.abc import Awaitable, Callable, Coroutine, Generator
 from contextlib import contextmanager
 from http.cookiejar import CookieJar as _StdlibCookieJar
 from typing import TYPE_CHECKING, Protocol, TypeVar, cast
@@ -341,19 +341,30 @@ T = TypeVar("T")
 
 
 def _close_on_fresh_loop(close: Callable[[], Awaitable[object]]) -> None:
-    """Close on a fresh loop, torn down after; unsafe when another loop runs
-    on this thread (run_until_complete cannot nest or run a foreign loop)."""
+    """Close on a fresh loop, torn down after; the previous current loop is
+    restored so a closed loop is never left as this thread's current loop."""
+    try:
+        previous = asyncio.get_event_loop()
+    except RuntimeError:
+        previous = None
     _fresh_loop = asyncio.new_event_loop()
     try:
         asyncio.set_event_loop(_fresh_loop)
         _fresh_loop.run_until_complete(close())
     finally:
         _fresh_loop.close()
+        if previous is not None:
+            asyncio.set_event_loop(previous)
+        else:
+            asyncio.set_event_loop(None)
 
 
 def _close_on_thread(close: Callable[[], Awaitable[object]]) -> None:
-    """Close on a fresh loop hosted by a background thread when another loop
-    runs here (run_until_complete cannot host a foreign loop)."""
+    """Close on a daemon thread's fresh loop when another loop runs here.
+
+    BaseException is captured and re-raised to the caller; a wait that never
+    wakes within 30s raises TimeoutError instead of returning silently.
+    """
     exc: list[BaseException | None] = [None]
     done = threading.Event()
 
@@ -365,14 +376,15 @@ def _close_on_thread(close: Callable[[], Awaitable[object]]) -> None:
                 _fresh_loop.run_until_complete(close())
             finally:
                 _fresh_loop.close()
-        except Exception as e:  # surface close failures to the caller
+        except BaseException as e:  # surface close failures to the caller
             exc[0] = e
         finally:
             done.set()
 
-    thread = threading.Thread(target=_run)
+    thread = threading.Thread(target=_run, daemon=True)
     thread.start()
-    done.wait(timeout=30)
+    if not done.wait(timeout=30):
+        raise TimeoutError("close on background thread did not complete within 30s")
     if exc[0] is not None:
         raise exc[0]
 
@@ -380,12 +392,28 @@ def _close_on_thread(close: Callable[[], Awaitable[object]]) -> None:
 def discard_if_unowned_loop(
     close: Callable[[], Awaitable[object] | object], slot: str, namespace: dict[str, PooledClient | None]
 ) -> None:
-    """Release ``slot``'s object, closing it only when no loop owns it.
+    """Release ``slot``'s object, closing it on its owning loop when it has one.
 
-    ``namespace`` is the module holding the pooled object, so one helper serves
-    every pool module instead of each keeping a globals()-bound copy.
+    ``namespace`` holds the pooled object; one helper serves every pool module.
+    A bound, open loop owns the close; a None or closed bound loop falls
+    through to the cross-loop branches below.
     """
-    if namespace[slot] is None:
+    client = namespace[slot]
+    if client is None:
+        return
+    bound = _loop_bound_to(client)
+    if bound is not None and not bound.is_closed():
+        # A real pooled client is loop-bound: close on its loop instead of
+        # whichever loop happens to be current at teardown.
+        if bound.is_running():
+            # The owning loop lives on another thread: schedule the close
+            # there and wait -- run_until_complete cannot host a foreign loop.
+            asyncio.run_coroutine_threadsafe(cast(Coroutine[object, object, object], close()), bound).result(
+                timeout=30
+            )
+        else:
+            bound.run_until_complete(cast(Awaitable[object], close()))
+        namespace[slot] = None
         return
     try:
         loop = asyncio.get_event_loop()
