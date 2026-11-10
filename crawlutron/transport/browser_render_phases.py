@@ -32,7 +32,10 @@ from crawlutron.transport.browser_targets import (
 )
 from crawlutron.transport.pinned_transport import PinnedRequest
 from crawlutron.transport.render_page import RenderPage
-from crawlutron.transport.timeouts import render_phase_seconds
+from crawlutron.transport.timeouts import (
+    bounded_evaluate,
+    render_phase_seconds,
+)
 from crawlutron.vocabulary.browser import BrowserAction
 
 if TYPE_CHECKING:
@@ -216,7 +219,7 @@ async def extract_with_pdf_fallback(
             lambda: pdf_extractor(final_url, render_phase_seconds(options.timeout_seconds))
         )
         html = html if options.include_html else None
-        title = await page.evaluate("() => document.title")
+        title = await bounded_evaluate(page, "() => document.title")
         classification = classify_page(html, pdf_text, title=str(title))
         text = pdf_text
         method = "pdf_text"
@@ -381,7 +384,12 @@ async def shape_render_result(
     """Terminal status, metadata, screenshots, and the CrawlResult envelope."""
     status = status_for(outcome.classification)
     metadata: dict[str, JsonValue] = {
-        "title": cast(JsonValue, await page.evaluate("() => document.title")),
+        "title": cast(
+            JsonValue,
+            # The ceiling keeps a wedged renderer from holding the pooled page
+            # at the terminal metadata step.
+            await bounded_evaluate(page, "() => document.title"),
+        ),
         "content_length": len(outcome.html or ""),
         "browser_reused": driver_reused,
         "challenge_resolved": challenge_resolved,

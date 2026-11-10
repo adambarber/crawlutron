@@ -107,7 +107,7 @@ def build_pinned_renderer(page, **overrides):
     """
 
     renderer = BrowserRenderer(
-        warmup_urls=[],
+        warmup_urls=overrides.pop("warmup_urls", []),
         # a driver the caller may have supplied its own; otherwise the default
         driver=overrides.pop("driver", None) or FakeBrowserDriver(page),
         extract=overrides.pop("extract", _static_extraction),

@@ -37,6 +37,7 @@ from crawlutron.transport.classification import classify_error_code
 from crawlutron.transport.driver_config import async_sleep
 from crawlutron.transport.pinned_dns import ResolverBudgetExceeded
 from crawlutron.transport.render_page import RenderPage
+from crawlutron.transport.timeouts import bounded_content, bounded_evaluate
 
 if TYPE_CHECKING:
     from crawlutron.models.host_policy import HostPolicy
@@ -294,7 +295,7 @@ class BrowserRenderer:
     ) -> tuple[str | None, str | None, Classification, bool]:
         html = await self.extract_html(page) if options.include_html else None
         text = await self.extract_text(page) if options.include_text else None
-        raw_title = await page.evaluate("() => document.title")
+        raw_title = await bounded_evaluate(page, "() => document.title")
         title = raw_title if isinstance(raw_title, str) else None
         classification = classify_page(html, text, title=title)
 
@@ -308,7 +309,7 @@ class BrowserRenderer:
             # read per tick, no full DOM re-serialization, and the clock is
             # controllable in tests. Never raw asyncio.sleep.
             await self._async_sleep(1)
-            ready_state = await page.evaluate("() => document.readyState")
+            ready_state = await bounded_evaluate(page, "() => document.readyState")
             if ready_state in {"interactive", "complete"}:
                 settled = True
                 break
@@ -317,7 +318,7 @@ class BrowserRenderer:
             # One final extract to confirm whether the challenge cleared.
             next_html = await self.extract_html(page) if options.include_html else None
             next_text = await self.extract_text(page) if options.include_text else None
-            raw_next_title = await page.evaluate("() => document.title")
+            raw_next_title = await bounded_evaluate(page, "() => document.title")
             next_title = raw_next_title if isinstance(raw_next_title, str) else None
             next_classification = classify_page(next_html, next_text, title=next_title)
             if next_classification != "bot_challenge_detected":
@@ -328,9 +329,14 @@ class BrowserRenderer:
 
     @staticmethod
     async def extract_html(page: RenderPage) -> str:
-        """The page's serialized HTML, or empty string if the page will not say."""
+        """The page's serialized HTML, or empty string if the page will not say.
+
+        A ceiling timeout PROPAGATES -- the classifier owes the attempt a
+        navigation_timeout verdict; only non-deadline failures degrade to ""."""
         try:
-            return await page.content()
+            return await bounded_content(page)
+        except TimeoutError:
+            raise
         except Exception as exc:
             logger.warning("html_capture_failed: %s", type(exc).__name__)
             return ""
@@ -342,7 +348,7 @@ class BrowserRenderer:
         renderer state, so a test substituting the step needs these stand-alone.
         """
         try:
-            text = await page.evaluate("() => document.body ? document.body.innerText: ''")
+            text = await bounded_evaluate(page, "() => document.body ? document.body.innerText: ''")
         except Exception as exc:
             logger.warning("text_capture_failed: %s", type(exc).__name__)
             return ""

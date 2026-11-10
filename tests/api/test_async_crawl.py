@@ -216,10 +216,19 @@ class TestAsyncCrawlApi:
         assert resp.json()["code"] == "validation_error"
 
     async def test_v1_crawl_202_envelope_webhook_url_is_redacted(self, crawl_api, monkeypatch):
-        """The 202 accepted envelope echoes the webhook REDACTED (#599): the
-        raw form is a delivery secret and must never ride a response body."""
+        """The 202 accepted envelope echoes the webhook REDACTED: the raw form is
+        a delivery secret and must never ride a response body. The target is
+        built past admission (a secret-named query param is refused at the door
+        now); the redaction law this test pins is defense-in-depth behind it."""
+        from crawlutron.models.normalized_url import NormalizedUrl
+        from crawlutron.models.webhook_target import WebhookTarget
 
         recorded = recorded_webhook_posts(monkeypatch)
+        monkeypatch.setattr(
+            WebhookTarget,
+            "admit",
+            classmethod(lambda cls, url, *, host_policy: cls(target=NormalizedUrl(url, policy=host_policy))),
+        )
         resp = await crawl_api.client.post(
             "/v1/crawl",
             json=crawl_api.payload(

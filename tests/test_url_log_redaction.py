@@ -12,8 +12,16 @@ import logging
 import pytest
 
 from crawlutron.models.host_policy import HostPolicy
+from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.safety.url_redaction import is_secret_name, redact_url
+
+
+def _secret_target(url: str) -> WebhookTarget:
+    """A secret-shaped target built past admission: projection tests exercise
+    redaction, which is defense-in-depth behind the admission refusal."""
+    return WebhookTarget(target=NormalizedUrl(url, policy=HostPolicy.unrestricted()))
+
 
 SECRET_QUERY_URLS = [
     "https://example.com/hook?key=secret",
@@ -86,7 +94,7 @@ def test_redact_url_drops_the_fragment_entirely():
 def test_the_target_masks_every_bypass_shape():
     """The object's projection inherits the same decoded-name law."""
     for url in BYPASS_SHAPES:
-        target = WebhookTarget.admit(url, host_policy=HostPolicy.unrestricted())
+        target = _secret_target(url)
         assert "secret" not in target.redacted(), url
         assert "secret" not in str(target), url
 
@@ -119,7 +127,7 @@ def test_the_target_refuses_userinfo_at_the_constructor():
 
 
 def test_the_target_masks_secret_query_values_in_every_projection():
-    target = WebhookTarget.admit("https://example.com/hook?key=secret", host_policy=HostPolicy.unrestricted())
+    target = _secret_target("https://example.com/hook?key=secret")
     assert "secret" not in target.redacted()
     assert "secret" not in str(target)
     assert "secret" not in repr(target)
@@ -127,7 +135,7 @@ def test_the_target_masks_secret_query_values_in_every_projection():
 
 
 def test_the_target_serializes_redacted():
-    target = WebhookTarget.admit("https://example.com/hook?key=secret", host_policy=HostPolicy.unrestricted())
+    target = _secret_target("https://example.com/hook?key=secret")
     dumped = target.model_dump_json() if hasattr(target, "model_dump_json") else str(target)
     assert "secret" not in dumped
 
@@ -153,13 +161,13 @@ def test_watchstate_serializes_and_reprs_the_webhook_redacted():
 async def test_webhook_log_paths_never_emit_a_secret(caplog, monkeypatch):
     from crawlutron.api import webhooks
 
-    target = WebhookTarget.admit("https://example.com/hook?key=secret", host_policy=HostPolicy.unrestricted())
+    target = _secret_target("https://example.com/hook?key=secret")
     monkeypatch.setattr(webhooks, "webhook_max_attempts", lambda: 1)
     monkeypatch.setattr(webhooks, "webhook_backoff_base_ms", lambda: 0)
     with caplog.at_level(logging.WARNING, logger="crawlutron.api.webhooks"):
         # Non-https refusal path logs the redacted URL.
         await webhooks.post_webhook(
-            WebhookTarget.admit("http://example.com/hook?key=secret", host_policy=HostPolicy.unrestricted()),
+            _secret_target("http://example.com/hook?key=secret"),
             {},
         )
         # Serialization-failure path.

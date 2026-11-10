@@ -13,6 +13,7 @@ from crawlutron.api import watch_sweep
 from crawlutron.api.watch_sweep import WatchSweeper
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.host_policy import HostPolicy
+from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.vocabulary.taxonomy import CrawlClassification
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
@@ -54,7 +55,9 @@ async def test_the_webhook_admission_failure_sink_emits_the_redacted_url(caplog,
     live policy, so ``watch.target()`` re-admission refuses exactly as production
     does.
     """
-    target = WebhookTarget.admit(SECRET_WEBHOOK, host_policy=UNRESTRICTED_HOST_POLICY)
+    # Built past admission (a secret-named query param is refused at the door
+    # now); this pins the sweep's re-admission refusal log redaction behind it.
+    target = WebhookTarget(target=NormalizedUrl(SECRET_WEBHOOK, policy=UNRESTRICTED_HOST_POLICY))
     watch_store.create(
         canonical(loopback_url(etag_server)),
         webhook_url=target,

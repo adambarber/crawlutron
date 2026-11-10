@@ -39,8 +39,12 @@ from crawlutron.transport.driver_pages import (
     safe_close_page,
 )
 from crawlutron.transport.render_page import RenderPage
+from crawlutron.transport.timeouts import bounded_evaluate
 from crawlutron.vocabulary.browser import ACTIONS_REQUIRING_SELECTOR, BROWSER_ACTION_TYPES, BrowserAction
-from crawlutron.vocabulary.limits import DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS, DEFAULT_MAX_BROWSER_RENDERS
+from crawlutron.vocabulary.limits import (
+    DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS,
+    DEFAULT_MAX_BROWSER_RENDERS,
+)
 
 if TYPE_CHECKING:
     from crawlutron.config.settings import CrawlerSettings
@@ -280,7 +284,7 @@ class BrowserDriver:
 
     async def wait_for_ready_state(self, page: RenderPage) -> None:
         for _ in range(10):
-            state = await page.evaluate("() => document.readyState")
+            state = await bounded_evaluate(page, "() => document.readyState")
             if state in {"interactive", "complete"}:
                 return
             await self._async_sleep(0.1)
@@ -393,8 +397,9 @@ class BrowserDriver:
         stable_polls = 0
         for _ in range(steps):
             try:
-                height = await page.evaluate(
-                    "() => { const h = document.body.scrollHeight; window.scrollTo(0, h); return h; }"
+                height = await bounded_evaluate(
+                    page,
+                    "() => { const h = document.body.scrollHeight; window.scrollTo(0, h); return h; }",
                 )
             except Exception:  # scrolling is best-effort
                 return

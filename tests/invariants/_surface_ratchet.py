@@ -98,7 +98,9 @@ DECLARED_SURFACE_RATCHET = {
     # #656 raised 16,7 -> 18,8: get_concurrency_tracker + TrackerDep make the
     # app-state stash load-bearing (the getattr-None scatter is refused loudly).
     "crawlutron/api/dependencies.py": (20, 9),
-    "crawlutron/api/exceptions.py": (10, 7),
+    # #813 raised 10,7 -> 11,8: is_quota_refusal is the named quota-refusal match
+    # the watch sweep reads instead of string-matching raw detail dicts.
+    "crawlutron/api/exceptions.py": (11, 8),
     # #668: the single-homed discovery-link constants the 404 details reuse.
     "crawlutron/discovery/links.py": (3, 0),
     # #649: derived discovery -- one thin re-export and one surface walk.
