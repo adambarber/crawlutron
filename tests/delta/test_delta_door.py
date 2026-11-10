@@ -20,16 +20,14 @@ from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
 from crawlutron.storage.result_store import CrawlResultStore, CrawlSpillStore
 from tests._job_harnesses import ScriptedExecute, make_job_store, scripted_engine
 from tests._result_builders import engine_result
+from tests.delta._door_harness import assert_removed_summary, delta_stores
 
 URL = "http://example.com/"
 ETAG_V1 = '"v1"'
 
 
 def _stores(tmpdir: str):
-    return (
-        CrawlResultStore(pathlib.Path(tmpdir) / "results.db"),
-        CrawlSpillStore(pathlib.Path(tmpdir) / "spills.db"),
-    )
+    return delta_stores(tmpdir)
 
 
 def _seed_baseline(result_store, request_id: str, caller_id: str, *, markdown: str) -> None:
@@ -60,9 +58,13 @@ async def _run(
     *,
     results=None,
     caller_id: str = "caller-a",
+    result_store: CrawlResultStore | None = None,
 ) -> UnifiedCrawlResponse:
     """Run the sync crawl() door over real stores with a scripted engine."""
-    result_store, spill_store = _stores(tmpdir)
+    if result_store is None:
+        result_store, spill_store = _stores(tmpdir)
+    else:
+        spill_store = CrawlSpillStore(pathlib.Path(tmpdir) / "spills.db")
     scripted = ScriptedExecute(results=results or [])
     scripted_engine(monkeypatch, _crawl_endpoint_mod, scripted)
     response = await crawl(
@@ -181,3 +183,41 @@ async def _scoped_run(
         results=[_result(classification="not_modified", http_status=304, markdown="one")],
         caller_id=caller_id,
     )
+
+
+async def test_baseline_url_absent_from_run_is_removed(monkeypatch, tmp_path):
+    """A baseline URL this run never answers is the removed verdict: the summary
+    counts it and skipped carries why=not_in_admitted_set for it."""
+    tmpdir = str(tmp_path)
+    removed_url = "http://example.com/gone/"
+    result_store, _ = _stores(tmpdir)
+    result_store.put(
+        "baseline-1",
+        {
+            "request_id": "baseline-1",
+            "results": [
+                {
+                    "original_url": URL,
+                    "normalized_url": URL,
+                    "validators": {"etag": ETAG_V1},
+                    "markdown": "one",
+                },
+                {
+                    "original_url": removed_url,
+                    "normalized_url": removed_url,
+                    "validators": {"etag": ETAG_V1},
+                    "markdown": "two",
+                },
+            ],
+        },
+        owner="caller-a",
+    )
+    response = await _run(
+        monkeypatch,
+        CrawlRequest(url=URL, baseline_request_id="baseline-1"),
+        tmpdir,
+        results=[_result(markdown="one")],
+        result_store=result_store,
+    )
+    assert response.delta_summary is not None
+    assert_removed_summary(response.delta_summary, removed_url)

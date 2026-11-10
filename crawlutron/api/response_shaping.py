@@ -15,7 +15,7 @@ from crawlutron.api.unified_shaping import (
     build_unified_result,
     render_result_to_unified,
 )
-from crawlutron.delta import DeltaContext, delta_summary_for
+from crawlutron.delta import DeltaContext, delta_summary_for, removed_urls_for
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.crawl_status import CrawlStatus
 from crawlutron.models.host_policy import HostPolicy
@@ -63,10 +63,22 @@ class EnvelopeOptions:
     success: bool = True
     submitted_count: int | None = None
     delta_context: DeltaContext | None = None
-    # Baseline keys (URLs seen before) absent from this run's admitted set: the
-    # run's removed set, reported in delta_summary. Empty when delta was not
-    # requested or nothing was removed.
-    removed_urls: tuple[str, ...] = ()
+
+
+def _removed_urls(shaped: list[UnifiedCrawlResult], delta_context: DeltaContext | None) -> tuple[str, ...]:
+    """Baseline identities this run never answered: the removed set.
+    A baseline key counts as served when EITHER of its result identities
+    (normalized or original) answered, so one run spelling cannot fake a removal.
+    """
+    if delta_context is None:
+        return ()
+    served: set[str] = set()
+    for result in shaped:
+        if result.normalized_url is not None:
+            served.add(str(result.normalized_url))
+        if result.original_url:
+            served.add(result.original_url)
+    return removed_urls_for(delta_context.baseline, served)
 
 
 def _response_envelope(
@@ -87,7 +99,7 @@ def _response_envelope(
         submitted_count=(result_count if options.submitted_count is None else options.submitted_count),
         delta_summary=delta_summary_for(
             shaped,
-            removed_urls=options.removed_urls,
+            removed_urls=_removed_urls(shaped, options.delta_context),
             delta_requested=options.delta_context is not None,
         ),
     )

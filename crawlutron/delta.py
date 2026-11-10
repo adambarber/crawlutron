@@ -286,8 +286,9 @@ def extract_baseline(stored_payload: dict[str, object]) -> dict[str, BaselineEvi
 def removed_urls_for(submitted_urls: Iterable[str], admitted_identities: Iterable[str]) -> tuple[str, ...]:
     """Submitted URLs absent from this run's admitted set.
 
-    Only honest when the caller submitted a bounded explicit set and admission
-    decides per URL; an empty admitted delta means nothing was removed this run.
+    Only honest when ``submitted_urls`` is a bounded set and admission decides
+    per URL; the delta summary feeds it the baseline keys and the run's served
+    identities, so a baseline URL this run never answered is reported removed.
     """
     admitted = set(admitted_identities)
     return tuple(url for url in submitted_urls if url not in admitted)
