@@ -302,6 +302,23 @@ _MODULE_GLOBAL_RESETS = (_clear_global_http_state,)
 
 
 @pytest.fixture(autouse=True)
+async def _reset_pooled_sockets_on_the_live_loop():
+    """Release the pooled HTTP clients while the test's loop still runs.
+
+    The pooled client is loop-bound: a reset that runs after pytest-asyncio
+    closed the loop cannot legally close its transports (a foreign-loop close
+    leaves them "closing" forever -- the unraisable __del__ flake family).
+    Closing on the owning loop before it dies is the structural fix; the sync
+    reset below stays as the safety net for stateless owners."""
+    yield
+    from crawlutron.runtime import process_state
+    from crawlutron.transport import pooled_clients
+
+    process_state.reset_all_process_state()
+    await pooled_clients.drain_pending_client_closes()
+
+
+@pytest.fixture(autouse=True)
 def _reset_module_globals():
     """Clear every process-global the production code shares, around each test."""
     for reset in _MODULE_GLOBAL_RESETS:

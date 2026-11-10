@@ -67,7 +67,10 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     "crawlutron/transport/scheduler_pacing.py": (6, 4),
     "crawlutron/transport/http_cache.py": (4, 4),
     "crawlutron/transport/http_classify.py": (3, 3),
-    "crawlutron/transport/pooled_clients.py": (12, 10),
+    "crawlutron/transport/pooled_clients.py": (9, 6),
+    # #820/unit-3: release machinery split out of pooled_clients for the ceiling.
+    "crawlutron/transport/pooled_client_release.py": (10, 8),
+    "crawlutron/transport/pooled_socket_abort.py": (1, 1),
     # #314/wave-2: JobAccumulators (one class) moved here whole from job_store_state
     # to hold the 500-line ceiling; the seam owns every accumulator table.
     "crawlutron/storage/job_store_accumulators.py": (1, 1),
