@@ -1,7 +1,8 @@
 """SDK-owned pydantic v2 wire mirrors of the crawlutron service contract.
 
-Request models use ``extra="forbid"``; response models tolerate unknown future
-fields with ``extra="allow"``. The SDK does not import crawlutron.
+Request models use ``extra="forbid"`` except WatchCreateRequest (``extra="allow"``);
+response models tolerate unknown future fields with ``extra="allow"``. The SDK does
+not import crawlutron.
 """
 
 from __future__ import annotations
@@ -196,7 +197,16 @@ class SearchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     query: str = Field(..., min_length=1, description="Web search query.")
-    limit: Annotated[int | None, Field(default=None, ge=1, le=100)] = None
+    limit: Annotated[
+        int | None,
+        Field(
+            default=None,
+            ge=1,
+            le=20,
+            description="Maximum results to return; the server clamps this to its "
+            "CRAWLUTRON_SEARCH_LIMIT_MAX (default 20).",
+        ),
+    ] = None
 
 
 class SearchResultItem(BaseModel):
