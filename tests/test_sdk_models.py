@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
+import crawlutron_sdk.models as sdk_models
 from crawlutron_sdk.models import (
     AdmitRequest,
     AdmitResponse,
@@ -89,11 +90,40 @@ def test_job_control_request_action_must_be_valid():
 
 
 def test_search_request_limit_bounds():
+    """The SDK mirrors the server's default clamp: CRAWLUTRON_SEARCH_LIMIT_MAX is 20."""
     with pytest.raises(ValidationError):
         SearchRequest(query="q", limit=0)
     with pytest.raises(ValidationError):
-        SearchRequest(query="q", limit=101)
+        SearchRequest(query="q", limit=21)
+    assert SearchRequest(query="q", limit=20).limit == 20
     assert SearchRequest(query="q").limit is None
+    description = SearchRequest.model_fields["limit"].description
+    assert description is not None and "clamps" in description
+
+
+def _sdk_request_models() -> dict[str, type[BaseModel]]:
+    return {
+        name: obj
+        for name, obj in vars(sdk_models).items()
+        if isinstance(obj, type)
+        and issubclass(obj, sdk_models.BaseModel)
+        and name.endswith("Request")
+        and obj.__module__ == sdk_models.__name__
+    }
+
+
+def test_sdk_docstring_extra_rule_names_every_non_forbid_request_model():
+    """Drift detector: the docstring states the request models' extra= rule.
+
+    Every request model deviating from forbid must be named there."""
+    doc = sdk_models.__doc__ or ""
+    unnamed = sorted(
+        name
+        for name, model in _sdk_request_models().items()
+        if model.model_config.get("extra") != "forbid" and name not in doc
+    )
+    assert not unnamed, f"docstring's extra= rule omits non-forbid request models: {unnamed}"
+    assert _sdk_request_models(), "detector found no request models; the premise is void"
 
 
 def test_watch_state_tolerates_unknown_fields():

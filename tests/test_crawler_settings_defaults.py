@@ -88,6 +88,33 @@ class TestFromMappingHardening:
         assert settings.adaptive_throttling is True
 
 
+class TestBatchSizeLoBound:
+    """A negative or zero batch size must clamp to the lo bound like the sibling
+    knobs (extraction_max_markdown, max_watches_per_caller): a typo'd negative
+    silently refuses every batch through batch_size_exceeded, so the read is
+    bounded at the settings read, not at each door."""
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [("-3", 1), ("0", 1), ("1", 1), ("2", 2)],
+        ids=["negative-floor", "zero-boundary", "lo-passes", "first-above-lo"],
+    )
+    def test_batch_size_clamps_at_the_lo_boundary(self, raw, expected):
+        # Kills the mutant deleting ``lo=1``: every <=0 shape must read 1.
+        settings = CrawlerSettings.from_mapping({"CRAWLUTRON_MAX_BATCH_SIZE": raw})
+        assert settings.max_batch_size == expected
+
+    def test_unparseable_batch_size_falls_back_to_the_default(self):
+        # Kills a mutant widening the clamp into a raise: garbage parses to the
+        # dataclass default like every sibling knob, never an exception.
+        settings = CrawlerSettings.from_mapping({"CRAWLUTRON_MAX_BATCH_SIZE": "fifty"})
+        assert settings.max_batch_size == 50
+
+    def test_positive_batch_size_passes_through(self):
+        settings = CrawlerSettings.from_mapping({"CRAWLUTRON_MAX_BATCH_SIZE": "50"})
+        assert settings.max_batch_size == 50
+
+
 def test_the_extraction_deadlines_are_settings_rather_than_module_snapshots():
     """The extraction deadlines are operator knobs, so they belong in settings: read
     at import they were the only knobs with no config home, and a deadline frozen at
