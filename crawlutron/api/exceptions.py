@@ -48,6 +48,16 @@ def error_envelope_from_detail(detail: object, status_code: int) -> ErrorEnvelop
     return error_envelope(MALFORMED_DETAIL_CODE, "Request failed", {"status_code": status_code})
 
 
+def is_quota_refusal(exc: object) -> bool:
+    """Whether ``exc`` is a caller-quota refusal (429 quota_exceeded): the caller
+    is at their own page/concurrency budget, so the guarded work never ran.
+    """
+    if not isinstance(exc, HTTPException):
+        return False
+    envelope = error_envelope_from_detail(getattr(exc, "detail", None), exc.status_code)
+    return exc.status_code == 429 and envelope["code"] == "quota_exceeded"
+
+
 def http_error(status_code: int, code: str, message: str, details: JsonValue | None = None) -> HTTPException:
     """HTTPException carrying a conforming envelope (use instead of literals)."""
     return HTTPException(status_code=status_code, detail=error_envelope(code, message, details))
@@ -122,6 +132,7 @@ __all__ = [
     "error_envelope",
     "error_envelope_from_detail",
     "http_error",
+    "is_quota_refusal",
     "http_exception_handler",
     "validation_exception_handler",
     "validation_http_error",

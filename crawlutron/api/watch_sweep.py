@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from crawlutron.api.caller_auth import Tracking, admit, anonymous_caller, identity_for_key
 from crawlutron.api.crawl_executor import CrawlRefusalError, execute_crawl
+from crawlutron.api.exceptions import is_quota_refusal
 from crawlutron.api.webhooks import start_webhook_delivery
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.caller_identity import CallerIdentity
@@ -144,7 +145,13 @@ class WatchSweeper:
             outcome = await self._check(watch, now=now)
         except CrawlRefusalError as error:
             return await self._deactivate_refused(watch, error.reason, now=now)
-        except Exception:
+        except Exception as error:
+            if is_quota_refusal(error):
+                # The owner's own page/concurrency budget refused the check:
+                # it never ran, so no failure streak -- leave the row to the
+                # next sweep rather than recording the site as unhealthy.
+                logger.info("watch_check_quota_refused", extra={"watch_id": watch.watch_id})
+                return None
             # One watch that raises must not end the pass nor starve its
             # co-scheduled watches: record the failure and reschedule anyway.
             logger.exception(

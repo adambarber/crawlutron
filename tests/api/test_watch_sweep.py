@@ -387,20 +387,29 @@ def _keyed_sweeper(watch_store, tmp_path, monkeypatch, *, capture: list[str] | N
     return tracker, record, sweeper
 
 
-async def test_a_busy_owner_watch_check_is_refused_not_run_unbounded(watch_store, tmp_path, monkeypatch):
-    """A due watch whose owner is at their concurrency cap is refused at admission
-    rather than executing a check outside the unified concurrency register (#325)."""
+async def test_a_owner_at_quota_watch_check_skips_the_row_without_a_failure_record(
+    watch_store, tmp_path, monkeypatch
+):
+    """A due watch whose owner is at their concurrency cap never ran: the row is
+    skipped (no arecord_check, no streak growth, next_check_at untouched) and
+    the next sweep retries -- a full parking lot does not make the car broken."""
     calls: list[str] = []
     tracker, record, sweeper = _keyed_sweeper(watch_store, tmp_path, monkeypatch, capture=calls)
     tracker.reserve(record.key_id)  # the owner's one slot is already taken
     watch = watch_store.list_watches()[0]
+    before = watch_store.get(watch.watch_id)
 
     outcomes = await sweeper.sweep_once(now=NOW)
 
-    # The check never ran: the owner's concurrency cap refused it at admission.
+    # The check never ran: the owner's quota refusal is not the site's health.
     assert calls == []
-    assert outcomes == [CrawlClassification.unknown_error]
-    assert watch_store.get(watch.watch_id).consecutive_failures == 1
+    assert outcomes == []
+    after = watch_store.get(watch.watch_id)
+    assert (after.consecutive_failures, after.next_check_at, after.last_checked_at) == (
+        before.consecutive_failures,
+        before.next_check_at,
+        before.last_checked_at,
+    )
 
 
 async def test_a_owner_watch_check_releases_the_slot_after_a_check(watch_store, tmp_path, monkeypatch):
