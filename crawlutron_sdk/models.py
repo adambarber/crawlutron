@@ -45,6 +45,7 @@ class CrawlRequest(BaseModel):
     changed_since: Annotated[
         float | None,
         Field(
+            ge=0,
             allow_inf_nan=False,
             description="Epoch seconds; when set, the caller requests delta classification relative to "
             "that time.",

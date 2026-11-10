@@ -18,6 +18,7 @@ an explanatory comment; silent ``0``/``-1`` literals still red.
 import ast
 import importlib
 import pathlib
+import types
 import typing
 from typing import Final
 
@@ -64,7 +65,7 @@ def _numeric_chain(annotation: object) -> tuple[type, bool] | None:
     is treated as float (the wider constraint governs); anything else is None.
     """
     origin = typing.get_origin(annotation)
-    if origin is typing.Union:
+    if origin in (typing.Union, types.UnionType):
         args = [a for a in typing.get_args(annotation) if a is not type(None)]
         if any(a is float for a in args):
             return (float, True)
@@ -108,7 +109,7 @@ def _field_lineno(cls: type[BaseModel], field_name: str) -> tuple[pathlib.Path, 
     return source_file, 0
 
 
-def _numeric_knob_offenders() -> list[str]:
+def _numeric_knob_offenders(extra_entries: list[type[BaseModel]] | None = None) -> list[str]:
     """The registry walk itself: every unbounded caller-facing numeric, named."""
     offenders: list[str] = []
     seen: set[type[BaseModel]] = set()
@@ -133,12 +134,16 @@ def _numeric_knob_offenders() -> list[str]:
             has_bound, inf_nan_disabled = _constraints(field_info)
             source_file, line = _field_lineno(cls, field_name)
             label = f"{source_file.relative_to(pathlib.Path.cwd())}:{line} {cls.__name__}.{field_name}"
-            if is_float and not inf_nan_disabled:
-                offenders.append(f"{label}: float knob lacks allow_inf_nan=False")
+            if is_float and not (has_bound and inf_nan_disabled):
+                missing = [] if has_bound else ["a floor bound"]
+                if not inf_nan_disabled:
+                    missing.append("allow_inf_nan=False")
+                offenders.append(f"{label}: float knob lacks {' and '.join(missing)}")
             elif not is_float and not has_bound:
                 offenders.append(f"{label}: int knob carries no floor bound")
 
-    for entry in sorted(_entry_models(), key=lambda m: m.__name__):
+    entries = sorted(set(_entry_models()) | set(extra_entries or []), key=lambda m: m.__name__)
+    for entry in entries:
         walk(entry, 0)
     return offenders
 
@@ -158,21 +163,41 @@ def test_every_caller_facing_numeric_knob_is_bounded():
     )
 
 
-class _InMemoryProbeModel(BaseModel):
-    """The mutation probe's subject, NOT part of the app tree."""
+class _UnboundedFiniteFloat(BaseModel):
+    """Mutation probe (a): finite float, no floor."""
 
     ratio: float
 
 
-def test_an_unbounded_numeric_field_reds_naming_it():
-    """The bite, in memory: an unbounded caller-facing float names file:line.
+class _UnboundedOptionalInt(BaseModel):
+    """Mutation probe (b): int | None, no floor."""
 
-    The probe model is constructed here so the walk's message can be checked
-    without touching the app tree; the walk itself is re-run against the
-    probe's field through the same detector the live test uses.
-    """
-    field_info = _InMemoryProbeModel.model_fields["ratio"]
-    has_bound, inf_nan_disabled = _constraints(field_info)
-    assert not has_bound and not inf_nan_disabled, "the probe model was supposed to be unbounded"
-    got = _numeric_chain(field_info.annotation)
+    retries: int | None = None
+
+
+class _NanAdmittableOptionalFloat(BaseModel):
+    """Mutation probe (c): float | None, no allow_inf_nan=False."""
+
+    ratio: float | None = None
+
+
+def test_an_unbounded_numeric_field_reds_naming_it():
+    """The bite, in memory: each unbounded shape reds, naming its defect."""
+    offenders = _numeric_knob_offenders(
+        [_UnboundedFiniteFloat, _UnboundedOptionalInt, _NanAdmittableOptionalFloat]
+    )
+    floor_msg = "_UnboundedFiniteFloat.ratio: float knob lacks a floor bound and allow_inf_nan=False"
+    int_msg = "_UnboundedOptionalInt.retries: int knob carries no floor bound"
+    nan_msg = "_NanAdmittableOptionalFloat.ratio: float knob lacks a floor bound and allow_inf_nan=False"
+    assert any(floor_msg in o for o in offenders)
+    assert any(int_msg in o for o in offenders)
+    assert any(nan_msg in o for o in offenders)
+    assert not any("_UnboundedOptionalInt.retries" in o and "allow_inf_nan" in o for o in offenders)
+
+
+def test_the_union_walk_sees_pep_604_unions():
+    """int | None (types.UnionType on 3.12) is recognized, not just typing.Union."""
+    got = _numeric_chain(_UnboundedOptionalInt.model_fields["retries"].annotation)
+    assert got == (int, False), got
+    got = _numeric_chain(_NanAdmittableOptionalFloat.model_fields["ratio"].annotation)
     assert got == (float, True), got
