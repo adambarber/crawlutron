@@ -8,13 +8,15 @@ from __future__ import annotations
 
 import datetime
 
+from crawlutron.safety.url_redaction import redacted_marker
+
 
 def json_default(obj: object) -> object:
     """Fallback for objects that are not natively JSON-serializable."""
-    # pydantic SecretStr/SecretBytes: serialize the actual secret value
+    # Secrets never surface through a generic serializer: redaction is the exit law.
     getter = getattr(obj, "get_secret_value", None)
     if callable(getter):
-        return getter()
+        return redacted_marker()
     reducer = getattr(obj, "model_dump", None)
     if callable(reducer):
         return reducer()

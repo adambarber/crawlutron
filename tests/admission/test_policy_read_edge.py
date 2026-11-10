@@ -289,6 +289,13 @@ class TestStoredPolicy:
         """What goes on disk is what the model accepts, not the corrupt text."""
         assert stored_policy({"limits": {"max_retries": _OVER_MAX_RETRIES}}) == read_policy({}).model_dump()
 
+    def test_a_marker_credential_row_refuses_typed_not_repaired(self):
+        """A reloaded row whose credential carries the redaction marker is not a
+        repairable malformed field: repair would silently drop the credential and
+        resume unauthenticated. The read edge refuses typed, naming the field."""
+        with pytest.raises(ValueError, match="credentials\\[https://example\\]\\.token.*redacted marker"):
+            read_policy({"credentials": {"https://example": {"kind": "bearer", "token": "[REDACTED]"}}})
+
 
 @pytest.mark.parametrize(
     "shape", [None, 17, "text", ["a"], {"limits": "nope"}, {"limits": {"max_depth": -1}}]

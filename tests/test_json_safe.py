@@ -5,6 +5,9 @@ from __future__ import annotations
 import datetime
 import json
 
+from crawlutron.admission.credentials import origin_of
+from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.models.credential import Credential
 from crawlutron.safety.json_safe import json_default
 
 
@@ -42,3 +45,33 @@ class TestJsonDefault:
 
     def test_fallback_is_str(self):
         assert json.dumps(object(), default=json_default).startswith('"')
+
+    def test_secretstr_redacts_never_unseals(self):
+        secret = Credential(kind="bearer", token="supersecret123")
+
+        rendered = json.dumps(secret, default=json_default)
+
+        assert "supersecret123" not in rendered
+        assert "REDACTED" in rendered
+
+    def test_stored_policy_never_carries_a_plaintext_credential(self):
+        """The write edge persists policy rows; the serializer must never be a
+        secret's exit, so the stored row redacts the credential value while the
+        rest of the policy round-trips."""
+        origin = origin_of("https://example.test")
+        policy = CrawlPolicy.model_validate(
+            {
+                "strategies": ["BROWSER_HEADLESS"],
+                "limits": {"max_depth": 2},
+                "credentials": {origin: {"kind": "bearer", "token": "supersecret123"}},
+            }
+        )
+
+        rendered = json.dumps(policy.model_dump(), default=json_default)
+
+        assert "supersecret123" not in rendered
+        assert json.loads(rendered)["strategies"] == ["BROWSER_HEADLESS"]
+        assert json.loads(rendered)["limits"]["max_depth"] == 2
+        credential = json.loads(rendered)["credentials"][origin]
+        assert credential["kind"] == "bearer"
+        assert "REDACTED" in credential["token"]

@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.crawl_policy_limits import CrawlPolicyLimits
 from crawlutron.models.json_value import JsonValue
+from crawlutron.safety import url_redaction
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard
     from crawlutron.config.settings import CrawlerSettings
@@ -219,12 +220,33 @@ def _policy_input(raw: PolicyLike | None) -> CrawlPolicy | dict[str, JsonValue] 
     return raw if isinstance(raw, dict) else None
 
 
+def _refuse_redacted_credentials(raw: dict[str, JsonValue]) -> None:
+    """A marker credential in a reloaded row is a policy that cannot be honored:
+    the repair loop would silently drop it and resume with no auth. Fail typed
+    instead -- the caller must re-supply the credential (the at-rest law's
+    reload side)."""
+    credentials = raw.get("credentials")
+    if not isinstance(credentials, Mapping):
+        return
+    for key, value in credentials.items():
+        if isinstance(value, Mapping):
+            for field in ("token", "username", "password"):
+                secret = value.get(field)
+                if isinstance(secret, str) and url_redaction.redacted_marker() in secret:
+                    raise ValueError(
+                        f"credentials[{key}].{field}: redacted marker is not a live"
+                        " credential -- re-supply the credential to resume"
+                    ) from None
+
+
 def read_policy(raw: PolicyLike | None, tier: PolicyTier | None = None) -> CrawlPolicy:
     """Total read edge: any input resolves to a policy, repairing what failed.
     Repair is field-scoped (whole-default discards what the caller got right; the read edge never raises).
     Drop the rejected locations and re-validate, ending at full defaults only when nothing remains.
     """
     resolved = _policy_input(raw)
+    if isinstance(resolved, dict):
+        _refuse_redacted_credentials(resolved)
     if not isinstance(resolved, dict):
         if resolved is None:
             # Nothing supplied is the empty policy's answer, not the model's raw 0.
