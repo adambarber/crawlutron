@@ -199,7 +199,6 @@ async def store_http_caches(ctx: HttpStrategyContext, resp: FetchedResponse) -> 
         # no-store bans every cache; private bans the shared one (RFC 9111 5.2.2.6)
         # -- a single-user body must never persist for another caller's replay.
         return
-    origin_ttl = max_age_seconds(resp.headers)
     if (
         ctx.cache is not None
         and resp.status_code < 400
