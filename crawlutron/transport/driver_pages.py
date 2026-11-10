@@ -9,6 +9,7 @@ from collections.abc import Callable
 from crawlutron.models.screenshot_diagnostics import ScreenshotDiagnostics
 from crawlutron.transport.driver_config import async_sleep
 from crawlutron.transport.render_page import PageElement, RenderPage
+from crawlutron.transport.timeouts import bounded_evaluate
 
 
 async def safe_close_page(page: RenderPage) -> None:
@@ -21,7 +22,8 @@ async def flatten_shadow_dom(page: RenderPage) -> None:
     # Move each open shadow root's children into its light-DOM host (closed
     # roots are inaccessible); collect first, then move, to avoid mutation.
     with contextlib.suppress(Exception):  # flattening is best-effort; never fail a render over it
-        await page.evaluate(
+        await bounded_evaluate(
+            page,
             """() => {
                 const collect = (root, acc) => {
                     const els = root.querySelectorAll ? root.querySelectorAll('*'): [];
@@ -57,7 +59,7 @@ async def flatten_shadow_dom(page: RenderPage) -> None:
                     }
                 }
                 return true;
-            }"""
+            }""",
         )
 
 
@@ -132,7 +134,7 @@ async def auto_accept_cookie_consent(page: RenderPage, enabled: bool, sleep: Cal
                         await async_sleep(sleep, 0.5)  # Brief wait for consent to register
                         return True
         # Fallback: evaluate JS to find buttons by text content
-        clicked = await page.evaluate(_CONSENT_FALLBACK_JS)
+        clicked = await bounded_evaluate(page, _CONSENT_FALLBACK_JS)
         return bool(clicked)
     except Exception:
         return False

@@ -32,9 +32,11 @@ from crawlutron.transport.browser_targets import (
 )
 from crawlutron.transport.pinned_transport import PinnedRequest
 from crawlutron.transport.render_page import RenderPage
-from crawlutron.transport.timeouts import render_phase_seconds
+from crawlutron.transport.timeouts import (
+    bounded_evaluate,
+    render_phase_seconds,
+)
 from crawlutron.vocabulary.browser import BrowserAction
-from crawlutron.vocabulary.limits import MAX_EVALUATE_TIMEOUT_SECONDS
 
 if TYPE_CHECKING:
     from crawlutron.models.host_policy import HostPolicy
@@ -93,13 +95,6 @@ def _profile_selectors(profile: BrowserProfileRecord | None) -> list[str]:
     """The profile's targeted-screenshot selectors, or none."""
     value = (profile or {}).get("screenshot_selectors")
     return value if isinstance(value, list) else []
-
-
-async def bounded_evaluate(page: RenderPage, expression: str) -> object:
-    """One page.evaluate under the evaluate ceiling: Playwright's evaluate
-    carries no default deadline, so a wedged renderer would park the call
-    (and the pooled page) forever. Raises TimeoutError when the ceiling trips."""
-    return await asyncio.wait_for(page.evaluate(expression), timeout=MAX_EVALUATE_TIMEOUT_SECONDS)
 
 
 async def wire_ssrf_guards(

@@ -24,7 +24,6 @@ from crawlutron.transport.browser_render_phases import (
     ReleasePlan,
     RenderCollaborators,
     WireGuard,
-    bounded_evaluate,
     guarded_render,
     release_page,
 )
@@ -38,6 +37,7 @@ from crawlutron.transport.classification import classify_error_code
 from crawlutron.transport.driver_config import async_sleep
 from crawlutron.transport.pinned_dns import ResolverBudgetExceeded
 from crawlutron.transport.render_page import RenderPage
+from crawlutron.transport.timeouts import bounded_content, bounded_evaluate
 
 if TYPE_CHECKING:
     from crawlutron.models.host_policy import HostPolicy
@@ -329,9 +329,14 @@ class BrowserRenderer:
 
     @staticmethod
     async def extract_html(page: RenderPage) -> str:
-        """The page's serialized HTML, or empty string if the page will not say."""
+        """The page's serialized HTML, or empty string if the page will not say.
+
+        A ceiling timeout PROPAGATES -- the classifier owes the attempt a
+        navigation_timeout verdict; only non-deadline failures degrade to ""."""
         try:
-            return await page.content()
+            return await bounded_content(page)
+        except TimeoutError:
+            raise
         except Exception as exc:
             logger.warning("html_capture_failed: %s", type(exc).__name__)
             return ""

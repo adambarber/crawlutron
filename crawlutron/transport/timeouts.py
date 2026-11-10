@@ -6,12 +6,21 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Awaitable
 from dataclasses import dataclass
+from typing import cast
 
 import httpx
 
+from crawlutron.transport.render_page import RenderPage
+
 #: The floor a render phase honors: a sub-second budget cannot bound a goto.
 RENDER_PHASE_FLOOR_SECONDS = 1.0
+
+#: The ceiling on one page read (evaluate or content): Playwright's reads carry
+#: NO default deadline, so a wedged renderer would hold the pooled page forever.
+MAX_EVALUATE_TIMEOUT_SECONDS = 5.0
 
 
 def render_phase_seconds(timeout_seconds: float) -> float:
@@ -19,6 +28,22 @@ def render_phase_seconds(timeout_seconds: float) -> float:
     RETURNED before actions start, so the two grants are sequential, not
     additive -- both call sites read this declaration instead of re-deriving."""
     return max(RENDER_PHASE_FLOOR_SECONDS, float(timeout_seconds))
+
+
+async def bounded_read(op: Awaitable[object]) -> object:
+    """One page read under the evaluate ceiling. Raises TimeoutError when the
+    ceiling trips; callers decide whether a wedged read degrades or fails."""
+    return await asyncio.wait_for(op, timeout=MAX_EVALUATE_TIMEOUT_SECONDS)
+
+
+async def bounded_evaluate(page: RenderPage, expression: str) -> object:
+    """One page.evaluate under the evaluate ceiling; TimeoutError past it."""
+    return await bounded_read(page.evaluate(expression))
+
+
+async def bounded_content(page: RenderPage) -> str:
+    """One page.content() under the evaluate ceiling; TimeoutError past it."""
+    return cast(str, await bounded_read(page.content()))
 
 
 @dataclass(frozen=True)
