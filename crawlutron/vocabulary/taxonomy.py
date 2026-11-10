@@ -47,6 +47,9 @@ class CrawlClassification(StrEnum):
     # The breaker was open, so the URL was never attempted: a capacity decision,
     # not a dead page -- a member so the code survives the strict response enum.
     circuit_breaker_open = "circuit_breaker_open"
+    # Admission never reached a renderer: the loop stalled on capacity, reason
+    # unknown -- never dispatched, never a page verdict.
+    admission_stalled = "admission_stalled"
     payload_too_large = "payload_too_large"
     too_many_redirects = "too_many_redirects"
     http_error = "http_error"
@@ -149,6 +152,10 @@ CLASSIFICATION_STATUS_BY_LABEL: dict[str, ResultStatus] = {
     # Capacity, not a dead page: the domain's breaker was open, so the URL was
     # never attempted. Same retry contract as browser_pool_exhausted above.
     "circuit_breaker_open": "failed",
+    # Capacity, not a dead page: admission stalled before a renderer was ever
+    # assigned; the status table says failed, TRANSIENT_CLASSIFICATIONS keeps it
+    # re-eligible. Same retry contract as circuit_breaker_open above.
+    "admission_stalled": "failed",
     # Exception codes from the shared classifier and the engine's guard: all
     # reach the wire as terminal failures, so their status is "failed", not "blocked".
     "network_error": "failed",
@@ -209,6 +216,7 @@ TRANSIENT_CLASSIFICATIONS: frozenset[str] = frozenset(
         # says the page stays eligible, which the frontier re-queue consumes.
         CrawlClassification.browser_pool_exhausted,
         CrawlClassification.circuit_breaker_open,
+        CrawlClassification.admission_stalled,
         # A renderer died rather than a page.
         CrawlClassification.browser_crash,
         # Untriaged: the one case where another pass is pure upside.

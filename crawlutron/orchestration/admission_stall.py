@@ -10,11 +10,10 @@ import asyncio
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, NamedTuple, cast
+from typing import TYPE_CHECKING, NamedTuple
 
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.crawl_task import CrawlTask
-from crawlutron.models.taxonomy import CrawlError
 from crawlutron.runtime.metrics import MetricsStore
 from crawlutron.transport.results import TerminalResult, failed_engine_result
 from crawlutron.vocabulary.taxonomy import CrawlClassification
@@ -62,7 +61,7 @@ class AdmissionStallGuard:
 
 
 async def fail_remaining_frontier(run: CrawlRun, frontier: deque[tuple[int, CrawlTask]]) -> None:
-    """Report every frontier URL as a capacity-stalled failure.
+    """Report every frontier URL as an admission-stalled failure.
 
     The URLs were never dispatched, so dropping them would mask the stall.
     """
@@ -76,8 +75,8 @@ async def fail_remaining_frontier(run: CrawlRun, frontier: deque[tuple[int, Craw
                     original_url=job.original_url,
                     normalized_url=job.normalized_url,
                     strategy=None,
-                    classification=CrawlClassification.browser_pool_exhausted,
-                    error=cast("CrawlError", CrawlClassification.browser_pool_exhausted),
+                    classification=CrawlClassification.admission_stalled,
+                    error=CrawlClassification.admission_stalled,
                 )
             ),
         )

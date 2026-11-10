@@ -364,8 +364,8 @@ async def test_saturated_admission_loop_terminates_within_bounded_interval():
     # Only at-stall failures were reported (never a real result): the loop
     # stopped honestly and did not silently drop the two unconsumed URLs.
     assert {i: r.classification for i, r in result.spill.writes.items()} == {
-        0: "browser_pool_exhausted",
-        1: "browser_pool_exhausted",
+        0: "admission_stalled",
+        1: "admission_stalled",
     }
     assert {i: r.status for i, r in result.spill.writes.items()} == {0: "failed", 1: "failed"}
 
