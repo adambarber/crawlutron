@@ -17,6 +17,7 @@ import time
 import pytest
 
 import crawlutron.transport.pinned_dns as pt
+from tests._timing_harnesses import await_until
 from tests._transport_doubles import ParkedResolver
 
 
@@ -73,26 +74,36 @@ def test_the_accounting_door_reports_live_resolves():
     assert pt.dns_in_flight_resolves() == 0
 
 
+def _parked_scenario():
+    """Shared arrange of the parked-worker tests: the events, the parked
+    resolve body wired to them, and the submit-and-register task opener."""
+    started = threading.Event()
+    hold = threading.Event()
+    worker_returned = threading.Event()
+
+    def parked():
+        return _parked_worker(started, hold, worker_returned)
+
+    async def submitted(timeout_seconds):
+        return asyncio.ensure_future(pt.bounded_thread_resolve(parked, timeout_seconds=timeout_seconds))
+
+    return started, hold, worker_returned, submitted
+
+
 def test_the_async_path_is_registered_too():
     """bounded_thread_resolve is the ASYNC DNS entry point (browser targets,
     search providers) -- its futures must register in the same saturation
     registry, or the chokepoint's guarantee holds for only one of two paths
     (adversarial pass 5, confirmed defect)."""
-    hold = threading.Event()
-    worker_returned = threading.Event()
-
-    def parked():
-        hold.wait(timeout=10.0)
-        worker_returned.set()
-        return "never returned in time"
+    started, hold, worker_returned, submitted = _parked_scenario()
 
     async def scenario():
-        task = asyncio.ensure_future(pt.bounded_thread_resolve(parked, timeout_seconds=5.0))
-        for _ in range(100):
-            if pt.dns_in_flight_resolves() >= 1:
-                break
-            await asyncio.sleep(0.01)
+        task = await submitted(5.0)
+        await _await_registration(100)
         registered = pt.dns_in_flight_resolves()
+        # A pre-start cancel skips the queued work item entirely, so cancel
+        # only once the worker is provably inside parked() (hang-safe bound).
+        await await_until(started.is_set, "the parked worker to start")
         task.cancel()
         hold.set()
         return registered
@@ -101,11 +112,31 @@ def test_the_async_path_is_registered_too():
     assert registered >= 1, (
         f"the async resolve path bypassed the saturation registry (in-flight: {registered})"
     )
-    # The discard runs in the completing worker thread: the worker's own last
-    # act gates the drain; the poll closes only the return-to-callback window.
+    _drain_parked_worker(worker_returned)
+
+
+def _drain_parked_worker(worker_returned: threading.Event) -> None:
+    """Shared tail of the parked-worker tests: the worker's own last act gates
+    the drain; the poll closes only the return-to-callback window."""
     assert worker_returned.wait(10.0), "the parked worker never completed"
     _join_via_polling()
     assert pt.dns_in_flight_resolves() == 0, "a completed worker stayed registered"
+
+
+def _parked_worker(started: threading.Event, hold: threading.Event, worker_returned: threading.Event) -> str:
+    """A resolve body that signals started, parks on hold, signals returned."""
+    started.set()
+    hold.wait(timeout=10.0)
+    worker_returned.set()
+    return "parked"
+
+
+async def _await_registration(poll_limit: int) -> None:
+    """Yield the loop until the resolve registers, bounded and hang-safe."""
+    for _ in range(poll_limit):
+        if pt.dns_in_flight_resolves() >= 1:
+            break
+        await asyncio.sleep(0.01)
 
 
 def _join_via_polling(seconds: float = 5.0) -> None:
@@ -120,30 +151,22 @@ def test_a_timed_out_wait_still_counts_the_worker(monkeypatch):
     until the caller's wait times out: a getaddrinfo still running inside its
     worker after the wait expires is exactly the blind window the saturation
     law exists to close (wave-3 N1). Released via Events, no wall-clock sleeps."""
-    started = threading.Event()
-    hold = threading.Event()
-    worker_returned = threading.Event()
-
-    def parked():
-        started.set()
-        hold.wait(timeout=10.0)
-        worker_returned.set()
-        return "done"
+    started, hold, worker_returned, submitted = _parked_scenario()
 
     async def scenario():
-        task = asyncio.ensure_future(pt.bounded_thread_resolve(parked, timeout_seconds=0.1))
+        task = await submitted(0.1)
         # The worker parks on ``hold``; ``started`` only proves it began, so the
         # loop stays free here while the registration becomes visible.
-        for _ in range(200):
-            if pt.dns_in_flight_resolves() >= 1:
-                break
-            await asyncio.sleep(0.01)
+        await _await_registration(200)
         assert pt.dns_in_flight_resolves() >= 1, "the parked resolve never registered"
         occupied = ParkedResolver(monkeypatch)
         occupied.occupy(pt, pt.DNS_WORKERS - 1)
         try:
             with pytest.raises(pt.ResolverBudgetExceeded, match="budget"):
                 await task  # the caller's wait expires; the WORKER is still parked
+            assert started.is_set(), (
+                "pickup lost the race with the 0.1s budget: the parked-worker premise is unestablished"
+            )
             with pytest.raises(pt.ResolverBudgetExceeded, match="saturated"):
                 # Wait expired, thread parked: with the parked worker counted the
                 # pool is full and a fresh resolve must refuse fast.
@@ -153,8 +176,4 @@ def test_a_timed_out_wait_still_counts_the_worker(monkeypatch):
             occupied.release(pt)
 
     asyncio.run(scenario())
-    # The discard runs in the completing worker thread: the worker's own last
-    # act gates the drain; the poll closes only the return-to-callback window.
-    assert worker_returned.wait(10.0), "the parked worker never completed"
-    _join_via_polling()
-    assert pt.dns_in_flight_resolves() == 0, "a completed worker stayed registered"
+    _drain_parked_worker(worker_returned)
