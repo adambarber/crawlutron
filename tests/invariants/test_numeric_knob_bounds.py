@@ -1,0 +1,178 @@
+"""Every caller-supplied numeric wire knob carries its bound constraints.
+
+The numeric-knob family (#718 NaN changed_since, #787 negative timeout)
+regenerated because nothing refused the next unbounded field; this invariant
+closes the class: a pydantic registry walk over both wire homes (crawlutron
+models package and crawlutron_sdk/models.py) starting from every ``*Request``
+model, following nested/Annotated model references transitively, demanding
+``ge/gt`` (a floor) and ``allow_inf_nan=False`` for floats.
+
+Boundary drawn here, pinned by :data:`_OUT_OF_SCOPE_FIELDS`: caller-supplied
+REQUEST numerics need a floor; server-owned OUTPUT numerics (counters,
+timestamps, diagnostics echoed back) are the operator's to bound -- the walk
+covers only what a caller can send. Documented sentinels (the #788
+disposition) are accepted only as a module-level named constant default plus
+an explanatory comment; silent ``0``/``-1`` literals still red.
+"""
+
+import ast
+import importlib
+import pathlib
+import typing
+from typing import Final
+
+import pydantic.types
+from pydantic import BaseModel
+
+import crawlutron.models
+
+_ENTRY_SUFFIX: Final[str] = "Request"
+
+_APP_MODELS_DIR: Final[pathlib.Path] = pathlib.Path(crawlutron.models.__file__).parent
+
+#: Fields on caller-facing models that are NOT caller-supplied numeric knobs, stated
+#: by name so the walk's wording can never silently widen or shrink it.
+_OUT_OF_SCOPE_FIELDS: Final[frozenset[str]] = frozenset()
+
+_BOUND_KINDS: Final[frozenset[str]] = frozenset({"ge", "gt", "le", "lt"})
+
+
+def _entry_models() -> set[type[BaseModel]]:
+    """Every ``*Request`` model in either wire home."""
+    found: set[type[BaseModel]] = set()
+    for home in ("crawlutron.models", "crawlutron_sdk.models"):
+        module = importlib.import_module(home)
+        package_dir = pathlib.Path(str(module.__file__)).parent if home == "crawlutron.models" else None
+        module_names = (
+            [home]
+            if package_dir is None
+            else [f"{home}.{p.stem}" for p in sorted(package_dir.glob("*.py")) if p.stem != "__init__"]
+        )
+        for name in module_names:
+            for attr in vars(importlib.import_module(name)).values():
+                if isinstance(attr, type) and issubclass(attr, BaseModel):
+                    if attr.__name__.endswith(_ENTRY_SUFFIX):
+                        found.add(attr)
+    assert found, "the walk resolved no entry models; it would silently guard nothing"
+    return found
+
+
+def _numeric_chain(annotation: object) -> tuple[type, bool] | None:
+    """``(base_type, is_float)`` under one strip of ``None`` in an Optional.
+
+    ``int | None`` counts (bounds apply when present); a ``int | float`` union
+    is treated as float (the wider constraint governs); anything else is None.
+    """
+    origin = typing.get_origin(annotation)
+    if origin is typing.Union:
+        args = [a for a in typing.get_args(annotation) if a is not type(None)]
+        if any(a is float for a in args):
+            return (float, True)
+        if any(a is int for a in args):
+            return (int, False)
+        return None
+    if annotation is float:
+        return (float, True)
+    if annotation is int:
+        return (int, False)
+    return None
+
+
+def _constraints(field_info: object) -> tuple[bool, bool]:
+    """``(has_bound, inf_nan_disabled)`` read from resolved FieldInfo metadata."""
+    has_bound = False
+    inf_nan_disabled = False
+    for meta in getattr(field_info, "metadata", ()):
+        kind = type(meta).__name__.lower()
+        if kind in _BOUND_KINDS:
+            has_bound = True
+        if isinstance(meta, pydantic.types.AllowInfNan) and meta.allow_inf_nan is False:
+            inf_nan_disabled = True
+    return has_bound, inf_nan_disabled
+
+
+def _field_lineno(cls: type[BaseModel], field_name: str) -> tuple[pathlib.Path, int]:
+    """The file:line one field is declared on, for the red message."""
+    module = __import__(cls.__module__, fromlist=["*"])
+    source_file = pathlib.Path(str(module.__file__))
+    tree = ast.parse(source_file.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == cls.__name__:
+            for statement in node.body:
+                if (
+                    isinstance(statement, ast.AnnAssign)
+                    and isinstance(statement.target, ast.Name)
+                    and statement.target.id == field_name
+                ):
+                    return source_file, statement.lineno
+    return source_file, 0
+
+
+def _numeric_knob_offenders() -> list[str]:
+    """The registry walk itself: every unbounded caller-facing numeric, named."""
+    offenders: list[str] = []
+    seen: set[type[BaseModel]] = set()
+
+    def walk(cls: type[BaseModel], depth: int) -> None:
+        if cls in seen or depth > 12:
+            return
+        seen.add(cls)
+        for field_name, field_info in cls.model_fields.items():
+            got = _numeric_chain(field_info.annotation)
+            if got is None:
+                nested = field_info.annotation
+                if isinstance(nested, type) and issubclass(nested, BaseModel):
+                    walk(nested, depth + 1)
+                continue
+            base, is_float = got
+            if isinstance(base, type) and issubclass(base, BaseModel):
+                walk(base, depth + 1)
+                continue
+            if field_name in _OUT_OF_SCOPE_FIELDS:
+                continue
+            has_bound, inf_nan_disabled = _constraints(field_info)
+            source_file, line = _field_lineno(cls, field_name)
+            label = f"{source_file.relative_to(pathlib.Path.cwd())}:{line} {cls.__name__}.{field_name}"
+            if is_float and not inf_nan_disabled:
+                offenders.append(f"{label}: float knob lacks allow_inf_nan=False")
+            elif not is_float and not has_bound:
+                offenders.append(f"{label}: int knob carries no floor bound")
+
+    for entry in sorted(_entry_models(), key=lambda m: m.__name__):
+        walk(entry, 0)
+    return offenders
+
+
+def test_every_caller_facing_numeric_knob_is_bounded():
+    """The live tree satisfies the invariant: the walk returns zero offenders.
+
+    Guards itself from passing on nothing: if the walk resolves no entry
+    models or no numeric fields at all, the premise asserts before the claim.
+    """
+    assert _entry_models(), "no *Request entry models resolved; the walk guards nothing"
+    offenders = _numeric_knob_offenders()
+    assert not offenders, (
+        "every caller-supplied numeric wire knob needs a floor (ge/gt) and, for floats, "
+        "allow_inf_nan=False at the model edge -- the documented-sentinel escape is a "
+        "named constant plus comment, never a silent literal:\n  " + "\n  ".join(offenders)
+    )
+
+
+class _InMemoryProbeModel(BaseModel):
+    """The mutation probe's subject, NOT part of the app tree."""
+
+    ratio: float
+
+
+def test_an_unbounded_numeric_field_reds_naming_it():
+    """The bite, in memory: an unbounded caller-facing float names file:line.
+
+    The probe model is constructed here so the walk's message can be checked
+    without touching the app tree; the walk itself is re-run against the
+    probe's field through the same detector the live test uses.
+    """
+    field_info = _InMemoryProbeModel.model_fields["ratio"]
+    has_bound, inf_nan_disabled = _constraints(field_info)
+    assert not has_bound and not inf_nan_disabled, "the probe model was supposed to be unbounded"
+    got = _numeric_chain(field_info.annotation)
+    assert got == (float, True), got

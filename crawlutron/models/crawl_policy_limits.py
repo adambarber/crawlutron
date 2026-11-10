@@ -102,6 +102,7 @@ class CrawlPolicyLimits(BaseModel):
         Field(
             ge=0.0,
             le=MAX_RATE_LIMIT_RPS,
+            allow_inf_nan=False,
             description="Maximum requests per second per domain enforced via token bucket. 0 disables rate "
             "limiting (default). When > 0, allows short bursts up to 5 tokens while sustaining the "
             "configured RPS.",
@@ -122,6 +123,7 @@ class CrawlPolicyLimits(BaseModel):
         Field(
             ge=0.1,
             le=MAX_TOTAL_URL_BUDGET_SECONDS,
+            allow_inf_nan=False,
             description="Hard per-URL deadline across the whole strategy chain (seconds). A poisoned/tarpit "
             "URL that exceeds this is failed as network_error instead of holding a concurrency slot. "
             "Default: 180 (the floor of 0.1 only prevents accidental near-zero values; production configs "
