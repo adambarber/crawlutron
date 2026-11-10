@@ -159,7 +159,6 @@ try:
         stdout.reconfigure(line_buffering=False, write_through=True)
         stderr.reconfigure(line_buffering=False, write_through=True)
     os.environ["PYTHONUNBUFFERED"] = "1"
-    os.environ["PYTHONDONTWRITEBYTECODE"] = "1"  # no pyc writes during collection
 except (AttributeError, ValueError):
     logging.getLogger(__name__).debug("stream reconfigure unavailable")
 
