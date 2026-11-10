@@ -205,6 +205,47 @@ async def test_a_row_reclaimed_by_a_second_sweeper_is_skipped_not_reworked(
     assert reloaded.next_check_at == NOW + 400.0 + INTERVAL
 
 
+async def test_the_forever_loop_forwards_its_clock_to_the_sweeper(watch_store, etag_server, monkeypatch):
+    """A clock injected through ``sweep_watches_forever`` must drive lease
+    renewals too: renewals stamped from wall time while the pass reads the
+    injected clock would mis-age every claim the loop touches."""
+    from crawlutron.api import watch_sweep
+
+    watch = watch_store.create(canonical(loopback_url(etag_server)), interval_seconds=INTERVAL, now=0.0)
+    inside = asyncio.Event()
+    release = asyncio.Event()
+    injected = NOW + 1.0  # epoch-2023 stamp; the live wall clock is years later
+
+    async def _parked_crawl(payload, *, settings, shutdown_event, urls=None):
+        inside.set()
+        await release.wait()
+        return _crawl_envelope(payload.url)
+
+    monkeypatch.setattr(watch_sweep, "execute_crawl", _parked_crawl)
+    stop = asyncio.Event()
+    loop = asyncio.create_task(
+        watch_sweep.sweep_watches_forever(
+            watch_store,
+            host_policy=UNRESTRICTED_HOST_POLICY,
+            settings=CrawlerSettings.from_mapping({}),
+            shutdown_event=stop,
+            interval_seconds=0.0,
+            clock=lambda: injected,
+        )
+    )
+    try:
+        await asyncio.wait_for(inside.wait(), timeout=10)
+        stamp = watch_store._conn.execute(
+            "SELECT claimed_at FROM watches WHERE watch_id = ?", (watch.watch_id,)
+        ).fetchone()["claimed_at"]
+    finally:
+        release.set()
+        stop.set()
+        await asyncio.wait_for(loop, timeout=10)
+
+    assert stamp == injected, f"the loop's renewal read a foreign clock: claimed_at={stamp}"
+
+
 async def test_a_hanging_webhook_does_not_stall_the_sweep_pass(watch_store, etag_server, monkeypatch):
     """A webhook that never answers must not hold the sweep pass: delivery is a
     tracked background task, so sweep_once returns while it runs (#528)."""

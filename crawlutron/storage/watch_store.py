@@ -176,7 +176,7 @@ class WatchStore(CoordinationStore):
             ).fetchall()
         return [_row_to_state(row) for row in rows]
 
-    def renew_claim(self, watch_id: str, token: str, *, now: float, claim_seconds: float) -> bool:
+    def renew_claim(self, watch_id: str, token: str, *, now: float) -> bool:
         """Re-stamp ``claimed_at`` while ``token`` still owns the row: a live
         sweep's lease survives a pass longer than the claim window. ``False``
         means ownership was lost -- the caller must skip the row, never rework it.

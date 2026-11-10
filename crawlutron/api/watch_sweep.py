@@ -124,9 +124,7 @@ class WatchSweeper:
         is re-stamped at the check's start, so a slow pass cannot lose the row
         mid-check; a lost renewal (a second sweeper re-claimed it) skips the row.
         """
-        if not await self._store.arenew_claim(
-            watch.watch_id, self._claim_token, now=self._clock(), claim_seconds=_CLAIM_SECONDS
-        ):
+        if not await self._store.arenew_claim(watch.watch_id, self._claim_token, now=self._clock()):
             # Ownership was already lost -- working the row would be the
             # duplicate fire the claim exists to prevent.
             return None
@@ -310,6 +308,7 @@ async def sweep_watches_forever(
         key_store=key_store,
         concurrency_tracker=concurrency_tracker,
         job_store=job_store,
+        clock=clock,
     )
     while not shutdown_event.is_set():
         try:
