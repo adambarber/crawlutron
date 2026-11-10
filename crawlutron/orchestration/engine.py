@@ -141,6 +141,7 @@ def seed_is_fresh(
             extraction,
             css,
             xp,
+            cookie_namespace=cookie_namespace_for(policy.request_profile),
         )
         cached_at = content_cache.cached_at_of(key)
         if cached_at is not None and lastmod_ts <= cached_at:

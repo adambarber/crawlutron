@@ -79,6 +79,21 @@ async def test_an_http_webhook_is_refused(watch_store):
     assert watch_store.list_watches() == []
 
 
+async def test_a_webhook_with_a_secret_query_param_is_refused(watch_store):
+    """A secret-named query param would persist plaintext at rest in
+    watches.webhook_url; admission refuses it (webhook auth is policy
+    credentials, never URL params)."""
+    response = await _register(
+        watch_store,
+        url=TARGET,
+        interval_seconds=INTERVAL,
+        webhook_url="https://receiver.example/hook?token=secret123",
+    )
+    assert response.status_code == 422, response.text
+    assert "secret123" not in response.text
+    assert watch_store.list_watches() == []
+
+
 async def test_a_non_positive_interval_is_refused(watch_store):
     response = await _register(watch_store, url=TARGET, interval_seconds=0)
 

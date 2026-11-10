@@ -3,6 +3,9 @@ scoping in crawl_policy; credentials ride policy.credentials, scoped to one
 origin, and origin-keyed fields use the existing cross-host scrub.
 """
 
+import json
+import sqlite3
+
 import pytest
 from pydantic import SecretStr
 
@@ -292,7 +295,9 @@ class TestIpv6AndTrailingDotOrigins:
     def test_an_ipv6_credential_row_loads_from_the_job_store(self, tmp_path):
         """The #518 corruption: a whole-site job whose policy carries an
         IPv6-port credential failed read_policy on EVERY load and the row
-        returned None (job_store_load_corrupt)."""
+        returned None (job_store_load_corrupt). The row itself must still be
+        loadable; the credential value is redacted at rest, so the loaded
+        policy carries the marker and the reload refusal is the resume law."""
         from tests._policy_factories import UNRESTRICTED_HOST_POLICY as unrestricted
         from tests._policy_factories import job_store
 
@@ -301,9 +306,19 @@ class TestIpv6AndTrailingDotOrigins:
             {"credentials": {"https://[2001:0db8::1]:8080": {"kind": "bearer", "token": "t"}}}
         )
         job = store.create("https://[2001:0db8::1]:8080/", policy)
-        loaded = store.load(job.job_id)
-        assert loaded is not None, "an IPv6-credential row must load back"
-        assert "https://[2001:0db8::1]:8080" in read_policy(loaded.policy).credentials
+        with sqlite3.connect(tmp_path / "jobs.db") as connection:
+            (raw,) = connection.execute(
+                "SELECT policy FROM crawl_jobs WHERE job_id = ?", (job.job_id,)
+            ).fetchone()
+        stored = json.loads(raw)
+        credential = stored["credentials"]["https://[2001:0db8::1]:8080"]
+        assert credential["kind"] == "bearer"
+        assert credential["token"] == "[REDACTED]"
+        assert '"token":"t"' not in raw
+        # The reload refusal is the typed resume law: the marker value is not
+        # a live credential; a resumed job must re-supply it.
+        with pytest.raises(ValueError, match="redacted marker"):
+            read_policy(stored)
 
     def test_an_ipv6_origin_credential_attaches(self):
         headers = apply_credentials(

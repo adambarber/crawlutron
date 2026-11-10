@@ -63,6 +63,22 @@ It is a powerful SSRF-enabled service that:
 - **S4 — credential origins ride the egress guard.** Credential origins pass
   the same SSRF egress check as crawl targets: a private/loopback credential
   origin requires `CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1`.
+- **S7 — secrets are never written at rest, and refuse to reload as plaintext.**
+  Stored policy rows (`crawl_jobs.policy`) are REDACTED: the JSON serializer
+  masks every `SecretStr` value (`[REDACTED]`), so credential material lives
+  only in the live process (and the caller's request). A row carrying plaintext
+  credential values is a defect. The contract is bidirectional: because the
+  stored row holds no secrets, a PAUSED job resumed from it has no credential
+  material — the marker value is REFUSED at the credential read edge (typed
+  ValueError naming the field), so a resumed job fails loud and typed instead
+  of crawling with `Authorization: Bearer [REDACTED]`; re-supply the caller's
+  credentials to resume a credentialed crawl. The `watches.webhook_url`
+  column is covered by the same law: `WebhookTarget.admit` refuses a webhook
+  URL whose query carries a credential-shaped parameter name (typed ValueError
+  → 422 at the create door), so a secret can never enter the column to persist.
+  Secrets reach the webhook receiver in the HMAC-signed POST body, never URL
+  params. Pre-existing rows from before this refusal carry it unredacted
+  (dev-stage stores are disposable; no migration).
 - **S6 — browser-initiated XHR/fetch is not fully host-policy-gated.** The
   Playwright route handler (`crawlutron/transport/browser_targets.py`, wired via
   `wire_ssrf_guards`) blocks navigation and subresource loads to private hosts,

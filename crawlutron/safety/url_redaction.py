@@ -61,6 +61,11 @@ _SECRET_NAME_SUBSTRINGS = ("secret", "token", "password", "passwd", "pwd", "apik
 _REDACTED = "[REDACTED]"
 
 
+def redacted_marker() -> str:
+    """The one mask literal, as a delegation door for serializers (#660)."""
+    return _REDACTED
+
+
 def _is_secret_name(name: str) -> bool:
     stripped = name.strip().lower().rstrip("[]").rstrip()
     if any(word in stripped for word in _SECRET_NAME_SUBSTRINGS):
