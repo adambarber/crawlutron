@@ -109,3 +109,5 @@ class UnifiedCrawlResult(BaseModel):
             "result.",
         ),
     ] = None
+    delta_classification: str | None = None
+    delta_evidence: dict[str, object] | None = None

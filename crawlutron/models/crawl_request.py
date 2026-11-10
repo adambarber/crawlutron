@@ -56,3 +56,19 @@ class CrawlRequest(SingleUrlSourceRequest):
             "media type instead of a UnifiedCrawlResponse model.",
         ),
     ] = None
+    changed_since: Annotated[
+        float | None,
+        Field(
+            description="Epoch seconds; when set, the caller requests delta classification of this crawl "
+            "relative to that time. Stored as a knob only: delta semantics (304/unchanged mapping) are "
+            "implemented in a later slice, so setting it changes nothing yet.",
+        ),
+    ] = None
+    baseline_request_id: Annotated[
+        str | None,
+        Field(
+            description="Prior crawl/job/watch request id to use as the delta baseline. Stored as a knob "
+            "only: baseline linkage semantics are implemented in a later slice, so setting it changes "
+            "nothing yet.",
+        ),
+    ] = None

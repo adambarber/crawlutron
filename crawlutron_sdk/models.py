@@ -41,6 +41,19 @@ class CrawlRequest(BaseModel):
         Literal["json", "jsonl", "ndjson", "markdown", "csv"] | None,
         Field(description="Output format; json is the default."),
     ] = None
+    changed_since: Annotated[
+        float | None,
+        Field(
+            description="Epoch seconds; when set, the caller requests delta classification relative to "
+            "that time.",
+        ),
+    ] = None
+    baseline_request_id: Annotated[
+        str | None,
+        Field(
+            description="Prior crawl/job/watch request id to use as the delta baseline.",
+        ),
+    ] = None
 
     @model_validator(mode="after")
     def _require_exactly_one_url_source(self) -> CrawlRequest:
@@ -63,6 +76,13 @@ class CrawlResponse(BaseModel):
     policy_schema_version: str
     success: bool
     results: list[dict[str, object]] = Field(default_factory=list)
+    delta_summary: Annotated[
+        dict[str, object] | None,
+        Field(
+            description="Per-result delta accounting, populated when delta crawl mode is requested and "
+            "implemented.",
+        ),
+    ] = None
 
 
 class CrawlAccepted(BaseModel):

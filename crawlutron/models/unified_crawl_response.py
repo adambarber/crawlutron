@@ -11,3 +11,4 @@ class UnifiedCrawlResponse(BaseModel):
     policy_schema_version: str = Field(description="Policy schema version used for this execution.")
     success: bool = Field(description="True if the request was processed without fatal service errors.")
     results: list[UnifiedCrawlResult] = Field(description="Per-URL crawl results in submitted order.")
+    delta_summary: dict[str, object] | None = None

@@ -108,3 +108,43 @@ def test_watch_state_tolerates_unknown_fields():
         }
     )
     assert watch.model_extra == {"extra_field": "ok"}
+
+
+def test_sdk_crawl_request_accepts_delta_knobs():
+    request = CrawlRequest.model_validate(
+        {
+            "url": "https://example.com/",
+            "changed_since": 1730000000.0,
+            "baseline_request_id": "req_abc123",
+        }
+    )
+    dumped = request.model_dump()
+    assert dumped["changed_since"] == 1730000000.0
+    assert dumped["baseline_request_id"] == "req_abc123"
+
+
+def test_sdk_crawl_request_delta_knobs_default_to_none():
+    request = CrawlRequest.model_validate({"url": "https://example.com/"})
+    dumped = request.model_dump()
+    assert dumped["changed_since"] is None
+    assert dumped["baseline_request_id"] is None
+
+
+def test_sdk_crawl_response_tolerates_delta_fields():
+    response = CrawlResponse(
+        request_id="abc",
+        submitted_count=1,
+        policy_schema_version="1",
+        success=True,
+        delta_summary={"changed": 1},
+        results=[
+            {
+                "url": "https://example.com/",
+                "delta_classification": "changed",
+                "delta_evidence": {"etag": "W/1"},
+            }
+        ],
+    )
+    assert response.delta_summary == {"changed": 1}
+    assert response.results[0]["delta_classification"] == "changed"
+    assert response.results[0]["delta_evidence"] == {"etag": "W/1"}
