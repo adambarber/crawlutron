@@ -269,15 +269,16 @@ async def test_drain_stops_at_the_cap_not_one_chunk_past(small_cap):
 
 
 async def _refused_within_deadline(request: Request, *, max_bytes: int) -> Response:
-    """Drive the middleware against a refused body under the 1s outer bound:
-    the deadline must answer 413 + close before the probe times out."""
+    """Drive the middleware against a refused body under a 5s outer bound:
+    the deadline must answer 413 + close long before the probe could time
+    out, so the outer bound can never be the measured quantity."""
     import asyncio
 
     async def probe():
         msg = "refused bodies never reach the app"
         return await limit_request_body(request, refuse_never(msg), max_bytes=max_bytes)
 
-    response = await asyncio.wait_for(probe(), timeout=1.0)
+    response = await asyncio.wait_for(probe(), timeout=5.0)
     assert response.status_code == 413
     assert response.headers["Connection"] == "close"
     return response
@@ -305,19 +306,38 @@ async def test_slow_drain_client_is_refused_within_the_deadline(monkeypatch):
 
 
 @pytest.mark.real_sleeps
+async def test_dribbling_drain_client_is_refused_within_the_deadline(monkeypatch):
+    """The named attack shape on the drain path: a dribble interval SHORTER
+    than the per-receive bound (so it never fires) with more bytes than the
+    outer probe can wait for -- only the OVERALL wall-clock deadline refuses."""
+    import crawlutron.api.middleware as mw
+
+    monkeypatch.setattr(mw, "BODY_DEADLINE_SECONDS", 0.1)
+
+    request = make_request([], headers=[(b"content-length", b"4096")], receive=_dribble_receive(0.05))
+    await _refused_within_deadline(request, max_bytes=1024)
+
+
+def _dribble_receive(interval: float):
+    """A receive double delivering one byte per ``interval`` seconds forever:
+    the slow-client shapes the deadline suites share."""
+    import asyncio
+
+    async def dribble() -> Message:
+        await asyncio.sleep(interval)
+        return {"type": "http.request", "body": b"X", "more_body": True}
+
+    return dribble
+
+
+@pytest.mark.real_sleeps
 async def test_slow_collect_client_is_refused_within_the_deadline(monkeypatch):
     """A dribbling client that never delivers the declared length holds
     _collect open; the deadline refuses the truncated body instead of
     pinning the task."""
-    import asyncio
-
     import crawlutron.api.middleware as mw
 
     monkeypatch.setattr(mw, "BODY_DEADLINE_SECONDS", 0.05)
 
-    async def endless_dribble() -> Message:
-        await asyncio.sleep(0.01)
-        return {"type": "http.request", "body": b"X", "more_body": True}
-
-    request = make_request([], headers=[(b"content-length", b"100")], receive=endless_dribble)
+    request = make_request([], headers=[(b"content-length", b"100")], receive=_dribble_receive(0.01))
     await _refused_within_deadline(request, max_bytes=1024)

@@ -21,9 +21,8 @@ from crawlutron.mcp.server import origin_allowed
 
 MAX_REQUEST_BODY_BYTES = 16 * 1024 * 1024
 
-# Flat wall-clock bound on each body-handling loop: a slow-post client that
-# dribbles bytes must not pin a middleware task indefinitely. Simpler and
-# more predictable than deriving from the declared length.
+# Flat wall-clock bound on each body-handling loop so a slow-post client
+# cannot pin a middleware task indefinitely.
 BODY_DEADLINE_SECONDS = 30.0
 
 
@@ -57,9 +56,12 @@ async def _drain_declared_body(original_receive: Receive, *, max_bytes: int) -> 
     how long a slow-post client can hold this loop open.
     """
     drained = 0
+    deadline = time.monotonic() + BODY_DEADLINE_SECONDS
     while drained < max_bytes:
+        if time.monotonic() >= deadline:
+            return
         try:
-            message = await asyncio.wait_for(original_receive(), BODY_DEADLINE_SECONDS)
+            message = await asyncio.wait_for(original_receive(), deadline - time.monotonic())
         except TimeoutError:
             return
         if not message.get("more_body", False):
