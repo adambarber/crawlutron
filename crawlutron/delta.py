@@ -35,11 +35,15 @@ class BaselineEvidence:
 
     ``etag``/``last_modified`` are origin validators a conditional revalidation
     can be sent against; ``fingerprint`` is the content fingerprint, or None.
+    ``fingerprint_fields`` names the content fields that fed ``fingerprint``, so
+    a re-crawl at a different output shape recomputes over the same fields
+    instead of a shifted hash (policy-invariant comparison).
     """
 
     etag: str | None = None
     last_modified: str | None = None
     fingerprint: str | None = None
+    fingerprint_fields: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +60,18 @@ class DeltaContext:
     baseline_request_id: str | None
     baseline: dict[str, BaselineEvidence]
     baseline_expired: bool
+    #: The baseline's results as identity GROUPS: one entry per stored result
+    #: with every key that row answers under. Removal is decided per entry, so
+    #: an alias spelling answered by this run does not report the page removed.
+    entries: tuple[BaselineEntry, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class BaselineEntry:
+    """One stored baseline result: every identity key it answers under."""
+
+    keys: tuple[str, ...]
+    evidence: BaselineEvidence
 
 
 def _url_key(item: EngineCrawlResult) -> str:
@@ -75,10 +91,32 @@ def content_fingerprint(item: EngineCrawlResult) -> str | None:
 
 
 def _content_fingerprint(markdown: str | None, html: str | None, text: str | None) -> str | None:
-    parts = [part for part in (markdown, html, text) if part]
-    if not parts:
+    return _fingerprint_over_fields((("markdown", markdown), ("html", html), ("text", text)))
+
+
+def _fingerprint_over_fields(
+    fields: Iterable[tuple[str, str | None]],
+) -> str | None:
+    values = [value for _, value in fields if value]
+    if not values:
         return None
-    return sha256("\x00".join(parts).encode("utf-8")).hexdigest()
+    return sha256("\x00".join(values).encode("utf-8")).hexdigest()
+
+
+def _fingerprint_matching_baseline(item: EngineCrawlResult, baseline: BaselineEvidence) -> str | None:
+    """The current result's hash over the baseline's fingerprinted fields, or None.
+
+    A re-crawl at a different output shape cannot reproduce the baseline's
+    field set: an incomparable fingerprint reports None so validators or the
+    ``evidence_incomplete`` degradation decide, never a shifted-hash "changed".
+    """
+    if baseline.fingerprint is None or not baseline.fingerprint_fields:
+        return content_fingerprint(item)
+    available = {"markdown": item.markdown, "html": item.html, "text": item.text}
+    missing = [name for name in baseline.fingerprint_fields if not available.get(name)]
+    if missing:
+        return None
+    return _fingerprint_over_fields([(name, available[name]) for name in baseline.fingerprint_fields])
 
 
 def _http_date_epoch(value: str | None) -> float | None:
@@ -147,7 +185,7 @@ def _classify_validated_200(
     context: DeltaContext,
 ) -> tuple[str, dict[str, object]]:
     """A 200 against a baseline: fingerprints decide, validators confirm."""
-    current_hash = content_fingerprint(item)
+    current_hash = _fingerprint_matching_baseline(item, baseline)
     if current_hash is not None and baseline.fingerprint is not None:
         if current_hash == baseline.fingerprint:
             return UNCHANGED, _evidence("same_fingerprint", item, baseline=baseline, context=context)
@@ -254,18 +292,31 @@ def extract_baseline(stored_payload: dict[str, object]) -> dict[str, BaselineEvi
 
     Keys are every identity the stored result carried (normalized URL first,
     then the caller's original text) so a later crawl matches whichever identity
-    its result answers under.
+    its result answers under. The flat view over :func:`extract_baseline_entries`.
     """
     baseline: dict[str, BaselineEvidence] = {}
+    for entry in extract_baseline_entries(stored_payload):
+        for key in entry.keys:
+            baseline[key] = entry.evidence
+    return baseline
+
+
+def extract_baseline_entries(stored_payload: dict[str, object]) -> tuple[BaselineEntry, ...]:
+    """The stored baseline as identity GROUPS, one entry per result row.
+
+    Classification looks evidence up per key (the flat view above); removal is
+    decided per ENTRY: served when ANY key answered, removed only with zero hits.
+    """
+    entries: list[BaselineEntry] = []
     results = stored_payload.get("results")
     if not isinstance(results, list):
-        return baseline
+        return ()
     for result in results:
         if not isinstance(result, dict):
             continue
         normalized = result.get("normalized_url")
         original = result.get("original_url")
-        keys = [key for key in (normalized, original) if isinstance(key, str) and key]
+        keys = tuple(key for key in (normalized, original) if isinstance(key, str) and key)
         if not keys:
             continue
         validators = result.get("validators")
@@ -279,6 +330,15 @@ def extract_baseline(stored_payload: dict[str, object]) -> dict[str, BaselineEvi
         markdown = result.get("markdown")
         html = result.get("html")
         text = result.get("text")
+        fields = tuple(
+            name
+            for name, value in (
+                ("markdown", markdown),
+                ("html", html),
+                ("text", text),
+            )
+            if isinstance(value, str) and value
+        )
         evidence = BaselineEvidence(
             etag=etag,
             last_modified=last_modified,
@@ -287,23 +347,35 @@ def extract_baseline(stored_payload: dict[str, object]) -> dict[str, BaselineEvi
                 html if isinstance(html, str) else None,
                 text if isinstance(text, str) else None,
             ),
+            fingerprint_fields=fields,
         )
-        for key in keys:
-            baseline[key] = evidence
-    return baseline
+        entries.append(BaselineEntry(keys=keys, evidence=evidence))
+    return tuple(entries)
+
+
+def removed_entry_keys(entries: tuple[BaselineEntry, ...], served: set[str]) -> tuple[str, ...]:
+    """Keys of baseline entries this run never answered, per ENTRY not per key.
+
+    An entry is served when ANY of its identities answered, so an alias
+    spelling answered by the run cannot report the page removed; a removed
+    entry reports under its first (normalized-first) key.
+    """
+    return tuple(entry.keys[0] for entry in entries if removed_urls_for(entry.keys, served) == entry.keys)
 
 
 def removed_urls_for(submitted_urls: Iterable[str], admitted_identities: Iterable[str]) -> tuple[str, ...]:
-    """Submitted URLs absent from this run's admitted set.
+    """Submitted URLs absent from this run's admitted set, flat per-key subtraction.
 
-    Only honest when the caller submitted a bounded explicit set and admission
-    decides per URL; an empty admitted delta means nothing was removed this run.
+    Only honest when ``submitted_urls`` is ONE entry's bounded identity set (or
+    an equivalent grouping the caller guarantees); the delta summary removes per
+    ENTRY via :func:`removed_entry_keys` so an alias spelling cannot fake one.
     """
     admitted = set(admitted_identities)
     return tuple(url for url in submitted_urls if url not in admitted)
 
 
 __all__ = [
+    "BaselineEntry",
     "BaselineEvidence",
     "CHANGED",
     "DeltaContext",
@@ -314,5 +386,7 @@ __all__ = [
     "content_fingerprint",
     "delta_summary_for",
     "extract_baseline",
+    "extract_baseline_entries",
+    "removed_entry_keys",
     "removed_urls_for",
 ]
