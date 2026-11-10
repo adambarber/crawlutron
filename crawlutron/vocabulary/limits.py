@@ -25,6 +25,10 @@ MAX_LAZY_SCROLL_DELAY_SECONDS: Final[float] = 5.0
 #: pooled renderer, not the caller's own budget.
 MAX_COOKIE_HARVEST_TIMEOUT_SECONDS: Final[float] = 5.0
 
+#: Longest wait for one page.evaluate: Playwright's evaluate has NO default
+#: deadline, so a wedged renderer would hold the pooled page forever.
+MAX_EVALUATE_TIMEOUT_SECONDS: Final[float] = 5.0
+
 # Discovered links returned per selected page.
 DEFAULT_MAX_DISCOVERED_LINKS: int = 100
 # Hard cap on the field AND the default for the extreme /v1/map whole-site
