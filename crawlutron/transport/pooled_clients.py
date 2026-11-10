@@ -47,6 +47,13 @@ __all__ = [
 
 _DEFAULT_HTTP_CLIENT: httpx.AsyncClient | None = None
 
+# Dirty flag: a pooled client was built since the flag was last reset. The
+# harness's per-test autouse reset reads it so pure unit tests that never touch
+# the pooled client skip the loop-bound drain entirely. Private by design -- it
+# is reached through the public :meth:`LoopBoundPooledClient.clients_were_built`
+# door on the shared singleton, not by name.
+_CLIENTS_BUILT: bool = False
+
 
 _HTTP_CLIENT_INIT_LOCK = threading.Lock()
 
@@ -196,9 +203,23 @@ class LoopBoundPooledClient:
                 self._supersede(superseded)
             raise
         self._set_current(built)
+        self._mark_built()
         if superseded is not None:
             self._supersede(superseded)
         return built
+
+    def clients_were_built(self) -> bool:
+        """Whether a pooled client was built since the flag was last reset."""
+        return _CLIENTS_BUILT
+
+    def reset_clients_built_flag(self) -> None:
+        """Clear the dirty flag so the next test starts clean."""
+        global _CLIENTS_BUILT
+        _CLIENTS_BUILT = False
+
+    def _mark_built(self) -> None:
+        global _CLIENTS_BUILT
+        _CLIENTS_BUILT = True
 
     def get(self, settings: CrawlerSettings | None = None) -> PooledClient:
         """Return the pooled client bound to the current event loop."""
