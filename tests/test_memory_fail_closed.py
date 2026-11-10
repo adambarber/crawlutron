@@ -18,14 +18,23 @@ def test_an_unknowable_ceiling_is_conservative_not_zero():
 
 
 def test_the_floor_branch_senses_honest_usage_not_zero():
-    """The fail-closed floor must not read usage 0.0 -- that left the ratio at 0
-    and the gate fully open on exactly the branch claiming to gate (adversarial
-    pass 5, confirmed defect). RSS is the kernel's honest answer."""
+    """The fail-closed floor reports honest usage: nonzero and bounded by the
+    ceiling it is measured against, so usage stays an honest fraction of it
+    even under parallel load (adversarial pass 5, confirmed defect)."""
     stats = read_memory_stats(cgroup_root="/nonexistent", total_ram=0)
     assert stats.used_bytes > 0, f"the floor branch never sensed usage: {stats}"
-    assert stats.used_bytes < stats.total_bytes, (
-        f"usage must stay under the ceiling for a sane process: {stats}"
+    assert stats.used_bytes <= stats.total_bytes, (
+        f"usage must never exceed the ceiling it is measured against: {stats}"
     )
+
+
+def test_the_floor_branch_bounds_usage_by_the_ceiling_under_load():
+    """Under load the process's own RSS can ride above the conservative
+    ceiling; the floor branch must clamp usage so it never exceeds total."""
+    big = bytearray(1_200_000_000)  # push peak RSS above the 1 GiB conservative ceiling
+    del big
+    stats = read_memory_stats(cgroup_root="/nonexistent", total_ram=0)
+    assert 0 < stats.used_bytes <= stats.total_bytes, f"usage exceeds ceiling under load: {stats}"
 
 
 def test_the_gate_throttles_when_only_a_conservative_ceiling_is_known(monkeypatch):
