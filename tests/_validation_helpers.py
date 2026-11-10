@@ -1,3 +1,6 @@
+import pytest
+from pydantic import ValidationError
+
 from crawlutron.config.env import get_env_int
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.normalized_url import admit_or_none as _admit_or_none
@@ -21,9 +24,22 @@ def assert_url_refused(url: str, policy, reason: str) -> None:
         NormalizedUrl(url, policy=policy)
 
 
+def assert_non_finite_float_field_refused(make_request, field: str) -> bool:
+    """``make_request(**{field: value})`` must refuse nan/inf/-inf at validation.
+
+    Non-finite floats ride Python's permissive JSON parser onto fields whose
+    comparisons they silently corrupt (e.g. NaN never compares greater-than).
+    """
+    for bad in (float("nan"), float("inf"), float("-inf")):
+        with pytest.raises(ValidationError):
+            make_request(**{field: bad})
+    return True
+
+
 __all__ = [
     "UNRESTRICTED_HOST_POLICY",
     "admit_or_none",
+    "assert_non_finite_float_field_refused",
     "assert_url_refused",
     "get_env_int",
     "registrable_domain",

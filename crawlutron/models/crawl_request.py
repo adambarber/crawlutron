@@ -59,6 +59,7 @@ class CrawlRequest(SingleUrlSourceRequest):
     changed_since: Annotated[
         float | None,
         Field(
+            allow_inf_nan=False,
             description="Epoch seconds; when set, the caller requests delta classification of this crawl "
             "relative to that time: results whose Last-Modified predates it classify unchanged (fail open "
             "toward change when undeterminable). Combine with baseline_request_id for fingerprint/validator "

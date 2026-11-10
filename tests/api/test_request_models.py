@@ -78,14 +78,27 @@ def test_empty_urls_list_with_url_rejected(model):
         model(url="http://example.com/", urls=[])
 
 
+async def _post_raw(body: bytes) -> httpx.Response:
+    transport = httpx.ASGITransport(app=service_app())
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        return await c.post("/v1/crawl", content=body, headers={"content-type": "application/json"})
+
+
+class TestNonFiniteChangedSinceRefusedOnTheWire:
+    """Python's json parses bare NaN/Infinity; a NaN changed_since makes every
+    freshness comparison False, so delta classification silently inverts."""
+
+    @pytest.mark.parametrize("literal", ["NaN", "Infinity", "-Infinity"])
+    async def test_non_finite_changed_since_is_422(self, literal):
+        body = f'{{"url": "http://example.com/", "changed_since": {literal}}}'
+        resp = await _post_raw(body.encode())
+        assert resp.status_code == 422
+
+
 class TestWebhookUrlValidation:
     async def test_main_invalid_webhook_url(self):
-        transport = httpx.ASGITransport(app=service_app())
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.post(
-                "/v1/crawl", json={"url": "http://example.com/", "webhook_url": "not_a_url"}
-            )
-            assert resp.status_code == 422
+        resp = await _post_raw(b'{"url": "http://example.com/", "webhook_url": "not_a_url"}')
+        assert resp.status_code == 422
 
 
 #: The models FastAPI binds a request body to. Everything reachable from one of these is caller-supplied,
