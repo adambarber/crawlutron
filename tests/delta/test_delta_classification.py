@@ -76,6 +76,32 @@ def test_missing_expired_foreign_baseline_degrades_to_new():
         assert evidence["why"] == "baseline_expired"
 
 
+def test_expired_baseline_freshness_still_classifies():
+    """Degradation kills the baseline ladder, not the caller-supplied freshness
+    evidence: a Last-Modified after changed_since is changed, before it unchanged."""
+    expired = _context(baseline_request_id="req-1", baseline_expired=True, changed_since=1_735_689_600.0)
+    newer = engine_result(URL, "rendered", headers={"last-modified": "Thu, 02 Jan 2025 00:00:00 GMT"})
+    older = engine_result(URL, "rendered", headers={"last-modified": "Wed, 01 Jan 2025 00:00:00 GMT"})
+    assert _classify(newer, expired) == (CHANGED, {"why": "last_modified_newer", "http_status": None})
+    classification, evidence = _classify(older, expired)
+    assert (classification, evidence["why"]) == (UNCHANGED, "last_modified_not_newer")
+
+
+def test_expired_baseline_304_still_classifies_new_by_dead_ladder():
+    """A 304 proves nothing without the baseline it validates against: the dead
+    ladder keeps its why even when the freshness knob is set."""
+    expired = _context(baseline_request_id="req-1", baseline_expired=True, changed_since=1_735_689_600.0)
+    classification, evidence = _classify(engine_result(URL, "not_modified", http_status=304), expired)
+    assert (classification, evidence["why"]) == (NEW, "baseline_expired")
+
+
+def test_delta_summary_marks_degraded_baseline_only_when_degraded():
+    summary = delta_summary_for([_shaped()], delta_requested=True, degraded_baseline=True)
+    assert summary is not None and summary["degraded_baseline"] is True
+    healthy = delta_summary_for([_shaped()], delta_requested=True)
+    assert healthy is not None and "degraded_baseline" not in healthy
+
+
 def test_304_with_baseline_is_unchanged_without_is_new():
     result = engine_result(URL, "not_modified", http_status=304)
     classification, evidence = _classify(

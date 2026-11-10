@@ -89,6 +89,7 @@ def _response_envelope(
             shaped,
             removed_urls=options.removed_urls,
             delta_requested=options.delta_context is not None,
+            degraded_baseline=bool(options.delta_context and options.delta_context.baseline_expired),
         ),
     )
 

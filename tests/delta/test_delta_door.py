@@ -137,6 +137,12 @@ def _baseline_run(monkeypatch, tmpdir: str, *, markdown: str, caller_id: str = "
     return CrawlRequest(url=URL, baseline_request_id="baseline-1")
 
 
+def _seeded_request(tmpdir: str) -> CrawlRequest:
+    """Seed the shared baseline-1 row for caller-a and return its reuse request."""
+    _seed_baseline(_stores(tmpdir)[0], "baseline-1", "caller-a", markdown="one")
+    return CrawlRequest(url=URL, baseline_request_id="baseline-1")
+
+
 async def test_older_last_modified_is_unchanged(monkeypatch, tmp_path):
     payload = CrawlRequest(url=URL, changed_since=1_735_689_600.0)  # 2025-01-01T00:00:00Z
     result = _result(headers={"last-modified": "Wed, 01 Jan 2025 00:00:00 GMT"}, markdown="body")
@@ -156,12 +162,31 @@ async def test_missing_baseline_degrades_to_baseline_expired_new(monkeypatch, tm
     assert summary is not None and summary["new"] == 1
 
 
+async def test_expired_baseline_freshness_survives_on_wire(monkeypatch, tmp_path):
+    """A missing baseline no longer masks changed_since: a Last-Modified after
+    changed_since classifies changed, and the summary carries degraded_baseline."""
+    payload = CrawlRequest(url=URL, baseline_request_id="does-not-exist", changed_since=1_735_689_600.0)
+    newer = _result(headers={"last-modified": "Thu, 02 Jan 2025 00:00:00 GMT"}, markdown="body")
+    response = await _run(monkeypatch, payload, str(tmp_path), results=[newer])
+    assert response.results[0].delta_classification == CHANGED
+    summary = response.delta_summary
+    assert summary is not None and summary["changed"] == 1 and summary["degraded_baseline"] is True
+
+
+async def test_degraded_marker_absent_on_healthy_baseline(monkeypatch, tmp_path):
+    """A fresh baseline never marks the summary degraded: the field is additive."""
+    tmpdir = str(tmp_path)
+    payload = _seeded_request(tmpdir)
+    response = await _run(monkeypatch, payload, tmpdir, results=[_result(markdown="one")])
+    summary = response.delta_summary
+    assert summary is not None and "degraded_baseline" not in summary
+
+
 async def test_baseline_is_caller_scoped(monkeypatch, tmp_path):
     """The same baseline_request_id read by a different caller is foreign: the
     caller-scoped read misses, the request degrades, and the result is new."""
     tmpdir = str(tmp_path)
-    _seed_baseline(_stores(tmpdir)[0], "baseline-1", "caller-a", markdown="one")
-    payload = CrawlRequest(url=URL, baseline_request_id="baseline-1")
+    payload = _seeded_request(tmpdir)
     own = await _scoped_run(monkeypatch, payload, tmpdir, "caller-a")
     foreign = await _scoped_run(monkeypatch, payload, tmpdir, "caller-b")
     assert own.results[0].delta_classification == UNCHANGED

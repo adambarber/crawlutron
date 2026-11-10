@@ -48,8 +48,8 @@ class DeltaContext:
 
     ``baseline_expired`` is true when ``baseline_request_id`` was set but the
     stored row was missing, expired, or foreign to this caller: the request
-    degrades to a full crawl and every result classifies ``new`` with
-    ``why: "baseline_expired"``.
+    degrades -- baseline-comparison classification dies, ``changed_since``
+    freshness still runs, and ``delta_summary`` carries ``degraded_baseline``.
     """
 
     changed_since: float | None
@@ -111,13 +111,19 @@ def classify_result(
 ) -> tuple[str | None, dict[str, object] | None]:
     """Classify one result against its caller-isolated baseline, or (None, None).
 
-    Fail-open and honest: never ``unchanged`` without evidence. The baseline is
-    already caller-scoped by the loader, so nothing here can leak across callers.
+    Fail-open and honest: never ``unchanged`` without evidence. A degraded
+    baseline still classifies by ``changed_since`` freshness; only the
+    baseline-comparison ladder dies with it.
     """
     if context is None or (context.changed_since is None and context.baseline_request_id is None):
         return None, None
     if context.baseline_expired:
-        return NEW, _evidence("baseline_expired", item, context=context)
+        # Degradation kills the baseline-comparison ladder (validators,
+        # fingerprints, 304), never the caller-supplied changed_since freshness.
+        freshness_dead = context.changed_since is None or item.http_status == 304
+        if freshness_dead:
+            return NEW, _evidence("baseline_expired", item, context=context)
+        return _classify_by_freshness(item, context.changed_since)
     baseline = context.baseline.get(_url_key(item))
     status = item.http_status
     if item.classification == _NOT_MODIFIED or status == 304:
@@ -204,6 +210,7 @@ def delta_summary_for(
     *,
     removed_urls: tuple[str, ...] = (),
     delta_requested: bool = False,
+    degraded_baseline: bool = False,
 ) -> dict[str, object] | None:
     """Deterministic rollup of one shaped batch, or None when delta was not asked.
 
@@ -229,7 +236,7 @@ def delta_summary_for(
             skipped.append({"url": url, "why": str((result.delta_evidence or {}).get("why", "unchanged"))})
     counts[REMOVED] = len(removed_urls)
     skipped.extend({"url": url, "why": "not_in_admitted_set"} for url in removed_urls)
-    return {
+    summary: dict[str, object] = {
         "considered": len(shaped),
         "new": counts[NEW],
         "changed": counts[CHANGED],
@@ -237,6 +244,9 @@ def delta_summary_for(
         "removed": counts[REMOVED],
         "skipped": skipped,
     }
+    if degraded_baseline:
+        summary["degraded_baseline"] = True
+    return summary
 
 
 def extract_baseline(stored_payload: dict[str, object]) -> dict[str, BaselineEvidence]:

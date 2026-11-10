@@ -81,8 +81,8 @@ async def delta_context_for(payload: CrawlRequest, caller_id: str, result_store)
     ``baseline_request_id`` is set, the caller-isolated baseline row is loaded
     through :meth:`CrawlResultStore.aget_for_caller` (foreign rows read as
     missing) and degraded: missing, expired, or foreign rows surface as
-    ``baseline_expired`` so every result classifies ``new`` rather than being
-    compared against another caller's evidence or a stale snapshot.
+    ``baseline_expired`` (``delta_summary.degraded_baseline``) -- the baseline
+    comparison dies, ``changed_since`` freshness still classifies.
     """
     if payload.changed_since is None and payload.baseline_request_id is None:
         return None

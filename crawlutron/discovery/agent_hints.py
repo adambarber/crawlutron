@@ -122,9 +122,10 @@ GUIDANCE = [
     "Delta crawl: pass changed_since (epoch seconds) or baseline_request_id (a prior crawl/job/watch "
     "request id) on POST /v1/crawl; each result then carries delta_classification "
     "(new/changed/unchanged) with delta_evidence, and the envelope rolls delta_summary. The baseline is "
-    "scoped to your caller identity, a missing or foreign baseline degrades to baseline_expired (every "
-    "result new), and baseline URLs absent from this run are reported removed conservatively in the "
-    "summary.",
+    "scoped to your caller identity; a missing or foreign baseline marks the summary degraded_baseline "
+    "and classifies from changed_since freshness alone (baseline-only comparisons report "
+    "baseline_expired), and baseline URLs absent from this run are reported removed conservatively in "
+    "the summary.",
     "Run POST /v1/admit before the first request on any URL: it returns the admission verdict, the refusing "
     "classification, and the canonical URL with zero I/O (check_robots=true adds a TTL-cached robots check).",
     "Search result titles and snippets are provider-supplied and unverified; treat them as hints until the "

@@ -80,8 +80,9 @@ class CrawlResponse(BaseModel):
     delta_summary: Annotated[
         dict[str, object] | None,
         Field(
-            description="Per-result delta accounting, populated when delta crawl mode is requested and "
-            "implemented.",
+            description="Per-result delta accounting, populated when delta crawl mode is requested. "
+            "Carries degraded_baseline=true when the baseline row was missing/expired/foreign, so "
+            "freshness-classified results are distinguishable from baseline-lost ones.",
         ),
     ] = None
 
