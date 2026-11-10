@@ -273,3 +273,25 @@ class TestEngineConsumesResolver:
         assert options.browser_profile == {"include_html": False, "viewport": "mobile"}
         # The captured HTML demonstrably fed the pipeline even though the caller's payload knob is False.
         assert result.diagnostics["content_metrics"]["html_length"] > 0
+
+
+class TestRawDictCallerFloors:
+    """The resolver is the floor belt for raw-dict callers below the model edge:
+    a caller knob below 1 (or a negative retry count) refuses here, matching
+    the wire model, instead of crossing as a broken RenderOptions."""
+
+    @pytest.mark.parametrize(
+        ("key", "bad"), [("timeout_seconds", -5), ("timeout_seconds", 0), ("max_retries", -3)]
+    )
+    def test_an_off_floor_caller_knob_is_refused(self, key, bad):
+        with pytest.raises(ValueError, match=key):
+            resolve_render_options({key: bad}, {})
+
+    def test_a_timeout_of_one_and_zero_retries_stand(self):
+        options = resolve_render_options({"timeout_seconds": 1, "max_retries": 0}, {})
+        assert options.timeout_seconds == 1
+        assert options.max_retries == 0
+
+    def test_a_string_timeout_below_the_floor_is_refused(self):
+        with pytest.raises(ValueError, match="timeout_seconds"):
+            resolve_render_options({"timeout_seconds": "0"}, {})
