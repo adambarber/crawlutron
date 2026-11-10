@@ -89,3 +89,30 @@ async def service_client(
         overrides[get_result_store] = lambda: results
     async with keyed_client(app, keys=keys, overrides=overrides) as client:
         yield client, job_store, keys
+
+
+@contextlib.asynccontextmanager
+async def keyed_result_client(
+    tmp_path: Path,
+    routers: tuple[APIRouter, ...],
+) -> AsyncGenerator[tuple[AsyncClient, CrawlResultStore, CallerKeyStore], None]:
+    """A keyed client over ``routers`` with a result store the rollup reads.
+
+    Own settings/shutdown/result overrides so the door reads the store handed
+    to it, and stashes the store on app.state for the MCP door; yields the
+    client, result store, and key store."""
+    _, results, keys = stores(tmp_path)
+    app = FastAPI()
+    for router in routers:
+        app.include_router(router)
+    app.state.result_store = results
+    async with keyed_client(
+        app,
+        keys=keys,
+        overrides={
+            get_result_store: lambda: results,
+            get_settings: lambda: CrawlerSettings.from_mapping({}),
+            get_shutdown_event: asyncio.Event,
+        },
+    ) as client:
+        yield client, results, keys

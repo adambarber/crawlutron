@@ -54,6 +54,11 @@ def identity_for_key(record: CallerKey) -> CallerIdentity:
     )
 
 
+def operator_caller() -> CallerIdentity:
+    """The operator trust plane's crawl identity: unbounded, caller_id 'admin'."""
+    return CallerIdentity(caller_id="admin", authenticated=True, max_pages=0, max_concurrency=0)
+
+
 def anonymous_caller() -> CallerIdentity:
     """The shared anonymous bucket: a bounded single-user identity; quotas resolve to
     capability defaults (max_pages=100, max_concurrency=4), identical to a keyed caller
@@ -174,12 +179,7 @@ async def get_keys_caller(request: Request) -> CallerIdentity:
         record_operator_auth_failure(_audit_store(request))
         _raise_invalid_api_key()
     throttle.record_admin_success()
-    return CallerIdentity(
-        caller_id="admin",
-        authenticated=True,
-        max_pages=0,
-        max_concurrency=0,
-    )
+    return operator_caller()
 
 
 async def _caller_from_secret(request: Request, secret: str) -> CallerIdentity:
@@ -200,10 +200,17 @@ async def _caller_from_secret(request: Request, secret: str) -> CallerIdentity:
 
 
 async def get_caller_identity(request: Request) -> CallerIdentity:
-    """FastAPI dependency: who this request crawls as."""
+    """FastAPI dependency: who this request crawls as.
+
+    A presented credential that matches the configured operator token resolves
+    to the operator identity (verify_admin_secret is fail-closed when unset);
+    any other presented secret rides the keyed path unchanged."""
     secret = _presented_key(request)
     if not secret:
         return anonymous_caller()
+    if verify_admin_secret(secret, request):
+        key_throttle.shared_throttle().record_admin_success()
+        return operator_caller()
     return await _caller_from_secret(request, secret)
 
 
@@ -390,6 +397,7 @@ __all__ = [
     "get_keys_caller",
     "identity_for_key",
     "is_operator",
+    "operator_caller",
     "key_admin_token",
     "presented_key",
     "quota_denials",

@@ -7,22 +7,18 @@ anonymous callers.
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from fastapi import FastAPI
 
-from crawlutron.api.dependencies import get_result_store, get_settings, get_shutdown_event
-from crawlutron.config.settings import CrawlerSettings
 from crawlutron.mcp.router import router as mcp_router
 from tests._async_harnesses import issue_key
 from tests._policy_factories import canonical
 from tests._policy_harnesses import stored_trace
-from tests._quota_harness import keyed_client, stores
+from tests._quota_harness import keyed_result_client
 from tests.mcp._tool_calls import KeyedToolCaller
 
 if TYPE_CHECKING:
@@ -61,21 +57,11 @@ async def _suggestion_app_client(
     from crawlutron.api.keys_router import router as keys_router
     from crawlutron.api.policy_router import router as policy_router
 
-    _, results, keys = stores(tmp_path)
-    app = FastAPI()
-    for router in (mcp_router, policy_router, keys_router):
-        app.include_router(router)
-    app.state.result_store = results
-    # Own settings/shutdown instances: the rollup reads the store it was handed.
-    async with keyed_client(
-        app,
-        keys=keys,
-        overrides={
-            get_result_store: lambda: results,
-            get_settings: lambda: CrawlerSettings.from_mapping({}),
-            get_shutdown_event: asyncio.Event,
-        },
-    ) as client:
+    async with keyed_result_client(tmp_path, (mcp_router, policy_router, keys_router)) as (
+        client,
+        results,
+        keys,
+    ):
         yield client, results, keys
 
 
