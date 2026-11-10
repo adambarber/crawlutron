@@ -12,11 +12,10 @@ from crawlutron.models.normalized_url import NormalizedUrl
 class HttpFetchResult:
     """What a single HTTP fetch returned, before anything is extracted from it.
 
-    ``url`` is the logical URL of the hop that produced this result -- for a
-    terminal result that is the terminal-hop logical URL (post-#685), not the
-    original admitted URL after redirects. ``final_url`` is the logical final
-    URL and is unchanged by redirect following; both are logical URLs, never a
-    pinned IP/connect address.
+    ``url`` is the logical URL of the hop that produced this result; ``final_url``
+    is the logical final URL (terminal hop on redirects). For a walker http_413
+    multi-hop cap breach ``url`` is the original admitted URL while ``final_url``
+    is the terminal-hop logical URL. Both are logical URLs, never a pinned IP.
     """
 
     url: NormalizedUrl

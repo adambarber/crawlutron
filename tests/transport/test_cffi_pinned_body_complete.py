@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+from curl_cffi.requests.exceptions import RequestException, SSLError
 from curl_cffi.requests.models import STREAM_END
 
 import crawlutron.transport.http_client_pool as http_client_pool
@@ -32,9 +34,10 @@ class _AbortingQueue:
     ignores close timing would false-green this suite.
     """
 
-    def __init__(self, chunks: list[bytes]) -> None:
+    def __init__(self, chunks: list[object], wedge: asyncio.Event | None = None) -> None:
         self._chunks = list(chunks)
         self.aborted = False
+        self._wedge = wedge
 
     async def get(self) -> object:
         await asyncio.sleep(0)
@@ -43,6 +46,10 @@ class _AbortingQueue:
             return STREAM_END
         if self._chunks:
             return self._chunks.pop(0)
+        if self._wedge is not None:
+            # Mid-stream back-pressure: block until the wedge is released so a
+            # cancel can land while the drain is waiting on the queue.
+            await self._wedge.wait()
         # Natural end of a fully-produced stream.
         return STREAM_END
 
@@ -53,24 +60,30 @@ class _AbortingQueue:
 class _TruncatingResponse:
     """curl_cffi stream response shape: status, headers, queue, aclose."""
 
-    def __init__(self, chunks: list[bytes]) -> None:
+    def __init__(self, chunks: list[object]) -> None:
         self.status_code = 200
         self.headers: dict[str, str] = {}
         self.queue = _AbortingQueue(chunks)
         self.aclose_awaited = False
+        self.aclose_error: BaseException | None = None
 
     async def aclose(self) -> None:
         self.aclose_awaited = True
+        if self.aclose_error is not None:
+            raise self.aclose_error
 
 
 class _OneShotSession:
     """A one-shot pinned session whose close() aborts the in-flight stream."""
 
-    def __init__(self, response: _TruncatingResponse) -> None:
+    def __init__(self, response: _TruncatingResponse, dial_error: BaseException | None = None) -> None:
         self.response = response
         self.close_count = 0
+        self.dial_error = dial_error
 
     async def get(self, url: str, **kwargs: object) -> _TruncatingResponse:
+        if self.dial_error is not None:
+            raise self.dial_error
         return self.response
 
     async def close(self) -> None:
@@ -104,10 +117,12 @@ async def test_pinned_terminal_body_is_complete_not_truncated(monkeypatch, stub_
 def _pinned_hop(
     monkeypatch,
     stub_builder,
-    chunks: list[bytes],
+    chunks: list[object],
     *,
     status_code: int = 200,
     headers: dict[str, str] | None = None,
+    dial_error: BaseException | None = None,
+    wedge: bool = False,
 ) -> tuple[CffiTransport, FetchRequest, _OneShotSession, _TruncatingResponse]:
     """Build one pinned hop end-to-end: stubbed shared session, monkeypatched
     one-shot builder, and a fetch request that resolves to a pinned session."""
@@ -117,7 +132,9 @@ def _pinned_hop(
     response = _TruncatingResponse(chunks)
     response.status_code = status_code
     response.headers = dict(headers or {})
-    session = _OneShotSession(response)
+    if wedge:
+        response.queue._wedge = asyncio.Event()
+    session = _OneShotSession(response, dial_error=dial_error)
     monkeypatch.setattr(http_client_pool, "build_pinned_cffi_session", lambda resolve_entry: session)
 
     transport = CffiTransport()
@@ -168,5 +185,77 @@ async def test_pinned_body_too_large_closes_session_once(monkeypatch, stub_build
         pass
     else:  # pragma: no cover - the cap must breach
         raise AssertionError("BodyTooLarge was not raised over the capped stream")
+
+    assert session.close_count == 1
+
+
+async def test_pinned_ssl_error_closes_session_once(monkeypatch, stub_builder) -> None:
+    """SSLError from the pinned dial closes the session once and propagates."""
+    transport, request, session, response = _pinned_hop(
+        monkeypatch,
+        stub_builder,
+        [EXPECTED_BODY],
+        dial_error=SSLError("certificate verify failed"),
+    )
+
+    with pytest.raises(SSLError):
+        await transport.fetch(request, max_bytes=1 << 20)
+
+    assert session.close_count == 1
+    assert not response.aclose_awaited
+
+
+async def test_pinned_dial_failure_closes_session_once(monkeypatch, stub_builder) -> None:
+    """Non-SSL dial failure closes the session once and propagates to the fallback."""
+    transport, request, session, response = _pinned_hop(
+        monkeypatch, stub_builder, [EXPECTED_BODY], dial_error=OSError("dial failed")
+    )
+
+    with pytest.raises(OSError):
+        await transport.fetch(request, max_bytes=1 << 20)
+
+    assert session.close_count == 1
+
+
+async def test_pinned_request_exception_mid_stream_closes_session_once(monkeypatch, stub_builder) -> None:
+    """A RequestException raised mid-stream closes the session once and propagates."""
+    transport, request, session, response = _pinned_hop(
+        monkeypatch, stub_builder, [b"partial", RequestException("stream broke")]
+    )
+
+    with pytest.raises(RequestException):
+        await transport.fetch(request, max_bytes=1 << 20)
+
+    assert session.close_count == 1
+
+
+async def test_pinned_cancelled_mid_stream_closes_session_once(monkeypatch, stub_builder) -> None:
+    """CancelledError mid-stream closes the session once and CancelledError propagates."""
+    transport, request, session, response = _pinned_hop(monkeypatch, stub_builder, [b"partial"], wedge=True)
+
+    task = asyncio.create_task(transport.fetch(request, max_bytes=1 << 20))
+    wedged = False
+    for _ in range(200):
+        if not response.queue._chunks:
+            await asyncio.sleep(0)
+            wedged = True
+            break
+        await asyncio.sleep(0)
+    assert wedged, "drain never consumed the first chunk"
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert session.close_count == 1
+
+
+async def test_pinned_unexpected_error_closes_session_once(monkeypatch, stub_builder) -> None:
+    """An unexpected error (aclose failure) after terminal drain closes once and propagates."""
+    transport, request, session, response = _pinned_hop(monkeypatch, stub_builder, [EXPECTED_BODY])
+    response.aclose_error = RuntimeError("unexpected close failure")
+
+    with pytest.raises(RuntimeError, match="unexpected close failure"):
+        await transport.fetch(request, max_bytes=1 << 20)
 
     assert session.close_count == 1

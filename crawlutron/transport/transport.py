@@ -70,7 +70,10 @@ def http_413(url: NormalizedUrl, final_url: NormalizedUrl, started: float) -> Ht
     """Standard 413 (payload too large) result.
 
     Takes the logical ``final_url``, never ``current_url``: a pinned plain-HTTP
-    response url is the resolved-IP literal, which leaks topology and mis-keys cookies by IP.
+    response url is the resolved-IP literal, which leaks topology and mis-keys
+    cookies by IP. Callers pass logical URLs for both ``url`` (the cap-breaching
+    hop's logical URL) and ``final_url`` (the terminal logical URL), never a
+    connect_url or resolved IP.
     """
     return HttpFetchResult(
         url=url,

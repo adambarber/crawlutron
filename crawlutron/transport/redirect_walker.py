@@ -73,9 +73,8 @@ class RedirectWalker:
     ) -> HttpFetchResult | None:
         """Walk one fetch from ``url`` following redirects to a terminal response.
 
-        Returns ``None`` when the transport yields no terminal result (cffi
-        transport failure -- the httpx fallback path). On cap breach returns an
-        http_413 ``HttpFetchResult`` instead of raising.
+        Returns the terminal ``HttpFetchResult`` or propagates; cffi transport
+        failure raises and the None/fallback is handled in fetchers, not here.
         """
         if started is None:
             started = time.monotonic()
@@ -105,6 +104,9 @@ class RedirectWalker:
             try:
                 result = await self._transport.fetch(request, max_bytes=max_bytes)
             except BodyTooLarge:
+                # Multi-hop cap breach: url is the original admitted URL
+                # (hop.url is never reassigned on redirect), final_url is the
+                # terminal-hop logical URL (chain.url advanced per hop).
                 return http_413(hop.url, chain.url, hop.started)
 
             outcome, pending = await self._process_result(result, chain, started)
