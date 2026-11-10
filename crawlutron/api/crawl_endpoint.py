@@ -21,6 +21,7 @@ from crawlutron.api.main_helpers import record_crawl_completion, request_gate
 from crawlutron.api.response_shaping import aunified_response_from_result
 from crawlutron.api.webhooks import ensure_https_webhook_url, validate_webhook_url_async
 from crawlutron.config.settings import CrawlerSettings
+from crawlutron.delta import BaselineEvidence, DeltaContext, extract_baseline
 from crawlutron.extraction.output_formats import serialize_results
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.crawl_pending import CrawlPendingError
@@ -72,6 +73,40 @@ def _crawl_rejection(error: ValueError) -> HTTPException:
     return validation_http_error(error)
 
 
+async def _delta_context_for(payload: CrawlRequest, caller_id: str, result_store) -> DeltaContext | None:
+    """Caller-scoped delta request for ``payload``, or ``None`` when no delta
+    knob was set (no behavior change: shaping stays blind to delta).
+
+    ``changed_since`` and ``baseline_request_id`` are the request knobs. When
+    ``baseline_request_id`` is set, the caller-isolated baseline row is loaded
+    through :meth:`CrawlResultStore.aget_for_caller` (foreign rows read as
+    missing) and degraded: missing, expired, or foreign rows surface as
+    ``baseline_expired`` so every result classifies ``new`` rather than being
+    compared against another caller's evidence or a stale snapshot.
+    """
+    if payload.changed_since is None and payload.baseline_request_id is None:
+        return None
+    baseline_request_id = payload.baseline_request_id
+    baseline: dict[str, BaselineEvidence] = {}
+    baseline_expired = False
+    if baseline_request_id is not None:
+        stored = (
+            None
+            if result_store is None
+            else await result_store.aget_for_caller(baseline_request_id, caller_id)
+        )
+        if stored is None:
+            baseline_expired = True
+        else:
+            baseline = extract_baseline(stored)
+    return DeltaContext(
+        changed_since=payload.changed_since,
+        baseline_request_id=baseline_request_id,
+        baseline=baseline,
+        baseline_expired=baseline_expired,
+    )
+
+
 def _serialize_or_reject(items: list[dict[str, JsonValue]], output_format: str) -> tuple[str, str]:
     """Serialize ``items`` for ``output_format``, or refuse as the 422 the
     contract names -- the one edge a refused format surfaces. Callers that only
@@ -105,6 +140,7 @@ async def crawl(
         # Batch size is gated pre-202: an oversized async batch fails unseen.
         host_policy = HostPolicy.from_settings(settings)
         checked_pairs = checked_payload_urls(payload, settings.max_batch_size, host_policy=host_policy)
+        delta_context = await _delta_context_for(payload, active_caller.caller_id, result_store)
         return await _admitted_crawl(
             payload,
             active_caller=active_caller,
@@ -116,6 +152,7 @@ async def crawl(
             shutdown_event=shutdown_event,
             host_policy=host_policy,
             checked_pairs=checked_pairs,
+            delta_context=delta_context,
             request=request,
             webhook_url=None
             if payload.webhook_url is None
@@ -135,32 +172,30 @@ async def _admitted_crawl(
     shutdown_event: asyncio.Event,
     host_policy: HostPolicy,
     checked_pairs: list[tuple[str, NormalizedUrl]],
+    delta_context: DeltaContext | None,
     request: Request | None,
     webhook_url: WebhookTarget | None,
 ) -> JSONResponse | Response | UnifiedCrawlResponse:
-    """One admission for both doors: sync holds a slot for the crawl's life; async
-    persists a durable job row. Admit and dispatch stay one block; the readiness
-    gate belongs to crawl() alone."""
+    """One admission for both doors: sync holds a slot; async persists a durable job row."""
     async_door = bool(payload.async_mode or webhook_url)
+    tracking = Tracking(job_store=job_store, concurrency_tracker=concurrency_tracker)
     async with admit(
         active_caller,
         payload.policy.limits.max_pages,
-        tracking=Tracking(job_store=job_store, concurrency_tracker=concurrency_tracker),
+        tracking=tracking,
         payload=payload,
         reserve_slot=not async_door,
     ) as owner:
-        # Built after admission (a slot exists); calling runs nothing.
-        crawl_awaitable = (
-            None
-            if async_door
-            else execute_crawl(
+        if async_door:
+            crawl_awaitable = None
+        else:
+            crawl_awaitable = execute_crawl(
                 payload,
                 settings=settings,
                 shutdown_event=shutdown_event,
                 url_pairs=checked_pairs,
                 spill_store=spill_store,
             )
-        )
         if async_door:
             return await _accepted_async(
                 payload,
@@ -173,6 +208,7 @@ async def _admitted_crawl(
                 checked=checked_pairs,
                 owner=owner,
                 webhook_url=webhook_url,
+                delta_context=delta_context,
             )
         return await _run_sync_crawl(
             payload,
@@ -180,13 +216,9 @@ async def _admitted_crawl(
             checked=checked_pairs,
             owner=owner,
             request=request,
-            crawl_awaitable=crawl_awaitable if crawl_awaitable is not None else _missing_sync_awaitable(),
+            crawl_awaitable=crawl_awaitable,
+            delta_context=delta_context,
         )
-
-
-def _missing_sync_awaitable() -> Awaitable[ProducerEnvelope]:
-    """Unreachable: the dispatch passes None only when the async door is taken."""
-    raise AssertionError("the sync door always receives a built awaitable")
 
 
 async def _accepted_async(
@@ -201,6 +233,7 @@ async def _accepted_async(
     checked: list[tuple[str, NormalizedUrl]],
     owner: str,
     webhook_url: WebhookTarget | None,
+    delta_context: DeltaContext | None,
 ) -> JSONResponse:
     """The 202 door: validate the webhook, persist the job row, start the runner."""
     if webhook_url is not None:
@@ -231,6 +264,7 @@ async def _accepted_async(
             shutdown_event,
             url_pairs=checked,
             spill_store=spill_store,
+            delta_context=delta_context,
         ),
     )
     get_metrics().observe_crawl(accepted=True, caller_id=owner)
@@ -252,9 +286,13 @@ async def _run_sync_crawl(
     checked: list[tuple[str, NormalizedUrl]],
     owner: str,
     request: Request | None,
-    crawl_awaitable: Awaitable[ProducerEnvelope],
+    crawl_awaitable: Awaitable[ProducerEnvelope] | None,
+    delta_context: DeltaContext | None,
 ) -> Response | UnifiedCrawlResponse:
     """The sync door: disconnect-aware crawl, metrics, store, then the body."""
+    if crawl_awaitable is None:
+        # Unreachable from the dispatch: the sync door always receives a built awaitable.
+        raise AssertionError("the sync door always receives a built awaitable")
     _crawl_started = time.monotonic()
     # Disconnect-aware sync crawl: if the caller has gone away, halt the
     # engine call instead of crawling to completion for a dead client.
@@ -269,7 +307,7 @@ async def _run_sync_crawl(
         logger=_logger,
         caller_id=owner,
     )
-    response_model = await aunified_response_from_result(result)
+    response_model = await aunified_response_from_result(result, delta_context=delta_context)
     try:
         await result_store.aput(result["request_id"], response_model.model_dump(), owner=owner)
     except Exception:

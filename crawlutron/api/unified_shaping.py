@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Mapping, Sequence
 from typing import cast
 
+from crawlutron.delta import DeltaContext, classify_result
 from crawlutron.extraction.llm_format import (
     PageMetadata as ExtractedPageMetadata,
 )
@@ -61,9 +62,11 @@ async def aformat_crawl_item(item: EngineCrawlResult) -> tuple[str | None, Extra
     return await asyncio.to_thread(format_crawl_item, item)
 
 
-async def abuild_unified_result(item: EngineCrawlResult) -> UnifiedCrawlResult:
+async def abuild_unified_result(
+    item: EngineCrawlResult, *, delta_context: DeltaContext | None = None
+) -> UnifiedCrawlResult:
     """Async :func:`build_unified_result` (whole mapping off the event loop)."""
-    return await asyncio.to_thread(build_unified_result, item)
+    return await asyncio.to_thread(build_unified_result, item, delta_context=delta_context)
 
 
 def _coerce_strategy(value: CrawlStrategyName | None) -> CrawlStrategy | None:
@@ -115,16 +118,22 @@ def _metadata_response(extracted: ExtractedPageMetadata) -> PageMetadataResponse
     return PageMetadataResponse(**extracted)
 
 
-def build_unified_result(item: EngineCrawlResult) -> UnifiedCrawlResult:
+def build_unified_result(
+    item: EngineCrawlResult, *, delta_context: DeltaContext | None = None
+) -> UnifiedCrawlResult:
     """Map an internal engine result into the unified API response model.
     The response carries both LLM-friendly ``markdown`` and full ``diagnostics``;
     page metadata comes from the carried ``llm_metadata`` or the shared extractor over the HTML.
+    When ``delta_context`` is set, each result is classified against its caller-isolated
+    baseline and carries ``delta_classification``/``delta_evidence``; unset knobs mean
+    no classification and no wire change.
     """
     markdown, extracted = format_crawl_item(item)
     url = item.final_url or item.normalized_url
     metadata = _metadata_response(extracted)
     if metadata.source_url is None:
         metadata.source_url = url.raw if url is not None else item.original_url
+    delta_classification, delta_evidence = classify_result(item, context=delta_context)
     return UnifiedCrawlResult(
         original_url=item.original_url,
         normalized_url=item.normalized_url,
@@ -154,6 +163,8 @@ def build_unified_result(item: EngineCrawlResult) -> UnifiedCrawlResult:
         discovered_links=_link_models(item.discovered_links),
         next_page_url=item.next_page_url,
         validators=_validator_model(item.validators),
+        delta_classification=delta_classification,
+        delta_evidence=delta_evidence,
     )
 
 
@@ -184,10 +195,18 @@ def _render_diagnostics(metadata: Mapping[str, JsonValue]) -> dict[str, JsonValu
     return diagnostics
 
 
-def render_result_to_unified(item: CrawlResult) -> UnifiedCrawlResult:
+def render_result_to_unified(
+    item: CrawlResult, *, delta_context: DeltaContext | None = None
+) -> UnifiedCrawlResult:
     """Adapt a browser ``CrawlResult`` into the unified result model.
     Returns the model, not a dict: every field has a default, so a dict could
     omit one invisibly (which is how an empty metadata shipped); the constructor names the field set.
+
+    The render path is deliberately *not* delta-classified: the browser worker
+    surfaces no origin validators and no integer HTTP status, so there is nothing
+    honest to compare against a baseline. ``delta_context`` is accepted for
+    interface symmetry with :func:`build_unified_result`; render results carry
+    no ``delta_classification``/``delta_evidence``.
     """
     metadata = item.metadata
     status = CrawlStatus(item.status)

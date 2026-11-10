@@ -22,6 +22,9 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     # RAISED to (7, 6): failed_unified_result is the single failure projection.
     "crawlutron/api/response_shaping.py": (7, 6),
     "crawlutron/api/unified_shaping.py": (5, 5),
+    # Delta crawl classification (#714): one pure source of truth; the verdict
+    # constants ride the surface so the wire spells them from here only.
+    "crawlutron/delta.py": (11, 5),
     # RAISED to (10, 8) by #314/F2: connection_data_version is the one PRAGMA read
     # chokepoint outside configure_store_connection, backing the table-trust digest.
     "crawlutron/storage/sqlite_store.py": (10, 8),

@@ -22,8 +22,10 @@ from crawlutron.api.response_shaping import (
 from crawlutron.api.unified_shaping import build_unified_result
 from crawlutron.config.env import get_env_int
 from crawlutron.config.settings import CrawlerSettings
+from crawlutron.delta import DeltaContext
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
 from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.runtime import process_state
 from crawlutron.storage.job_store import TERMINAL_STATUSES, CrawlJobState, JobStatus
@@ -98,6 +100,7 @@ async def run_async_crawl(
     shutdown_event: asyncio.Event,
     url_pairs: list[tuple[str, NormalizedUrl]] | None = None,
     spill_store: CrawlSpillStore | None = None,
+    delta_context: DeltaContext | None = None,
 ) -> None:
     """Run a single-shot crawl in the background, persisting results to job_store
     through PENDING -> RUNNING -> COMPLETED/FAILED and POSTing when ``webhook_url``
@@ -118,6 +121,7 @@ async def run_async_crawl(
                 job,
                 job_store,
                 spill_store=spill_store,
+                delta_context=delta_context,
             )
         # Deliver outside the semaphore -- a retrying webhook (up to 60s
         # of backoff) must not gate another caller's crawl capacity.
@@ -162,6 +166,7 @@ async def _crawl_and_build_response(
     job_store,
     *,
     spill_store: CrawlSpillStore | None = None,
+    delta_context: DeltaContext | None = None,
 ) -> dict[str, object]:
     """Execute the crawl, observe metrics, and build the unified response.
 
@@ -192,10 +197,20 @@ async def _crawl_and_build_response(
             submitted_count=result.get("submitted_count"),
             policy_schema_version=result.get("policy_schema_version", ""),
         ),
+        delta_context=delta_context,
     )
-    response_payload = response_model.model_dump()
+    _persist_unified_job_results(job, response_model)
+    await job_store.asave(job)
+    return response_model.model_dump()
 
-    job.results = [response_payload]
+
+def _persist_unified_job_results(job, response_model: UnifiedCrawlResponse) -> None:
+    """Write the unified results and the two single-shot stats back onto ``job``.
+
+    Single-shot jobs have no frontier, so "discovered" is undefined and only
+    what happened is reported; the whole-site runner owns discovery stats.
+    """
+    response_payload = response_model.model_dump()
 
     def _failed(item) -> bool:
         status = item.get("status") if isinstance(item, dict) else getattr(item, "status", None)
@@ -203,14 +218,11 @@ async def _crawl_and_build_response(
 
     unified_results = response_model.results
     failed = sum(1 for item in unified_results if _failed(item))
-    # Single-shot jobs have no frontier, so "discovered" is undefined
-    # and only what happened is reported; the whole-site runner owns it.
+    job.results = [response_payload]
     job.stats = {
         "total_crawled": len(unified_results),
         "total_failed": failed,
     }
-    await job_store.asave(job)
-    return response_payload
 
 
 async def _publish_success(

@@ -8,13 +8,14 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from crawlutron.admission.admission_links import LinkCandidate
 from crawlutron.api.unified_shaping import (
     build_unified_result,
     render_result_to_unified,
 )
+from crawlutron.delta import DeltaContext, delta_summary_for
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.crawl_status import CrawlStatus
 from crawlutron.models.host_policy import HostPolicy
@@ -61,6 +62,11 @@ class EnvelopeOptions:
     policy_schema_version: str = ""
     success: bool = True
     submitted_count: int | None = None
+    delta_context: DeltaContext | None = None
+    # Baseline keys (URLs seen before) absent from this run's admitted set: the
+    # run's removed set, reported in delta_summary. Empty when delta was not
+    # requested or nothing was removed.
+    removed_urls: tuple[str, ...] = ()
 
 
 def _response_envelope(
@@ -71,6 +77,7 @@ def _response_envelope(
     """The one construction of the response envelope: shaped results + every scalar.
     Every UnifiedCrawlResponse field is required, so a new one is passed here.
     result_count is the RAW list length, so a dropped shaped item can't silently change the submitted count.
+    delta_summary is None unless a delta knob was set (delta_context present).
     """
     return UnifiedCrawlResponse(
         results=shaped,
@@ -78,20 +85,43 @@ def _response_envelope(
         policy_schema_version=options.policy_schema_version,
         success=options.success,
         submitted_count=(result_count if options.submitted_count is None else options.submitted_count),
+        delta_summary=delta_summary_for(
+            shaped,
+            removed_urls=options.removed_urls,
+            delta_requested=options.delta_context is not None,
+        ),
     )
+
+
+def _adapt_with_delta(
+    adapt: Callable[..., UnifiedCrawlResult], delta_context: DeltaContext | None
+) -> Callable[[object], UnifiedCrawlResult]:
+    """Wrap ``adapt`` so every per-item shape threads ``delta_context`` into the
+    result. When no delta knob is set, ``delta_context`` is ``None`` and the
+    shaper behaves exactly as before (no classification, no wire change)."""
+
+    def _adapted(item: object) -> UnifiedCrawlResult:
+        return adapt(item, delta_context=delta_context)
+
+    return _adapted
 
 
 def build_unified_crawl_response(
     results: list[EngineCrawlResult],
     *,
     options: EnvelopeOptions | None = None,
+    adapt: Callable[[EngineCrawlResult], UnifiedCrawlResult] = build_unified_result,
+    delta_context: DeltaContext | None = None,
 ) -> UnifiedCrawlResponse:
     """Build the unified crawl response from a list of engine-result dicts.
     The async twin is the same contract with shaping off the event loop; both
     hand their options to :func:`_response_envelope`, so the response is decided in one place.
     """
+    options = options or EnvelopeOptions()
+    if delta_context is not None:
+        options = replace(options, delta_context=delta_context)
     return _response_envelope(
-        _shape_all(results, adapt=build_unified_result), len(results), options or EnvelopeOptions()
+        _shape_all(results, adapt=_adapt_with_delta(adapt, delta_context)), len(results), options
     )
 
 
@@ -182,13 +212,21 @@ async def abuild_unified_crawl_response[ResultT: AnyResult](
     *,
     options: EnvelopeOptions | None = None,
     adapt: Callable[[ResultT], UnifiedCrawlResult],
+    delta_context: DeltaContext | None = None,
 ) -> UnifiedCrawlResponse:
     """Async :func:`build_unified_crawl_response` for use inside async endpoints.
     Shapes the whole batch in ONE ``to_thread`` offload (per-item fan-out pays N
     Future + dispatch overheads), matching the sync contract; ``adapt`` keeps the per-item guard.
     """
-    shaped = await asyncio.to_thread(_shape_all, results, adapt=adapt) if results else []
-    return _response_envelope(shaped, len(results), options or EnvelopeOptions())
+    options = options or EnvelopeOptions()
+    if delta_context is not None:
+        options = replace(options, delta_context=delta_context)
+    shaped = (
+        await asyncio.to_thread(_shape_all, results, adapt=_adapt_with_delta(adapt, delta_context))
+        if results
+        else []
+    )
+    return _response_envelope(shaped, len(results), options)
 
 
 def _envelope_options(result: ProducerEnvelope | RenderEnvelope) -> EnvelopeOptions:
@@ -203,7 +241,11 @@ def _envelope_options(result: ProducerEnvelope | RenderEnvelope) -> EnvelopeOpti
     )
 
 
-async def aunified_response_from_result(result: ProducerEnvelope) -> UnifiedCrawlResponse:
+async def aunified_response_from_result(
+    result: ProducerEnvelope,
+    *,
+    delta_context: DeltaContext | None = None,
+) -> UnifiedCrawlResponse:
     """The one adapter from a crawl producer's envelope to the unified response.
     Both wire endpoints read the envelope here, so an envelope field is passed once
     and reaches both (a dropped field is silent). Paired with :func:`arender_response_from_result`.
@@ -212,10 +254,15 @@ async def aunified_response_from_result(result: ProducerEnvelope) -> UnifiedCraw
         result["results"],
         options=_envelope_options(result),
         adapt=build_unified_result,
+        delta_context=delta_context,
     )
 
 
-async def arender_response_from_result(result: RenderEnvelope) -> UnifiedCrawlResponse:
+async def arender_response_from_result(
+    result: RenderEnvelope,
+    *,
+    delta_context: DeltaContext | None = None,
+) -> UnifiedCrawlResponse:
     """:func:`aunified_response_from_result` for the render producer's envelope.
     Same one-adapter-per-shape decision and shared options builder; the per-item
     guard in ``_shape_all`` still degrades one unshapable result to a terminal failure.
@@ -224,6 +271,7 @@ async def arender_response_from_result(result: RenderEnvelope) -> UnifiedCrawlRe
         result["results"],
         options=_envelope_options(result),
         adapt=render_result_to_unified,
+        delta_context=delta_context,
     )
 
 
