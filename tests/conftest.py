@@ -18,6 +18,16 @@ import pytest
 
 from tests._app_factory import service_app
 
+# The real PBKDF2 work factor, captured at import before the autouse clamp
+# fixture can patch it: the floor pin reads this, not the live attribute.
+_REAL_PBKDF2_ITERATIONS: int | None = None
+try:
+    from crawlutron.storage import caller_key_store as _caller_key_store
+
+    _REAL_PBKDF2_ITERATIONS = _caller_key_store.PBKDF2_ITERATIONS
+except ImportError:  # pragma: no cover
+    pass
+
 # Fixtures live one-per-file in ``tests/fixtures/``: one legible contract each, never welded to a first user.
 pytest_plugins = (
     "tests.fixtures.stub_builder",
@@ -168,6 +178,27 @@ def pytest_sessionfinish(session, exitstatus):  # args unused; hook signature
         sys.stderr.flush()
     except (ValueError, OSError):
         logging.getLogger(__name__).debug("final flush unavailable")
+
+
+@pytest.fixture(autouse=True)
+def clamp_pbkdf2_iterations(request, monkeypatch):
+    """Hold caller-key hashing at a 1_000-iteration work factor in tests.
+
+    The real 210k derivation is the dominant cost of every keyed-key test;
+    the real path is covered by the ``real_pbkdf2``-marked test."""
+    if request.node.get_closest_marker("real_pbkdf2"):
+        return
+    from crawlutron.storage import caller_key_store
+
+    monkeypatch.setattr(caller_key_store, "PBKDF2_ITERATIONS", 1_000)
+
+
+def real_pbkdf2_iterations() -> int:
+    """The unclamped work factor as captured at conftest import."""
+    import tests.conftest as conftest
+
+    assert conftest._REAL_PBKDF2_ITERATIONS is not None
+    return conftest._REAL_PBKDF2_ITERATIONS
 
 
 @pytest.fixture(autouse=True)
