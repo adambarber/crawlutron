@@ -279,6 +279,27 @@ def test_flags_map_to_wire_fields(capsys):
     assert limits["respect_robots"] is False
 
 
+def test_limits_only_flags_reach_policy_without_strategy(capsys):
+    """--max-pages/--timeout/--max-retries/--no-robots reach policy.limits with no --strategy."""
+    captured: list[httpx.Request] = []
+    assert (
+        _run(
+            captured,
+            [DEFAULT_URL, "--max-pages", "50", "--timeout", "60", "--max-retries", "7", "--no-robots"],
+        )
+        == EXIT_SUCCESS
+    )
+    body = json.loads(captured[0].content or b"{}")
+    policy = body["policy"]
+    assert "strategies" not in policy
+    assert "extraction" not in policy
+    limits = policy["limits"]
+    assert limits["timeout_seconds"] == 60
+    assert limits["max_retries"] == 7
+    assert limits["max_pages"] == 50
+    assert limits["respect_robots"] is False
+
+
 def test_async_returns_202_envelope_and_exits_zero(capsys):
     capture: list[httpx.Request] = []
     envelope = {"status": "accepted", "request_id": "r1", "status_url": "/v1/crawl/r1", "webhook_url": None}

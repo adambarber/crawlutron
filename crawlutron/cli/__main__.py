@@ -182,10 +182,10 @@ def _build_payload(args: argparse.Namespace) -> dict[str, object]:
     if args.deep_crawl == "none":
         limits["max_depth"] = 0
 
-    if policy:
-        payload["policy"] = policy
     if limits:
         policy["limits"] = limits
+    if policy or limits:
+        payload["policy"] = policy
     if args.async_mode:
         payload["async_mode"] = True
     if args.webhook:
