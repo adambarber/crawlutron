@@ -80,6 +80,10 @@ jobs:
           cache-dependency-glob: uv.lock
       - name: Install package + dev dependencies
         run: uv sync --frozen --extra dev
+      # Precompile bytecode once so every xdist worker reuses .pyc instead of
+      # recompiling ~90k lines per run (S4).
+      - name: Precompile bytecode
+        run: python3 -m compileall -q crawlutron tests scripts
       # Includes the project-specific safety predicates (tests/invariants/ and
       # friends): those detectors are the only exit path for the chokepoint
       # rules, and they run inside the default marker set.

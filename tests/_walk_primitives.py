@@ -1,7 +1,10 @@
 """Walk primitives: scopes, parents, line numbers and offenders."""
 
 import ast
+import hashlib
+import os
 import pathlib
+import sys
 import weakref
 from functools import cache
 
@@ -27,21 +30,50 @@ _NODES_BY_KIND: weakref.WeakKeyDictionary[ast.AST, dict[str, tuple[ast.AST, ...]
 )
 
 
-# One parse per (path, mtime_ns, size) per session; every tree reader funnels here.
-_PARSE_CACHE: dict[tuple[str, int, int], ast.Module] = {}
+# One parse per (path, mtime_ns, size, py_version) per session; every tree reader funnels here.
+_PARSE_CACHE: dict[tuple[str, int, int, str], ast.Module] = {}
+
+# Persistent parse cache under .pytest_cache/ast_parse/, keyed on
+# (path, mtime_ns, size, py_version); stale on edit or Python version bump.
+_AST_PARSE_CACHE_DIR = REPO_ROOT / ".pytest_cache" / "ast_parse"
+_PY_VERSION = ".".join(map(str, sys.version_info[:3]))
+
+
+def _cache_file(path: pathlib.Path, mtime_ns: int, size: int) -> pathlib.Path:
+    """Cache-file path for one parse key, hashed to a filesystem-safe name."""
+    digest = hashlib.sha256(f"{path}\0{mtime_ns}\0{size}\0{_PY_VERSION}".encode()).hexdigest()
+    return _AST_PARSE_CACHE_DIR / f"{digest}.src"
+
+
+def _read_source(path: pathlib.Path, stat: os.stat_result) -> str:
+    """Source for `path`, served from the persistent parse cache when present.
+
+    The cache file is keyed on (path, mtime_ns, size, py_version); a miss reads
+    the source file and populates the cache so the next session reuses it.
+    """
+    _AST_PARSE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cf = _cache_file(path, stat.st_mtime_ns, stat.st_size)
+    try:
+        return cf.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        source = path.read_text(encoding="utf-8")
+        cf.write_text(source, encoding="utf-8")
+        return source
 
 
 def parsed(path: pathlib.Path) -> ast.Module:
     """The AST of `path`, parsed once per session and shared.
 
-    Keyed on mtime and size so an edited file is re-parsed, never stale:
-    a detector reading the cache still sees a freshly planted violation.
+    Keyed on mtime, size and Python version so an edited file is re-parsed,
+    never stale: a detector reading the cache still sees a freshly planted
+    violation. The source is persisted under .pytest_cache/ast_parse/ so
+    repeat sessions reuse it instead of re-reading the source file.
     """
     stat = path.stat()
-    key = (str(path), stat.st_mtime_ns, stat.st_size)
+    key = (str(path), stat.st_mtime_ns, stat.st_size, _PY_VERSION)
     tree = _PARSE_CACHE.get(key)
     if tree is None:
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        tree = ast.parse(_read_source(path, stat), filename=str(path))
         _PARSE_CACHE[key] = tree
     return tree
 

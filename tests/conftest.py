@@ -159,7 +159,6 @@ try:
         stdout.reconfigure(line_buffering=False, write_through=True)
         stderr.reconfigure(line_buffering=False, write_through=True)
     os.environ["PYTHONUNBUFFERED"] = "1"
-    os.environ["PYTHONDONTWRITEBYTECODE"] = "1"  # no pyc writes during collection
 except (AttributeError, ValueError):
     logging.getLogger(__name__).debug("stream reconfigure unavailable")
 
@@ -340,13 +339,18 @@ async def _reset_pooled_sockets_on_the_live_loop():
     closed the loop cannot legally close its transports (a foreign-loop close
     leaves them "closing" forever -- the unraisable __del__ flake family).
     Closing on the owning loop before it dies is the structural fix; the sync
-    reset below stays as the safety net for stateless owners."""
-    yield
-    from crawlutron.runtime import process_state
+    reset below stays as the safety net for stateless owners. Pure unit tests
+    that never build a pooled client skip the loop-bound drain entirely."""
     from crawlutron.transport import pooled_clients
 
-    process_state.reset_all_process_state()
-    await pooled_clients.drain_pending_client_closes()
+    pooled = pooled_clients.http_singleton()
+    pooled.reset_clients_built_flag()
+    yield
+    if pooled.clients_were_built():
+        from crawlutron.runtime import process_state
+
+        process_state.reset_all_process_state()
+        await pooled_clients.drain_pending_client_closes()
 
 
 @pytest.fixture(autouse=True)
@@ -367,13 +371,17 @@ async def owned_job_runtime():
     """Hand every test the job runtime, and take it back at the end.
 
     The task registry and shutdown event are module-global: a crawl from one
-    test stayed visible to the next. Teardown is where the reset belongs."""
+    test stayed visible to the next. Teardown is where the reset belongs. When
+    no job task was started during the test, the loop-bound shutdown is a
+    no-op (the seam reset still runs)."""
     from crawlutron.api import job_runner
+    from crawlutron.runtime import process_state
     from tests._app_factory import service_app
 
     app = service_app()
     if app is not None:
         app.state.shutdown_event = asyncio.Event()
     yield
-    await job_runner.shutdown_job_runner()
     job_runner.reset_execute_crawl()
+    if process_state.owner_has_state("crawlutron.api.job_lifecycle"):
+        await job_runner.shutdown_job_runner()

@@ -234,3 +234,27 @@ def test_enforcement_job_caches_gate_state() -> None:
         assert expected in paths, f"gate-state cache missing {expected}"
     key = str(with_block["key"])
     assert "hashFiles('uv.lock', 'pyproject.toml')" in key, key
+
+
+def test_conftest_leaves_bytecode_writing_enabled() -> None:
+    """S4: conftest must not set PYTHONDONTWRITEBYTECODE so modules compile to
+    .pyc once and are reused across xdist workers and runs."""
+    import os
+
+    import tests.conftest as conftest_module
+
+    _ = conftest_module  # conftest's import side effect applies its env at startup
+    assert os.environ.get("PYTHONDONTWRITEBYTECODE") != "1", (
+        "conftest disables bytecode writes; remove the PYTHONDONTWRITEBYTECODE=1 line"
+    )
+
+
+def test_ci_precompiles_bytecode_once_in_test_fast() -> None:
+    """S4: the test-fast job precompiles .pyc once after install so every worker
+    reuses them instead of recompiling ~90k lines per run."""
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    steps = _jobs(workflow)["test-fast"].get("steps")
+    assert isinstance(steps, list)
+    runs = " ".join(str(step.get("run", "")) for step in steps if isinstance(step, dict))
+    assert "compileall" in runs, "test-fast must precompile bytecode with compileall"
+    assert "crawlutron" in runs and "tests" in runs, "compileall must cover the imported trees"
