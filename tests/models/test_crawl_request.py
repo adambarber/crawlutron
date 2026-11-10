@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from crawlutron.models.crawl_request import CrawlRequest
+from tests._validation_helpers import assert_non_finite_float_field_refused
 
 
 def test_crawl_request_accepts_delta_knobs():
@@ -32,3 +33,9 @@ def test_crawl_request_still_forbids_unknown_fields():
 def test_crawl_request_url_source_rule_still_applies():
     with pytest.raises(ValidationError):
         CrawlRequest(url="https://example.com/", urls=["https://example.com/"])
+
+
+def test_crawl_request_rejects_non_finite_changed_since():
+    assert assert_non_finite_float_field_refused(
+        lambda **kw: CrawlRequest(url="https://example.com/", **kw), "changed_since"
+    )

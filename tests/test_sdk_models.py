@@ -15,6 +15,7 @@ from crawlutron_sdk.models import (
     SearchRequest,
     WatchState,
 )
+from tests._validation_helpers import assert_non_finite_float_field_refused
 
 
 def test_crawl_request_forbids_extra_fields():
@@ -148,3 +149,10 @@ def test_sdk_crawl_response_tolerates_delta_fields():
     assert response.delta_summary == {"changed": 1}
     assert response.results[0]["delta_classification"] == "changed"
     assert response.results[0]["delta_evidence"] == {"etag": "W/1"}
+
+
+def test_sdk_crawl_request_rejects_non_finite_changed_since():
+    assert assert_non_finite_float_field_refused(
+        lambda **kw: CrawlRequest.model_validate({"url": "https://example.com/", **kw}),
+        "changed_since",
+    )
