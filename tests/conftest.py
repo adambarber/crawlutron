@@ -10,9 +10,9 @@ import shutil
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import TextIO
-from unittest.mock import patch
 
 import pytest
 
@@ -36,17 +36,33 @@ pytest_plugins = (
     "tests.network_guard",
 )
 
-# The real asyncio.sleep, kept so the zero-second patch below can still yield.
+# The real asyncio.sleep, kept so the fast dispatcher can still yield through it.
 _ORIGINAL_ASYNCIO_SLEEP = asyncio.sleep
+_REAL_TIME_SLEEP = time.sleep
+
+# The suite's stable sleep dispatcher, installed once and never uninstalled:
+# a sibling's captured restore round-trips to THIS binding, never the fast sleep.
+_SLEEP_MODE = {"fast": False}
 
 
-async def _fast_asyncio_sleep(delay, *args, **kwargs):
-    """A zero-second async sleep: it waits for nothing, but it still yields.
+async def _dispatched_asyncio_sleep(delay, *args, **kwargs):
+    """Fast mode waits for nothing but still yields once (a never-suspending
+    patch turns yield-point sleeps into hot spins); real mode passes through."""
+    if _SLEEP_MODE["fast"]:
+        del args, kwargs
+        await _ORIGINAL_ASYNCIO_SLEEP(0)
+        return
+    await _ORIGINAL_ASYNCIO_SLEEP(delay)
 
-    A never-suspending patch turns yield-point sleeps into hot spins that hang
-    the suite; yielding once through the real sleep keeps that intact."""
-    del delay, args, kwargs
-    await _ORIGINAL_ASYNCIO_SLEEP(0)
+
+def _dispatched_time_sleep(delay=None):
+    """Fast mode is a no-op; real mode is the real time.sleep."""
+    if not _SLEEP_MODE["fast"]:
+        _REAL_TIME_SLEEP(delay if delay is not None else 0)
+
+
+asyncio.sleep = _dispatched_asyncio_sleep
+time.sleep = _dispatched_time_sleep
 
 
 HERE = Path(__file__).resolve().parent
@@ -158,12 +174,12 @@ def pytest_sessionfinish(session, exitstatus):  # args unused; hook signature
 def fast_sleeps(request):
     """Zero ``time.sleep`` and ``asyncio.sleep`` unless the test opts out.
 
-    Timing-true tests carry the ``real_sleeps`` marker instead."""
-    if request.node.get_closest_marker("real_sleeps"):
-        yield
-        return
-    with patch("time.sleep", lambda *a, **k: None), patch("asyncio.sleep", _fast_asyncio_sleep):
-        yield
+    Timing-true tests carry the ``real_sleeps`` marker instead. The patch is a
+    stable dispatcher (module level, below): never a ``mock.patch`` whose
+    restore a sibling monkeypatch can capture and re-install."""
+    _SLEEP_MODE["fast"] = not request.node.get_closest_marker("real_sleeps")
+    yield
+    _SLEEP_MODE["fast"] = False
 
 
 @pytest.fixture(autouse=True)
