@@ -27,16 +27,31 @@ def _tool_cases():
     # (label, tool name, stub_target, payload, extra_patches) for the four fetch
     # kinds; spelled locally so the import block stays the test's own.
     return [
-        ("map", "map", "map_site", MapRequest(url="http://example.com/"), {}),
+        ("map", "map", "map_site", "crawlutron.mcp.handlers", MapRequest(url="http://example.com/"), {}),
         (
             "render",
             "render",
             "render_endpoint_handler",
+            "crawlutron.mcp.handlers",
             RenderRequest(url="http://example.com/"),
             {"get_browser_pool": lambda: object()},
         ),
-        ("search", "search", "search_endpoint_handler", SearchRequest(query="x"), {}),
-        ("crawl", "crawl", "execute_crawl", CrawlRequest(url="http://example.com/"), {}),
+        (
+            "search",
+            "search",
+            "search_endpoint_handler",
+            "crawlutron.mcp.handlers",
+            SearchRequest(query="x"),
+            {},
+        ),
+        (
+            "crawl",
+            "crawl",
+            "execute_crawl",
+            "crawlutron.mcp.handlers",
+            CrawlRequest(url="http://example.com/"),
+            {},
+        ),
     ]
 
 
@@ -95,7 +110,7 @@ async def _invoke(monkeypatch, *, cap: int | None, label: str, prefill: int = 0)
     # so the awaited call is typed, not unknown.
     door = TOOLS_BY_NAME[case[1]]
     assert isinstance(door, ToolSpec), "the case names a registered tool"
-    _, _real, target, payload, extra = case
+    _, _real, target, target_module, payload, extra = case
     state = ReadinessState(max_active_requests=cap)
     monkeypatch.setattr(main_helpers, "readiness_state", state)
     for _ in range(prefill):
@@ -108,7 +123,7 @@ async def _invoke(monkeypatch, *, cap: int | None, label: str, prefill: int = 0)
     exec_stub = _stub_for(label, _active, held)
     for name, value in extra.items():
         monkeypatch.setattr(f"crawlutron.mcp.handlers.{name}", value)
-    monkeypatch.setattr(f"crawlutron.mcp.handlers.{target}", exec_stub)
+    monkeypatch.setattr(f"{target_module}.{target}", exec_stub)
     settings = CrawlerSettings.from_mapping({})
     shutdown = asyncio.Event()
     result = await tool_dispatch(door, payload, settings=settings, shutdown_event=shutdown)

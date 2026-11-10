@@ -33,10 +33,9 @@ from crawlutron.api.map_endpoint import map_site
 from crawlutron.api.render_endpoint import render as render_endpoint_handler
 from crawlutron.api.response_shaping import aunified_response_from_result
 from crawlutron.config.settings import CrawlerSettings
+from crawlutron.mcp.crawl_shaping import CrawlProjection, projected
 from crawlutron.models.caller_identity import CallerIdentity
-from crawlutron.models.crawl_and_extract_response import CrawlAndExtractResponse
 from crawlutron.models.crawl_pending import CrawlPendingError
-from crawlutron.models.extracted_page import ExtractedPage
 from crawlutron.models.json_value import JsonValue
 from crawlutron.models.policy_suggestions_response import PolicySuggestionsResponse
 from crawlutron.safety.json_safe import json_default
@@ -113,12 +112,6 @@ async def tool_result(coro: Awaitable[BaseModel | Mapping[str, object]]) -> Tool
 def caller_for(caller: CallerIdentity | None) -> CallerIdentity:
     """The identity to enforce against: the resolved caller, else anonymous."""
     return caller if caller is not None else CallerIdentity()
-
-
-#: One projection of a crawl response, chosen by the door the caller came through.
-class _Unified(StrEnum):
-    from_crawl = auto()
-    from_extract = auto()
 
 
 class DoorKind(StrEnum):
@@ -228,45 +221,12 @@ async def _admit_tool(
 
 
 async def _crawled(payload: CrawlRequest, settings, shutdown_event, caller_id: str, result_store):
-    """Run the crawl endpoint and shape it, so the door owns only the boundary.
-
-    The delta knobs thread through the REST endpoint's own loader
-    (:func:`crawlutron.api.crawl_endpoint.delta_context_for`): one source of
-    delta semantics, no facade copy."""
+    """Run the crawl endpoint and shape it, threading the delta knobs through the
+    REST endpoint's own delta_context_for loader (one semantics source)."""
     delta_context = await delta_context_for(payload, caller_id, result_store)
     return await aunified_response_from_result(
-        await execute_crawl(
-            payload,
-            settings=settings,
-            shutdown_event=shutdown_event,
-        ),
+        await execute_crawl(payload, settings=settings, shutdown_event=shutdown_event),
         delta_context=delta_context,
-    )
-
-
-async def _projected(crawled: Awaitable, projection: _Unified) -> BaseModel:
-    """The crawl response read through the door the caller came through."""
-    response = await crawled
-    return response if projection is _Unified.from_crawl else await _extracted(response)
-
-
-async def _extracted(response) -> CrawlAndExtractResponse:
-    """The crawl response read as extraction records -- the same projection over the
-    same stored data, provenance dropped, so a content-only caller does not pay
-    for doubled per-page bulk on the wire.
-    """
-    return CrawlAndExtractResponse(
-        submitted_count=response.submitted_count,
-        pages=[
-            ExtractedPage(
-                url=result.normalized_url,
-                status=result.status,
-                classification=result.classification,
-                title=result.metadata.title,
-                markdown=result.markdown,
-            )
-            for result in response.results
-        ],
     )
 
 
@@ -274,7 +234,7 @@ async def _guarded_crawl(
     payload: CrawlRequest,
     settings,
     shutdown_event,
-    projection: _Unified,
+    projection: CrawlProjection,
     caller: CallerIdentity | None = None,
     concurrency_tracker=None,
     job_store=None,
@@ -293,14 +253,8 @@ async def _guarded_crawl(
         payload=payload,
         tracking=tracking,
         work=lambda: tool_result(
-            _projected(
-                _crawled(
-                    payload,
-                    settings,
-                    shutdown_event,
-                    caller_for(caller).caller_id,
-                    result_store,
-                ),
+            projected(
+                _crawled(payload, settings, shutdown_event, caller_for(caller).caller_id, result_store),
                 projection,
             )
         ),
@@ -352,7 +306,7 @@ async def _store_tool(payload: BaseModel, door: DoorEnv, door_data: DoorBinding)
     return await tool_result(core(*args, **door_data.core_kwargs))
 
 
-async def _crawl_door(payload: BaseModel, door: DoorEnv, projection: _Unified) -> ToolResult:
+async def _crawl_door(payload: BaseModel, door: DoorEnv, projection: CrawlProjection) -> ToolResult:
     """Either crawl door: the same guarded, admitted crawl, differing only by projection."""
     return await _guarded_crawl(
         cast("CrawlRequest", payload),
@@ -463,9 +417,9 @@ async def dispatch(spec, payload: BaseModel, **door: Unpack[_DoorKwargs]) -> Too
     if kind is DoorKind.admit:
         return await tool_result(admit_url(cast("AdmitRequest", payload), settings=tool_door.settings))
     if kind is DoorKind.crawl:
-        return await _crawl_door(payload, tool_door, _Unified.from_crawl)
+        return await _crawl_door(payload, tool_door, CrawlProjection.from_crawl)
     if kind is DoorKind.crawl_and_extract:
-        return await _crawl_door(payload, tool_door, _Unified.from_extract)
+        return await _crawl_door(payload, tool_door, CrawlProjection.from_extract)
     if kind is DoorKind.map:
         return await _map_door(payload, tool_door)
     if kind is DoorKind.render:

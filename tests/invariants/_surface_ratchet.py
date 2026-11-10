@@ -132,6 +132,9 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/mcp/protocol.py": (6, 6),
     "crawlutron/mcp/router.py": (2, 1),
     "crawlutron/mcp/server.py": (6, 5),
+    # #714: the MCP crawl doors' projection split (projection enum + projected);
+    # handlers.py back under the 500-line ceiling.
+    "crawlutron/mcp/crawl_shaping.py": (2, 1),
     # #645: tools.py split into registry + handlers (500-line ceiling); the read
     # tools joined. Closures lowered both entry counts.
     "crawlutron/mcp/registry.py": (4, 1),

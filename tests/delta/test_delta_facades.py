@@ -73,7 +73,7 @@ def _seed_baseline(result_store, request_id: str, markdown: str) -> None:
 
 
 def _mcp_engine(monkeypatch, scripted: ScriptedExecute) -> None:
-    """The MCP door's patch target: the module object, not the module name."""
+    """The MCP door's patch target: handlers owns the gated engine seam."""
     import crawlutron.mcp.handlers as handlers_mod
 
     scripted_engine(monkeypatch, handlers_mod, scripted)
