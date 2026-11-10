@@ -9,7 +9,7 @@ from crawlutron.orchestration.engine import parse_lastmod, seed_is_fresh, stale_
 from crawlutron.transport.content_cache import ContentCache
 from crawlutron.transport.content_cache_key import build_content_cache_key
 from crawlutron.transport.fetch_helpers import SITEMAP_CACHE, fetch_sitemap_urls
-from crawlutron.transport.request_profile import headers_for_strategy
+from crawlutron.transport.request_profile import cookie_namespace_for, headers_for_strategy
 from crawlutron.vocabulary.limits import SITEMAP_CACHE_TTL_SECONDS, SITEMAP_FAILURE_TTL_SECONDS
 from tests._assertions import install_to_thread_spy
 from tests._fetch_doubles import FetcherDouble, make_fetch
@@ -317,11 +317,12 @@ def test_parse_lastmod_variants():
     assert parse_lastmod("not-a-date") is None
 
 
-def _cache_with_fresh(tmp_path, url, lastmod, policy):
+def _cache_with_fresh(tmp_path, url, lastmod, policy, *, namespace=""):
     """Seed the content cache so ``url`` is fresh as of ``lastmod``.
 
     The key must match what sitemap seeding looks up, so the caller passes
-    the exact policy the engine derives."""
+    the exact policy the engine derives; ``namespace`` keys the entry as the
+    fetch path would."""
     cache = ContentCache(str(tmp_path), clock=lambda: 1_700_000_000.0)
     strategy = list(policy.strategies) or ["HTTP_DECLARED_CRAWLER"]
     target = canonical(url)
@@ -332,6 +333,7 @@ def _cache_with_fresh(tmp_path, url, lastmod, policy):
         policy.extraction,
         policy.css_selector,
         policy.xpath,
+        cookie_namespace=namespace,
     )
     cache.set(key, {"html": "<html>cached</html>"})
     return cache
@@ -361,6 +363,53 @@ _CRAWL_URL = "http://seed-batch.test/"
 
 # The sitemap seed-batch policy: same chain, HTML main-text extraction only.
 _POLICY_SEED_BATCH = partial(_policy, extraction="trafilatura")
+
+
+class _RecordingCache:
+    """SeedCache double that records every key the freshness path looks up."""
+
+    def __init__(self):
+        self.queries: list[str] = []
+
+    def cached_at_of(self, key: str) -> float | None:
+        self.queries.append(key)
+        return None
+
+
+def test_seed_is_fresh_namespaced_policy_hits_freshness(tmp_path):
+    """A namespaced policy's stored entry is keyed WITH the namespace (as the
+    fetch path does), so the freshness check must find it: a namespaced
+    caller with a fresh cached copy skips the re-crawl."""
+    policy = _policy({"request_profile": {"cookie_namespace": "tenant-a"}})
+    url = canonical("http://example.com/page")
+    cache = _cache_with_fresh(
+        tmp_path,
+        url.raw,
+        "2020-01-01T00:00:00Z",
+        policy,
+        namespace=cookie_namespace_for(policy.request_profile),
+    )
+    assert seed_is_fresh(url, "2020-01-01T00:00:00Z", cache, policy) is True
+
+
+def test_seed_freshness_key_matches_fetch_path_key():
+    """The freshness lookup must query the exact key the fetch path builds
+    for the same policy+url+strategy -- the namespace included."""
+    policy = _policy({"request_profile": {"cookie_namespace": "tenant-a"}})
+    target = canonical("http://example.com/page")
+    strategy = list(policy.strategies)[0]
+    fetch_key = build_content_cache_key(
+        target,
+        strategy,
+        headers_for_strategy(strategy, policy, target),
+        policy.extraction,
+        policy.css_selector,
+        policy.xpath,
+        cookie_namespace=cookie_namespace_for(policy.request_profile),
+    )
+    cache = _RecordingCache()
+    seed_is_fresh(target, "2020-01-01T00:00:00Z", cache, policy)
+    assert cache.queries == [fetch_key]
 
 
 class TestStaleSeedBatch:
