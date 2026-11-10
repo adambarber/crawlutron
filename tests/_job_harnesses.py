@@ -99,6 +99,16 @@ def _execution_payload(results: list[EngineCrawlResult], submitted_count: int) -
     }
 
 
+def scripted_engine(monkeypatch, target, scripted: ScriptedExecute) -> None:
+    """Swap ``target``'s execute_crawl for a scripted stand-in: the shared
+    engine seam both delta door tests patch (HTTP door and MCP tool)."""
+
+    async def _execute(payload_dict, *, settings, shutdown_event, url_pairs=None, spill_store=None):
+        return await scripted(payload_dict, settings=settings, shutdown_event=shutdown_event)
+
+    monkeypatch.setattr(target, "execute_crawl", _execute)
+
+
 class ScriptedExecute:
     """The engine seam, faked, owning the per-URL attempt count.
 
@@ -242,6 +252,7 @@ def _execution_policy(policy: PolicyLike | None) -> PolicyLike:
 
 __all__ = [
     "ScriptedExecute",
+    "scripted_engine",
     "_create_api_job",
     "_execution_payload",
     "_execution_policy",

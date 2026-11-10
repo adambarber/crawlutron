@@ -18,7 +18,7 @@ from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
 from crawlutron.storage.result_store import CrawlResultStore, CrawlSpillStore
-from tests._job_harnesses import ScriptedExecute, make_job_store
+from tests._job_harnesses import ScriptedExecute, make_job_store, scripted_engine
 from tests._result_builders import engine_result
 
 URL = "http://example.com/"
@@ -64,11 +64,7 @@ async def _run(
     """Run the sync crawl() door over real stores with a scripted engine."""
     result_store, spill_store = _stores(tmpdir)
     scripted = ScriptedExecute(results=results or [])
-
-    async def _execute(payload_dict, *, settings, shutdown_event, url_pairs=None, spill_store=None):
-        return await scripted(payload_dict, settings=settings, shutdown_event=shutdown_event)
-
-    monkeypatch.setattr(_crawl_endpoint_mod, "execute_crawl", _execute)
+    scripted_engine(monkeypatch, _crawl_endpoint_mod, scripted)
     response = await crawl(
         payload,
         CrawlerSettings.from_mapping(),

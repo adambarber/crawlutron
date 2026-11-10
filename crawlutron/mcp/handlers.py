@@ -25,6 +25,7 @@ from pydantic import BaseModel, ValidationError
 from crawlutron.api.admit_endpoint import admit_url
 from crawlutron.api.caller_auth import Tracking, admit, bound_render_cookie_namespace
 from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
+from crawlutron.api.crawl_endpoint import delta_context_for
 from crawlutron.api.crawl_executor import execute_crawl
 from crawlutron.api.job_cores import create_job_core
 from crawlutron.api.main_helpers import request_gate
@@ -226,14 +227,20 @@ async def _admit_tool(
         return _tool_error(error)
 
 
-async def _crawled(payload: CrawlRequest, settings, shutdown_event):
-    """Run the crawl endpoint and shape it, so the door owns only the boundary."""
+async def _crawled(payload: CrawlRequest, settings, shutdown_event, caller_id: str, result_store):
+    """Run the crawl endpoint and shape it, so the door owns only the boundary.
+
+    The delta knobs thread through the REST endpoint's own loader
+    (:func:`crawlutron.api.crawl_endpoint.delta_context_for`): one source of
+    delta semantics, no facade copy."""
+    delta_context = await delta_context_for(payload, caller_id, result_store)
     return await aunified_response_from_result(
         await execute_crawl(
             payload,
             settings=settings,
             shutdown_event=shutdown_event,
-        )
+        ),
+        delta_context=delta_context,
     )
 
 
@@ -271,6 +278,7 @@ async def _guarded_crawl(
     caller: CallerIdentity | None = None,
     concurrency_tracker=None,
     job_store=None,
+    result_store=None,
 ) -> ToolResult:
     """The delivery refusal check, the caller admission, then the crawl, in one place.
 
@@ -284,7 +292,18 @@ async def _guarded_crawl(
         pages,
         payload=payload,
         tracking=tracking,
-        work=lambda: tool_result(_projected(_crawled(payload, settings, shutdown_event), projection)),
+        work=lambda: tool_result(
+            _projected(
+                _crawled(
+                    payload,
+                    settings,
+                    shutdown_event,
+                    caller_for(caller).caller_id,
+                    result_store,
+                ),
+                projection,
+            )
+        ),
     )
 
 
@@ -343,6 +362,7 @@ async def _crawl_door(payload: BaseModel, door: DoorEnv, projection: _Unified) -
         caller=door.caller,
         concurrency_tracker=door.concurrency_tracker,
         job_store=door.job_store,
+        result_store=door.result_store,
     )
 
 

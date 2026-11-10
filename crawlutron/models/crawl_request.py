@@ -60,15 +60,17 @@ class CrawlRequest(SingleUrlSourceRequest):
         float | None,
         Field(
             description="Epoch seconds; when set, the caller requests delta classification of this crawl "
-            "relative to that time. Stored as a knob only: delta semantics (304/unchanged mapping) are "
-            "implemented in a later slice, so setting it changes nothing yet.",
+            "relative to that time: results whose Last-Modified predates it classify unchanged (fail open "
+            "toward change when undeterminable). Combine with baseline_request_id for fingerprint/validator "
+            "classification.",
         ),
     ] = None
     baseline_request_id: Annotated[
         str | None,
         Field(
-            description="Prior crawl/job/watch request id to use as the delta baseline. Stored as a knob "
-            "only: baseline linkage semantics are implemented in a later slice, so setting it changes "
-            "nothing yet.",
+            description="Prior crawl/job/watch request id to use as the delta baseline. Scoped to the "
+            "caller: a missing, expired, or foreign baseline degrades to baseline_expired (every result "
+            "classifies new). Results carry delta_classification/delta_evidence and the envelope rolls "
+            "delta_summary.",
         ),
     ] = None

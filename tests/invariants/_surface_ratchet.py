@@ -50,7 +50,9 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     # The two latest surface modules: the gate must not silently drop a module
     # added since the list was pinned (these prune handlers/helpers via __all__).
     "crawlutron/api/keys_router.py": (4, 3),
-    "crawlutron/api/crawl_endpoint.py": (6, 6),  # #645: RAISED, the two read cores joined.
+    # #645: the two read cores joined. #714: delta_context_for is the shared
+    # delta loader both facades reach through.
+    "crawlutron/api/crawl_endpoint.py": (7, 7),
     # #127: the pool concept splits on a real async/sync axis -- AsyncPool for
     # BrowserPool, SyncPool for DocExtractionPool -- so the surface is two protocols.
     "crawlutron/runtime/pool.py": (2, 2),

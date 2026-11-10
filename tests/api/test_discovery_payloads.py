@@ -57,6 +57,7 @@ class TestCapabilitiesPayload:
             "per_request_trace",
             "policy_suggestions",
             "watches",
+            "delta_crawl",
             "recursive_frontier",
             "warmup",
             "request_profiles",

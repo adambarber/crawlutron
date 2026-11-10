@@ -73,7 +73,7 @@ def _crawl_rejection(error: ValueError) -> HTTPException:
     return validation_http_error(error)
 
 
-async def _delta_context_for(payload: CrawlRequest, caller_id: str, result_store) -> DeltaContext | None:
+async def delta_context_for(payload: CrawlRequest, caller_id: str, result_store) -> DeltaContext | None:
     """Caller-scoped delta request for ``payload``, or ``None`` when no delta
     knob was set (no behavior change: shaping stays blind to delta).
 
@@ -140,7 +140,7 @@ async def crawl(
         # Batch size is gated pre-202: an oversized async batch fails unseen.
         host_policy = HostPolicy.from_settings(settings)
         checked_pairs = checked_payload_urls(payload, settings.max_batch_size, host_policy=host_policy)
-        delta_context = await _delta_context_for(payload, active_caller.caller_id, result_store)
+        delta_context = await delta_context_for(payload, active_caller.caller_id, result_store)
         return await _admitted_crawl(
             payload,
             active_caller=active_caller,
@@ -439,6 +439,7 @@ async def get_crawl_trace(
 __all__ = [
     "await_or_client_gone",
     "crawl",
+    "delta_context_for",
     "get_crawl_result",
     "get_crawl_trace",
     "read_crawl_result_record",

@@ -41,6 +41,8 @@ OUTPUT_FIELDS = [
     "discovered_link_count",
     "discovered_links_truncated",
     "discovered_links",
+    "delta_classification",
+    "delta_evidence",
     "diagnostics",
     "error",
 ]
@@ -101,6 +103,9 @@ def _feature_flag_fields() -> dict[str, bool]:
         # The surface that uses `conditional_fetch` on the caller's behalf:
         # registered URLs the sweep rechecks, and announces when they change.
         "watches": True,
+        # Delta crawl: changed_since / baseline_request_id classification with
+        # caller-scoped baselines; expired baselines degrade to all-new.
+        "delta_crawl": True,
         "recursive_frontier": True,
         "warmup": True,
         "request_profiles": True,

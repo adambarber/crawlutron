@@ -62,6 +62,7 @@ def _crawl_args() -> argparse.ArgumentParser:
     _add_limit_args(parser)
     _add_strategy_extraction_args(parser)
     _add_async_webhook_args(parser)
+    _add_delta_args(parser)
     _add_auth_trace_exit_args(parser)
     return parser
 
@@ -129,6 +130,20 @@ def _add_async_webhook_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--webhook", metavar="URL", help="Webhook delivery URL (async only).")
 
 
+def _add_delta_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--changed-since",
+        type=float,
+        metavar="EPOCH",
+        help="Epoch seconds; classify results against this time (delta crawl).",
+    )
+    parser.add_argument(
+        "--baseline-request-id",
+        metavar="ID",
+        help="Prior request id to use as the delta baseline (caller-scoped).",
+    )
+
+
 def _add_auth_trace_exit_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--key", metavar="KEY", help="API key (env CRAWLUTRON_API_KEY).")
     parser.add_argument(
@@ -190,6 +205,10 @@ def _build_payload(args: argparse.Namespace) -> dict[str, object]:
         payload["async_mode"] = True
     if args.webhook:
         payload["webhook_url"] = args.webhook
+    if args.changed_since is not None:
+        payload["changed_since"] = args.changed_since
+    if args.baseline_request_id is not None:
+        payload["baseline_request_id"] = args.baseline_request_id
     if args.output:
         payload["output_format"] = args.output
     return payload
