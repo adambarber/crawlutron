@@ -5,9 +5,11 @@ import threading
 
 import httpx
 
-from crawlutron.transport import pinned_transport
 from crawlutron.transport.fetchers import default_http_fetcher
+from crawlutron.transport.redirect_walker import RedirectWalker
+from tests._fetch_doubles import make_fetch
 from tests._policy_factories import canonical
+from tests._transport_doubles import ScriptedTransport, _void_store_cookies
 
 
 def _thread_recording_spy(seen: dict[str, threading.Thread], *, dead_port: bool = True):
@@ -68,16 +70,16 @@ async def test_pinned_hop_offloads_the_pin_rule_to_thread():
     """
     seen: dict[str, threading.Thread] = {}
 
-    walk = pinned_transport.apinned_hops(
-        canonical("http://example.com/"),
-        {},
-        pin=_thread_recording_spy(seen, dead_port=False),
+    transport = ScriptedTransport(
+        [make_fetch(status=200, body=b"ok", url="http://example.com/", final_url="http://example.com/")]
     )
-    chain, pinned = await anext(walk)
+    await RedirectWalker(transport, _void_store_cookies).walk(
+        canonical("http://example.com/"), {}, 10, pin=_thread_recording_spy(seen, dead_port=False)
+    )
 
     assert seen, "the pin rule was never invoked"
     assert seen["thread"] is not threading.current_thread()
     assert seen["thread"].name.startswith("dns-resolve")
-    assert pinned.connect_url == "http://example.com/"
-    assert pinned.headers == {}
-    assert chain.url == canonical("http://example.com/")
+    assert transport.calls[0][0].connect_url == "http://example.com/"
+    assert transport.calls[0][0].headers == {}
+    assert transport.calls[0][0].url == canonical("http://example.com/")

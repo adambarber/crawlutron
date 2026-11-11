@@ -51,7 +51,7 @@ class FetchRequest:
     connect_url: str
     headers: dict[str, str]
     url: NormalizedUrl
-    timeout_seconds: int
+    timeout_seconds: float
     resolve_entry: list[str] | None = None
 
 

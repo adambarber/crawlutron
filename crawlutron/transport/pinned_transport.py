@@ -8,7 +8,6 @@ constructs. SSRF validation and DNS resolution live in ``pinned_dns``.
 from __future__ import annotations
 
 import typing
-from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Protocol
 from urllib.parse import urlparse
@@ -17,7 +16,6 @@ import httpx
 
 from crawlutron.models.json_value import JsonValue
 from crawlutron.models.normalized_url import NormalizedUrl
-from crawlutron.safety.header_values import reject_injectable_header_values
 from crawlutron.transport import pinned_dns as _dns
 from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE, global_cookie_jar
 
@@ -51,6 +49,12 @@ class PinnedRequest:
         return self.url.tls_hostname
 
 
+def _sni_extensions(request: PinnedRequest) -> dict[str, str] | None:
+    """The SNI extension mapping for a pinned request: the logical hostname.
+    ``None`` when the hop has nothing to pin (plain HTTP or the local-dev posture)."""
+    return {"sni_hostname": sni} if (sni := request.tls_hostname) else None
+
+
 def build_pinned_request(url: NormalizedUrl, headers: dict[str, str]) -> PinnedRequest:
     """Build the pinned request for an admitted URL -- the sole owner of the
     composition (IP blocklist, fresh pin, exact-IP connect with Host preserved).
@@ -67,47 +71,6 @@ def build_pinned_request(url: NormalizedUrl, headers: dict[str, str]) -> PinnedR
     out_headers = dict(headers)
     out_headers["Host"] = f"[{url.host}]{port}" if ":" in url.host else f"{url.host}{port}"
     return PinnedRequest(connect_url=connect_url, headers=out_headers, url=url)
-
-
-def apinned_stream(
-    client: httpx.AsyncClient,
-    chain: RedirectChain,
-    request: PinnedRequest,
-    timeout: httpx.Timeout,
-) -> typing.AsyncContextManager[httpx.Response]:
-    """Open the one SSRF-pinned httpx stream for a hop: GET to the validated IP
-    with the logical hostname carried as TLS SNI and redirects left to the chain."""
-    return client.stream(
-        "GET",
-        request.connect_url,
-        headers=request.headers,
-        timeout=timeout,
-        follow_redirects=False,
-        extensions=_sni_extensions(request),
-    )
-
-
-def _sni_extensions(request: PinnedRequest) -> dict[str, str] | None:
-    """The SNI extension mapping for a pinned request: the logical hostname.
-    ``None`` when the hop has nothing to pin (plain HTTP or the local-dev posture)."""
-    return {"sni_hostname": sni} if (sni := request.tls_hostname) else None
-
-
-@dataclass(frozen=True, slots=True)
-class PinnedBody:
-    """The request body a pinned call sends: exactly one arm is set.
-
-    One record instead of three parallel optional parameters, so no call site
-    mirrors a helper's argument list to send a body.
-    """
-
-    content: bytes | None = None
-    json_value: dict[str, JsonValue] | None = None
-    form: dict[str, str] | None = None
-
-    def __post_init__(self) -> None:
-        if sum(arm is not None for arm in (self.content, self.json_value, self.form)) > 1:
-            raise ValueError("PinnedBody carries at most one body arm")
 
 
 def open_pinned_request(
@@ -133,6 +96,23 @@ def open_pinned_request(
         data=body.form if body else None,
         extensions=_sni_extensions(request),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class PinnedBody:
+    """The request body a pinned call sends: exactly one arm is set.
+
+    One record instead of three parallel optional parameters, so no call site
+    mirrors a helper's argument list to send a body.
+    """
+
+    content: bytes | None = None
+    json_value: dict[str, JsonValue] | None = None
+    form: dict[str, str] | None = None
+
+    def __post_init__(self) -> None:
+        if sum(arm is not None for arm in (self.content, self.json_value, self.form)) > 1:
+            raise ValueError("PinnedBody carries at most one body arm")
 
 
 class PinRule(Protocol):
@@ -209,96 +189,6 @@ async def _stripped_credentials(headers: dict[str, str], new_url: NormalizedUrl)
     if jar_cookie:
         stripped["Cookie"] = jar_cookie
     return stripped
-
-
-class RedirectChain:
-    """One hop-by-hop redirect walk: its state, and the decision that advances it.
-
-    Both transports follow redirects by hand (automatic would connect to an
-    un-revalidated target); the state each carried as locals is one value here.
-    """
-
-    __slots__ = ("_rule", "hops", "headers", "timeout_seconds", "url")
-
-    def __init__(
-        self,
-        url: NormalizedUrl,
-        headers: dict[str, str],
-        *,
-        pin: PinRule,
-        timeout_seconds: float | None = None,
-    ) -> None:
-        self.url = url
-        # Copied, not aliased: a cross-host hop strips credentials by rebuilding
-        # the mapping, and the caller's dict must not be rewritten underneath it.
-        self.headers = dict(headers)
-        self.hops = 0
-        # The request's own budget bounds the resolver wait: a slow
-        # getaddrinfo surfaces a classifiable timeout, not an indefinite hang.
-        self.timeout_seconds = timeout_seconds
-        # The rule travels whole; the bounded off-loop resolve wraps it at pin
-        # time, so a substituted builder goes to the pool with the same bound.
-        self._rule = pin
-
-    async def pin(self) -> PinnedRequest:
-        """The connect-ready request for the current hop (DNS off the loop, wait
-        bounded by the request's own budget)."""
-        return await _dns.bounded_thread_resolve(
-            lambda: self._rule(self.url, self.headers), timeout_seconds=self.timeout_seconds
-        )
-
-    async def advance(self, response: httpx.Response) -> NormalizedUrl | None:
-        """Step to the next hop; return the URL the response was served from.
-
-        ``None`` means terminal - read the body. The served URL is captured
-        BEFORE the step: a redirect response's cookie state belongs to the
-        origin that sent it (#571), and this is the one decision site -- the
-        return value is the only post-advance handle a caller gets, so a
-        read-after-mutate of ``self.url`` is unrepresentable. Awaited: a
-        cross-origin hop reads the persistent jar off the loop.
-        """
-        served_url = self.url
-        target = await redirect_target(
-            self.url,
-            self.headers,
-            response.status_code,
-            response.headers.get("location"),
-            self.hops,
-        )
-        if target is None:
-            return None
-        self.url, self.headers = target
-        self.hops += 1
-        return served_url
-
-
-async def apinned_hops(
-    url: NormalizedUrl,
-    headers: dict[str, str],
-    *,
-    pin: PinRule | None = None,
-    timeout_seconds: float | None = None,
-) -> AsyncIterator[tuple[RedirectChain, PinnedRequest]]:
-    """Yield each hop of the manual redirect walk, already SSRF-checked and re-pinned.
-
-    The body receives ``(chain, pinned_request)``, sends, then leaves;
-    ``continue`` after ``chain.advance(response)`` asks for the next hop.
-    """
-    # timeout_seconds is the request budget; it bounds the resolver wait.
-    # The shared wire edge: a value that can start another header is refused here.
-    reject_injectable_header_values(headers)
-    chain = RedirectChain(url, headers, pin=pin or build_pinned_request, timeout_seconds=timeout_seconds)
-    while True:
-        pinned = await chain.pin()
-        # Service-built additions (Host, hop cookies) ride the same law.
-        reject_injectable_header_values(pinned.headers)
-        served_hops = chain.hops
-        yield chain, pinned
-        if chain.hops == served_hops:
-            raise AssertionError(
-                "the walk body ended without returning a result and without "
-                "chain.advance(response) asking for another hop"
-            )
 
 
 def cffi_resolve_entry(request: PinnedRequest) -> list[str] | None:

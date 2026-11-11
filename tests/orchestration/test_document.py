@@ -1,7 +1,6 @@
 """Document model: text parsing, bytearray paths and document-level extraction edges."""
 
 import asyncio
-import contextlib
 import logging
 import socket
 from pathlib import Path
@@ -10,7 +9,6 @@ from urllib.parse import urlparse
 
 import httpx
 
-import crawlutron.transport.http_client_pool as _http_pool_mod
 from crawlutron.transport.document import (
     default_document_text_extractor,
     extract_pdf_bytes_to_markdown,
@@ -18,7 +16,7 @@ from crawlutron.transport.document import (
 )
 from tests._doc_pool_fixtures import fresh_doc_pool
 from tests._extraction_helpers import format_extracted_document_text
-from tests._fetch_doubles import FetcherDouble
+from tests._fetch_doubles import FetcherDouble, make_fetch
 from tests._fetcher_factories import run_http_strategy
 from tests._policy_factories import canonical
 
@@ -414,26 +412,26 @@ class TestDocumentFetchHonorsRequestBudget:
     async def test_document_bytes_use_caller_budget_not_fixed_30s(self, monkeypatch):
 
         import crawlutron.transport.document as doc_mod
-        import crawlutron.transport.pinned_transport as pinned_mod
-        from tests._transport_doubles import MockResponse, dispatching_transport_client
+        from crawlutron.models.http_fetch_result import HttpFetchResult
+        from crawlutron.transport.transport import FetchRequest
 
-        seen_timeouts: list[httpx.Timeout] = []
+        captured_timeouts: list[float] = []
 
-        def handler(request: httpx.Request) -> httpx.Response:
-            return MockResponse(200, content=FIXTURE.read_bytes())
+        class _CaptureTransport:
+            """Transport double recording the per-request timeout the walker saw."""
 
-        client = dispatching_transport_client(handler)
-        monkeypatch.setattr(_http_pool_mod, "get_async_http_client", lambda: client)
+            async def fetch(self, request: FetchRequest, *, max_bytes: int) -> HttpFetchResult:
+                captured_timeouts.append(request.timeout_seconds)
+                return make_fetch(
+                    status=200,
+                    body=FIXTURE.read_bytes(),
+                    url="http://initial.test/doc.pdf",
+                    final_url="http://initial.test/doc.pdf",
+                )
 
-        real_stream = pinned_mod.apinned_stream
+        capture = _CaptureTransport()
+        monkeypatch.setattr(doc_mod, "HttpxTransport", lambda settings=None: capture)
 
-        @contextlib.asynccontextmanager
-        async def capture_stream(client, chain, request, timeout, **_kwargs):
-            seen_timeouts.append(timeout)
-            async with real_stream(client, chain, request, timeout) as response:
-                yield response
-
-        monkeypatch.setattr(pinned_mod, "apinned_stream", capture_stream)
         # The production caller's door is the public extractor; drive the budget
         # through it so the fetch seam sees the request budget, not 30s.
         md = await asyncio.to_thread(
@@ -443,4 +441,4 @@ class TestDocumentFetchHonorsRequestBudget:
         )
         assert "Alice" in md
         # The budget flows through the vocabulary, not a fixed 30s posture.
-        assert seen_timeouts and seen_timeouts[0].read == 12.0
+        assert captured_timeouts and captured_timeouts[0] == 12
