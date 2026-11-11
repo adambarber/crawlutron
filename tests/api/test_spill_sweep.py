@@ -14,7 +14,7 @@ from tests._lifespan_doubles import stub_heavy_teardown
 
 class TestSpillSweepTick:
     async def test_the_tick_reclaims_released_rows_past_the_age_and_spares_fenced_ones(self, tmp_path):
-        from crawlutron.api.spill_sweep import spill_maintenance_once
+        from crawlutron.service.spill_sweep import spill_maintenance_once
         from crawlutron.storage.result_store import CrawlSpillStore
         from tests._result_builders import engine_result
 
@@ -44,7 +44,7 @@ class TestSpillSweepTick:
             store.close()
 
     async def test_the_tick_rides_the_store_gc_twin_off_the_loop(self, tmp_path, monkeypatch):
-        from crawlutron.api import spill_sweep
+        from crawlutron.service import spill_sweep
         from crawlutron.storage.result_store import CrawlSpillStore
         from tests._result_builders import engine_result
 
@@ -66,7 +66,7 @@ class TestSpillSweepTick:
 
 class TestSpillSweepLoop:
     async def test_a_raising_tick_does_not_end_the_loop(self, monkeypatch, caplog):
-        from crawlutron.api import spill_sweep
+        from crawlutron.service import spill_sweep
 
         calls: list[int] = []
         stop = asyncio.Event()
@@ -79,7 +79,7 @@ class TestSpillSweepLoop:
 
         monkeypatch.setattr(spill_sweep, "spill_maintenance_once", _tick)
 
-        with caplog.at_level("ERROR", logger="crawlutron.api.spill_sweep"):
+        with caplog.at_level("ERROR", logger="crawlutron.service.spill_sweep"):
             await asyncio.wait_for(
                 spill_sweep.sweep_spills_forever(
                     store=None,
@@ -113,7 +113,7 @@ class TestSpillSweepWiring:
         assert task.done(), "shutdown must drain the spill sweep task"
 
     async def test_the_spill_sweep_sweeps_the_shared_spill_store(self, monkeypatch, tmp_path):
-        from crawlutron.api import spill_sweep
+        from crawlutron.service import spill_sweep
 
         app = self._wired_app(monkeypatch, tmp_path)
         swept: list[object] = []

@@ -24,8 +24,8 @@ from tests.rules import Bites, Rule
 # The four fetch executors a door (HTTP or MCP) must reach through request_gate.
 _GATED_FETCH_EXECUTORS = frozenset(
     {
-        "crawlutron.api.crawl_executor.execute_crawl",
-        "crawlutron.api.map_endpoint.map_site",
+        "crawlutron.service.crawl_executor.execute_crawl",
+        "crawlutron.service.map_endpoint.map_site",
         "crawlutron.api.render_endpoint.render",
         "crawlutron.search.endpoint.search",
     }
@@ -39,9 +39,9 @@ _GATED_EXECUTOR_NAMES = frozenset(name.rsplit(".", 1)[-1] for name in _GATED_FET
 # job row rather than a slot; they are not doors and need no request_gate.
 _GATED_FETCH_BACKGROUND = frozenset(
     {
-        "crawlutron/api/async_crawl_runner.py",
-        "crawlutron/api/job_runner.py",
-        "crawlutron/api/watch_sweep.py",
+        "crawlutron/service/async_crawl_runner.py",
+        "crawlutron/service/job_runner.py",
+        "crawlutron/service/watch_sweep.py",
     }
 )
 
@@ -173,18 +173,18 @@ FETCH_EXECUTORS_REACH_WORK_ONLY_THROUGH_THE_GATE = Rule(
     find=_ungated_fetch_executor_offenders,
     summary=(
         "a fetch executor (crawl/map/render/search) must be reached only under "
-        "crawlutron.api.main_helpers.request_gate, so /ready counts the work and the cap refuses it"
+        "crawlutron.service.main_helpers.request_gate, so /ready counts the work and the cap refuses it"
     ),
     skip=_GATED_FETCH_BACKGROUND,
     bite=lambda: Bites(
-        "from crawlutron.api.map_endpoint import map_site\n"
+        "from crawlutron.service.map_endpoint import map_site\n"
         "async def handle_map(payload, settings, shutdown_event):\n"
         "    return await map_site(payload, settings=settings, shutdown_event=shutdown_event)\n",
         "map_site",
     ),
     clean=lambda: (
-        "from crawlutron.api.map_endpoint import map_site\n"
-        "from crawlutron.api.main_helpers import request_gate\n"
+        "from crawlutron.service.map_endpoint import map_site\n"
+        "from crawlutron.service.main_helpers import request_gate\n"
         "async def handle_map(payload, settings):\n"
         '    with request_gate("map_request_rejected", logger=logger):\n'
         "        return await map_site(payload, settings=settings)\n",

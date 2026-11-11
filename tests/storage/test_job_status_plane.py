@@ -162,7 +162,7 @@ class TestDeleteFinality:
 
     async def test_restart_recovery_does_not_resume_a_deleted_job(self, tmp_path):
         """A deleted job's resurrected PENDING row must not be re-started on boot."""
-        from crawlutron.api.job_recovery import recover_orphaned_running_jobs
+        from crawlutron.service.job_recovery import recover_orphaned_running_jobs
 
         store, job = await self._deleted_job(tmp_path)
         rewound = await recover_orphaned_running_jobs(store)
@@ -346,7 +346,7 @@ class TestErrorStampingGatedOnTheFailedCas:
     """The error field is stamped only when the FAILED CAS lands (#365)."""
 
     async def test_a_lost_cas_leaves_the_error_field_untouched(self, tmp_path):
-        from crawlutron.api.job_runner import arecord_terminal_failure
+        from crawlutron.service.job_runner import arecord_terminal_failure
         from crawlutron.storage.job_store import Expected
 
         store = make_job_store(tmp_path)
@@ -374,7 +374,7 @@ class TestErrorStampingGatedOnTheFailedCas:
         )
 
     async def test_a_won_cas_stamps_the_error(self, tmp_path):
-        from crawlutron.api.job_runner import arecord_terminal_failure
+        from crawlutron.service.job_runner import arecord_terminal_failure
 
         store = make_job_store(tmp_path)
         _running_job(store)
@@ -392,7 +392,7 @@ class TestErrorStampingGatedOnTheFailedCas:
         the status wire reads. The persist door scrubs through the redaction
         chokepoint; the red: a credentialed URL survived verbatim.
         """
-        from crawlutron.api.job_runner import arecord_terminal_failure
+        from crawlutron.service.job_runner import arecord_terminal_failure
 
         store = make_job_store(tmp_path)
         _running_job(store)

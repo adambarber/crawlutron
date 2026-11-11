@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import pytest
 
-from crawlutron.api.crawl_executor import CrawlRefusalError
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.crawl_strategy import CrawlStrategy
+from crawlutron.service.crawl_executor import CrawlRefusalError
 from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 
 SETTINGS = CrawlerSettings.from_mapping({"CRAWLUTRON_DENIED_HOSTS": "blocked.test"})
@@ -42,7 +42,7 @@ async def test_every_constructor_refusal_crosses_as_a_typed_member(url: str, rea
 
 async def CrawlRefusalError_from_executor(url: str) -> None:
     """Drive the executor's own admission edge (the wrapper's real signature)."""
-    from crawlutron.api.crawl_executor import execute_crawl
+    from crawlutron.service.crawl_executor import execute_crawl
 
     await execute_crawl(_request(url), settings=SETTINGS, shutdown_event=None)
 

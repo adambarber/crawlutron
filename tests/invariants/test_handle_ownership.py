@@ -269,7 +269,7 @@ def test_no_rule_violations():
 
 def test_the_holder_is_one_value_with_exactly_the_two_fields():
     """Single holder: the semaphore and its loop are one dataclass value, not two globals."""
-    source = (REPO_ROOT / "crawlutron/api/async_crawl_runner.py").read_text(encoding="utf-8")
+    source = (REPO_ROOT / "crawlutron/service/async_crawl_runner.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
     holders = [
         node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "_SemaphoreHolder"
@@ -288,7 +288,7 @@ def test_the_holder_is_loop_bound_and_reset_clears_it():
     the public reset empties the holder so the next accessor rebuilds fresh."""
     import asyncio
 
-    import crawlutron.api.async_crawl_runner as runner
+    import crawlutron.service.async_crawl_runner as runner
     from crawlutron.runtime import process_state
 
     async def _accessor_on_this_loop():

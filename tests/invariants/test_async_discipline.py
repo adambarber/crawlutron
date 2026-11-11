@@ -101,14 +101,14 @@ ADMISSION_BUDGET_ARRIVES_AS_A_BUDGET = Rule(
 )
 
 
-# --------------------------------------------------------------------------- Endpoint readiness gate (the
-# rejection tail) ``request_gate`` (crawlutron/api/main_helpers.py) owns the whole gated tail: admit, reject
+# Endpoint readiness gate: ``request_gate`` (crawlutron/service/main_helpers.py)
+# owns the whole gated tail: admit, reject, release.
 
 
 def _unsanctioned_readiness_counter_offenders(tree, path):
     """Flag a direct readiness-slot admit/release outside the gate chokepoint."""
     return [
-        offender_at(path, call, f"{callee.attr}() outside crawlutron.api.main_helpers.request_gate")
+        offender_at(path, call, f"{callee.attr}() outside crawlutron.service.main_helpers.request_gate")
         for call, callee in attribute_calls(tree)
         if callee.attr in {"begin_request", "end_request"}
     ]
@@ -118,11 +118,11 @@ READINESS_SLOTS_GO_THROUGH_THE_GATE = Rule(
     name="readiness-slots-go-through-the-gate",
     find=_unsanctioned_readiness_counter_offenders,
     summary=(
-        "take a readiness slot with crawlutron.api.main_helpers.request_gate; a hand-written "
+        "take a readiness slot with crawlutron.service.main_helpers.request_gate; a hand-written "
         "admit/release is how a rejected request holds its slot for the life of the process"
     ),
     skip=frozenset(
-        {"crawlutron/api/main_helpers.py"}
+        {"crawlutron/service/main_helpers.py"}
     ),  # owner: request_gate admits and releases inside itself
     bite=lambda: (
         Bites("def f():\n    readiness_state.begin_request()\n", "begin_request"),

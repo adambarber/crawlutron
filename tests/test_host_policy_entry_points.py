@@ -44,7 +44,7 @@ async def _probe_crawl_endpoint(monkeypatch, tmp_path):
 
 
 async def _probe_crawl_executor(monkeypatch, tmp_path):
-    from crawlutron.api import crawl_executor
+    from crawlutron.service import crawl_executor
 
     effects = _effects()
 
@@ -100,8 +100,8 @@ async def _probe_jobs_router(monkeypatch, tmp_path):
 
 
 async def _probe_map_endpoint(monkeypatch, tmp_path):
-    from crawlutron.api import map_endpoint
     from crawlutron.models.map_request import MapRequest
+    from crawlutron.service import map_endpoint
 
     effects = _effects()
 
@@ -152,9 +152,9 @@ async def _probe_watch_router(monkeypatch, tmp_path):
 async def _probe_watch_cores(monkeypatch, tmp_path):
     """The MCP-facing register core must consult live policy itself: the MCP
     caller has no other admission edge, so the core is the probe's subject."""
-    from crawlutron.api import watch_cores
     from crawlutron.models.caller_identity import CallerIdentity
     from crawlutron.models.watch_create_request import WatchCreateRequest
+    from crawlutron.service import watch_cores
 
     effects = _effects()
     await _assert_refused(
@@ -175,9 +175,9 @@ async def _probe_site_map(monkeypatch, tmp_path):
     entry point filters instead of raising, so the claim is the output, and the shape
     with no normalized root is where aggregation consults policy.
     """
-    from crawlutron.api.site_map import build_site_map
     from crawlutron.models.host_policy import HostPolicy
     from crawlutron.models.result_record import ProducerEnvelope
+    from crawlutron.service.site_map import build_site_map
     from tests._result_builders import engine_result
 
     allowed, denied = "https://allowed.test/feed", "https://denied.test/sitemap"
@@ -294,7 +294,7 @@ async def _probe_policy_suggestions(monkeypatch, tmp_path):
 async def _probe_job_runner(monkeypatch, tmp_path):
     import asyncio
 
-    from crawlutron.api import job_runner
+    from crawlutron.service import job_runner
     from crawlutron.storage.job_store_collections import FrontierEntry, JobStatus
     from crawlutron.storage.job_store_state import CrawlJobState
     from tests._job_store_doubles import make_job_store
@@ -336,15 +336,15 @@ async def _probe_admit_endpoint(monkeypatch, tmp_path):
 _PROBES = {
     "crawlutron/api/crawl_endpoint.py:crawl": _probe_crawl_endpoint,
     "crawlutron/service/admit_endpoint.py:admit_url": _probe_admit_endpoint,
-    "crawlutron/api/crawl_executor.py:execute_crawl": _probe_crawl_executor,
-    "crawlutron/api/job_runner.py:run_job": _probe_job_runner,
-    "crawlutron/api/job_cores.py:create_job_core": _probe_jobs_router,
-    "crawlutron/api/map_endpoint.py:map_site": _probe_map_endpoint,
-    "crawlutron/api/site_map.py:build_site_map": _probe_site_map,
+    "crawlutron/service/crawl_executor.py:execute_crawl": _probe_crawl_executor,
+    "crawlutron/service/job_runner.py:run_job": _probe_job_runner,
+    "crawlutron/service/job_cores.py:create_job_core": _probe_jobs_router,
+    "crawlutron/service/map_endpoint.py:map_site": _probe_map_endpoint,
+    "crawlutron/service/site_map.py:build_site_map": _probe_site_map,
     "crawlutron/api/render.py:render_request": _probe_render,
     "crawlutron/service/response_shaping.py:frontier_link_url": _probe_response_shaping,
     "crawlutron/api/watch_router.py:create_watch": _probe_watch_router,
-    "crawlutron/api/watch_cores.py:register_watch_core": _probe_watch_cores,
+    "crawlutron/service/watch_cores.py:register_watch_core": _probe_watch_cores,
     "crawlutron/api/policy_suggestions.py:policy_suggestions": _probe_policy_suggestions,
     "crawlutron/api/policy_suggestions.py:build_policy_suggestions": _probe_policy_suggestions,
     "crawlutron/service/webhooks.py:deliver_pinned_webhook": _probe_webhook_delivery,

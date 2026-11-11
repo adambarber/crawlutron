@@ -5,9 +5,9 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler
 
-from crawlutron.api import job_runner
 from crawlutron.runtime import process_state
 from crawlutron.runtime.metrics import get_metrics
+from crawlutron.service import job_runner
 from tests._assertions import (
     accepted_crawl,
     completed_crawl,
@@ -400,7 +400,7 @@ class TestAsyncCrawlShutdownOwnership:
                 cancelled.set()
                 raise
 
-        monkeypatch.setattr("crawlutron.api.async_crawl_runner.run_async_crawl", blocked_crawl)
+        monkeypatch.setattr("crawlutron.service.async_crawl_runner.run_async_crawl", blocked_crawl)
 
         # A 202 is a promise that the work outlives the request
         body = await asyncio.wait_for(

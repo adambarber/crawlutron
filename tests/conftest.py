@@ -417,8 +417,8 @@ async def owned_job_runtime():
     test stayed visible to the next. Teardown is where the reset belongs. When
     no job task was started during the test, the loop-bound shutdown is a
     no-op (the seam reset still runs)."""
-    from crawlutron.api import job_runner
     from crawlutron.runtime import process_state
+    from crawlutron.service import job_runner
     from tests._app_factory import service_app
 
     app = service_app()
@@ -426,7 +426,7 @@ async def owned_job_runtime():
         app.state.shutdown_event = asyncio.Event()
     yield
     job_runner.reset_execute_crawl()
-    if process_state.owner_has_state("crawlutron.api.job_lifecycle"):
+    if process_state.owner_has_state("crawlutron.service.job_lifecycle"):
         await job_runner.shutdown_job_runner()
 
 

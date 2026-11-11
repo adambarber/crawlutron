@@ -75,7 +75,7 @@ async def test_two_concurrent_async_posts_cannot_both_pass_a_quota_of_one(tmp_pa
         count_spy, pinned_crawl, state = _instrument(store, store.aactive_count_for_caller, pinned)
 
         monkeypatch.setattr(store, "aactive_count_for_caller", count_spy)
-        monkeypatch.setattr("crawlutron.api.async_crawl_runner.execute_crawl", pinned_crawl)
+        monkeypatch.setattr("crawlutron.service.async_crawl_runner.execute_crawl", pinned_crawl)
 
         posts = _two_concurrent_posts(client, {"X-API-Key": issued.secret})
         responses = [await asyncio.wait_for(t, timeout=10) for t in posts]

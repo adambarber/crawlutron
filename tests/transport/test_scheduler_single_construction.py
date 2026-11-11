@@ -102,7 +102,7 @@ def test_admission_global_limit_not_getattr_redefaulted():
 def test_recovery_start_limit_not_getattr_redefaulted():
     """#142: boot recovery sizes its runner cap from the settings home, not a
     second getattr default that can drift from CrawlerSettings.global_concurrency."""
-    from crawlutron.api.job_recovery import recovery_start_limit
+    from crawlutron.service.job_recovery import recovery_start_limit
 
     assert recovery_start_limit(CrawlerSettings(global_concurrency=6)) == 6
 

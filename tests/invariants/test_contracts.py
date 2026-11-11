@@ -25,7 +25,7 @@ def job_engine_payload_chokepoint_offenders(tree: ast.AST, path: pathlib.Path) -
         isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == "job_engine_payload"
         for node in nodes_of(tree)
     )
-    if relative != "crawlutron/api/job_runner.py" and not has_builder:
+    if relative != "crawlutron/service/job_runner.py" and not has_builder:
         return []
     execute_names = {"_execute_crawl", "_real_execute_crawl"}
     builder_names = {"job_engine_payload"}
@@ -68,7 +68,7 @@ JOB_ENGINE_PAYLOAD_USES_SINGLE_BUILDER = Rule(
         "Build whole-site engine payloads only with job_engine_payload, "
         "so a new call site to _execute_crawl cannot silently skip the builder"
     ),
-    proof_path=REPO_ROOT / "crawlutron" / "api" / "job_runner.py",
+    proof_path=REPO_ROOT / "crawlutron" / "service" / "job_runner.py",
     bite=lambda: (
         Bites(
             "async def run(job, batch):\n"

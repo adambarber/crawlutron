@@ -11,13 +11,6 @@ from fastapi import Response
 from crawlutron.api.dependencies import CallerDep, SettingsDep, WatchStoreDep
 from crawlutron.api.exceptions import validation_http_error
 from crawlutron.api.route_layer import guarded_router
-from crawlutron.api.watch_cores import (
-    delete_watch_core,
-    get_watch_core,
-    list_watches_core,
-    register_watch_core,
-)
-from crawlutron.api.watch_sweep import WATCH_SWEEP_INTERVAL_SECONDS
 from crawlutron.api.webhooks import ensure_https_webhook_url, validate_webhook_url_async
 from crawlutron.models.error_response import ErrorResponse
 from crawlutron.models.host_policy import HostPolicy
@@ -26,6 +19,13 @@ from crawlutron.models.watch_id_request import WatchIdRequest
 from crawlutron.models.watch_list_response import WatchListResponse
 from crawlutron.models.watch_state import WatchState
 from crawlutron.models.webhook_target import WebhookTarget
+from crawlutron.service.watch_cores import (
+    delete_watch_core,
+    get_watch_core,
+    list_watches_core,
+    register_watch_core,
+)
+from crawlutron.service.watch_sweep import WATCH_SWEEP_INTERVAL_SECONDS
 
 router = guarded_router(prefix="/v1/watches", tags=["Crawler"])
 

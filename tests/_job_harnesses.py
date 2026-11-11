@@ -163,7 +163,7 @@ async def _join_runner_task(job_id: str) -> bool:
 
     For a terminal wait this is the exact event the caller waits on, with no
     deadline to race; ``asyncio.wait`` resolves however the task finished."""
-    from crawlutron.api import job_lifecycle
+    from crawlutron.service import job_lifecycle
 
     task = job_lifecycle.tracked_task(job_id)
     if task is None or task.done():

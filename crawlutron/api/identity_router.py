@@ -12,8 +12,6 @@ from typing import TYPE_CHECKING
 from crawlutron.api._depends_singletons import settings_dep, shutdown_event_dep
 from crawlutron.api.caller_auth import admit, bound_render_cookie_namespace, quota_denials
 from crawlutron.api.dependencies import CallerDep, TrackingDep
-from crawlutron.api.main_helpers import request_gate
-from crawlutron.api.map_endpoint import map_site
 from crawlutron.api.render_endpoint import render as render_handler
 from crawlutron.api.render_endpoint import render_rejection
 from crawlutron.api.route_layer import guarded_router
@@ -23,6 +21,8 @@ from crawlutron.models.search_response import SearchResponse
 from crawlutron.models.site_map_response import SiteMapResponse
 from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
 from crawlutron.search.endpoint import search as search_handler
+from crawlutron.service.main_helpers import request_gate
+from crawlutron.service.map_endpoint import map_site
 
 if TYPE_CHECKING:
     from crawlutron.models.site_map_response import SiteMapPayload

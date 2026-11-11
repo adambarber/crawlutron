@@ -2,9 +2,9 @@ from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
 from crawlutron.admission.policy import read_policy
-from crawlutron.api.site_map import build_site_map
 from crawlutron.models.result_record import ProducerEnvelope
 from crawlutron.orchestration.engine import parse_lastmod, seed_is_fresh
+from crawlutron.service.site_map import build_site_map
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 from tests._result_builders import _link, engine_result
 

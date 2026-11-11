@@ -142,7 +142,7 @@ EXEMPTIONS: tuple[tuple[str, str, str], ...] = (
         "anonymous_throttle stays api (HTTP-ONLY ASGI middleware)",
     ),
     (
-        "tests/api/test_error_envelope.py",
+        "tests/test_error_envelope.py",
         "crawlutron.api.exceptions",
         "exceptions stays api (HTTP-ONLY envelope mapping)",
     ),
@@ -172,36 +172,6 @@ EXEMPTIONS: tuple[tuple[str, str, str], ...] = (
         "the private-imports gate's fixture strings; repoint lands with the move",
     ),
     (
-        "tests/api/test_request_gate.py",
-        "crawlutron.api.main_helpers",
-        "main_helpers core parts move later; repoint lands there",
-    ),
-    (
-        "tests/search/test_search_caller_identity.py",
-        "crawlutron.api.main_helpers",
-        "main_helpers readiness_state seam moves later; repoint lands there",
-    ),
-    (
-        "tests/mcp/test_mcp_readiness_gate.py",
-        "crawlutron.api.main_helpers",
-        "main_helpers readiness_state seam moves later; repoint lands there",
-    ),
-    (
-        "tests/invariants/test_async_discipline.py",
-        "crawlutron/api/main_helpers.py",
-        "async-discipline law scope targets main_helpers; repoints with the move",
-    ),
-    (
-        "tests/invariants/test_contracts.py",
-        "crawlutron/api/job_runner.py",
-        "builder carve-out names job_runner; repoints with the move",
-    ),
-    (
-        "tests/invariants/test_handle_ownership.py",
-        "crawlutron/api/async_crawl_runner.py",
-        "ownership law reads the runner's source by path; repoints with the move",
-    ),
-    (
         "tests/invariants/test_url_secrets_law.py",
         "crawlutron/api/watch_router.py",
         "watch_router stays api (HTTP-ONLY); no action",
@@ -213,33 +183,8 @@ EXEMPTIONS: tuple[tuple[str, str, str], ...] = (
     ),
     (
         "tests/invariants/test_fetch_gate_discipline.py",
-        "crawlutron/api/async_crawl_runner.py",
-        "fetch-gate scope names moved modules; repoints with the move",
-    ),
-    (
-        "tests/invariants/test_fetch_gate_discipline.py",
-        "crawlutron/api/job_runner.py",
-        "fetch-gate scope names moved modules; repoints with the move",
-    ),
-    (
-        "tests/invariants/test_fetch_gate_discipline.py",
-        "crawlutron/api/watch_sweep.py",
-        "fetch-gate scope names moved modules; repoints with the move",
-    ),
-    (
-        "tests/invariants/test_fetch_gate_discipline.py",
         "crawlutron/api/render_endpoint.py",
         "fetch-gate scope names render_endpoint (stays api); no action",
-    ),
-    (
-        "tests/invariants/test_fetch_gate_discipline.py",
-        "crawlutron/api/main_helpers.py",
-        "fetch-gate scope names moved modules; repoints with the move",
-    ),
-    (
-        "tests/invariants/test_fetch_gate_discipline.py",
-        "crawlutron/api/map_endpoint.py",
-        "fetch-gate scope names moved modules; repoints with the move",
     ),
 )
 

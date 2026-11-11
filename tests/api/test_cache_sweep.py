@@ -13,7 +13,7 @@ from tests._lifespan_doubles import stub_heavy_teardown
 
 class TestMaintenanceTick:
     async def test_the_tick_removes_an_expired_envelope_and_an_orphan_tmp(self, tmp_path):
-        from crawlutron.api.cache_sweep import cache_maintenance_once
+        from crawlutron.service.cache_sweep import cache_maintenance_once
         from crawlutron.transport.content_cache import ContentCache
 
         now = 5000.0  # past TMP_ORPHAN_MAX_AGE_SECONDS so an mtime-0 orphan is aged out
@@ -62,7 +62,7 @@ class TestNamespaceCoverage:
 
 class TestSweepLoop:
     async def test_a_raising_tick_does_not_end_the_loop(self, monkeypatch, caplog):
-        from crawlutron.api import cache_sweep
+        from crawlutron.service import cache_sweep
 
         calls: list[int] = []
         stop = asyncio.Event()
@@ -75,7 +75,7 @@ class TestSweepLoop:
 
         monkeypatch.setattr(cache_sweep, "cache_maintenance_once", _tick)
 
-        with caplog.at_level("ERROR", logger="crawlutron.api.cache_sweep"):
+        with caplog.at_level("ERROR", logger="crawlutron.service.cache_sweep"):
             await asyncio.wait_for(
                 cache_sweep.sweep_cache_forever(stop, interval_seconds=0.0),
                 timeout=30,

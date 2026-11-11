@@ -11,7 +11,6 @@ from collections.abc import Awaitable, Callable
 
 import pytest
 
-from crawlutron.api import main_helpers
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.health.readiness import ReadinessState
 from crawlutron.mcp.handlers import dispatch as tool_dispatch
@@ -21,6 +20,7 @@ from crawlutron.models.json_value import JsonValue
 from crawlutron.models.map_request import MapRequest as MapRequest
 from crawlutron.models.render_request import RenderRequest as RenderRequest
 from crawlutron.models.search_request import SearchRequest as SearchRequest
+from crawlutron.service import main_helpers
 
 
 def _tool_cases():

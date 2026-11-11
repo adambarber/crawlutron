@@ -13,10 +13,10 @@ from pathlib import Path
 import pytest
 
 import crawlutron.transport.content_cache as cc
-from crawlutron.api.job_runner import run_job
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.result_record import ProducerEnvelope
+from crawlutron.service.job_runner import run_job
 from crawlutron.storage.job_store import JobStatus
 from crawlutron.storage.result_store import CrawlSpillStore
 from crawlutron.transport.content_cache import ContentCache
@@ -252,8 +252,8 @@ class TestAsyncCrawlRunnerSavesOffTheEventLoop:
     """
 
     async def test_run_async_crawl_save_does_not_block_the_event_loop(self, monkeypatch, tmp_path) -> None:
-        from crawlutron.api.async_crawl_runner import run_async_crawl
         from crawlutron.config.settings import CrawlerSettings
+        from crawlutron.service.async_crawl_runner import run_async_crawl
         from crawlutron.storage.result_store import CrawlResultStore
         from tests._job_harnesses import make_job_store
 
@@ -279,7 +279,7 @@ class TestAsyncCrawlRunnerSavesOffTheEventLoop:
             # network work.
             return {"results": [], "submitted_count": 0}
 
-        monkeypatch.setattr("crawlutron.api.async_crawl_runner.execute_crawl", _fake_execute)
+        monkeypatch.setattr("crawlutron.service.async_crawl_runner.execute_crawl", _fake_execute)
 
         async def scenario() -> int:
             from crawlutron.models.crawl_request import CrawlRequest

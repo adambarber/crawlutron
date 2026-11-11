@@ -12,14 +12,7 @@ from dataclasses import dataclass
 from pydantic import BaseModel
 
 from crawlutron.api.crawl_endpoint import read_crawl_result_record, read_crawl_trace_record
-from crawlutron.api.job_cores import control_job, delete_job_core, get_job_core, list_jobs_core
 from crawlutron.api.policy_suggestions import policy_suggestions as policy_suggestions_core
-from crawlutron.api.watch_cores import (
-    delete_watch_core,
-    get_watch_core,
-    list_watches_core,
-    register_watch_core,
-)
 from crawlutron.api.watch_router import WATCH_INTERVAL_MIN_SECONDS
 from crawlutron.mcp.handlers import DoorBinding, DoorKind, ToolResult
 from crawlutron.models.admit_request import AdmitRequest
@@ -51,6 +44,13 @@ from crawlutron.models.watch_id_request import WatchIdRequest
 from crawlutron.models.watch_list_request import WatchListRequest
 from crawlutron.models.watch_list_response import WatchListResponse
 from crawlutron.models.watch_state import WatchState
+from crawlutron.service.job_cores import control_job, delete_job_core, get_job_core, list_jobs_core
+from crawlutron.service.watch_cores import (
+    delete_watch_core,
+    get_watch_core,
+    list_watches_core,
+    register_watch_core,
+)
 
 #: The declared MCP-side delivery refusal both crawl doors answer (keyed on
 #: the fields' effective VALUE by dispatch: an explicit no-op is accepted).

@@ -153,7 +153,7 @@ class TestAppLifecycleEdges:
     async def test_crawl_endpoint_webhook_error(self, async_client, caplog, monkeypatch):
         # Crawl a valid URL whose webhook is undeliverable: best-effort delivery
         # must not crash the request, and the loss must be recorded.
-        from crawlutron.api import async_crawl_runner
+        from crawlutron.service import async_crawl_runner
 
         async def _failing_crawl(*args, **kwargs):
             raise RuntimeError("scripted crawl failure (#513)")
@@ -173,7 +173,7 @@ class TestAppLifecycleEdges:
 
         # #513: await the runner task itself (the 202 body carries its request_id) --
         # the failure webhook posts inline inside it, so no dispatch race is possible.
-        from crawlutron.api.job_lifecycle import tracked_task
+        from crawlutron.service.job_lifecycle import tracked_task
         from crawlutron.service.webhooks import drain_webhook_deliveries
 
         def _delivery_failed() -> bool:

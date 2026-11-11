@@ -107,7 +107,7 @@ _ENVELOPE_BUILDERS = ("abuild_unified_crawl_response", "build_unified_crawl_resp
 
 
 _ENVELOPE_ADAPTER_EXEMPT = frozenset(
-    {"crawlutron/api/async_crawl_runner.py", "crawlutron/mcp/handlers.py"}  # adapters, not wire endpoints
+    {"crawlutron/service/async_crawl_runner.py", "crawlutron/mcp/handlers.py"}  # adapters, not wire endpoints
 )
 
 
@@ -166,7 +166,7 @@ CRAWL_RESPONSE_ENVELOPE_IS_ADAPTED_BY_ONE_OWNER = Rule(
             "async def f(request_id):\n"
             "    return await abuild_unified_crawl_response([], "
             "options=EnvelopeOptions(request_id=request_id, success=False))\n",
-            at=REPO_ROOT / "crawlutron" / "api" / "async_crawl_runner.py",
+            at=REPO_ROOT / "crawlutron" / "service" / "async_crawl_runner.py",
         ),
     ),
 )

@@ -5,10 +5,10 @@ from __future__ import annotations
 import asyncio
 from typing import cast
 
-from crawlutron.api import job_runner
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.discovered_link import DiscoveredLink
+from crawlutron.service import job_runner
 from crawlutron.storage.job_store import JobStatus
 from tests._job_harnesses import (
     ScriptedExecute,
@@ -234,7 +234,7 @@ class TestRunnerLifecycle:
     async def test_resume_waits_out_a_stale_predecessor_before_respawning(self, job_store, monkeypatch):
         """#523 COR-08: resume with a live (wedged) predecessor task must not spawn
         a RUNNING row with no runner; the old task is joined or cancelled first."""
-        from crawlutron.api.job_lifecycle import tracked_task
+        from crawlutron.service.job_lifecycle import tracked_task
 
         job, hang, settings = _started_hung_job(job_store)
         await _wait_status(job_store, job.job_id, {"running"})
@@ -259,7 +259,7 @@ class TestRunnerLifecycle:
     async def test_boot_backlog_starts_at_most_global_concurrency_runners(self, job_store):
         """#523 COR-09: a 10-job crash backlog must not spawn 10 concurrent
         runners at startup; starts are bounded by the global concurrency."""
-        from crawlutron.api import job_lifecycle
+        from crawlutron.service import job_lifecycle
 
         hang = asyncio.Event()
         job_runner.install_execute_crawl(
@@ -354,8 +354,8 @@ async def test_recovery_cas_lost_logs_warning(caplog):
     import logging
     from unittest.mock import AsyncMock, MagicMock
 
-    from crawlutron.api import job_recovery
     from crawlutron.config.settings import CrawlerSettings
+    from crawlutron.service import job_recovery
     from crawlutron.storage.job_store import JobKind, JobStatus
 
     mock_store = MagicMock()
@@ -367,7 +367,7 @@ async def test_recovery_cas_lost_logs_warning(caplog):
     mock_store.aset_status = AsyncMock(return_value=False)  # lost CAS
     mock_store.aload = AsyncMock(return_value=None)
 
-    with caplog.at_level(logging.WARNING, logger="crawlutron.api.job_recovery"):
+    with caplog.at_level(logging.WARNING, logger="crawlutron.service.job_recovery"):
 
         def _null_start(*args: object, **kwargs: object) -> asyncio.Task[object]:
             raise AssertionError("an unresumable row never starts a runner")

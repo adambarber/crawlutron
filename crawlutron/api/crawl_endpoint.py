@@ -14,10 +14,7 @@ from fastapi.responses import JSONResponse, Response
 from crawlutron.admission.payload_helpers import checked_payload_urls
 from crawlutron.api.caller_auth import Tracking, admit, anonymous_caller
 from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
-from crawlutron.api.crawl_executor import execute_crawl
 from crawlutron.api.exceptions import http_error, validation_http_error
-from crawlutron.api.job_runner import start_tracked_task
-from crawlutron.api.main_helpers import record_crawl_completion, request_gate
 from crawlutron.api.response_shaping import aunified_response_from_result
 from crawlutron.api.webhooks import ensure_https_webhook_url, validate_webhook_url_async
 from crawlutron.config.settings import CrawlerSettings
@@ -36,6 +33,9 @@ from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.trace_response import TraceResponse
 from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.runtime.metrics import get_metrics
+from crawlutron.service.crawl_executor import execute_crawl
+from crawlutron.service.job_lifecycle import start_tracked_task
+from crawlutron.service.main_helpers import record_crawl_completion, request_gate
 from crawlutron.storage.ids import new_request_id
 from crawlutron.storage.job_store import TERMINAL_STATUSES, FrontierEntry, JobKind, JobStore
 from crawlutron.storage.result_store import CrawlResultStore, CrawlSpillStore
@@ -259,11 +259,11 @@ async def _accepted_async(
     await job_store.acreate_single_shot(
         request_id, checked[0][0], payload.policy, owner=owner, frontier=batch
     )
-    from crawlutron.api.async_crawl_runner import run_async_crawl
+    from crawlutron.service import async_crawl_runner as _acr
 
     start_tracked_task(
         request_id,
-        lambda: run_async_crawl(
+        lambda: _acr.run_async_crawl(
             request_id,
             payload,
             webhook_url,

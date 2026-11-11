@@ -15,16 +15,16 @@ def host_policy_entry_table() -> set[str]:
     return {
         "crawlutron/service/admit_endpoint.py:admit_url",
         "crawlutron/api/crawl_endpoint.py:crawl",
-        "crawlutron/api/crawl_executor.py:execute_crawl",
-        "crawlutron/api/job_runner.py:run_job",
-        "crawlutron/api/job_cores.py:create_job_core",
-        "crawlutron/api/map_endpoint.py:map_site",
+        "crawlutron/service/crawl_executor.py:execute_crawl",
+        "crawlutron/service/job_runner.py:run_job",
+        "crawlutron/service/job_cores.py:create_job_core",
+        "crawlutron/service/map_endpoint.py:map_site",
         "crawlutron/api/render.py:render_request",
         "crawlutron/service/response_shaping.py:frontier_link_url",
         "crawlutron/api/watch_router.py:create_watch",
-        "crawlutron/api/watch_cores.py:register_watch_core",
+        "crawlutron/service/watch_cores.py:register_watch_core",
         "crawlutron/api/policy_suggestions.py:policy_suggestions",
-        "crawlutron/api/site_map.py:build_site_map",
+        "crawlutron/service/site_map.py:build_site_map",
         "crawlutron/api/policy_suggestions.py:build_policy_suggestions",
         # post_webhook* left the table: they take an admitted WebhookTarget, whose
         # constructor IS the policy seam (probed via deliver_pinned_webhook).

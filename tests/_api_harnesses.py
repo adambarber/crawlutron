@@ -55,13 +55,13 @@ async def run_with_webhook(request_id, execute_fn, webhook_url, job_store, resul
 
     ``webhook_url`` admits at this harness edge, the same conversion the API
     door performs; delivery sees the target, never a raw string."""
-    from crawlutron.api.async_crawl_runner import run_async_crawl
     from crawlutron.config.settings import CrawlerSettings
     from crawlutron.models.crawl_request import CrawlRequest
     from crawlutron.models.webhook_target import WebhookTarget
+    from crawlutron.service.async_crawl_runner import run_async_crawl
 
     target = None if webhook_url is None else WebhookTarget.admit(webhook_url, host_policy=_webhook_policy())
-    with patch("crawlutron.api.async_crawl_runner.execute_crawl", new=execute_fn):
+    with patch("crawlutron.service.async_crawl_runner.execute_crawl", new=execute_fn):
         with patch("crawlutron.service.webhooks.post_webhook", new_callable=AsyncMock) as post_webhook:
             await run_async_crawl(
                 request_id,

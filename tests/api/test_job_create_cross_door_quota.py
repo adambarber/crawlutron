@@ -49,7 +49,7 @@ async def test_rest_create_refuses_when_the_tracker_holds_the_callers_slot(tmp_p
 
 def test_create_job_core_requires_a_concurrency_tracker():
     """The core's non-divergence promise is the signature: no tracker, no call."""
-    from crawlutron.api.job_cores import create_job_core
+    from crawlutron.service.job_cores import create_job_core
 
     parameters = inspect.signature(create_job_core).parameters
     tracker = parameters["concurrency_tracker"]

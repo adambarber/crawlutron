@@ -6,10 +6,10 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, patch
 
-from crawlutron.api.async_crawl_runner import run_async_crawl
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.delta import DeltaContext, extract_baseline, extract_baseline_entries
 from crawlutron.models.crawl_request import CrawlRequest
+from crawlutron.service.async_crawl_runner import run_async_crawl
 from tests._job_harnesses import make_job_store
 from tests._result_builders import engine_result
 from tests.delta._door_harness import assert_removed_summary, delta_stores
@@ -54,7 +54,7 @@ async def test_async_run_reports_baseline_url_absent_from_run(monkeypatch, tmp_p
     job_store = make_job_store(tmpdir)
     await job_store.acreate_single_shot("r1", URL, payload.policy, owner="caller-a")
     job = await job_store.aload("r1")
-    with patch("crawlutron.api.async_crawl_runner.execute_crawl", new=scripted):
+    with patch("crawlutron.service.async_crawl_runner.execute_crawl", new=scripted):
         with patch("crawlutron.service.webhooks.post_webhook", new_callable=AsyncMock):
             await run_async_crawl(
                 "r1",

@@ -4,8 +4,8 @@ Job and watch endpoints stay off the loop; the guard is a real subclass."""
 
 import asyncio
 
-from crawlutron.api import job_runner
 from crawlutron.config.settings import CrawlerSettings
+from crawlutron.service import job_runner
 from tests._job_harnesses import ScriptedExecute
 from tests._job_store_doubles import (
     _off_loop,
@@ -90,7 +90,7 @@ class TestWatchSurfaceStaysOffTheLoop:
 
     async def test_a_sweep_pass_stays_off_the_loop(self, loop_guard_watch_store):
         """The pass reads the due rows and records each verdict off the loop too."""
-        from crawlutron.api.watch_sweep import WatchSweeper
+        from crawlutron.service.watch_sweep import WatchSweeper
 
         watch = await _off_loop(
             loop_guard_watch_store.create,

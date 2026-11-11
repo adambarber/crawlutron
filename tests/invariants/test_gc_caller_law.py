@@ -1,7 +1,7 @@
 """The GC-caller law for the cache maintenance seams: a reaping seam with zero
 production callers is dead surface, so ``ContentCache.prune`` and the robots
 ``purge_robots_cache`` export must each have a live production call site --
-today the app-lifespan maintenance pass in ``crawlutron.api.cache_sweep``.
+today the app-lifespan maintenance pass in ``crawlutron.service.cache_sweep``.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import ast
 from tests.invariants._shared import REPO_ROOT
 
 _SEAMS = ("prune", "purge_robots_cache")
-_MAINTENANCE_MODULE = "crawlutron/api/cache_sweep.py"
+_MAINTENANCE_MODULE = "crawlutron/service/cache_sweep.py"
 
 
 def _call_names(tree: ast.AST) -> set[str]:

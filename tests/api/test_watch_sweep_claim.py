@@ -10,15 +10,20 @@ import asyncio
 
 import pytest
 
-from crawlutron.api import watch_sweep
-from crawlutron.api.watch_sweep import WatchSweeper
-from crawlutron.config.settings import CrawlerSettings
-from crawlutron.models.webhook_target import WebhookTarget
-from crawlutron.vocabulary.taxonomy import CrawlClassification
 from tests._clocks import arrange_clock
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
+from tests._policy_factories import canonical
 from tests._result_builders import engine_result
-from tests._watch_harnesses import capture_announcements, default_sweeper, loopback_url
+from tests._watch_harnesses import (
+    UNRESTRICTED_HOST_POLICY,
+    CrawlClassification,
+    CrawlerSettings,
+    WatchSweeper,
+    WebhookTarget,
+    capture_announcements,
+    default_sweeper,
+    loopback_url,
+    watch_sweep,
+)
 
 NOW = 1_700_000_000.0
 INTERVAL = 3600
@@ -73,7 +78,7 @@ def _sweeper_on_arranged_time(watch_store, start: float = NOW):
 def _slow_then_live(watch_store, etag_server, monkeypatch):
     """Two due rows over distinct URLs, a parked crawl stub, and the events to
     step the pass: returns (slow, watched, inside, releases)."""
-    from crawlutron.api import watch_sweep
+    from crawlutron.service import watch_sweep
 
     slow = watch_store.create(
         canonical(loopback_url(etag_server) + "slow"), interval_seconds=INTERVAL, now=0.0
@@ -155,7 +160,7 @@ def _delivery_buffer(monkeypatch):
 async def test_two_concurrent_sweeps_deliver_one_webhook_not_two(watch_store, etag_server, monkeypatch):
     """Two sweeper processes over one due watch must fire the webhook once: the
     second sweeper's claim CAS loses and the row is skipped, not re-delivered."""
-    from crawlutron.api import watch_sweep
+    from crawlutron.service import watch_sweep
 
     watch = _registered_webhook_watch(watch_store, etag_server)
     deliveries = _delivery_buffer(monkeypatch)
@@ -392,7 +397,7 @@ async def test_the_forever_loop_forwards_its_clock_to_the_sweeper(watch_store, e
     """A clock injected through ``sweep_watches_forever`` must drive lease
     renewals too: renewals stamped from wall time while the pass reads the
     injected clock would mis-age every claim the loop touches."""
-    from crawlutron.api import watch_sweep
+    from crawlutron.service import watch_sweep
 
     watch = watch_store.create(canonical(loopback_url(etag_server)), interval_seconds=INTERVAL, now=0.0)
     inside = asyncio.Event()
@@ -432,7 +437,7 @@ async def test_the_forever_loop_forwards_its_clock_to_the_sweeper(watch_store, e
 async def test_a_hanging_webhook_does_not_stall_the_sweep_pass(watch_store, etag_server, monkeypatch):
     """A webhook that never answers must not hold the sweep pass: delivery is a
     tracked background task, so sweep_once returns while it runs (#528)."""
-    from crawlutron.api import watch_sweep
+    from crawlutron.service import watch_sweep
     from crawlutron.service.webhooks import drain_webhook_deliveries
 
     watch = watch_store.create(

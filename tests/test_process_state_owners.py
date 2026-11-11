@@ -35,8 +35,8 @@ KNOWN = (
     "crawlutron.transport.pooled_cffi",
     "crawlutron.service.webhooks",
     "crawlutron.storage.sqlite_store",
-    "crawlutron.api.async_crawl_runner",
-    "crawlutron.api.job_lifecycle",
+    "crawlutron.service.async_crawl_runner",
+    "crawlutron.service.job_lifecycle",
     "crawlutron.models.host_policy",
     "crawlutron.runtime.metrics",
 )

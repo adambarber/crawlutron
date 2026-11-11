@@ -8,12 +8,12 @@ import asyncio
 
 import pytest
 
-from crawlutron.api import watch_sweep
-from crawlutron.api.watch_sweep import WatchSweeper, sweep_watches_forever
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models import watch_state
 from crawlutron.models.watch_status import WatchStatus
+from crawlutron.service import watch_sweep
 from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
+from crawlutron.service.watch_sweep import WatchSweeper, sweep_watches_forever
 from crawlutron.storage.caller_key_store import CallerKeyStore
 from crawlutron.vocabulary.taxonomy import CrawlClassification
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical

@@ -9,14 +9,15 @@ import asyncio
 
 from httpx import ASGITransport, AsyncClient
 
-from crawlutron.api import watch_sweep
 from crawlutron.api.dependencies import get_settings, get_watch_store
 from crawlutron.api.watch_router import router as watch_router
-from crawlutron.api.watch_sweep import WatchSweeper
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models import watch_state
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.webhook_target import WebhookTarget
+from crawlutron.service import watch_sweep
+from crawlutron.service.watch_sweep import WatchSweeper
+from crawlutron.vocabulary.taxonomy import CrawlClassification
 from tests._app_harnesses import harness_app
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
@@ -106,4 +107,9 @@ __all__ = [
     "stub_transient_failure",
     "watch_client",
     "watch_router",
+    "WebhookTarget",
+    "WatchSweeper",
+    "watch_sweep",
+    "CrawlClassification",
+    "UNRESTRICTED_HOST_POLICY",
 ]

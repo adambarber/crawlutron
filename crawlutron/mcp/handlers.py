@@ -20,10 +20,6 @@ from crawlutron.api.admit_endpoint import admit_url
 from crawlutron.api.caller_auth import Tracking, admit, bound_render_cookie_namespace
 from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
 from crawlutron.api.crawl_endpoint import delta_context_for
-from crawlutron.api.crawl_executor import execute_crawl
-from crawlutron.api.job_cores import create_job_core
-from crawlutron.api.main_helpers import request_gate
-from crawlutron.api.map_endpoint import map_site
 from crawlutron.api.render_endpoint import render as render_endpoint_handler
 from crawlutron.api.response_shaping import aunified_response_from_result
 from crawlutron.config.settings import CrawlerSettings
@@ -34,6 +30,10 @@ from crawlutron.models.json_value import JsonValue
 from crawlutron.models.policy_suggestions_response import PolicySuggestionsResponse
 from crawlutron.safety.json_safe import json_default
 from crawlutron.search.endpoint import search as search_endpoint_handler
+from crawlutron.service.crawl_executor import execute_crawl
+from crawlutron.service.job_cores import create_job_core
+from crawlutron.service.main_helpers import request_gate
+from crawlutron.service.map_endpoint import map_site
 from crawlutron.storage.job_store import JobStore
 from crawlutron.storage.result_store import CrawlResultStore
 from crawlutron.storage.watch_store import WatchStore

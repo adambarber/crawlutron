@@ -7,8 +7,8 @@ import asyncio
 
 import pytest
 
-from crawlutron.api import job_runner
 from crawlutron.config.settings import CrawlerSettings
+from crawlutron.service import job_runner
 from tests._api_harnesses import spy_on_history_reads
 from tests._job_drivers import _seed_job
 from tests._job_harnesses import ScriptedExecute

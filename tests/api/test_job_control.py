@@ -8,9 +8,9 @@ from dataclasses import replace
 
 import pytest
 
-from crawlutron.api import job_runner
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.service import job_runner
 from crawlutron.storage.job_store import FrontierEntry, JobStatus, JobStore
 from tests._job_harnesses import (
     ScriptedExecute,

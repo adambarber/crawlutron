@@ -134,8 +134,8 @@ async def test_search_is_refused_at_the_admission_cap(tmp_path, monkeypatch):
     Search shares the cap's counter; it must take a slot and refuse at the bound
     like every trackable door, not count-and-proceed with a discarded bool.
     """
-    from crawlutron.api import main_helpers
     from crawlutron.health.readiness import ReadinessState
+    from crawlutron.service import main_helpers
 
     state = ReadinessState(max_active_requests=1)
     assert state.begin_request()  # fill the cap

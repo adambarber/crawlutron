@@ -172,7 +172,8 @@ PRIVATE_IMPORT_LEDGER = Rule(
         "from crawlutron.transport.content_cache import ContentCache\n\n"
         'cache = ContentCache("/tmp/x")\n\nassert cache._undeclared_probe_index\n',
         # And the string-FIRST form, where the target is the first argument, not the replacement.
-        'import pytest\n\nmonkeypatch.setattr("crawlutron.api.job_runner._undeclared_probe", lambda: None)\n',
+        "import pytest\n\n"
+        'monkeypatch.setattr("crawlutron.service.job_runner._undeclared_probe", lambda: None)\n',
     ),
     clean=lambda: (
         # A public name is the whole point -- it carries no exemption.
@@ -194,7 +195,7 @@ PRIVATE_IMPORT_LEDGER = Rule(
         "class _LocalProbe:\n    def __init__(self):\n        self._probe = 1\n\n"
         "p = _LocalProbe()\n\nassert p._probe\n",
         # A string-first setattr of a PUBLIC app name still needs no row.
-        'monkeypatch.setattr("crawlutron.api.job_runner.run_job", fake)\n',
+        'monkeypatch.setattr("crawlutron.service.job_runner.run_job", fake)\n',
     ),
 )
 

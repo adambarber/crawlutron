@@ -7,9 +7,9 @@ reason; and its negation -- a transient failure deactivates nothing.
 
 import pytest
 
-from crawlutron.api import watch_sweep
-from crawlutron.api.crawl_executor import CrawlRefusalError
 from crawlutron.models.watch_status import WatchStatus
+from crawlutron.service import watch_sweep
+from crawlutron.service.crawl_executor import CrawlRefusalError
 from crawlutron.vocabulary.taxonomy import CrawlClassification
 from tests._assertions import block_private_targets
 from tests._policy_factories import canonical

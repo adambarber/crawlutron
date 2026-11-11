@@ -9,15 +9,19 @@ from __future__ import annotations
 
 import logging
 
-from crawlutron.api import watch_sweep
-from crawlutron.api.watch_sweep import WatchSweeper
-from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
-from crawlutron.models.webhook_target import WebhookTarget
-from crawlutron.vocabulary.taxonomy import CrawlClassification
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
-from tests._watch_harnesses import default_sweeper, loopback_url
+from tests._policy_factories import canonical
+from tests._watch_harnesses import (
+    UNRESTRICTED_HOST_POLICY,
+    CrawlClassification,
+    CrawlerSettings,
+    WatchSweeper,
+    WebhookTarget,
+    default_sweeper,
+    loopback_url,
+    watch_sweep,
+)
 
 NOW = 1_700_000_000.0
 INTERVAL = 3600
@@ -38,7 +42,7 @@ async def test_the_check_failure_sink_emits_the_redacted_url(caplog, watch_store
     """``watch_check_failed`` logs the redacted projection, never ``watch.url``."""
     watch_store.create(canonical(SECRET_URL), interval_seconds=INTERVAL, now=NOW)
     monkeypatch.setattr(watch_sweep, "execute_crawl", _raise)
-    with caplog.at_level(logging.WARNING, logger="crawlutron.api.watch_sweep"):
+    with caplog.at_level(logging.WARNING, logger="crawlutron.service.watch_sweep"):
         outcomes = await default_sweeper(watch_store).sweep_once(now=NOW + INTERVAL)
 
     assert outcomes == [CrawlClassification.unknown_error]
@@ -70,7 +74,7 @@ async def test_the_webhook_admission_failure_sink_emits_the_redacted_url(caplog,
         host_policy=HostPolicy.from_strings("", "watcher.example.com"),
         settings=CrawlerSettings.from_mapping(),
     )
-    with caplog.at_level(logging.WARNING, logger="crawlutron.api.watch_sweep"):
+    with caplog.at_level(logging.WARNING, logger="crawlutron.service.watch_sweep"):
         outcomes = await sweeper.sweep_once(now=NOW + INTERVAL)
 
     # The check succeeded (rendered); the webhook refusal is logged, the change

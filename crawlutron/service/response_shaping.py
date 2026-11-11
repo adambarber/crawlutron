@@ -1,6 +1,6 @@
 """Unified response shaping: engine results and render output to unified dicts.
 
-The pure-data mapping lives in :mod:`crawlutron.api.unified_shaping`; this module
+The pure-data mapping lives in :mod:`crawlutron.service.unified_shaping`; this module
 keeps the response envelope builders around them."""
 
 from __future__ import annotations

@@ -14,7 +14,7 @@ from tests._policy_factories import canonical
 
 
 async def _create_api_job(client, root_url: str, execute, policy: PolicyLike | None = None):
-    from crawlutron.api import job_runner
+    from crawlutron.service import job_runner
 
     job_runner.install_execute_crawl(execute)
     response = await post_api_job(client, root_url, policy)
@@ -95,8 +95,8 @@ def drive_job(job_id: str, job_store: JobStore, settings=None, shutdown_event=No
 
     ``run_job``'s call shape is every runner-lifecycle test's ending, so it is
     spelled once. The task is returned, not awaited: cancel/wait tests hold it."""
-    from crawlutron.api import job_runner
     from crawlutron.config.settings import CrawlerSettings
+    from crawlutron.service import job_runner
 
     return asyncio.ensure_future(
         job_runner.run_job(
@@ -110,7 +110,7 @@ def drive_job(job_id: str, job_store: JobStore, settings=None, shutdown_event=No
 
 async def run_seeded_job(job, job_store, execute):
     """Drive an already-persisted job in-line to terminal; return the row."""
-    from crawlutron.api import job_runner
+    from crawlutron.service import job_runner
 
     job_runner.install_execute_crawl(execute)
     # A row a crash left RUNNING restarts the way the service restarts it: the recovery rewind first, because

@@ -371,11 +371,11 @@ async def _recover_jobs_and_start_sweep(_app: FastAPI, settings: CrawlerSettings
     shutdown event is minted here, not at import (an import-time event is set
     by the first teardown and cancels every later run's crawls).
     """
-    from .api.cache_sweep import sweep_cache_forever
-    from .api.job_recovery import recover_and_start_pending_jobs
-    from .api.job_runner import start_job
-    from .api.spill_sweep import sweep_spills_forever
-    from .api.watch_sweep import sweep_watches_forever
+    from .service.cache_sweep import sweep_cache_forever
+    from .service.job_recovery import recover_and_start_pending_jobs
+    from .service.job_runner import start_job
+    from .service.spill_sweep import sweep_spills_forever
+    from .service.watch_sweep import sweep_watches_forever
 
     shutdown_event = asyncio.Event()
     _app.state.shutdown_event = shutdown_event
@@ -431,7 +431,7 @@ async def _shutdown_services(_app: FastAPI) -> None:
     shutdown_event = _app.state.shutdown_event
     shutdown_event.set()
     await _drain_watch_sweep(_app)
-    from .api.job_runner import shutdown_job_runner
+    from .service.job_runner import shutdown_job_runner
 
     await shutdown_job_runner()
 
@@ -447,7 +447,7 @@ async def _shutdown_services(_app: FastAPI) -> None:
     from .api.store_shutdown import close_app_stores
 
     async def _close_app_stores_step() -> None:
-        await close_app_stores(_app)
+        await close_app_stores(_app, module_app())
 
     async def _unbind_metric_counters() -> None:
         from .runtime.metrics import unbind_metric_counters

@@ -8,8 +8,8 @@ from typing import cast
 import pytest
 from fastapi import HTTPException
 
-from crawlutron.api import job_runner
 from crawlutron.config.settings import CrawlerSettings
+from crawlutron.service import job_runner
 from crawlutron.storage.job_store import TERMINAL_STATUSES, JobStatus, JobStore
 from crawlutron.storage.result_store import CrawlResultStore
 from crawlutron.storage.watch_store import WatchStore
@@ -141,7 +141,7 @@ class TestStartupRecoveryStaysOffTheLoop:
     pins that the recovery never blocks the loop that just booted the service."""
 
     async def test_recovery_rewinds_and_starts_without_touching_the_loop(self, loop_guard_store):
-        from crawlutron.api.job_runner import recover_and_start_pending_jobs, start_job
+        from crawlutron.service.job_runner import recover_and_start_pending_jobs, start_job
 
         job_runner.reset_job_runner()
         job_runner.install_execute_crawl(ScriptedExecute(results=[engine_result(_ROOT, "rendered")]))
@@ -156,7 +156,7 @@ class TestStartupRecoveryStaysOffTheLoop:
             job_runner.reset_job_runner()
 
     async def test_rewinding_a_crash_orphan_never_touches_the_loop(self, loop_guard_store):
-        from crawlutron.api.job_runner import recover_orphaned_running_jobs
+        from crawlutron.service.job_runner import recover_orphaned_running_jobs
 
         job = await _off_loop(_seed_job, loop_guard_store, _ROOT, {"limits": {"max_depth": 1}}, running=True)
         rewound = await recover_orphaned_running_jobs(loop_guard_store)
@@ -168,8 +168,8 @@ class TestStartupRecoveryStaysOffTheLoop:
         """A booting/other worker must not rewind a RUNNING job its own process is
         driving: the task registry is the ownership check, so a live task means
         the row is not a crash orphan (#220)."""
-        from crawlutron.api.job_lifecycle import start_tracked_task
-        from crawlutron.api.job_runner import recover_orphaned_running_jobs
+        from crawlutron.service.job_lifecycle import start_tracked_task
+        from crawlutron.service.job_runner import recover_orphaned_running_jobs
 
         owned = await _off_loop(
             _seed_job, loop_guard_store, _ROOT, {"limits": {"max_depth": 1}}, running=True

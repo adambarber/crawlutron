@@ -15,12 +15,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from crawlutron.api import job_runner
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.result_record import ProducerEnvelope
 from crawlutron.models.taxonomy import Classification
+from crawlutron.service import job_runner
 from crawlutron.storage.job_store import CrawlJobState, FrontierEntry, JobStatus, JobStore
 from crawlutron.storage.job_store_collections import JobKind, OrderedUrlSet
 from tests._policy_factories import canonical

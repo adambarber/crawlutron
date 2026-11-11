@@ -8,9 +8,9 @@ from unittest.mock import patch
 
 import pytest
 
-from crawlutron.api.async_crawl_runner import run_async_crawl
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_request import CrawlRequest
+from crawlutron.service.async_crawl_runner import run_async_crawl
 from crawlutron.storage.job_store import JobStatus
 from crawlutron.storage.result_store import CrawlResultStore
 from tests._api_harnesses import admitted_webhook
@@ -47,7 +47,7 @@ class TestSemaphoreHoldsTheCrawlOnly:
 
     async def test_a_queued_job_is_not_claimed_running_while_waiting_for_the_slot(self, job_store, tmp_path):
         """While the semaphore is held by another crawl, the queued row stays PENDING."""
-        from crawlutron.api.async_crawl_runner import async_crawl_semaphore
+        from crawlutron.service.async_crawl_runner import async_crawl_semaphore
 
         request_id = "crawl_queued_pending"
         _seed_single_shot(job_store, request_id)
@@ -76,7 +76,7 @@ class TestSemaphoreHoldsTheCrawlOnly:
 
     async def test_the_webhook_delivery_runs_outside_the_crawl_semaphore(self, job_store, tmp_path):
         """A retrying webhook must not hold the crawl slot (#463)."""
-        from crawlutron.api.async_crawl_runner import async_crawl_semaphore
+        from crawlutron.service.async_crawl_runner import async_crawl_semaphore
 
         request_id = "crawl_delivery_outside"
         _seed_single_shot(job_store, request_id)
@@ -92,7 +92,7 @@ class TestSemaphoreHoldsTheCrawlOnly:
             nonlocal delivery_seen_inside
             delivery_seen_inside = async_crawl_semaphore().locked()
 
-        with patch("crawlutron.api.async_crawl_runner.execute_crawl", new=quick_crawl):
+        with patch("crawlutron.service.async_crawl_runner.execute_crawl", new=quick_crawl):
             with patch("crawlutron.service.webhooks.post_webhook_guarded", new=watching_delivery):
                 await run_async_crawl(
                     request_id,

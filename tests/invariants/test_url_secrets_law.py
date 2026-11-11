@@ -163,7 +163,7 @@ RAW_WEBHOOK_URL_MOVES_THROUGH_THE_ADMITTED_TARGET = Rule(
         Silent(
             "async def _deliver_webhook(webhook_url: WebhookTarget | None, payload: dict) -> None:\n"
             "    return None\n",
-            at=REPO_ROOT / "crawlutron" / "api" / "async_crawl_runner.py",
+            at=REPO_ROOT / "crawlutron" / "service" / "async_crawl_runner.py",
         ),
         # Inside a sanctioned door the raw str parameter is the wire form.
         Silent(

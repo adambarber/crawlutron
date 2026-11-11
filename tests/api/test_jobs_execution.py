@@ -12,12 +12,13 @@ from fastapi.routing import APIRoute
 from httpx import ASGITransport, AsyncClient
 
 from crawlutron.admission.policy import PolicyLike, read_policy
-from crawlutron.api import dependencies, job_runner, jobs_router
+from crawlutron.api import dependencies, jobs_router
 from crawlutron.api.caller_auth import get_caller_identity
 from crawlutron.api.dependencies import get_job_store, get_settings, get_shutdown_event, get_tracking
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.crawl_request import CrawlRequest
+from crawlutron.service import job_runner
 from crawlutron.storage.job_store import FrontierEntry, JobStatus
 from tests._job_harnesses import (
     ScriptedExecute,
@@ -422,7 +423,7 @@ class TestWholeSiteJobExecution:
     ):
         """#548: the occupied set is derived ONCE at loop start and threaded by
         value (the reserved delta), not re-derived per batch."""
-        import crawlutron.api.job_runner as job_runner_module
+        import crawlutron.service.job_runner as job_runner_module
 
         calls: list[int] = []
         real = job_runner_module.admitted_page_identities

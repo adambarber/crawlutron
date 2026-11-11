@@ -89,20 +89,20 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/_version.py": (3, 0),
     "crawlutron/admission/policy.py": (10, 5),
     "crawlutron/api/_depends_singletons.py": (2, 0),
-    "crawlutron/api/async_crawl_runner.py": (3, 2),
+    "crawlutron/service/async_crawl_runner.py": (3, 2),
     # #664 raised 18,15 -> 19,16 (verify_admin_secret); #822 raised 21,18 -> 22,19
     # (operator_caller: the shared operator identity the keys door and resolver read).
-    "crawlutron/api/cache_sweep.py": (3, 2),
+    "crawlutron/service/cache_sweep.py": (3, 2),
     "crawlutron/service/sweep_loop.py": (2, 1),
     # Spill sweep (#753): one GC lane beside the cache sweep; max_age is wired
     # from the result store's ttl_seconds, not a second literal.
-    "crawlutron/api/spill_sweep.py": (4, 2),
-    "crawlutron/api/store_shutdown.py": (1, 1),
+    "crawlutron/service/spill_sweep.py": (4, 2),
+    "crawlutron/service/store_shutdown.py": (1, 1),
     "crawlutron/api/caller_auth.py": (22, 19),
     "crawlutron/service/caller_concurrency.py": (1, 1),
     # #674 raised 1,1 -> 2,2: CrawlRefusalError is the typed refusal carrier the
     # sweep's deactivation arm reads (reason as an enum member, not boundary text).
-    "crawlutron/api/crawl_executor.py": (2, 2),
+    "crawlutron/service/crawl_executor.py": (2, 2),
     "crawlutron/api/crawl_router.py": (4, 3),
     # #656 raised 16,7 -> 18,8: get_concurrency_tracker + TrackerDep make the
     # app-state stash load-bearing (the getattr-None scatter is refused loudly).
@@ -117,10 +117,10 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/discovery/recommended_surface.py": (3, 1),
     "crawlutron/api/router_identity.py": (1, 1),
     "crawlutron/api/identity_router.py": (5, 3),
-    "crawlutron/api/job_runner.py": (15, 12),
+    "crawlutron/service/job_runner.py": (15, 12),
     "crawlutron/api/jobs_router.py": (6, 5),
-    "crawlutron/api/main_helpers.py": (3, 3),
-    "crawlutron/api/map_endpoint.py": (2, 1),
+    "crawlutron/service/main_helpers.py": (3, 3),
+    "crawlutron/service/map_endpoint.py": (2, 1),
     "crawlutron/api/metrics_router.py": (2, 1),
     "crawlutron/api/middleware.py": (4, 2),
     # #653: the key-verify meter (one class + the shared instance accessor).
@@ -133,7 +133,7 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/api/policy_suggestions.py": (3, 2),
     "crawlutron/api/render.py": (3, 3),
     "crawlutron/api/render_endpoint.py": (3, 2),
-    "crawlutron/api/watch_sweep.py": (4, 2),
+    "crawlutron/service/watch_sweep.py": (4, 2),
     "crawlutron/service/webhooks.py": (15, 13),
     "crawlutron/extraction/content.py": (4, 4),
     "crawlutron/extraction/llm_format.py": (4, 4),
@@ -153,11 +153,11 @@ DECLARED_SURFACE_RATCHET = {
     # ARCH-1: factory collapse (data-driven dispatch) deleted the factories + watch_handlers.py.
     "crawlutron/mcp/handlers.py": (9, 6),  # RAISED to (9, 6) by #701: DoorEnv is the typed door environment.
     # #646: the one control-plane transition both job doors run, plus its shared 404/409 raisers.
-    "crawlutron/api/job_control.py": (3, 3),
+    "crawlutron/service/job_control.py": (3, 3),
     # #647: the typed job cores both doors run (create/list/get/control/delete).
-    "crawlutron/api/job_cores.py": (5, 5),
+    "crawlutron/service/job_cores.py": (5, 5),
     # #648: the typed watch cores both doors run (register/list/get/delete).
-    "crawlutron/api/watch_cores.py": (4, 4),
+    "crawlutron/service/watch_cores.py": (4, 4),
     # #644: the one declaration of the module-level feature routers.
     "crawlutron/api/router_registry.py": (1, 0),
     # #664: the auth+metering layer (guards, router factories, ratchet row).
@@ -180,6 +180,19 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/api/sweep_loop.py": (0, 0),
     "crawlutron/api/unified_shaping.py": (0, 0),
     "crawlutron/api/webhooks.py": (0, 0),
+    # C1b shim rows, same law: re-export is not ownership; deleted at the drain.
+    "crawlutron/api/async_crawl_runner.py": (0, 0),
+    "crawlutron/api/cache_sweep.py": (0, 0),
+    "crawlutron/api/crawl_executor.py": (0, 0),
+    "crawlutron/api/job_control.py": (0, 0),
+    "crawlutron/api/job_cores.py": (0, 0),
+    "crawlutron/api/job_runner.py": (0, 0),
+    "crawlutron/api/main_helpers.py": (0, 0),
+    "crawlutron/api/map_endpoint.py": (0, 0),
+    "crawlutron/api/spill_sweep.py": (0, 0),
+    "crawlutron/api/store_shutdown.py": (0, 0),
+    "crawlutron/api/watch_cores.py": (0, 0),
+    "crawlutron/api/watch_sweep.py": (0, 0),
     "crawlutron/orchestration/admission_stall.py": (6, 4),
     "crawlutron/orchestration/recursive.py": (11, 7),
     "crawlutron/orchestration/request_pipeline.py": (5, 3),

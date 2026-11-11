@@ -58,7 +58,7 @@ def test_module_logger_extras_serialize_to_json(service_sink):
 
 def test_info_records_from_app_loggers_reach_the_sink(service_sink):
     """INFO-level service events must not be dropped on the way out."""
-    logging.getLogger("crawlutron.api.job_runner").info("job_submitted")
+    logging.getLogger("crawlutron.service.job_runner").info("job_submitted")
     assert _last_record(service_sink)["message"] == "job_submitted"
 
 

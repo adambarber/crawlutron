@@ -16,10 +16,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from httpx import Request
 
-from crawlutron.api.async_crawl_runner import run_async_crawl
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.webhook_target import WebhookTarget
+from crawlutron.service.async_crawl_runner import run_async_crawl
 from crawlutron.storage.job_store import JobStatus, JobStore
 from crawlutron.storage.result_store import CrawlResultStore
 from tests._api_harnesses import run_with_webhook as _run_with_webhook
@@ -277,7 +277,7 @@ class TestErrorBranchTerminalCasGatesPublish:
             await job_store.aset_status(request_id, JobStatus.PAUSED, expected=JobStatus.RUNNING)
             raise RuntimeError("crawl blew up")
 
-        with patch("crawlutron.api.async_crawl_runner.execute_crawl", side_effect=explode_then_pause):
+        with patch("crawlutron.service.async_crawl_runner.execute_crawl", side_effect=explode_then_pause):
             with patch("crawlutron.service.webhooks.post_webhook", new_callable=AsyncMock) as post_webhook:
                 await _run_webhook_crawl(job_store, result_store, request_id)
 

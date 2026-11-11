@@ -12,8 +12,8 @@ import pytest
 from httpx import AsyncClient
 
 from crawlutron.admission.policy import PolicyLike
-from crawlutron.api import job_runner
 from crawlutron.models.json_value import JsonValue
+from crawlutron.service import job_runner
 from crawlutron.storage.job_store import CrawlJobState, JobStatus, JobStore
 from crawlutron.transport.robots import RobotsRules
 from crawlutron.transport.robots_parse import parse_robots_rules
