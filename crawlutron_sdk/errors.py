@@ -59,6 +59,11 @@ class CrawlutronConflictError(CrawlutronClientError):
 
 
 class CrawlutronClientClosedRequestError(CrawlutronClientError):
+    """499: the service saw the caller hang up. Envelope-construction only.
+
+    A connected SDK caller sees httpx TransportError; the service raises 499
+    only after detecting the disconnect, so this class never crosses live HTTP."""
+
     status_code = 499
     code = "client_disconnected"
 

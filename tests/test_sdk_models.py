@@ -109,7 +109,9 @@ def _upper_bound(model: type[BaseModel]) -> int | None:
 
 
 def test_search_request_limit_bound_tracks_the_server_model():
-    """Drift guard: the SDK's upper bound must cover the server model's bound."""
+    """Drift guard, one-directional by design: sdk_le >= server_le seals the
+    dangerous direction (SDK rejecting what the server serves); server
+    tightening fails safe via a typed 422."""
     server_le = _upper_bound(ServerSearchRequest)
     sdk_le = _upper_bound(SearchRequest)
     assert server_le is not None and sdk_le is not None

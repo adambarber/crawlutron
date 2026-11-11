@@ -36,6 +36,14 @@ def test_package_root_exports_every_refusal_class():
         assert getattr(crawlutron_sdk, name) is not None, name
 
 
+def test_new_refusal_class_code_constants_match_their_wire_codes():
+    """error_from_response overrides code from the envelope, so a drifting
+    class constant is invisible to the mapping tests; pin the three newest."""
+    assert CrawlutronBadRequestError.code == "bad_request"
+    assert CrawlutronConflictError.code == "invalid_state"
+    assert CrawlutronClientClosedRequestError.code == "client_disconnected"
+
+
 def test_error_attributes():
     error = CrawlutronNotFoundError("gone", details={"request_id": "x"}, status_code=404)
     assert error.message == "gone"
