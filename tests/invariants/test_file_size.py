@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pathlib
 
-from tests._walk_primitives import declared_root_files
+from tests._walk_primitives import REPO_ROOT, declared_root_files
 
 #: Total lines one file may hold.
 LIMIT = 500
@@ -76,10 +76,24 @@ def test_scan_includes_the_extensionless_gate_helper(tmp_path: pathlib.Path) -> 
     assert found[gate.as_posix()] == 502
 
 
+def _python_bearing_roots() -> set[str]:
+    """Top-level dirs holding any ``*.py``, derived by walking REPO_ROOT.
+
+    Hidden dirs are skipped: they hold environment/cache trees, not shipped
+    code, and a dot-named root could never be a declared scan root."""
+    return {
+        d.name
+        for d in REPO_ROOT.iterdir()
+        if d.is_dir()
+        and not d.name.startswith(".")
+        and any("__pycache__" not in q.parts for q in d.rglob("*.py"))
+    }
+
+
 def test_every_declared_scan_root_has_a_budget_row() -> None:
-    """A walked-but-unbudgeted root is a blind spot: ceiling enforcement only
-    reads _BUDGETS, so every root the repo ships must carry an exact row."""
-    assert set(_BUDGETS) == {"crawlutron", "crawlutron_sdk", "scripts", "tests"}
+    """The derived side seals: no undeclared python root escapes the ceiling.
+    The table side seals: no dead budget row points at a vanished root."""
+    assert set(_BUDGETS) == _python_bearing_roots()
 
 
 def test_every_root_is_at_its_declared_file_budget() -> None:
