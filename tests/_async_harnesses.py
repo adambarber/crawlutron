@@ -140,9 +140,9 @@ async def issue_key(client: AsyncClient, *, max_pages: int = 0, max_concurrency:
 
 
 def expect_quota_refused(response) -> None:
-    """The 429 quota_exceeded shape every quota test reads back."""
+    """The 429 quota_exceeded refusal in the production error envelope."""
     assert response.status_code == 429, response.text
-    assert response.json()["detail"]["code"] == "quota_exceeded"
+    assert response.json()["code"] == "quota_exceeded"
 
 
 __all__ = [

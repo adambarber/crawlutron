@@ -13,12 +13,13 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from fastapi import FastAPI, Request
+from fastapi import Request
 
 from crawlutron.api.dependencies import get_settings, get_shutdown_event, get_watch_store
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.mcp.registry import TOOLS_BY_NAME
 from crawlutron.mcp.router import router as mcp_router
+from tests._app_harnesses import harness_app
 from tests._async_harnesses import issue_key
 from tests._quota_harness import keyed_client, stores
 from tests.mcp._tool_calls import KeyedToolCaller
@@ -54,9 +55,7 @@ async def watch_harness(tmp_path: Path) -> AsyncGenerator[WatchHarness, None]:
     from crawlutron.storage.watch_store import WatchStore
 
     _, _, keys = stores(tmp_path)
-    app = FastAPI()
-    for router in (mcp_router, watch_router, keys_router):
-        app.include_router(router)
+    app = harness_app(mcp_router, watch_router, keys_router)
     watch_store = WatchStore(tmp_path / "watches.db")
     app.state.watch_store = watch_store
     overrides: dict[Callable[[Request], object], Callable[[], object]] = {

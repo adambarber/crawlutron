@@ -120,7 +120,7 @@ async def test_door_refuses_throttled_key_without_pbkdf2(tmp_path):
             json={"url": "http://example.com/", "async_mode": True},
         )
         assert throttled.status_code == 429, throttled.text
-        assert throttled.json()["detail"]["code"] == "key_verify_throttled"
+        assert throttled.json()["code"] == "key_verify_throttled"
         after = caller_key_store.pbkdf2_calls - calls_before
         assert after == KeyVerifyThrottle.MAX_FAILURES, f"burned {after} PBKDF2 calls"
 

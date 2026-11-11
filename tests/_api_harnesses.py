@@ -102,15 +102,9 @@ def stored_request(store: JobStore, response):
 
 def mount_tracker(client: AsyncClient):
     """Attach the sync-door register to the test client's app and return it."""
-    from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
+    from tests._app_harnesses import mount_concurrency_tracker
 
-    tracker = CallerConcurrencyTracker()
-    transport = client._transport
-    # ASGITransport carries the app; assert it rather than import the class here.
-    app = getattr(transport, "app", None)
-    assert app is not None, "the quota client must ride an ASGI transport"
-    app.state.concurrency_tracker = tracker
-    return tracker
+    return mount_concurrency_tracker(client)
 
 
 @contextlib.asynccontextmanager

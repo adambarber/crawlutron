@@ -18,6 +18,7 @@ from httpx import AsyncClient, Response
 from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
 from crawlutron.api.dependencies import get_concurrency_tracker
 from crawlutron.storage import caller_key_store, job_store, result_store
+from tests._app_harnesses import harness_app
 from tests._async_harnesses import issue_key, serve
 from tests._quota_harness import grant_test_admin_token, stores
 
@@ -37,9 +38,7 @@ async def trackerless_app(tmp_path: Path) -> AsyncGenerator[_Harness, None]:
     from crawlutron.api.keys_router import router as keys_router
 
     store, results, keys = stores(tmp_path)
-    app = FastAPI()
-    app.include_router(crawl_router)
-    app.include_router(keys_router)
+    app = harness_app(crawl_router, keys_router)
     app.state.caller_key_store = keys
     app.state.job_store = store
     app.state.result_store = results
@@ -61,7 +60,7 @@ async def test_crawl_without_tracker_is_refused_not_degraded(trackerless_app):
     client, _, _, _, _ = trackerless_app
     response = await _keyed_crawl(client)
     assert response.status_code == 500, response.text
-    assert response.json()["detail"]["code"] == "tracker_missing"
+    assert response.json()["code"] == "tracker_missing"
 
 
 async def test_crawl_with_tracker_serves(trackerless_app):

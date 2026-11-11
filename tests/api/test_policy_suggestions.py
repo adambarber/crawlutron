@@ -385,4 +385,4 @@ async def test_a_wrong_credential_is_401_through_the_real_door(tmp_path):
 def _assert_401_envelope(response) -> None:
     """The 401 refusal shape every unauthenticated caller reads."""
     assert response.status_code == 401, response.text
-    assert response.json()["detail"]["code"] == "invalid_api_key"
+    assert response.json()["code"] == "invalid_api_key"

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from crawlutron.api import watch_sweep
@@ -18,7 +17,7 @@ from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models import watch_state
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.webhook_target import WebhookTarget
-from tests._app_factory import service_app
+from tests._app_harnesses import harness_app
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 WATCH_INTERVAL = 3600
@@ -80,12 +79,7 @@ def capture_announcements(monkeypatch):
 
 def watch_client(store) -> AsyncClient:
     """An AsyncClient over ``/v1/watches``, backed by ``store``."""
-    app = FastAPI()
-    app.include_router(watch_router)
-    # The error envelope is part of the surface under test, so the handlers that shape it are read off the
-    # real app rather than restated here: a harness that spelled them out would keep answering with the old
-    for exception_class, handler in service_app().exception_handlers.items():
-        app.add_exception_handler(exception_class, handler)
+    app = harness_app(watch_router)
     from tempfile import mkdtemp
 
     from crawlutron.storage.caller_key_store import CallerKeyStore
@@ -100,7 +94,6 @@ __all__ = [
     "ASGITransport",
     "AsyncClient",
     "CrawlerSettings",
-    "FastAPI",
     "WATCH_INTERVAL",
     "WATCH_WEBHOOK",
     "DEFAULT_TARGET",
@@ -110,7 +103,6 @@ __all__ = [
     "get_watch_store",
     "loopback_url",
     "register_watch",
-    "service_app",
     "stub_transient_failure",
     "watch_client",
     "watch_router",

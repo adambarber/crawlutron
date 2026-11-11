@@ -20,6 +20,7 @@ from crawlutron.config.settings import CrawlerSettings
 from crawlutron.storage.caller_key_store import CallerKeyStore
 from crawlutron.storage.job_store import JobStore
 from crawlutron.storage.result_store import CrawlResultStore
+from tests._app_harnesses import harness_app
 from tests._async_harnesses import serve
 from tests._policy_factories import job_store as make_store
 
@@ -75,9 +76,7 @@ async def service_client(
     ``with_results`` also wires a result store and propagates the job store to
     ``app.state`` for the MCP door. Yields the client, job store, and key store."""
     job_store, results, keys = stores(tmp_path)
-    app = FastAPI()
-    for router in routers.values():
-        app.include_router(router)
+    app = harness_app(*routers.values())
     app.state.job_store = job_store
     overrides: dict[Callable[[Request], object], Callable[[], object]] = {
         get_job_store: lambda: job_store,
@@ -107,9 +106,7 @@ async def keyed_result_client(
     to it, and stashes the store on app.state for the MCP door; yields the
     client, result store, and key store."""
     _, results, keys = stores(tmp_path)
-    app = FastAPI()
-    for router in routers:
-        app.include_router(router)
+    app = harness_app(*routers)
     app.state.result_store = results
     async with keyed_client(
         app,

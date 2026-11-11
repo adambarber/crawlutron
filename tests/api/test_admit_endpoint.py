@@ -19,6 +19,7 @@ from fastapi import FastAPI
 from httpx import AsyncClient
 
 from crawlutron.config.settings import CrawlerSettings
+from tests._app_harnesses import harness_app
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -36,8 +37,7 @@ def _admit_app(settings: CrawlerSettings | None = None) -> FastAPI:
     from crawlutron.api.admit_router import router as admit_router
     from crawlutron.api.dependencies import get_settings
 
-    app = FastAPI()
-    app.include_router(admit_router)
+    app = harness_app(admit_router)
     app.dependency_overrides[get_settings] = lambda: settings or CrawlerSettings.from_mapping({})
     return app
 
