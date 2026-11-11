@@ -6,7 +6,7 @@ import multiprocessing
 import socket
 import threading
 import time
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from multiprocessing.process import BaseProcess
 from multiprocessing.queues import Queue
 
@@ -14,6 +14,8 @@ import httpx
 import pytest
 
 from crawlutron.models.http_fetch_result import HttpFetchResult
+from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.transport.transport import FetchRequest
 from crawlutron.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 from tests._fetch_outcome import FetchFailed, FetchOutcome
 
@@ -263,6 +265,32 @@ def real_cffi_fetch_outcome(
     if out_queue.empty():
         pytest.fail(f"the cffi worker produced no outcome for {url}")
     return out_queue.get()
+
+
+class ScriptedTransport:
+    """A :class:`crawlutron.transport.Transport` double: answers ``fetch()`` from
+    a script and records every call (request, max_bytes)."""
+
+    def __init__(
+        self,
+        script: list[HttpFetchResult | BaseException] | None = None,
+    ) -> None:
+        self._script = list(script or [])
+        self.calls: list[tuple[FetchRequest, int]] = []
+
+    async def fetch(self, request: FetchRequest, *, max_bytes: int) -> HttpFetchResult:
+        self.calls.append((request, max_bytes))
+        if not self._script:
+            raise AssertionError("transport.fetch called beyond the script")
+        answer = self._script.pop(0)
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer
+
+
+async def _void_store_cookies(hop_url: NormalizedUrl, response_headers: Mapping[str, str]) -> None:
+    """No-op cookie store: the walker's injection seam, for tests that do not pin cookies."""
+    return None
 
 
 __all__ = [

@@ -1,13 +1,14 @@
-"""RedirectWalker: owns the fetch walk (redirects, cookie capture, pin validation,
-header checks), calling ``transport.fetch()`` once per hop.
+"""RedirectWalker: the single redirect-walk implementation.
 
-Capping happens via :func:`crawlutron.safety.bounded_io.read_capped_async` -- one
-function, both transports. Cookie capture lives in the walker, not per-backend,
-which makes the C1 cookie-injection bug structurally impossible.
+Owns the fetch walk: one transport.fetch() per hop, redirect following,
+deferred cookie capture, cross-origin credential stripping, and pin
+validation in one place. ``redirect_target`` (pinned_transport) is the one
+redirect decision, and this walker is the only owner of hop-to-hop state, so
+one chain always yields one verdict -- no second walk implementation coexists
+with it.
 
-The cookie-store callable is injected (never imported here from ``fetchers``),
-so this module has no import edge back to the fetch layer -- ``fetchers`` owns
-both the walker and the sanctioned cookie tail, one direction only.
+``store_cookies`` is the sanctioned cookie tail (``fetchers.store_hop_cookies``,
+injected so this module never imports ``fetchers``).
 """
 
 from __future__ import annotations
@@ -15,15 +16,16 @@ from __future__ import annotations
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
+from typing import cast
 
 from crawlutron.models.http_fetch_result import HttpFetchResult
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.safety.bounded_io import BodyTooLarge
 from crawlutron.safety.header_values import reject_injectable_header_values
+from crawlutron.transport import pinned_dns as _dns
 from crawlutron.transport.pinned_transport import (
     PinnedRequest,
     PinRule,
-    RedirectChain,
     build_pinned_request,
     cffi_resolve_entry,
     redirect_target,
@@ -39,19 +41,13 @@ class _HopFrame:
     """One hop's shared frame: parameters every arm forwards."""
 
     url: NormalizedUrl
-    timeout_seconds: int
+    timeout_seconds: float
     max_bytes: int
     started: float
 
 
 class RedirectWalker:
-    """Owns the redirect walk: one transport.fetch() per hop, with redirect
-    following, deferred cookie capture, cross-origin credential stripping, and
-    pin validation all in one place.
-
-    ``store_cookies`` is the sanctioned cookie tail (``fetchers.store_hop_cookies``,
-    injected so this module never imports ``fetchers``).
-    """
+    """The single redirect-walk implementation (see module docstring)."""
 
     def __init__(
         self,
@@ -65,7 +61,7 @@ class RedirectWalker:
         self,
         url: NormalizedUrl,
         headers: dict[str, str],
-        timeout_seconds: int,
+        timeout_seconds: float,
         *,
         max_bytes: int = DEFAULT_MAX_CONTENT_LENGTH_BYTES,
         pin: PinRule | None = None,
@@ -78,45 +74,84 @@ class RedirectWalker:
         """
         if started is None:
             started = time.monotonic()
-        chain = RedirectChain(url, headers, pin=pin or build_pinned_request, timeout_seconds=timeout_seconds)
-        pending: tuple[NormalizedUrl, Mapping[str, str]] | None = None
+        # One walk object: hop state lives in locals; one verdict per chain.
+        current_url = url
+        current_headers: Mapping[str, str] | dict[str, str] = dict(headers)
+        hops = 0
+        rule = pin or build_pinned_request
         hop = _HopFrame(url=url, timeout_seconds=timeout_seconds, max_bytes=max_bytes, started=started)
-
+        pending: tuple[NormalizedUrl, Mapping[str, str]] | None = None
         # The shared wire edge: a header value that could end one header and
         # start another is refused before the first hop.
         reject_injectable_header_values(headers)
 
         while True:
-            # The pin admits this hop FIRST: a refused pin means the previous
-            # hop's Set-Cookie is never planted (no state leaks to an
-            # unreached target).
-            pinned = await chain.pin()
-            # Service-built additions (Host, hop cookies) ride the same law.
-            reject_injectable_header_values(pinned.headers)
+            pinned = await self._admit_hop(current_url, current_headers, rule, timeout_seconds)
 
             # The previous hop's Set-Cookie flushes here: reaching this point
             # means this hop's pin admitted the walk.
             await _flush_deferred_hop_cookies(pending, self._store_cookies)
             pending = None
-
-            request = self._build_request(chain, pinned, timeout_seconds)
+            request = self._build_request(pinned, timeout_seconds)
 
             try:
                 result = await self._transport.fetch(request, max_bytes=max_bytes)
             except BodyTooLarge:
                 # Multi-hop cap breach: url is the original admitted URL
                 # (hop.url is never reassigned on redirect), final_url is the
-                # terminal-hop logical URL (chain.url advanced per hop).
-                return http_413(hop.url, chain.url, hop.started)
+                # terminal-hop logical URL (current_url advanced per hop).
+                return http_413(hop.url, current_url, hop.started)
 
-            outcome, pending = await self._process_result(result, chain, started)
-            if outcome is not None:
-                return outcome
+            next_hop, cookie_headers = await self._handle_hop_result(
+                result, current_url, current_headers, hops
+            )
+            if next_hop is None:
+                # Terminal: persist this hop's cookies and return the result.
+                await self._store_cookies(current_url, cookie_headers)
+                return result
 
-    def _build_request(
-        self, chain: RedirectChain, pinned: PinnedRequest, timeout_seconds: int
-    ) -> FetchRequest:
-        """Build one hop's fetch request from the chain and pinned request."""
+            # Redirect: defer this hop's cookies until the next pin admits.
+            # RFC 6265 5.3: the Set-Cookie belongs to the origin that sent it
+            # (current_url before advancing), not the redirect target.
+            pending = (current_url, cookie_headers)
+            current_url, current_headers = next_hop
+            hops += 1
+
+    async def _admit_hop(
+        self,
+        url: NormalizedUrl,
+        headers: Mapping[str, str] | dict[str, str],
+        rule: PinRule,
+        timeout_seconds: float,
+    ) -> PinnedRequest:
+        """The pin admits this hop FIRST: a refused pin means the previous hop's
+        Set-Cookie is never planted (no state leaks to an unreached target).
+        Service-built additions (Host, hop cookies) ride the same wire-edge law."""
+        pinned = await _dns.bounded_thread_resolve(
+            cast(
+                Callable[[], PinnedRequest],
+                lambda _url=url, _headers=headers: rule(_url, dict(_headers)),
+            ),
+            timeout_seconds=timeout_seconds,
+        )
+        reject_injectable_header_values(pinned.headers)
+        return pinned
+
+    async def _handle_hop_result(
+        self,
+        result: HttpFetchResult,
+        current_url: NormalizedUrl,
+        current_headers: Mapping[str, str] | dict[str, str],
+        hops: int,
+    ) -> tuple[tuple[NormalizedUrl, Mapping[str, str]] | None, Mapping[str, str] | dict[str, str]]:
+        """Decide redirect-vs-terminal for one hop result: the next hop and its
+        deferred cookie headers, or None when the response is terminal."""
+        target = await self._advance(current_url, dict(current_headers), hops, result)
+        cookie_headers = result._raw_headers if result._raw_headers is not None else result.headers
+        return target, cookie_headers
+
+    def _build_request(self, pinned: PinnedRequest, timeout_seconds: float) -> FetchRequest:
+        """Build one hop's fetch request from the pinned request."""
         resolve_entry = cffi_resolve_entry(pinned)
         return FetchRequest(
             connect_url=pinned.connect_url,
@@ -126,35 +161,20 @@ class RedirectWalker:
             resolve_entry=resolve_entry,
         )
 
-    async def _process_result(
+    async def _advance(
         self,
+        url: NormalizedUrl,
+        headers: dict[str, str],
+        hops: int,
         result: HttpFetchResult,
-        chain: RedirectChain,
-        started: float,
-    ) -> tuple[HttpFetchResult | None, tuple[NormalizedUrl, Mapping[str, str]] | None]:
-        """Decide whether a hop result is terminal or a redirect; update chain
-        state on redirect and defer this hop's cookies until the next pin admits."""
-        target = await redirect_target(
-            chain.url,
-            chain.headers,
-            result.status_code,
-            result.headers.get("location"),
-            chain.hops,
-        )
-        if target is None:
-            # Terminal: persist this hop's cookies and return the result.
-            cookie_headers = result._raw_headers if result._raw_headers is not None else result.headers
-            await self._store_cookies(chain.url, cookie_headers)
-            return result, None
+    ) -> tuple[NormalizedUrl, dict[str, str]] | None:
+        """The single redirect decision: ``redirect_target`` applied to hop state.
 
-        # Redirect: defer this hop's cookies until the next pin admits the walk.
-        # RFC 6265 5.3: the Set-Cookie belongs to the origin that sent it
-        # (chain.url before advancing), not the redirect target.
-        cookie_headers = result._raw_headers if result._raw_headers is not None else result.headers
-        pending = (chain.url, cookie_headers)
-        chain.url, chain.headers = target
-        chain.hops += 1
-        return None, pending
+        Returns the next hop's ``(url, headers)``, or None when the response is
+        terminal. A second walk implementation used to decide this -- deleted,
+        so one chain yields one verdict.
+        """
+        return await redirect_target(url, headers, result.status_code, result.headers.get("location"), hops)
 
 
 async def _flush_deferred_hop_cookies(

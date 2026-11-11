@@ -13,17 +13,22 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import TypeGuard
 
+import httpx
+import pytest
+
 from crawlutron.models.http_fetch_result import HttpFetchResult
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.safety.bounded_io import BodyTooLarge
 from crawlutron.transport.pinned_transport import PinnedRequest
 from crawlutron.transport.redirect_walker import RedirectWalker
-from crawlutron.transport.transport import FetchRequest, http_413
+from crawlutron.transport.transport import http_413
 from tests._fetch_doubles import make_fetch
 from tests._policy_factories import canonical
+from tests._transport_doubles import ScriptedTransport
 
 ORIGINAL = canonical("http://a.com/x")
 TARGET = canonical("http://a.com/y")
+THIRD = canonical("http://a.com/z")
 
 
 def _result(
@@ -58,22 +63,6 @@ def _redirect(location: str = "/y", url: NormalizedUrl = ORIGINAL) -> HttpFetchR
     return _result(302, url=url, final_url=url, headers={"set-cookie": "hop=1"}, location=location)
 
 
-class _ScriptedTransport:
-    """A :class:`crawlutron.transport.Transport` double that answers from a
-    script and records every ``fetch()`` call (request + max_bytes)."""
-
-    def __init__(self, script: list[HttpFetchResult | BaseException]) -> None:
-        self._script = list(script)
-        self.calls: list[tuple[FetchRequest, int]] = []
-
-    async def fetch(self, request: FetchRequest, *, max_bytes: int) -> HttpFetchResult:
-        self.calls.append((request, max_bytes))
-        answer = self._script.pop(0)
-        if isinstance(answer, BaseException):
-            raise answer
-        return answer
-
-
 class _CookieStore:
     """The injected ``store_cookies`` seam; records each (url, headers) planting."""
 
@@ -106,7 +95,7 @@ def _pinned(url: NormalizedUrl = ORIGINAL, connect_url: str | None = None) -> Pi
 
 
 async def _walk(
-    transport: _ScriptedTransport,
+    transport: ScriptedTransport,
     store: _CookieStore,
     pin: _RecordingPin | None = None,
     max_bytes: int = 1024,
@@ -132,11 +121,12 @@ async def _run_walk(
     max_bytes: int = 1024,
     url: NormalizedUrl = ORIGINAL,
     headers: dict[str, str] | None = None,
-) -> tuple[HttpFetchResult | None, _ScriptedTransport, _RecordingPin, _CookieStore]:
+    store: _CookieStore | None = None,
+) -> tuple[HttpFetchResult | None, ScriptedTransport, _RecordingPin, _CookieStore]:
     """Build the walker's doubles, run one walk, return result plus doubles."""
-    transport = _ScriptedTransport(list(script))
+    transport = ScriptedTransport(list(script))
     pin = _RecordingPin(list(pin_responses))
-    store = _CookieStore()
+    store = _CookieStore() if store is None else store
     result = await _walk(transport, store, pin=pin, max_bytes=max_bytes, url=url, headers=headers)
     return result, transport, pin, store
 
@@ -257,3 +247,92 @@ async def test_terminal_url_is_terminal_hop_logical_not_original_admitted():
     assert result.final_url == TARGET, result.final_url
     assert result.url != ORIGINAL
     assert result.final_url != ORIGINAL
+
+
+async def test_empty_chain_returns_the_first_response_terminal():
+    """Empty chain: a terminal first hop ends the walk with one fetch, no advance."""
+    result, transport, *_ = await _run_walk(
+        [_terminal(url=ORIGINAL)], [_pinned(ORIGINAL)], store=_CookieStore()
+    )
+    assert result is not None and result.status_code == 200
+    assert result.url == ORIGINAL
+    assert result.final_url == ORIGINAL
+    assert len(transport.calls) == 1
+
+
+async def test_one_hop_reaches_its_terminal():
+    """One hop: a single redirect then a terminal answer; final URL is /y."""
+    result, transport, pin, *_ = await _run_walk(
+        [_redirect("/y"), _terminal()], [_pinned(ORIGINAL), _pinned(TARGET)], store=_CookieStore()
+    )
+    assert result is not None and result.status_code == 200
+    assert result.url == TARGET
+    assert result.final_url == TARGET
+    assert len(transport.calls) == 2
+    assert pin.calls[0][0] == ORIGINAL
+    assert pin.calls[1][0] == TARGET
+
+
+async def test_multi_hop_within_budget_reaches_the_final_hop():
+    """Multi-hop: three redirects then a terminal answer, all within the hop budget."""
+    result, transport, *_ = await _run_walk(
+        [_redirect("/y"), _redirect("/z"), _redirect(THIRD.raw), _terminal(url=THIRD)],
+        [_pinned(ORIGINAL), _pinned(TARGET), _pinned(THIRD), _pinned(THIRD)],
+        store=_CookieStore(),
+    )
+    assert result is not None and result.status_code == 200
+    assert result.url == THIRD
+    assert result.final_url == THIRD
+    assert len(transport.calls) == 4
+
+
+async def test_self_loop_exhausts_the_hop_budget():
+    """Self-loop: redirecting to itself advances until hop exhaustion, then refuses."""
+    script = [_redirect(ORIGINAL.raw)] * 6
+    with pytest.raises(httpx.TooManyRedirects):
+        await _run_walk(script, [_pinned(ORIGINAL)] * 6, store=_CookieStore())
+
+
+async def test_cyclic_chain_exhausts_the_hop_budget():
+    """Cyclic: A hopping to B and back advances until hop exhaustion, then refuses."""
+    script = [_redirect(TARGET.raw), _redirect(ORIGINAL.raw)] * 3
+    with pytest.raises(httpx.TooManyRedirects):
+        await _run_walk(script, [_pinned(ORIGINAL), _pinned(TARGET)] * 3, store=_CookieStore())
+
+
+def _assert_terminal(
+    result: HttpFetchResult | None,
+    transport: ScriptedTransport,
+    expected_url: NormalizedUrl,
+    expected_calls: int,
+) -> None:
+    """One verdict: terminal 200 at the expected URL with the expected fetch count."""
+    assert result is not None and result.status_code == 200
+    assert result.url == expected_url
+    assert result.final_url == expected_url
+    assert len(transport.calls) == expected_calls
+
+
+async def test_unified_walker_one_verdict_per_chain():
+    """One chain yields one verdict: RedirectWalker is the single redirect-walk
+    implementation. A multi-hop chain with deferred cookies produces exactly one
+    terminal result -- no second walk implementation interposes a divergent
+    verdict. Each hop's Set-Cookie defers until the next pin admits, then plants
+    on the origin that sent it."""
+    result, transport, pin, store = await _run_walk(
+        [
+            _result(302, url=ORIGINAL, final_url=ORIGINAL, headers={"set-cookie": "hop=1"}, location="/y"),
+            _result(302, url=TARGET, final_url=TARGET, headers={"set-cookie": "hop=2"}, location="/z"),
+            _terminal(url=THIRD, headers={"set-cookie": "hop=3"}),
+        ],
+        [_pinned(ORIGINAL), _pinned(TARGET), _pinned(THIRD)],
+    )
+    _assert_terminal(result, transport, THIRD, 3)
+    assert len(pin.calls) == 3
+    assert len(store.calls) == 3
+    assert store.calls[0][0] == ORIGINAL
+    assert store.calls[0][1]["set-cookie"] == "hop=1"
+    assert store.calls[1][0] == TARGET
+    assert store.calls[1][1]["set-cookie"] == "hop=2"
+    assert store.calls[2][0] == THIRD
+    assert store.calls[2][1]["set-cookie"] == "hop=3"

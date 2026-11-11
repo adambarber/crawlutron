@@ -7,12 +7,14 @@ from __future__ import annotations
 
 import asyncio
 import io
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
 import pdfplumber
 
 from crawlutron.models.normalized_url import NormalizedUrl
+from crawlutron.transport.httpx_transport import HttpxTransport
 from crawlutron.transport.timeouts import Timeouts
 
 if TYPE_CHECKING:
@@ -79,27 +81,30 @@ async def _afetch_document_bytes(
     *,
     timeout_seconds: float | None = None,
 ) -> bytes:
-    """Fetch document bytes over the shared pinned transport, redirect hops
-    re-pinned, with ``follow_redirects=False``. The budget is the caller's
-    request budget via ``Timeouts.for_request``; none falls to the posture."""
+    """Fetch document bytes over the single redirect walk: every hop re-pinned,
+    redirects followed by :class:`RedirectWalker`, body capped per hop. The
+    budget is the caller's request budget via ``Timeouts.for_request``; none
+    falls to the posture. Document extraction plants no hop cookies."""
     from crawlutron.extraction.content import EXTRACTION_DOC_MAX_INPUT_BYTES
-    from crawlutron.safety.bounded_io import read_capped_async
-    from crawlutron.transport import http_client_pool, pinned_transport, pooled_clients
+    from crawlutron.transport import pooled_clients
+    from crawlutron.transport.redirect_walker import RedirectWalker
 
     await pooled_clients.drain_pending_client_closes()
-    client = http_client_pool.get_async_http_client()
     # The request budget when one exists, the service posture otherwise --
     # both read FROM the vocabulary, never a local scalar.
     budget = Timeouts.for_request(timeout_seconds) if timeout_seconds is not None else Timeouts.defaults()
-    timeout = budget.as_httpx()
-    async for chain, pinned in pinned_transport.apinned_hops(url, {}, pin=pin, timeout_seconds=budget.read):
-        # Follow_redirects=False: the chain below is the redirect loop, so httpx
-        # following one too would connect to a target nobody re-validated.
-        async with pinned_transport.apinned_stream(client, chain, pinned, timeout) as response:
-            if await chain.advance(response) is not None:
-                continue
-            return await read_capped_async(response.aiter_raw(), EXTRACTION_DOC_MAX_INPUT_BYTES)
-    raise AssertionError("apinned_hops raises on a body that neither returned nor advanced")
+
+    async def _noop_store_cookies(hop_url: NormalizedUrl, response_headers: Mapping[str, str]) -> None:
+        """Document extraction is read-only: no hop cookies are planted."""
+        return None
+
+    result = await RedirectWalker(HttpxTransport(), store_cookies=_noop_store_cookies).walk(
+        url, {}, budget.read, max_bytes=EXTRACTION_DOC_MAX_INPUT_BYTES, pin=pin
+    )
+    if result is None:
+        # The walker always returns a terminal result or raises.
+        raise AssertionError("the redirect walker returned no terminal result")
+    return result.body
 
 
 def default_document_text_extractor(url: NormalizedUrl, timeout_seconds: float | None = None) -> str:
