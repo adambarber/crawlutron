@@ -4,18 +4,7 @@ import pytest
 
 from crawlutron.models.json_value import JsonValue
 from crawlutron.storage.result_store import CrawlResultStore
-
-
-def _clock(start=1000.0):
-    state = {"t": start}
-
-    def clock():
-        return state["t"]
-
-    def advance(seconds):
-        state["t"] += seconds
-
-    return clock, advance
+from tests._clocks import advance_clock, arrange_clock
 
 
 def _payload(tag="x"):
@@ -23,22 +12,22 @@ def _payload(tag="x"):
 
 
 def test_roundtrip():
-    clock, _ = _clock()
+    state, clock = arrange_clock()
     store = CrawlResultStore(":memory:", ttl_seconds=3600, max_entries=10, clock=clock)
     store.put("crawl_a", _payload("a"))
     assert store.get("crawl_a") == _payload("a")
 
 
 def test_expiry_returns_none():
-    clock, advance = _clock()
+    state, clock = arrange_clock()
     store = CrawlResultStore(":memory:", ttl_seconds=600, max_entries=10, clock=clock)
     store.put("crawl_a", _payload("a"))
-    advance(601)
+    advance_clock(state, 601)
     assert store.get("crawl_a") is None
 
 
 def test_max_entries_prunes_oldest():
-    clock, _ = _clock()
+    _state, clock = arrange_clock()
     store = CrawlResultStore(":memory:", ttl_seconds=3600, max_entries=3, clock=clock)
     for i in range(5):
         store.put(f"crawl_{i}", _payload(str(i)))
@@ -47,7 +36,7 @@ def test_max_entries_prunes_oldest():
 
 
 def test_missing_id_returns_none():
-    clock, _ = _clock()
+    _state, clock = arrange_clock()
     store = CrawlResultStore(":memory:", ttl_seconds=3600, max_entries=10, clock=clock)
     assert store.get("crawl_nope") is None
 
@@ -102,7 +91,7 @@ def test_a_payload_within_the_byte_cap_is_retained(tmp_path):
 def test_page_reads_are_bounded_and_continue_by_cursor():
     """#443: a page read returns at most ``limit`` rows and a cursor that
     continues the scan; the whole table is never materialized at once."""
-    clock, _ = _clock()
+    _state, clock = arrange_clock()
     store = CrawlResultStore(":memory:", ttl_seconds=3600, max_entries=10, clock=clock)
     for i in range(5):
         store.put(f"crawl_{i}", _payload(str(i)))
@@ -125,11 +114,11 @@ def test_page_reads_are_bounded_and_continue_by_cursor():
 
 def test_retained_count_is_the_ttl_window_size():
     """The honest denominator: how many rows the TTL window still holds."""
-    clock, advance = _clock()
+    state, clock = arrange_clock()
     store = CrawlResultStore(":memory:", ttl_seconds=300, max_entries=10, clock=clock)
     store.put("crawl_kept", _payload("kept"))
     store.put("crawl_gone", _payload("gone"))
-    advance(301)
+    advance_clock(state, 301)
     store.put("crawl_late", _payload("late"))
 
     assert store.retained_count() == 1

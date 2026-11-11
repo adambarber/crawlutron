@@ -75,7 +75,7 @@ def test_direct_reads_do_not_perturb_slope(monkeypatch):
     ticks = itertools.count(0.0, 10.0)
     sampled: list[float] = []
 
-    def _clock() -> float:
+    def sampling_clock() -> float:
         value = next(ticks)
         sampled.append(value)
         return value
@@ -87,7 +87,7 @@ def test_direct_reads_do_not_perturb_slope(monkeypatch):
             total_bytes=1000, used_bytes=int(next(ratios) * 1000)
         ),
     )
-    monkeypatch.setattr(time, "monotonic", _clock)
+    monkeypatch.setattr(time, "monotonic", sampling_clock)
     gate = mp.MemoryGate(target=0.9, hard=1.0)
     assert gate.leading_usage_ratio() == 0.5
     assert gate.leading_usage_ratio() == 0.5

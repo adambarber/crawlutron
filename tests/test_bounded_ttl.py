@@ -3,22 +3,23 @@
 from typing import Any
 
 from crawlutron.safety.bounded_ttl import BoundedTTLCache
+from tests._clocks import ClockState, arrange_clock
 from tests._thread_fanout import run_thread_fanout
 
 
-def _clocked_cache(ttl: float = 10.0) -> tuple[dict[str, float], BoundedTTLCache[str, object]]:
+def _cache_on_movable_time(ttl: float = 10.0) -> tuple[ClockState, BoundedTTLCache[str, object]]:
     """A cache whose clock the test owns, plus the handle to move it: none of these
     tests can use a real clock, so each was building the same clock-plus-cache pair;
     moving ``now`` is the only verb the caller has.
     """
-    clock: dict[str, float] = {"now": 1000.0}
+    clock, _ = arrange_clock()
     cache = BoundedTTLCache[str, object](max_entries=4, ttl=ttl, clock=lambda: clock["now"])
     return clock, cache
 
 
 def _lru_with_a_b():
     """BoundedTTLCache (max_entries=2) pre-loaded with a and b."""
-    clock: dict[str, float] = {"now": 1000.0}
+    clock, _ = arrange_clock()
     cache = BoundedTTLCache[str, Any](max_entries=2, ttl=100.0, clock=lambda: clock["now"])
     cache.put("a", 1)
     cache.put("b", 2)
@@ -27,7 +28,7 @@ def _lru_with_a_b():
 
 class TestContract:
     def test_get_put_roundtrip_and_ttl_expiry(self):
-        clock, cache = _clocked_cache()
+        clock, cache = _cache_on_movable_time()
         cache.put("a", 1)
         assert cache.get("a") == 1
         clock["now"] += 10.0  # exactly at expiry boundary: engines treat
@@ -42,7 +43,7 @@ class TestContract:
         assert cache.get("a") is None
 
     def test_get_stale_returns_expired_entries_for_304_reuse(self):
-        clock, cache = _clocked_cache()
+        clock, cache = _cache_on_movable_time()
         cache.put("u", (["/p1"], "v1", None))
         clock["now"] += 60.0  # expired
         assert cache.get("u") is None  # freshness still enforced on get
@@ -59,7 +60,7 @@ class TestContract:
         assert cache.get("c") == 3
 
     def test_purge_expired_returns_count(self):
-        clock: dict[str, float] = {"now": 1000.0}
+        clock, _ = arrange_clock()
         cache = BoundedTTLCache[str, Any](max_entries=8, ttl=10.0, clock=lambda: clock["now"])
         cache.put("a", 1)
         cache.put("b", 2, ttl=100.0)

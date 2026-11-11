@@ -13,6 +13,7 @@ import pytest
 
 from crawlutron.api.key_throttle import KeyVerifyThrottle
 from crawlutron.storage.caller_key_store import CallerKeyStore
+from tests._clocks import arrange_clock
 
 
 def test_consecutive_failed_verifies_trip_cooldown(tmp_path):
@@ -125,21 +126,11 @@ async def test_door_refuses_throttled_key_without_pbkdf2(tmp_path):
         assert after == KeyVerifyThrottle.MAX_FAILURES, f"burned {after} PBKDF2 calls"
 
 
-def _frozen_clock():
-    """An injected monotonic-shaped clock a test can advance."""
-    state = {"now": 100.0}
-
-    def clock() -> float:
-        return state["now"]
-
-    return state, clock
-
-
 def test_cooldown_survives_a_capacity_flood():
     """#675: an active cooldown survives the LRU cap -- a flood cannot launder
     a cooldown victim's ledger (the surviving owner of the #663 retention pin,
     whose sweep mechanism was deleted with the mint budget)."""
-    state, clock = _frozen_clock()
+    state, clock = arrange_clock(start=100.0)
     throttle = KeyVerifyThrottle(clock=clock)
     victim = "ck_0123456789abcdef.victim"
     for _ in range(KeyVerifyThrottle.MAX_FAILURES):
@@ -155,7 +146,7 @@ def test_cooldown_expiry_rearms_the_bucket():
     """#661: after a cooldown elapses, ONE wrong guess must not re-trip an
     instant re-cooldown -- the expired cooldown clears the failure ladder, so
     the next MAX_FAILURES guesses are needed before cooling again."""
-    state, clock = _frozen_clock()
+    state, clock = arrange_clock(start=100.0)
     throttle = KeyVerifyThrottle(clock=clock)
     presented = "ck_0123456789abcdef.cooldown"
 
@@ -224,7 +215,7 @@ def test_concurrent_record_failure_loses_increments_without_lock():
     MAX_FAILURES or cooling; no deadlock, no sleeps, no GIL timing."""
     count = KeyVerifyThrottle.MAX_FAILURES
     key = "ck_0123456789abcdef.racy"
-    state, clock = _frozen_clock()
+    state, clock = arrange_clock(start=100.0)
     gate = threading.Barrier(count)
     throttle = _RacyThrottle(clock=clock, gate=gate)
 
@@ -239,7 +230,7 @@ def test_concurrent_failures_reach_cooldown_threshold():
     reach the cooldown threshold; no increment is lost. The fix makes it."""
     count = KeyVerifyThrottle.MAX_FAILURES
     key = "ck_0123456789abcdef.concurrent"
-    state, clock = _frozen_clock()
+    state, clock = arrange_clock(start=100.0)
     throttle = KeyVerifyThrottle(clock=clock)
 
     _run_concurrent(throttle, key, count)

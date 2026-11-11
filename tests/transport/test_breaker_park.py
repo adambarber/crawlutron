@@ -10,59 +10,25 @@ import pytest
 
 from crawlutron.models.crawl_task import CrawlTask
 from crawlutron.transport.scheduler import DomainScheduler
+from tests._clocks import Timeline, parking_clock
 from tests._policy_factories import canonical
 from tests._recursive_harnesses import drive_recursive_crawl, make_crawl_task
 from tests._result_builders import engine_result
 from tests._scheduler_doubles import engine_envelope, make_scheduler, ok_worker, trip_circuit
-
-# Bound at module import, before any runtime patch -- its inner sleep(0) must
-# be the REAL primitive or the helper re-enters the patch forever (attack 3).
-_REAL_SLEEP = asyncio.sleep
 
 
 def _task(index: int, url: str) -> CrawlTask:
     return CrawlTask(index=index, original_url=url, normalized_url=canonical(url))
 
 
-class _Clock:
-    """A mutable monotonic clock the test advances when the park sleeps."""
-
-    def __init__(self):
-        self.now = 0.0
-
-    def __call__(self) -> float:
-        return self.now
-
-
 async def _allows(url):
     return True
-
-
-async def _advance_on_sleep(clock: _Clock, requested: list[float], delay=None):
-    """Record the sleep request and move the injected clock past it, so parks
-    and half-open recoveries are deterministic and zero wall clock."""
-    if delay:
-        requested.append(delay)
-        clock.now += delay
-    await _REAL_SLEEP(0)
-
-
-def _parking_clock(monkeypatch) -> tuple[_Clock, list[float]]:
-    """An injected clock that advances by every sleep the scheduler requests:
-    parks elapse deterministically, zero wall clock."""
-    clock = _Clock()
-    requested: list[float] = []
-    monkeypatch.setattr(
-        "crawlutron.transport.scheduler.asyncio.sleep",
-        lambda delay=None: _advance_on_sleep(clock, requested, delay),
-    )
-    return clock, requested
 
 
 async def test_open_breaker_parks_the_batch_and_records_a_cooldown(monkeypatch):
     """A batch facing an open breaker parks (cooldown recorded), then RUNS when
     the window elapses -- no failed envelope, no requeue, no lost fetch."""
-    clock, requested = _parking_clock(monkeypatch)
+    clock, requested = parking_clock(monkeypatch)
     scheduler = make_scheduler(circuit_cooldown_base=30.0, clock=clock)
     trip_circuit(scheduler, "example.com")
 
@@ -112,17 +78,17 @@ async def test_breaker_still_open_after_the_park_cap_fails_the_job(monkeypatch):
 async def test_recursive_batch_over_an_open_breaker_runs_not_requeues(monkeypatch):
     """The storm end-to-end: a recursive batch over an open breaker must run each
     job once after parking -- no circuit_breaker_open envelopes, no requeue churn."""
-    clock = _Clock()
+    clock = Timeline()
     real_sleep = asyncio.sleep
 
-    async def advance_on_sleep(delay=None):
+    async def advance_on_sleep_local(delay=None):
         # The park sleeps out the breaker window; advancing the injected clock
         # here makes the half-open recovery deterministic, zero wall clock.
         if delay:
             clock.now += delay
         await real_sleep(0)
 
-    monkeypatch.setattr("crawlutron.orchestration.admission_stall.asyncio.sleep", advance_on_sleep)
+    monkeypatch.setattr("crawlutron.orchestration.admission_stall.asyncio.sleep", advance_on_sleep_local)
 
     scheduler = DomainScheduler(
         global_limit=4, per_domain_limit=4, delay_seconds=0.0, circuit_cooldown_base=30.0, clock=clock
@@ -161,7 +127,7 @@ async def test_breaker_window_over_the_park_cap_fails_terminal(monkeypatch):
     """A breaker window larger than the park cap parks only the cap, then the
     still-open re-check fails the job terminally -- no oversized wait waves the
     batch at the origin (#580 follow-up: the cap the park sleeps is pinned)."""
-    clock, requested = _parking_clock(monkeypatch)
+    clock, requested = parking_clock(monkeypatch)
     # Two trips: 200 then 400 (min(400, cooldown ceiling 600)) > the 300 cap.
     scheduler = make_scheduler(circuit_cooldown_base=200.0, circuit_cooldown=600.0, clock=clock)
     trip_circuit(scheduler, "example.com", failures=scheduler.circuit_threshold * 2)

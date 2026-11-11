@@ -213,9 +213,12 @@ def test_rotated_previous_key_verifies_within_grace_window(tmp_path):
 
 
 def test_previous_key_stops_verifying_after_grace_window(tmp_path):
+    from tests._clocks import arrange_clock
+
     store, issued, new_secret = _rotated_key(tmp_path)
     with closing(sqlite3.connect(tmp_path / "keys.db")) as conn:
-        conn.execute("UPDATE caller_keys SET previous_rotated_at = ?", (time.time() - 400,))
+        state, _ = arrange_clock(start=1000.0)
+        conn.execute("UPDATE caller_keys SET previous_rotated_at = ?", (state["now"] - 400,))
         conn.commit()
 
     assert store.verify_key(issued.secret) is None  # previous expired

@@ -164,13 +164,9 @@ def _aliased_time_roots(tree: ast.Module) -> set[str]:
 def _from_imported_clocks(tree: ast.Module) -> set[str]:
     """Local names bound to a CLOCK member via ``from time import ...`` at any
     scope (cycle 2: module-level-only missed function-local imports)."""
-    return {
-        alias.asname or alias.name
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom) and node.module == "time"
-        for alias in node.names
-        if alias.name in _TIME_CLOCK_MEMBERS
-    }
+    from tests.invariants._clock_family import from_time_imports
+
+    return from_time_imports(tree, _TIME_CLOCK_MEMBERS)
 
 
 def _clock_call_offenders(tree: ast.Module, path: pathlib.Path) -> Iterator[str]:
