@@ -43,6 +43,26 @@ class CrawlutronForbiddenError(CrawlutronClientError):
     code = "forbidden"
 
 
+class CrawlutronNotFoundError(CrawlutronClientError):
+    status_code = 404
+    code = "not_found"
+
+
+class CrawlutronBadRequestError(CrawlutronClientError):
+    status_code = 400
+    code = "bad_request"
+
+
+class CrawlutronConflictError(CrawlutronClientError):
+    status_code = 409
+    code = "invalid_state"
+
+
+class CrawlutronClientClosedRequestError(CrawlutronClientError):
+    status_code = 499
+    code = "client_disconnected"
+
+
 class CrawlutronRequestTooLargeError(CrawlutronClientError):
     status_code = 413
     code = "request_too_large"
@@ -51,11 +71,6 @@ class CrawlutronRequestTooLargeError(CrawlutronClientError):
 class CrawlutronTooManyRequestsError(CrawlutronClientError):
     status_code = 429
     code = "too_many_requests"
-
-
-class CrawlutronNotFoundError(CrawlutronClientError):
-    status_code = 404
-    code = "not_found"
 
 
 class CrawlutronUnprocessableEntityError(CrawlutronClientError):
@@ -96,12 +111,15 @@ class CrawlutronTransportError(CrawlutronError):
 
 _STATUS_TO_ERROR: dict[int, type[CrawlutronError]] = {
     202: CrawlutronAcceptedError,
+    400: CrawlutronBadRequestError,
     401: CrawlutronUnauthorizedError,
     403: CrawlutronForbiddenError,
-    413: CrawlutronRequestTooLargeError,
     404: CrawlutronNotFoundError,
+    409: CrawlutronConflictError,
+    413: CrawlutronRequestTooLargeError,
     422: CrawlutronUnprocessableEntityError,
     429: CrawlutronTooManyRequestsError,
+    499: CrawlutronClientClosedRequestError,
 }
 
 _SERVER_ERRORS: dict[int, type[CrawlutronServerError]] = {
@@ -128,7 +146,10 @@ def error_from_response(status_code: int, envelope: dict[str, object]) -> Crawlu
 __all__ = [
     "CrawlutronAcceptedError",
     "CrawlutronBadGatewayError",
+    "CrawlutronBadRequestError",
+    "CrawlutronClientClosedRequestError",
     "CrawlutronClientError",
+    "CrawlutronConflictError",
     "CrawlutronError",
     "CrawlutronForbiddenError",
     "CrawlutronInternalServerError",

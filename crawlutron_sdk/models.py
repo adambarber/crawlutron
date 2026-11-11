@@ -218,9 +218,9 @@ class SearchRequest(BaseModel):
         Field(
             default=None,
             ge=1,
-            le=20,
+            le=100,
             description="Maximum results to return; the server clamps this to its "
-            "CRAWLUTRON_SEARCH_LIMIT_MAX (default 20).",
+            "CRAWLUTRON_SEARCH_LIMIT_MAX (drift-guarded against the server model).",
         ),
     ] = None
 

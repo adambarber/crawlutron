@@ -8,17 +8,24 @@ from contextlib import asynccontextmanager
 import httpx
 import pytest
 
-from crawlutron_sdk import CrawlutronClient, CrawlutronClientSync
+from crawlutron_sdk import (
+    CrawlutronBadRequestError,
+    CrawlutronClient,
+    CrawlutronClientClosedRequestError,
+    CrawlutronClientSync,
+    CrawlutronConflictError,
+    CrawlutronUnauthorizedError,
+)
 from crawlutron_sdk.errors import (
     CrawlutronAcceptedError,
     CrawlutronBadGatewayError,
+    CrawlutronError,
     CrawlutronForbiddenError,
     CrawlutronInternalServerError,
     CrawlutronNotFoundError,
     CrawlutronServiceUnavailableError,
     CrawlutronTooManyRequestsError,
     CrawlutronTransportError,
-    CrawlutronUnauthorizedError,
     CrawlutronUnprocessableEntityError,
 )
 from crawlutron_sdk.models import AdmitRequest, CrawlRequest, CrawlResponse
@@ -38,6 +45,24 @@ def _client(handler) -> CrawlutronClient:
 
 def _sync_client(handler) -> CrawlutronClientSync:
     return CrawlutronClientSync(transport=httpx.MockTransport(handler), base_url="http://test")
+
+
+@asynccontextmanager
+async def _served(handler) -> AsyncGenerator[CrawlutronClient, None]:
+    client = _client(handler)
+    try:
+        yield client
+    finally:
+        await client.aclose()
+
+
+@asynccontextmanager
+async def _served_sync(handler) -> AsyncGenerator[CrawlutronClientSync, None]:
+    client = _sync_client(handler)
+    try:
+        yield client
+    finally:
+        client.close()
 
 
 def _crawl_200(request: httpx.Request) -> httpx.Response:
@@ -63,15 +88,6 @@ def _sequential_handler(
         return _accepted(request)
 
     return handler
-
-
-@asynccontextmanager
-async def _served(handler) -> AsyncGenerator[CrawlutronClient, None]:
-    client = _client(handler)
-    try:
-        yield client
-    finally:
-        await client.aclose()
 
 
 @pytest.mark.asyncio
@@ -170,6 +186,9 @@ async def test_api_key_is_sent_as_header():
 @pytest.mark.asyncio
 async def test_server_errors_map_to_typed_errors():
     cases = {
+        400: CrawlutronBadRequestError,
+        409: CrawlutronConflictError,
+        499: CrawlutronClientClosedRequestError,
         401: CrawlutronUnauthorizedError,
         403: CrawlutronForbiddenError,
         429: CrawlutronTooManyRequestsError,
@@ -189,6 +208,20 @@ async def test_server_errors_map_to_typed_errors():
 
 
 @pytest.mark.asyncio
+async def test_unmapped_status_falls_to_generic_base_error():
+    """Boundary: a status with no typed class lands on the generic base."""
+    _ = CrawlutronError  # import guard keeps the base in scope for the assert
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(418, json={"code": "teapot", "message": "m", "details": {}})
+
+    async with _served(handler) as client:
+        with pytest.raises(CrawlutronError) as excinfo:
+            await client.admit(AdmitRequest(url="https://example.com/"))
+    assert type(excinfo.value) is CrawlutronError
+
+
+@pytest.mark.asyncio
 async def test_transport_failure_raises_transport_error():
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("boom")
@@ -196,6 +229,43 @@ async def test_transport_failure_raises_transport_error():
     async with _served(handler) as client:
         with pytest.raises(CrawlutronTransportError):
             await client.admit(AdmitRequest(url="https://example.com/"))
+
+
+@pytest.mark.asyncio
+async def test_sync_get_crawl_result_202_raises_accepted():
+    async with _served_sync(_accepted) as client:
+        with pytest.raises(CrawlutronAcceptedError) as excinfo:
+            client.get_crawl_result("abc")
+    assert excinfo.value.status_code == 202
+
+
+@pytest.mark.asyncio
+async def test_sync_crawl_202_raises_accepted():
+    """Sync crawl mirrors async: a 202 (async-mode body) is an accepted error."""
+    async with _served_sync(_accepted) as client:
+        with pytest.raises(CrawlutronAcceptedError) as excinfo:
+            client.crawl(CrawlRequest(url="https://example.com/"))
+    assert excinfo.value.status_code == 202
+
+
+@pytest.mark.asyncio
+async def test_crawl_202_parity_between_transports():
+    """The same 202 wire event raises the SAME typed class on both clients."""
+    async with _served(_accepted) as async_client:
+        with pytest.raises(CrawlutronAcceptedError):
+            await async_client.crawl(CrawlRequest(url="https://example.com/"))
+    async with _served_sync(_accepted) as sync_client:
+        with pytest.raises(CrawlutronAcceptedError):
+            sync_client.crawl(CrawlRequest(url="https://example.com/"))
+
+
+@pytest.mark.asyncio
+async def test_sync_wait_for_polls_then_succeeds():
+    states = iter([202, 202, 200])
+
+    async with _served_sync(_sequential_handler(states)) as client:
+        response = client.wait_for("abc", poll_interval=0, max_wait=5)
+    assert response.request_id == "abc"
 
 
 def test_sync_client_crawl():
