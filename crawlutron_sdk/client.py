@@ -352,10 +352,6 @@ class CrawlutronClientSync(_ClientBase):
             return client.request(method, path, json=json)
         except httpx.HTTPError as error:
             self._transport_failure(error)
-        try:
-            return client.request(method, path, json=json)
-        except httpx.HTTPError as error:
-            self._transport_failure(error)
 
     def crawl(self, payload: CrawlRequest) -> CrawlResponse:
         response = self._request("POST", "/v1/crawl", json=_payload_dict(payload))
