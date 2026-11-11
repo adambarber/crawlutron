@@ -17,9 +17,8 @@ from tests.chokepoint_walks import REPO_ROOT, offender_at
 from tests.invariants._clock_family import suite_trees, wall_names, wall_read
 from tests.rules import Bites, Rule, Silent
 
-# Files whose wall reads are arrangement (constructing state, never asserted
-# on) or pre-existing sanctioned bounds the sweep provably does not need to
-# police. The table only ever shrinks: a row deleted here is the ratchet.
+# Wall reads here are arrangement (state construction, never asserted on) or
+# sanctioned bounds. The table only ever shrinks: a row deleted here is the ratchet.
 _EXEMPT = frozenset(
     {
         "tests/test_safe_regex.py",  # native C-loop timeout bound, marked
@@ -60,9 +59,9 @@ def _wall_assertion_offenders(tree: ast.Module, path: pathlib.Path) -> Iterator[
     following the read's name to its uses in asserts and comparisons."""
     relative = path.relative_to(REPO_ROOT).as_posix()
     if relative in _EXEMPT or not relative.startswith("tests/"):
-        # The law governs the test suite's timelines, not production's, and
-        # the two marked files carry sanctioned native bounds.
         return
+    # The law governs the test suite's timelines, not production's; the two
+    # marked files carry sanctioned native bounds.
     wall = wall_names(tree)
     for scope, fn in _test_defs(tree):
         if _marked(fn, scope):
