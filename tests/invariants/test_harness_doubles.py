@@ -54,9 +54,8 @@ def _decorator_name(decorator: ast.expr) -> str:
 
 _RECORD_BASE_TAILS = ("BaseModel", "TypedDict")
 
-#: The browser-family stand-in law (#844): each page/context double must carry
-#: every member of the production Protocol it stands in for. Both ends of the
-#: table are asserted live in the gate so a rename cannot silently ungovern a fake.
+# Browser-family stand-in law (#844): each fake carries every member of the
+# production Protocol it stands in for; both table ends are asserted live.
 _FAKE_STANDINS = {
     "BrowserFakePage": "RenderPage",
     "ScriptedPage": "RenderPage",
