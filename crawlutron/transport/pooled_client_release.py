@@ -62,22 +62,17 @@ async def safe_aclose(client: PooledClient) -> None:
 
 
 def close_on_fresh_loop(close: Callable[[], Awaitable[object]]) -> None:
-    """Close on a fresh loop, torn down after; the previous current loop is
-    restored so a closed loop is never left as this thread's current loop."""
-    try:
-        previous = asyncio.get_event_loop()
-    except RuntimeError:
-        previous = None
+    """Close on a fresh loop that owns its teardown.
+
+    Never consults the deprecated get_event_loop; closes the loop and clears
+    the thread's current loop so a closed loop is never left current."""
     fresh_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(fresh_loop)
     try:
-        asyncio.set_event_loop(fresh_loop)
         fresh_loop.run_until_complete(close())
     finally:
         fresh_loop.close()
-        if previous is not None:
-            asyncio.set_event_loop(previous)
-        else:
-            asyncio.set_event_loop(None)
+        asyncio.set_event_loop(None)
 
 
 def close_on_thread(close: Callable[[], Awaitable[object]]) -> None:
@@ -91,12 +86,7 @@ def close_on_thread(close: Callable[[], Awaitable[object]]) -> None:
 
     def _run() -> None:
         try:
-            fresh_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(fresh_loop)
-            try:
-                fresh_loop.run_until_complete(close())
-            finally:
-                fresh_loop.close()
+            close_on_fresh_loop(close)
         except BaseException as e:  # surface close failures to the caller
             exc[0] = e
         finally:

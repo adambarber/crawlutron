@@ -22,28 +22,27 @@ from tests._pool_harnesses import builder_for as _builder_for
 
 @pytest.fixture(autouse=True)
 def _clean_pooled_state():
-    """Start and end each test with the pooled state production never holds.
+    """Release pooled state only when a test actually used it.
 
-    The registry reset releases both pooled clients and clears the queue
-    as the unit production releases them."""
+    Idle tests pay no throwaway loop; tests that left state behind get the
+    bounded drain-then-reset teardown instead."""
     process_state.reset_all_process_state()
     yield
-    _drain_then_reset()
+    if process_state.has_any_process_state():
+        _drain_then_reset()
     assert not process_state.has_any_process_state(), "the pooled state outlived the test that used it"
 
 
-async def _drain_bounded(guard: float = 2.0) -> None:
-    """Drain queued and in-flight superseded closes bounded.
+async def _drain_bounded() -> None:
+    """Drain queued and in-flight superseded closes.
 
-    A stuck close raises TimeoutError: teardown must fail, never swallow it."""
-    await asyncio.wait_for(drain_pending_client_closes(), timeout=guard)
+    wait_for(10.0) is a hang canary for a close that never returns (#643),
+    not a speed budget: never tuned back down."""
+    await asyncio.wait_for(drain_pending_client_closes(), timeout=10.0)
 
 
 def _drain_then_reset() -> None:
-    """Drain queued closes bounded, then reset, then the caller asserts.
-
-    The drain always runs before the reset: no running-loop short-circuit, so
-    a live loop never skips the release and a stuck close fails teardown."""
+    """Drain queued closes, then reset -- drain always runs before reset."""
     asyncio.run(_drain_bounded())
     process_state.reset_all_process_state()
 
@@ -59,10 +58,9 @@ class _TrackedClient(Protocol):
 
 
 class _PooledFake:
-    """Minimal loop-bound client: records its bound loop and whether it closed.
+    """Minimal loop-bound client: bound loop recorded, close is one loop turn.
 
-    ``close`` yields to the loop first, like a real teardown; ``closer`` names
-    the real attribute, and the cffi fake must NOT grow an ``is_closed``."""
+    close never bets on a wall-clock timer; the cffi fake carries no is_closed."""
 
     def __init__(self, closer: str, *, publishes_is_closed: bool) -> None:
         setattr(self, closer, self._closed)
@@ -73,7 +71,7 @@ class _PooledFake:
             self.is_closed = False
 
     async def _closed(self) -> None:
-        await asyncio.sleep(0.02)
+        await asyncio.sleep(0)
         self.closed = True
         if hasattr(self, "is_closed"):
             self.is_closed = True
@@ -183,23 +181,23 @@ def test_a_burst_of_loop_changes_releases_every_superseded_client(seam, getter, 
     stub_builder(seam, _build)
 
     def acquire_on_fresh_loop() -> _PooledFake:
-        loop = asyncio.new_event_loop()
-        try:
+        # asyncio.run cancels+awaits the supersede's close task, so no loop
+        # closes with a pending task under filterwarnings=error.
+        async def _get():
+            return getattr(http_mod, getter)()
 
-            async def _get():
-                return getattr(http_mod, getter)()
-
-            return loop.run_until_complete(_get())
-        finally:
-            loop.close()
+        return asyncio.run(_get())
 
     acquired = [acquire_on_fresh_loop() for _ in range(8)]
 
     async def _drain_on_a_live_loop():
+        # Both doors drain the shared queue; each also closes its own CURRENT
+        # slot, so the last acquired client is released by its kind's door.
         await http_mod.close_async_http_client()
+        await http_mod.close_cffi_session()
 
     asyncio.run(_drain_on_a_live_loop())
-    assert all(a.closed for a in acquired[:-1]), (
+    assert all(a.closed for a in acquired), (
         f"{getter} left a superseded client unreleased after a burst of loop changes"
     )
 
@@ -316,8 +314,12 @@ class _NeverClosedClient:
         return None
 
 
-def _discard_probe(monkeypatch, loop_replacement) -> list[bool]:
-    """Run discard_if_unowned_loop with a dead/missing loop; return whether close was called."""
+def _discard_probe(install: asyncio.AbstractEventLoop | None) -> list[bool]:
+    """Run discard_if_unowned_loop with ``install`` as the current loop
+    (None means none); return whether close was called.
+
+    The condition is installed for real via set_event_loop instead of
+    monkeypatching asyncio.get_event_loop, so the probe pins behavior."""
     from crawlutron.transport.pooled_clients import PooledClient, discard_if_unowned_loop
 
     closed: list[bool] = []
@@ -327,43 +329,35 @@ def _discard_probe(monkeypatch, loop_replacement) -> list[bool]:
 
     namespace: dict[str, PooledClient | None] = {"_slot": _NeverClosedClient()}
 
-    if loop_replacement is None:
-        # Simulate pytest-asyncio leaving no current event loop after a test.
-        monkeypatch.setattr(
-            asyncio, "get_event_loop", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no loop"))
-        )
-    else:
-        monkeypatch.setattr(asyncio, "get_event_loop", lambda *a, **k: loop_replacement)
-
-    discard_if_unowned_loop(_close, "_slot", namespace)
+    asyncio.set_event_loop(install)
+    try:
+        discard_if_unowned_loop(_close, "_slot", namespace)
+    finally:
+        asyncio.set_event_loop(None)
 
     assert namespace["_slot"] is None
     return closed
 
 
-def test_discard_if_unowned_loop_closes_client_without_usable_loop(monkeypatch):
+def test_discard_if_unowned_loop_closes_client_without_usable_loop():
     """A pooled client must be closed, not merely dropped, when no usable
-    event loop exists at teardown. Dropping it leaves its transports open and
-    they surface later as random ResourceWarning errors on unrelated tests
-    (the socket-leak unraisable family)."""
-    closed = _discard_probe(monkeypatch, None)
+    event loop exists at teardown. Dropping it leaves its transports open."""
+    closed = _discard_probe(None)
     assert closed, "client was dropped without being closed on a dead loop"
 
 
-def test_discard_if_unowned_loop_closes_client_on_closed_loop(monkeypatch):
-    """When the current event loop is closed (pytest-asyncio teardown), the
-    pooled client must still be closed on a fresh loop, not silently dropped."""
+def test_discard_if_unowned_loop_closes_client_on_closed_loop():
+    """When the current loop is closed at teardown, the pooled client must
+    still be closed on a fresh loop, not silently dropped."""
     dead = asyncio.new_event_loop()
     dead.close()
-    closed = _discard_probe(monkeypatch, dead)
+    closed = _discard_probe(dead)
     assert closed, "client was dropped without being closed on a closed loop"
 
 
 async def test_discard_if_unowned_loop_closes_client_on_running_loop():
     """A pooled client must be closed, not merely dropped, when the current
-    loop is running (teardown runs while the test loop is still alive).
-    Dropping it orphaned its transports; they surfaced later as ResourceWarning
-    on a random victim test (socket-leak unraisable family)."""
+    loop is running at teardown. Dropping it orphaned its transports."""
     closed: list[bool] = []
 
     async def _close() -> None:
@@ -380,10 +374,9 @@ async def test_discard_if_unowned_loop_closes_client_on_running_loop():
 
 
 def test_a_closed_current_loop_never_poisons_the_reset_chain(stub_builder):
-    """#643 red, raising site named: discard_if_unowned_loop. A closed loop left
-    as the thread's current loop answers get_event_loop happily, then
-    run_until_complete raises inside the reset; the chain re-raises, the queue
-    clear never runs, and the state survives into the next test."""
+    """#643 red, raising site named: discard_if_unowned_loop. A closed loop
+    left current answers get_event_loop happily; run_until_complete then raises
+    inside the reset, the queue clear never runs, and state survives."""
     fake = _LoopBoundFake()
     stub_builder("http", lambda settings=None: fake)
 

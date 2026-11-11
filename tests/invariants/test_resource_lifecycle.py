@@ -118,8 +118,7 @@ _MODULE_RELEASE_NAMES = frozenset(
         "close_async_http_client",
         "close_cffi_session",
         "close_browser_pool",
-        "close_on_fresh_loop",  # #820/unit-3: pooled release machinery split out
-        "close_on_thread",  # #820/unit-3: pooled release machinery split out
+        "close_on_fresh_loop",  # #820/unit-3; close_on_thread delegates to it
         "shutdown_doc_extraction_executor",
         "shutdown_job_runner",
         "close_queued_session",
