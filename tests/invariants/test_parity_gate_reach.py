@@ -26,7 +26,7 @@ _DIRECT_FACTORY_ROUTERS = {
     "crawlutron.discovery.capabilities",
     "crawlutron.discovery.well_known",
     "crawlutron.health.readiness",
-    "crawlutron.mcp.router",
+    "crawlutron.api.mcp_router",
 }
 
 #: Framework-owned routes (FastAPI's default docs/metrics mounts); not ours to gate.

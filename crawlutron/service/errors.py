@@ -20,6 +20,7 @@ __all__ = [
     "JobStateConflict",
     "KeyVerifyThrottled",
     "QuotaRefusal",
+    "RequestNotFound",
     "SearchProviderError",
     "SearchProviderUnavailable",
     "ValidationRefusal",
@@ -84,6 +85,13 @@ class KeyVerifyThrottled(DomainError):
 class JobNotFound(DomainError):
     def __init__(self, job_id: str) -> None:
         super().__init__(404, "not_found", f"Unknown job_id: {job_id}")
+
+
+class RequestNotFound(DomainError):
+    """A stored-crawl read missed: same 404 triplet the REST replay doors raise."""
+
+    def __init__(self, request_id: str) -> None:
+        super().__init__(404, "not_found", f"Unknown or expired request_id: {request_id}")
 
 
 class JobStateConflict(DomainError):

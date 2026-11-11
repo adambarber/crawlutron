@@ -16,9 +16,9 @@ import pytest
 from fastapi import Request
 
 from crawlutron.api.dependencies import get_settings, get_shutdown_event, get_watch_store
+from crawlutron.api.mcp_router import router as mcp_router
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.mcp.registry import TOOLS_BY_NAME
-from crawlutron.mcp.router import router as mcp_router
 from tests._app_harnesses import harness_app
 from tests._async_harnesses import issue_key
 from tests._quota_harness import keyed_client, stores

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from crawlutron.mcp.router import router as mcp_router
+from crawlutron.api.mcp_router import router as mcp_router
 from tests._async_harnesses import issue_key
 from tests._policy_factories import canonical
 from tests._policy_harnesses import stored_trace

@@ -12,7 +12,7 @@ from pathlib import Path
 
 from crawlutron.api.crawl_router import router as crawl_router
 from crawlutron.api.keys_router import router as keys_router
-from crawlutron.mcp.router import router as mcp_router
+from crawlutron.api.mcp_router import router as mcp_router
 from crawlutron.storage.job_store import JobStatus
 from tests._async_harnesses import issue_key
 from tests._concurrency_probe import block_execute_crawl

@@ -275,8 +275,8 @@ def _include_routers(app) -> None:
     app.include_router(create_capabilities_router())
     app.include_router(create_agent_hints_router())
     app.include_router(create_well_known_router())
+    from .api.mcp_router import router as mcp_router
     from .api.router_registry import ROUTER_MODULES
-    from .mcp.router import router as mcp_router
 
     for feature_router in ROUTER_MODULES:
         app.include_router(feature_router)

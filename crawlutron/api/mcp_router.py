@@ -1,7 +1,7 @@
 """``POST /mcp`` — MCP 2026-07-28 streamable-HTTP endpoint.
 
-Pure router: parses the raw JSON-RPC body and delegates to
-:func:`crawlutron.mcp.server.handle_mcp_request`; results are single JSON objects.
+Pure HTTP-wire concern, so it lives in api: parses the JSON-RPC body and
+delegates to :func:`crawlutron.mcp.server.handle_mcp_request`.
 """
 
 from __future__ import annotations

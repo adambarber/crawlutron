@@ -51,8 +51,8 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     # added since the list was pinned (these prune handlers/helpers via __all__).
     "crawlutron/api/keys_router.py": (4, 3),
     # #645: the two read cores joined. #714: delta_context_for is the shared
-    # delta loader both facades reach through.
-    "crawlutron/api/crawl_endpoint.py": (7, 7),
+    # delta loader. #849: the cores moved to service.crawl_endpoint_cores.
+    "crawlutron/api/crawl_endpoint.py": (4, 4),
     # #127: the pool concept splits on a real async/sync axis -- AsyncPool for
     # BrowserPool, SyncPool for DocExtractionPool -- so the surface is two protocols.
     "crawlutron/runtime/pool.py": (2, 2),
@@ -98,7 +98,8 @@ DECLARED_SURFACE_RATCHET = {
     # from the result store's ttl_seconds, not a second literal.
     "crawlutron/service/spill_sweep.py": (4, 2),
     "crawlutron/service/store_shutdown.py": (1, 1),
-    "crawlutron/api/caller_auth.py": (22, 19),
+    # #849: the core moved to service/caller_auth; Request plumbing stays api.
+    "crawlutron/api/caller_auth.py": (11, 9),
     "crawlutron/service/caller_concurrency.py": (1, 1),
     # #674 raised 1,1 -> 2,2: CrawlRefusalError is the typed refusal carrier the
     # sweep's deactivation arm reads (reason as an enum member, not boundary text).
@@ -130,13 +131,18 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/service/key_throttle.py": (2, 2),
     "crawlutron/service/policy_defaults.py": (2, 0),
     "crawlutron/api/policy_router.py": (2, 1),
-    "crawlutron/api/policy_suggestions.py": (3, 2),
+    "crawlutron/api/policy_suggestions.py": (0, 0),
+    # #849: re-export shim; the core moved to service/policy_suggestions.
+    "crawlutron/api/mcp_router.py": (2, 1),
     "crawlutron/api/render.py": (3, 3),
     "crawlutron/api/render_endpoint.py": (3, 2),
+    "crawlutron/service/caller_auth.py": (11, 10),
+    "crawlutron/service/crawl_endpoint_cores.py": (4, 4),
+    "crawlutron/service/policy_suggestions.py": (3, 2),
     "crawlutron/service/watch_sweep.py": (4, 2),
     # #849: the typed domain refusals both doors map — one base + named subclasses
     # plus the single-homed quota predicate the sweep reads.
-    "crawlutron/service/errors.py": (16, 15),
+    "crawlutron/service/errors.py": (17, 16),
     "crawlutron/service/webhooks.py": (15, 13),
     "crawlutron/extraction/content.py": (4, 4),
     "crawlutron/extraction/llm_format.py": (4, 4),
@@ -144,7 +150,8 @@ DECLARED_SURFACE_RATCHET = {
     # meter's /mcp refusal answers with.
     "crawlutron/mcp/constants.py": (19, 0),
     "crawlutron/mcp/protocol.py": (6, 6),
-    "crawlutron/mcp/router.py": (2, 1),
+    # #849: the MCP HTTP router relocated to api/mcp_router (wire concern); the
+    # protocol layer imports service only.
     "crawlutron/mcp/server.py": (6, 5),
     # #714: the MCP crawl doors' projection split (projection enum + projected);
     # handlers.py back under the 500-line ceiling.

@@ -52,6 +52,7 @@ MOVED_MODULES: dict[str, str] = {
     "policy_defaults": "leaf move (#849)",
     "webhooks": "leaf move (#849)",
     "sweep_loop": "leaf move (#849)",
+    "policy_suggestions": "core moved to service, shim for the REST router (#849)",
 }
 
 # Exempt (path_pattern, allowed_substring, justification) — ratcheted down-only.
@@ -104,6 +105,11 @@ EXEMPTIONS: tuple[tuple[str, str, str], ...] = (
     (
         "tests/invariants/_surface_ratchet.py",
         "crawlutron/api/webhooks.py",
+        "the shim budget rows: the ratchet must name the shim path it budgets",
+    ),
+    (
+        "tests/invariants/_surface_ratchet.py",
+        "crawlutron/api/policy_suggestions.py",
         "the shim budget rows: the ratchet must name the shim path it budgets",
     ),
     (

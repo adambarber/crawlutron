@@ -18,7 +18,7 @@ import pytest
 
 from crawlutron.api.jobs_router import router as jobs_router
 from crawlutron.api.keys_router import router as keys_router
-from crawlutron.mcp.router import router as mcp_router
+from crawlutron.api.mcp_router import router as mcp_router
 from crawlutron.service import job_runner
 from tests._job_harnesses import ScriptedExecute, _execution_policy, post_api_job
 from tests._policy_factories import canonical

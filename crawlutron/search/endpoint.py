@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import time
 
-from crawlutron.api.caller_auth import anonymous_caller
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.search_request import SearchRequest
 from crawlutron.models.search_response import SearchResponse
@@ -13,6 +12,7 @@ from crawlutron.models.search_result_item import SearchResultItem
 from crawlutron.runtime.metrics import get_metrics
 from crawlutron.search.providers import SearchProviderError, SearchProviderUnavailable
 from crawlutron.search.providers_api import get_search_provider
+from crawlutron.service.caller_auth import anonymous_caller
 from crawlutron.service.errors import SearchProviderError as DomainProviderError
 from crawlutron.service.errors import SearchProviderUnavailable as DomainProviderUnavailable
 

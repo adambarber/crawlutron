@@ -345,8 +345,8 @@ _PROBES = {
     "crawlutron/service/response_shaping.py:frontier_link_url": _probe_response_shaping,
     "crawlutron/api/watch_router.py:create_watch": _probe_watch_router,
     "crawlutron/service/watch_cores.py:register_watch_core": _probe_watch_cores,
-    "crawlutron/api/policy_suggestions.py:policy_suggestions": _probe_policy_suggestions,
-    "crawlutron/api/policy_suggestions.py:build_policy_suggestions": _probe_policy_suggestions,
+    "crawlutron/service/policy_suggestions.py:policy_suggestions": _probe_policy_suggestions,
+    "crawlutron/service/policy_suggestions.py:build_policy_suggestions": _probe_policy_suggestions,
     "crawlutron/service/webhooks.py:deliver_pinned_webhook": _probe_webhook_delivery,
 }
 

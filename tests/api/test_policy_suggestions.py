@@ -9,10 +9,10 @@ from typing import cast
 
 import pytest
 
-from crawlutron.api.policy_suggestions import policy_suggestions
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.json_value import JsonValue
+from crawlutron.service.policy_suggestions import policy_suggestions
 from crawlutron.storage.result_store import CrawlResultStore
 from tests._assertions import completed_crawl
 from tests._fetcher_factories import make_crawl_payload
@@ -252,7 +252,7 @@ async def test_validation_and_rollup_run_off_the_event_loop(tmp_path, monkeypatc
         return real_admit(candidate, policy=policy)
 
     monkeypatch.setattr(TraceResponse, "model_validate", _validate_spy)
-    monkeypatch.setattr("crawlutron.api.policy_suggestions.admit_or_none", _admit_spy)
+    monkeypatch.setattr("crawlutron.service.policy_suggestions.admit_or_none", _admit_spy)
 
     await policy_suggestions(result_store=store, settings=CrawlerSettings.from_mapping({}))
 

@@ -18,13 +18,7 @@ from crawlutron.api.exceptions import http_error
 from crawlutron.api.response_shaping import aunified_response_from_result
 from crawlutron.api.webhooks import ensure_https_webhook_url, validate_webhook_url_async
 from crawlutron.config.settings import CrawlerSettings
-from crawlutron.delta import (
-    BaselineEntry,
-    BaselineEvidence,
-    DeltaContext,
-    extract_baseline,
-    extract_baseline_entries,
-)
+from crawlutron.delta import DeltaContext
 from crawlutron.extraction.output_formats import serialize_results
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.crawl_pending import CrawlPendingError
@@ -33,12 +27,16 @@ from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.trace_response import TraceResponse
 from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.runtime.metrics import get_metrics
+from crawlutron.service.crawl_endpoint_cores import (
+    delta_context_for,
+    stored_response_payload,
+)
 from crawlutron.service.crawl_executor import execute_crawl
 from crawlutron.service.errors import DomainError, ValidationRefusal
 from crawlutron.service.job_lifecycle import start_tracked_task
 from crawlutron.service.main_helpers import record_crawl_completion, request_gate
 from crawlutron.storage.ids import new_request_id
-from crawlutron.storage.job_store import TERMINAL_STATUSES, FrontierEntry, JobKind, JobStore
+from crawlutron.storage.job_store import FrontierEntry, JobStore
 from crawlutron.storage.result_store import CrawlResultStore, CrawlSpillStore
 
 if TYPE_CHECKING:
@@ -91,34 +89,8 @@ def _crawl_rejection(error: ValueError) -> DomainError:
     )
 
 
-async def delta_context_for(payload: CrawlRequest, caller_id: str, result_store) -> DeltaContext | None:
-    """Caller-scoped delta request for ``payload``, or ``None`` when no delta knob
-    was set. With ``baseline_request_id`` set, the caller-isolated baseline loads
-    and degrades (missing/expired/foreign rows surface as ``baseline_expired``)."""
-    if payload.changed_since is None and payload.baseline_request_id is None:
-        return None
-    baseline_request_id = payload.baseline_request_id
-    baseline: dict[str, BaselineEvidence] = {}
-    entries: tuple[BaselineEntry, ...] = ()
-    baseline_expired = False
-    if baseline_request_id is not None:
-        stored = (
-            None
-            if result_store is None
-            else await result_store.aget_for_caller(baseline_request_id, caller_id)
-        )
-        if stored is None:
-            baseline_expired = True
-        else:
-            baseline = extract_baseline(stored)
-            entries = extract_baseline_entries(stored)
-    return DeltaContext(
-        changed_since=payload.changed_since,
-        baseline_request_id=baseline_request_id,
-        baseline=baseline,
-        baseline_expired=baseline_expired,
-        entries=entries,
-    )
+# The delta loader and the stored-payload reader moved to service.crawl_endpoint_cores
+# (#849); the HTTP doors below keep their wire shapes over the shared cores.
 
 
 def _serialize_or_reject(items: list[dict[str, JsonValue]], output_format: str) -> tuple[str, str]:
@@ -335,31 +307,8 @@ async def _run_sync_crawl(
     return response_model
 
 
-async def _stored_response_payload(
-    request_id: str,
-    job_store,
-    result_store,
-    caller_id: str = "",
-) -> JsonValue | None:
-    """The stored response for ``request_id``, or None, shared by both replay
-    doors: a job not in a terminal state raises 202; the sync path with no job
-    answers from the store. Reads scope to ``caller_id``; foreign rows miss.
-    """
-    job = await job_store.aload_for_caller(request_id, caller_id)
-    if job is not None and job.status not in TERMINAL_STATUSES:
-        # Typed, not an HTTP status: REST converts it to the 202 below, and the
-        # MCP read tools answer it as a structured non-error result.
-        raise CrawlPendingError(request_id, job.status.value)
-    # The MCP read door passes no store when the app has none wired; the job
-    # row below is then the only source, which is the durable copy anyway.
-    stored = None if result_store is None else await result_store.aget_for_caller(request_id, caller_id)
-    if stored is not None:
-        return stored
-    if job is not None and job.kind == JobKind.SINGLE_SHOT and job.results:
-        # Same wire payload, written by the runner to the job's results. It is
-        # also the durable copy: the result cache expires, the job row does not.
-        return job.results[0]
-    return None
+# The stored-payload reader lives in service.crawl_endpoint_cores (#849); the
+# replay doors map its typed refusals to the wire below.
 
 
 async def _stored_payload_or_not_found(
@@ -368,13 +317,13 @@ async def _stored_payload_or_not_found(
     result_store,
     caller_id: str = "",
 ) -> JsonValue:
-    """The stored payload for ``request_id``, or a 404.
+    """The stored payload for ``request_id``, or the mapped refusal.
 
     Both replay doors answer the same miss the same way, and the second copy of
     the check is a second place the message shape can drift.
     """
     try:
-        payload = await _stored_response_payload(request_id, job_store, result_store, caller_id)
+        payload = await stored_response_payload(request_id, job_store, result_store, caller_id)
     except CrawlPendingError as error:
         raise http_error(
             202,
@@ -383,36 +332,10 @@ async def _stored_payload_or_not_found(
             {"status": str(error.job_status)},
         ) from error
     if payload is None:
+        # The REST wire envelope the replay doors have always answered; the MCP
+        # read core raises the same typed refusal for its own door.
         raise http_error(404, "not_found", f"Unknown or expired request_id: {request_id}")
     return payload
-
-
-async def read_crawl_result_record(
-    request_id: str,
-    job_store,
-    result_store,
-    caller_id: str = "",
-) -> JsonValue:
-    """The stored crawl response for the MCP read tool, as stored.
-
-    Reads the same rows the replay door serves, without re-admitting URL fields.
-    A running job raises the typed :class:`CrawlPendingError` (non-error door).
-    """
-    payload = await _stored_response_payload(request_id, job_store, result_store, caller_id)
-    if payload is None:
-        raise http_error(404, "not_found", f"Unknown or expired request_id: {request_id}")
-    return payload
-
-
-async def read_crawl_trace_record(
-    request_id: str,
-    job_store,
-    result_store,
-    caller_id: str = "",
-) -> TraceResponse:
-    """The stored record read as a trace, for the MCP read tool."""
-    payload = await read_crawl_result_record(request_id, job_store, result_store, caller_id)
-    return TraceResponse.model_validate(payload)
 
 
 async def get_crawl_result(
@@ -451,9 +374,6 @@ async def get_crawl_trace(
 __all__ = [
     "await_or_client_gone",
     "crawl",
-    "delta_context_for",
     "get_crawl_result",
     "get_crawl_trace",
-    "read_crawl_result_record",
-    "read_crawl_trace_record",
 ]
