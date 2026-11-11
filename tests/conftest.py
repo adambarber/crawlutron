@@ -120,9 +120,27 @@ def _remove_test_cache_dir():
 @pytest.fixture(scope="session", autouse=True)
 def _enable_loopback_for_test_suite():
     """Enable private targets (loopback crawling) for the test session."""
+    _INHERITED_ALLOW_PRIVATE = os.environ.get("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     os.environ["CRAWLUTRON_ALLOW_PRIVATE_TARGETS"] = "1"
     yield
-    os.environ["CRAWLUTRON_ALLOW_PRIVATE_TARGETS"] = "0"
+    os.environ["CRAWLUTRON_ALLOW_PRIVATE_TARGETS"] = _INHERITED_ALLOW_PRIVATE
+
+
+# No test may leak env or cwd state; the snapshot is the contract (#840).
+@pytest.fixture(autouse=True)
+def _snapshot_env_and_cwd_per_test():
+    """Restore ``os.environ`` and ``os.getcwd`` after every test."""
+    env_snapshot = dict(os.environ)
+    cwd_snapshot = os.getcwd()
+    yield
+    if os.getcwd() != cwd_snapshot:
+        os.chdir(cwd_snapshot)
+    for key in tuple(os.environ):
+        if key not in env_snapshot:
+            del os.environ[key]
+    for key, value in env_snapshot.items():
+        if os.environ.get(key) != value:
+            os.environ[key] = value
 
 
 # Per-xdist-worker paths: when running under pytest-xdist each worker gets its own log/cache files so parallel
