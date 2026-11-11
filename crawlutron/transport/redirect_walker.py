@@ -1,15 +1,7 @@
 """RedirectWalker: the single redirect-walk implementation.
 
-Owns the fetch walk: one transport.fetch() per hop, redirect following,
-deferred cookie capture, cross-origin credential stripping, and pin
-validation in one place. ``redirect_target`` (pinned_transport) is the one
-redirect decision, and this walker is the only owner of hop-to-hop state, so
-one chain always yields one verdict -- no second walk implementation coexists
-with it.
-
-``store_cookies`` is the sanctioned cookie tail (``fetchers.store_hop_cookies``,
-injected so this module never imports ``fetchers``).
-"""
+Owns the fetch walk: one transport.fetch() per hop, redirect following, deferred
+cookie capture, credential stripping, and pin validation in one place."""
 
 from __future__ import annotations
 
@@ -97,9 +89,8 @@ class RedirectWalker:
             try:
                 result = await self._transport.fetch(request, max_bytes=max_bytes)
             except BodyTooLarge:
-                # Multi-hop cap breach: url is the original admitted URL
-                # (hop.url is never reassigned on redirect), final_url is the
-                # terminal-hop logical URL (current_url advanced per hop).
+                # Multi-hop cap breach: url is the original admitted URL, final_url
+                # the terminal-hop logical URL (current_url advanced per hop).
                 return http_413(hop.url, current_url, hop.started)
 
             next_hop, cookie_headers = await self._handle_hop_result(
@@ -110,9 +101,8 @@ class RedirectWalker:
                 await self._store_cookies(current_url, cookie_headers)
                 return result
 
-            # Redirect: defer this hop's cookies until the next pin admits.
-            # RFC 6265 5.3: the Set-Cookie belongs to the origin that sent it
-            # (current_url before advancing), not the redirect target.
+            # Redirect: defer this hop's cookies until the next pin admits;
+            # RFC 6265 5.3: the Set-Cookie belongs to the sending origin.
             pending = (current_url, cookie_headers)
             current_url, current_headers = next_hop
             hops += 1
@@ -170,9 +160,8 @@ class RedirectWalker:
     ) -> tuple[NormalizedUrl, dict[str, str]] | None:
         """The single redirect decision: ``redirect_target`` applied to hop state.
 
-        Returns the next hop's ``(url, headers)``, or None when the response is
-        terminal. A second walk implementation used to decide this -- deleted,
-        so one chain yields one verdict.
+        Returns the next hop's ``(url, headers)``, or None when terminal; a second
+        walk implementation used to decide this -- deleted, one chain one verdict.
         """
         return await redirect_target(url, headers, result.status_code, result.headers.get("location"), hops)
 

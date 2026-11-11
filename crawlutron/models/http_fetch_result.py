@@ -12,10 +12,8 @@ from crawlutron.models.normalized_url import NormalizedUrl
 class HttpFetchResult:
     """What a single HTTP fetch returned, before anything is extracted from it.
 
-    ``url`` is the logical URL of the hop that produced this result; ``final_url``
-    is the logical final URL (terminal hop on redirects). For a walker http_413
-    multi-hop cap breach ``url`` is the original admitted URL while ``final_url``
-    is the terminal-hop logical URL. Both are logical URLs, never a pinned IP.
+    ``url`` is the logical URL of the producing hop; ``final_url`` the terminal
+    logical URL (both logical, never a pinned IP).
     """
 
     url: NormalizedUrl
@@ -28,7 +26,5 @@ class HttpFetchResult:
     # quality and flag diagnostics instead of trusting the text.
     decompression_failed: bool = False
     # Raw transport headers (a multidict preserving duplicate names, e.g. repeated
-    # Set-Cookie). Kept separately from ``headers`` (a dict that comma-joins
-    # duplicates) so cookie capture via ``get_list`` survives the walk. Only the
-    # redirect walker reads this field; consumers read ``headers``.
+    # Set-Cookie), kept separately from ``headers`` so ``get_list`` cookie capture survives.
     _raw_headers: Mapping[str, str] | None = None

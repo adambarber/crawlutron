@@ -1,16 +1,7 @@
 """Transport protocol and result types for the unified fetch walk.
 
-The :class:`Transport` protocol owns a single SSRF-pinned hop: send the
-request, read and cap the body, return one :class:`FetchResult`. Redirect
-following, cookie capture, pin validation and header checks live in
-:class:`~crawlutron.transport.redirect_walker.RedirectWalker`, which calls
-``transport.fetch()`` per hop.
-
-Capping is consolidated in :func:`crawlutron.safety.bounded_io.read_capped_async`
--- one function, both transports. The contract mismatch (http_413 result vs
-``BodyTooLarge`` raise) is resolved here: transports raise ``BodyTooLarge`` and
-the walker maps it to an http_413 ``FetchResult``.
-"""
+The :class:`Transport` protocol owns a single SSRF-pinned hop; the walker owns
+the walk. Transports raise ``BodyTooLarge`` and the walker maps it to http_413."""
 
 from __future__ import annotations
 
@@ -57,10 +48,8 @@ class FetchRequest:
 
 class Transport(Protocol):
     """One pinned hop: send the request, cap the body, return a FetchResult.
-
-    Implementations read the body with ``read_capped_async`` so capping lives
-    in exactly one place across both backends. On cap breach they raise
-    ``BodyTooLarge``; the walker maps that to an http_413 ``FetchResult``.
+    Implementations read the body with ``read_capped_async`` so capping lives in
+    one place across both backends; on cap breach they raise ``BodyTooLarge``.
     """
 
     async def fetch(self, request: FetchRequest, *, max_bytes: int) -> FetchResult: ...
@@ -70,11 +59,7 @@ def http_413(url: NormalizedUrl, final_url: NormalizedUrl, started: float) -> Ht
     """Standard 413 (payload too large) result.
 
     Takes the logical ``final_url``, never ``current_url``: a pinned plain-HTTP
-    response url is the resolved-IP literal, which leaks topology and mis-keys
-    cookies by IP. Callers pass logical URLs for both ``url`` (the cap-breaching
-    hop's logical URL) and ``final_url`` (the terminal logical URL), never a
-    connect_url or resolved IP.
-    """
+    response url is the resolved-IP literal, which leaks topology."""
     return HttpFetchResult(
         url=url,
         final_url=final_url,

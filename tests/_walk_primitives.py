@@ -68,7 +68,13 @@ def parsed(path: pathlib.Path) -> ast.Module:
     never stale: a detector reading the cache still sees a freshly planted
     violation. The source is persisted under .pytest_cache/ast_parse/ so
     repeat sessions reuse it instead of re-reading the source file.
+
+    A nonexistent path blows up here -- the ONE seam every tree-taking reader
+    goes through -- so a gate walking a renamed/missing root fails loud at
+    the ask, never silently scans an empty iterator green.
     """
+    if not path.is_file():
+        raise FileNotFoundError(f"ast requested for a nonexistent source file: {path}")
     stat = path.stat()
     key = (str(path), stat.st_mtime_ns, stat.st_size, _PY_VERSION)
     tree = _PARSE_CACHE.get(key)
@@ -153,6 +159,23 @@ def trees_under(directory: pathlib.Path) -> tuple[tuple[pathlib.Path, ast.Module
     The same ownership as ``app_trees``: a tree re-read per detector is a
     tree each of them observed separately."""
     return _trees_under(directory)
+
+
+@cache
+def declared_root_files(root: str) -> tuple[pathlib.Path, ...]:
+    """Every .py file under a declared repo-relative scan root; missing/empty FAILS LOUD.
+
+    A gate iterating a nonexistent root is silently vacuous (zero offenders,
+    zero files scanned) -- the app/ rename made the comment gate blind for
+    months. A declared root that does not exist or carries no .py file is a
+    gate defect, never a green."""
+    base = REPO_ROOT / root
+    if not base.is_dir():
+        raise AssertionError(f"declared scan root does not exist: {root}/ (gate would scan nothing)")
+    files = tuple(sorted(p for p in base.rglob("*.py") if "__pycache__" not in p.parts))
+    if not files:
+        raise AssertionError(f"declared scan root contains no .py files: {root}/ (gate would scan nothing)")
+    return files
 
 
 @cache

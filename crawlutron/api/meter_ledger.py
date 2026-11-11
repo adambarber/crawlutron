@@ -1,9 +1,7 @@
 """The shared process-meter skeleton (#668 extraction): one laddered ledger.
 
-Every process-meter holder (#621) carries the same triple -- a monotonic
-clock, a lock-guarded keyed ledger, and the reset/has registration doors.
-The key-verify throttle (#653) and the anonymous IP meter (#668) adopt it;
-the jscpd logic gate holds the line against a third hand-copy.
+Every process-meter holder (#621) carries the same triple -- a monotonic clock,
+a lock-guarded keyed ledger, and the reset/has registration doors.
 """
 
 from __future__ import annotations

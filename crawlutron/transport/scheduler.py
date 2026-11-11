@@ -109,10 +109,8 @@ async def _skip_if_breaker_open[Job: ScheduledJob, Result: SchedulerResult](
 class DomainScheduler:
     """Per-instance domain pacing/breakers/rate accounting; nothing shared.
 
-    Every per-domain record is one :class:`DomainState` in one map -- cooldowns,
-    breaker, politeness floor, fire-time reservation, latency EMA, strategy pin,
-    token bucket and concurrency gate travel together and purge together.
-    """
+    Every per-domain record is one :class:`DomainState` in one map: cooldowns,
+    breaker, politeness floor, fire-time reservation, EMA, bucket, gate."""
 
     @classmethod
     def from_settings(
@@ -351,10 +349,7 @@ class DomainScheduler:
     def _reserve_fire(self, domain: str) -> float:
         """Reserve the domain's next fire slot; return seconds until it arrives.
         THE spacing mechanism: a fire time is booked under the domain gate, one
-        per fire, so same-domain requests space by the delay instead of sleeping
-        it concurrently. Monotonic; a parked job's spent reservation is never
-        refunded (conservative direction).
-        """
+        per fire, so same-domain requests space by the delay. Monotonic."""
         state = self._state(domain)
         now = self._clock()
         fire_at = max(now, state.next_fire or 0.0)
@@ -400,9 +395,8 @@ class DomainScheduler:
         # breaker trip or 429 cooldown parks us here, outside every gate.
         if await _skip_if_breaker_open(self, job, deliver, failed_result):
             return True
-        # A cooldown held this domain: sleep it out, then fire after the
-        # domain's next slot -- not shoulder-to-shoulder with peers waking
-        # at the same expiry (the herd a raw sleep produced).
+        # A cooldown held this domain: sleep it out, then fire after the domain's
+        # next slot -- not shoulder-to-shoulder with peers waking at the same expiry.
         expiry = self._state(job.domain).cooldown_until
         await sleep_out(expiry, self._clock)
         if expiry is not None:

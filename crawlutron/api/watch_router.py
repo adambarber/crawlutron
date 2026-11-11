@@ -61,8 +61,7 @@ async def create_watch(
         host_policy = HostPolicy.from_settings(settings)
         try:
             # The target admits through the ONE chokepoint: NormalizedUrl refuses
-            # userinfo (webhook auth is policy.credentials, never URL creds), and
-            # the pinned-request validation below is the same SSRF rule as pages.
+            # userinfo, and the pinned-request validation is the SSRF rule.
             ensure_https_webhook_url(payload.webhook_url)
             await validate_webhook_url_async(payload.webhook_url, host_policy=host_policy)
             webhook_url = WebhookTarget.admit(payload.webhook_url, host_policy=host_policy)

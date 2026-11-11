@@ -19,9 +19,7 @@ __all__ = ["apply_credentials", "authorization_value", "origin_of"]
 def origin_of(url: str) -> str:
     """Canonical ``scheme://host[:port]`` for ``url``, via admission: one spelling,
     the one NormalizedUrl produces. Raises on non-HTTP schemes, userinfo, and any
-    host admission refuses -- so a credential for an origin no crawl can reach is
-    loud at config load, never silently dead.
-    """
+    host admission refuses -- loud at config load, never silently dead."""
     return NormalizedUrl(url.strip(), policy=HostPolicy.unrestricted()).origin
 
 

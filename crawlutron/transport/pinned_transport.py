@@ -1,8 +1,7 @@
 """Owns request pinning, redirect targeting, and stream composition.
 
-Carries the pinned primitives over an admitted URL (fresh pin, plain-HTTP/HTTPS
-connect composition, redirect-chain rules); never retries, extracts, or
-constructs. SSRF validation and DNS resolution live in ``pinned_dns``.
+Carries the pinned primitives over an admitted URL (fresh pin, connect
+composition, redirect-chain rules); never retries, extracts, or constructs.
 """
 
 from __future__ import annotations
@@ -84,8 +83,7 @@ def open_pinned_request(
 ) -> typing.AsyncContextManager[httpx.Response]:
     """Open one SSRF-pinned httpx stream by method: the connect URL is the
     validated IP and TLS SNI stays on the logical hostname. The CALLER owns the
-    response drain -- a body read inside the context -- so each site keeps its
-    own cap posture (webhook warns-and-continues, search refuses)."""
+    response drain, so each site keeps its own cap posture."""
     return client.stream(
         method,
         request.connect_url,
@@ -193,10 +191,8 @@ async def _stripped_credentials(headers: dict[str, str], new_url: NormalizedUrl)
 
 def cffi_resolve_entry(request: PinnedRequest) -> list[str] | None:
     """The curl_cffi resolve table for a pinned hop: ``host:port:ip`` dialing the
-    pinned IP while SNI and cert verification stay on the logical hostname.
-    None when there is nothing to pin (HTTP hops, or the local-dev posture where
-    the pin is the hostname itself).
-    """
+    pinned IP while SNI and cert verification stay on the logical hostname. None
+    when there is nothing to pin (HTTP hops, or a pin-is-hostname posture)."""
     if request.connect_url == request.url.raw:
         return None
     tls = request.tls_hostname

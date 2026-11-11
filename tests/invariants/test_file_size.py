@@ -8,14 +8,15 @@ from __future__ import annotations
 
 import pathlib
 
-from tests.chokepoint_walks import REPO_ROOT
+from tests._walk_primitives import declared_root_files
 
 #: Total lines one file may hold.
 LIMIT = 500
 
 #: Files over the ceiling per root. Exact both ways; a split wave lowers it here.
+#: Keyed by declared scan root -- a missing root fails loud, not silently empty.
 _BUDGETS = {
-    "app": 0,
+    "crawlutron": 0,
     "tests": 0,
     "scripts": 0,
 }
@@ -31,20 +32,32 @@ def scan(base: pathlib.Path, *, include_gate: bool = False) -> dict[str, int]:
         gate = base / "gate"
         if gate.exists():
             paths.append(gate)
+    return _over_line_counts(paths)
+
+
+def overlong(root: str) -> dict[str, int]:
+    """Every overlong file under one declared repo root, as ``{file: lines}``.
+
+    ``scripts`` is the one root with an extensionless helper every hook routes
+    through, so it is swept with the gate included. The root walk goes through
+    the fail-loud helper: a missing root is a gate defect, never an empty scan.
+    """
+    candidates = list(declared_root_files(root))
+    if root == "scripts":
+        gate = candidates[0].parents[0] / "gate"
+        if gate.exists():
+            candidates.append(gate)
+    return _over_line_counts(candidates)
+
+
+def _over_line_counts(paths: list[pathlib.Path]) -> dict[str, int]:
+    """The shared body both sweeps measure with: ``{file: lines}`` over LIMIT."""
     found: dict[str, int] = {}
     for path in paths:
         lines = len(path.read_text(encoding="utf-8").splitlines())
         if lines > LIMIT:
             found[path.as_posix()] = lines
     return found
-
-
-def overlong(root: str) -> dict[str, int]:
-    """Every overlong file under one repo root, as ``{file: lines}``.
-
-    ``scripts`` is the one root with an extensionless helper every hook routes
-    through, so it is swept with the gate included."""
-    return scan(REPO_ROOT / root, include_gate=(root == "scripts"))
 
 
 def test_scan_includes_the_extensionless_gate_helper(tmp_path: pathlib.Path) -> None:

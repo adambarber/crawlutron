@@ -1,8 +1,7 @@
 """Owns SSRF validation and DNS resolution.
 
-The safety decisions and pinned primitives over a hostname: public-only IP
-check, the fresh pin, the saturation sand the resolver wait budget. Never
-builds requests, redirects, or streams -- that is pinned_transport's concern.
+The safety decisions and pinned primitives over a hostname: public-only IP check,
+the fresh pin, the saturation gate and the resolver wait budget.
 """
 
 from __future__ import annotations
@@ -45,15 +44,13 @@ class ResolverBudgetExceeded(TimeoutError):
 
 
 async def bounded_thread_resolve[T](work: Callable[[], T], *, timeout_seconds: float | None) -> T:
-    """Run one blocking resolve off the loop, bounded by the DNS posture tightened
-    by the caller's own budget; a resolver that outlasts the wait raises the
-    classifiable failure. Registered in the SAME saturation registry as the sync
-    path (#C10): the chokepoint covers every DNS entry point, not one of two."""
+    """Run one blocking resolve off the loop, bounded by the DNS posture; a resolver
+    that outlasts the wait raises the classifiable failure. Registered in the SAME
+    saturation registry as the sync path (#C10): one chokepoint, every entry point."""
     wait_for = dns_wait_for(timeout_seconds)
     _refuse_if_saturated()
-    # The CONCURRENT future is what stays undone until the worker thread
-    # returns; the asyncio wrapper the caller awaits is cancelled by the wait
-    # timeout, so registering it would re-open the blind window this closes.
+    # The CONCURRENT future is what stays undone until the worker thread returns
+    # (the asyncio wrapper is cancelled by the wait timeout).
     concurrent_future = _DNS_EXECUTOR.submit(work)
     _register_dns_future(concurrent_future)
     future = asyncio.wrap_future(concurrent_future)
@@ -70,12 +67,8 @@ _DNS_TTL = 60.0
 _DNS_CACHE_MAX = 4096
 _DNS_CACHE: BoundedTTLCache[str, list[str]] = BoundedTTLCache(max_entries=_DNS_CACHE_MAX, ttl=_DNS_TTL)
 
-# A RUNNING getaddrinfo cannot be cancelled, so a hostile/slow resolver can
-# occupy every worker; queued resolves then each wait the full budget -- the
-# request path hostage to a queue (#C10). Saturation law: when every worker is
-# inside a live resolve, a new resolve refuses FAST instead of queueing. Both
-# DNS entry points register here (sync concurrent + async asyncio-wrapped,
-# pass 5); the registry is event-loop-side only, so it needs no lock.
+# A RUNNING getaddrinfo cannot be cancelled, so a hostile resolver can occupy
+# every worker and hold the request path hostage (#C10) -- refusals stay fast.
 _DnsFuture = concurrent.futures.Future | asyncio.Future
 _dns_futures: set[_DnsFuture] = set()
 
@@ -97,10 +90,9 @@ def _refuse_if_saturated() -> None:
 
 
 def _register_dns_future(future: _DnsFuture) -> None:
-    """Account a resolve until its RESOLVER THREAD completes, not until the
-    caller's wait times out (wave-3 N1): a getaddrinfo still running inside a
-    worker is exactly the saturation the chokepoint must keep counting. Both
-    future kinds support add_done_callback, so one registration covers both paths."""
+    """Account a resolve until its RESOLVER THREAD completes, not until the caller's
+    wait times out (wave-3 N1): a getaddrinfo still running inside a worker is
+    exactly the saturation the chokepoint must keep counting."""
     _dns_futures.add(future)
     future.add_done_callback(_dns_futures.discard)
 

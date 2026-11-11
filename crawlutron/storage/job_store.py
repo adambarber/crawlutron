@@ -130,9 +130,6 @@ class JobStore:
         """Collections read under the (reentrant) lock; the caller owns the hold.
 
         The single body both loaders share, so the atomic hold cannot drift.
-        Entered from ``_read_row`` the hold spans select + reads + walk (one
-        generation); a direct entry (``_row_to_job`` outside ``_read_row``)
-        re-acquires for the reads only.
         """
         with self._lock:
             visited = self._accumulators.read_visited(row["job_id"]) if with_accumulators else []
@@ -150,11 +147,9 @@ class JobStore:
     def _row_to_job(self, row: sqlite3.Row, *, with_accumulators: bool = True) -> CrawlJobState:
         """One row, read through the declared record (the walk lives beside it).
 
-        Entered from ``_read_row`` the caller's hold spans the reads and the
-        walk, so the state returned is one generation; a direct entry re-acquires
-        for the reads only. The frontier always loads: the runner's state-only
-        reload owns the queue, so only results/visited are with-accumulators
-        collections."""
+        Entered from ``_read_row`` the caller's hold spans reads and walk; a direct
+        entry re-acquires for the reads only. The frontier always loads.
+        """
         return self._read_collections(row, with_accumulators=with_accumulators)
 
     def create(self, root_url: str, policy: PolicyLike, *, owner: str = "") -> CrawlJobState:
@@ -241,15 +236,11 @@ class JobStore:
     ) -> CrawlJobState | None:
         """The one row read both loaders share.
         Row select, collection reads and the walk hold one lock (reentrant), so
-        the returned state is one generation on every route. ``owner`` narrows
-        to the caller's own row before any walk."""
+        the returned state is one generation on every route."""
         statement, params = _owner_statement(_ROW_COLUMNS, True, "", owner)
         try:
-            # One hold AND one read snapshot across row select, collection reads
-            # and the walk: the lock serializes in-process callers, but only the
-            # deferred read transaction pins the WAL snapshot, so a sibling or
-            # raw connection committing mid-load still reads one generation.
-            # The RLock re-enters for the collection reads; both end together.
+            # One hold AND one read snapshot across select, reads and walk; only
+            # the deferred read transaction pins the WAL snapshot.
             with self._lock:
                 self._conn.execute("BEGIN")
                 try:

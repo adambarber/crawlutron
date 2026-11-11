@@ -14,10 +14,8 @@ __all__ = ["DomainGate", "DomainState"]
 class DomainGate:
     """The domain's concurrency gate: the semaphore plus its public occupancy.
 
-    ``Semaphore._value`` is a CPython detail, so in-flight occupancy is
-    tracked here explicitly (#577 F1: any holder or waiter keeps the record
-    live; ``locked()`` alone misses a half-full gate). ``async with`` works
-    unchanged by delegation.
+    ``Semaphore._value`` is a CPython detail, so occupancy is tracked here
+    explicitly (#577 F1: any holder or waiter keeps the record live).
     """
 
     def __init__(self, limit: int) -> None:
@@ -37,14 +35,8 @@ class DomainGate:
 class DomainState:
     """Everything the scheduler remembers about one domain.
 
-    A field is dropped only when it is inert; liveness is per-field (see
-    ``live``), so an in-flight reservation or a half-climbed failure ladder
-    survives a mid-run purge. The breaker math lives here with the counters
-    it escalates; the scheduler keeps only the knobs. Every timestamp here is
-    a reading of the scheduler's ONE injected monotonic clock, handed in as
-    ``now`` (#580): no method of this class reads a clock of its own, so a
-    second family cannot re-enter through a side door.
-    """
+    A field is dropped only when it is inert; liveness is per-field (``live``),
+    so an in-flight reservation or a half-climbed ladder survives a purge."""
 
     def __init__(self) -> None:
         # Monotonic fire-time reservation; None = the domain owes no spacing.
@@ -62,18 +54,15 @@ class DomainState:
         self.last_seen: float | None = None
         self.pin: tuple[str, float] | None = None
         self.bucket: TokenBucket | None = None
-        # Per-domain concurrency gate, scheduler-lifetime: one home for the
-        # domain's pacing, never re-minted per batch. The scheduler's _state()
-        # mints the record and sizes this gate from its knobs.
+        # Per-domain concurrency gate, scheduler-lifetime: one home for the domain's
+        # pacing, never re-minted per batch (the scheduler's _state() sizes it).
         self.gate = DomainGate(1)
 
     def observation_copy(self) -> DomainState:
         """A snapshot record: every field copied; only the LIVE gate is shared.
 
-        The gate is a semaphore, not data -- it cannot be copied, and
-        sharing keeps occupancy truthful. The bucket is copied too (token
-        balance included), so consuming through a snapshot never drains the
-        scheduler's real bucket. Writes to the copy never reach the record."""
+        The gate is a semaphore, not data -- sharing keeps occupancy truthful;
+        the bucket is copied too, so a snapshot never drains the real bucket."""
         snapshot = DomainState()
         snapshot.next_fire = self.next_fire
         snapshot.cooldown_until = self.cooldown_until
@@ -122,12 +111,8 @@ class DomainState:
             return True
         if self.ema is not None and self.last_seen is not None and self.last_seen > now - window:
             return True
-        # In use right now: any holder or waiter -- the gate's public
-        # occupancy. ``locked()`` alone is "at capacity" and misses a half-full
-        # gate (limit 2, one holder): a record dropped then re-mints a FULL
-        # fresh gate under the old holder and the cap silently widens
-        # (#577 adversarial F1). The count rides the gate itself (DomainGate),
-        # so no semaphore implementation detail is read.
+        # In use right now: any holder or waiter (the gate's public occupancy);
+        # ``locked()`` alone misses a half-full gate (#577 F1).
         if self.gate.occupancy > 0:
             return True
         # The bucket rides along: it is kept while the record is live for any
@@ -136,9 +121,8 @@ class DomainState:
 
     def charge_failure(self, *, now: float, threshold: int, base: float, cooldown_max: float) -> None:
         """Count one failure; open the breaker past ``threshold`` with an
-        exponentially escalating cooldown (base, base*2, ... capped) -- a tarpit
-        parks progressively longer. Total observations charged, not URLs: a
-        requeued retry charges again.
+        exponentially escalating cooldown (base, base*2, ... capped). Total
+        observations charged, not URLs: a requeued retry charges again.
         """
         self.failures += 1
         n = self.failures // threshold
@@ -147,11 +131,9 @@ class DomainState:
             self.circuit_open_until = now + min(base * (2 ** (n - 1)), cooldown_max)
 
     def reset_breaker(self) -> None:
-        """Clear the failure ladder -- counters only. An open window is NOT
-        cleared: a success during another job's park must not end the breaker
-        (the pre-#577 maps did this by only zeroing the counters; a success
-        while a peer parks is common, and ending the trip would wave the whole
-        batch at the origin). Only a served cooldown half-opens the window."""
+        """Clear the failure ladder -- counters only. An open window is NOT cleared:
+        a success during another job's park must not end the breaker (the pre-#577
+        maps did this); only a served cooldown half-opens the window."""
         self.failures = 0
         self.trips = 0
 

@@ -1,12 +1,6 @@
 """The MCP tool dispatch: every ``tools/call`` door and the machinery that
-turns one endpoint call into a ``ToolResult``. Each door delegates to the same
-pydantic models and endpoint functions the REST doors use; webhook/async
-delivery is deliberately rejected over MCP (no out-of-band callback), and the
-stored-record read tools answer a still-running job as a structured non-error
-shaped from the typed pending state, never the HTTPException catch-all.
-
-Behavior is data-driven: every ToolSpec declares a DoorBinding, and ONE
-``dispatch`` switches on the declared kind -- no per-family handler factories.
+turns one endpoint call into a ``ToolResult``; each door delegates to the same
+pydantic models and endpoint functions the REST doors use.
 """
 
 from __future__ import annotations
@@ -386,10 +380,8 @@ async def _read_door(payload: BaseModel, door: DoorEnv, door_data: DoorBinding) 
 
 async def _suggestions_door(payload: BaseModel, door: DoorEnv, door_data: DoorBinding) -> ToolResult:
     """The policy-suggestions read door: the REST twin's caller scoping -- a keyed
-    caller's rollup covers only its own records; anonymous is refused (the REST
-    door answers 401, the tool a tool error) -- with the operator's cross-tenant
-    view unavailable over MCP (operator wiring is REST-only; the keyed scope is
-    the MCP door's)."""
+    caller's rollup covers only its own records; anonymous is refused (REST 401,
+    tool error) -- and the operator's cross-tenant view is REST-only."""
     core = door_data.core
     if core is None:
         raise ValueError("a suggestions door declares its core")

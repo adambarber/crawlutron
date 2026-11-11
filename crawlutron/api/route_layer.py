@@ -37,11 +37,8 @@ LAYER_GUARDS: frozenset[str] = _LAYER_GUARDS
 class _RouterKwargs(TypedDict, total=False):
     """The keyword arguments callers actually pass to these router factories.
 
-    Installed FastAPI 0.162's APIRouter.__init__ takes no ``**kwargs``, so the
-    bare ``**kwargs: Any`` annotation was a lie: it forwarded nothing the
-    constructor accepts. The factories fix ``dependencies`` and ``responses``
-    themselves; callers pass only ``prefix`` and/or ``tags``. Typed against the
-    real keyword set instead of widened at every call site.
+    FastAPI 0.162's APIRouter.__init__ takes no ``**kwargs``; the factories fix
+    ``dependencies``/``responses`` and callers pass only ``prefix``/``tags``.
     """
 
     prefix: str
@@ -61,9 +58,8 @@ async def guard_admin_request(request: Request) -> None:
 async def operator_guard(request: Request) -> bool:
     """The soft operator gate: negatives pace through the admin bucket.
 
-    No token presented stays anonymous without touching the meter; a presented
-    token is paced BEFORE the compare and its outcome is recorded, mirroring
-    the keys door (#659) while keeping the soft 200-on-miss contract (#209).
+    A presented token is paced BEFORE the compare and its outcome recorded
+    (#659), keeping the soft 200-on-miss contract (#209).
     """
     secret = presented_key(request)
     if not secret:
@@ -143,9 +139,7 @@ LAYER_EXEMPT_RATCHET: tuple[ExemptRow, ...] = (
 
 
 #: The anonymous-metered surfaces (#668): externally reachable, outside the
-#: layer (no caller identity), and metered per remote IP through
-#: api/anonymous_throttle.py's middleware + the 404 handler's bucket check.
-#: The list moves DOWN only; adding a row demands landing metering first.
+#: layer, metered per remote IP. The list moves DOWN only.
 ANONYMOUS_METERED: tuple[ExemptRow, ...] = (
     ExemptRow(
         "post",

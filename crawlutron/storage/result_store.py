@@ -209,18 +209,8 @@ class CrawlResultStore(_PayloadStoreGuardrails):
 
 class CrawlSpillStore(_PayloadStoreGuardrails):
     """SQLite spill of page results keyed by (request_id, sequence): the engine
-    writes one row per result as its batch finishes, reassembly is one ordered
-    SELECT, and reclamation is a DELETE by age. Replaces the file-based spill
-    (mkstemp + flock + NDJSON + process-local GC): same write/read shape, the
-    database owns durability and GC.
-
-    Ownership: age alone is not permission. The deleted file spill refused to
-    reclaim a file its writer held a flock on, because a crawl slower than the
-    GC age loses its early rows before reassembly. The store re-derives that
-    safety itself: every ``put`` fences its request_id as a live writer, and the
-    crawl's own teardown releases the fence once its rows are served or its
-    crawl has ended -- so the age sweep never touches a live request's rows and
-    a dead request's fence cannot leak.
+    writes one row per result, reassembly is one ordered SELECT, reclamation a
+    DELETE by age; every ``put`` fences its request_id as a live writer.
     """
 
     schema = StoreSchema.CRAWL_SPILLS
@@ -246,15 +236,7 @@ class CrawlSpillStore(_PayloadStoreGuardrails):
         """Reassemble one crawl's spilled results in submission order.
 
         Degradation ruling (supersedes the deleted file spill's corrupt-line
-        skip, #C8): two corruption classes existed there. A crash-TORN NDJSON
-        line was the class the skip served -- row atomicity kills it here, so
-        the skip has no successor. A corrupt PAYLOAD row makes this reassembly
-        raise rather than silently serve N-1 of N results: this table is
-        store-owned with a single writer (the engine's ``put``), so an
-        undecodable row means a defect or manual tampering, both of which must
-        surface, not mask. The strict behavior is pinned in
-        tests/storage/test_crawl_spill_store.py.
-        """
+        skip, #C8): a corrupt PAYLOAD row RAISES, never silently N-1 of N."""
         with self._lock:
             rows = self._conn.execute(
                 "SELECT payload FROM crawl_spills WHERE request_id = ? ORDER BY sequence",
@@ -272,8 +254,7 @@ class CrawlSpillStore(_PayloadStoreGuardrails):
     def gc_stale_spills(self, max_age_seconds: float) -> int:
         """Delete rows older than ``max_age_seconds`` EXCEPT a live writer's; the
         return is the row count reclaimed. Rows are request-scoped and the fence
-        is set by the writer itself, so the sweep is one DELETE plus the fence,
-        never a filesystem walk and never a second registry.
+        is set by the writer itself, so the sweep is one DELETE plus the fence.
         """
         cutoff = self._clock() - max(0.0, max_age_seconds)
         with self._lock:

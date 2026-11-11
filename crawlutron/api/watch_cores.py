@@ -1,9 +1,6 @@
-"""The typed watch cores both doors run: REST ``/v1/watches`` and the MCP watch tools.
-
-Every caller-facing watch operation is spelled once here -- register, list,
-get, delete -- so caller scoping cannot diverge between the HTTP door and the
-MCP tool. Webhook delivery admits ONLY through the REST door: the MCP create
-refuses webhook_url (no tool-delivered URL may bypass WebhookTarget/NormalizedUrl).
+"""The typed watch cores both doors run: REST ``/v1/watches`` and the MCP watch
+tools. Every caller-facing watch operation is spelled once here so caller
+scoping cannot diverge between doors; webhook delivery is REST-door-only.
 """
 
 from __future__ import annotations

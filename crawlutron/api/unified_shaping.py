@@ -122,11 +122,8 @@ def build_unified_result(
     item: EngineCrawlResult, *, delta_context: DeltaContext | None = None
 ) -> UnifiedCrawlResult:
     """Map an internal engine result into the unified API response model.
-    The response carries both LLM-friendly ``markdown`` and full ``diagnostics``;
-    page metadata comes from the carried ``llm_metadata`` or the shared extractor over the HTML.
-    When ``delta_context`` is set, each result is classified against its caller-isolated
-    baseline and carries ``delta_classification``/``delta_evidence``; unset knobs mean
-    no classification and no wire change.
+    Carries LLM-friendly ``markdown`` plus full ``diagnostics``; with
+    ``delta_context``, each result is baseline-classified with evidence.
     """
     markdown, extracted = format_crawl_item(item)
     url = item.final_url or item.normalized_url
@@ -199,15 +196,8 @@ def render_result_to_unified(
     item: CrawlResult, *, delta_context: DeltaContext | None = None
 ) -> UnifiedCrawlResult:
     """Adapt a browser ``CrawlResult`` into the unified result model.
-    Returns the model, not a dict: every field has a default, so a dict could
-    omit one invisibly (which is how an empty metadata shipped); the constructor names the field set.
-
-    The render path is deliberately *not* delta-classified: the browser worker
-    surfaces no origin validators and no integer HTTP status, so there is nothing
-    honest to compare against a baseline. ``delta_context`` is accepted for
-    interface symmetry with :func:`build_unified_result`; render results carry
-    no ``delta_classification``/``delta_evidence``.
-    """
+    Returns the model, not a dict (the constructor names the field set). Not
+    delta-classified: no validators, no integer status; symmetry parameter."""
     metadata = item.metadata
     status = CrawlStatus(item.status)
     classification = CrawlClassification(item.classification)

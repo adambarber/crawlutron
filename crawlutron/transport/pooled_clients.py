@@ -47,11 +47,8 @@ __all__ = [
 
 _DEFAULT_HTTP_CLIENT: httpx.AsyncClient | None = None
 
-# Dirty flag: a pooled client was built since the flag was last reset. The
-# harness's per-test autouse reset reads it so pure unit tests that never touch
-# the pooled client skip the loop-bound drain entirely. Private by design -- it
-# is reached through the public :meth:`LoopBoundPooledClient.clients_were_built`
-# door on the shared singleton, not by name.
+# Dirty flag: a pooled client was built since the flag was last reset; the
+# harness's per-test reset reads it via the public ``clients_were_built`` door.
 _CLIENTS_BUILT: bool = False
 
 
@@ -82,8 +79,7 @@ def _build_async_client(settings: CrawlerSettings | None = None) -> httpx.AsyncC
 
 
 # Superseded loop-bound pooled clients awaiting a loop to close on -- one bounded
-# backlog and reaper cover both httpx and curl_cffi kinds. The queue itself lives
-# in pooled_client_release (one backlog across the release helpers).
+# backlog and reaper cover both httpx and curl_cffi kinds.
 
 PENDING_CLIENT_CLOSE_MAX = 32
 
@@ -349,14 +345,11 @@ def _reset() -> None:
         bound = _loop_bound_to(_DEFAULT_HTTP_CLIENT)
         if bound is not None and bound.is_closed():
             # The owning loop is dead: no loop can complete its transports'
-            # close, so abort the sockets directly instead of queuing a close
-            # no loop will ever run (the unraisable __del__ flake family).
+            # close, so abort the sockets directly (the unraisable __del__ family).
             abort_transport_sockets((bound,))
         discard_if_unowned_loop(close_async_http_client, "_DEFAULT_HTTP_CLIENT", globals())
     # Failed rebuild can leave current=None with a queued superseded client;
-    # close it instead of dropping it (socket-leak family). A loop running on
-    # this thread cannot host the fresh loop the drain would need: close on a
-    # background thread's fresh loop there.
+    # close it instead of dropping it (socket-leak family).
     with PENDING_CLIENT_CLOSE_LOCK:
         queued = bool(PENDING_CLIENT_CLOSE)
     if queued:

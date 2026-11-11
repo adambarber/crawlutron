@@ -256,8 +256,7 @@ def install_error_surface(app) -> None:
     app.middleware("http")(reject_hostile_origin)
     app.middleware("http")(limit_request_body)
     # LAST registered = OUTERMOST (#668 HIGH-2): the anonymous meter must see
-    # every request -- including 413/403-rejected ones -- or rejected requests
-    # escape the budget (rejected requests are still work).
+    # every request, including 413/403-rejected ones, or they escape the budget.
     app.middleware("http")(throttle_anonymous_surfaces)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
     # Framework-level 404/405 raise Starlette's base HTTPException (parent of

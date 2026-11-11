@@ -22,10 +22,8 @@ __all__ = ["CoordinationStore", "atwin"]
 P = ParamSpec("P")
 R = TypeVar("R")
 
-# Bounded dedicated pool for blocking SQLite store calls. The store lock (one RLock
-# per db file) already serializes in-process store access, so a modest bound is
-# enough: the point is to keep store saturation from starving the default
-# ``asyncio.to_thread`` executor used by extraction and other crawl work.
+# Bounded dedicated pool for blocking SQLite store calls: the store lock already
+# serializes in-process access; this keeps saturation from starving other work.
 _STORE_WORKERS = 8
 _STORE_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
     max_workers=_STORE_WORKERS, thread_name_prefix="coordination-store"

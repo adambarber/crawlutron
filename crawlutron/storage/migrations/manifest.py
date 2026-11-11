@@ -186,9 +186,8 @@ WATCHES_SCHEMA = TableSchema(
     ),
 )
 
-# One row per admin action at the key doors: the append-only audit trail. The
-# (sequence) key is the append order; rows are structured fields only and are
-# reclaimed by the store's roll, never rewritten.
+# One row per admin action at the key doors: the append-only audit trail,
+# structured fields only, reclaimed by the store's roll.
 KEY_ADMIN_EVENTS_SCHEMA = TableSchema(
     name="key_admin_events",
     columns=(
@@ -216,9 +215,8 @@ CALLER_KEYS_SCHEMA = TableSchema(
     indexes=(IndexSchema("caller_keys_by_hash", ("key_hash",), unique=True),),
 )
 
-# One row per spilled page result: the engine's incremental write target. The
-# (request_id, sequence) key is the spill's ordering, so reassembly is one
-# ordered SELECT; rows are reclaimed by age, never by a process-local sweep.
+# One row per spilled page result: the engine's incremental write target, keyed
+# (request_id, sequence) so reassembly is one ordered SELECT; reclaimed by age.
 CRAWL_SPILLS_SCHEMA = TableSchema(
     name="crawl_spills",
     columns=(

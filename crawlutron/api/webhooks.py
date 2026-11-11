@@ -1,7 +1,6 @@
 """Webhook delivery helpers (SSRF-safe, IP-pinned): every outbound callback
 routes through ``post_webhook``; deliveries are HMAC-signed, retried with
-backoff, and drained on shutdown so a finished job's callback survives the drain budget
-(one past-budget delivery is logged and abandoned, not silently dropped).
+backoff, and drained on shutdown so a finished job's callback survives.
 """
 
 from __future__ import annotations
@@ -37,9 +36,7 @@ _WEBHOOK_MAX_ATTEMPTS_DEFAULT = 3
 _WEBHOOK_BACKOFF_MS_DEFAULT = 200
 
 # In-flight delivery tasks, tracked so shutdown drains a callback even when the
-# runner that scheduled it was cancelled after its terminal write landed.
-#: Hard cap on tracked in-flight deliveries: a flooded set refuses (logs, best-effort
-#: per delivery) rather than growing without limit (#655).
+# runner was cancelled after its terminal write landed. Hard cap (#655).
 DELIVERIES_CAP = 1024
 _DELIVERIES: set[asyncio.Task] = set()
 
@@ -347,9 +344,8 @@ def start_webhook_delivery(
 ) -> asyncio.Task | None:
     """Spawn the delivery as a tracked background task and return at once.
 
-    The sweep pass must not stall on a slow receiver; the task joins the
-    same ``_DELIVERIES`` set, so shutdown drains it like any other callback.
-    ``None``: refused at the in-flight cap (#655)."""
+    The sweep pass must not stall on a slow receiver; the task joins ``_DELIVERIES``
+    so shutdown drains it. ``None``: refused at the in-flight cap (#655)."""
     return _tracked_delivery(target, payload)
 
 

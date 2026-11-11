@@ -258,9 +258,8 @@ async def crawl_request(
 
 def _teardown_spill(spill: CrawlSpillStore, state: PipelineState | None, private_spill: bool) -> None:
     """The crawl's spill teardown: the writer's own release -- once the crawl has
-    ended its rows are served or dead, so the store may age-reclaim them (its
-    live-writer fence drops) -- then the private store's close, never the shared
-    one's."""
+    ended its rows are served or dead and the store may age-reclaim them -- then
+    the private store's close, never the shared one's."""
     minted = state.request_id if state is not None else None
     if minted is not None:
         spill.release_spill(minted)

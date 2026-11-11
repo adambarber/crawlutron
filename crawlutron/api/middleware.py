@@ -1,8 +1,7 @@
 """ASGI middleware: body-size cap and the DNS-rebinding Origin guard.
 
 ``limit_request_body`` caps bodies at ``receive()`` and refuses a truncated
-declared body (#619); ``reject_hostile_origin`` refuses a present non-loopback
-browser Origin on every surface.
+declared body (#619); ``reject_hostile_origin`` refuses a hostile browser Origin.
 """
 
 from __future__ import annotations
@@ -52,8 +51,7 @@ async def _drain_declared_body(original_receive: Receive, *, max_bytes: int) -> 
     """Discard a refused declared body up to ``max_bytes`` -- never unbounded.
 
     Past the cap the client is streaming forever or lying; the 413's
-    Connection: close aborts the remainder. The wall-clock deadline bounds
-    how long a slow-post client can hold this loop open.
+    Connection: close aborts the remainder. The deadline bounds slow-post holds.
     """
     drained = 0
     deadline = time.monotonic() + BODY_DEADLINE_SECONDS
@@ -86,8 +84,7 @@ async def _collect_declared_body(original_receive: Receive, *, declared: int) ->
     """Read a declared body up front, verifying the declared length arrives.
 
     Returns the buffered messages for replay, or ``None`` when the stream ended
-    short -- truncation the app must never process (#619). The declared length
-    passed the cap pre-check, so the buffer is bounded by it.
+    short -- truncation the app must never process (#619).
     """
     buffered: list[Message] = []
     received = 0
@@ -101,8 +98,7 @@ async def _collect_declared_body(original_receive: Receive, *, declared: int) ->
             return None
         if message.get("type") != "http.request":
             # A non-request message mid-collect is a disconnect (uvicorn
-            # re-delivers it forever): further receives can never produce the
-            # declared bytes, so the body is truncated (#619), not spinnable.
+            # re-delivers it forever): the body is truncated (#619), not spinnable.
             return None
         buffered.append(message)
         received += len(message.get("body", b"") or b"")
@@ -160,29 +156,22 @@ def _capped_receive_for(original_receive: Receive, *, max_bytes: int, truncated:
 
 
 async def limit_request_body(request: Request, call_next, *, max_bytes: int = MAX_REQUEST_BODY_BYTES):
-    """ASGI middleware: cap request bodies at ``max_bytes``, and refuse a body
-    that never delivers its declared Content-Length (#619). A nonempty
-    Content-Length that is not a plain non-negative decimal integer refuses
-    413 like an oversized one (#675): a negative value would serve an empty
-    body (the declared collect loops zero times) and a non-int value would
-    silently fall into the undeclared truncation path -- one refusal shape
-    for every malformed declaration."""
+    """ASGI middleware: cap request bodies at ``max_bytes`` and refuse a body
+    that never delivers its declared Content-Length (#619); a malformed
+    Content-Length refuses 413 like an oversized one (#675)."""
     original_receive = request.receive
     content_length = request.headers.get("content-length")
     declared = 0
     if content_length is not None:
-        # A nonempty header that is not a plain non-negative decimal integer
-        # refuses (#675): a negative value would serve an empty body (the
-        # declared collect loops zero times) and a non-int value would
-        # silently fall into the undeclared truncation path.
+        # A nonempty header that is not a plain non-negative decimal refuses
+        # (#675): negative serves an empty body, non-int falls into truncation.
         try:
             declared = int(content_length)
         except ValueError:
             return _error_413(max_bytes)
         if not content_length.isascii() or not content_length.isdigit() or declared > max_bytes:
             # Mirror the truncation path: drain the refused body before the
-            # 413, capped by bytes and by the wall-clock deadline so a
-            # slow-post client cannot pin the task.
+            # 413, capped by bytes and the wall-clock deadline.
             await _drain_declared_body(original_receive, max_bytes=max_bytes)
             return _error_413(max_bytes)
     if declared:

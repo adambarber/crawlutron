@@ -60,8 +60,7 @@ class CrawlClassification(StrEnum):
     unsupported_scheme = "unsupported_scheme"
     private_network_target = "private_network_target"
     # Live host-policy refusals: the deployment denied (or de-allowed) a host
-    # while a watch still pointed at it. Terminal for a watch, so the sweep can
-    # record the exact reason instead of a generic error (#674).
+    # while a watch still pointed at it; terminal, so the sweep records the reason.
     host_denied = "host_denied"
     host_not_allowed = "host_not_allowed"
     # The constructor refuses a URL carrying its own credentials (userinfo is
@@ -153,8 +152,7 @@ CLASSIFICATION_STATUS_BY_LABEL: dict[str, ResultStatus] = {
     # never attempted. Same retry contract as browser_pool_exhausted above.
     "circuit_breaker_open": "failed",
     # Capacity, not a dead page: admission stalled before a renderer was ever
-    # assigned; the status table says failed, TRANSIENT_CLASSIFICATIONS keeps it
-    # re-eligible. Same retry contract as circuit_breaker_open above.
+    # assigned; TRANSIENT_CLASSIFICATIONS keeps it re-eligible.
     "admission_stalled": "failed",
     # Exception codes from the shared classifier and the engine's guard: all
     # reach the wire as terminal failures, so their status is "failed", not "blocked".

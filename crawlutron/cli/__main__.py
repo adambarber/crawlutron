@@ -2,9 +2,6 @@
 
 The CLI performs no SSRF, policy, or URL validation; it forwards URL and flags
 to the service, which is the single source of truth.
-
-Exit codes: 0 success, 1 partial (per --exit-on), 2 usage/401/422,
-3 5xx/transport/timeout, 130 SIGINT.
 """
 
 from __future__ import annotations
@@ -35,9 +32,7 @@ EXIT_SERVER_OR_TRANSPORT = 3
 EXIT_SIGINT = 130
 
 #: Cap on a single service body the CLI buffers into RAM. Service envelopes are
-#: small JSON, so this is a backstop against a hostile or runaway payload, not a
-#: size the CLI expects to approach. Kept out of crawlutron.safety because the
-#: CLI is a pure transport facade that must not import safety/policy internals.
+#: small JSON; this is a backstop against a hostile payload (no safety imports here).
 _CLIENT_BODY_CAP = 16 * 1024 * 1024
 
 _OUTPUT_FORMATS = ("json", "jsonl", "ndjson", "markdown", "csv")
@@ -217,11 +212,8 @@ def _build_payload(args: argparse.Namespace) -> dict[str, object]:
 def _read_body(response: httpx.Response, cap: int = _CLIENT_BODY_CAP) -> bytes:
     """Read one service body, capped, streaming through ``iter_bytes``.
 
-    httpx ``Response.read()`` / ``.content`` pulls the whole body into RAM
-    unbounded; this streams it through ``iter_bytes`` and raises as soon as the
-    cap is hit. The receiver is read via ``iter_bytes`` (not ``.read()``), so the
-    body-read invariant that bans bare ``response.read()`` stays satisfied while
-    the CLI never buffers a hostile body whole.
+    httpx ``.read()`` pulls the whole body into RAM unbounded; this streams and
+    raises at the cap, so the CLI never buffers a hostile body whole.
     """
     raw = bytearray()
     for chunk in response.iter_bytes():

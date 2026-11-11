@@ -51,9 +51,7 @@ class SharedCookieStore(CoordinationStore):
         """Union ``cookies`` into the slot, then evict past the per-namespace cap.
 
         Lock order: store lock (``self._lock``) first, then ``BEGIN IMMEDIATE``
-        on the shared connection -- never the reverse. The store lock is one RLock
-        per database file shared by every instance, so only one thread may start a
-        transaction on ``self._conn`` at a time.
+        on the shared connection -- never the reverse (one RLock per db file).
         """
         key = (namespace or "", host)
         with self._lock:

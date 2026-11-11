@@ -1,10 +1,7 @@
 """Inbound caller keys: the persisted secrets callers crawl as.
 
-The secret is shown once at issuance and never stored; verification hashes
-what the caller presents (PBKDF2-SHA256, per-key salt) and compares digests
-only. The issued secret embeds its public key id so verification is one
-primary-key lookup and one PBKDF2, never a per-key scan.
-"""
+The secret is shown once at issuance and never stored; verification hashes what
+the caller presents and compares digests only, one primary-key lookup."""
 
 from __future__ import annotations
 
@@ -23,9 +20,8 @@ _KEY_ID_BYTES = 8
 _SECRET_BODY_BYTES = 32
 _SALT_BYTES = 16
 
-# PBKDF2-SHA256 at 210k: the OWASP 600k floor is the comfortable choice, but keys
-# verify at the request door, so the documented 210k step ( OWASP's accelerated
-# hardware floor ) keeps lookup sub-20ms on the reference machine. Measure before raising.
+# PBKDF2-SHA256 at 210k: the documented accelerated-hardware floor keeps lookup
+# sub-20ms at the request door; measure before raising.
 PBKDF2_ITERATIONS = 210_000
 
 #: Grace window in seconds: a rotated-away key still verifies against the

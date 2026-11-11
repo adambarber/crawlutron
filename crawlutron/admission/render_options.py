@@ -84,16 +84,13 @@ def resolve_render_options(
         value = _pick(request, base, key)
         if value is not None:
             kwargs[key] = bool(value)
-    # The vocabulary authority is the render edge's validation boundary:
-    # unknown keys, over-ceiling knobs, oversized strings, malformed actions,
-    # and off-vocabulary values all refuse here (a 422), so the raw wire
-    # dict crosses as the record with every door closed.
+    # The vocabulary authority is the render edge's validation boundary: unknown
+    # keys, over-ceiling knobs, and off-vocabulary values all refuse here (422).
     raw_profile = _pick(request, base, "browser_profile")
     profile = dict(raw_profile) if isinstance(raw_profile, dict) else {}
     close_browser_profile_vocabulary(profile)
-    # A string-shaped knob slips the authority's numeric refusal (the consumers
-    # coerce it, so the ceiling applies here before it crosses); a non-numeric
-    # string is caller garbage and refuses like every other off-boundary value.
+    # A string-shaped knob slips the authority's numeric refusal (consumers coerce
+    # it, so the ceiling applies here); non-numeric strings refuse like garbage.
     for key, ceiling in bounded_knob_table():
         if isinstance(knob := profile.get(key), str):
             try:

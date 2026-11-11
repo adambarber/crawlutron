@@ -315,9 +315,8 @@ def _cache_walk_result(
 ) -> None:
     """Store one walk's outcome: failure (nothing, no validators) expires short.
 
-    #675: an EMPTY result never replaces a non-empty cached entry -- a failed
-    or starved walk must not displace the last good set (it survives
-    stale-readable); only a walk with no prior good entry caches failure."""
+    #675: an EMPTY result never replaces a non-empty cached entry -- a failed walk
+    must not displace the last good set; only a walk with no prior entry caches failure."""
     if not page_urls and root_etag is None and root_lm is None:
         prior = SITEMAP_CACHE.get_stale(cache_key)
         if prior is not None and prior[0]:
@@ -372,15 +371,13 @@ async def fetch_sitemap_urls(
         page_urls = await single_flight(_INFLIGHT_SITEMAP, cache_key, walk_and_cache)
     except Exception:
         # #675: a failed walk never writes the cache and never returns less
-        # than the last known-good set -- the stale entry stays readable
-        # (304-reuse) instead of being displaced by a failure-TTL empty set.
+        # than the last known-good set (304-reuse survives the failure).
         if stale:
             return set(stale[0])
         raise
     if not page_urls and stale:
-        # A completed walk that resolved nothing (origin 5xx, transport
-        # failure): same contract -- serve the last good set, keep it cached;
-        # only a walk with NO prior entry caches the failure-TTL empty result.
+        # A completed walk that resolved nothing: same contract -- serve the
+        # last good set; only a walk with NO prior entry caches the empty result.
         return set(stale[0])
     return page_urls
 

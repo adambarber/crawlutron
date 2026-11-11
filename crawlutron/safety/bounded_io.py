@@ -32,10 +32,8 @@ MAX_HTML_INPUT_BYTES = 4 * 1024 * 1024
 
 def truncate_html_input(html: str | None) -> str:
     """Bound an HTML document to :data:`MAX_HTML_INPUT_BYTES`, truncating rather
-    than raising: a partial document still yields usable text, so a refused page
-    would lose the result entirely. Callers keep the "why"; this owns "how much".
-    Truncation is byte-accurate (#655): the cut lands on a UTF-8 character
-    boundary, so the result never exceeds the byte budget.
+    than raising: a partial document still yields usable text. Truncation is
+    byte-accurate (#655): the cut lands on a UTF-8 character boundary.
     """
     body = html or ""
     encoded = body.encode("utf-8")

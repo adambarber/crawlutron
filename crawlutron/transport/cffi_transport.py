@@ -1,9 +1,7 @@
 """curl_cffi transport: one pinned hop per ``fetch()`` call.
 
-Mirrors the httpx transport's SSRF-safe redirect and header handling. Returns
-``None``-equivalent (raises) on transport failure so the caller can fall back to
-plain httpx; ``BodyTooLarge`` from the body cap is raised and mapped to http_413
-by the walker.
+Mirrors the httpx transport's SSRF-safe redirect and header handling; raises on
+transport failure so the caller can fall back to plain httpx.
 """
 
 from __future__ import annotations
@@ -84,9 +82,8 @@ def release_stream_noblock(response: Closeable) -> None:
 class CffiTransport:
     """curl_cffi backend: one SSRF-pinned hop per ``fetch()`` call.
 
-    On transport failure raises (no result) so the caller can fall back to plain
-    httpx. TLS-handshake failures (SSLError) always propagate -- impersonation
-    never completed, so plain httpx would be a silent capability lie.
+    Raises on transport failure so the caller can fall back to plain httpx;
+    TLS-handshake failures always propagate (impersonation never completed).
     """
 
     def __init__(self, settings=None, release_stream_noblock=None) -> None:
@@ -96,9 +93,8 @@ class CffiTransport:
     async def fetch(self, request: FetchRequest, *, max_bytes: int) -> FetchResult:
         """Send one pinned curl_cffi hop and return its result.
 
-        Raises ``BodyTooLarge`` when the streamed body exceeds ``max_bytes``;
-        the walker maps that to an http_413 ``FetchResult``.
-        On curl_cffi transport failure this raises so the caller can fall back to httpx.
+        Raises ``BodyTooLarge`` (the walker maps it to http_413); on transport
+        failure raises so the caller can fall back to httpx.
         """
         started = time.monotonic()
         response, release = await self._dial(request)
@@ -176,8 +172,7 @@ class CffiTransport:
         """Content-length gate, redirect, or terminal body read for one cffi hop.
 
         The one-shot pinned session stays alive until the terminal body is fully
-        consumed; ``release`` closes it exactly once on every exit path, after the
-        drain (or abandon) is complete.
+        consumed; ``release`` closes it exactly once on every exit path.
         """
         stream_release = self._release_stream_noblock or release_stream_noblock
         try:

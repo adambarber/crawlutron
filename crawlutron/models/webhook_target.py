@@ -1,10 +1,7 @@
 """WebhookTarget: the admitted, secret-carrying webhook destination (#599).
 
-The raw URL enters the constructor and is admitted through the ONE SSRF
-chokepoint -- ``NormalizedUrl(raw, policy=...)``, which refuses userinfo under
-the shared ``userinfo_refused`` law. Every projection (str, repr, serialization,
-log/metric/error paths) is redacted; the raw admitted URL escapes only via
-``delivery_url()``, at the POST site alone.
+The raw URL is admitted through the ONE SSRF chokepoint; every projection is
+redacted, and the raw URL escapes only via ``delivery_url()`` at the POST site.
 """
 
 from __future__ import annotations
@@ -31,10 +28,8 @@ class WebhookTarget:
     def admit(cls, raw: str, *, host_policy: HostPolicy) -> WebhookTarget:
         """Admit a raw webhook URL through the shared SSRF chokepoint.
 
-        Userinfo (``user:pass@host``) is refused by NormalizedUrl's own
-        ``userinfo_refused`` law; webhook auth is policy.credentials, never
-        credentials in the URL. A secret-named query parameter is refused too:
-        it would persist plaintext at rest and leave at delivery time.
+        Userinfo is refused by NormalizedUrl's ``userinfo_refused`` law; a secret-
+        named query parameter is refused too (it would persist plaintext at rest).
         """
         parsed = urlsplit(raw)
         secret = next(

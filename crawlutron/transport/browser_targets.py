@@ -46,11 +46,7 @@ async def resolve_browser_target(
     """SSRF-check ``url`` for browser navigation, per scheme (#617).
 
     HTTPS keeps the hostname so TLS SNI and cert verification attest the pinned
-    identity (an IP literal with a Host override never checks the cert) -- gated
-    by the fresh+stable double-resolve the route and websocket guards share.
-    Plain HTTP pins the resolved IP with the original Host: no TLS to verify.
-    Unsafe targets raise. Async because pinning resolves DNS.
-    """
+    identity; plain HTTP pins the resolved IP with the original Host."""
     if url.scheme == "https":
         await _BOUNDED(
             lambda: check_ssrf_protection_stable(url),

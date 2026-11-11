@@ -43,8 +43,7 @@ def add_column_step(table_name: str, column_ddl: str) -> Iterable:
                 conn.execute(f"ALTER TABLE {_quote(table_name)} ADD COLUMN {column_ddl}")
             except sqlite3.OperationalError as exc:
                 # Concurrent migrations can both pass the guard: a duplicate-column
-                # error means a sibling already added it, so the state we need is
-                # present -- treat as applied rather than aborting the battery.
+                # error means a sibling added it -- treat as applied.
                 if "duplicate column" in str(exc).lower():
                     return
                 raise

@@ -1,11 +1,7 @@
-"""Delta crawl classification and accounting: one pure source of truth.
+"""Delta classification and accounting: one pure source of truth.
 
-Classifies each crawl result against its caller-isolated baseline evidence
-(validators, content fingerprint, freshness) and rolls a shaped batch up into
-``delta_summary``. No I/O, no network, no facade logic: doors thread the
-request knobs (``changed_since``, ``baseline_request_id``) and the loaded
-baseline in through :class:`DeltaContext`. Unset knobs mean no classification
-and no wire change.
+Classifies each result against its caller-isolated baseline and rolls a shaped
+batch into ``delta_summary``; no I/O -- doors thread the knobs in themselves.
 """
 
 from __future__ import annotations
@@ -18,9 +14,8 @@ from hashlib import sha256
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.unified_crawl_result import UnifiedCrawlResult
 
-#: Wire spellings of the four verdicts. ``UnifiedCrawlResult.delta_classification``
-#: is ``str | None`` so these constants are the single spelling source; the wire
-#: never sees a classification when no delta knob was set.
+#: Wire spellings of the four verdicts: the single spelling source for
+#: ``UnifiedCrawlResult.delta_classification`` (``str | None`` on the wire).
 NEW = "new"
 CHANGED = "changed"
 UNCHANGED = "unchanged"
@@ -31,13 +26,10 @@ _NOT_MODIFIED = "not_modified"
 
 @dataclass(frozen=True, slots=True)
 class BaselineEvidence:
-    """Per-URL evidence from the baseline request or per-URL submitted validators.
+    """Per-URL evidence from the baseline or per-URL submitted validators.
 
-    ``etag``/``last_modified`` are origin validators a conditional revalidation
-    can be sent against; ``fingerprint`` is the content fingerprint, or None.
-    ``fingerprint_fields`` names the content fields that fed ``fingerprint``, so
-    a re-crawl at a different output shape recomputes over the same fields
-    instead of a shifted hash (policy-invariant comparison).
+    ``fingerprint_fields`` names the fields that fed ``fingerprint``, so a
+    re-crawl at a different output shape recomputes over the same fields.
     """
 
     etag: str | None = None
@@ -50,10 +42,8 @@ class BaselineEvidence:
 class DeltaContext:
     """Caller-scoped delta request: knobs plus the resolved baseline.
 
-    ``baseline_expired`` is true when ``baseline_request_id`` was set but the
-    stored row was missing, expired, or foreign to this caller: the request
-    degrades -- baseline-comparison classification dies, ``changed_since``
-    freshness still runs, and ``delta_summary`` carries ``degraded_baseline``.
+    ``baseline_expired``: the row was missing, expired, or foreign -- baseline
+    comparison dies, ``changed_since`` freshness runs, ``delta_summary`` flags it.
     """
 
     changed_since: float | None
@@ -61,8 +51,7 @@ class DeltaContext:
     baseline: dict[str, BaselineEvidence]
     baseline_expired: bool
     #: The baseline's results as identity GROUPS: one entry per stored result
-    #: with every key that row answers under. Removal is decided per entry, so
-    #: an alias spelling answered by this run does not report the page removed.
+    #: with every key that row answers under.
     entries: tuple[BaselineEntry, ...] = ()
 
 
@@ -106,9 +95,8 @@ def _fingerprint_over_fields(
 def _fingerprint_matching_baseline(item: EngineCrawlResult, baseline: BaselineEvidence) -> str | None:
     """The current result's hash over the baseline's fingerprinted fields, or None.
 
-    A re-crawl at a different output shape cannot reproduce the baseline's
-    field set: an incomparable fingerprint reports None so validators or the
-    ``evidence_incomplete`` degradation decide, never a shifted-hash "changed".
+    A different output shape cannot reproduce the baseline's field set, so an
+    incomparable fingerprint reports None -- never a shifted-hash "changed".
     """
     if baseline.fingerprint is None or not baseline.fingerprint_fields:
         return content_fingerprint(item)
@@ -150,8 +138,7 @@ def classify_result(
     """Classify one result against its caller-isolated baseline, or (None, None).
 
     Fail-open and honest: never ``unchanged`` without evidence. A degraded
-    baseline still classifies by ``changed_since`` freshness; only the
-    baseline-comparison ladder dies with it.
+    baseline still classifies by ``changed_since`` freshness only.
     """
     if context is None or (context.changed_since is None and context.baseline_request_id is None):
         return None, None
@@ -252,11 +239,8 @@ def delta_summary_for(
 ) -> dict[str, object] | None:
     """Deterministic rollup of one shaped batch, or None when delta was not asked.
 
-    ``delta_requested`` is the caller's signal that a delta knob was set; without
-    it there is no summary to emit. ``considered`` is every shaped result;
-    buckets count only classified ones, so an unclassifiable result (a shaping
-    failure) is considered but in no bucket, and is listed in ``skipped`` with
-    its why.
+    ``considered`` is every shaped result; buckets count only classified ones, so
+    an unclassifiable result is considered but in no bucket, listed in ``skipped``.
     """
     if not delta_requested:
         return None
@@ -290,9 +274,8 @@ def delta_summary_for(
 def extract_baseline(stored_payload: dict[str, object]) -> dict[str, BaselineEvidence]:
     """Per-URL baseline evidence from a stored ``UnifiedCrawlResponse`` dump.
 
-    Keys are every identity the stored result carried (normalized URL first,
-    then the caller's original text) so a later crawl matches whichever identity
-    its result answers under. The flat view over :func:`extract_baseline_entries`.
+    Keys are every identity the stored result carried (normalized URL first), so
+    a later crawl matches whichever identity its result answers under.
     """
     baseline: dict[str, BaselineEvidence] = {}
     for entry in extract_baseline_entries(stored_payload):
@@ -356,9 +339,8 @@ def extract_baseline_entries(stored_payload: dict[str, object]) -> tuple[Baselin
 def removed_entry_keys(entries: tuple[BaselineEntry, ...], served: set[str]) -> tuple[str, ...]:
     """Keys of baseline entries this run never answered, per ENTRY not per key.
 
-    An entry is served when ANY of its identities answered, so an alias
-    spelling answered by the run cannot report the page removed; a removed
-    entry reports under its first (normalized-first) key.
+    An entry is served when ANY of its identities answered, so an alias spelling
+    answered by the run cannot report the page removed.
     """
     return tuple(entry.keys[0] for entry in entries if removed_urls_for(entry.keys, served) == entry.keys)
 
@@ -366,9 +348,8 @@ def removed_entry_keys(entries: tuple[BaselineEntry, ...], served: set[str]) -> 
 def removed_urls_for(submitted_urls: Iterable[str], admitted_identities: Iterable[str]) -> tuple[str, ...]:
     """Submitted URLs absent from this run's admitted set, flat per-key subtraction.
 
-    Only honest when ``submitted_urls`` is ONE entry's bounded identity set (or
-    an equivalent grouping the caller guarantees); the delta summary removes per
-    ENTRY via :func:`removed_entry_keys` so an alias spelling cannot fake one.
+    Only honest when ``submitted_urls`` is ONE entry's bounded identity set; the
+    summary removes per ENTRY via :func:`removed_entry_keys`.
     """
     admitted = set(admitted_identities)
     return tuple(url for url in submitted_urls if url not in admitted)

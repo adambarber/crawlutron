@@ -85,9 +85,9 @@ def presented_key(request: Request) -> str | None:
 
 
 def record_operator_auth_failure(audit, *, actor: str = "anonymous") -> None:
-    """One durable audit row per failed operator authentication (#697); the
-    #696 counter stays the metric, this is the durable record -- never both
-    wired at separate sites. No-op when no audit store is wired (tests)."""
+    """One durable audit row per failed operator authentication (#697); the #696
+    counter stays the metric, this the durable record -- never both wired.
+    No-op when no audit store is wired (tests)."""
     if audit is None:
         return
     audit.record_event(actor=actor, action="operator_auth_failure", target_key_id=None, outcome="refused")
@@ -160,13 +160,8 @@ def _constant_time_eq(secret: str, token: str) -> bool:
 async def get_keys_caller(request: Request) -> CallerIdentity:
     """FastAPI dependency: the operator token is the only /v1/keys caller.
 
-    A caller key never enters, valid or not; no store lookup, so the door is
-    not a key-validity oracle, and an unconfigured token seals it (fail closed).
-    Failed guesses meter through the shared KeyVerifyThrottle's dedicated
-    ``admin`` bucket (#659): guess-pacing, not CPU protection --
-    compare_digest is cheap, so the meter's value is pacing the door away
-    from unlimited online guessing. 5 misses/300s -> 60s fail-closed
-    cooldown BEFORE any comparison work beyond the digest.
+    A caller key never enters; an unconfigured token seals it (fail closed).
+    Failed guesses meter through the shared throttle's ``admin`` bucket (#659).
     """
     secret = _presented_key(request)
     admin_token = key_admin_token(request)
@@ -186,8 +181,8 @@ async def _caller_from_secret(request: Request, secret: str) -> CallerIdentity:
     """Resolve a presented secret to an identity or raise 401.
 
     The meter runs BEFORE the PBKDF2: a credential in cooldown refuses without
-    burning another derivation (#653). The meter is the single per-entry-point
-    chokepoint, not per-door."""
+    burning another derivation (#653). One per-entry-point chokepoint.
+    """
     throttle = key_throttle.shared_throttle()
     throttle.check(secret)
     store = getattr(request.app.state, "caller_key_store", None)
@@ -202,9 +197,8 @@ async def _caller_from_secret(request: Request, secret: str) -> CallerIdentity:
 async def get_caller_identity(request: Request) -> CallerIdentity:
     """FastAPI dependency: who this request crawls as.
 
-    A presented credential that matches the configured operator token resolves
-    to the operator identity (verify_admin_secret is fail-closed when unset);
-    any other presented secret rides the keyed path unchanged."""
+    The configured operator token resolves to the operator identity (fail-closed
+    when unset); any other presented secret rides the keyed path unchanged."""
     secret = _presented_key(request)
     if not secret:
         return anonymous_caller()

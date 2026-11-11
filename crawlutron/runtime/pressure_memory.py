@@ -21,9 +21,7 @@ _DEFAULT_TARGET = 0.85
 _DEFAULT_HARD = 0.92
 
 # When no ceiling can be sensed (no cgroup files; sysconf without /proc), the
-# gate stands on THIS floor instead of collapsing to 0 -- a 0 ceiling made every
-# ratio 0.0 and the gate ran fully open forever (#C11). 1 GiB is conservative:
-# a small crawl still fits; a real memory hog throttles against it.
+# gate stands on THIS floor instead of collapsing to 0 (that ran it open, #C11).
 _CONSERVATIVE_CEILING_BYTES = 1 << 30
 
 
@@ -83,9 +81,8 @@ def read_memory_stats(
 def batch_scale(used: float, total: float, target: float, hard: float | None = None) -> float:
     """Dispatch multiplier for current pressure.
 
-    <= target -> 1.0 (full speed); target..hard -> linear down to 0;
-    >= hard   -> 0 (caller must pause until usage drains). A zero ceiling is a
-    caller lie (the conservative floor owns unknowable ceilings) -- refuse.
+    <= target -> 1.0 (full speed); target..hard -> linear down to 0; >= hard -> 0
+    (caller must pause until usage drains). A zero ceiling is a caller lie -- refuse.
     """
     if total <= 0:
         raise ValueError(f"batch_scale needs a positive ceiling, got {total=}")

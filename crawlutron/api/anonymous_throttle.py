@@ -1,12 +1,7 @@
 """Anonymous IP-bucket metering (#668): the surfaces outside the auth layer.
 
-The rate-limit law: every externally reachable surface is metered. The
-former exempt GETs (discovery, docs, health), POST /mcp anonymous traffic,
-and the route-miss oracle have no caller credential to key a bucket on, so
-they meter per remote IP here.
-
-#659/#663 inheritance: buckets are LRU-bounded, the clock is monotonic, and
-the meter is registered process state (#621).
+The rate-limit law: every externally reachable surface is metered. Surfaces
+with no caller credential meter per remote IP here (#659/#663 inheritance).
 """
 
 from __future__ import annotations
@@ -20,21 +15,16 @@ from crawlutron.api.meter_ledger import MeterLedger, register_shared_meter
 __all__ = ["AnonymousThrottle", "Throttled", "shared_anonymous_throttle"]
 
 #: The anonymous budget: these surfaces cost route matching plus envelope
-#: construction (and, on /mcp, the pure tools/list arm) -- no fetch, no egress.
-#: 120 requests per 60s per remote IP is the defensible default; no env knob
-#: (the knob-contract gate carries no row for this surface).
+#: construction -- no fetch, no egress. 120/60s per remote IP; no env knob.
 MAX_REQUESTS_PER_WINDOW = 120
 WINDOW_SECONDS = 60.0
-#: The LRU bound: attacker IP rotation cannot grow memory unboundedly; the
-#: least-recently-used (quiescent for a full window's worth of fresher callers)
-#: bucket is the eviction victim. An ACTIVE ip is touched on every check and
-#: sits at the MRU end, so eviction never resets an in-window count.
+#: The LRU bound: attacker IP rotation cannot grow memory unboundedly; a
+#: quiescent bucket is the eviction victim and an active IP is never evicted.
 BUCKET_CAPACITY = 1024
 NO_CLIENT_BUCKET = "unknown"
 
-#: The accepted 2x boundary burst: a bucket that hit exactly MAX within the
-#: window admits one more request (count > MAX refuses), so a client racing
-#: the boundary sees at most 2*MAX-1 successes before steady 429s.
+#: The accepted 2x boundary burst: a bucket that hit exactly MAX admits one
+#: more (count > MAX refuses), so a racer sees at most 2*MAX-1 successes.
 
 
 class Throttled(Exception):
@@ -104,10 +94,8 @@ def shared_anonymous_throttle() -> AnonymousThrottle:
 
 register_shared_meter(__name__, _SHARED)
 
-#: The paths this meter gates: MCP anonymous traffic and FastAPI's static docs
-#: pages. The former exempt GETs (health, ready, discovery, capabilities,
-#: agent-hints, openapi.json) meter through the middleware below this table;
-#: ANONYMOUS_METERED carries them as the ratchet's path inventory.
+#: The paths this meter gates: MCP anonymous traffic and FastAPI's static
+#: docs pages; exempt GETs meter through the middleware (ANONYMOUS_METERED).
 METERED_PREFIXES = ("/docs", "/redoc")
 METERED_EXACT = ("/mcp",)
 
@@ -115,17 +103,8 @@ METERED_EXACT = ("/mcp",)
 async def throttle_anonymous_surfaces(request, call_next):
     """HTTP middleware meter over every surface with no caller to key on.
 
-    Registered OUTERMOST (last) and counting at the REQUEST stage: every
-    request consumes exactly ONE anonymous unit, including 413 body-size and
-    403 origin rejections -- REJECTED requests are still work (the pinning
-    probes prove one unit each from a MAX-1 baseline). One stage means one
-    count per request: no double-metering anywhere.
-
-    Presented-credential /mcp traffic is skipped: it resolves a caller identity
-    inline and meters through the caller's own quota (the #664 layer). Caller
-    semantics for everything else: the caller plane has no request-count quota
-    (page/concurrency only), so requests to caller-guarded routes consume the
-    anonymous IP bucket too -- one request, one unit, whatever the response.
+    Registered OUTERMOST, counting at the REQUEST stage: every request consumes
+    one anonymous unit (413/403 included); /mcp with a credential skips (#664).
     """
     path = request.url.path
     if path in METERED_EXACT and _presents_credential(request):

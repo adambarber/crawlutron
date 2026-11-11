@@ -6,9 +6,8 @@ from __future__ import annotations
 class CrawlPendingError(Exception):
     """A stored-crawl read raced a job that is still running.
 
-    Typed, deliberately distinct from ``HTTPException``: REST converts it to
-    the 202 the replay doors report, and the MCP read tools answer it as a
-    structured non-error result rather than an is_error tool result.
+    Typed, deliberately distinct from ``HTTPException``: REST converts it to a
+    202; the MCP read tools answer it as a structured non-error result.
     """
 
     def __init__(self, request_id: str, status: str) -> None:

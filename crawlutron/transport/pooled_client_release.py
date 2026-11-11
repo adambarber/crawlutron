@@ -1,11 +1,7 @@
 """Releasing pooled clients across loop boundaries.
 
-`discard_if_unowned_loop` decides where a superseded client's close runs: on
-its owning loop (bound and open), on a fresh loop, on a background thread's
-loop, or as a tracked task when the caller itself runs on the owning loop.
-The tracked-task and dead-loop paths are the structural fix for the unraisable
-``_SelectorTransport.__del__`` flake family (#820 unit 3): a close no loop
-will ever run leaves the socket to warn at a random later test's GC.
+``discard_if_unowned_loop`` decides where a superseded client's close runs:
+owning loop, fresh loop, background thread, or a tracked task on the owner.
 """
 
 from __future__ import annotations
@@ -40,15 +36,13 @@ class PooledClient(Protocol):
     async def aclose(self) -> object: ...
 
 
-# Superseded loop-bound pooled clients awaiting a loop to close on. The queue
-# is the one shared backlog across every release helper, so it is public: the
-# pool modules read and clear it through the reset doors below.
+# Superseded loop-bound pooled clients awaiting a loop to close on: the one
+# shared backlog across every release helper, public for the reset doors below.
 PENDING_CLIENT_CLOSE: list[PooledClient] = []
 PENDING_CLIENT_CLOSE_LOCK = threading.Lock()
 
-# Closes scheduled onto the loop that is currently running (a reset called
-# from inside the owning loop): the teardown drains these before the loop
-# closes.
+# Closes scheduled onto the currently running loop (a reset called from inside
+# the owning loop): the teardown drains these before the loop closes.
 _LIVE_LOOP_CLOSE_TASKS: set[asyncio.Task[None]] = set()
 
 
@@ -143,10 +137,8 @@ def _close_captured_and_queue(client: PooledClient) -> Coroutine[object, object,
 def _schedule_on_owning_loop(bound: asyncio.AbstractEventLoop, client: PooledClient) -> None:
     """Schedule the captured client's close on the loop the caller runs on.
 
-    Blocking would deadlock the loop that must run the close (the 30s wait
-    always times out, stranding the socket for GC -- the unraisable ``__del__``
-    flake family). The close is a tracked task; the teardown drains it before
-    the loop closes.
+    Blocking would deadlock that loop (stranding the socket for GC), so the
+    close is a tracked task the teardown drains before the loop closes.
     """
     task: asyncio.Task[None] = bound.create_task(_close_captured_and_queue(client))
     _LIVE_LOOP_CLOSE_TASKS.add(task)
@@ -166,9 +158,8 @@ def _close_on_owning_loop(bound: asyncio.AbstractEventLoop, close: Callable[[], 
 def _close_cross_loop(close: Callable[[], Awaitable[object]]) -> None:
     """Close when the client has no open owning loop.
 
-    A loop may be RUNNING on this thread even with no current loop -- hosting
-    a fresh loop there raises "another loop is running", so use a background
-    thread in that case.
+    A loop may be RUNNING on this thread even with no current loop -- hosting a
+    fresh loop there raises, so use a background thread in that case.
     """
     try:
         running = asyncio.get_running_loop() is not None
@@ -186,8 +177,7 @@ def discard_if_unowned_loop(
     """Release ``slot``'s object, closing it on its owning loop when it has one.
 
     ``namespace`` holds the pooled object; one helper serves every pool module.
-    A bound, open loop owns the close; a None or closed bound loop falls
-    through to the cross-loop branches.
+    A None or closed bound loop falls to the cross-loop branches.
     """
     client = namespace[slot]
     if client is None:
@@ -221,12 +211,8 @@ async def drain_pending_client_closes() -> None:
                 break
             client = PENDING_CLIENT_CLOSE.pop(0)
         await safe_aclose(client)
-    # Join the close tasks this loop itself scheduled (a reset called from
-    # inside the owning loop): they own the pooled transports. The task
-    # draining right now (a close task re-entering here) is excluded, or the
-    # gather would wait on itself forever.
-    # The join is also the backstop under the reset abort net: _reset_release_state
-    # reclaims sockets stranded by a task that dies with its loop.
+    # Join this loop's own close tasks (a reset called from inside the owning
+    # loop); the task draining right now is excluded or the gather waits on itself.
     me = asyncio.current_task()
     while pending := {
         t for t in _LIVE_LOOP_CLOSE_TASKS if t is not me and t.get_loop() is asyncio.get_running_loop()
@@ -247,9 +233,8 @@ def clear_live_loop_close_tasks() -> None:
 def _reset_release_state() -> None:
     """Release this module's reset-shaped state.
 
-    A still-pending tracked task belongs to a loop that may be gone, so its
-    sockets are aborted loop-free first; dropping the task alone would strand
-    the socket for GC (the unraisable __del__ family).
+    A still-pending tracked task's sockets are aborted loop-free first: a gone
+    loop can never run the close, and dropping the task alone strands the socket.
     """
     from crawlutron.transport.pooled_socket_abort import abort_transport_sockets
 
@@ -282,6 +267,5 @@ def _has_pending_client_state() -> bool:
 
 
 # The release module owns its own reset-shaped state (queue + tracked tasks);
-# registering it here keeps the reset family exhaustive (the reset-shaped-state
-# invariant refuses an unregistered reset door).
+# registering it keeps the reset family exhaustive.
 process_state.register(__name__, _reset_release_state, _has_pending_client_state)

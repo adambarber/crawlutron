@@ -14,9 +14,8 @@ __all__ = [
     "reject_injectable_header_values",
 ]
 
-#: The RFC 7230 CTL set: every C0 control plus DEL. Any of them can corrupt
-#: HTTP framing in some lenient parser (CR/LF split headers; NUL and the rest
-#: poison token parsing); multibyte text stays a legal header value.
+#: The RFC 7230 CTL set: every C0 control plus DEL. Any can corrupt HTTP
+#: framing in some lenient parser; multibyte text stays a legal header value.
 _INJECTABLE = re.compile(r"[\x00-\x1f\x7f]")
 
 

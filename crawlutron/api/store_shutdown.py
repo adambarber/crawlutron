@@ -23,8 +23,7 @@ async def close_app_stores(app: FastAPI) -> None:
     """Close the stores create_app built: their connections are shutdown's.
 
     The process-wide module singleton is excluded: its connections are the
-    process's (closed at session finish), so one test's shutdown must not
-    strand every later test's app on a closed store.
+    process's, so one test's shutdown must not strand later tests' apps.
     """
     from crawlutron.main import module_app
 

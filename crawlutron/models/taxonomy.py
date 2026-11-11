@@ -1,7 +1,6 @@
-"""The vocabulary a crawl result is written in: ``Classification`` (the
-StrEnum in vocabulary/taxonomy, re-exported here as the single spelling),
-``CrawlError`` (a union that includes it), and ``CrawlStrategyName``; the
-runtime set is DERIVED from these, one declaration read many ways.
+"""The vocabulary a crawl result is written in: ``Classification`` (the StrEnum,
+re-exported here as the single spelling), ``CrawlError``, and
+``CrawlStrategyName``; the runtime set is DERIVED from these.
 """
 
 from __future__ import annotations
@@ -16,10 +15,8 @@ from crawlutron.vocabulary.taxonomy import CrawlClassification
 # origins; a taxonomy alias written either way has to read the same here.
 _UNION_ORIGINS = (Union, types.UnionType)
 
-#: The page-outcome taxonomy: ONE declaration (the StrEnum), imported under
-#: its historical alias so every ``Classification`` annotation stays valid.
-#: A StrEnum IS a str, so wire comparisons and equality with plain strings
-#: keep working unchanged.
+#: The page-outcome taxonomy: ONE declaration (the StrEnum), imported under its
+#: historical alias so every ``Classification`` annotation stays valid.
 Classification = CrawlClassification
 
 # Pipeline conditions with no page-classification analogue (capacity, config):
@@ -51,10 +48,9 @@ CrawlStrategyName = Literal[
 
 
 def literal_members(alias: object) -> frozenset[str]:
-    """The string members of a declared type, total by origin: a ``Literal``
-    yields its args, an Enum class its values, a union the union of what it
-    holds, and anything else nothing -- the clause that makes a field sweep
-    safe to point it at.
+    """The string members of a declared type, total by origin: a ``Literal`` yields
+    its args, an Enum class its values, a union the union of what it holds, and
+    anything else nothing -- the clause that makes a field sweep safe to point it at.
     """
     if isinstance(alias, type) and issubclass(alias, enum.Enum):
         return frozenset(member.value for member in alias)

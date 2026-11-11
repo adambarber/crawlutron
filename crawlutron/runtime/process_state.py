@@ -1,11 +1,7 @@
 """The one process-state seam (#621).
 
 Modules holding state that outlives one call register a private reset/probe
-pair here at import; the harness drives :func:`reset_all_process_state` instead
-of importing a hand-copied ``reset_process_state`` from every owner. Scope:
-stateful containers and singletons with observable behavior. Bounded pure-function
-memo caches (``lru_cache`` on total functions) and in-flight registries emptied by
-drain are not members: their entries are value-keyed and never go stale.
+pair here; the harness drives :func:`reset_all_process_state`.
 """
 
 from __future__ import annotations
@@ -45,9 +41,8 @@ def register(owner: str, reset: Callable[[], None], has: Callable[[], bool]) -> 
 def reset_all_process_state() -> None:
     """Every registered module drops its state, in registration order.
 
-    One owner's failure never strands the rest: each reset runs, the first
-    failure is re-raised with its owner named after the whole chain completes
-    -- an aborted chain left later owners' state held into the next test (#643).
+    One owner's failure never strands the rest: each reset runs, and the first
+    failure is re-raised with its owner named after the chain completes (#643).
     """
     first_failure: tuple[str, BaseException] | None = None
     for owner, reset, _ in list(_ENTRIES):

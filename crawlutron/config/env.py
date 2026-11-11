@@ -43,9 +43,8 @@ def parse_bool_env(name: str, default: bool = False) -> bool:
 class EnvDecisionMemo:
     """One memoized escape-hatch env read, shared by every twin (#621).
 
-    The raw env value is the cache key: an unchanged value skips the parse, an
-    env change lands on the next call, and an enabled decision warns once per
-    distinct value through the owner's logger and message, not per call.
+    The raw env value is the cache key: unchanged value skips the parse, and an
+    enabled decision warns once per distinct value, not per call.
     """
 
     def __init__(

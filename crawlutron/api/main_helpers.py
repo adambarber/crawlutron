@@ -57,8 +57,7 @@ def request_gate(
 ) -> Generator[None, None, None]:
     """Admit one readiness-tracked request and own the whole tail: the
     ``begin_request`` admission, the rejection envelope, and the ``end_request``
-    release. A fixed-cap refusal (503) happens before admission, taking no slot.
-    Nested acquisition is a defect: one request is one slot (#576).
+    release. A fixed-cap refusal happens before admission; re-entry is a defect.
     """
     if _gate_token.get() is not None:
         raise RuntimeError(f"request_gate re-entered inside gate {event!r}: one request is one slot")

@@ -71,9 +71,8 @@ logger = logging.getLogger(__name__)
 
 def _render_classification(error: BaseException) -> Classification:
     """The attempt verdict for a failed render. A bounded-resolver timeout is a
-    resolution failure (dns_error), never a navigation one: the request
-    never got to navigate. A browser cert refusal (identity mismatch) is the
-    pin law working: tls_error, visibly classified, never a silent success."""
+    resolution failure (dns_error), never navigation; a browser cert refusal is
+    the pin law working: tls_error, visibly classified."""
     if isinstance(error, ResolverBudgetExceeded):
         return Classification.dns_error
     if isinstance(error, TimeoutError):
@@ -305,9 +304,8 @@ class BrowserRenderer:
         deadline = time.monotonic() + self._challenge_wait_seconds
         settled = False
         while time.monotonic() < deadline:
-            # Poll readiness through the injected clock: one cheap readyState
-            # read per tick, no full DOM re-serialization, and the clock is
-            # controllable in tests. Never raw asyncio.sleep.
+            # Poll readiness through the injected clock: one cheap readyState read
+            # per tick; the clock is controllable in tests. Never raw asyncio.sleep.
             await self._async_sleep(1)
             ready_state = await bounded_evaluate(page, "() => document.readyState")
             if ready_state in {"interactive", "complete"}:

@@ -1,11 +1,7 @@
 """The append-only admin audit trail: one durable row per key-admin action.
 
-Every mint, revoke, inventory read, and failed operator guess lands here as
-structured fields only -- actor, action, target key id, timestamp, outcome.
-No secret material ever enters a row (#660 redaction law): the row has no
-free-text column by construction. Rows are never rewritten; retention is a
-bounded roll applied at the append itself, so a mint flood cannot grow the
-table past its cap and a read never pays for the sweep.
+Every key-admin action lands here as structured fields only; no secret material
+ever enters a row (#660). Rows are never rewritten; retention is a bounded roll.
 """
 
 from __future__ import annotations
@@ -19,10 +15,8 @@ from pydantic import BaseModel
 from crawlutron.storage.coordination_store import CoordinationStore, atwin
 from crawlutron.storage.migrations.manifest import StoreSchema
 
-#: The trail's size bound. Key-admin actions are operator-paced (the keys door
-#: meters guesses, mints are operator-initiated), so the population is bounded
-#: by admin activity, not by the keyed-caller count; 10k rows at ~150 bytes is
-#: comfortably under a megabyte while spanning months of normal operation.
+#: The trail's size bound. Key-admin actions are operator-paced, so the
+#: population is bounded by admin activity; 10k rows is under a megabyte.
 DEFAULT_MAX_EVENTS = 10_000
 
 #: Age bound in seconds: 30 days. The roll drops lapsed rows at the next

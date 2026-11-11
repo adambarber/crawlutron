@@ -1,10 +1,7 @@
 """The resource lifecycle: one declared release path, one deferred-close owner.
 
 The owner below is the ONE scheduler for "close this later, on the running
-loop": a strong ref so asyncio cannot GC the task, eviction on completion,
-failure logged not silent (#589 -- was hand-rolled once per pool, and the
-copies had drifted). Each owning module keeps its own closed predicate; the
-owner keeps the mechanism.
+loop": a strong ref so asyncio cannot GC the task, failure logged not silent.
 """
 
 from __future__ import annotations
@@ -29,9 +26,8 @@ __all__ = [
 
 _logger = logging.getLogger(__name__)
 
-#: Declined close attempts, ``(reason, resource_kind)`` -> count. A decline is a
-#: handled state, not a warning: production callers reclaim via their own teardown,
-#: and tests assert on this record instead of parsing printed noise (#643).
+#: Declined close attempts, ``(reason, resource_kind)`` -> count. A decline is
+#: a handled state, not a warning: tests assert on this record (#643).
 _DECLINED_CLOSES: dict[tuple[str, str], int] = {}
 
 
@@ -51,9 +47,8 @@ def clear_declined_closes() -> None:
     _DECLINED_CLOSES.clear()
 
 
-#: Mapped foreign ValueErrors, ``(foreign_message,)`` -> count. The constructor
-#: belt remaps a foreign ValueError to ``invalid_url``; this is the bounded
-#: record of WHEN that happened, so a programming bug is not silently 422.
+#: Mapped foreign ValueErrors, ``(foreign_message,)`` -> count: the bounded
+#: record of constructor-belt remaps, so a bug is not silently 422.
 _MAPPED_VALUE_ERRORS: dict[tuple[str], int] = {}
 
 
@@ -85,10 +80,8 @@ class ResourceLifecycle(Protocol):
 class DeferredClose[T]:
     """Owns deferred closes for one resource family: schedule, drain, forget.
 
-    ``is_closed`` is required -- only the owner knows how a kind reports closed
-    (curl_cffi publishes no flag), so the generic owner never guesses. A drain
-    re-checks after each gather: a close scheduled while draining is joined
-    too, not abandoned to loop teardown (the snapshot gather was).
+    ``is_closed`` is required -- only the owner knows how a kind reports closed,
+    so the generic owner never guesses. A drain joins closes scheduled mid-drain.
     """
 
     def __init__(
@@ -106,8 +99,7 @@ class DeferredClose[T]:
     def schedule(self, resource: T, *, skip_if_closed: bool = True) -> None:
         """Schedule ``aclose(resource)`` on the running loop; no loop, or a loop
         mid-shutdown, declines honestly -- the caller's own teardown reclaims.
-        Declines are RECORDED, not printed: a decline is a handled state the
-        tests assert on, not a warning (#643 warning-zero).
+        Declines are RECORDED, not printed (#643 warning-zero).
         """
         if skip_if_closed and self._is_closed(resource):
             return
@@ -132,12 +124,8 @@ class DeferredClose[T]:
     async def drain(self) -> None:
         """Await every pending close, including ones scheduled while draining.
 
-        Each gather re-snapshots ``_pending`` after yielding, so a close
-        scheduled mid-drain is joined too (a snapshot gather abandons it).
-        The ``sleep(0)`` yield is required: ``asyncio.gather`` completes
-        synchronously on an already-done child and would otherwise starve the
-        done-callbacks that drop finished tasks out of ``_pending``, spinning
-        forever on a closed task.
+        Each gather re-snapshots ``_pending`` after yielding; the ``sleep(0)``
+        yield keeps the done-callbacks that drop finished tasks from starving.
         """
         while self._pending:
             await asyncio.gather(*list(self._pending), return_exceptions=True)

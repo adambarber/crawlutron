@@ -74,8 +74,7 @@ def _is_tracking_param(key: str) -> bool:
 
 
 #: The refusal-shaped literals ``_canonical_parts`` legitimately raises: a
-#: ValueError carrying one of these IS an admission refusal; anything else
-#: exiting the constructor is foreign (mapped at the boundary, never leaked).
+#: ValueError carrying one of these IS an admission refusal; anything else is foreign.
 _REFUSAL_LITERALS = frozenset(
     {
         "unsupported_scheme",
@@ -172,14 +171,7 @@ class NormalizedUrl:
             canonical, scheme, host, site, port, path, query = _canonical_parts(raw, policy=policy)
         except ValueError as error:
             # The constructor boundary: only a refusal-shaped literal leaves as
-            # itself; a foreign ValueError (a shape the structural checks have
-            # not been wrapped into a named refusal) is mapped EXPLICITLY to
-            # "invalid_url" here, so urllib or a future refactor can never
-            # leak its own message into the wire vocabulary. A non-ValueError
-            # programming error still raises -- admission never swallows it.
-            # A non-ValueError programming error still raises -- admission
-            # never swallows it. The mapping itself is recorded (bounded,
-            # structured fields only), so it is never a silent 422.
+            # itself; a foreign ValueError maps EXPLICITLY to "invalid_url".
             reason = _refusal_literal(str(error))
             if reason != str(error):
                 record_mapped_value_error(str(error))

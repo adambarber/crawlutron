@@ -118,9 +118,8 @@ async def http_exception_handler(request: Request, exc: Exception) -> JSONRespon
     if exc.status_code == 404 and not (isinstance(detail, dict) and "code" in detail):
         from crawlutron.discovery.links import DISCOVERY_LINKS
 
-        # The metering itself lives in the anonymous-throttle middleware's
-        # response stage (a route-miss is scope["route"]-less); this branch
-        # only shapes the refusal surface: both discovery doors in details.
+        # The metering lives in the anonymous-throttle middleware's response
+        # stage; this branch only shapes the refusal surface.
         content = error_envelope("not_found", "Request path not found", dict(DISCOVERY_LINKS))
     return JSONResponse(status_code=exc.status_code, content=content, headers=headers)
 

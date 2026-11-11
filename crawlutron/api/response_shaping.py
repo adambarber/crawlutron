@@ -87,9 +87,8 @@ def _response_envelope(
     options: EnvelopeOptions,
 ) -> UnifiedCrawlResponse:
     """The one construction of the response envelope: shaped results + every scalar.
-    Every UnifiedCrawlResponse field is required, so a new one is passed here.
-    result_count is the RAW list length, so a dropped shaped item can't silently change the submitted count.
-    delta_summary is None unless a delta knob was set (delta_context present).
+    Every UnifiedCrawlResponse field is required, so a new one is passed here;
+    result_count is the RAW list length, so a dropped item cannot hide in it.
     """
     return UnifiedCrawlResponse(
         results=shaped,

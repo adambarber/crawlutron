@@ -65,8 +65,7 @@ class BrowserHandle(Protocol):
 class BrowserContextManager(Protocol):
     """The ``async with`` wrapper a browser factory hands back. AsyncCamoufox
     yields ``Browser | BrowserContext``; the driver calls ``new_page`` on it, so
-    the handle is the protocol member, not the class. The yielded object is
-    narrowed to BrowserHandle at the single acquire boundary.
+    the handle is the protocol member, not the class.
     """
 
     async def __aenter__(self) -> object: ...

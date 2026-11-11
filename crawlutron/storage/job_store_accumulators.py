@@ -1,9 +1,7 @@
 """One crawl job's accumulators: page history, visited set, frontier queue.
 
 Each collection gets its own table so a batch is one INSERT per new row. The
-table-trust seam lives here too: a skip decision compares in-memory content
-against what the TABLE holds (re-seeded at save entry via PRAGMA data_version),
-never process-local memory alone.
+table-trust seam lives here: a skip compares against what the TABLE holds.
 """
 
 from __future__ import annotations
@@ -34,8 +32,7 @@ class JobAccumulators:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
         # Table-trust digests: what the TABLE last held per (job_id, collection),
-        # re-seeded at save entry whenever another connection has committed
-        # (PRAGMA data_version), so a skip never rides a stale memory digest.
+        # re-seeded at save entry (PRAGMA data_version) so skips never ride stale memory.
         self._content_digest: dict[str, dict[str, str]] = {}
         self._seeded_version: dict[str, int] = {}
         self._table_rows: dict[str, list] = {}
@@ -51,10 +48,9 @@ class JobAccumulators:
     def _seed_table_truth(self, job_id: str) -> None:
         """Re-read the tables' content when another connection may have written.
 
-        A skip decision must compare against what the TABLE holds, not what this
-        process last wrote; own commits leave ``data_version`` put, so the
-        no-op path stays read-free. The version is read BEFORE the rows so a
-        commit landing mid-read forces the next save to re-seed."""
+        A skip must compare against the TABLE, not this process's last write; own
+        commits leave ``data_version`` put, so the no-op path stays read-free.
+        """
         version = self._data_version()
         if self._seeded_version.get(job_id) == version:
             return
@@ -73,9 +69,8 @@ class JobAccumulators:
     def _content_matches(self, job_id: str, collection: str, digest: str) -> bool:
         """The single content-identity seam every accumulator mutation gates on.
 
-        True iff ``digest`` matches the TABLE's persisted content -- the map is
-        re-seeded from the tables at each save entry -- so an identical batch is
-        not re-written and an out-of-band table change is never skipped over.
+        True iff ``digest`` matches the TABLE's persisted content, so an identical
+        batch is not re-written and an out-of-band change is never skipped over.
         """
         return self._content_digest.get(job_id, {}).get(collection) == digest
 
@@ -172,8 +167,6 @@ class JobAccumulators:
 
         ``frontier_removed`` names rows to delete, ``frontier_mark`` splits the
         persisted prefix from the appended tail: a batch is O(removed+appended).
-        A same-length replacement is detected by content identity, not by the
-        persisted prefix length, so it is never silently skipped.
         """
         job_id = job.job_id
         for url in job.frontier_removed:
@@ -215,10 +208,9 @@ class JobAccumulators:
         self._record_content(job_id, "frontier", digest)
 
     def _append_results(self, job: CrawlJobState) -> None:
-        """Insert only the pages this batch added, keyed off the table's high-water mark
-        (not a remembered count, so a resumed process still appends exactly what it
-        hasn't written). If normalization shrank history, resync rather than silently skip.
-        A same-length replacement is detected by content identity and resynced.
+        """Insert only the pages this batch added, keyed off the table's high-water
+        mark (not a remembered count). Shrunken history or a same-length replacement
+        is detected by content identity and resynced.
         """
         job_id = job.job_id
         results = job.results
@@ -248,9 +240,8 @@ class JobAccumulators:
 
     def _append_visited(self, job: CrawlJobState) -> None:
         """Insert only the visited tail this state has not sent yet, keyed off
-        the live ``visited_mark`` (the ``_append_results`` pattern): the set is
-        insertion-ordered, so the slice after the mark is exactly what is new.
-        A same-length replacement is detected by content identity and resynced.
+        the live ``visited_mark`` (the ``_append_results`` pattern): the slice
+        after the mark is exactly what is new; replacements resync by identity.
         """
         job_id = job.job_id
         digest = self._digest([url.raw for url in job.visited])

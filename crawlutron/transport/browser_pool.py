@@ -61,11 +61,10 @@ class BrowserPool:
         self._available: asyncio.Queue[BrowserRenderer] = asyncio.Queue()
         # Renderers currently checked out: close() must not sweep them mid-render.
         self._checked_out: set[BrowserRenderer] = set()
-        # Renderers close() skipped as checked out: release() closes EXACTLY these
-        # -- never inferred from the initialized flag, which is how a second close
-        # or a re-queue of a dead renderer used to slip through (#589).
+        # Renderers close() skipped as checked out: release() closes EXACTLY
+        # these -- never inferred from the initialized flag (#589).
         self._retired: set[BrowserRenderer] = set()
-        # Renderers whose close is scheduled: the single ownership chokepoint --
+        # Renderers whose close is scheduled: the single ownership chokepoint,
         # neither release() nor the sweep may close one of these again (#590).
         self._close_owned: set[BrowserRenderer] = set()
         self._retired_closes = DeferredClose[BrowserRenderer](aclose=lambda r: r.close())
@@ -112,13 +111,9 @@ class BrowserPool:
             self._closing.clear()
 
     async def acquire(self, timeout: float | None = BROWSER_POOL_ACQUIRE_TIMEOUT_SECONDS) -> BrowserRenderer:
-        """Acquire a renderer from the pool; the wait is bounded so a leaked
-        renderer shrinks capacity loudly rather than hanging every acquire with
-        no diagnostics. Pass ``timeout=None`` only when the caller owns a deadline.
-
-        A close() sweeping while this acquire is suspended must not hand back a
-        closed renderer: the wake is re-checked under the pool's lock, and a
-        post-close wake is a clean exhaustion refusal (#590).
+        """Acquire a renderer from the pool; the wait is bounded so a leaked renderer
+        shrinks capacity loudly. ``timeout=None`` only when the caller owns a deadline.
+        A suspended acquire re-checks under the lock after a close() wake (#590).
         """
         if not self._initialized:
             await self.initialize()
@@ -168,18 +163,10 @@ class BrowserPool:
         )
 
     def release(self, worker: BrowserRenderer) -> None:
-        """The release state machine, exact on pool state. Renderer closes have
-        one ownership chokepoint: the ``_close_owned`` set plus disjoint
-        ownership sets -- a renderer leaving ``_retired`` also leaves
-        ``_checked_out`` at that same moment, so any SECOND release finds it in
-        no closable state and falls to a refusal; the sweep also skips anything
-        in ``_close_owned``. Every pool path closes a renderer exactly once
-        (#589, #590, #641).
-
-        Branches: retired by close -> the pool schedules its close (the #C6
-        leak path); checked out while closing -> the deferred close, owned at
-        schedule time; checked out -> back to the queue; anything else ->
-        refused."""
+        """The release state machine, exact on pool state. Renderer closes have one
+        ownership chokepoint: ``_close_owned`` plus disjoint ownership sets -- a
+        renderer leaving ``_retired`` leaves ``_checked_out`` then (#589-#641).
+        """
         if worker in self._retired:
             self._retired.discard(worker)
             self._checked_out.discard(worker)
@@ -187,9 +174,8 @@ class BrowserPool:
             self._retired_closes.schedule(worker)
             return
         if self._closing.is_set() and worker in self._checked_out:
-            # A release landing during close's sweep: the queue is already
-            # drained, so the renderer is closed here, not enqueued into a dead
-            # pool (#590) -- owned at schedule time, so the sweep skips it too.
+            # A release landing during close's sweep: the renderer is closed
+            # here, not enqueued into a dead pool (#590) -- owned at schedule time.
             self._checked_out.discard(worker)
             self._close_owned.add(worker)
             self._retired_closes.schedule(worker)
@@ -212,15 +198,8 @@ class BrowserPool:
 
     async def close(self) -> None:
         """Close all idle renderers and drain the queue; CHECKED-OUT renderers are
-        not swept mid-render (the close would race the active render and its failure
-        is swallowed) -- their reap belongs to release()'s retired path, which this
-        close waits out.
-
-        The queue is drained BEFORE the sweep: an acquire suspended on a queued
-        renderer must not wake to a renderer this close is closing (#590). With
-        the queue empty, releases during the sweep take the retired path, so no
-        closed renderer can be enqueued while close holds the lock.
-        """
+        not swept mid-render -- their reap belongs to release()'s retired path.
+        The queue drains BEFORE the sweep (#590)."""
         async with self._lock:
             self._closing.set()
             while True:
@@ -245,12 +224,8 @@ class BrowserPool:
                     logger.warning("browser_pool_renderer_close_failed", extra={"error": str(e)})
             self._renderers.clear()
             self._checked_out.clear()
-            # _retired is deliberately NOT cleared: entries parked here owe
-            # their close to a LATER release (the #C6 leak path survives pool
-            # death), so the set is live state until that release consumes it,
-            # not stale bookkeeping. It is dead state only once a release has
-            # drained it or its renderer never releases -- exactness lives in
-            # the disjoint-set invariant, not in teardown clearing.
+            # _retired is deliberately NOT cleared: entries parked here owe their
+            # close to a LATER release (the #C6 leak path survives pool death).
             self._initialized = False
             await self._retired_closes.drain()
             logger.info("browser_pool_closed", extra={"available": self._available.qsize()})

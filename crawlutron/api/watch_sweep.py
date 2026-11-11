@@ -121,9 +121,8 @@ class WatchSweeper:
 
     async def _one_watch(self, watch: WatchState, *, now: float) -> CrawlClassification | None:
         """One due watch's conclusion, isolated: a raising watch neither ends the
-        pass nor starves the watches sorted after it in the due list. The lease
-        is re-stamped at the check's start, so a slow pass cannot lose the row
-        mid-check; a lost renewal (a second sweeper re-claimed it) skips the row.
+        pass nor starves watches sorted after it. The lease is re-stamped at the
+        check's start; a lost renewal (a second sweeper re-claimed it) skips.
         """
         if not await self._store.arenew_claim(watch.watch_id, self._claim_token, now=self._clock()):
             # Ownership was already lost -- working the row would be the
@@ -147,9 +146,8 @@ class WatchSweeper:
             return await self._deactivate_refused(watch, error.reason, now=now)
         except Exception as error:
             if is_quota_refusal(error):
-                # The owner's own page/concurrency budget refused the check:
-                # it never ran, so no failure streak -- leave the row to the
-                # next sweep rather than recording the site as unhealthy.
+                # The owner's own budget refused the check: it never ran, so
+                # no failure streak -- leave the row to the next sweep.
                 logger.info("watch_check_quota_refused", extra={"watch_id": watch.watch_id})
                 return None
             # One watch that raises must not end the pass nor starve its
@@ -173,10 +171,9 @@ class WatchSweeper:
     async def _deactivate_refused(
         self, watch: WatchState, reason: CrawlClassification, *, now: float
     ) -> CrawlClassification:
-        """A watch the live policy no longer admits is terminal: the deployment has
-        permanently refused this URL's host, so re-admitting every interval burns a
-        full admit cycle for the same verdict. Same lifecycle as a revoked owner:
-        deactivate with the reason recorded, matching the robots-refusal shape.
+        """A watch the live policy no longer admits is terminal: re-admitting
+        every interval burns a full admit cycle for the same verdict. Same
+        lifecycle as a revoked owner: deactivate with the reason recorded.
         """
         logger.warning(
             "watch_admission_refused_deactivated",
@@ -231,9 +228,7 @@ class WatchSweeper:
             )
             return classification
         # A delivered change is what a webhook exists to say: any success-status
-        # classification except "not_modified" (a 304 that proved freshness).
-        # The target is RE-admitted here against the live host policy: the row's
-        # durable text is an identity, not a standing permission.
+        # classification except "not_modified" (target RE-admitted there).
         if (
             status_for_classification(classification) == "success"
             and classification != CrawlClassification.not_modified

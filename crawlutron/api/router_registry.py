@@ -1,8 +1,7 @@
 """The single declaration of crawlutron's module-level feature routers.
 
-One tuple, two consumers: ``main._include_routers`` mounts them and the
-REST/MCP parity gate walks them. Factory-built routers (health, capabilities,
-agent-hints, well-known) and the MCP router itself are deliberately not here.
+One tuple, two consumers: ``main._include_routers`` mounts them and the REST/MCP
+parity gate walks them. Factory-built routers and the MCP router are not here.
 """
 
 from __future__ import annotations

@@ -1,16 +1,7 @@
 """Key-verification metering (#653): the pre-auth PBKDF2 amplifier is throttled.
 
-Every request presenting an ``X-API-Key`` costs one PBKDF2-SHA256 at 210k
-iterations -- the service's most expensive pre-auth operation. This module
-meters it: consecutive failed verifies from the same presented credential trip
-a fail-closed cooldown. It is process state like every other holder (#621).
-
-#675 owner ruling: buckets key on a SHA-256 of the FULL presented secret, so
-garbage bodies under a victim's public key id cool their own buckets and
-third-party lockout dies. The #659 mint budget is replaced by an LRU capacity
-cap (#668 precedent): bucket minting is bounded by memory, never 429-priced.
-A cooling bucket is exempt from eviction, so a flood cannot launder a cooldown
-victim's ledger; the ledger may exceed the cap by the live-cooldown count.
+Every X-API-Key request costs one PBKDF2-SHA256 at 210k iterations; consecutive
+failed verifies trip a fail-closed cooldown (#621). #675: FULL-secret buckets.
 """
 
 from __future__ import annotations
@@ -25,8 +16,7 @@ __all__ = ["KeyVerifyThrottle", "shared_throttle"]
 _FAILURE_WINDOW_SECONDS = 300.0
 _COOLDOWN_SECONDS = 60.0
 #: The LRU bound (#675, AnonymousThrottle precedent): distinct-garbage minting
-#: is bounded by capacity, not by a 429-priced budget. Cooling buckets are
-#: eviction-exempt, so worst-case residence is capacity plus live cooldowns.
+#: is bounded by capacity; cooling buckets are eviction-exempt.
 _BUCKET_CAPACITY = 1024
 
 
@@ -51,19 +41,13 @@ class _Bucket:
 class KeyVerifyThrottle(MeterLedger[_Bucket]):
     """Fail-closed cooldown over failed key verifications, one chokepoint.
 
-    Buckets key on a hash of the FULL presented secret (#675): distinct
-    garbage hashes to distinct buckets, so poisoning requires the victim's
-    secret itself. The ledger is LRU-capped; a cooling bucket is never evicted.
+    Buckets key on a hash of the FULL presented secret (#675): poisoning requires
+    the victim's secret itself. LRU-capped; a cooling bucket is never evicted.
     """
 
     MAX_FAILURES = 5
     #: The dedicated bucket every /v1/keys admin-token guess meters against
-    #: (#659): one shared ledger, so per-credential bucket minting cannot
-    #: dilute the admin door's pacing. Accepted griefing risk: 5 wrong
-    #: guesses lock the OPERATOR's correct token out for 60s (refreshable) --
-    #: the alternative, per-source buckets, would re-mint unbounded bucket
-    #: space on the one door that must not be dilutable, and a mint flood
-    #: would then block admin failure-recording entirely.
+    #: (#659): one shared ledger minting cannot dilute.
     ADMIN_BUCKET = "admin"
 
     def check(self, presented: str) -> None:

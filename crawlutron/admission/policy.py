@@ -222,9 +222,8 @@ def _policy_input(raw: PolicyLike | None) -> CrawlPolicy | dict[str, JsonValue] 
 
 def _refuse_redacted_credentials(raw: dict[str, JsonValue]) -> None:
     """A marker credential in a reloaded row is a policy that cannot be honored:
-    the repair loop would silently drop it and resume with no auth. Fail typed
-    instead -- the caller must re-supply the credential (the at-rest law's
-    reload side)."""
+    the repair loop would silently drop it and resume with no auth. Fail typed --
+    the caller must re-supply the credential (the at-rest law's reload side)."""
     credentials = raw.get("credentials")
     if not isinstance(credentials, Mapping):
         return

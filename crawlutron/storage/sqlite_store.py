@@ -170,9 +170,7 @@ def bind_conn_lifecycle(store: object) -> None:
     """A store whose last reference dies closes its connection at that GC point (#838).
 
     Never interpreter-exit finalization, whose ResourceWarning fires inside
-    whichever test/run is executing (the rotating flake family). The callback
-    captures the CONNECTION (a bound store method would pin the store and the
-    close would never run)."""
+    whichever test is executing. The callback captures the CONNECTION itself."""
     conn = getattr(store, "_conn", None)
     if conn is not None:
         weakref.finalize(store, conn.close)

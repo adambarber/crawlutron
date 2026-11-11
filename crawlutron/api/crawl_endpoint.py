@@ -80,16 +80,9 @@ def _crawl_rejection(error: ValueError) -> HTTPException:
 
 
 async def delta_context_for(payload: CrawlRequest, caller_id: str, result_store) -> DeltaContext | None:
-    """Caller-scoped delta request for ``payload``, or ``None`` when no delta
-    knob was set (no behavior change: shaping stays blind to delta).
-
-    ``changed_since`` and ``baseline_request_id`` are the request knobs. When
-    ``baseline_request_id`` is set, the caller-isolated baseline row is loaded
-    through :meth:`CrawlResultStore.aget_for_caller` (foreign rows read as
-    missing) and degraded: missing, expired, or foreign rows surface as
-    ``baseline_expired`` (``delta_summary.degraded_baseline``) -- the baseline
-    comparison dies, ``changed_since`` freshness still classifies.
-    """
+    """Caller-scoped delta request for ``payload``, or ``None`` when no delta knob
+    was set. With ``baseline_request_id`` set, the caller-isolated baseline loads
+    and degrades (missing/expired/foreign rows surface as ``baseline_expired``)."""
     if payload.changed_since is None and payload.baseline_request_id is None:
         return None
     baseline_request_id = payload.baseline_request_id
@@ -390,10 +383,8 @@ async def read_crawl_result_record(
 ) -> JsonValue:
     """The stored crawl response for the MCP read tool, as stored.
 
-    Reads the same rows the replay door serves, without re-admitting URL
-    fields: the record is the wire mapping already, and admission is the
-    constructor's ingress job, not the cache's. A running job raises the typed
-    :class:`CrawlPendingError` so the tool door can answer it non-error.
+    Reads the same rows the replay door serves, without re-admitting URL fields.
+    A running job raises the typed :class:`CrawlPendingError` (non-error door).
     """
     payload = await _stored_response_payload(request_id, job_store, result_store, caller_id)
     if payload is None:

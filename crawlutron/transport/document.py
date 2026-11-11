@@ -82,9 +82,8 @@ async def _afetch_document_bytes(
     timeout_seconds: float | None = None,
 ) -> bytes:
     """Fetch document bytes over the single redirect walk: every hop re-pinned,
-    redirects followed by :class:`RedirectWalker`, body capped per hop. The
-    budget is the caller's request budget via ``Timeouts.for_request``; none
-    falls to the posture. Document extraction plants no hop cookies."""
+    body capped per hop. The budget is the caller's request budget; none falls
+    to the posture. Extraction plants no hop cookies."""
     from crawlutron.extraction.content import EXTRACTION_DOC_MAX_INPUT_BYTES
     from crawlutron.transport import pooled_clients
     from crawlutron.transport.redirect_walker import RedirectWalker

@@ -23,9 +23,8 @@ if TYPE_CHECKING:
 class HttpxTransport:
     """httpx backend: one SSRF-pinned hop per ``fetch()`` call.
 
-    Redirects are not followed here -- the :class:`~crawlutron.transport.redirect_walker.RedirectWalker`
-    owns the walk. This transport reads and caps the body, decompresses,
-    persists cookies, and returns one ``FetchResult``.
+    Redirects are not followed here -- the RedirectWalker owns the walk; this
+    transport reads and caps the body, decompresses, and persists cookies.
     """
 
     def __init__(self, settings: CrawlerSettings | None = None) -> None:

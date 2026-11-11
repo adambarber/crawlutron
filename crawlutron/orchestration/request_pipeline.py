@@ -340,8 +340,7 @@ async def _dispatch_paced(
         take_http = http_jobs[:admit_http] if admit_http else []
         take_browser = browser_jobs[:admit_browser] if admit_browser else []
         # Saturated gate: bounded progress floor -- dispatch k jobs (a fraction of
-        # the HTTP ramp) so a pinned gate cannot leave the batch in flight forever
-        # while the pass cost stays a fraction of the batch, not one cycle per job.
+        # the HTTP ramp) so a pinned gate cannot leave the batch in flight forever.
         if not take_http and not take_browser and remaining:
             if http_jobs:
                 take_http = http_jobs[:floor]

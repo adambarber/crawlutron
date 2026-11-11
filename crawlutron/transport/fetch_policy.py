@@ -41,9 +41,8 @@ def retry_backoff_seconds(attempt: int) -> float:
     return min(_RETRY_BACKOFF_CAP_SECONDS, _RETRY_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1)))
 
 
-# An HTTP-date Retry-After is a politeness cooldown like the integer form, so
-# it rides the same hostile-value clamp: an unbounded date would park scheduler
-# coroutines in cooldown sleep for years.
+# An HTTP-date Retry-After is a politeness cooldown like the integer form, so it
+# rides the same hostile-value clamp (an unbounded date parks coroutines for years).
 _RETRY_AFTER_MAX_SECONDS = 300
 
 

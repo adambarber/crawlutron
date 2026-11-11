@@ -26,9 +26,8 @@ class DiscoveryPayload(TypedDict):
 class DiscoveryResponse(BaseModel):
     """The validated wire record.
 
-    ``auth`` is the caller-identity story: credential, anonymous caller, key
-    management. ``is_operator_sealed``: whether the operator token is unset
-    (the keys door refuses everything).
+    ``auth`` is the caller-identity story; ``is_operator_sealed`` whether the
+    operator token is unset (the keys door refuses everything).
     """
 
     service: str

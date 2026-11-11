@@ -24,10 +24,8 @@ IntervalSeconds = Annotated[
 class WatchState(BaseModel):
     """One row of the watches table, in the shape the store and API share.
 
-    ``url`` stores the durable text identity, re-admitted by every consumer against
-    live host policy -- never a decision a past deployment made. The change
-    notification target is a CREDENTIAL: it enters as raw text (durable identity)
-    and leaves only redacted, or raw via :meth:`delivery_url` at the POST site.
+    ``url`` stores the durable text identity, re-admitted against live host
+    policy. The notification target is a CREDENTIAL: leaves only redacted.
     """
 
     watch_id: str

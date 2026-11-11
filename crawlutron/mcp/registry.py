@@ -1,9 +1,7 @@
 """The declared MCP tool registry: the contract types and the tool list.
 
-Every entry here is the parity gate's anchor -- each ToolSpec carries the REST
-door it mirrors, so the tests/invariants/test_rest_mcp_parity table and this
-registry answer each other; adding a tool means adding an entry, and deleting a
-REST door means deleting the row and lowering the pinned count in the same commit.
+Every entry is the parity gate's anchor -- each ToolSpec carries the REST door
+it mirrors; adding a tool means adding an entry in the same commit.
 """
 
 from __future__ import annotations
@@ -88,9 +86,8 @@ class RestRoute:
 @dataclass(frozen=True)
 class ToolSpec:
     """A registered MCP tool definition plus its declared door data. ``request_model`` is
-    the source of truth for the advertised ``inputSchema`` and argument
-    validation; ``unsupported_fields`` is the same list the door refuses on;
-    ``door`` carries the behavior data ``handlers.dispatch`` binds from.
+    the source of truth for the advertised ``inputSchema``; ``unsupported_fields``
+    is what the door refuses; ``door`` carries ``handlers.dispatch``'s data.
     """
 
     name: str

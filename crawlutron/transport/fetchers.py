@@ -1,13 +1,7 @@
 """Owns the direct httpx and curl_cffi fetch implementations.
 
-Delegates to :class:`~crawlutron.transport.redirect_walker.RedirectWalker`,
-which owns the walk (redirects, cookie capture, pin validation, header checks)
-calling ``transport.fetch()`` per hop. Capping is consolidated in
-:func:`crawlutron.safety.bounded_io.read_capped_async` via the transports; cookie
-capture lives in the walker only, which makes the C1 cookie-injection bug
-structurally impossible. ~100 lines of parallel per-hop logic deleted from this
-module.
-"""
+Delegates to :class:`~crawlutron.transport.redirect_walker.RedirectWalker`, which
+owns the walk (redirects, cookie capture, pin validation, header checks)."""
 
 from __future__ import annotations
 
@@ -41,11 +35,10 @@ async def default_http_fetcher(
     pin: pinned_transport.PinRule | None = None,
     release_stream_noblock: Callable[[object], None] | None = None,
 ) -> HttpFetchResult:
-    """The one fetcher: TLS impersonation first when asked (falling back to httpx
-    on transport failure), the pooled httpx client otherwise.
+    """The one fetcher: TLS impersonation first when asked (httpx fallback on
+    transport failure), the pooled httpx client otherwise.
 
-    ``release_stream_noblock`` is accepted for interface compatibility; stream
-    release is handled inside the transport implementations now.
+    ``release_stream_noblock`` is accepted for interface compatibility only.
     """
     if impersonate:
         attempted = await cffi_fetch(
@@ -80,9 +73,8 @@ async def cffi_fetch(
     """The curl_cffi transport behind impersonate=True. Returns None on
     transport failure so the httpx fallback can serve. TLS-handshake failures
     propagate -- impersonation never completed."""
-    # Release superseded clients before any fetch work (pin/DNS included), so a
-    # failed pin never leaves a displaced session ownerless -- the same ordering
-    # the walk's httpx twin keeps in default_http_fetcher.
+    # Release superseded clients before any fetch work (pin/DNS included), so
+    # a failed pin never leaves a displaced session ownerless.
     await pooled_clients.drain_pending_client_closes()
     try:
         return await RedirectWalker(

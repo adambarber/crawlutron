@@ -1,8 +1,7 @@
 """The structural door for "a record the serialization walk can render."
 
-The walk's precondition is "a frozen-dataclass instance whose fields are the
-key set" (models/serialization.py docstring); this protocol names that shape
-so the walk's declared type says the contract, not two lucky members.
+The walk's precondition is "a frozen-dataclass instance whose fields are the key
+set"; this protocol names that shape so the walk's declared type says the contract.
 """
 
 from __future__ import annotations

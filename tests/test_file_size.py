@@ -1,4 +1,4 @@
-"""Every Python file in app/, tests/ and scripts/ holds at most 500 lines.
+"""Every Python file in crawlutron/, tests/ and scripts/ holds at most 500 lines.
 
 The count is total lines: prose spends the same scroll as code. A file that
 outgrows the ceiling splits, keeping each rationale beside the code it explains.
@@ -9,7 +9,7 @@ from __future__ import annotations
 import pathlib
 from collections.abc import Iterable, Iterator
 
-from tests.chokepoint_walks import REPO_ROOT
+from tests._walk_primitives import REPO_ROOT, declared_root_files
 
 #: Total lines one file may hold. 501 breaches; 500 is the maximum.
 MAX_FILE_LINES = 500
@@ -26,9 +26,7 @@ def file_lines(text: str) -> int:
 def python_files() -> Iterator[pathlib.Path]:
     """Every source file the ceiling governs, in a stable order."""
     for root in ROOTS:
-        yield from sorted(
-            path for path in (REPO_ROOT / root).rglob("*.py") if "__pycache__" not in path.parts
-        )
+        yield from declared_root_files(root)
 
 
 def measured_files() -> list[tuple[str, int]]:

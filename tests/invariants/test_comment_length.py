@@ -11,8 +11,10 @@ import pathlib
 import re
 from collections.abc import Callable
 
+import pytest
+
 from scripts.extract_comments import over_line_docstrings
-from tests._walk_primitives import parsed
+from tests._walk_primitives import declared_root_files, parsed
 from tests.chokepoint_walks import REPO_ROOT
 
 #: The most consecutive full-line ``#`` comments a block may run.
@@ -93,7 +95,7 @@ def _root_findings[T](
     scripts/run-tests.sh) to the sweep; the docstring scan never asks for them.
     ``collect`` gets the file's source; tree-taking readers parse via ``parsed``.
     """
-    files = sorted((REPO_ROOT / root).rglob("*.py"))
+    files = list(declared_root_files(root))
     if include_gate_bash and root == "scripts":
         for name in _ENTRY_POINTS:
             path = REPO_ROOT / name
@@ -101,8 +103,6 @@ def _root_findings[T](
                 files.append(path)
     found: dict[str, list[T]] = {}
     for path in files:
-        if "__pycache__" in path.parts:
-            continue
         findings = collect(path.read_text(encoding="utf-8"))
         if findings:
             found[path.relative_to(REPO_ROOT).as_posix()] = findings
@@ -115,9 +115,7 @@ def _root_tree_findings[T](
     """:func:`_root_findings` for a tree-taking ``collect``: the session parse cache
     serves every reader, so the docstring gates stop re-parsing each file."""
     found: dict[str, list[T]] = {}
-    for path in sorted((REPO_ROOT / root).rglob("*.py")):
-        if "__pycache__" in path.parts:
-            continue
+    for path in declared_root_files(root):
         findings = collect(parsed(path), path)
         if findings:
             found[path.relative_to(REPO_ROOT).as_posix()] = findings
@@ -208,7 +206,7 @@ def test_a_block_cut_mid_clause_fires() -> None:
 def _zero_everywhere[T](collect: Callable[[str], list[T]]) -> list[tuple[str, T]]:
     """Every finding of ``collect`` across all three roots, with file and raw item."""
     offenders: list[tuple[str, T]] = []
-    for root in ("app", "tests", "scripts"):
+    for root in ("crawlutron", "tests", "scripts"):
         for name, items in _root_findings(root, collect).items():
             for item in items:
                 offenders.append((name, item))
@@ -225,17 +223,17 @@ def _format_overlong_docstring(name: str, item: tuple[int, int, str]) -> str:
 
 
 def test_zero_long_comment_runs_everywhere() -> None:
-    """Zero long comment runs in app/, tests/ and scripts/ -- no budget, no exemption."""
+    """Zero long comment runs in crawlutron/, tests/ and scripts/ -- no budget, no exemption."""
     offenders = [_format_long_comment_run(name, item) for name, item in _zero_everywhere(long_comment_runs)]
     assert not offenders, "\n".join(offenders)
 
 
 def test_no_overlong_docstring_anywhere() -> None:
-    """Zero over-limit docstrings in app/, tests/ and scripts/ -- no budget, no exemption."""
+    """Zero over-limit docstrings in crawlutron/, tests/ and scripts/ -- no budget, no exemption."""
     offenders = [
         _format_overlong_docstring(name, item)
         for name, items in _root_tree_findings(
-            "app", lambda tree, _p: over_line_docstrings(tree, DOC_LIMIT)
+            "crawlutron", lambda tree, _p: over_line_docstrings(tree, DOC_LIMIT)
         ).items()
         for item in items
     ]
@@ -249,7 +247,7 @@ def test_no_docstring_sits_below_the_first_statement() -> None:
     a length, and the object it claimed to document carried no documentation.
     """
     failures: list[str] = []
-    for root in ("app", "tests", "scripts"):
+    for root in ("crawlutron", "tests", "scripts"):
         for name, items in _root_tree_findings(root, lambda tree, _p: demoted_docstrings(tree)).items():
             for lineno, _end, symbol in items:
                 failures.append(f"{name}:{lineno}: {symbol} has a docstring that documents nothing")
@@ -259,7 +257,7 @@ def test_no_docstring_sits_below_the_first_statement() -> None:
 def test_no_comment_block_ends_mid_clause() -> None:
     """Every block in the tree closes the thought it opens."""
     offenders: list[str] = []
-    for root in ("app", "tests", "scripts"):
+    for root in ("crawlutron", "tests", "scripts"):
         for name, found in _root_all_blocks(root).items():
             for start, _end, text in found:
                 offenders.append(f"{name}:{start}: comment block ends mid-clause ({text})")
@@ -268,3 +266,30 @@ def test_no_comment_block_ends_mid_clause() -> None:
         "the rule is that every block ends on a complete clause, not a dangling "
         "connective or comma:\n" + "\n".join(offenders)
     )
+
+
+def test_declared_scan_roots_fail_loud_when_vacuous(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A gate iterating a missing or file-less root is SILENTLY vacuous: the
+    package rename left this gate scanning app/ (nonexistent) for months.
+    Both seams fail loud: the walk entry refuses a root resolving to nothing,
+    and the AST loader refuses a nonexistent file -- a gate can no longer
+    scan an empty iterator and report a green."""
+    import tests._walk_primitives as walk
+
+    monkeypatch.setattr(walk, "REPO_ROOT", tmp_path)
+    (tmp_path / "exists").mkdir()
+    (tmp_path / "exists" / "real.py").write_text("x = 1\n")
+    (tmp_path / "hollow").mkdir()
+
+    # Walk-entry seam: missing root, hollow root, and the real file resolves.
+    with pytest.raises(AssertionError, match="declared scan root does not exist: absent/"):
+        walk.declared_root_files("absent")
+    with pytest.raises(AssertionError, match="declared scan root contains no .py files: hollow/"):
+        walk.declared_root_files("hollow")
+    assert [p.name for p in walk.declared_root_files("exists")] == ["real.py"]
+
+    # AST-ask seam: parsed() blows up at the ask for a nonexistent file.
+    with pytest.raises(FileNotFoundError, match="nonexistent source file"):
+        walk.parsed(tmp_path / "absent" / "ghost.py")

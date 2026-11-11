@@ -1,8 +1,7 @@
 """The typed job cores both doors run: REST ``/v1/jobs`` and the MCP job tools.
 
 Every caller-facing job operation is spelled once here -- create, list, get,
-control, delete -- so caller scoping and quota admission cannot diverge
-between the HTTP door and the MCP tool.
+control, delete -- so caller scoping and quota admission cannot diverge.
 """
 
 from __future__ import annotations

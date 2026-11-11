@@ -83,12 +83,8 @@ def install_execute_crawl(fn: ExecuteCrawl) -> None:
 
 async def arecord_terminal_failure(job_store: JobStore, job_id: str, error: str) -> bool:
     """Flip a RUNNING job to FAILED with a scrubbed ``error`` in the same CAS
-    write; True iff it landed. A job past RUNNING is left as-is and reports
-    False: no partial stamp, so a lost CAS cannot leave the error on a
-    non-FAILED row. The scrub goes through the #599 redaction chokepoint:
-    str(exc) embeds REDIRECT-TARGET URLs whose userinfo and secret queries
-    must never reach the durable error field the status wire reads (#666).
-    """
+    write; True iff it landed; a past-RUNNING job is left as-is. The scrub routes
+    through the #599 chokepoint (str(exc) embeds redirect-target credentials)."""
     job = await job_store.aload(job_id)
     if job is None or job.status is not JobStatus.RUNNING:
         return False

@@ -249,8 +249,7 @@ class _ChainRun:
         retry_policy = self.context.policy.model_copy(update={"headers": retry_headers})
         retry_result = await self.with_policy(retry_policy).execute(HTTP_CFFI_IMPERSONATE)
         # The retry re-fires the SAME cffi rung with cookies, so its attempt
-        # REPLACES the denied one in the rung-ordered diagnostics (#C9): one
-        # entry per rung, the rung's final state -- never an inflated count.
+        # REPLACES the denied one (#C9): one entry per rung, never inflated.
         state.attempts = [a for a in state.attempts if a.strategy != HTTP_CFFI_IMPERSONATE]
         state.attempts.extend(retry_result.attempted_strategies)
         if retry_result.status == "success" and retry_result.quality_score > 0:

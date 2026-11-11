@@ -34,8 +34,7 @@ class CrawlRefusalError(ValueError):
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
         # The membership closure: a member keeps its name, a foreign reason
-        # degrades to the NAMED unknown_error fallback -- never a cast of text
-        # from the boundary into the strict enum.
+        # degrades to the NAMED unknown_error fallback -- never a cast.
         self.reason = CrawlClassification(as_classification(reason))
 
 
@@ -56,11 +55,8 @@ async def execute_crawl(
     spill_store: CrawlSpillStore | None = None,
 ) -> ProducerEnvelope:
     """Run a crawl shared by every crawl entry point. ``payload`` is the declared
-    :class:`CrawlRequest` model; an invalid URL surfaces as 422, a missing pool as
-    503 only for a browser-needed chain. ``url_pairs`` forwards the gate's batch.
-
-    crawl_request is the single admission: it validates URLs (422) and resolves
-    settings, so this wrapper only adds the pool guard -- no re-derived values.
+    :class:`CrawlRequest`; invalid URL 422, missing pool 503 for browser-needed
+    chains. crawl_request is the single admission; this adds the pool guard.
     """
     active_settings = settings or CrawlerSettings.from_mapping()
     host_policy = HostPolicy.from_settings(active_settings)
