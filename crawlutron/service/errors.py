@@ -5,8 +5,6 @@ triplet verbatim — one exception family, no envelope construction below api.
 
 from __future__ import annotations
 
-from fastapi import HTTPException
-
 from crawlutron.models.json_value import JsonValue
 
 __all__ = [
@@ -133,14 +131,4 @@ def is_quota_refusal(exc: object) -> bool:
     """Whether ``exc`` is a caller-quota refusal (429 quota_exceeded): the caller
     is at their own page/concurrency budget, so the guarded work never ran.
     """
-    if isinstance(exc, QuotaRefusal):
-        return True
-    if not isinstance(exc, HTTPException):
-        return False
-    detail = getattr(exc, "detail", None)
-    return (
-        exc.status_code == 429
-        and isinstance(detail, dict)
-        and detail.get("code") == "quota_exceeded"
-        and "message" in detail
-    )
+    return isinstance(exc, QuotaRefusal)
