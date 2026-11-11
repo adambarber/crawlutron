@@ -34,13 +34,13 @@ def validate_exempt_routes(app: FastAPI) -> None:
 
     guard_request resolves anonymous callers; a missing or guarded declared route refuses to boot.
     """
-    from crawlutron.api.route_layer import ADMIN_GUARD_NAME, LAYER_EXEMPT_RATCHET, OPERATOR_GUARD_NAME
+    from crawlutron.api.route_layer import LAYER_EXEMPT_RATCHET, guard_admin_request, operator_guard
 
-    refusing = frozenset({ADMIN_GUARD_NAME, OPERATOR_GUARD_NAME})
+    refusing = frozenset({guard_admin_request, operator_guard})
 
     def _refuses_anonymous(route: APIRoute) -> bool:
-        names = {dep.call.__name__ for dep in route.dependant.dependencies if dep.call is not None}
-        return bool(names & refusing)
+        calls = {dep.call for dep in route.dependant.dependencies if dep.call is not None}
+        return bool(calls & refusing)
 
     mounted: dict[tuple[str, str], APIRoute] = {}
     collect_mounted(app.router.routes, mounted)

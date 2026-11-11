@@ -6,6 +6,7 @@ accepts the same-commit justification.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
@@ -90,6 +91,18 @@ def _walk_served(visit: Callable[[object], None], *, include_foreign: bool = Fal
                 visit(route)
 
     walk(app.router.routes)
+
+
+def _declare_exempt_row_and_boot(monkeypatch: pytest.MonkeyPatch, row: ExemptRow) -> RuntimeError:
+    """Boot with `row` added to the ratchet; return the RuntimeError the guard raises."""
+    monkeypatch.setattr(
+        _route_layer_module,
+        "LAYER_EXEMPT_RATCHET",
+        LAYER_EXEMPT_RATCHET + (row,),
+    )
+    with pytest.raises(RuntimeError) as exc_info:
+        fresh_app()
+    return exc_info.value
 
 
 def test_exempt_rows_match_real_routes():
@@ -194,13 +207,26 @@ async def test_boot_refuses_a_declared_exempt_route_without_a_mounted_door(monke
         "/v1/no-such-exempt-route",
         "a route nothing mounts, used to prove the boot guard",
     )
-    monkeypatch.setattr(
-        _route_layer_module,
-        "LAYER_EXEMPT_RATCHET",
-        LAYER_EXEMPT_RATCHET + (bogus,),
-    )
-    with pytest.raises(RuntimeError, match="no mounted route"):
-        fresh_app()
+    exc = _declare_exempt_row_and_boot(monkeypatch, bogus)
+    assert "GET /v1/no-such-exempt-route" in str(exc)
+    assert "no mounted route" in str(exc)
+
+
+async def test_boot_refuses_exempt_row_behind_credential_refusing_guard(monkeypatch):
+    """A row on a guard_admin_request-mounted path refuses boot naming the row and the refusing arm."""
+    row = ExemptRow("get", "/v1/keys", "pinned by the guarded arm")
+    exc = _declare_exempt_row_and_boot(monkeypatch, row)
+    text = str(exc)
+    assert "GET /v1/keys" in text
+    assert "credential-refusing guard" in text
+
+
+async def test_boot_detects_renamed_guard_by_function_identity(monkeypatch):
+    """A renamed guard (wrong __name__) evades name-match but is caught by identity comparison."""
+    monkeypatch.setattr(_route_layer_module.guard_admin_request, "__name__", "renamed_admin_guard")
+    row = ExemptRow("get", "/v1/keys", "pinned by identity comparison")
+    exc = _declare_exempt_row_and_boot(monkeypatch, row)
+    assert re.search(r"GET /v1/keys.*credential-refusing guard", str(exc))
 
 
 async def test_declared_exempt_routes_are_credential_free():
