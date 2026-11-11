@@ -16,9 +16,6 @@ from typing import TYPE_CHECKING, Any, NotRequired, Protocol, TypedDict, Unpack,
 from fastapi import HTTPException
 from pydantic import BaseModel, ValidationError
 
-# #849 C4-owed residual (named in the MCP seal's allowlist): the render door
-# still calls the api render core; drained at C4.
-from crawlutron.api.render_endpoint import render as render_endpoint_handler
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.mcp.crawl_shaping import CrawlProjection, projected
 from crawlutron.models.caller_identity import CallerIdentity
@@ -36,6 +33,7 @@ from crawlutron.service.errors import DomainError
 from crawlutron.service.job_cores import create_job_core
 from crawlutron.service.main_helpers import request_gate
 from crawlutron.service.map_endpoint import map_site
+from crawlutron.service.render_endpoint import render as render_endpoint_handler
 from crawlutron.service.response_shaping import aunified_response_from_result
 from crawlutron.storage.job_store import JobStore
 from crawlutron.storage.result_store import CrawlResultStore

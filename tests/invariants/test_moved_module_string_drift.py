@@ -93,11 +93,6 @@ EXEMPTIONS: tuple[tuple[str, str, str], ...] = (
         "crawlutron/api/crawl_endpoint.py",
         "crawl_endpoint stays api (SPLIT, HTTP part); no action",
     ),
-    (
-        "tests/invariants/test_fetch_gate_discipline.py",
-        "crawlutron/api/render_endpoint.py",
-        "fetch-gate scope names render_endpoint (stays api); no action",
-    ),
 )
 
 

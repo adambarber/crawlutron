@@ -11,11 +11,11 @@ from pydantic import ValidationError
 
 from crawlutron.admission.policy import read_policy
 from crawlutron.admission.render_options import policy_wants_html, resolve_render_options
-from crawlutron.api.render import render_options_for
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.json_value import JsonValue
 from crawlutron.models.render_options import RenderOptions
 from crawlutron.models.render_request import RenderRequest
+from crawlutron.service.render import render_options_for
 from crawlutron.transport.browser_result import browser_strategy_result
 from crawlutron.vocabulary.limits import (
     MAX_COOKIE_HARVEST_TIMEOUT_SECONDS,

@@ -26,7 +26,7 @@ _GATED_FETCH_EXECUTORS = frozenset(
     {
         "crawlutron.service.crawl_executor.execute_crawl",
         "crawlutron.service.map_endpoint.map_site",
-        "crawlutron.api.render_endpoint.render",
+        "crawlutron.service.render_endpoint.render",
         "crawlutron.search.endpoint.search",
     }
 )

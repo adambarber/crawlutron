@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import crawlutron.api.render as render_mod
+import crawlutron.service.render as render_mod
 from tests._fetch_doubles import FetcherDouble
 from tests._render_producer import render_stub_request
 

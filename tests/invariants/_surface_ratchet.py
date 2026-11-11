@@ -22,6 +22,10 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     # RAISED to (7, 6): failed_unified_result is the single failure projection.
     "crawlutron/service/response_shaping.py": (7, 6),
     "crawlutron/service/unified_shaping.py": (5, 5),
+    # #861: the render core moved from api/ to service/; logger is private so
+    # surface is two public symbols, both entry points.
+    "crawlutron/service/render.py": (3, 3),
+    "crawlutron/service/render_endpoint.py": (2, 2),
     # Delta crawl classification (#714); RAISED to (14, 7) for BaselineEntry and
     # extract_baseline_entries/removed_entry_keys, the per-entry removal substrate.
     "crawlutron/delta.py": (14, 7),
@@ -132,8 +136,6 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/service/policy_defaults.py": (2, 0),
     "crawlutron/api/policy_router.py": (2, 1),
     "crawlutron/api/mcp_router.py": (2, 1),
-    "crawlutron/api/render.py": (3, 3),
-    "crawlutron/api/render_endpoint.py": (3, 2),
     # RAISED to (14, 12) by #854: the CallerQuotaAdmission port (Protocol, concrete
     # binding, default instance) joins the core so doors consume the interface.
     "crawlutron/service/caller_auth.py": (14, 12),
