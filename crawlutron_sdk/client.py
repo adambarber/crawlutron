@@ -89,7 +89,16 @@ class _ClientBase:
             headers["X-API-Key"] = self._api_key
         return headers
 
-    def _raise_for_status(self, status_code: int, body: dict[str, object]) -> None:
+    def _raise_for_status(
+        self,
+        status_code: int,
+        body: dict[str, object],
+        *,
+        accepted_if_pending: bool = False,
+    ) -> None:
+        """Raise typed errors; with ``accepted_if_pending`` also refuse a 202."""
+        if accepted_if_pending and status_code == 202:
+            raise error_from_response(status_code, body)
         if status_code < 400:
             return
         raise error_from_response(status_code, body)
@@ -151,9 +160,7 @@ class CrawlutronClient(_ClientBase):
         """Synchronous crawl door: returns the unified crawl response."""
         response = await self._request("POST", "/v1/crawl", json=_payload_dict(payload))
         body = _json_body(response)
-        self._raise_for_status(response.status_code, body)
-        if response.status_code == 202:
-            raise error_from_response(202, body)
+        self._raise_for_status(response.status_code, body, accepted_if_pending=True)
         return CrawlResponse.model_validate(body)
 
     async def crawl_async(self, payload: CrawlRequest) -> CrawlAccepted:
@@ -168,9 +175,7 @@ class CrawlutronClient(_ClientBase):
         """Retrieve a completed crawl; raises if still accepted (202) or gone (404)."""
         response = await self._request("GET", f"/v1/crawl/{request_id}")
         body = _json_body(response)
-        self._raise_for_status(response.status_code, body)
-        if response.status_code == 202:
-            raise error_from_response(202, body)
+        self._raise_for_status(response.status_code, body, accepted_if_pending=True)
         return CrawlResponse.model_validate(body)
 
     async def wait_for(
@@ -368,7 +373,7 @@ class CrawlutronClientSync(_ClientBase):
     def crawl(self, payload: CrawlRequest) -> CrawlResponse:
         response = self._request("POST", "/v1/crawl", json=_payload_dict(payload))
         body = _json_body(response)
-        self._raise_for_status(response.status_code, body)
+        self._raise_for_status(response.status_code, body, accepted_if_pending=True)
         return CrawlResponse.model_validate(body)
 
     def crawl_async(self, payload: CrawlRequest) -> CrawlAccepted:
@@ -379,9 +384,10 @@ class CrawlutronClientSync(_ClientBase):
         return CrawlAccepted.model_validate(body)
 
     def get_crawl_result(self, request_id: str) -> CrawlResponse:
+        """Retrieve a completed crawl; raises if still accepted (202) or gone (404)."""
         response = self._request("GET", f"/v1/crawl/{request_id}")
         body = _json_body(response)
-        self._raise_for_status(response.status_code, body)
+        self._raise_for_status(response.status_code, body, accepted_if_pending=True)
         return CrawlResponse.model_validate(body)
 
     def wait_for(

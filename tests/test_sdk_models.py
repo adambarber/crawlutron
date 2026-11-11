@@ -6,6 +6,7 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 import crawlutron_sdk.models as sdk_models
+from crawlutron.models.search_request import SearchRequest as ServerSearchRequest
 from crawlutron_sdk.models import (
     AdmitRequest,
     AdmitResponse,
@@ -89,16 +90,30 @@ def test_job_control_request_action_must_be_valid():
         JobControlRequest(action="reboot")
 
 
-def test_search_request_limit_bounds():
-    """The SDK mirrors the server's default clamp: CRAWLUTRON_SEARCH_LIMIT_MAX is 20."""
+def test_search_request_limit_accepts_full_server_range():
+    """The SDK must not second-guess the server's clamp: the full range admits."""
     with pytest.raises(ValidationError):
         SearchRequest(query="q", limit=0)
-    with pytest.raises(ValidationError):
-        SearchRequest(query="q", limit=21)
-    assert SearchRequest(query="q", limit=20).limit == 20
+    assert SearchRequest(query="q", limit=100).limit == 100
     assert SearchRequest(query="q").limit is None
     description = SearchRequest.model_fields["limit"].description
     assert description is not None and "clamps" in description
+
+
+def _upper_bound(model: type[BaseModel]) -> int | None:
+    for constraint in model.model_fields["limit"].metadata:
+        le = getattr(constraint, "le", None)
+        if le is not None:
+            return le
+    return None
+
+
+def test_search_request_limit_bound_tracks_the_server_model():
+    """Drift guard: the SDK's upper bound must cover the server model's bound."""
+    server_le = _upper_bound(ServerSearchRequest)
+    sdk_le = _upper_bound(SearchRequest)
+    assert server_le is not None and sdk_le is not None
+    assert sdk_le >= server_le
 
 
 def _sdk_request_models() -> dict[str, type[BaseModel]]:

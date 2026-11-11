@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import crawlutron_sdk
 from crawlutron_sdk.errors import (
     CrawlutronAcceptedError,
     CrawlutronBadGatewayError,
+    CrawlutronBadRequestError,
+    CrawlutronClientClosedRequestError,
     CrawlutronClientError,
+    CrawlutronConflictError,
     CrawlutronError,
     CrawlutronForbiddenError,
     CrawlutronInternalServerError,
@@ -21,6 +25,17 @@ from crawlutron_sdk.errors import (
 )
 
 
+def test_package_root_exports_every_refusal_class():
+    """Every service refusal class a caller can catch imports from the root."""
+    for name in (
+        "CrawlutronUnauthorizedError",
+        "CrawlutronBadRequestError",
+        "CrawlutronConflictError",
+        "CrawlutronClientClosedRequestError",
+    ):
+        assert getattr(crawlutron_sdk, name) is not None, name
+
+
 def test_error_attributes():
     error = CrawlutronNotFoundError("gone", details={"request_id": "x"}, status_code=404)
     assert error.message == "gone"
@@ -31,6 +46,9 @@ def test_error_attributes():
 
 
 def test_subclass_status_codes():
+    assert CrawlutronBadRequestError.status_code == 400
+    assert CrawlutronConflictError.status_code == 409
+    assert CrawlutronClientClosedRequestError.status_code == 499
     assert CrawlutronUnauthorizedError.status_code == 401
     assert CrawlutronForbiddenError.status_code == 403
     assert CrawlutronRequestTooLargeError.status_code == 413
@@ -53,6 +71,9 @@ def test_error_family_catches():
 
 def test_error_from_response_maps_4xx():
     cases = {
+        400: CrawlutronBadRequestError,
+        409: CrawlutronConflictError,
+        499: CrawlutronClientClosedRequestError,
         401: CrawlutronUnauthorizedError,
         403: CrawlutronForbiddenError,
         413: CrawlutronRequestTooLargeError,
