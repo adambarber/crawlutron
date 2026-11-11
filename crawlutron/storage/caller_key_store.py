@@ -140,6 +140,20 @@ class CallerKeyStore(CoordinationStore):
             key_id=key_id, label=name, secret=secret, max_pages=max_pages, max_concurrency=max_concurrency
         )
 
+    def _reread_row(self, key_id: str | None) -> tuple | None:
+        """The current row for ``key_id`` under the lock, for post-derive re-checks."""
+        with self._lock:
+            return (
+                self._conn.execute(
+                    "SELECT key_id, label, key_hash, max_pages, max_concurrency,"
+                    " created_at, previous_hash, previous_rotated_at"
+                    " FROM caller_keys WHERE key_id = ?",
+                    (key_id,),
+                ).fetchone()
+                if key_id is not None
+                else None
+            )
+
     def verify_key(self, secret: str) -> CallerKey | None:
         """The record for ``secret``, or None when it names no live key.
 
@@ -165,6 +179,10 @@ class CallerKeyStore(CoordinationStore):
         stored = row[2] if row is not None else _DUMMY_VERIFIER
         salt_hex, _, digest_hex = stored.partition("$")
         computed = _hash_secret(body, bytes.fromhex(salt_hex))
+        if row is not None:
+            # Re-read under the lock: the row may have been revoked or rotated
+            # while the derivation ran; the post-derive row decides.
+            row = self._reread_row(key_id)
         if row is not None and secrets.compare_digest(computed, digest_hex):
             return _record_from_row(row)
         if row is not None and row[6] and row[7] is not None and time.time() - row[7] <= GRACE_WINDOW_SECONDS:

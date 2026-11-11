@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import secrets
 import sqlite3
+import threading
 import time
 from contextlib import closing
 
@@ -271,3 +273,71 @@ async def test_async_rotate_twin_moves_current_to_previous(tmp_path):
     assert await store.arotate_key(issued.key_id, new_secret) is True
     assert await store.averify_key(issued.secret) is not None
     assert await store.averify_key(new_secret) is not None
+
+
+def _stalled_pbkdf2(stall: threading.Event, release: threading.Event):
+    """A pbkdf2_hmac stand-in that stalls once, then derives normally."""
+    real = hashlib.pbkdf2_hmac
+
+    def stalled(algorithm, secret, salt, iterations):
+        # One-shot: only the first derive stalls; the admin ops this test
+        # times also hash and must run at full speed.
+        if not stall.is_set():
+            stall.set()
+            release.wait(10)
+        return real(algorithm, secret, salt, iterations)
+
+    return stalled
+
+
+def test_derive_does_not_block_admin_ops(tmp_path, monkeypatch):
+    """PBKDF2 runs outside the store lock: a derivation in flight must not
+    stall mint/list/rotate (admin ops queue behind hash CPU otherwise)."""
+    store = CallerKeyStore(tmp_path / "keys.db")
+    issued = store.issue_key("agent-a")
+
+    in_derive = threading.Event()
+    release = threading.Event()
+    monkeypatch.setattr(hashlib, "pbkdf2_hmac", _stalled_pbkdf2(in_derive, release))
+    try:
+        verifier = threading.Thread(target=lambda: store.verify_key(issued.secret))
+        verifier.start()
+        assert in_derive.wait(5), "derivation never started"
+        try:
+            started = time.perf_counter()
+            assert store.list_keys() != []
+            assert store.issue_key("agent-b") is not None
+            assert store.rotate_key(issued.key_id, f"ck_{issued.key_id[4:]}.{secrets.token_urlsafe(32)}")
+            elapsed = time.perf_counter() - started
+            assert elapsed < 1.0, f"admin ops blocked {elapsed:.2f}s behind the derivation"
+        finally:
+            release.set()
+            verifier.join(10)
+            assert not verifier.is_alive()
+    finally:
+        store.close()
+
+
+def test_revocation_during_derivation_does_not_grant(tmp_path, monkeypatch):
+    """A key revoked while its verification derives must not verify: the
+    re-check after derive decides, closing the read-then-derive window."""
+    store = CallerKeyStore(tmp_path / "keys.db")
+    issued = store.issue_key("agent-a")
+
+    in_derive = threading.Event()
+    release = threading.Event()
+    result: dict[str, object] = {}
+    monkeypatch.setattr(hashlib, "pbkdf2_hmac", _stalled_pbkdf2(in_derive, release))
+    try:
+        verifier = threading.Thread(target=lambda: result.update(v=store.verify_key(issued.secret)))
+        verifier.start()
+        assert in_derive.wait(5), "derivation never started"
+        try:
+            assert store.revoke_key(issued.key_id) is True
+        finally:
+            release.set()
+            verifier.join(10)
+            assert not verifier.is_alive()
+        assert result["v"] is None, "revoked-during-derive key still granted"
+    finally:
+        store.close()
