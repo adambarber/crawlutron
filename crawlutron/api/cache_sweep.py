@@ -6,14 +6,12 @@ expired robots rules, so reaping is not read-lazy only.
 from __future__ import annotations
 
 import asyncio
-import logging
 from collections.abc import Callable
 
+from crawlutron.api.sweep_loop import sweep_forever
 from crawlutron.orchestration.engine import purge_robots_cache
 from crawlutron.transport.content_cache import ContentCache, shared_content_cache
 from crawlutron.transport.freshness import default_clock
-
-logger = logging.getLogger(__name__)
 
 CACHE_MAINTENANCE_INTERVAL_SECONDS = 300.0
 
@@ -39,12 +37,13 @@ async def sweep_cache_forever(
 
     A failing pass is logged and the loop continues (fail-open sweep law).
     """
-    while not shutdown_event.is_set():
-        try:
-            await asyncio.to_thread(cache_maintenance_once, now=clock())
-        except Exception:
-            logger.exception("cache_maintenance_pass_failed")
-        try:
-            await asyncio.wait_for(shutdown_event.wait(), timeout=interval_seconds)
-        except TimeoutError:
-            continue
+
+    async def tick() -> None:
+        await asyncio.to_thread(cache_maintenance_once, now=clock())
+
+    await sweep_forever(
+        tick,
+        shutdown_event,
+        interval_seconds=interval_seconds,
+        log_key="cache_maintenance_pass_failed",
+    )

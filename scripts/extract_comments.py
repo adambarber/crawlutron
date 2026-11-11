@@ -89,7 +89,7 @@ def _docstring_nodes(tree: ast.Module) -> list[ast.Expr]:
     The extract's line records and the gate's length decision both consume
     this list, so the walk lives here and nowhere else.
     """
-    return [node for node in ast.walk(tree) if _is_docstring_node(node)]
+    return [node for node in ast.walk(tree) if isinstance(node, ast.Expr) and _is_docstring_node(node)]
 
 
 def over_line_docstrings(tree: ast.Module, line_limit: int) -> list[tuple[int, int, str]]:
@@ -112,7 +112,10 @@ def over_line_docstrings(tree: ast.Module, line_limit: int) -> list[tuple[int, i
         if len(content) <= line_limit:
             continue
         doc_node = holder.body[0] if holder is not tree else tree.body[0]
-        kind = "module" if holder is tree else holder.name
+        if isinstance(holder, ast.Module):
+            kind = "module"
+        else:
+            kind = holder.name
         over.append((doc_node.lineno, doc_node.end_lineno or doc_node.lineno, kind))
     return sorted(over)
 

@@ -71,6 +71,11 @@ class CrawlResultStore(_PayloadStoreGuardrails):
         self._ttl_seconds = max(0.0, float(ttl_seconds))
         self._max_entries = max(1, int(max_entries))
 
+    @property
+    def ttl_seconds(self) -> float:
+        """The retention vocabulary: one home, so the spill sweep derives from it."""
+        return self._ttl_seconds
+
     def put(self, request_id: str, payload: JsonValue, *, owner: str = "") -> None:
         """Store a completed response; ``owner=""`` is the shared anonymous bucket."""
         # json.dumps defaults to ensure_ascii, so the dump is pure ASCII and its
