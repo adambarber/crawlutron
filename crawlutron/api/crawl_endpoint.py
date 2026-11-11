@@ -59,14 +59,21 @@ async def await_or_client_gone[Work](
     and cancel (freeing the slot/browser); a finished crawl returns untouched.
     """
     task = asyncio.ensure_future(work)
-    while True:
-        if task.done():
-            return await task
-        if await request.is_disconnected():
+    try:
+        while True:
+            if task.done():
+                return await task
+            if await request.is_disconnected():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+                raise http_error(499, "client_disconnected", "Client disconnected before the crawl completed")
+            await asyncio.sleep(poll_interval)
+    finally:
+        # Handler cancelled (uvicorn shutdown) or any exit: the crawl task must not
+        # outlive this frame holding its slot for a result nobody will read.
+        if not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
-            raise http_error(499, "client_disconnected", "Client disconnected before the crawl completed")
-        await asyncio.sleep(poll_interval)
 
 
 def _crawl_rejection(error: ValueError) -> HTTPException:
