@@ -6,12 +6,12 @@ live in their own Prometheus families, and the caller dimension is overflow-capp
 
 from __future__ import annotations
 
-from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from crawlutron.api.metrics_router import router as metrics_router
 from crawlutron.runtime.metrics import MetricsStore, get_metrics
 from crawlutron.storage.coordination_counters import CoordinationCounters
+from tests._app_harnesses import harness_app
 
 
 def _store(tmp_path) -> MetricsStore:
@@ -89,8 +89,7 @@ def _bind_singleton(tmp_path) -> None:
 async def _metrics_client(*, admin_token: str):
     from crawlutron.config.settings import CrawlerSettings
 
-    app = FastAPI()
-    app.include_router(metrics_router)
+    app = harness_app(metrics_router)
     app.state.crawler_settings = CrawlerSettings.from_mapping({"CRAWLUTRON_KEY_ADMIN_TOKEN": admin_token})
     transport = ASGITransport(app=app)
     return AsyncClient(transport=transport, base_url="http://test")

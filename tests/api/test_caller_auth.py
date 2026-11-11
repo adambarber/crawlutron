@@ -32,9 +32,9 @@ def test_203_cleanup_pins():
 
 
 def _assert_401(response) -> None:
-    """A 401 with the invalid_api_key code, as every auth-refusal reads it."""
+    """A 401 with the invalid_api_key code in the production error envelope."""
     assert response.status_code == 401, response.text
-    assert response.json()["detail"]["code"] == "invalid_api_key"
+    assert response.json()["code"] == "invalid_api_key"
 
 
 async def _issue_key_as_admin(client: AsyncClient) -> Response:
@@ -179,7 +179,7 @@ async def test_wrong_admin_token_guesses_trip_the_cooldown(tmp_path):
             assert response.status_code == 401, response.text
         throttled = await client.get("/v1/keys", headers={"X-API-Key": "wrong-guess-999"})
         assert throttled.status_code == 429, throttled.text
-        assert throttled.json()["detail"]["code"] == "key_verify_throttled"
+        assert throttled.json()["code"] == "key_verify_throttled"
 
 
 async def test_correct_admin_token_still_admits_after_metering(tmp_path):

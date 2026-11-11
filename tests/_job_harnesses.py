@@ -17,6 +17,7 @@ from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.json_value import JsonValue
 from crawlutron.models.taxonomy import Classification
 from crawlutron.storage.job_store import TERMINAL_STATUSES, JobStatus, JobStore
+from tests._app_harnesses import harness_app
 from tests._dependency_overrides import bind_base_overrides
 
 if TYPE_CHECKING:
@@ -151,8 +152,7 @@ class ScriptedExecute:
 def _make_app(job_store):
     from crawlutron.api.jobs_router import router as jobs_router
 
-    app = FastAPI()
-    app.include_router(jobs_router)
+    app = harness_app(jobs_router)
     shutdown = asyncio.Event()
     bind_base_overrides(app, job_store=job_store, shutdown_event=shutdown)
     return app

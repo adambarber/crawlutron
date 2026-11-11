@@ -9,14 +9,13 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from crawlutron.storage.caller_key_store import CallerKeyStore
+from tests._app_harnesses import harness_app
 from tests._watch_harnesses import (
     ASGITransport,
     AsyncClient,
     CrawlerSettings,
-    FastAPI,
     get_settings,
     get_watch_store,
-    service_app,
     watch_router,
 )
 
@@ -34,10 +33,7 @@ async def _keyed_watch_client(
     watch_store, key_store: CallerKeyStore, *, max_watches: int = 100
 ) -> AsyncGenerator[AsyncClient, None]:
     """A client over ``/v1/watches`` whose app holds ``key_store`` for identity."""
-    app = FastAPI()
-    app.include_router(watch_router)
-    for exception_class, handler in service_app().exception_handlers.items():
-        app.add_exception_handler(exception_class, handler)
+    app = harness_app(watch_router)
     app.state.caller_key_store = key_store
     app.dependency_overrides[get_watch_store] = lambda: watch_store
     app.dependency_overrides[get_settings] = lambda: CrawlerSettings.from_mapping(

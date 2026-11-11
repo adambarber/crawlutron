@@ -24,7 +24,7 @@ def _assert_quota_outcome(responses, *, overlapped: bool, store, tracker, issued
     )
     assert len(refused) == 1
     for response in refused:
-        assert response.json()["detail"]["code"] == "quota_exceeded"
+        assert response.json()["code"] == "quota_exceeded"
     assert tracker.sync_in_flight(issued.key_id) == 0, "a refused or handed-off slot was leaked"
     assert store.active_count_for_caller(issued.key_id) == 1
 

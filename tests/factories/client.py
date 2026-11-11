@@ -14,6 +14,7 @@ from crawlutron.api.dependencies import get_job_store, get_result_store, get_set
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.json_value import JsonValue
 from crawlutron.storage import caller_key_store, job_store, result_store
+from tests._app_harnesses import harness_app
 from tests._async_harnesses import serve
 from tests._quota_harness import grant_test_admin_token, keyed_client, stores
 
@@ -37,9 +38,7 @@ def isolation_app(
     from crawlutron.api.crawl_router import router as crawl_router
     from crawlutron.api.keys_router import router as keys_router
 
-    app = FastAPI()
-    app.include_router(crawl_router)
-    app.include_router(keys_router)
+    app = harness_app(crawl_router, keys_router)
     app.state.caller_key_store = keys
     app.state.concurrency_tracker = CallerConcurrencyTracker()
     grant_test_admin_token(app)
