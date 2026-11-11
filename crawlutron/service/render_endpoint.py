@@ -1,25 +1,20 @@
-"""``/v1/render`` endpoint handler.
+"""``/v1/render`` endpoint core: pooled-browser render, in service.
 
-Backward-compatible browser-render endpoint wrapping
-:func:`crawlutron.api.render.render_request` with the unified shape.
+Wraps service.render.render_request with the unified shape; service never imports api.
 """
 
 import logging
 
-from crawlutron.api.exceptions import browser_pool_unavailable
-from crawlutron.api.render import render_request
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.browser_pool_exhausted import BrowserPoolExhaustedError
 from crawlutron.models.render_request import RenderRequest
 from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
-from crawlutron.service.errors import DomainError, ValidationRefusal
+from crawlutron.service.errors import BrowserPoolUnavailable, DomainError, ValidationRefusal
+from crawlutron.service.render import render_request
 from crawlutron.service.response_shaping import arender_response_from_result
-from crawlutron.transport.browser_pool import (
-    PooledBrowserWorker,
-    get_browser_pool,
-)
+from crawlutron.transport.browser_pool import PooledBrowserWorker, get_browser_pool
 
-logger = logging.getLogger(__name__)
+_logger = logging.getLogger(__name__)
 
 
 def render_rejection(error: ValueError) -> DomainError:
@@ -39,7 +34,7 @@ async def render(payload: RenderRequest, settings: CrawlerSettings) -> UnifiedCr
     # An absent pool refuses 503 (startup/shutdown) rather than an AttributeError 500.
     pool = get_browser_pool()
     if pool is None:
-        raise browser_pool_unavailable()
+        raise BrowserPoolUnavailable()
     pooled_worker = PooledBrowserWorker(pool)
     try:
         result = await render_request(
@@ -48,9 +43,9 @@ async def render(payload: RenderRequest, settings: CrawlerSettings) -> UnifiedCr
             worker=pooled_worker,
         )
     except BrowserPoolExhaustedError as error:
-        logger.warning("render_request_pool_exhausted", extra={"error": str(error)})
-        raise browser_pool_unavailable(str(error)) from error
-    logger.info(
+        _logger.warning("render_request_pool_exhausted", extra={"error": str(error)})
+        raise BrowserPoolUnavailable(str(error)) from error
+    _logger.info(
         "render_request_completed",
         extra={"url_count": len(result.get("results", []))},
     )

@@ -7,7 +7,7 @@ bounded-concurrent since #544/P10, and render shares that doctrine.
 
 import asyncio
 
-import crawlutron.api.render as render_mod
+import crawlutron.service.render as render_mod
 from tests._fetch_doubles import FetcherDouble
 from tests._render_producer import render_stub_request
 

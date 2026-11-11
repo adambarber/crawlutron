@@ -159,8 +159,8 @@ async def test_render_request_never_invokes_worker_for_policy_blocked_host():
         calls.append(job.url.raw)
         return rendered(job)
 
-    from crawlutron.api.render import render_request
     from crawlutron.models.render_request import RenderRequest
+    from crawlutron.service.render import render_request
 
     with pytest.raises(ValueError, match="host_denied"):
         await render_request(

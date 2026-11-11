@@ -54,7 +54,7 @@ def test_settings_default_not_getattr_default():
 
 
 def _render_scheduler_of(settings: CrawlerSettings) -> DomainScheduler:
-    from crawlutron.api.render import render_scheduler
+    from crawlutron.service.render import render_scheduler
 
     return render_scheduler(settings)
 

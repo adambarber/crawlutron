@@ -1,7 +1,6 @@
-"""Browser-render request orchestration (the ``/v1/render`` path).
+"""Browser-render request orchestration: the /v1/render core lives in service.
 
-Extracted from the old ``app.service`` legacy shim shim so the canonical browser-render
-entry point lives in ``crawlutron.api``; existing callers import from ``crawlutron.api.render``.
+service never imports api; the api layer keeps only the FastAPI door.
 """
 
 from __future__ import annotations
@@ -109,7 +108,7 @@ async def _robots_allow_set(
 def _failed_render_result(job: CrawlJob, exc: BaseException, *, submitted_url: str) -> CrawlResult:
     """Render-pipeline failure envelope for the domain scheduler.
 
-        ``DomainScheduler.run`` is generic over result shape; this answers ``CrawlResult``,
+    ``DomainScheduler.run`` is generic over result shape; this answers ``CrawlResult``,
     the ``/v1/render`` contract, via the same converter ``_collect`` uses.
     """
     return crawl_result_from_engine_result(

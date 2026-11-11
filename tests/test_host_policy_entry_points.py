@@ -205,7 +205,7 @@ async def _probe_site_map(monkeypatch, tmp_path):
 
 
 async def _probe_render(monkeypatch, tmp_path):
-    from crawlutron.api.render import render_request
+    from crawlutron.service.render import render_request
 
     effects = _effects()
 
@@ -341,7 +341,7 @@ _PROBES = {
     "crawlutron/service/job_cores.py:create_job_core": _probe_jobs_router,
     "crawlutron/service/map_endpoint.py:map_site": _probe_map_endpoint,
     "crawlutron/service/site_map.py:build_site_map": _probe_site_map,
-    "crawlutron/api/render.py:render_request": _probe_render,
+    "crawlutron/service/render.py:render_request": _probe_render,
     "crawlutron/service/response_shaping.py:frontier_link_url": _probe_response_shaping,
     "crawlutron/api/watch_router.py:create_watch": _probe_watch_router,
     "crawlutron/service/watch_cores.py:register_watch_core": _probe_watch_cores,

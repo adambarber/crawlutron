@@ -212,7 +212,7 @@ def text_from_html(html: str) -> str:
 
 ### 2.7 [P1] Unbounded render options → pooled-renderer occupation DoS
 
-**Where:** `crawlutron/api/render.py:39-54` (`render_options_for` → `resolve_render_options`, no upper bound), wire model `crawlutron/models/render_options_request.py` (`timeout_seconds: int | None` with no `le=`), consumers `crawlutron/transport/browser_render_phases.py` (raw into navigation; budget only *floors* it).
+**Where:** `crawlutron/service/render.py:39-54` (`render_options_for` → `resolve_render_options`, no upper bound), wire model `crawlutron/models/render_options_request.py` (`timeout_seconds: int | None` with no `le=`), consumers `crawlutron/transport/browser_render_phases.py` (raw into navigation; budget only *floors* it).
 
 The crawl path bounds the identical knob through `CrawlPolicyLimits` (`ge=1, le=MAX_HTTP_TIMEOUT_SECONDS`), but `/v1/render` accepts `options.timeout_seconds=1000000000` — the request then occupies one of a handful of pooled renderers (~700 MiB each) for as long as the target stalls, retried indefinitely. `max_retries` is likewise unbounded. On the documented small-pool deployment, one anonymous client starves every other render caller.
 
@@ -496,7 +496,7 @@ LOC figures below are estimates verified by reading; "dead" items were grep-conf
 | D1 | `build_unified_crawl_response` (sync twin; only the async twin is called) | `crawlutron/service/response_shaping.py:70-81` | ~12 |
 | D2 | `validate_webhook_url` (sync twin; only async used) | `crawlutron/service/webhooks.py:179-185` | ~7 |
 | D3 | `aformat_crawl_item` (no callers; `format_crawl_item` used synchronously inside an already-offloaded builder) | `crawlutron/service/unified_shaping.py:46-51` | ~7 |
-| D4 | `render_options_for`'s dict arm (only caller always passes `RenderRequest`; `RenderOptionsRequest` is `extra="forbid"`) | `crawlutron/api/render.py:43-54` | ~8 |
+| D4 | `render_options_for`'s dict arm (only caller always passes `RenderRequest`; `RenderOptionsRequest` is `extra="forbid"`) | `crawlutron/service/render.py:43-54` | ~8 |
 | D5 | `_depends_singletons.py` — whole module re-declares `Depends(get_settings)` that typed Annotated deps already provide (and loses the annotation) | `crawlutron/api/_depends_singletons.py` | ~12 |
 | D6 | `tracked_task` (docstring promises a supervisor seam; zero callers) | `crawlutron/service/job_lifecycle.py:13-17` | ~5 |
 | D7 | Dead pre-validation block in `execute_crawl` (calls the engine that re-validates identically) | `crawlutron/service/crawl_executor.py:38-48` | ~10 |

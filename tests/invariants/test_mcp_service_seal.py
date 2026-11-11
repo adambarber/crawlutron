@@ -30,15 +30,8 @@ _SEALED_LAYER = "crawlutron.mcp."
 _FORBIDDEN_LAYER = "crawlutron.api"
 
 #: Named residuals: (mcp module, DIRECT api module it imports) with the reason's
-#: commit. The gate closes each over the transitive graph.
-RESIDUAL_EDGES: dict[tuple[str, str], str] = {
-    ("crawlutron.mcp.handlers", "crawlutron.api.render_endpoint"): (
-        "#849 C4-owed: handlers' render door calls api.render_endpoint.render; the "
-        "core's body lives over api.render's scheduler pipeline and api.exceptions' "
-        "pool refusal factory, and api-side tests monkeypatch render_endpoint. "
-        "Drained at C4 with the render core's ownership move."
-    ),
-}
+#: commit; the gate closes each over the transitive graph. Sealed EMPTY by #861.
+RESIDUAL_EDGES: dict[tuple[str, str], str] = {}
 
 
 def _reachable(modules: dict[str, set[str]], start: str) -> set[str]:
@@ -118,9 +111,9 @@ def test_seal_names_both_endpoints_of_a_two_hop_chain() -> None:
     }, offenders
 
 
-def test_seal_refuses_a_new_edge_routed_around_the_residual() -> None:
-    """Bypass attack: a SECOND direct mcp->api edge that the residual closure does
-    not cover (its api target is off the residual's downstream) must red."""
+def test_seal_refuses_every_mcp_to_api_edge_with_empty_residuals() -> None:
+    """With the allowlist sealed empty, any planted mcp->api edge is an offender:
+    the residual closure is empty so nothing is allowed."""
     planted = {
         "crawlutron.mcp.handlers": {"crawlutron.api.render_endpoint", "crawlutron.api.route_layer"},
         "crawlutron.api.render_endpoint": {"crawlutron.api.render"},
@@ -130,9 +123,10 @@ def test_seal_refuses_a_new_edge_routed_around_the_residual() -> None:
     offenders = _offender_pairs(planted)
     allowed = _allowed_pairs(planted)
     unallowed = offenders - allowed
-    assert "crawlutron.mcp.handlers -> crawlutron.api.route_layer" in unallowed, unallowed
-    # ...while the residual's own fallout stays allowed:
-    assert "crawlutron.mcp.handlers -> crawlutron.api.render" in allowed, allowed
+    assert unallowed == offenders, unallowed
+    assert "crawlutron.mcp.handlers -> crawlutron.api.route_layer" in unallowed
+    assert "crawlutron.mcp.handlers -> crawlutron.api.render_endpoint" in unallowed
+    assert "crawlutron.mcp.handlers -> crawlutron.api.render" in unallowed
 
 
 def test_every_residual_row_cites_a_commit_body() -> None:

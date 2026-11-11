@@ -18,9 +18,9 @@ async def render_stub_request(payload: dict[str, object], *, worker=None) -> Ren
     to success on a fixed body -- the shape an endpoint test asserts on; pass
     ``worker`` for scenarios that are about the worker itself.
     """
-    from crawlutron.api.render import render_request
     from crawlutron.config.settings import CrawlerSettings
     from crawlutron.models.render_request import RenderRequest
+    from crawlutron.service.render import render_request
 
     return await render_request(
         RenderRequest.model_validate(payload),

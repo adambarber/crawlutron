@@ -9,13 +9,13 @@ from pydantic import ValidationError
 
 from crawlutron.admission.payload_helpers import checked_payload_urls
 from crawlutron.admission.policy import PolicyTier, read_policy
-from crawlutron.api.render import render_options_for
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.extraction.document_text import format_extracted_document_text
 from crawlutron.extraction.trees import FrameCollector, frames_from, walkable
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.json_value import JsonValue
 from crawlutron.models.render_request import RenderRequest
+from crawlutron.service.render import render_options_for
 from crawlutron.transport.fetch_policy import (
     fetch_with_retries,
     looks_like_binary_body,

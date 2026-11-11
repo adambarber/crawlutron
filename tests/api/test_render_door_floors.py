@@ -40,9 +40,9 @@ async def test_a_zero_timeout_and_negative_retries_are_422(tmp_path):
 async def test_floor_values_validate_and_resolve_through_the_real_resolver():
     """timeout_seconds=1 with zero retries passes the wire model and resolves
     through the real resolver (no overrides) to a floor-standing RenderOptions."""
-    from crawlutron.api.render import render_options_for
     from crawlutron.config.settings import CrawlerSettings
     from crawlutron.models.render_request import RenderRequest
+    from crawlutron.service.render import render_options_for
 
     payload = RenderRequest.model_validate(
         {"urls": ["http://example.com/1"], "options": {"timeout_seconds": 1, "max_retries": 0}}

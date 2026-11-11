@@ -81,7 +81,7 @@ class TestDiscoveryAndRenderApi:
 
     async def test_v1_render_exhausted_pool_returns_503(self, monkeypatch):
         # When every renderer is wedged, the request surfaces as 503, not a hang or a 500.
-        import crawlutron.api.render_endpoint as render_endpoint
+        import crawlutron.service.render_endpoint as render_endpoint
         from crawlutron.transport.browser_pool import BrowserPoolExhaustedError
         from crawlutron.transport.results import crawl_result_from_exception
         from crawlutron.vocabulary.strategies import BROWSER_HEADLESS
@@ -108,7 +108,7 @@ class TestDiscoveryAndRenderApi:
     async def test_v1_render_worker_exception_returns_shaped_failure_not_500(self, monkeypatch):
         # The render pipeline normalizes the shape at its single receive point and routes the endpoint through
         # the same per-item shaping guard /v1/crawl has, so the failure degrades to a correctly-shaped
-        import crawlutron.api.render_endpoint as render_endpoint
+        import crawlutron.service.render_endpoint as render_endpoint
 
         secret = "SECRET_TOKEN_ABC123_INTERNAL_PATH=/etc"
 
@@ -133,7 +133,7 @@ class TestDiscoveryAndRenderApi:
         assert secret not in resp.text, f"raw exception text leaked into the response: {resp.text!r}"
 
     async def test_v1_render_reports_the_real_failure_for_a_worker_exception(self, monkeypatch):
-        import crawlutron.api.render_endpoint as render_endpoint
+        import crawlutron.service.render_endpoint as render_endpoint
         from crawlutron.transport.browser_pool import PooledBrowserWorker
 
         monkeypatch.setattr(render_endpoint, "PooledBrowserWorker", lambda pool: PooledBrowserWorker(pool))
