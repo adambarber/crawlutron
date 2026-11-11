@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
+from crawlutron.api import watch_sweep
 from crawlutron.api.watch_sweep import WatchSweeper
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.webhook_target import WebhookTarget
@@ -79,6 +82,14 @@ def _slow_then_live(watch_store, etag_server, monkeypatch):
     return slow, watched, inside, releases
 
 
+def _start_second_sweeper(watch_store, clock_t):
+    """Fast-forward the clock past the claim window and start a second sweeper;
+    return its pass task for the caller to await."""
+    clock_t["t"] = NOW + 400.0
+    second = default_sweeper(watch_store)
+    return asyncio.create_task(second.sweep_once(now=NOW + 400.0))
+
+
 async def test_two_concurrent_sweeps_deliver_one_webhook_not_two(watch_store, etag_server, monkeypatch):
     """Two sweeper processes over one due watch must fire the webhook once: the
     second sweeper's claim CAS loses and the row is skipped, not re-delivered."""
@@ -123,6 +134,68 @@ async def test_two_concurrent_sweeps_deliver_one_webhook_not_two(watch_store, et
 
     assert deliveries == [WEBHOOK], f"double-fired: {deliveries}"
     assert watch_store.get(watch.watch_id).next_check_at == NOW + INTERVAL
+
+
+async def test_a_check_outliving_the_claim_window_fires_once_not_twice(watch_store, etag_server, monkeypatch):
+    """A check that outlives its claim window must still fire once: the sweeper
+    re-stamps the lease live before the webhook, so a second sweeper that
+    re-claimed the lapsed row mid-check wins the CAS and the first skips."""
+    watch_store.create(
+        canonical(loopback_url(etag_server)),
+        webhook_url=_webhook(),
+        interval_seconds=INTERVAL,
+        now=0.0,
+    )
+    deliveries = capture_announcements(monkeypatch)
+    clock_t = {"t": NOW}
+    first_in_check = asyncio.Event()
+    release = asyncio.Event()
+    crawl_calls = 0
+
+    async def _parked_crawl(payload, *, settings, shutdown_event, urls=None):
+        nonlocal crawl_calls
+        crawl_calls += 1
+        # Only the first sweeper parks inside its check; the second sweeper's
+        # check runs straight through once it has re-claimed the lapsed row.
+        if crawl_calls == 1:
+            first_in_check.set()
+            await release.wait()
+        return _crawl_envelope(payload.url)
+
+    monkeypatch.setattr(watch_sweep, "execute_crawl", _parked_crawl)
+
+    first = _clocked_sweeper(watch_store, lambda: clock_t["t"])
+    pass_one = asyncio.create_task(first.sweep_once(now=NOW))
+    await asyncio.wait_for(first_in_check.wait(), timeout=10)
+
+    # The claim window lapses while the first sweeper is mid-check.
+    pass_two = _start_second_sweeper(watch_store, clock_t)
+    await asyncio.wait_for(pass_two, timeout=10)
+    await asyncio.sleep(0)
+
+    release.set()
+    await asyncio.wait_for(pass_one, timeout=10)
+    await asyncio.sleep(0)
+
+    assert [url for url, _ in deliveries] == [WEBHOOK], f"double-fired: {deliveries}"
+
+
+@pytest.mark.parametrize(
+    "claim_age,reclaimable",
+    [
+        (299.0, False),  # 1s under the window: still held
+        (300.0, False),  # exactly at the window: still held (strict <)
+        (301.0, True),  # 1s over: stale, re-claimable
+    ],
+)
+async def test_claim_window_staleness_boundary(watch_store, claim_age, reclaimable):
+    """A claim is stale-claimable only once its window has fully elapsed:
+    exactly at the window the row is still held, one second over it is not.
+    Pins claim_due's strict ``claimed_at < now - claim_seconds`` boundary."""
+    watch_store.create(canonical("http://127.0.0.1/watch"), interval_seconds=1, now=0.0)
+    await watch_store.aclaim_due(NOW, "sweeper-a", claim_seconds=300.0)
+    reclaimed = await watch_store.aclaim_due(NOW + claim_age, "sweeper-b", claim_seconds=300.0)
+    assert (len(reclaimed) == 1) is reclaimable
 
 
 def _start_pass(clock, watch_store):
@@ -186,9 +259,7 @@ async def test_a_row_reclaimed_by_a_second_sweeper_is_skipped_not_reworked(
 
     # Past the claim window, the second sweeper re-claims BOTH rows and works
     # the one sorted after the parked check the first pass is stuck on.
-    clock_t["t"] = NOW + 400.0
-    second = default_sweeper(watch_store)
-    pass_two = asyncio.create_task(second.sweep_once(now=NOW + 400.0))
+    pass_two = _start_second_sweeper(watch_store, clock_t)
     await asyncio.wait_for(inside[watched.url].wait(), timeout=10)
 
     releases[slow.url].set()

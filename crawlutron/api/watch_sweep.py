@@ -249,6 +249,10 @@ class WatchSweeper:
                 return classification
             if target is None:
                 return classification
+            # Hold the lease through the check: re-stamp live before the webhook;
+            # a re-claiming second sweeper wins this CAS, so we skip the fire.
+            if not await self._store.arenew_claim(watch.watch_id, self._claim_token, now=self._clock()):
+                return classification
             # Backgrounded, not awaited: a slow receiver must not stall the pass;
             # the delivery rides the tracked set and shutdown drains it.
             start_webhook_delivery(
