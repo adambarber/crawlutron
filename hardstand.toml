@@ -73,56 +73,56 @@ run = ".venv/bin/pre-commit install --hook-type commit-msg --hook-type pre-commi
 name = "pytest"
 kind = "exec"
 env = ["PATH"]
-timeout = 120
+
 run = ".venv/bin/python -m pytest"
 
 [[actions]]
 name = "pytest-fast"
 kind = "exec"
 env = ["PATH"]
-timeout = 120
+
 run = ".venv/bin/python -m pytest -q"
 
 [[actions]]
 name = "ruff"
 kind = "exec"
 env = ["PATH"]
-timeout = 30
+timeout = "30s"
 run = ".venv/bin/ruff check"
 
 [[actions]]
 name = "mypy"
 kind = "exec"
 env = ["PATH"]
-timeout = 60
+timeout = "60s"
 run = ".venv/bin/mypy"
 
 [[actions]]
 name = "pre-commit"
 kind = "exec"
 env = ["PATH"]
-timeout = 90
+timeout = "90s"
 run = ".venv/bin/pre-commit run --all-files"
 
 [[actions]]
 name = "lint"
 kind = "exec"
 env = ["PATH"]
-timeout = 60
+timeout = "60s"
 run = ".venv/bin/make lint"
 
 [[actions]]
 name = "typecheck"
 kind = "exec"
 env = ["PATH"]
-timeout = 60
+timeout = "60s"
 run = ".venv/bin/python -m mypy"
 
 [[actions]]
 name = "basedpyright"
 kind = "exec"
 env = ["PATH"]
-timeout = 60
+timeout = "60s"
 run = ".venv/bin/basedpyright --pythonpath .venv/bin/python"
 
 [[actions]]
