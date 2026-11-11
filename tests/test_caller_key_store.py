@@ -9,6 +9,8 @@ import threading
 import time
 from contextlib import closing
 
+import pytest
+
 from crawlutron.storage.caller_key_store import CallerKeyStore
 
 
@@ -293,6 +295,7 @@ def _stalled_pbkdf2(stall: threading.Event, release: threading.Event):
     return stalled
 
 
+@pytest.mark.wall_assertion
 def test_derive_does_not_block_admin_ops(tmp_path, monkeypatch):
     """PBKDF2 runs outside the store lock: a derivation in flight must not
     stall mint/list/rotate (admin ops queue behind hash CPU otherwise)."""
