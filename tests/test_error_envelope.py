@@ -165,15 +165,21 @@ class TestEnvelopeFromDetail:
         assert set(body) == {"code", "message", "details"}, body
         assert body["details"] == {"status_code": 405}
 
-    async def test_unhandled_in_handler_exception_is_a_envelope_500(self, async_client):
+    async def test_unhandled_in_handler_exception_is_a_envelope_500(self):
         """A generic exception escaping a handler must yield the envelope, not
         Starlette's text/plain 'Internal Server Error' (raise_app_exceptions=False, as
-        ServerErrorMiddleware always re-raises after sending for logging)."""
+        ServerErrorMiddleware always re-raises after sending for logging).
+
+        A throwaway app carrying the REAL error surface, so the shared app's
+        route table is never mutated (a leaked /boom reds the discovery gate).
+        """
         import httpx
+        from fastapi import FastAPI
 
-        from tests._app_factory import service_app
+        from crawlutron.main import install_error_surface
 
-        app = service_app()
+        app = FastAPI()
+        install_error_surface(app)
 
         @app.get("/boom")
         async def _boom():

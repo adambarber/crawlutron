@@ -187,7 +187,7 @@ def _build_app(
         caller_key_store,
         audit_store,
     )
-    _install_error_surface(app)
+    install_error_surface(app)
     _include_routers(app)
     return app
 
@@ -243,7 +243,7 @@ def _stash_state(
     app.state.concurrency_tracker = CallerConcurrencyTracker()
 
 
-def _install_error_surface(app) -> None:
+def install_error_surface(app) -> None:
     """Middleware and exception handlers every response path funnels through."""
     # Body-size guard: 16 MiB cap at the ASGI receive layer (see
     # crawlutron/api/middleware.py for how truncation and keep-alive are handled).
