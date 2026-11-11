@@ -351,7 +351,7 @@ def _reset() -> None:
             # The owning loop is dead: no loop can complete its transports'
             # close, so abort the sockets directly instead of queuing a close
             # no loop will ever run (the unraisable __del__ flake family).
-            abort_transport_sockets()
+            abort_transport_sockets((bound,))
         discard_if_unowned_loop(close_async_http_client, "_DEFAULT_HTTP_CLIENT", globals())
     # Failed rebuild can leave current=None with a queued superseded client;
     # close it instead of dropping it (socket-leak family). A loop running on

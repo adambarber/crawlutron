@@ -15,7 +15,7 @@ from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.storage.coordination_store import atwin
 from crawlutron.storage.ids import new_job_id
 from crawlutron.storage.migrations import StoreSchema
-from crawlutron.storage.sqlite_store import connect_store, process_lock, store_lock_key
+from crawlutron.storage.sqlite_store import bind_conn_lifecycle, connect_store, process_lock, store_lock_key
 
 from .job_store_accumulators import JobAccumulators
 from .job_store_collections import (
@@ -117,6 +117,8 @@ class JobStore:
         # Column-addressed rows: the schema grows by migration, so positional
         # indexing would couple reads to ALTER ordering.
         self._conn.row_factory = sqlite3.Row
+        # A store whose last reference dies closes its connection at that GC point (see bind_conn_lifecycle).
+        bind_conn_lifecycle(self)
         # A caller-supplied row-to-model mapping replaces the default for
         # observation or a custom projection; it runs under the same lock.
         self._row_to_job_factory: Callable[..., CrawlJobState] | None = row_to_job

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 
 import pytest
 
@@ -218,7 +218,7 @@ def test_a_batch_save_inserts_only_the_pages_it_added(job_db):
     job = _job_with_pages(store, 30)
 
     def page_rows():
-        with sqlite3.connect(store.db_path) as conn:
+        with closing(sqlite3.connect(store.db_path)) as conn:
             return conn.execute(
                 'SELECT count(*) AS n FROM "crawl_job_results" WHERE job_id = ?', (job.job_id,)
             ).fetchone()[0]
@@ -243,7 +243,7 @@ def test_a_batch_save_visits_only_the_pages_it_added(job_db):
     job = _job_with_pages(store, 30)
 
     def visited_rows():
-        with sqlite3.connect(store.db_path) as conn:
+        with closing(sqlite3.connect(store.db_path)) as conn:
             return conn.execute(
                 'SELECT count(*) AS n FROM "crawl_job_visited" WHERE job_id = ?', (job.job_id,)
             ).fetchone()[0]
@@ -293,7 +293,7 @@ def test_a_second_processs_visited_pages_survive_the_watermark(job_db):
 
 
 def _visited_rows(db_path, job_id: str) -> int:
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn:
         return conn.execute(
             'SELECT count(*) AS n FROM "crawl_job_visited" WHERE job_id = ?', (job_id,)
         ).fetchone()[0]

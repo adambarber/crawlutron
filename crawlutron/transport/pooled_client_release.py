@@ -253,7 +253,12 @@ def _reset_release_state() -> None:
     """
     from crawlutron.transport.pooled_socket_abort import abort_transport_sockets
 
-    abort_transport_sockets()
+    loops: list[asyncio.AbstractEventLoop] = []
+    for client in tuple(PENDING_CLIENT_CLOSE):
+        bound = _bound_loop_of(client)
+        if bound is not None and bound.is_closed():
+            loops.append(bound)
+    abort_transport_sockets(tuple(loops))
     _LIVE_LOOP_CLOSE_TASKS.clear()
     with PENDING_CLIENT_CLOSE_LOCK:
         PENDING_CLIENT_CLOSE.clear()

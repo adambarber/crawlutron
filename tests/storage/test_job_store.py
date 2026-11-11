@@ -425,6 +425,7 @@ def test_cross_list_duplicate_keeps_shallowest_depth():
 
     assert loaded.frontier == []
     assert loaded.in_flight == [FrontierEntry(canonical("https://example.test/child"), 1)]
+    connection.close()
 
 
 def test_read_row_normalizes_outside_the_store_lock():

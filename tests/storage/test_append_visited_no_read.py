@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Iterator
+from contextlib import closing
 
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.json_value import JsonValue
@@ -53,7 +54,7 @@ def _store_with_traced_connection(tmp_path, trace_target: list[str]) -> JobStore
 def _on_disk_visited(db_path, job_id: str | None = None) -> list[str]:
     """The stored visited keys, read off a fresh connection to the file."""
 
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn:
         if job_id is None:
             return [row[0] for row in conn.execute('SELECT url FROM "crawl_job_visited"')]
         return [

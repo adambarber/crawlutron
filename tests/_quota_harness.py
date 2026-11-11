@@ -88,7 +88,12 @@ async def service_client(
         app.state.result_store = results
         overrides[get_result_store] = lambda: results
     async with keyed_client(app, keys=keys, overrides=overrides) as client:
-        yield client, job_store, keys
+        try:
+            yield client, job_store, keys
+        finally:
+            job_store.close()
+            results.close()
+            keys.close()
 
 
 @contextlib.asynccontextmanager
@@ -115,4 +120,8 @@ async def keyed_result_client(
             get_shutdown_event: asyncio.Event,
         },
     ) as client:
-        yield client, results, keys
+        try:
+            yield client, results, keys
+        finally:
+            results.close()
+            keys.close()

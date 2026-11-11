@@ -5,6 +5,7 @@ from __future__ import annotations
 import secrets
 import sqlite3
 import time
+from contextlib import closing
 
 from crawlutron.storage.caller_key_store import CallerKeyStore
 
@@ -98,7 +99,7 @@ def test_a_tampered_hash_does_not_verify(tmp_path):
     assert record is not None
     salt, digest = record.key_hash.split("$", 1)
     flipped = f"{salt}{'0' if digest[0] != '0' else '1'}{digest[1:]}"
-    with sqlite3.connect(tmp_path / "keys.db") as conn:
+    with closing(sqlite3.connect(tmp_path / "keys.db")) as conn:
         conn.execute("UPDATE caller_keys SET key_hash = ?", (flipped,))
         conn.commit()
     assert store.verify_key(issued.secret) is None
@@ -211,7 +212,7 @@ def test_rotated_previous_key_verifies_within_grace_window(tmp_path):
 
 def test_previous_key_stops_verifying_after_grace_window(tmp_path):
     store, issued, new_secret = _rotated_key(tmp_path)
-    with sqlite3.connect(tmp_path / "keys.db") as conn:
+    with closing(sqlite3.connect(tmp_path / "keys.db")) as conn:
         conn.execute("UPDATE caller_keys SET previous_rotated_at = ?", (time.time() - 400,))
         conn.commit()
 

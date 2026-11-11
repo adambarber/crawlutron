@@ -418,6 +418,11 @@ def _load_cookie_jar(settings: CrawlerSettings, _app: FastAPI, database_path: st
     _app.state.cookie_jar = jar
 
 
+def module_app() -> FastAPI | None:
+    """The lazily built module singleton's ASGI app, or None before discovery."""
+    return _module_app
+
+
 async def _shutdown_services(_app: FastAPI) -> None:
     """Stop the world FIRST: no webhooks against cleared dependencies, no
     cookies after the snapshot. The jar needs no step -- the store persists."""
@@ -440,6 +445,16 @@ async def _shutdown_services(_app: FastAPI) -> None:
     async def _close_gate() -> None:
         resource_gate().close()
 
+    from .api.store_shutdown import close_app_stores
+
+    async def _close_app_stores_step() -> None:
+        await close_app_stores(_app)
+
+    async def _unbind_metric_counters() -> None:
+        from .runtime.metrics import unbind_metric_counters
+
+        unbind_metric_counters()
+
     # Every step is attempted and failures surface only after the last: a
     # close() that raises partway leaks every pool below it (and its subprocesses).
     await _run_shutdown_steps(
@@ -451,6 +466,10 @@ async def _shutdown_services(_app: FastAPI) -> None:
             # above touches; without this their subprocesses outlive shutdown.
             ("shutdown_doc_extraction_executor", shutdown_doc_extraction_executor),
             ("resource_gate.close", _close_gate),
+            # The stores create_app built hold long-lived connections; shutdown
+            # closes them so nothing relies on GC finalization (#838).
+            ("close_app_stores", _close_app_stores_step),
+            ("unbind_metric_counters", _unbind_metric_counters),
         )
     )
     # Symmetry with set_utilization_sampler(...): release the closed

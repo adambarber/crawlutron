@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing
 
 import pytest
 
@@ -22,7 +23,7 @@ def make_spill_store(tmp_path) -> CrawlSpillStore:
 
 
 def _row_count(tmp_path) -> int:
-    with sqlite3.connect(tmp_path / "spills.db") as conn:
+    with closing(sqlite3.connect(tmp_path / "spills.db")) as conn:
         return conn.execute("SELECT COUNT(*) FROM crawl_spills").fetchone()[0]
 
 
@@ -78,7 +79,7 @@ def test_a_payload_past_the_cap_is_refused_before_persistence(tmp_path):
 
 
 def _backdate_all_rows(tmp_path, created_at: float) -> None:
-    with sqlite3.connect(tmp_path / "spills.db") as conn:
+    with closing(sqlite3.connect(tmp_path / "spills.db")) as conn:
         conn.execute("UPDATE crawl_spills SET created_at = ?", (created_at,))
         conn.commit()
 
@@ -121,7 +122,7 @@ def test_gc_deletes_only_rows_older_than_the_age(tmp_path):
     store = _backdated_store(tmp_path, now)
     try:
         store.put("r1", 0, engine_result("https://spill.test/0", "rendered"))
-        with sqlite3.connect(tmp_path / "spills.db") as conn:
+        with closing(sqlite3.connect(tmp_path / "spills.db")) as conn:
             conn.execute("UPDATE crawl_spills SET created_at = ?", (now - 7200,))
             conn.commit()
         assert store.gc_stale_spills(3600.0) == 0, "the fence must hold before the release"
@@ -151,7 +152,7 @@ def test_an_undecodable_row_raises_strict_not_serves_n_minus_one(tmp_path):
     try:
         store.put("r1", 0, engine_result("https://spill.test/0", "rendered"))
         store.put("r1", 1, engine_result("https://spill.test/1", "rendered"))
-        with sqlite3.connect(tmp_path / "spills.db") as conn:
+        with closing(sqlite3.connect(tmp_path / "spills.db")) as conn:
             conn.execute("UPDATE crawl_spills SET payload = ? WHERE sequence = 1", ("not json",))
             conn.commit()
         with pytest.raises(json.JSONDecodeError):
@@ -191,7 +192,7 @@ def test_the_row_payload_carries_the_index_and_wire_form(tmp_path):
     store = make_spill_store(tmp_path)
     try:
         store.put("r1", 3, engine_result("https://spill.test/0", "rendered"))
-        with sqlite3.connect(tmp_path / "spills.db") as conn:
+        with closing(sqlite3.connect(tmp_path / "spills.db")) as conn:
             blob = conn.execute("SELECT payload FROM crawl_spills").fetchone()[0]
         entry = json.loads(blob)
         assert entry["i"] == 3
@@ -205,7 +206,7 @@ def test_the_spill_store_schema_drifts_nothing(tmp_path):
 
     store = make_spill_store(tmp_path)
     try:
-        with sqlite3.connect(tmp_path / "spills.db") as conn:
+        with closing(sqlite3.connect(tmp_path / "spills.db")) as conn:
             drift = schema_drift(conn, CURRENT_SCHEMAS[StoreSchema.CRAWL_SPILLS], StoreSchema.CRAWL_SPILLS)
             assert drift == ()
     finally:

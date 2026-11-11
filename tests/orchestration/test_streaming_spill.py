@@ -8,6 +8,7 @@ from the rows in submission order.
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 
 from crawlutron.storage.result_store import CrawlSpillStore
 from tests._fetcher_factories import crawled_results
@@ -39,7 +40,7 @@ async def _crawl(*, scope=True, **kwargs):
 
 
 def _row_count(db_path) -> int:
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn:
         return conn.execute("SELECT COUNT(*) FROM crawl_spills").fetchone()[0]
 
 

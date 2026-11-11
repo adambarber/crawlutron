@@ -7,6 +7,7 @@ import asyncio
 import logging
 import os
 import shutil
+import sqlite3
 import sys
 import tempfile
 import threading
@@ -177,6 +178,28 @@ def pytest_sessionfinish(session, exitstatus):  # args unused; hook signature
         sys.stderr.flush()
     except (ValueError, OSError):
         logging.getLogger(__name__).debug("final flush unavailable")
+    # The module-level app's stores hold long-lived connections (#838); close
+    # them HERE, before interpreter exit relies on GC finalization.
+    from tests._app_factory import service_app
+
+    try:
+        app = service_app()
+    except (AssertionError, ImportError):
+        return
+    for attr in (
+        "job_store",
+        "result_store",
+        "spill_store",
+        "watch_store",
+        "caller_key_store",
+        "audit_store",
+    ):
+        store = getattr(app.state, attr, None)
+        if store is not None:
+            store.close()
+    from tests.conftest import assert_no_live_session_connections
+
+    assert_no_live_session_connections()
 
 
 @pytest.fixture(autouse=True)
@@ -311,7 +334,9 @@ def job_store(tmp_path):
     """JobStore backed by a per-test SQLite db under ``tmp_path``."""
     from tests._job_harnesses import make_job_store
 
-    return make_job_store(str(tmp_path))
+    store = make_job_store(str(tmp_path))
+    yield store
+    store.close()
 
 
 def _clear_global_http_state() -> None:
@@ -385,3 +410,41 @@ async def owned_job_runtime():
     job_runner.reset_execute_crawl()
     if process_state.owner_has_state("crawlutron.api.job_lifecycle"):
         await job_runner.shutdown_job_runner()
+
+
+@pytest.fixture(autouse=True)
+def _every_store_connection_a_test_opens_it_closes(monkeypatch, request):
+    """Track every sqlite3.connect the test performs (#838).
+
+    A leaked store connection finalizes at a GC-chosen moment under Python
+    3.14, raising ResourceWarning inside whichever test is running — the
+    rotating invariant-victim flake family. The ledger holds STRONG references
+    so nothing finalizes mid-run; at SESSION finish the sweep is exact: a
+    connection that still executes was never closed — the defect this gate
+    exists to name. Closed-by-finalize stores are fine: the close happened."""
+    import tests.invariants.test_no_leaked_store_connections as ledger_mod
+    from tests.invariants.test_no_leaked_store_connections import (
+        _LEDGER,
+        _LEDGER_LOCK,
+        _tracking_connect,
+    )
+
+    with _LEDGER_LOCK:
+        _LEDGER.clear()
+    monkeypatch.setattr(sqlite3, "connect", _tracking_connect)
+    ledger_mod._CURRENT_TEST = request.node.nodeid
+    yield
+    ledger_mod._CURRENT_TEST = "?"
+    with _LEDGER_LOCK:
+        _LEDGER.clear()
+
+
+def assert_no_live_session_connections() -> None:
+    """The session's own gate (#838): every connection the suite opened is closed."""
+    from tests.invariants.test_no_leaked_store_connections import live_ledgered_sites
+
+    leaked = live_ledgered_sites()
+    assert not leaked, (
+        f"{len(leaked)} sqlite3.Connection object(s) opened by this session were never "
+        f"closed at: {leaked} — close the owning store in fixture teardown (or at app shutdown)"
+    )

@@ -123,6 +123,7 @@ _MODULE_RELEASE_NAMES = frozenset(
         "shutdown_doc_extraction_executor",
         "shutdown_job_runner",
         "close_queued_session",
+        "close_app_stores",  # #838: shutdown closes the app-owned store connections
     }
 )
 
