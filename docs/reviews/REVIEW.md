@@ -388,7 +388,7 @@ def __init__(self, status_code: int, payload: JsonValue) -> None:
 
 ### 3.5 [P1] Webhook pre-validation raises outside the retry loop — corrupts correct watch outcomes
 
-**Where:** `crawlutron/service/webhooks.py:149` (`await validate_webhook_url_async(...)` *before* the attempt loop), consumer `crawlutron/api/watch_sweep.py:145-169` (check outcome recorded first, webhook fired after), blanket handler `:104-120`.
+**Where:** `crawlutron/service/webhooks.py:149` (`await validate_webhook_url_async(...)` *before* the attempt loop), consumer `crawlutron/service/watch_sweep.py:145-169` (check outcome recorded first, webhook fired after), blanket handler `:104-120`.
 
 `validate_webhook_url_async` raises on transient DNS failure, resolver-budget timeout, and host-policy drift. In the watch sweep the *correct* check outcome has already been recorded; the raise propagates to the sweep's blanket handler, which re-records the watch as `unknown_error`, increments `consecutive_failures`, and drops the change notification — one DNS blip at delivery time turns a good check into a failed one, silently. The same raise escapes into `_publish_success` after a job already won its COMPLETED CAS (`crawlutron/service/async_crawl_runner.py`). And the pre-loop validation is redundant anyway: `deliver_pinned_webhook` re-resolves fresh and fails closed per attempt.
 
@@ -396,7 +396,7 @@ def __init__(self, status_code: int, payload: JsonValue) -> None:
 
 ### 3.6 [P1] `start_tracked_task`'s done-callback can untrack a *newer* task
 
-**Where:** `crawlutron/api/job_lifecycle.py:51-54`.
+**Where:** `crawlutron/service/job_lifecycle.py:51-54`.
 
 ```python
 task = asyncio.create_task(factory())
@@ -416,7 +416,7 @@ Task A finishes → its callback is scheduled via `call_soon` → before it runs
 
 ### 3.8 [P2] Background-job lifecycle: zombies, queue-lies, and held semaphores
 
-- **Crash-orphaned PENDING single-shots are permanent zombies** — `crawlutron/api/job_recovery.py:44-45` skips every PENDING row whose kind isn't `whole_site`; nothing ever retires them, so `GET /v1/crawl/{id}` answers 202 "still pending" forever and the webhook never fires. Fail them in recovery the way RUNNING non-resumables are failed (`:29`).
+- **Crash-orphaned PENDING single-shots are permanent zombies** — `crawlutron/service/job_recovery.py:44-45` skips every PENDING row whose kind isn't `whole_site`; nothing ever retires them, so `GET /v1/crawl/{id}` answers 202 "still pending" forever and the webhook never fires. Fail them in recovery the way RUNNING non-resumables are failed (`:29`).
 - **Async jobs claim RUNNING before the semaphore** — `crawlutron/service/async_crawl_runner.py:70-77`: under a flood of 202s, jobs sit `running` doing nothing (and consume concurrency quota while queued). Claim after acquiring, or add a QUEUED state.
 - **Webhook delivery with retries holds the crawl semaphore** — same file, the retry loop (up to ~60 s/attempt backoff) runs inside `async with _get_async_crawl_semaphore()`; one slow receiver starves crawl width. Move the POST outside the guarded block.
 - **Concurrency-quota TOCTOU on async doors** — `crawlutron/api/caller_auth.py:198-203` + `crawl_endpoint.py:138-142`/`jobs_router.py:88-89`: for `reserve_slot=False` the check→insert window contains awaits; two concurrent submits at `max_concurrency=N` both pass and both create. Reserve a tracker slot for async doors and release it at terminal, or make the quota check-and-insert one transaction.
@@ -495,11 +495,11 @@ LOC figures below are estimates verified by reading; "dead" items were grep-conf
 |---|------|----------|-----|
 | D1 | `build_unified_crawl_response` (sync twin; only the async twin is called) | `crawlutron/service/response_shaping.py:70-81` | ~12 |
 | D2 | `validate_webhook_url` (sync twin; only async used) | `crawlutron/service/webhooks.py:179-185` | ~7 |
-| D3 | `aformat_crawl_item` (no callers; `format_crawl_item` used synchronously inside an already-offloaded builder) | `crawlutron/api/unified_shaping.py:46-51` | ~7 |
+| D3 | `aformat_crawl_item` (no callers; `format_crawl_item` used synchronously inside an already-offloaded builder) | `crawlutron/service/unified_shaping.py:46-51` | ~7 |
 | D4 | `render_options_for`'s dict arm (only caller always passes `RenderRequest`; `RenderOptionsRequest` is `extra="forbid"`) | `crawlutron/api/render.py:43-54` | ~8 |
 | D5 | `_depends_singletons.py` — whole module re-declares `Depends(get_settings)` that typed Annotated deps already provide (and loses the annotation) | `crawlutron/api/_depends_singletons.py` | ~12 |
-| D6 | `tracked_task` (docstring promises a supervisor seam; zero callers) | `crawlutron/api/job_lifecycle.py:13-17` | ~5 |
-| D7 | Dead pre-validation block in `execute_crawl` (calls the engine that re-validates identically) | `crawlutron/api/crawl_executor.py:38-48` | ~10 |
+| D6 | `tracked_task` (docstring promises a supervisor seam; zero callers) | `crawlutron/service/job_lifecycle.py:13-17` | ~5 |
+| D7 | Dead pre-validation block in `execute_crawl` (calls the engine that re-validates identically) | `crawlutron/service/crawl_executor.py:38-48` | ~10 |
 | D8 | `reset_process_state` in async runner (no repo caller) | `crawlutron/service/async_crawl_runner.py:47-55` | ~8 |
 | D9 | `HOST_POLICY_ENTRY_POINTS` (declared, exported, zero consumers) | `crawlutron/models/host_policy.py:57-78` | ~22 |
 | D10 | `FrameCollector` + re-exports (zero callers; "back-compat" for an internal API) | `crawlutron/extraction/trees.py:75-95` + `content.py` exports | ~25 |
