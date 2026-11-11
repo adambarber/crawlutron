@@ -83,13 +83,17 @@ def _is_docstring_node(node: ast.stmt) -> bool:
     )
 
 
-def _docstring_nodes(tree: ast.Module) -> list[ast.Expr]:
+def _docstring_nodes(tree: ast.Module) -> list[ast.expr]:
     """Every docstring node, from ONE walk.
 
     The extract's line records and the gate's length decision both consume
     this list, so the walk lives here and nowhere else.
     """
-    return [node for node in ast.walk(tree) if _is_docstring_node(node)]
+    nodes: list[ast.expr] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Expr) and _is_docstring_node(node):
+            nodes.append(node.value)
+    return nodes
 
 
 def over_line_docstrings(tree: ast.Module, line_limit: int) -> list[tuple[int, int, str]]:
@@ -98,7 +102,7 @@ def over_line_docstrings(tree: ast.Module, line_limit: int) -> list[tuple[int, i
     Only real docstring positions count -- a string at a module, function or class
     body's head; content lines exclude the quoting.
     """
-    holders = [tree] + [
+    holders: list[ast.Module | ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef] = [tree] + [
         node
         for node in ast.walk(tree)
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
@@ -112,7 +116,10 @@ def over_line_docstrings(tree: ast.Module, line_limit: int) -> list[tuple[int, i
         if len(content) <= line_limit:
             continue
         doc_node = holder.body[0] if holder is not tree else tree.body[0]
-        kind = "module" if holder is tree else holder.name
+        if isinstance(holder, ast.Module):
+            kind = "module"
+        else:
+            kind = holder.name
         over.append((doc_node.lineno, doc_node.end_lineno or doc_node.lineno, kind))
     return sorted(over)
 
