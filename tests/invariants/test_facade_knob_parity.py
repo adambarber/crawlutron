@@ -13,6 +13,7 @@ from tests.invariants._facade_tables import (
     MCP_ROUTE_EXCLUSIONS,
     REFUSAL_FIELD_NAMES,
     AcceptedKnob,
+    _tool_spec_routes,
     accepted_knobs,
 )
 from tests.invariants._parity_rows import PRINCIPLED_ROWS
@@ -37,11 +38,8 @@ def _mcp_covered(knob: AcceptedKnob) -> bool:
 def test_registry_has_one_spec_per_rest_route():
     """The registry invariant _mcp_covered's first-spec-wins scan depends on."""
     seen: set[tuple[str, str]] = set()
-    for spec in TOOL_SPECS:
-        if spec.rest_route is None:
-            continue
-        key = (spec.rest_route.method, spec.rest_route.path)
-        assert key not in seen, f"tools {spec.name} and a sibling both claim {key}"
+    for key in sorted(_tool_spec_routes()):
+        assert key not in seen, f"a sibling already claims {key}"
         seen.add(key)
 
 

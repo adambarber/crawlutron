@@ -2,7 +2,7 @@
 
 Request models use ``extra="forbid"`` except WatchCreateRequest (``extra="allow"``);
 response models tolerate unknown future fields with ``extra="allow"``. The SDK does
-not import crawlutron.
+not import crawlutron. Shape-pinned against the served OpenAPI; drift reds.
 """
 
 from __future__ import annotations
@@ -118,7 +118,22 @@ class AdmitResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     admitted: bool
-    classification: Annotated[str | None, Field(default=None)] = None
+    classification: Annotated[
+        Literal[
+            "invalid_url",
+            "unsupported_scheme",
+            "userinfo_refused",
+            "ipvfuture_refused",
+            "invalid_port",
+            "invalid_idn_host",
+            "host_denied",
+            "host_not_allowed",
+            "private_network_target",
+            "robots_disallowed",
+        ]
+        | None,
+        Field(default=None),
+    ] = None
     canonical_url: Annotated[str | None, Field(default=None)] = None
     checks: dict[str, str | None] = Field(default_factory=dict)
 
@@ -217,7 +232,7 @@ class SearchResultItem(BaseModel):
 
     url: str
     title: str
-    description: str
+    description: str = ""
 
 
 class SearchResponse(BaseModel):
@@ -252,11 +267,56 @@ class WatchState(BaseModel):
     url: str
     webhook_url: Annotated[str | None, Field(default=None)] = None
     interval_seconds: int
-    status: str = "active"
+    status: Literal["active", "deactivated"] = "active"
     validators: dict[str, object] = Field(default_factory=dict)
     next_check_at: float
     last_checked_at: Annotated[float | None, Field(default=None)] = None
-    last_outcome: Annotated[str | None, Field(default=None)] = None
+    last_outcome: Annotated[
+        Literal[
+            "rendered",
+            "captcha_detected",
+            "bot_challenge_detected",
+            "access_denied",
+            "login_required",
+            "paywall_detected",
+            "rate_limited",
+            "cookie_consent_required",
+            "javascript_required",
+            "unsupported_browser",
+            "geolocation_blocked",
+            "waf_challenge_detected",
+            "not_found",
+            "site_error",
+            "gone",
+            "binary_no_text",
+            "robots_disallowed",
+            "navigation_timeout",
+            "browser_crash",
+            "network_error",
+            "connection_error",
+            "http_status_error",
+            "url_budget_exceeded",
+            "browser_pool_exhausted",
+            "circuit_breaker_open",
+            "admission_stalled",
+            "payload_too_large",
+            "too_many_redirects",
+            "http_error",
+            "value_error",
+            "tls_error",
+            "dns_error",
+            "invalid_url",
+            "unsupported_scheme",
+            "private_network_target",
+            "host_denied",
+            "host_not_allowed",
+            "userinfo_refused",
+            "unknown_error",
+            "not_modified",
+        ]
+        | None,
+        Field(default=None),
+    ] = None
     last_changed_at: Annotated[float | None, Field(default=None)] = None
     consecutive_failures: int = 0
     created_at: float

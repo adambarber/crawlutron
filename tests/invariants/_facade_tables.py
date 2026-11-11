@@ -13,6 +13,17 @@ from tests.invariants._parity_rows import PRINCIPLED_ROWS
 _BODY_METHODS = frozenset({"post", "put", "patch", "delete"})
 
 
+#: Shared OpenAPI navigation: the JSON body schema's $ref, dereferenced.
+#: Lives HERE (the single derivation owner); shape pins import it.
+def _json_body_ref(op: dict[str, object]) -> str | None:
+    body = op.get("requestBody", {})
+    content = body.get("content", {}) if isinstance(body, dict) else {}
+    media = content.get("application/json", {}) if isinstance(content, dict) else {}
+    schema = media.get("schema", {}) if isinstance(media, dict) else {}
+    ref = schema.get("$ref") if isinstance(schema, dict) else None
+    return ref.rsplit("/", 1)[-1] if isinstance(ref, str) else None
+
+
 @dataclass(frozen=True)
 class AcceptedKnob:
     """One accepted request field on one route, derived from the OpenAPI schema."""
@@ -35,10 +46,9 @@ def accepted_knobs() -> tuple[AcceptedKnob, ...]:
             if method not in ("get", "post", "put", "patch", "delete"):
                 continue
             route = (method.upper(), path)
-            body = op.get("requestBody", {}).get("content", {}).get("application/json", {})
-            ref = body.get("schema", {}).get("$ref")
+            ref = _json_body_ref(op)
             if ref is not None:
-                schema = openapi["components"]["schemas"][ref.rsplit("/", 1)[-1]]
+                schema = openapi["components"]["schemas"][ref]
                 knobs.extend(AcceptedKnob(*route, field) for field in schema.get("properties", {}))
             knobs.extend(
                 AcceptedKnob(*route, param["name"])
@@ -46,6 +56,13 @@ def accepted_knobs() -> tuple[AcceptedKnob, ...]:
                 if param.get("in") in ("query", "path") and param.get("name")
             )
     return tuple(knobs)
+
+
+def _tool_spec_routes() -> set[tuple[str, str]]:
+    """Every TOOL_SPECS rest_route as (METHOD, path) -- one loop for all parity gates."""
+    return {
+        (spec.rest_route.method, spec.rest_route.path) for spec in TOOL_SPECS if spec.rest_route is not None
+    }
 
 
 #: /v1/keys has no MCP tool by principled exclusion: the operator trust plane,

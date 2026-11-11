@@ -280,6 +280,14 @@ async def test_async_rotate_twin_moves_current_to_previous(tmp_path):
     assert await store.averify_key(new_secret) is not None
 
 
+def _stalled_derivation(monkeypatch) -> tuple[threading.Event, threading.Event]:
+    """Install the stalled pbkdf2 double; return (in_derive, release) events."""
+    in_derive = threading.Event()
+    release = threading.Event()
+    monkeypatch.setattr(hashlib, "pbkdf2_hmac", _stalled_pbkdf2(in_derive, release))
+    return in_derive, release
+
+
 def _stalled_pbkdf2(stall: threading.Event, release: threading.Event):
     """A pbkdf2_hmac stand-in that stalls once, then derives normally."""
     real = hashlib.pbkdf2_hmac
@@ -302,9 +310,7 @@ def test_derive_does_not_block_admin_ops(tmp_path, monkeypatch):
     store = CallerKeyStore(tmp_path / "keys.db")
     issued = store.issue_key("agent-a")
 
-    in_derive = threading.Event()
-    release = threading.Event()
-    monkeypatch.setattr(hashlib, "pbkdf2_hmac", _stalled_pbkdf2(in_derive, release))
+    in_derive, release = _stalled_derivation(monkeypatch)
     try:
         verifier = threading.Thread(target=lambda: store.verify_key(issued.secret))
         verifier.start()
@@ -330,10 +336,8 @@ def test_revocation_during_derivation_does_not_grant(tmp_path, monkeypatch):
     store = CallerKeyStore(tmp_path / "keys.db")
     issued = store.issue_key("agent-a")
 
-    in_derive = threading.Event()
-    release = threading.Event()
+    in_derive, release = _stalled_derivation(monkeypatch)
     result: dict[str, object] = {}
-    monkeypatch.setattr(hashlib, "pbkdf2_hmac", _stalled_pbkdf2(in_derive, release))
     try:
         verifier = threading.Thread(target=lambda: result.update(v=store.verify_key(issued.secret)))
         verifier.start()
