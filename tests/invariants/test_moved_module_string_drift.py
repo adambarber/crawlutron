@@ -1,29 +1,11 @@
-"""The moved-module string-drift invariant (#849).
+"""The moved-module string-drift invariant (#849): the ledger is EMPTY.
 
-After a module moves from ``crawlutron/api/<m>.py`` to
-``crawlutron/service/<m>.py``, a string literal in ``tests/`` still naming the
-api form — a monkeypatch target, a logger name, a process_state owner, a
-path-keyed table entry — resolves against the narrow re-export shim, not the
-moved module: a void patch or a dead logger/owner. Import statements repoint
-visibly; string literals repoint silently-or-never. This invariant is the
-standing gate: for every moved module, both reference forms —
-
-- dotted ``crawlutron.api.<m>`` (runtime names: patch targets, loggers, owners)
-- slash ``crawlutron/api/<m>.py`` (disk paths: law targets, table keys)
-
-— must reach ZERO occurrences under ``tests/``, except rows in the exemption
-table below. Every exemption row needs a written justification and is
-ratcheted DOWN-only: when the shim drain empties a row's premise, the row
-is deleted in the same commit. Unknown ``crawlutron.api.X`` strings where X is
-a moved module are hard failures naming file:line; unknown X not moved and not
-exempted fails too — the discoverer must classify it, never a silent third
-category.
-
-Scan mechanics: AST walk over every ``tests/**/*.py`` (Constants folded, so
-adjacent-string concatenation and f-string literal fragments —
-``ast.JoinedStr``/``FormattedValue`` — surface as matchable strings), plus a
-tokenize COMMENT pass restricted to moved-module names (warnings-only, so the
-gate stays strict without naming prose comments).
+Every moved module's shim is drained: consumers import from
+``crawlutron.service`` directly, no ``crawlutron.api.<m>`` string or import
+remains, and the api→service re-export shims are deleted outright
+(test_api_service_shim_drain holds that at zero). The detector below stays as
+the standing tripwire for any FUTURE move: register the module in
+MOVED_MODULES when its api shim lands, delete the row when the shim dies.
 """
 
 from __future__ import annotations
@@ -40,20 +22,9 @@ __all__ = ["MOVED_MODULES"]
 
 _TESTS_ROOT = REPO_ROOT / "tests"
 
-# Moved modules ledger (#849): every module ALREADY relocated to service/.
-# A shim keeps resolving (assertion 1) until its drain deletes row + shim.
-MOVED_MODULES: dict[str, str] = {
-    "caller_concurrency": "leaf move (#849)",
-    "meter_ledger": "leaf move (#849)",
-    "key_throttle": "leaf move (#849)",
-    "admit_endpoint": "leaf move (#849)",
-    "unified_shaping": "leaf move (#849)",
-    "response_shaping": "leaf move (#849)",
-    "policy_defaults": "leaf move (#849)",
-    "webhooks": "leaf move (#849)",
-    "sweep_loop": "leaf move (#849)",
-    "policy_suggestions": "core moved to service, shim for the REST router (#849)",
-}
+# Moved modules ledger (#849): drained to EMPTY by the shim drain — no api
+# re-export shim remains; the drain gate holds the tree at zero, unconditionally.
+MOVED_MODULES: dict[str, str] = {}
 
 # Exempt (path_pattern, allowed_substring, justification) — ratcheted down-only.
 EXEMPTIONS: tuple[tuple[str, str, str], ...] = (
@@ -61,56 +32,6 @@ EXEMPTIONS: tuple[tuple[str, str, str], ...] = (
         "tests/invariants/test_moved_module_string_drift.py",
         "crawlutron",
         "this module's own tables, probes, and docstrings",
-    ),
-    (
-        "tests/invariants/_surface_ratchet.py",
-        "crawlutron/api/admit_endpoint.py",
-        "the shim budget rows: the ratchet must name the shim path it budgets",
-    ),
-    (
-        "tests/invariants/_surface_ratchet.py",
-        "crawlutron/api/caller_concurrency.py",
-        "the shim budget rows: the ratchet must name the shim path it budgets",
-    ),
-    (
-        "tests/invariants/_surface_ratchet.py",
-        "crawlutron/api/key_throttle.py",
-        "the shim budget rows: the ratchet must name the shim path it budgets",
-    ),
-    (
-        "tests/invariants/_surface_ratchet.py",
-        "crawlutron/api/meter_ledger.py",
-        "the shim budget rows: the ratchet must name the shim path it budgets",
-    ),
-    (
-        "tests/invariants/_surface_ratchet.py",
-        "crawlutron/api/policy_defaults.py",
-        "the shim budget rows: the ratchet must name the shim path it budgets",
-    ),
-    (
-        "tests/invariants/_surface_ratchet.py",
-        "crawlutron/api/response_shaping.py",
-        "the shim budget rows: the ratchet must name the shim path it budgets",
-    ),
-    (
-        "tests/invariants/_surface_ratchet.py",
-        "crawlutron/api/sweep_loop.py",
-        "the shim budget rows: the ratchet must name the shim path it budgets",
-    ),
-    (
-        "tests/invariants/_surface_ratchet.py",
-        "crawlutron/api/unified_shaping.py",
-        "the shim budget rows: the ratchet must name the shim path it budgets",
-    ),
-    (
-        "tests/invariants/_surface_ratchet.py",
-        "crawlutron/api/webhooks.py",
-        "the shim budget rows: the ratchet must name the shim path it budgets",
-    ),
-    (
-        "tests/invariants/_surface_ratchet.py",
-        "crawlutron/api/policy_suggestions.py",
-        "the shim budget rows: the ratchet must name the shim path it budgets",
     ),
     (
         "tests/invariants/test_host_policy_entry_points.py",
@@ -163,21 +84,6 @@ EXEMPTIONS: tuple[tuple[str, str, str], ...] = (
         "caller_auth stays api until its split",
     ),
     (
-        "tests/api/test_policy_suggestions.py",
-        "crawlutron.api.policy_suggestions",
-        "policy_suggestions is SPLIT, stays api for now",
-    ),
-    (
-        "tests/mcp/test_mcp_policy_suggestions.py",
-        "crawlutron.api.policy_suggestions",
-        "docstring naming the tool's api door; policy_suggestions stays api",
-    ),
-    (
-        "tests/invariants/test_private_imports.py",
-        "crawlutron.api.job_runner",
-        "the private-imports gate's fixture strings; repoint lands with the move",
-    ),
-    (
         "tests/invariants/test_url_secrets_law.py",
         "crawlutron/api/watch_router.py",
         "watch_router stays api (HTTP-ONLY); no action",
@@ -214,10 +120,12 @@ def _exempt(relative: str, value: str) -> bool:
     return False
 
 
-def _drift_offenders() -> list[str]:
+def _drift_offenders(root: pathlib.Path = _TESTS_ROOT) -> list[str]:
     offenders: list[str] = []
-    for path in sorted(_TESTS_ROOT.rglob("*.py")):
-        relative = path.relative_to(REPO_ROOT).as_posix()
+    for path in sorted(root.rglob("*.py")):
+        relative = (
+            path.relative_to(REPO_ROOT).as_posix() if path.is_relative_to(REPO_ROOT) else path.as_posix()
+        )
         source = path.read_text(encoding="utf-8")
         tree = ast.parse(source)
         for lineno, value in string_constants(tree):
@@ -253,9 +161,18 @@ def test_no_stale_api_strings_for_moved_modules() -> None:
 
 def test_drift_detector_bites(tmp_path: pathlib.Path) -> None:
     """Mutant check: a stale dotted string must be named file:line + module."""
-    source = "x = monkeypatch.setattr('crawlutron.api.webhooks.post_webhook', fake)\n"
-    probe = tmp_path / "probe.py"
-    probe.write_text(source, encoding="utf-8")
-    tree = ast.parse(source)
-    hits = [(lineno, value) for lineno, value in string_constants(tree) if "crawlutron.api.webhooks" in value]
-    assert hits == [(1, "crawlutron.api.webhooks.post_webhook")], hits
+    MOVED_MODULES["webhooks"] = "probe row"
+    try:
+        source = "x = monkeypatch.setattr('crawlutron.api.webhooks.post_webhook', fake)\n"
+        probe = tmp_path / "probe.py"
+        probe.write_text(source, encoding="utf-8")
+        tree = ast.parse(source)
+        hits = [
+            (lineno, value) for lineno, value in string_constants(tree) if "crawlutron.api.webhooks" in value
+        ]
+        assert hits == [(1, "crawlutron.api.webhooks.post_webhook")], hits
+        offenders = _drift_offenders(tmp_path)
+        assert any("names moved module 'webhooks'" in o for o in offenders), offenders
+    finally:
+        MOVED_MODULES.pop("webhooks", None)
+    assert not _drift_offenders(), "the probe row leaked into the ledger"

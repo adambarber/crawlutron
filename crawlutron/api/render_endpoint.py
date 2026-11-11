@@ -8,12 +8,12 @@ import logging
 
 from crawlutron.api.exceptions import browser_pool_unavailable
 from crawlutron.api.render import render_request
-from crawlutron.api.response_shaping import arender_response_from_result
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.browser_pool_exhausted import BrowserPoolExhaustedError
 from crawlutron.models.render_request import RenderRequest
 from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
 from crawlutron.service.errors import DomainError, ValidationRefusal
+from crawlutron.service.response_shaping import arender_response_from_result
 from crawlutron.transport.browser_pool import (
     PooledBrowserWorker,
     get_browser_pool,

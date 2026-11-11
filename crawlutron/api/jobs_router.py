@@ -1,7 +1,7 @@
 """``/v1/jobs`` URL→handler mapping for whole-site crawl jobs.
 
 Create/list/get/control/delete delegate to the shared typed job cores
-(:mod:`crawlutron.api.job_cores`); this module is only the URL→handler mapping.
+(:mod:`crawlutron.service.job_cores`); this module is only the URL→handler mapping.
 """
 
 from __future__ import annotations

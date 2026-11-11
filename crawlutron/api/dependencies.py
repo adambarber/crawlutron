@@ -12,10 +12,11 @@ from typing import Annotated
 from fastapi import Depends, Request
 
 from crawlutron.api.caller_auth import Tracking, get_caller_identity, get_keys_caller
-from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.caller_identity import CallerIdentity
+from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
 from crawlutron.service.errors import DomainError
+from crawlutron.service.settings_access import get_settings as get_app_settings
 from crawlutron.storage.caller_key_store import CallerKeyStore
 from crawlutron.storage.job_store import JobStore
 from crawlutron.storage.result_store import CrawlResultStore, CrawlSpillStore
@@ -23,8 +24,8 @@ from crawlutron.storage.watch_store import WatchStore
 
 
 def get_settings(request: Request) -> CrawlerSettings:
-    """FastAPI dependency: return the active :class:`CrawlerSettings` instance."""
-    return request.app.state.crawler_settings
+    """FastAPI dependency: the active :class:`CrawlerSettings` via the service getter."""
+    return get_app_settings(request.app.state)
 
 
 def get_shutdown_event(request: Request) -> asyncio.Event:

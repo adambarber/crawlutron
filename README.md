@@ -60,7 +60,7 @@ guards them stated:
 
 Every `CRAWLUTRON_*` variable that weakens a safety default (derived from the
 live settings/env code — `crawlutron/models/host_policy.py`,
-`crawlutron/api/webhooks.py`, `crawlutron/config/settings.py`,
+`crawlutron/service/webhooks.py`, `crawlutron/config/settings.py`,
 `crawlutron/transport/driver_config.py`):
 
 | Variable | Default | Weakened when | Effect |

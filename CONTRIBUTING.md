@@ -103,7 +103,7 @@ These require explicit review from a maintainer before merge:
 - `crawlutron/runtime/pressure_sizing.py` and `crawlutron/transport/browser_pool.py` —
   browser-pool sizing from cgroup memory limits; `BROWSER_RAM_FRACTION`.
 - `crawlutron/main.py` — middleware order, body-size limits, error envelopes.
-- `crawlutron/api/webhooks.py` — webhook delivery (`deliver_pinned_webhook`).
+- `crawlutron/service/webhooks.py` — webhook delivery (`deliver_pinned_webhook`).
 - `crawlutron/config/env.py` — `parse_bool_env` and the operator environment reads,
   including the private-target opt-in.
 - `crawlutron/extraction/output_formats.py` — CSV serialization (``_to_csv``),

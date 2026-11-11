@@ -129,7 +129,7 @@ class TestPurity:
         assert response.json()["admitted"] is True
 
     def test_endpoint_module_never_touches_the_quota_seam(self):
-        from crawlutron.api import admit_endpoint
+        from crawlutron.service import admit_endpoint
 
         source = inspect.getsource(admit_endpoint)
         assert "caller_auth" not in source

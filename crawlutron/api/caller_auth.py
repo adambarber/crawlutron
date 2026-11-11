@@ -11,9 +11,9 @@ from typing import NoReturn, TypedDict
 
 from fastapi import Request
 
-from crawlutron.api import key_throttle
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.error_response import ErrorResponse
+from crawlutron.service import key_throttle
 from crawlutron.service.caller_auth import (
     Tracking,
     admit,

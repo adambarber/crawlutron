@@ -20,8 +20,8 @@ from crawlutron.api.caller_auth import (
     verify_admin_secret,
 )
 from crawlutron.api.dependencies import CallerDep
-from crawlutron.api.key_throttle import shared_throttle
 from crawlutron.models.caller_identity import CallerIdentity
+from crawlutron.service.key_throttle import shared_throttle
 
 #: The resolver names the invariant walk matches route dependencies against.
 GUARD_NAME = "guard_request"

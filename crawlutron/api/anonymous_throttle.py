@@ -10,7 +10,7 @@ import time
 
 from fastapi.responses import JSONResponse
 
-from crawlutron.api.meter_ledger import MeterLedger, register_shared_meter
+from crawlutron.service.meter_ledger import MeterLedger, register_shared_meter
 
 __all__ = ["AnonymousThrottle", "Throttled", "shared_anonymous_throttle"]
 
