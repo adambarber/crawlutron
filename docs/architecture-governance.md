@@ -46,7 +46,6 @@ the slowest gate, not the sum; each child is hard-killed after 60 s
 - `ruff format --check crawlutron tests scripts` — formatter as a gate; `check` reports drift instead of rewriting (`:104-112`).
 - `basedpyright` whole tree — zero annotation lies; fails close (`:132-140`).
 - `jscpd` at 2 lines / 30 tokens, threshold 0 — zero copy/clone tolerance, no exemption path (`:152-163`).
-- `helper-clone-sweep` — 2/30 logic clones across helper files the per-tree gate cannot see (`:169-177`).
 - `mypy` — `mypy.ini`'s `files` is the scope (`:183-191`).
 - `vulture` dead code, min-confidence 90, zero tolerance, no ignore-names/excludes/whitelist (`:205-213`).
 - `commit-citation` (commit-msg) — every commit message cites an issue (`:217-227`).
