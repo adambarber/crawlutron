@@ -10,28 +10,17 @@ scan — nothing under ``crawlutron/mcp/`` uses it. The MCP protocol layer impor
 service (and models/vocabulary/storage), never api, even transitively; api owns the
 HTTP-wire door (``api.mcp_router``).
 
-The allowlist below declares the DIRECT residual edges; the gate derives their
-transitive closure, so a residual edge whose fallout reaches other api modules
-names every fallout pair too — the reported offender set is exactly the
-closure of the declared rows, both directions checked. Each row cites the
-commit body that landed it; the set is a RATCHET DOWN at later commits: a row
-dies when its edge dies, and a stale row (edge gone) is itself a failure.
-Weakening the seal — an uncited row, or shrinking the scanned set — is a
-defect, not a fix.
+The residual table is sealed empty: every mcp->api edge that ever existed was
+drained by #849/C4 and #861, and the offender count is zero, so no exemption
+surface survives the sealed gate. `test_no_mcp_module_reaches_api()` is the
+unconditional assertion — it reds on any live mcp->api reach, naming both module
+endpoints. Weakening the seal is a defect, not a fix.
 """
-
-from __future__ import annotations
 
 from scripts.module_graph import build_graph
 
-__all__ = ["RESIDUAL_EDGES"]
-
 _SEALED_LAYER = "crawlutron.mcp."
 _FORBIDDEN_LAYER = "crawlutron.api"
-
-#: Named residuals: (mcp module, DIRECT api module it imports) with the reason's
-#: commit; the gate closes each over the transitive graph. Sealed EMPTY by #861.
-RESIDUAL_EDGES: dict[tuple[str, str], str] = {}
 
 
 def _reachable(modules: dict[str, set[str]], start: str) -> set[str]:
@@ -59,41 +48,14 @@ def _offender_pairs(modules: dict[str, set[str]]) -> set[str]:
     return offenders
 
 
-def _allowed_pairs(modules: dict[str, set[str]]) -> set[str]:
-    """The closure of the declared residual edges over the import graph.
-
-    Fallout flows BOTH ways through mcp-internal imports (registry -> handlers
-    re-exports the residual reach), so a module that reaches a residual's api
-    target inherits the same allowance for that target's downstream only."""
-    allowed: set[str] = set()
-    for _mcp_module, api_module in RESIDUAL_EDGES:
-        fallout = {r for r in _reachable(modules, api_module) if r.startswith(_FORBIDDEN_LAYER)}
-        for name in modules:
-            if not name.startswith(_SEALED_LAYER):
-                continue
-            if api_module in _reachable(modules, name):
-                allowed.update(f"{name} -> {reached}" for reached in fallout)
-    return allowed
-
-
 def test_no_mcp_module_reaches_api() -> None:
-    """The seal: DFS over the runtime import graph; offenders minus the closure."""
+    """The seal: DFS over the runtime import graph; any offender is a finding."""
     modules, _importers = build_graph()
     offenders = _offender_pairs(modules)
-    unallowed = offenders - _allowed_pairs(modules)
-    assert not unallowed, (
+    assert not offenders, (
         "mcp reaches api outside the named residuals "
-        "(each needs a commit-body citation or an ownership move):\n" + "\n".join(sorted(unallowed))
+        "(each needs a commit-body citation or an ownership move):\n" + "\n".join(sorted(offenders))
     )
-
-
-def test_no_stale_residual_rows() -> None:
-    """A row whose direct edge died is deleted in the same commit, not left."""
-    modules, _importers = build_graph()
-    for mcp_module, api_module in RESIDUAL_EDGES:
-        assert api_module in modules.get(mcp_module, ()), (
-            f"stale residual row (the direct edge died): {mcp_module} -> {api_module}"
-        )
 
 
 def test_seal_names_both_endpoints_of_a_two_hop_chain() -> None:
@@ -115,31 +77,11 @@ def test_seal_refuses_every_mcp_to_api_edge_with_empty_residuals() -> None:
     """With the allowlist sealed empty, any planted mcp->api edge is an offender:
     the residual closure is empty so nothing is allowed."""
     planted = {
-        "crawlutron.mcp.handlers": {"crawlutron.api.render_endpoint", "crawlutron.api.route_layer"},
-        "crawlutron.api.render_endpoint": {"crawlutron.api.render"},
-        "crawlutron.api.render": set(),
+        "crawlutron.mcp.handlers": {"crawlutron.api.route_layer"},
         "crawlutron.api.route_layer": set(),
     }
     offenders = _offender_pairs(planted)
-    allowed = _allowed_pairs(planted)
+    allowed: set[str] = set()
     unallowed = offenders - allowed
     assert unallowed == offenders, unallowed
     assert "crawlutron.mcp.handlers -> crawlutron.api.route_layer" in unallowed
-    assert "crawlutron.mcp.handlers -> crawlutron.api.render_endpoint" in unallowed
-    assert "crawlutron.mcp.handlers -> crawlutron.api.render" in unallowed
-
-
-def test_every_residual_row_cites_a_commit_body() -> None:
-    """An allowlist row without its citation is an unreviewed exemption."""
-    for (mcp_module, api_module), reason in RESIDUAL_EDGES.items():
-        assert mcp_module.startswith(_SEALED_LAYER), f"non-mcp row: {mcp_module}"
-        assert api_module.startswith(_FORBIDDEN_LAYER), f"non-api row: {api_module}"
-        assert "#849" in reason and "C4-owed" in reason, f"uncited row: {mcp_module} -> {api_module}"
-
-
-def test_residual_rows_name_live_modules() -> None:
-    """A row naming a module that no longer exists is a stale row, not history."""
-    modules, _importers = build_graph()
-    for mcp_module, api_module in RESIDUAL_EDGES:
-        assert mcp_module in modules, f"residual row names a dead module: {mcp_module}"
-        assert api_module in modules, f"residual row names a dead module: {api_module}"
