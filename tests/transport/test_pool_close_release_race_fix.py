@@ -4,7 +4,7 @@ that pins the single ownership chokepoint over renderer closes."""
 import asyncio
 
 from crawlutron.transport.browser_pool import BrowserPool
-from tests._browser_pool_doubles import GatedCloseRenderer, SpyRenderer, close_mid_sweep
+from tests._browser_doubles import GatedCloseRenderer, SpyRenderer, close_mid_sweep
 
 
 async def test_release_during_sweep_await_window_never_double_closes():

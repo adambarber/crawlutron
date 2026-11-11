@@ -17,10 +17,9 @@ from crawlutron.transport.fetchers import default_http_fetcher, impersonating_fe
 from crawlutron.vocabulary.strategies import HTTP_CFFI_IMPERSONATE
 from tests._fetch_doubles import FetcherDouble
 from tests._fetch_outcome import FetchFailed
-from tests._fetcher_factories import strategy_request
+from tests._fetcher_factories import real_cffi_fetch_outcome, strategy_request
 from tests._policy_factories import canonical, make_base_policy
 from tests._timing_harnesses import await_until
-from tests._transport_doubles import real_cffi_fetch_outcome
 from tests.helpers.server import SilentHandler, spawn_threaded_server
 
 # The impersonating transport, bound once for this module.

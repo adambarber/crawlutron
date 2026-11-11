@@ -1,7 +1,7 @@
 """Lazy-scroll stops early when the page height stops growing (#356)."""
 
 from crawlutron.transport.browser_driver import BrowserDriver
-from tests._browser_page_doubles import ScriptedPage
+from tests._browser_doubles import ScriptedPage
 
 
 def _driver(sleeps: list[float], steps: int = 5) -> BrowserDriver:

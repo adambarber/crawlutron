@@ -7,11 +7,11 @@ import asyncio
 from crawlutron.api import job_runner
 from crawlutron.config.settings import CrawlerSettings
 from tests._job_harnesses import ScriptedExecute
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
-from tests._result_builders import engine_result
-from tests.api._offload_doubles import (
+from tests._job_store_doubles import (
     _off_loop,
 )
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
+from tests._result_builders import engine_result
 
 _ROOT = "http://example.test/a"
 

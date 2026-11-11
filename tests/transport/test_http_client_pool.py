@@ -4,7 +4,7 @@ import contextlib
 
 import crawlutron.transport.http_client_pool as http_mod
 from crawlutron.transport.http_client_pool import get_async_http_client
-from tests._pool_ws_doubles import FakeClient as _FakeClient
+from tests._browser_doubles import FakeClient as _FakeClient
 
 
 class TestPooledClientBuilders:

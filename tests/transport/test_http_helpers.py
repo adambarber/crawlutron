@@ -32,9 +32,9 @@ from crawlutron.vocabulary.strategies import BROWSER_HEADLESS, HTTP_DECLARED_CRA
 from tests._assertions import assert_result_failed, assert_result_success
 from tests._extraction_helpers import extract_discovered_links
 from tests._fetch_doubles import FetcherDouble, make_fetch
+from tests._fetcher_factories import diagnostics_for_failed_probes as _diagnostics_for_failed_probes
 from tests._fetcher_factories import run_chain
-from tests._http_fetch_doubles import diagnostics_for_failed_probes as _diagnostics_for_failed_probes
-from tests._http_fetch_doubles import run_http_result as _run_http_result
+from tests._fetcher_factories import run_http_result as _run_http_result
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, make_base_policy
 
 

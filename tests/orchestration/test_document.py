@@ -75,7 +75,7 @@ class TestDocumentRedirectSsrf:
         from urllib.parse import urlparse
 
         import crawlutron.transport.http_client_pool as pool_mod
-        from tests._transport_doubles import MockResponse, dispatching_transport_client
+        from tests._fetcher_factories import MockResponse, dispatching_transport_client
 
         table = {"evil.test": "169.254.169.254"}
 

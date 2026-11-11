@@ -185,3 +185,39 @@ class RaisingRendererPool(NoRendererPool):
 
     async def acquire(self, timeout: float | None = None) -> BrowserRenderer:
         return RaisingRenderer()
+
+
+class FakeClient:
+    def __init__(self):
+        self.is_closed = False
+        self._bound_loop = None
+
+    async def aclose(self):
+        self.is_closed = True
+
+
+def bind_to_running_loop(client) -> None:
+    """Bind a fake client to the running loop, or leave it unbound if there is none.
+
+    An unbound fake is how the pool's "closed from the loop it was made on"
+    question gets answered honestly."""
+    try:
+        client._bound_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        client._bound_loop = None
+
+
+class FakeWS:
+    """A stand-in for Playwright's ``WebSocketRoute``: ``url``/``close()``/``connect_to_server()``."""
+
+    def __init__(self, url):
+        self.url = url
+        self.closed_count = 0
+        self.connect_calls = 0
+
+    async def close(self, **kwargs):
+        self.closed_count += 1
+
+    def connect_to_server(self):
+        self.connect_calls += 1
+        return self

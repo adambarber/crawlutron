@@ -15,8 +15,8 @@ from tests._assertions import (
     block_private_targets,
     host_resolves_to,
 )
+from tests._fetcher_factories import MockResponse, scripted_transport_client
 from tests._policy_factories import canonical
-from tests._transport_doubles import MockResponse, scripted_transport_client
 
 
 class TestDNSRebindingProtection:

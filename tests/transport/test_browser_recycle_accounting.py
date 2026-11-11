@@ -9,8 +9,13 @@ from __future__ import annotations
 import pytest
 
 from crawlutron.models.render_options import RenderOptions
-from tests._browser_doubles import FakeBrowserDriver, build_pinned_renderer, stub_pinned_request
-from tests._browser_page_doubles import BrowserFakePage, FakePageContext
+from tests._browser_doubles import (
+    BrowserFakePage,
+    FakeBrowserDriver,
+    FakePageContext,
+    build_pinned_renderer,
+    stub_pinned_request,
+)
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
 

@@ -136,7 +136,22 @@ DOOR_SURFACE_IS_EXACTLY_THE_TWO_CONSTRUCTIONS = Rule(
     proof_path=REPO_ROOT / "tests" / "_synthetic.py",
 )
 
-RULES = (FETCH_DOUBLES_IMPORT_ONLY_THROUGH_THE_DOOR, DOOR_SURFACE_IS_EXACTLY_THE_TWO_CONSTRUCTIONS)
+
+def _staged_transport_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
+    """A staged-HTTP-answer double imported off its own module, file and line named.
+
+    ``tests._transport_doubles`` and ``tests._http_fetch_doubles`` hold real
+    doubles the fetch door re-exports; importing either directly is a second
+    altitude of the same wire answer, the drift site #844 consolidates."""
+    out: list[str] = []
+    for node in from_imports(tree):
+        if node.module in {"tests._transport_doubles", "tests._http_fetch_doubles"}:
+            names = ", ".join(alias.name for alias in node.names)
+            out.append(
+                f"{relative_posix(path)}:{node.lineno}: {names} must import from "
+                f"tests._fetcher_factories, not {node.module}"
+            )
+    return out
 
 
 def test_fetch_doubles_import_only_through_the_door():
@@ -145,3 +160,32 @@ def test_fetch_doubles_import_only_through_the_door():
 
 def test_fetch_doubles_door_surface_is_exactly_the_two_constructions():
     DOOR_SURFACE_IS_EXACTLY_THE_TWO_CONSTRUCTIONS.scan()
+
+
+STAGED_TRANSPORT_DOUBLES_IMPORT_ONLY_THROUGH_THE_DOOR = Rule(
+    name="staged-transport-doubles-import-only-through-the-door",
+    find=_staged_transport_offenders,
+    summary=(
+        "imports a staged-HTTP-answer double (tests._transport_doubles or "
+        "tests._http_fetch_doubles) directly; the fetch door re-exports those "
+        "doubles, so the import names tests._fetcher_factories instead"
+    ),
+    scope=lambda *, exclude: trees_under(_TESTS_DIR),
+    # The door itself re-exports the staged doubles; its own body is not a caller.
+    skip=frozenset({"tests/_fetcher_factories.py"}),
+    bite=lambda: (
+        "from tests._transport_doubles import MockResponse\n",
+        "from tests._http_fetch_doubles import fake_fetcher\n",
+    ),
+    clean=lambda: (
+        "from tests._fetcher_factories import MockResponse\n",
+        "from tests._fetcher_factories import fake_fetcher, run_http_result\n",
+        # A module importing itself is the door's own body, not a caller.
+        "from tests._fetch_doubles import FetcherDouble\n",
+    ),
+    proof_path=REPO_ROOT / "tests" / "_synthetic.py",
+)
+
+
+def test_staged_transport_doubles_import_only_through_the_door():
+    STAGED_TRANSPORT_DOUBLES_IMPORT_ONLY_THROUGH_THE_DOOR.scan()

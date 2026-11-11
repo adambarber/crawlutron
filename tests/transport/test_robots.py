@@ -26,7 +26,7 @@ from crawlutron.transport.robots_parse import (
 from crawlutron.vocabulary.identity import SERVICE_ID
 from crawlutron.vocabulary.robots import RobotsSource
 from tests._fetch_doubles import FetcherDouble
-from tests._http_fetch_doubles import fake_fetcher as _fake_fetcher
+from tests._fetcher_factories import fake_fetcher as _fake_fetcher
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, crawl_policy
 from tests._timing_harnesses import cpu_seconds
 

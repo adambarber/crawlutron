@@ -3,9 +3,9 @@
 import pytest
 
 from tests._job_harnesses import _make_app
+from tests._job_store_doubles import LoopGuardJobStore, LoopGuardResultStore, LoopGuardWatchStore
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, deployment_tier
 from tests._watch_harnesses import watch_client
-from tests.api._offload_doubles import LoopGuardJobStore, LoopGuardResultStore, LoopGuardWatchStore
 
 
 @pytest.fixture

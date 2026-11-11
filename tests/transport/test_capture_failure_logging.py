@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 from crawlutron.transport.browser import BrowserRenderer
-from tests._browser_page_doubles import BrowserFakePage
+from tests._browser_doubles import BrowserFakePage
 
 
 class _FailingPage(BrowserFakePage):

@@ -16,8 +16,7 @@ from crawlutron.transport.browser_pool import (
     get_browser_pool,
     set_browser_pool,
 )
-from tests._browser_doubles import FakeBrowserPool
-from tests._browser_page_doubles import BrowserFakeContextManager
+from tests._browser_doubles import BrowserFakeContextManager, FakeBrowserPool
 from tests._policy_factories import canonical
 
 

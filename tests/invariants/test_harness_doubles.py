@@ -54,6 +54,14 @@ def _decorator_name(decorator: ast.expr) -> str:
 
 _RECORD_BASE_TAILS = ("BaseModel", "TypedDict")
 
+# Browser-family stand-in law (#844): each fake carries every member of the
+# production Protocol it stands in for; both table ends are asserted live.
+_FAKE_STANDINS = {
+    "BrowserFakePage": "RenderPage",
+    "ScriptedPage": "RenderPage",
+    "FakePageContext": "GuardContext",
+}
+
 
 def _base_name(base: ast.expr) -> str:
     """The bare name a class base resolves to (``pydantic.BaseModel`` too)."""
@@ -355,6 +363,74 @@ def test_the_result_builder_declares_the_record_s_url_union() -> None:
     assert "NormalizedUrl" in annotation and "str" in annotation, (
         f"engine_result(url) drifted from the record's own union: {annotation}"
     )
+
+
+def test_the_browser_page_fakes_carry_the_production_protocol_surface() -> None:
+    """The browser-family extension of the superset-or-equal law: a page or
+    context double that stands in for a ``crawlutron.transport.render_page``
+    Protocol must declare every member of it -- a fake that DROPPED a
+    production member (say ``content`` or ``route``) would fail inside a
+    render phase instead of at this gate.
+    """
+    from tests._browser_double_surface import _protocol_members, _standin_members
+
+    protocols = _protocol_members()
+    assert "RenderPage" in protocols and "GuardContext" in protocols, (
+        "the protocol census came back empty; the gate would govern nothing"
+    )
+    findings: list[str] = []
+    for fake, protocol in sorted(_FAKE_STANDINS.items()):
+        missing = protocols[protocol] - _standin_members(fake)
+        if missing:
+            findings.append(f"{fake} drops {sorted(missing)} of {protocol}")
+    assert not findings, f"browser doubles missing production protocol members: {findings}"
+
+
+def test_a_browser_fake_that_drops_a_production_member_reds() -> None:
+    """The mutation check: a fake dropping a RenderPage member is a finding
+    naming the fake, proved in memory over a mutated parse -- never by touching
+    the workspace tree."""
+    import pytest
+
+    from tests._browser_double_surface import (
+        _PAGE_DOUBLE_HOME,
+        _protocol_members,
+        _standin_members,
+    )
+
+    source = _PAGE_DOUBLE_HOME.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == "BrowserFakePage":
+            node.body = [
+                s
+                for s in node.body
+                if not (isinstance(s, (ast.FunctionDef, ast.AsyncFunctionDef)) and s.name == "content")
+            ]
+            break
+    else:
+        pytest.fail("BrowserFakePage not found; re-derive the mutant")
+    mutated = _PAGE_DOUBLE_HOME.with_name("_browser_page_doubles.held")
+    mutated.write_text(ast.unparse(tree), encoding="utf-8")
+    try:
+        missing = _protocol_members()["RenderPage"] - _standin_members("BrowserFakePage", mutated)
+    finally:
+        mutated.unlink()
+    assert "content" in missing, f"the dropped-member mutant did not discriminate: {missing}"
+
+
+def test_the_browser_standin_table_is_live_on_both_ends() -> None:
+    """Both ends of the stand-in table exist: every named fake is a class the
+    page-double module declares, and every named protocol is one production
+    declares. A renamed-away entry would silently ungovern its fake."""
+    from tests._browser_double_surface import _page_double_classes, _protocol_members
+
+    classes = _page_double_classes()
+    protocols = _protocol_members()
+    unknown = {fake: fake not in classes for fake in _FAKE_STANDINS} | {
+        protocol: protocol not in protocols for protocol in _FAKE_STANDINS.values()
+    }
+    assert not any(unknown.values()), f"stand-in table drifts from the live tree: {unknown}"
 
 
 def test_engine_result_carries_the_caller_s_link_records_once_each() -> None:

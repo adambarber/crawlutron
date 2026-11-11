@@ -13,9 +13,8 @@ import pytest
 from crawlutron.storage.coordination_cookies import SharedCookieStore
 from crawlutron.transport import cookie_jar
 from crawlutron.transport.cookie_jar import MAX_COOKIE_LIFETIME_SECONDS, CookieJar
-from tests._fetcher_factories import run_default_http_fetcher
+from tests._fetcher_factories import MockResponse, patch_http_fetcher_transport, run_default_http_fetcher
 from tests._policy_factories import canonical
-from tests._transport_doubles import MockResponse, patch_http_fetcher_transport
 
 
 def _header_for(jar: CookieJar, url: str, *, namespace: str = "") -> str:
@@ -421,7 +420,7 @@ _REDIRECT_SCRIPT = [
 
 
 def _script_hermetic_walk(monkeypatch):
-    from tests._transport_doubles import allow_scripted_egress
+    from tests._fetcher_factories import allow_scripted_egress
 
     allow_scripted_egress(monkeypatch)
     return [_REDIRECT_SCRIPT[0], _REDIRECT_SCRIPT[1]]

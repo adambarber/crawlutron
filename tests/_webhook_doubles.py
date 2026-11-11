@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import httpx
 
-from tests._transport_doubles import MockResponse
+from tests._fetcher_factories import MockResponse
 
 __all__ = ["record_webhook_delivery", "recorded_webhook_posts"]
 
