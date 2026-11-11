@@ -15,8 +15,8 @@ import pytest
 from fastapi import FastAPI, HTTPException, Request
 from httpx import AsyncClient, Response
 
-from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
 from crawlutron.api.dependencies import get_concurrency_tracker
+from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
 from crawlutron.storage import caller_key_store, job_store, result_store
 from tests._app_harnesses import harness_app
 from tests._async_harnesses import issue_key, serve

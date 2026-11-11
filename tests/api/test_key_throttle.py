@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from crawlutron.api.key_throttle import KeyVerifyThrottle
+from crawlutron.service.key_throttle import KeyVerifyThrottle
 from crawlutron.storage.caller_key_store import CallerKeyStore
 from tests._clocks import arrange_clock
 
@@ -74,14 +74,14 @@ def test_successful_verify_resets_the_counter(tmp_path):
 def test_throttle_state_is_registered_process_state():
     """The meter is process state like every other holder (#621): it registers
     a reset/probe pair with the registry."""
-    import crawlutron.api.key_throttle as key_throttle
+    import crawlutron.service.key_throttle as key_throttle
     from crawlutron.runtime import process_state
 
     process_state.reset_all_process_state()
-    assert process_state.owner_has_state("crawlutron.api.key_throttle") is False
+    assert process_state.owner_has_state("crawlutron.service.key_throttle") is False
     throttle = key_throttle.shared_throttle()
     throttle.record_failure("ck_0123456789abcdef.x")
-    assert process_state.owner_has_state("crawlutron.api.key_throttle") is True
+    assert process_state.owner_has_state("crawlutron.service.key_throttle") is True
 
 
 def _assert_429(exc: BaseException) -> None:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 from collections.abc import AsyncGenerator
 from pathlib import Path
@@ -10,13 +9,11 @@ from pathlib import Path
 from fastapi import FastAPI
 from httpx import AsyncClient
 
-from crawlutron.api.dependencies import get_job_store, get_result_store, get_settings, get_shutdown_event
-from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.json_value import JsonValue
 from crawlutron.storage import caller_key_store, job_store, result_store
 from tests._app_harnesses import harness_app
 from tests._async_harnesses import serve
-from tests._quota_harness import grant_test_admin_token, keyed_client, stores
+from tests._quota_harness import keyed_client, keyed_overrides, stores
 
 # The isolated-stores result both harness clients yield: HTTP client plus the
 # store trio, unpacked as ``(client, store, results, keys)`` at call sites.
@@ -34,16 +31,12 @@ def isolation_app(
     keys: caller_key_store.CallerKeyStore,
 ) -> FastAPI:
     """A test app with the crawl and key routers over isolated stores."""
-    from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
     from crawlutron.api.crawl_router import router as crawl_router
     from crawlutron.api.keys_router import router as keys_router
 
     app = harness_app(crawl_router, keys_router)
-    app.state.caller_key_store = keys
-    app.state.concurrency_tracker = CallerConcurrencyTracker()
-    grant_test_admin_token(app)
-    app.dependency_overrides[get_job_store] = lambda: store
-    app.dependency_overrides[get_result_store] = lambda: results
+    for dependency, factory in keyed_overrides(app, keys, job_store=store, result_store=results).items():
+        app.dependency_overrides[dependency] = factory
     return app
 
 
@@ -76,14 +69,7 @@ async def quota_client(
     """An HTTP client whose app can run the crawl POST: settings and shutdown wired."""
     store, results, keys = stores(tmp_path)
     app = isolation_app(store, results, keys)
-    async with keyed_client(
-        app,
-        keys=keys,
-        overrides={
-            get_settings: lambda: CrawlerSettings.from_mapping({}),
-            get_shutdown_event: asyncio.Event,
-        },
-    ) as client:
+    async with keyed_client(app, keys=keys) as client:
         try:
             yield client, store, results, keys
         finally:

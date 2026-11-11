@@ -293,7 +293,7 @@ def test_the_internal_and_wire_taxonomies_name_the_same_members():
         assert internal == wire, (
             f"the {axis} taxonomies disagree: "
             f"internal-only={sorted(internal - wire)} wire-only={sorted(wire - internal)}. "
-            f"crawlutron/api/response_shaping.py converts this axis without a fallback branch, "
+            f"crawlutron/service/response_shaping.py converts this axis without a fallback branch, "
             f"which is only true while the sets are equal -- so add the member to both sides "
             f"in the same change."
         )

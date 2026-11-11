@@ -226,7 +226,7 @@ async def _probe_render(monkeypatch, tmp_path):
 
 
 async def _probe_response_shaping(monkeypatch, tmp_path):
-    from crawlutron.api.response_shaping import frontier_link_url
+    from crawlutron.service.response_shaping import frontier_link_url
 
     async def invoke():
         return frontier_link_url({"normalized_url": _BLOCKED_URL}, policy=_denied_policy())
@@ -322,8 +322,8 @@ async def _probe_job_runner(monkeypatch, tmp_path):
 
 
 async def _probe_admit_endpoint(monkeypatch, tmp_path):
-    from crawlutron.api.admit_endpoint import admit_url
     from crawlutron.models.admit_request import AdmitRequest
+    from crawlutron.service.admit_endpoint import admit_url
 
     effects = _effects()
     monkeypatch_wire_guard(monkeypatch, effects)
@@ -335,19 +335,19 @@ async def _probe_admit_endpoint(monkeypatch, tmp_path):
 
 _PROBES = {
     "crawlutron/api/crawl_endpoint.py:crawl": _probe_crawl_endpoint,
-    "crawlutron/api/admit_endpoint.py:admit_url": _probe_admit_endpoint,
+    "crawlutron/service/admit_endpoint.py:admit_url": _probe_admit_endpoint,
     "crawlutron/api/crawl_executor.py:execute_crawl": _probe_crawl_executor,
     "crawlutron/api/job_runner.py:run_job": _probe_job_runner,
     "crawlutron/api/job_cores.py:create_job_core": _probe_jobs_router,
     "crawlutron/api/map_endpoint.py:map_site": _probe_map_endpoint,
     "crawlutron/api/site_map.py:build_site_map": _probe_site_map,
     "crawlutron/api/render.py:render_request": _probe_render,
-    "crawlutron/api/response_shaping.py:frontier_link_url": _probe_response_shaping,
+    "crawlutron/service/response_shaping.py:frontier_link_url": _probe_response_shaping,
     "crawlutron/api/watch_router.py:create_watch": _probe_watch_router,
     "crawlutron/api/watch_cores.py:register_watch_core": _probe_watch_cores,
     "crawlutron/api/policy_suggestions.py:policy_suggestions": _probe_policy_suggestions,
     "crawlutron/api/policy_suggestions.py:build_policy_suggestions": _probe_policy_suggestions,
-    "crawlutron/api/webhooks.py:deliver_pinned_webhook": _probe_webhook_delivery,
+    "crawlutron/service/webhooks.py:deliver_pinned_webhook": _probe_webhook_delivery,
 }
 
 

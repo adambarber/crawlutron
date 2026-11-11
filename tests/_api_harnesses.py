@@ -17,7 +17,7 @@ from crawlutron.storage.job_store import JobStore
 if TYPE_CHECKING:
     from httpx import AsyncClient
 
-    from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
+    from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
     from crawlutron.storage.caller_key_store import IssuedKey
 
 #: What ``keyed_quota_client`` yields: client, job store, concurrency tracker, issued key.
@@ -62,7 +62,7 @@ async def run_with_webhook(request_id, execute_fn, webhook_url, job_store, resul
 
     target = None if webhook_url is None else WebhookTarget.admit(webhook_url, host_policy=_webhook_policy())
     with patch("crawlutron.api.async_crawl_runner.execute_crawl", new=execute_fn):
-        with patch("crawlutron.api.webhooks.post_webhook", new_callable=AsyncMock) as post_webhook:
+        with patch("crawlutron.service.webhooks.post_webhook", new_callable=AsyncMock) as post_webhook:
             await run_async_crawl(
                 request_id,
                 CrawlRequest.model_validate({"url": "http://example.com/"}),

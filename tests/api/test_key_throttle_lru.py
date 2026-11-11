@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from crawlutron.api.key_throttle import KeyVerifyThrottle
+from crawlutron.service.key_throttle import KeyVerifyThrottle
 from tests._clocks import advance_clock, arrange_clock
 
 

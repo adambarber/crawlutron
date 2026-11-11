@@ -14,9 +14,9 @@ from typing import TYPE_CHECKING
 from fastapi import APIRouter, FastAPI
 from httpx import AsyncClient
 
-from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
 from crawlutron.api.dependencies import get_job_store, get_result_store, get_settings, get_shutdown_event
 from crawlutron.config.settings import CrawlerSettings
+from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
 from crawlutron.storage.caller_key_store import CallerKeyStore
 from crawlutron.storage.job_store import JobStore
 from crawlutron.storage.result_store import CrawlResultStore
@@ -47,6 +47,31 @@ def grant_test_admin_token(app: FastAPI, token: str = TEST_ADMIN_TOKEN) -> None:
     app.state.crawler_settings = CrawlerSettings.from_mapping({"CRAWLUTRON_KEY_ADMIN_TOKEN": token})
 
 
+def keyed_overrides(
+    app: FastAPI,
+    keys: CallerKeyStore,
+    *,
+    job_store: JobStore | None = None,
+    result_store: CrawlResultStore | None = None,
+) -> dict[Callable[[Request], object], Callable[[], object]]:
+    """The keyed-app wiring: tracker, key store, admin token, store overrides.
+
+    ``job_store``/``result_store`` are optional because a keyed door may serve
+    routes that need only the key plane; each named store is wired when given."""
+    app.state.concurrency_tracker = CallerConcurrencyTracker()
+    app.state.caller_key_store = keys
+    grant_test_admin_token(app)
+    overrides: dict[Callable[[Request], object], Callable[[], object]] = {
+        get_settings: lambda: CrawlerSettings.from_mapping({}),
+        get_shutdown_event: asyncio.Event,
+    }
+    if job_store is not None:
+        overrides[get_job_store] = lambda: job_store
+    if result_store is not None:
+        overrides[get_result_store] = lambda: result_store
+    return overrides
+
+
 @contextlib.asynccontextmanager
 async def keyed_client(
     app: FastAPI,
@@ -55,10 +80,9 @@ async def keyed_client(
     overrides: Mapping[Callable[[Request], object], Callable[[], object]] | None = None,
 ) -> AsyncGenerator[AsyncClient, None]:
     """Configure ``app`` as a keyed service and serve it with an in-process client."""
-    app.state.concurrency_tracker = CallerConcurrencyTracker()
-    app.state.caller_key_store = keys
-    grant_test_admin_token(app)
-    for dependency, factory in (overrides or {}).items():
+    for dependency, factory in (
+        keyed_overrides(app, keys) if overrides is None else {**keyed_overrides(app, keys), **overrides}
+    ).items():
         app.dependency_overrides[dependency] = factory
     async with serve(app) as client:
         yield client
@@ -78,11 +102,7 @@ async def service_client(
     job_store, results, keys = stores(tmp_path)
     app = harness_app(*routers.values())
     app.state.job_store = job_store
-    overrides: dict[Callable[[Request], object], Callable[[], object]] = {
-        get_job_store: lambda: job_store,
-        get_settings: lambda: CrawlerSettings.from_mapping({}),
-        get_shutdown_event: asyncio.Event,
-    }
+    overrides = keyed_overrides(app, keys, job_store=job_store)
     if with_results:
         app.state.result_store = results
         overrides[get_result_store] = lambda: results

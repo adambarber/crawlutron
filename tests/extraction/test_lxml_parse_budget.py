@@ -90,9 +90,9 @@ async def test_shaping_never_reparses_engine_produced_items(parse_budget):
     """The shaping ceiling for engine items went 1 -> 0: it reads the record."""
     import json
 
-    from crawlutron.api.unified_shaping import format_crawl_item
     from crawlutron.extraction.llm_format import extract_llm_metadata
     from crawlutron.models.serialization import to_dict
+    from crawlutron.service.unified_shaping import format_crawl_item
 
     result = await _run({"limits": {"max_depth": 1}}, html=META_HTML)
     item = replace(result, markdown=result.markdown or "# hello")
@@ -112,7 +112,7 @@ async def test_engine_item_without_a_tree_still_shapes_once(parse_budget):
     Carrying is conditional on a tree the pipeline built anyway; forcing its
     own parse would REGRESS the single-shot budget, so the fallback stays.
     """
-    from crawlutron.api.unified_shaping import format_crawl_item
+    from crawlutron.service.unified_shaping import format_crawl_item
 
     result = await _run({}, html=META_HTML)
     assert result.llm_metadata is None  # no tree existed to read from
@@ -125,7 +125,7 @@ async def test_engine_item_without_a_tree_still_shapes_once(parse_budget):
 
 async def test_carried_metadata_never_reaches_the_wire():
     """The wire shape is unchanged: llm_metadata is an internal field."""
-    from crawlutron.api.response_shaping import build_unified_result
+    from crawlutron.service.response_shaping import build_unified_result
 
     result = await _run({"limits": {"max_depth": 1}}, html=META_HTML)
     unified = build_unified_result(result)

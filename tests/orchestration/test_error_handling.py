@@ -139,7 +139,7 @@ class TestClassificationValueValidity:
 
     def test_budget_exceeded_result_survives_response_shaping(self):
         """The boundary that rejected it: the strict enum on the wire model."""
-        from crawlutron.api.response_shaping import build_unified_result
+        from crawlutron.service.response_shaping import build_unified_result
 
         item = _budget_item()
         result = build_unified_result(item)
@@ -184,7 +184,7 @@ class TestShapeAllGuardsPerItem:
     """
 
     async def test_one_bad_item_does_not_fail_the_batch(self):
-        from crawlutron.api.response_shaping import (
+        from crawlutron.service.response_shaping import (
             EnvelopeOptions,
             abuild_unified_crawl_response,
             build_unified_result,
@@ -213,7 +213,7 @@ class TestShapeAllGuardsPerItem:
 
     def test_fallback_status_and_classification_agree(self):
         # The fallback hardcodes status="failed" and picks the classification independently.
-        from crawlutron.api.response_shaping import failed_unified_result
+        from crawlutron.service.response_shaping import failed_unified_result
         from crawlutron.vocabulary.taxonomy import status_for_classification
 
         result = failed_unified_result({"normalized_url": "https://example.org/a"})

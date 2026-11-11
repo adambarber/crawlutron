@@ -7,14 +7,14 @@ import asyncio
 
 import pytest
 
-from crawlutron.api.response_shaping import (
+from crawlutron.models.crawl_result import EngineCrawlResult
+from crawlutron.service.response_shaping import (
     EnvelopeOptions,
     abuild_unified_crawl_response,
     build_unified_crawl_response,
     build_unified_result,
 )
-from crawlutron.api.unified_shaping import abuild_unified_result, aformat_crawl_item
-from crawlutron.models.crawl_result import EngineCrawlResult
+from crawlutron.service.unified_shaping import abuild_unified_result, aformat_crawl_item
 from tests._assertions import install_to_thread_spy
 from tests._result_builders import engine_result
 
@@ -122,7 +122,7 @@ async def test_sync_and_async_envelope_builders_agree_on_the_submitted_count(sub
 
 async def test_abuild_unified_result_single_item_matches_sync():
     item = _html_item(3)
-    from crawlutron.api.response_shaping import build_unified_result
+    from crawlutron.service.response_shaping import build_unified_result
 
     assert (await abuild_unified_result(item)).model_dump() == build_unified_result(item).model_dump()
 

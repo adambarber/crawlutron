@@ -14,9 +14,9 @@ _OK: dict[str, list[object]] = {"results": []}
 
 async def _post_through_chokepoint(monkeypatch, *, url: str, payload) -> list[httpx.Request]:
     """One post_webhook drive for the contract tests; returns delivered requests."""
-    from crawlutron.api import webhooks
     from crawlutron.models.normalized_url import NormalizedUrl
     from crawlutron.models.webhook_target import WebhookTarget
+    from crawlutron.service import webhooks
 
     delivered = record_webhook_delivery(monkeypatch)
     # Built past admission: a credential-shaped query param is refused at the
@@ -34,7 +34,7 @@ async def _assert_https_delivers_once(monkeypatch) -> None:
 class TestPostWebhookSchemeLaw:
     async def _refused(self, monkeypatch, caplog, url):
         """Post a refused non-https URL; return delivered and the log."""
-        with caplog.at_level(logging.WARNING, logger="crawlutron.api.webhooks"):
+        with caplog.at_level(logging.WARNING, logger="crawlutron.service.webhooks"):
             delivered = await _post_through_chokepoint(monkeypatch, url=url, payload=_OK)
         return delivered
 
@@ -58,7 +58,7 @@ class TestPostWebhookSchemeLaw:
 
 class TestPostWebhookPayloadSerialization:
     async def test_unserializable_payload_is_logged_not_raised(self, monkeypatch, caplog):
-        with caplog.at_level(logging.WARNING, logger="crawlutron.api.webhooks"):
+        with caplog.at_level(logging.WARNING, logger="crawlutron.service.webhooks"):
             delivered = await _post_through_chokepoint(monkeypatch, url=_HTTPS, payload={"data": {object()}})
         assert delivered == [], "post_webhook delivered a payload that failed to serialize"
         assert "webhook_payload_serialization_failed" in caplog.text

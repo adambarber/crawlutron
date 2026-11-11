@@ -159,12 +159,12 @@ def test_watchstate_serializes_and_reprs_the_webhook_redacted():
 
 
 async def test_webhook_log_paths_never_emit_a_secret(caplog, monkeypatch):
-    from crawlutron.api import webhooks
+    from crawlutron.service import webhooks
 
     target = _secret_target("https://example.com/hook?key=secret")
     monkeypatch.setattr(webhooks, "webhook_max_attempts", lambda: 1)
     monkeypatch.setattr(webhooks, "webhook_backoff_base_ms", lambda: 0)
-    with caplog.at_level(logging.WARNING, logger="crawlutron.api.webhooks"):
+    with caplog.at_level(logging.WARNING, logger="crawlutron.service.webhooks"):
         # Non-https refusal path logs the redacted URL.
         await webhooks.post_webhook(
             _secret_target("http://example.com/hook?key=secret"),

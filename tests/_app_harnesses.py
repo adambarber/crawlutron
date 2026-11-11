@@ -34,7 +34,7 @@ def mounted_app(client) -> FastAPI:
 
 def mount_concurrency_tracker(client):
     """Attach the sync-door register to the client's app and return it."""
-    from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
+    from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
 
     tracker = CallerConcurrencyTracker()
     mounted_app(client).state.concurrency_tracker = tracker

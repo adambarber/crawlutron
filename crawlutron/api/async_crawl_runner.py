@@ -268,7 +268,7 @@ async def _deliver_webhook(webhook_url: WebhookTarget | None, payload: dict[str,
     """One guarded delivery of the admitted target; admission lived at the door."""
     if webhook_url is None:
         return
-    from crawlutron.api.webhooks import post_webhook_guarded
+    from crawlutron.service.webhooks import post_webhook_guarded
 
     await post_webhook_guarded(webhook_url, payload)
 

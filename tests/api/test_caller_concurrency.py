@@ -1,10 +1,10 @@
-"""Unit tests for :class:`crawlutron.api.caller_concurrency.CallerConcurrencyTracker`."""
+"""Unit tests for :class:`crawlutron.service.caller_concurrency.CallerConcurrencyTracker`."""
 
 from __future__ import annotations
 
 import asyncio
 
-from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
+from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
 
 
 class TestCallerConcurrencyTrackerLocks:

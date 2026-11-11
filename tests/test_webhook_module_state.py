@@ -1,4 +1,4 @@
-"""Guards for ``crawlutron.api.webhooks`` after the dead-delivery-island deletion: the
+"""Guards for ``crawlutron.service.webhooks`` after the dead-delivery-island deletion: the
 crawl-plus-deliver story lives in ``async_crawl_runner``, and a second wiring
 apparatus here would recreate the island -- so its absence is pinned.
 """
@@ -8,7 +8,7 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from crawlutron.api import webhooks as wm
+from crawlutron.service import webhooks as wm
 from tests.chokepoint_walks import nodes_of
 
 ISLAND_NAMES = (

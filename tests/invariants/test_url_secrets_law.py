@@ -29,7 +29,7 @@ _ADMISSION_EDGES = frozenset({"crawlutron/api/watch_router.py", "crawlutron/api/
 
 #: The delivery POST site and its validation helpers: raw str is the wire
 #: form here, inside the one delivery module.
-_DELIVERY_SITE = "crawlutron/api/webhooks.py"
+_DELIVERY_SITE = "crawlutron/service/webhooks.py"
 
 #: The persistence/identity owner: the durable text is stored and read back
 #: here, and every consumer re-admits it.
@@ -168,7 +168,7 @@ RAW_WEBHOOK_URL_MOVES_THROUGH_THE_ADMITTED_TARGET = Rule(
         # Inside a sanctioned door the raw str parameter is the wire form.
         Silent(
             "def ensure_https_webhook_url(webhook_url: str) -> None:\n    return None\n",
-            at=REPO_ROOT / "crawlutron" / "api" / "webhooks.py",
+            at=REPO_ROOT / "crawlutron" / "service" / "webhooks.py",
         ),
         Silent(
             "def store(webhook_url: str | None) -> None:\n    return None\n",

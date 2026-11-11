@@ -3,9 +3,9 @@ a field added on one path and forgotten on the other shipped missing and was
 caught only by curling live. Adaptation is now one function over one shape.
 """
 
-from crawlutron.api.response_shaping import arender_response_from_result, aunified_response_from_result
 from crawlutron.models.crawl_policy import POLICY_SCHEMA_VERSION
 from crawlutron.models.result_record import ProducerEnvelope, RenderEnvelope
+from crawlutron.service.response_shaping import arender_response_from_result, aunified_response_from_result
 from tests._browser_doubles import _fake_browser
 from tests._render_producer import render_stub_request
 from tests._result_builders import engine_result

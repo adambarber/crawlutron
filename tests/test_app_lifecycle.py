@@ -161,7 +161,7 @@ class TestAppLifecycleEdges:
         # #513: the crawl is stubbed at the runner's execute seam so the failure path
         # runs without real robots/DNS I/O -- the #513 flake was this I/O exceeding the window.
         monkeypatch.setattr(async_crawl_runner, "execute_crawl", _failing_crawl)
-        with caplog.at_level(logging.WARNING, logger="crawlutron.api.webhooks"):
+        with caplog.at_level(logging.WARNING, logger="crawlutron.service.webhooks"):
             resp = await async_client.post(
                 "/v1/crawl",
                 json={"url": "http://example.com/", "webhook_url": "https://unreachable.invalid/"},
@@ -174,7 +174,7 @@ class TestAppLifecycleEdges:
         # #513: await the runner task itself (the 202 body carries its request_id) --
         # the failure webhook posts inline inside it, so no dispatch race is possible.
         from crawlutron.api.job_lifecycle import tracked_task
-        from crawlutron.api.webhooks import drain_webhook_deliveries
+        from crawlutron.service.webhooks import drain_webhook_deliveries
 
         def _delivery_failed() -> bool:
             return any(

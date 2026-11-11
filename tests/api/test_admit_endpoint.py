@@ -123,7 +123,7 @@ class TestPurity:
         import httpx
 
         monkeypatch.setattr(httpx, "AsyncClient", _boom)
-        monkeypatch.setattr("crawlutron.api.admit_endpoint.load_robots_rules", _boom)
+        monkeypatch.setattr("crawlutron.service.admit_endpoint.load_robots_rules", _boom)
         async with serve_admit(_admit_app(admit_settings)) as client:
             response = await client.post("/v1/admit", json={"url": "https://example.com/"})
         assert response.json()["admitted"] is True
@@ -154,9 +154,8 @@ class TestRobotsOptIn:
 
     async def _admit_with_robots(self, monkeypatch, admit_settings, *, allowed: bool) -> dict[str, object]:
         """One shared harness: opt-in check with a scripted robots policy."""
-        monkeypatch.setattr(
-            "crawlutron.api.admit_endpoint.load_robots_rules", self._loader_for(allowed=allowed)
-        )
+        loader = self._loader_for(allowed=allowed)
+        monkeypatch.setattr("crawlutron.service.admit_endpoint.load_robots_rules", loader)
         async with serve_admit(_admit_app(admit_settings)) as client:
             return await _post_admit(client, {"url": "https://example.com/x", "check_robots": True})
 
@@ -179,7 +178,7 @@ class TestRobotsOptIn:
             calls.append(args)
             raise AssertionError("robots check ran without opt-in")
 
-        monkeypatch.setattr("crawlutron.api.admit_endpoint.load_robots_rules", _loader)
+        monkeypatch.setattr("crawlutron.service.admit_endpoint.load_robots_rules", _loader)
         async with serve_admit(_admit_app(admit_settings)) as client:
             body = await _post_admit(client, {"url": "https://example.com/x"})
         assert body["admitted"] is True
@@ -187,7 +186,7 @@ class TestRobotsOptIn:
 
     def test_robots_loader_is_the_shared_one(self):
         """The cache lives inside load_robots_rules; sharing it is sharing the function."""
-        from crawlutron.api import admit_endpoint
+        from crawlutron.service import admit_endpoint
         from crawlutron.transport.robots import load_robots_rules
 
         assert admit_endpoint.load_robots_rules is load_robots_rules
@@ -389,7 +388,7 @@ class TestProducerVocabularyLoop:
     """
 
     def test_every_producer_reason_has_a_table_row(self):
-        import crawlutron.api.admit_endpoint as endpoint_module
+        import crawlutron.service.admit_endpoint as endpoint_module
 
         missing = _producers_missing_rows(Path(endpoint_module.__file__), endpoint_module.known_reasons())
         assert missing == [], "producer->table loop broken:\n" + "\n".join(missing)
@@ -399,7 +398,7 @@ class TestProducerVocabularyLoop:
         in the boundary pass-through set (else it is remapped to invalid_url, and
         its table row is dead), and every set entry is table-mapped (else the
         boundary passes a value the wire cannot name)."""
-        import crawlutron.api.admit_endpoint as endpoint_module
+        import crawlutron.service.admit_endpoint as endpoint_module
         from crawlutron.models.normalized_url import refusal_literals
 
         endpoint_path = Path(endpoint_module.__file__)

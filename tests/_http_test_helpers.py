@@ -9,7 +9,7 @@ from crawlutron.vocabulary.strategies import HTTP_CFFI_IMPERSONATE
 
 def minimal_request(path: str = "/") -> Request:
     """A starlette request whose app carries the one per-caller register."""
-    from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
+    from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
 
     app = FastAPI()
     app.state.concurrency_tracker = CallerConcurrencyTracker()

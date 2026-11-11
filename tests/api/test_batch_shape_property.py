@@ -10,19 +10,19 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import cast
 
-from crawlutron.api.response_shaping import (
-    EnvelopeOptions,
-    abuild_unified_crawl_response,
-    build_unified_crawl_response,
-    build_unified_result,
-    render_result_to_unified,
-)
 from crawlutron.models.classification_evidence import ClassificationEvidenceRecord
 from crawlutron.models.crawl_result import CrawlResult, EngineCrawlResult
 from crawlutron.models.crawl_status import CrawlStatus
 from crawlutron.models.result_factory import terminal_attempt
 from crawlutron.models.taxonomy import Classification
 from crawlutron.models.unified_crawl_result import UnifiedCrawlResult
+from crawlutron.service.response_shaping import (
+    EnvelopeOptions,
+    abuild_unified_crawl_response,
+    build_unified_crawl_response,
+    build_unified_result,
+    render_result_to_unified,
+)
 from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from crawlutron.vocabulary.taxonomy import CrawlClassification, status_for_classification
 from tests._policy_factories import canonical
@@ -240,9 +240,9 @@ class TestPoisonDegradesLoudly:
             list[EngineCrawlResult],
             [_healthy(0, Classification.rendered), {}, _poison("wrong_types", 1), None, _BoomMapping()],
         )
-        with caplog.at_level("WARNING", logger="crawlutron.api.response_shaping"):
+        with caplog.at_level("WARNING", logger="crawlutron.service.response_shaping"):
             build_unified_crawl_response(batch)
-        warnings = [r for r in caplog.records if r.name == "crawlutron.api.response_shaping"]
+        warnings = [r for r in caplog.records if r.name == "crawlutron.service.response_shaping"]
         assert len(warnings) == 4, (
             "one warning per poison item, none for healthy ones — the silent "
             "site_error reclassification must stay impossible to miss"

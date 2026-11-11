@@ -2,13 +2,37 @@
 
 import ast
 import hashlib
+import io
 import os
 import pathlib
 import sys
+import tokenize
 import weakref
 from functools import cache
 
 TESTS_DIR = pathlib.Path(__file__).resolve().parent
+
+
+def string_constants(tree: ast.AST) -> list[tuple[int, str]]:
+    """Every string Constant with its line, including f-string literal fragments."""
+    found: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            found.append((node.lineno, node.value))
+        elif isinstance(node, ast.JoinedStr):
+            for value in node.values:
+                if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                    found.append((value.lineno, value.value))
+    return found
+
+
+def comment_lines(source: str) -> list[tuple[int, str]]:
+    """Every comment token as ``(line, text)`` (tokenize: a # in a string is not one)."""
+    return [
+        (token.start[0], token.string)
+        for token in tokenize.generate_tokens(io.StringIO(source).readline)
+        if token.type == tokenize.COMMENT
+    ]
 
 
 REPO_ROOT = TESTS_DIR.parent
@@ -184,7 +208,7 @@ def _trees_under(directory: pathlib.Path) -> tuple[tuple[pathlib.Path, ast.Modul
 
 
 def file_tree(relative: str) -> tuple[pathlib.Path, ast.Module]:
-    """Parse one module by its repo-relative path (e.g. crawlutron/api/webhooks.py)."""
+    """Parse one module by its repo-relative path (e.g. crawlutron/service/webhooks.py)."""
     path = REPO_ROOT / relative
     return path, parsed(path)
 

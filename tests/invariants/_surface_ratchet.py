@@ -20,8 +20,8 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     # (it replaced two hand-copied lumps; net surface across the memo modules went DOWN).
     "crawlutron/config/env.py": (8, 6),
     # RAISED to (7, 6): failed_unified_result is the single failure projection.
-    "crawlutron/api/response_shaping.py": (7, 6),
-    "crawlutron/api/unified_shaping.py": (5, 5),
+    "crawlutron/service/response_shaping.py": (7, 6),
+    "crawlutron/service/unified_shaping.py": (5, 5),
     # Delta crawl classification (#714); RAISED to (14, 7) for BaselineEntry and
     # extract_baseline_entries/removed_entry_keys, the per-entry removal substrate.
     "crawlutron/delta.py": (14, 7),
@@ -93,13 +93,13 @@ DECLARED_SURFACE_RATCHET = {
     # #664 raised 18,15 -> 19,16 (verify_admin_secret); #822 raised 21,18 -> 22,19
     # (operator_caller: the shared operator identity the keys door and resolver read).
     "crawlutron/api/cache_sweep.py": (3, 2),
-    "crawlutron/api/sweep_loop.py": (2, 1),
+    "crawlutron/service/sweep_loop.py": (2, 1),
     # Spill sweep (#753): one GC lane beside the cache sweep; max_age is wired
     # from the result store's ttl_seconds, not a second literal.
     "crawlutron/api/spill_sweep.py": (4, 2),
     "crawlutron/api/store_shutdown.py": (1, 1),
     "crawlutron/api/caller_auth.py": (22, 19),
-    "crawlutron/api/caller_concurrency.py": (1, 1),
+    "crawlutron/service/caller_concurrency.py": (1, 1),
     # #674 raised 1,1 -> 2,2: CrawlRefusalError is the typed refusal carrier the
     # sweep's deactivation arm reads (reason as an enum member, not boundary text).
     "crawlutron/api/crawl_executor.py": (2, 2),
@@ -126,15 +126,15 @@ DECLARED_SURFACE_RATCHET = {
     # #653: the key-verify meter (one class + the shared instance accessor).
     "crawlutron/api/admit_router.py": (2, 1),
     # #677: known_reasons is the public door the producer->table loop gate reads.
-    "crawlutron/api/admit_endpoint.py": (3, 2),
-    "crawlutron/api/key_throttle.py": (2, 2),
-    "crawlutron/api/policy_defaults.py": (2, 0),
+    "crawlutron/service/admit_endpoint.py": (3, 2),
+    "crawlutron/service/key_throttle.py": (2, 2),
+    "crawlutron/service/policy_defaults.py": (2, 0),
     "crawlutron/api/policy_router.py": (2, 1),
     "crawlutron/api/policy_suggestions.py": (3, 2),
     "crawlutron/api/render.py": (3, 3),
     "crawlutron/api/render_endpoint.py": (3, 2),
     "crawlutron/api/watch_sweep.py": (4, 2),
-    "crawlutron/api/webhooks.py": (15, 13),
+    "crawlutron/service/webhooks.py": (15, 13),
     "crawlutron/extraction/content.py": (4, 4),
     "crawlutron/extraction/llm_format.py": (4, 4),
     # #668 raised 18,0 -> 19,0: RATE_LIMITED is the JSON-RPC code the anonymous
@@ -168,7 +168,18 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/api/anonymous_throttle.py": (10, 4),
     # #668: the shared process-meter skeleton the two throttles compose (the
     # jscpd logic gate's extraction, replacing two hand-copied ledger triples).
-    "crawlutron/api/meter_ledger.py": (2, 2),
+    "crawlutron/service/meter_ledger.py": (2, 2),
+    # #849 re-export shims: (0,0) — re-export is not ownership; a shim may grow
+    # no symbol of its own. Deleted at the shim drain (row + file, same commit).
+    "crawlutron/api/admit_endpoint.py": (0, 0),
+    "crawlutron/api/caller_concurrency.py": (0, 0),
+    "crawlutron/api/key_throttle.py": (0, 0),
+    "crawlutron/api/meter_ledger.py": (0, 0),
+    "crawlutron/api/policy_defaults.py": (0, 0),
+    "crawlutron/api/response_shaping.py": (0, 0),
+    "crawlutron/api/sweep_loop.py": (0, 0),
+    "crawlutron/api/unified_shaping.py": (0, 0),
+    "crawlutron/api/webhooks.py": (0, 0),
     "crawlutron/orchestration/admission_stall.py": (6, 4),
     "crawlutron/orchestration/recursive.py": (11, 7),
     "crawlutron/orchestration/request_pipeline.py": (5, 3),

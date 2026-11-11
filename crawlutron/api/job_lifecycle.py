@@ -55,7 +55,7 @@ async def shutdown_job_runner() -> None:
     _tasks.clear()
     # A cancellation can land after a job's terminal write but before its webhook
     # POST; drain the shielded deliveries so that callback is never dropped at exit.
-    from crawlutron.api.webhooks import drain_webhook_deliveries
+    from crawlutron.service.webhooks import drain_webhook_deliveries
 
     await drain_webhook_deliveries()
 

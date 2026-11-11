@@ -33,7 +33,7 @@ KNOWN = (
     "crawlutron.transport.pooled_clients",
     "crawlutron.transport.pinned_dns",
     "crawlutron.transport.pooled_cffi",
-    "crawlutron.api.webhooks",
+    "crawlutron.service.webhooks",
     "crawlutron.storage.sqlite_store",
     "crawlutron.api.async_crawl_runner",
     "crawlutron.api.job_lifecycle",

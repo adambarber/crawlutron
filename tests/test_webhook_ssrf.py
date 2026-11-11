@@ -5,17 +5,17 @@ pinned IP (DNS-rebinding safe) while preserving the original Host header.
 
 import pytest
 
-from crawlutron.api.webhooks import (
-    ensure_https_webhook_url,
-)
-from crawlutron.api.webhooks import (
-    post_webhook as _post_webhook,
-)
-from crawlutron.api.webhooks import (
-    validate_webhook_url_async as _validate_webhook_url,
-)
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.webhook_target import WebhookTarget
+from crawlutron.service.webhooks import (
+    ensure_https_webhook_url,
+)
+from crawlutron.service.webhooks import (
+    post_webhook as _post_webhook,
+)
+from crawlutron.service.webhooks import (
+    validate_webhook_url_async as _validate_webhook_url,
+)
 from tests._assertions import (
     block_private_targets,
     host_resolves_to,
@@ -95,7 +95,7 @@ class TestWebhookDeliveryPinning:
     async def test_https_delivery_connects_to_the_validated_ip(self, monkeypatch):
         """HTTPS webhooks now connect to the validated pinned IP like HTTP (DNS-rebinding
         safe); the logical hostname is preserved for TLS SNI via the request extension."""
-        from crawlutron.api.webhooks import deliver_pinned_webhook
+        from crawlutron.service.webhooks import deliver_pinned_webhook
 
         delivered = record_webhook_delivery(monkeypatch)
         with host_resolves_to(monkeypatch, "8.8.8.8"):
@@ -113,14 +113,14 @@ class TestWebhookDeliveryPinning:
         bounded_io cap and survive an oversized body without raising."""
         import logging
 
-        from crawlutron.api.webhooks import deliver_pinned_webhook, max_webhook_size
+        from crawlutron.service.webhooks import deliver_pinned_webhook, max_webhook_size
 
         # ``host_resolves_to`` also stands the private-target escape hatch down, so the rejection this test
         # wants is the policy's answer and not an accident of what the machine's resolver returned.
         big_body = b"x" * (max_webhook_size() + 1)
         delivered = record_webhook_delivery(monkeypatch, body=big_body)
         with host_resolves_to(monkeypatch, "8.8.8.8"):
-            with caplog.at_level(logging.WARNING, logger="crawlutron.api.webhooks"):
+            with caplog.at_level(logging.WARNING, logger="crawlutron.service.webhooks"):
                 await deliver_pinned_webhook(
                     "https://webhook.example.com/cb",
                     b"{}",
@@ -136,7 +136,7 @@ def test_webhook_size_cap_honors_a_live_env_override(monkeypatch):
     once per distinct value while an override -- operator env, or a test -- is still
     picked up on the very next call.
     """
-    from crawlutron.api import webhooks
+    from crawlutron.service import webhooks
 
     monkeypatch.setenv("CRAWLUTRON_MAX_WEBHOOK_SIZE", "1234")
     assert webhooks.max_webhook_size() == 1234, "the override was not honored"
@@ -153,7 +153,7 @@ def test_webhook_size_cap_honors_a_live_env_override(monkeypatch):
 def test_webhook_size_cap_keeps_the_unit_floor(monkeypatch):
     """The ``lo=1`` floor survives the caching path: a zero/negative cap would
     cap every delivery at nothing and silently drop all webhooks."""
-    from crawlutron.api import webhooks
+    from crawlutron.service import webhooks
 
     monkeypatch.setenv("CRAWLUTRON_MAX_WEBHOOK_SIZE", "0")
     assert webhooks.max_webhook_size() == 1
@@ -164,7 +164,7 @@ def test_webhook_size_cap_keeps_the_unit_floor(monkeypatch):
 
 async def _deliver_once(monkeypatch, *, secret: str | None):
     """One real delivery against the mocked transport, with the secret set or not."""
-    from crawlutron.api.webhooks import deliver_pinned_webhook
+    from crawlutron.service.webhooks import deliver_pinned_webhook
 
     if secret is None:
         monkeypatch.delenv("CRAWLUTRON_WEBHOOK_SECRET", raising=False)
@@ -188,7 +188,7 @@ class TestWebhookNoSecretWarning:
         from crawlutron.runtime import process_state
 
         process_state.reset_all_process_state()
-        with caplog.at_level(logging.WARNING, logger="crawlutron.api.webhooks"):
+        with caplog.at_level(logging.WARNING, logger="crawlutron.service.webhooks"):
             await _deliver_once(monkeypatch, secret=None)
             await _deliver_once(monkeypatch, secret=None)
 
@@ -199,7 +199,7 @@ class TestWebhookNoSecretWarning:
     async def test_signed_delivery_does_not_warn(self, monkeypatch, caplog):
         import logging
 
-        with caplog.at_level(logging.WARNING, logger="crawlutron.api.webhooks"):
+        with caplog.at_level(logging.WARNING, logger="crawlutron.service.webhooks"):
             await _deliver_once(monkeypatch, secret="test-secret")
 
         assert not [r for r in caplog.records if "webhook_unsigned_delivery" in r.message]

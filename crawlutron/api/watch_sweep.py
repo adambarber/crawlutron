@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING
 from crawlutron.api.caller_auth import Tracking, admit, anonymous_caller, identity_for_key
 from crawlutron.api.crawl_executor import CrawlRefusalError, execute_crawl
 from crawlutron.api.exceptions import is_quota_refusal
-from crawlutron.api.webhooks import start_webhook_delivery
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.crawl_policy import CrawlPolicy
@@ -26,6 +25,7 @@ from crawlutron.models.fetch_validators import FetchValidators
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.watch_announcement import WatchAnnouncement
 from crawlutron.models.watch_state import WatchState
+from crawlutron.service.webhooks import start_webhook_delivery
 from crawlutron.storage.watch_store import WatchStore
 from crawlutron.transport.freshness import default_clock
 from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER

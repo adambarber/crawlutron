@@ -8,7 +8,7 @@ work. policy-suggestions meters wrong-token guesses per-credential only
 
 from __future__ import annotations
 
-from crawlutron.api.key_throttle import KeyVerifyThrottle, shared_throttle
+from crawlutron.service.key_throttle import KeyVerifyThrottle, shared_throttle
 from tests._app_factory import fresh_app
 from tests._async_harnesses import serve
 

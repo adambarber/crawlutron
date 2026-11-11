@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from crawlutron.api.key_throttle import KeyVerifyThrottle, shared_throttle
+from crawlutron.service.key_throttle import KeyVerifyThrottle, shared_throttle
 from tests._app_factory import fresh_app
 from tests._async_harnesses import serve
 
@@ -54,7 +54,7 @@ async def test_the_robots_arm_refuses_an_exhausted_caller():
 async def test_the_robots_arm_meters_a_live_caller_without_refusing(monkeypatch):
     """The robots arm runs under the layer: identity resolves (anonymous here),
     and the loader is the shared one, so the fetch rides the process TTL cache."""
-    from crawlutron.api import admit_endpoint
+    from crawlutron.service import admit_endpoint
     from crawlutron.transport.robots import RobotsRules, load_robots_rules
     from crawlutron.vocabulary.robots import RobotsSource
 
@@ -63,7 +63,7 @@ async def test_the_robots_arm_meters_a_live_caller_without_refusing(monkeypatch)
     async def _fake_loader(target, fetcher, timeout_seconds, *, fetch_and_decode=None, policy=None):
         return RobotsRules([], [], None, RobotsSource.policy)
 
-    monkeypatch.setattr("crawlutron.api.admit_endpoint.load_robots_rules", _fake_loader)
+    monkeypatch.setattr("crawlutron.service.admit_endpoint.load_robots_rules", _fake_loader)
     async with serve(_layered_admit_app()) as client:
         response = await client.post(
             "/v1/admit",

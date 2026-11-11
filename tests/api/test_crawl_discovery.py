@@ -67,7 +67,7 @@ class TestDiscoveryAndRenderApi:
             assert resp.json()
 
     async def test_build_unified_response(self):
-        from crawlutron.api.response_shaping import build_unified_crawl_response
+        from crawlutron.service.response_shaping import build_unified_crawl_response
 
         resp = build_unified_crawl_response([engine_result("http://x/", "rendered")])
         assert resp.success is True

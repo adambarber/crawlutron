@@ -84,7 +84,7 @@ def _crawl_response_construction_offenders(tree: ast.AST, path: pathlib.Path) ->
 CRAWL_RESPONSE_BUILT_ONLY_BY_THE_SHAPING_CHOKEPOINT = Rule(
     name="crawl-response-built-only-by-the-shaping-chokepoint",
     find=_crawl_response_construction_offenders,
-    summary="Use crawlutron.api.response_shaping.build_unified_crawl_response",
+    summary="Use crawlutron.service.response_shaping.build_unified_crawl_response",
     excludes=SANCTIONED,
     bite=lambda: Bites(
         "def f(results):\n    return UnifiedCrawlResponse(request_id='r', results=results)\n",
@@ -97,7 +97,7 @@ CRAWL_RESPONSE_BUILT_ONLY_BY_THE_SHAPING_CHOKEPOINT = Rule(
 # The rules below close both ends of that: the envelope is adapted in one module, and its scalar fields are
 # passed in one function. ---------------------------------------------------------------------------
 
-_ENVELOPE_OWNER_MODULE = "crawlutron/api/response_shaping.py"
+_ENVELOPE_OWNER_MODULE = "crawlutron/service/response_shaping.py"
 
 
 _ENVELOPE_OWNER_FUNCTION = "_response_envelope"
@@ -134,7 +134,7 @@ CRAWL_RESPONSE_ENVELOPE_IS_ADAPTED_BY_ONE_OWNER = Rule(
     name="crawl-response-envelope-is-adapted-by-one-owner",
     find=_unsanctioned_envelope_adapter_offenders,
     summary=(
-        "adapt a producer envelope with crawlutron.api.response_shaping's envelope owner, "
+        "adapt a producer envelope with crawlutron.service.response_shaping's envelope owner, "
         "so an envelope field cannot be passed on one path and forgotten on another"
     ),
     excludes=SANCTIONED,
@@ -216,7 +216,7 @@ CRAWL_RESPONSE_ENVELOPE_FIELDS_ARE_PASSED_BY_ONE_OWNER = Rule(
     name="crawl-response-envelope-fields-are-passed-by-one-owner",
     find=_hand_rolled_envelope_fields_offenders,
     summary=(
-        "pass the unified envelope's fields in crawlutron.api.response_shaping._response_envelope; "
+        "pass the unified envelope's fields in crawlutron.service.response_shaping._response_envelope; "
         "a field the model requires is dropped, not rejected, when a caller forgets it"
     ),
     excludes=SANCTIONED,

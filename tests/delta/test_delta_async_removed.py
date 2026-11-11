@@ -55,7 +55,7 @@ async def test_async_run_reports_baseline_url_absent_from_run(monkeypatch, tmp_p
     await job_store.acreate_single_shot("r1", URL, payload.policy, owner="caller-a")
     job = await job_store.aload("r1")
     with patch("crawlutron.api.async_crawl_runner.execute_crawl", new=scripted):
-        with patch("crawlutron.api.webhooks.post_webhook", new_callable=AsyncMock):
+        with patch("crawlutron.service.webhooks.post_webhook", new_callable=AsyncMock):
             await run_async_crawl(
                 "r1",
                 payload,

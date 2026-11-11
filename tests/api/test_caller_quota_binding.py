@@ -10,8 +10,8 @@ import asyncio
 import pytest
 
 from crawlutron.api.caller_auth import identity_for_key
-from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
 from crawlutron.config.settings import CrawlerSettings
+from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
 from crawlutron.storage.caller_key_store import CallerKeyStore
 from tests._api_harnesses import keyed_quota_client as _keyedquota_client
 from tests._api_harnesses import mount_tracker as _mount_tracker

@@ -9,6 +9,7 @@ caller population cannot red; the only red is a second implementation.
 import ast
 from pathlib import Path
 
+from tests._walk_primitives import string_constants
 from tests.chokepoint_walks import REPO_ROOT
 
 #: The one sanctioned home for masking implementation.
@@ -37,12 +38,12 @@ def _is_redaction_named(name: str) -> bool:
 
 def _masking_violations(path: Path, tree: ast.AST) -> list[str]:
     findings: list[str] = []
+    for lineno, value in string_constants(tree):
+        if any(marker in value for marker in MASKING_MARKERS):
+            findings.append(f"{path}:{lineno} masking marker literal {value!r}")
+        if _PARAM_SPAN_TOKEN in value and "=" in value:
+            findings.append(f"{path}:{lineno} secret-param span pattern {value!r}")
     for node in ast.walk(tree):
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            if any(marker in node.value for marker in MASKING_MARKERS):
-                findings.append(f"{path}:{node.lineno} masking marker literal {node.value!r}")
-            if _PARAM_SPAN_TOKEN in node.value and "=" in node.value:
-                findings.append(f"{path}:{node.lineno} secret-param span pattern {node.value!r}")
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and _is_redaction_named(node.name):
             if _has_own_masking_logic(node):
                 findings.append(f"{path}:{node.lineno} {node.name}() carries its own masking logic")

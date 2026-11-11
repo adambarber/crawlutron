@@ -433,7 +433,7 @@ async def test_a_hanging_webhook_does_not_stall_the_sweep_pass(watch_store, etag
     """A webhook that never answers must not hold the sweep pass: delivery is a
     tracked background task, so sweep_once returns while it runs (#528)."""
     from crawlutron.api import watch_sweep
-    from crawlutron.api.webhooks import drain_webhook_deliveries
+    from crawlutron.service.webhooks import drain_webhook_deliveries
 
     watch = watch_store.create(
         canonical(loopback_url(etag_server)),

@@ -10,8 +10,8 @@ import secrets
 from httpx import AsyncClient, Response
 from starlette.requests import Request
 
-from crawlutron.api.key_throttle import KeyVerifyThrottle
 from crawlutron.config.settings import CrawlerSettings
+from crawlutron.service.key_throttle import KeyVerifyThrottle
 from crawlutron.storage.caller_key_store import CallerKeyStore
 from tests._async_harnesses import issue_key
 from tests.factories.client import isolation_client, post_crawl, quota_client

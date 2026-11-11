@@ -12,9 +12,9 @@ from pathlib import Path
 from fastapi import FastAPI
 from httpx import AsyncClient, Response
 
-from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
 from crawlutron.api.dependencies import get_job_store, get_settings
 from crawlutron.config.settings import CrawlerSettings
+from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
 from crawlutron.storage.caller_key_store import CallerKeyStore
 from tests._app_harnesses import harness_app
 from tests._async_harnesses import expect_quota_refused, issue_key, serve

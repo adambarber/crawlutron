@@ -10,8 +10,8 @@ import pytest
 
 from crawlutron.api import anonymous_throttle, key_throttle
 from crawlutron.api.anonymous_throttle import AnonymousThrottle
-from crawlutron.api.key_throttle import KeyVerifyThrottle
 from crawlutron.runtime.metrics import get_metrics
+from crawlutron.service.key_throttle import KeyVerifyThrottle
 
 
 def _meter_snapshot() -> dict[str, float]:

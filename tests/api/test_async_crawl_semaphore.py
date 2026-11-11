@@ -93,7 +93,7 @@ class TestSemaphoreHoldsTheCrawlOnly:
             delivery_seen_inside = async_crawl_semaphore().locked()
 
         with patch("crawlutron.api.async_crawl_runner.execute_crawl", new=quick_crawl):
-            with patch("crawlutron.api.webhooks.post_webhook_guarded", new=watching_delivery):
+            with patch("crawlutron.service.webhooks.post_webhook_guarded", new=watching_delivery):
                 await run_async_crawl(
                     request_id,
                     CrawlRequest.model_validate({"url": "http://example.com/"}),
