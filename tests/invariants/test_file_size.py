@@ -90,6 +90,19 @@ def _python_bearing_roots() -> set[str]:
     }
 
 
+def test_every_python_bearing_root_is_scanned_by_the_duplication_gate() -> None:
+    """A top-level dir holding ``*.py`` that TREE_ROOTS misses is invisible to jscpd.
+
+    crawlutron_sdk escaped exactly this way: a later cohort added the tree and
+    no gate compared the scanned roots to the trees that exist. Same derivation
+    as the budget row pin above -- derived by walking REPO_ROOT, never hand-listed.
+    """
+    from scripts.jscpd_gate import TREE_ROOTS
+
+    scanned = {root for roots in TREE_ROOTS.values() for root in roots}
+    assert scanned == _python_bearing_roots()
+
+
 def test_every_declared_scan_root_has_a_budget_row() -> None:
     """The derived side seals: no undeclared python root escapes the ceiling.
     The table side seals: no dead budget row points at a vanished root."""

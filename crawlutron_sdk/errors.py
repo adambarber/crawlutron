@@ -164,6 +164,7 @@ __all__ = [
     "CrawlutronServiceUnavailableError",
     "CrawlutronTooManyRequestsError",
     "CrawlutronTransportError",
+    "CrawlutronUnauthorizedError",
     "CrawlutronUnprocessableEntityError",
     "error_from_response",
 ]

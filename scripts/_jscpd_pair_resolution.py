@@ -41,7 +41,7 @@ CROSS_TREE_ROOT = "."
 # One jscpd invocation per root: jscpd names files relative to its root, so
 # attribution requires one scan per root.
 TREE_ROOTS = {
-    "production": ("crawlutron",),
+    "production": ("crawlutron", "crawlutron_sdk"),
     "test": ("tests", "scripts"),
 }
 

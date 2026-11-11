@@ -107,7 +107,7 @@ def test_fail_on_empty_is_no_longer_a_required_cli_flag(monkeypatch, capsys) -> 
 
 
 def test_source_floor_fails_on_thin_scan(monkeypatch) -> None:
-    _stub_report(monkeypatch, [], sources=60)
+    _stub_report(monkeypatch, [], sources=40)
 
     assert gate._run(_args()) == 1
 

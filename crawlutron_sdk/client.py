@@ -4,7 +4,7 @@ The client serializes JSON, deserializes envelopes, and raises typed errors.
 The server is the sole enforcement chokepoint; the SDK reimplements no
 admission, policy, robots, metering, or extraction logic.
 
-The client owns one :class:`httpx.AsyncClient` (lazily created, closed on
+The async client owns one :class:`httpx.AsyncClient` (lazily created, closed on
 :meth:`aclose` / ``__aexit__``). :meth:`sync` returns a blocking mirror that
 owns its own :class:`httpx.Client` configured identically.
 """
@@ -14,15 +14,11 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import AsyncIterator
-from typing import Literal
+from typing import Literal, TypedDict, TypeVar
 
 import httpx
 
-from .errors import (
-    CrawlutronAcceptedError,
-    CrawlutronTransportError,
-    error_from_response,
-)
+from .errors import CrawlutronAcceptedError, CrawlutronTransportError, error_from_response
 from .models import (
     AdmitRequest,
     AdmitResponse,
@@ -35,7 +31,6 @@ from .models import (
     JobControlRequest,
     JobCreateRequest,
     JobCreateResponse,
-    JobDeletedResponse,
     JobListResponse,
     JobStatusResponse,
     ReadinessResponse,
@@ -48,29 +43,42 @@ from .models import (
 
 _DEFAULT_BASE_URL = "http://127.0.0.1:8765"
 
+_ModelT = TypeVar("_ModelT")
+
+
+class _ClientKwargs(TypedDict):
+    """The shared httpx client constructor options."""
+
+    base_url: str
+    timeout: float | None
+    headers: dict[str, str]
+    transport: httpx.BaseTransport | httpx.AsyncBaseTransport | None
+
+
+def _str_key_dict(data: object) -> dict[str, object]:
+    """Coerce a decoded JSON value to a string-keyed dict."""
+    if not isinstance(data, dict):
+        return {}
+    return {str(key): value for key, value in data.items()}
+
 
 def _json_body(response: httpx.Response) -> dict[str, object]:
     """Decode a JSON response body without leaking httpx's ``Any``."""
     if not response.content:
         return {}
-    data: object = response.json()
-    if isinstance(data, dict):
-        return {str(key): value for key, value in data.items()}
-    return {}
+    return _str_key_dict(response.json())
 
 
 def _payload_dict(payload: object) -> dict[str, object]:
     """Dump a pydantic model to a plain dict for JSON serialization."""
     dump = getattr(payload, "model_dump", None)
     if callable(dump):
-        data = dump()
-        if isinstance(data, dict):
-            return {str(key): value for key, value in data.items()}
+        return _str_key_dict(dump())
     return {}
 
 
 class _ClientBase:
-    """Shared configuration and error handling for the async and sync clients."""
+    """Shared configuration, response handling, and error mapping."""
 
     def __init__(
         self,
@@ -78,16 +86,27 @@ class _ClientBase:
         base_url: str = _DEFAULT_BASE_URL,
         api_key: str | None = None,
         timeout: float | None = None,
+        transport: httpx.BaseTransport | httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._timeout = timeout
+        self._transport = transport
+        self._client: httpx.Client | httpx.AsyncClient | None = None
 
     def _headers(self) -> dict[str, str]:
         headers: dict[str, str] = {}
         if self._api_key is not None:
             headers["X-API-Key"] = self._api_key
         return headers
+
+    def _client_kwargs(self) -> _ClientKwargs:
+        return {
+            "base_url": self._base_url,
+            "timeout": self._timeout,
+            "headers": self._headers(),
+            "transport": self._transport,
+        }
 
     def _raise_for_status(
         self,
@@ -103,24 +122,43 @@ class _ClientBase:
             return
         raise error_from_response(status_code, body)
 
+    def _check(self, response: httpx.Response) -> None:
+        """Raise typed errors for a response with no body to return."""
+        self._raise_for_status(response.status_code, _json_body(response))
+
+    def _finish(
+        self,
+        response: httpx.Response,
+        model: type[_ModelT],
+        *,
+        accepted_if_pending: bool = False,
+    ) -> _ModelT:
+        """Validate one response body against ``model`` after status checking."""
+        body = _json_body(response)
+        self._raise_for_status(response.status_code, body, accepted_if_pending=accepted_if_pending)
+        return model.model_validate(body)
+
+    def _timeout_error(self, request_id: str, max_wait: float) -> CrawlutronTransportError:
+        return CrawlutronTransportError(
+            f"crawl {request_id} did not reach a terminal state within {max_wait}s",
+            status_code=None,
+        )
+
     def _transport_error(self, error: httpx.HTTPError) -> CrawlutronTransportError:
         return CrawlutronTransportError(str(error), status_code=None)
+
+    def _transport_failure(self, error: httpx.HTTPError) -> None:
+        raise self._transport_error(error) from error
+
+    def _check_max_wait(self, request_id: str, elapsed: float, max_wait: float | None) -> None:
+        if max_wait is not None and elapsed >= max_wait:
+            raise self._timeout_error(request_id, max_wait)
 
 
 class CrawlutronClient(_ClientBase):
     """Async typed client: ``async with CrawlutronClient() as client: ...``."""
 
-    def __init__(
-        self,
-        *,
-        base_url: str = _DEFAULT_BASE_URL,
-        api_key: str | None = None,
-        timeout: float | None = None,
-        transport: httpx.AsyncBaseTransport | None = None,
-    ) -> None:
-        super().__init__(base_url=base_url, api_key=api_key, timeout=timeout)
-        self._transport = transport
-        self._client: httpx.AsyncClient | None = None
+    _client: httpx.AsyncClient | None = None
 
     async def __aenter__(self) -> CrawlutronClient:
         return self
@@ -129,19 +167,22 @@ class CrawlutronClient(_ClientBase):
         await self.aclose()
 
     async def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None:
-            self._client = httpx.AsyncClient(
-                base_url=self._base_url,
-                timeout=self._timeout,
-                headers=self._headers(),
-                transport=self._transport,
-            )
-        return self._client
+        client = self._client
+        if client is None or not isinstance(client, httpx.AsyncClient):
+            self._client = httpx.AsyncClient(**self._client_kwargs())
+            client = self._client
+        if not isinstance(client, httpx.AsyncClient):
+            raise CrawlutronTransportError("unexpected http client type", status_code=None)
+        return client
 
     async def aclose(self) -> None:
-        if self._client is not None:
-            await self._client.aclose()
-            self._client = None
+        client = self._client
+        if client is None:
+            return
+        if not isinstance(client, httpx.AsyncClient):
+            raise CrawlutronTransportError("unexpected http client type", status_code=None)
+        await client.aclose()
+        self._client = None
 
     async def _request(
         self,
@@ -159,31 +200,21 @@ class CrawlutronClient(_ClientBase):
     async def crawl(self, payload: CrawlRequest) -> CrawlResponse:
         """Synchronous crawl door: returns the unified crawl response."""
         response = await self._request("POST", "/v1/crawl", json=_payload_dict(payload))
-        body = _json_body(response)
-        self._raise_for_status(response.status_code, body, accepted_if_pending=True)
-        return CrawlResponse.model_validate(body)
+        return self._finish(response, CrawlResponse, accepted_if_pending=True)
 
     async def crawl_async(self, payload: CrawlRequest) -> CrawlAccepted:
         """Async crawl door: returns the accepted handle (request_id, status_url)."""
         request = payload.model_copy(update={"async_mode": True})
         response = await self._request("POST", "/v1/crawl", json=_payload_dict(request))
-        body = _json_body(response)
-        self._raise_for_status(response.status_code, body)
-        return CrawlAccepted.model_validate(body)
+        return self._finish(response, CrawlAccepted)
 
     async def get_crawl_result(self, request_id: str) -> CrawlResponse:
         """Retrieve a completed crawl; raises if still accepted (202) or gone (404)."""
         response = await self._request("GET", f"/v1/crawl/{request_id}")
-        body = _json_body(response)
-        self._raise_for_status(response.status_code, body, accepted_if_pending=True)
-        return CrawlResponse.model_validate(body)
+        return self._finish(response, CrawlResponse, accepted_if_pending=True)
 
     async def wait_for(
-        self,
-        request_id: str,
-        *,
-        poll_interval: float = 1.0,
-        max_wait: float | None = None,
+        self, request_id: str, *, poll_interval: float = 1.0, max_wait: float | None = None
     ) -> CrawlResponse:
         """Poll ``get_crawl_result`` until the crawl reaches a terminal state."""
         elapsed = 0.0
@@ -192,11 +223,7 @@ class CrawlutronClient(_ClientBase):
                 return await self.get_crawl_result(request_id)
             except CrawlutronAcceptedError:
                 pass
-            if max_wait is not None and elapsed >= max_wait:
-                raise CrawlutronTransportError(
-                    f"crawl {request_id} did not reach a terminal state within {max_wait}s",
-                    status_code=None,
-                )
+            self._check_max_wait(request_id, elapsed, max_wait)
             await asyncio.sleep(poll_interval)
             elapsed += poll_interval
 
@@ -208,30 +235,22 @@ class CrawlutronClient(_ClientBase):
     async def admit(self, payload: AdmitRequest) -> AdmitResponse:
         """Pre-flight admission verdict for one URL."""
         response = await self._request("POST", "/v1/admit", json=_payload_dict(payload))
-        body = _json_body(response)
-        self._raise_for_status(response.status_code, body)
-        return AdmitResponse.model_validate(body)
+        return self._finish(response, AdmitResponse)
 
     async def create_job(self, payload: JobCreateRequest) -> JobCreateResponse:
         """Create and start a resumable whole-site crawl job."""
         response = await self._request("POST", "/v1/jobs", json=_payload_dict(payload))
-        body = _json_body(response)
-        self._raise_for_status(response.status_code, body)
-        return JobCreateResponse.model_validate(body)
+        return self._finish(response, JobCreateResponse)
 
     async def list_jobs(self) -> JobListResponse:
         """List the caller's crawl jobs with live status."""
         response = await self._request("GET", "/v1/jobs")
-        body = _json_body(response)
-        self._raise_for_status(response.status_code, body)
-        return JobListResponse.model_validate(body)
+        return self._finish(response, JobListResponse)
 
     async def get_job(self, job_id: str) -> JobStatusResponse:
         """Get one crawl job's state and results."""
         response = await self._request("GET", f"/v1/jobs/{job_id}")
-        body = _json_body(response)
-        self._raise_for_status(response.status_code, body)
-        return JobStatusResponse.model_validate(body)
+        return self._finish(response, JobStatusResponse)
 
     async def control_job(
         self, job_id: str, action: Literal["pause", "resume", "cancel"]
@@ -239,78 +258,57 @@ class CrawlutronClient(_ClientBase):
         """Pause/resume/cancel a crawl job."""
         payload = JobControlRequest(action=action)
         response = await self._request("POST", f"/v1/jobs/{job_id}/control", json=_payload_dict(payload))
-        body = _json_body(response)
-        self._raise_for_status(response.status_code, body)
-        return JobStatusResponse.model_validate(body)
+        return self._finish(response, JobStatusResponse)
 
-    async def delete_job(self, job_id: str) -> JobDeletedResponse:
+    async def delete_job(self, job_id: str) -> None:
         """Cancel (if running) and delete a crawl job."""
         response = await self._request("DELETE", f"/v1/jobs/{job_id}")
-        body = _json_body(response)
-        self._raise_for_status(response.status_code, body)
-        return JobDeletedResponse.model_validate(body)
+        self._check(response)
 
     async def search(self, payload: SearchRequest) -> SearchResponse:
         """Run a web search against the configured provider."""
         response = await self._request("POST", "/v1/search", json=_payload_dict(payload))
-        body = _json_body(response)
-        self._raise_for_status(response.status_code, body)
-        return SearchResponse.model_validate(body)
+        return self._finish(response, SearchResponse)
 
     async def create_watch(self, payload: WatchCreateRequest) -> WatchState:
         """Register a URL revalidation watch."""
         response = await self._request("POST", "/v1/watches", json=_payload_dict(payload))
-        body = _json_body(response)
-        self._raise_for_status(response.status_code, body)
-        return WatchState.model_validate(body)
+        return self._finish(response, WatchState)
 
     async def list_watches(self) -> WatchListResponse:
         """List the caller's registered watches."""
         response = await self._request("GET", "/v1/watches")
-        body = _json_body(response)
-        self._raise_for_status(response.status_code, body)
-        return WatchListResponse.model_validate(body)
+        return self._finish(response, WatchListResponse)
 
     async def get_watch(self, watch_id: str) -> WatchState:
         """Get one watch's revalidation state."""
         response = await self._request("GET", f"/v1/watches/{watch_id}")
-        body = _json_body(response)
-        self._raise_for_status(response.status_code, body)
-        return WatchState.model_validate(body)
+        return self._finish(response, WatchState)
 
     async def delete_watch(self, watch_id: str) -> None:
         """Stop checking a watch's URL."""
         response = await self._request("DELETE", f"/v1/watches/{watch_id}")
-        body = _json_body(response)
-        self._raise_for_status(response.status_code, body)
+        self._check(response)
 
     async def capabilities(self) -> CapabilitiesResponse:
         """Service capabilities discovery (GET /v1/capabilities)."""
         response = await self._request("GET", "/v1/capabilities")
-        body = _json_body(response)
-        self._raise_for_status(response.status_code, body)
-        return CapabilitiesResponse.model_validate(body)
+        return self._finish(response, CapabilitiesResponse)
 
     async def agent_hints(self) -> AgentHintsResponse:
         """Agent guidance (GET /v1/agent-hints)."""
         response = await self._request("GET", "/v1/agent-hints")
-        body = _json_body(response)
-        self._raise_for_status(response.status_code, body)
-        return AgentHintsResponse.model_validate(body)
+        return self._finish(response, AgentHintsResponse)
 
     async def health(self) -> HealthResponse:
         """Lightweight liveness (GET /health)."""
         response = await self._request("GET", "/health")
-        body = _json_body(response)
-        self._raise_for_status(response.status_code, body)
-        return HealthResponse.model_validate(body)
+        return self._finish(response, HealthResponse)
 
     async def ready(self) -> ReadinessResponse:
         """Crawl capacity/readiness (GET /ready)."""
         response = await self._request("GET", "/ready")
-        body = _json_body(response)
-        self._raise_for_status(response.status_code, body)
-        return ReadinessResponse.model_validate(body)
+        return self._finish(response, ReadinessResponse)
 
     def sync(self) -> CrawlutronClientSync:
         """A sync client sharing this client's configuration."""
@@ -324,17 +322,7 @@ class CrawlutronClient(_ClientBase):
 class CrawlutronClientSync(_ClientBase):
     """Blocking typed client mirroring :class:`CrawlutronClient`."""
 
-    def __init__(
-        self,
-        *,
-        base_url: str = _DEFAULT_BASE_URL,
-        api_key: str | None = None,
-        timeout: float | None = None,
-        transport: httpx.BaseTransport | None = None,
-    ) -> None:
-        super().__init__(base_url=base_url, api_key=api_key, timeout=timeout)
-        self._transport = transport
-        self._client: httpx.Client | None = None
+    _client: httpx.Client | None = None
 
     def __enter__(self) -> CrawlutronClientSync:
         return self
@@ -343,59 +331,48 @@ class CrawlutronClientSync(_ClientBase):
         self.close()
 
     def _get_client(self) -> httpx.Client:
-        if self._client is None:
-            self._client = httpx.Client(
-                base_url=self._base_url,
-                timeout=self._timeout,
-                headers=self._headers(),
-                transport=self._transport,
-            )
-        return self._client
+        client = self._client
+        if not isinstance(client, httpx.Client):
+            self._client = httpx.Client(**self._client_kwargs())
+            client = self._client
+        return client
 
     def close(self) -> None:
-        if self._client is not None:
-            self._client.close()
-            self._client = None
+        if self._client is None:
+            return
+        client = self._client
+        if not isinstance(client, httpx.Client):
+            raise CrawlutronTransportError("unexpected http client type", status_code=None)
+        client.close()
+        self._client = None
 
-    def _request(
-        self,
-        method: str,
-        path: str,
-        *,
-        json: dict[str, object] | None = None,
-    ) -> httpx.Response:
+    def _request(self, method: str, path: str, *, json: dict[str, object] | None = None) -> httpx.Response:
         client = self._get_client()
         try:
             return client.request(method, path, json=json)
         except httpx.HTTPError as error:
-            raise self._transport_error(error) from error
+            self._transport_failure(error)
+        try:
+            return client.request(method, path, json=json)
+        except httpx.HTTPError as error:
+            self._transport_failure(error)
 
     def crawl(self, payload: CrawlRequest) -> CrawlResponse:
         response = self._request("POST", "/v1/crawl", json=_payload_dict(payload))
-        body = _json_body(response)
-        self._raise_for_status(response.status_code, body, accepted_if_pending=True)
-        return CrawlResponse.model_validate(body)
+        return self._finish(response, CrawlResponse, accepted_if_pending=True)
 
     def crawl_async(self, payload: CrawlRequest) -> CrawlAccepted:
         request = payload.model_copy(update={"async_mode": True})
         response = self._request("POST", "/v1/crawl", json=_payload_dict(request))
-        body = _json_body(response)
-        self._raise_for_status(response.status_code, body)
-        return CrawlAccepted.model_validate(body)
+        return self._finish(response, CrawlAccepted)
 
     def get_crawl_result(self, request_id: str) -> CrawlResponse:
         """Retrieve a completed crawl; raises if still accepted (202) or gone (404)."""
         response = self._request("GET", f"/v1/crawl/{request_id}")
-        body = _json_body(response)
-        self._raise_for_status(response.status_code, body, accepted_if_pending=True)
-        return CrawlResponse.model_validate(body)
+        return self._finish(response, CrawlResponse, accepted_if_pending=True)
 
     def wait_for(
-        self,
-        request_id: str,
-        *,
-        poll_interval: float = 1.0,
-        max_wait: float | None = None,
+        self, request_id: str, *, max_wait: float | None = None, poll_interval: float = 1.0
     ) -> CrawlResponse:
         elapsed = 0.0
         while True:
@@ -403,37 +380,25 @@ class CrawlutronClientSync(_ClientBase):
                 return self.get_crawl_result(request_id)
             except CrawlutronAcceptedError:
                 pass
-            if max_wait is not None and elapsed >= max_wait:
-                raise CrawlutronTransportError(
-                    f"crawl {request_id} did not reach a terminal state within {max_wait}s",
-                    status_code=None,
-                )
+            self._check_max_wait(request_id, elapsed, max_wait)
             time.sleep(poll_interval)
             elapsed += poll_interval
 
     def admit(self, payload: AdmitRequest) -> AdmitResponse:
         response = self._request("POST", "/v1/admit", json=_payload_dict(payload))
-        body = _json_body(response)
-        self._raise_for_status(response.status_code, body)
-        return AdmitResponse.model_validate(body)
+        return self._finish(response, AdmitResponse)
 
     def capabilities(self) -> CapabilitiesResponse:
         response = self._request("GET", "/v1/capabilities")
-        body = _json_body(response)
-        self._raise_for_status(response.status_code, body)
-        return CapabilitiesResponse.model_validate(body)
+        return self._finish(response, CapabilitiesResponse)
 
     def health(self) -> HealthResponse:
         response = self._request("GET", "/health")
-        body = _json_body(response)
-        self._raise_for_status(response.status_code, body)
-        return HealthResponse.model_validate(body)
+        return self._finish(response, HealthResponse)
 
     def ready(self) -> ReadinessResponse:
         response = self._request("GET", "/ready")
-        body = _json_body(response)
-        self._raise_for_status(response.status_code, body)
-        return ReadinessResponse.model_validate(body)
+        return self._finish(response, ReadinessResponse)
 
 
 __all__ = [
