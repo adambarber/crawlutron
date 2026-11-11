@@ -15,7 +15,6 @@ _DECISION_NAMES = frozenset(
         "admit_or_none",
         "checked_payload_urls",
         "filter_js_endpoints",
-        "validate_webhook_url",
         "validate_webhook_url_async",
     }
 )

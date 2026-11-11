@@ -134,7 +134,7 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/api/render.py": (3, 3),
     "crawlutron/api/render_endpoint.py": (3, 2),
     "crawlutron/api/watch_sweep.py": (4, 2),
-    "crawlutron/api/webhooks.py": (16, 14),
+    "crawlutron/api/webhooks.py": (15, 13),
     "crawlutron/extraction/content.py": (4, 4),
     "crawlutron/extraction/llm_format.py": (4, 4),
     # #668 raised 18,0 -> 19,0: RATE_LIMITED is the JSON-RPC code the anonymous

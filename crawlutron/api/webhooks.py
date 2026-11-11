@@ -349,20 +349,10 @@ def start_webhook_delivery(
     return _tracked_delivery(target, payload)
 
 
-def validate_webhook_url(webhook_url: str, *, host_policy: HostPolicy) -> None:
-    """Validate a webhook URL against SSRF: resolves the hostname and rejects any
-    that maps to a private/loopback address (DNS-rebinding class), implemented
-    on the one pin rule (admission + resolve-and-pin); raises ValueError if unsafe.
-    """
-    from crawlutron.transport.pinned_transport import build_pinned_request
-
-    build_pinned_request(NormalizedUrl(webhook_url, policy=host_policy), {})
-
-
 async def validate_webhook_url_async(webhook_url: str, *, host_policy: HostPolicy) -> None:
-    """Off-event-loop twin of :func:`validate_webhook_url`: the sync getaddrinfo
-    would stall the loop on a slow resolver, so this reuses the fetch path's
-    dedicated dns pool; every webhook caller is async, so they route here.
+    """Validate a webhook URL against SSRF: resolves the hostname and rejects
+    private/loopback targets (DNS-rebinding class) via the one pin rule; raises
+    ValueError if unsafe. Off the event loop: sync getaddrinfo would stall it.
     """
     from crawlutron.transport.pinned_transport import build_pinned_request_async
 
@@ -375,6 +365,5 @@ __all__ = [
     "ensure_https_webhook_url",
     "max_webhook_size",
     "post_webhook",
-    "validate_webhook_url",
     "validate_webhook_url_async",
 ]

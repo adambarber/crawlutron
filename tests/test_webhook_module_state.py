@@ -37,7 +37,6 @@ def test_webhook_module_has_no_dependency_wiring_state():
         "ensure_https_webhook_url",
         "max_webhook_size",
         "post_webhook",
-        "validate_webhook_url",
         "validate_webhook_url_async",
     }
 
@@ -60,3 +59,12 @@ def test_deliver_pinned_webhook_is_called_only_from_post_webhook():
                 }:
                     callers.add(f"{path.name}::{node.name}")
     assert callers == {"webhooks.py::post_webhook"}, callers
+
+
+def test_webhook_validation_has_only_the_async_twin():
+    """The sync validate_webhook_url twin is deleted: it had zero callers (every
+    webhook caller is async), and its sync getaddrinfo would stall the loop if a
+    future caller picked it. Only the off-loop async twin remains.
+    """
+    assert not hasattr(wm, "validate_webhook_url"), "the sync twin came back"
+    assert hasattr(wm, "validate_webhook_url_async")

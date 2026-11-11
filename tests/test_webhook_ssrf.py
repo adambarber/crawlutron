@@ -12,7 +12,7 @@ from crawlutron.api.webhooks import (
     post_webhook as _post_webhook,
 )
 from crawlutron.api.webhooks import (
-    validate_webhook_url as _validate_webhook_url,
+    validate_webhook_url_async as _validate_webhook_url,
 )
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.webhook_target import WebhookTarget
@@ -32,33 +32,33 @@ def _assert_pinned_delivery(delivered) -> None:
 
 
 class TestWebhookUrlValidation:
-    def test_blocks_private_dns_hostname(self, monkeypatch):
+    async def test_blocks_private_dns_hostname(self, monkeypatch):
         """A DNS name that resolves to a private IP must be rejected."""
         with host_resolves_to(monkeypatch, "127.0.0.1"), pytest.raises(ValueError):
-            _validate_webhook_url(
+            await _validate_webhook_url(
                 "http://evil.example.com/callback",
                 host_policy=HostPolicy.unrestricted(),
             )
 
-    def test_allows_public_dns_hostname(self, monkeypatch):
+    async def test_allows_public_dns_hostname(self, monkeypatch):
         """A DNS name that resolves to a public IP is accepted."""
         with host_resolves_to(monkeypatch, "8.8.8.8"):
-            _validate_webhook_url(
+            await _validate_webhook_url(
                 "http://public.example.com/callback",
                 host_policy=HostPolicy.unrestricted(),
             )
 
-    def test_rejects_non_http_scheme(self):
+    async def test_rejects_non_http_scheme(self):
         with pytest.raises(ValueError):
-            _validate_webhook_url(
+            await _validate_webhook_url(
                 "ftp://example.com/callback",
                 host_policy=HostPolicy.unrestricted(),
             )
 
-    def test_rejects_localhost(self, monkeypatch):
+    async def test_rejects_localhost(self, monkeypatch):
         block_private_targets(monkeypatch)
         with pytest.raises(ValueError):
-            _validate_webhook_url(
+            await _validate_webhook_url(
                 "http://localhost:8080/callback",
                 host_policy=HostPolicy.unrestricted(),
             )
