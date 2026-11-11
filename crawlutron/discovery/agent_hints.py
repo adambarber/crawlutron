@@ -2,11 +2,11 @@
 
 from fastapi import APIRouter
 
-from crawlutron.api.policy_defaults import BROWSER_FALLBACK_POLICY, DOCUMENT_EXTRACTION_POLICY
 from crawlutron.models.agent_hints_payload import AgentHintsPayload
 from crawlutron.models.agent_hints_response import AgentHintsResponse
 from crawlutron.models.crawl_strategy import CrawlStrategy
 from crawlutron.models.example_policy import ExamplePolicy
+from crawlutron.service.policy_defaults import BROWSER_FALLBACK_POLICY, DOCUMENT_EXTRACTION_POLICY
 from crawlutron.vocabulary.extraction import EXTRACTION_DESCRIPTIONS, EXTRACTION_TRAFILATURA
 from crawlutron.vocabulary.identity import SERVICE_ID
 from crawlutron.vocabulary.limits import LARGE_CRAWL_GUIDANCE

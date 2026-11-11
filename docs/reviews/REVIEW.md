@@ -229,7 +229,7 @@ This is a safety bound, not a wire change: sane requests behave identically.
 
 ### 2.8 [P1] Result store accepts unbounded payloads and materializes the full table per policy-suggestions request
 
-**Where:** `crawlutron/storage/result_store.py:30-50` (`put` — `INSERT OR REPLACE` with no byte bound), `:78-90` (`payloads()` — unbounded `SELECT payload … WHERE stored_at >= ?`), consumer `crawlutron/api/policy_suggestions.py:129` (awaited on the event loop; per-row pydantic validation also on-loop — see §3.7).
+**Where:** `crawlutron/storage/result_store.py:30-50` (`put` — `INSERT OR REPLACE` with no byte bound), `:78-90` (`payloads()` — unbounded `SELECT payload … WHERE stored_at >= ?`), consumer `crawlutron/service/policy_suggestions.py:129` (awaited on the event loop; per-row pydantic validation also on-loop — see §3.7).
 
 Rows are capped at 1000 *entries*, never *bytes*; payloads are full crawl responses including HTML. ~1000 multi-megabyte payloads are trivially generated (the store writes on every successful crawl, anonymous callers included), after which one unauthenticated `GET /v1/policy-suggestions` streams the whole table into RAM on the event loop — the O(n²) validation on top makes it a stuck-loop, not just a spike.
 
@@ -283,13 +283,13 @@ tavily_api_key: str = field(default="", repr=False)
 
 ### 2.12 [P2] Webhook URLs are logged raw; the anonymous watch bucket shares everything
 
-**Where:** `crawlutron/api/webhooks.py:146,159` (`extra={"url": webhook_url, ...}` — raw caller string, frequently carrying `?token=…` or userinfo secrets); `crawlutron/api/watch_router.py:87,100,112` (all watches scoped strictly by `caller_id`, and un-keyed callers share `caller_id=""`).
+**Where:** `crawlutron/service/webhooks.py:146,159` (`extra={"url": webhook_url, ...}` — raw caller string, frequently carrying `?token=…` or userinfo secrets); `crawlutron/api/watch_router.py:87,100,112` (all watches scoped strictly by `caller_id`, and un-keyed callers share `caller_id=""`).
 
 Two compounding issues: (a) the delivery logs persist receiver URLs verbatim — in practice these embed bearer tokens, so the *log* becomes the leak channel; note also that userinfo is silently dropped by canonicalization before delivery, so the secret is logged **and** never used. (b) Every un-keyed caller owns every other un-keyed caller's watches: `GET /v1/watches` discloses webhook URLs (token disclosure), `DELETE` lets one anonymous client kill another's monitoring, and the 100-watch cap is shared. Under the README's "localhost only" posture this is acceptable-by-design; under "reverse proxy in production" with un-keyed tenants it is not. Fix (a) by logging `host`/canonical raw only; mitigate (b) by refusing to serialize `webhook_url` in list responses and documenting the bucket collapse in SECURITY.md.
 
 ### 2.13 [P2] Webhook signature doesn't cover the timestamp; 3xx counts as delivered
 
-**Where:** `crawlutron/api/webhooks.py:92-95` (HMAC over body only; `X-Crawlutron-Webhook-Timestamp` sent unsigned), `:87-91` (`>= 500 or == 429` retryable, `>= 400` permanent — everything else, including `301/302/307/308`, falls through to *success*).
+**Where:** `crawlutron/service/webhooks.py:92-95` (HMAC over body only; `X-Crawlutron-Webhook-Timestamp` sent unsigned), `:87-91` (`>= 500 or == 429` retryable, `>= 400` permanent — everything else, including `301/302/307/308`, falls through to *success*).
 
 A captured `(body, signature)` pair replays forever with any timestamp — the timestamp header is decorative. And because `follow_redirects=False` (good for SSRF), a receiver that 30x-redirects (http→https misconfig, proxy) is recorded as *notified* while nothing arrived — for a monitoring feature, "delivered" that isn't is the worst failure mode. Both are outbound-contract changes, so land them **before** the API freeze:
 
@@ -388,9 +388,9 @@ def __init__(self, status_code: int, payload: JsonValue) -> None:
 
 ### 3.5 [P1] Webhook pre-validation raises outside the retry loop — corrupts correct watch outcomes
 
-**Where:** `crawlutron/api/webhooks.py:149` (`await validate_webhook_url_async(...)` *before* the attempt loop), consumer `crawlutron/api/watch_sweep.py:145-169` (check outcome recorded first, webhook fired after), blanket handler `:104-120`.
+**Where:** `crawlutron/service/webhooks.py:149` (`await validate_webhook_url_async(...)` *before* the attempt loop), consumer `crawlutron/api/watch_sweep.py:145-169` (check outcome recorded first, webhook fired after), blanket handler `:104-120`.
 
-`validate_webhook_url_async` raises on transient DNS failure, resolver-budget timeout, and host-policy drift. In the watch sweep the *correct* check outcome has already been recorded; the raise propagates to the sweep's blanket handler, which re-records the watch as `unknown_error`, increments `consecutive_failures`, and drops the change notification — one DNS blip at delivery time turns a good check into a failed one, silently. The same raise escapes into `_publish_success` after a job already won its COMPLETED CAS (`crawlutron/api/async_crawl_runner.py`). And the pre-loop validation is redundant anyway: `deliver_pinned_webhook` re-resolves fresh and fails closed per attempt.
+`validate_webhook_url_async` raises on transient DNS failure, resolver-budget timeout, and host-policy drift. In the watch sweep the *correct* check outcome has already been recorded; the raise propagates to the sweep's blanket handler, which re-records the watch as `unknown_error`, increments `consecutive_failures`, and drops the change notification — one DNS blip at delivery time turns a good check into a failed one, silently. The same raise escapes into `_publish_success` after a job already won its COMPLETED CAS (`crawlutron/service/async_crawl_runner.py`). And the pre-loop validation is redundant anyway: `deliver_pinned_webhook` re-resolves fresh and fails closed per attempt.
 
 **Fix:** delete the pre-loop validation (it's simultaneously the bug *and* a per-delivery DNS round-trip — see §5.3 item 5) and let the per-attempt pin path do its job. If you keep it, wrap the delivery await in the sweep.
 
@@ -412,12 +412,12 @@ Task A finishes → its callback is scheduled via `call_soon` → before it runs
 
 ### 3.7 [P2] `/v1/policy-suggestions` validates and rolls up unbounded rows on the event loop
 
-**Where:** `crawlutron/api/policy_suggestions.py:101-110` (`_valid_traces` — pydantic `model_validate` per row, on-loop), `:34-65` (per-page rollup with an O(n²) signature dedupe), fed by `result_store.apayloads()` (unbounded — see §2.8). One GET against a large retention store stalls the loop for seconds-to-minutes. Fix: move validation+rollup inside the `to_thread` offload, cap the signature set, and bound the record window (§2.8's cap is the real fix).
+**Where:** `crawlutron/service/policy_suggestions.py:101-110` (`_valid_traces` — pydantic `model_validate` per row, on-loop), `:34-65` (per-page rollup with an O(n²) signature dedupe), fed by `result_store.apayloads()` (unbounded — see §2.8). One GET against a large retention store stalls the loop for seconds-to-minutes. Fix: move validation+rollup inside the `to_thread` offload, cap the signature set, and bound the record window (§2.8's cap is the real fix).
 
 ### 3.8 [P2] Background-job lifecycle: zombies, queue-lies, and held semaphores
 
 - **Crash-orphaned PENDING single-shots are permanent zombies** — `crawlutron/api/job_recovery.py:44-45` skips every PENDING row whose kind isn't `whole_site`; nothing ever retires them, so `GET /v1/crawl/{id}` answers 202 "still pending" forever and the webhook never fires. Fail them in recovery the way RUNNING non-resumables are failed (`:29`).
-- **Async jobs claim RUNNING before the semaphore** — `crawlutron/api/async_crawl_runner.py:70-77`: under a flood of 202s, jobs sit `running` doing nothing (and consume concurrency quota while queued). Claim after acquiring, or add a QUEUED state.
+- **Async jobs claim RUNNING before the semaphore** — `crawlutron/service/async_crawl_runner.py:70-77`: under a flood of 202s, jobs sit `running` doing nothing (and consume concurrency quota while queued). Claim after acquiring, or add a QUEUED state.
 - **Webhook delivery with retries holds the crawl semaphore** — same file, the retry loop (up to ~60 s/attempt backoff) runs inside `async with _get_async_crawl_semaphore()`; one slow receiver starves crawl width. Move the POST outside the guarded block.
 - **Concurrency-quota TOCTOU on async doors** — `crawlutron/api/caller_auth.py:198-203` + `crawl_endpoint.py:138-142`/`jobs_router.py:88-89`: for `reserve_slot=False` the check→insert window contains awaits; two concurrent submits at `max_concurrency=N` both pass and both create. Reserve a tracker slot for async doors and release it at terminal, or make the quota check-and-insert one transaction.
 
@@ -493,14 +493,14 @@ LOC figures below are estimates verified by reading; "dead" items were grep-conf
 
 | # | Item | Location | LOC |
 |---|------|----------|-----|
-| D1 | `build_unified_crawl_response` (sync twin; only the async twin is called) | `crawlutron/api/response_shaping.py:70-81` | ~12 |
-| D2 | `validate_webhook_url` (sync twin; only async used) | `crawlutron/api/webhooks.py:179-185` | ~7 |
+| D1 | `build_unified_crawl_response` (sync twin; only the async twin is called) | `crawlutron/service/response_shaping.py:70-81` | ~12 |
+| D2 | `validate_webhook_url` (sync twin; only async used) | `crawlutron/service/webhooks.py:179-185` | ~7 |
 | D3 | `aformat_crawl_item` (no callers; `format_crawl_item` used synchronously inside an already-offloaded builder) | `crawlutron/api/unified_shaping.py:46-51` | ~7 |
 | D4 | `render_options_for`'s dict arm (only caller always passes `RenderRequest`; `RenderOptionsRequest` is `extra="forbid"`) | `crawlutron/api/render.py:43-54` | ~8 |
 | D5 | `_depends_singletons.py` — whole module re-declares `Depends(get_settings)` that typed Annotated deps already provide (and loses the annotation) | `crawlutron/api/_depends_singletons.py` | ~12 |
 | D6 | `tracked_task` (docstring promises a supervisor seam; zero callers) | `crawlutron/api/job_lifecycle.py:13-17` | ~5 |
 | D7 | Dead pre-validation block in `execute_crawl` (calls the engine that re-validates identically) | `crawlutron/api/crawl_executor.py:38-48` | ~10 |
-| D8 | `reset_process_state` in async runner (no repo caller) | `crawlutron/api/async_crawl_runner.py:47-55` | ~8 |
+| D8 | `reset_process_state` in async runner (no repo caller) | `crawlutron/service/async_crawl_runner.py:47-55` | ~8 |
 | D9 | `HOST_POLICY_ENTRY_POINTS` (declared, exported, zero consumers) | `crawlutron/models/host_policy.py:57-78` | ~22 |
 | D10 | `FrameCollector` + re-exports (zero callers; "back-compat" for an internal API) | `crawlutron/extraction/trees.py:75-95` + `content.py` exports | ~25 |
 | D11 | `parse_count` tally machinery (zero callers; a lock on the hot parse path exists only for it) | `crawlutron/extraction/trees.py:34-52` | ~12 |

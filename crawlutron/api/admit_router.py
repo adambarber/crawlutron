@@ -7,11 +7,11 @@ path the MCP ``admit`` tool's ``rest_route`` names.
 from __future__ import annotations
 
 from crawlutron.api._depends_singletons import settings_dep
-from crawlutron.api.admit_endpoint import admit_url
 from crawlutron.api.caller_auth import quota_denials
 from crawlutron.api.route_layer import guarded_router
 from crawlutron.models.admit_request import AdmitRequest
 from crawlutron.models.admit_response import AdmitResponse
+from crawlutron.service.admit_endpoint import admit_url
 
 router = guarded_router(tags=["Crawler"])
 

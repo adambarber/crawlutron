@@ -22,12 +22,12 @@ from crawlutron.api.dependencies import (
     get_shutdown_event,
     get_spill_store,
 )
-from crawlutron.api.policy_defaults import BROWSER_FALLBACK_POLICY, DOCUMENT_EXTRACTION_POLICY
 from crawlutron.api.route_layer import guarded_router
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.error_response import ErrorResponse
 from crawlutron.models.trace_response import TraceResponse
 from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
+from crawlutron.service.policy_defaults import BROWSER_FALLBACK_POLICY, DOCUMENT_EXTRACTION_POLICY
 from crawlutron.vocabulary.limits import LARGE_CRAWL_GUIDANCE
 
 router = guarded_router(tags=["Crawler"])

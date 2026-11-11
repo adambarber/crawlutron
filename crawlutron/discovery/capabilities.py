@@ -2,7 +2,6 @@
 
 from fastapi import APIRouter, Depends
 
-from crawlutron.api.dependencies import get_settings
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.discovery.links import OPENAPI_DOCS_LINK
 from crawlutron.models.auth_capabilities_record import AuthCapabilitiesRecord
@@ -174,10 +173,14 @@ def _crawl_timing_fields() -> CrawlTimingRecord:
 
 def create_capabilities_router() -> APIRouter:
     """Create capabilities router."""
+    from crawlutron.api.dependencies import get_settings as api_get_settings
+
     router = APIRouter(tags=["Discovery"])
 
     @router.get("/v1/capabilities", response_model=CapabilitiesResponse)
-    async def capabilities(settings: CrawlerSettings = Depends(get_settings)) -> CapabilitiesPayload:
+    async def capabilities(
+        settings: CrawlerSettings = Depends(api_get_settings),
+    ) -> CapabilitiesPayload:
         """Describe crawler capabilities."""
         return capabilities_payload(settings)
 

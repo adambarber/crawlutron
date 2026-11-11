@@ -131,8 +131,6 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/service/key_throttle.py": (2, 2),
     "crawlutron/service/policy_defaults.py": (2, 0),
     "crawlutron/api/policy_router.py": (2, 1),
-    "crawlutron/api/policy_suggestions.py": (0, 0),
-    # #849: re-export shim; the core moved to service/policy_suggestions.
     "crawlutron/api/mcp_router.py": (2, 1),
     "crawlutron/api/render.py": (3, 3),
     "crawlutron/api/render_endpoint.py": (3, 2),
@@ -181,30 +179,7 @@ DECLARED_SURFACE_RATCHET = {
     # #668: the shared process-meter skeleton the two throttles compose (the
     # jscpd logic gate's extraction, replacing two hand-copied ledger triples).
     "crawlutron/service/meter_ledger.py": (2, 2),
-    # #849 re-export shims: (0,0) — re-export is not ownership; a shim may grow
-    # no symbol of its own. Deleted at the shim drain (row + file, same commit).
-    "crawlutron/api/admit_endpoint.py": (0, 0),
-    "crawlutron/api/caller_concurrency.py": (0, 0),
-    "crawlutron/api/key_throttle.py": (0, 0),
-    "crawlutron/api/meter_ledger.py": (0, 0),
-    "crawlutron/api/policy_defaults.py": (0, 0),
-    "crawlutron/api/response_shaping.py": (0, 0),
-    "crawlutron/api/sweep_loop.py": (0, 0),
-    "crawlutron/api/unified_shaping.py": (0, 0),
-    "crawlutron/api/webhooks.py": (0, 0),
-    # C1b shim rows, same law: re-export is not ownership; deleted at the drain.
-    "crawlutron/api/async_crawl_runner.py": (0, 0),
-    "crawlutron/api/cache_sweep.py": (0, 0),
-    "crawlutron/api/crawl_executor.py": (0, 0),
-    "crawlutron/api/job_control.py": (0, 0),
-    "crawlutron/api/job_cores.py": (0, 0),
-    "crawlutron/api/job_runner.py": (0, 0),
-    "crawlutron/api/main_helpers.py": (0, 0),
-    "crawlutron/api/map_endpoint.py": (0, 0),
-    "crawlutron/api/spill_sweep.py": (0, 0),
-    "crawlutron/api/store_shutdown.py": (0, 0),
-    "crawlutron/api/watch_cores.py": (0, 0),
-    "crawlutron/api/watch_sweep.py": (0, 0),
+    "crawlutron/service/settings_access.py": (2, 1),
     "crawlutron/orchestration/admission_stall.py": (6, 4),
     "crawlutron/orchestration/recursive.py": (11, 7),
     "crawlutron/orchestration/request_pipeline.py": (5, 3),

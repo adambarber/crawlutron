@@ -247,7 +247,7 @@ async def _probe_webhook(monkeypatch, tmp_path):
 
 
 async def _probe_webhook_delivery(monkeypatch, tmp_path):
-    from crawlutron.api import webhooks
+    from crawlutron.service import webhooks
 
     effects = _effects()
     monkeypatch_wire_guard(monkeypatch, effects)
@@ -266,8 +266,8 @@ async def _probe_policy_suggestions(monkeypatch, tmp_path):
     rollup admits every stored URL through the deployment's policy, so a candidate rule
     about a refused host is not reviewable and surfaces as an empty proposal, not a raise.
     """
-    from crawlutron.api import policy_suggestions as module
     from crawlutron.models.trace_response import TraceResponse
+    from crawlutron.service import policy_suggestions as module
 
     async def _payloads_page(*, limit, cursor=None, owner=None):
         if cursor is not None:

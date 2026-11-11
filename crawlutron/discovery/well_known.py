@@ -45,14 +45,13 @@ def discovery_payload(settings: CrawlerSettings) -> DiscoveryPayload:
 
 def create_well_known_router() -> APIRouter:
     """Create well-known discovery router."""
-    from crawlutron.api.dependencies import get_settings
+    from crawlutron.api.dependencies import get_settings as api_get_settings
 
-    _settings_dep = get_settings
     router = APIRouter(tags=["Discovery"])
 
     @router.get("/.well-known/crawler-service", response_model=DiscoveryResponse)
     async def well_known_crawler_service(
-        settings: CrawlerSettings = Depends(_settings_dep),
+        settings: CrawlerSettings = Depends(api_get_settings),
     ) -> DiscoveryPayload:
         """Discover crawler service contracts."""
         return discovery_payload(settings)

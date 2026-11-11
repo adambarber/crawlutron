@@ -237,7 +237,7 @@ def _stash_state(
     app.state.audit_store = audit_store
     # ONE per-process register of in-flight sync work (crawl/map/render/search)
     # so every sync door counts against the caller's one concurrency ceiling.
-    from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
+    from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
 
     app.state.concurrency_tracker = CallerConcurrencyTracker()
 
@@ -449,7 +449,7 @@ async def _shutdown_services(_app: FastAPI) -> None:
     async def _close_gate() -> None:
         resource_gate().close()
 
-    from .api.store_shutdown import close_app_stores
+    from crawlutron.service.store_shutdown import close_app_stores
 
     async def _close_app_stores_step() -> None:
         await close_app_stores(_app, module_app())

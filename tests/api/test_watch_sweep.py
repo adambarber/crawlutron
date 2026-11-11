@@ -160,7 +160,7 @@ async def test_a_delivery_time_validation_failure_leaves_the_recorded_outcome_in
     """One DNS blip at webhook-delivery time must not turn a good check into a
     failed one (#450): the outcome ``arecord_check`` already wrote stands, and a
     delivery-time raise never reaches the sweep's failure recorder."""
-    from crawlutron.api import webhooks
+    from crawlutron.service import webhooks
 
     watch = register(watch_store, canonical(origin_url(etag_server)))
 

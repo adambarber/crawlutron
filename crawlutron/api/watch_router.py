@@ -1,7 +1,7 @@
 """``/v1/watches`` registration and status.
 
 Registration admits the URL through host policy and persists its identity; checking
-belongs to the sweep (:mod:`crawlutron.api.watch_sweep`). This router owns register/list/inspect/delete.
+belongs to the sweep (:mod:`crawlutron.service.watch_sweep`). This router owns register/list/inspect/delete.
 """
 
 from __future__ import annotations
@@ -11,7 +11,6 @@ from fastapi import Response
 from crawlutron.api.dependencies import CallerDep, SettingsDep, WatchStoreDep
 from crawlutron.api.exceptions import validation_http_error
 from crawlutron.api.route_layer import guarded_router
-from crawlutron.api.webhooks import ensure_https_webhook_url, validate_webhook_url_async
 from crawlutron.models.error_response import ErrorResponse
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.watch_create_request import WatchCreateRequest
@@ -26,6 +25,7 @@ from crawlutron.service.watch_cores import (
     register_watch_core,
 )
 from crawlutron.service.watch_sweep import WATCH_SWEEP_INTERVAL_SECONDS
+from crawlutron.service.webhooks import ensure_https_webhook_url, validate_webhook_url_async
 
 router = guarded_router(prefix="/v1/watches", tags=["Crawler"])
 
