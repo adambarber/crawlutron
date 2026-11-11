@@ -81,7 +81,12 @@ class TestSpillSweepLoop:
 
         with caplog.at_level("ERROR", logger="crawlutron.api.spill_sweep"):
             await asyncio.wait_for(
-                spill_sweep.sweep_spills_forever(store=None, shutdown_event=stop, interval_seconds=0.0),
+                spill_sweep.sweep_spills_forever(
+                    store=None,
+                    shutdown_event=stop,
+                    interval_seconds=0.0,
+                    max_age_seconds=3600.0,
+                ),
                 timeout=30,
             )
 
@@ -125,4 +130,26 @@ class TestSpillSweepWiring:
 
         assert swept and swept[0] is app.state.spill_store, (
             "the sweep must run against the shared spill store production writes"
+        )
+
+    async def test_the_spill_sweep_max_age_is_the_resolved_result_ttl(self, monkeypatch, tmp_path):
+        from crawlutron.storage.result_store import CrawlSpillStore
+
+        monkeypatch.setenv("CRAWLUTRON_RESULT_TTL_SECONDS", "1234.5")
+        app = self._wired_app(monkeypatch, tmp_path)
+        seen: list[float] = []
+
+        async def recording_twin(self, max_age_seconds):
+            seen.append(max_age_seconds)
+            return 0
+
+        monkeypatch.setattr(CrawlSpillStore, "agc_stale_spills", recording_twin)
+
+        async with app.router.lifespan_context(app):
+            await asyncio.sleep(0)  # one loop turn: the first tick runs
+            app.state.shutdown_event.set()
+            await asyncio.wait_for(app.state.spill_maintenance_task, timeout=10)
+
+        assert seen and seen[0] == 1234.5, (
+            "the GC's max age must equal the resolved result TTL, not a second literal"
         )

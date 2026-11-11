@@ -13,15 +13,11 @@ from crawlutron.storage.result_store import CrawlSpillStore
 
 logger = logging.getLogger(__name__)
 
-# Rows a released request owns are garbage once the result TTL window closes:
-# the durable copy lives in ``results`` under its own TTL, so the spill copy
-# never needs to outlive CRAWLUTRON_RESULT_TTL_SECONDS. The sweep cadence is
-# the cache sweep's -- one maintenance lane, one tick.
-SPILL_MAX_AGE_SECONDS = 3600.0
+# Spill rows are age-garbage once the result TTL closes; the max age is wired
+# from create_app's single CRAWLUTRON_RESULT_TTL_SECONDS read.
 SPILL_SWEEP_INTERVAL_SECONDS = 300.0
 
 __all__ = [
-    "SPILL_MAX_AGE_SECONDS",
     "SPILL_SWEEP_INTERVAL_SECONDS",
     "spill_maintenance_once",
     "sweep_spills_forever",
@@ -31,7 +27,7 @@ __all__ = [
 async def spill_maintenance_once(
     store: CrawlSpillStore | None = None,
     *,
-    max_age_seconds: float = SPILL_MAX_AGE_SECONDS,
+    max_age_seconds: float,
 ) -> int:
     """Run the shared spill store's async age GC once; return rows reclaimed."""
     spill = store if store is not None else _shared_spill_store()
@@ -54,7 +50,7 @@ async def sweep_spills_forever(
     *,
     shutdown_event: asyncio.Event,
     interval_seconds: float = SPILL_SWEEP_INTERVAL_SECONDS,
-    max_age_seconds: float = SPILL_MAX_AGE_SECONDS,
+    max_age_seconds: float,
 ) -> None:
     """Run ``spill_maintenance_once`` on a bounded cadence until shutdown.
 

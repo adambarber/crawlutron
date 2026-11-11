@@ -94,9 +94,9 @@ DECLARED_SURFACE_RATCHET = {
     # (operator_caller: the shared operator identity the keys door and resolver read).
     "crawlutron/api/cache_sweep.py": (3, 2),
     "crawlutron/api/sweep_loop.py": (2, 1),
-    # Spill sweep (#753): one GC lane beside the cache sweep; the derived
-    # shared-store lookup rides as the fifth public symbol.
-    "crawlutron/api/spill_sweep.py": (5, 2),
+    # Spill sweep (#753): one GC lane beside the cache sweep; max_age is wired
+    # from the result store's ttl_seconds, not a second literal.
+    "crawlutron/api/spill_sweep.py": (4, 2),
     "crawlutron/api/store_shutdown.py": (1, 1),
     "crawlutron/api/caller_auth.py": (22, 19),
     "crawlutron/api/caller_concurrency.py": (1, 1),

@@ -55,8 +55,7 @@ _TeardownStep = tuple[str, Callable[[], Awaitable[None]]]
 async def _run_shutdown_steps(steps: Sequence[_TeardownStep]) -> None:
     """Run every teardown step, then report the ones that failed.
 
-    Shutdown is where one failure must not decide what else is released, so each
-    step runs whatever its predecessor did; failures raise together at the end.
+    One failure must not decide what else is released; failures raise together.
     """
     failures: list[str] = []
     for name, step in steps:
@@ -382,8 +381,9 @@ async def _recover_jobs_and_start_sweep(_app: FastAPI, settings: CrawlerSettings
     _app.state.shutdown_event = shutdown_event
     await recover_and_start_pending_jobs(_app.state.job_store, settings, shutdown_event, start_job)
     _app.state.cache_maintenance_task = asyncio.create_task(sweep_cache_forever(shutdown_event))
+    ttl = _app.state.result_store.ttl_seconds
     _app.state.spill_maintenance_task = asyncio.create_task(
-        sweep_spills_forever(_app.state.spill_store, shutdown_event=shutdown_event)
+        sweep_spills_forever(_app.state.spill_store, shutdown_event=shutdown_event, max_age_seconds=ttl)
     )
     _app.state.watch_sweep_task = asyncio.create_task(
         sweep_watches_forever(
@@ -414,8 +414,6 @@ def _load_cookie_jar(settings: CrawlerSettings, _app: FastAPI, database_path: st
     jar = CookieJar(SharedCookieStore(database_path))
     jar.import_file_into(settings.cookie_jar_path)
     cookie_jar_module.set_global_cookie_jar(jar)
-    # Published like ``shutdown_event``: what the process is using
-    # is otherwise answerable only via the module global the lifespan assigned.
     _app.state.cookie_jar = jar
 
 
