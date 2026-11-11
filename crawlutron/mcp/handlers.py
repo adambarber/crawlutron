@@ -28,7 +28,7 @@ from crawlutron.models.policy_suggestions_response import PolicySuggestionsRespo
 from crawlutron.safety.json_safe import json_default
 from crawlutron.search.endpoint import search as search_endpoint_handler
 from crawlutron.service.admit_endpoint import admit_url
-from crawlutron.service.caller_auth import Tracking, admit, bound_render_cookie_namespace
+from crawlutron.service.caller_auth import CALLER_QUOTA_ADMISSION, CallerQuotaAdmission, Tracking
 from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
 from crawlutron.service.crawl_endpoint_cores import delta_context_for
 from crawlutron.service.crawl_executor import execute_crawl
@@ -164,6 +164,8 @@ class DoorEnv(Protocol):
     def result_store(self) -> CrawlResultStore | None: ...
     @property
     def concurrency_tracker(self) -> CallerConcurrencyTracker | None: ...
+    @property
+    def caller_auth(self) -> CallerQuotaAdmission | None: ...
 
 
 class _DoorKwargs(TypedDict, total=False):
@@ -180,6 +182,7 @@ class _DoorKwargs(TypedDict, total=False):
     result_store: NotRequired[CrawlResultStore | None]
     concurrency_tracker: NotRequired[CallerConcurrencyTracker | None]
     caller: NotRequired[CallerIdentity | None]
+    caller_auth: NotRequired[CallerQuotaAdmission | None]
 
 
 @dataclass(frozen=True)
@@ -196,6 +199,7 @@ class _ToolDoor:
     result_store: CrawlResultStore | None = None
     concurrency_tracker: CallerConcurrencyTracker | None = None
     caller: CallerIdentity | None = None
+    caller_auth: CallerQuotaAdmission | None = None
 
 
 async def _admit_tool(
@@ -205,17 +209,19 @@ async def _admit_tool(
     tracking: Tracking,
     payload: CrawlRequest | MapRequest | None = None,
     work: Callable[[], Awaitable[ToolResult]],
+    caller_auth: CallerQuotaAdmission | None = None,
 ) -> ToolResult:
     """Admit one fetch tool under the readiness gate: request_gate OUTER, admit INNER.
 
     Every fetch tool funnels through here, so the MCP surface shares the HTTP
     doors' single gate: /ready counts MCP work and the capacity cap refuses it.
     """
+    port = CALLER_QUOTA_ADMISSION if caller_auth is None else caller_auth
     # request_gate OUTER, admit INNER: the count takes the slot first, so a quota-
     # rejected request holds it only for the brief admission (the HTTP door order).
     try:
         with request_gate("mcp_request_rejected", logger=_logger):
-            async with admit(caller, pages, tracking=tracking, payload=payload):
+            async with port.admit(caller, pages, tracking=tracking, payload=payload):
                 return await work()
     except (HTTPException, DomainError) as error:
         return _tool_error(error)
@@ -240,6 +246,7 @@ async def _guarded_crawl(
     concurrency_tracker=None,
     job_store=None,
     result_store=None,
+    caller_auth=None,
 ) -> ToolResult:
     """The delivery refusal check, the caller admission, then the crawl, in one place.
 
@@ -253,6 +260,7 @@ async def _guarded_crawl(
         pages,
         payload=payload,
         tracking=tracking,
+        caller_auth=caller_auth,
         work=lambda: tool_result(
             projected(
                 _crawled(payload, settings, shutdown_event, caller_for(caller).caller_id, result_store),
@@ -265,6 +273,11 @@ async def _guarded_crawl(
 def _tracking(door: DoorEnv) -> Tracking:
     """The caller tracking every admitted door composes."""
     return Tracking(job_store=door.job_store, concurrency_tracker=door.concurrency_tracker)
+
+
+def _port(door: DoorEnv) -> CallerQuotaAdmission:
+    """The door's injected admission port, defaulting to the module's instance."""
+    return CALLER_QUOTA_ADMISSION if door.caller_auth is None else door.caller_auth
 
 
 async def _running_answer(payload, job_store, result_store, caller, read) -> ToolResult:
@@ -318,6 +331,7 @@ async def _crawl_door(payload: BaseModel, door: DoorEnv, projection: CrawlProjec
         concurrency_tracker=door.concurrency_tracker,
         job_store=door.job_store,
         result_store=door.result_store,
+        caller_auth=door.caller_auth,
     )
 
 
@@ -335,12 +349,13 @@ async def _render_door(payload: BaseModel, door: DoorEnv) -> ToolResult:
     requested = len(render_payload.urls) if render_payload.urls is not None else 1
     # The namespace binds around the whole admit, so the gate and the work
     # both run under it; an MCP render's harvest keys by the caller's key id.
-    async with bound_render_cookie_namespace(caller_for(door.caller)):
+    async with _port(door).bound_render_cookie_namespace(caller_for(door.caller)):
         return await _admit_tool(
             door.caller,
             requested,
             tracking=_tracking(door),
             work=lambda: tool_result(render_endpoint_handler(render_payload, settings=settings)),
+            caller_auth=door.caller_auth,
         )
 
 
@@ -351,6 +366,7 @@ async def _search_door(payload: BaseModel, door: DoorEnv) -> ToolResult:
         caller,
         0,
         tracking=_tracking(door),
+        caller_auth=door.caller_auth,
         work=lambda: tool_result(
             search_endpoint_handler(
                 cast("SearchRequest", payload),
@@ -369,6 +385,7 @@ async def _map_door(payload: BaseModel, door: DoorEnv) -> ToolResult:
         map_payload.policy.limits.max_pages,
         payload=map_payload,
         tracking=_tracking(door),
+        caller_auth=door.caller_auth,
         work=lambda: tool_result(
             map_site(map_payload, settings=door.settings, shutdown_event=door.shutdown_event)
         ),
@@ -381,6 +398,7 @@ async def _read_door(payload: BaseModel, door: DoorEnv, door_data: DoorBinding) 
         door.caller,
         0,
         tracking=_tracking(door),
+        caller_auth=door.caller_auth,
         work=lambda: _running_answer(payload, door.job_store, door.result_store, door.caller, door_data.core),
     )
 

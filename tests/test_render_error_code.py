@@ -10,6 +10,7 @@ from crawlutron.api.identity_router import render as render_door
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.render_request import RenderRequest
+from crawlutron.service.caller_auth import CALLER_QUOTA_ADMISSION
 from crawlutron.service.errors import ValidationRefusal
 from tests._browser_doubles import FakeBrowserPool, owned_browser_pool
 
@@ -32,7 +33,7 @@ async def test_render_value_error_reports_validation_error_code(monkeypatch, _po
 
     payload = RenderRequest(urls=["http://example.com/", "http://example.com/2"])
     with pytest.raises(ValidationRefusal) as exc_info:
-        await render_door(payload, CallerIdentity(), Tracking(), settings)
+        await render_door(payload, CallerIdentity(), Tracking(), CALLER_QUOTA_ADMISSION, settings)
 
     # The carrier IS the envelope triplet the service raises (the render door pins
     # the 400 status through its own rejection factory at the gate).

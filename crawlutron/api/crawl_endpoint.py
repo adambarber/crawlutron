@@ -12,7 +12,6 @@ from fastapi import Request
 from fastapi.responses import JSONResponse, Response
 
 from crawlutron.admission.payload_helpers import checked_payload_urls
-from crawlutron.api.caller_auth import Tracking, admit, anonymous_caller
 from crawlutron.api.exceptions import http_error
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.delta import DeltaContext
@@ -24,6 +23,7 @@ from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.trace_response import TraceResponse
 from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.runtime.metrics import get_metrics
+from crawlutron.service.caller_auth import CALLER_QUOTA_ADMISSION, CallerQuotaAdmission, Tracking
 from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
 from crawlutron.service.crawl_endpoint_cores import (
     delta_context_for,
@@ -114,9 +114,11 @@ async def crawl(
     request: Request | None = None,
     caller: CallerIdentity | None = None,
     concurrency_tracker: CallerConcurrencyTracker | None = None,
+    admission: CallerQuotaAdmission | None = None,
 ) -> JSONResponse | Response | UnifiedCrawlResponse:
     """Execute a policy-driven crawl (sync or async webhook mode)."""
-    active_caller = caller if caller is not None else anonymous_caller()
+    port = CALLER_QUOTA_ADMISSION if admission is None else admission
+    active_caller = caller if caller is not None else port.anonymous_caller()
     # One admission for both doors: sync holds a slot for the crawl's life; async
     # persists a durable job row. The whole dispatch stays under the gate.
     with request_gate("crawl_request_rejected", logger=_logger, reject=_crawl_rejection):
@@ -130,6 +132,7 @@ async def crawl(
         return await _admitted_crawl(
             payload,
             active_caller=active_caller,
+            admission=port,
             settings=settings,
             job_store=job_store,
             result_store=result_store,
@@ -150,6 +153,7 @@ async def _admitted_crawl(
     payload: CrawlRequest,
     *,
     active_caller: CallerIdentity,
+    admission: CallerQuotaAdmission,
     settings: CrawlerSettings,
     job_store,
     result_store: CrawlResultStore,
@@ -165,7 +169,7 @@ async def _admitted_crawl(
     """One admission for both doors: sync holds a slot; async persists a durable job row."""
     async_door = bool(payload.async_mode or webhook_url)
     tracking = Tracking(job_store=job_store, concurrency_tracker=concurrency_tracker)
-    async with admit(
+    async with admission.admit(
         active_caller,
         payload.policy.limits.max_pages,
         tracking=tracking,

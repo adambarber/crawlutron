@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import AsyncGenerator, Mapping
+from collections.abc import AsyncGenerator, Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -25,8 +25,6 @@ from tests._async_harnesses import serve
 from tests._policy_factories import job_store as make_store
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from fastapi import Request
 
 
@@ -94,11 +92,14 @@ async def service_client(
     *,
     routers: Mapping[str, APIRouter],
     with_results: bool = False,
+    wire: Callable[[FastAPI], None] | None = None,
 ) -> AsyncGenerator[tuple[AsyncClient, JobStore, CallerKeyStore], None]:
     """Serve a keyed HTTP client over one register and one key admin and ``routers``.
 
     ``with_results`` also wires a result store and propagates the job store to
-    ``app.state`` for the MCP door. Yields the client, job store, and key store."""
+    ``app.state`` for the MCP door. ``wire`` runs once the app is mounted, so a
+    test substitutes app-wiring state (e.g. the admission port) at the same
+    injection point production uses. Yields the client, job store, and key store."""
     job_store, results, keys = stores(tmp_path)
     app = harness_app(*routers.values())
     app.state.job_store = job_store
@@ -106,6 +107,8 @@ async def service_client(
     if with_results:
         app.state.result_store = results
         overrides[get_result_store] = lambda: results
+    if wire is not None:
+        wire(app)
     async with keyed_client(app, keys=keys, overrides=overrides) as client:
         try:
             yield client, job_store, keys
@@ -113,6 +116,15 @@ async def service_client(
             job_store.close()
             results.close()
             keys.close()
+
+
+def mcp_crawl_keys_routers() -> dict[str, APIRouter]:
+    """The /mcp + /v1/crawl + /v1/keys router map the cross-door suites serve."""
+    from crawlutron.api.crawl_router import router as crawl_router
+    from crawlutron.api.keys_router import router as keys_router
+    from crawlutron.api.mcp_router import router as mcp_router
+
+    return {"mcp": mcp_router, "crawl": crawl_router, "keys": keys_router}
 
 
 @contextlib.asynccontextmanager

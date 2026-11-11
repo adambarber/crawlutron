@@ -16,12 +16,15 @@ __all__ = ["harness_app", "mount_concurrency_tracker", "mounted_app"]
 def harness_app(*routers, safety_stack: bool = True) -> FastAPI:
     """A FastAPI app over ``routers`` carrying the service's safety stack."""
     from crawlutron.main import install_error_surface
+    from crawlutron.service.caller_auth import CALLER_QUOTA_ADMISSION
 
     app = FastAPI()
     for router in routers:
         app.include_router(router)
     if safety_stack:
         install_error_surface(app)
+    if getattr(app.state, "caller_quota_admission", None) is None:
+        app.state.caller_quota_admission = CALLER_QUOTA_ADMISSION
     return app
 
 

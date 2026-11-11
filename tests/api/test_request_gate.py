@@ -24,6 +24,7 @@ from crawlutron.models.map_request import MapRequest
 from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
 from crawlutron.runtime.metrics import get_metrics
 from crawlutron.service import async_crawl_runner, main_helpers, map_endpoint
+from crawlutron.service.caller_auth import CALLER_QUOTA_ADMISSION
 from crawlutron.service.errors import DomainError
 from crawlutron.service.main_helpers import request_gate
 from crawlutron.storage.result_store import CrawlResultStore, CrawlSpillStore
@@ -137,6 +138,7 @@ async def test_map_holds_a_readiness_slot_only_while_it_runs(monkeypatch):
         MapRequest(url="http://example.com/"),
         CallerIdentity(),
         Tracking(),
+        CALLER_QUOTA_ADMISSION,
         CrawlerSettings.from_mapping(),
         asyncio.Event(),
     )

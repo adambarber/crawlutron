@@ -107,7 +107,7 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/api/crawl_router.py": (4, 3),
     # #656 raised 16,7 -> 18,8: get_concurrency_tracker + TrackerDep make the
     # app-state stash load-bearing (the getattr-None scatter is refused loudly).
-    "crawlutron/api/dependencies.py": (20, 9),
+    "crawlutron/api/dependencies.py": (22, 10),
     # #813: is_quota_refusal is the named quota-refusal match the sweep reads.
     # #849: the predicate single-homed to service/errors; handler joins here.
     "crawlutron/api/exceptions.py": (10, 8),
@@ -134,7 +134,9 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/api/mcp_router.py": (2, 1),
     "crawlutron/api/render.py": (3, 3),
     "crawlutron/api/render_endpoint.py": (3, 2),
-    "crawlutron/service/caller_auth.py": (11, 10),
+    # RAISED to (14, 12) by #854: the CallerQuotaAdmission port (Protocol, concrete
+    # binding, default instance) joins the core so doors consume the interface.
+    "crawlutron/service/caller_auth.py": (14, 12),
     "crawlutron/service/crawl_endpoint_cores.py": (4, 4),
     "crawlutron/service/policy_suggestions.py": (3, 2),
     "crawlutron/service/watch_sweep.py": (4, 2),
