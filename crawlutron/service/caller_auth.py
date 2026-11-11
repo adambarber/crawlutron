@@ -6,10 +6,10 @@ api.caller_auth; everything here is caller law the MCP layer shares.
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, Mapping
-from contextlib import asynccontextmanager
+from collections.abc import AsyncGenerator, Callable, Mapping
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
 from crawlutron.admission.policy import DEFAULT_MAX_PAGES
 from crawlutron.models.caller_identity import CallerIdentity
@@ -29,6 +29,31 @@ if TYPE_CHECKING:
     #: Every carrier of a mutable ``CrawlPolicy`` the admit helper writes the resolved
     #: page bound and cookie namespace into; crawl and map are the two today.
     PolicyCarrier = CrawlRequest | MapRequest
+
+
+@runtime_checkable
+class CallerQuotaAdmission(Protocol):
+    """The admission PORT the doors consume: caller-quota law behind one interface.
+
+    Doors resolve this from app wiring (ONE injection point), never per call site.
+    """
+
+    #: One declaration of the admit call-shape; the concrete class binds the law to it.
+    admit: Callable[..., AbstractAsyncContextManager[str]]
+
+    def resolve_page_limit(self, caller: CallerIdentity, requested_max_pages: int) -> int: ...
+
+    def effective_cookie_namespace(self, profile: Mapping[str, object], caller: CallerIdentity) -> str: ...
+
+    def refuse_anonymous_cookie_namespace(
+        self, caller: CallerIdentity, profile: RequestProfileRecord
+    ) -> None: ...
+
+    def anonymous_caller(self) -> CallerIdentity: ...
+
+    def bound_render_cookie_namespace(
+        self, caller: CallerIdentity | None
+    ) -> AbstractAsyncContextManager[None]: ...
 
 
 @dataclass(frozen=True)
@@ -197,7 +222,40 @@ def _apply_payload_policy(payload: PolicyCarrier, active: CallerIdentity, resolv
     return policy
 
 
+class DefaultCallerQuotaAdmission:
+    """The concrete port: the module's admission law behind the interface."""
+
+    def __init__(self) -> None:
+        self.admit = admit
+
+    def resolve_page_limit(self, caller: CallerIdentity, requested_max_pages: int) -> int:
+        return resolve_page_limit(caller, requested_max_pages)
+
+    def effective_cookie_namespace(self, profile: Mapping[str, object], caller: CallerIdentity) -> str:
+        return effective_cookie_namespace(profile, caller)
+
+    def refuse_anonymous_cookie_namespace(
+        self, caller: CallerIdentity, profile: RequestProfileRecord
+    ) -> None:
+        refuse_anonymous_cookie_namespace(caller, profile)
+
+    def anonymous_caller(self) -> CallerIdentity:
+        return anonymous_caller()
+
+    def bound_render_cookie_namespace(
+        self, caller: CallerIdentity | None
+    ) -> AbstractAsyncContextManager[None]:
+        return bound_render_cookie_namespace(caller)
+
+
+#: The default instance the wiring stashes; substitution happens at the wiring site.
+#: Named cast for basedpyright CM variance; conformance is asserted by test_caller_quota_port.py.
+CALLER_QUOTA_ADMISSION = cast("CallerQuotaAdmission", DefaultCallerQuotaAdmission())
+
 __all__ = [
+    "CALLER_QUOTA_ADMISSION",
+    "CallerQuotaAdmission",
+    "DefaultCallerQuotaAdmission",
     "Tracking",
     "admit",
     "anonymous_caller",

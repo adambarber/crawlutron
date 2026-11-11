@@ -14,6 +14,7 @@ from fastapi import Depends, Request
 from crawlutron.api.caller_auth import Tracking, get_caller_identity, get_keys_caller
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.caller_identity import CallerIdentity
+from crawlutron.service.caller_auth import CallerQuotaAdmission
 from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
 from crawlutron.service.errors import DomainError
 from crawlutron.service.settings_access import get_settings as get_app_settings
@@ -79,6 +80,18 @@ def get_tracking(request: Request, job_store: JobStoreDep, tracker: TrackerDep) 
     return Tracking(job_store=job_store, concurrency_tracker=tracker)
 
 
+def get_caller_quota(request: Request) -> CallerQuotaAdmission:
+    """FastAPI dependency: the caller-quota admission port wired at construction."""
+    admission = getattr(request.app.state, "caller_quota_admission", None)
+    if admission is None:
+        raise DomainError(
+            500,
+            "caller_quota_unwired",
+            "the caller-quota admission port is not wired into app.state",
+        )
+    return admission
+
+
 # One declaration per provider, Annotated rather than a default so the dependency is
 # declared: an unannotated provider makes the alias, and every endpoint, carry Any.
 CallerKeyStoreDep = Annotated[CallerKeyStore, Depends(get_caller_key_store)]
@@ -91,10 +104,12 @@ ResultStoreDep = Annotated[CrawlResultStore, Depends(get_result_store)]
 SpillStoreDep = Annotated[CrawlSpillStore | None, Depends(get_spill_store)]
 WatchStoreDep = Annotated[WatchStore, Depends(get_watch_store)]
 TrackingDep = Annotated[Tracking, Depends(get_tracking)]
+AdmissionDep = Annotated[CallerQuotaAdmission, Depends(get_caller_quota)]
 TrackerDep = Annotated[CallerConcurrencyTracker, Depends(get_concurrency_tracker)]
 
 
 __all__ = [
+    "AdmissionDep",
     "CallerDep",
     "KeysCallerDep",
     "CallerKeyStoreDep",
@@ -107,6 +122,7 @@ __all__ = [
     "WatchStoreDep",
     "TrackingDep",
     "get_caller_key_store",
+    "get_caller_quota",
     "get_concurrency_tracker",
     "get_job_store",
     "get_result_store",

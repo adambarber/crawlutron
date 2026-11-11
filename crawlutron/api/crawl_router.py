@@ -14,6 +14,7 @@ from crawlutron.api.crawl_endpoint import crawl as crawl_handler
 from crawlutron.api.crawl_endpoint import get_crawl_result as get_crawl_result_handler
 from crawlutron.api.crawl_endpoint import get_crawl_trace as get_crawl_trace_handler
 from crawlutron.api.dependencies import (
+    AdmissionDep,
     CallerDep,
     TrackerDep,
     get_job_store,
@@ -121,6 +122,7 @@ async def crawl(
     request: Request,
     caller: CallerDep,
     tracker: TrackerDep,
+    admission: AdmissionDep,
     payload: CrawlRequest = Body(
         ...,
         examples=[
@@ -146,6 +148,7 @@ async def crawl(
         request=request,
         caller=caller,
         concurrency_tracker=tracker,
+        admission=admission,
     )
 
 

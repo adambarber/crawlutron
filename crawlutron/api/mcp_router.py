@@ -69,6 +69,15 @@ async def mcp_endpoint(
             status_code=400,
             content=error_response(None, INVALID_REQUEST, "Invalid Request"),
         )
+    # An MCP door built without the stash is a wiring defect: refuse 500
+    # caller_quota_unwired instead of admitting through the silent singleton default.
+    caller_auth = getattr(request.app.state, "caller_quota_admission", None)
+    if caller_auth is None:
+        raise DomainError(
+            500,
+            "caller_quota_unwired",
+            "the caller-quota admission port is not wired into app.state",
+        )
     status, payload = await handle_mcp_request(
         body,
         protocol_version_header=request.headers.get("mcp-protocol-version"),
@@ -81,6 +90,7 @@ async def mcp_endpoint(
         watch_store=getattr(request.app.state, "watch_store", None),
         result_store=getattr(request.app.state, "result_store", None),
         caller=caller,
+        caller_auth=caller_auth,
     )
     if payload is None:
         return Response(status_code=202)

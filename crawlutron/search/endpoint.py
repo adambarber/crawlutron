@@ -12,7 +12,7 @@ from crawlutron.models.search_result_item import SearchResultItem
 from crawlutron.runtime.metrics import get_metrics
 from crawlutron.search.providers import SearchProviderError, SearchProviderUnavailable
 from crawlutron.search.providers_api import get_search_provider
-from crawlutron.service.caller_auth import anonymous_caller
+from crawlutron.service.caller_auth import CALLER_QUOTA_ADMISSION, CallerQuotaAdmission
 from crawlutron.service.errors import SearchProviderError as DomainProviderError
 from crawlutron.service.errors import SearchProviderUnavailable as DomainProviderUnavailable
 
@@ -24,13 +24,15 @@ async def search(
     *,
     settings,
     caller: CallerIdentity | None = None,
+    caller_auth: CallerQuotaAdmission | None = None,
 ) -> SearchResponse:
     """Run a web search against the configured provider and shape the results.
 
     Readiness admission (``request_gate``) and caller admission (``admit``) live
     at the door; this runs only the provider search.
     """
-    active_caller = caller if caller is not None else anonymous_caller()
+    port = CALLER_QUOTA_ADMISSION if caller_auth is None else caller_auth
+    active_caller = caller if caller is not None else port.anonymous_caller()
     caller_id = active_caller.caller_id
     try:
         provider = get_search_provider(settings)

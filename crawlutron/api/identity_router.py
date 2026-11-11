@@ -10,8 +10,8 @@ import logging
 from typing import TYPE_CHECKING
 
 from crawlutron.api._depends_singletons import settings_dep, shutdown_event_dep
-from crawlutron.api.caller_auth import admit, bound_render_cookie_namespace, quota_denials
-from crawlutron.api.dependencies import CallerDep, TrackingDep
+from crawlutron.api.caller_auth import quota_denials
+from crawlutron.api.dependencies import AdmissionDep, CallerDep, TrackingDep
 from crawlutron.api.render_endpoint import render as render_handler
 from crawlutron.api.render_endpoint import render_rejection
 from crawlutron.api.route_layer import guarded_router
@@ -52,13 +52,16 @@ async def map(
     payload: map_request.MapRequest,
     caller: CallerDep,
     tracking: TrackingDep,
+    admission: AdmissionDep,
     settings=settings_dep,
     shutdown_event=shutdown_event_dep,
 ) -> SiteMapPayload:
     # Request_gate OUTER (the readiness count includes quota-
     # rejected requests), admit INNER -- the one order every door shares.
     with request_gate("map_request_rejected", logger=logger):
-        async with admit(caller, payload.policy.limits.max_pages, tracking=tracking, payload=payload):
+        async with admission.admit(
+            caller, payload.policy.limits.max_pages, tracking=tracking, payload=payload
+        ):
             return await map_site(payload, settings=settings, shutdown_event=shutdown_event)
 
 
@@ -76,14 +79,15 @@ async def render(
     payload: render_request.RenderRequest,
     caller: CallerDep,
     tracking: TrackingDep,
+    admission: AdmissionDep,
     settings=settings_dep,
 ) -> UnifiedCrawlResponse:
     requested = len(payload.urls) if payload.urls is not None else 1
     with request_gate("render_request_rejected", logger=logger, reject=render_rejection):
-        async with admit(caller, requested, tracking=tracking):
+        async with admission.admit(caller, requested, tracking=tracking):
             # The render door has no policy carrier, so the caller's cookie
             # namespace is bound here -- a keyed harvest never lands in the shared slot.
-            async with bound_render_cookie_namespace(caller):
+            async with admission.bound_render_cookie_namespace(caller):
                 return await render_handler(payload, settings=settings)
 
 
@@ -112,10 +116,11 @@ async def search(
     payload: search_request.SearchRequest,
     caller: CallerDep,
     tracking: TrackingDep,
+    admission: AdmissionDep,
     settings=settings_dep,
 ) -> SearchResponse:
     with request_gate("search_request_rejected", logger=logger):
-        async with admit(caller, 0, tracking=tracking):
+        async with admission.admit(caller, 0, tracking=tracking):
             return await search_handler(payload, settings=settings, caller=caller)
 
 

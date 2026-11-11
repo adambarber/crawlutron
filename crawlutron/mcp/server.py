@@ -183,12 +183,9 @@ async def call_tool(
     body: dict[str, JsonValue],
     settings,
     shutdown_event,
-    concurrency_tracker=None,
-    job_store=None,
-    watch_store=None,
-    result_store=None,
-    caller=None,
+    **door,
 ) -> JsonValue:
+    """Invoke one declared tool; the door environment forwards to dispatch."""
     from crawlutron.mcp.handlers import dispatch, validation_message
     from crawlutron.mcp.registry import TOOLS_BY_NAME
 
@@ -216,17 +213,7 @@ async def call_tool(
                 "isError": True,
             },
         )
-    result = await dispatch(
-        spec,
-        payload,
-        settings=settings,
-        shutdown_event=shutdown_event,
-        concurrency_tracker=concurrency_tracker,
-        job_store=job_store,
-        watch_store=watch_store,
-        result_store=result_store,
-        caller=caller,
-    )
+    result = await dispatch(spec, payload, settings=settings, shutdown_event=shutdown_event, **door)
     success: dict[str, JsonValue] = {
         "resultType": "complete",
         "content": [{"type": "text", "text": result.text}],
@@ -257,12 +244,7 @@ async def _dispatch_method(
     params: dict[str, JsonValue],
     settings,
     shutdown_event,
-    *,
-    concurrency_tracker,
-    job_store,
-    watch_store,
-    result_store,
-    caller,
+    **door,
 ) -> tuple[int, JsonValue | None]:
     """Route one validated method; an unknown method is a 404."""
     if method == "server/discover":
@@ -270,17 +252,7 @@ async def _dispatch_method(
     if method == "tools/list":
         return 200, result_response(request_id, tools_list_result())
     if method == "tools/call":
-        return 200, await call_tool(
-            request_id,
-            params,
-            settings,
-            shutdown_event,
-            concurrency_tracker=concurrency_tracker,
-            job_store=job_store,
-            watch_store=watch_store,
-            result_store=result_store,
-            caller=caller,
-        )
+        return 200, await call_tool(request_id, params, settings, shutdown_event, **door)
     return 404, error_response(request_id, METHOD_NOT_FOUND, f"Method not found: {method}")
 
 
@@ -297,6 +269,7 @@ async def handle_mcp_request(
     watch_store=None,
     result_store=None,
     caller=None,
+    caller_auth=None,
 ) -> tuple[int, JsonValue | None]:
     """Process one JSON-RPC message; returns ``(http_status, payload_or_None)``.
 
@@ -335,6 +308,7 @@ async def handle_mcp_request(
             watch_store=watch_store,
             result_store=result_store,
             caller=caller,
+            caller_auth=caller_auth,
         )
     except ProtocolValidationError as error:
         return error.status_code, error.payload

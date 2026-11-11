@@ -10,9 +10,6 @@ import contextlib
 import json
 from pathlib import Path
 
-from crawlutron.api.crawl_router import router as crawl_router
-from crawlutron.api.keys_router import router as keys_router
-from crawlutron.api.mcp_router import router as mcp_router
 from crawlutron.storage.job_store import JobStatus
 from tests._async_harnesses import issue_key
 from tests._concurrency_probe import block_execute_crawl
@@ -24,9 +21,11 @@ PROTOCOL = "2026-07-28"
 @contextlib.asynccontextmanager
 async def _mcp_client(tmp_path: Path):
     """Isolated app serving /mcp + /v1/crawl + /v1/keys over one register and job store."""
+    from tests._quota_harness import mcp_crawl_keys_routers
+
     async with service_client(
         tmp_path,
-        routers={"mcp": mcp_router, "crawl": crawl_router, "keys": keys_router},
+        routers=mcp_crawl_keys_routers(),
         with_results=True,
     ) as (client, job_store, keys):
         yield client, job_store, keys

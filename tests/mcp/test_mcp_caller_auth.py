@@ -27,3 +27,29 @@ class TestCallerAuth:
         )
         resp = await mcp_post(async_client, body, {"X-API-Key": "definitely-not-a-key"})
         _assert_401_api_key(resp)
+
+
+async def test_an_unwired_mcp_port_refuses_loudly():
+    """An MCP app built without the stash is refused 500 caller_quota_unwired
+    instead of being admitted through the silent singleton default."""
+    import asyncio
+
+    from crawlutron.api.mcp_router import router as mcp_router
+    from crawlutron.config.settings import CrawlerSettings
+    from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
+    from tests._app_harnesses import harness_app
+    from tests._async_harnesses import serve
+
+    app = harness_app(mcp_router)
+    app.state.crawler_settings = CrawlerSettings.from_mapping({})
+    app.state.shutdown_event = asyncio.Event()
+    app.state.concurrency_tracker = CallerConcurrencyTracker()
+    del app.state.caller_quota_admission
+    async with serve(app) as client:
+        body = _body(
+            "tools/call",
+            params={"name": "search", "arguments": {"query": "x"}, "_meta": META},
+        )
+        resp = await mcp_post(client, body)
+        assert resp.status_code == 500, resp.text
+        assert resp.json()["code"] == "caller_quota_unwired", resp.text
