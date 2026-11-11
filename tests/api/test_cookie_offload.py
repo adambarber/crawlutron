@@ -13,8 +13,8 @@ import pytest
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.runtime import process_state
 from crawlutron.transport import cookie_jar
+from tests._job_store_doubles import LoopGuardSharedCookieStore
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
-from tests.api._offload_doubles import LoopGuardSharedCookieStore
 
 
 def _refuse_on_loop(name: str) -> None:
@@ -23,10 +23,6 @@ def _refuse_on_loop(name: str) -> None:
     except RuntimeError:
         return
     raise AssertionError(f"sync cookie-store method {name} ran on the event loop")
-
-
-# LoopGuardSharedCookieStore lives in tests/api/_offload_doubles.py with the
-# other loop-guard store doubles; the redirect door's test imports it there.
 
 
 def _url(path: str = "https://example.test/a") -> NormalizedUrl:
