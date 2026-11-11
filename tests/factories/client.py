@@ -48,6 +48,14 @@ def isolation_app(
     return app
 
 
+def close_all(*stores_: object) -> None:
+    """Close every store harness call sites opened; None entries are skipped."""
+    for store_ in stores_:
+        close = getattr(store_, "close", None)
+        if close is not None:
+            close()
+
+
 @contextlib.asynccontextmanager
 async def isolation_client(
     tmp_path: Path,
@@ -56,7 +64,10 @@ async def isolation_client(
     store, results, keys = stores(tmp_path)
     app = isolation_app(store, results, keys)
     async with serve(app) as client:
-        yield client, store, results, keys
+        try:
+            yield client, store, results, keys
+        finally:
+            close_all(store, results, keys)
 
 
 @contextlib.asynccontextmanager
@@ -74,7 +85,10 @@ async def quota_client(
             get_shutdown_event: asyncio.Event,
         },
     ) as client:
-        yield client, store, results, keys
+        try:
+            yield client, store, results, keys
+        finally:
+            close_all(store, results, keys)
 
 
 async def post_crawl(client: AsyncClient, *, max_pages: int | None = 0, key: str | None = None):

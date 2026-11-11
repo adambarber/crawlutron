@@ -13,6 +13,7 @@ from crawlutron.transport.request_profile import cookie_namespace_for, headers_f
 from crawlutron.vocabulary.limits import SITEMAP_CACHE_TTL_SECONDS, SITEMAP_FAILURE_TTL_SECONDS
 from tests._assertions import install_to_thread_spy
 from tests._fetch_doubles import FetcherDouble, make_fetch
+from tests._overlap_probe import OverlapProbe
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, crawl_policy
 
 
@@ -164,29 +165,20 @@ class TestSitemapFanoutBound:
 
         monkeypatch.setattr(asyncio, "create_task", counting_create_task)
 
-        def respond(u, headers):
+        child_fetches = 0
+
+        async def respond(fetched, headers, *_args):
             nonlocal child_fetches
-            if u.raw == url.raw:
+            if fetched.raw == url.raw:
                 return _resp_test_sitemap_fanout(index_body)
             child_fetches += 1
-            return _resp_test_sitemap_fanout(_child_xml(int(u.raw.split("child")[1].split(".")[0])))
+            return _resp_test_sitemap_fanout(_child_xml(int(fetched.raw.split("child")[1].split(".")[0])))
 
-        # Overlap is observed as the largest set of children in flight at once; the list holds one sample per
-        # entry, so the cap is read off the samples rather than restated.
-        _active: list[str] = []
-        _samples: list[int] = []
-
-        async def _overlap_answer(url, sent_headers, *_args):
-            _active.append(url.raw)
-            _samples.append(len(_active))
-            try:
-                await asyncio.sleep(0)
-                return respond(url, sent_headers)
-            finally:
-                _active.remove(url.raw)
-
-        fetcher = FetcherDouble(_overlap_answer)
-        fetcher.peak = lambda: max(_samples)
+        # The probe records the largest set of children in flight at once by
+        # arrival accounting; the cap is read off it rather than restated.
+        probe = OverlapProbe()
+        fetcher = FetcherDouble(probe.wrap(respond))
+        fetcher.peak = probe.peak
 
         try:
             out = await fetch_sitemap_urls(

@@ -4,11 +4,10 @@ Before the batching fix the recursive branch awaited one link at a time,
 bypassing DomainScheduler entirely (no concurrency, no rate limiting).
 """
 
-import asyncio
-
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.orchestration.engine import crawl_request
 from tests._fetch_doubles import FetcherDouble
+from tests._overlap_probe import OverlapProbe
 
 
 def _page_html(path: str) -> str:
@@ -22,30 +21,18 @@ def _page_html(path: str) -> str:
 async def test_recursive_crawl_fetches_links_concurrently():
     """Discovered links are fetched concurrently, within the configured gates.
 
-    The fetcher yields once mid-fetch, so every in-flight link is in flight at
-    once; awaiting them one at a time holds the peak at 1 and fails the bound.
+    The probe's rendezvous holds four discovered-link fetchers in flight
+    together; awaiting links one at a time never gathers four and the bounded
+    wait expires, so the peak assert fails deterministically (no sleep-race).
     """
+    probe = OverlapProbe(rendezvous_at=4)
 
-    def respond(url, headers):
+    async def _answer(url, sent_headers, *_args):
         path = url.path or "/"
         return (200, _page_html(path), "text/html")
 
-    # Each fetch parks on its own event pair: entering marks the URL active, and the peak is how many marks
-    # were outstanding at the widest moment, which one-at-a-time scheduling holds at 1.
-    _live: set[str] = set()
-    _widest = {"n": 0}
-
-    async def _overlap_answer(url, sent_headers, *_args):
-        _live.add(url.raw)
-        _widest["n"] = max(_widest["n"], len(_live))
-        try:
-            await asyncio.sleep(0)
-            return respond(url, sent_headers)
-        finally:
-            _live.discard(url.raw)
-
-    fetcher = FetcherDouble(_overlap_answer)
-    fetcher.peak = lambda: _widest["n"]
+    fetcher = FetcherDouble(probe.wrap(_answer, participate=lambda url, *_args: url.path != "/"))
+    fetcher.peak = probe.peak
 
     payload = {
         "url": "http://example.com/",

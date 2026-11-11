@@ -44,7 +44,11 @@ async def _search_client(
         {"CRAWLUTRON_SEARCH_PROVIDER": "tavily", "CRAWLUTRON_TAVILY_API_KEY": "test-key"}
     )
     async with serve(app) as client:
-        yield client, app
+        try:
+            yield client, app
+        finally:
+            jobs.close()
+            keys.close()
 
 
 def _admin() -> dict[str, str]:
