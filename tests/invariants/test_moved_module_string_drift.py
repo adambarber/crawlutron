@@ -138,11 +138,11 @@ def _drift_offenders(root: pathlib.Path = _TESTS_ROOT) -> list[str]:
     return offenders
 
 
-@pytest.mark.parametrize("name", sorted(MOVED_MODULES))
-def test_moved_module_shim_still_resolves(name: str) -> None:
+def test_moved_module_shim_still_resolves() -> None:
     import importlib
 
-    importlib.import_module(f"crawlutron.api.{name}")
+    for name in sorted(MOVED_MODULES):
+        importlib.import_module(f"crawlutron.api.{name}")
 
 
 def test_no_stale_api_strings_for_moved_modules() -> None:
@@ -171,3 +171,24 @@ def test_drift_detector_bites(tmp_path: pathlib.Path) -> None:
     finally:
         MOVED_MODULES.pop("webhooks", None)
     assert not _drift_offenders(), "the probe row leaked into the ledger"
+
+
+def test_moved_module_shim_gate_bites_on_shimless_row() -> None:
+    """Mutation probe: a row with no api shim reds the shim gate, naming it."""
+    MOVED_MODULES["webhooks"] = "probe row"
+    try:
+        with pytest.raises(ImportError, match="crawlutron.api.webhooks"):
+            test_moved_module_shim_still_resolves()
+    finally:
+        MOVED_MODULES.pop("webhooks", None)
+    test_moved_module_shim_still_resolves()
+    assert not _drift_offenders(), "the probe row leaked into the ledger"
+
+
+def test_moved_module_shim_gate_green_when_shim_exists() -> None:
+    """Positive control: a row naming an existing api module stays green."""
+    MOVED_MODULES["crawl_endpoint"] = "probe row"
+    try:
+        test_moved_module_shim_still_resolves()
+    finally:
+        MOVED_MODULES.pop("crawl_endpoint", None)
