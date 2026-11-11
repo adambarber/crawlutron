@@ -113,8 +113,7 @@ async def test_a_cross_origin_redirect_reattach_stays_off_the_loop(monkeypatch, 
     loop. The fetcher's own redirect loop is driven for real -- a scripted 302
     to another origin -- and the store itself refuses the loop.
     """
-    from tests._fetcher_factories import run_default_http_fetcher
-    from tests._transport_doubles import MockResponse, patch_http_fetcher_transport
+    from tests._fetcher_factories import MockResponse, patch_http_fetcher_transport, run_default_http_fetcher
 
     jar = cookie_jar.global_cookie_jar()
     # Seed the jar off the loop through its derived twin: the cookie the new

@@ -26,8 +26,8 @@ from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from crawlutron.vocabulary.taxonomy import status_for_classification
 from tests._extraction_helpers import extract_discovered_links
 from tests._fetch_doubles import FetcherDouble, make_fetch
-from tests._http_fetch_doubles import FEED_ADVERTISING_PAGE
-from tests._http_fetch_doubles import diagnostics_for_failed_probes as _diagnostics_for_failed_probes
+from tests._fetcher_factories import FEED_ADVERTISING_PAGE
+from tests._fetcher_factories import diagnostics_for_failed_probes as _diagnostics_for_failed_probes
 from tests._http_test_helpers import (
     HTTP_CFFI_IMPERSONATE,
     decode_body,

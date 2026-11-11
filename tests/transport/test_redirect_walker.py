@@ -23,8 +23,8 @@ from crawlutron.transport.pinned_transport import PinnedRequest
 from crawlutron.transport.redirect_walker import RedirectWalker
 from crawlutron.transport.transport import http_413
 from tests._fetch_doubles import make_fetch
+from tests._fetcher_factories import ScriptedTransport
 from tests._policy_factories import canonical
-from tests._transport_doubles import ScriptedTransport
 
 ORIGINAL = canonical("http://a.com/x")
 TARGET = canonical("http://a.com/y")

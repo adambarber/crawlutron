@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING
 import pytest
 
 from crawlutron.admission.policy import CrawlPolicy
-from crawlutron.models.http_fetch_result import HttpFetchResult
 from crawlutron.models.json_value import JsonValue
 from tests._browser_doubles import _fake_browser
 
@@ -39,10 +38,34 @@ from tests._crawl_runners import (
     strategy_request,
     xml_page,
 )
-from tests._fetch_doubles import (
-    FetcherDouble,
+from tests._fetch_doubles import FetcherDouble
+from tests._http_fetch_doubles import (
+    FEED_ADVERTISING_PAGE,
+    diagnostics_for_failed_probes,
+    fake_fetcher,
+    run_http_result,
 )
 from tests._policy_factories import canonical
+from tests._transport_doubles import (
+    FetchOutcome,
+    HttpFetchResult,
+    MockResponse,
+    ParkedResolver,
+    ScriptedClient,
+    ScriptedTransport,
+    allow_scripted_egress,
+    dispatching_transport_client,
+    isolated_process,
+    isolated_queue,
+    join_or_kill,
+    outcome_worker,
+    patch_http_fetcher_transport,
+    real_cffi_fetch_outcome,
+    scripted_transport_client,
+)
+from tests._transport_doubles import (
+    _void_store_cookies as _void_store_cookies,
+)
 
 
 async def invoke_http_strategy(
@@ -125,7 +148,16 @@ def make_expiring_cache(tmpdir, *, max_total_bytes: int = 10_000):
 
 __all__ = [
     "LLM_FORMAT_TEST_HTML",
+    "FetchOutcome",
+    "HttpFetchResult",
+    "LINKED_PAIR_LIMITS",
+    "MockResponse",
+    "ParkedResolver",
+    "ScriptedClient",
+    "ScriptedTransport",
+    "FEED_ADVERTISING_PAGE",
     "_spawn_fetch",
+    "allow_scripted_egress",
     "build_payload",
     "cache_with_etag",
     "crawl_homepage_async",
@@ -133,17 +165,27 @@ __all__ = [
     "crawled_results",
     "crawled_urls",
     "clocked_cache",
+    "diagnostics_for_failed_probes",
+    "dispatching_transport_client",
+    "fake_fetcher",
     "invoke_browser_strategy",
     "invoke_http_strategy",
+    "isolated_process",
+    "isolated_queue",
+    "join_or_kill",
     "make_crawl_payload",
     "make_expiring_cache",
     "make_seeded_cache",
-    "site_linking_to",
+    "outcome_worker",
+    "patch_http_fetcher_transport",
+    "real_cffi_fetch_outcome",
     "run_cached_twice",
     "run_chain",
     "run_crawl_async",
     "run_default_http_fetcher",
+    "run_http_result",
     "run_http_strategy",
-    "LINKED_PAIR_LIMITS",
+    "scripted_transport_client",
+    "site_linking_to",
     "xml_page",
 ]

@@ -14,15 +14,15 @@ from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.request_profile_record import RequestProfileRecord
 from tests._fetch_doubles import FetcherDouble
 from tests._fetch_outcome import FetchFailed
-from tests._fetcher_factories import run_http_strategy
-from tests._policy_factories import http_strategy_policy
-from tests._transport_doubles import (
+from tests._fetcher_factories import (
     isolated_process,
     isolated_queue,
     join_or_kill,
     outcome_worker,
     real_cffi_fetch_outcome,
+    run_http_strategy,
 )
+from tests._policy_factories import http_strategy_policy
 from tests.helpers.server import _Handler, spawn_threaded_server
 
 

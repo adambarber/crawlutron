@@ -3,9 +3,8 @@ from http.server import BaseHTTPRequestHandler
 from crawlutron.transport import cookie_jar
 from crawlutron.transport.cookie_jar import CookieJar
 from crawlutron.transport.request_profile import store_set_cookies
-from tests._fetcher_factories import run_default_http_fetcher
+from tests._fetcher_factories import MockResponse, patch_http_fetcher_transport, run_default_http_fetcher
 from tests._policy_factories import canonical
-from tests._transport_doubles import MockResponse, patch_http_fetcher_transport
 
 SENSITIVE_HEADERS = {"Cookie": "session=secret123", "Authorization": "Bearer token456"}
 

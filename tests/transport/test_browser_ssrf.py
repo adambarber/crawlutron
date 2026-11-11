@@ -41,7 +41,7 @@ async def test_document_extractor_invokes_ssrf_check(monkeypatch):
     """
     from unittest.mock import patch
 
-    from tests._transport_doubles import MockResponse, scripted_transport_client
+    from tests._fetcher_factories import MockResponse, scripted_transport_client
 
     seen = {}
 

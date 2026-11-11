@@ -19,8 +19,8 @@ from crawlutron.transport.pinned_transport import (
 from crawlutron.transport.redirect_walker import RedirectWalker
 from tests._assertions import block_private_targets
 from tests._fetch_doubles import make_fetch
+from tests._fetcher_factories import ScriptedTransport, _void_store_cookies
 from tests._policy_factories import canonical
-from tests._transport_doubles import ScriptedTransport, _void_store_cookies
 
 # The scripted resolver answers a public IPv4 host; the builder resolves the hostname itself, so the test
 # scripts the resolver rather than the network.

@@ -17,8 +17,8 @@ import time
 import pytest
 
 import crawlutron.transport.pinned_dns as pt
+from tests._fetcher_factories import ParkedResolver
 from tests._timing_harnesses import await_until
-from tests._transport_doubles import ParkedResolver
 
 
 @pytest.fixture(autouse=True)
