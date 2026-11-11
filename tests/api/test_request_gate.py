@@ -9,13 +9,12 @@ import pathlib
 import tempfile
 
 import pytest
-from fastapi import HTTPException, Response
+from fastapi import Response
 from fastapi.responses import JSONResponse
 
 import crawlutron.api.crawl_endpoint as crawl_endpoint
 from crawlutron.api.caller_auth import Tracking
 from crawlutron.api.crawl_endpoint import crawl
-from crawlutron.api.exceptions import error_envelope_from_detail
 from crawlutron.api.identity_router import map as map_door
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.health.readiness import READINESS_STATE, ReadinessState
@@ -25,6 +24,7 @@ from crawlutron.models.map_request import MapRequest
 from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
 from crawlutron.runtime.metrics import get_metrics
 from crawlutron.service import async_crawl_runner, main_helpers, map_endpoint
+from crawlutron.service.errors import DomainError
 from crawlutron.service.main_helpers import request_gate
 from crawlutron.storage.result_store import CrawlResultStore, CrawlSpillStore
 from tests._job_harnesses import ScriptedExecute, make_job_store
@@ -59,15 +59,15 @@ async def test_gate_releases_the_slot_when_the_body_is_rejected(caplog):
     server-side trace of why; one that forgot the release holds the slot.
     """
     before = _active()
-    with caplog.at_level(logging.WARNING, logger=logger.name), pytest.raises(HTTPException) as exc_info:
+    with caplog.at_level(logging.WARNING, logger=logger.name), pytest.raises(DomainError) as exc_info:
         with request_gate("test_request_rejected", logger=logger):
             raise ValueError("nothing crawlable here")
-    assert exc_info.value.status_code == 422
-    assert exc_info.value.detail == {
-        "code": "validation_error",
-        "message": "Request validation failed",
-        "details": {"errors": [{"msg": "nothing crawlable here"}]},
-    }
+    assert exc_info.value.status == 422
+    assert (exc_info.value.code, exc_info.value.message, exc_info.value.details) == (
+        "validation_error",
+        "Request validation failed",
+        {"errors": [{"msg": "nothing crawlable here"}]},
+    )
     assert "test_request_rejected" in caplog.text
     assert _active() == before
 
@@ -99,7 +99,7 @@ async def test_rejected_crawl_hands_its_slot_back_and_still_counts_the_error(cap
     # Real dependencies, not ``object()``. A store also asserts what the production ``crawl`` signature
     # promises it will be handed.
     with tempfile.TemporaryDirectory() as tmpdir:
-        with caplog.at_level(logging.WARNING), pytest.raises(HTTPException) as exc_info:
+        with caplog.at_level(logging.WARNING), pytest.raises(DomainError) as exc_info:
             result_store, spill_store = _real_stores(tmpdir)
             await crawl(
                 CrawlRequest(urls=["http://example.com/", "http://example.com/2"]),
@@ -110,11 +110,10 @@ async def test_rejected_crawl_hands_its_slot_back_and_still_counts_the_error(cap
                 asyncio.Event(),
             )
 
-    assert exc_info.value.status_code == 422
-    # This is the shape a client actually receives.
-    envelope = error_envelope_from_detail(exc_info.value.detail, exc_info.value.status_code)
-    assert envelope["code"] == "validation_error"
-    assert envelope["details"] == {"errors": [{"msg": "batch_size_exceeded"}]}
+    assert exc_info.value.status == 422
+    # This is the shape a client actually receives (the carrier IS the envelope triplet).
+    assert exc_info.value.code == "validation_error"
+    assert exc_info.value.details == {"errors": [{"msg": "batch_size_exceeded"}]}
     assert "crawl_request_rejected" in caplog.text
     assert _active() == before_active
     assert metrics.snapshot().crawl_errors_total == before_errors + 1
@@ -154,12 +153,11 @@ async def test_request_gate_refuses_requests_over_the_cap(monkeypatch):
     assert state.begin_request() and state.begin_request()  # fill the cap
     monkeypatch.setattr(main_helpers, "readiness_state", state)
 
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(DomainError) as exc_info:
         with request_gate("test_request_rejected", logger=logger):
             pass
-    assert exc_info.value.status_code == 503
-    envelope = error_envelope_from_detail(exc_info.value.detail, exc_info.value.status_code)
-    assert envelope["code"] == "capacity_exceeded"
+    assert exc_info.value.status == 503
+    assert exc_info.value.code == "capacity_exceeded"
     assert state.snapshot().active_requests == 2  # the refused request never held a slot
 
 

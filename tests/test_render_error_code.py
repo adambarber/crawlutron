@@ -4,14 +4,13 @@ and clients key error handling on ``code`` -- a free-text code is unenumerable.
 """
 
 import pytest
-from fastapi import HTTPException
 
 from crawlutron.api.caller_auth import Tracking
-from crawlutron.api.exceptions import error_envelope_from_detail
 from crawlutron.api.identity_router import render as render_door
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.render_request import RenderRequest
+from crawlutron.service.errors import ValidationRefusal
 from tests._browser_doubles import FakeBrowserPool, owned_browser_pool
 
 
@@ -32,14 +31,14 @@ async def test_render_value_error_reports_validation_error_code(monkeypatch, _po
     active_before = READINESS_STATE.snapshot().active_requests
 
     payload = RenderRequest(urls=["http://example.com/", "http://example.com/2"])
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(ValidationRefusal) as exc_info:
         await render_door(payload, CallerIdentity(), Tracking(), settings)
 
-    # Through the accessor the service itself uses.
-    detail = error_envelope_from_detail(exc_info.value.detail, exc_info.value.status_code)
-    assert detail["code"] == "validation_error", detail
+    # The carrier IS the envelope triplet the service raises (the render door pins
+    # the 400 status through its own rejection factory at the gate).
+    assert exc_info.value.code == "validation_error", exc_info.value
     # The ValueError text stays as the human-readable message, not the code.
-    assert detail["message"] == "batch_size_exceeded"
+    assert exc_info.value.message == "batch_size_exceeded"
     # The refusal hands its readiness slot back: the gate that converts the rejection also releases it, so
     # /v1/render cannot hold a slot per bad request. /v1/crawl's equivalent is tests/api/test_request_gate.py.
     assert READINESS_STATE.snapshot().active_requests == active_before

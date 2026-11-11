@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
+from crawlutron.service.errors import KeyVerifyThrottled
 from crawlutron.service.key_throttle import KeyVerifyThrottle
 from crawlutron.storage.caller_key_store import CallerKeyStore
 from tests._clocks import arrange_clock
@@ -32,9 +33,10 @@ def test_consecutive_failed_verifies_trip_cooldown(tmp_path):
     # The cooldown is fail-closed: even the LIVE secret for that id is refused.
     refused = store.verify_key(good.secret)
     assert refused is not None  # the store itself is not the meter
-    with pytest.raises(Exception) as raised:
+    with pytest.raises(KeyVerifyThrottled) as raised:
         throttle.check(bad_id)
-    assert getattr(raised.value, "status_code", "") == 429
+    assert raised.value.status == 429
+    assert raised.value.code == "key_verify_throttled"
 
     # A different key id has its own bucket and stays clean.
     throttle.check(other.secret)
@@ -50,9 +52,9 @@ def test_throttle_is_per_entry_point_not_per_door():
         throttle.record_failure(garbage)
 
     # The same instance refuses on any door's behalf once the bucket is full.
-    with pytest.raises(Exception) as raised:
+    with pytest.raises(KeyVerifyThrottled) as raised:
         throttle.check(garbage)
-    assert getattr(raised.value, "status_code", None) == 429
+    assert raised.value.status == 429
 
 
 def test_successful_verify_resets_the_counter(tmp_path):
@@ -86,7 +88,8 @@ def test_throttle_state_is_registered_process_state():
 
 def _assert_429(exc: BaseException) -> None:
     """The meter's one refusal shape, as every #659 refusal reads it."""
-    assert getattr(exc, "status_code", None) == 429, exc
+    assert isinstance(exc, KeyVerifyThrottled), exc
+    assert exc.status == 429, exc
 
 
 def _refuses(throttle: KeyVerifyThrottle, presented: str) -> None:
@@ -236,6 +239,6 @@ def test_concurrent_failures_reach_cooldown_threshold():
     _run_concurrent(throttle, key, count)
 
     # All N failures landed: bucket at threshold, fail-closed.
-    with pytest.raises(Exception) as raised:
+    with pytest.raises(KeyVerifyThrottled) as raised:
         throttle.check(key)
-    assert getattr(raised.value, "status_code", None) == 429
+    assert raised.value.status == 429

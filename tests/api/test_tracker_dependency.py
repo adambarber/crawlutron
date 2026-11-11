@@ -12,11 +12,12 @@ from collections.abc import AsyncGenerator
 from pathlib import Path
 
 import pytest
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from httpx import AsyncClient, Response
 
 from crawlutron.api.dependencies import get_concurrency_tracker
 from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
+from crawlutron.service.errors import DomainError
 from crawlutron.storage import caller_key_store, job_store, result_store
 from tests._app_harnesses import harness_app
 from tests._async_harnesses import issue_key, serve
@@ -74,9 +75,7 @@ def test_dependency_refuses_untracked_state():
     """The typed dependency: a bare app.state refuses via the error envelope."""
     scope = {"type": "http", "app": FastAPI()}
     request = Request(scope)
-    with pytest.raises(HTTPException) as raised:
+    with pytest.raises(DomainError) as raised:
         get_concurrency_tracker(request)
-    assert raised.value.status_code == 500
-    detail = raised.value.detail
-    assert isinstance(detail, dict)
-    assert detail["code"] == "tracker_missing"
+    assert raised.value.status == 500
+    assert raised.value.code == "tracker_missing"

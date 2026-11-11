@@ -19,6 +19,7 @@ from crawlutron.mcp.protocol import error_response
 from crawlutron.mcp.server import handle_mcp_request
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.error_response import ErrorResponse
+from crawlutron.service.errors import DomainError
 
 router = APIRouter(tags=["MCP"])
 
@@ -50,10 +51,11 @@ async def mcp_endpoint(
     # An invalid credential must be a 401, never a benign 200 (no key stays anonymous).
     try:
         caller: CallerIdentity = await get_caller_identity(request)
-    except HTTPException as error:
+    except (HTTPException, DomainError) as error:
+        message = str(error.message) if isinstance(error, DomainError) else http_exception_message(error)
         return JSONResponse(
             status_code=401,
-            content=error_response(None, INVALID_API_KEY, http_exception_message(error)),
+            content=error_response(None, INVALID_API_KEY, message),
         )
     try:
         body = await request.json()

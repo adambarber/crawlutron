@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal, NoReturn, cast
 
-from crawlutron.api.exceptions import http_error
 from crawlutron.models.job_status_response import JobStatusResponse
 from crawlutron.service import job_runner
+from crawlutron.service.errors import JobNotFound, JobStateConflict
 from crawlutron.service.main_helpers import build_job_status
 from crawlutron.storage.job_store import JobStatusView
 
@@ -24,11 +24,11 @@ _JobAction = Literal["pause", "resume", "cancel"]
 
 def raise_job_not_found(job_id: str) -> NoReturn:
     """The 404 both job doors answer for an unknown or foreign job_id."""
-    raise http_error(404, "not_found", f"Unknown job_id: {job_id}")
+    raise JobNotFound(job_id)
 
 
 def raise_job_conflict(message: str) -> NoReturn:
-    raise http_error(409, "invalid_state", message)
+    raise JobStateConflict(message)
 
 
 async def control_job_core(

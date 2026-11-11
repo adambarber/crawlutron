@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from crawlutron.service.errors import KeyVerifyThrottled
 from crawlutron.service.key_throttle import KeyVerifyThrottle
 from tests._clocks import advance_clock, arrange_clock
 
@@ -39,9 +40,9 @@ def test_red_cooling_victim_survives_capacity_flood():
         throttle.record_failure(victim)
     for i in range(1200):
         throttle.record_failure(f"ck_{i:016x}.flood-{i}")
-    with pytest.raises(Exception) as raised:
+    with pytest.raises(KeyVerifyThrottled) as raised:
         throttle.check(victim)
-    assert getattr(raised.value, "status_code", None) == 429
+    assert raised.value.status == 429
 
 
 def test_red_quiescent_garbage_evicts_before_an_active_victim():
@@ -62,9 +63,9 @@ def test_red_quiescent_garbage_evicts_before_an_active_victim():
     for i in range(1023):
         throttle.record_failure(f"ck_{i + 1:016x}.flood-{i}")
     assert throttle.residence() == 1024
-    with pytest.raises(Exception) as raised:
+    with pytest.raises(KeyVerifyThrottled) as raised:
         throttle.check(cooling)
-    assert getattr(raised.value, "status_code", None) == 429
+    assert raised.value.status == 429
     # The fresh bucket was the eviction victim (re-record needs full ladder).
     throttle.record_failure(fresh)
     throttle.check(fresh)

@@ -6,15 +6,14 @@ Backward-compatible browser-render endpoint wrapping
 
 import logging
 
-from fastapi import HTTPException
-
-from crawlutron.api.exceptions import browser_pool_unavailable, http_error
+from crawlutron.api.exceptions import browser_pool_unavailable
 from crawlutron.api.render import render_request
 from crawlutron.api.response_shaping import arender_response_from_result
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.browser_pool_exhausted import BrowserPoolExhaustedError
 from crawlutron.models.render_request import RenderRequest
 from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
+from crawlutron.service.errors import DomainError, ValidationRefusal
 from crawlutron.transport.browser_pool import (
     PooledBrowserWorker,
     get_browser_pool,
@@ -23,13 +22,13 @@ from crawlutron.transport.browser_pool import (
 logger = logging.getLogger(__name__)
 
 
-def render_rejection(error: ValueError) -> HTTPException:
+def render_rejection(error: ValueError) -> DomainError:
     """``/v1/render``'s reject envelope: 400, ValueError text as the message.
 
     ``code`` is the machine-readable contract clients branch on, so this is a named
     factory handed to the gate, not a literal at a raise.
     """
-    return http_error(400, "validation_error", str(error))
+    return ValidationRefusal("validation_error", str(error), status=400)
 
 
 async def render(payload: RenderRequest, settings: CrawlerSettings) -> UnifiedCrawlResponse:

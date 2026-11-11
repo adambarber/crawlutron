@@ -9,12 +9,12 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from crawlutron.api.exceptions import browser_pool_unavailable
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.taxonomy import as_classification
 from crawlutron.orchestration.engine import crawl_request
+from crawlutron.service.errors import BrowserPoolUnavailable
 from crawlutron.storage.result_store import CrawlSpillStore
 from crawlutron.transport.browser_pool import PooledBrowserWorker, get_browser_pool
 from crawlutron.vocabulary.strategies import BROWSER_STRATEGIES
@@ -67,7 +67,7 @@ async def execute_crawl(
             raise CrawlRefusalError(str(error)) from error
     pool = get_browser_pool()
     if pool is None and _request_needs_browser(payload.policy):
-        raise browser_pool_unavailable()
+        raise BrowserPoolUnavailable()
     pooled_worker = PooledBrowserWorker(pool) if pool is not None else None
     return await crawl_request(
         payload,

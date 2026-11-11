@@ -8,13 +8,13 @@ import time
 from collections.abc import Awaitable
 from typing import TYPE_CHECKING
 
-from fastapi import HTTPException, Request
+from fastapi import Request
 from fastapi.responses import JSONResponse, Response
 
 from crawlutron.admission.payload_helpers import checked_payload_urls
 from crawlutron.api.caller_auth import Tracking, admit, anonymous_caller
 from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
-from crawlutron.api.exceptions import http_error, validation_http_error
+from crawlutron.api.exceptions import http_error
 from crawlutron.api.response_shaping import aunified_response_from_result
 from crawlutron.api.webhooks import ensure_https_webhook_url, validate_webhook_url_async
 from crawlutron.config.settings import CrawlerSettings
@@ -34,6 +34,7 @@ from crawlutron.models.trace_response import TraceResponse
 from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.runtime.metrics import get_metrics
 from crawlutron.service.crawl_executor import execute_crawl
+from crawlutron.service.errors import DomainError, ValidationRefusal
 from crawlutron.service.job_lifecycle import start_tracked_task
 from crawlutron.service.main_helpers import record_crawl_completion, request_gate
 from crawlutron.storage.ids import new_request_id
@@ -76,14 +77,18 @@ async def await_or_client_gone[Work](
             await asyncio.gather(task, return_exceptions=True)
 
 
-def _crawl_rejection(error: ValueError) -> HTTPException:
+def _crawl_rejection(error: ValueError) -> DomainError:
     """``/v1/crawl``'s refusal: the shared 422 envelope, counted as a crawl error.
 
     This is the gate's ``reject`` hook, so the metric is part of refusing rather
     than a line a handler can forget once the reject tail stopped being its own.
     """
     get_metrics().observe_crawl(errors=1)
-    return validation_http_error(error)
+    return ValidationRefusal(
+        "validation_error",
+        "Request validation failed",
+        {"errors": [{"msg": str(error)}]},
+    )
 
 
 async def delta_context_for(payload: CrawlRequest, caller_id: str, result_store) -> DeltaContext | None:

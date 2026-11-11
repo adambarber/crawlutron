@@ -11,6 +11,7 @@ import pytest
 from crawlutron.api import anonymous_throttle, key_throttle
 from crawlutron.api.anonymous_throttle import AnonymousThrottle
 from crawlutron.runtime.metrics import get_metrics
+from crawlutron.service.errors import KeyVerifyThrottled
 from crawlutron.service.key_throttle import KeyVerifyThrottle
 
 
@@ -60,9 +61,9 @@ def test_key_verify_throttle_trip_is_counted():
     presented = "ck_0123456789abcdef.trip"
     for _ in range(KeyVerifyThrottle.MAX_FAILURES):
         throttle.record_failure(presented)
-    with pytest.raises(Exception) as raised:
+    with pytest.raises(KeyVerifyThrottled) as raised:
         throttle.check(presented)
-    assert getattr(raised.value, "status_code", None) == 429
+    assert raised.value.status == 429
     assert _meter_snapshot()["key_verify_throttle_trips"] == 1.0
 
 

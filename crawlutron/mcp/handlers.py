@@ -31,6 +31,7 @@ from crawlutron.models.policy_suggestions_response import PolicySuggestionsRespo
 from crawlutron.safety.json_safe import json_default
 from crawlutron.search.endpoint import search as search_endpoint_handler
 from crawlutron.service.crawl_executor import execute_crawl
+from crawlutron.service.errors import DomainError
 from crawlutron.service.job_cores import create_job_core
 from crawlutron.service.main_helpers import request_gate
 from crawlutron.service.map_endpoint import map_site
@@ -80,8 +81,12 @@ def validation_message(error: Exception) -> str:
     return str(error)
 
 
-def _tool_error(error: HTTPException | ValueError) -> ToolResult:
-    message = http_exception_message(error) if isinstance(error, HTTPException) else str(error)
+def _tool_error(error: HTTPException | ValueError | DomainError) -> ToolResult:
+    message = (
+        str(error.message)
+        if isinstance(error, DomainError)
+        else (http_exception_message(error) if isinstance(error, HTTPException) else str(error))
+    )
     return ToolResult(text=message, is_error=True)
 
 
@@ -94,11 +99,11 @@ def _tool_success(value: BaseModel | Mapping[str, object]) -> ToolResult:
 
 async def tool_result(coro: Awaitable[BaseModel | Mapping[str, object]]) -> ToolResult:
     """Cross the MCP boundary for one tool call: run it, or turn the endpoint's
-    ``HTTPException``/``ValueError`` into a tool error rather than a traceback.
+    ``HTTPException``/``DomainError``/``ValueError`` into a tool error rather than a traceback.
     """
     try:
         result = await coro
-    except (HTTPException, ValueError) as error:
+    except (HTTPException, DomainError, ValueError) as error:
         return _tool_error(error)
     return _tool_success(result)
 
@@ -210,7 +215,7 @@ async def _admit_tool(
         with request_gate("mcp_request_rejected", logger=_logger):
             async with admit(caller, pages, tracking=tracking, payload=payload):
                 return await work()
-    except HTTPException as error:
+    except (HTTPException, DomainError) as error:
         return _tool_error(error)
 
 
@@ -276,7 +281,7 @@ async def _running_answer(payload, job_store, result_store, caller, read) -> Too
                 "crawl_status": pending.job_status,
             },
         )
-    except HTTPException as error:
+    except (HTTPException, DomainError) as error:
         return _tool_error(error)
 
 

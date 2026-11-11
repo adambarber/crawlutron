@@ -8,13 +8,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, NoReturn
 from urllib.parse import parse_qsl, urlsplit
 
-from crawlutron.api.exceptions import http_error, validation_http_error
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.watch_deleted_response import WatchDeletedResponse
 from crawlutron.models.watch_list_response import WatchListResponse
 from crawlutron.models.watch_state import WatchState
 from crawlutron.safety.url_redaction import is_secret_name
+from crawlutron.service.errors import ValidationRefusal, WatchLimitExceeded, WatchNotFound
 from crawlutron.transport.freshness import default_clock
 
 if TYPE_CHECKING:
@@ -38,8 +38,7 @@ def _refuse_credential_shaped_query(url: str) -> None:
     secret = next((name for name in names if is_secret_name(name)), None)
     if secret:
         msg = f"watch URL query parameter {secret!r} carries credential-shaped vocabulary and is refused"
-        raise http_error(
-            422,
+        raise ValidationRefusal(
             "validation_error",
             "Request validation failed",
             {"errors": [{"msg": msg}]},
@@ -47,7 +46,7 @@ def _refuse_credential_shaped_query(url: str) -> None:
 
 
 def _raise_not_found(watch_id: str) -> NoReturn:
-    raise http_error(404, "not_found", f"Unknown watch_id: {watch_id}")
+    raise WatchNotFound(watch_id)
 
 
 async def register_watch_core(
@@ -65,8 +64,7 @@ async def register_watch_core(
     the MCP door passes None (poll-only). Admission precedes the quota spend.
     """
     if payload.interval_seconds < interval_floor:
-        raise http_error(
-            422,
+        raise ValidationRefusal(
             "validation_error",
             f"interval_seconds must be at least {interval_floor:g}s",
         )
@@ -74,15 +72,15 @@ async def register_watch_core(
     try:
         url = NormalizedUrl(payload.url, policy=host_policy)
     except ValueError as error:
-        raise validation_http_error(error) from error
+        raise ValidationRefusal(
+            "validation_error",
+            "Request validation failed",
+            {"errors": [{"msg": str(error)}]},
+        ) from error
     _refuse_credential_shaped_query(url.raw)
     owner = caller.caller_id
     if await watch_store.acount_for_owner(owner) >= settings.max_watches_per_caller:
-        raise http_error(
-            429,
-            "watch_limit_exceeded",
-            f"Caller watch limit is {settings.max_watches_per_caller}",
-        )
+        raise WatchLimitExceeded(settings.max_watches_per_caller)
     return await watch_store.acreate(
         url,
         interval_seconds=payload.interval_seconds,

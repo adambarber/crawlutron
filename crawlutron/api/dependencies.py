@@ -13,9 +13,9 @@ from fastapi import Depends, Request
 
 from crawlutron.api.caller_auth import Tracking, get_caller_identity, get_keys_caller
 from crawlutron.api.caller_concurrency import CallerConcurrencyTracker
-from crawlutron.api.exceptions import http_error
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.caller_identity import CallerIdentity
+from crawlutron.service.errors import DomainError
 from crawlutron.storage.caller_key_store import CallerKeyStore
 from crawlutron.storage.job_store import JobStore
 from crawlutron.storage.result_store import CrawlResultStore, CrawlSpillStore
@@ -67,10 +67,8 @@ def get_concurrency_tracker(request: Request) -> CallerConcurrencyTracker:
     """
     tracker = getattr(request.app.state, "concurrency_tracker", None)
     if tracker is None:
-        raise http_error(
-            500,
-            "tracker_missing",
-            "the service's concurrency tracker is not wired into app.state",
+        raise DomainError(
+            500, "tracker_missing", "the service's concurrency tracker is not wired into app.state"
         )
     return tracker
 

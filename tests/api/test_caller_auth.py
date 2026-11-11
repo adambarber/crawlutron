@@ -11,6 +11,7 @@ from httpx import AsyncClient, Response
 from starlette.requests import Request
 
 from crawlutron.config.settings import CrawlerSettings
+from crawlutron.service.errors import AuthRefusal
 from crawlutron.service.key_throttle import KeyVerifyThrottle
 from crawlutron.storage.caller_key_store import CallerKeyStore
 from tests._async_harnesses import issue_key
@@ -98,7 +99,6 @@ async def test_non_ascii_key_on_keys_door_is_401(tmp_path):
     from types import SimpleNamespace
 
     import pytest
-    from fastapi import HTTPException
     from starlette.requests import Request
 
     keys = CallerKeyStore(tmp_path / "keys.db")
@@ -116,11 +116,11 @@ async def test_non_ascii_key_on_keys_door_is_401(tmp_path):
             )
         ),
     }
-    with pytest.raises(HTTPException) as raised:
+    with pytest.raises(AuthRefusal) as raised:
         from crawlutron.api.caller_auth import get_keys_caller
 
         await get_keys_caller(Request(scope))
-    assert raised.value.status_code == 401
+    assert raised.value.status == 401
 
 
 async def test_keyless_crawl_stays_anonymous(tmp_path):

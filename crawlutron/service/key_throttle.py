@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import time
 
+from crawlutron.service.errors import DomainError, KeyVerifyThrottled
 from crawlutron.service.meter_ledger import MeterLedger, register_shared_meter
 
 __all__ = ["KeyVerifyThrottle", "shared_throttle"]
@@ -20,11 +21,9 @@ _COOLDOWN_SECONDS = 60.0
 _BUCKET_CAPACITY = 1024
 
 
-def _throttled() -> Exception:
-    """The caller-visible metering refusal: a 429-shaped HTTPException."""
-    from crawlutron.api.exceptions import http_error
-
-    return http_error(429, "key_verify_throttled", "Too many failed key verifications; retry later")
+def _throttled() -> DomainError:
+    """The caller-visible metering refusal: a 429 key-verify refusal."""
+    return KeyVerifyThrottled()
 
 
 class _Bucket:

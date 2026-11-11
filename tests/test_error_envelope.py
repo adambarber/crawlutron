@@ -64,19 +64,20 @@ class TestErrorEnvelope:
         from crawlutron.api.exceptions import BROWSER_POOL_MESSAGE, browser_pool_unavailable
 
         default = browser_pool_unavailable()
-        assert default.detail == {
-            "code": "browser_pool_unavailable",
-            "message": BROWSER_POOL_MESSAGE,
-            "details": {},
-        }
+        assert (default.status, default.code, default.message, default.details) == (
+            503,
+            "browser_pool_unavailable",
+            BROWSER_POOL_MESSAGE,
+            None,
+        )
         override = browser_pool_unavailable("exhausted: 4/4")
-        # Compared whole rather than indexed into: `HTTPException.detail` is annotated `str` upstream, but the
-        # envelope contract makes it the envelope dict, and asserting the full shape is this file's own
-        assert override.detail == {
-            "code": "browser_pool_unavailable",
-            "message": "exhausted: 4/4",
-            "details": {},
-        }
+        # Compared whole rather than indexed into a detail dict: the DomainError carrier
+        # holds the triplet directly, and asserting the full shape is this file's own job.
+        assert (override.status, override.code, override.message) == (
+            503,
+            "browser_pool_unavailable",
+            "exhausted: 4/4",
+        )
 
 
 class TestEnvelopeFromDetail:

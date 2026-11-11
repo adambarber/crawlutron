@@ -9,13 +9,11 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 
-from fastapi import HTTPException
-
-from crawlutron.api.exceptions import http_error, validation_http_error
 from crawlutron.health.readiness import READINESS_STATE as readiness_state
 from crawlutron.models.job_status_response import JobStatusResponse
 from crawlutron.models.result_record import ProducerEnvelope
 from crawlutron.runtime.metrics import get_metrics
+from crawlutron.service.errors import CapacityExceeded, DomainError, ValidationRefusal
 from crawlutron.storage.job_store import JobStatusView
 
 _gate_token: ContextVar[str | None] = ContextVar("crawlutron_request_gate_token", default=None)
@@ -52,7 +50,7 @@ def request_gate(
     event: str,
     *,
     logger: logging.Logger,
-    reject: Callable[[ValueError], HTTPException] = validation_http_error,
+    reject: Callable[[ValueError], DomainError] | None = None,
 ) -> Generator[None, None, None]:
     """Admit one readiness-tracked request and own the whole tail: the
     ``begin_request`` admission, the rejection envelope, and the ``end_request``
@@ -63,16 +61,12 @@ def request_gate(
     _gate_token.set(event)
     try:
         if not readiness_state.begin_request():
-            raise http_error(
-                503,
-                "capacity_exceeded",
-                "Request refused: active requests are at the configured cap (CRAWLUTRON_MAX_ACTIVE_REQUESTS)",
-            )
+            raise CapacityExceeded()
         try:
             yield
         except ValueError as error:
             logger.warning(event, extra={"error": str(error)})
-            raise reject(error) from error
+            raise (reject(error) if reject is not None else _validation_refusal(error)) from error
         finally:
             readiness_state.end_request()
     finally:
@@ -80,3 +74,12 @@ def request_gate(
 
 
 __all__ = ["build_job_status", "record_crawl_completion", "request_gate"]
+
+
+def _validation_refusal(error: ValueError) -> ValidationRefusal:
+    """The default ValueError refusal: the shared 422 validation envelope."""
+    return ValidationRefusal(
+        "validation_error",
+        "Request validation failed",
+        {"errors": [{"msg": str(error)}]},
+    )

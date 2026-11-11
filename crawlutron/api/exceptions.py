@@ -15,6 +15,11 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from crawlutron.models.error_response import ErrorEnvelope
 from crawlutron.models.json_value import JsonValue
+from crawlutron.service.errors import (
+    BROWSER_POOL_MESSAGE,
+    BrowserPoolUnavailable,
+    DomainError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,16 +53,6 @@ def error_envelope_from_detail(detail: object, status_code: int) -> ErrorEnvelop
     return error_envelope(MALFORMED_DETAIL_CODE, "Request failed", {"status_code": status_code})
 
 
-def is_quota_refusal(exc: object) -> bool:
-    """Whether ``exc`` is a caller-quota refusal (429 quota_exceeded): the caller
-    is at their own page/concurrency budget, so the guarded work never ran.
-    """
-    if not isinstance(exc, HTTPException):
-        return False
-    envelope = error_envelope_from_detail(getattr(exc, "detail", None), exc.status_code)
-    return exc.status_code == 429 and envelope["code"] == "quota_exceeded"
-
-
 def http_error(status_code: int, code: str, message: str, details: JsonValue | None = None) -> HTTPException:
     """HTTPException carrying a conforming envelope (use instead of literals)."""
     return HTTPException(status_code=status_code, detail=error_envelope(code, message, details))
@@ -72,13 +67,10 @@ def validation_http_error(error: ValueError) -> HTTPException:
     )
 
 
-BROWSER_POOL_MESSAGE = "Browser pool is not initialized; the service is starting up or shutting down."
-
-
-def browser_pool_unavailable(message: str | None = None) -> HTTPException:
+def browser_pool_unavailable(message: str | None = None) -> BrowserPoolUnavailable:
     """The 503 pool-down error: render endpoints and the crawl executor share
     one code + canonical message; only the pool-exhausted site overrides."""
-    return http_error(503, "browser_pool_unavailable", message or BROWSER_POOL_MESSAGE)
+    return BrowserPoolUnavailable(message)
 
 
 async def validation_exception_handler(request: Request, exc: Exception) -> JSONResponse:
@@ -124,14 +116,24 @@ async def http_exception_handler(request: Request, exc: Exception) -> JSONRespon
     return JSONResponse(status_code=exc.status_code, content=content, headers=headers)
 
 
+async def domain_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Map a typed service refusal to the wire envelope (status, code, message, details)."""
+    if not isinstance(exc, DomainError):
+        return JSONResponse(
+            status_code=500,
+            content=error_envelope("internal_error", "Unhandled exception in request handling"),
+        )
+    return JSONResponse(status_code=exc.status, content=error_envelope(exc.code, exc.message, exc.details))
+
+
 __all__ = [
     "BROWSER_POOL_MESSAGE",
     "MALFORMED_DETAIL_CODE",
     "browser_pool_unavailable",
+    "domain_error_handler",
     "error_envelope",
     "error_envelope_from_detail",
     "http_error",
-    "is_quota_refusal",
     "http_exception_handler",
     "validation_exception_handler",
     "validation_http_error",

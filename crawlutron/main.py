@@ -5,7 +5,7 @@ import logging
 import os
 import traceback
 from collections.abc import Awaitable, Callable, Sequence
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import TYPE_CHECKING
 
 from crawlutron.admission.policy import PolicyTier
@@ -40,7 +40,6 @@ else:
         # with no web server): FastAPI -> None, exceptions -> ``Exception``.
         FastAPI = None
         RequestValidationError = Exception
-
 
 # Import modular routers
 from .discovery.agent_hints import create_agent_hints_router
@@ -244,12 +243,16 @@ def _stash_state(
 
 def install_error_surface(app) -> None:
     """Middleware and exception handlers every response path funnels through."""
-    # Body-size guard: 16 MiB ASGI receive cap; see middleware.py for truncation.
     from starlette.exceptions import HTTPException as StarletteHTTPException
 
     from crawlutron.api.anonymous_throttle import throttle_anonymous_surfaces
-    from crawlutron.api.exceptions import http_exception_handler, validation_exception_handler
+    from crawlutron.api.exceptions import (
+        domain_error_handler,
+        http_exception_handler,
+        validation_exception_handler,
+    )
     from crawlutron.api.middleware import limit_request_body, reject_hostile_origin
+    from crawlutron.service.errors import DomainError
 
     app.middleware("http")(reject_hostile_origin)
     app.middleware("http")(limit_request_body)
@@ -257,6 +260,7 @@ def install_error_surface(app) -> None:
     # every request, including 413/403-rejected ones, or they escape the budget.
     app.middleware("http")(throttle_anonymous_surfaces)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    app.add_exception_handler(DomainError, domain_error_handler)
     # 404/405 raise Starlette's base HTTPException; register on the base +
     # Exception for the last-resort 500.
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
@@ -492,7 +496,5 @@ async def _drain_task(_app, name: str) -> None:
     if task is None:
         return
     task.cancel()
-    try:
+    with suppress(asyncio.CancelledError):
         await task
-    except asyncio.CancelledError:
-        pass

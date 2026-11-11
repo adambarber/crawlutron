@@ -107,9 +107,9 @@ DECLARED_SURFACE_RATCHET = {
     # #656 raised 16,7 -> 18,8: get_concurrency_tracker + TrackerDep make the
     # app-state stash load-bearing (the getattr-None scatter is refused loudly).
     "crawlutron/api/dependencies.py": (20, 9),
-    # #813 raised 10,7 -> 11,8: is_quota_refusal is the named quota-refusal match
-    # the watch sweep reads instead of string-matching raw detail dicts.
-    "crawlutron/api/exceptions.py": (11, 8),
+    # #813: is_quota_refusal is the named quota-refusal match the sweep reads.
+    # #849: the predicate single-homed to service/errors; handler joins here.
+    "crawlutron/api/exceptions.py": (10, 8),
     # #668: the single-homed discovery-link constants the 404 details reuse.
     "crawlutron/discovery/links.py": (3, 0),
     # #649: derived discovery -- one thin re-export and one surface walk.
@@ -134,6 +134,9 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/api/render.py": (3, 3),
     "crawlutron/api/render_endpoint.py": (3, 2),
     "crawlutron/service/watch_sweep.py": (4, 2),
+    # #849: the typed domain refusals both doors map — one base + named subclasses
+    # plus the single-homed quota predicate the sweep reads.
+    "crawlutron/service/errors.py": (16, 15),
     "crawlutron/service/webhooks.py": (15, 13),
     "crawlutron/extraction/content.py": (4, 4),
     "crawlutron/extraction/llm_format.py": (4, 4),

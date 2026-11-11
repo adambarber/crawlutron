@@ -72,7 +72,11 @@ async def _assert_refused(awaitable, effects: Mapping[str, list[str]]) -> None:
     except (ValueError, RuntimeError):
         result = None
     except Exception as error:
-        if error.__class__.__name__ != "HTTPException":
+        # Any refusal carrier refuses: the api HTTPException or a service DomainError subclass.
+        if not (
+            error.__class__.__name__ == "HTTPException"
+            or "DomainError" in (c.__name__ for c in type(error).__mro__)
+        ):
             raise
         result = None
     assert _refused_result(result)

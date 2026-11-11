@@ -276,19 +276,20 @@ def test_anonymous_crawl_cannot_read_keyed_callers_jar_via_admission(tmp_path):
 
 def test_page_quota_rejects_over_budget_crawls():
     import pytest
-    from fastapi import HTTPException
+
+    from crawlutron.service.errors import QuotaRefusal
 
     caller = CallerIdentity(caller_id="key_a", authenticated=True, max_pages=10)
 
     check_page_quota(caller, 10)
 
-    with pytest.raises(HTTPException) as raised:
+    with pytest.raises(QuotaRefusal) as raised:
         check_page_quota(CallerIdentity(), 1000)
-    assert raised.value.status_code == 429
+    assert raised.value.status == 429
 
-    with pytest.raises(HTTPException) as raised:
+    with pytest.raises(QuotaRefusal) as raised:
         check_page_quota(caller, 11)
-    assert raised.value.status_code == 429
+    assert raised.value.status == 429
 
 
 async def test_get_crawl_result_enforces_owner(tmp_path):
@@ -369,21 +370,20 @@ def test_active_count_for_caller_counts_only_live_owned_jobs(tmp_path):
 
 def test_concurrency_quota_rejects_a_full_caller():
     import pytest
-    from fastapi import HTTPException
 
     from crawlutron.api.caller_auth import check_concurrency_quota
+    from crawlutron.service.errors import QuotaRefusal
 
     caller = CallerIdentity(caller_id="key_a", authenticated=True, max_concurrency=1)
 
     check_concurrency_quota(caller, 0)
 
-    with pytest.raises(HTTPException) as raised:
+    with pytest.raises(QuotaRefusal) as raised:
         check_concurrency_quota(CallerIdentity(), 100)
-    assert raised.value.status_code == 429
+    assert raised.value.status == 429
 
-    with pytest.raises(HTTPException) as raised:
+    with pytest.raises(QuotaRefusal) as raised:
         check_concurrency_quota(caller, 1)
-    assert raised.value.status_code == 429
 
 
 async def test_http_concurrency_quota_rejects_a_full_caller(tmp_path):

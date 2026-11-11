@@ -6,7 +6,6 @@ import logging
 import time
 
 from crawlutron.api.caller_auth import anonymous_caller
-from crawlutron.api.exceptions import http_error
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.search_request import SearchRequest
 from crawlutron.models.search_response import SearchResponse
@@ -14,6 +13,8 @@ from crawlutron.models.search_result_item import SearchResultItem
 from crawlutron.runtime.metrics import get_metrics
 from crawlutron.search.providers import SearchProviderError, SearchProviderUnavailable
 from crawlutron.search.providers_api import get_search_provider
+from crawlutron.service.errors import SearchProviderError as DomainProviderError
+from crawlutron.service.errors import SearchProviderUnavailable as DomainProviderUnavailable
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ async def search(
         provider = get_search_provider(settings)
     except SearchProviderUnavailable as error:
         logger.warning("search_request_unavailable", extra={"error": str(error)})
-        raise http_error(503, "search_provider_unavailable", str(error)) from error
+        raise DomainProviderUnavailable(str(error)) from error
     limit = max(1, min(payload.limit or settings.search_limit_default, settings.search_limit_max))
     started = time.monotonic()
     try:
@@ -46,7 +47,7 @@ async def search(
             "search_request_provider_error",
             extra={"provider": provider.name, "error": str(error)},
         )
-        raise http_error(502, "search_provider_error", str(error)) from error
+        raise DomainProviderError(str(error)) from error
     elapsed_ms = (time.monotonic() - started) * 1000
     get_metrics().observe_search(
         provider=provider.name, results=len(results), elapsed_ms=elapsed_ms, caller_id=caller_id
