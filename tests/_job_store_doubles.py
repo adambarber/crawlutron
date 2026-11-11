@@ -98,6 +98,7 @@ class InstrumentedJobStore(JobStore):
 
 def make_job_store(tmpdir: str) -> JobStore:
     db_path = pathlib.Path(tmpdir) / "jobs.db"
+    # The store base binds the conn's lifecycle: the store's GC closes it.
     return job_store(db_path, of=InstrumentedJobStore)
 
 
@@ -137,7 +138,10 @@ def single_shot_job(job_id: str = "test-id", root: str = "http://example.com/"):
     not re-derive them, and a second seed copy is a second thing to forget."""
     with tempfile.TemporaryDirectory() as tmpdir:
         store = make_job_store(tmpdir)
-        yield store, store.create_single_shot(job_id, root, CrawlPolicy())
+        try:
+            yield store, store.create_single_shot(job_id, root, CrawlPolicy())
+        finally:
+            store.close()
 
 
 @contextmanager

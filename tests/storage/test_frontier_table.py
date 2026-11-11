@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing
 
 import pytest
 
@@ -27,7 +28,7 @@ def _queued_job(store, count: int):
 
 
 def _queue_rows(db_path, job_id: str) -> list[tuple[int, str]]:
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn:
         return [
             (row[0], row[1])
             for row in conn.execute(
@@ -78,7 +79,7 @@ def test_the_job_row_stops_carrying_the_queue(tmp_path):
     store = make_job_store(tmp_path)
     job = _queued_job(store, 50)
 
-    with sqlite3.connect(store.db_path) as conn:
+    with closing(sqlite3.connect(store.db_path)) as conn:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(crawl_jobs)")}
     assert "frontier" not in columns, "the frontier column survived the split"
     assert "frontier_head" not in columns, "no queue bookkeeping belongs on the row"
@@ -222,7 +223,7 @@ class TestMigrationCarriesTheQueue:
 
     def test_the_carry(self, tmp_path):
         _apply, _rollback, store, job = self._rescued(tmp_path)
-        with sqlite3.connect(store.db_path) as conn:
+        with closing(sqlite3.connect(store.db_path)) as conn:
             # A database the migration is rescuing: the legacy column is back
             # (as a pre-0006 row would carry it) and the table is empty.
             conn.execute("ALTER TABLE crawl_jobs ADD COLUMN frontier TEXT NOT NULL DEFAULT '[]'")
@@ -250,7 +251,7 @@ class TestMigrationCarriesTheQueue:
 
     def test_the_rollback(self, tmp_path):
         _apply, rollback_step, store, job = self._rescued(tmp_path)
-        with sqlite3.connect(store.db_path) as conn:
+        with closing(sqlite3.connect(store.db_path)) as conn:
             rollback_step(conn)
             columns = {column.name for column in table_columns(conn, "crawl_jobs")}
             assert "frontier" in columns, "the rollback dropped the queue instead of restoring it"

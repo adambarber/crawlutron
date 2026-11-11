@@ -482,3 +482,12 @@ def get_metrics() -> MetricsStore:
     the current store even if a test or harness swaps the singleton.
     """
     return metrics
+
+
+def unbind_metric_counters() -> None:
+    """Close the bound shared counters and detach them (shutdown, #838): a later
+    reset falls to the process-local arm instead of a closed connection."""
+    counters = metrics.counters
+    if counters is not None:
+        counters.close()
+        metrics._counters = None

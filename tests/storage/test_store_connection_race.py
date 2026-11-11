@@ -18,7 +18,11 @@ def _delete_mode_database(path: str) -> None:
     conn.execute("CREATE TABLE t (v INTEGER)")
     conn.commit()
     conn.close()
-    assert sqlite3.connect(path).execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+    probe = sqlite3.connect(path)
+    try:
+        assert probe.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+    finally:
+        probe.close()
 
 
 class _PeerHoldingTheFile:

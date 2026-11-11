@@ -13,12 +13,14 @@ import pytest
 from crawlutron.transport.classification import classify_error_code
 from crawlutron.transport.pinned_dns import DNS_WAIT_SECONDS, dns_wait_for
 from crawlutron.transport.pinned_transport import (
-    apinned_hops,
     build_pinned_request,
     build_pinned_request_async,
 )
+from crawlutron.transport.redirect_walker import RedirectWalker
 from tests._assertions import block_private_targets
+from tests._fetch_doubles import make_fetch
 from tests._policy_factories import canonical
+from tests._transport_doubles import ScriptedTransport, _void_store_cookies
 
 # The scripted resolver answers a public IPv4 host; the builder resolves the hostname itself, so the test
 # scripts the resolver rather than the network.
@@ -135,13 +137,8 @@ class TestResolverDeadline:
         _stalling_resolver(monkeypatch, 1.0)
         started = time.monotonic()
         with pytest.raises(TimeoutError):
-            await anext(
-                apinned_hops(
-                    canonical("http://slow.example/"),
-                    {},
-                    pin=build_pinned_request,
-                    timeout_seconds=0.3,
-                )
+            await RedirectWalker(ScriptedTransport(), _void_store_cookies).walk(
+                canonical("http://slow.example/"), {}, 0.3, pin=build_pinned_request
             )
         assert time.monotonic() - started < 0.9  # bounded, not the resolver's full stall
         # The surfaced type is one the classification table maps.
@@ -151,16 +148,22 @@ class TestResolverDeadline:
         """The budget cuts both ways: a resolver that answers inside the request's
         budget resolves, even though the posture alone would have cut it off."""
         _stalling_resolver(monkeypatch, 0.4)
-        chain, pinned = await anext(
-            apinned_hops(
-                canonical("http://ok.example/"),
-                {},
-                pin=build_pinned_request,
-                timeout_seconds=2,
-            )
+        transport = ScriptedTransport(
+            [
+                make_fetch(
+                    status=200,
+                    body=b"ok",
+                    url="http://ok.example/",
+                    final_url="http://ok.example/",
+                )
+            ]
         )
-        assert pinned.connect_url == "http://93.184.216.34/"
-        assert chain.url == canonical("http://ok.example/")
+        result = await RedirectWalker(transport, _void_store_cookies).walk(
+            canonical("http://ok.example/"), {}, 2, pin=build_pinned_request
+        )
+        assert result is not None and result.status_code == 200
+        assert transport.calls[0][0].connect_url == "http://93.184.216.34/"
+        assert result.url == canonical("http://ok.example/")
 
     def test_the_derivation_never_exceeds_the_posture(self):
         """The request budget tightens the wait; the posture is the ceiling."""
@@ -191,23 +194,20 @@ class TestWrapperBudget:
 
 
 class TestHeaderValueWireGuard:
-    """#441: apinned_hops is the one edge both transports send through, so it is
+    """#441: the redirect walk is the one edge both transports send through, so it is
     where a header VALUE that could end one header and start another (CR/LF/NUL)
     is refused -- whatever door it came through.
     """
 
     async def test_caller_crlf_value_is_refused_before_the_first_hop(self):
-        # The resolver is scripted for the RED state: today the walk proceeds
-        # toward the wire; once the guard lands the refusal precedes any resolve.
-        with _resolve_as(_PUBLIC):
-            with pytest.raises(ValueError):
-                await anext(
-                    apinned_hops(
-                        canonical("http://example.com/"),
-                        {"X-Tenant": "a\r\nCookie: admin=1"},
-                        pin=build_pinned_request,
-                    )
-                )
+        # The refusal precedes any resolve: no DNS mock needed.
+        with pytest.raises(ValueError):
+            await RedirectWalker(ScriptedTransport(), _void_store_cookies).walk(
+                canonical("http://example.com/"),
+                {"X-Tenant": "a\r\nCookie: admin=1"},
+                10,
+                pin=build_pinned_request,
+            )
 
     async def test_a_value_injected_by_a_pin_rule_is_refused_before_the_wire(self):
         """The pin rule is injectable by design; its output is re-checked, so a
@@ -221,15 +221,20 @@ class TestHeaderValueWireGuard:
 
         with _resolve_as(_PUBLIC):
             with pytest.raises(ValueError):
-                await anext(apinned_hops(canonical("http://example.com/"), {}, pin=injecting_rule))
+                await RedirectWalker(ScriptedTransport(), _void_store_cookies).walk(
+                    canonical("http://example.com/"), {}, 10, pin=injecting_rule
+                )
 
     async def test_clean_headers_still_reach_the_pin(self):
         # No false positives: ordinary values (multibyte included) pass untouched.
+        transport = ScriptedTransport(
+            [make_fetch(status=200, body=b"ok", url="http://example.com/", final_url="http://example.com/")]
+        )
         with _resolve_as(_PUBLIC):
-            _chain, pinned = await anext(
-                apinned_hops(canonical("http://example.com/"), {"X-Tenant": "Café"}, pin=build_pinned_request)
+            await RedirectWalker(transport, _void_store_cookies).walk(
+                canonical("http://example.com/"), {"X-Tenant": "Café"}, 10, pin=build_pinned_request
             )
-        assert pinned.headers["X-Tenant"] == "Café"
+        assert transport.calls[0][0].headers["X-Tenant"] == "Café"
 
 
 class TestPinnedRequestIdentity:
@@ -240,8 +245,32 @@ class TestPinnedRequestIdentity:
     async def test_the_identity_rides_the_off_loop_entry_and_the_walk(self, monkeypatch):
         with _resolve_https_as(("93.184.216.34", 443), monkeypatch):
             request = await build_pinned_request_async(canonical("https://example.com/"), {})
-            _chain, pinned = await anext(
-                apinned_hops(canonical("https://example.com/"), {}, pin=build_pinned_request)
+            transport = ScriptedTransport(
+                [
+                    make_fetch(
+                        status=200,
+                        body=b"ok",
+                        url="https://example.com/",
+                        final_url="https://example.com/",
+                    )
+                ]
+            )
+            await RedirectWalker(transport, _void_store_cookies).walk(
+                canonical("https://example.com/"), {}, 10, pin=build_pinned_request
             )
         assert request.tls_hostname == "example.com"
-        assert pinned.tls_hostname == "example.com"
+        assert transport.calls[0][0].url.tls_hostname == "example.com"
+
+
+def test_one_redirect_walk_on_the_surface():
+    """One redirect walk on the surface: RedirectWalker. RedirectChain and the
+    apinned_hops redirect door are gone, so one chain yields one verdict."""
+    import crawlutron.transport.pinned_transport as pinned_mod
+
+    assert not hasattr(pinned_mod, "RedirectChain")
+    assert not hasattr(pinned_mod, "apinned_hops")
+    assert not hasattr(pinned_mod, "apinned_stream")
+
+    from crawlutron.transport.redirect_walker import RedirectWalker
+
+    assert RedirectWalker.__name__ == "RedirectWalker"

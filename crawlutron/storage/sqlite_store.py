@@ -6,6 +6,7 @@ import secrets
 import sqlite3
 import threading
 import time
+import weakref
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -165,6 +166,18 @@ def connect_store(db_path: str | Path, *, schema: StoreSchema) -> tuple[sqlite3.
     return conn, memory_name
 
 
+def bind_conn_lifecycle(store: object) -> None:
+    """A store whose last reference dies closes its connection at that GC point (#838).
+
+    Never interpreter-exit finalization, whose ResourceWarning fires inside
+    whichever test/run is executing (the rotating flake family). The callback
+    captures the CONNECTION (a bound store method would pin the store and the
+    close would never run)."""
+    conn = getattr(store, "_conn", None)
+    if conn is not None:
+        weakref.finalize(store, conn.close)
+
+
 def _validated_identifier(value: str) -> str:
     if not value.replace("_", "").isalnum():
         raise ValueError(f"unsafe SQL identifier: {value!r}")
@@ -212,6 +225,7 @@ def table_indexes(conn: sqlite3.Connection, table: str) -> tuple[IndexInfo, ...]
 __all__ = [
     "ColumnInfo",
     "IndexInfo",
+    "bind_conn_lifecycle",
     "configure_store_connection",
     "connection_data_version",
     "connect_store",

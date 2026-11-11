@@ -8,6 +8,7 @@ mutant that drops the audit write at one chokepoint reds exactly its test.
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 
 from crawlutron.api import caller_auth
 from crawlutron.storage.admin_audit_store import AdminAuditStore
@@ -103,7 +104,7 @@ async def test_audit_rows_carry_no_free_text_and_no_secret_material(tmp_path):
         secret_holder = {"X-API-Key": TEST_ADMIN_TOKEN}
         issued = await client.post("/v1/keys", json={"label": "no-secret"}, headers=secret_holder)
 
-        with sqlite3.connect(tmp_path / "audit.db") as conn:
+        with closing(sqlite3.connect(tmp_path / "audit.db")) as conn:
             rows = conn.execute("SELECT * FROM key_admin_events").fetchall()
         blob = str(rows)
         assert "wrong-token" not in blob
@@ -131,7 +132,7 @@ async def test_retention_sweep_drops_lapsed_rows_at_the_roll_point(tmp_path):
     audit = _audit(tmp_path)
     audit.record_event(actor="admin", action="key_mint", target_key_id="key_old", outcome="granted")
     # Backdate the row past the retention window directly at the stored table.
-    with sqlite3.connect(tmp_path / "audit.db") as conn:
+    with closing(sqlite3.connect(tmp_path / "audit.db")) as conn:
         conn.execute("UPDATE key_admin_events SET recorded_at = 0.0")
         conn.commit()
 

@@ -5,6 +5,7 @@ PRAGMA statements confined to it (PRAGMAs are connection-scoped)."""
 
 import ast
 import sqlite3
+from contextlib import closing
 
 from crawlutron.storage.result_store import CrawlResultStore
 from tests._job_harnesses import make_job_store
@@ -180,7 +181,7 @@ def test_both_stores_share_the_pragma_configuration(tmp_path):
     ):
         # WAL is persistent in the database header, so any opener reads it;
         # busy_timeout is per-connection, so its wait behavior is tested elsewhere.
-        with sqlite3.connect(store.db_path) as conn:
+        with closing(sqlite3.connect(store.db_path)) as conn:
             assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
 
 

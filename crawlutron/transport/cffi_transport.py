@@ -41,7 +41,7 @@ class _CffiResponse(Protocol):
     async def aclose(self) -> None: ...
 
 
-async def _cffi_chunks(response: _CffiResponse, timeout_seconds: int) -> AsyncIterator[bytes]:
+async def _cffi_chunks(response: _CffiResponse, timeout_seconds: float) -> AsyncIterator[bytes]:
     """Yield curl_cffi queue chunks as bytes, ending at STREAM_END.
 
     A queued RequestException is raised; a stall raises TimeoutError so the

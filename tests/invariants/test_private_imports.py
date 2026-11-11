@@ -456,7 +456,7 @@ CONFTEST_WELDS = Rule(
         # The shape this rule exists to force: ask the owner, do not touch the state.
         "from crawlutron.transport import pinned_transport\n\npinned_transport.reset_dns_cache()\n",
         # A public app name is the whole point.
-        "from crawlutron.transport import pinned_transport\n\npinned_transport.apinned_hops\n",
+        "from crawlutron.transport import pinned_transport\n\npinned_transport.build_pinned_request\n",
         # Not an app import, so not this rule's business.
         "import os\n\nos.environ.get('CRAWLUTRON_LOG_LEVEL')\n",
     ),

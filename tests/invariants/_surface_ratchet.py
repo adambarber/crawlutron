@@ -27,7 +27,7 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     "crawlutron/delta.py": (14, 7),
     # RAISED to (10, 8) by #314/F2: connection_data_version is the one PRAGMA read
     # chokepoint outside configure_store_connection, backing the table-trust digest.
-    "crawlutron/storage/sqlite_store.py": (10, 8),
+    "crawlutron/storage/sqlite_store.py": (11, 9),
     "crawlutron/safety/safe_regex.py": (7, 2),
     # robots_pattern_to_regex is public (#190) -- robots_allows itself calls it; the matcher class
     # behind it stays private, and RobotsMatcher stays public as the function's return type.
@@ -93,6 +93,7 @@ DECLARED_SURFACE_RATCHET = {
     # #664 raised 18,15 -> 19,16 (verify_admin_secret); #822 raised 21,18 -> 22,19
     # (operator_caller: the shared operator identity the keys door and resolver read).
     "crawlutron/api/cache_sweep.py": (4, 2),
+    "crawlutron/api/store_shutdown.py": (1, 1),
     "crawlutron/api/caller_auth.py": (22, 19),
     "crawlutron/api/caller_concurrency.py": (1, 1),
     # #674 raised 1,1 -> 2,2: CrawlRefusalError is the typed refusal carrier the

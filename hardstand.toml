@@ -56,7 +56,7 @@ run = ".venv/bin/python scripts/regen_version.py"
 
 [[setup]]
 name = "bind-workspace-tree"
-run = "printf %s $PWD > .venv/lib/python3.12/site-packages/!hardstand-workspace.pth"
+run = "printf %s $PWD > .venv/lib/$(.venv/bin/python -c 'import sys; print(f\"python{sys.version_info.major}.{sys.version_info.minor}\")')/site-packages/!hardstand-workspace.pth"
 
 # #553 residual: a fresh workspace's git hooks do not exist until pre-commit
 # installs them -- without this step a workspace commit runs ZERO gates and

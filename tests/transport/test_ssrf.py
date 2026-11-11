@@ -9,13 +9,16 @@ import crawlutron.transport.pinned_dns as http_mod
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.transport.pinned_dns import check_ssrf_protection, resolve_and_pin_host
-from crawlutron.transport.pinned_transport import apinned_hops, build_pinned_request
+from crawlutron.transport.pinned_transport import build_pinned_request
+from crawlutron.transport.redirect_walker import RedirectWalker
 from tests._assertions import (
     assert_dns_pinning_uses_first_resolution,
     block_private_targets,
     host_resolves_to,
 )
+from tests._fetch_doubles import make_fetch
 from tests._policy_factories import canonical
+from tests._transport_doubles import ScriptedTransport, _void_store_cookies
 
 
 def _blocked(ip):
@@ -143,7 +146,9 @@ async def test_pinned_hop_never_targets_loopback_for_unresolvable(monkeypatch):
     # attacker-influenced, unresolvable hostname.
     _unresolvable_host(monkeypatch)
     with pytest.raises(ValueError):
-        await anext(apinned_hops(canonical("http://nonexistent.invalid/"), {}, pin=build_pinned_request))
+        await RedirectWalker(
+            ScriptedTransport([make_fetch(status=200, body=b"ok")]), _void_store_cookies
+        ).walk(canonical("http://nonexistent.invalid/"), {}, 10, pin=build_pinned_request)
 
 
 def test_pinned_builder_surfaces_unresolvable_host_as_an_ssrf_refusal(monkeypatch):

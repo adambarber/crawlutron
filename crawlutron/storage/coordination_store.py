@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import ClassVar, Concatenate, ParamSpec, TypeVar
 
 from crawlutron.storage.migrations.manifest import StoreSchema
-from crawlutron.storage.sqlite_store import connect_store, process_lock, store_lock_key
+from crawlutron.storage.sqlite_store import bind_conn_lifecycle, connect_store, process_lock, store_lock_key
 
 __all__ = ["CoordinationStore", "atwin"]
 
@@ -52,6 +52,9 @@ class CoordinationStore:
         # excludes this store from nothing. On the memory path that is its own name.
         self.lock_key = store_lock_key(db_path, memory_name)
         self._lock = process_lock(self.lock_key)
+        # A store whose last reference dies closes its connection at that GC
+        # point — never at interpreter-exit finalization (see bind_conn_lifecycle).
+        bind_conn_lifecycle(self)
 
     def close(self) -> None:
         """Close the connection under the lock -- on the base, not per store, since

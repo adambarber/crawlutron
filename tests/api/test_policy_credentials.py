@@ -5,6 +5,7 @@ origin, and origin-keyed fields use the existing cross-host scrub.
 
 import json
 import sqlite3
+from contextlib import closing
 
 import pytest
 from pydantic import SecretStr
@@ -306,7 +307,7 @@ class TestIpv6AndTrailingDotOrigins:
             {"credentials": {"https://[2001:0db8::1]:8080": {"kind": "bearer", "token": "t"}}}
         )
         job = store.create("https://[2001:0db8::1]:8080/", policy)
-        with sqlite3.connect(tmp_path / "jobs.db") as connection:
+        with closing(sqlite3.connect(tmp_path / "jobs.db")) as connection:
             (raw,) = connection.execute(
                 "SELECT policy FROM crawl_jobs WHERE job_id = ?", (job.job_id,)
             ).fetchone()
