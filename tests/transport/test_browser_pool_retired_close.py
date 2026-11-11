@@ -12,7 +12,7 @@ import pytest
 from crawlutron.runtime.resource_lifecycle import DeferredClose
 from crawlutron.transport.browser import BrowserRenderer
 from crawlutron.transport.browser_pool import BrowserPool, BrowserPoolExhaustedError
-from tests._browser_pool_doubles import SpyRenderer
+from tests._browser_doubles import SpyRenderer
 
 _SpyRenderer = SpyRenderer
 

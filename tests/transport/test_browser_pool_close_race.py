@@ -9,7 +9,7 @@ from typing import cast
 import pytest
 
 from crawlutron.transport.browser_pool import BrowserPool, BrowserPoolExhaustedError
-from tests._browser_pool_doubles import GatedCloseRenderer, SpyRenderer, close_mid_sweep
+from tests._browser_doubles import GatedCloseRenderer, SpyRenderer, close_mid_sweep
 
 
 async def test_close_never_hands_a_suspended_acquire_a_swept_renderer():

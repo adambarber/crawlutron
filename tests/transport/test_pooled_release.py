@@ -6,8 +6,8 @@ import crawlutron.transport.http_client_pool as http_mod
 from crawlutron.config import settings as settings_mod
 from crawlutron.transport.http_client_pool import get_async_http_client
 from tests._async_harnesses import run_loop_rebind_scenario
-from tests._pool_ws_doubles import FakeClient as _FakeClient
-from tests._pool_ws_doubles import bind_to_running_loop as _bind_to_running_loop
+from tests._browser_doubles import FakeClient as _FakeClient
+from tests._browser_doubles import bind_to_running_loop as _bind_to_running_loop
 
 
 class _PooledClientDouble:

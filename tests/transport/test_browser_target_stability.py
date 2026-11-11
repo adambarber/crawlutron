@@ -15,8 +15,8 @@ import pytest
 
 from tests._assertions import block_private_targets, resolves_in_sequence
 from tests._browser_doubles import FakeRequest, FakeRoute, ssrf_route_handler
+from tests._browser_doubles import FakeWS as _FakeWS
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
-from tests._pool_ws_doubles import FakeWS as _FakeWS
 
 
 async def test_https_subresource_refuses_a_changed_fresh_answer(monkeypatch) -> None:

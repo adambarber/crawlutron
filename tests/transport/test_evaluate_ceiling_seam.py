@@ -10,7 +10,7 @@ import time
 import pytest
 
 from crawlutron.transport import timeouts
-from tests._browser_page_doubles import BrowserFakePage
+from tests._browser_doubles import BrowserFakePage
 
 _HANG_GUARD_SECONDS = 8.0
 

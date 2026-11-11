@@ -10,15 +10,16 @@ from crawlutron.transport.pinned_transport import build_pinned_request, build_pi
 from tests._assertions import block_private_targets
 from tests._browser_doubles import (
     BrowserFakePage,
+    FakePageContext,
     FakeRequest,
     FakeRoute,
+    _ContextSwappingPage,
     build_pinned_renderer,
     pinned_page_renderer,
     render_bare,
     render_pinned,
     stub_pinned_request,
 )
-from tests._browser_page_doubles import FakePageContext, _ContextSwappingPage
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
 # -------------------------------------------------------------------------- document.py: SSRF gate on urlopen

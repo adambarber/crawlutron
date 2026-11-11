@@ -15,9 +15,9 @@ from crawlutron.transport.pooled_clients import (
     drain_pending_client_closes,
 )
 from tests._async_harnesses import run_loop_rebind_scenario
+from tests._browser_doubles import bind_to_running_loop as _bind_to_running_loop
 from tests._policy_factories import canonical
 from tests._pool_harnesses import builder_for as _builder_for
-from tests._pool_ws_doubles import bind_to_running_loop as _bind_to_running_loop
 
 
 @pytest.fixture(autouse=True)

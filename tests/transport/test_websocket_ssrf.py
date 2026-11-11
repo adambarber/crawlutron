@@ -8,9 +8,8 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from tests._assertions import block_private_targets, host_resolves_to
-from tests._browser_doubles import pinned_page_renderer, render_bare
-from tests._browser_page_doubles import FakePageContext, _ContextSwappingPage
-from tests._pool_ws_doubles import FakeWS as _FakeWS
+from tests._browser_doubles import FakePageContext, _ContextSwappingPage, pinned_page_renderer, render_bare
+from tests._browser_doubles import FakeWS as _FakeWS
 
 _PUBLIC = "1.2.3.4"
 
