@@ -17,6 +17,7 @@ LIMIT = 500
 #: Keyed by declared scan root -- a missing root fails loud, not silently empty.
 _BUDGETS = {
     "crawlutron": 0,
+    "crawlutron_sdk": 0,
     "tests": 0,
     "scripts": 0,
 }
@@ -73,6 +74,12 @@ def test_scan_includes_the_extensionless_gate_helper(tmp_path: pathlib.Path) -> 
     found = scan(scripts, include_gate=True)
     assert list(found) == [gate.as_posix()], f"the gate helper was not scanned: {found}"
     assert found[gate.as_posix()] == 502
+
+
+def test_every_declared_scan_root_has_a_budget_row() -> None:
+    """A walked-but-unbudgeted root is a blind spot: ceiling enforcement only
+    reads _BUDGETS, so every root the repo ships must carry an exact row."""
+    assert set(_BUDGETS) == {"crawlutron", "crawlutron_sdk", "scripts", "tests"}
 
 
 def test_every_root_is_at_its_declared_file_budget() -> None:
