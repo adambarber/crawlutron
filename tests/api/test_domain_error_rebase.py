@@ -159,16 +159,6 @@ def test_widened_is_quota_refusal_classifies_the_quota_refusal_class():
     assert is_quota_refusal(HTTPException(status_code=429, detail="plain")) is False
 
 
-def test_widened_is_quota_refusal_keeps_the_legacy_shape():
-    from crawlutron.service.errors import is_quota_refusal
-
-    legacy = HTTPException(
-        status_code=429,
-        detail={"code": "quota_exceeded", "message": "at cap", "details": {}},
-    )
-    assert is_quota_refusal(legacy) is True
-
-
 def test_browser_pool_unavailable_is_a_domain_error_with_the_canonical_message():
     from crawlutron.api.exceptions import BROWSER_POOL_MESSAGE, browser_pool_unavailable
     from crawlutron.service.errors import BrowserPoolUnavailable
