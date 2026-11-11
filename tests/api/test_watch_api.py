@@ -122,18 +122,22 @@ async def test_status_reports_what_the_sweep_recorded(watch_store):
     """The status endpoints read the row the sweep writes, not their own bookkeeping."""
     registered = watch_store.create(canonical(TARGET), interval_seconds=INTERVAL, now=1_000.0)
     # A prior successful fetch established the etag; the revalidation below kept it.
+    watch_store.claim_due(2_000.0, "sweeper-a", claim_seconds=300.0)
     watch_store.record_check(
         registered.watch_id,
         outcome=CrawlClassification.rendered,
         now=1_500.0,
         next_check_at=2_000.0,
         etag='"v1"',
+        claimed_by="sweeper-a",
     )
+    watch_store.claim_due(3_000.0, "sweeper-a", claim_seconds=300.0)
     watch_store.record_check(
         registered.watch_id,
         outcome=CrawlClassification.not_modified,
         now=2_000.0,
         next_check_at=3_000.0,
+        claimed_by="sweeper-a",
     )
 
     async with watch_client(watch_store) as client:

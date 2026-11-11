@@ -206,12 +206,14 @@ async def test_a_failed_check_keeps_what_it_knew_and_announces_nothing(
     deactivated (that is for a terminal refusal, #335). The crawl is stubbed so
     the failure is genuinely transient -- no admission verdict at all."""
     watch = register(watch_store, canonical(DEAD_ORIGIN))
+    watch_store.claim_due(INTERVAL, "sweeper-a", claim_seconds=300.0)
     watch_store.record_check(
         watch.watch_id,
         outcome=CrawlClassification.rendered,
         now=0.0,
         next_check_at=INTERVAL,
         etag='"v1"',
+        claimed_by="sweeper-a",
     )
 
     _stub_transient_failure(monkeypatch)

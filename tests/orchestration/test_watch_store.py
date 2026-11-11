@@ -21,6 +21,30 @@ def register(store, url="https://example.com/feed.xml", *, at=NOW, interval=INTE
     return store.create(canonical(url), webhook_url=target, interval_seconds=interval, now=at)
 
 
+def claimed_record(
+    store,
+    watch_id,
+    *,
+    outcome,
+    at=NOW,
+    next_at=NOW + INTERVAL,
+    token,
+    claim_at=None,
+    **extra,
+):
+    """Claim the row (at ``claim_at``, defaulting to ``at``) and record
+    ``outcome`` under ``token``; the arrange step every verdict test needs."""
+    store.claim_due(claim_at if claim_at is not None else at, token, claim_seconds=300.0)
+    return store.record_check(
+        watch_id,
+        outcome=outcome,
+        now=at,
+        next_check_at=next_at,
+        claimed_by=token,
+        **extra,
+    )
+
+
 def test_registration_round_trips_what_was_declared(watch_store):
     state = register(watch_store, webhook="https://example.com/hook")
 
@@ -73,20 +97,25 @@ def test_due_selects_matured_watches_earliest_first(watch_store):
 def test_record_check_moves_the_schedule(watch_store):
     state = register(watch_store)
     checked_at = NOW + INTERVAL
+    watch_store.claim_due(checked_at, "sweeper-a", claim_seconds=300.0)
     # A prior successful fetch established the etag; the revalidation below kept it
     # and is the one whose schedule move this test reads.
-    watch_store.record_check(
+    claimed_record(
+        watch_store,
         state.watch_id,
+        token="sweeper-a",
         outcome=CrawlClassification.rendered,
-        now=NOW,
-        next_check_at=checked_at,
+        at=NOW,
+        next_at=checked_at,
         etag="v1",
     )
-    watch_store.record_check(
+    claimed_record(
+        watch_store,
         state.watch_id,
+        token="sweeper-a",
         outcome=CrawlClassification.not_modified,
-        now=checked_at,
-        next_check_at=checked_at + INTERVAL,
+        at=checked_at,
+        next_at=checked_at + INTERVAL,
     )
 
     reloaded = watch_store.get(state.watch_id)
@@ -102,18 +131,24 @@ def test_modified_outcome_moves_the_change_clock(watch_store):
     state = register(watch_store)
     first_seen = NOW + INTERVAL
 
-    watch_store.record_check(
+    claimed_record(
+        watch_store,
         state.watch_id,
+        token="sweeper-a",
         outcome=CrawlClassification.rendered,
-        now=first_seen,
-        next_check_at=first_seen + INTERVAL,
+        at=first_seen,
+        next_at=first_seen + INTERVAL,
+        claim_at=first_seen,
     )
     later = first_seen + INTERVAL
-    watch_store.record_check(
+    claimed_record(
+        watch_store,
         state.watch_id,
+        token="sweeper-a",
         outcome=CrawlClassification.not_modified,
-        now=later,
-        next_check_at=later + INTERVAL,
+        at=later,
+        next_at=later + INTERVAL,
+        claim_at=later,
     )
 
     # The change clock holds the last modified check, not the last check.
@@ -123,20 +158,34 @@ def test_modified_outcome_moves_the_change_clock(watch_store):
 def test_error_outcome_extends_the_failure_streak_and_success_resets_it(watch_store):
     state = register(watch_store)
 
-    for attempt in range(2):
-        watch_store.record_check(
-            state.watch_id,
-            outcome=CrawlClassification.site_error,
-            now=NOW + INTERVAL + attempt,
-            next_check_at=NOW + 2 * INTERVAL,
-        )
+    claimed_record(
+        watch_store,
+        state.watch_id,
+        token="sweeper-a",
+        outcome=CrawlClassification.site_error,
+        at=NOW + INTERVAL,
+        next_at=NOW + 2 * INTERVAL,
+        claim_at=NOW + 2 * INTERVAL,
+    )
+    claimed_record(
+        watch_store,
+        state.watch_id,
+        token="sweeper-a",
+        outcome=CrawlClassification.site_error,
+        at=NOW + INTERVAL + 1,
+        next_at=NOW + 2 * INTERVAL,
+        claim_at=NOW + 2 * INTERVAL,
+    )
     assert watch_store.get(state.watch_id).consecutive_failures == 2
 
-    watch_store.record_check(
+    claimed_record(
+        watch_store,
         state.watch_id,
+        token="sweeper-a",
         outcome=CrawlClassification.not_modified,
-        now=NOW + 2 * INTERVAL,
-        next_check_at=NOW + 3 * INTERVAL,
+        at=NOW + 2 * INTERVAL,
+        next_at=NOW + 3 * INTERVAL,
+        claim_at=NOW + 3 * INTERVAL,
     )
     assert watch_store.get(state.watch_id).consecutive_failures == 0
 
@@ -146,11 +195,13 @@ def test_a_skipped_check_is_not_a_failure(watch_store):
     grow the failure streak, so a persistent refusal cannot climb monotonically
     without a deactivation path (#335)."""
     state = register(watch_store)
-    watch_store.record_check(
+    claimed_record(
+        watch_store,
         state.watch_id,
+        token="sweeper-a",
         outcome=CrawlClassification.robots_disallowed,
-        now=NOW,
-        next_check_at=NOW + INTERVAL,
+        at=NOW,
+        next_at=NOW + INTERVAL,
     )
 
     assert watch_store.get(state.watch_id).consecutive_failures == 0
@@ -159,18 +210,22 @@ def test_a_skipped_check_is_not_a_failure(watch_store):
 def test_validator_replacement_is_wholesale(watch_store):
     """A 200 whose origin dropped the ETag clears it; no merge resurrects it."""
     state = register(watch_store)
-    watch_store.record_check(
+    claimed_record(
+        watch_store,
         state.watch_id,
+        token="sweeper-a",
         outcome=CrawlClassification.rendered,
-        now=NOW,
-        next_check_at=NOW + INTERVAL,
+        at=NOW,
+        next_at=NOW + INTERVAL,
         etag="v1",
     )
-    watch_store.record_check(
+    claimed_record(
+        watch_store,
         state.watch_id,
+        token="sweeper-a",
         outcome=CrawlClassification.rendered,
-        now=NOW + INTERVAL,
-        next_check_at=NOW + 2 * INTERVAL,
+        at=NOW + INTERVAL,
+        next_at=NOW + 2 * INTERVAL,
     )
 
     assert watch_store.get(state.watch_id).validators.etag is None
@@ -210,11 +265,14 @@ def test_a_failed_check_does_not_stop_counting_a_watch(watch_store):
     """A non-terminal failure keeps the watch active and counted; only a
     ``deactivate`` (terminal status) releases the cap slot."""
     watch = register(watch_store, url="https://example.com/a")
-    watch_store.record_check(
+    claimed_record(
+        watch_store,
         watch.watch_id,
+        token="sweeper-a",
         outcome=CrawlClassification.site_error,
-        now=NOW,
-        next_check_at=NOW + INTERVAL,
+        at=NOW,
+        next_at=NOW + INTERVAL,
+        claim_at=NOW + INTERVAL,
     )
 
     assert watch_store.count_for_owner("") == 1

@@ -157,12 +157,15 @@ class WatchSweeper:
                 extra={"watch_id": watch.watch_id, "url": watch.redacted_url()},
             )
             try:
-                await self._store.arecord_check(
+                recorded = await self._store.arecord_check(
                     watch.watch_id,
                     outcome=CrawlClassification.unknown_error,
                     now=now,
                     next_check_at=now + watch.interval_seconds,
+                    claimed_by=self._claim_token,
                 )
+                if not recorded:
+                    logger.info("watch_check_stale_verdict_dropped", extra={"watch_id": watch.watch_id})
             except Exception:
                 logger.exception("watch_check_record_failed", extra={"watch_id": watch.watch_id})
             return CrawlClassification.unknown_error
@@ -216,6 +219,7 @@ class WatchSweeper:
             next_check_at=now + watch.interval_seconds,
             etag=etag,
             last_modified=last_modified,
+            claimed_by=self._claim_token,
         )
         # A robots-txt refusal is terminal: stop sweeping it rather than re-checking
         # a host that declined us forever (same lifecycle as a revoked owner).
@@ -243,6 +247,10 @@ class WatchSweeper:
                 )
                 return classification
             if target is None:
+                return classification
+            # Delivery atomicity rides the RESCHEDULE above: record_check nulls the
+            # claim and pushes next_check_at out, so no sweeper re-claims mid-delivery.
+            if not await self._store.arenew_claim(watch.watch_id, self._claim_token, now=self._clock()):
                 return classification
             # Backgrounded, not awaited: a slow receiver must not stall the pass;
             # the delivery rides the tracked set and shutdown drains it.

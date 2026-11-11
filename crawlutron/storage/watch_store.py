@@ -201,16 +201,17 @@ class WatchStore(CoordinationStore):
         next_check_at: float,
         etag: str | None = None,
         last_modified: str | None = None,
-    ) -> None:
-        """Persist a completed check's result and reschedule. ``etag``/``last_modified``
-        are stored only on a delivered change; other verdicts keep the stored set.
-        A ``skipped`` (robots refusal) is a non-attempt, not an error.
+        claimed_by: str,
+    ) -> bool:
+        """Persist a completed check's result and reschedule, only while
+        ``claimed_by`` still owns the row: a stale sweeper's late verdict must
+        not overwrite the new owner's fresher one. Returns whether it landed.
         """
         status = status_for_classification(outcome)
         modified = status == "success" and outcome != CrawlClassification.not_modified
         error = status not in ("success", "skipped")
         with self._lock:
-            self._conn.execute(
+            cursor = self._conn.execute(
                 """
                 UPDATE watches SET
                     last_checked_at = ?,
@@ -225,7 +226,7 @@ class WatchStore(CoordinationStore):
                     -- the claim ends with the check: a completed row is unclaimed
                     claimed_at = NULL,
                     updated_at = ?
-                WHERE watch_id = ?
+                WHERE watch_id = ? AND claimed_by = ?
                 """,
                 (
                     now,
@@ -241,9 +242,11 @@ class WatchStore(CoordinationStore):
                     next_check_at,
                     now,
                     watch_id,
+                    claimed_by,
                 ),
             )
             self._conn.commit()
+        return cursor.rowcount == 1
 
     def deactivate(
         self,
