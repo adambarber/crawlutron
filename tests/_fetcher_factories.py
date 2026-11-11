@@ -17,6 +17,7 @@ from tests._browser_doubles import _fake_browser
 
 if TYPE_CHECKING:
     from crawlutron.models.crawl_result import EngineCrawlResult
+from tests._clocks import clocked_cache, make_seeded_cache
 from tests._crawl_runners import (
     LINKED_PAIR_LIMITS,
     LLM_FORMAT_TEST_HTML,
@@ -24,13 +25,11 @@ from tests._crawl_runners import (
     _spawn_fetch,
     build_payload,
     cache_with_etag,
-    clocked_cache,
     crawl_homepage_async,
     crawled_result,
     crawled_results,
     crawled_urls,
     make_crawl_payload,
-    make_seeded_cache,
     run_cached_twice,
     run_chain,
     run_crawl_async,

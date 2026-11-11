@@ -14,7 +14,7 @@ from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.orchestration.engine import crawl_request
 from crawlutron.storage.result_store import CrawlSpillStore
 from crawlutron.transport.cache import HttpCache
-from crawlutron.transport.content_cache import CONTENT_CACHE_MAX_TOTAL_BYTES, ContentCache
+from crawlutron.transport.content_cache import ContentCache
 from crawlutron.transport.fetchers import default_http_fetcher
 from crawlutron.transport.strategy_request import StrategyRequest
 from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
@@ -345,51 +345,6 @@ async def run_cached_twice(
         for _ in range(2)
     ]
     return results[0], results[1]
-
-
-def clocked_cache(
-    directory: str,
-    *,
-    default_ttl: float = 1,
-    clock_start: float = 1000.0,
-    max_entries: int = 10000,
-    max_total_bytes: int | None = CONTENT_CACHE_MAX_TOTAL_BYTES,
-) -> tuple[ContentCache, list[float]]:
-    """A cache over ``directory`` reading time from a handle the caller advances.
-
-    Expiry is the subject of most of these tests, so a movable clock handle is
-    returned beside the cache -- no site declares a list and a lambda over it."""
-    clock = [clock_start]
-    return (
-        ContentCache(
-            directory,
-            default_ttl=default_ttl,
-            clock=lambda: clock[0],
-            max_entries=max_entries,
-            max_total_bytes=max_total_bytes,
-        ),
-        clock,
-    )
-
-
-def make_seeded_cache(
-    directory: str,
-    *keys: str,
-    value: JsonValue | None = None,
-    default_ttl: float = 1,
-    max_entries: int = 10000,
-    max_total_bytes: int | None = CONTENT_CACHE_MAX_TOTAL_BYTES,
-) -> tuple[ContentCache, list[float]]:
-    """:func:`clocked_cache` holding one entry per key.
-
-    Seeding + a clock are the two halves of "an entry that expires"; a test
-    needing both used to write down directory, TTL, clock list and entry."""
-    cache, clock = clocked_cache(
-        directory, default_ttl=default_ttl, max_entries=max_entries, max_total_bytes=max_total_bytes
-    )
-    for key in keys:
-        cache.set(key, {"data": "1"} if value is None else value)
-    return cache, clock
 
 
 def _spawn_fetch(fn: Callable[[TestServer], HttpFetchResult]) -> HttpFetchResult:

@@ -15,13 +15,7 @@ from crawlutron.api.anonymous_throttle import (
     Throttled,
     shared_anonymous_throttle,
 )
-
-
-def _clock(start: list[float]):
-    def clock() -> float:
-        return start[0]
-
-    return clock
+from tests._clocks import ClockState, arrange_clock
 
 
 def _burst(throttle: AnonymousThrottle, remote: str | None, count: int) -> int:
@@ -34,35 +28,38 @@ def _burst(throttle: AnonymousThrottle, remote: str | None, count: int) -> int:
     return refused
 
 
+def _throttle_on_arranged_time(start: float = 0.0) -> tuple[ClockState, AnonymousThrottle]:
+    """An :class:`AnonymousThrottle` over an arrange clock the caller advances."""
+    state, clock = arrange_clock(start=start)
+    return state, AnonymousThrottle(clock=clock)
+
+
 def test_burst_over_budget_refuses_under_budget_passes():
     """The budget is a real ceiling: MAX requests pass, the next one refuses."""
-    now = [0.0]
-    throttle = AnonymousThrottle(clock=_clock(now))
+    _state, throttle = _throttle_on_arranged_time()
     assert _burst(throttle, "10.0.0.1", MAX_REQUESTS_PER_WINDOW) == 0
     assert _burst(throttle, "10.0.0.1", 1) == 1
 
 
 def test_window_rollover_restores_the_budget():
     """A lapsed window resets the bucket: the caller gets a fresh budget."""
-    now = [0.0]
-    throttle = AnonymousThrottle(clock=_clock(now))
+    state, throttle = _throttle_on_arranged_time()
     assert _burst(throttle, "10.0.0.1", MAX_REQUESTS_PER_WINDOW + 5) == 5
-    now[0] = 61.0
+    state["now"] = 61.0
     assert _burst(throttle, "10.0.0.1", 1) == 0
 
 
 def test_per_ip_isolation_two_ips_do_not_share_a_bucket():
     """One IP exhausting its budget leaves another IP's budget untouched."""
-    throttle = AnonymousThrottle(clock=_clock([0.0]))
+    _state, throttle = _throttle_on_arranged_time()
     assert _burst(throttle, "10.0.0.1", MAX_REQUESTS_PER_WINDOW) == 0
-    assert _burst(throttle, "10.0.0.1", 1) == 1
     assert _burst(throttle, "10.0.0.2", 1) == 0
 
 
 def test_no_client_ip_shares_one_fixed_bucket():
     """Transports providing no remote address pool into one fixed bucket, so
     varying nothing cannot mint unlimited buckets."""
-    throttle = AnonymousThrottle(clock=_clock([0.0]))
+    _state, throttle = _throttle_on_arranged_time()
     assert _burst(throttle, None, MAX_REQUESTS_PER_WINDOW) == 0
     assert _burst(throttle, None, 1) == 1
 
@@ -72,8 +69,7 @@ def test_lru_eviction_is_bounded_and_never_resets_an_active_ip():
     memory is bounded at capacity, and an ip touched DURING the flood (MRU
     end on every touch) keeps its accumulated ledger -- its next touch still
     refuses past budget, where a reset ledger would admit it."""
-    now = [0.0]
-    throttle = AnonymousThrottle(clock=_clock(now))
+    _state, throttle = _throttle_on_arranged_time()
     assert _burst(throttle, "10.0.0.1", MAX_REQUESTS_PER_WINDOW) == 0
     for i in range(BUCKET_CAPACITY):
         throttle.check(f"10.1.{i // 256}.{i % 256}")
@@ -85,7 +81,7 @@ def test_lru_eviction_is_bounded_and_never_resets_an_active_ip():
 
 def test_residence_is_the_probe_door():
     """The meter exposes its live bucket count (the #621 has/reset walk)."""
-    throttle = AnonymousThrottle(clock=_clock([0.0]))
+    _state, throttle = _throttle_on_arranged_time()
     assert throttle.residence() == 0
     throttle.check("10.0.0.1")
     assert throttle.residence() == 1

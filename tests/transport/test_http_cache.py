@@ -2,6 +2,7 @@
 
 from crawlutron.models.json_value import JsonValue
 from crawlutron.transport.cache import HttpCache
+from tests._clocks import Timeline
 from tests._fetch_doubles import FetcherDouble
 from tests._fetcher_factories import run_http_strategy
 from tests._policy_factories import canonical
@@ -46,20 +47,12 @@ class TestHttpCacheEdges:
         assert c.is_closed is True
 
 
-class _Clock:
-    def __init__(self):
-        self.t = 1000.0
-
-    def __call__(self):
-        return self.t
-
-
 def test_ttl_expiry_returns_none():
-    clock = _Clock()
+    clock = Timeline()
     cache = HttpCache(ttl_seconds=10, clock=clock)
     cache.store(canonical("http://x/1"), {"etag": '"v1"'})
     assert cache.get(canonical("http://x/1")) == ('"v1"', None)
-    clock.t += 11
+    clock.advance(11)
     assert cache.get(canonical("http://x/1")) == (None, None)
 
 
@@ -101,16 +94,16 @@ def test_concurrent_store_get_is_safe():
 
 
 def test_store_updates_and_refreshes_ttl():
-    clock = _Clock()
+    clock = Timeline()
     cache = HttpCache(ttl_seconds=10, clock=clock)
     cache.store(canonical("http://x/a"), {"etag": '"v1"', "last-modified": "Wed, 01 Jan 2020 00:00:00 GMT"})
     # Read once (advances no clock), then re-store with a new validator mid-TTL.
-    clock.t += 5
+    clock.advance(5)
     cache.store(canonical("http://x/a"), {"etag": '"v2"'})
     etag, lm = cache.get(canonical("http://x/a"))
     assert etag == '"v2"'
     assert lm is None  # overwrote the old validator set
-    clock.t += 6  # within the freshly-reset TTL window
+    clock.advance(6)  # within the freshly-reset TTL window
     assert cache.get(canonical("http://x/a")) == ('"v2"', None)
 
 

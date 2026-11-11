@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from crawlutron.api.key_throttle import KeyVerifyThrottle
+from tests._clocks import advance_clock, arrange_clock
 
 
 def test_red_garbage_under_victim_id_does_not_poison_victims_bucket():
@@ -47,16 +48,12 @@ def test_red_quiescent_garbage_evicts_before_an_active_victim():
     """The eviction scan skips cooling buckets: at full capacity of cooling
     buckets plus one fresh mint, the fresh non-cooling bucket is dropped, not
     a cooling victim's."""
-    state = {"now": 100.0}
-
-    def clock() -> float:
-        return state["now"]
-
+    state, clock = arrange_clock(start=100.0)
     throttle = KeyVerifyThrottle(clock=clock)
     cooling = f"ck_{0:016x}.cooling"
     for _ in range(KeyVerifyThrottle.MAX_FAILURES):
         throttle.record_failure(cooling)
-    state["now"] += 1.0
+    advance_clock(state, 1.0)
     fresh = "ck_ffffffffffffffff.fresh"
     throttle.record_failure(fresh)
     throttle.check(fresh)

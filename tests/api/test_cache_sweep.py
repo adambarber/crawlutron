@@ -7,6 +7,7 @@ import asyncio
 import os
 import pathlib
 
+from tests._clocks import advance_clock, arrange_clock
 from tests._lifespan_doubles import stub_heavy_teardown
 
 
@@ -16,10 +17,7 @@ class TestMaintenanceTick:
         from crawlutron.transport.content_cache import ContentCache
 
         now = 5000.0  # past TMP_ORPHAN_MAX_AGE_SECONDS so an mtime-0 orphan is aged out
-        times = {"t": 0.0}
-
-        def clock() -> float:
-            return times["t"]
+        times, clock = arrange_clock(start=0.0)
 
         cache = ContentCache(tmp_path, clock=clock, max_total_bytes=None)
         cache.set("cold", {"v": 1}, ttl=10)
@@ -28,7 +26,7 @@ class TestMaintenanceTick:
         orphan.write_text("{}")
         os.utime(orphan, (0, 0))
 
-        times["t"] = now
+        advance_clock(times, now)
         removed = cache_maintenance_once(cache=cache, now=now)
 
         assert removed >= 2, "the expired envelope and the orphan .tmp must both go"
@@ -37,7 +35,7 @@ class TestMaintenanceTick:
         # A live entry written at the current time survives the same tick.
         hot_key = cache.make_key("hot")
         cache.set(hot_key, {"v": 2}, ttl=10)
-        times["t"] = now + 1
+        advance_clock(times, 1.0)
         cache_maintenance_once(cache=cache, now=now + 1)
         assert cache.get(hot_key) == {"v": 2}
 

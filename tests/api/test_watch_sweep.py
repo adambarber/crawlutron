@@ -245,12 +245,14 @@ async def test_the_sweep_loop_passes_on_the_injected_clock_and_stops_on_the_even
     _stub_transient_failure(monkeypatch)
     stop = asyncio.Event()
 
+    passes = {"n": 0}
+
     def clock() -> float:
         """Three passes' worth of time, the last one raising the shutdown flag."""
-        passes = watch_store.get(watch.watch_id).consecutive_failures + 1
-        if passes >= 3:
+        passes["n"] = watch_store.get(watch.watch_id).consecutive_failures + 1
+        if passes["n"] >= 3:
             stop.set()
-        return passes * INTERVAL
+        return passes["n"] * INTERVAL
 
     await asyncio.wait_for(
         sweep_watches_forever(

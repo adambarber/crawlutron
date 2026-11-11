@@ -144,13 +144,15 @@ def test_prune_sweeps_orphaned_tmp_files(tmp_path):
     """A SIGKILL-mid-write leaves a ``.tmp`` orphan the cache glob never matches
     and the byte budget never counts; prune must sweep it (#241)."""
     import os
-    import time
+
+    from tests._clocks import arrange_clock
 
     c = _make_cache(tmp_path / "orphans")
     c.set("k", "v")
-    orphan = c.cache_dir / f".{c.namespace}.stale.{time.time()}.json.tmp"
+    state, _ = arrange_clock()
+    orphan = c.cache_dir / f".{c.namespace}.stale.{state['now']}.json.tmp"
     orphan.write_bytes(b"partial\n")
-    old = time.time() - 7200
+    old = state["now"] - 7200
     os.utime(orphan, (old, old))
 
     c.prune()

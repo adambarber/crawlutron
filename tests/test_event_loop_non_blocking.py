@@ -26,10 +26,10 @@ from tests._cache_fixtures import (
     on_disk_bytes,
     parked_entry_unlink,
 )
+from tests._clocks import HANG_GUARD_SECONDS, clocked_cache
 from tests._fetcher_factories import crawled_results
 from tests._job_harnesses import loaded_job, make_job_store
 from tests._loop_liveness import LoopLiveness as _LoopLiveness
-from tests._timing_harnesses import HANG_GUARD_SECONDS
 
 
 async def _wait_for(flag: threading.Event, *, reason: str) -> None:
@@ -58,13 +58,12 @@ def _serve_stale_envelope(monkeypatch, cache: ContentCache, stale: bytes) -> lis
     return serve
 
 
-def _clocked_cache(tmp_path) -> tuple[list[float], ContentCache]:
+def _cache_on_movable_time(tmp_path) -> tuple[list[float], ContentCache]:
     """A cache whose clock the test advances; return ``(now, cache)``.
 
     These tests pin a verdict computed at one instant from bytes read at
     another; one builder keeps the shared ttl/byte-cap pair stated once."""
-    now = [1000.0]
-    cache = ContentCache(str(tmp_path), default_ttl=30, clock=lambda: now[0], max_entry_bytes=10_000)
+    cache, now = clocked_cache(str(tmp_path), default_ttl=30, max_entries=10_000)
     return now, cache
 
 
@@ -163,7 +162,7 @@ class TestContentCacheDiskIOOffTheLock:
         """The expiry verdict came from bytes read off the lock; a re-set that
         landed during the scan must not be applied -- the entry is live and
         unlinking destroys data. The mirror-guard analogue for the prune verdict."""
-        now, cache = _clocked_cache(tmp_path)
+        now, cache = _cache_on_movable_time(tmp_path)
         cache.set("k", {"body": "a" * 100}, ttl=10)  # expires 1010
         # The refresh a concurrent writer landed during the scan: a longer payload so the recorded byte size
         # differs, and a TTL still live.
@@ -184,7 +183,7 @@ class TestContentCacheDiskIOOffTheLock:
     def test_stale_read_does_not_poison_the_freshness_mirror(self, monkeypatch, tmp_path) -> None:
         """A live entry's ``cached_at`` must be answered from its real metadata,
         never a superseded read's value."""
-        _, cache = _clocked_cache(tmp_path)
+        _, cache = _cache_on_movable_time(tmp_path)
         cache.set("k", {"v": "old"})  # (expires, cached_at) = (1030.0, 1000.0)
         assert cache.cached_at_of("k") == 1000.0
 

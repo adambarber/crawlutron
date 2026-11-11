@@ -18,8 +18,9 @@ _TIME_LIMIT_NOTE = (
 
 def _marked_real_sleeps(node, parent_class=None) -> bool:
     """real_sleeps via get_closest_marker semantics: the test or its class."""
-    scopes = (node,) if parent_class is None else (node, parent_class)
-    return any(getattr(d, "attr", None) == "real_sleeps" for scope in scopes for d in scope.decorator_list)
+    from tests.invariants.test_wall_assertion import _marker_spelled
+
+    return _marker_spelled(node, "real_sleeps", parent_class)
 
 
 def _nested_defs(fn) -> tuple[ast.AST, ...]:
