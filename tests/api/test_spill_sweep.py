@@ -24,9 +24,12 @@ class TestSpillSweepTick:
         try:
             store.put("r-old", 0, engine_result("https://spill.test/old", "rendered"))
             store.put("r-live", 0, engine_result("https://spill.test/live", "rendered"))
+            # Backdate both rows past the max age through raw SQL, then age the
+            # clock itself so the cutoff lands after them.
             with closing(sqlite3.connect(tmp_path / "spills.db")) as conn:
-                conn.execute("UPDATE crawl_spills SET created_at = ?", (now - 7200,))
+                conn.execute("UPDATE crawl_spills SET created_at = created_at - 7200", ())
                 conn.commit()
+            times["t"] = now + 7200
             store.release_spill("r-old")  # served or dead: its rows are age-reclaimable
 
             reclaimed = await spill_maintenance_once(store, max_age_seconds=3600.0)
@@ -87,12 +90,15 @@ class TestSpillSweepLoop:
 
 
 class TestSpillSweepWiring:
-    async def test_the_lifespan_starts_and_drains_the_spill_sweep_task(self, monkeypatch, tmp_path):
+    def _wired_app(self, monkeypatch, tmp_path):
         from crawlutron import main as main_mod
 
         monkeypatch.setenv("CRAWLUTRON_CACHE_DIR", str(tmp_path))
         stub_heavy_teardown(monkeypatch)
-        app = main_mod.create_app()
+        return main_mod.create_app()
+
+    async def test_the_lifespan_starts_and_drains_the_spill_sweep_task(self, monkeypatch, tmp_path):
+        app = self._wired_app(monkeypatch, tmp_path)
 
         async with app.router.lifespan_context(app):
             task = app.state.spill_maintenance_task
@@ -102,12 +108,9 @@ class TestSpillSweepWiring:
         assert task.done(), "shutdown must drain the spill sweep task"
 
     async def test_the_spill_sweep_sweeps_the_shared_spill_store(self, monkeypatch, tmp_path):
-        from crawlutron import main as main_mod
         from crawlutron.api import spill_sweep
 
-        monkeypatch.setenv("CRAWLUTRON_CACHE_DIR", str(tmp_path))
-        stub_heavy_teardown(monkeypatch)
-        app = main_mod.create_app()
+        app = self._wired_app(monkeypatch, tmp_path)
         swept: list[object] = []
         real_sweep = spill_sweep.sweep_spills_forever
 

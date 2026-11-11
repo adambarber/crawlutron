@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from crawlutron.api.sweep_loop import sweep_forever
 from crawlutron.storage.result_store import CrawlSpillStore
 
 logger = logging.getLogger(__name__)
@@ -59,12 +60,11 @@ async def sweep_spills_forever(
 
     A failing pass is logged and the loop continues (fail-open sweep law).
     """
-    while not shutdown_event.is_set():
-        try:
-            await spill_maintenance_once(store, max_age_seconds=max_age_seconds)
-        except Exception:
-            logger.exception("spill_maintenance_pass_failed")
-        try:
-            await asyncio.wait_for(shutdown_event.wait(), timeout=interval_seconds)
-        except TimeoutError:
-            continue
+    if store is None:
+        store = _shared_spill_store()
+    await sweep_forever(
+        lambda: spill_maintenance_once(store, max_age_seconds=max_age_seconds),
+        shutdown_event,
+        interval_seconds=interval_seconds,
+        log_key="spill_maintenance_pass_failed",
+    )
