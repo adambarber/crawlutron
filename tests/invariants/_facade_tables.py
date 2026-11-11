@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from crawlutron.mcp.registry import TOOL_SPECS
 from tests._app_factory import service_app
-from tests.invariants.test_rest_mcp_parity import PRINCIPLED_ROWS
+from tests.invariants._parity_rows import PRINCIPLED_ROWS
 
 _BODY_METHODS = frozenset({"post", "put", "patch", "delete"})
 
@@ -26,7 +26,7 @@ class AcceptedKnob:
 
 
 def accepted_knobs() -> tuple[AcceptedKnob, ...]:
-    """Every body field and query parameter the served OpenAPI schema accepts."""
+    """Every body field, query parameter, and path parameter the served OpenAPI schema accepts."""
     openapi = service_app().openapi()
     knobs: list[AcceptedKnob] = []
     for path, item in openapi["paths"].items():
@@ -40,8 +40,6 @@ def accepted_knobs() -> tuple[AcceptedKnob, ...]:
             if ref is not None:
                 schema = openapi["components"]["schemas"][ref.rsplit("/", 1)[-1]]
                 knobs.extend(AcceptedKnob(*route, field) for field in schema.get("properties", {}))
-            if method in _BODY_METHODS:
-                continue
             knobs.extend(
                 AcceptedKnob(*route, param["name"])
                 for param in (*shared, *op.get("parameters", []))
@@ -71,16 +69,19 @@ SDK_THIN_ROWS: tuple[tuple[str, str], ...] = (
     ("POST", "/v1/render"),
 )
 
-#: Identity knobs the SDK accepts as METHOD parameters (get_job(job_id) etc.);
+#: Identity knobs the SDK accepts as METHOD parameters (delete_job(job_id) etc.);
 #: #846 owns any richer shape, and /v1/keys has no SDK client at all.
 SDK_KNOB_ROWS: dict[tuple[str, str], frozenset[str]] = {
     ("GET", "/v1/jobs"): frozenset({"limit", "offset"}),
     ("GET", "/v1/jobs/{job_id}"): frozenset({"job_id"}),
     ("POST", "/v1/jobs/{job_id}/control"): frozenset({"job_id"}),
+    ("DELETE", "/v1/jobs/{job_id}"): frozenset({"job_id"}),
     ("GET", "/v1/watches/{watch_id}"): frozenset({"watch_id"}),
+    ("DELETE", "/v1/watches/{watch_id}"): frozenset({"watch_id"}),
     ("GET", "/v1/crawl/{request_id}"): frozenset({"request_id"}),
     ("GET", "/v1/crawl/{request_id}/trace"): frozenset({"request_id"}),
     ("POST", "/v1/keys"): frozenset({"label", "max_concurrency", "max_pages"}),
+    ("DELETE", "/v1/keys/{key_id}"): frozenset({"key_id"}),
 }
 
 #: The CLI forwards POST /v1/crawl only (audit-1: intentionally thin).
@@ -95,9 +96,12 @@ CLI_EXCLUDED_ROUTES: tuple[tuple[str, str], ...] = (
     ("POST", "/v1/watches"),
     ("GET", "/v1/jobs"),
     ("GET", "/v1/jobs/{job_id}"),
+    ("DELETE", "/v1/jobs/{job_id}"),
     ("GET", "/v1/crawl/{request_id}"),
     ("GET", "/v1/crawl/{request_id}/trace"),
     ("GET", "/v1/watches/{watch_id}"),
+    ("DELETE", "/v1/watches/{watch_id}"),
+    ("DELETE", "/v1/keys/{key_id}"),
 )
 
 #: CLI flags consumed client-side (polling, output shaping, auth transport);

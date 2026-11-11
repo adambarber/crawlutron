@@ -15,7 +15,7 @@ from tests.invariants._facade_tables import (
     AcceptedKnob,
     accepted_knobs,
 )
-from tests.invariants.test_rest_mcp_parity import PRINCIPLED_ROWS
+from tests.invariants._parity_rows import PRINCIPLED_ROWS
 
 
 def _mcp_covered(knob: AcceptedKnob) -> bool:
@@ -32,6 +32,17 @@ def _mcp_covered(knob: AcceptedKnob) -> bool:
             return True
         return knob.field in spec.request_model.model_json_schema().get("properties", {})
     return False
+
+
+def test_registry_has_one_spec_per_rest_route():
+    """The registry invariant _mcp_covered's first-spec-wins scan depends on."""
+    seen: set[tuple[str, str]] = set()
+    for spec in TOOL_SPECS:
+        if spec.rest_route is None:
+            continue
+        key = (spec.rest_route.method, spec.rest_route.path)
+        assert key not in seen, f"tools {spec.name} and a sibling both claim {key}"
+        seen.add(key)
 
 
 def test_mcp_advertises_or_refuses_every_knob():
