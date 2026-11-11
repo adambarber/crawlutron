@@ -27,8 +27,7 @@ from .transport.browser_pool import (
 )
 
 if TYPE_CHECKING:
-    # FastAPI is imported only for annotations under type checking; the runtime
-    # import below carries the real classes (a bare variable is not a valid annotation).
+    # Imported for annotations under type checking; the runtime import carries the real classes.
     from fastapi import FastAPI
     from fastapi.exceptions import RequestValidationError
 else:
@@ -41,7 +40,6 @@ else:
         FastAPI = None
         RequestValidationError = Exception
 
-# Import modular routers
 from .discovery.agent_hints import create_agent_hints_router
 from .discovery.capabilities import create_capabilities_router
 from .discovery.well_known import create_well_known_router
@@ -99,7 +97,7 @@ def create_app(settings: CrawlerSettings | None = None) -> FastAPI:
         yield
         await _shutdown_services(app)
 
-    return _build_app(
+    app = _build_app(
         settings,
         job_store=job_store,
         result_store=result_store,
@@ -109,10 +107,13 @@ def create_app(settings: CrawlerSettings | None = None) -> FastAPI:
         audit_store=audit_store,
         lifespan=lifespan,
     )
+    from crawlutron.api.exempt_route_boot import validate_exempt_routes
+
+    validate_exempt_routes(app)
+    return app
 
 
 def _configure_logging(settings: CrawlerSettings) -> logging.Logger:
-    """Wire the standalone JSON logging; opt-in via create_app, never at import."""
     if settings.log_file_path:
         os.makedirs(os.path.dirname(settings.log_file_path) or ".", exist_ok=True)
     logger = configure_service_logging(
@@ -475,8 +476,7 @@ async def _shutdown_services(_app: FastAPI) -> None:
             ("unbind_metric_counters", _unbind_metric_counters),
         )
     )
-    # Symmetry with set_utilization_sampler(...): release the closed
-    # gate's ratio sampler so nothing dereferences it post-shutdown.
+    # Symmetry with set_utilization_sampler(...): release the closed gate's sampler.
     READINESS_STATE.set_utilization_sampler(None)
 
 

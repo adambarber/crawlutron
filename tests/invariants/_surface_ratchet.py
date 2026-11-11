@@ -173,6 +173,8 @@ DECLARED_SURFACE_RATCHET = {
     # #664: the auth+metering layer (guards, router factories, ratchet row).
     # #668: PENDING sealed at zero and left; ANONYMOUS_METERED joined (12, 5).
     "crawlutron/api/route_layer.py": (12, 5),
+    # #818: the fail-closed boot validator for the layer-exempt ratchet.
+    "crawlutron/api/exempt_route_boot.py": (2, 2),
     # #668: the anonymous IP-bucket meter over the docs surfaces, /mcp
     # anonymous traffic, and the 404 route-miss (metered on the response stage).
     "crawlutron/api/anonymous_throttle.py": (10, 4),

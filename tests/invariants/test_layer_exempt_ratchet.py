@@ -9,10 +9,14 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+import pytest
 from fastapi.routing import APIRoute
 
+import crawlutron.api.route_layer as _route_layer_module
 from crawlutron.api.route_layer import ANONYMOUS_METERED, LAYER_EXEMPT_RATCHET, ExemptRow
 from crawlutron.api.router_registry import ROUTER_MODULES
+from tests._app_factory import fresh_app
+from tests._async_harnesses import serve
 from tests.invariants.test_route_layer import _offender_module
 
 
@@ -181,3 +185,38 @@ def test_every_row_carries_a_justification():
     """An exemption without a stated reason is not an explicit act."""
     for row in LAYER_EXEMPT_RATCHET:
         assert isinstance(row, ExemptRow) and len(row.reason) > 20, f"row {row} lacks a real justification"
+
+
+async def test_boot_refuses_a_declared_exempt_route_without_a_mounted_door(monkeypatch):
+    """Fail closed: a declared exemption row with no mounted route keeps the app from booting."""
+    bogus = ExemptRow(
+        "get",
+        "/v1/no-such-exempt-route",
+        "a route nothing mounts, used to prove the boot guard",
+    )
+    monkeypatch.setattr(
+        _route_layer_module,
+        "LAYER_EXEMPT_RATCHET",
+        LAYER_EXEMPT_RATCHET + (bogus,),
+    )
+    with pytest.raises(RuntimeError, match="no mounted route"):
+        fresh_app()
+
+
+async def test_declared_exempt_routes_are_credential_free():
+    """Every declared exemption row answers without a caller credential."""
+    async with serve(fresh_app()) as client:
+        for row in LAYER_EXEMPT_RATCHET:
+            path = row.path.split(":")[0]
+            if row.method == "post":
+                response = await client.post(path, json={"url": "https://example.com/"})
+            else:
+                response = await client.get(path)
+            assert response.status_code == 200, f"{row.method.upper()} {path}: {response.text}"
+
+
+async def test_non_exempt_served_route_refuses_anonymous_callers():
+    """Converse boundary: a served route outside the ratchet refuses anonymous callers."""
+    async with serve(fresh_app()) as client:
+        response = await client.post("/v1/keys")
+    assert response.status_code == 401, response.text
