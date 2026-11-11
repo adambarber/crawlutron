@@ -245,8 +245,7 @@ def _stash_state(
 
 def install_error_surface(app) -> None:
     """Middleware and exception handlers every response path funnels through."""
-    # Body-size guard: 16 MiB cap at the ASGI receive layer (see
-    # crawlutron/api/middleware.py for how truncation and keep-alive are handled).
+    # Body-size guard: 16 MiB ASGI receive cap; see middleware.py for truncation.
     from starlette.exceptions import HTTPException as StarletteHTTPException
 
     from crawlutron.api.anonymous_throttle import throttle_anonymous_surfaces
@@ -256,12 +255,11 @@ def install_error_surface(app) -> None:
     app.middleware("http")(reject_hostile_origin)
     app.middleware("http")(limit_request_body)
     # LAST registered = OUTERMOST (#668 HIGH-2): the anonymous meter must see
-    # every request -- including 413/403-rejected ones -- or rejected requests
-    # escape the budget (rejected requests are still work).
+    # every request, or rejected requests escape the budget.
     app.middleware("http")(throttle_anonymous_surfaces)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
-    # Framework-level 404/405 raise Starlette's base HTTPException (parent of
-    # FastAPI's); register on the base + Exception for the last-resort 500.
+    # 404/405 raise Starlette's base HTTPException; register on the base +
+    # Exception for the last-resort 500.
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
     app.add_exception_handler(Exception, http_exception_handler)
 
@@ -370,20 +368,23 @@ def _bind_metrics(database_path: str) -> None:
 
 
 async def _recover_jobs_and_start_sweep(_app: FastAPI, settings: CrawlerSettings) -> None:
-    """Rewind crash orphans, resume PENDING jobs, start the watch sweep.
-
-    The shutdown event is minted in the lifespan, not at import: an import-time
-    event is set by the first teardown and cancels every later run's crawls.
+    """Rewind crash orphans, resume PENDING jobs, start the sweep tasks; the
+    shutdown event is minted here, not at import (an import-time event is set
+    by the first teardown and cancels every later run's crawls).
     """
     from .api.cache_sweep import sweep_cache_forever
     from .api.job_recovery import recover_and_start_pending_jobs
     from .api.job_runner import start_job
+    from .api.spill_sweep import sweep_spills_forever
     from .api.watch_sweep import sweep_watches_forever
 
     shutdown_event = asyncio.Event()
     _app.state.shutdown_event = shutdown_event
     await recover_and_start_pending_jobs(_app.state.job_store, settings, shutdown_event, start_job)
     _app.state.cache_maintenance_task = asyncio.create_task(sweep_cache_forever(shutdown_event))
+    _app.state.spill_maintenance_task = asyncio.create_task(
+        sweep_spills_forever(_app.state.spill_store, shutdown_event=shutdown_event)
+    )
     _app.state.watch_sweep_task = asyncio.create_task(
         sweep_watches_forever(
             _app.state.watch_store,
@@ -478,12 +479,12 @@ async def _shutdown_services(_app: FastAPI) -> None:
 
 
 async def _drain_watch_sweep(_app: FastAPI) -> None:
-    """Cancel and await the watch sweep before the job runner drains.
-
-    The sweep is cancelled while the key store is still open: a pass that
-    consults it for liveness must not race a closed handle.
+    """Cancel and await the maintenance sweeps before the job runner drains: the
+    watch sweep is cancelled while the key store is still open (liveness reads
+    cannot race a closed handle).
     """
     await _drain_task(_app, "cache_maintenance_task")
+    await _drain_task(_app, "spill_maintenance_task")
     await _drain_task(_app, "watch_sweep_task")
 
 
