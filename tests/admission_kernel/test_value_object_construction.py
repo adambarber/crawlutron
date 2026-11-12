@@ -135,7 +135,7 @@ def test_granted_requires_positive_total_and_a_live_lease() -> None:
     from tests.admission_kernel._gate_factory import build_gate
 
     gate, _handles = build_gate()
-    lease = Lease(lane=LaneId.GENERAL, amount=Count(1), gate=gate)
+    lease = Lease._of(gate, {LaneId.GENERAL: 1}, cold=False, scale=Scale(1.0))
     bad_allocation = Allocation(
         {LaneId.GENERAL: AllocationEntry(Count(0)), LaneId.HEAVY: AllocationEntry(Count(0))}
     )

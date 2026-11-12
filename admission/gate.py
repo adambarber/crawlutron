@@ -143,6 +143,10 @@ class AdmissionGate:
                 last_decision=Instant._of(self._progress.last_decision.value),
             )
 
+    def now(self) -> Instant:
+        """The gate's current clock reading, for liveness checks."""
+        return self._clock.now()
+
     def reset_ramp_for_quiescence(self) -> None:
         """Restore the cold initial ramp; guarded against running mid-flight."""
         with self._lock:
@@ -343,9 +347,9 @@ class AdmissionGate:
         if decision.cold:
             self._cold_in_flight += 1
         granted_alloc = Allocation(allocation_entries)
-        lease = Lease._of(self, per_lane, cold=decision.cold)
         now = self._clock.now().value
         decision_scale = decision.scale or Scale(1.0)
+        lease = Lease._of(self, per_lane, cold=decision.cold, scale=decision_scale)
         self._record_decision(now, granted_alloc, cold=decision.cold, scale=decision_scale)
         return Granted(
             allocation=granted_alloc,
@@ -411,7 +415,10 @@ class AdmissionGate:
                     last_decision=self._progress.last_decision,
                 )
             self._signal.set()
-            self._decay_ramp()
+            # A grant that ran at full scale did not decay the ramp during its
+            # lease, so the release skips the (re-reading) decay pass (M2).
+            if lease._grant_scale.value < 1.0:
+                self._decay_ramp()
 
 
 class StallGuard:
@@ -428,6 +435,6 @@ class StallGuard:
 
     def stalled(self) -> bool:
         """Whether gate liveness froze past the bound, on the injected clock."""
-        now = self._gate._clock.now().value
-        last = self._gate._progress.last_advance.value
-        return (now - last) > self._bound
+        now = self._gate.now()
+        last = self._gate.progress().last_advance
+        return (now.value - last.value) > self._bound
