@@ -22,7 +22,7 @@ WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "ci.yml"
 # The config as the workflow must name it.
 WORKFLOW_ROOT_CONFIG = CONFIG_PATH.relative_to(SERVICE_ROOT).as_posix()
 
-ENFORCEMENT_COMMAND = f"pre-commit run --all-files --config {WORKFLOW_ROOT_CONFIG}"
+ENFORCEMENT_COMMAND = f".venv/bin/pre-commit run --all-files --config {WORKFLOW_ROOT_CONFIG}"
 
 # Every job that reports a result the aggregate must depend on. `audit` and
 # `secret-scan` are the supply-chain gates added by #623.

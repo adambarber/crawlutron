@@ -173,13 +173,9 @@ def test_no_ci_job_reruns_a_precommit_hook_command() -> None:
 def test_a_ci_job_that_reruns_a_hook_command_is_caught() -> None:
     """Bites: adding a job that re-runs a hook command fails the check."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-    broken = workflow.replace(
-        "- name: Run all configured hooks\n        run: pre-commit run --all-files --config "
-        ".pre-commit-config.yaml",
-        "- name: Run all configured hooks\n        run: pre-commit run --all-files --config "
-        ".pre-commit-config.yaml\n      - name: Drift copy\n        run: python -m ruff check app tests "
-        "scripts",
-    )
+    needle = f"- name: Run all configured hooks\n        run: {ENFORCEMENT_COMMAND}"
+    inserted = f"{needle}\n      - name: Drift copy\n        run: python -m ruff check app tests scripts"
+    broken = workflow.replace(needle, inserted)
     with pytest.raises(AssertionError):
         assert_no_hook_command_rerun(broken, {"python -m ruff check"})
 
@@ -211,7 +207,7 @@ def test_browser_job_selects_only_browser_marked_tests() -> None:
             if isinstance(step, dict) and "Run pytest (browser)" == str(step.get("name"))
         )
     )
-    assert browser_step.strip() == 'python3 -m pytest -m "browser"', browser_step
+    assert browser_step.strip() == '.venv/bin/python -m pytest -m "browser"', browser_step
 
 
 def test_enforcement_job_caches_gate_state() -> None:

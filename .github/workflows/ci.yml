@@ -62,7 +62,7 @@ jobs:
             .gate_fanout
           key: gate-state-${{ runner.os }}-${{ hashFiles('uv.lock', 'pyproject.toml') }}
       - name: Run all configured hooks
-        run: pre-commit run --all-files --config .pre-commit-config.yaml
+        run: .venv/bin/pre-commit run --all-files --config .pre-commit-config.yaml
 
   test-fast:
     name: Test suite (fast)
@@ -83,12 +83,12 @@ jobs:
       # Precompile bytecode once so every xdist worker reuses .pyc instead of
       # recompiling ~90k lines per run (S4).
       - name: Precompile bytecode
-        run: python3 -m compileall -q crawlutron tests scripts
+        run: .venv/bin/python -m compileall -q crawlutron tests scripts
       # Includes the project-specific safety predicates (tests/invariants/ and
       # friends): those detectors are the only exit path for the chokepoint
       # rules, and they run inside the default marker set.
       - name: Run pytest (fast)
-        run: python3 -m pytest
+        run: .venv/bin/python -m pytest
 
   test-browser:
     name: Test suite (browser)
@@ -126,14 +126,14 @@ jobs:
           path: ~/.cache/camoufox
           key: camoufox-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
       - name: Install Camoufox browser binary
-        run: python3 -m camoufox fetch
+        run: .venv/bin/python -m camoufox fetch
       - name: Run pytest (browser)
     # Selects the `browser` marker, and only that. The previous `-m "not
     # slow"` admitted the whole fast suite (the fast job already runs it),
     # re-running ~3,400 tests per push in a job that exists to add one
     # marker. This still keeps `--strict-markers` and the rest of the
     # addopts configuration intact.
-        run: python3 -m pytest -m "browser"
+        run: .venv/bin/python -m pytest -m "browser"
 
   # #623: dependency audit against the frozen lock. The export/pip-audit tools
   # install inside CI's runner (owner-bandwidth is irrelevant there); the DB
