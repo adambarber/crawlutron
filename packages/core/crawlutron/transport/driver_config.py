@@ -157,6 +157,7 @@ def browser_kwargs(
     kwargs: dict[str, object] = {
         "headless": headless_enabled(),
         "humanize": True,
+        "i_know_what_im_doing": True,
     }
 
     profile = browser_profile or {}

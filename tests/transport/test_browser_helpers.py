@@ -102,3 +102,11 @@ class TestBrowserKwargs:
         assert driver.browser_kwargs({"resource_mode": "reduced"})["args"] == [
             "--blink-settings=imagesEnabled=false"
         ]
+
+    def test_hardening_declared_intentional_always(self):
+        """The per-launch LeakWarning suppression flag always rides the base
+        kwargs, surviving profile-driven additions."""
+        driver = BrowserDriver()
+        kwargs = driver.browser_kwargs({"resource_mode": "reduced"})
+        assert kwargs["i_know_what_im_doing"] is True
+        assert "args" in kwargs, "profile additions must merge alongside the flag"
