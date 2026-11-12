@@ -50,3 +50,23 @@ def test_a_runtime_edge_survives_the_type_checking_skip() -> None:
 def test_a_runtime_edge_is_reported() -> None:
     """A plain runtime import is still an edge."""
     assert _imports_of(f"from {A} import CrawlEndpoint\n") == {A}
+
+
+def test_a_package_form_import_records_the_edge_into_the_package() -> None:
+    """`from crawlutron.api import exceptions` reaches the crawlutron.api package
+    (a namespace dir with no __init__.py); the MCP seal's forbidden layer must see it."""
+    assert _imports_of("from crawlutron.api import exceptions\n") == {"crawlutron.api.exceptions"}
+
+
+def test_a_from_package_import_alias_resolves_the_subpackage() -> None:
+    """`from crawlutron import api` is the same blind-spot class: the alias names
+    the crawlutron.api package dir, so the seal must see that edge too."""
+    assert _imports_of("from crawlutron import api\n") == {"crawlutron.api"}
+
+
+def test_a_module_form_import_still_resolves_the_module_file() -> None:
+    """Regression: module-form `from crawlutron.api.crawl_endpoint import ...` keeps
+    resolving to the .py module file, not to a package dir."""
+    assert _imports_of("from crawlutron.api.crawl_endpoint import CrawlEndpoint\n") == {
+        "crawlutron.api.crawl_endpoint"
+    }
