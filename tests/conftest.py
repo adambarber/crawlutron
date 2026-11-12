@@ -88,13 +88,14 @@ if ROOT.exists() and str(ROOT) not in sys.path:
 # (the secure default).
 os.environ.setdefault("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
 
-# `crawlutron.main` binds `DATABASE_PATH = settings.cache_dir + "/crawler.db"` at import; every test
-# the same process-wide `JobStore` built on it.
+# `crawlutron.main` binds `DATABASE_PATH` from settings.cache_dir at import; every test gets the same
+# process-wide `JobStore` built on it. (Not a CRAWLUTRON_CACHE_DIR default: a suite-scratch env face.)
 _SCRATCH_CACHE_DIR = (
     Path(tempfile.gettempdir())
     / f"crawlutron-tests-{os.environ.get('PYTEST_XDIST_WORKER', 'master')}-{os.getpid()}"
 )
 _INHERITED_CACHE_DIR = os.environ.get("CRAWLUTRON_CACHE_DIR", "")
+# (Suite plumbing, not a knob default: the gate reads the settings-home default, never this face.)
 _INHERITED_IS_SUITE_SCRATCH = (
     _INHERITED_CACHE_DIR.startswith(f"{Path(tempfile.gettempdir())}{os.sep}")
     and "crawlutron-tests-" in _INHERITED_CACHE_DIR

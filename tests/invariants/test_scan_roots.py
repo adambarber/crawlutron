@@ -8,7 +8,11 @@ from tests._walk_primitives import SCAN_ROOTS, python_bearing_roots
 
 
 def test_scan_roots_equal_every_python_bearing_tree() -> None:
-    """SCAN_ROOTS is the derived tuple of every python-bearing top-level dir."""
+    """SCAN_ROOTS is the derived tuple of every python-bearing top-level dir.
+
+    This equality pin IS the scope law's declaration, so the completeness audit
+    (test_scan_scope_completeness) exempts this one file by name.
+    """
     assert SCAN_ROOTS == ("crawlutron", "crawlutron_sdk", "scripts", "tests")
 
 

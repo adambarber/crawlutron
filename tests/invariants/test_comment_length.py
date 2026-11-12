@@ -202,9 +202,9 @@ def test_a_block_cut_mid_clause_fires() -> None:
 
 
 def _zero_everywhere[T](collect: Callable[[str], list[T]]) -> list[tuple[str, T]]:
-    """Every finding of ``collect`` across all three roots, with file and raw item."""
+    """Every finding of ``collect`` across the derived scan surface, with file and raw item."""
     offenders: list[tuple[str, T]] = []
-    for root in ("crawlutron", "tests", "scripts"):
+    for root in SCAN_ROOTS:
         for name, items in _root_findings(root, collect).items():
             for item in items:
                 offenders.append((name, item))
@@ -245,7 +245,7 @@ def test_no_docstring_sits_below_the_first_statement() -> None:
     a length, and the object it claimed to document carried no documentation.
     """
     failures: list[str] = []
-    for root in ("crawlutron", "tests", "scripts"):
+    for root in SCAN_ROOTS:
         for name, items in _root_tree_findings(root, lambda tree, _p: demoted_docstrings(tree)).items():
             for lineno, _end, symbol in items:
                 failures.append(f"{name}:{lineno}: {symbol} has a docstring that documents nothing")
@@ -255,7 +255,7 @@ def test_no_docstring_sits_below_the_first_statement() -> None:
 def test_no_comment_block_ends_mid_clause() -> None:
     """Every block in the tree closes the thought it opens."""
     offenders: list[str] = []
-    for root in ("crawlutron", "tests", "scripts"):
+    for root in SCAN_ROOTS:
         for name, found in _root_all_blocks(root).items():
             for start, _end, text in found:
                 offenders.append(f"{name}:{start}: comment block ends mid-clause ({text})")
