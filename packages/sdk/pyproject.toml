@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs>=0.4"]
+build-backend = "hatchling.build"
+
+[project]
+name = "crawlutron-sdk"
+dynamic = ["version"]
+description = "Python client for the Crawlutron execution service"
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = [
+    "httpx",
+    "pydantic",
+]
+
+[tool.hatch.version]
+source = "vcs"
+raw-options = { search_parent_directories = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["crawlutron_sdk"]

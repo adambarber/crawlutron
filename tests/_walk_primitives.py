@@ -125,6 +125,39 @@ def package_roots(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
 PACKAGE_ROOTS = package_roots()
 
 
+def _member_import_packages(base: pathlib.Path, member: str) -> tuple[str, ...]:
+    """The import names a member's wheel ships, from its own ``packages`` list.
+
+    ``crawlutron, admission`` for core, ``crawlutron_rest`` for rest; a member
+    without a wheel target is a stub container and ships nothing.
+    """
+    pyproject = base / member / "pyproject.toml"
+    if not pyproject.is_file():
+        return ()
+    try:
+        with pyproject.open("rb") as handle:
+            table = tomllib.load(handle)
+    except tomllib.TOMLDecodeError:
+        return ()
+    wheel = table.get("tool", {}).get("hatch", {}).get("build", {}).get("targets", {}).get("wheel", {})
+    packages = wheel.get("packages")
+    if not isinstance(packages, list):
+        return ()
+    return tuple(str(p) for p in packages if isinstance(p, str))
+
+
+def import_roots(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
+    """The import-root package dirs (``packages/<member>/<import-name>``), derived.
+
+    From each member's wheel ``packages`` truth; a new member lands here by its
+    own pyproject, never a hand-typed list (#906)."""
+    roots = [
+        f"{member}/{pkg}" for member in package_roots(base) for pkg in _member_import_packages(base, member)
+    ]
+    assert roots, f"uv members declare no import roots under {base}"
+    return tuple(sorted(set(roots)))
+
+
 def scan_roots(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
     """Every python-bearing dir under ``base``: the package roots plus the
     top-level python-bearing roots, minus member-package containers that a

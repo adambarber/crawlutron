@@ -20,7 +20,7 @@ def test_scan_roots_equal_every_python_bearing_tree() -> None:
     This equality pin IS the scope law's declaration, so the completeness audit
     (test_scan_scope_completeness) exempts this one file by name.
     """
-    assert SCAN_ROOTS == ("crawlutron_sdk", "packages/core", "packages/rest", "scripts", "tests")
+    assert SCAN_ROOTS == ("packages/core", "packages/rest", "packages/sdk", "scripts", "tests")
 
 
 def test_constant_matches_a_fresh_derivation() -> None:
@@ -60,10 +60,13 @@ def test_scan_roots_never_names_the_member_container(tmp_path: pathlib.Path) -> 
         "packages/core/crawlutron",
         "packages/rest",
         "packages/rest/crawlutron_rest",
+        "packages/sdk",
+        "packages/sdk/crawlutron_sdk",
     ):
         (tmp_path / member).mkdir(parents=True)
     (tmp_path / "packages/core/crawlutron/mod.py").write_text("x = 1\n")
     (tmp_path / "packages/rest/crawlutron_rest/mod.py").write_text("x = 1\n")
+    (tmp_path / "packages/sdk/crawlutron_sdk/mod.py").write_text("x = 1\n")
     (tmp_path / "pyproject.toml").write_text(
         '[tool.uv.workspace]\nmembers = ["packages/*"]\n',
         encoding="utf-8",

@@ -41,8 +41,8 @@ CROSS_TREE_ROOT = "."
 # One jscpd invocation per root: jscpd names files relative to its root, so
 # attribution requires one scan per root.
 TREE_ROOTS = {
-    # packages/core + packages/rest are the uv members; crawlutron_sdk ships from the root until #898.
-    "production": ("packages/core", "packages/rest", "crawlutron_sdk"),
+    # packages/core + packages/rest + packages/sdk are the uv members.
+    "production": ("packages/core", "packages/rest", "packages/sdk"),
     "test": ("tests", "scripts"),
 }
 

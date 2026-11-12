@@ -173,7 +173,7 @@ def _assert_pair(refusal: DomainError, sdk_class: type[crawlutron_sdk.Crawlutron
     assert refusal.code == sdk_class.code, (
         f"{origin}: the service raises code {refusal.code!r} (status {refusal.status}) but the SDK "
         f"class {sdk_class.__name__} carries {sdk_class.code!r} -- the SDK constant drifted from "
-        f"the live service raise site; update crawlutron_sdk/errors.py in the same change."
+        f"the live service raise site; update packages/sdk/crawlutron_sdk/errors.py in the same change."
     )
     assert refusal.status == sdk_class.status_code, (
         f"{origin}: the service answers status {refusal.status} for code {refusal.code!r} but the "

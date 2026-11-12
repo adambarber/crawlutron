@@ -18,7 +18,7 @@ LIMIT = 500
 _BUDGETS = {
     "packages/core": 0,
     "packages/rest": 0,
-    "crawlutron_sdk": 0,
+    "packages/sdk": 0,
     "tests": 0,
     "scripts": 0,
 }

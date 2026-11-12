@@ -13,7 +13,7 @@ import re
 _CRAWLUtron_IMPORT = re.compile(r"^\s*(import crawlutron\b|from crawlutron\b)")
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
-SDK_ROOT = REPO_ROOT / "crawlutron_sdk"
+SDK_ROOT = REPO_ROOT / "packages/sdk/crawlutron_sdk"
 
 
 def _sdk_sources():
