@@ -8,9 +8,10 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import AsyncIterator
-from typing import Literal, TypedDict, TypeVar
+from typing import Literal, Never, TypedDict, TypeVar
 
 import httpx
+from pydantic import BaseModel
 
 from .errors import CrawlutronAcceptedError, CrawlutronTransportError, error_from_response
 from .models import (
@@ -37,7 +38,7 @@ from .models import (
 
 _DEFAULT_BASE_URL = "http://127.0.0.1:8765"
 
-_ModelT = TypeVar("_ModelT")
+_ModelT = TypeVar("_ModelT", bound=BaseModel)
 
 
 class _ClientKwargs(TypedDict):
@@ -46,7 +47,6 @@ class _ClientKwargs(TypedDict):
     base_url: str
     timeout: float | None
     headers: dict[str, str]
-    transport: httpx.BaseTransport | httpx.AsyncBaseTransport | None
 
 
 def _str_key_dict(data: object) -> dict[str, object]:
@@ -99,7 +99,6 @@ class _ClientBase:
             "base_url": self._base_url,
             "timeout": self._timeout,
             "headers": self._headers(),
-            "transport": self._transport,
         }
 
     def _raise_for_status(
@@ -141,7 +140,7 @@ class _ClientBase:
     def _transport_error(self, error: httpx.HTTPError) -> CrawlutronTransportError:
         return CrawlutronTransportError(str(error), status_code=None)
 
-    def _transport_failure(self, error: httpx.HTTPError) -> None:
+    def _transport_failure(self, error: httpx.HTTPError) -> Never:
         raise self._transport_error(error) from error
 
     def _check_max_wait(self, request_id: str, elapsed: float, max_wait: float | None) -> None:
@@ -163,7 +162,13 @@ class CrawlutronClient(_ClientBase):
     async def _get_client(self) -> httpx.AsyncClient:
         client = self._client
         if client is None or not isinstance(client, httpx.AsyncClient):
-            self._client = httpx.AsyncClient(**self._client_kwargs())
+            transport = self._transport
+            if transport is not None and not isinstance(transport, httpx.AsyncBaseTransport):
+                raise CrawlutronTransportError(
+                    "sync-only transport cannot drive an async client",
+                    status_code=None,
+                )
+            self._client = httpx.AsyncClient(**self._client_kwargs(), transport=transport)
             client = self._client
         if not isinstance(client, httpx.AsyncClient):
             raise CrawlutronTransportError("unexpected http client type", status_code=None)
@@ -310,6 +315,7 @@ class CrawlutronClient(_ClientBase):
             base_url=self._base_url,
             api_key=self._api_key,
             timeout=self._timeout,
+            transport=self._transport,
         )
 
 
@@ -329,7 +335,13 @@ class CrawlutronClientSync(_ClientBase):
     def _get_client(self) -> httpx.Client:
         client = self._client
         if not isinstance(client, httpx.Client):
-            self._client = httpx.Client(**self._client_kwargs())
+            transport = self._transport
+            if transport is not None and not isinstance(transport, httpx.BaseTransport):
+                raise CrawlutronTransportError(
+                    "async-only transport cannot drive a sync client; pass an httpx.BaseTransport",
+                    status_code=None,
+                )
+            self._client = httpx.Client(**self._client_kwargs(), transport=transport)
             client = self._client
         return client
 

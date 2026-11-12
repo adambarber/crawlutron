@@ -280,6 +280,52 @@ def test_sync_client_crawl():
     assert response.request_id == "abc"
 
 
+def test_sync_mirrors_the_injected_transport():
+    """sync() hands the async client's transport to the sync handle."""
+    fired: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        fired.append(request.method)
+        return httpx.Response(200, json=_CRAWL_BODY)
+
+    async_client = CrawlutronClient(transport=httpx.MockTransport(handler), base_url="http://test")
+    sync_handle = async_client.sync()
+    try:
+        response = sync_handle.crawl(CrawlRequest(url="https://example.com/"))
+    finally:
+        sync_handle.close()
+    assert fired == ["POST"]
+    assert response.request_id == "abc"
+
+
+class _AsyncOnlyTransport(httpx.AsyncBaseTransport):
+    """A genuinely async-only transport a sync client must refuse."""
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_CRAWL_BODY)
+
+
+def test_sync_refuses_an_async_only_transport():
+    """sync() fail-closes: an async-only transport cannot drive a sync client."""
+    async_client = CrawlutronClient(transport=_AsyncOnlyTransport(), base_url="http://test")
+    sync_handle = async_client.sync()
+    try:
+        with pytest.raises(CrawlutronTransportError, match="async-only transport"):
+            sync_handle.crawl(CrawlRequest(url="https://example.com/"))
+    finally:
+        sync_handle.close()
+
+
+def test_sync_client_refuses_an_async_only_transport_directly():
+    """The refusal sits at the sync chokepoint for any construction path."""
+    client = CrawlutronClientSync(transport=_AsyncOnlyTransport(), base_url="http://test")
+    try:
+        with pytest.raises(CrawlutronTransportError, match="async-only transport"):
+            client.crawl(CrawlRequest(url="https://example.com/"))
+    finally:
+        client.close()
+
+
 # Async-only surfaces the sync twin cannot mirror. Derived, not hand-listed per
 # the #876 invariant-scope doctrine; each name is a live `dir()` disclosure.
 _ASYNC_ONLY_SUBSET = frozenset(
