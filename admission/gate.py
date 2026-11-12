@@ -10,7 +10,7 @@ import asyncio
 import contextvars
 import sys
 import threading
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from enum import Enum
@@ -85,7 +85,7 @@ class AdmissionGate:
         sensing: Sensing,
         clock: Clock,
         signal: Signal,
-        loop_lag_multiplier: Ratio | None = None,
+        loop_lag: Callable[[], Ratio] | None = None,
         memory_budget: Bytes | None = None,
         reserved: Bytes | None = None,
     ) -> None:
@@ -96,7 +96,7 @@ class AdmissionGate:
         self._sensing = sensing
         self._clock = clock
         self._signal = signal
-        self._loop_lag = loop_lag_multiplier if loop_lag_multiplier is not None else Ratio(1.0)
+        self._loop_lag = loop_lag if loop_lag is not None else (lambda: Ratio(1.0))
         if memory_budget is None:
             memory_budget = Bytes(
                 max(
@@ -193,7 +193,7 @@ class AdmissionGate:
             base = cpu if 1.0 - cpu_usage > source.threshold.value else Ratio(min(mem.value, cpu.value))
         else:
             base = Ratio(min(mem.value, cpu.value))
-        return Scale(max(0.0, base.value) * self._loop_lag.value)
+        return Scale(max(0.0, base.value) * self._loop_lag().value)
 
     def _scale_of(self, reading: _ResourceReading, limits) -> Ratio:
         """The §5.1 law: full at/by target, zero at/by hard, linear between."""

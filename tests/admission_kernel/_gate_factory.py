@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from admission import (
@@ -206,6 +207,7 @@ class GateSpec:
     cold_probe: int = 1
     initial_ramp: int | None = None
     loop_lag: float = 1.0
+    loop_lag_fn: Callable[[], Ratio] | None = None
     scale_source: ScaleSource | None = None
     mem_gauge: ResourceGauge | None = None
     cpu_gauge: ResourceGauge | None = None
@@ -263,7 +265,7 @@ def build_gate(spec: GateSpec | None = None) -> tuple[AdmissionGate, GateHandles
         sensing=sensing,
         clock=clock,
         signal=signal,
-        loop_lag_multiplier=Ratio(s.loop_lag),
+        loop_lag=s.loop_lag_fn if s.loop_lag_fn is not None else (lambda: Ratio(s.loop_lag)),
         memory_budget=None if s.memory_budget_mib is None else Bytes(s.memory_budget_mib * mib),
         reserved=None if s.reserved_mib is None else Bytes(s.reserved_mib * mib),
     )
