@@ -62,6 +62,10 @@ async def resolve_browser_target(
 # Tracking/analytics hosts are never fetched (NormalizedUrl.is_analytics_host, shared with enqueue refusal).
 _REDUCED_BLOCK_RESOURCE_TYPES = frozenset({"image", "font", "media"})
 
+# Local-harmless subresource schemes: no DNS, delegated to the browser. Every
+# other non-http(s) scheme (file:, ftp:, ws:, chrome:, unknown) is refused.
+_LOCAL_HARMLESS_SCHEMES = frozenset({"data", "blob", "about", "javascript"})
+
 
 def make_ssrf_route_handler(
     resource_mode: str | None = None,
@@ -80,10 +84,11 @@ def make_ssrf_route_handler(
         # Re-pin the IP per subresource request (DNS-rebinding TOCTOU): raises on
         # private/loopback, returns (pinned_url, {Host: hostname}) to preserve routing.
         request_scheme = request.url.split(":", 1)[0].lower()
-        if request_scheme not in ("http", "https", ""):
-            # Data:, blob:, about:, javascript: never touch the network via DNS;
-            # let the browser handle them locally instead of aborting.
+        if request_scheme in _LOCAL_HARMLESS_SCHEMES:
             await route.continue_()
+            return
+        if request_scheme not in ("http", "https", ""):
+            await route.abort()
             return
         # The browser-observed URL is a live-text boundary: admitted here, once,
         # inline; an unadmittable URL reaches the same "unsafe target" abort below.

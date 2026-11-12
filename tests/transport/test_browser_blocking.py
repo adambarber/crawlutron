@@ -118,12 +118,56 @@ async def test_ssrf_route_handler_fails_closed_on_unexpected_errors(monkeypatch)
 
 
 async def test_ssrf_route_handler_allows_non_network_schemes():
-    """Data:/blob:/about: requests never touch DNS; they must pass through."""
+    """Data:/blob:/about:/javascript: are local-harmless and must continue.
+
+    javascript: is deliberately absent from the old tuple the allowlist replaces;
+    only the local-harmless, no-DNS set may be delegated to the browser."""
     await assert_route_decision(
         ssrf_route_handler(),
-        ("data:text/html;base64,PGI+", "blob:https://x/y", "about:blank"),
+        (
+            "data:text/html;base64,PGI+",
+            "blob:https://x/y",
+            "about:blank",
+            "javascript:void(0)",
+        ),
         "continue",
     )
+
+
+async def test_ssrf_route_handler_aborts_file_and_unknown_schemes():
+    """Any scheme outside the allowlist and http(s) is refused, not delegated.
+
+    A file: URL from an http origin would resolve local content in the headless
+    browser; the allowlist is the honest posture -- unknown = abort."""
+    await assert_route_decision(
+        ssrf_route_handler(),
+        (
+            "file:///etc/passwd",
+            "ftp://example.com/x",
+            "ws://example.com/socket",
+            "wss://example.com/socket",
+            "chrome://settings",
+            "future-scheme://x/y",
+        ),
+        "abort",
+    )
+
+
+async def test_ssrf_route_handler_file_scheme_aborts_before_any_url_admission():
+    """A file: subresource reaches the handler and is refused at the allowlist.
+
+    The abort must happen before URL admission so the browser never sees the
+    local path -- the likely attack surface for handing file content outward."""
+    route = FakeRoute()
+    await ssrf_route_handler()(route, FakeRequest("file:///etc/passwd", "document"))
+    assert route.decision == "abort"
+
+
+async def test_ssrf_route_handler_upper_case_file_scheme_still_aborts():
+    """Scheme matching is case-insensitive: FILE: must abort like file:."""
+    route = FakeRoute()
+    await ssrf_route_handler()(route, FakeRequest("FILE:///etc/passwd", "document"))
+    assert route.decision == "abort"
 
 
 async def test_ws_guard_closes_internal_targets(monkeypatch):
