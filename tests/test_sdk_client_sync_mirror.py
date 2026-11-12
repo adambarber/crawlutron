@@ -17,8 +17,11 @@ from crawlutron_sdk.models import (
     JobCreateResponse,
     JobListResponse,
     JobStatusResponse,
+    MapRequest,
+    RenderRequest,
     SearchRequest,
     SearchResponse,
+    SiteMapResponse,
     WatchCreateRequest,
     WatchListResponse,
     WatchState,
@@ -39,6 +42,15 @@ def _assert_sent(request: httpx.Request, method: str, path: str) -> None:
     """Pin the wire method and path a handler saw."""
     assert request.method == method
     assert request.url.path == path
+
+
+_CRAWL_BODY = {
+    "request_id": "abc",
+    "submitted_count": 1,
+    "policy_schema_version": "1",
+    "success": True,
+    "results": [],
+}
 
 
 def _watch_state(watch_id: str = "w1") -> dict[str, object]:
@@ -213,3 +225,48 @@ def test_sync_agent_hints_returns_response():
         response = client.agent_hints()
     assert isinstance(response, AgentHintsResponse)
     assert response.service == "crawlutron"
+
+
+def test_sync_map_snapshot_posts_frontier_request():
+    def handler(request: httpx.Request) -> httpx.Response:
+        _assert_sent(request, "POST", "/v1/map")
+        assert '"url":"https://example.com/"' in request.read().decode()
+        return httpx.Response(200, json={"url": "https://example.com/", "links": ["https://example.com/a"]})
+
+    with _served_sync_client(handler) as client:
+        response = client.map_snapshot(MapRequest(url="https://example.com/"))
+    assert isinstance(response, SiteMapResponse)
+    assert "https://example.com/a" in response.links
+
+
+def test_sync_render_posts_url_and_parses_crawl_response():
+    def handler(request: httpx.Request) -> httpx.Response:
+        _assert_sent(request, "POST", "/v1/render")
+        assert '"url":"https://example.com/"' in request.read().decode()
+        return httpx.Response(200, json=_CRAWL_BODY)
+
+    with _served_sync_client(handler) as client:
+        response = client.render(RenderRequest(url="https://example.com/"))
+    assert response.request_id == "abc"
+
+
+def test_sync_policy_suggestions_gets_rollup():
+    def handler(request: httpx.Request) -> httpx.Response:
+        _assert_sent(request, "GET", "/v1/policy-suggestions")
+        return httpx.Response(200, json={"records_examined": 0, "suggestions": []})
+
+    with _served_sync_client(handler) as client:
+        response = client.policy_suggestions()
+    assert response.records_examined == 0
+
+
+def test_sync_list_jobs_passes_limit_and_offset_query():
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"jobs": [], "total": 0})
+
+    with _served_sync_client(handler) as client:
+        client.list_jobs(limit=10, offset=5)
+    assert dict(seen[0].url.params) == {"limit": "10", "offset": "5"}

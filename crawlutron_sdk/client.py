@@ -28,9 +28,13 @@ from .models import (
     JobCreateResponse,
     JobListResponse,
     JobStatusResponse,
+    MapRequest,
+    PolicySuggestionsResponse,
     ReadinessResponse,
+    RenderRequest,
     SearchRequest,
     SearchResponse,
+    SiteMapResponse,
     WatchCreateRequest,
     WatchListResponse,
     WatchState,
@@ -69,6 +73,16 @@ def _payload_dict(payload: object) -> dict[str, object]:
     if callable(dump):
         return _str_key_dict(dump())
     return {}
+
+
+def _job_list_query(limit: int | None, offset: int) -> str:
+    """Build the GET /v1/jobs query suffix from the caller's page knobs."""
+    parts: list[str] = []
+    if limit is not None:
+        parts.append(f"limit={limit}")
+    if offset:
+        parts.append(f"offset={offset}")
+    return f"?{'&'.join(parts)}" if parts else ""
 
 
 class _ClientBase:
@@ -236,14 +250,29 @@ class CrawlutronClient(_ClientBase):
         response = await self._request("POST", "/v1/admit", json=_payload_dict(payload))
         return self._finish(response, AdmitResponse)
 
+    async def map_snapshot(self, payload: MapRequest) -> SiteMapResponse:
+        """Discover the URL frontier for a root URL (POST /v1/map)."""
+        response = await self._request("POST", "/v1/map", json=_payload_dict(payload))
+        return self._finish(response, SiteMapResponse)
+
+    async def render(self, payload: RenderRequest) -> CrawlResponse:
+        """Browser-render one or more pages (POST /v1/render)."""
+        response = await self._request("POST", "/v1/render", json=_payload_dict(payload))
+        return self._finish(response, CrawlResponse)
+
+    async def policy_suggestions(self) -> PolicySuggestionsResponse:
+        """Propose candidate host policy rules (GET /v1/policy-suggestions)."""
+        response = await self._request("GET", "/v1/policy-suggestions")
+        return self._finish(response, PolicySuggestionsResponse)
+
     async def create_job(self, payload: JobCreateRequest) -> JobCreateResponse:
         """Create and start a resumable whole-site crawl job."""
         response = await self._request("POST", "/v1/jobs", json=_payload_dict(payload))
         return self._finish(response, JobCreateResponse)
 
-    async def list_jobs(self) -> JobListResponse:
-        """List the caller's crawl jobs with live status."""
-        response = await self._request("GET", "/v1/jobs")
+    async def list_jobs(self, limit: int | None = None, offset: int = 0) -> JobListResponse:
+        """List the caller's crawl jobs; ``limit``/``offset`` page the result."""
+        response = await self._request("GET", f"/v1/jobs{_job_list_query(limit, offset)}")
         return self._finish(response, JobListResponse)
 
     async def get_job(self, job_id: str) -> JobStatusResponse:
@@ -392,12 +421,24 @@ class CrawlutronClientSync(_ClientBase):
         response = self._request("POST", "/v1/admit", json=_payload_dict(payload))
         return self._finish(response, AdmitResponse)
 
+    def map_snapshot(self, payload: MapRequest) -> SiteMapResponse:
+        response = self._request("POST", "/v1/map", json=_payload_dict(payload))
+        return self._finish(response, SiteMapResponse)
+
+    def render(self, payload: RenderRequest) -> CrawlResponse:
+        response = self._request("POST", "/v1/render", json=_payload_dict(payload))
+        return self._finish(response, CrawlResponse)
+
+    def policy_suggestions(self) -> PolicySuggestionsResponse:
+        response = self._request("GET", "/v1/policy-suggestions")
+        return self._finish(response, PolicySuggestionsResponse)
+
     def create_job(self, payload: JobCreateRequest) -> JobCreateResponse:
         response = self._request("POST", "/v1/jobs", json=_payload_dict(payload))
         return self._finish(response, JobCreateResponse)
 
-    def list_jobs(self) -> JobListResponse:
-        response = self._request("GET", "/v1/jobs")
+    def list_jobs(self, limit: int | None = None, offset: int = 0) -> JobListResponse:
+        response = self._request("GET", f"/v1/jobs{_job_list_query(limit, offset)}")
         return self._finish(response, JobListResponse)
 
     def get_job(self, job_id: str) -> JobStatusResponse:

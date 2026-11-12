@@ -24,6 +24,9 @@ def _sdk_mirror_fields() -> dict[tuple[str, str], frozenset[str]]:
         ("POST", "/v1/jobs"): frozenset(sdk.JobCreateRequest.model_fields),
         ("POST", "/v1/watches"): frozenset(sdk.WatchCreateRequest.model_fields),
         ("POST", "/v1/jobs/{job_id}/control"): frozenset(sdk.JobControlRequest.model_fields),
+        ("POST", "/v1/map"): frozenset(sdk.MapRequest.model_fields),
+        ("POST", "/v1/render"): frozenset(sdk.RenderRequest.model_fields),
+        ("GET", "/v1/jobs"): frozenset({"limit", "offset"}),
     }
 
 

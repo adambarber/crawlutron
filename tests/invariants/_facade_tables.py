@@ -79,17 +79,13 @@ REFUSAL_FIELD_NAMES: frozenset[str] = frozenset(
     for field in (*spec.unsupported_fields, *getattr(spec.door, "refusal_fields", ()))
 )
 
-#: SDK facade intentionally mirrors only the core doors (sdk_thin_by_design;
-#: see #846 for the completeness follow-up).
-SDK_THIN_ROWS: tuple[tuple[str, str], ...] = (
-    ("POST", "/v1/map"),
-    ("POST", "/v1/render"),
-)
+#: SDK facade mirrors the core doors (sdk_thin_by_design; see #846). Once a
+#: door is mirrored its exclusion row must be deleted in the same commit.
+SDK_THIN_ROWS: tuple[tuple[str, str], ...] = ()
 
 #: Identity knobs the SDK accepts as METHOD parameters (delete_job(job_id) etc.);
-#: #846 owns any richer shape, and /v1/keys has no SDK client at all.
+#: limit/offset ride the method signature now (see test_facade_sdk_mirror). /v1/keys has no SDK client.
 SDK_KNOB_ROWS: dict[tuple[str, str], frozenset[str]] = {
-    ("GET", "/v1/jobs"): frozenset({"limit", "offset"}),
     ("GET", "/v1/jobs/{job_id}"): frozenset({"job_id"}),
     ("POST", "/v1/jobs/{job_id}/control"): frozenset({"job_id"}),
     ("DELETE", "/v1/jobs/{job_id}"): frozenset({"job_id"}),

@@ -28,7 +28,15 @@ from crawlutron_sdk.errors import (
     CrawlutronTransportError,
     CrawlutronUnprocessableEntityError,
 )
-from crawlutron_sdk.models import AdmitRequest, CrawlRequest, CrawlResponse
+from crawlutron_sdk.models import (
+    AdmitRequest,
+    CrawlRequest,
+    CrawlResponse,
+    MapRequest,
+    PolicySuggestionsResponse,
+    RenderRequest,
+    SiteMapResponse,
+)
 
 _CRAWL_BODY = {
     "request_id": "abc",
@@ -76,6 +84,31 @@ def _accepted(request: httpx.Request) -> httpx.Response:
         202,
         json={"status": "accepted", "request_id": "abc", "status_url": "/v1/crawl/abc"},
     )
+
+
+def _url_handler(path: str, body: dict[str, object]) -> Callable[[httpx.Request], httpx.Response]:
+    """POST handler asserting the path and a url-bearing request body."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == path
+        assert '"url":"https://example.com/"' in request.read().decode()
+        return httpx.Response(200, json=body)
+
+    return handler
+
+
+def _capturing_handler(
+    payload: dict[str, object],
+) -> tuple[list[httpx.Request], Callable[[httpx.Request], httpx.Response]]:
+    """A handler that records the request and answers a fixed body."""
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json=payload)
+
+    return captured, handler
 
 
 def _sequential_handler(
@@ -165,11 +198,7 @@ async def test_admit_returns_response():
 
 @pytest.mark.asyncio
 async def test_api_key_is_sent_as_header():
-    captured: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        captured.append(request)
-        return httpx.Response(200, json={"admitted": True, "checks": {}})
+    captured, handler = _capturing_handler({"admitted": True, "checks": {}})
 
     client = CrawlutronClient(
         transport=httpx.MockTransport(handler),
@@ -366,3 +395,74 @@ async def test_crawl_stream_yields_response():
         results = [r async for r in client.crawl_stream(CrawlRequest(url="https://example.com/"))]
     assert len(results) == 1
     assert results[0].request_id == "abc"
+
+
+@pytest.mark.asyncio
+async def test_map_snapshot_posts_frontier_request():
+    handler = _url_handler("/v1/map", {"url": "https://example.com/", "links": ["https://example.com/a"]})
+
+    async with _served(handler) as client:
+        response = await client.map_snapshot(MapRequest(url="https://example.com/"))
+    assert isinstance(response, SiteMapResponse)
+    assert "https://example.com/a" in response.links
+
+
+@pytest.mark.asyncio
+async def test_render_posts_url_and_parses_crawl_response():
+    handler = _url_handler("/v1/render", _CRAWL_BODY)
+
+    async with _served(handler) as client:
+        response = await client.render(RenderRequest(url="https://example.com/"))
+    assert isinstance(response, CrawlResponse)
+    assert response.request_id == "abc"
+
+
+@pytest.mark.asyncio
+async def test_render_validator_refuses_both_url_and_urls():
+    """Bypass guard: exactly-one-of url/urls is enforced client-side too."""
+    with pytest.raises(ValueError, match="exactly one of 'url' or 'urls'"):
+        RenderRequest(url="https://example.com/", urls=["https://example.com/a"])
+
+
+@pytest.mark.asyncio
+async def test_policy_suggestions_gets_rollup():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/v1/policy-suggestions"
+        return httpx.Response(
+            200,
+            json={
+                "records_examined": 1,
+                "suggestions": [
+                    {
+                        "host": "example.com",
+                        "rule": "denied_hosts",
+                        "blocked_attempts": 1,
+                        "observed_attempts": 1,
+                        "classifications": ["host_denied"],
+                        "signatures": ["s"],
+                        "evidence": [],
+                        "rationale": "r",
+                    }
+                ],
+            },
+        )
+
+    async with _served(handler) as client:
+        response = await client.policy_suggestions()
+    assert isinstance(response, PolicySuggestionsResponse)
+    assert response.records_examined == 1
+    assert response.suggestions[0].host == "example.com"
+    assert response.suggestions[0].rule == "denied_hosts"
+
+
+@pytest.mark.asyncio
+async def test_list_jobs_passes_limit_offset_and_omits_default():
+    """Pagination: limit/offset ride the query; the default offset (0) is omitted."""
+    captured, handler = _capturing_handler({"jobs": [], "total": 0})
+
+    async with _served(handler) as client:
+        await client.list_jobs(limit=10, offset=5)
+        await client.list_jobs(limit=20)
+    assert dict(captured[0].url.params) == {"limit": "10", "offset": "5"}
+    assert dict(captured[1].url.params) == {"limit": "20"}

@@ -13,7 +13,7 @@ import pytest
 
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.main import create_app
-from crawlutron_sdk import CrawlutronClient
+from crawlutron_sdk import CrawlutronClient, CrawlutronUnauthorizedError
 from crawlutron_sdk.models import AdmitRequest
 
 
@@ -85,3 +85,10 @@ async def test_client_context_manager_closes(tmp_path: pathlib.Path):
     async with client:
         health = await client.health()
     assert health.status == "ok"
+
+
+@pytest.mark.asyncio
+async def test_policy_suggestions_unauthenticated_refused(app_client: CrawlutronClient):
+    """The rollup is per-tenant: an unauthenticated SDK caller is refused 401."""
+    with pytest.raises(CrawlutronUnauthorizedError):
+        await app_client.policy_suggestions()

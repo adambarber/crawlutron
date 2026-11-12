@@ -10,16 +10,28 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-class CrawlRequest(BaseModel):
+class _UrlSource(BaseModel):
+    """Shared exactly-one-of url/urls base for request models."""
+
+    url: str | None = None
+    urls: list[str] | None = None
+
+    @model_validator(mode="after")
+    def _require_exactly_one_url_source(self) -> _UrlSource:
+        has_url = self.url is not None
+        has_urls = self.urls is not None
+        if has_url == has_urls:
+            raise ValueError("supply exactly one of 'url' or 'urls'")
+        if has_urls and not self.urls:
+            raise ValueError("'urls' must contain at least one URL")
+        return self
+
+
+class CrawlRequest(_UrlSource):
     """Request body for ``POST /v1/crawl`` (one URL source plus a policy)."""
 
     model_config = ConfigDict(extra="forbid")
 
-    url: Annotated[str | None, Field(description="Single public HTTP(S) URL.")] = None
-    urls: Annotated[
-        list[str] | None,
-        Field(description="Batch of public HTTP(S) URLs. Use either url or urls."),
-    ] = None
     policy: dict[str, object] = Field(
         default_factory=dict,
         description="Resolved caller-provided policy/execution plan.",
@@ -55,16 +67,6 @@ class CrawlRequest(BaseModel):
             description="Prior crawl/job/watch request id to use as the delta baseline.",
         ),
     ] = None
-
-    @model_validator(mode="after")
-    def _require_exactly_one_url_source(self) -> CrawlRequest:
-        has_url = self.url is not None
-        has_urls = self.urls is not None
-        if has_url == has_urls:
-            raise ValueError("supply exactly one of 'url' or 'urls'")
-        if has_urls and not self.urls:
-            raise ValueError("'urls' must contain at least one URL")
-        return self
 
 
 class CrawlResponse(BaseModel):
@@ -134,6 +136,38 @@ class AdmitResponse(BaseModel):
     ] = None
     canonical_url: Annotated[str | None, Field(default=None)] = None
     checks: dict[str, str | None] = Field(default_factory=dict)
+
+
+class MapRequest(BaseModel):
+    """Request body for ``POST /v1/map`` (discover a root URL's frontier)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    url: str = Field(..., description="Root public HTTP(S) URL to map.")
+    policy: dict[str, object] = Field(
+        default_factory=dict,
+        description="Optional crawl policy for the mapping crawl.",
+    )
+
+
+class SiteMapResponse(BaseModel):
+    """The de-duplicated URL frontier for a mapping crawl (200 from ``POST /v1/map``)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    url: str | None = None
+    links: list[str] = Field(default_factory=list)
+    sitemaps: list[str] = Field(default_factory=list)
+    feeds: list[str] = Field(default_factory=list)
+    all_urls: list[str] = Field(default_factory=list)
+
+
+class RenderRequest(_UrlSource):
+    """Request body for ``POST /v1/render`` (backward-compatible browser render)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    options: dict[str, object] | None = None
 
 
 class JobCreateRequest(BaseModel):
@@ -363,6 +397,31 @@ class AgentHintsResponse(BaseModel):
     example_policies: dict[str, object] = Field(default_factory=dict)
 
 
+class HostPolicySuggestion(BaseModel):
+    """One host's candidate rule, with the evidence that proposed it."""
+
+    model_config = ConfigDict(extra="allow")
+
+    host: str
+    rule: str
+    blocked_attempts: int
+    observed_attempts: int
+    classifications: list[str] = Field(default_factory=list)
+    signatures: list[str] = Field(default_factory=list)
+    evidence: list[dict[str, object]] = Field(default_factory=list)
+    rationale: str
+
+
+class PolicySuggestionsResponse(BaseModel):
+    """Candidate host policy rules drawn from retained crawl records."""
+
+    model_config = ConfigDict(extra="allow")
+
+    records_examined: int
+    records_skipped: int = 0
+    suggestions: list[HostPolicySuggestion] = Field(default_factory=list)
+
+
 class HealthResponse(BaseModel):
     """The /health liveness response."""
 
@@ -402,16 +461,21 @@ __all__ = [
     "CrawlResponse",
     "ErrorEnvelope",
     "HealthResponse",
+    "HostPolicySuggestion",
     "JobControlRequest",
     "JobCreateRequest",
     "JobCreateResponse",
     "JobDeletedResponse",
     "JobListResponse",
     "JobStatusResponse",
+    "MapRequest",
+    "PolicySuggestionsResponse",
     "ReadinessResponse",
+    "RenderRequest",
     "SearchRequest",
     "SearchResponse",
     "SearchResultItem",
+    "SiteMapResponse",
     "WatchCreateRequest",
     "WatchListResponse",
     "WatchState",
