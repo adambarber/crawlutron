@@ -11,6 +11,11 @@ from tests._timing_harnesses import recorder
 _JITTER_BAND = (0.07, 0.13)
 
 
+def _frozen_scheduler(of=DomainScheduler, **overrides) -> DomainScheduler:
+    """A scheduler on a frozen clock: recorded sleeps equal their jitter draw."""
+    return make_scheduler(of, clock=lambda: 0.0, **overrides)
+
+
 def _two_jobs(url_a: str, url_b: str):
     return [make_job(0, url_a), make_job(1, url_b)]
 
@@ -23,7 +28,7 @@ class TestSameDomainSpacing:
         it -- the requested waits are staggered, never two copies of the delay.
         """
         sleeps = recorder(monkeypatch)
-        scheduler = make_scheduler(delay_seconds=0.1, adaptive=False)
+        scheduler = _frozen_scheduler(delay_seconds=0.1, adaptive=False)
         jobs = _two_jobs("http://example.com/a", "http://example.com/b")
         results = await scheduler.run(jobs, ok_worker, failed_result=engine_envelope)
         assert results is not None and sorted(results) == [0, 1]
@@ -39,7 +44,7 @@ class TestSameDomainSpacing:
         the domain waits the floor past the first, not concurrently with it.
         """
         sleeps = recorder(monkeypatch)
-        scheduler = make_scheduler(delay_seconds=0.0, adaptive=False)
+        scheduler = _frozen_scheduler(delay_seconds=0.0, adaptive=False)
         scheduler.set_domain_min_delay("example.com", 0.5)
         jobs = _two_jobs("http://example.com/a", "http://example.com/b")
         await scheduler.run(jobs, ok_worker, failed_result=engine_envelope)
@@ -59,7 +64,7 @@ class TestSameDomainSpacing:
                 return 1.0 if domain == "example.com" else 0.05
 
         sleeps = recorder(monkeypatch)
-        scheduler = make_scheduler(Separated, adaptive=False)
+        scheduler = _frozen_scheduler(Separated, adaptive=False)
         jobs = [
             make_job(0, "http://a.example.com/1"),
             make_job(1, "http://a.example.com/2"),
@@ -82,7 +87,7 @@ class TestSameDomainSpacing:
         scheme serializes to one-at-a-time, a no-reservation scheme fires all three at once.
         """
         sleeps = recorder(monkeypatch)
-        scheduler = make_scheduler(global_limit=2, per_domain_limit=2, delay_seconds=0.1, adaptive=False)
+        scheduler = _frozen_scheduler(global_limit=2, per_domain_limit=2, delay_seconds=0.1, adaptive=False)
         in_flight = 0
         peak = 0
 
@@ -129,7 +134,7 @@ class TestMidRunPurgeKeepsState:
         under rate limiting -- the one scenario politeness exists for.
         """
         sleeps = recorder(monkeypatch)
-        scheduler = make_scheduler(delay_seconds=0.1, adaptive=False)
+        scheduler = _frozen_scheduler(delay_seconds=0.1, adaptive=False)
         jobs = [make_job(i, f"http://example.com/{i}") for i in range(4)]
         # The purge cadence fires from set_domain_cooldown; run one mid-batch.
 
