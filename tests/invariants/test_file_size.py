@@ -91,6 +91,15 @@ def test_every_declared_scan_root_has_a_budget_row() -> None:
     assert set(_BUDGETS) == set(python_bearing_roots())
 
 
+def test_over_line_counts_boundary_is_exact(tmp_path: pathlib.Path) -> None:
+    """The off-by-one the stale twin pinned: 501 lines is over, 500 is not."""
+    over = tmp_path / "over.py"
+    over.write_text("\n" * LIMIT + "x\n")
+    at = tmp_path / "at.py"
+    at.write_text("\n" * (LIMIT - 1) + "x\n")
+    assert _over_line_counts([over, at]) == {over.as_posix(): LIMIT + 1}
+
+
 def test_every_root_is_at_its_declared_file_budget() -> None:
     """No new overlong file lands, and no split is left unclaimed."""
     failures: list[str] = []
