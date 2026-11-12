@@ -129,7 +129,7 @@ DECLARED_SURFACE_RATCHET = {
     # door (router factory) while the state names re-export for patch-seam survival.
     "crawlutron/health/readiness.py": (1, 1),
     # #871: lazy app-module reference so service sweeps avoid the fastapi graph.
-    "crawlutron/runtime/app_module_ref.py": (3, 3),
+    "crawlutron/runtime/app_module_ref.py": (6, 6),  # raised 3,3 -> 6,6 (#873 reset door + snapshot pair)
     "crawlutron/service/map_endpoint.py": (2, 1),
     "crawlutron/api/metrics_router.py": (2, 1),
     "crawlutron/api/middleware.py": (4, 2),
