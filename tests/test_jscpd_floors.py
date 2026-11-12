@@ -107,7 +107,11 @@ def test_fail_on_empty_is_no_longer_a_required_cli_flag(monkeypatch, capsys) -> 
 
 
 def test_source_floor_fails_on_thin_scan(monkeypatch) -> None:
-    _stub_report(monkeypatch, [], sources=40)
+    """An aggregate below MIN_SOURCES is refused: the gate names the thin scan.
+
+    Each of the five roots reports below the 200-source aggregate floor, so the
+    run cannot be a real scan of the tree (#888 adds the admission root)."""
+    _stub_report(monkeypatch, [], sources=30)
 
     assert gate._run(_args()) == 1
 
@@ -117,7 +121,7 @@ def test_a_tree_that_scanned_nothing_fails(monkeypatch, capsys) -> None:
     _stub_report(
         monkeypatch,
         [],
-        sources={"crawlutron": 0, "tests": 200, "scripts": 200},
+        sources={"admission": 0, "crawlutron": 0, "tests": 200, "scripts": 200},
     )
 
     assert gate._run(_args()) == 1
