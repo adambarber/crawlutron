@@ -196,7 +196,7 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/orchestration/strategy_chain.py": (4, 2),
     "crawlutron/runtime/worker_dispatch.py": (1, 1),
     "crawlutron/runtime/logging_config.py": (1, 1),
-    "crawlutron/runtime/pressure_sizing.py": (12, 8),
+    "crawlutron/runtime/pressure_sizing.py": (13, 9),
     "crawlutron/search/endpoint.py": (2, 1),
     "crawlutron/search/providers.py": (21, 9),
     "crawlutron/search/providers_api.py": (5, 5),

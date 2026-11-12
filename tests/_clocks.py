@@ -10,6 +10,7 @@ import itertools
 import time
 from collections.abc import Awaitable, Callable
 
+from admission import Instant
 from crawlutron.models.json_value import JsonValue
 from crawlutron.runtime.pressure_sizing import ResourceGate
 from crawlutron.transport.content_cache import CONTENT_CACHE_MAX_TOTAL_BYTES, ContentCache
@@ -53,6 +54,19 @@ def lag_clock(lag: float, interval: float = 0.05) -> Clock:
     step = interval + lag
     calls = itertools.count()
     return lambda: next(calls) * step
+
+
+def kernel_clock(start: float = 0.0):
+    """An Instant-returning clock over a movable float timeline (kernel gate).
+    The kernel gate's :class:`~admission.Clock` needs ``now() -> Instant``; this
+    adapts the suite's one movable timeline into that typed boundary."""
+    timeline = Timeline(start)
+
+    class _Now:
+        def now(self):
+            return Instant._of(timeline())
+
+    return timeline, _Now()
 
 
 async def scripted_sleep(seconds: float) -> None:
@@ -266,6 +280,7 @@ __all__ = [
     "await_until",
     "clocked_cache",
     "cpu_seconds",
+    "kernel_clock",
     "lag_clock",
     "lagged_gate",
     "make_seeded_cache",

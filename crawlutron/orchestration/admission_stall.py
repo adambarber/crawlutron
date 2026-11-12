@@ -126,7 +126,7 @@ async def crawl_batches(
             continue
         scheduled_results = await stages.crawl_batch(run, allowed_jobs)
         await stages.commit_batch(run, state, allowed_jobs, scheduled_results)
-        if allowed_jobs or state.page_count > page_count_before:
+        if state.page_count > page_count_before:
             stall_guard.record_progress()
 
 
