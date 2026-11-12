@@ -316,10 +316,9 @@ class Want:
         return cls({LaneId.GENERAL: general, LaneId.HEAVY: heavy})
 
 
+@dataclass(frozen=True, slots=True)
 class MinAll:
     """The MIN_ALL scale source: the lane honours combined resource pressure."""
-
-    __slots__ = ()
 
 
 @dataclass(frozen=True, slots=True)

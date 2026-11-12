@@ -318,15 +318,11 @@ class AdmissionGate:
             await self._bounded_wait(self._signal, None)
 
     async def _bounded_wait(self, signal: Signal, timeout: float | None) -> None:
-        """The single gate-side wait site: Signal + version re-check (5.4, 4.3)."""
-        version_before = self._version
+        """The single gate-side wait site: Signal, optional wall deadline (5.4)."""
         try:
             await asyncio.wait_for(signal.wait(timeout), timeout=timeout)
         except TimeoutError:
             pass
-        # Wake-then-recheck: a version bump since the decision re-decides (4.3).
-        if self._version == version_before:
-            return
 
     def _commit_grant_locked(self, decision: Decision) -> Granted:
         """Commit an already-decided GRANT; the caller holds the state lock."""
@@ -418,10 +414,10 @@ class AdmissionGate:
 
 
 class StallGuard:
-    """Gate-liveness detection keyed on the gate's own clock and Progress.
+    """Gate-liveness detection keyed on the gate's own clock and progress.
 
-    ``last_advance`` advancing (a grant or completed release) suppresses the stall; an
-    uncompleted early-return or exceptioned body freezes progress. No ``clock`` param.
+    ``last_advance`` advancing (a grant or a completed release) keeps the gate live;
+    a stall freezes progress past the bound. No ``clock`` param.
     """
 
     def __init__(self, gate: AdmissionGate, *, no_progress_stall: Duration | None = None) -> None:
