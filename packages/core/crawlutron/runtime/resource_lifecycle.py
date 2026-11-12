@@ -26,6 +26,9 @@ __all__ = [
 
 _logger = logging.getLogger(__name__)
 
+#: One drain gather's budget: a wedged aclose must not hang shutdown forever.
+_DRAIN_BUDGET_SECONDS = 10.0
+
 #: Declined close attempts, ``(reason, resource_kind)`` -> count. A decline is
 #: a handled state, not a warning: tests assert on this record (#643).
 _DECLINED_CLOSES: dict[tuple[str, str], int] = {}
@@ -90,10 +93,12 @@ class DeferredClose[T]:
         aclose: Callable[[T], Awaitable[None]],
         is_closed: Callable[[T], bool] = lambda resource: False,
         log: logging.Logger = _logger,
+        drain_budget_seconds: float = _DRAIN_BUDGET_SECONDS,
     ) -> None:
         self._aclose = aclose
         self._is_closed = is_closed
         self._log = log
+        self._drain_budget_seconds = drain_budget_seconds
         self._pending: set[asyncio.Task[None]] = set()
 
     def schedule(self, resource: T, *, skip_if_closed: bool = True) -> None:
@@ -122,13 +127,24 @@ class DeferredClose[T]:
             self._log.warning("deferred_close_failed", extra={"error": str(e)})
 
     async def drain(self) -> None:
-        """Await every pending close, including ones scheduled while draining.
+        """Await every pending close, incl. ones scheduled mid-drain.
 
-        Each gather re-snapshots ``_pending`` after yielding; the ``sleep(0)``
-        yield keeps the done-callbacks that drop finished tasks from starving.
+        Each gather re-snapshots ``_pending``; the ``sleep(0)`` yield keeps the
+        done-callbacks from starving. One round is bounded, fail-closed on timeout.
         """
         while self._pending:
-            await asyncio.gather(*list(self._pending), return_exceptions=True)
+            pending = len(self._pending)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*list(self._pending), return_exceptions=True),
+                    timeout=self._drain_budget_seconds,
+                )
+            except TimeoutError:
+                self._log.warning(
+                    "deferred_close_drain_timed_out",
+                    extra={"pending": pending, "owner": type(self).__name__},
+                )
+                return
             await asyncio.sleep(0)
 
 
