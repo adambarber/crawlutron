@@ -5,6 +5,9 @@ from __future__ import annotations
 import ast
 import pathlib
 
+import yaml
+
+from scripts.gate_fanout import SCAN_ROOTS_MARKER
 from tests._walk_primitives import REPO_ROOT, SCAN_ROOTS, declared_root_files
 
 #: The root-literal tuples the completeness gate names; SCAN_ROOTS members
@@ -119,3 +122,52 @@ def test_the_root_literal_audit_detects_a_planted_literal() -> None:
     assert _app_root_literal_hits(violation, pathlib.Path("x.py")) == ["1"]
     owner_shape = ast.parse("APP_ROOT = REPO_ROOT / 'crawlutron'\n")
     assert _app_root_literal_hits(owner_shape, pathlib.Path("x.py")) == ["1"]
+
+
+#: The pre-commit gate whose scan command must name the derived surface. This
+#: list is the audit's own declaration; a gate added here must use the token.
+_PRECOMMIT_CONFIG = REPO_ROOT / ".pre-commit-config.yaml"
+
+
+def _scan_literal_offenders(config: pathlib.Path) -> list[str]:
+    """Every hook whose command or files-trigger hard-codes a scan-root path."""
+    document = yaml.safe_load(config.read_text(encoding="utf-8"))
+    offenders: list[str] = []
+    for repo in document["repos"]:
+        for hook in repo.get("hooks", ()):
+            hook_id = hook["id"]
+            if hook_id in {"commit-citation"}:
+                continue
+            entry = hook.get("entry", "")
+            command = entry.split(" -- ", 1)[1] if " -- " in entry else ""
+            roots_ = {arg for arg in command.split() if arg in SCAN_ROOTS}
+            for root in roots_:
+                offenders.append(f"{hook_id}: hard-coded scan root {root!r} (use {SCAN_ROOTS_MARKER})")
+            file_trigger = hook.get("files", "")
+            for root in SCAN_ROOTS:
+                if root in file_trigger:
+                    offenders.append(f"{hook_id}: files-trigger hard-codes root {root!r}")
+    return offenders
+
+
+def test_every_precommit_run_gate_names_the_derived_scan_surface() -> None:
+    """A hook entry that hard-codes a scan-root path literal is the same drift the AST
+    audit kills: ruff/vulture carrying a root tuple quietly skip a tree that lands
+    later. The declaration must name the token; gate_fanout expands it to the surface."""
+    offenders = _scan_literal_offenders(_PRECOMMIT_CONFIG)
+    assert not offenders, "\n".join(offenders)
+
+
+def test_the_scan_surface_audit_bites_a_hand_listed_scan() -> None:
+    """The audit must red on a hook that hard-codes one root, so a future
+    regression to a literal is a finding, not a silent narrowing."""
+    # Clone the real config text with the token replaced by one root literal.
+    live = _PRECOMMIT_CONFIG.read_text(encoding="utf-8")
+    mutant_text = live.replace("ruff check {{SCAN_ROOTS}}", "ruff check packages/core")
+    mutant = REPO_ROOT / "tests" / "invariants" / "._scan_mutant.yaml"
+    mutant.write_text(mutant_text, encoding="utf-8")
+    try:
+        hits = _scan_literal_offenders(mutant)
+    finally:
+        mutant.unlink(missing_ok=True)
+    assert hits and any("packages/core" in h for h in hits), "audit lost the literal scan shape"

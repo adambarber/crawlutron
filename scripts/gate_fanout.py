@@ -12,10 +12,17 @@ from pathlib import Path
 
 import yaml
 
+from tests._walk_primitives import SCAN_ROOTS
+
 SERVICE_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = SERVICE_ROOT / ".pre-commit-config.yaml"
 STATUS_ROOT = SERVICE_ROOT / ".gate_fanout"
 ENGINE_MODULE = "scripts.gate_fanout"
+
+#: Hook scan-scope marker: {{SCAN_ROOTS}} expands to the derived surface.
+#: A hook never names a path literal -- a move/landing scans by construction.
+SCAN_ROOTS_MARKER = "{{SCAN_ROOTS}}"
+
 
 #: Seconds a gate child may hold the run before its session is killed.
 WALL_SECONDS = 60.0
@@ -25,6 +32,22 @@ STALE_SECONDS = 600.0
 
 def _python() -> str:
     return str(SERVICE_ROOT / ".venv" / "bin" / "python")
+
+
+def _expand_scan_roots(argv: list[str]) -> list[str]:
+    """Replace {{SCAN_ROOTS}} with every non-cached python root, in place order.
+
+    A hook scans the derived surface, never a hand-listed tuple; a package that
+    moves or lands under packages/ is picked up without an entry edit."""
+    if SCAN_ROOTS_MARKER not in argv:
+        return argv
+    expanded: list[str] = []
+    for token in argv:
+        if token != SCAN_ROOTS_MARKER:
+            expanded.append(token)
+        else:
+            expanded.extend(SCAN_ROOTS)
+    return expanded
 
 
 def _gate_argv() -> dict[str, list[str]]:
@@ -37,7 +60,8 @@ def _gate_argv() -> dict[str, list[str]]:
             if "pre-commit" in (hook.get("stages") or []) and ENGINE_MODULE in entry:
                 # shlex, not split: the entry after `--` carries shell quoting
                 # (addopts=""), which pre-commit itself would consume.
-                gates[hook["id"]] = shlex.split(entry.split(" -- ", 1)[1])
+                argv = shlex.split(entry.split(" -- ", 1)[1])
+                gates[hook["id"]] = _expand_scan_roots(argv)
     if not gates:
         raise ValueError(f"{CONFIG_PATH.name} declares no {ENGINE_MODULE} gates")
     return gates

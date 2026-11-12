@@ -45,18 +45,16 @@ def _git(*args: str, cwd: str | Path) -> subprocess.CompletedProcess[str]:
 
 
 def test_all_hooks_share_one_trigger() -> None:
-    """The ENFORCEMENT hooks' ``files:`` values are one YAML anchor: the trigger was copied five times and
-    never compared; they are now ``&service_trigger``. #557: coverage is a measurement surface, not
-    enforcement, so a divergent files value cannot silently skip a gate.
+    """Every hook's ``files:`` is one YAML anchor, and none names a package path
+    literal: the surface is derived (``&service_trigger`` / ``{{SCAN_ROOTS}}``), not
+    spelled out, so a divergent value cannot silently skip a gate (#557).
     """
     hooks = _hook_blocks(CONFIG_PATH.read_text(encoding="utf-8"))
     message_stage = {hook_id for hook_id, block in hooks if "commit-msg" in str(_field(block, "stages"))}
-    enforcement = [
-        (hook_id, block) for hook_id, block in hooks if hook_id not in {"coverage"} | message_stage
-    ]
-    triggers = {_field(block, "files") for _, block in enforcement}
+    file_hooks = {hook_id for hook_id, _ in hooks} - message_stage
+    triggers = {_field(block, "files") for hook_id, block in hooks if hook_id in file_hooks}
     assert triggers == {ENFORCEMENT_TRIGGER_PATTERN}, (
-        f"enforcement hooks must all share the one trigger {ENFORCEMENT_TRIGGER_PATTERN!r}; "
+        f"all hooks must share the one derived trigger {ENFORCEMENT_TRIGGER_PATTERN!r}; "
         f"got {sorted(triggers)}"
     )
     for hook_id in message_stage:
@@ -67,8 +65,8 @@ def test_all_hooks_share_one_trigger() -> None:
         )
     coverage = [(hook_id, block) for hook_id, block in hooks if hook_id == "coverage"]
     assert coverage, "the coverage surface must exist as its own hook"
-    assert all(_field(block, "files") == "^(packages/core/crawlutron|tests)/" for _, block in coverage), (
-        "the coverage hook's trigger is scoped to the measured tree, not the service trigger"
+    assert _field(coverage[0][1], "files") == ENFORCEMENT_TRIGGER_PATTERN, (
+        "coverage must share the derived trigger, not a hard-coded path literal"
     )
 
 
