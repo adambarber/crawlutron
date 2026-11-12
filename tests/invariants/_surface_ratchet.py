@@ -168,7 +168,7 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/mcp/registry.py": (4, 1),
     # #646: the four job-tool handlers joined via _job_tool_handler. #647: create_job.
     # ARCH-1: factory collapse (data-driven dispatch) deleted the factories + watch_handlers.py.
-    "crawlutron/mcp/handlers.py": (9, 6),  # RAISED to (9, 6) by #701: DoorEnv is the typed door environment.
+    "crawlutron/mcp/handlers.py": (8, 5),  # lowered from (9, 6) by the HTTPException-arm deletion (#869).
     # #646: the one control-plane transition both job doors run, plus its shared 404/409 raisers.
     "crawlutron/service/job_control.py": (3, 3),
     # #647: the typed job cores both doors run (create/list/get/control/delete).

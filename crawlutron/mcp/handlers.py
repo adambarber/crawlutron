@@ -13,7 +13,6 @@ from dataclasses import dataclass, field
 from enum import StrEnum, auto
 from typing import TYPE_CHECKING, Any, NotRequired, Protocol, TypedDict, Unpack, cast
 
-from fastapi import HTTPException
 from pydantic import BaseModel, ValidationError
 
 from crawlutron.config.settings import CrawlerSettings
@@ -60,18 +59,6 @@ class ToolResult:
     is_error: bool = False
 
 
-def http_exception_message(error: HTTPException) -> str:
-    """Render an ``HTTPException``'s detail as the human message an MCP caller sees.
-
-    Conforming detail (a ``dict`` with a ``message`` key) unwraps to that message;
-    a plain detail is its string; neither falls back to the exception itself.
-    """
-    detail = error.detail
-    if isinstance(detail, dict):
-        return str(detail.get("message") or detail)
-    return str(detail) if detail else str(error)
-
-
 def validation_message(error: Exception) -> str:
     if isinstance(error, ValidationError):
         return "; ".join(
@@ -81,12 +68,8 @@ def validation_message(error: Exception) -> str:
     return str(error)
 
 
-def _tool_error(error: HTTPException | ValueError | DomainError) -> ToolResult:
-    message = (
-        str(error.message)
-        if isinstance(error, DomainError)
-        else (http_exception_message(error) if isinstance(error, HTTPException) else str(error))
-    )
+def _tool_error(error: ValueError | DomainError) -> ToolResult:
+    message = str(error.message) if isinstance(error, DomainError) else str(error)
     return ToolResult(text=message, is_error=True)
 
 
@@ -99,11 +82,11 @@ def _tool_success(value: BaseModel | Mapping[str, object]) -> ToolResult:
 
 async def tool_result(coro: Awaitable[BaseModel | Mapping[str, object]]) -> ToolResult:
     """Cross the MCP boundary for one tool call: run it, or turn the endpoint's
-    ``HTTPException``/``DomainError``/``ValueError`` into a tool error rather than a traceback.
+    ``DomainError``/``ValueError`` into a tool error rather than a traceback.
     """
     try:
         result = await coro
-    except (HTTPException, DomainError, ValueError) as error:
+    except (DomainError, ValueError) as error:
         return _tool_error(error)
     return _tool_success(result)
 
@@ -221,7 +204,7 @@ async def _admit_tool(
         with request_gate("mcp_request_rejected", logger=_logger):
             async with port.admit(caller, pages, tracking=tracking, payload=payload):
                 return await work()
-    except (HTTPException, DomainError) as error:
+    except DomainError as error:
         return _tool_error(error)
 
 
@@ -294,7 +277,7 @@ async def _running_answer(payload, job_store, result_store, caller, read) -> Too
                 "crawl_status": pending.job_status,
             },
         )
-    except (HTTPException, DomainError) as error:
+    except DomainError as error:
         return _tool_error(error)
 
 
@@ -483,7 +466,6 @@ __all__ = [
     "ToolResult",
     "caller_for",
     "dispatch",
-    "http_exception_message",
     "tool_result",
     "validation_message",
 ]
