@@ -80,12 +80,9 @@ def _raise_sites(tree: ast.AST, source_name: str) -> list[tuple[str, int, str]]:
 
 
 def _http_error_calls(tree: ast.AST) -> list[ast.Call]:
-    """EVERY Call shaped like http_error, however the name was bound: direct
-    import, local alias (Assign or ImportFrom-as), or attribute form. The
-    census matches on the CALL SHAPE, not on binding resolution -- so an
-    aliased attribute (``z.http_error(...)``) is seen by the attribute match
-    without tracking the base binding. Sentinel classification stays with the
-    args via _triplet_args, unchanged."""
+    """Every Call shaped like http_error, however the name was bound:
+    direct import, Assign/ImportFrom alias, or attribute form. Matches
+    CALL SHAPE, not binding resolution; classification via _triplet_args."""
     aliased = (
         {
             node.targets[0].id
