@@ -207,10 +207,9 @@ def test_wire_triplets_carry_multiline_raise_sites():
 
 
 def test_wire_triplets_name_every_non_literal_code_site():
-    """Every non-literal raise site must be an explicit exemption, and the
-    derivation must account for EVERY raise-shaped call site in the sources:
-    a routed-around call (aliased super, renamed helper) would otherwise
-    vanish silently, so classified + exempted must equal the site count."""
+    """Non-literal raise sites must all be explicit exemptions.
+    Classified + exempted must equal the site count: a routed-around call
+    (aliased super, renamed helper) would otherwise vanish silently."""
     triplets = _wire_triplets()
     sentinels = [code for code, status, _ in triplets if not isinstance(status, int) or status < 0]
     assert set(sentinels) == set(_NON_LITERAL_CODE_SITES), (
