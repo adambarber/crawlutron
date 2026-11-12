@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 
+from scripts import module_graph
 from scripts.module_graph import _imports
 
 # Real modules of this tree, so _resolve's on-disk check accepts them: they stand
@@ -50,6 +51,16 @@ def test_a_runtime_edge_survives_the_type_checking_skip() -> None:
 def test_a_runtime_edge_is_reported() -> None:
     """A plain runtime import is still an edge."""
     assert _imports_of(f"from {A} import CrawlEndpoint\n") == {A}
+
+
+def test_a_package_dir_with_only_subpackages_still_resolves(tmp_path, monkeypatch) -> None:
+    """A package dir holding only subpackage .py files (no direct child) must
+    still resolve, at any depth — the one-level glob blind-spot is closed."""
+    nested = tmp_path / "crawlutron" / "pkg" / "sub"
+    nested.mkdir(parents=True)
+    (nested / "leaf.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.setattr(module_graph, "APP_ROOT", tmp_path / "crawlutron")
+    assert module_graph._resolve("crawlutron.pkg") == "crawlutron.pkg"
 
 
 def test_a_package_form_import_records_the_edge_into_the_package() -> None:

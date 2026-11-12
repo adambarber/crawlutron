@@ -32,7 +32,7 @@ def _resolve(name: str, package_ok: bool = True) -> str | None:
     candidate = APP_ROOT.parent / name.replace(".", "/")
     if candidate.with_suffix(".py").exists():
         return name
-    if package_ok and candidate.is_dir() and any(candidate.glob("*.py")):
+    if package_ok and candidate.is_dir() and any(candidate.rglob("*.py")):
         return name
     return None
 
