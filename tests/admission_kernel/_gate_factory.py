@@ -181,6 +181,7 @@ class GateSpec:
     mem_gauge: FakeGauge | None = None
     cpu_gauge: FakeGauge | None = None
     memory_budget_mib: int | None = None
+    ramp_growth_window: int = 3
 
 
 __all__ = ["FakeGauge", "GateHandles", "GateSpec", "build_gate"]
@@ -224,7 +225,7 @@ def build_gate(spec: GateSpec | None = None) -> tuple[AdmissionGate, GateHandles
         cold_probe=Count(s.cold_probe),
         initial_ramp=None if s.initial_ramp is None else Count(s.initial_ramp),
         yield_interval=Duration(0.0),
-        ramp_growth_window=Count(3),
+        ramp_growth_window=Count(s.ramp_growth_window),
     )
     gate = AdmissionGate(
         pacing=pacing,

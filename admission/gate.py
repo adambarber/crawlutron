@@ -339,22 +339,25 @@ class AdmissionGate:
             granted_alloc = Allocation(allocation_entries)
             lease = Lease._of(self, per_lane, cold=decision.cold)
             now = self._clock.now().value
-            self._record_decision(now, granted_alloc, cold=decision.cold)
+            decision_scale = decision.scale or Scale(1.0)
+            self._record_decision(now, granted_alloc, cold=decision.cold, scale=decision_scale)
         return Granted(
             allocation=granted_alloc,
-            scale=decision.scale or Scale(1.0),
+            scale=decision_scale,
             paced=False,
             lease=lease,
         )
 
-    def _record_decision(self, now: float, allocation: Allocation, *, cold: bool = False) -> None:
+    def _record_decision(
+        self, now: float, allocation: Allocation, *, cold: bool = False, scale: Scale
+    ) -> None:
         """Ramp growth/decay and progress advance for one granting decision (4.1, 4.4)."""
         self._progress = Progress(
             last_advance=Instant._of(max(now, self._progress.last_advance.value)),
             last_decision=Instant._of(max(now, self._progress.last_decision.value)),
         )
-        if cold:
-            # Cold posture grows no ramp: no current sample means no throughput proof.
+        if cold or scale.value < 1.0:
+            # Cold posture or pressure interrupts growth: no ramp growth this decision.
             self._scale_full_streak = 0
             return
         # Growth only after scale-full over a window; the streak is consumed here.
@@ -366,7 +369,6 @@ class AdmissionGate:
 
     def _decay_ramp(self) -> None:
         """Decay the ramp below full scale: ramp = max(ramp_floor, ramp*scale) (4.1)."""
-        self._scale_full_streak = 0
         read = self._snapshot_readings(self._clock.now().value)
         scale = min(
             self._scale_of(read[ResourceId.MEMORY], self._sensing.sensors[ResourceId.MEMORY].limits).value,
