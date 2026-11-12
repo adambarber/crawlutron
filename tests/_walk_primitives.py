@@ -38,6 +38,29 @@ def comment_lines(source: str) -> list[tuple[int, str]]:
 REPO_ROOT = TESTS_DIR.parent
 
 
+@cache
+def python_bearing_roots(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
+    """Every top-level dir under ``base`` holding any ``*.py``, sorted.
+
+    Hidden dirs and symlinked trees (venvs) are skipped: they hold caches and
+    environments, not shipped code. Derived by walking, never hand-listed --
+    the app/ rename and crawlutron_sdk's late arrival were hand-list blindness.
+    """
+    roots = [
+        d.name
+        for d in base.iterdir()
+        if d.is_dir()
+        and not d.is_symlink()
+        and not d.name.startswith(".")
+        and any("__pycache__" not in q.parts for q in d.rglob("*.py"))
+    ]
+    assert roots, f"no python-bearing roots under {base}: repo surface is empty"
+    return tuple(sorted(roots))
+
+
+SCAN_ROOTS = python_bearing_roots()
+
+
 APP_ROOT = REPO_ROOT / "crawlutron"
 
 
