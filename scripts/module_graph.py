@@ -34,6 +34,10 @@ def _resolve(name: str, package_ok: bool = True) -> str | None:
         return name
     if package_ok and candidate.is_dir() and any(candidate.rglob("*.py")):
         return name
+    # Third-party (fastapi, starlette, ...): record the top-level distribution
+    # root so seals see external reach; a crawlutron-internal miss is not one.
+    if root != APP_ROOT.name:
+        return root
     return None
 
 

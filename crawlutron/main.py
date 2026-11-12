@@ -12,6 +12,7 @@ from crawlutron.admission.policy import PolicyTier
 from crawlutron.config.env import get_env_float, get_env_int
 from crawlutron.models.address_class import is_loopback_bind
 from crawlutron.models.host_policy import HostPolicy
+from crawlutron.runtime.app_module_ref import set_module_app_provider
 from crawlutron.runtime.pressure_sizing import default_executor_workers
 from crawlutron.vocabulary.identity import SERVICE_ID, SERVICE_VERSION
 
@@ -294,8 +295,7 @@ if FastAPI is not None:
     def __getattr__(name: str):
         """Lazily build the ASGI app on first attribute access.
 
-        Importing this module constructs nothing; ``app`` discovery (uvicorn,
-        tests) triggers one create_app() cached for the process lifetime.
+        Nothing constructs at import; ``app`` discovery triggers one create_app().
         """
         global _module_app
         if name == "app":
@@ -427,9 +427,11 @@ def module_app() -> FastAPI | None:
     return _module_app
 
 
+set_module_app_provider(module_app)
+
+
 async def _shutdown_services(_app: FastAPI) -> None:
-    """Stop the world FIRST: no webhooks against cleared dependencies, no
-    cookies after the snapshot. The jar needs no step -- the store persists."""
+    """Stop the world FIRST: no webhooks against cleared deps; jar needs no step."""
     from .health.readiness import READINESS_STATE
     from .orchestration.engine import resource_gate
 
@@ -440,11 +442,10 @@ async def _shutdown_services(_app: FastAPI) -> None:
 
     await shutdown_job_runner()
 
-    from crawlutron.transport.http_client_pool import close_async_http_client, close_cffi_session
-
     # Imported here, not at module scope: this pulls in the markitdown stack,
     # which CLI/MCP callers that never render a PDF must not pay for.
     from .extraction.content import shutdown_doc_extraction_executor
+    from .transport.http_client_pool import close_async_http_client, close_cffi_session
 
     async def _close_gate() -> None:
         resource_gate().close()
@@ -481,10 +482,7 @@ async def _shutdown_services(_app: FastAPI) -> None:
 
 
 async def _drain_watch_sweep(_app: FastAPI) -> None:
-    """Cancel and await the maintenance sweeps before the job runner drains: the
-    watch sweep is cancelled while the key store is still open (liveness reads
-    cannot race a closed handle).
-    """
+    """Cancel sweeps while the key store is still open (no closed-handle race)."""
     await _drain_task(_app, "cache_maintenance_task")
     await _drain_task(_app, "spill_maintenance_task")
     await _drain_task(_app, "watch_sweep_task")

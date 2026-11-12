@@ -35,8 +35,12 @@ async def spill_maintenance_once(
 
 
 def _shared_spill_store() -> CrawlSpillStore:
-    """The running app's shared spill store, for a sweep task wired without one."""
-    from crawlutron.main import module_app
+    """The running app's shared spill store, for a sweep task wired without one.
+
+    The main module is imported lazily and only read for its ``module_app``
+    accessor: importing the state object keeps the sweep off the fastapi graph.
+    """
+    from crawlutron.runtime.app_module_ref import module_app
 
     app = module_app()
     store = getattr(app.state if app is not None else None, "spill_store", None)

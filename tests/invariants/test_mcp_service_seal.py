@@ -18,34 +18,15 @@ endpoints. Weakening the seal is a defect, not a fix.
 """
 
 from scripts.module_graph import build_graph
+from tests.invariants._seal_walk import offender_pairs as _walk_offenders
 
 _SEALED_LAYER = "crawlutron.mcp."
 _FORBIDDEN_LAYER = "crawlutron.api"
 
 
-def _reachable(modules: dict[str, set[str]], start: str) -> set[str]:
-    """Every module transitively reachable from ``start`` (inclusive of start)."""
-    seen: set[str] = set()
-    queue = [start]
-    while queue:
-        current = queue.pop()
-        if current in seen:
-            continue
-        seen.add(current)
-        queue.extend(modules.get(current, ()))
-    return seen
-
-
 def _offender_pairs(modules: dict[str, set[str]]) -> set[str]:
     """Every (mcp module -> api module) reachability pair, as 'a -> b' strings."""
-    offenders: set[str] = set()
-    for name in modules:
-        if not name.startswith(_SEALED_LAYER):
-            continue
-        for reached in _reachable(modules, name):
-            if reached.startswith(_FORBIDDEN_LAYER):
-                offenders.add(f"{name} -> {reached}")
-    return offenders
+    return _walk_offenders(modules, _SEALED_LAYER, (_FORBIDDEN_LAYER,))
 
 
 def test_no_mcp_module_reaches_api() -> None:

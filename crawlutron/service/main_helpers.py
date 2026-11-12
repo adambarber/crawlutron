@@ -9,10 +9,10 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 
-from crawlutron.health.readiness import READINESS_STATE as readiness_state
 from crawlutron.models.job_status_response import JobStatusResponse
 from crawlutron.models.result_record import ProducerEnvelope
 from crawlutron.runtime.metrics import get_metrics
+from crawlutron.runtime.readiness_state import READINESS_STATE as readiness_state
 from crawlutron.service.errors import CapacityExceeded, DomainError, ValidationRefusal
 from crawlutron.storage.job_store import JobStatusView
 

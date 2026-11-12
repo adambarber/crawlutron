@@ -125,6 +125,11 @@ DECLARED_SURFACE_RATCHET = {
     "crawlutron/service/job_runner.py": (15, 12),
     "crawlutron/api/jobs_router.py": (6, 5),
     "crawlutron/service/main_helpers.py": (3, 3),
+    # #871: readiness state re-homed framework-free; health keeps the FastAPI wire
+    # door (router factory) while the state names re-export for patch-seam survival.
+    "crawlutron/health/readiness.py": (1, 1),
+    # #871: lazy app-module reference so service sweeps avoid the fastapi graph.
+    "crawlutron/runtime/app_module_ref.py": (3, 3),
     "crawlutron/service/map_endpoint.py": (2, 1),
     "crawlutron/api/metrics_router.py": (2, 1),
     "crawlutron/api/middleware.py": (4, 2),
