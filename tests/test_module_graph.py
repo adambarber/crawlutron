@@ -7,7 +7,8 @@ import ast
 import pytest
 
 from scripts import module_graph
-from scripts.module_graph import _imports
+from scripts.module_graph import _imports, build_graph
+from tests._walk_primitives import import_roots
 
 # Real modules of this tree, so _resolve's on-disk check accepts them: they stand
 # in for any two modules whose only mutual reference is a type-checking one.
@@ -61,16 +62,17 @@ def test_a_package_dir_with_only_subpackages_still_resolves(tmp_path, monkeypatc
     nested = tmp_path / "crawlutron" / "pkg" / "sub"
     nested.mkdir(parents=True)
     (nested / "leaf.py").write_text("x = 1\n", encoding="utf-8")
-    monkeypatch.setattr(module_graph, "APP_ROOT", tmp_path / "crawlutron")
+    monkeypatch.setattr(module_graph, "_MEMBERS", (tmp_path,))
+    monkeypatch.setattr(module_graph, "_IMPORT_NAMES", {"crawlutron"})
     assert module_graph._resolve("crawlutron.pkg") == "crawlutron.pkg"
 
 
 def test_a_vacuous_app_root_is_refused_not_greened(tmp_path, monkeypatch) -> None:
-    """The seal kill-switch: an empty APP_ROOT builds no graph, and build_graph raises,
+    """The seal kill-switch: an empty import root builds no graph, and build_graph raises,
     so the MCP/service layering seals cannot green over a scanned-nothing walk."""
     empty = tmp_path / "crawlutron"
     empty.mkdir()
-    monkeypatch.setattr(module_graph, "APP_ROOT", empty)
+    monkeypatch.setattr(module_graph, "IMPORT_ROOTS", ((empty, "crawlutron"),))
     with pytest.raises(AssertionError, match="walked zero modules"):
         module_graph.build_graph()
 
@@ -91,3 +93,17 @@ def test_a_module_form_import_still_resolves_the_module_file() -> None:
     """Regression: module-form `from crawlutron.service.errors import ...` keeps
     resolving to the .py module file, not to a package dir."""
     assert _imports_of("from crawlutron.service.errors import DomainError\n") == {"crawlutron.service.errors"}
+
+
+def test_the_graph_walks_every_import_root_not_just_crawlutron() -> None:
+    """Wave A (#917): the graph must walk every derived import root, so a package that
+    leaves core (mcp -> packages/mcp/crawlutron_mcp) is still walked and its seal never
+    greens over an empty set. Red-first: the single-package graph named only crawlutron."""
+    modules, _importers = build_graph()
+    prefixes = {name.split(".", 1)[0] for name in modules}
+    derived = {root.rsplit("/", 1)[-1] for root in import_roots()}
+    missing = sorted(derived - prefixes)
+    assert not missing, (
+        "the module graph walks only a subset of the derived import roots; an "
+        "unwalked root's sealed layer would green over empty (missing: " + repr(missing) + ")"
+    )

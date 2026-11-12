@@ -1,6 +1,20 @@
 ```mermaid
 graph LR
-    crawlutron --> _version
+     --> errors
+     --> gate
+     --> gauge
+     --> policy
+     --> seams
+     --> values
+    errors --> values
+    gate --> errors
+    gate --> policy
+    gate --> seams
+    gate --> values
+    gauge --> values
+    policy --> values
+    seams --> values
+     --> _version
     admission_admission --> admission_admission_links
     admission_admission --> admission_policy
     admission_admission --> admission_scope_match
@@ -19,6 +33,7 @@ graph LR
     admission_admission_links --> models_json_value
     admission_admission_links --> models_normalized_url
     admission_admission_links --> safety_safe_regex
+    admission_admission_links --> safety_url_redaction
     admission_admission_links --> storage_job_store
     admission_credentials --> models_credential
     admission_credentials --> models_host_policy
@@ -31,305 +46,21 @@ graph LR
     admission_policy --> models_crawl_policy
     admission_policy --> models_crawl_policy_limits
     admission_policy --> models_json_value
+    admission_policy --> safety_url_redaction
+    admission_policy --> pydantic
     admission_render_options --> models_crawl_policy
     admission_render_options --> models_crawl_policy_vocabulary
     admission_render_options --> models_json_value
     admission_render_options --> models_render_options
     admission_render_options --> vocabulary_limits
     admission_scope_match --> safety_safe_regex
-    api__depends_singletons --> api_dependencies
-    api_async_crawl_runner --> api_crawl_executor
-    api_async_crawl_runner --> api_job_runner
-    api_async_crawl_runner --> api_response_shaping
-    api_async_crawl_runner --> api_unified_shaping
-    api_async_crawl_runner --> api_webhooks
-    api_async_crawl_runner --> config_env
-    api_async_crawl_runner --> config_settings
-    api_async_crawl_runner --> models_crawl_request
-    api_async_crawl_runner --> models_host_policy
-    api_async_crawl_runner --> models_normalized_url
-    api_async_crawl_runner --> runtime_metrics
-    api_async_crawl_runner --> storage_job_store
-    api_caller_auth --> api_exceptions
-    api_caller_auth --> config_settings
-    api_caller_auth --> models_caller_identity
-    api_caller_auth --> models_caller_key
-    api_caller_auth --> models_error_response
-    api_caller_auth --> models_request_profile_record
-    api_caller_auth --> transport_cookie_jar
-    api_caller_auth --> transport_request_profile
-    api_crawl_endpoint --> admission_payload_helpers
-    api_crawl_endpoint --> api_async_crawl_runner
-    api_crawl_endpoint --> api_caller_auth
-    api_crawl_endpoint --> api_caller_concurrency
-    api_crawl_endpoint --> api_crawl_executor
-    api_crawl_endpoint --> api_exceptions
-    api_crawl_endpoint --> api_job_runner
-    api_crawl_endpoint --> api_main_helpers
-    api_crawl_endpoint --> api_response_shaping
-    api_crawl_endpoint --> api_webhooks
-    api_crawl_endpoint --> config_settings
-    api_crawl_endpoint --> extraction_output_formats
-    api_crawl_endpoint --> models_caller_identity
-    api_crawl_endpoint --> models_crawl_request
-    api_crawl_endpoint --> models_host_policy
-    api_crawl_endpoint --> models_json_value
-    api_crawl_endpoint --> models_normalized_url
-    api_crawl_endpoint --> models_result_record
-    api_crawl_endpoint --> models_trace_response
-    api_crawl_endpoint --> models_unified_crawl_response
-    api_crawl_endpoint --> runtime_metrics
-    api_crawl_endpoint --> storage_ids
-    api_crawl_endpoint --> storage_job_store
-    api_crawl_endpoint --> storage_result_store
-    api_crawl_executor --> api_exceptions
-    api_crawl_executor --> config_settings
-    api_crawl_executor --> models_host_policy
-    api_crawl_executor --> models_normalized_url
-    api_crawl_executor --> models_result_record
-    api_crawl_executor --> orchestration_engine
-    api_crawl_executor --> transport_browser_pool
-    api_crawl_executor --> vocabulary_strategies
-    api_crawl_router --> api_caller_auth
-    api_crawl_router --> api_crawl_endpoint
-    api_crawl_router --> api_dependencies
-    api_crawl_router --> api_policy_defaults
-    api_crawl_router --> models_crawl_request
-    api_crawl_router --> models_error_response
-    api_crawl_router --> models_trace_response
-    api_crawl_router --> models_unified_crawl_response
-    api_crawl_router --> vocabulary_limits
-    api_dependencies --> api_caller_auth
-    api_dependencies --> config_settings
-    api_dependencies --> models_caller_identity
-    api_dependencies --> storage_caller_key_store
-    api_dependencies --> storage_job_store
-    api_dependencies --> storage_result_store
-    api_dependencies --> storage_watch_store
-    api_exceptions --> models_error_response
-    api_exceptions --> models_json_value
-    api_identity_router --> api__depends_singletons
-    api_identity_router --> api_caller_auth
-    api_identity_router --> api_dependencies
-    api_identity_router --> api_main_helpers
-    api_identity_router --> api_map_endpoint
-    api_identity_router --> api_render_endpoint
-    api_identity_router --> models_error_response
-    api_identity_router --> models_search_response
-    api_identity_router --> models_site_map_response
-    api_identity_router --> models_unified_crawl_response
-    api_identity_router --> search_endpoint
-    api_job_lifecycle --> api_webhooks
-    api_job_recovery --> api_job_lifecycle
-    api_job_recovery --> config_settings
-    api_job_recovery --> storage_job_store
-    api_job_runner --> admission_admission
-    api_job_runner --> admission_admission_links
-    api_job_runner --> admission_policy
-    api_job_runner --> api_crawl_executor
-    api_job_runner --> api_job_lifecycle
-    api_job_runner --> api_job_recovery
-    api_job_runner --> api_response_shaping
-    api_job_runner --> api_unified_shaping
-    api_job_runner --> config_settings
-    api_job_runner --> models_crawl_request
-    api_job_runner --> models_crawl_result
-    api_job_runner --> models_crawl_task
-    api_job_runner --> models_normalized_url
-    api_job_runner --> models_result_factory
-    api_job_runner --> models_result_record
-    api_job_runner --> models_taxonomy
-    api_job_runner --> storage_job_store
-    api_job_runner --> transport_robots
-    api_job_runner --> vocabulary_limits
-    api_job_runner --> vocabulary_taxonomy
-    api_jobs_router --> admission_payload_helpers
-    api_jobs_router --> admission_policy
-    api_jobs_router --> api_caller_auth
-    api_jobs_router --> api_dependencies
-    api_jobs_router --> api_exceptions
-    api_jobs_router --> api_main_helpers
-    api_jobs_router --> models_crawl_request
-    api_jobs_router --> models_error_response
-    api_jobs_router --> models_host_policy
-    api_jobs_router --> models_job_control_request
-    api_jobs_router --> models_job_create_request
-    api_jobs_router --> models_job_create_response
-    api_jobs_router --> models_job_list_response
-    api_jobs_router --> models_job_status_response
-    api_jobs_router --> storage_job_store
-    api_jobs_router --> transport_request_profile
-    api_jobs_router --> vocabulary_limits
-    api_keys_router --> api_caller_auth
-    api_keys_router --> api_dependencies
-    api_keys_router --> api_exceptions
-    api_keys_router --> models_error_response
-    api_keys_router --> models_issued_key
-    api_keys_router --> models_key_create_request
-    api_keys_router --> models_key_summary
-    api_keys_router --> models_revoked_key
-    api_main_helpers --> api_exceptions
-    api_main_helpers --> health_readiness
-    api_main_helpers --> models_job_status_response
-    api_main_helpers --> models_result_record
-    api_main_helpers --> runtime_metrics
-    api_main_helpers --> storage_job_store
-    api_map_endpoint --> api_crawl_executor
-    api_map_endpoint --> api_main_helpers
-    api_map_endpoint --> api_site_map
-    api_map_endpoint --> config_settings
-    api_map_endpoint --> models_crawl_request
-    api_map_endpoint --> models_discovery_config
-    api_map_endpoint --> models_host_policy
-    api_map_endpoint --> models_map_request
-    api_map_endpoint --> models_site_map_response
-    api_map_endpoint --> vocabulary_limits
-    api_metrics_router --> api_caller_auth
-    api_metrics_router --> runtime_metrics
-    api_middleware --> api_exceptions
-    api_middleware --> mcp_constants
-    api_middleware --> mcp_protocol
-    api_middleware --> mcp_server
-    api_policy_defaults --> models_example_policy
-    api_policy_defaults --> vocabulary_extraction
-    api_policy_defaults --> vocabulary_strategies
-    api_policy_router --> api_caller_auth
-    api_policy_router --> api_dependencies
-    api_policy_router --> api_exceptions
-    api_policy_router --> api_policy_suggestions
-    api_policy_router --> models_policy_suggestions_response
-    api_policy_suggestions --> api_dependencies
-    api_policy_suggestions --> models_classification_evidence
-    api_policy_suggestions --> models_crawl_status
-    api_policy_suggestions --> models_host_policy
-    api_policy_suggestions --> models_host_policy_suggestion
-    api_policy_suggestions --> models_json_value
-    api_policy_suggestions --> models_normalized_url
-    api_policy_suggestions --> models_policy_suggestions_response
-    api_policy_suggestions --> models_trace_response
-    api_policy_suggestions --> vocabulary_taxonomy
-    api_render --> admission_admission_links
-    api_render --> admission_payload_helpers
-    api_render --> admission_render_options
-    api_render --> config_settings
-    api_render --> models_browser_pool_exhausted
-    api_render --> models_crawl_job
-    api_render --> models_crawl_policy
-    api_render --> models_crawl_result
-    api_render --> models_host_policy
-    api_render --> models_json_value
-    api_render --> models_normalized_url
-    api_render --> models_render_request
-    api_render --> models_result_factory
-    api_render --> runtime_worker_dispatch
-    api_render --> storage_ids
-    api_render --> transport_classification
-    api_render --> transport_fetchers
-    api_render --> transport_results
-    api_render --> transport_robots
-    api_render --> transport_scheduler
-    api_render --> vocabulary_robots
-    api_render_endpoint --> api_exceptions
-    api_render_endpoint --> api_render
-    api_render_endpoint --> api_response_shaping
-    api_render_endpoint --> config_settings
-    api_render_endpoint --> models_browser_pool_exhausted
-    api_render_endpoint --> models_render_request
-    api_render_endpoint --> models_unified_crawl_response
-    api_render_endpoint --> transport_browser_pool
-    api_response_shaping --> admission_admission_links
-    api_response_shaping --> api_unified_shaping
-    api_response_shaping --> models_crawl_result
-    api_response_shaping --> models_crawl_status
-    api_response_shaping --> models_host_policy
-    api_response_shaping --> models_normalized_url
-    api_response_shaping --> models_result_record
-    api_response_shaping --> models_unified_crawl_response
-    api_response_shaping --> models_unified_crawl_result
-    api_response_shaping --> vocabulary_taxonomy
-    api_site_map --> api_response_shaping
-    api_site_map --> models_crawl_diagnostics
-    api_site_map --> models_crawl_result
-    api_site_map --> models_host_policy
-    api_site_map --> models_normalized_url
-    api_site_map --> models_result_record
-    api_site_map --> models_site_map_response
-    api_unified_shaping --> extraction_llm_format
-    api_unified_shaping --> models_classification_evidence
-    api_unified_shaping --> models_content_validators
-    api_unified_shaping --> models_crawl_result
-    api_unified_shaping --> models_crawl_status
-    api_unified_shaping --> models_crawl_strategy
-    api_unified_shaping --> models_crawl_strategy_attempt
-    api_unified_shaping --> models_discovered_link
-    api_unified_shaping --> models_discovered_link_response
-    api_unified_shaping --> models_json_value
-    api_unified_shaping --> models_page_metadata_response
-    api_unified_shaping --> models_serialization
-    api_unified_shaping --> models_strategy_attempt
-    api_unified_shaping --> models_taxonomy
-    api_unified_shaping --> models_unified_crawl_result
-    api_unified_shaping --> vocabulary_taxonomy
-    api_watch_router --> api_caller_auth
-    api_watch_router --> api_dependencies
-    api_watch_router --> api_exceptions
-    api_watch_router --> api_watch_sweep
-    api_watch_router --> api_webhooks
-    api_watch_router --> models_error_response
-    api_watch_router --> models_host_policy
-    api_watch_router --> models_normalized_url
-    api_watch_router --> models_watch_create_request
-    api_watch_router --> models_watch_list_response
-    api_watch_router --> models_watch_state
-    api_watch_sweep --> api_caller_auth
-    api_watch_sweep --> api_crawl_executor
-    api_watch_sweep --> api_webhooks
-    api_watch_sweep --> config_settings
-    api_watch_sweep --> models_caller_identity
-    api_watch_sweep --> models_crawl_policy
-    api_watch_sweep --> models_crawl_policy_limits
-    api_watch_sweep --> models_crawl_request
-    api_watch_sweep --> models_crawl_strategy
-    api_watch_sweep --> models_fetch_validators
-    api_watch_sweep --> models_host_policy
-    api_watch_sweep --> models_watch_announcement
-    api_watch_sweep --> models_watch_state
-    api_watch_sweep --> storage_watch_store
-    api_watch_sweep --> vocabulary_strategies
-    api_watch_sweep --> vocabulary_taxonomy
-    api_webhooks --> config_env
-    api_webhooks --> models_host_policy
-    api_webhooks --> models_normalized_url
-    api_webhooks --> safety_bounded_io
-    api_webhooks --> transport_pinned_transport
-    api_webhooks --> transport_timeouts
+    admission_scope_match --> safety_url_redaction
     config_settings --> config_env
     config_settings --> runtime_pressure_memory
     config_settings --> runtime_pressure_sizing
     config_settings --> vocabulary_limits
-    discovery_agent_hints --> api_policy_defaults
-    discovery_agent_hints --> models_agent_hints_payload
-    discovery_agent_hints --> models_agent_hints_response
-    discovery_agent_hints --> models_crawl_strategy
-    discovery_agent_hints --> models_example_policy
-    discovery_agent_hints --> vocabulary_extraction
-    discovery_agent_hints --> vocabulary_identity
-    discovery_agent_hints --> vocabulary_limits
-    discovery_agent_hints --> vocabulary_strategies
-    discovery_capabilities --> api_dependencies
-    discovery_capabilities --> config_settings
-    discovery_capabilities --> models_auth_capabilities_record
-    discovery_capabilities --> models_capabilities_response
-    discovery_capabilities --> models_crawl_extraction_method
-    discovery_capabilities --> models_crawl_strategy
-    discovery_capabilities --> models_crawl_timing_record
-    discovery_capabilities --> models_mcp_capabilities_record
-    discovery_capabilities --> models_search_capabilities_record
-    discovery_capabilities --> models_service_identity
-    discovery_capabilities --> vocabulary_limits
-    discovery_capabilities --> vocabulary_taxonomy
-    discovery_well_known --> models_discovery_response
-    discovery_well_known --> models_service_identity
+    delta --> models_crawl_result
+    delta --> models_unified_crawl_result
     extraction_classify --> models_classification_evidence
     extraction_classify --> models_taxonomy
     extraction_classify --> safety_bounded_io
@@ -346,8 +77,12 @@ graph LR
     extraction_discovery --> models_json_value
     extraction_discovery --> models_normalized_url
     extraction_discovery --> safety_validation
+    extraction_discovery --> lxml
     extraction_doc_pool --> runtime_metrics
     extraction_doc_pool --> runtime_pool
+    extraction_doc_pool --> markitdown
+    extraction_doc_pool --> onnxruntime
+    extraction_documents --> bs4
     extraction_documents --> config_env
     extraction_documents --> config_settings
     extraction_documents --> extraction_doc_pool
@@ -355,76 +90,109 @@ graph LR
     extraction_documents --> extraction_trees
     extraction_documents --> models_normalized_url
     extraction_documents --> runtime_pressure_sizing
+    extraction_documents --> lxml
+    extraction_documents --> markdownify
+    extraction_documents --> trafilatura
     extraction_llm_format --> extraction_classify
     extraction_llm_format --> extraction_trees
     extraction_llm_format --> models_json_value
     extraction_llm_format --> models_normalized_url
     extraction_llm_format --> models_page_metadata
     extraction_llm_format --> safety_bounded_io
+    extraction_llm_format --> lxml
     extraction_output_formats --> models_json_value
     extraction_output_formats --> safety_json_safe
     extraction_trees --> models_normalized_url
-    health_readiness --> config_env
+    extraction_trees --> lxml
     health_readiness --> models_health_response
     health_readiness --> models_readiness_response
-    health_readiness --> runtime_metrics
-    main --> admission_policy
-    main --> api_caller_concurrency
-    main --> api_exceptions
-    main --> api_middleware
-    main --> config_env
-    main --> models_address_class
-    main --> models_host_policy
-    main --> runtime_logging_config
-    main --> runtime_pressure_sizing
-    main --> storage_coordination_cookies
-    main --> storage_coordination_counters
-    main --> transport_cookie_jar
-    main --> transport_http_client_pool
-    main --> vocabulary_identity
-    mcp --> mcp_tools
+    health_readiness --> runtime_readiness_state
+    health_readiness --> fastapi
+    mcp --> mcp_registry
     mcp_constants --> vocabulary_identity
+    mcp_crawl_shaping --> models_crawl_and_extract_response
+    mcp_crawl_shaping --> models_extracted_page
+    mcp_handlers --> config_settings
+    mcp_handlers --> mcp_crawl_shaping
+    mcp_handlers --> models_caller_identity
+    mcp_handlers --> models_crawl_pending
+    mcp_handlers --> models_json_value
+    mcp_handlers --> models_policy_suggestions_response
+    mcp_handlers --> safety_json_safe
+    mcp_handlers --> search_endpoint
+    mcp_handlers --> service_admit_endpoint
+    mcp_handlers --> service_caller_auth
+    mcp_handlers --> service_caller_concurrency
+    mcp_handlers --> service_crawl_endpoint_cores
+    mcp_handlers --> service_crawl_executor
+    mcp_handlers --> service_errors
+    mcp_handlers --> service_job_cores
+    mcp_handlers --> service_main_helpers
+    mcp_handlers --> service_map_endpoint
+    mcp_handlers --> service_render_endpoint
+    mcp_handlers --> service_response_shaping
+    mcp_handlers --> storage_job_store
+    mcp_handlers --> storage_result_store
+    mcp_handlers --> storage_watch_store
+    mcp_handlers --> transport_browser_pool
+    mcp_handlers --> pydantic
     mcp_protocol --> mcp_constants
     mcp_protocol --> models_json_value
-    mcp_router --> api_caller_auth
-    mcp_router --> api_dependencies
-    mcp_router --> mcp_constants
-    mcp_router --> mcp_protocol
-    mcp_router --> mcp_server
-    mcp_router --> mcp_tools
-    mcp_router --> models_caller_identity
-    mcp_router --> models_error_response
+    mcp_registry --> mcp_handlers
+    mcp_registry --> models_admit_request
+    mcp_registry --> models_admit_response
+    mcp_registry --> models_crawl_and_extract_response
+    mcp_registry --> models_crawl_request
+    mcp_registry --> models_crawl_result_request
+    mcp_registry --> models_job_control_tool_request
+    mcp_registry --> models_job_create_request
+    mcp_registry --> models_job_create_response
+    mcp_registry --> models_job_deleted_response
+    mcp_registry --> models_job_id_request
+    mcp_registry --> models_job_list_request
+    mcp_registry --> models_job_list_response
+    mcp_registry --> models_job_status_response
+    mcp_registry --> models_json_value
+    mcp_registry --> models_map_request
+    mcp_registry --> models_policy_suggestions_request
+    mcp_registry --> models_policy_suggestions_response
+    mcp_registry --> models_render_request
+    mcp_registry --> models_search_request
+    mcp_registry --> models_search_response
+    mcp_registry --> models_site_map_response
+    mcp_registry --> models_trace_response
+    mcp_registry --> models_unified_crawl_response
+    mcp_registry --> models_watch_create_request
+    mcp_registry --> models_watch_deleted_response
+    mcp_registry --> models_watch_id_request
+    mcp_registry --> models_watch_list_request
+    mcp_registry --> models_watch_list_response
+    mcp_registry --> models_watch_state
+    mcp_registry --> service_crawl_endpoint_cores
+    mcp_registry --> service_job_cores
+    mcp_registry --> service_policy_suggestions
+    mcp_registry --> service_watch_cores
+    mcp_registry --> service_watch_sweep
+    mcp_registry --> pydantic
     mcp_server --> mcp_constants
+    mcp_server --> mcp_handlers
     mcp_server --> mcp_protocol
-    mcp_server --> mcp_tools
+    mcp_server --> mcp_registry
     mcp_server --> models_json_value
-    mcp_tools --> api_caller_auth
-    mcp_tools --> api_crawl_executor
-    mcp_tools --> api_main_helpers
-    mcp_tools --> api_map_endpoint
-    mcp_tools --> api_render_endpoint
-    mcp_tools --> api_response_shaping
-    mcp_tools --> models_caller_identity
-    mcp_tools --> models_crawl_and_extract_response
-    mcp_tools --> models_crawl_request
-    mcp_tools --> models_extracted_page
-    mcp_tools --> models_json_value
-    mcp_tools --> models_map_request
-    mcp_tools --> models_render_request
-    mcp_tools --> models_search_request
-    mcp_tools --> models_search_response
-    mcp_tools --> models_site_map_response
-    mcp_tools --> models_unified_crawl_response
-    mcp_tools --> safety_json_safe
-    mcp_tools --> search_endpoint
-    mcp_tools --> transport_browser_pool
+    mcp_server --> pydantic
+    models_admit_request --> pydantic
+    models_admit_response --> models_normalized_url
+    models_admit_response --> pydantic
     models_agent_hints_payload --> models_example_policy
     models_agent_hints_response --> models_crawl_extraction_method
     models_agent_hints_response --> models_crawl_strategy
     models_agent_hints_response --> models_example_policy
+    models_agent_hints_response --> pydantic
     models_browser_profile_record --> models_json_value
     models_cache_envelope --> models_json_value
     models_caller_identity --> admission_policy
+    models_caller_identity --> pydantic
+    models_caller_key --> pydantic
     models_capabilities_response --> models_auth_capabilities_record
     models_capabilities_response --> models_crawl_extraction_method
     models_capabilities_response --> models_crawl_strategy
@@ -435,7 +203,11 @@ graph LR
     models_capabilities_response --> models_search_capabilities
     models_capabilities_response --> models_search_capabilities_record
     models_capabilities_response --> vocabulary_taxonomy
+    models_capabilities_response --> pydantic
+    models_classification_evidence --> pydantic
+    models_content_validators --> pydantic
     models_crawl_and_extract_response --> models_extracted_page
+    models_crawl_and_extract_response --> pydantic
     models_crawl_diagnostics --> models_browser_profile_record
     models_crawl_diagnostics --> models_content_metrics
     models_crawl_diagnostics --> models_cooldown_diagnostics
@@ -463,7 +235,11 @@ graph LR
     models_crawl_policy --> safety_header_values
     models_crawl_policy --> safety_safe_regex
     models_crawl_policy --> vocabulary_limits
+    models_crawl_policy --> lxml
+    models_crawl_policy --> pydantic
+    models_crawl_policy --> soupsieve
     models_crawl_policy_limits --> vocabulary_limits
+    models_crawl_policy_limits --> pydantic
     models_crawl_policy_vocabulary --> safety_header_values
     models_crawl_policy_vocabulary --> vocabulary_browser
     models_crawl_policy_vocabulary --> vocabulary_limits
@@ -472,6 +248,7 @@ graph LR
     models_crawl_request --> models_crawl_policy
     models_crawl_request --> models_fetch_validators
     models_crawl_request --> models_single_url_source_request
+    models_crawl_request --> pydantic
     models_crawl_result --> models_classification_evidence
     models_crawl_result --> models_crawl_diagnostics
     models_crawl_result --> models_crawl_strategy_attempt
@@ -482,52 +259,91 @@ graph LR
     models_crawl_result --> models_page_metadata
     models_crawl_result --> models_taxonomy
     models_crawl_result --> vocabulary_taxonomy
+    models_crawl_result_request --> pydantic
     models_crawl_strategy --> vocabulary_strategies
     models_crawl_strategy_attempt --> models_literal_checked
     models_crawl_strategy_attempt --> models_taxonomy
     models_crawl_strategy_attempt --> vocabulary_taxonomy
     models_crawl_task --> models_normalized_url
+    models_crawl_timing --> pydantic
     models_crawl_worker --> models_crawl_job
     models_crawl_worker --> models_crawl_result
     models_credential --> safety_header_values
+    models_credential --> safety_url_redaction
+    models_credential --> pydantic
     models_discovered_link --> models_normalized_url
     models_discovered_link_response --> models_normalized_url
+    models_discovered_link_response --> pydantic
+    models_discovery_config --> pydantic
+    models_discovery_response --> pydantic
     models_error_response --> models_json_value
+    models_error_response --> pydantic
     models_extracted_page --> models_crawl_status
     models_extracted_page --> models_normalized_url
     models_extracted_page --> vocabulary_taxonomy
+    models_extracted_page --> pydantic
     models_fetch_validators --> safety_header_values
+    models_fetch_validators --> pydantic
+    models_health_response --> pydantic
     models_host_policy --> config_env
     models_host_policy --> models_address_class
+    models_host_policy --> models_host_canonical
+    models_host_policy --> runtime_process_state
     models_host_policy_suggestion --> models_classification_evidence
     models_host_policy_suggestion --> vocabulary_taxonomy
+    models_host_policy_suggestion --> pydantic
     models_http_fetch_result --> models_normalized_url
     models_http_fetcher --> models_http_fetch_result
     models_http_fetcher --> models_normalized_url
     models_intercepted_xhr_record --> models_json_value
+    models_issued_key --> pydantic
+    models_job_control_request --> pydantic
+    models_job_control_tool_request --> models_job_control_request
+    models_job_control_tool_request --> pydantic
     models_job_create_request --> models_crawl_policy
+    models_job_create_request --> pydantic
+    models_job_create_response --> pydantic
+    models_job_deleted_response --> pydantic
+    models_job_id_request --> pydantic
+    models_job_list_request --> vocabulary_limits
+    models_job_list_request --> pydantic
     models_job_list_response --> models_job_status_response
+    models_job_list_response --> pydantic
+    models_job_status_response --> pydantic
+    models_key_create_request --> pydantic
     models_key_summary --> models_caller_key
+    models_key_summary --> pydantic
     models_literal_checked --> models_taxonomy
     models_literal_checked --> vocabulary_taxonomy
     models_map_request --> models_crawl_policy
+    models_map_request --> pydantic
+    models_mcp_capabilities --> pydantic
     models_normalized_url --> models_host_canonical
     models_normalized_url --> models_host_policy
     models_normalized_url --> models_registrable_domain
+    models_normalized_url --> runtime_resource_lifecycle
+    models_normalized_url --> pydantic_core
     models_page_metadata --> models_json_value
     models_page_metadata_response --> models_json_value
+    models_page_metadata_response --> pydantic
     models_page_trace --> models_classification_evidence
     models_page_trace --> models_crawl_status
     models_page_trace --> models_crawl_strategy
     models_page_trace --> models_strategy_attempt
     models_page_trace --> vocabulary_taxonomy
+    models_page_trace --> pydantic
+    models_policy_suggestions_request --> pydantic
     models_policy_suggestions_response --> models_host_policy_suggestion
+    models_policy_suggestions_response --> pydantic
+    models_readiness_response --> pydantic
     models_registrable_domain --> models_address_class
     models_registrable_domain --> models_host_canonical
     models_render_options --> models_browser_profile_record
     models_render_options_request --> vocabulary_limits
+    models_render_options_request --> pydantic
     models_render_request --> models_render_options_request
     models_render_request --> models_single_url_source_request
+    models_render_request --> pydantic
     models_request_profile_record --> models_json_value
     models_result_factory --> models_classification_evidence
     models_result_factory --> models_crawl_diagnostics
@@ -540,19 +356,30 @@ graph LR
     models_result_factory --> models_taxonomy
     models_result_factory --> vocabulary_taxonomy
     models_result_record --> models_crawl_result
+    models_revoked_key --> pydantic
     models_robots_diagnostics --> models_json_value
+    models_search_capabilities --> pydantic
+    models_search_request --> pydantic
     models_search_response --> models_search_result_item
-    models_serialization --> models_crawl_result
+    models_search_response --> pydantic
+    models_search_result_item --> pydantic
+    models_serialization --> models_freezable_record
     models_serialization --> models_host_policy
     models_serialization --> models_json_value
     models_serialization --> models_normalized_url
     models_service_identity --> models_crawl_policy
     models_service_identity --> vocabulary_identity
+    models_single_url_source_request --> pydantic
+    models_site_map_response --> pydantic
     models_strategy_attempt --> models_crawl_status
     models_strategy_attempt --> models_crawl_strategy
     models_strategy_attempt --> vocabulary_taxonomy
+    models_strategy_attempt --> pydantic
+    models_taxonomy --> vocabulary_taxonomy
     models_trace_response --> models_page_trace
+    models_trace_response --> pydantic
     models_unified_crawl_response --> models_unified_crawl_result
+    models_unified_crawl_response --> pydantic
     models_unified_crawl_result --> models_classification_evidence
     models_unified_crawl_result --> models_content_validators
     models_unified_crawl_result --> models_crawl_status
@@ -563,16 +390,26 @@ graph LR
     models_unified_crawl_result --> models_page_metadata_response
     models_unified_crawl_result --> models_strategy_attempt
     models_unified_crawl_result --> vocabulary_taxonomy
+    models_unified_crawl_result --> pydantic
     models_watch_announcement --> vocabulary_taxonomy
     models_watch_create_request --> models_watch_state
+    models_watch_create_request --> pydantic
+    models_watch_deleted_response --> pydantic
+    models_watch_id_request --> pydantic
+    models_watch_list_request --> pydantic
     models_watch_list_response --> models_watch_state
+    models_watch_list_response --> pydantic
     models_watch_state --> models_content_validators
     models_watch_state --> models_watch_status
+    models_watch_state --> models_webhook_target
+    models_watch_state --> safety_url_redaction
     models_watch_state --> vocabulary_taxonomy
+    models_watch_state --> pydantic
+    models_webhook_target --> models_host_policy
+    models_webhook_target --> models_normalized_url
+    models_webhook_target --> safety_url_redaction
     orchestration_admission_stall --> models_crawl_result
     orchestration_admission_stall --> models_crawl_task
-    orchestration_admission_stall --> models_taxonomy
-    orchestration_admission_stall --> orchestration_spill_sink
     orchestration_admission_stall --> runtime_metrics
     orchestration_admission_stall --> transport_results
     orchestration_admission_stall --> vocabulary_taxonomy
@@ -582,12 +419,13 @@ graph LR
     orchestration_engine --> config_env
     orchestration_engine --> config_settings
     orchestration_engine --> models_crawl_request
-    orchestration_engine --> models_crawl_result
     orchestration_engine --> models_host_policy
-    orchestration_engine --> models_json_value
-    orchestration_engine --> models_serialization
+    orchestration_engine --> models_normalized_url
+    orchestration_engine --> models_result_record
     orchestration_engine --> orchestration_request_pipeline
     orchestration_engine --> runtime_pressure_gates
+    orchestration_engine --> runtime_process_state
+    orchestration_engine --> storage_result_store
     orchestration_engine --> transport_cache
     orchestration_engine --> transport_content_cache
     orchestration_engine --> transport_content_cache_key
@@ -601,11 +439,12 @@ graph LR
     orchestration_recursive --> models_host_policy
     orchestration_recursive --> models_normalized_url
     orchestration_recursive --> orchestration_admission_stall
-    orchestration_recursive --> orchestration_spill_sink
     orchestration_recursive --> runtime_metrics
     orchestration_recursive --> runtime_pressure_gates
     orchestration_recursive --> runtime_pressure_sizing
     orchestration_recursive --> safety_safe_regex
+    orchestration_recursive --> safety_url_redaction
+    orchestration_recursive --> storage_result_store
     orchestration_recursive --> transport_results
     orchestration_recursive --> transport_scheduler
     orchestration_recursive --> vocabulary_limits
@@ -624,28 +463,26 @@ graph LR
     orchestration_request_pipeline --> models_crawl_worker
     orchestration_request_pipeline --> models_host_policy
     orchestration_request_pipeline --> models_normalized_url
-    orchestration_request_pipeline --> models_result_record
+    orchestration_request_pipeline --> models_taxonomy
     orchestration_request_pipeline --> orchestration_recursive
-    orchestration_request_pipeline --> orchestration_spill_sink
     orchestration_request_pipeline --> orchestration_strategy_chain
     orchestration_request_pipeline --> runtime_pressure_gates
     orchestration_request_pipeline --> runtime_pressure_memory
     orchestration_request_pipeline --> runtime_pressure_sizing
     orchestration_request_pipeline --> safety_safe_regex
     orchestration_request_pipeline --> storage_ids
+    orchestration_request_pipeline --> storage_result_store
     orchestration_request_pipeline --> transport_cache
     orchestration_request_pipeline --> transport_content_cache
     orchestration_request_pipeline --> transport_fetch_helpers
     orchestration_request_pipeline --> transport_results
     orchestration_request_pipeline --> transport_robots
     orchestration_request_pipeline --> transport_scheduler
-    orchestration_spill_sink --> models_crawl_result
-    orchestration_spill_sink --> models_host_policy
-    orchestration_spill_sink --> runtime_resource_lifecycle
+    orchestration_request_pipeline --> vocabulary_strategies
     orchestration_strategy_chain --> models_cooldown_diagnostics
     orchestration_strategy_chain --> models_crawl_strategy
     orchestration_strategy_chain --> models_taxonomy
-    orchestration_strategy_chain --> transport_browser
+    orchestration_strategy_chain --> transport_browser_cookies
     orchestration_strategy_chain --> transport_browser_result
     orchestration_strategy_chain --> transport_cache
     orchestration_strategy_chain --> transport_content_cache
@@ -655,25 +492,30 @@ graph LR
     orchestration_strategy_chain --> transport_strategy_request
     orchestration_strategy_chain --> vocabulary_strategies
     orchestration_strategy_chain --> vocabulary_taxonomy
+    runtime_cgroup_sense --> runtime_process_state
     runtime_metrics --> models_crawl_result
+    runtime_metrics --> runtime_process_state
     runtime_pressure_gates --> runtime_pressure_memory
     runtime_pressure_gates --> runtime_pressure_probes
     runtime_pressure_memory --> runtime_cgroup_sense
     runtime_pressure_probes --> runtime_cgroup_sense
+    runtime_pressure_sizing --> gauge
     runtime_pressure_sizing --> config_env
     runtime_pressure_sizing --> runtime_pressure_gates
     runtime_pressure_sizing --> runtime_pressure_memory
     runtime_pressure_sizing --> runtime_pressure_probes
+    runtime_readiness_state --> config_env
+    runtime_readiness_state --> runtime_metrics
+    runtime_resource_lifecycle --> runtime_process_state
     runtime_worker_dispatch --> models_crawl_job
     runtime_worker_dispatch --> models_crawl_result
     runtime_worker_dispatch --> models_crawl_worker
+    safety_json_safe --> safety_url_redaction
+    safety_safe_regex --> regex
     safety_validation --> models_address_class
-    safety_validation --> models_host_policy
     safety_validation --> models_normalized_url
     search --> search_providers
     search --> search_providers_api
-    search_endpoint --> api_caller_auth
-    search_endpoint --> api_exceptions
     search_endpoint --> models_caller_identity
     search_endpoint --> models_search_request
     search_endpoint --> models_search_response
@@ -681,12 +523,16 @@ graph LR
     search_endpoint --> runtime_metrics
     search_endpoint --> search_providers
     search_endpoint --> search_providers_api
+    search_endpoint --> service_caller_auth
+    search_endpoint --> service_errors
     search_providers --> models_host_policy
     search_providers --> models_normalized_url
     search_providers --> safety_bounded_io
     search_providers --> transport_http_client_pool
+    search_providers --> transport_pinned_dns
     search_providers --> transport_pinned_transport
     search_providers --> transport_timeouts
+    search_providers --> httpx
     search_providers_api --> config_settings
     search_providers_api --> models_host_policy
     search_providers_api --> models_json_value
@@ -694,6 +540,249 @@ graph LR
     search_providers_api --> search_providers_html
     search_providers_html --> models_host_policy
     search_providers_html --> search_providers
+    search_providers_html --> lxml
+    service_admit_endpoint --> models_admit_request
+    service_admit_endpoint --> models_admit_response
+    service_admit_endpoint --> models_host_policy
+    service_admit_endpoint --> models_normalized_url
+    service_admit_endpoint --> transport_fetchers
+    service_admit_endpoint --> transport_robots
+    service_async_crawl_runner --> config_env
+    service_async_crawl_runner --> config_settings
+    service_async_crawl_runner --> delta
+    service_async_crawl_runner --> models_crawl_request
+    service_async_crawl_runner --> models_normalized_url
+    service_async_crawl_runner --> models_unified_crawl_response
+    service_async_crawl_runner --> models_webhook_target
+    service_async_crawl_runner --> runtime_process_state
+    service_async_crawl_runner --> service_crawl_executor
+    service_async_crawl_runner --> service_job_runner
+    service_async_crawl_runner --> service_main_helpers
+    service_async_crawl_runner --> service_response_shaping
+    service_async_crawl_runner --> service_unified_shaping
+    service_async_crawl_runner --> service_webhooks
+    service_async_crawl_runner --> storage_job_store
+    service_async_crawl_runner --> storage_result_store
+    service_cache_sweep --> orchestration_engine
+    service_cache_sweep --> service_sweep_loop
+    service_cache_sweep --> transport_content_cache
+    service_cache_sweep --> transport_freshness
+    service_caller_auth --> admission_policy
+    service_caller_auth --> models_caller_identity
+    service_caller_auth --> models_caller_key
+    service_caller_auth --> service_errors
+    service_caller_auth --> transport_cookie_jar
+    service_caller_auth --> transport_request_profile
+    service_crawl_endpoint_cores --> delta
+    service_crawl_endpoint_cores --> models_crawl_pending
+    service_crawl_endpoint_cores --> models_crawl_request
+    service_crawl_endpoint_cores --> models_json_value
+    service_crawl_endpoint_cores --> models_trace_response
+    service_crawl_endpoint_cores --> service_errors
+    service_crawl_endpoint_cores --> storage_job_store
+    service_crawl_executor --> config_settings
+    service_crawl_executor --> models_host_policy
+    service_crawl_executor --> models_normalized_url
+    service_crawl_executor --> models_taxonomy
+    service_crawl_executor --> orchestration_engine
+    service_crawl_executor --> service_errors
+    service_crawl_executor --> storage_result_store
+    service_crawl_executor --> transport_browser_pool
+    service_crawl_executor --> vocabulary_strategies
+    service_crawl_executor --> vocabulary_taxonomy
+    service_errors --> models_json_value
+    service_job_control --> models_job_status_response
+    service_job_control --> service_errors
+    service_job_control --> service_job_runner
+    service_job_control --> service_main_helpers
+    service_job_control --> storage_job_store
+    service_job_cores --> admission_payload_helpers
+    service_job_cores --> admission_policy
+    service_job_cores --> models_crawl_request
+    service_job_cores --> models_host_policy
+    service_job_cores --> models_job_control_tool_request
+    service_job_cores --> models_job_create_response
+    service_job_cores --> models_job_deleted_response
+    service_job_cores --> models_job_list_response
+    service_job_cores --> service_caller_auth
+    service_job_cores --> service_job_control
+    service_job_cores --> service_job_runner
+    service_job_cores --> service_main_helpers
+    service_job_cores --> transport_request_profile
+    service_job_cores --> vocabulary_limits
+    service_job_lifecycle --> runtime_process_state
+    service_job_lifecycle --> service_webhooks
+    service_job_recovery --> config_settings
+    service_job_recovery --> service_job_lifecycle
+    service_job_recovery --> storage_job_store
+    service_job_runner --> admission_admission
+    service_job_runner --> admission_admission_links
+    service_job_runner --> admission_policy
+    service_job_runner --> config_settings
+    service_job_runner --> models_crawl_request
+    service_job_runner --> models_crawl_result
+    service_job_runner --> models_normalized_url
+    service_job_runner --> models_result_record
+    service_job_runner --> safety_url_redaction
+    service_job_runner --> service_crawl_executor
+    service_job_runner --> service_job_lifecycle
+    service_job_runner --> service_job_recovery
+    service_job_runner --> service_response_shaping
+    service_job_runner --> service_unified_shaping
+    service_job_runner --> storage_job_store
+    service_job_runner --> transport_robots
+    service_job_runner --> vocabulary_limits
+    service_job_runner --> vocabulary_taxonomy
+    service_key_throttle --> runtime_metrics
+    service_key_throttle --> service_errors
+    service_key_throttle --> service_meter_ledger
+    service_main_helpers --> models_job_status_response
+    service_main_helpers --> models_result_record
+    service_main_helpers --> runtime_metrics
+    service_main_helpers --> runtime_readiness_state
+    service_main_helpers --> service_errors
+    service_main_helpers --> storage_job_store
+    service_map_endpoint --> config_settings
+    service_map_endpoint --> models_crawl_request
+    service_map_endpoint --> models_discovery_config
+    service_map_endpoint --> models_host_policy
+    service_map_endpoint --> models_map_request
+    service_map_endpoint --> models_site_map_response
+    service_map_endpoint --> service_crawl_executor
+    service_map_endpoint --> service_main_helpers
+    service_map_endpoint --> service_site_map
+    service_map_endpoint --> vocabulary_limits
+    service_meter_ledger --> runtime_process_state
+    service_policy_defaults --> models_example_policy
+    service_policy_defaults --> vocabulary_extraction
+    service_policy_defaults --> vocabulary_strategies
+    service_policy_suggestions --> config_settings
+    service_policy_suggestions --> models_classification_evidence
+    service_policy_suggestions --> models_crawl_status
+    service_policy_suggestions --> models_host_policy
+    service_policy_suggestions --> models_host_policy_suggestion
+    service_policy_suggestions --> models_json_value
+    service_policy_suggestions --> models_normalized_url
+    service_policy_suggestions --> models_policy_suggestions_response
+    service_policy_suggestions --> models_trace_response
+    service_policy_suggestions --> storage_result_store
+    service_policy_suggestions --> vocabulary_taxonomy
+    service_policy_suggestions --> pydantic
+    service_render --> admission_admission_links
+    service_render --> admission_payload_helpers
+    service_render --> admission_render_options
+    service_render --> config_settings
+    service_render --> models_browser_pool_exhausted
+    service_render --> models_crawl_job
+    service_render --> models_crawl_policy
+    service_render --> models_crawl_result
+    service_render --> models_host_policy
+    service_render --> models_render_request
+    service_render --> models_result_factory
+    service_render --> models_taxonomy
+    service_render --> runtime_worker_dispatch
+    service_render --> storage_ids
+    service_render --> transport_classification
+    service_render --> transport_fetchers
+    service_render --> transport_results
+    service_render --> transport_robots
+    service_render --> transport_scheduler
+    service_render --> vocabulary_robots
+    service_render_endpoint --> config_settings
+    service_render_endpoint --> models_browser_pool_exhausted
+    service_render_endpoint --> models_render_request
+    service_render_endpoint --> models_unified_crawl_response
+    service_render_endpoint --> service_errors
+    service_render_endpoint --> service_render
+    service_render_endpoint --> service_response_shaping
+    service_render_endpoint --> transport_browser_pool
+    service_response_shaping --> admission_admission_links
+    service_response_shaping --> delta
+    service_response_shaping --> models_crawl_result
+    service_response_shaping --> models_crawl_status
+    service_response_shaping --> models_host_policy
+    service_response_shaping --> models_normalized_url
+    service_response_shaping --> models_result_record
+    service_response_shaping --> models_unified_crawl_response
+    service_response_shaping --> models_unified_crawl_result
+    service_response_shaping --> service_unified_shaping
+    service_response_shaping --> vocabulary_taxonomy
+    service_settings_access --> config_settings
+    service_site_map --> models_crawl_diagnostics
+    service_site_map --> models_crawl_result
+    service_site_map --> models_host_policy
+    service_site_map --> models_normalized_url
+    service_site_map --> models_result_record
+    service_site_map --> models_site_map_response
+    service_site_map --> service_response_shaping
+    service_spill_sweep --> runtime_app_module_ref
+    service_spill_sweep --> service_sweep_loop
+    service_spill_sweep --> storage_result_store
+    service_store_bootstrap --> admission_policy
+    service_store_bootstrap --> config_env
+    service_store_bootstrap --> config_settings
+    service_store_bootstrap --> models_host_policy
+    service_store_bootstrap --> storage_admin_audit_store
+    service_store_bootstrap --> storage_caller_key_store
+    service_store_bootstrap --> storage_job_store
+    service_store_bootstrap --> storage_result_store
+    service_store_bootstrap --> storage_watch_store
+    service_unified_shaping --> delta
+    service_unified_shaping --> extraction_llm_format
+    service_unified_shaping --> models_classification_evidence
+    service_unified_shaping --> models_content_validators
+    service_unified_shaping --> models_crawl_result
+    service_unified_shaping --> models_crawl_status
+    service_unified_shaping --> models_crawl_strategy
+    service_unified_shaping --> models_crawl_strategy_attempt
+    service_unified_shaping --> models_discovered_link
+    service_unified_shaping --> models_discovered_link_response
+    service_unified_shaping --> models_json_value
+    service_unified_shaping --> models_page_metadata_response
+    service_unified_shaping --> models_serialization
+    service_unified_shaping --> models_strategy_attempt
+    service_unified_shaping --> models_taxonomy
+    service_unified_shaping --> models_unified_crawl_result
+    service_unified_shaping --> vocabulary_taxonomy
+    service_watch_cores --> models_host_policy
+    service_watch_cores --> models_normalized_url
+    service_watch_cores --> models_watch_deleted_response
+    service_watch_cores --> models_watch_list_response
+    service_watch_cores --> models_watch_state
+    service_watch_cores --> safety_url_redaction
+    service_watch_cores --> service_errors
+    service_watch_cores --> transport_freshness
+    service_watch_sweep --> config_settings
+    service_watch_sweep --> models_caller_identity
+    service_watch_sweep --> models_crawl_policy
+    service_watch_sweep --> models_crawl_policy_limits
+    service_watch_sweep --> models_crawl_request
+    service_watch_sweep --> models_crawl_strategy
+    service_watch_sweep --> models_fetch_validators
+    service_watch_sweep --> models_host_policy
+    service_watch_sweep --> models_watch_announcement
+    service_watch_sweep --> models_watch_state
+    service_watch_sweep --> service_caller_auth
+    service_watch_sweep --> service_crawl_executor
+    service_watch_sweep --> service_errors
+    service_watch_sweep --> service_webhooks
+    service_watch_sweep --> storage_watch_store
+    service_watch_sweep --> transport_freshness
+    service_watch_sweep --> vocabulary_strategies
+    service_watch_sweep --> vocabulary_taxonomy
+    service_webhooks --> config_env
+    service_webhooks --> models_host_policy
+    service_webhooks --> models_normalized_url
+    service_webhooks --> models_webhook_target
+    service_webhooks --> runtime_process_state
+    service_webhooks --> safety_bounded_io
+    service_webhooks --> safety_url_redaction
+    service_webhooks --> transport_pinned_transport
+    service_webhooks --> transport_timeouts
+    service_webhooks --> httpx
+    storage_admin_audit_store --> storage_coordination_store
+    storage_admin_audit_store --> storage_migrations_manifest
+    storage_admin_audit_store --> pydantic
     storage_caller_key_store --> models_caller_key
     storage_caller_key_store --> models_issued_key
     storage_caller_key_store --> storage_coordination_store
@@ -710,6 +799,9 @@ graph LR
     storage_job_store --> storage_coordination_store
     storage_job_store --> storage_ids
     storage_job_store --> storage_sqlite_store
+    storage_job_store_accumulators --> models_json_value
+    storage_job_store_accumulators --> safety_json_safe
+    storage_job_store_accumulators --> storage_sqlite_store
     storage_job_store_collections --> admission_policy
     storage_job_store_collections --> models_crawl_policy
     storage_job_store_collections --> models_host_policy
@@ -722,7 +814,6 @@ graph LR
     storage_job_store_state --> admission_policy
     storage_job_store_state --> models_crawl_policy
     storage_job_store_state --> models_host_policy
-    storage_job_store_state --> models_json_value
     storage_job_store_state --> models_normalized_url
     storage_job_store_state --> safety_json_safe
     storage_migrations --> storage_migrations_manifest
@@ -735,10 +826,16 @@ graph LR
     storage_migrations_0001_coordination_counters_initial --> storage_migrations_manifest
     storage_migrations_0001_crawl_jobs_initial --> storage_migrations_ddl
     storage_migrations_0001_crawl_jobs_initial --> storage_migrations_manifest
+    storage_migrations_0001_crawl_spills_initial --> storage_migrations_ddl
+    storage_migrations_0001_crawl_spills_initial --> storage_migrations_manifest
+    storage_migrations_0001_key_admin_events_initial --> storage_migrations_ddl
+    storage_migrations_0001_key_admin_events_initial --> storage_migrations_manifest
     storage_migrations_0001_results_initial --> storage_migrations_ddl
     storage_migrations_0001_results_initial --> storage_migrations_manifest
     storage_migrations_0001_watches_initial --> storage_migrations_ddl
     storage_migrations_0001_watches_initial --> storage_migrations_manifest
+    storage_migrations_0002_caller_keys_add_previous --> storage_migrations_ddl
+    storage_migrations_0002_caller_keys_add_previous --> storage_migrations_manifest
     storage_migrations_0002_crawl_jobs_drop_canonicalized --> storage_migrations_runner
     storage_migrations_0002_crawl_jobs_drop_canonicalized --> storage_sqlite_store
     storage_migrations_0002_results_add_owner --> storage_migrations_ddl
@@ -761,15 +858,23 @@ graph LR
     storage_migrations_manifest --> storage_sqlite_store
     storage_migrations_runner --> storage_migrations_manifest
     storage_migrations_runner --> storage_sqlite_store
+    storage_migrations_runner --> yoyo
+    storage_result_store --> models_crawl_result
+    storage_result_store --> models_host_policy
     storage_result_store --> models_json_value
+    storage_result_store --> models_serialization
     storage_result_store --> storage_coordination_store
+    storage_result_store --> transport_freshness
+    storage_sqlite_store --> runtime_process_state
     storage_watch_store --> models_content_validators
     storage_watch_store --> models_normalized_url
     storage_watch_store --> models_watch_state
     storage_watch_store --> models_watch_status
+    storage_watch_store --> models_webhook_target
     storage_watch_store --> storage_coordination_store
     storage_watch_store --> storage_ids
     storage_watch_store --> vocabulary_taxonomy
+    transport_body_decode --> charset_normalizer
     transport_body_decode --> models_content_metrics
     transport_browser --> config_env
     transport_browser --> config_settings
@@ -777,28 +882,35 @@ graph LR
     transport_browser --> models_crawl_result
     transport_browser --> models_normalized_url
     transport_browser --> models_result_factory
-    transport_browser --> transport_browser_cookies
+    transport_browser --> models_taxonomy
     transport_browser --> transport_browser_driver
     transport_browser --> transport_browser_render_phases
     transport_browser --> transport_browser_targets
     transport_browser --> transport_classification
     transport_browser --> transport_document
     transport_browser --> transport_driver_config
+    transport_browser --> transport_pinned_dns
     transport_browser --> transport_pinned_transport
     transport_browser --> transport_render_page
+    transport_browser --> transport_timeouts
     transport_browser --> vocabulary_browser
     transport_browser --> vocabulary_limits
     transport_browser --> vocabulary_taxonomy
     transport_browser_cookies --> models_normalized_url
+    transport_browser_cookies --> runtime_process_state
+    transport_browser_cookies --> runtime_resource_lifecycle
+    transport_browser_cookies --> safety_url_redaction
     transport_browser_cookies --> transport_cookie_jar
     transport_browser_cookies --> transport_cookie_store
     transport_browser_cookies --> transport_render_page
     transport_browser_driver --> config_env
     transport_browser_driver --> models_browser_profile_record
     transport_browser_driver --> models_screenshot_diagnostics
+    transport_browser_driver --> safety_url_redaction
     transport_browser_driver --> transport_driver_config
     transport_browser_driver --> transport_driver_pages
     transport_browser_driver --> transport_render_page
+    transport_browser_driver --> transport_timeouts
     transport_browser_driver --> vocabulary_browser
     transport_browser_driver --> vocabulary_limits
     transport_browser_pool --> config_settings
@@ -808,6 +920,7 @@ graph LR
     transport_browser_pool --> models_taxonomy
     transport_browser_pool --> runtime_pool
     transport_browser_pool --> runtime_pressure_sizing
+    transport_browser_pool --> runtime_resource_lifecycle
     transport_browser_pool --> transport_browser
     transport_browser_pool --> transport_results
     transport_browser_pool --> vocabulary_strategies
@@ -819,9 +932,11 @@ graph LR
     transport_browser_render_phases --> models_normalized_url
     transport_browser_render_phases --> models_result_factory
     transport_browser_render_phases --> models_screenshot_diagnostics
+    transport_browser_render_phases --> runtime_resource_lifecycle
     transport_browser_render_phases --> transport_browser_cookies
     transport_browser_render_phases --> transport_browser_driver
     transport_browser_render_phases --> transport_browser_targets
+    transport_browser_render_phases --> transport_pinned_transport
     transport_browser_render_phases --> transport_render_page
     transport_browser_render_phases --> transport_timeouts
     transport_browser_render_phases --> vocabulary_browser
@@ -830,7 +945,6 @@ graph LR
     transport_browser_result --> models_crawl_job
     transport_browser_result --> models_crawl_policy
     transport_browser_result --> models_crawl_strategy_attempt
-    transport_browser_result --> models_json_value
     transport_browser_result --> models_result_factory
     transport_browser_result --> models_taxonomy
     transport_browser_result --> runtime_worker_dispatch
@@ -840,21 +954,35 @@ graph LR
     transport_browser_result --> vocabulary_extraction
     transport_browser_targets --> models_host_policy
     transport_browser_targets --> models_intercepted_xhr_record
-    transport_browser_targets --> models_json_value
     transport_browser_targets --> models_normalized_url
     transport_browser_targets --> safety_json_safe
+    transport_browser_targets --> transport_pinned_dns
     transport_browser_targets --> transport_pinned_transport
     transport_cache --> models_normalized_url
+    transport_cache --> runtime_process_state
     transport_cache --> transport_cookie_jar
     transport_cache --> transport_freshness
+    transport_cffi_transport --> runtime_resource_lifecycle
+    transport_cffi_transport --> safety_bounded_io
+    transport_cffi_transport --> transport_http_client_pool
+    transport_cffi_transport --> transport_pinned_transport
+    transport_cffi_transport --> transport_pooled_clients
+    transport_cffi_transport --> transport_timeouts
+    transport_cffi_transport --> transport_transport
+    transport_cffi_transport --> curl_cffi
     transport_classification --> models_browser_pool_exhausted
     transport_classification --> models_taxonomy
+    transport_classification --> safety_url_redaction
     transport_classification --> transport_decompression
-    transport_classification --> transport_pinned_transport
+    transport_classification --> transport_pinned_dns
     transport_classification --> transport_scheduler_exceptions
     transport_classification --> vocabulary_taxonomy
+    transport_classification --> curl_cffi
+    transport_classification --> httpx
+    transport_content_cache --> config_settings
     transport_content_cache --> models_cache_envelope
     transport_content_cache --> models_json_value
+    transport_content_cache --> runtime_process_state
     transport_content_cache --> transport_content_cache_internals
     transport_content_cache --> transport_freshness
     transport_content_cache --> vocabulary_limits
@@ -880,15 +1008,21 @@ graph LR
     transport_content_pipeline --> vocabulary_extraction
     transport_cookie_jar --> models_normalized_url
     transport_cookie_jar --> models_registrable_domain
+    transport_cookie_jar --> runtime_process_state
     transport_cookie_jar --> safety_atomic_write
     transport_cookie_jar --> storage_coordination_cookies
     transport_cookie_jar --> storage_coordination_store
     transport_cookie_jar --> transport_cookie_store
     transport_cookie_jar --> transport_header_carrier
+    transport_decompression --> brotli
     transport_document --> extraction_content
     transport_document --> models_normalized_url
-    transport_document --> safety_bounded_io
+    transport_document --> transport_httpx_transport
+    transport_document --> transport_pooled_clients
+    transport_document --> transport_redirect_walker
     transport_document --> transport_timeouts
+    transport_document --> pdfplumber
+    transport_driver_config --> camoufox
     transport_driver_config --> config_env
     transport_driver_config --> models_browser_profile_record
     transport_driver_config --> vocabulary_browser
@@ -896,10 +1030,12 @@ graph LR
     transport_driver_pages --> models_screenshot_diagnostics
     transport_driver_pages --> transport_driver_config
     transport_driver_pages --> transport_render_page
+    transport_driver_pages --> transport_timeouts
     transport_fetch_helpers --> models_host_policy
     transport_fetch_helpers --> models_http_fetch_result
     transport_fetch_helpers --> models_http_fetcher
     transport_fetch_helpers --> models_normalized_url
+    transport_fetch_helpers --> runtime_process_state
     transport_fetch_helpers --> safety_bounded_ttl
     transport_fetch_helpers --> transport_body_decode
     transport_fetch_helpers --> transport_decompression
@@ -922,10 +1058,15 @@ graph LR
     transport_fetchers --> models_http_fetch_result
     transport_fetchers --> models_http_fetcher
     transport_fetchers --> models_normalized_url
-    transport_fetchers --> transport_decompression
+    transport_fetchers --> safety_url_redaction
+    transport_fetchers --> transport_cffi_transport
+    transport_fetchers --> transport_httpx_transport
+    transport_fetchers --> transport_pinned_transport
+    transport_fetchers --> transport_pooled_clients
+    transport_fetchers --> transport_redirect_walker
     transport_fetchers --> transport_request_profile
-    transport_fetchers --> transport_timeouts
     transport_fetchers --> vocabulary_limits
+    transport_fetchers --> curl_cffi
     transport_http --> admission_policy
     transport_http --> config_settings
     transport_http --> models_classification_evidence
@@ -938,9 +1079,11 @@ graph LR
     transport_http --> models_http_fetcher
     transport_http --> models_result_factory
     transport_http --> models_taxonomy
+    transport_http --> transport_body_decode
     transport_http --> transport_cache
     transport_http --> transport_content_cache
     transport_http --> transport_content_pipeline
+    transport_http --> transport_fetch_policy
     transport_http --> transport_http_cache
     transport_http --> transport_http_classify
     transport_http --> transport_http_response
@@ -957,6 +1100,8 @@ graph LR
     transport_http_cache --> models_result_factory
     transport_http_cache --> models_taxonomy
     transport_http_cache --> transport_cache_control
+    transport_http_cache --> transport_content_cache_key
+    transport_http_cache --> transport_fetch_policy
     transport_http_cache --> transport_http_response
     transport_http_cache --> transport_request_profile
     transport_http_cache --> vocabulary_taxonomy
@@ -966,6 +1111,7 @@ graph LR
     transport_http_classify --> models_classification_evidence
     transport_http_classify --> models_request_profile_diagnostics
     transport_http_classify --> models_taxonomy
+    transport_http_classify --> transport_body_decode
     transport_http_classify --> transport_content_pipeline
     transport_http_classify --> transport_decompression
     transport_http_classify --> transport_http_response
@@ -988,17 +1134,45 @@ graph LR
     transport_http_response --> models_taxonomy
     transport_http_response --> transport_cache
     transport_http_response --> transport_content_cache
-    transport_pinned_transport --> models_host_policy
+    transport_httpx_transport --> safety_bounded_io
+    transport_httpx_transport --> transport_http_client_pool
+    transport_httpx_transport --> transport_pinned_transport
+    transport_httpx_transport --> transport_timeouts
+    transport_httpx_transport --> transport_transport
+    transport_pinned_dns --> models_host_policy
+    transport_pinned_dns --> models_normalized_url
+    transport_pinned_dns --> runtime_process_state
+    transport_pinned_dns --> safety_bounded_ttl
+    transport_pinned_dns --> safety_validation
+    transport_pinned_transport --> models_json_value
     transport_pinned_transport --> models_normalized_url
-    transport_pinned_transport --> safety_bounded_ttl
-    transport_pinned_transport --> safety_header_values
-    transport_pinned_transport --> safety_validation
     transport_pinned_transport --> transport_cookie_jar
+    transport_pinned_transport --> transport_pinned_dns
+    transport_pinned_transport --> httpx
+    transport_pooled_cffi --> runtime_process_state
+    transport_pooled_cffi --> transport_pooled_client_release
     transport_pooled_cffi --> transport_pooled_clients
     transport_pooled_cffi --> vocabulary_strategies
+    transport_pooled_cffi --> curl_cffi
+    transport_pooled_client_release --> runtime_process_state
+    transport_pooled_client_release --> runtime_resource_lifecycle
+    transport_pooled_client_release --> transport_pooled_socket_abort
     transport_pooled_clients --> config_settings
+    transport_pooled_clients --> runtime_process_state
+    transport_pooled_clients --> runtime_resource_lifecycle
+    transport_pooled_clients --> transport_pooled_client_release
+    transport_pooled_clients --> transport_pooled_socket_abort
     transport_pooled_clients --> transport_timeouts
     transport_pooled_clients --> vocabulary_identity
+    transport_pooled_clients --> httpx
+    transport_redirect_walker --> models_http_fetch_result
+    transport_redirect_walker --> models_normalized_url
+    transport_redirect_walker --> safety_bounded_io
+    transport_redirect_walker --> safety_header_values
+    transport_redirect_walker --> transport_pinned_dns
+    transport_redirect_walker --> transport_pinned_transport
+    transport_redirect_walker --> transport_transport
+    transport_redirect_walker --> vocabulary_limits
     transport_request_profile --> admission_credentials
     transport_request_profile --> models_crawl_policy
     transport_request_profile --> models_normalized_url
@@ -1009,7 +1183,6 @@ graph LR
     transport_results --> models_crawl_diagnostics
     transport_results --> models_crawl_result
     transport_results --> models_crawl_strategy_attempt
-    transport_results --> models_json_value
     transport_results --> models_normalized_url
     transport_results --> models_result_factory
     transport_results --> models_taxonomy
@@ -1023,12 +1196,255 @@ graph LR
     transport_robots --> transport_robots_parse
     transport_robots --> vocabulary_robots
     transport_robots_parse --> vocabulary_identity
+    transport_scheduler --> transport_scheduler_domain_state
     transport_scheduler --> transport_scheduler_exceptions
-    transport_scheduler --> transport_scheduler_purge
+    transport_scheduler --> transport_scheduler_pacing
     transport_scheduler --> vocabulary_taxonomy
-    transport_strategy_request --> models_crawl_policy
-    transport_strategy_request --> models_host_policy
-    transport_strategy_request --> models_normalized_url
-    transport_strategy_request --> models_taxonomy
+    transport_timeouts --> transport_render_page
+    transport_timeouts --> httpx
+    transport_transport --> models_http_fetch_result
+    transport_transport --> models_normalized_url
+    transport_transport --> transport_decompression
     vocabulary_robots --> models_taxonomy
+    api__depends_singletons --> api_dependencies
+    api__depends_singletons --> fastapi
+    api_admit_router --> models_admit_request
+    api_admit_router --> models_admit_response
+    api_admit_router --> service_admit_endpoint
+    api_admit_router --> api__depends_singletons
+    api_admit_router --> api_caller_auth
+    api_admit_router --> api_route_layer
+    api_anonymous_throttle --> mcp_constants
+    api_anonymous_throttle --> mcp_protocol
+    api_anonymous_throttle --> runtime_metrics
+    api_anonymous_throttle --> service_meter_ledger
+    api_anonymous_throttle --> api_exceptions
+    api_anonymous_throttle --> fastapi
+    api_caller_auth --> models_caller_identity
+    api_caller_auth --> models_error_response
+    api_caller_auth --> runtime_metrics
+    api_caller_auth --> service_caller_auth
+    api_caller_auth --> service_errors
+    api_caller_auth --> service_key_throttle
+    api_caller_auth --> fastapi
+    api_crawl_endpoint --> admission_payload_helpers
+    api_crawl_endpoint --> config_settings
+    api_crawl_endpoint --> delta
+    api_crawl_endpoint --> extraction_output_formats
+    api_crawl_endpoint --> models_caller_identity
+    api_crawl_endpoint --> models_crawl_pending
+    api_crawl_endpoint --> models_crawl_request
+    api_crawl_endpoint --> models_host_policy
+    api_crawl_endpoint --> models_trace_response
+    api_crawl_endpoint --> models_webhook_target
+    api_crawl_endpoint --> runtime_metrics
+    api_crawl_endpoint --> service_async_crawl_runner
+    api_crawl_endpoint --> service_caller_auth
+    api_crawl_endpoint --> service_caller_concurrency
+    api_crawl_endpoint --> service_crawl_endpoint_cores
+    api_crawl_endpoint --> service_crawl_executor
+    api_crawl_endpoint --> service_errors
+    api_crawl_endpoint --> service_job_lifecycle
+    api_crawl_endpoint --> service_main_helpers
+    api_crawl_endpoint --> service_response_shaping
+    api_crawl_endpoint --> service_webhooks
+    api_crawl_endpoint --> storage_ids
+    api_crawl_endpoint --> storage_job_store
+    api_crawl_endpoint --> storage_result_store
+    api_crawl_endpoint --> api_exceptions
+    api_crawl_endpoint --> fastapi
+    api_crawl_router --> models_crawl_request
+    api_crawl_router --> models_error_response
+    api_crawl_router --> models_trace_response
+    api_crawl_router --> models_unified_crawl_response
+    api_crawl_router --> service_policy_defaults
+    api_crawl_router --> vocabulary_limits
+    api_crawl_router --> api_caller_auth
+    api_crawl_router --> api_crawl_endpoint
+    api_crawl_router --> api_dependencies
+    api_crawl_router --> api_route_layer
+    api_crawl_router --> fastapi
+    api_dependencies --> config_settings
+    api_dependencies --> models_caller_identity
+    api_dependencies --> service_caller_auth
+    api_dependencies --> service_caller_concurrency
+    api_dependencies --> service_errors
+    api_dependencies --> service_settings_access
+    api_dependencies --> storage_caller_key_store
+    api_dependencies --> storage_job_store
+    api_dependencies --> storage_result_store
+    api_dependencies --> storage_watch_store
+    api_dependencies --> api_caller_auth
+    api_dependencies --> fastapi
+    api_exceptions --> discovery_links
+    api_exceptions --> models_error_response
+    api_exceptions --> models_json_value
+    api_exceptions --> service_errors
+    api_exceptions --> fastapi
+    api_exceptions --> starlette
+    api_exempt_route_boot --> api_route_layer
+    api_exempt_route_boot --> fastapi
+    api_identity_router --> models_error_response
+    api_identity_router --> models_map_request
+    api_identity_router --> models_render_request
+    api_identity_router --> models_search_request
+    api_identity_router --> models_search_response
+    api_identity_router --> models_site_map_response
+    api_identity_router --> models_unified_crawl_response
+    api_identity_router --> search_endpoint
+    api_identity_router --> service_main_helpers
+    api_identity_router --> service_map_endpoint
+    api_identity_router --> service_render_endpoint
+    api_identity_router --> api__depends_singletons
+    api_identity_router --> api_caller_auth
+    api_identity_router --> api_dependencies
+    api_identity_router --> api_route_layer
+    api_jobs_router --> models_error_response
+    api_jobs_router --> models_job_control_request
+    api_jobs_router --> models_job_create_request
+    api_jobs_router --> models_job_create_response
+    api_jobs_router --> models_job_deleted_response
+    api_jobs_router --> models_job_list_response
+    api_jobs_router --> models_job_status_response
+    api_jobs_router --> service_job_control
+    api_jobs_router --> service_job_cores
+    api_jobs_router --> service_job_runner
+    api_jobs_router --> service_main_helpers
+    api_jobs_router --> vocabulary_limits
+    api_jobs_router --> api_caller_auth
+    api_jobs_router --> api_dependencies
+    api_jobs_router --> api_exceptions
+    api_jobs_router --> api_route_layer
+    api_jobs_router --> fastapi
+    api_keys_router --> models_error_response
+    api_keys_router --> models_issued_key
+    api_keys_router --> models_key_create_request
+    api_keys_router --> models_key_summary
+    api_keys_router --> models_revoked_key
+    api_keys_router --> api_dependencies
+    api_keys_router --> api_exceptions
+    api_keys_router --> api_route_layer
+    api_mcp_router --> mcp_constants
+    api_mcp_router --> mcp_protocol
+    api_mcp_router --> mcp_server
+    api_mcp_router --> models_caller_identity
+    api_mcp_router --> models_error_response
+    api_mcp_router --> service_errors
+    api_mcp_router --> api_caller_auth
+    api_mcp_router --> api_dependencies
+    api_mcp_router --> fastapi
+    api_metrics_router --> runtime_metrics
+    api_metrics_router --> api_route_layer
+    api_metrics_router --> fastapi
+    api_middleware --> mcp_constants
+    api_middleware --> mcp_protocol
+    api_middleware --> mcp_server
+    api_middleware --> api_exceptions
+    api_middleware --> fastapi
+    api_middleware --> starlette
+    api_policy_router --> models_policy_suggestions_response
+    api_policy_router --> service_policy_suggestions
+    api_policy_router --> api_caller_auth
+    api_policy_router --> api_dependencies
+    api_policy_router --> api_exceptions
+    api_policy_router --> api_route_layer
+    api_policy_router --> fastapi
+    api_route_layer --> models_caller_identity
+    api_route_layer --> service_key_throttle
+    api_route_layer --> api_caller_auth
+    api_route_layer --> api_dependencies
+    api_route_layer --> fastapi
+    api_watch_router --> models_error_response
+    api_watch_router --> models_host_policy
+    api_watch_router --> models_watch_create_request
+    api_watch_router --> models_watch_id_request
+    api_watch_router --> models_watch_list_response
+    api_watch_router --> models_watch_state
+    api_watch_router --> models_webhook_target
+    api_watch_router --> service_watch_cores
+    api_watch_router --> service_watch_sweep
+    api_watch_router --> service_webhooks
+    api_watch_router --> api_dependencies
+    api_watch_router --> api_exceptions
+    api_watch_router --> api_route_layer
+    api_watch_router --> fastapi
+    cli___main__ --> httpx
+    cli_client --> httpx
+    discovery_agent_hints --> mcp_registry
+    discovery_agent_hints --> models_agent_hints_payload
+    discovery_agent_hints --> models_agent_hints_response
+    discovery_agent_hints --> models_crawl_strategy
+    discovery_agent_hints --> models_example_policy
+    discovery_agent_hints --> service_policy_defaults
+    discovery_agent_hints --> vocabulary_extraction
+    discovery_agent_hints --> vocabulary_identity
+    discovery_agent_hints --> vocabulary_limits
+    discovery_agent_hints --> vocabulary_strategies
+    discovery_agent_hints --> fastapi
+    discovery_capabilities --> config_settings
+    discovery_capabilities --> discovery_links
+    discovery_capabilities --> mcp_registry
+    discovery_capabilities --> models_auth_capabilities_record
+    discovery_capabilities --> models_capabilities_response
+    discovery_capabilities --> models_crawl_extraction_method
+    discovery_capabilities --> models_crawl_strategy
+    discovery_capabilities --> models_crawl_timing_record
+    discovery_capabilities --> models_mcp_capabilities_record
+    discovery_capabilities --> models_search_capabilities_record
+    discovery_capabilities --> models_service_identity
+    discovery_capabilities --> vocabulary_limits
+    discovery_capabilities --> vocabulary_taxonomy
+    discovery_capabilities --> api_dependencies
+    discovery_capabilities --> fastapi
+    discovery_recommended --> discovery_recommended_surface
+    discovery_recommended_surface --> api_router_identity
+    discovery_recommended_surface --> api_router_registry
+    discovery_recommended_surface --> fastapi
+    discovery_well_known --> config_settings
+    discovery_well_known --> discovery_links
+    discovery_well_known --> models_discovery_response
+    discovery_well_known --> models_service_identity
+    discovery_well_known --> api_dependencies
+    discovery_well_known --> discovery_recommended
+    discovery_well_known --> fastapi
+    main --> config_settings
+    main --> extraction_content
+    main --> health_readiness
+    main --> models_address_class
+    main --> models_host_policy
+    main --> orchestration_engine
+    main --> runtime_app_module_ref
+    main --> runtime_logging_config
+    main --> runtime_metrics
+    main --> runtime_pressure_sizing
+    main --> service_cache_sweep
+    main --> service_caller_auth
+    main --> service_caller_concurrency
+    main --> service_errors
+    main --> service_job_recovery
+    main --> service_job_runner
+    main --> service_spill_sweep
+    main --> service_store_bootstrap
+    main --> service_store_shutdown
+    main --> service_watch_sweep
+    main --> storage_coordination_cookies
+    main --> storage_coordination_counters
+    main --> transport_browser_pool
+    main --> transport_cookie_jar
+    main --> transport_http_client_pool
+    main --> vocabulary_identity
+    main --> api_anonymous_throttle
+    main --> api_exceptions
+    main --> api_exempt_route_boot
+    main --> api_mcp_router
+    main --> api_middleware
+    main --> api_router_registry
+    main --> discovery_agent_hints
+    main --> discovery_capabilities
+    main --> discovery_well_known
+    main --> fastapi
+    main --> starlette
+    client --> httpx
+    client --> pydantic
+    models --> pydantic
 ```

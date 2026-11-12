@@ -1,7 +1,7 @@
-"""Module dependency graph and coupling report for crawlutron/.
+"""Module dependency graph for the whole importable surface (Wave A multi-package).
 
-Usage: ``python scripts/module_graph.py [--mermaid] [-o docs/module-graph.md]``. For the
-splitting programme: size = work, fan-in = risk, cycles = misplaced boundary; ranked output.
+Walks every import root derived from the uv members' wheel packages, so a package that
+leaves core is still walked and its layering seal stays non-vacuous.
 """
 
 from __future__ import annotations
@@ -12,31 +12,35 @@ import pathlib
 import sys
 from collections import defaultdict
 
-from tests._walk_primitives import REPO_ROOT, SCAN_ROOTS
-
-#: The package under analysis, validated against the derived scan surface so a layout move
-#: raises here instead of resolving a stale path the seals would green over.
-_PACKAGE = "crawlutron"
+from tests._walk_primitives import REPO_ROOT, import_roots
 
 
-def _app_root() -> pathlib.Path:
-    """The package's source dir, found under a scan root (never a bare path)."""
-    for root in SCAN_ROOTS:
-        candidate = REPO_ROOT / root
-        if candidate.name == _PACKAGE:
-            return candidate
-        nested = candidate / _PACKAGE
-        if nested.is_dir():
-            return nested
-    raise AssertionError(f"package {_PACKAGE!r} not found under any scan root: {SCAN_ROOTS}")
+#: The ``(import-dir, import-name)`` roots under analysis, derived from each uv member's
+#: wheel ``packages`` truth (#906), so a layout move re-derives the roots, never a literal.
+def _derived_import_roots() -> tuple[tuple[pathlib.Path, str], ...]:
+    pairs: set[tuple[pathlib.Path, str]] = set()
+    for root in import_roots():
+        import_dir = (REPO_ROOT / root).resolve()
+        pairs.add((import_dir, root.rsplit("/", 1)[-1]))
+    if not pairs:
+        raise AssertionError(f"derived no import roots: {import_roots()}")
+    return tuple(sorted(pairs))
 
 
-APP_ROOT = _app_root()
+IMPORT_ROOTS: tuple[tuple[pathlib.Path, str], ...] = _derived_import_roots()
+
+#: The import dirs' parents -- each member dir a dotted name resolves against.
+_MEMBERS = tuple(sorted({import_dir.parent for import_dir, _name in IMPORT_ROOTS}))
+
+#: Every walked package's import prefix (its dir name under the member).
+_IMPORT_NAMES = {name for _dir, name in IMPORT_ROOTS}
+
 STDLIB = set(sys.stdlib_module_names)
 
 
-def _module_name(path: pathlib.Path) -> str:
-    relative = path.relative_to(APP_ROOT.parent).with_suffix("")
+def _module_name(path: pathlib.Path, import_dir: pathlib.Path) -> str:
+    """The dotted module name of ``path``, rooted at the importing member."""
+    relative = path.relative_to(import_dir.parent).with_suffix("")
     parts = list(relative.parts)
     if parts[-1] == "__init__":
         parts.pop()
@@ -48,16 +52,17 @@ def _resolve(name: str, package_ok: bool = True) -> str | None:
     root = name.split(".")[0]
     if root in STDLIB:
         return None
-    candidate = APP_ROOT.parent / name.replace(".", "/")
-    if candidate.with_suffix(".py").exists():
-        return name
-    if package_ok and candidate.is_dir() and any(candidate.rglob("*.py")):
-        return name
+    for member in _MEMBERS:
+        candidate = member / name.replace(".", "/")
+        if candidate.with_suffix(".py").exists():
+            return name
+        if package_ok and candidate.is_dir() and any(candidate.rglob("*.py")):
+            return name
     # Third-party (fastapi, starlette, ...): record the top-level distribution
-    # root so seals see external reach; a crawlutron-internal miss is not one.
-    if root != APP_ROOT.name:
-        return root
-    return None
+    # root so seals see external reach; a walked-internal miss is not one.
+    if root in _IMPORT_NAMES:
+        return None
+    return root
 
 
 def _imports(tree: ast.AST) -> set[str]:
@@ -96,7 +101,7 @@ def _resolved(statements: list[ast.AST]) -> set[str]:
             if node.level or not node.module:
                 continue
             # A package dir is not the from-module target: its __init__ imports
-            # the submodules that import the package back — record the alias edge.
+            # the submodules that import the package back -- record the alias edge.
             if (resolved := _resolve(node.module, package_ok=False)) is not None:
                 found.add(resolved)
             for alias in node.names:
@@ -112,20 +117,28 @@ def _is_type_checking_guard(node: ast.If) -> bool:
 def build_graph() -> tuple[dict[str, set[str]], dict[str, set[str]]]:
     modules: dict[str, set[str]] = {}
     importers: dict[str, set[str]] = defaultdict(set)
-    paths = sorted(APP_ROOT.rglob("*.py"))
-    if not paths:
+    walked_any = False
+    for import_dir, _import_name in IMPORT_ROOTS:
+        paths = sorted(import_dir.rglob("*.py"))
+        if not paths:
+            raise AssertionError(
+                f"module graph walked zero modules under {import_dir}: the layering seals "
+                "would green over an empty graph (vacuity kill-switch)"
+            )
+        walked_any = True
+        for path in paths:
+            name = _module_name(path, import_dir)
+            try:
+                tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            except SyntaxError as error:
+                print(f"skipping {name}: {error}", file=sys.stderr)
+                continue
+            modules[name] = _imports(tree)
+    if not walked_any:
         raise AssertionError(
-            f"module graph walked zero modules under {APP_ROOT}: the layering seals "
+            "module graph walked zero modules across every root: the layering seals "
             "would green over an empty graph (vacuity kill-switch)"
         )
-    for path in paths:
-        name = _module_name(path)
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        except SyntaxError as error:
-            print(f"skipping {name}: {error}", file=sys.stderr)
-            continue
-        modules[name] = _imports(tree)
     for name, targets in modules.items():
         for target in targets:
             importers[target].add(name)
@@ -175,7 +188,12 @@ def report(modules: dict[str, set[str]], importers: dict[str, set[str]]) -> None
 
 def mermaid(modules: dict[str, set[str]]) -> str:
     def node(name: str) -> str:
-        return name.replace("crawlutron.", "").replace(".", "_").replace("-", "_")
+        shortened = name
+        for prefix in sorted(_IMPORT_NAMES, key=len, reverse=True):
+            if shortened == prefix or shortened.startswith(prefix + "."):
+                shortened = shortened[len(prefix) :].lstrip(".")
+                break
+        return shortened.replace(".", "_").replace("-", "_")
 
     lines = ["graph LR"]
     for name in sorted(modules):
