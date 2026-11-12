@@ -172,7 +172,7 @@ without the fix.
 **Coverage is measured, not a badge.** No coverage badge or coverage
 ratchet is claimed. The pre-push coverage hook is measured-descriptive
 only — no threshold, no fail-under, no ratchet until the owner rules one
-(`.pre-commit-config.yaml:244-252`). The safety boundary is the invariant
+(`.pre-commit-config.yaml:229-237`). The safety boundary is the invariant
 suite and the fail-closed SSRF/auth guards, not a coverage percentage.
 See `docs/architecture-governance.md`.
 

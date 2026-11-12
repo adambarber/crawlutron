@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
 import subprocess
@@ -24,6 +25,22 @@ from tests._ci_contract import (
     _hook_blocks,
     _jobs,
 )
+
+# pre-commit exports GIT_* env vars to hook processes; a git subprocess that
+# inherits them ignores -C and answers for THIS repo.
+_GIT_ENV = {name: value for name, value in os.environ.items() if not name.startswith("GIT_")}
+
+
+def _git(*args: str, cwd: str | Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [require_executable(GIT), *args],
+        cwd=str(cwd),
+        env=_GIT_ENV,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    )
 
 
 def test_all_hooks_share_one_trigger() -> None:
@@ -239,7 +256,7 @@ def _gate_repo(repo: Path, *, layout: str, venv: bool) -> Path:
     at the repo root; ``venv`` plants a stub interpreter for the helper to exec.
     """
     service_root = repo / "docker" / "browser-crawler" if layout == "nested" else repo
-    subprocess.run([require_executable(GIT), "init", "-q", str(repo)], check=True, capture_output=True)
+    _git("init", "-q", str(repo), cwd=repo)
     scripts = service_root / "scripts"
     scripts.mkdir(parents=True)
     (scripts / "gate").write_text(GATE_HELPER.read_text(encoding="utf-8"), encoding="utf-8")
@@ -285,7 +302,7 @@ def _run_gate_entry_in_layout(repo: Path, layout: str) -> tuple[Path, subprocess
     # `browser-crawler` here is the pre-extraction layout the hook's prologue still probes for, not this
     # project's name; the nested branch exists to prove the helper resolves there too.
     service_root = _gate_repo(repo, layout=layout, venv=True)
-    subprocess.run([require_executable(GIT), "-C", str(repo), "add", "-A"], check=True, capture_output=True)
+    _git("-C", str(repo), "add", "-A", cwd=repo)
 
     # pre-commit runs an entry as `shlex.split(entry)` with the repository root as the working directory, so
     # the first four tokens -- program, -c, the dual-layout script, and the gate's own $0 name -- are exactly
@@ -294,6 +311,7 @@ def _run_gate_entry_in_layout(repo: Path, layout: str) -> tuple[Path, subprocess
     completed = subprocess.run(
         [*prologue, ".venv/bin/python", "-c", "import os; print(os.getcwd())"],
         cwd=repo,
+        env=_GIT_ENV,
         capture_output=True,
         text=True,
         check=False,

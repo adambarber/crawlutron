@@ -1,4 +1,4 @@
-# Quality gates for crawlutron. The eight pre-commit-stage hooks run THROUGH
+# Quality gates for crawlutron. The seven pre-commit-stage hooks run THROUGH
 # scripts/gate_fanout, which starts every gate child at once on the first hook
 # of a run and lets each hook wait only on its own child; the commands after
 # each entry's `--` remain the single declaration of what that gate runs.
@@ -236,16 +236,14 @@ repos:
         pass_filenames: false
         stages: [pre-push]
 
-      # The project-specific safety predicates (chokepoint detectors). They are
-      # the real architecture gate and the only exit path for those rules.
-      - id: safety-invariants
-        name: chokepoint safety invariants
+      # The full randomized battery: commit admission includes BEHAVIOR, not
+      # only tree shape. One pytest invocation runs at pre-commit — this child
+      # IS the whole suite, subsuming the retired invariants-subset child.
+      - id: battery
+        name: full randomized battery (commit admission control)
         entry: >-
           bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
-          .venv/bin/python -m scripts.gate_fanout safety-invariants -- .venv/bin/python -m pytest -q -o addopts= -n 6 --timeout=30 --timeout-method=thread
-          tests/invariants/ tests/test_metrics_budget.py
-          tests/test_env_regression.py tests/test_store_pragma_chokepoint.py
-          tests/membership_gate.py
+          .venv/bin/python -m scripts.gate_fanout battery -- .venv/bin/python -m pytest -q
         language: system
         files: *service_trigger
         pass_filenames: false
