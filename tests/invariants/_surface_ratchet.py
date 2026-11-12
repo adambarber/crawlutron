@@ -164,20 +164,20 @@ DECLARED_SURFACE_RATCHET = {
     "packages/core/crawlutron/extraction/llm_format.py": (4, 4),
     # #668 raised 18,0 -> 19,0: RATE_LIMITED is the JSON-RPC code the anonymous
     # meter's /mcp refusal answers with.
-    "packages/core/crawlutron/mcp/constants.py": (19, 0),
-    "packages/core/crawlutron/mcp/protocol.py": (6, 6),
+    "packages/mcp/crawlutron_mcp/constants.py": (19, 0),
+    "packages/mcp/crawlutron_mcp/protocol.py": (6, 6),
     # #849: the MCP HTTP router relocated to api/mcp_router (wire concern); the
     # protocol layer imports service only.
-    "packages/core/crawlutron/mcp/server.py": (6, 5),
+    "packages/mcp/crawlutron_mcp/server.py": (6, 5),
     # #714: the MCP crawl doors' projection split (projection enum + projected);
     # handlers.py back under the 500-line ceiling.
-    "packages/core/crawlutron/mcp/crawl_shaping.py": (2, 1),
+    "packages/mcp/crawlutron_mcp/crawl_shaping.py": (2, 1),
     # #645: tools.py split into registry + handlers (500-line ceiling); the read
     # tools joined. Closures lowered both entry counts.
-    "packages/core/crawlutron/mcp/registry.py": (4, 1),
+    "packages/mcp/crawlutron_mcp/registry.py": (4, 1),
     # #646: the four job-tool handlers joined via _job_tool_handler. #647: create_job.
     # ARCH-1: factory collapse (data-driven dispatch) deleted the factories + watch_handlers.py.
-    "packages/core/crawlutron/mcp/handlers.py": (
+    "packages/mcp/crawlutron_mcp/handlers.py": (
         8,
         5,
     ),  # lowered from (9, 6) by the HTTPException-arm deletion (#869).

@@ -5,8 +5,9 @@ updating discovery REDS here.
 
 from __future__ import annotations
 
+from crawlutron_mcp.registry import TOOL_SPECS
+
 from crawlutron.config.settings import CrawlerSettings
-from crawlutron.mcp.registry import TOOL_SPECS
 from crawlutron_rest.discovery.recommended_surface import OPERATOR_EXCLUSIONS
 from crawlutron_rest.discovery.well_known import discovery_payload
 
@@ -105,7 +106,7 @@ def test_crawl_refusal_fields_never_exceed_the_schema_drop_list():
     """ToolSpec defense-in-depth: no door may refuse a field its schema still
     advertises -- unsupported_fields owns the vocabulary and refusal_fields
     must stay within it (the #670 drift assert)."""
-    from crawlutron.mcp.registry import TOOL_SPECS
+    from crawlutron_mcp.registry import TOOL_SPECS
 
     for spec in TOOL_SPECS:
         refusal = spec.door.refusal_fields if spec.door else ()

@@ -20,7 +20,7 @@ from tests.chokepoint_walks import (
 from tests.invariants._shared import _declared_public_symbols, _enclosing_calls, _enclosing_nodes
 from tests.rules import Bites, Rule
 
-_PROTOCOL_CONSTANTS_MODULE = "packages/core/crawlutron/mcp/constants.py"
+_PROTOCOL_CONSTANTS_MODULE = "packages/mcp/crawlutron_mcp/constants.py"
 
 
 def _module_level_assignment_lines(tree: ast.Module, names: Iterable[str]) -> dict[str, int]:
@@ -80,7 +80,7 @@ def _unproduced_protocol_constants(
 
 
 def test_every_protocol_constant_is_produced():
-    """packages/core/crawlutron/mcp/constants.py declares only codes and keys the server can reach."""
+    """packages/mcp/crawlutron_mcp/constants.py declares only codes and keys the server can reach."""
     _, owner_tree = file_tree(_PROTOCOL_CONSTANTS_MODULE)
     offenders = _unproduced_protocol_constants(owner_tree, app_trees())
     assert not offenders, "protocol constants with no production reader: " + ", ".join(offenders)
@@ -207,5 +207,5 @@ THE_META_KEY_REJECTION_REASON_IS_AUTHORED_ONCE = Rule(
 
 
 def test_the_meta_key_rejection_reason_is_authored_once():
-    """packages/core/crawlutron/mcp/protocol.py spells the wrong-type _meta reason in one function."""
+    """packages/mcp/crawlutron_mcp/protocol.py spells the wrong-type _meta reason in one function."""
     THE_META_KEY_REJECTION_REASON_IS_AUTHORED_ONCE.scan()

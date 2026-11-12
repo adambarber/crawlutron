@@ -170,7 +170,7 @@ class TestPolicySuggestionsDiscovery:
 
     def test_the_advertised_schema_accepts_the_arguments_the_tool_takes(self):
         """An empty-argument tool advertises an object schema with nothing required."""
-        from crawlutron.mcp.registry import TOOLS_BY_NAME
+        from crawlutron_mcp.registry import TOOLS_BY_NAME
 
         spec = TOOLS_BY_NAME["policy_suggestions"]
         schema = cast("dict[str, object]", spec.input_schema)

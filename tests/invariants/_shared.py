@@ -12,6 +12,7 @@ from collections.abc import Callable, Iterable
 from functools import cache
 from pathlib import Path
 
+from tests._walk_primitives import APP_ROOTS, import_roots
 from tests.chokepoint_walks import (
     APP_ROOT,
     REPO_ROOT,
@@ -49,7 +50,8 @@ def _app_tree_key() -> tuple[tuple[str, int, int], ...]:
 
 
 def _app_file_paths() -> list[pathlib.Path]:
-    return [path for path in APP_ROOT.rglob("*.py") if "__pycache__" not in path.parts]
+    """Every app-surface module (core + rest + mcp, Wave A) minus pycache."""
+    return [path for root in APP_ROOTS for path in root.rglob("*.py") if "__pycache__" not in path.parts]
 
 
 @cache
@@ -274,8 +276,9 @@ def _module_name(path: pathlib.Path) -> str:
     elif relative.endswith(".py"):
         relative = relative[:-3]
     parts = relative.split("/")
+    tokens = {root.rsplit("/", 1)[-1] for root in import_roots()}
     for index, part in enumerate(parts):
-        if part in {"crawlutron", "crawlutron_rest", "admission"}:
+        if part in tokens:
             parts = parts[index:]
             break
     return ".".join(parts)

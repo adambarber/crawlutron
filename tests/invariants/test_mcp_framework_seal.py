@@ -1,4 +1,4 @@
-"""The MCP framework-freeness seal: no ``crawlutron.mcp`` module reaches fastapi or starlette.
+"""The MCP framework-freeness seal: no ``crawlutron_mcp`` module reaches fastapi or starlette.
 Reach is transitive via the shared walk, naming the violating (mcp module -> forbidden) pair;
 the alias-proof import resolution lives in the module graph, the reach chokepoint.
 """
@@ -11,7 +11,7 @@ from scripts import module_graph
 from scripts.module_graph import build_graph
 from tests.invariants._seal_walk import offender_pairs as _walk_offenders
 
-_SEALED_LAYER = "crawlutron.mcp."
+_SEALED_LAYER = "crawlutron_mcp."
 _FORBIDDEN_LAYERS = ("fastapi", "starlette")
 
 
@@ -20,19 +20,19 @@ def test_no_mcp_module_imports_fastapi_or_starlette() -> None:
     modules, _importers = build_graph()
     offenders = _walk_offenders(modules, _SEALED_LAYER, _FORBIDDEN_LAYERS)
     assert not offenders, (
-        "crawlutron.mcp reaches fastapi/starlette; the MCP protocol layer is "
+        "crawlutron_mcp reaches fastapi/starlette; the MCP protocol layer is "
         "framework-free so it can embed in any ASGI server:\n" + "\n".join(sorted(offenders))
     )
 
 
 def test_seal_names_the_bare_package_root_source() -> None:
-    """The package root (crawlutron/mcp/__init__.py) is a sealed source itself."""
+    """The package root (crawlutron_mcp/__init__.py) is a sealed source itself."""
     planted = {
-        "crawlutron.mcp": {"fastapi"},
+        "crawlutron_mcp": {"fastapi"},
         "fastapi": set(),
     }
     offenders = _walk_offenders(planted, _SEALED_LAYER, _FORBIDDEN_LAYERS)
-    assert "crawlutron.mcp -> fastapi" in offenders, offenders
+    assert "crawlutron_mcp -> fastapi" in offenders, offenders
 
 
 def test_seal_catches_aliased_and_nested_import_shapes() -> None:

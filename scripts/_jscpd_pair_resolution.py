@@ -10,6 +10,7 @@ from typing import cast
 
 from scripts._jscpd_report_types import JscpdDuplicate, JscpdLocation, JscpdReport
 from scripts.executables import require_repo_tool
+from tests._walk_primitives import package_roots, scan_roots
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = SERVICE_ROOT / ".jscpd.json"
@@ -38,12 +39,15 @@ CROSS_TREE = "cross"
 CROSS_TREE_ROOT = "."
 
 
-# One jscpd invocation per root: jscpd names files relative to its root, so
-# attribution requires one scan per root.
+# One jscpd invocation per root: attribution requires one scan per root. Derived from
+# the uv members and the scan surface (#8510/#858), never a literal tuple.
+_MEMBER_ROOTS = package_roots()
+_SURFACE = set(scan_roots())
 TREE_ROOTS = {
-    # packages/core + packages/rest + packages/sdk are the uv members.
-    "production": ("packages/core", "packages/rest", "packages/sdk"),
-    "test": ("tests", "scripts"),
+    # The uv members are the production package dirs; the sweep surface minus the
+    # members is the test/scripts surface.
+    "production": _MEMBER_ROOTS,
+    "test": tuple(sorted(_SURFACE - set(_MEMBER_ROOTS))),
 }
 
 

@@ -1,19 +1,19 @@
 """``POST /mcp`` — MCP 2026-07-28 streamable-HTTP endpoint.
 
 Pure HTTP-wire concern, so it lives in api: parses the JSON-RPC body and
-delegates to :func:`crawlutron.mcp.server.handle_mcp_request`.
+delegates to :func:`crawlutron_mcp.server.handle_mcp_request`.
 """
 
 from __future__ import annotations
 
 import json
 
+from crawlutron_mcp.constants import INVALID_API_KEY, INVALID_REQUEST, PARSE_ERROR
+from crawlutron_mcp.protocol import error_response
+from crawlutron_mcp.server import handle_mcp_request
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
-from crawlutron.mcp.constants import INVALID_API_KEY, INVALID_REQUEST, PARSE_ERROR
-from crawlutron.mcp.protocol import error_response
-from crawlutron.mcp.server import handle_mcp_request
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.error_response import ErrorResponse
 from crawlutron.service.errors import DomainError

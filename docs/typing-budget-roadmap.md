@@ -133,8 +133,8 @@ or holds forces an edit there. Every module below is marked **doable now** or
 ### app/mcp — doable (protocol types)
 - `protocol.py:58,65` (2), `tools.py:79,85,120,246` (4). These already use
   `JsonValue` elsewhere; the `dict[str, Any]` remnants that are MCP JSON-RPC
-  params/results → `JsonValue` / records. `packages/core/crawlutron/mcp/server.py` is not forbidden.
-  Check `packages/core/crawlutron/mcp/server.py:216` (1) — not in the forbidden list, doable.
+  params/results → `JsonValue` / records. `packages/mcp/crawlutron_mcp/server.py` is not forbidden.
+  Check `packages/mcp/crawlutron_mcp/server.py:216` (1) — not in the forbidden list, doable.
 - `well_known.py` done.
 
 ### app/orchestration

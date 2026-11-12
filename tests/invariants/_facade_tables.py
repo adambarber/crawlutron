@@ -6,7 +6,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from crawlutron.mcp.registry import TOOL_SPECS
+from crawlutron_mcp.registry import TOOL_SPECS
+
 from tests._app_factory import service_app
 from tests.invariants._parity_rows import PRINCIPLED_ROWS
 

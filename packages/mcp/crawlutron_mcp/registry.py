@@ -11,7 +11,6 @@ from dataclasses import dataclass
 
 from pydantic import BaseModel
 
-from crawlutron.mcp.handlers import DoorBinding, DoorKind, ToolResult
 from crawlutron.models.admit_request import AdmitRequest
 from crawlutron.models.admit_response import AdmitResponse
 from crawlutron.models.crawl_and_extract_response import CrawlAndExtractResponse
@@ -51,6 +50,7 @@ from crawlutron.service.watch_cores import (
     register_watch_core,
 )
 from crawlutron.service.watch_sweep import WATCH_SWEEP_INTERVAL_SECONDS as WATCH_INTERVAL_MIN_SECONDS
+from crawlutron_mcp.handlers import DoorBinding, DoorKind, ToolResult
 
 #: The declared MCP-side delivery refusal both crawl doors answer (keyed on
 #: the fields' effective VALUE by dispatch: an explicit no-op is accepted).

@@ -12,12 +12,20 @@ import pathlib
 import sys
 from collections import defaultdict
 
-from tests._walk_primitives import REPO_ROOT, import_roots
+# Standalone ``make graph`` runs this file as a script: sys.path[0] is scripts/,
+# so put the repo root on the path to reach the ``tests._walk_primitives`` roots.
+_REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+STDLIB = set(sys.stdlib_module_names)
 
 
 #: The ``(import-dir, import-name)`` roots under analysis, derived from each uv member's
 #: wheel ``packages`` truth (#906), so a layout move re-derives the roots, never a literal.
 def _derived_import_roots() -> tuple[tuple[pathlib.Path, str], ...]:
+    from tests._walk_primitives import REPO_ROOT, import_roots
+
     pairs: set[tuple[pathlib.Path, str]] = set()
     for root in import_roots():
         import_dir = (REPO_ROOT / root).resolve()

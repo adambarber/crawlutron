@@ -39,10 +39,11 @@ def test_import_configures_nothing(tmp_path):
 
     import crawlutron_rest.main
 
-    # The editable install points at the main checkout; pin THIS tree so the probe observes
-    # the factory under test, not another worktree. Both package roots: rest imports core.
+    # Pin THIS tree so the probe observes the factory under test, not another worktree:
+    # the member roots rest imports (core, and mcp since #917).
     rest_root = Path(crawlutron_rest.main.__file__).resolve().parents[1]
     core_root = rest_root.parent / "core"
+    mcp_root = rest_root.parent / "mcp"
     probe = (
         "import logging, os, sys\n"
         "import crawlutron_rest.main\n"
@@ -56,7 +57,7 @@ def test_import_configures_nothing(tmp_path):
     )
     env = {
         k: v
-        for k, v in {**os.environ, "PYTHONPATH": f"{str(rest_root)}:{str(core_root)}"}.items()
+        for k, v in {**os.environ, "PYTHONPATH": f"{str(rest_root)}:{str(core_root)}:{str(mcp_root)}"}.items()
         if not k.startswith("CRAWLUTRON_")
     }
     result = subprocess.run(

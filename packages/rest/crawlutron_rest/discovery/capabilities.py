@@ -153,7 +153,7 @@ def _search_fields(settings: CrawlerSettings) -> SearchCapabilitiesRecord:
 
 def _mcp_fields() -> McpCapabilitiesRecord:
     """The MCP surface's endpoint, protocol versions, and the tools it serves."""
-    from crawlutron.mcp.registry import TOOL_SPECS
+    from crawlutron_mcp.registry import TOOL_SPECS
 
     return {
         "endpoint": "/mcp",

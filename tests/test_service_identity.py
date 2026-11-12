@@ -2,9 +2,10 @@
 installed package carries, derived once in the vocabulary and re-derived nowhere.
 """
 
+from crawlutron_mcp.protocol import server_info
+
 from crawlutron import __version__
 from crawlutron.config.settings import CrawlerSettings
-from crawlutron.mcp.protocol import server_info
 from crawlutron.models.crawl_strategy import CrawlStrategy
 from crawlutron.models.json_value import JsonValue
 from crawlutron.vocabulary.identity import DEFAULT_USER_AGENT, SERVICE_VERSION

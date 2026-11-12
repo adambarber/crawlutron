@@ -10,10 +10,10 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, cast
 
 import pytest
+from crawlutron_mcp.registry import TOOLS_BY_NAME
 from fastapi import Request
 
 from crawlutron.config.settings import CrawlerSettings
-from crawlutron.mcp.registry import TOOLS_BY_NAME
 from crawlutron_rest.api.dependencies import get_settings, get_shutdown_event, get_watch_store
 from crawlutron_rest.api.mcp_router import router as mcp_router
 from tests._app_harnesses import harness_app

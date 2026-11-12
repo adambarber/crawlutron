@@ -78,7 +78,7 @@ DDL_IS_CONFINED_TO_THE_MIGRATIONS_PACKAGE = Rule(
 
 # Two descriptions of one contract, neither derived from the other -- and the advertised one claimed
 # additionalProperties: False for a request model that in fact ignores extras.
-_MCP_TOOLS_MODULE = "packages/core/crawlutron/mcp/registry.py"
+_MCP_TOOLS_MODULE = "packages/mcp/crawlutron_mcp/registry.py"
 
 
 def _mcp_unvalidated_tool_offenders(tree, path, *, tools_module):
@@ -144,7 +144,7 @@ def test_advertised_mcp_schemas_come_from_the_request_models():
     The bite proves the detector; this proves the property on the real
     TOOL_SPECS: no tool ships a schema its request model does not describe.
     """
-    from crawlutron.mcp.registry import TOOL_SPECS
+    from crawlutron_mcp.registry import TOOL_SPECS
 
     for spec in TOOL_SPECS:
         assert spec.request_model is not None, spec.name

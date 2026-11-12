@@ -5,7 +5,8 @@ from the OpenAPI schema (wire truth off the served app), never hand-listed (#649
 
 from __future__ import annotations
 
-from crawlutron.mcp.registry import TOOL_SPECS
+from crawlutron_mcp.registry import TOOL_SPECS
+
 from tests.invariants._facade_tables import (
     DICT_FIELD_ROUTES,
     MCP_ROUTE_EXCLUSIONS,

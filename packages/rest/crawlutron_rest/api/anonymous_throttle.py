@@ -138,8 +138,9 @@ def _remote(request) -> str | None:
 
 def _refuse(path: str, throttled: Throttled) -> JSONResponse:
     """The refusal in the surface's shape: JSON-RPC on /mcp, envelope elsewhere."""
-    from crawlutron.mcp.constants import RATE_LIMITED
-    from crawlutron.mcp.protocol import error_response
+    from crawlutron_mcp.constants import RATE_LIMITED
+    from crawlutron_mcp.protocol import error_response
+
     from crawlutron_rest.api.exceptions import error_envelope
 
     if path in METERED_EXACT:

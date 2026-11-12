@@ -70,7 +70,9 @@ def test_no_invariant_gate_carries_a_private_root_tuple() -> None:
 def test_the_completeness_audit_itself_spans_the_derived_surface() -> None:
     """The audit is not a smaller hand list wearing a badge: it must accept a
     synthetic gate whose tuple matches SCAN_ROOTS exactly (drift-proof both ways)."""
-    probe = ast.parse("x = ('packages/core', 'packages/rest', 'packages/sdk', 'scripts', 'tests')\n")
+    probe = ast.parse(
+        "x = ('packages/core', 'packages/mcp', 'packages/rest', 'packages/sdk', 'scripts', 'tests')\n"
+    )
     assert _local_root_tuples(probe), "audit lost the full-surface shape"
     subset = ast.parse("x = ('scripts', 'tests')\n")
     assert _local_root_tuples(subset), "audit lost the subset shape"

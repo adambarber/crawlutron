@@ -10,11 +10,11 @@ import asyncio
 from collections.abc import Awaitable, Callable
 
 import pytest
+from crawlutron_mcp.handlers import dispatch as tool_dispatch
+from crawlutron_mcp.registry import TOOLS_BY_NAME, ToolSpec
 
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.health.readiness import ReadinessState
-from crawlutron.mcp.handlers import dispatch as tool_dispatch
-from crawlutron.mcp.registry import TOOLS_BY_NAME, ToolSpec
 from crawlutron.models.crawl_request import CrawlRequest as CrawlRequest
 from crawlutron.models.json_value import JsonValue
 from crawlutron.models.map_request import MapRequest as MapRequest
@@ -27,12 +27,12 @@ def _tool_cases():
     # (label, tool name, stub_target, payload, extra_patches) for the four fetch
     # kinds; spelled locally so the import block stays the test's own.
     return [
-        ("map", "map", "map_site", "crawlutron.mcp.handlers", MapRequest(url="http://example.com/"), {}),
+        ("map", "map", "map_site", "crawlutron_mcp.handlers", MapRequest(url="http://example.com/"), {}),
         (
             "render",
             "render",
             "render_endpoint_handler",
-            "crawlutron.mcp.handlers",
+            "crawlutron_mcp.handlers",
             RenderRequest(url="http://example.com/"),
             {"get_browser_pool": lambda: object()},
         ),
@@ -40,7 +40,7 @@ def _tool_cases():
             "search",
             "search",
             "search_endpoint_handler",
-            "crawlutron.mcp.handlers",
+            "crawlutron_mcp.handlers",
             SearchRequest(query="x"),
             {},
         ),
@@ -48,7 +48,7 @@ def _tool_cases():
             "crawl",
             "crawl",
             "execute_crawl",
-            "crawlutron.mcp.handlers",
+            "crawlutron_mcp.handlers",
             CrawlRequest(url="http://example.com/"),
             {},
         ),
@@ -122,7 +122,7 @@ async def _invoke(monkeypatch, *, cap: int | None, label: str, prefill: int = 0)
     held: list[int] = []
     exec_stub = _stub_for(label, _active, held)
     for name, value in extra.items():
-        monkeypatch.setattr(f"crawlutron.mcp.handlers.{name}", value)
+        monkeypatch.setattr(f"crawlutron_mcp.handlers.{name}", value)
     monkeypatch.setattr(f"{target_module}.{target}", exec_stub)
     settings = CrawlerSettings.from_mapping({})
     shutdown = asyncio.Event()

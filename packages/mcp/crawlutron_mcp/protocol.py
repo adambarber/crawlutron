@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import base64
 
-from crawlutron.mcp.constants import (
+from crawlutron.models.json_value import JsonValue
+from crawlutron_mcp.constants import (
     INVALID_PARAMS,
     MCP_SERVER_NAME,
     MCP_SERVER_VERSION,
@@ -15,7 +16,6 @@ from crawlutron.mcp.constants import (
     META_PROTOCOL_VERSION,
     META_SERVER_INFO,
 )
-from crawlutron.models.json_value import JsonValue
 
 
 class ProtocolValidationError(Exception):

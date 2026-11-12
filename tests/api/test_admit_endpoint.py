@@ -196,7 +196,7 @@ class TestMcpParity:
     """The MCP admit tool mirrors the REST handler one-for-one."""
 
     async def test_tool_list_advertises_admit(self):
-        from crawlutron.mcp.server import tools_list_result
+        from crawlutron_mcp.server import tools_list_result
 
         tools = tools_list_result()["tools"]
         assert isinstance(tools, list)
@@ -204,8 +204,9 @@ class TestMcpParity:
         assert "admit" in names
 
     async def _tool_verdict(self, admit_settings, url: str) -> object:
-        from crawlutron.mcp.handlers import dispatch as tool_dispatch
-        from crawlutron.mcp.registry import TOOLS_BY_NAME
+        from crawlutron_mcp.handlers import dispatch as tool_dispatch
+        from crawlutron_mcp.registry import TOOLS_BY_NAME
+
         from crawlutron.models.admit_request import AdmitRequest
 
         result = await tool_dispatch(

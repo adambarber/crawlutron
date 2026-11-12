@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING, Any, NotRequired, Protocol, TypedDict, Unpack,
 from pydantic import BaseModel, ValidationError
 
 from crawlutron.config.settings import CrawlerSettings
-from crawlutron.mcp.crawl_shaping import CrawlProjection, projected
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.crawl_pending import CrawlPendingError
 from crawlutron.models.json_value import JsonValue
@@ -38,6 +37,7 @@ from crawlutron.storage.job_store import JobStore
 from crawlutron.storage.result_store import CrawlResultStore
 from crawlutron.storage.watch_store import WatchStore
 from crawlutron.transport.browser_pool import get_browser_pool
+from crawlutron_mcp.crawl_shaping import CrawlProjection, projected
 
 if TYPE_CHECKING:
     from crawlutron.models.admit_request import AdmitRequest

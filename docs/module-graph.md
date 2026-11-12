@@ -108,78 +108,6 @@ graph LR
     health_readiness --> models_readiness_response
     health_readiness --> runtime_readiness_state
     health_readiness --> fastapi
-    mcp --> mcp_registry
-    mcp_constants --> vocabulary_identity
-    mcp_crawl_shaping --> models_crawl_and_extract_response
-    mcp_crawl_shaping --> models_extracted_page
-    mcp_handlers --> config_settings
-    mcp_handlers --> mcp_crawl_shaping
-    mcp_handlers --> models_caller_identity
-    mcp_handlers --> models_crawl_pending
-    mcp_handlers --> models_json_value
-    mcp_handlers --> models_policy_suggestions_response
-    mcp_handlers --> safety_json_safe
-    mcp_handlers --> search_endpoint
-    mcp_handlers --> service_admit_endpoint
-    mcp_handlers --> service_caller_auth
-    mcp_handlers --> service_caller_concurrency
-    mcp_handlers --> service_crawl_endpoint_cores
-    mcp_handlers --> service_crawl_executor
-    mcp_handlers --> service_errors
-    mcp_handlers --> service_job_cores
-    mcp_handlers --> service_main_helpers
-    mcp_handlers --> service_map_endpoint
-    mcp_handlers --> service_render_endpoint
-    mcp_handlers --> service_response_shaping
-    mcp_handlers --> storage_job_store
-    mcp_handlers --> storage_result_store
-    mcp_handlers --> storage_watch_store
-    mcp_handlers --> transport_browser_pool
-    mcp_handlers --> pydantic
-    mcp_protocol --> mcp_constants
-    mcp_protocol --> models_json_value
-    mcp_registry --> mcp_handlers
-    mcp_registry --> models_admit_request
-    mcp_registry --> models_admit_response
-    mcp_registry --> models_crawl_and_extract_response
-    mcp_registry --> models_crawl_request
-    mcp_registry --> models_crawl_result_request
-    mcp_registry --> models_job_control_tool_request
-    mcp_registry --> models_job_create_request
-    mcp_registry --> models_job_create_response
-    mcp_registry --> models_job_deleted_response
-    mcp_registry --> models_job_id_request
-    mcp_registry --> models_job_list_request
-    mcp_registry --> models_job_list_response
-    mcp_registry --> models_job_status_response
-    mcp_registry --> models_json_value
-    mcp_registry --> models_map_request
-    mcp_registry --> models_policy_suggestions_request
-    mcp_registry --> models_policy_suggestions_response
-    mcp_registry --> models_render_request
-    mcp_registry --> models_search_request
-    mcp_registry --> models_search_response
-    mcp_registry --> models_site_map_response
-    mcp_registry --> models_trace_response
-    mcp_registry --> models_unified_crawl_response
-    mcp_registry --> models_watch_create_request
-    mcp_registry --> models_watch_deleted_response
-    mcp_registry --> models_watch_id_request
-    mcp_registry --> models_watch_list_request
-    mcp_registry --> models_watch_list_response
-    mcp_registry --> models_watch_state
-    mcp_registry --> service_crawl_endpoint_cores
-    mcp_registry --> service_job_cores
-    mcp_registry --> service_policy_suggestions
-    mcp_registry --> service_watch_cores
-    mcp_registry --> service_watch_sweep
-    mcp_registry --> pydantic
-    mcp_server --> mcp_constants
-    mcp_server --> mcp_handlers
-    mcp_server --> mcp_protocol
-    mcp_server --> mcp_registry
-    mcp_server --> models_json_value
-    mcp_server --> pydantic
     models_admit_request --> pydantic
     models_admit_response --> models_normalized_url
     models_admit_response --> pydantic
@@ -1206,6 +1134,78 @@ graph LR
     transport_transport --> models_normalized_url
     transport_transport --> transport_decompression
     vocabulary_robots --> models_taxonomy
+     --> registry
+    constants --> vocabulary_identity
+    crawl_shaping --> models_crawl_and_extract_response
+    crawl_shaping --> models_extracted_page
+    handlers --> config_settings
+    handlers --> models_caller_identity
+    handlers --> models_crawl_pending
+    handlers --> models_json_value
+    handlers --> models_policy_suggestions_response
+    handlers --> safety_json_safe
+    handlers --> search_endpoint
+    handlers --> service_admit_endpoint
+    handlers --> service_caller_auth
+    handlers --> service_caller_concurrency
+    handlers --> service_crawl_endpoint_cores
+    handlers --> service_crawl_executor
+    handlers --> service_errors
+    handlers --> service_job_cores
+    handlers --> service_main_helpers
+    handlers --> service_map_endpoint
+    handlers --> service_render_endpoint
+    handlers --> service_response_shaping
+    handlers --> storage_job_store
+    handlers --> storage_result_store
+    handlers --> storage_watch_store
+    handlers --> transport_browser_pool
+    handlers --> crawl_shaping
+    handlers --> pydantic
+    protocol --> models_json_value
+    protocol --> constants
+    registry --> models_admit_request
+    registry --> models_admit_response
+    registry --> models_crawl_and_extract_response
+    registry --> models_crawl_request
+    registry --> models_crawl_result_request
+    registry --> models_job_control_tool_request
+    registry --> models_job_create_request
+    registry --> models_job_create_response
+    registry --> models_job_deleted_response
+    registry --> models_job_id_request
+    registry --> models_job_list_request
+    registry --> models_job_list_response
+    registry --> models_job_status_response
+    registry --> models_json_value
+    registry --> models_map_request
+    registry --> models_policy_suggestions_request
+    registry --> models_policy_suggestions_response
+    registry --> models_render_request
+    registry --> models_search_request
+    registry --> models_search_response
+    registry --> models_site_map_response
+    registry --> models_trace_response
+    registry --> models_unified_crawl_response
+    registry --> models_watch_create_request
+    registry --> models_watch_deleted_response
+    registry --> models_watch_id_request
+    registry --> models_watch_list_request
+    registry --> models_watch_list_response
+    registry --> models_watch_state
+    registry --> service_crawl_endpoint_cores
+    registry --> service_job_cores
+    registry --> service_policy_suggestions
+    registry --> service_watch_cores
+    registry --> service_watch_sweep
+    registry --> handlers
+    registry --> pydantic
+    server --> models_json_value
+    server --> constants
+    server --> handlers
+    server --> protocol
+    server --> registry
+    server --> pydantic
     api__depends_singletons --> api_dependencies
     api__depends_singletons --> fastapi
     api_admit_router --> models_admit_request
@@ -1214,10 +1214,10 @@ graph LR
     api_admit_router --> api__depends_singletons
     api_admit_router --> api_caller_auth
     api_admit_router --> api_route_layer
-    api_anonymous_throttle --> mcp_constants
-    api_anonymous_throttle --> mcp_protocol
     api_anonymous_throttle --> runtime_metrics
     api_anonymous_throttle --> service_meter_ledger
+    api_anonymous_throttle --> constants
+    api_anonymous_throttle --> protocol
     api_anonymous_throttle --> api_exceptions
     api_anonymous_throttle --> fastapi
     api_caller_auth --> models_caller_identity
@@ -1324,21 +1324,21 @@ graph LR
     api_keys_router --> api_dependencies
     api_keys_router --> api_exceptions
     api_keys_router --> api_route_layer
-    api_mcp_router --> mcp_constants
-    api_mcp_router --> mcp_protocol
-    api_mcp_router --> mcp_server
     api_mcp_router --> models_caller_identity
     api_mcp_router --> models_error_response
     api_mcp_router --> service_errors
+    api_mcp_router --> constants
+    api_mcp_router --> protocol
+    api_mcp_router --> server
     api_mcp_router --> api_caller_auth
     api_mcp_router --> api_dependencies
     api_mcp_router --> fastapi
     api_metrics_router --> runtime_metrics
     api_metrics_router --> api_route_layer
     api_metrics_router --> fastapi
-    api_middleware --> mcp_constants
-    api_middleware --> mcp_protocol
-    api_middleware --> mcp_server
+    api_middleware --> constants
+    api_middleware --> protocol
+    api_middleware --> server
     api_middleware --> api_exceptions
     api_middleware --> fastapi
     api_middleware --> starlette
@@ -1370,7 +1370,6 @@ graph LR
     api_watch_router --> fastapi
     cli___main__ --> httpx
     cli_client --> httpx
-    discovery_agent_hints --> mcp_registry
     discovery_agent_hints --> models_agent_hints_payload
     discovery_agent_hints --> models_agent_hints_response
     discovery_agent_hints --> models_crawl_strategy
@@ -1380,10 +1379,10 @@ graph LR
     discovery_agent_hints --> vocabulary_identity
     discovery_agent_hints --> vocabulary_limits
     discovery_agent_hints --> vocabulary_strategies
+    discovery_agent_hints --> registry
     discovery_agent_hints --> fastapi
     discovery_capabilities --> config_settings
     discovery_capabilities --> discovery_links
-    discovery_capabilities --> mcp_registry
     discovery_capabilities --> models_auth_capabilities_record
     discovery_capabilities --> models_capabilities_response
     discovery_capabilities --> models_crawl_extraction_method
@@ -1394,6 +1393,7 @@ graph LR
     discovery_capabilities --> models_service_identity
     discovery_capabilities --> vocabulary_limits
     discovery_capabilities --> vocabulary_taxonomy
+    discovery_capabilities --> registry
     discovery_capabilities --> api_dependencies
     discovery_capabilities --> fastapi
     discovery_recommended --> discovery_recommended_surface

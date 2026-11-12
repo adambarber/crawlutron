@@ -189,9 +189,13 @@ def is_exempt(relative: str, value: str, exemptions: tuple[tuple[str, str, str],
 APP_ROOT = REPO_ROOT / "packages" / "core" / "crawlutron"
 
 
-#: Every production app/package surface the sweep laws cover. Wave A split the FastAPI
-#: surface into packages/rest (#902); sweeps must span core and rest or a law vacates it.
-APP_ROOTS = (APP_ROOT, REPO_ROOT / "packages" / "rest" / "crawlutron_rest")
+#: Every production app/package surface the sweep laws cover (core + rest + mcp,
+#: Wave A #900/#902/#917); sweeps must span all three or a law vacates one of them.
+APP_ROOTS = (
+    APP_ROOT,
+    REPO_ROOT / "packages" / "rest" / "crawlutron_rest",
+    REPO_ROOT / "packages" / "mcp" / "crawlutron_mcp",
+)
 
 
 TRANSPORT_DIR = APP_ROOT / "transport"

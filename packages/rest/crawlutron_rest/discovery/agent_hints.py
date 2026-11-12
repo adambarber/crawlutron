@@ -30,7 +30,7 @@ STRATEGY_DESCRIPTIONS = {
 
 def _mcp_tool_guidance() -> str:
     """The MCP guidance entry, with the tool list DERIVED from TOOL_SPECS."""
-    from crawlutron.mcp.registry import TOOL_SPECS
+    from crawlutron_mcp.registry import TOOL_SPECS
 
     names = ", ".join(spec.name for spec in TOOL_SPECS)
     return (
@@ -52,7 +52,7 @@ def _family_guidance(intro: str, names: tuple[str, ...], door: str) -> str:
 
 def _suggestions_guidance() -> str:
     """Policy-suggestions guidance derived from TOOL_SPECS."""
-    from crawlutron.mcp.registry import TOOL_SPECS
+    from crawlutron_mcp.registry import TOOL_SPECS
 
     return _family_guidance(
         "Self-tuning policy review is available over MCP too (policy_suggestions proposes candidate "
@@ -65,7 +65,7 @@ def _suggestions_guidance() -> str:
 
 def _job_guidance() -> str:
     """Job-tool guidance derived from TOOL_SPECS."""
-    from crawlutron.mcp.registry import TOOL_SPECS
+    from crawlutron_mcp.registry import TOOL_SPECS
 
     return _family_guidance(
         "Whole-site crawl jobs are managed over MCP too (create_job starts one, same admission and "
@@ -77,7 +77,7 @@ def _job_guidance() -> str:
 
 def _watch_guidance() -> str:
     """Watch-tool guidance derived from TOOL_SPECS; webhook delivery is REST-only."""
-    from crawlutron.mcp.registry import TOOL_SPECS
+    from crawlutron_mcp.registry import TOOL_SPECS
 
     return _family_guidance(
         "URL watches are managed over MCP too (register_watch starts a poll-only revalidation watch, "

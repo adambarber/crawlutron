@@ -357,7 +357,7 @@ async def test_host_policy_entry_point_refuses(entry, monkeypatch, tmp_path):
 
 
 def test_host_policy_probes_cover_the_full_api_entry_table():
-    api_entries = {name for name in _table_entries() if not name.startswith("packages/core/crawlutron/mcp/")}
+    api_entries = {name for name in _table_entries() if not name.startswith("packages/mcp/crawlutron_mcp/")}
     assert set(_PROBES) == api_entries
 
 

@@ -18,7 +18,7 @@ _DECISION_NAMES = frozenset(
         "validate_webhook_url_async",
     }
 )
-_MODULE_PREFIXES = ("crawlutron_rest.api.", "crawlutron.mcp.", "crawlutron.service.")
+_MODULE_PREFIXES = ("crawlutron_rest.api.", "crawlutron_mcp.", "crawlutron.service.")
 
 
 def _call_edges(

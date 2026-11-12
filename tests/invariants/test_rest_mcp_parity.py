@@ -6,9 +6,9 @@ and health routers are not walk sources and the app is never constructed here.
 
 from __future__ import annotations
 
+from crawlutron_mcp.registry import TOOL_SPECS
 from fastapi.routing import APIRoute
 
-from crawlutron.mcp.registry import TOOL_SPECS
 from crawlutron_rest.api.router_registry import ROUTER_MODULES
 from tests.invariants._parity_rows import (
     ACCIDENT_ROW_COUNT,

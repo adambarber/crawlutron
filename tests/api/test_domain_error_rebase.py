@@ -218,7 +218,8 @@ def test_domain_error_handler_details_none_becomes_empty_object():
 
 
 def test_mcp_tool_result_catches_domain_error():
-    from crawlutron.mcp.handlers import tool_result
+    from crawlutron_mcp.handlers import tool_result
+
     from crawlutron.service.errors import DomainError
 
     async def _raises():

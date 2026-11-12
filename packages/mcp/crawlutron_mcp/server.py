@@ -12,7 +12,8 @@ from urllib.parse import urlsplit
 
 from pydantic import ValidationError
 
-from crawlutron.mcp.constants import (
+from crawlutron.models.json_value import JsonValue
+from crawlutron_mcp.constants import (
     CACHE_SCOPE,
     DEFAULT_TTL_MS,
     DISCOVER_TTL_MS,
@@ -25,14 +26,13 @@ from crawlutron.mcp.constants import (
     SUPPORTED_PROTOCOL_VERSIONS,
     UNSUPPORTED_PROTOCOL_VERSION,
 )
-from crawlutron.mcp.protocol import (
+from crawlutron_mcp.protocol import (
     ProtocolValidationError,
     decode_header_value,
     error_response,
     result_response,
     validate_meta,
 )
-from crawlutron.models.json_value import JsonValue
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +79,7 @@ def discover_result() -> dict[str, JsonValue]:
 
 
 def tools_list_result() -> dict[str, JsonValue]:
-    from crawlutron.mcp.registry import TOOL_SPECS
+    from crawlutron_mcp.registry import TOOL_SPECS
 
     tools: list[dict[str, JsonValue]] = []
     for spec in TOOL_SPECS:
@@ -186,8 +186,8 @@ async def call_tool(
     **door,
 ) -> JsonValue:
     """Invoke one declared tool; the door environment forwards to dispatch."""
-    from crawlutron.mcp.handlers import dispatch, validation_message
-    from crawlutron.mcp.registry import TOOLS_BY_NAME
+    from crawlutron_mcp.handlers import dispatch, validation_message
+    from crawlutron_mcp.registry import TOOLS_BY_NAME
 
     params = body
 

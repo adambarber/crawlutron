@@ -7,11 +7,11 @@ still-running job is a STRUCTURED NON-ERROR result (status: running), not an is_
 from __future__ import annotations
 
 import pytest
+from crawlutron_mcp.handlers import ToolResult
+from crawlutron_mcp.handlers import dispatch as tool_dispatch
+from crawlutron_mcp.registry import TOOLS_BY_NAME
 from typing_extensions import TypedDict
 
-from crawlutron.mcp.handlers import ToolResult
-from crawlutron.mcp.handlers import dispatch as tool_dispatch
-from crawlutron.mcp.registry import TOOLS_BY_NAME
 from crawlutron.models.crawl_result_request import CrawlResultRequest
 from crawlutron.models.json_value import JsonValue
 from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
@@ -231,8 +231,9 @@ class TestNoRevalidationOnTheReplayPath:
 
 class TestDiscoveryAndParity:
     def test_capabilities_name_the_full_mcp_tool_set(self):
+        from crawlutron_mcp.registry import TOOL_SPECS
+
         from crawlutron.config.settings import CrawlerSettings
-        from crawlutron.mcp.registry import TOOL_SPECS
         from crawlutron_rest.discovery.capabilities import capabilities_payload
 
         mcp = capabilities_payload(CrawlerSettings.from_mapping({}))["mcp"]
@@ -246,7 +247,7 @@ class TestDiscoveryAndParity:
         assert "read_crawl_trace" in guidance
 
     def test_tool_descriptions_cross_reference_polling(self):
-        from crawlutron.mcp.registry import TOOLS_BY_NAME
+        from crawlutron_mcp.registry import TOOLS_BY_NAME
 
         assert "read_crawl_result" in TOOLS_BY_NAME["crawl"].description
         assert "read_crawl_result" in TOOLS_BY_NAME["read_crawl_result"].description
