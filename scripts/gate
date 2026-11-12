@@ -10,12 +10,18 @@ if [ "$#" -eq 0 ]; then
     exit 1
 fi
 
-# Dual layout, service-first then repo-root; the nested candidate never exists
-# here (docs/gate-helper.md). #487: derive the root from THIS script's own
+# Dual layout, service-first then repo-root; iterate docker/*/ for a nested service
+# above this helper, then fall back to the immediate parent (#487 derive root from $0).
 self_dir=$(cd "$(dirname "$0")" && pwd -P)  # location, not the caller's CWD: git rev-parse --show-toplevel answers from the caller, so a gate invoked from outside any repository died with exit 128 before its command. This script lives in the service it gates, so the service root is its grandparent.
-if [ -d "$self_dir/../docker/browser-crawler" ]; then
-    service_root=$(cd "$self_dir/../docker/browser-crawler" && pwd -P)
-else
+service_root=""
+for image_dir in "$self_dir"/../docker/*/; do
+    [ -d "$image_dir" ] || continue
+    if [ -x "$image_dir/scripts/gate" ]; then
+        service_root=$(cd "$image_dir" && pwd -P)
+        break
+    fi
+done
+if [ -z "$service_root" ]; then
     service_root=$(cd "$self_dir/.." && pwd -P)
 fi
 cd "$service_root"

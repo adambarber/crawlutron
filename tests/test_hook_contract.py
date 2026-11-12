@@ -11,6 +11,7 @@ from pathlib import Path
 from scripts.executables import GIT, require_executable
 from tests._ci_contract import (
     CONFIG_PATH,
+    DOCKER_IMAGES,
     ENFORCEMENT_INPUTS,
     ENFORCEMENT_TRIGGER_PATTERN,
     GATE_ENTRY_END,
@@ -105,8 +106,39 @@ def test_every_gate_fires_on_every_enforcement_input() -> None:
         for name in ENFORCEMENT_INPUTS:
             # Both layouts: nested under the parent repo, and at the repository root once the service is
             # extracted.
-            for candidate in (f"docker/browser-crawler/{name}", name):
-                assert re.search(pattern, candidate), f"hook {hook_id} does not fire on {candidate}"
+            for image in DOCKER_IMAGES:
+                for candidate in (f"{image}/{name}", name):
+                    assert re.search(pattern, candidate), f"hook {hook_id} does not fire on {candidate}"
+
+
+def test_every_docker_image_is_enforced_by_the_trigger() -> None:
+    """A new docker/<name>/ image must match the enforcement trigger.
+
+    The pattern is built from DOCKER_IMAGES, so a sibling image added as a
+    docker/*/ directory is enumerated here before it can be skipped.
+    """
+    for image_dir in (SERVICE_ROOT / "docker").glob("*/"):
+        if not image_dir.is_dir():
+            continue
+        image = f"docker/{image_dir.name}"
+        assert re.search(ENFORCEMENT_TRIGGER_PATTERN, f"{image}/x"), (
+            f"{image} files are not matched by the enforcement trigger"
+        )
+
+
+def test_the_canonical_docker_image_is_always_enumerated() -> None:
+    """The both-layout hooks and tests need the canonical image even when no
+    live docker/ tree exists, so it must survive an empty glob.
+    """
+    assert "docker/browser-crawler" in DOCKER_IMAGES
+
+
+def test_a_non_image_docker_path_is_not_enforced() -> None:
+    """A docker/ entry that is not an image layout (e.g. docker/README) is not
+    a service source and must stay outside the enforcement surface.
+    """
+    assert "docker/README" not in DOCKER_IMAGES
+    assert not re.search(ENFORCEMENT_TRIGGER_PATTERN, "docker/README")
 
 
 def test_the_workflow_is_written_for_the_repository_root_it_will_run_from() -> None:

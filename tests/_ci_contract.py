@@ -53,9 +53,22 @@ ENFORCEMENT_INPUTS = (
     ".github/workflows/ci.yml",
 )
 
-# The single trigger pattern every hook shares, held as one YAML anchor (`*service_trigger`) in
-# .pre-commit-config.yaml so the copies cannot drift.
-ENFORCEMENT_TRIGGER_PATTERN = r"^(docker/browser-crawler/|(?!docker/))"
+# Images the service can live under: the fixed canonical image plus live docker/*/ siblings. The
+# canonical is a product constant the both-layout tests require; the glob is the derived part.
+DOCKER_IMAGES = (
+    "docker/browser-crawler",
+    *(
+        f"docker/{path.name}"
+        for path in sorted((SERVICE_ROOT / "docker").glob("*/"))
+        if path.is_dir() and f"docker/{path.name}" != "docker/browser-crawler"
+    ),
+)
+
+# The single trigger pattern every hook shares, held as one YAML anchor (*service_trigger). re.escape
+# over-escapes `-` (literal in an alternation); stripping it keeps the canonical bytes the config pins.
+ENFORCEMENT_TRIGGER_PATTERN = (
+    r"^(" + "|".join(re.escape(image).replace(r"\-", "-") + "/" for image in DOCKER_IMAGES) + r"|(?!docker/))"
+)
 
 # The committed gate entry point every hook resolves to, and the shape of the entry that resolves it.
 GATE_HELPER = SERVICE_ROOT / "scripts" / "gate"
@@ -64,14 +77,21 @@ GATE_HELPER_PATH = "scripts/gate"
 
 GATE_ENTRY_END = "' gate "
 
+# The candidate layout directories the gate prologue probes: one toplevel-joined image per candidate,
+# plus the repository root -- the dual-layout resolution both hooks rely on.
+_DOCKER_GATE_CANDIDATES = (
+    " ".join(f'"$(git rev-parse --show-toplevel)/{image}"' for image in DOCKER_IMAGES)
+    + ' "$(git rev-parse --show-toplevel)"'
+)
+
 # The one-line `bash -c` prologue every entry must open with, pinned byte for byte so the five copies cannot
 # drift.
 GATE_ENTRY_PROLOGUE = (
     "bash -c 'for d in "
-    '"$(git rev-parse --show-toplevel)/docker/browser-crawler" '
-    '"$(git rev-parse --show-toplevel)"; '
-    f'do [ -x "$d/{GATE_HELPER_PATH}" ] && exec bash "$d/{GATE_HELPER_PATH}" "$@"; '
-    f'done; echo "{GATE_HELPER_PATH} not found in either layout" >&2; exit 1\''
+    + _DOCKER_GATE_CANDIDATES
+    + "; "
+    + f'do [ -x "$d/{GATE_HELPER_PATH}" ] && exec bash "$d/{GATE_HELPER_PATH}" "$@"; '
+    + f'done; echo "{GATE_HELPER_PATH} not found in either layout" >&2; exit 1\''
 )
 
 
