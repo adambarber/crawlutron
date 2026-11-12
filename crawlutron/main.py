@@ -8,8 +8,6 @@ from collections.abc import Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager, suppress
 from typing import TYPE_CHECKING
 
-from crawlutron.admission.policy import PolicyTier
-from crawlutron.config.env import get_env_float, get_env_int
 from crawlutron.models.address_class import is_loopback_bind
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.runtime.app_module_ref import set_module_app_provider
@@ -17,11 +15,7 @@ from crawlutron.runtime.pressure_sizing import default_executor_workers
 from crawlutron.vocabulary.identity import SERVICE_ID, SERVICE_VERSION
 
 from .config.settings import CrawlerSettings
-from .storage.admin_audit_store import AdminAuditStore
-from .storage.caller_key_store import CallerKeyStore
-from .storage.job_store import JobStore
-from .storage.result_store import CrawlResultStore, CrawlSpillStore
-from .storage.watch_store import WatchStore
+from .service.store_bootstrap import build_stores
 from .transport.browser_pool import (
     close_browser_pool,
     initialize_browser_pool,
@@ -74,22 +68,14 @@ def create_app(settings: CrawlerSettings | None = None) -> FastAPI:
     if FastAPI is None:
         raise RuntimeError("create_app requires FastAPI, which is not importable here")
     settings = settings or CrawlerSettings.from_mapping()
-    database_path = settings.cache_dir + "/crawler.db"
-    job_store = JobStore(
-        database_path,
-        policy=HostPolicy.from_settings(settings),
-        tier=PolicyTier.from_settings(settings),
-    )
-    result_store = CrawlResultStore(
-        database_path,
-        ttl_seconds=get_env_float("CRAWLUTRON_RESULT_TTL_SECONDS", 3600.0),
-        max_entries=get_env_int("CRAWLUTRON_RESULT_MAX_ENTRIES", 1000),
-    )
-    spill_store = CrawlSpillStore(database_path)
-    watch_store = WatchStore(database_path)
-    caller_key_store = CallerKeyStore(database_path)
-    audit_store = AdminAuditStore(database_path)
-    caller_key_store.attach_audit(audit_store)
+    stores = build_stores(settings)
+    job_store = stores.job_store
+    result_store = stores.result_store
+    spill_store = stores.spill_store
+    watch_store = stores.watch_store
+    caller_key_store = stores.caller_key_store
+    audit_store = stores.audit_store
+    database_path = str(stores.job_store.db_path)
     _configure_logging(settings)
 
     @asynccontextmanager

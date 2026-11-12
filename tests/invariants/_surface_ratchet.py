@@ -102,6 +102,9 @@ DECLARED_SURFACE_RATCHET = {
     # from the result store's ttl_seconds, not a second literal.
     "crawlutron/service/spill_sweep.py": (4, 2),
     "crawlutron/service/store_shutdown.py": (1, 1),
+    # #892: the store bootstrap factory + its frozen typed container; the former
+    # inline create_app assembly is the library-mode entrance now.
+    "crawlutron/service/store_bootstrap.py": (2, 1),
     # #849: the core moved to service/caller_auth; Request plumbing stays api.
     "crawlutron/api/caller_auth.py": (11, 9),
     "crawlutron/service/caller_concurrency.py": (1, 1),
