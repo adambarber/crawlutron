@@ -163,17 +163,7 @@ class CallerKeyStore(CoordinationStore):
         parsed = _secret_id_and_body(secret)
         key_id = parsed[0] if parsed is not None else None
         body = parsed[1] if parsed is not None else ""
-        with self._lock:
-            row = (
-                self._conn.execute(
-                    "SELECT key_id, label, key_hash, max_pages, max_concurrency,"
-                    " created_at, previous_hash, previous_rotated_at"
-                    " FROM caller_keys WHERE key_id = ?",
-                    (key_id,),
-                ).fetchone()
-                if key_id is not None
-                else None
-            )
+        row = self._reread_row(key_id)
         # Current first: one PBKDF2; on a miss, ``previous`` inside the grace
         # window gets one more -- at most two derivations, body-independent timing.
         stored = row[2] if row is not None else _DUMMY_VERIFIER
