@@ -29,4 +29,11 @@ if [ ! -x .venv/bin/python ]; then
     exit 1
 fi
 
+# The importable tree spans the uv workspace members (packages/core, rest, …); the
+# shared venv's .pth can be stale (PYTHONPATH wins). Prepend every existing member root.
+for root in "$service_root"/packages/*/; do
+    [ -d "$root" ] || continue
+    export PYTHONPATH="${root%/}${PYTHONPATH:+:$PYTHONPATH}"
+done
+
 exec "$@"
