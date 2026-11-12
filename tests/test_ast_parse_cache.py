@@ -1,32 +1,43 @@
-"""S6 contract: the AST parse cache persists source under .pytest_cache/. parsed() persists each module's
-source under .pytest_cache/ast_parse/, keyed on (path, mtime_ns, size, py_version), so repeat sessions
-reuse it instead of re-reading the source file. The tree is parsed once per session.
+"""S6 contract: parsed() shares one AST per (path, content) per session and re-parses on any content
+change -- even a rewrite that keeps size and mtime identical (the same-size-same-mtime stale hole).
 """
 
 import ast
+import os
 
-from tests._walk_primitives import REPO_ROOT, parsed
+from tests._walk_primitives import parsed
+from tests.invariants._clock_family import single_target_assigns
 
 
-def test_parsed_persists_source_under_pytest_cache(tmp_path) -> None:
-    """A parsed module's source is cached under .pytest_cache/ast_parse/."""
-    # Unique per run so a stale cache file from an earlier invocation never matches.
-    source = f'S6_PARSE_CACHE_PROBE = "{tmp_path}"\n'
-    path = tmp_path / "s6_parse_cache_probe.py"
-    path.write_text(source, encoding="utf-8")
+def _assigned_constant(tree: ast.Module, name: str) -> object:
+    """The value of the first top-level literal assignment to `name`."""
+    for target, node in single_target_assigns(tree):
+        if target == name and isinstance(node.value, ast.Constant):
+            return node.value.value
+    raise AssertionError(f"no literal assignment to {name} in parsed tree")
 
-    tree = parsed(path)
-    assert isinstance(tree, ast.Module)
-    targets = [
-        node.targets[0].id
-        for node in tree.body
-        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
-    ]
-    assert targets == ["S6_PARSE_CACHE_PROBE"]
 
-    cache_dir = REPO_ROOT / ".pytest_cache" / "ast_parse"
-    matches = [cf for cf in cache_dir.glob("*.src") if cf.read_text(encoding="utf-8") == source]
-    assert len(matches) == 1, f"expected exactly one cache file holding the source, found {len(matches)}"
+def test_parsed_returns_the_same_tree_object_on_repeat_reads(tmp_path) -> None:
+    """Repeat reads of unchanged content share one AST object."""
+    path = tmp_path / "share.py"
+    path.write_text("SHARED = 1\n", encoding="utf-8")
+    assert parsed(path) is parsed(path)
 
-    # The in-memory cache returns the same tree object on repeat reads.
-    assert parsed(path) is tree
+
+def test_same_size_same_mtime_rewrite_is_reparsed(tmp_path) -> None:
+    """A rewrite preserving both size and mtime is still re-parsed from fresh source.
+
+    Keying on (mtime_ns, size) cannot identify content; keying on the content digest can.
+    """
+    path = tmp_path / "rewrite.py"
+    path.write_text("BODY = 10\n", encoding="utf-8")  # ten bytes
+    stamp = path.stat()
+    assert _assigned_constant(parsed(path), "BODY") == 10
+
+    path.write_text("BODY = 20\n", encoding="utf-8")  # still ten bytes
+    os.utime(path, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    assert path.stat().st_size == stamp.st_size
+    assert path.stat().st_mtime_ns == stamp.st_mtime_ns
+
+    value = _assigned_constant(parsed(path), "BODY")
+    assert value == 20, f"stale source served after same-size-same-mtime rewrite: got {value}"
