@@ -11,7 +11,6 @@ import time
 from collections.abc import Awaitable, Callable
 
 from admission import Instant
-
 from crawlutron.models.json_value import JsonValue
 from crawlutron.runtime.pressure_sizing import ResourceGate
 from crawlutron.transport.content_cache import CONTENT_CACHE_MAX_TOTAL_BYTES, ContentCache

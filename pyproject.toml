@@ -194,7 +194,7 @@ ignore = [
 # is no longer at the repo root and ruff no longer auto-detects it as first-party.
 # Naming it keeps isort grouping the package and test trees where it always has,
 # rather than re-folded into the third-party block.
-known-first-party = ["crawlutron", "crawlutron_sdk", "tests", "scripts"]
+known-first-party = ["admission", "crawlutron", "crawlutron_sdk", "tests", "scripts"]
 # PLR0911 (too-many-returns) and PLR0913 (too-many-arguments) are deliberately
 # NOT selected, having been measured rather than assumed:
 #

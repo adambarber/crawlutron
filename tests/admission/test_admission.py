@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from admission import AdmissionRefused, Count, IdleReason, LaneId, Want
 
+from admission import AdmissionRefused, Count, IdleReason, LaneId, Want
 from crawlutron.health.readiness import ReadinessState
 from crawlutron.runtime.metrics import get_metrics
 from crawlutron.runtime.pressure_memory import MemoryStats, read_memory_stats

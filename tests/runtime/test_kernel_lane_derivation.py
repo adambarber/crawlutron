@@ -2,7 +2,6 @@
 
 from admission import Count, LaneId, LaneSpec, MinAll
 from admission.values import Bytes
-
 from crawlutron.runtime.pressure_sizing import kernel_lane_specs
 from tests.runtime._seam_sizing import seam_sizing_budget, seam_sizing_policy
 

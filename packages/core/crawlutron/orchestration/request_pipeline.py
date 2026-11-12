@@ -8,7 +8,6 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, cast
 
 from admission import AdmissionGate
-
 from crawlutron.admission.admission import normalize_sitemap_candidates
 from crawlutron.admission.admission_links import gather_robots_decisions
 from crawlutron.admission.policy import DiscoveryFlags, discovery_flags

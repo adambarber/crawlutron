@@ -291,18 +291,22 @@ def _print_logic_vs_preamble(results: SweepResults, args: argparse.Namespace) ->
 
 def _print_concentration(results: SweepResults) -> None:
     """Pairs per production file, over the whole range, worst first."""
+    production = set(gate.TREE_ROOTS["production"])
     floors = sorted(results)
     print("\nCONCENTRATION  (pairs per production file, over the whole range)")
     per_file: dict[str, int] = {}
     for floor in floors:
-        for duplicate in results[floor].get("crawlutron", []):
-            for side in ("firstFile", "secondFile"):
-                name = duplicate[side]["name"]
-                per_file[name] = per_file.get(name, 0) + 1
+        for root in results[floor]:
+            if root not in production:
+                continue
+            for duplicate in results[floor][root]:
+                for side in ("firstFile", "secondFile"):
+                    name = duplicate[side]["name"]
+                    per_file[f"{root}/{name}"] = per_file.get(f"{root}/{name}", 0) + 1
     for name, count in sorted(per_file.items(), key=lambda kv: -kv[1])[:15]:
         if count < 2:
             break
-        print(f"  {count:>4} pairs  crawlutron/{name}")
+        print(f"  {count:>4} pairs  {name}")
 
 
 def _print_remaining(results: SweepResults, args: argparse.Namespace) -> None:

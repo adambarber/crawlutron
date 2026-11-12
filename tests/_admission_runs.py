@@ -11,7 +11,6 @@ from contextlib import asynccontextmanager
 from typing import NamedTuple, cast
 
 from admission import AdmissionGate, Allocation, AllocationEntry, Count, LaneId, Want
-
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.crawl_task import CrawlTask
 from crawlutron.models.discovered_link import DiscoveredLink

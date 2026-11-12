@@ -9,8 +9,8 @@ from __future__ import annotations
 import dataclasses
 
 import pytest
-from admission.values import Ratio
 
+from admission.values import Ratio
 from tests.admission_kernel._doors import AdmissionRefused, Count, IdleReason, LaneId, Want
 from tests.admission_kernel._gate_factory import GateSpec, build_gate
 

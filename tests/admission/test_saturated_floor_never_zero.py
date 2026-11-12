@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from admission import Count, Want
 from admission.errors import AdmissionRefused
-
 from crawlutron.runtime.pressure_gates import ResourceGate
 from crawlutron.runtime.pressure_sizing import (
     TaskRamBudget,

@@ -6,9 +6,9 @@ starves parked waiters; a mismatch is corruption and must raise."""
 from __future__ import annotations
 
 import pytest
+
 from admission import LaneId
 from admission.values import Lease
-
 from tests.admission_kernel._doors import _finish, _hold_one
 from tests.admission_kernel._gate_factory import build_gate
 

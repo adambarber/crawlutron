@@ -5,8 +5,8 @@ against a 256-connection hardcode (#350)."""
 from __future__ import annotations
 
 import pytest
-from admission import AdmissionGate, LaneId, Want
 
+from admission import AdmissionGate, LaneId, Want
 from crawlutron.orchestration import request_pipeline
 from crawlutron.runtime.pressure_gates import ResourceGate
 from crawlutron.runtime.pressure_sizing import AdmissionPolicy, TaskRamBudget
