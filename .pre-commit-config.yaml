@@ -146,14 +146,17 @@ repos:
       #
       # The gate is ONE whole-repo invocation (every root handed to jscpd at
       # once), so a clone spanning two roots is seen by the same scan that sees a
-      # within-root pair. At floor 3/30 the whole repo measures ZERO pairs; the
+      # within-root pair. At floor 2/30 the whole repo measures ZERO pairs; the
       # floor is the single-invocation floor.
+      #
+      # min-LINES stays 2 (a 3-line floor would hide 2-line clones); the tightening
+      # axis is min-TOKENS, and the floor ratchets only down.
       - id: jscpd
-        name: jscpd single whole-repo invocation (3 lines / 30 tokens, zero tolerance)
+        name: jscpd single whole-repo invocation (2 lines / 30 tokens, zero tolerance)
         entry: >-
           bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
           .venv/bin/python -m scripts.gate_fanout jscpd -- .venv/bin/python -m scripts.jscpd_gate all
-          --min-lines 3
+          --min-lines 2
           --min-tokens 30
           --threshold 0
         language: system
