@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import time
 from collections.abc import Awaitable, Callable
 
 from crawlutron.runtime.cgroup_sense import read_int, read_text
+
+_logger = logging.getLogger(__name__)
 
 # Self-managed, no operator knob (mirrors crawlutron/runtime/pressure_memory.py): the gate
 # rides at TARGET and pauses at HARD against the cgroup quota it discovers.
@@ -57,6 +60,7 @@ class LoopLagProbe:
         self._clock = clock
         self._sleep = sleep
         self._lag = 0.0
+        self._faults = 0
         self._task: asyncio.Task | None = None
 
     def start(self) -> None:
@@ -77,22 +81,32 @@ class LoopLagProbe:
         self._task = None
 
     async def _run(self) -> None:
-        try:
-            while True:
-                t0 = self._clock()
-                await self._sleep(self._interval)
-                elapsed = self._clock() - t0
-                lag = max(0.0, elapsed - self._interval)
-                self._lag = self._lag * (1.0 - self._smoothing) + lag * self._smoothing
-        except asyncio.CancelledError:
-            return
-        except (RuntimeError, Exception):
-            # Loop closed or other failure: stop sampling, report zero lag.
-            self._lag = 0.0
-            return
+        while True:
+            try:
+                while True:
+                    t0 = self._clock()
+                    await self._sleep(self._interval)
+                    elapsed = self._clock() - t0
+                    lag = max(0.0, elapsed - self._interval)
+                    self._lag = self._lag * (1.0 - self._smoothing) + lag * self._smoothing
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                # A raising tick must never read as full health or kill the sensor:
+                # keep last-good lag, count the fault, let the next tick re-attempt.
+                self._faults += 1
+                if self._faults == 1:
+                    _logger.warning(
+                        "loop-lag probe tick raised; retaining last-good lag and retrying",
+                        exc_info=True,
+                    )
 
     def get(self) -> float:
         return self._lag
+
+    def faults(self) -> int:
+        """Raising ticks survived since the probe was constructed (never silent death)."""
+        return self._faults
 
     def factor(self) -> float:
         """Scale multiplier from current lag: 1.0 below ``ok``, 0.0 at/above ``hard``."""

@@ -8,6 +8,7 @@ import asyncio
 import pytest
 
 from crawlutron.runtime.pressure_sizing import LoopLagProbe
+from tests._clocks import await_until
 from tests._lag_scheduling import lag_clock, lagged_gate, scripted_sleep
 
 
@@ -68,5 +69,70 @@ async def test_probe_reports_the_overshoot_it_observed(monkeypatch, overshoot):
         for _ in range(20):
             await asyncio.sleep(0)
         assert probe.get() == pytest.approx(overshoot)
+    finally:
+        probe.stop()
+
+
+async def test_a_raising_tick_retains_last_good_lag_and_keeps_the_probe_alive():
+    """A sensor fault must never read as full health: the probe retains its last good
+    lag, counts the fault, and keeps sampling so no dead sensor emits a fake healthy 0.0.
+    """
+    interval = 0.05
+    sleep_calls = [0]
+    raised = [False]
+
+    async def raising_sleep(seconds):
+        sleep_calls[0] += 1
+        del seconds
+        if sleep_calls[0] == 2:
+            raised[0] = True
+            raise RuntimeError("event loop closed")
+        await asyncio.sleep(0)
+
+    probe = LoopLagProbe(
+        interval=interval,
+        smoothing=1.0,
+        clock=lag_clock(0.20, interval=interval),
+        sleep=raising_sleep,
+    )
+    probe.start()
+    try:
+        await await_until(lambda: raised[0], "the raising tick fires")
+        # Tick 1 established a genuine 0.20s overshoot; the fault must not reset it.
+        assert probe.get() == pytest.approx(0.20, abs=0.01)
+        assert probe.get() != 0.0
+        assert probe.factor() != 1.0
+    finally:
+        probe.stop()
+
+
+async def test_repeated_raising_ticks_surface_a_fault_count():
+    """The operator sees a struggling sensor, never a fake healthy zero: every raising
+    tick after the first still increments a readable counter while last-good lag holds.
+    """
+    sleep_calls = [0]
+
+    async def raising_sleep(seconds):
+        sleep_calls[0] += 1
+        del seconds
+        if 1 <= sleep_calls[0] <= 3:
+            raise RuntimeError("loop kept failing")
+        await asyncio.sleep(0)
+
+    probe = LoopLagProbe(
+        interval=0.05,
+        smoothing=1.0,
+        clock=lag_clock(0.20, interval=0.05),
+        sleep=raising_sleep,
+    )
+    probe.start()
+    try:
+        await await_until(lambda: probe.faults() == 3, "three raising ticks are counted")
+        assert probe.faults() == 3
+        # The probe survives the fault storm and keeps sampling: a later healthy
+        # tick lands and the last-good lag is now a real 0.20 measuring.
+        await await_until(
+            lambda: probe.get() == pytest.approx(0.20, abs=0.01), "a post-fault healthy tick lands"
+        )
     finally:
         probe.stop()
