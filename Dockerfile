@@ -175,6 +175,14 @@ COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
 # invalidate the browser download cache.
 COPY --from=camoufox-binary /camoufox-bundle /home/appuser/.cache/camoufox
 
+# Pre-fetch the fpgen fingerprint model into the venv so first launch is fully
+# offline. fpgen (a transitive dep of camoufox in uv.lock) downloads the model
+# DATA into <site-packages>/fpgen/data/ at first `import fpgen`; python -m fpgen
+# fetch --decompress populates it at build time. A --mount=type=cache is NOT
+# used on purpose: the data must be baked into this image layer (a buildx cache
+# mount is never persisted into the image), which is the whole requirement.
+RUN /app/.venv/bin/python -m fpgen fetch --decompress
+
 # Copy application code. Post-Wave-A the importable trees live under packages/ and
 # the root crawlutron_sdk/: all four must be present at /app to resolve the CMD's
 # `uvicorn crawlutron_rest.main:app` with PYTHONPATH=/app. The packages/core
