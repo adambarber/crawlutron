@@ -145,6 +145,17 @@ def _close_on_owning_loop(bound: asyncio.AbstractEventLoop, close: Callable[[], 
         bound.run_until_complete(close())
 
 
+def _abort_sockets_on_current_loop(bound: asyncio.AbstractEventLoop) -> None:
+    """Abort a client bound to the loop running a reset, dropping it loop-free.
+
+    The close cannot finish until that loop yields, which a synchronous reset
+    never does -- scheduling it would re-arm a tracked task (#880).
+    """
+    from crawlutron.transport.pooled_socket_abort import abort_transport_sockets
+
+    abort_transport_sockets((bound,))
+
+
 def _close_cross_loop(close: Callable[[], Awaitable[object]]) -> None:
     """Close when the client has no open owning loop.
 
@@ -162,12 +173,16 @@ def _close_cross_loop(close: Callable[[], Awaitable[object]]) -> None:
 
 
 def discard_if_unowned_loop(
-    close: Callable[[], Awaitable[object]], slot: str, namespace: dict[str, PooledClient | None]
+    close: Callable[[], Awaitable[object]],
+    slot: str,
+    namespace: dict[str, PooledClient | None],
+    *,
+    reset: bool = False,
 ) -> None:
     """Release ``slot``'s object, closing it on its owning loop when it has one.
 
     ``namespace`` holds the pooled object; one helper serves every pool module.
-    A None or closed bound loop falls to the cross-loop branches.
+    With ``reset``, abort a client bound to the running loop, never schedule.
     """
     client = namespace[slot]
     if client is None:
@@ -182,7 +197,10 @@ def discard_if_unowned_loop(
             except RuntimeError:
                 mine = None
             if mine is bound:
-                _schedule_on_owning_loop(bound, client)
+                if reset:
+                    _abort_sockets_on_current_loop(bound)
+                else:
+                    _schedule_on_owning_loop(bound, client)
             else:
                 _close_on_owning_loop(bound, close)
         else:
