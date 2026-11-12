@@ -189,7 +189,7 @@ def _dispatch_chain(app) -> tuple[str, ...]:
 def test_harness_builder_mounts_the_service_middleware_stack():
     from fastapi import FastAPI
 
-    from crawlutron.api.crawl_router import router as crawl_router
+    from crawlutron_rest.api.crawl_router import router as crawl_router
     from tests._app_factory import service_app
     from tests._app_harnesses import harness_app
 

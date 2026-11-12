@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from crawlutron.api.router_identity import router_module
-from crawlutron.api.router_registry import ROUTER_MODULES
+from crawlutron_rest.api.router_identity import router_module
+from crawlutron_rest.api.router_registry import ROUTER_MODULES
 from tests._app_factory import service_app
 
 if TYPE_CHECKING:
@@ -19,11 +19,11 @@ if TYPE_CHECKING:
 EXPECTED_DIRECT_MOUNTS: tuple[type[APIRouter], ...] = ()
 
 _DIRECT_FACTORY_ROUTERS = {
-    "crawlutron.discovery.agent_hints",
-    "crawlutron.discovery.capabilities",
-    "crawlutron.discovery.well_known",
+    "crawlutron_rest.discovery.agent_hints",
+    "crawlutron_rest.discovery.capabilities",
+    "crawlutron_rest.discovery.well_known",
     "crawlutron.health.readiness",
-    "crawlutron.api.mcp_router",
+    "crawlutron_rest.api.mcp_router",
 }
 
 #: Framework-owned routes (FastAPI's default docs/metrics mounts); not ours to gate.

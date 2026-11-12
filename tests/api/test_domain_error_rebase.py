@@ -124,8 +124,8 @@ async def test_an_auth_refusal_carries_the_401_triplet():
 
     from starlette.requests import Request
 
-    from crawlutron.api import caller_auth
     from crawlutron.service.errors import AuthRefusal
+    from crawlutron_rest.api import caller_auth
 
     scope = {
         "type": "http",
@@ -141,9 +141,9 @@ async def test_an_auth_refusal_carries_the_401_triplet():
 
 def test_the_cookie_namespace_refusal_is_its_own_code():
     """The anonymous cookie-namespace refusal is its OWN code, never the validation family."""
-    from crawlutron.api import caller_auth
     from crawlutron.models.caller_identity import CallerIdentity
     from crawlutron.service.errors import CookieNamespaceRefusal
+    from crawlutron_rest.api import caller_auth
 
     anon = CallerIdentity()
     with pytest.raises(CookieNamespaceRefusal) as ns:
@@ -160,8 +160,8 @@ def test_widened_is_quota_refusal_classifies_the_quota_refusal_class():
 
 
 def test_browser_pool_unavailable_is_a_domain_error_with_the_canonical_message():
-    from crawlutron.api.exceptions import BROWSER_POOL_MESSAGE, browser_pool_unavailable
     from crawlutron.service.errors import BrowserPoolUnavailable
+    from crawlutron_rest.api.exceptions import BROWSER_POOL_MESSAGE, browser_pool_unavailable
 
     default = browser_pool_unavailable()
     assert isinstance(default, BrowserPoolUnavailable)
@@ -189,14 +189,18 @@ def test_search_refusals_are_domain_errors():
     )
 
 
-def test_domain_error_handler_maps_to_the_error_envelope():
+def _handler_response(handler, exc):
     from starlette.requests import Request
 
-    from crawlutron.api.exceptions import domain_error_handler
-    from crawlutron.service.errors import DomainError
-
     request = Request({"type": "http", "method": "GET", "path": "/", "headers": [], "query_string": b""})
-    response = asyncio.run(domain_error_handler(request, DomainError(409, "invalid_state", "no")))
+    return asyncio.run(handler(request, exc))
+
+
+def test_domain_error_handler_maps_to_the_error_envelope():
+    from crawlutron.service.errors import DomainError
+    from crawlutron_rest.api.exceptions import domain_error_handler
+
+    response = _handler_response(domain_error_handler, DomainError(409, "invalid_state", "no"))
     assert response.status_code == 409
     import json
 
@@ -204,13 +208,10 @@ def test_domain_error_handler_maps_to_the_error_envelope():
 
 
 def test_domain_error_handler_details_none_becomes_empty_object():
-    from starlette.requests import Request
-
-    from crawlutron.api.exceptions import domain_error_handler
     from crawlutron.service.errors import ValidationRefusal
+    from crawlutron_rest.api.exceptions import domain_error_handler
 
-    request = Request({"type": "http", "method": "GET", "path": "/", "headers": [], "query_string": b""})
-    response = asyncio.run(domain_error_handler(request, ValidationRefusal("c", "m", None)))
+    response = _handler_response(domain_error_handler, ValidationRefusal("c", "m", None))
     import json
 
     assert json.loads(bytes(response.body))["details"] == {}
@@ -230,9 +231,9 @@ def test_mcp_tool_result_catches_domain_error():
 
 def test_quota_refusal_across_the_sweep_predicate_covers_every_site():
     """The census's quota raise sites are check_page_quota + check_concurrency_quota."""
-    from crawlutron.api import caller_auth
     from crawlutron.models.caller_identity import CallerIdentity
     from crawlutron.service.errors import QuotaRefusal, is_quota_refusal
+    from crawlutron_rest.api import caller_auth
 
     pages = CallerIdentity(caller_id="k", authenticated=True, max_pages=5)
     conc = CallerIdentity(caller_id="k", authenticated=True, max_concurrency=2)

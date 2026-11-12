@@ -21,8 +21,8 @@ async def test_rest_create_refuses_when_the_tracker_holds_the_callers_slot(tmp_p
 
     The core's non-divergence promise is cross-door: the REST create must see
     the same concurrency register the sync crawl reserved against."""
-    from crawlutron.api.caller_auth import get_caller_identity, identity_for_key
-    from crawlutron.api.jobs_router import router as jobs_router
+    from crawlutron_rest.api.caller_auth import get_caller_identity, identity_for_key
+    from crawlutron_rest.api.jobs_router import router as jobs_router
 
     blocker, entered, released = block_sync_crawl(monkeypatch)
     async with quota_client(tmp_path) as (client, store, results, keys):

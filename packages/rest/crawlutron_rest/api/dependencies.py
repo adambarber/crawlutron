@@ -11,7 +11,6 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 
-from crawlutron.api.caller_auth import Tracking, get_caller_identity, get_keys_caller
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.service.caller_auth import CallerQuotaAdmission
@@ -22,6 +21,7 @@ from crawlutron.storage.caller_key_store import CallerKeyStore
 from crawlutron.storage.job_store import JobStore
 from crawlutron.storage.result_store import CrawlResultStore, CrawlSpillStore
 from crawlutron.storage.watch_store import WatchStore
+from crawlutron_rest.api.caller_auth import Tracking, get_caller_identity, get_keys_caller
 
 
 def get_settings(request: Request) -> CrawlerSettings:

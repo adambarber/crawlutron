@@ -5,13 +5,13 @@ and clients key error handling on ``code`` -- a free-text code is unenumerable.
 
 import pytest
 
-from crawlutron.api.caller_auth import Tracking
-from crawlutron.api.identity_router import render as render_door
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.render_request import RenderRequest
 from crawlutron.service.caller_auth import CALLER_QUOTA_ADMISSION
 from crawlutron.service.errors import ValidationRefusal
+from crawlutron_rest.api.caller_auth import Tracking
+from crawlutron_rest.api.identity_router import render as render_door
 from tests._browser_doubles import FakeBrowserPool, owned_browser_pool
 
 

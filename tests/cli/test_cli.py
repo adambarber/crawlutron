@@ -15,7 +15,7 @@ from pathlib import Path
 
 import httpx
 
-from crawlutron.cli.__main__ import (
+from crawlutron_rest.cli.__main__ import (
     EXIT_PARTIAL,
     EXIT_SERVER_OR_TRANSPORT,
     EXIT_SIGINT,
@@ -23,8 +23,8 @@ from crawlutron.cli.__main__ import (
     EXIT_USAGE,
     run_crawl,
 )
-from crawlutron.cli.client import CrawlClient
-from crawlutron.cli.docker import run_up
+from crawlutron_rest.cli.client import CrawlClient
+from crawlutron_rest.cli.docker import run_up
 
 SERVICE_BASE = "http://service.example"
 DEFAULT_URL = "http://127.0.0.1/page"
@@ -106,9 +106,9 @@ def _run(capture: list[httpx.Request], argv: list[str], api_key: str | None = No
 
 def test_cli_package_has_no_admission_policy_or_ssrf_imports():
     """Contract pin: the CLI package imports no admission/SSRF/policy validation internals."""
-    import crawlutron.cli
+    import crawlutron_rest.cli
 
-    package = os.path.dirname(crawlutron.cli.__file__)
+    package = os.path.dirname(crawlutron_rest.cli.__file__)
     forbidden = (
         "crawlutron.admission",
         "crawlutron.models.host_policy",
@@ -377,13 +377,13 @@ def test_trace_prints_trace_after_crawl(capsys):
 
 
 def test_main_with_no_args_returns_usage():
-    from crawlutron.cli.__main__ import main
+    from crawlutron_rest.cli.__main__ import main
 
     assert main([]) == EXIT_USAGE
 
 
 def test_main_help_returns_zero():
-    from crawlutron.cli.__main__ import main
+    from crawlutron_rest.cli.__main__ import main
 
     assert main(["--help"]) == EXIT_SUCCESS
 
@@ -413,7 +413,7 @@ def test_run_up_image_present_starts_container_and_waits_for_health():
 
 
 def test_run_up_missing_image_without_yes_returns_usage(monkeypatch):
-    monkeypatch.setattr("crawlutron.cli.docker.sys.stdin", io.StringIO("n\n"))
+    monkeypatch.setattr("crawlutron_rest.cli.docker.sys.stdin", io.StringIO("n\n"))
     run, calls = _docker_run_script(image_present=False)
     code = _up(run, ["--image", "packages/core/crawlutron/crawlutron", "--tag", "1.2.3"])
     assert code == EXIT_USAGE

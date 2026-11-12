@@ -41,7 +41,7 @@ Rules that bite (from memory #4666 and the previous failed pass):
 | File | Position | Move |
 |---|---|---|
 | `packages/core/crawlutron/models/error_response.py` | `ErrorEnvelope` (new TypedDict) | record |
-| `packages/core/crawlutron/api/exceptions.py:18,32,52` | `error_envelope`/`error_envelope_from_detail`/`http_error` | return `ErrorEnvelope`; `details` → `JsonValue`; guarded `cast` at pydantic validation |
+| `packages/rest/crawlutron_rest/api/exceptions.py:18,32,52` | `error_envelope`/`error_envelope_from_detail`/`http_error` | return `ErrorEnvelope`; `details` → `JsonValue`; guarded `cast` at pydantic validation |
 | `packages/core/crawlutron/models/discovery_response.py` | `DiscoveryPayload` (new TypedDict) | record |
 | `packages/core/crawlutron/discovery/well_known.py:11,62` | `discovery_payload`/handler | return `DiscoveryPayload` seed identity keys explicitly |
 
@@ -72,7 +72,7 @@ or holds forces an edit there. Every module below is marked **doable now** or
 ### app/admission — mixed
 - `payload_helpers.py:27,58,90` (3): the admission wire payload (`urls`/`url`/
   `policy`) is the textbook record the task named. **Blocked**: it is threaded
-  through `packages/core/crawlutron/api/crawl_endpoint.py:115` (forbidden). Retype the helper params to
+  through `packages/rest/crawlutron_rest/api/crawl_endpoint.py:115` (forbidden). Retype the helper params to
   `AdmissionWire` TypedDict only after the parallel agent lands, else mypy breaks
   crawl_endpoint.
 - `policy.py:159-342` (13): the policy repair machinery operates on arbitrary
@@ -124,7 +124,7 @@ or holds forces an edit there. Every module below is marked **doable now** or
 - `classify.py:147,178` — forbidden.
 - `output_formats.py:52,75,136` (3): `serialize_results`/`_to_markdown`/`_to_csv`
   read the unified result by key (`final_url`,`status`,...) → a `CrawlResultWire`
-  TypedDict. **Blocked**: sole caller is `packages/core/crawlutron/api/crawl_endpoint.py:92` (forbidden).
+  TypedDict. **Blocked**: sole caller is `packages/rest/crawlutron_rest/api/crawl_endpoint.py:92` (forbidden).
 - `trees.py:121-208` (6), `discovery.py:21,37,89` (3), `llm_format.py:105`,
   `document_text.py`/`documents.py`: DOM/tree node records; the list members are
   output records → TypedDicts. Moderate, check forbiddden consumers.
@@ -150,7 +150,7 @@ or holds forces an edit there. Every module below is marked **doable now** or
 ### app/storage
 - `result_store.py:45,67,100,104` (4): `put`/`get`/`aput`/`aget` genuinely
   pass-through arbitrary stored JSON (`json.dumps`/`json.loads`) → **JsonValue**.
-  **Blocked**: `aget` return is key-read by `packages/core/crawlutron/api/crawl_endpoint.py:179`
+  **Blocked**: `aget` return is key-read by `packages/rest/crawlutron_rest/api/crawl_endpoint.py:179`
   (forbidden) and `aput` is fed by `crawl_endpoint.py:317`; retyping to JsonValue
   breaks those without narrowing edits in the forbidden file.
 - `job_store_state.py` (5) — forbidden.

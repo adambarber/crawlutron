@@ -13,9 +13,9 @@ from pathlib import Path
 import pytest
 from fastapi.routing import APIRoute
 
-import crawlutron.api.route_layer as _route_layer_module
-from crawlutron.api.route_layer import ANONYMOUS_METERED, LAYER_EXEMPT_RATCHET, ExemptRow
-from crawlutron.api.router_registry import ROUTER_MODULES
+import crawlutron_rest.api.route_layer as _route_layer_module
+from crawlutron_rest.api.route_layer import ANONYMOUS_METERED, LAYER_EXEMPT_RATCHET, ExemptRow
+from crawlutron_rest.api.router_registry import ROUTER_MODULES
 from tests._app_factory import fresh_app
 from tests._async_harnesses import serve
 from tests.invariants.test_route_layer import _offender_module
@@ -23,7 +23,7 @@ from tests.invariants.test_route_layer import _offender_module
 
 def _guarded_keys() -> set[tuple[str, str]]:
     """The (method, path) pairs the layer guard protects, read off the routers."""
-    from crawlutron.api.route_layer import LAYER_GUARDS
+    from crawlutron_rest.api.route_layer import LAYER_GUARDS
 
     keys: set[tuple[str, str]] = set()
     for router in ROUTER_MODULES:
@@ -56,13 +56,18 @@ def _served_routes(*, include_foreign: bool = False) -> set[tuple[str, str]]:
 
 def _walk_served(visit: Callable[[object], None], *, include_foreign: bool = False) -> None:
     """Depth-first over the real app's production routes. Test-added routes are pollution, not surface: only
-    endpoints whose code lives inside the crawlutron PACKAGE count -- a Path comparison, not a
+    endpoints whose code lives inside a crawlutron PACKAGE count -- a Path comparison, not a
     checkout-path substring; ``include_foreign`` adds framework-owned routes for existence checks only.
     """
     import crawlutron
-
-    package_root = Path(crawlutron.__file__).resolve().parent
+    import crawlutron_rest
     from tests._app_factory import service_app
+
+    ours_roots: tuple[Path, ...] = ()
+    for pkg in (crawlutron, crawlutron_rest):
+        this_file = pkg.__file__
+        if this_file is not None:
+            ours_roots = (*ours_roots, Path(this_file).resolve().parent)
 
     app = service_app()
     assert app is not None
@@ -77,7 +82,7 @@ def _walk_served(visit: Callable[[object], None], *, include_foreign: bool = Fal
             code = getattr(endpoint, "__code__", None)
             if code is None:
                 continue
-            ours = package_root in Path(code.co_filename).resolve().parents
+            ours = any(root in Path(code.co_filename).resolve().parents for root in ours_roots)
             if ours or include_foreign:
                 visit(route)
 

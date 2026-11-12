@@ -9,7 +9,7 @@ import json
 
 from starlette.requests import Request
 
-from crawlutron.api.middleware import limit_request_body
+from crawlutron_rest.api.middleware import limit_request_body
 from tests._asgi_request import pass_through, refuse_appends_to, refuse_never, two_chunk_request
 
 CAP = 100

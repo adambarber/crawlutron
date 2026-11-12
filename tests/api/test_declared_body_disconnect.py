@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from crawlutron.api.middleware import limit_request_body
+from crawlutron_rest.api.middleware import limit_request_body
 from tests._asgi_request import body_reader_call_next, make_request
 
 

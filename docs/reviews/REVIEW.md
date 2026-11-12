@@ -18,7 +18,7 @@ as written.
 | `render()` closing the driver on a page exception | **RESOLVED** | `BrowserRenderer._render_with_page_unlocked` wraps the render body in `try/finally` with `release_page(...)` (bounded best-effort cookie harvest → `safe_close_page` → `note_render` for ALL attempts), so a page exception releases the page without tearing down the shared driver — `packages/core/crawlutron/transport/browser.py:280-288`, `browser_render_phases.py:242-257`. |
 | cffi TLS-impersonation SNI (§2.5) | **RESOLVED** | The RESOLVE-table fix from the review's own sketch landed: `cffi_resolve_entry` builds the `host:port:ip` CURLOPT_RESOLVE mapping (`packages/core/crawlutron/transport/pinned_transport.py:255-268`) and `_handle_cffi_hop` dials a one-shot session on the logical hostname so SNI and cert verification attest to it (#574) — `packages/core/crawlutron/transport/fetchers.py:294-332`; an `SSLError` now raises visibly instead of degrading silently (`fetchers.py:323-326`). |
 | namespace-scoped cookie reads (§2.2) | **RESOLVED** | The browser-cookie store is keyed by `(namespace, domain)`: `store_browser_cookies`/`get_browser_cookies_for` resolve an explicit namespace or defer to the crawl's `COOKIE_NAMESPACE` contextvar (`packages/core/crawlutron/transport/browser_cookies.py:50-101`), so one caller's harvested session never surfaces to another caller's jar. |
-| `/v1/keys` escalation (§2.1) | **RESOLVED** | The `/v1/keys` routes now mount on `admin_guarded_router`, so `guard_admin_request` → `get_keys_caller` requires the operator token and fails closed (401 `invalid_api_key` when unset or wrong) — `packages/core/crawlutron/api/keys_router.py:18`, `packages/core/crawlutron/api/route_layer.py:88-90`, `packages/core/crawlutron/api/caller_auth.py:155-175` (#653, #659, #666, #676, #664); no caller key can mint, revoke, or list another caller's keys. |
+| `/v1/keys` escalation (§2.1) | **RESOLVED** | The `/v1/keys` routes now mount on `admin_guarded_router`, so `guard_admin_request` → `get_keys_caller` requires the operator token and fails closed (401 `invalid_api_key` when unset or wrong) — `packages/rest/crawlutron_rest/api/keys_router.py:18`, `packages/rest/crawlutron_rest/api/route_layer.py:88-90`, `packages/rest/crawlutron_rest/api/caller_auth.py:155-175` (#653, #659, #666, #676, #664); no caller key can mint, revoke, or list another caller's keys. |
 
 ---
 
@@ -62,7 +62,7 @@ Severity scale: **P0** exploitable/secret-exposing now (none found) · **P1** fi
 
 ### 2.1 [P1] `/v1/keys` is reachable by every valid API key — one request mints an unbounded key
 
-**Where:** `packages/core/crawlutron/api/caller_auth.py:104-108` (`get_keys_caller`), `packages/core/crawlutron/api/keys_router.py:34-36`, `:44-48`, `:58-65`; amplifiers `packages/core/crawlutron/models/key_create_request.py` and `packages/core/crawlutron/api/caller_auth.py:152-165`.
+**Where:** `packages/rest/crawlutron_rest/api/caller_auth.py:104-108` (`get_keys_caller`), `packages/rest/crawlutron_rest/api/keys_router.py:34-36`, `:44-48`, `:58-65`; amplifiers `packages/core/crawlutron/models/key_create_request.py` and `packages/rest/crawlutron_rest/api/caller_auth.py:152-165`.
 
 ```python
     if admin_token and _constant_time_eq(secret, admin_token):
@@ -91,7 +91,7 @@ async def get_keys_caller(request: Request) -> CallerIdentity:
 
 …or, if self-service issuance is the intent: clamp `payload.max_pages/max_concurrency` to the *issuing* identity's quotas inside `issue_key`, and scope `revoke_key`/`list_keys` to `caller.caller_id`. Related (P2): with the operator-only fix, an *unset* `key_admin_token` (the settings default is `""`, `caller_auth.py:80-93` silently skips the admin branch) should hard-fail `/v1/keys` with 503 rather than silently widening access — today "no token configured" and "any key wins" are indistinguishable.
 
-**Status — RESOLVED** (live tree, verified for this sweep; added to the Status Addendum above). The `/v1/keys` routes now mount on `admin_guarded_router` (`packages/core/crawlutron/api/keys_router.py:18`), so `guard_admin_request` → `get_keys_caller` requires the operator token and fails closed — `packages/core/crawlutron/api/route_layer.py:88-90`, `packages/core/crawlutron/api/caller_auth.py:155-175` (#653, #659, #666, #676, #664). A presented caller key no longer passes the operator check; minting, revoking, and listing keys require `X-API-Key: CRAWLUTRON_KEY_ADMIN_TOKEN`. Cross-checked with `git log`.
+**Status — RESOLVED** (live tree, verified for this sweep; added to the Status Addendum above). The `/v1/keys` routes now mount on `admin_guarded_router` (`packages/rest/crawlutron_rest/api/keys_router.py:18`), so `guard_admin_request` → `get_keys_caller` requires the operator token and fails closed — `packages/rest/crawlutron_rest/api/route_layer.py:88-90`, `packages/rest/crawlutron_rest/api/caller_auth.py:155-175` (#653, #659, #666, #676, #664). A presented caller key no longer passes the operator check; minting, revoking, and listing keys require `X-API-Key: CRAWLUTRON_KEY_ADMIN_TOKEN`. Cross-checked with `git log`.
 
 ### 2.2 [P1] Browser-harvested cookies are stored process-global and replayed across callers
 
@@ -283,7 +283,7 @@ tavily_api_key: str = field(default="", repr=False)
 
 ### 2.12 [P2] Webhook URLs are logged raw; the anonymous watch bucket shares everything
 
-**Where:** `packages/core/crawlutron/service/webhooks.py:146,159` (`extra={"url": webhook_url, ...}` — raw caller string, frequently carrying `?token=…` or userinfo secrets); `packages/core/crawlutron/api/watch_router.py:87,100,112` (all watches scoped strictly by `caller_id`, and un-keyed callers share `caller_id=""`).
+**Where:** `packages/core/crawlutron/service/webhooks.py:146,159` (`extra={"url": webhook_url, ...}` — raw caller string, frequently carrying `?token=…` or userinfo secrets); `packages/rest/crawlutron_rest/api/watch_router.py:87,100,112` (all watches scoped strictly by `caller_id`, and un-keyed callers share `caller_id=""`).
 
 Two compounding issues: (a) the delivery logs persist receiver URLs verbatim — in practice these embed bearer tokens, so the *log* becomes the leak channel; note also that userinfo is silently dropped by canonicalization before delivery, so the secret is logged **and** never used. (b) Every un-keyed caller owns every other un-keyed caller's watches: `GET /v1/watches` discloses webhook URLs (token disclosure), `DELETE` lets one anonymous client kill another's monitoring, and the 100-watch cap is shared. Under the README's "localhost only" posture this is acceptable-by-design; under "reverse proxy in production" with un-keyed tenants it is not. Fix (a) by logging `host`/canonical raw only; mitigate (b) by refusing to serialize `webhook_url` in list responses and documenting the bucket collapse in SECURITY.md.
 
@@ -311,10 +311,10 @@ For the record, these were hunted hard and held (each verified in source, not ta
 - **Credential stripping on redirect** — origin-equality includes scheme (https→http strips too); `cookie`/`authorization`/`proxy-authorization` dropped on cross-origin hops; hop `Set-Cookie` captured before moving on (`pinned_transport.py:212-226`).
 - **Search provider keys** — keys live only in memory and flow to three constant URLs; the pooled client refuses redirects outright; response bodies capped at 1 MiB (`packages/core/crawlutron/search/providers.py`, `pooled_clients`).
 - **SQL** — every value bound, identifiers through an `[A-Za-z0-9_]` allowlist, DDL through quoted constants (`packages/core/crawlutron/storage/sqlite_store.py:125-128`, `ddl.py`).
-- **Caller keys** — 256-bit `ck_` tokens, SHA-256 *hash* storage with UNIQUE index (no plaintext anywhere; lookup-by-digest is fine for high-entropy tokens), secret returned once, `compare_digest` for the one admin-token compare, no key material in any log/error (`packages/core/crawlutron/storage/caller_key_store.py`, `packages/core/crawlutron/api/caller_auth.py:94-101`).
+- **Caller keys** — 256-bit `ck_` tokens, SHA-256 *hash* storage with UNIQUE index (no plaintext anywhere; lookup-by-digest is fine for high-entropy tokens), secret returned once, `compare_digest` for the one admin-token compare, no key material in any log/error (`packages/core/crawlutron/storage/caller_key_store.py`, `packages/rest/crawlutron_rest/api/caller_auth.py:94-101`).
 - **Migration runner** — process lock + yoyo DB lock, stamped pre-ledger only after drift check, fail-closed `_require_current_schema` (`packages/core/crawlutron/storage/migrations/runner.py:82-107`).
 - **Bounded IO/decompression** — every decompression call site passes a cap (required kwarg), brotli refuses to run uncapped, declared Content-Length pre-gate plus streamed cap (`packages/core/crawlutron/transport/decompression.py:31-67, 147-148`).
-- **MCP** — 16 MiB body cap, `extra="forbid"` models, bounded tool payloads, notifications drained before header validation, generic "Internal error" on the wire (`packages/core/crawlutron/mcp/server.py`, `packages/core/crawlutron/api/middleware.py`).
+- **MCP** — 16 MiB body cap, `extra="forbid"` models, bounded tool payloads, notifications drained before header validation, generic "Internal error" on the wire (`packages/core/crawlutron/mcp/server.py`, `packages/rest/crawlutron_rest/api/middleware.py`).
 - **Browser navigation** — route guard wired before any navigation (including warmups), WebSockets fail closed, downloads never enabled, no CDP surface, `file://`-class schemes rely on browser sandbox but are at least *continued* rather than aborted (P3: abort everything non-http would be strictly safer) (`packages/core/crawlutron/transport/browser_targets.py`, `browser_render_phases.py:72-85`).
 
 ---
@@ -419,7 +419,7 @@ Task A finishes → its callback is scheduled via `call_soon` → before it runs
 - **Crash-orphaned PENDING single-shots are permanent zombies** — `packages/core/crawlutron/service/job_recovery.py:44-45` skips every PENDING row whose kind isn't `whole_site`; nothing ever retires them, so `GET /v1/crawl/{id}` answers 202 "still pending" forever and the webhook never fires. Fail them in recovery the way RUNNING non-resumables are failed (`:29`).
 - **Async jobs claim RUNNING before the semaphore** — `packages/core/crawlutron/service/async_crawl_runner.py:70-77`: under a flood of 202s, jobs sit `running` doing nothing (and consume concurrency quota while queued). Claim after acquiring, or add a QUEUED state.
 - **Webhook delivery with retries holds the crawl semaphore** — same file, the retry loop (up to ~60 s/attempt backoff) runs inside `async with _get_async_crawl_semaphore()`; one slow receiver starves crawl width. Move the POST outside the guarded block.
-- **Concurrency-quota TOCTOU on async doors** — `packages/core/crawlutron/api/caller_auth.py:198-203` + `crawl_endpoint.py:138-142`/`jobs_router.py:88-89`: for `reserve_slot=False` the check→insert window contains awaits; two concurrent submits at `max_concurrency=N` both pass and both create. Reserve a tracker slot for async doors and release it at terminal, or make the quota check-and-insert one transaction.
+- **Concurrency-quota TOCTOU on async doors** — `packages/rest/crawlutron_rest/api/caller_auth.py:198-203` + `crawl_endpoint.py:138-142`/`jobs_router.py:88-89`: for `reserve_slot=False` the check→insert window contains awaits; two concurrent submits at `max_concurrency=N` both pass and both create. Reserve a tracker slot for async doors and release it at terminal, or make the quota check-and-insert one transaction.
 
 ### 3.9 [P2] Extraction subsystem: races, re-reads, and one silent charset bug
 
@@ -497,7 +497,7 @@ LOC figures below are estimates verified by reading; "dead" items were grep-conf
 | D2 | `validate_webhook_url` (sync twin; only async used) | `packages/core/crawlutron/service/webhooks.py:179-185` | ~7 |
 | D3 | `aformat_crawl_item` (no callers; `format_crawl_item` used synchronously inside an already-offloaded builder) | `packages/core/crawlutron/service/unified_shaping.py:46-51` | ~7 |
 | D4 | `render_options_for`'s dict arm (only caller always passes `RenderRequest`; `RenderOptionsRequest` is `extra="forbid"`) | `packages/core/crawlutron/service/render.py:43-54` | ~8 |
-| D5 | `_depends_singletons.py` — whole module re-declares `Depends(get_settings)` that typed Annotated deps already provide (and loses the annotation) | `packages/core/crawlutron/api/_depends_singletons.py` | ~12 |
+| D5 | `_depends_singletons.py` — whole module re-declares `Depends(get_settings)` that typed Annotated deps already provide (and loses the annotation) | `packages/rest/crawlutron_rest/api/_depends_singletons.py` | ~12 |
 | D6 | `tracked_task` (docstring promises a supervisor seam; zero callers) | `packages/core/crawlutron/service/job_lifecycle.py:13-17` | ~5 |
 | D7 | Dead pre-validation block in `execute_crawl` (calls the engine that re-validates identically) | `packages/core/crawlutron/service/crawl_executor.py:38-48` | ~10 |
 | D8 | `reset_process_state` in async runner (no repo caller) | `packages/core/crawlutron/service/async_crawl_runner.py:47-55` | ~8 |
@@ -513,7 +513,7 @@ LOC figures below are estimates verified by reading; "dead" items were grep-conf
 | D18 | 11 pure-delegation methods on `BrowserDriver` → the module functions they wrap | `packages/core/crawlutron/transport/browser_driver.py:157-170,210-214,288-293,303-308` | ~32 |
 | D19 | `browser.py` re-export shim (external code imports only `BrowserRenderer` + `get_browser_cookies_for`) | `packages/core/crawlutron/transport/browser.py:19-58` | ~10 |
 | D20 | Settings TypedDict boilerplate — six `_XFields` TypedDicts exist only so `from_mapping` unpack type-checks | `packages/core/crawlutron/config/settings.py:128-186` | ~50 |
-| D21 | `well_known.recommended_endpoints` (hand-kept restatement of the `links` dict) | `packages/core/crawlutron/discovery/well_known.py:26-48` | ~18 |
+| D21 | `well_known.recommended_endpoints` (hand-kept restatement of the `links` dict) | `packages/rest/crawlutron_rest/discovery/well_known.py:26-48` | ~18 |
 | D22 | `_BC_OWNED_HANDLER` (written 3×, never read) + dead `except ValueError` around never-raising `get_env_int` + dead `or "."` fallbacks | `packages/core/crawlutron/runtime/logging_config.py:72,101,115`; `packages/core/crawlutron/runtime/resource_pressure.py:44-47`; `packages/core/crawlutron/safety/atomic_write.py:15-19` | ~8 |
 | D23 | Dead third reserved-membership re-check (unreachable; would miscount `duplicates_skipped` if revived) + half-dead `except (UnsafePattern, re.error)` (`compile_untrusted` already wraps `regex.error`) + duplicate `_MAX_SCOPE_PATTERN_LEN` (= `safe_regex` default) | `packages/core/crawlutron/admission/admission_links.py:167-168, 269-270, 33+5` | ~6 |
 | D24 | Dead key-length recheck (pydantic `max_length` already fired) | `packages/core/crawlutron/models/key_create_request.py:12` | ~2 |
@@ -581,7 +581,7 @@ Every module was swept for hardcoded credentials, tokens, internal hostnames, de
 
 - **Zero hardcoded secrets** across all 262 modules. Search-provider keys (`tavily/brave/serper`) and `key_admin_token` are env-sourced with `""` defaults (`packages/core/crawlutron/config/settings.py:100-108`); no sample-looking real keys anywhere; webhook signing secret is env-gated.
 - **No internal URLs/hosts** beyond the intentional loopback default and the `host.docker.internal` denylist entries in `host_policy`. No developer names/emails in code. No debug prints or breakpoints (the migrations CLI's `print` is intended stdout).
-- **Key material flows** verified: caller keys are returned once and stored only as SHA-256; keys never appear in logs, errors, the 202 body, or webhook payloads; pydantic validation errors are stripped to `loc`/`msg` (the offending `input` is dropped, `packages/core/crawlutron/api/exceptions.py:50-66`).
+- **Key material flows** verified: caller keys are returned once and stored only as SHA-256; keys never appear in logs, errors, the 202 body, or webhook payloads; pydantic validation errors are stripped to `loc`/`msg` (the offending `input` is dropped, `packages/rest/crawlutron_rest/api/exceptions.py:50-66`).
 - **Two latent leak channels to close before release** (both P2, both one-liners): `Credential.token/username/password` are repr-enabled (§2.11), and the four secret fields on `CrawlerSettings` lack `repr=False` (§2.11). Also: raw webhook URLs (which routinely embed receiver tokens) are logged verbatim (§2.12), and `env.py` config warnings log raw env values (`packages/core/crawlutron/config/env.py:28,100,107` — truncate to ~12 chars).
 - **Cookie payloads and `webhook_url` are stored plaintext in SQLite** with default file permissions — standard mitigation is operator disk security; say so in SECURITY.md.
 
@@ -589,7 +589,7 @@ Every module was swept for hardcoded credentials, tokens, internal hostnames, de
 
 | Item | State | Action |
 |---|---|---|
-| LICENSE file | **Missing** — `packages/core/crawlutron/main.py` OpenAPI claims `license_info={"name": "MIT License"}` and a comment references "NOTICE carries the MIT lines", but no license text is in the tree | **Blocker.** Add LICENSE (MIT) + NOTICE before publishing; keep the OpenAPI claim consistent |
+| LICENSE file | **Missing** — `packages/rest/crawlutron_rest/main.py` OpenAPI claims `license_info={"name": "MIT License"}` and a comment references "NOTICE carries the MIT lines", but no license text is in the tree | **Blocker.** Add LICENSE (MIT) + NOTICE before publishing; keep the OpenAPI claim consistent |
 | SECURITY.md | Present and genuinely good (threat model, reporting SLA, operator guidance, `CRAWLUTRON_ALLOW_PRIVATE_TARGETS` warning discipline) | Update after §2/§3 fixes (webhook signature scheme change, anonymous-bucket caveat) |
 | README / CONTRIBUTING / CHANGELOG / CODE_OF_CONDUCT | Present | CONTRIBUTING's docstrings-references and module tour still describe the *old* `packages/core/crawlutron/crawl/*` layout in places (`docs/review-and-refactoring-plan.md` is archived-historical but reachable); refresh the tour to `packages/core/crawlutron/{admission,api,orchestration,transport,…}` |
 | Python floor | Code uses PEP 695 `type` aliases and generics ⇒ **requires ≥3.12**, but packaging isn't in the upload | Verify `requires-python = ">=3.12"` in pyproject; CI on 3.12+ |

@@ -12,14 +12,14 @@ from fastapi.routing import APIRoute
 from httpx import ASGITransport, AsyncClient
 
 from crawlutron.admission.policy import PolicyLike, read_policy
-from crawlutron.api import dependencies, jobs_router
-from crawlutron.api.caller_auth import get_caller_identity
-from crawlutron.api.dependencies import get_job_store, get_settings, get_shutdown_event, get_tracking
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.service import job_runner
 from crawlutron.storage.job_store import FrontierEntry, JobStatus
+from crawlutron_rest.api import dependencies, jobs_router
+from crawlutron_rest.api.caller_auth import get_caller_identity
+from crawlutron_rest.api.dependencies import get_job_store, get_settings, get_shutdown_event, get_tracking
 from tests._job_harnesses import (
     ScriptedExecute,
     _create_api_job,
@@ -70,7 +70,7 @@ def test_every_job_endpoint_declares_its_providers_through_an_alias():
     default is the shape that let two hand-written lists look equivalent.
     """
     aliases = {value for name, value in vars(dependencies).items() if name.endswith("Dep")}
-    assert aliases, "crawlutron.api.dependencies declares no provider aliases"
+    assert aliases, "crawlutron_rest.api.dependencies declares no provider aliases"
 
     for route in jobs_router.router.routes:
         # An APIRouter registers APIRoutes, but the attribute holding them is typed as BaseRoute, which
@@ -195,8 +195,8 @@ class TestCrashRecovery:
         self, job_store, monkeypatch, url, settings_values
     ):
 
-        from crawlutron.api.dependencies import get_settings
         from crawlutron.config.settings import CrawlerSettings
+        from crawlutron_rest.api.dependencies import get_settings
 
         app = _make_app(job_store)
         app.dependency_overrides[get_settings] = lambda: CrawlerSettings.from_mapping(

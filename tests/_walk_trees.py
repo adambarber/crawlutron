@@ -6,7 +6,7 @@ import tokenize
 from collections.abc import Callable, Iterable, Iterator
 from functools import cache
 
-from tests._walk_primitives import APP_ROOT, REPO_ROOT, _narrow, parsed, trees_under
+from tests._walk_primitives import APP_ROOTS, REPO_ROOT, _narrow, parsed, trees_under
 
 # crawlutron/safety/safe_regex.py is the sanctioned regex wrapper (the third-party `regex`
 # engine); only the regex-engine-import rule excludes it, never a walk default.
@@ -76,8 +76,8 @@ def app_trees(*, exclude: frozenset[str] = frozenset()) -> tuple[tuple[pathlib.P
 
 @cache
 def _app_files(exclude: frozenset[str]) -> tuple[pathlib.Path, ...]:
-    """The one glob of app/*.py, memoized per exclude set."""
-    return tuple(sorted(p for p in APP_ROOT.rglob("*.py") if p.name not in exclude))
+    """The one glob of app/*.py across every production package root, memoized per exclude set."""
+    return tuple(sorted(p for root in APP_ROOTS for p in root.rglob("*.py") if p.name not in exclude))
 
 
 @cache

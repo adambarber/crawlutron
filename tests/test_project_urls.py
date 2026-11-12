@@ -59,7 +59,7 @@ def test_openapi_title_is_the_brand() -> None:
     the rename missed it -- space/title-cased, it escaped hyphen/underscore sweeps -- and
     a positive pin catches the next spelling without widening a ban list.
     """
-    from crawlutron.main import app as service
+    from crawlutron_rest.main import app as service
 
     # ``app`` is a module-level ``FastAPI | None`` holder; the lifespan sets it,
     # and this import-path check is about the type, not a live app instance.

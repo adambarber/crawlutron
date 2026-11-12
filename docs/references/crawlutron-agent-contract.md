@@ -20,7 +20,7 @@ discover the contract from:
 - `POST /mcp` — MCP 2026-07-28 endpoint (see [MCP](#mcp-mcp-2026-07-28))
 
 The static implementation source of truth is `packages/core/crawlutron/models/`; the
-discovery payloads and OpenAPI app metadata are in `packages/core/crawlutron/main.py`.
+discovery payloads and OpenAPI app metadata are in `packages/rest/crawlutron_rest/main.py`.
 
 ## Endpoint Selection
 

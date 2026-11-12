@@ -17,6 +17,7 @@ LIMIT = 500
 #: Keyed by declared scan root -- a missing root fails loud, not silently empty.
 _BUDGETS = {
     "packages/core": 0,
+    "packages/rest": 0,
     "crawlutron_sdk": 0,
     "tests": 0,
     "scripts": 0,

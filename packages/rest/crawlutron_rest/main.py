@@ -8,18 +8,17 @@ from collections.abc import Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager, suppress
 from typing import TYPE_CHECKING
 
+from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.address_class import is_loopback_bind
 from crawlutron.models.host_policy import HostPolicy
 from crawlutron.runtime.app_module_ref import set_module_app_provider
 from crawlutron.runtime.pressure_sizing import default_executor_workers
-from crawlutron.vocabulary.identity import SERVICE_ID, SERVICE_VERSION
-
-from .config.settings import CrawlerSettings
-from .service.store_bootstrap import build_stores
-from .transport.browser_pool import (
+from crawlutron.service.store_bootstrap import build_stores
+from crawlutron.transport.browser_pool import (
     close_browser_pool,
     initialize_browser_pool,
 )
+from crawlutron.vocabulary.identity import SERVICE_ID, SERVICE_VERSION
 
 if TYPE_CHECKING:
     # Imported for annotations under type checking; the runtime import carries the real classes.
@@ -35,11 +34,11 @@ else:
         FastAPI = None
         RequestValidationError = Exception
 
-from .discovery.agent_hints import create_agent_hints_router
-from .discovery.capabilities import create_capabilities_router
-from .discovery.well_known import create_well_known_router
-from .health.readiness import create_health_router
-from .runtime.logging_config import configure_service_logging
+from crawlutron.health.readiness import create_health_router
+from crawlutron.runtime.logging_config import configure_service_logging
+from crawlutron_rest.discovery.agent_hints import create_agent_hints_router
+from crawlutron_rest.discovery.capabilities import create_capabilities_router
+from crawlutron_rest.discovery.well_known import create_well_known_router
 
 _TeardownStep = tuple[str, Callable[[], Awaitable[None]]]
 
@@ -94,7 +93,7 @@ def create_app(settings: CrawlerSettings | None = None) -> FastAPI:
         audit_store=audit_store,
         lifespan=lifespan,
     )
-    from crawlutron.api.exempt_route_boot import validate_exempt_routes
+    from crawlutron_rest.api.exempt_route_boot import validate_exempt_routes
 
     validate_exempt_routes(app)
     return app
@@ -233,14 +232,14 @@ def install_error_surface(app) -> None:
     """Middleware and exception handlers every response path funnels through."""
     from starlette.exceptions import HTTPException as StarletteHTTPException
 
-    from crawlutron.api.anonymous_throttle import throttle_anonymous_surfaces
-    from crawlutron.api.exceptions import (
+    from crawlutron.service.errors import DomainError
+    from crawlutron_rest.api.anonymous_throttle import throttle_anonymous_surfaces
+    from crawlutron_rest.api.exceptions import (
         domain_error_handler,
         http_exception_handler,
         validation_exception_handler,
     )
-    from crawlutron.api.middleware import limit_request_body, reject_hostile_origin
-    from crawlutron.service.errors import DomainError
+    from crawlutron_rest.api.middleware import limit_request_body, reject_hostile_origin
 
     app.middleware("http")(reject_hostile_origin)
     app.middleware("http")(limit_request_body)
@@ -263,8 +262,8 @@ def _include_routers(app) -> None:
     app.include_router(create_capabilities_router())
     app.include_router(create_agent_hints_router())
     app.include_router(create_well_known_router())
-    from .api.mcp_router import router as mcp_router
-    from .api.router_registry import ROUTER_MODULES
+    from crawlutron_rest.api.mcp_router import router as mcp_router
+    from crawlutron_rest.api.router_registry import ROUTER_MODULES
 
     for feature_router in ROUTER_MODULES:
         app.include_router(feature_router)
@@ -320,8 +319,8 @@ async def _startup_services(_app: FastAPI, settings: CrawlerSettings, database_p
     cookies load before job recovery (a clear-then-populate load drops them).
     """
     install_default_executor(asyncio.get_running_loop())
-    from .health.readiness import READINESS_STATE
-    from .orchestration.engine import resource_gate
+    from crawlutron.health.readiness import READINESS_STATE
+    from crawlutron.orchestration.engine import resource_gate
 
     # Readiness saturation comes from the live resource gate, not the
     # metrics gauges (which only recursive crawls refresh).
@@ -350,9 +349,8 @@ def _bind_metrics(database_path: str) -> None:
     /metrics reports the service, not this worker: counters go to the shared
     store (a shared cgroup summed reports nothing real).
     """
+    from crawlutron.runtime.metrics import get_metrics
     from crawlutron.storage.coordination_counters import CoordinationCounters
-
-    from .runtime.metrics import get_metrics
 
     get_metrics().bind_counters(CoordinationCounters(database_path))
 
@@ -362,11 +360,11 @@ async def _recover_jobs_and_start_sweep(_app: FastAPI, settings: CrawlerSettings
     shutdown event is minted here, not at import (an import-time event is set
     by the first teardown and cancels every later run's crawls).
     """
-    from .service.cache_sweep import sweep_cache_forever
-    from .service.job_recovery import recover_and_start_pending_jobs
-    from .service.job_runner import start_job
-    from .service.spill_sweep import sweep_spills_forever
-    from .service.watch_sweep import sweep_watches_forever
+    from crawlutron.service.cache_sweep import sweep_cache_forever
+    from crawlutron.service.job_recovery import recover_and_start_pending_jobs
+    from crawlutron.service.job_runner import start_job
+    from crawlutron.service.spill_sweep import sweep_spills_forever
+    from crawlutron.service.watch_sweep import sweep_watches_forever
 
     shutdown_event = asyncio.Event()
     _app.state.shutdown_event = shutdown_event
@@ -418,20 +416,20 @@ set_module_app_provider(module_app)
 
 async def _shutdown_services(_app: FastAPI) -> None:
     """Stop the world FIRST: no webhooks against cleared deps; jar needs no step."""
-    from .health.readiness import READINESS_STATE
-    from .orchestration.engine import resource_gate
+    from crawlutron.health.readiness import READINESS_STATE
+    from crawlutron.orchestration.engine import resource_gate
 
     shutdown_event = _app.state.shutdown_event
     shutdown_event.set()
     await _drain_watch_sweep(_app)
-    from .service.job_runner import shutdown_job_runner
+    from crawlutron.service.job_runner import shutdown_job_runner
 
     await shutdown_job_runner()
 
     # Imported here, not at module scope: this pulls in the markitdown stack,
     # which CLI/MCP callers that never render a PDF must not pay for.
-    from .extraction.content import shutdown_doc_extraction_executor
-    from .transport.http_client_pool import close_async_http_client, close_cffi_session
+    from crawlutron.extraction.content import shutdown_doc_extraction_executor
+    from crawlutron.transport.http_client_pool import close_async_http_client, close_cffi_session
 
     async def _close_gate() -> None:
         resource_gate().close()
@@ -442,7 +440,7 @@ async def _shutdown_services(_app: FastAPI) -> None:
         await close_app_stores(_app, module_app())
 
     async def _unbind_metric_counters() -> None:
-        from .runtime.metrics import unbind_metric_counters
+        from crawlutron.runtime.metrics import unbind_metric_counters
 
         unbind_metric_counters()
 

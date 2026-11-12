@@ -11,7 +11,7 @@ from scripts.module_graph import _imports
 
 # Real modules of this tree, so _resolve's on-disk check accepts them: they stand
 # in for any two modules whose only mutual reference is a type-checking one.
-A, B = "crawlutron.api.crawl_endpoint", "crawlutron.api.caller_auth"
+A, B = "crawlutron.models.host_policy", "crawlutron.vocabulary.identity"
 
 _ALPHA = (
     "from __future__ import annotations\n"
@@ -76,20 +76,18 @@ def test_a_vacuous_app_root_is_refused_not_greened(tmp_path, monkeypatch) -> Non
 
 
 def test_a_package_form_import_records_the_edge_into_the_package() -> None:
-    """`from crawlutron.api import exceptions` reaches the crawlutron.api package
-    (a namespace dir with no __init__.py); the MCP seal's forbidden layer must see it."""
-    assert _imports_of("from crawlutron.api import exceptions\n") == {"crawlutron.api.exceptions"}
+    """`from crawlutron.service import errors` reaches the crawlutron.service package
+    (a namespace dir with no __init__.py); the seal's forbidden layer must see it."""
+    assert _imports_of("from crawlutron.service import errors\n") == {"crawlutron.service.errors"}
 
 
 def test_a_from_package_import_alias_resolves_the_subpackage() -> None:
-    """`from crawlutron import api` is the same blind-spot class: the alias names
-    the crawlutron.api package dir, so the seal must see that edge too."""
-    assert _imports_of("from crawlutron import api\n") == {"crawlutron.api"}
+    """`from crawlutron import service` is the same blind-spot class: the alias names
+    the crawlutron.service package dir, so the seal must see that edge too."""
+    assert _imports_of("from crawlutron import service\n") == {"crawlutron.service"}
 
 
 def test_a_module_form_import_still_resolves_the_module_file() -> None:
-    """Regression: module-form `from crawlutron.api.crawl_endpoint import ...` keeps
+    """Regression: module-form `from crawlutron.service.errors import ...` keeps
     resolving to the .py module file, not to a package dir."""
-    assert _imports_of("from crawlutron.api.crawl_endpoint import CrawlEndpoint\n") == {
-        "crawlutron.api.crawl_endpoint"
-    }
+    assert _imports_of("from crawlutron.service.errors import DomainError\n") == {"crawlutron.service.errors"}

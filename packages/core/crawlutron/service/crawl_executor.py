@@ -1,6 +1,6 @@
 """Shared crawl execution path used by ``/v1/crawl`` and ``/v1/map``.
 
-Extracted from ``crawlutron.main`` so execution and handler live apart; the executor
+Extracted from ``crawlutron_rest.main`` so execution and handler live apart; the executor
 takes ``settings`` and ``shutdown_event`` explicitly (no module globals).
 """
 

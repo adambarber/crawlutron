@@ -12,7 +12,6 @@ from fastapi import Request
 from fastapi.responses import JSONResponse, Response
 
 from crawlutron.admission.payload_helpers import checked_payload_urls
-from crawlutron.api.exceptions import http_error
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.delta import DeltaContext
 from crawlutron.extraction.output_formats import serialize_results
@@ -38,6 +37,7 @@ from crawlutron.service.webhooks import ensure_https_webhook_url, validate_webho
 from crawlutron.storage.ids import new_request_id
 from crawlutron.storage.job_store import FrontierEntry, JobStore
 from crawlutron.storage.result_store import CrawlResultStore, CrawlSpillStore
+from crawlutron_rest.api.exceptions import http_error
 
 if TYPE_CHECKING:
     # Annotation-only vocabulary: the endpoint's signatures name the shared record
@@ -240,11 +240,11 @@ async def _accepted_async(
     await job_store.acreate_single_shot(
         request_id, checked[0][0], payload.policy, owner=owner, frontier=batch
     )
-    from crawlutron.service import async_crawl_runner as _acr
+    from crawlutron.service.async_crawl_runner import run_async_crawl
 
     start_tracked_task(
         request_id,
-        lambda: _acr.run_async_crawl(
+        lambda: run_async_crawl(
             request_id,
             payload,
             webhook_url,

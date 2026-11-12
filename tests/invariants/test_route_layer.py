@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from fastapi.routing import APIRoute
 
-from crawlutron.api.route_layer import ADMIN_GUARD_NAME, GUARD_NAME, OPERATOR_GUARD_NAME
-from crawlutron.api.router_registry import ROUTER_MODULES
+from crawlutron_rest.api.route_layer import ADMIN_GUARD_NAME, GUARD_NAME, OPERATOR_GUARD_NAME
+from crawlutron_rest.api.router_registry import ROUTER_MODULES
 
 _LAYER_GUARDS = frozenset({GUARD_NAME, ADMIN_GUARD_NAME, OPERATOR_GUARD_NAME})
 

@@ -6,7 +6,7 @@ entry, an unadvertised live route). The list is now COMPUTED from the registry.
 
 from __future__ import annotations
 
-from crawlutron.discovery.recommended_surface import advertised_route_strings
+from crawlutron_rest.discovery.recommended_surface import advertised_route_strings
 
 __all__ = ["recommended_endpoints"]
 

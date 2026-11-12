@@ -173,7 +173,7 @@ def _crawl_timing_fields() -> CrawlTimingRecord:
 
 def create_capabilities_router() -> APIRouter:
     """Create capabilities router."""
-    from crawlutron.api.dependencies import get_settings as api_get_settings
+    from crawlutron_rest.api.dependencies import get_settings as api_get_settings
 
     router = APIRouter(tags=["Discovery"])
 

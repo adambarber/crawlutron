@@ -34,9 +34,9 @@ async def test_an_unwired_mcp_port_refuses_loudly():
     instead of being admitted through the silent singleton default."""
     import asyncio
 
-    from crawlutron.api.mcp_router import router as mcp_router
     from crawlutron.config.settings import CrawlerSettings
     from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
+    from crawlutron_rest.api.mcp_router import router as mcp_router
     from tests._app_harnesses import harness_app
     from tests._async_harnesses import serve
 

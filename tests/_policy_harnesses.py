@@ -10,13 +10,13 @@ import asyncio
 
 from httpx import ASGITransport, AsyncClient
 
-from crawlutron.api.caller_auth import get_caller_identity
-from crawlutron.api.crawl_router import router as crawl_router
-from crawlutron.api.dependencies import get_result_store
-from crawlutron.api.policy_router import router as policy_router
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.json_value import JsonValue
+from crawlutron_rest.api.caller_auth import get_caller_identity
+from crawlutron_rest.api.crawl_router import router as crawl_router
+from crawlutron_rest.api.dependencies import get_result_store
+from crawlutron_rest.api.policy_router import router as policy_router
 from tests._app_harnesses import harness_app
 from tests._dependency_overrides import bind_base_overrides
 

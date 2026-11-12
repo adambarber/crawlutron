@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import pytest
 
-from crawlutron.api import anonymous_throttle
-from crawlutron.api.anonymous_throttle import AnonymousThrottle
 from crawlutron.runtime.metrics import get_metrics
 from crawlutron.service import key_throttle
 from crawlutron.service.errors import KeyVerifyThrottled
 from crawlutron.service.key_throttle import KeyVerifyThrottle
+from crawlutron_rest.api import anonymous_throttle
+from crawlutron_rest.api.anonymous_throttle import AnonymousThrottle
 
 
 def _meter_snapshot() -> dict[str, float]:

@@ -325,8 +325,8 @@ async def test_the_bearer_presented_operator_token_sees_the_cross_tenant_rollup(
 async def _real_door_client(tmp_path):
     """The REAL /v1/policy-suggestions door: a live key store and settings, no
     identity override -- every credential class resolves through get_caller_identity."""
-    from crawlutron.api.keys_router import router as keys_router
-    from crawlutron.api.policy_router import router as policy_router
+    from crawlutron_rest.api.keys_router import router as keys_router
+    from crawlutron_rest.api.policy_router import router as policy_router
 
     async with keyed_result_client(tmp_path, (policy_router, keys_router)) as (client, results, keys):
         yield client, keys, results

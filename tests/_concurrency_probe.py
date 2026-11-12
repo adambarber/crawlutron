@@ -19,7 +19,7 @@ def sync_crawl_blocker() -> BlockHandle:
 
 def block_sync_crawl(monkeypatch) -> BlockHandle:
     """Stub the crawl_endpoint engine seam with a parked sync-crawl call."""
-    from crawlutron.api import crawl_endpoint
+    from crawlutron_rest.api import crawl_endpoint
 
     handle = sync_crawl_blocker()
     monkeypatch.setattr(crawl_endpoint, "execute_crawl", handle.blocker)

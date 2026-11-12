@@ -8,8 +8,8 @@ from __future__ import annotations
 import contextlib
 from pathlib import Path
 
-from crawlutron.api.identity_router import router as identity_router
-from crawlutron.api.keys_router import router as keys_router
+from crawlutron_rest.api.identity_router import router as identity_router
+from crawlutron_rest.api.keys_router import router as keys_router
 from tests._async_harnesses import expect_quota_refused, issue_key
 from tests._quota_harness import service_client
 

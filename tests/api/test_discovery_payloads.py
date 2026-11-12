@@ -1,14 +1,14 @@
 """Capabilities, agent-hints and well-known discovery payload contracts."""
 
 from crawlutron.config.settings import CrawlerSettings
-from crawlutron.discovery.agent_hints import (
+from crawlutron.models.crawl_strategy import CrawlStrategy
+from crawlutron_rest.discovery.agent_hints import (
     EXAMPLE_POLICIES,
     STRATEGY_DESCRIPTIONS,
     agent_hints_payload,
 )
-from crawlutron.discovery.capabilities import capabilities_payload
-from crawlutron.discovery.well_known import discovery_payload
-from crawlutron.models.crawl_strategy import CrawlStrategy
+from crawlutron_rest.discovery.capabilities import capabilities_payload
+from crawlutron_rest.discovery.well_known import discovery_payload
 
 
 class TestCapabilitiesPayload:
@@ -214,7 +214,7 @@ class TestDiscoveryPayload:
     def test_recommended_endpoints_name_the_trace_view(self):
         """A trace nobody can find is not shipped: the door an agent reads first
         is the discovery list, not the OpenAPI document."""
-        from crawlutron.discovery.well_known import discovery_payload
+        from crawlutron_rest.discovery.well_known import discovery_payload
 
         recommended = discovery_payload(CrawlerSettings.from_mapping({}))["recommended_endpoints"]
         assert "GET /v1/crawl/{request_id}/trace" in recommended
@@ -230,7 +230,7 @@ class TestDiscoveryPayload:
         """``conditional_fetch`` is the primitive; ``watches`` is the surface that
         uses it on the caller's behalf. An agent deciding whether to poll for
         changes has to be able to see that the service will."""
-        from crawlutron.discovery.capabilities import capabilities_payload
+        from crawlutron_rest.discovery.capabilities import capabilities_payload
 
         features = capabilities_payload(CrawlerSettings.from_mapping({}))["features"]
         assert features["watches"] is True
@@ -239,7 +239,7 @@ class TestDiscoveryPayload:
         """The recommendation list is hand-curated, so it can drift from the
         routers it mirrors: an entry for a dead route sends a discovering agent
         at a 404. Every advertised METHOD /path must resolve against the app."""
-        from crawlutron.main import app as service
+        from crawlutron_rest.main import app as service
 
         # The app mounts its routers via _IncludedRouter, so app.routes does not expose APIRoute objects; the
         # OpenAPI schema is the surface the recommendation list mirrors and the one a discovering agent
@@ -266,7 +266,7 @@ class TestOperatorSeal:
         assert payload["is_operator_sealed"] is False
 
     async def test_endpoint_reflects_the_seal(self, async_client, monkeypatch):
-        from crawlutron.api.dependencies import get_settings
+        from crawlutron_rest.api.dependencies import get_settings
 
         app = async_client._transport.app
         app.dependency_overrides[get_settings] = lambda: CrawlerSettings.from_mapping({})

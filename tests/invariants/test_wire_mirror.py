@@ -147,8 +147,16 @@ def test_wire_models_mirror_every_domain_field():
 # build a dict by hand and hand it to FastAPI with a strict `response_model=`.
 
 _ADVERTISED_PAYLOADS = (
-    ("packages/core/crawlutron/discovery/capabilities.py", "capabilities_payload", "CapabilitiesResponse"),
-    ("packages/core/crawlutron/discovery/agent_hints.py", "agent_hints_payload", "AgentHintsResponse"),
+    (
+        "packages/rest/crawlutron_rest/discovery/capabilities.py",
+        "capabilities_payload",
+        "CapabilitiesResponse",
+    ),
+    (
+        "packages/rest/crawlutron_rest/discovery/agent_hints.py",
+        "agent_hints_payload",
+        "AgentHintsResponse",
+    ),
 )
 
 

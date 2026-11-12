@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from crawlutron.api.mcp_router import router as mcp_router
+from crawlutron_rest.api.mcp_router import router as mcp_router
 from tests._async_harnesses import issue_key
 from tests._policy_factories import canonical
 from tests._policy_harnesses import stored_trace
@@ -53,8 +53,8 @@ async def _suggestion_app_client(
     tmp_path: Path,
 ) -> AsyncGenerator[tuple[AsyncClient, CrawlResultStore, CallerKeyStore], None]:
     """An app over /mcp + /v1/policy-suggestions + keys, one isolated triple of stores."""
-    from crawlutron.api.keys_router import router as keys_router
-    from crawlutron.api.policy_router import router as policy_router
+    from crawlutron_rest.api.keys_router import router as keys_router
+    from crawlutron_rest.api.policy_router import router as policy_router
 
     async with keyed_result_client(tmp_path, (mcp_router, policy_router, keys_router)) as (
         client,
@@ -163,7 +163,7 @@ async def tool_error_text_anonymous(client: AsyncClient) -> str:
 
 class TestPolicySuggestionsDiscovery:
     def test_agent_hints_mention_the_policy_suggestions_tool(self):
-        from crawlutron.discovery.agent_hints import agent_hints_payload
+        from crawlutron_rest.discovery.agent_hints import agent_hints_payload
 
         guidance = " ".join(agent_hints_payload()["guidance"])
         assert "policy_suggestions" in guidance

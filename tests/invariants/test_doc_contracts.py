@@ -6,6 +6,8 @@ import ast
 import json
 import pathlib
 import re
+import shutil
+import subprocess
 
 import pytest
 from pydantic import BaseModel
@@ -53,12 +55,21 @@ def _is_tree_path_claim(candidate: str) -> bool:
 
 
 def _markdown_documents() -> list[str]:
-    return sorted(
+    # Tracked *.md only -- an untracked task brief (never committed) must not red the doc gate.
+    all_docs = sorted(
         str(document.relative_to(REPO_ROOT))
         for document in REPO_ROOT.rglob("*.md")
-        # Relative parts, never absolute ones: the skip list names directories of THIS repository
         if not _SKIP_DIRECTORIES.intersection(document.relative_to(REPO_ROOT).parts)
     )
+    if not (REPO_ROOT / ".git").exists():
+        return all_docs
+    lf = subprocess.run(
+        [shutil.which("git") or "git", "-C", str(REPO_ROOT), "ls-files", "*.md"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+    return [name for name in all_docs if name in set(lf)]
 
 
 def _live_documents() -> list[str]:

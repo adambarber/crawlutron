@@ -117,7 +117,7 @@ order is ignored (set comparison, not list comparison).
 
 ## MCP Origin check (middleware.py, mcp/server.py)
 
-`reject_hostile_origin` (`packages/core/crawlutron/api/middleware.py:22-41`) refuses a
+`reject_hostile_origin` (`packages/rest/crawlutron_rest/api/middleware.py:22-41`) refuses a
 present, non-loopback browser `Origin` on every surface: `/mcp` answers with
 the JSON-RPC error object, every REST route with the error envelope, and the
 Origin is never echoed back (#655). `origin_allowed`
@@ -157,5 +157,5 @@ admitted and the SSRF boundary is intentionally relaxed.
 | Per-fetch fresh pin; validation cached, pin never cached | `packages/core/crawlutron/transport/pinned_dns.py:206`, `:174`, `:189` | `tests/transport/test_dns_cache.py:30-52` |
 | Redirect re-anchor, hop budget `MAX_REDIRECT_HOPS = 5`, credential strip | `packages/core/crawlutron/transport/pinned_transport.py:172`, `:163`, `:201` | `tests/transport/test_redirect_target.py:61-142` |
 | Browser Host-rewrite pin, stable-answer double resolve | `packages/core/crawlutron/transport/browser_targets.py:40`, `:70` | `tests/transport/test_browser_target_stability.py:22-72` |
-| MCP Origin check, non-loopback → 403, Origin never echoed | `packages/core/crawlutron/api/middleware.py:22-41`, `packages/core/crawlutron/mcp/server.py:42-56` | `tests/api/test_origin_guard.py:9-43` |
+| MCP Origin check, non-loopback → 403, Origin never echoed | `packages/rest/crawlutron_rest/api/middleware.py:22-41`, `packages/core/crawlutron/mcp/server.py:42-56` | `tests/api/test_origin_guard.py:9-43` |
 | Private-target guard; warned once per enabled value at first use | `packages/core/crawlutron/models/host_policy.py:85-160` | `tests/transport/test_dns_cache.py:55-66` |

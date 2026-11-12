@@ -97,8 +97,8 @@ def _comment_mentions(source: str) -> list[tuple[int, str]]:
     for lineno, token_text in comment_lines(source):
         for name in MOVED_MODULES:
             if (
-                f"crawlutron.api.{name}" in token_text
-                or f"packages/core/crawlutron/api/{name}.py" in token_text
+                f"crawlutron_rest.api.{name}" in token_text
+                or f"packages/rest/crawlutron_rest/api/{name}.py" in token_text
             ):
                 mentions.append((lineno, token_text.strip()))
                 break
@@ -119,8 +119,8 @@ def _drift_offenders(root: pathlib.Path = _TESTS_ROOT) -> list[str]:
         tree = ast.parse(source)
         for lineno, value in string_constants(tree):
             for name in MOVED_MODULES:
-                dotted = f"crawlutron.api.{name}"
-                slash = f"packages/core/crawlutron/api/{name}.py"
+                dotted = f"crawlutron_rest.api.{name}"
+                slash = f"packages/rest/crawlutron_rest/api/{name}.py"
                 if dotted in value or slash in value:
                     if _exempt(relative, value):
                         continue
@@ -136,15 +136,14 @@ def test_moved_module_shim_still_resolves() -> None:
     import importlib
 
     for name in sorted(MOVED_MODULES):
-        importlib.import_module(f"crawlutron.api.{name}")
+        importlib.import_module(f"crawlutron_rest.api.{name}")
 
 
 def test_no_stale_api_strings_for_moved_modules() -> None:
     offenders = _drift_offenders()
     assert not offenders, (
-        "stale crawlutron.api.* string references to moved modules "
-        "(repoint to crawlutron.service.* — a string naming the shim is a void patch): "
-        + "; ".join(offenders)
+        "stale crawlutron_rest.api.* string references to moved modules "
+        "(repoint to the moved home -- a string naming the shim is a void patch): " + "; ".join(offenders)
     )
 
 
@@ -152,14 +151,16 @@ def test_drift_detector_bites(tmp_path: pathlib.Path) -> None:
     """Mutant check: a stale dotted string must be named file:line + module."""
     MOVED_MODULES["webhooks"] = "probe row"
     try:
-        source = "x = monkeypatch.setattr('crawlutron.api.webhooks.post_webhook', fake)\n"
+        source = "x = monkeypatch.setattr('crawlutron_rest.api.webhooks.post_webhook', fake)\n"
         probe = tmp_path / "probe.py"
         probe.write_text(source, encoding="utf-8")
         tree = ast.parse(source)
         hits = [
-            (lineno, value) for lineno, value in string_constants(tree) if "crawlutron.api.webhooks" in value
+            (lineno, value)
+            for lineno, value in string_constants(tree)
+            if "crawlutron_rest.api.webhooks" in value
         ]
-        assert hits == [(1, "crawlutron.api.webhooks.post_webhook")], hits
+        assert hits == [(1, "crawlutron_rest.api.webhooks.post_webhook")], hits
         offenders = _drift_offenders(tmp_path)
         assert any("names moved module 'webhooks'" in o for o in offenders), offenders
     finally:
@@ -171,7 +172,7 @@ def test_moved_module_shim_gate_bites_on_shimless_row() -> None:
     """Mutation probe: a row with no api shim reds the shim gate, naming it."""
     MOVED_MODULES["webhooks"] = "probe row"
     try:
-        with pytest.raises(ImportError, match="crawlutron.api.webhooks"):
+        with pytest.raises(ImportError, match="crawlutron_rest.api.webhooks"):
             test_moved_module_shim_still_resolves()
     finally:
         MOVED_MODULES.pop("webhooks", None)

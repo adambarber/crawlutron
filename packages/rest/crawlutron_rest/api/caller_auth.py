@@ -13,7 +13,6 @@ from fastapi import Request
 
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.error_response import ErrorResponse
-from crawlutron.service import key_throttle
 from crawlutron.service.caller_auth import (
     Tracking,
     admit,
@@ -28,6 +27,7 @@ from crawlutron.service.caller_auth import (
     resolve_page_limit,
 )
 from crawlutron.service.errors import AuthRefusal
+from crawlutron.service.key_throttle import shared_throttle
 
 
 def _presented_key(request: Request) -> str | None:
@@ -130,7 +130,7 @@ async def get_keys_caller(request: Request) -> CallerIdentity:
     admin_token = key_admin_token(request)
     if not secret or not admin_token:
         _raise_invalid_api_key()
-    throttle = key_throttle.shared_throttle()
+    throttle = shared_throttle()
     throttle.check_admin()
     if not _constant_time_eq(secret, admin_token):
         throttle.record_admin_failure()
@@ -146,7 +146,7 @@ async def _caller_from_secret(request: Request, secret: str) -> CallerIdentity:
     The meter runs BEFORE the PBKDF2: a credential in cooldown refuses without
     burning another derivation (#653). One per-entry-point chokepoint.
     """
-    throttle = key_throttle.shared_throttle()
+    throttle = shared_throttle()
     throttle.check(secret)
     store = getattr(request.app.state, "caller_key_store", None)
     record = await store.averify_key(secret) if store is not None else None
@@ -166,7 +166,7 @@ async def get_caller_identity(request: Request) -> CallerIdentity:
     if not secret:
         return anonymous_caller()
     if verify_admin_secret(secret, request):
-        key_throttle.shared_throttle().record_admin_success()
+        shared_throttle().record_admin_success()
         return operator_caller()
     return await _caller_from_secret(request, secret)
 

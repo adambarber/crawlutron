@@ -4,14 +4,14 @@ installed package carries, derived once in the vocabulary and re-derived nowhere
 
 from crawlutron import __version__
 from crawlutron.config.settings import CrawlerSettings
-from crawlutron.discovery.agent_hints import STRATEGY_DESCRIPTIONS
-from crawlutron.discovery.capabilities import capabilities_payload
-from crawlutron.discovery.well_known import discovery_payload
 from crawlutron.mcp.protocol import server_info
 from crawlutron.models.crawl_strategy import CrawlStrategy
 from crawlutron.models.json_value import JsonValue
 from crawlutron.vocabulary.identity import DEFAULT_USER_AGENT, SERVICE_VERSION
 from crawlutron.vocabulary.strategies import CFFI_IMPERSONATE_TARGET
+from crawlutron_rest.discovery.agent_hints import STRATEGY_DESCRIPTIONS
+from crawlutron_rest.discovery.capabilities import capabilities_payload
+from crawlutron_rest.discovery.well_known import discovery_payload
 
 
 def test_service_version_is_the_package_version():

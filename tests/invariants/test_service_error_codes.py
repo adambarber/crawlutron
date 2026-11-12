@@ -12,11 +12,11 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 #: Live raise-site sources the wire triplets are re-derived from each run.
 _RAISE_SITE_SOURCES = (
-    "packages/core/crawlutron/api/crawl_endpoint.py",
+    "packages/rest/crawlutron_rest/api/crawl_endpoint.py",
     "packages/core/crawlutron/service/errors.py",
 )
 
-_DISCONNECT_SOURCE = "packages/core/crawlutron/api/crawl_endpoint.py"
+_DISCONNECT_SOURCE = "packages/rest/crawlutron_rest/api/crawl_endpoint.py"
 
 
 #: Raise sites whose wire code is not a literal, named and reasoned so the AST

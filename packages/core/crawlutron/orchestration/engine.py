@@ -1,6 +1,6 @@
 """Crawl execution engine: owns the policy-driven crawl orchestration --
 payload/URL/policy parsing, the per-URL strategy chain (HTTP then browser
-fallback), worker dispatch, and final result assembly. The single entry point crawlutron.main calls.
+fallback), worker dispatch, and final result assembly. The single entry point crawlutron_rest.main calls.
 """
 
 from __future__ import annotations

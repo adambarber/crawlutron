@@ -12,10 +12,7 @@ import pytest
 from fastapi import Response
 from fastapi.responses import JSONResponse
 
-import crawlutron.api.crawl_endpoint as crawl_endpoint
-from crawlutron.api.caller_auth import Tracking
-from crawlutron.api.crawl_endpoint import crawl
-from crawlutron.api.identity_router import map as map_door
+import crawlutron_rest.api.crawl_endpoint as crawl_endpoint
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.health.readiness import READINESS_STATE, ReadinessState
 from crawlutron.models.caller_identity import CallerIdentity
@@ -28,6 +25,9 @@ from crawlutron.service.caller_auth import CALLER_QUOTA_ADMISSION
 from crawlutron.service.errors import DomainError
 from crawlutron.service.main_helpers import request_gate
 from crawlutron.storage.result_store import CrawlResultStore, CrawlSpillStore
+from crawlutron_rest.api.caller_auth import Tracking
+from crawlutron_rest.api.crawl_endpoint import crawl
+from crawlutron_rest.api.identity_router import map as map_door
 from tests._job_harnesses import ScriptedExecute, make_job_store
 from tests._result_builders import engine_result
 

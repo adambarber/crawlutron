@@ -13,10 +13,10 @@ import pytest
 from fastapi import FastAPI, Request
 from httpx import AsyncClient, Response
 
-from crawlutron.api.dependencies import get_concurrency_tracker
 from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
 from crawlutron.service.errors import DomainError
 from crawlutron.storage import caller_key_store, job_store, result_store
+from crawlutron_rest.api.dependencies import get_concurrency_tracker
 from tests._app_harnesses import harness_app
 from tests._async_harnesses import issue_key, serve
 from tests._quota_harness import grant_test_admin_token, stores
@@ -33,8 +33,8 @@ type _Harness = tuple[
 @pytest.fixture
 async def trackerless_app(tmp_path: Path) -> AsyncGenerator[_Harness, None]:
     """The crawl router served WITHOUT a concurrency tracker on app.state."""
-    from crawlutron.api.crawl_router import router as crawl_router
-    from crawlutron.api.keys_router import router as keys_router
+    from crawlutron_rest.api.crawl_router import router as crawl_router
+    from crawlutron_rest.api.keys_router import router as keys_router
 
     store, results, keys = stores(tmp_path)
     app = harness_app(crawl_router, keys_router)

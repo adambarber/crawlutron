@@ -10,8 +10,8 @@ import pytest
 from fastapi.dependencies.utils import get_typed_signature
 from fastapi.routing import APIRoute
 
-from crawlutron.api import crawl_router, identity_router, jobs_router, keys_router, watch_router
-from crawlutron.api.caller_auth import get_caller_identity, get_keys_caller
+from crawlutron_rest.api import crawl_router, identity_router, jobs_router, keys_router, watch_router
+from crawlutron_rest.api.caller_auth import get_caller_identity, get_keys_caller
 
 _AUTH_DEPS = {get_caller_identity.__name__, get_keys_caller.__name__}
 _AUTH_ROUTERS = (crawl_router, identity_router, jobs_router, keys_router, watch_router)
@@ -62,7 +62,7 @@ def _auth_ops() -> list[tuple[str, str]]:
 
 
 def _spec_responses() -> dict[tuple[str, str], set[str]]:
-    from crawlutron.main import app
+    from crawlutron_rest.main import app
 
     assert app is not None, "the lifespan-set app is absent; re-ground this spec walk"
     spec = app.openapi()

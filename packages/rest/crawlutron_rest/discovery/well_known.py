@@ -4,9 +4,9 @@ from fastapi import APIRouter, Depends
 
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.discovery.links import OPENAPI_DOCS_LINK
-from crawlutron.discovery.recommended import recommended_endpoints
 from crawlutron.models.discovery_response import DiscoveryPayload, DiscoveryResponse
 from crawlutron.models.service_identity import SERVICE_IDENTITY
+from crawlutron_rest.discovery.recommended import recommended_endpoints
 
 
 def discovery_payload(settings: CrawlerSettings) -> DiscoveryPayload:
@@ -45,7 +45,7 @@ def discovery_payload(settings: CrawlerSettings) -> DiscoveryPayload:
 
 def create_well_known_router() -> APIRouter:
     """Create well-known discovery router."""
-    from crawlutron.api.dependencies import get_settings as api_get_settings
+    from crawlutron_rest.api.dependencies import get_settings as api_get_settings
 
     router = APIRouter(tags=["Discovery"])
 

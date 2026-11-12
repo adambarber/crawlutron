@@ -34,7 +34,7 @@ def validate_exempt_routes(app: FastAPI) -> None:
 
     guard_request resolves anonymous callers; a missing or guarded declared route refuses to boot.
     """
-    from crawlutron.api.route_layer import LAYER_EXEMPT_RATCHET, guard_admin_request, operator_guard
+    from crawlutron_rest.api.route_layer import LAYER_EXEMPT_RATCHET, guard_admin_request, operator_guard
 
     refusing = frozenset({guard_admin_request, operator_guard})
 

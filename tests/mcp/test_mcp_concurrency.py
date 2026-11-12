@@ -94,7 +94,7 @@ async def test_keyed_mcp_crawl_refused_when_holding_an_async_job(tmp_path):
 
 async def test_mcp_crawl_and_http_sync_crawl_share_one_ceiling(tmp_path, monkeypatch):
     """A sync crawl in flight over HTTP leaves the same caller's MCP crawl refused."""
-    from crawlutron.api import crawl_endpoint as crawl_mod
+    from crawlutron_rest.api import crawl_endpoint as crawl_mod
 
     _, entered, released = block_execute_crawl(monkeypatch, crawl_mod)
     async with _mcp_client(tmp_path) as (client, job_store, keys):

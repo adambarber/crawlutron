@@ -82,7 +82,7 @@ async def test_an_unwired_port_refuses_loudly(tmp_path):
     from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
 
     store, results, keys = stores(tmp_path)
-    from crawlutron.api.identity_router import router as identity_router
+    from crawlutron_rest.api.identity_router import router as identity_router
     from tests._app_harnesses import harness_app
 
     app = harness_app(identity_router)

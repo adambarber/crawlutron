@@ -22,7 +22,7 @@ from tests.factories.store import complete_job
 def test_203_cleanup_pins():
     # #676 inverted pin 1: the credential funnel is ONE parsing path, so guards read it
     # through the public door presented_key() (#203's private-only posture predates it).
-    import crawlutron.api.caller_auth as caller_auth
+    import crawlutron_rest.api.caller_auth as caller_auth
 
     assert "presented_key" in caller_auth.__all__
 
@@ -117,7 +117,7 @@ async def test_non_ascii_key_on_keys_door_is_401(tmp_path):
         ),
     }
     with pytest.raises(AuthRefusal) as raised:
-        from crawlutron.api.caller_auth import get_keys_caller
+        from crawlutron_rest.api.caller_auth import get_keys_caller
 
         await get_keys_caller(Request(scope))
     assert raised.value.status == 401
@@ -230,7 +230,7 @@ def test_operator_token_rotation_is_honored_not_memoized():
     """
     from types import SimpleNamespace
 
-    import crawlutron.api.caller_auth as caller_auth
+    import crawlutron_rest.api.caller_auth as caller_auth
 
     settings = SimpleNamespace(key_admin_token="tok-old")
     scope = {
@@ -255,7 +255,7 @@ def test_with_no_settings_home_the_door_is_sealed(monkeypatch):
     app.state the door is sealed (fail closed), whatever the env says -- an
     env-var fallback was the memoized second home that broke rotation."""
 
-    import crawlutron.api.caller_auth as caller_auth
+    import crawlutron_rest.api.caller_auth as caller_auth
 
     monkeypatch.setenv("CRAWLUTRON_KEY_ADMIN_TOKEN", "tok-from-env")
     request = _request_with({"x-api-key": "tok-from-env"})
@@ -269,7 +269,7 @@ def test_the_settings_home_is_read_not_rederived(monkeypatch):
     """
     from types import SimpleNamespace
 
-    import crawlutron.api.caller_auth as caller_auth
+    import crawlutron_rest.api.caller_auth as caller_auth
     from crawlutron.config.settings import CrawlerSettings
 
     calls = []

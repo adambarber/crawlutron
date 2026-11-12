@@ -34,8 +34,8 @@ async def serve_admit(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
 
 
 def _admit_app(settings: CrawlerSettings | None = None) -> FastAPI:
-    from crawlutron.api.admit_router import router as admit_router
-    from crawlutron.api.dependencies import get_settings
+    from crawlutron_rest.api.admit_router import router as admit_router
+    from crawlutron_rest.api.dependencies import get_settings
 
     app = harness_app(admit_router)
     app.dependency_overrides[get_settings] = lambda: settings or CrawlerSettings.from_mapping({})
@@ -238,25 +238,25 @@ class TestDiscovery:
     """Discovery surfaces name admission in the same commit as the door."""
 
     def test_well_known_links_name_admit(self):
-        from crawlutron.discovery.well_known import discovery_payload
+        from crawlutron_rest.discovery.well_known import discovery_payload
 
         assert discovery_payload(CrawlerSettings.from_mapping({}))["links"]["admit"] == "/v1/admit"
 
     def test_recommended_endpoints_name_admit_before_crawl(self):
-        from crawlutron.discovery.well_known import discovery_payload
+        from crawlutron_rest.discovery.well_known import discovery_payload
 
         recommended = discovery_payload(CrawlerSettings.from_mapping({}))["recommended_endpoints"]
         assert "POST /v1/admit" in recommended
         assert recommended.index("POST /v1/admit") < recommended.index("POST /v1/crawl")
 
     def test_capabilities_advertises_pre_flight_admission(self):
-        from crawlutron.discovery.capabilities import capabilities_payload
+        from crawlutron_rest.discovery.capabilities import capabilities_payload
 
         features = capabilities_payload(CrawlerSettings.from_mapping({}))["features"]
         assert features["pre_flight_admission"] is True
 
     def test_agent_hints_recommend_admission_as_preflight(self):
-        from crawlutron.discovery.agent_hints import agent_hints_payload
+        from crawlutron_rest.discovery.agent_hints import agent_hints_payload
 
         guidance = " ".join(agent_hints_payload()["guidance"])
         assert "/v1/admit" in guidance

@@ -6,7 +6,7 @@ import json
 
 from starlette.responses import Response
 
-from crawlutron.api.middleware import limit_request_body
+from crawlutron_rest.api.middleware import limit_request_body
 from tests._asgi_request import make_request, pass_through
 
 CAP = 100

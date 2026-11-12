@@ -25,7 +25,3 @@ version-file = "crawlutron/_version.py"
 # Dist name (crawlutron-core) and import names (crawlutron, admission) are
 # independent: importing either resolves into this one wheel.
 packages = ["crawlutron", "admission"]
-
-[project.scripts]
-# The crawler service CLI ships in this member, alongside the package it runs.
-crawl = "crawlutron.cli.__main__:main"

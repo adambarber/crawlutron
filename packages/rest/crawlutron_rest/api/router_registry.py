@@ -14,14 +14,14 @@ if TYPE_CHECKING:
 
 #: Mount order preserved from the historical _include_routers body.
 _ROUTER_MODULE_NAMES = (
-    "crawlutron.api.metrics_router",
-    "crawlutron.api.identity_router",
-    "crawlutron.api.jobs_router",
-    "crawlutron.api.keys_router",
-    "crawlutron.api.watch_router",
-    "crawlutron.api.crawl_router",
-    "crawlutron.api.policy_router",
-    "crawlutron.api.admit_router",
+    "crawlutron_rest.api.metrics_router",
+    "crawlutron_rest.api.identity_router",
+    "crawlutron_rest.api.jobs_router",
+    "crawlutron_rest.api.keys_router",
+    "crawlutron_rest.api.watch_router",
+    "crawlutron_rest.api.crawl_router",
+    "crawlutron_rest.api.policy_router",
+    "crawlutron_rest.api.admit_router",
 )
 
 ROUTER_MODULES: tuple[APIRouter, ...] = tuple(import_module(name).router for name in _ROUTER_MODULE_NAMES)

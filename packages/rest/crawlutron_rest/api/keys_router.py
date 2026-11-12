@@ -6,14 +6,14 @@ them. The operator token is the only credential these routes accept.
 
 from __future__ import annotations
 
-from crawlutron.api.dependencies import CallerKeyStoreDep
-from crawlutron.api.exceptions import http_error
-from crawlutron.api.route_layer import admin_guarded_router
 from crawlutron.models.error_response import ErrorResponse
 from crawlutron.models.issued_key import IssuedKey
 from crawlutron.models.key_create_request import KeyCreateRequest
 from crawlutron.models.key_summary import KeySummary
 from crawlutron.models.revoked_key import RevokedKey
+from crawlutron_rest.api.dependencies import CallerKeyStoreDep
+from crawlutron_rest.api.exceptions import http_error
+from crawlutron_rest.api.route_layer import admin_guarded_router
 
 router = admin_guarded_router(prefix="/v1/keys", tags=["Crawler"])
 

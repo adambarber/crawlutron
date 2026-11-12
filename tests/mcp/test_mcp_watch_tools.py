@@ -12,10 +12,10 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from fastapi import Request
 
-from crawlutron.api.dependencies import get_settings, get_shutdown_event, get_watch_store
-from crawlutron.api.mcp_router import router as mcp_router
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.mcp.registry import TOOLS_BY_NAME
+from crawlutron_rest.api.dependencies import get_settings, get_shutdown_event, get_watch_store
+from crawlutron_rest.api.mcp_router import router as mcp_router
 from tests._app_harnesses import harness_app
 from tests._async_harnesses import issue_key
 from tests._quota_harness import keyed_client, stores
@@ -47,9 +47,9 @@ async def other_caller(h: WatchHarness) -> WatchHarness:
 @pytest.fixture
 async def watch_harness(tmp_path: Path) -> AsyncGenerator[WatchHarness, None]:
     """A keyed client over /mcp + /v1/watches sharing one watch store and key admin."""
-    from crawlutron.api.keys_router import router as keys_router
-    from crawlutron.api.watch_router import router as watch_router
     from crawlutron.storage.watch_store import WatchStore
+    from crawlutron_rest.api.keys_router import router as keys_router
+    from crawlutron_rest.api.watch_router import router as watch_router
 
     _, _, keys = stores(tmp_path)
     app = harness_app(mcp_router, watch_router, keys_router)
@@ -154,7 +154,7 @@ class TestPollOnlyRefusal:
 
 class TestWatchToolDiscovery:
     def test_agent_hints_mention_the_watch_tools(self):
-        from crawlutron.discovery.agent_hints import agent_hints_payload
+        from crawlutron_rest.discovery.agent_hints import agent_hints_payload
 
         guidance = " ".join(agent_hints_payload()["guidance"])
         assert "register_watch" in guidance

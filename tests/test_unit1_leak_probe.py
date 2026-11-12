@@ -9,7 +9,7 @@ import pytest
 from starlette.types import Message
 
 import tests.conftest as cf
-from crawlutron.api.middleware import limit_request_body
+from crawlutron_rest.api.middleware import limit_request_body
 from tests._asgi_request import make_request, refuse_never
 
 
@@ -56,7 +56,7 @@ def test_time_sleep_is_real_after_a_sibling_monkeypatch():
 async def test_deadline_refusal_survives_a_sibling_sleep_monkeypatch(monkeypatch):
     """The real victim shape, run AFTER a sibling patched asyncio.sleep: the
     dribble must really sleep, so the 0.05s deadline fires and refuses."""
-    import crawlutron.api.middleware as mw
+    import crawlutron_rest.api.middleware as mw
 
     monkeypatch.setattr(mw, "BODY_DEADLINE_SECONDS", 0.05)
 

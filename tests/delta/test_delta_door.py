@@ -8,14 +8,14 @@ from __future__ import annotations
 import asyncio
 import pathlib
 
-from crawlutron.api import crawl_endpoint as _crawl_endpoint_mod
-from crawlutron.api.crawl_endpoint import crawl
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.delta import CHANGED, NEW, UNCHANGED
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
 from crawlutron.storage.result_store import CrawlResultStore, CrawlSpillStore
+from crawlutron_rest.api import crawl_endpoint as _crawl_endpoint_mod
+from crawlutron_rest.api.crawl_endpoint import crawl
 from tests._job_harnesses import ScriptedExecute, make_job_store, scripted_engine
 from tests._result_builders import engine_result
 from tests.delta._door_harness import assert_removed_summary, baseline_row, delta_stores, seed_baseline_row

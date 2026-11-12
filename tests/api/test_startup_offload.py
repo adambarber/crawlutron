@@ -195,7 +195,7 @@ class TestSingleShotResultStoreStaysOffTheLoop:
     async def test_reading_a_stored_single_shot_response_stays_off_the_loop(
         self, loop_guard_store, result_store
     ):
-        from crawlutron.api.crawl_endpoint import get_crawl_result
+        from crawlutron_rest.api.crawl_endpoint import get_crawl_result
 
         await _off_loop(loop_guard_store.create_single_shot, "req-1", _ROOT, {"strategies": []})
         await _off_loop(loop_guard_store.set_status, "req-1", JobStatus.COMPLETED, expected=JobStatus.PENDING)
@@ -205,7 +205,7 @@ class TestSingleShotResultStoreStaysOffTheLoop:
         assert json.loads(cast("str | bytes | bytearray", response.body))["request_id"] == "req-1"
 
     async def test_a_pending_single_shot_read_stays_off_the_loop(self, loop_guard_store, result_store):
-        from crawlutron.api.crawl_endpoint import get_crawl_result
+        from crawlutron_rest.api.crawl_endpoint import get_crawl_result
 
         await _off_loop(loop_guard_store.create_single_shot, "req-2", _ROOT, {"strategies": []})
         with pytest.raises(HTTPException) as raised:
@@ -247,7 +247,7 @@ class TestStatusEndpointAnswersOnlyForTerminalJobs:
     async def test_a_running_job_that_has_written_results_is_still_pending(
         self, loop_guard_store, result_store
     ):
-        from crawlutron.api.crawl_endpoint import get_crawl_result
+        from crawlutron_rest.api.crawl_endpoint import get_crawl_result
 
         await _off_loop(loop_guard_store.create_single_shot, "req-3", _ROOT, {"strategies": []})
         await _job_with_results_written(loop_guard_store, "req-3")
@@ -263,7 +263,7 @@ class TestStatusEndpointAnswersOnlyForTerminalJobs:
 
         The runner's terminal write is an unchecked CAS, so a paused job is
         published anyway; keyed on the store alone the endpoint answers 200."""
-        from crawlutron.api.crawl_endpoint import get_crawl_result
+        from crawlutron_rest.api.crawl_endpoint import get_crawl_result
 
         await _off_loop(loop_guard_store.create_single_shot, "req-5", _ROOT, {"strategies": []})
         await _off_loop(loop_guard_store.set_status, "req-5", JobStatus.RUNNING, expected=JobStatus.PENDING)
@@ -278,7 +278,7 @@ class TestStatusEndpointAnswersOnlyForTerminalJobs:
 
         Both transitions compare-and-set from ``RUNNING``; whichever lands
         first wins, and a paused job is stopped, not finished (so 202)."""
-        from crawlutron.api.crawl_endpoint import get_crawl_result
+        from crawlutron_rest.api.crawl_endpoint import get_crawl_result
 
         await _off_loop(loop_guard_store.create_single_shot, "req-6", _ROOT, {"strategies": []})
         await _off_loop(loop_guard_store.set_status, "req-6", JobStatus.RUNNING, expected=JobStatus.PENDING)
@@ -293,7 +293,7 @@ class TestStatusEndpointAnswersOnlyForTerminalJobs:
         self, loop_guard_store, result_store
     ):
         """The complement on the store path: the fix must not make it unreadable."""
-        from crawlutron.api.crawl_endpoint import get_crawl_result
+        from crawlutron_rest.api.crawl_endpoint import get_crawl_result
 
         await _off_loop(loop_guard_store.create_single_shot, "req-7", _ROOT, {"strategies": []})
         await _off_loop(loop_guard_store.set_status, "req-7", JobStatus.RUNNING, expected=JobStatus.PENDING)
@@ -305,7 +305,7 @@ class TestStatusEndpointAnswersOnlyForTerminalJobs:
 
     async def test_the_same_job_answers_200_once_it_is_completed(self, loop_guard_store, result_store):
         """The complement: the fix must not make a finished job unreadable."""
-        from crawlutron.api.crawl_endpoint import get_crawl_result
+        from crawlutron_rest.api.crawl_endpoint import get_crawl_result
 
         await _off_loop(loop_guard_store.create_single_shot, "req-4", _ROOT, {"strategies": []})
         await _job_with_results_written(loop_guard_store, "req-4")

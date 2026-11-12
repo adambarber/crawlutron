@@ -1,6 +1,6 @@
 """Lazily resolved reference to the running app module's accessor.
 
-Keeps runtime/service callers off the fastapi graph crawlutron.main owns.
+Keeps runtime/service callers off the fastapi graph crawlutron_rest.main owns.
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ def reset_module_app_provider() -> None:
 def module_app() -> AppModuleLike | None:
     """The installed app-module accessor; main's ``module_app`` by default wiring."""
     if _provider is None:
-        raise RuntimeError("module_app provider not installed: crawlutron.main not imported")
+        raise RuntimeError("module_app provider not installed: crawlutron_rest.main not imported")
     return _provider()
 
 

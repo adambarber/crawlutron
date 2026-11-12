@@ -9,10 +9,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from crawlutron.api._depends_singletons import settings_dep, shutdown_event_dep
-from crawlutron.api.caller_auth import quota_denials
-from crawlutron.api.dependencies import AdmissionDep, CallerDep, TrackingDep
-from crawlutron.api.route_layer import guarded_router
 from crawlutron.models import map_request, render_request, search_request
 from crawlutron.models.error_response import ErrorResponse
 from crawlutron.models.search_response import SearchResponse
@@ -23,6 +19,10 @@ from crawlutron.service.main_helpers import request_gate
 from crawlutron.service.map_endpoint import map_site
 from crawlutron.service.render_endpoint import render as render_handler
 from crawlutron.service.render_endpoint import render_rejection
+from crawlutron_rest.api._depends_singletons import settings_dep, shutdown_event_dep
+from crawlutron_rest.api.caller_auth import quota_denials
+from crawlutron_rest.api.dependencies import AdmissionDep, CallerDep, TrackingDep
+from crawlutron_rest.api.route_layer import guarded_router
 
 if TYPE_CHECKING:
     from crawlutron.models.site_map_response import SiteMapPayload

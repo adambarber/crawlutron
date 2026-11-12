@@ -8,7 +8,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.types import Message
 
-from crawlutron.api.middleware import MAX_REQUEST_BODY_BYTES, limit_request_body
+from crawlutron_rest.api.middleware import MAX_REQUEST_BODY_BYTES, limit_request_body
 from tests._asgi_request import (
     body_reader_call_next,
     make_request,
@@ -212,7 +212,7 @@ async def test_cap_is_enforced_on_the_app_that_serves_traffic():
     would ever say so -- so this drives the shipped app over its own stack."""
     from httpx import ASGITransport, AsyncClient
 
-    from crawlutron.main import app
+    from crawlutron_rest.main import app
 
     assert app is not None, "the lifespan-set app is absent"
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
@@ -289,7 +289,7 @@ async def test_slow_drain_client_is_refused_within_the_deadline(monkeypatch):
     middleware task forever when receive() never returns."""
     import asyncio
 
-    import crawlutron.api.middleware as mw
+    import crawlutron_rest.api.middleware as mw
 
     monkeypatch.setattr(mw, "BODY_DEADLINE_SECONDS", 0.05)
 
@@ -308,7 +308,7 @@ async def test_dribbling_drain_client_is_refused_within_the_deadline(monkeypatch
     """The named attack shape on the drain path: a dribble interval SHORTER
     than the per-receive bound (so it never fires) with more bytes than the
     outer probe can wait for -- only the OVERALL wall-clock deadline refuses."""
-    import crawlutron.api.middleware as mw
+    import crawlutron_rest.api.middleware as mw
 
     monkeypatch.setattr(mw, "BODY_DEADLINE_SECONDS", 0.1)
 
@@ -335,7 +335,7 @@ async def test_slow_collect_client_is_refused_within_the_deadline(monkeypatch):
     """
     import asyncio
 
-    import crawlutron.api.middleware as mw
+    import crawlutron_rest.api.middleware as mw
 
     monkeypatch.setattr(mw, "BODY_DEADLINE_SECONDS", 0.05)
 

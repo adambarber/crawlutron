@@ -12,10 +12,10 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from fastapi import FastAPI
 
-from crawlutron.api.dependencies import get_job_store, get_settings, get_shutdown_event
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
 from crawlutron.storage.job_store import JobStore
+from crawlutron_rest.api.dependencies import get_job_store, get_settings, get_shutdown_event
 
 
 def bind_base_overrides(app: FastAPI, *, job_store: JobStore, shutdown_event: asyncio.Event) -> None:

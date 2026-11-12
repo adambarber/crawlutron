@@ -7,7 +7,7 @@ import logging
 
 import pytest
 
-from crawlutron.main import warn_if_bound_off_loopback
+from crawlutron_rest.main import warn_if_bound_off_loopback
 
 # Addresses a request can never leave the machine over. The whole 127/8 block qualifies, not just 127.0.0.1: a
 # deployment that binds 127.0.0.53 is still loopback-only and should not be told it is exposed.

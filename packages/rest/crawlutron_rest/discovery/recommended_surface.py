@@ -21,14 +21,14 @@ OPERATOR_EXCLUSIONS: frozenset[str] = frozenset(
 #: Registry modules first in the recommendation list, in agent-use order
 #: (pre-flight admission, then the fetch primitives); anything else appended.
 _ADVERTISEMENT_ORDER = (
-    "crawlutron.api.admit_router",
-    "crawlutron.api.crawl_router",
-    "crawlutron.api.identity_router",
-    "crawlutron.api.jobs_router",
-    "crawlutron.api.keys_router",
-    "crawlutron.api.watch_router",
-    "crawlutron.api.metrics_router",
-    "crawlutron.api.policy_router",
+    "crawlutron_rest.api.admit_router",
+    "crawlutron_rest.api.crawl_router",
+    "crawlutron_rest.api.identity_router",
+    "crawlutron_rest.api.jobs_router",
+    "crawlutron_rest.api.keys_router",
+    "crawlutron_rest.api.watch_router",
+    "crawlutron_rest.api.metrics_router",
+    "crawlutron_rest.api.policy_router",
 )
 
 __all__ = ["DISCOVERY_DOORS", "OPERATOR_EXCLUSIONS", "advertised_route_strings"]
@@ -38,8 +38,8 @@ def _registry_route_strings() -> list[str]:
     """Every registry (METHOD path) string, advertisement order first."""
     from fastapi.routing import APIRoute
 
-    from crawlutron.api.router_identity import router_module
-    from crawlutron.api.router_registry import ROUTER_MODULES
+    from crawlutron_rest.api.router_identity import router_module
+    from crawlutron_rest.api.router_registry import ROUTER_MODULES
 
     modules = (router_module(r) for r in ROUTER_MODULES)
     routers = dict(zip(modules, ROUTER_MODULES, strict=True))

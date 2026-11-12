@@ -8,12 +8,12 @@ from __future__ import annotations
 
 from fastapi import Depends, Request
 
-from crawlutron.api.caller_auth import is_operator
-from crawlutron.api.dependencies import CallerDep, get_result_store, get_settings
-from crawlutron.api.exceptions import http_error
-from crawlutron.api.route_layer import guarded_router
 from crawlutron.models.policy_suggestions_response import PolicySuggestionsResponse
 from crawlutron.service.policy_suggestions import policy_suggestions as policy_suggestions_handler
+from crawlutron_rest.api.caller_auth import is_operator
+from crawlutron_rest.api.dependencies import CallerDep, get_result_store, get_settings
+from crawlutron_rest.api.exceptions import http_error
+from crawlutron_rest.api.route_layer import guarded_router
 
 router = guarded_router(tags=["Crawler"])
 

@@ -88,7 +88,7 @@ if ROOT.exists() and str(ROOT) not in sys.path:
 # (the secure default).
 os.environ.setdefault("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
 
-# `crawlutron.main` binds `DATABASE_PATH` from settings.cache_dir at import; every test gets the same
+# `crawlutron_rest.main` binds `DATABASE_PATH` from settings.cache_dir at import; every test gets the same
 # process-wide `JobStore` built on it. (Not a CRAWLUTRON_CACHE_DIR default: a suite-scratch env face.)
 _SCRATCH_CACHE_DIR = (
     Path(tempfile.gettempdir())

@@ -10,14 +10,14 @@ import contextlib
 from pathlib import Path
 from types import SimpleNamespace
 
-from crawlutron.api.identity_router import router as identity_router
-from crawlutron.api.keys_router import router as keys_router
 from crawlutron.models.render_options import RenderOptions
 from crawlutron.models.taxonomy import Classification
 from crawlutron.runtime import process_state
 from crawlutron.transport.browser import BrowserRenderer
 from crawlutron.transport.browser_pool import BrowserPool
 from crawlutron.transport.render_page import RenderPage
+from crawlutron_rest.api.identity_router import router as identity_router
+from crawlutron_rest.api.keys_router import router as keys_router
 from tests._async_harnesses import issue_key
 from tests._policy_factories import canonical
 from tests._quota_harness import service_client

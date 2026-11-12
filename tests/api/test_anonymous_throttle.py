@@ -8,7 +8,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from crawlutron.api.anonymous_throttle import (
+from crawlutron_rest.api.anonymous_throttle import (
     BUCKET_CAPACITY,
     MAX_REQUESTS_PER_WINDOW,
     AnonymousThrottle,
@@ -92,9 +92,9 @@ def test_meters_are_registered_process_state():
     from crawlutron.runtime import process_state
 
     process_state.reset_all_process_state()
-    assert process_state.owner_has_state("crawlutron.api.anonymous_throttle") is False
+    assert process_state.owner_has_state("crawlutron_rest.api.anonymous_throttle") is False
     shared_anonymous_throttle().check("10.0.0.1")
-    assert process_state.owner_has_state("crawlutron.api.anonymous_throttle") is True
+    assert process_state.owner_has_state("crawlutron_rest.api.anonymous_throttle") is True
 
 
 def _app_client() -> httpx.AsyncClient:

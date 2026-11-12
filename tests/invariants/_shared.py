@@ -275,7 +275,7 @@ def _module_name(path: pathlib.Path) -> str:
         relative = relative[:-3]
     parts = relative.split("/")
     for index, part in enumerate(parts):
-        if part in {"crawlutron", "admission"}:
+        if part in {"crawlutron", "crawlutron_rest", "admission"}:
             parts = parts[index:]
             break
     return ".".join(parts)

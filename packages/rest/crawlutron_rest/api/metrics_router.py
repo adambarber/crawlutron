@@ -6,8 +6,8 @@ import asyncio
 
 from fastapi import APIRouter, Depends, Request, Response
 
-from crawlutron.api.route_layer import operator_guard
 from crawlutron.runtime.metrics import get_metrics
+from crawlutron_rest.api.route_layer import operator_guard
 
 router = APIRouter(tags=["Health"], dependencies=[Depends(operator_guard)])
 

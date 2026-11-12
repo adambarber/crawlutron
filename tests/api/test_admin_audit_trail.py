@@ -8,9 +8,9 @@ from __future__ import annotations
 import sqlite3
 from contextlib import closing
 
-from crawlutron.api import caller_auth
 from crawlutron.storage.admin_audit_store import AdminAuditStore
 from crawlutron.storage.caller_key_store import CallerKeyStore
+from crawlutron_rest.api import caller_auth
 from tests._async_harnesses import serve
 from tests._quota_harness import TEST_ADMIN_TOKEN, stores
 from tests.factories.client import isolation_app

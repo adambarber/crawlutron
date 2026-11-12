@@ -11,7 +11,8 @@ from typing import Protocol
 
 import pytest
 
-from tests.chokepoint_walks import APP_ROOT, app_trees, nodes_of
+from tests._walk_primitives import APP_ROOTS
+from tests.chokepoint_walks import app_trees, nodes_of, relative_posix
 
 ALL_APP: frozenset[str] = frozenset()
 """Every app module.
@@ -59,7 +60,7 @@ def walk[
     each line number with its path so the work list can be acted on.
     """
     for path, tree in app_trees(exclude=exclude):
-        relative = path.relative_to(APP_ROOT.parent).as_posix()
+        relative = relative_posix(path)
         for metric, line, detail in collect(tree):
             yield metric, f"{relative}:{line}", detail
 
@@ -169,7 +170,7 @@ def collector_sees_the_whole_tree(
     minimum_modules = 50
 
     def assertion_reaches_the_tree() -> None:
-        total = sum(1 for _ in APP_ROOT.rglob("*.py"))
+        total = sum(1 for root in APP_ROOTS for _ in root.rglob("*.py"))
         assert total > minimum_modules, f"{subject}: expected a real app tree, found {total} files"
         reached = counts()
         for what, minimum in minimums.items():

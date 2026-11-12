@@ -6,9 +6,9 @@ updating discovery REDS here.
 from __future__ import annotations
 
 from crawlutron.config.settings import CrawlerSettings
-from crawlutron.discovery.recommended_surface import OPERATOR_EXCLUSIONS
-from crawlutron.discovery.well_known import discovery_payload
 from crawlutron.mcp.registry import TOOL_SPECS
+from crawlutron_rest.discovery.recommended_surface import OPERATOR_EXCLUSIONS
+from crawlutron_rest.discovery.well_known import discovery_payload
 
 
 def _live_surface() -> set[str]:
@@ -56,7 +56,7 @@ def test_recommended_endpoints_are_derived_not_hand_listed():
     import ast
     import inspect
 
-    from crawlutron.discovery import well_known
+    from crawlutron_rest.discovery import well_known
 
     tree = ast.parse(inspect.getsource(well_known))
     literals = {
@@ -81,7 +81,7 @@ def test_no_hand_listed_endpoints_in_the_discovery_package():
     import ast
     import pathlib
 
-    import crawlutron.discovery as discovery_pkg
+    import crawlutron_rest.discovery as discovery_pkg
 
     exempt = {"recommended_surface.py"}
     offenders: list[str] = []
@@ -119,7 +119,7 @@ def test_crawl_refusal_fields_never_exceed_the_schema_drop_list():
 def test_mcp_guidance_names_every_registered_tool():
     """The hints' MCP guidance is derived from TOOL_SPECS: a new tool REDS until
     the guidance carries it -- hand-written tool lists cannot drift."""
-    from crawlutron.discovery.agent_hints import agent_hints_payload
+    from crawlutron_rest.discovery.agent_hints import agent_hints_payload
 
     guidance = " ".join(agent_hints_payload()["guidance"])
     unadvertised = [spec.name for spec in TOOL_SPECS if spec.name not in guidance]

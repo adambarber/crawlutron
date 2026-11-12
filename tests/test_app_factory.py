@@ -10,7 +10,7 @@ from crawlutron.config.settings import CrawlerSettings
 
 
 def test_create_app_returns_a_wired_app():
-    from crawlutron.main import create_app
+    from crawlutron_rest.main import create_app
 
     app = create_app()
     assert isinstance(app, FastAPI)
@@ -24,7 +24,7 @@ def test_create_app_returns_a_wired_app():
 
 
 def test_create_app_accepts_settings():
-    from crawlutron.main import create_app
+    from crawlutron_rest.main import create_app
 
     settings = CrawlerSettings.from_mapping({"CRAWLUTRON_KEY_ADMIN_TOKEN": "secret"})
     app = create_app(settings)
@@ -33,33 +33,34 @@ def test_create_app_accepts_settings():
 
 
 def test_import_configures_nothing(tmp_path):
-    """Importing crawlutron.main is side-effect free: no database file appears in
+    """Importing crawlutron_rest.main is side-effect free: no database file appears in
     the working directory and no service logging handler is installed."""
     import os
 
-    import crawlutron.main
+    import crawlutron_rest.main
 
-    # The editable install points at the main checkout; pin THIS tree so the probe
-    # observes the factory under test, not another worktree's main.py.
-    repo_root = Path(crawlutron.main.__file__).resolve().parents[1]
+    # The editable install points at the main checkout; pin THIS tree so the probe observes
+    # the factory under test, not another worktree. Both package roots: rest imports core.
+    rest_root = Path(crawlutron_rest.main.__file__).resolve().parents[1]
+    core_root = rest_root.parent / "core"
     probe = (
         "import logging, os, sys\n"
-        "import crawlutron.main\n"
+        "import crawlutron_rest.main\n"
         "made = sorted(set(os.listdir('.')) - {'__pycache__'})\n"
         "db = [p for p in os.listdir('cache') if p.endswith('.db')] if os.path.isdir('cache') else []\n"
         "handlers = [type(h).__name__ for h in logging.getLogger().handlers]\n"
-        "assert crawlutron.main.__file__ == sys.argv[1], crawlutron.main.__file__\n"
+        "assert crawlutron_rest.main.__file__ == sys.argv[1], crawlutron_rest.main.__file__\n"
         "print('MADE', made)\n"
         "print('DBS', db)\n"
         "print('HANDLERS', handlers)\n"
     )
     env = {
         k: v
-        for k, v in {**os.environ, "PYTHONPATH": str(repo_root)}.items()
+        for k, v in {**os.environ, "PYTHONPATH": f"{str(rest_root)}:{str(core_root)}"}.items()
         if not k.startswith("CRAWLUTRON_")
     }
     result = subprocess.run(
-        [sys.executable, "-c", probe, str(crawlutron.main.__file__)],
+        [sys.executable, "-c", probe, str(crawlutron_rest.main.__file__)],
         cwd=tmp_path,
         capture_output=True,
         text=True,
@@ -74,8 +75,8 @@ def test_import_configures_nothing(tmp_path):
 
 
 def test_module_app_is_lazy_but_available():
-    """`crawlutron.main.app` still resolves (ASGI discovery, tests) and is a real app."""
-    import crawlutron.main as main_mod
+    """`crawlutron_rest.main.app` still resolves (ASGI discovery, tests) and is a real app."""
+    import crawlutron_rest.main as main_mod
 
     app = main_mod.app
     assert isinstance(app, FastAPI)

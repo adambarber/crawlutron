@@ -31,8 +31,8 @@ def isolation_app(
     keys: caller_key_store.CallerKeyStore,
 ) -> FastAPI:
     """A test app with the crawl and key routers over isolated stores."""
-    from crawlutron.api.crawl_router import router as crawl_router
-    from crawlutron.api.keys_router import router as keys_router
+    from crawlutron_rest.api.crawl_router import router as crawl_router
+    from crawlutron_rest.api.keys_router import router as keys_router
 
     app = harness_app(crawl_router, keys_router)
     for dependency, factory in keyed_overrides(app, keys, job_store=store, result_store=results).items():

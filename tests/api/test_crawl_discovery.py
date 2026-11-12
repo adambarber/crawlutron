@@ -227,7 +227,7 @@ class TestDiscoveryAndRenderApi:
 
     async def test_validation_exception_handler_returns_422(self):
         # The handler itself, not the one in the app's registry.
-        from crawlutron.api.exceptions import validation_exception_handler
+        from crawlutron_rest.api.exceptions import validation_exception_handler
 
         scope = {"type": "http", "method": "POST", "path": "/v1/crawl", "headers": [], "query_string": b""}
         request = Request(scope)

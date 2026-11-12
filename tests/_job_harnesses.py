@@ -150,7 +150,7 @@ class ScriptedExecute:
 
 
 def _make_app(job_store):
-    from crawlutron.api.jobs_router import router as jobs_router
+    from crawlutron_rest.api.jobs_router import router as jobs_router
 
     app = harness_app(jobs_router)
     shutdown = asyncio.Event()

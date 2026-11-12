@@ -53,7 +53,7 @@ def _envelope_dict_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 _HAND_ROLLED_ERROR_ENVELOPES_FORBIDDEN = Rule(
     name="no-hand-rolled-error-envelopes",
     find=_envelope_dict_offenders,
-    summary="Use crawlutron.api.exceptions.http_error/browser_pool_unavailable",
+    summary="Use crawlutron_rest.api.exceptions.http_error/browser_pool_unavailable",
     excludes=ENVELOPE_SANCTIONED,
     bite=lambda: (
         # Four offenders from one source: two bare HTTPException builds, one detail= envelope literal, one
@@ -67,7 +67,7 @@ _HAND_ROLLED_ERROR_ENVELOPES_FORBIDDEN = Rule(
         ),
     ),
     clean=lambda: (
-        "from crawlutron.api.exceptions import http_error\n"
+        "from crawlutron_rest.api.exceptions import http_error\n"
         "raise http_error(404, 'not_found', 'gone')\n"
         "response = build_thing({'code': 1, 'message': 'x'})\n",
     ),

@@ -9,18 +9,18 @@ from typing import cast
 import pytest
 
 from crawlutron.admission.policy import DEFAULT_MAX_PAGES, validate_wire_policy
-from crawlutron.api.caller_auth import (
-    check_page_quota,
-    effective_cookie_namespace,
-    identity_for_key,
-)
-from crawlutron.api.crawl_endpoint import get_crawl_result
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.json_value import JsonValue
 from crawlutron.runtime.metrics import MetricsStore
 from crawlutron.storage.caller_key_store import CallerKeyStore
 from crawlutron.storage.job_store import JobStatus, JobStore
 from crawlutron.storage.result_store import CrawlResultStore
+from crawlutron_rest.api.caller_auth import (
+    check_page_quota,
+    effective_cookie_namespace,
+    identity_for_key,
+)
+from crawlutron_rest.api.crawl_endpoint import get_crawl_result
 from tests._api_harnesses import stored_request as _stored_request
 from tests._async_harnesses import expect_quota_refused
 from tests.factories.client import (
@@ -371,8 +371,8 @@ def test_active_count_for_caller_counts_only_live_owned_jobs(tmp_path):
 def test_concurrency_quota_rejects_a_full_caller():
     import pytest
 
-    from crawlutron.api.caller_auth import check_concurrency_quota
     from crawlutron.service.errors import QuotaRefusal
+    from crawlutron_rest.api.caller_auth import check_concurrency_quota
 
     caller = CallerIdentity(caller_id="key_a", authenticated=True, max_concurrency=1)
 

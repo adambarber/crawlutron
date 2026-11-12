@@ -12,14 +12,14 @@ def host_policy_entry_table() -> set[str]:
     """
     return {
         "packages/core/crawlutron/service/admit_endpoint.py:admit_url",
-        "packages/core/crawlutron/api/crawl_endpoint.py:crawl",
+        "packages/rest/crawlutron_rest/api/crawl_endpoint.py:crawl",
         "packages/core/crawlutron/service/crawl_executor.py:execute_crawl",
         "packages/core/crawlutron/service/job_runner.py:run_job",
         "packages/core/crawlutron/service/job_cores.py:create_job_core",
         "packages/core/crawlutron/service/map_endpoint.py:map_site",
         "packages/core/crawlutron/service/render.py:render_request",
         "packages/core/crawlutron/service/response_shaping.py:frontier_link_url",
-        "packages/core/crawlutron/api/watch_router.py:create_watch",
+        "packages/rest/crawlutron_rest/api/watch_router.py:create_watch",
         "packages/core/crawlutron/service/watch_cores.py:register_watch_core",
         "packages/core/crawlutron/service/policy_suggestions.py:policy_suggestions",
         "packages/core/crawlutron/service/site_map.py:build_site_map",

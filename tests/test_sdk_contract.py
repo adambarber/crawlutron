@@ -12,7 +12,7 @@ import httpx
 import pytest
 
 from crawlutron.config.settings import CrawlerSettings
-from crawlutron.main import create_app
+from crawlutron_rest.main import create_app
 from crawlutron_sdk import CrawlutronClient, CrawlutronUnauthorizedError
 from crawlutron_sdk.models import AdmitRequest
 

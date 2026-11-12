@@ -20,10 +20,17 @@ from tests.chokepoint_walks import (
 )
 from tests.rules import Bites, Registry, Rule, Silent
 
+#: The rest package's api dir, for the path-keyed bite proofs that must prove
+#: a silenced site in the moved surface (relative_posix renders it rest-form).
+_REST_API = pathlib.Path(__file__).resolve().parents[2] / "packages" / "rest" / "crawlutron_rest" / "api"
+
 # The two admission edges (watch + async crawl) and the delivery POST site:
 # the only modules a raw ``webhook_url: str`` may appear in a signature of.
 _ADMISSION_EDGES = frozenset(
-    {"packages/core/crawlutron/api/watch_router.py", "packages/core/crawlutron/api/crawl_endpoint.py"}
+    {
+        "packages/rest/crawlutron_rest/api/watch_router.py",
+        "packages/rest/crawlutron_rest/api/crawl_endpoint.py",
+    }
 )
 
 #: The delivery POST site and its validation helpers: raw str is the wire
@@ -102,7 +109,9 @@ def _webhook_target_str_union_offenders(tree: ast.AST, path: pathlib.Path) -> li
 
 # ``delivery_url()`` may be read only at the sanctioned webhook_url sites
 # plus the pre-delivery validation edge (watch_router).
-_RAW_ACCESSOR_READER_SITES = _SANCTIONED_RAW_STR_MODULES | {"packages/core/crawlutron/api/watch_router.py"}
+_RAW_ACCESSOR_READER_SITES = _SANCTIONED_RAW_STR_MODULES | {
+    "packages/rest/crawlutron_rest/api/watch_router.py"
+}
 
 
 def _raw_delivery_url_read_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -172,7 +181,7 @@ RAW_WEBHOOK_URL_MOVES_THROUGH_THE_ADMITTED_TARGET = Rule(
         ),
         Silent(
             "def admit(payload, *, webhook_url: str | None) -> None:\n    return None\n",
-            at=APP_ROOT / "api" / "watch_router.py",
+            at=_REST_API / "watch_router.py",
         ),
     ),
 )
@@ -215,7 +224,7 @@ RAW_URL_ESCAPES_ONLY_THROUGH_THE_DELIVERY_DOOR = Rule(
         # the shape the doors actually spell, proved at the delivery edge).
         Silent(
             "def deliver(target: WebhookTarget) -> None:\n    print(target.delivery_url())\n",
-            at=APP_ROOT / "api" / "crawl_endpoint.py",
+            at=_REST_API / "crawl_endpoint.py",
         ),
     ),
 )

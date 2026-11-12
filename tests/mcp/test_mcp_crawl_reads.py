@@ -232,14 +232,14 @@ class TestNoRevalidationOnTheReplayPath:
 class TestDiscoveryAndParity:
     def test_capabilities_name_the_full_mcp_tool_set(self):
         from crawlutron.config.settings import CrawlerSettings
-        from crawlutron.discovery.capabilities import capabilities_payload
         from crawlutron.mcp.registry import TOOL_SPECS
+        from crawlutron_rest.discovery.capabilities import capabilities_payload
 
         mcp = capabilities_payload(CrawlerSettings.from_mapping({}))["mcp"]
         assert mcp["tools"] == [spec.name for spec in TOOL_SPECS]
 
     def test_agent_hints_mention_the_read_tools_and_polling(self):
-        from crawlutron.discovery.agent_hints import agent_hints_payload
+        from crawlutron_rest.discovery.agent_hints import agent_hints_payload
 
         guidance = " ".join(agent_hints_payload()["guidance"])
         assert "read_crawl_result" in guidance

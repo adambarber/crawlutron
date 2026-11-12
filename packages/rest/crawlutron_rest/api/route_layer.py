@@ -12,16 +12,16 @@ from typing import TypedDict, Unpack
 
 from fastapi import APIRouter, Depends, Request
 
-from crawlutron.api.caller_auth import (
+from crawlutron.models.caller_identity import CallerIdentity
+from crawlutron.service.key_throttle import shared_throttle
+from crawlutron_rest.api.caller_auth import (
     auth_denials,
     get_keys_caller,
     presented_key,
     record_operator_auth_failure,
     verify_admin_secret,
 )
-from crawlutron.api.dependencies import CallerDep
-from crawlutron.models.caller_identity import CallerIdentity
-from crawlutron.service.key_throttle import shared_throttle
+from crawlutron_rest.api.dependencies import CallerDep
 
 #: The resolver names the invariant walk matches route dependencies against.
 GUARD_NAME = "guard_request"

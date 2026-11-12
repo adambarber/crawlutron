@@ -29,7 +29,7 @@ def _booted_app(monkeypatch, *, workers: str | None = None):
 
     The fleet boot and shared database need a RUNNING service; written twice,
     the two setups drifted into being different."""
-    from crawlutron import main as main_mod
+    from crawlutron_rest import main as main_mod
 
     if workers is not None:
         monkeypatch.setenv("CRAWLUTRON_WORKERS", workers)
@@ -118,7 +118,7 @@ class TestAppLifecycleEdges:
         actually runs: FastAPI -> None and unknown attributes raise AttributeError."""
         import importlib
 
-        import crawlutron.main as main_mod
+        import crawlutron_rest.main as main_mod
 
         class _BrokenFastAPI:
             def __getattr__(self, name):
@@ -211,7 +211,7 @@ class TestLifespanContextManager:
 
         The ``_lifespan(None)`` shape wrote the event to ``_app.state``, so
         ``None`` raised at startup; the decorator cannot see that."""
-        from crawlutron.main import app
+        from crawlutron_rest.main import app
 
         # The lifespan runs on the app the module holds; assert its presence so
         # the union-narrowing is explicit about which arm the test needs.

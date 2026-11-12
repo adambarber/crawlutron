@@ -12,10 +12,10 @@ import json
 import httpx
 
 from crawlutron.config.settings import CrawlerSettings
-from crawlutron.discovery.capabilities import OUTPUT_FIELDS, capabilities_payload
 from crawlutron.mcp.handlers import dispatch as tool_dispatch
 from crawlutron.mcp.registry import TOOLS_BY_NAME
 from crawlutron.models.crawl_request import CrawlRequest
+from crawlutron_rest.discovery.capabilities import OUTPUT_FIELDS, capabilities_payload
 from tests._job_harnesses import ScriptedExecute, make_job_store, scripted_engine
 from tests._result_builders import engine_result
 from tests.delta._door_harness import assert_removed_summary, delta_stores
@@ -166,8 +166,8 @@ def _capture_handler(capture: list[httpx.Request], response: httpx.Response):
 
 
 def _run_cli(capture: list[httpx.Request], argv: list[str]) -> int:
-    from crawlutron.cli.__main__ import run_crawl
-    from crawlutron.cli.client import CrawlClient
+    from crawlutron_rest.cli.__main__ import run_crawl
+    from crawlutron_rest.cli.client import CrawlClient
 
     handler = _capture_handler(
         capture, httpx.Response(200, json={"request_id": "r1", "success": True, "results": []})
@@ -266,7 +266,7 @@ def test_capabilities_output_fields_name_delta_fields():
 
 
 def test_agent_hints_describe_delta_semantics_honestly():
-    from crawlutron.discovery.agent_hints import agent_hints_payload
+    from crawlutron_rest.discovery.agent_hints import agent_hints_payload
 
     guidance = " ".join(agent_hints_payload()["guidance"])
     assert "changed_since" in guidance

@@ -44,7 +44,7 @@ class TestWireModel:
 
         from fastapi import Request
 
-        from crawlutron.api.caller_auth import key_admin_token
+        from crawlutron_rest.api.caller_auth import key_admin_token
 
         app = SimpleNamespace(
             state=SimpleNamespace(crawler_settings=SimpleNamespace(key_admin_token="settings-token"))
@@ -61,8 +61,8 @@ class TestWireModel:
 
         from fastapi import Request
 
-        from crawlutron.api import caller_auth
         from crawlutron.config.settings import CrawlerSettings
+        from crawlutron_rest.api import caller_auth
 
         calls = []
         real_from_mapping = CrawlerSettings.from_mapping

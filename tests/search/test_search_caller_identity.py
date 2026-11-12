@@ -12,10 +12,10 @@ from pathlib import Path
 from fastapi import FastAPI
 from httpx import AsyncClient, Response
 
-from crawlutron.api.dependencies import get_job_store, get_settings
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
 from crawlutron.storage.caller_key_store import CallerKeyStore
+from crawlutron_rest.api.dependencies import get_job_store, get_settings
 from tests._app_harnesses import harness_app
 from tests._async_harnesses import expect_quota_refused, issue_key, serve
 from tests._policy_factories import job_store as make_job_store
@@ -27,8 +27,8 @@ async def _search_client(
     tmp_path: Path,
 ) -> AsyncGenerator[tuple[AsyncClient, FastAPI], None]:
     """An app serving /v1/search + /v1/keys over isolated stores, Tavily configured."""
-    from crawlutron.api.identity_router import router as identity_router
-    from crawlutron.api.keys_router import router as keys_router
+    from crawlutron_rest.api.identity_router import router as identity_router
+    from crawlutron_rest.api.keys_router import router as keys_router
 
     keys = CallerKeyStore(tmp_path / "keys.db")
     jobs = make_job_store(tmp_path / "jobs.db")

@@ -96,7 +96,7 @@ class TestSpillSweepLoop:
 
 class TestSpillSweepWiring:
     def _wired_app(self, monkeypatch, tmp_path):
-        from crawlutron import main as main_mod
+        from crawlutron_rest import main as main_mod
 
         monkeypatch.setenv("CRAWLUTRON_CACHE_DIR", str(tmp_path))
         stub_heavy_teardown(monkeypatch)

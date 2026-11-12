@@ -16,7 +16,7 @@
 
 The sync crawl path:
 
-- `/v1/crawl` (`packages/core/crawlutron/api/crawl_endpoint.py` → `crawl_executor.execute_crawl`) → `packages/core/crawlutron/orchestration/engine.py:crawl_request`.
+- `/v1/crawl` (`packages/rest/crawlutron_rest/api/crawl_endpoint.py` → `crawl_executor.execute_crawl`) → `packages/core/crawlutron/orchestration/engine.py:crawl_request`.
 - `crawl_request` calls `_bind_spill(spill_store)`:
   - shared store supplied → reuse it, `private_spill=False` (no per-crawl setup, no close);
   - `None` → `CrawlSpillStore(":memory:")`, `private_spill=True`.
@@ -26,7 +26,7 @@ The sync crawl path:
   - `migrate_store` runs the yoyo migration battery — for `CRAWL_SPILLS` that is a single migration, `0001_crawl_spills_initial` (`CREATE TABLE crawl_spills` + index), then a drift check.
 - Teardown (`engine.py:_teardown_spill`): `release_spill(request_id)` always; `spill.close()` only for private stores.
 
-One important wiring fact: `packages/core/crawlutron/main.py` creates **one shared** `CrawlSpillStore(database_path)` at startup and exposes it via `app.state.spill_store` → `get_spill_store` dependency. The normal HTTP `/v1/crawl` sync path therefore passes a shared store and pays **zero** per-crawl spill setup/migration. The per-crawl `:memory:` store only happens for direct `crawl_request()` callers that pass `spill_store=None` (MCP door, programmatic/test callers).
+One important wiring fact: `packages/rest/crawlutron_rest/main.py` creates **one shared** `CrawlSpillStore(database_path)` at startup and exposes it via `app.state.spill_store` → `get_spill_store` dependency. The normal HTTP `/v1/crawl` sync path therefore passes a shared store and pays **zero** per-crawl spill setup/migration. The per-crawl `:memory:` store only happens for direct `crawl_request()` callers that pass `spill_store=None` (MCP door, programmatic/test callers).
 
 ## 3. Methodology
 

@@ -1,6 +1,6 @@
 """``/v1/crawl`` URL→handler mapping.
 
-Pure router: binds :func:`crawlutron.api.crawl_endpoint.crawl` and
+Pure router: binds :func:`crawlutron_rest.api.crawl_endpoint.crawl` and
 ``get_crawl_result`` to their paths; handler implementations live in the endpoint module.
 """
 
@@ -9,11 +9,17 @@ from __future__ import annotations
 from fastapi import Body, Depends, Request
 from fastapi.responses import Response
 
-from crawlutron.api.caller_auth import quota_denials
-from crawlutron.api.crawl_endpoint import crawl as crawl_handler
-from crawlutron.api.crawl_endpoint import get_crawl_result as get_crawl_result_handler
-from crawlutron.api.crawl_endpoint import get_crawl_trace as get_crawl_trace_handler
-from crawlutron.api.dependencies import (
+from crawlutron.models.crawl_request import CrawlRequest
+from crawlutron.models.error_response import ErrorResponse
+from crawlutron.models.trace_response import TraceResponse
+from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
+from crawlutron.service.policy_defaults import BROWSER_FALLBACK_POLICY, DOCUMENT_EXTRACTION_POLICY
+from crawlutron.vocabulary.limits import LARGE_CRAWL_GUIDANCE
+from crawlutron_rest.api.caller_auth import quota_denials
+from crawlutron_rest.api.crawl_endpoint import crawl as crawl_handler
+from crawlutron_rest.api.crawl_endpoint import get_crawl_result as get_crawl_result_handler
+from crawlutron_rest.api.crawl_endpoint import get_crawl_trace as get_crawl_trace_handler
+from crawlutron_rest.api.dependencies import (
     AdmissionDep,
     CallerDep,
     TrackerDep,
@@ -23,13 +29,7 @@ from crawlutron.api.dependencies import (
     get_shutdown_event,
     get_spill_store,
 )
-from crawlutron.api.route_layer import guarded_router
-from crawlutron.models.crawl_request import CrawlRequest
-from crawlutron.models.error_response import ErrorResponse
-from crawlutron.models.trace_response import TraceResponse
-from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
-from crawlutron.service.policy_defaults import BROWSER_FALLBACK_POLICY, DOCUMENT_EXTRACTION_POLICY
-from crawlutron.vocabulary.limits import LARGE_CRAWL_GUIDANCE
+from crawlutron_rest.api.route_layer import guarded_router
 
 router = guarded_router(tags=["Crawler"])
 

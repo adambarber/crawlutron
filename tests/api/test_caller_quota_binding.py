@@ -9,10 +9,10 @@ import asyncio
 
 import pytest
 
-from crawlutron.api.caller_auth import identity_for_key
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
 from crawlutron.storage.caller_key_store import CallerKeyStore
+from crawlutron_rest.api.caller_auth import identity_for_key
 from tests._api_harnesses import keyed_quota_client as _keyedquota_client
 from tests._api_harnesses import mount_tracker as _mount_tracker
 from tests._api_harnesses import stored_request as _stored_request
@@ -92,7 +92,7 @@ async def test_sync_crawl_counts_toward_concurrency(tmp_path, monkeypatch):
 
 async def test_sync_crawl_releases_the_slot_when_the_engine_fails(tmp_path, monkeypatch):
     """The concurrency slot is released on engine failure, not leaked."""
-    from crawlutron.api import crawl_endpoint
+    from crawlutron_rest.api import crawl_endpoint
 
     async def _failing_crawl(*args, **kwargs):
         raise RuntimeError("engine exploded")
@@ -107,9 +107,9 @@ async def test_sync_crawl_releases_the_slot_when_the_engine_fails(tmp_path, monk
 
 async def test_keyed_job_stores_the_key_bound_when_limits_omitted(tmp_path, monkeypatch):
     """The /v1/jobs door stores the key's ceiling, not the unbounded read edge."""
-    from crawlutron.api import jobs_router
-    from crawlutron.api.caller_auth import Tracking
     from crawlutron.models.job_create_request import JobCreateRequest
+    from crawlutron_rest.api import jobs_router
+    from crawlutron_rest.api.caller_auth import Tracking
 
     store = make_store(tmp_path / "jobs.db")
     keys = CallerKeyStore(tmp_path / "keys.db")
@@ -146,7 +146,7 @@ async def test_anonymous_sync_concurrency_is_bounded_at_four(tmp_path, monkeypat
     """Five concurrent anonymous sync crawls: four run, the fifth 429s (#194).
     The anonymous max_concurrency is four; only keyed sync bounds were tested.
     """
-    from crawlutron.api import crawl_endpoint
+    from crawlutron_rest.api import crawl_endpoint
 
     released = asyncio.Event()
     entered = 0

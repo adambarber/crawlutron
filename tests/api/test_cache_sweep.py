@@ -87,7 +87,7 @@ class TestSweepLoop:
 
 class TestLifespanWiring:
     async def test_the_lifespan_starts_and_drains_the_maintenance_task(self, monkeypatch, tmp_path):
-        from crawlutron import main as main_mod
+        from crawlutron_rest import main as main_mod
 
         monkeypatch.setenv("CRAWLUTRON_CACHE_DIR", str(tmp_path))
         stub_heavy_teardown(monkeypatch)

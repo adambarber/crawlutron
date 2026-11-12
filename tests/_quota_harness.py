@@ -14,12 +14,12 @@ from typing import TYPE_CHECKING
 from fastapi import APIRouter, FastAPI
 from httpx import AsyncClient
 
-from crawlutron.api.dependencies import get_job_store, get_result_store, get_settings, get_shutdown_event
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
 from crawlutron.storage.caller_key_store import CallerKeyStore
 from crawlutron.storage.job_store import JobStore
 from crawlutron.storage.result_store import CrawlResultStore
+from crawlutron_rest.api.dependencies import get_job_store, get_result_store, get_settings, get_shutdown_event
 from tests._app_harnesses import harness_app
 from tests._async_harnesses import serve
 from tests._policy_factories import job_store as make_store
@@ -118,9 +118,9 @@ async def service_client(
 
 def mcp_crawl_keys_routers() -> dict[str, APIRouter]:
     """The /mcp + /v1/crawl + /v1/keys router map the cross-door suites serve."""
-    from crawlutron.api.crawl_router import router as crawl_router
-    from crawlutron.api.keys_router import router as keys_router
-    from crawlutron.api.mcp_router import router as mcp_router
+    from crawlutron_rest.api.crawl_router import router as crawl_router
+    from crawlutron_rest.api.keys_router import router as keys_router
+    from crawlutron_rest.api.mcp_router import router as mcp_router
 
     return {"mcp": mcp_router, "crawl": crawl_router, "keys": keys_router}
 

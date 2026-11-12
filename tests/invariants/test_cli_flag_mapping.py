@@ -1,5 +1,5 @@
 """CLI flag-mapping pin: every wire-bound CLI flag names a real OpenAPI field. The flag->field table is
-DERIVED from ``crawlutron.cli.__main__``'s ``_build_payload`` at test time via AST and validated against
+DERIVED from ``crawlutron_rest.cli.__main__``'s ``_build_payload`` at test time via AST and validated against
 the OpenAPI-derived schema components, so flag->renamed-field drift reds at collection.
 """
 
@@ -12,7 +12,12 @@ from tests._app_factory import service_app
 from tests.invariants._facade_tables import CLI_CLIENT_ONLY_FLAGS, accepted_knobs
 
 _CLI_MAIN = (
-    pathlib.Path(__file__).resolve().parents[2] / "packages" / "core" / "crawlutron" / "cli" / "__main__.py"
+    pathlib.Path(__file__).resolve().parents[2]
+    / "packages"
+    / "rest"
+    / "crawlutron_rest"
+    / "cli"
+    / "__main__.py"
 )
 _ROUTE = ("POST", "/v1/crawl")
 #: Container variable -> wire schema that owns the keys written into it.

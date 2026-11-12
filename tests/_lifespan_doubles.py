@@ -18,11 +18,11 @@ def stub_heavy_teardown(monkeypatch: pytest.MonkeyPatch) -> ReadinessState:
     and a fresh ``READINESS_STATE`` is installed -- and return that state, which
     a sampler test asserts against.
     """
-    from crawlutron import main as main_mod
     from crawlutron.health import readiness as readiness_mod
     from crawlutron.health.readiness import ReadinessState
     from crawlutron.service import job_runner as job_runner_mod
     from crawlutron.transport import http_client_pool as http_mod
+    from crawlutron_rest import main as main_mod
 
     async def _noop() -> None:
         return None

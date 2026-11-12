@@ -12,7 +12,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from crawlutron.api import crawl_endpoint
+from crawlutron_rest.api import crawl_endpoint
 
 #: The ASGI scope a ``Request`` is built from.
 _SCOPE = {"type": "http", "method": "POST", "path": "/v1/crawl", "headers": [], "query_string": b""}

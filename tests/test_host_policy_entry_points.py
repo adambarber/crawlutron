@@ -22,8 +22,8 @@ from tests._policy_factories import canonical
 async def _probe_crawl_endpoint(monkeypatch, tmp_path):
     import asyncio
 
-    from crawlutron.api.crawl_endpoint import crawl
     from crawlutron.models.crawl_request import CrawlRequest
+    from crawlutron_rest.api.crawl_endpoint import crawl
 
     effects = _effects()
     job_store = type(
@@ -67,10 +67,10 @@ async def _probe_crawl_executor(monkeypatch, tmp_path):
 
 
 async def _probe_jobs_router(monkeypatch, tmp_path):
-    from crawlutron.api import jobs_router
-    from crawlutron.api.caller_auth import Tracking
     from crawlutron.models.caller_identity import CallerIdentity
     from crawlutron.models.job_create_request import JobCreateRequest
+    from crawlutron_rest.api import jobs_router
+    from crawlutron_rest.api.caller_auth import Tracking
 
     effects = _effects()
     job_store = type(
@@ -133,9 +133,9 @@ def _watch_probe_store(effects):
 
 
 async def _probe_watch_router(monkeypatch, tmp_path):
-    from crawlutron.api import watch_router
     from crawlutron.models.caller_identity import CallerIdentity
     from crawlutron.models.watch_create_request import WatchCreateRequest
+    from crawlutron_rest.api import watch_router
 
     effects = _effects()
     await _assert_refused(
@@ -334,7 +334,7 @@ async def _probe_admit_endpoint(monkeypatch, tmp_path):
 
 
 _PROBES = {
-    "packages/core/crawlutron/api/crawl_endpoint.py:crawl": _probe_crawl_endpoint,
+    "packages/rest/crawlutron_rest/api/crawl_endpoint.py:crawl": _probe_crawl_endpoint,
     "packages/core/crawlutron/service/admit_endpoint.py:admit_url": _probe_admit_endpoint,
     "packages/core/crawlutron/service/crawl_executor.py:execute_crawl": _probe_crawl_executor,
     "packages/core/crawlutron/service/job_runner.py:run_job": _probe_job_runner,
@@ -343,7 +343,7 @@ _PROBES = {
     "packages/core/crawlutron/service/site_map.py:build_site_map": _probe_site_map,
     "packages/core/crawlutron/service/render.py:render_request": _probe_render,
     "packages/core/crawlutron/service/response_shaping.py:frontier_link_url": _probe_response_shaping,
-    "packages/core/crawlutron/api/watch_router.py:create_watch": _probe_watch_router,
+    "packages/rest/crawlutron_rest/api/watch_router.py:create_watch": _probe_watch_router,
     "packages/core/crawlutron/service/watch_cores.py:register_watch_core": _probe_watch_cores,
     "packages/core/crawlutron/service/policy_suggestions.py:policy_suggestions": _probe_suggestions,
     "packages/core/crawlutron/service/policy_suggestions.py:build_policy_suggestions": _probe_suggestions,

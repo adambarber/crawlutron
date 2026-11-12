@@ -14,9 +14,9 @@ from pathlib import Path
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from crawlutron.api.caller_auth import get_caller_identity
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.storage.job_store import JobStore
+from crawlutron_rest.api.caller_auth import get_caller_identity
 from tests._app_harnesses import harness_app
 from tests._dependency_overrides import bind_base_overrides
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, deployment_tier
@@ -24,7 +24,7 @@ from tests._result_builders import GRAPH_ROOT
 
 
 def _app(job_store: JobStore, caller: CallerIdentity) -> FastAPI:
-    from crawlutron.api.jobs_router import router as jobs_router
+    from crawlutron_rest.api.jobs_router import router as jobs_router
 
     app = harness_app(jobs_router)
     bind_base_overrides(app, job_store=job_store, shutdown_event=asyncio.Event())

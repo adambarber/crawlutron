@@ -387,7 +387,7 @@ def test_capabilities_advertises_exactly_the_taxonomy():
     """The /v1/capabilities wire list is generated from the single enum, not a
     second hand-copied list."""
     from crawlutron.config.settings import CrawlerSettings
-    from crawlutron.discovery.capabilities import capabilities_payload
+    from crawlutron_rest.discovery.capabilities import capabilities_payload
 
     advertised = capabilities_payload(CrawlerSettings.from_mapping())["supported_classifications"]
     assert advertised == [member.value for member in CrawlClassification]

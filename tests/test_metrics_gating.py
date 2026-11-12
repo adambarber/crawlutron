@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from httpx import ASGITransport, AsyncClient
 
-from crawlutron.api.metrics_router import router as metrics_router
 from crawlutron.runtime.metrics import MetricsStore, get_metrics
 from crawlutron.storage.coordination_counters import CoordinationCounters
+from crawlutron_rest.api.metrics_router import router as metrics_router
 from tests._app_harnesses import harness_app
 
 

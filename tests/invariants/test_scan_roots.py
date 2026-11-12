@@ -20,7 +20,7 @@ def test_scan_roots_equal_every_python_bearing_tree() -> None:
     This equality pin IS the scope law's declaration, so the completeness audit
     (test_scan_scope_completeness) exempts this one file by name.
     """
-    assert SCAN_ROOTS == ("crawlutron_sdk", "packages/core", "scripts", "tests")
+    assert SCAN_ROOTS == ("crawlutron_sdk", "packages/core", "packages/rest", "scripts", "tests")
 
 
 def test_constant_matches_a_fresh_derivation() -> None:
@@ -55,9 +55,15 @@ def test_scan_roots_never_names_the_member_container(tmp_path: pathlib.Path) -> 
     """The Wave A shape: ``packages/`` (a dir holding only member packages) is never
     itself a scan root -- the member root ``packages/core`` already covers its tree,
     so naming both would double-scan it."""
-    for member in ("packages/core", "packages/core/crawlutron"):
+    for member in (
+        "packages/core",
+        "packages/core/crawlutron",
+        "packages/rest",
+        "packages/rest/crawlutron_rest",
+    ):
         (tmp_path / member).mkdir(parents=True)
     (tmp_path / "packages/core/crawlutron/mod.py").write_text("x = 1\n")
+    (tmp_path / "packages/rest/crawlutron_rest/mod.py").write_text("x = 1\n")
     (tmp_path / "pyproject.toml").write_text(
         '[tool.uv.workspace]\nmembers = ["packages/*"]\n',
         encoding="utf-8",

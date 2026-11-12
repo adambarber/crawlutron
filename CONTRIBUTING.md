@@ -102,7 +102,7 @@ These require explicit review from a maintainer before merge:
   (`is_public_ip_value`).
 - `packages/core/crawlutron/runtime/pressure_sizing.py` and `packages/core/crawlutron/transport/browser_pool.py` —
   browser-pool sizing from cgroup memory limits; `BROWSER_RAM_FRACTION`.
-- `packages/core/crawlutron/main.py` — middleware order, body-size limits, error envelopes.
+- `packages/rest/crawlutron_rest/main.py` — middleware order, body-size limits, error envelopes.
 - `packages/core/crawlutron/service/webhooks.py` — webhook delivery (`deliver_pinned_webhook`).
 - `packages/core/crawlutron/config/env.py` — `parse_bool_env` and the operator environment reads,
   including the private-target opt-in.

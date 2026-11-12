@@ -125,7 +125,7 @@ class TestCreateAppConsumesBuildStores:
         A second assembly site is the bypass: patch the factory seam and the app
         build must route through it exactly once with the derived path.
         """
-        import crawlutron.main as main_mod
+        import crawlutron_rest.main as main_mod
 
         calls: list[CrawlerSettings] = []
         real_build = build_stores
