@@ -12,7 +12,7 @@ from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._assertions import (
     accepted_crawl,
     assert_result_failed,
-    browser_available,
+    browser_integration_test,
     completed_crawl,
     poll_webhook_delivery,
     wire_dict,
@@ -213,8 +213,7 @@ class TestMapApi(_AsgiEndpointTests):
 class TestShadowDomApi(_AsgiEndpointTests):
     """Shadow-DOM flattening via browser renderer (real camoufox)."""
 
-    @pytest.mark.browser
-    @pytest.mark.skipif(not browser_available(), reason="no usable browser binary (camoufox/playwright)")
+    @browser_integration_test
     async def test_v1_crawl_shadow_dom_flattened(self):
         # The ASGI harness runs no lifespan, so the pool is None; a real browser-strategy crawl needs a live
         # pool. Initialize (real camoufox) and close it in a finally so no browsers leak into later tests.

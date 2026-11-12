@@ -227,8 +227,10 @@ class BrowserRenderer:
         await self._driver.close()
 
     async def _navigate_and_settle(self, page: RenderPage, pinned_url: str) -> None:
-        """Goto the pinned URL and wait for a settled ready state."""
-        await page.goto(pinned_url, wait_until="domcontentloaded")
+        """Goto the pinned URL and wait for the page's network to settle.
+        ``networkidle`` waits for in-flight XHR/fetch to drain before extraction,
+        so async-fetched content is not read mid-flight (#918)."""
+        await page.goto(pinned_url, wait_until="networkidle")
         await self._driver.wait_for_ready_state(page)
 
     async def _render_with_page_unlocked(

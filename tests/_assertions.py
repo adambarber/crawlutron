@@ -258,6 +258,17 @@ def browser_available() -> bool:
         return False
 
 
+def browser_integration_test(func):
+    """Mark a test as a real-browser engine-integration that also joins the
+    default battery; it runs when a browser is present and skips when not."""
+    func = pytest.mark.browser(func)
+    func = pytest.mark.browser_battery(func)
+    func = pytest.mark.skipif(
+        not browser_available(), reason="no usable browser binary (camoufox/playwright)"
+    )(func)
+    return func
+
+
 async def poll_webhook_delivery(records, *, timeout: float = 10.0, interval: float = 0.1):
     await poll_until(
         lambda: len(records) == 1,

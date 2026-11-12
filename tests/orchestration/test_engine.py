@@ -20,7 +20,7 @@ from crawlutron.transport.scheduler import DomainScheduler
 from crawlutron.vocabulary.extraction import EXTRACTION_DOCUMENT, EXTRACTION_TRAFILATURA
 from crawlutron.vocabulary.strategies import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
 from crawlutron.vocabulary.taxonomy import CrawlClassification
-from tests._assertions import browser_available
+from tests._assertions import browser_integration_test
 from tests._browser_doubles import _fake_browser
 from tests._fetch_doubles import FetcherDouble
 from tests._fetcher_factories import (
@@ -67,8 +67,7 @@ class TestEngineCrawlRequest:
         assert result.status == "failed"
         assert result.classification == "browser_crash"
 
-    @pytest.mark.browser
-    @pytest.mark.skipif(not browser_available(), reason="no usable browser binary (camoufox/playwright)")
+    @browser_integration_test
     async def test_crawl_request_http_failure_falls_back_to_browser(self, base_url):
 
         # The intent here is page-fetch failure -> browser fallback.

@@ -74,6 +74,7 @@ class TestBrowserRenderer:
         assert result.classification == "access_denied"
         assert result.status == "blocked"
 
+    @pytest.mark.browser_battery
     async def test_crawl_request_uses_browser_strategy(self, base_url):
         payload = {
             "url": f"{base_url}/",

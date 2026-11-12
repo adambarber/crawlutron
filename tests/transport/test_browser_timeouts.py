@@ -15,6 +15,30 @@ from tests._browser_doubles import BrowserFakePage, pinned_page_renderer
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 
+class _WaitUntilRecordingPage(BrowserFakePage):
+    """Records the ``wait_until`` each goto carries, so the navigation settle
+    strategy is asserted rather than inferred."""
+
+    def __init__(self):
+        super().__init__()
+        self.wait_untils = []
+
+    async def goto(self, url, wait_until="load", **kwargs):
+        self.wait_untils.append(wait_until)
+        await super().goto(url, wait_until=wait_until, **kwargs)
+
+
+class TestNavigationNetworkSettle:
+    async def test_navigation_waits_for_network_idle(self, monkeypatch):
+        page, renderer = pinned_page_renderer(monkeypatch, _WaitUntilRecordingPage())
+        await renderer.render(
+            NormalizedUrl("http://example.com/", policy=UNRESTRICTED_HOST_POLICY),
+            RenderOptions(timeout_seconds=1, max_retries=0),
+            policy=UNRESTRICTED_HOST_POLICY,
+        )
+        assert "networkidle" in page.wait_untils, page.wait_untils
+
+
 class _TimeoutRecordingPage(BrowserFakePage):
     def __init__(self):
         super().__init__()
