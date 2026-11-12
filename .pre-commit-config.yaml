@@ -1,4 +1,4 @@
-# Quality gates for crawlutron. The eight pre-commit-stage hooks run THROUGH
+# Quality gates for crawlutron. The seven pre-commit-stage hooks run THROUGH
 # scripts/gate_fanout, which starts every gate child at once on the first hook
 # of a run and lets each hook wait only on its own child; the commands after
 # each entry's `--` remain the single declaration of what that gate runs.

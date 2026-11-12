@@ -50,7 +50,7 @@ the slowest gate, not the sum; each child is hard-killed after 60 s
 - `vulture` dead code, min-confidence 90, zero tolerance, no ignore-names/excludes/whitelist (`:190-198`).
 - `commit-citation` (commit-msg) — every commit message cites an issue (`:202-212`).
 - `coverage` (pre-push) — measured-descriptive surface only (**no threshold, no fail-under, no ratchet** until the owner rules one) (`:229-237`).
-- `battery` — the full randomized test suite as commit admission control; exactly ONE pytest child runs at pre-commit and it covers the whole collected suite (`:239-249`).
+- `battery` — the full randomized test suite as commit admission control; exactly ONE pytest child runs at pre-commit and it covers the whole collected suite (`:239-250`).
 
 ## Coverage: an explicit stated refusal
 
