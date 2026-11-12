@@ -8,11 +8,7 @@ import tokenize
 
 import pytest
 
-from tests._walk_primitives import REPO_ROOT
-
-#: The source roots the law covers. scripts/ is checked by the same rules in
-#: its own right (it imports like production code), docker/ ships its own tree.
-_SCANNED_ROOTS = ("crawlutron", "tests")
+from tests._walk_primitives import REPO_ROOT, SCAN_ROOTS
 
 #: A directive is a comment that actually suppresses: noqa or a type-ignore
 #: spelling. A backticked mention or an explanation is prose, never a hit.
@@ -30,8 +26,10 @@ def _comment_lines(path: pathlib.Path) -> list[tuple[int, str]]:
 
 
 def _scanned_files() -> list[pathlib.Path]:
+    """One instance per scanned file, derived from SCAN_ROOTS directly -- no
+    private root tuple, so a tree added later generates its own instances."""
     files: list[pathlib.Path] = []
-    for root in _SCANNED_ROOTS:
+    for root in SCAN_ROOTS:
         files.extend(p for p in (REPO_ROOT / root).rglob("*.py") if p.is_file())
     return sorted(files)
 
