@@ -171,19 +171,39 @@ def trees_under(directory: pathlib.Path) -> tuple[tuple[pathlib.Path, ast.Module
     return _trees_under(directory)
 
 
+def _walk_root_files(base: pathlib.Path, root: str) -> tuple[pathlib.Path, ...]:
+    """Every .py under ``base / root`` (no ``__pycache__``), raising loud on a missing dir.
+
+    The one per-root walk both declared_root_files and empty_scan_roots share; a gate
+    walking nothing must fail loud, never green."""
+    directory = base / root
+    if not directory.is_dir():
+        raise AssertionError(f"declared scan root does not exist: {root}/ (base {base})")
+    return tuple(sorted(p for p in directory.rglob("*.py") if "__pycache__" not in p.parts))
+
+
 @cache
 def declared_root_files(root: str) -> tuple[pathlib.Path, ...]:
     """Every .py file under a declared repo-relative scan root; missing/empty FAILS LOUD. A gate iterating a
     nonexistent root is silently vacuous -- the app/ rename made the comment gate blind for months -- so a
     root resolving to nothing is a gate defect, never a green.
     """
-    base = REPO_ROOT / root
-    if not base.is_dir():
-        raise AssertionError(f"declared scan root does not exist: {root}/ (gate would scan nothing)")
-    files = tuple(sorted(p for p in base.rglob("*.py") if "__pycache__" not in p.parts))
+    files = _walk_root_files(REPO_ROOT, root)
     if not files:
         raise AssertionError(f"declared scan root contains no .py files: {root}/ (gate would scan nothing)")
     return files
+
+
+def empty_scan_roots(roots: tuple[str, ...], base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
+    """Declared roots resolving to zero .py files under ``base``: the vacuity failure, named.
+
+    A dead root would green whatever gate walks it, so it is the walk-vacuity gate's
+    finding; a missing root dir raises instead of returning empty, itself a gate defect."""
+    empty: list[str] = []
+    for root in roots:
+        if not _walk_root_files(base, root):
+            empty.append(root)
+    return tuple(empty)
 
 
 @cache
