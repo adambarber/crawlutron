@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pathlib
 
-from tests._walk_primitives import declared_root_files, python_bearing_roots
+from tests._walk_primitives import SCAN_ROOTS, declared_root_files
 
 #: Total lines one file may hold.
 LIMIT = 500
@@ -16,8 +16,7 @@ LIMIT = 500
 #: Files over the ceiling per root. Exact both ways; a split wave lowers it here.
 #: Keyed by declared scan root -- a missing root fails loud, not silently empty.
 _BUDGETS = {
-    "admission": 0,
-    "crawlutron": 0,
+    "packages/core": 0,
     "crawlutron_sdk": 0,
     "tests": 0,
     "scripts": 0,
@@ -83,13 +82,13 @@ def test_every_python_bearing_root_is_scanned_by_the_duplication_gate() -> None:
     from scripts.jscpd_gate import TREE_ROOTS
 
     scanned = {root for roots in TREE_ROOTS.values() for root in roots}
-    assert scanned == set(python_bearing_roots())
+    assert scanned == set(SCAN_ROOTS)
 
 
 def test_every_declared_scan_root_has_a_budget_row() -> None:
     """The derived side seals: no undeclared python root escapes the ceiling.
     The table side seals: no dead budget row points at a vanished root."""
-    assert set(_BUDGETS) == set(python_bearing_roots())
+    assert set(_BUDGETS) == set(SCAN_ROOTS)
 
 
 def test_over_line_counts_boundary_is_exact(tmp_path: pathlib.Path) -> None:

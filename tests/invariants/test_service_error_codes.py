@@ -12,19 +12,19 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 #: Live raise-site sources the wire triplets are re-derived from each run.
 _RAISE_SITE_SOURCES = (
-    "crawlutron/api/crawl_endpoint.py",
-    "crawlutron/service/errors.py",
+    "packages/core/crawlutron/api/crawl_endpoint.py",
+    "packages/core/crawlutron/service/errors.py",
 )
 
-_DISCONNECT_SOURCE = "crawlutron/api/crawl_endpoint.py"
+_DISCONNECT_SOURCE = "packages/core/crawlutron/api/crawl_endpoint.py"
 
 
 #: Raise sites whose wire code is not a literal, named and reasoned so the AST
 #: derivation cannot silently skip them. Each row's code is chosen by the CALLER.
 _NON_LITERAL_CODE_SITES: dict[str, str] = {
-    "crawlutron/service/errors.py:DomainError": "base constructor; subclasses supply the triplet",
-    "crawlutron/service/errors.py:ValidationRefusal": "422 triplet forwarded from the validation caller",
-    "crawlutron/service/errors.py:AuthRefusal": "401 code forwarded from the auth caller",
+    "packages/core/crawlutron/service/errors.py:DomainError": "base constructor; subclasses supply triplet",
+    "packages/core/crawlutron/service/errors.py:ValidationRefusal": "422 triplet from the validation caller",
+    "packages/core/crawlutron/service/errors.py:AuthRefusal": "401 code forwarded from the auth caller",
 }
 
 
@@ -212,7 +212,7 @@ def test_wire_triplets_carry_multiline_raise_sites():
     """The sweep re-derives triplets the regex sweep cannot see: raise calls split
     across lines are invisible to a single-line regex but not to the AST."""
     triplets = set(_wire_triplets())
-    assert ("capacity_exceeded", 503, "crawlutron/service/errors.py") in triplets
+    assert ("capacity_exceeded", 503, "packages/core/crawlutron/service/errors.py") in triplets
     assert ("pending", 202, _DISCONNECT_SOURCE) in triplets
 
 

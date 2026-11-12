@@ -267,12 +267,18 @@ def assert_property_detector_bites(
 
 
 def _module_name(path: pathlib.Path) -> str:
+    """A module's import name from its repo path, past any member-package prefix."""
     relative = _relative_app_path(path)
     if relative.endswith("/__init__.py"):
-        return relative[: -len("/__init__.py")].replace("/", ".")
-    if relative.endswith(".py"):
-        return relative[:-3].replace("/", ".")
-    return relative.replace("/", ".")
+        relative = relative[: -len("/__init__.py")]
+    elif relative.endswith(".py"):
+        relative = relative[:-3]
+    parts = relative.split("/")
+    for index, part in enumerate(parts):
+        if part in {"crawlutron", "admission"}:
+            parts = parts[index:]
+            break
+    return ".".join(parts)
 
 
 #: A module-level symbol ``_module_definition_index`` records. Naming the three keeps the guarantee where it

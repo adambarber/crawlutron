@@ -10,6 +10,7 @@ import sys
 import threading
 
 from admission import LaneId
+
 from tests.admission_kernel._doors import _GENERAL_ONE
 from tests.admission_kernel._gate_factory import GateSpec, build_gate
 

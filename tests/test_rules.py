@@ -210,7 +210,7 @@ class TestLookalikes:
 
 class TestCleanCheck:
     def _trees(self, source: str) -> list[tuple[pathlib.Path, ast.Module]]:
-        return [(pathlib.Path("crawlutron/x.py"), ast.parse(source))]
+        return [(pathlib.Path("packages/core/crawlutron/x.py"), ast.parse(source))]
 
     def test_a_tree_with_no_offenders_passes(self):
         _urljoin_rule().check_clean(self._trees("def f():\n    return 1\n"))
@@ -219,14 +219,16 @@ class TestCleanCheck:
         with pytest.raises(AssertionError) as caught:
             _urljoin_rule().check_clean(self._trees("def f(a, b):\n    return urljoin(a, b)\n"))
         message = str(caught.value)
-        assert "crawlutron/x.py" in message
+        assert "packages/core/crawlutron/x.py" in message
         assert "raw urljoin" in message
         assert "URLs are joined only through the chokepoint" in message
 
     def test_the_owner_is_excluded_by_default(self):
         """Sanctioned basenames keep a rule from failing on the owner that defines it."""
         rule = _urljoin_rule(excludes=frozenset({"validation.py"}))
-        rule.check_clean([(pathlib.Path("crawlutron/safety/validation.py"), ast.parse("urljoin(a, b)\n"))])
+        rule.check_clean(
+            [(pathlib.Path("packages/core/crawlutron/safety/validation.py"), ast.parse("urljoin(a, b)\n"))]
+        )
 
 
 class TestRuleScope:

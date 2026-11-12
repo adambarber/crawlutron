@@ -50,12 +50,12 @@ EXEMPTIONS: tuple[tuple[str, str, str], ...] = (
     ),
     (
         "tests/invariants/test_layer_exempt_ratchet.py",
-        "crawlutron/api/anonymous_throttle.py",
+        "packages/core/crawlutron/api/anonymous_throttle.py",
         "comment naming the module that stays api (HTTP-only ASGI middleware)",
     ),
     (
         "tests/_walk_primitives.py",
-        "crawlutron/service/webhooks.py",
+        "packages/core/crawlutron/service/webhooks.py",
         "docstring example only; the sweep's own docstring may name a moved path",
     ),
     (
@@ -80,12 +80,12 @@ EXEMPTIONS: tuple[tuple[str, str, str], ...] = (
     ),
     (
         "tests/invariants/test_url_secrets_law.py",
-        "crawlutron/api/watch_router.py",
+        "packages/core/crawlutron/api/watch_router.py",
         "watch_router stays api (HTTP-ONLY); no action",
     ),
     (
         "tests/invariants/test_url_secrets_law.py",
-        "crawlutron/api/crawl_endpoint.py",
+        "packages/core/crawlutron/api/crawl_endpoint.py",
         "crawl_endpoint stays api (SPLIT, HTTP part); no action",
     ),
 )
@@ -96,7 +96,10 @@ def _comment_mentions(source: str) -> list[tuple[int, str]]:
     mentions: list[tuple[int, str]] = []
     for lineno, token_text in comment_lines(source):
         for name in MOVED_MODULES:
-            if f"crawlutron.api.{name}" in token_text or f"crawlutron/api/{name}.py" in token_text:
+            if (
+                f"crawlutron.api.{name}" in token_text
+                or f"packages/core/crawlutron/api/{name}.py" in token_text
+            ):
                 mentions.append((lineno, token_text.strip()))
                 break
     return mentions
@@ -117,7 +120,7 @@ def _drift_offenders(root: pathlib.Path = _TESTS_ROOT) -> list[str]:
         for lineno, value in string_constants(tree):
             for name in MOVED_MODULES:
                 dotted = f"crawlutron.api.{name}"
-                slash = f"crawlutron/api/{name}.py"
+                slash = f"packages/core/crawlutron/api/{name}.py"
                 if dotted in value or slash in value:
                     if _exempt(relative, value):
                         continue

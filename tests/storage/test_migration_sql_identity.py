@@ -27,7 +27,9 @@ from crawlutron.storage.migrations.manifest import (
     create_table_sql,
 )
 
-MIGRATIONS_ROOT = pathlib.Path(__file__).parents[2] / "crawlutron" / "storage" / "migrations"
+MIGRATIONS_ROOT = (
+    pathlib.Path(__file__).parents[2] / "packages" / "core" / "crawlutron" / "storage" / "migrations"
+)
 
 #: A step's apply and rollback: a statement string, or a callable that runs it.
 Step = str | Callable[[sqlite3.Connection], None]

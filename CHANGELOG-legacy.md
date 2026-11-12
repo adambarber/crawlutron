@@ -1507,7 +1507,7 @@ leak, JobStore concurrency, selector DoS) were already fixed.
 - **Identity strings**: ``DEFAULT_USER_AGENT`` and ``USER_AGENT_TOKEN``
   constants added to ``app/constants.py``. All references to the
   dev-stack monorepo / local hostname have been replaced with the
-  project-neutral ``crawlutron/0.2`` identity. FastAPI
+  project-neutral ``packages/core/crawlutron/0.2`` identity. FastAPI
   ``contact`` and ``license_info`` now reference the project, not the
   monorepo.
 - **Probe target neutral**: ``scripts/probe_session.py`` and

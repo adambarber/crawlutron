@@ -9,8 +9,8 @@ from __future__ import annotations
 import dataclasses
 
 import pytest
-
 from admission import Count, Want
+
 from tests.admission_kernel._doors import _finish, _live
 from tests.admission_kernel._gate_factory import GateSpec, build_gate
 

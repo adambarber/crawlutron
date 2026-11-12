@@ -206,8 +206,8 @@ def _roots_of(command: list[str]) -> list[str]:
 
 
 def _duplicate(
-    first_path: str = "crawlutron/new.py",
-    second_path: str = "crawlutron/other.py",
+    first_path: str = "packages/core/crawlutron/new.py",
+    second_path: str = "packages/core/crawlutron/other.py",
     fragment: str = "duplicate",
 ) -> JscpdDuplicate:
     return {

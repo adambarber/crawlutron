@@ -406,7 +406,7 @@ def _docker_run_script(image_present: bool = True):
 
 def test_run_up_image_present_starts_container_and_waits_for_health():
     run, calls = _docker_run_script()
-    _up_ok(run, ["--image", "crawlutron/crawlutron", "--tag", "1.2.3", "--yes"])
+    _up_ok(run, ["--image", "packages/core/crawlutron/crawlutron", "--tag", "1.2.3", "--yes"])
     assert any(c[1:3] == ["image", "inspect"] for c in calls)
     assert any(c[1] == "run" for c in calls)
     assert any(c[0] == "curl" for c in calls)
@@ -415,21 +415,21 @@ def test_run_up_image_present_starts_container_and_waits_for_health():
 def test_run_up_missing_image_without_yes_returns_usage(monkeypatch):
     monkeypatch.setattr("crawlutron.cli.docker.sys.stdin", io.StringIO("n\n"))
     run, calls = _docker_run_script(image_present=False)
-    code = _up(run, ["--image", "crawlutron/crawlutron", "--tag", "1.2.3"])
+    code = _up(run, ["--image", "packages/core/crawlutron/crawlutron", "--tag", "1.2.3"])
     assert code == EXIT_USAGE
     assert not any(c[1] == "pull" for c in calls)
 
 
 def test_run_up_missing_image_with_yes_pulls_and_starts():
     run, calls = _docker_run_script(image_present=False)
-    _up_ok(run, ["--image", "crawlutron/crawlutron", "--tag", "1.2.3", "--yes"])
+    _up_ok(run, ["--image", "packages/core/crawlutron/crawlutron", "--tag", "1.2.3", "--yes"])
     assert any(c[1] == "pull" for c in calls)
     assert any(c[1] == "run" for c in calls)
 
 
 def test_run_up_refuses_latest_tag():
     run, calls = _docker_run_script()
-    code = _up(run, ["--image", "crawlutron/crawlutron", "--tag", "latest"])
+    code = _up(run, ["--image", "packages/core/crawlutron/crawlutron", "--tag", "latest"])
     assert code == EXIT_USAGE
     assert not any(c[1] == "pull" for c in calls)
     assert not any(c[1] == "run" for c in calls)
@@ -439,7 +439,7 @@ def test_run_up_no_wait_for_health_starts_without_curl():
     run, calls = _docker_run_script()
     code = _up(
         run,
-        ["--image", "crawlutron/crawlutron", "--tag", "1.2.3", "--yes", "--no-wait-for-health"],
+        ["--image", "packages/core/crawlutron/crawlutron", "--tag", "1.2.3", "--yes", "--no-wait-for-health"],
     )
     assert code == EXIT_SUCCESS
     assert any(c[1] == "run" for c in calls)

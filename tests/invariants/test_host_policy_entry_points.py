@@ -4,7 +4,7 @@ import ast
 import pathlib
 
 from tests.chokepoint_walks import APP_ROOT, REPO_ROOT, app_trees, local_nodes, nodes_of, resolved_call_name
-from tests.invariants._shared import DefinitionNode, _module_definition_index
+from tests.invariants._shared import DefinitionNode, _module_definition_index, _module_name
 
 _DECISION_NAMES = frozenset(
     {
@@ -19,13 +19,6 @@ _DECISION_NAMES = frozenset(
     }
 )
 _MODULE_PREFIXES = ("crawlutron.api.", "crawlutron.mcp.", "crawlutron.service.")
-
-
-def _module_name(path: pathlib.Path) -> str:
-    relative = path.relative_to(REPO_ROOT).as_posix()
-    if relative.endswith("/__init__.py"):
-        return relative[: -len("/__init__.py")].replace("/", ".")
-    return relative[:-3].replace("/", ".")
 
 
 def _call_edges(
@@ -169,5 +162,5 @@ def test_host_policy_discovery_rejects_undeclared_entry_point():
         ),
     )
     discovered = discover_host_policy_entry_points(modules)
-    assert "crawlutron/api/_undeclared_entry.py:undeclared_entry" in discovered
+    assert "packages/core/crawlutron/api/_undeclared_entry.py:undeclared_entry" in discovered
     assert discovered - _table_entries()

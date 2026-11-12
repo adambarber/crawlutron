@@ -11,6 +11,7 @@ from itertools import islice
 from typing import Protocol, cast
 
 from admission import AdmissionGate
+
 from crawlutron.admission.admission_links import (
     AdmittedLink,
     admit_discovered_links,

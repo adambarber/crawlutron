@@ -13,7 +13,7 @@ from tests.chokepoint_walks import APP_ROOT, REPO_ROOT, offender_at, trees_under
 from tests.invariants._clock_family import dotted_name
 from tests.rules import Bites, Rule, Silent
 
-_ADMISSION = REPO_ROOT / "admission"
+_ADMISSION = REPO_ROOT / "packages" / "core" / "admission"
 _SYNTHETIC = _ADMISSION / "_synthetic.py"
 _ELSEWHERE = APP_ROOT / "admission" / "policy.py"
 

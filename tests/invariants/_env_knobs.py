@@ -101,7 +101,7 @@ def _settings_alias_declaration_constant(
     tree,
     node,
 ) -> bool:
-    if _relative_app_path(path) != "crawlutron/config/settings.py":
+    if _relative_app_path(path) != "packages/core/crawlutron/config/settings.py":
         return False
     parents = parent_map(tree)
     current: ast.AST = node

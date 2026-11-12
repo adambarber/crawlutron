@@ -94,7 +94,9 @@ def test_set_writes_disk_outside_the_lock():
     The write seam must not sit inside ``with self._lock:``: one slow disk write would block every other
     cache operation. Asserted on the live source so the two set twins cannot drift apart again.
     """
-    offenders = calls_inside_self_lock("crawlutron/transport/content_cache.py", ("set",), ("write_data",))
+    offenders = calls_inside_self_lock(
+        "packages/core/crawlutron/transport/content_cache.py", ("set",), ("write_data",)
+    )
     assert offenders == [], (
         "set() calls write_data inside the commit lock: one slow disk write "
         "blocks every other cache operation (the aset twin runs it outside)"

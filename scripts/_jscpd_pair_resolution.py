@@ -41,7 +41,9 @@ CROSS_TREE_ROOT = "."
 # One jscpd invocation per root: jscpd names files relative to its root, so
 # attribution requires one scan per root.
 TREE_ROOTS = {
-    "production": ("admission", "crawlutron", "crawlutron_sdk"),
+    # packages/core is the uv workspace member holding the crawler and the
+    # admission kernel; the root project dir ships crawlutron_sdk until #898.
+    "production": ("packages/core", "crawlutron_sdk"),
     "test": ("tests", "scripts"),
 }
 
@@ -56,7 +58,7 @@ SANCTIONED_IGNORE_GLOBS = (
     "**/.pytest_cache/**",  # pytest cache, not source
     "**/node_modules/**",  # vendored third-party tree, not source
     "**/.git/**",  # git metadata, not source
-    "**/crawlutron/storage/migrations/**",  # generated DDL snapshots, not hand-written source
+    "**/packages/core/crawlutron/storage/migrations/**",  # generated DDL snapshots, not hand-written source
 )
 
 

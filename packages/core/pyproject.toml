@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs>=0.4"]
+build-backend = "hatchling.build"
+
+[project]
+name = "crawlutron-core"
+dynamic = ["version"]
+description = "Policy-driven, self-hosted web crawler and content-extraction service built around FastAPI"
+requires-python = ">=3.12"
+license = "MIT"
+
+[tool.hatch.version]
+# The single source of the version: the most recent git tag (SemVer). Untagged
+# or dirty checkouts get a dev suffix; no hand-edited number. This member lives
+# under packages/core, a subdirectory of the shared git repository, so the VCS
+# source searches parent directories to find the workspace root's history.
+source = "vcs"
+raw-options = { search_parent_directories = true }
+
+[tool.hatch.build.hooks.vcs]
+# Written at build/editable-install time; regenerated, never committed.
+version-file = "crawlutron/_version.py"
+
+[tool.hatch.build.targets.wheel]
+# Dist name (crawlutron-core) and import names (crawlutron, admission) are
+# independent: importing either resolves into this one wheel.
+packages = ["crawlutron", "admission"]
+
+[project.scripts]
+# The crawler service CLI ships in this member, alongside the package it runs.
+crawl = "crawlutron.cli.__main__:main"

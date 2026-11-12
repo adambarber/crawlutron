@@ -22,18 +22,20 @@ from tests.rules import Bites, Registry, Rule, Silent
 
 # The two admission edges (watch + async crawl) and the delivery POST site:
 # the only modules a raw ``webhook_url: str`` may appear in a signature of.
-_ADMISSION_EDGES = frozenset({"crawlutron/api/watch_router.py", "crawlutron/api/crawl_endpoint.py"})
+_ADMISSION_EDGES = frozenset(
+    {"packages/core/crawlutron/api/watch_router.py", "packages/core/crawlutron/api/crawl_endpoint.py"}
+)
 
 #: The delivery POST site and its validation helpers: raw str is the wire
 #: form here, inside the one delivery module.
-_DELIVERY_SITE = "crawlutron/service/webhooks.py"
+_DELIVERY_SITE = "packages/core/crawlutron/service/webhooks.py"
 
 #: The persistence/identity owner: the durable text is stored and read back
 #: here, and every consumer re-admits it.
-_PERSISTENCE_SITE = "crawlutron/storage/watch_store.py"
+_PERSISTENCE_SITE = "packages/core/crawlutron/storage/watch_store.py"
 
 #: The model that owns the raw durable text; its projections are all redacted.
-_RAW_OWNER = "crawlutron/models/watch_state.py"
+_RAW_OWNER = "packages/core/crawlutron/models/watch_state.py"
 
 _SANCTIONED_RAW_STR_MODULES = _ADMISSION_EDGES | {_DELIVERY_SITE, _PERSISTENCE_SITE, _RAW_OWNER}
 
@@ -100,7 +102,7 @@ def _webhook_target_str_union_offenders(tree: ast.AST, path: pathlib.Path) -> li
 
 # ``delivery_url()`` may be read only at the sanctioned webhook_url sites
 # plus the pre-delivery validation edge (watch_router).
-_RAW_ACCESSOR_READER_SITES = _SANCTIONED_RAW_STR_MODULES | {"crawlutron/api/watch_router.py"}
+_RAW_ACCESSOR_READER_SITES = _SANCTIONED_RAW_STR_MODULES | {"packages/core/crawlutron/api/watch_router.py"}
 
 
 def _raw_delivery_url_read_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -221,7 +223,7 @@ RAW_URL_ESCAPES_ONLY_THROUGH_THE_DELIVERY_DOOR = Rule(
 # ========================================================================= clause 2: the redaction chokepoint
 
 #: The ONE redaction mechanism; nowhere else is credential masking spelled.
-_REDACTION_CHOKEPOINT = "crawlutron/safety/url_redaction.py"
+_REDACTION_CHOKEPOINT = "packages/core/crawlutron/safety/url_redaction.py"
 
 _SECRET_NAME_WORDS = ("token", "secret", "password", "passwd", "apikey", "api_key", "key=")
 _MASK_TOKENS = ("[redacted]", "***", "*****")

@@ -434,7 +434,7 @@ def test_read_row_normalizes_outside_the_store_lock():
     store lock across that work blocks every writer behind one reader's CPU.
     """
     offenders = calls_inside_self_lock(
-        "crawlutron/storage/job_store.py",
+        "packages/core/crawlutron/storage/job_store.py",
         ("_read_row", "_row_to_job"),
         ("_row_to_job", "row_to_state"),
     )

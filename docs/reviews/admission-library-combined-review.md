@@ -161,9 +161,9 @@ precedence) is the risk.
    numbers drifted ~20 lines vs the 11-11 snapshot. Re-pin the drift table from
    the live tree before the deletion commits — string-drift doctrine.
 6. **Import-contract and ratchet work**: new top-level package means extending
-   the file-size ratchet `_BUDGETS` with an `admission/` root; seal "zero
+   the file-size ratchet `_BUDGETS` with an `packages/core/admission/` root; seal "zero
    crawlutron imports" as an import-contract gate, not a comment; add a
-   source-scan gate for `time.monotonic`/`asyncio.sleep` in `admission/`; add a
+   source-scan gate for `time.monotonic`/`asyncio.sleep` in `packages/core/admission/`; add a
    mutation gate on the floor law; add the seam-parity test (old knob vs new
    kernel, same decision) before deleting `pressure_sizing` sites.
 7. **Release sequencing**: cut 0.4.0rc0 first (tree is ready; CHANGELOG empty),

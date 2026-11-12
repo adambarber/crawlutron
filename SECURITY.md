@@ -80,7 +80,7 @@ It is a powerful SSRF-enabled service that:
   params. Pre-existing rows from before this refusal carry it unredacted
   (dev-stage stores are disposable; no migration).
 - **S6 — browser-initiated XHR/fetch is not fully host-policy-gated.** The
-  Playwright route handler (`crawlutron/transport/browser_targets.py`, wired via
+  Playwright route handler (`packages/core/crawlutron/transport/browser_targets.py`, wired via
   `wire_ssrf_guards`) blocks navigation and subresource loads to private hosts,
   but JavaScript a hostile rendered page runs (XHR/fetch/`WebSocket` from page
   code, service workers, or non-http schemes) can attempt requests the route
@@ -95,7 +95,7 @@ It is a powerful SSRF-enabled service that:
   secrets embed their key id (`ck_<key_id>.<body>`, 256-bit-entropy body via
   `secrets.token_urlsafe(32)`). At rest the key row stores a salted
   PBKDF2-SHA256 digest (210,000 iterations, per-key 16-byte salt,
-  `crawlutron/storage/caller_key_store.py`); verification is one primary-key
+  `packages/core/crawlutron/storage/caller_key_store.py`); verification is one primary-key
   lookup plus one PBKDF2 run, with a miss burning the same derivation against
   a fixed dummy digest so timing is uniform. That derivation is **metered**
   (#653): five consecutive failed verifications from the same presented

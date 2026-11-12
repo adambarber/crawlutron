@@ -13,7 +13,7 @@ from collections.abc import Iterable
 from tests.chokepoint_walks import APP_ROOT, REPO_ROOT, trees_under
 from tests.rules import Bites, Rule, Silent
 
-_ADMISSION = REPO_ROOT / "admission"
+_ADMISSION = REPO_ROOT / "packages" / "core" / "admission"
 _SYNTHETIC = _ADMISSION / "_synthetic.py"
 _ELSEWHERE = APP_ROOT / "crawl" / "content_cache.py"
 

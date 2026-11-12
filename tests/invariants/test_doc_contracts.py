@@ -193,13 +193,13 @@ _NON_SYMBOL_WORDS = frozenset(
 
 
 def _app_symbol_definitions(root: pathlib.Path = REPO_ROOT) -> dict[str, frozenset[str]]:
-    """Every top-level name defined in crawlutron/, mapped to the module files that define it.
+    """Every top-level name defined in the crawlutron package, mapped to the module files that define it.
 
     A bare backticked name in a doc can only be checked against this index: if no
     module defines it, the doc is citing something that doesn't exist as a crawlutron symbol.
     """
     definitions: dict[str, set[str]] = {}
-    for path in sorted((root / "crawlutron").rglob("*.py")):
+    for path in sorted((root / "packages" / "core" / "crawlutron").rglob("*.py")):
         tree = parsed(path)
         relative = path.relative_to(root).as_posix()
         for node in tree.body:
@@ -263,7 +263,9 @@ def _check_dotted_symbol(name: str, candidate: str, app_root: pathlib.Path) -> l
     if _module_file(app_root, parts).exists():
         return []
     symbol = parts[-1]
-    module_path = app_root / "crawlutron" / pathlib.Path(*parts[1:-1]).with_suffix(".py")
+    module_path = (
+        app_root / "packages" / "core" / "crawlutron" / pathlib.Path(*parts[1:-1]).with_suffix(".py")
+    )
     if not module_path.exists():
         return [f"{name}: `{candidate}` module does not exist"]
     tree = ast.parse(module_path.read_text(encoding="utf-8"))
@@ -274,7 +276,7 @@ def _check_dotted_symbol(name: str, candidate: str, app_root: pathlib.Path) -> l
 
 def _module_file(app_root: pathlib.Path, parts: list[str]) -> pathlib.Path:
     """The citation read as a MODULE path: crawlutron/<pkg...>/<name>.py."""
-    return (app_root / "crawlutron").joinpath(*parts[1:]).with_suffix(".py")
+    return (app_root / "packages" / "core" / "crawlutron").joinpath(*parts[1:]).with_suffix(".py")
 
 
 def _check_bare_symbol(name: str, candidate: str, symbols: dict[str, frozenset[str]]) -> list[str]:

@@ -16,6 +16,12 @@ resolution-markers = [
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 
+[manifest]
+members = [
+    "crawlutron",
+    "crawlutron-core",
+]
+
 [[package]]
 name = "annotated-doc"
 version = "0.0.5"
@@ -742,6 +748,10 @@ requires-dist = [
     { name = "yoyo-migrations", specifier = "==9.0.0" },
 ]
 provides-extras = ["dev"]
+
+[[package]]
+name = "crawlutron-core"
+source = { editable = "packages/core" }
 
 [[package]]
 name = "cryptography"

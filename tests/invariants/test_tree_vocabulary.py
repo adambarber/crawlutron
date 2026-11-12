@@ -185,8 +185,9 @@ RETIRED_VOCABULARY_IS_NOT_IMPORTABLE = Rule(
     name="vocabulary-imports-name-a-topic",
     find=_retired_vocabulary_offenders,
     summary=(
-        "crawlutron/constants.py was one topic bucket -- taxonomy, strategies, limits, browser vocabulary, "
-        "request profiles, host classifiers and identity in a single file, so a reader could not "
+        "one topic bucket -- taxonomy, strategies, limits, browser vocabulary, "
+        "(crawlutron/constants.py) request profiles, host classifiers and identity "
+        "in a single file, so a reader could not "
         "answer 'where does X live' from the mental model. It is retired: the vocabulary lives one "
         "topic per module under crawlutron.vocabulary, so name the topic instead"
     ),

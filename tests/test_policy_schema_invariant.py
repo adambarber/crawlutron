@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
-POLICY_PATH = "crawlutron/models/crawl_policy.py"
+POLICY_PATH = "packages/core/crawlutron/models/crawl_policy.py"
 _DECL = 'POLICY_SCHEMA_VERSION = "'
 
 
@@ -62,7 +62,7 @@ def test_the_gate_law(tmp_path, monkeypatch, bumped, expected):
     monkeypatch.setattr(
         gate,
         "_diff_paths",
-        lambda: ["crawlutron/models/crawl_policy.py", "msg.txt"],
+        lambda: ["packages/core/crawlutron/models/crawl_policy.py", "msg.txt"],
     )
     monkeypatch.setattr(gate, "_schema_bumped", lambda: bumped)
     msg_file = tmp_path / "COMMIT_EDITMSG"

@@ -30,7 +30,7 @@ SCANNED = sorted(
     path
     for path in (
         [
-            *ROOT.joinpath("crawlutron").rglob("*.py"),
+            *ROOT.joinpath("packages", "core", "crawlutron").rglob("*.py"),
             *ROOT.joinpath("tests").rglob("*.py"),
             ROOT / ".env.example",
         ]

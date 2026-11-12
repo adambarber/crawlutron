@@ -64,8 +64,9 @@ def _version_parts(desc: str) -> tuple[str, tuple[int | str, ...]]:
 
 def main() -> None:
     version, parts = _version_parts(_describe())
-    Path("crawlutron/_version.py").write_text(TEMPLATE.format(ver=version, vt=parts))
-    print(f"wrote crawlutron/_version.py: {version}")
+    write_target = Path("packages/core/crawlutron/_version.py")
+    write_target.write_text(TEMPLATE.format(ver=version, vt=parts))
+    print(f"wrote {write_target}: {version}")
 
 
 if __name__ == "__main__":

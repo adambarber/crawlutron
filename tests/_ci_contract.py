@@ -35,7 +35,7 @@ ERREXIT_SHELL = "bash -e {0}"
 # Every file the gates read to decide what to enforce. A commit that edits one of them must run the
 # enforcement: the config that decides what is checked cannot itself be the one change that skips the check.
 ENFORCEMENT_INPUTS = (
-    "crawlutron/config/settings.py",
+    "packages/core/crawlutron/config/settings.py",
     "tests/_jscpd_gate_helpers.py",
     # The duplication gate's own implementation.
     "scripts/jscpd_gate.py",

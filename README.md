@@ -3,7 +3,7 @@
 A policy-driven, self-hosted web crawler and content-extraction service built around
 FastAPI. It exposes a single, machine-readable crawl contract that supports:
 
-**Positioning.** crawlutron is a self-hosted, policy-driven crawler for public pages. Its caller security boundary is built-in per-caller authentication (API keys issued and revoked through `/v1/keys`, operator-token gated; keyed jobs and results are readable only under their key, anonymous crawls share a bounded identity). SSRF is architecture, not an add-on: every egress target is classified, fresh-resolved, IP-pinned, and re-validated per hop and per browser subresource — `when the private-target guard is enabled`, warned once per enabled value at first use (`crawlutron/models/host_policy.py:88-100`). A transport-auth reverse proxy is recommended when exposing beyond localhost (TLS termination, `Server` header stripping, request-id logging), but built-in per-caller auth is the caller security boundary; the proxy is transport hardening, not a substitute for it. The rule framework (`tests/invariants/`) arms and bites every rule, and the pre-commit hook chain gates every commit. See `docs/architecture-ssrf.md`, `docs/architecture-governance.md`, and `SECURITY.md`.
+**Positioning.** crawlutron is a self-hosted, policy-driven crawler for public pages. Its caller security boundary is built-in per-caller authentication (API keys issued and revoked through `/v1/keys`, operator-token gated; keyed jobs and results are readable only under their key, anonymous crawls share a bounded identity). SSRF is architecture, not an add-on: every egress target is classified, fresh-resolved, IP-pinned, and re-validated per hop and per browser subresource — `when the private-target guard is enabled`, warned once per enabled value at first use (`packages/core/crawlutron/models/host_policy.py:88-100`). A transport-auth reverse proxy is recommended when exposing beyond localhost (TLS termination, `Server` header stripping, request-id logging), but built-in per-caller auth is the caller security boundary; the proxy is transport hardening, not a substitute for it. The rule framework (`tests/invariants/`) arms and bites every rule, and the pre-commit hook chain gates every commit. See `docs/architecture-ssrf.md`, `docs/architecture-governance.md`, and `SECURITY.md`.
 
 - **HTTP fetch strategies** — transparent declared-crawler HTTP and TLS-fingerprint
   impersonation (curl_cffi).
@@ -28,10 +28,10 @@ FastAPI. It exposes a single, machine-readable crawl contract that supports:
 
 Linux and macOS are supported; Windows is not. The service is built on POSIX
 primitives the Windows runtime does not provide: `fcntl` advisory file locking
-(`crawlutron/safety/atomic_write.py`, `crawlutron/orchestration/engine.py`,
-`crawlutron/transport/content_cache.py`), `resource`/sysconf-based memory
-sizing (`crawlutron/runtime/pressure_memory.py`), and cgroup filesystem
-readings for the resource gauges (`crawlutron/runtime/cgroup_sense.py`).
+(`packages/core/crawlutron/safety/atomic_write.py`, `packages/core/crawlutron/orchestration/engine.py`,
+`packages/core/crawlutron/transport/content_cache.py`), `resource`/sysconf-based memory
+sizing (`packages/core/crawlutron/runtime/pressure_memory.py`), and cgroup filesystem
+readings for the resource gauges (`packages/core/crawlutron/runtime/cgroup_sense.py`).
 Deploy it as a Linux container or run it directly on Linux/macOS.
 
 ## Security residuals and environment escape hatches
@@ -50,7 +50,7 @@ guards them stated:
   secrets are `ck_<key_id>.<body>` where the body is `secrets.token_urlsafe(32)`
   (256-bit entropy). At rest the key row stores a salted PBKDF2-SHA256 digest
   (210,000 iterations, per-key 16-byte salt,
-  `crawlutron/storage/caller_key_store.py`); verification is one primary-key
+  `packages/core/crawlutron/storage/caller_key_store.py`); verification is one primary-key
   lookup plus one PBKDF2 run, with a miss burning the same derivation against
   a fixed dummy digest so timing is uniform. Residual: entropy of the secret,
   not the KDF, is the real guard; do not reuse this pattern for human-chosen
@@ -59,9 +59,9 @@ guards them stated:
 ### Dangerous environment escape hatches
 
 Every `CRAWLUTRON_*` variable that weakens a safety default (derived from the
-live settings/env code — `crawlutron/models/host_policy.py`,
-`crawlutron/service/webhooks.py`, `crawlutron/config/settings.py`,
-`crawlutron/transport/driver_config.py`):
+live settings/env code — `packages/core/crawlutron/models/host_policy.py`,
+`packages/core/crawlutron/service/webhooks.py`, `packages/core/crawlutron/config/settings.py`,
+`packages/core/crawlutron/transport/driver_config.py`):
 
 | Variable | Default | Weakened when | Effect |
 | -------- | ------- | ------------- | ------ |
@@ -208,7 +208,7 @@ container with Caddy or another reverse proxy that owns the `.local` zone.
 
 ## SQLite schema migrations
 
-Migrations live in `crawlutron/storage/migrations/`. Every store schema — jobs, results, metrics, coordination — lives in the single `cache/crawler.db`; startup applies that database's pending migrations under yoyo's lock, and an exact pre-ledger table is stamped instead of recreated. The CLI names the schema explicitly because they share one file.
+Migrations live in `packages/core/crawlutron/storage/migrations/`. Every store schema — jobs, results, metrics, coordination — lives in the single `cache/crawler.db`; startup applies that database's pending migrations under yoyo's lock, and an exact pre-ledger table is stamped instead of recreated. The CLI names the schema explicitly because they share one file.
 
 ```bash
 # Apply pending migrations (normally automatic when the store opens).
@@ -347,7 +347,7 @@ exhausted.
 ## Classifications
 
 Every crawl result carries a `classification` from a fixed enum of **36 values**
-(defined in `crawlutron/vocabulary/taxonomy.py`, returned by `GET /v1/capabilities` under
+(defined in `packages/core/crawlutron/vocabulary/taxonomy.py`, returned by `GET /v1/capabilities` under
 `supported_classifications`). Examples: `rendered`, `not_modified`, `captcha_detected`,
 `waf_challenge_detected`, `robots_disallowed`, `navigation_timeout`,
 `private_network_target`, `network_error`, `http_error`, `url_budget_exceeded`,
@@ -448,7 +448,7 @@ defaults shown):
 | `CRAWLUTRON_WARMUP_URLS` | `""` | Comma-separated URLs fetched once at browser startup to warm engine caches (`browser.py`). Warmup URLs are normalized through the same public-URL policy as crawl targets. Related: `browser_profile.storage_state` paths are honored only under `CRAWLUTRON_CACHE_DIR` (the allowlist root); without a cache dir no storage_state is accepted. |
 
 Two DNS posture values are **not** env-tunable — they are module constants in
-`crawlutron/transport/pinned_dns.py`: `DNS_WORKERS = 32` (the dedicated DNS
+`packages/core/crawlutron/transport/pinned_dns.py`: `DNS_WORKERS = 32` (the dedicated DNS
 resolver thread pool) and `DNS_WAIT_SECONDS = 5.0` (the ceiling on a resolver
 wait; a request's own timeout tightens it further). They implement the
 pinned-DNS saturation law: when every worker is inside a live resolve, a new
@@ -464,7 +464,7 @@ instead of queueing behind an uncancellable `getaddrinfo`.
 | `CRAWLUTRON_LOG_MAX_BYTES` | `10485760` | Log rotation size. |
 | `CRAWLUTRON_LOG_BACKUP_COUNT` | `3` | Number of rotated log files to keep. |
 
-Host policy is applied at the shared public-URL chokepoint before the SSRF/private-target check. Entries are normalized as case-insensitive IDNA hostnames (`_policy_host_entry` in `crawlutron/models/host_policy.py` parses each value via `urlparse(...).hostname`); a port in a config value is stripped during normalization and never matched — an entry is a hostname, not a `host:port` pair. A denied host wins over an allowed host, while an empty allowlist permits every otherwise-valid public host.
+Host policy is applied at the shared public-URL chokepoint before the SSRF/private-target check. Entries are normalized as case-insensitive IDNA hostnames (`_policy_host_entry` in `packages/core/crawlutron/models/host_policy.py` parses each value via `urlparse(...).hostname`); a port in a config value is stripped during normalization and never matched — an entry is a hostname, not a `host:port` pair. A denied host wins over an allowed host, while an empty allowlist permits every otherwise-valid public host.
 
 > The container's production command also reads `CRAWLUTRON_WORKERS` (uvicorn worker count). **Keep this at `1`.** The browser pool is a single global pool sized to the container RAM budget; running more than one uvicorn worker multiplies the browser-pool count across workers (e.g. 4 workers × pool_size 2 = 8 Camoufox processes ≈ 5+ GiB) and blows the 3 GiB memory limit. Do not raise it.
 

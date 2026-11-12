@@ -74,12 +74,12 @@ the time-seam source-scan can't coexist with an in-package Sleeper
 §4.3 needs event wakeup (release/sensing version bump → re-decide early);
 §8 names the seam a `Sleeper` (duration); a duration-sleeper cannot wake on a
 release. And the source-scan gate forbids `asyncio.sleep`/`time.monotonic`
-and aliases in `admission/**` — if a concrete event/sleep primitive is
+and aliases in `packages/core/admission/**` — if a concrete event/sleep primitive is
 implemented *in* the package, the gate reds its own seam.
 Fix: define the wait as a single event-with-optional-timeout primitive whose
-concrete implementation lives OUTSIDE `admission/` (injected from the seam);
+concrete implementation lives OUTSIDE `packages/core/admission/` (injected from the seam);
 state the source-scan gate is satisfiable only under that reading, keyed on
-`admission/**` only (crawlutron imports out of scope).
+`packages/core/admission/**` only (crawlutron imports out of scope).
 
 ### M5. `Progress(last_advance >= last_decision)` misfires on decisions that do
 not advance (Idle)
@@ -125,16 +125,16 @@ Verified correct: 4 `pinned_resource_gate` sites; `ContentionFreeGate` present;
 `:158,163`; initial ramp `recursive.py:407`; `CrawlState.ramp` at
 `recursive.py:275`; `(0,0)`-yield `pressure_sizing.py:245-246`; loop-lag
 `pressure_gates.py:199` + `pressure_probes.py:97-103`; `admission_stall.py`
-(module is `crawlutron/orchestration/admission_stall.py`) :25,49,78-79,125;
+(module is `packages/core/crawlutron/orchestration/admission_stall.py`) :25,49,78-79,125;
 `caller_auth.py:149-154`. Nothing in the v2 "Corrections to the combined
 review" section is itself wrong.
 
 ## Gate-writability
 
 - Import-contract + time-seam source-scan: realizable as Bites/Rule/Registry
-  with `scope=` walking `admission/**` — contingent on M4 (concrete
+  with `scope=` walking `packages/core/admission/**` — contingent on M4 (concrete
   clock/sleeper/event injected from outside; gate must scan the top-level
-  `admission/` only, not `crawlutron/admission/`).
+  `packages/core/admission/` only, not `packages/core/crawlutron/admission/`).
 - Floor mutation gate: the standing enforcement must be a **property test
   under mutation coverage** (an AST gate cannot judge the data-dependent
   "floor never zero" invariant). Clarify the acceptance table's phrasing.

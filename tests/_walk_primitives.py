@@ -83,6 +83,17 @@ def uv_workspace_members(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...] | No
     return tuple(str(m) for m in members if isinstance(m, str))
 
 
+def _expanded_members(base: pathlib.Path, pattern: str) -> tuple[str, ...]:
+    """A member pattern as concrete existing dirs, named repo-relatively.
+
+    UV workspace members are gitignore-style globs (``packages/*``); a literal
+    member path is its own match, while a glob resolves to every matching dir."""
+    literal = base / pattern
+    if literal.is_dir():
+        return (pattern,)
+    return tuple(sorted(p.relative_to(base).as_posix() for p in base.glob(pattern) if p.is_dir()))
+
+
 def _member_package_roots(base: pathlib.Path, members: tuple[str, ...]) -> tuple[str, ...]:
     """The python-bearing member dirs of a UV workspace, named repo-relatively.
 
@@ -90,12 +101,12 @@ def _member_package_roots(base: pathlib.Path, members: tuple[str, ...]) -> tuple
     is a stub (docs-only), not part of the packaging surface."""
     roots = [
         member
-        for member in members
+        for pattern in members
+        for member in _expanded_members(base, pattern)
         if any("__pycache__" not in q.parts for q in (base / member).rglob("*.py"))
-        if (base / member).is_dir()
     ]
     assert roots, f"uv workspace members declare no python-bearing dirs under {base}: {members}"
-    return tuple(sorted(roots))
+    return tuple(sorted(set(roots)))
 
 
 def package_roots(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
@@ -115,12 +126,17 @@ PACKAGE_ROOTS = package_roots()
 
 
 def scan_roots(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
-    """Every python-bearing dir under ``base``, computed through PACKAGE_ROOTS.
-
-    The scan surface is the package roots plus non-package python-bearing top-level
-    dirs (tests, scripts); SCAN_ROOTS consumes PACKAGE_ROOTS, one re-derivation."""
+    """Every python-bearing dir under ``base``: the package roots plus the
+    top-level python-bearing roots, minus member-package containers that a
+    member root already covers (``packages/`` once ``packages/core`` is one)."""
     packages = set(PACKAGE_ROOTS) if base == REPO_ROOT else set(package_roots(base))
-    return tuple(sorted(packages | set(python_bearing_roots(base))))
+    package_paths = {pathlib.PurePosixPath(p) for p in packages}
+    containers = {
+        root
+        for root in python_bearing_roots(base)
+        if any(pathlib.PurePosixPath(root) in pkg.parents for pkg in package_paths)
+    }
+    return tuple(sorted(packages | (set(python_bearing_roots(base)) - containers)))
 
 
 SCAN_ROOTS = scan_roots()
@@ -137,7 +153,7 @@ def is_exempt(relative: str, value: str, exemptions: tuple[tuple[str, str, str],
     return False
 
 
-APP_ROOT = REPO_ROOT / "crawlutron"
+APP_ROOT = REPO_ROOT / "packages" / "core" / "crawlutron"
 
 
 TRANSPORT_DIR = APP_ROOT / "transport"

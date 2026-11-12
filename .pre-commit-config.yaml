@@ -90,7 +90,7 @@ repos:
         name: ruff check
         entry: >-
           bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
-          .venv/bin/python -m scripts.gate_fanout ruff -- .venv/bin/python -m ruff check crawlutron tests scripts
+          .venv/bin/python -m scripts.gate_fanout ruff -- .venv/bin/python -m ruff check packages/core/crawlutron tests scripts
         language: system
         files: &service_trigger ^(docker/browser-crawler/|(?!docker/))
         pass_filenames: false
@@ -105,7 +105,7 @@ repos:
         name: ruff format
         entry: >-
           bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
-          .venv/bin/python -m scripts.gate_fanout ruff-format -- .venv/bin/python -m ruff format --check crawlutron tests scripts
+          .venv/bin/python -m scripts.gate_fanout ruff-format -- .venv/bin/python -m ruff format --check packages/core/crawlutron tests scripts
         language: system
         files: *service_trigger
         pass_filenames: false
@@ -191,7 +191,7 @@ repos:
         name: vulture dead code (min-confidence 90, zero tolerance)
         entry: >-
           bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
-          .venv/bin/python -m scripts.gate_fanout vulture -- .venv/bin/python -m vulture crawlutron tests scripts --min-confidence 90
+          .venv/bin/python -m scripts.gate_fanout vulture -- .venv/bin/python -m vulture packages/core/crawlutron tests scripts --min-confidence 90
         language: system
         files: *service_trigger
         pass_filenames: false
@@ -240,7 +240,7 @@ repos:
           bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
           .venv/bin/python -m pytest -q --cov=crawlutron --cov-report=
         language: system
-        files: ^(crawlutron|tests)/
+        files: ^(packages/core/crawlutron|tests)/
         pass_filenames: false
         stages: [pre-push]
 

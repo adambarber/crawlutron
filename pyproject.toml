@@ -2,6 +2,9 @@
 requires = ["hatchling", "hatch-vcs>=0.4"]
 build-backend = "hatchling.build"
 
+[tool.uv.workspace]
+members = ["packages/*"]
+
 [project]
 name = "crawlutron"
 dynamic = ["version"]
@@ -59,11 +62,6 @@ dependencies = [
     # without it the suffix heuristic silently degrades.
     "publicsuffixlist==1.1.2.20261101",
 ]
-
-[project.scripts]
-# Thin HTTP client facade for the crawl service (Spike A, issue #710).
-# No SSRF/policy/URL validation here; the service is the single source of truth.
-crawl = "crawlutron.cli.__main__:main"
 
 [project.optional-dependencies]
 # Lint and type tools are PINNED, not ranged. These are gates: a floating
@@ -134,16 +132,11 @@ Security = "https://github.com/adambarber/crawlutron/blob/main/SECURITY.md"
 # #561). Untagged or dirty checkouts get a dev suffix; no hand-edited number.
 source = "vcs"
 
-[tool.hatch.build.hooks.vcs]
-# Written at build/editable-install time; regenerated, never committed.
-version-file = "crawlutron/_version.py"
-
 [tool.hatch.build.targets.wheel]
-# crawlutron_sdk ships in the same wheel as crawlutron (one hatchling project,
-# one build). A truly separate `crawlutron-sdk` wheel would require a second
-# hatchling project/pyproject.toml plus CI/release changes -- broader
-# restructuring than this ticket; see the #711 report for the tradeoff note.
-packages = ["crawlutron", "crawlutron_sdk"]
+# The root project builds crawlutron_sdk until #898 gives it its own wheel;
+# crawlutron (and the admission kernel) moved into the `crawlutron-core`
+# workspace member under packages/core in the UV workspace drive (#879).
+packages = ["crawlutron_sdk"]
 
 # Coverage engine config -- the ONE declaration the pre-push coverage hook and
 # any future CI consumer read. `core = "sysmon"` (PEP 669 sys.monitoring) is
@@ -195,6 +188,13 @@ select = [
 ignore = [
     "D209",  # multiline docstring closing """ stays on the body line (house style)
 ]
+
+[tool.ruff.lint.isort]
+# The crawler moved under packages/core (a uv workspace member), so ``crawlutron``
+# is no longer at the repo root and ruff no longer auto-detects it as first-party.
+# Naming it keeps isort grouping the package and test trees where it always has,
+# rather than re-folded into the third-party block.
+known-first-party = ["crawlutron", "crawlutron_sdk", "tests", "scripts"]
 # PLR0911 (too-many-returns) and PLR0913 (too-many-arguments) are deliberately
 # NOT selected, having been measured rather than assumed:
 #
@@ -331,7 +331,7 @@ max-statements = 87
 # (crawl up, Spike A, issue #710). The argv is built from the operator's explicit
 # --image/--tag (never caller input, never credentials), so importing and invoking
 # subprocess is intentional, not a bypassable sink.
-"crawlutron/cli/docker.py" = [
+"packages/core/crawlutron/cli/docker.py" = [
     "S404",  # intentional: the docker CLI is the only way to start the service
     "S603",  # intentional: argv is operator-supplied image/tag, never caller credentials
 ]

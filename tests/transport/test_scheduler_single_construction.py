@@ -138,7 +138,7 @@ def test_domain_scheduler_constructed_only_in_its_home():
             return "direct DomainScheduler build"
         return None
 
-    offenders = _app_call_offenders("crawlutron/transport/scheduler.py", direct_build)
+    offenders = _app_call_offenders("packages/core/crawlutron/transport/scheduler.py", direct_build)
     assert not offenders, "DomainScheduler constructed outside its home: " + ", ".join(offenders)
 
 
@@ -153,5 +153,5 @@ def test_global_concurrency_not_getattr_redefaulted():
             return "global_concurrency re-defaulted via getattr"
         return None
 
-    offenders = _app_call_offenders("crawlutron/transport/scheduler.py", getattr_redefault)
+    offenders = _app_call_offenders("packages/core/crawlutron/transport/scheduler.py", getattr_redefault)
     assert not offenders, "global_concurrency re-defaulted via getattr: " + ", ".join(offenders)

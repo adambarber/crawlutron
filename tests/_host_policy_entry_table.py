@@ -11,20 +11,20 @@ def host_policy_entry_table() -> set[str]:
     defining module (registry.py), so none are discoverable; the policy seams stay guarded.
     """
     return {
-        "crawlutron/service/admit_endpoint.py:admit_url",
-        "crawlutron/api/crawl_endpoint.py:crawl",
-        "crawlutron/service/crawl_executor.py:execute_crawl",
-        "crawlutron/service/job_runner.py:run_job",
-        "crawlutron/service/job_cores.py:create_job_core",
-        "crawlutron/service/map_endpoint.py:map_site",
-        "crawlutron/service/render.py:render_request",
-        "crawlutron/service/response_shaping.py:frontier_link_url",
-        "crawlutron/api/watch_router.py:create_watch",
-        "crawlutron/service/watch_cores.py:register_watch_core",
-        "crawlutron/service/policy_suggestions.py:policy_suggestions",
-        "crawlutron/service/site_map.py:build_site_map",
-        "crawlutron/service/policy_suggestions.py:build_policy_suggestions",
+        "packages/core/crawlutron/service/admit_endpoint.py:admit_url",
+        "packages/core/crawlutron/api/crawl_endpoint.py:crawl",
+        "packages/core/crawlutron/service/crawl_executor.py:execute_crawl",
+        "packages/core/crawlutron/service/job_runner.py:run_job",
+        "packages/core/crawlutron/service/job_cores.py:create_job_core",
+        "packages/core/crawlutron/service/map_endpoint.py:map_site",
+        "packages/core/crawlutron/service/render.py:render_request",
+        "packages/core/crawlutron/service/response_shaping.py:frontier_link_url",
+        "packages/core/crawlutron/api/watch_router.py:create_watch",
+        "packages/core/crawlutron/service/watch_cores.py:register_watch_core",
+        "packages/core/crawlutron/service/policy_suggestions.py:policy_suggestions",
+        "packages/core/crawlutron/service/site_map.py:build_site_map",
+        "packages/core/crawlutron/service/policy_suggestions.py:build_policy_suggestions",
         # post_webhook* left the table: they take an admitted WebhookTarget, whose
         # constructor IS the policy seam (probed via deliver_pinned_webhook).
-        "crawlutron/service/webhooks.py:deliver_pinned_webhook",
+        "packages/core/crawlutron/service/webhooks.py:deliver_pinned_webhook",
     }

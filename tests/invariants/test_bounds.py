@@ -92,7 +92,7 @@ HTML_INPUT_CAP = Rule(
     find=_local_html_input_caps,
     summary=(
         "declares a second HTML input byte cap; import MAX_HTML_INPUT_BYTES from "
-        "crawlutron/safety/bounded_io.py and call truncate_html_input instead"
+        "packages/core/crawlutron/safety/bounded_io.py and call truncate_html_input instead"
     ),
     # owner: bounded_io.py is the cap itself
     excludes=SANCTIONED | {"bounded_io.py"},
@@ -264,7 +264,7 @@ _DISCOVERY_FETCH = "fetch_decode_discovery"
 
 
 # The chokepoint module that legitimately owns what it bans.
-_DISCOVERY_CHOKEPOINT = "crawlutron/transport/fetch_helpers.py"
+_DISCOVERY_CHOKEPOINT = "packages/core/crawlutron/transport/fetch_helpers.py"
 
 
 def _is_discovery_fetch(value: ast.AST | None) -> bool:

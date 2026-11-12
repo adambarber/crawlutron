@@ -207,11 +207,14 @@ def test_no_rule_violations():
     RULES.check_all_clean()
 
 
-# ---------------------------------------------------------------------------
-
-
 def _module_of(path: pathlib.Path) -> str:
-    return ".".join(path.relative_to(REPO_ROOT).with_suffix("").parts)
+    """A module's import name from its repo path, past the workspace member prefix."""
+    parts = path.relative_to(REPO_ROOT).with_suffix("").parts
+    try:
+        start = parts.index("crawlutron")
+    except ValueError:
+        return ".".join(parts)
+    return ".".join(parts[start:])
 
 
 def _cross_module_private_names(tree: ast.Module, path: pathlib.Path) -> dict[str, int]:

@@ -102,10 +102,10 @@ that can fit" — the actual guarantee.
    (recommend STALE-first → OVERSIZE → RETRY_PRESSURE) and pin a combination
    probe.
 4. **§2/§9.6 source-scan scope**: the standard `Rule`/`Registry` defaults to
-   `app_trees` (crawlutron-only); the top-level `admission/**` scan needs an
+   `app_trees` (crawlutron-only); the top-level `packages/core/admission/**` scan needs an
    explicit descriptor — `scope = lambda *, exclude:
    trees_under(REPO_ROOT / "admission")` — or an implementer sweeps
-   `crawlutron/admission/` instead (the exact collision the fix gates
+   `packages/core/crawlutron/admission/` instead (the exact collision the fix gates
    against). Note `app_trees` is not the right default.
 5. **§7.2 cold-probe fairness**: the global `cold_in_flight` counter can be
    saturated by cheap GENERAL cold admits, refusing the HEAVY cold probe.

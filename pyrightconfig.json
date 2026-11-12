@@ -11,12 +11,23 @@
     // owner of project-specific safety predicates; this file is the single owner
     // of "the type annotation is a lie". Gated by a pre-commit hook running
     // basedpyright directly, whose finding count is zero-or-fail.
-    "include": ["crawlutron"],
+    "include": ["packages/core/crawlutron"],
     "exclude": [
         "tests",
         "scripts",
         "**/__pycache__",
         "**/.pytest_cache"
+    ],
+
+    // The crawler is a workspace member nested under packages/core, so that
+    // directory is an import root: a file under packages/core/crawlutron is the
+    // module ``crawlutron.*``, not ``packages.core.crawlutron.*``. Naming the
+    // execution root keeps the two identities from colliding on one package.
+    "executionEnvironments": [
+        {
+            "root": "packages/core",
+            "extraPaths": ["packages/core"]
+        }
     ],
 
     // The service runs 3.12. This was pinned to 3.11 and had never been run

@@ -261,7 +261,7 @@ async def _probe_webhook_delivery(monkeypatch, tmp_path):
     )
 
 
-async def _probe_policy_suggestions(monkeypatch, tmp_path):
+async def _probe_suggestions(monkeypatch, tmp_path):
     """A host this deployment refuses must produce no suggestion at either level: the
     rollup admits every stored URL through the deployment's policy, so a candidate rule
     about a refused host is not reviewable and surfaces as an empty proposal, not a raise.
@@ -334,20 +334,20 @@ async def _probe_admit_endpoint(monkeypatch, tmp_path):
 
 
 _PROBES = {
-    "crawlutron/api/crawl_endpoint.py:crawl": _probe_crawl_endpoint,
-    "crawlutron/service/admit_endpoint.py:admit_url": _probe_admit_endpoint,
-    "crawlutron/service/crawl_executor.py:execute_crawl": _probe_crawl_executor,
-    "crawlutron/service/job_runner.py:run_job": _probe_job_runner,
-    "crawlutron/service/job_cores.py:create_job_core": _probe_jobs_router,
-    "crawlutron/service/map_endpoint.py:map_site": _probe_map_endpoint,
-    "crawlutron/service/site_map.py:build_site_map": _probe_site_map,
-    "crawlutron/service/render.py:render_request": _probe_render,
-    "crawlutron/service/response_shaping.py:frontier_link_url": _probe_response_shaping,
-    "crawlutron/api/watch_router.py:create_watch": _probe_watch_router,
-    "crawlutron/service/watch_cores.py:register_watch_core": _probe_watch_cores,
-    "crawlutron/service/policy_suggestions.py:policy_suggestions": _probe_policy_suggestions,
-    "crawlutron/service/policy_suggestions.py:build_policy_suggestions": _probe_policy_suggestions,
-    "crawlutron/service/webhooks.py:deliver_pinned_webhook": _probe_webhook_delivery,
+    "packages/core/crawlutron/api/crawl_endpoint.py:crawl": _probe_crawl_endpoint,
+    "packages/core/crawlutron/service/admit_endpoint.py:admit_url": _probe_admit_endpoint,
+    "packages/core/crawlutron/service/crawl_executor.py:execute_crawl": _probe_crawl_executor,
+    "packages/core/crawlutron/service/job_runner.py:run_job": _probe_job_runner,
+    "packages/core/crawlutron/service/job_cores.py:create_job_core": _probe_jobs_router,
+    "packages/core/crawlutron/service/map_endpoint.py:map_site": _probe_map_endpoint,
+    "packages/core/crawlutron/service/site_map.py:build_site_map": _probe_site_map,
+    "packages/core/crawlutron/service/render.py:render_request": _probe_render,
+    "packages/core/crawlutron/service/response_shaping.py:frontier_link_url": _probe_response_shaping,
+    "packages/core/crawlutron/api/watch_router.py:create_watch": _probe_watch_router,
+    "packages/core/crawlutron/service/watch_cores.py:register_watch_core": _probe_watch_cores,
+    "packages/core/crawlutron/service/policy_suggestions.py:policy_suggestions": _probe_suggestions,
+    "packages/core/crawlutron/service/policy_suggestions.py:build_policy_suggestions": _probe_suggestions,
+    "packages/core/crawlutron/service/webhooks.py:deliver_pinned_webhook": _probe_webhook_delivery,
 }
 
 
@@ -357,7 +357,7 @@ async def test_host_policy_entry_point_refuses(entry, monkeypatch, tmp_path):
 
 
 def test_host_policy_probes_cover_the_full_api_entry_table():
-    api_entries = {name for name in _table_entries() if not name.startswith("crawlutron/mcp/")}
+    api_entries = {name for name in _table_entries() if not name.startswith("packages/core/crawlutron/mcp/")}
     assert set(_PROBES) == api_entries
 
 

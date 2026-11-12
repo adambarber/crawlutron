@@ -129,9 +129,8 @@ def _derives_scope(source: str, tree: ast.Module) -> bool:
 
 
 def test_gate_docstrings_claim_no_root_their_walk_misses() -> None:
-    """The audit that caught the docstring gate's lie becomes permanent: the gate claimed "crawlutron/,
-    tests/ and scripts/" while scanning only crawlutron -- violations behind a green. A gate whose
-    docstrings claim a tree scope must derive it from SCAN_ROOTS or walk the claimed roots."""
+    """A gate that claims a tree scope must derive it from SCAN_ROOTS or walk the roots.
+    The commit that invented this gate had claimed a scope it did not scan."""
     offenders: list[str] = []
     for path in sorted((REPO_ROOT / "tests" / "invariants").glob("*.py")):
         if path.name in {"__pycache__", _DECLARATION}:

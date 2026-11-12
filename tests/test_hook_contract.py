@@ -66,7 +66,7 @@ def test_all_hooks_share_one_trigger() -> None:
         )
     coverage = [(hook_id, block) for hook_id, block in hooks if hook_id == "coverage"]
     assert coverage, "the coverage surface must exist as its own hook"
-    assert all(_field(block, "files") == "^(crawlutron|tests)/" for _, block in coverage), (
+    assert all(_field(block, "files") == "^(packages/core/crawlutron|tests)/" for _, block in coverage), (
         "the coverage hook's trigger is scoped to the measured tree, not the service trigger"
     )
 

@@ -39,9 +39,9 @@ _GATED_EXECUTOR_NAMES = frozenset(name.rsplit(".", 1)[-1] for name in _GATED_FET
 # job row rather than a slot; they are not doors and need no request_gate.
 _GATED_FETCH_BACKGROUND = frozenset(
     {
-        "crawlutron/service/async_crawl_runner.py",
-        "crawlutron/service/job_runner.py",
-        "crawlutron/service/watch_sweep.py",
+        "packages/core/crawlutron/service/async_crawl_runner.py",
+        "packages/core/crawlutron/service/job_runner.py",
+        "packages/core/crawlutron/service/watch_sweep.py",
     }
 )
 

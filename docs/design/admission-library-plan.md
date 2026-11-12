@@ -41,7 +41,7 @@ can cancel the floor because there is no downstream `batch_size`.
 
 A generic, typed package independent of the crawler, the API server, and
 crawlutron specifics. Zero crawlutron imports (an import-contract gate, not a
-comment). Lives at a top-level `admission/` package member of the UV workspace.
+comment). Lives at a top-level `packages/core/admission/` package member of the UV workspace.
 
 ### Closed vocabularies
 
@@ -99,7 +99,7 @@ and never 429s; the `admission_stalled` classification and 60s hard stop stay.
 ## Acceptance bar
 
 The library must be as correct, safe, and buttoned up as
-`crawlutron/models/normalized_url.py`: construction IS admission, refusal
+`packages/core/crawlutron/models/normalized_url.py`: construction IS admission, refusal
 vocabulary is public (`refusal_literals()`), foreign errors map explicitly,
 values are immutable and compare by canonical identity, `__all__` is exact.
 The v2 specification adds the runtime state machine the reviews demand

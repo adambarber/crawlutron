@@ -83,7 +83,7 @@ jobs:
       # Precompile bytecode once so every xdist worker reuses .pyc instead of
       # recompiling ~90k lines per run (S4).
       - name: Precompile bytecode
-        run: .venv/bin/python -m compileall -q crawlutron tests scripts
+        run: .venv/bin/python -m compileall -q packages/core/crawlutron tests scripts
       # Includes the project-specific safety predicates (tests/invariants/ and
       # friends): those detectors are the only exit path for the chokepoint
       # rules, and they run inside the default marker set.

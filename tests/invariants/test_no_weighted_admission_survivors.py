@@ -24,7 +24,7 @@ RETIRED_SYMBOLS = (
 # docstring retells the legacy name to explain the floor_fraction retype.
 EXEMPTIONS: tuple[tuple[str, str, str], ...] = (
     (
-        "admission/policy.py",
+        "packages/core/admission/policy.py",
         "saturated_dispatch_floor",
         "kernel PacingPolicy compat docstring retelling the legacy name (historical record)",
     ),

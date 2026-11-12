@@ -12,7 +12,7 @@ hatch — each with the file:line or test that proves it.
 ## The classification primitive (address_class.py)
 
 Every address is parsed once, unwrapped once, and read against a range in
-`crawlutron/models/address_class.py:134` (`classify`). The verdicts are
+`packages/core/crawlutron/models/address_class.py:134` (`classify`). The verdicts are
 `PUBLIC`, `PRIVATE`, `LOOPBACK`, `LINK_LOCAL`, `CGNAT` (`100.64.0.0/10`),
 `UNIQUE_LOCAL` (`fc00::/7`), `NAT64` (`64:ff9b::/96` and the RFC 8215
 `64:ff9b:1::/48`), `MULTICAST`, `UNSPECIFIED`, `RESERVED`, and
@@ -82,7 +82,7 @@ proxy-authorization}`); within one origin they are kept
 **origin** (scheme+host+port), not the host — a port change or scheme
 downgrade scrubs credentials
 (`tests/transport/test_redirect_target.py:103-129`). The canonical origin
-spelling is `origin_of` in `crawlutron/admission/credentials.py:19-25`,
+spelling is `origin_of` in `packages/core/crawlutron/admission/credentials.py:19-25`,
 which raises on non-HTTP schemes, userinfo, and any host admission refuses,
 and `apply_credentials` (`credentials.py:51-68`) attaches `Authorization`
 iff the URL's origin holds a credential, by exact canonical-origin equality:
@@ -117,11 +117,11 @@ order is ignored (set comparison, not list comparison).
 
 ## MCP Origin check (middleware.py, mcp/server.py)
 
-`reject_hostile_origin` (`crawlutron/api/middleware.py:22-41`) refuses a
+`reject_hostile_origin` (`packages/core/crawlutron/api/middleware.py:22-41`) refuses a
 present, non-loopback browser `Origin` on every surface: `/mcp` answers with
 the JSON-RPC error object, every REST route with the error envelope, and the
 Origin is never echoed back (#655). `origin_allowed`
-(`crawlutron/mcp/server.py:42-56`) admits only an absent origin or a
+(`packages/core/crawlutron/mcp/server.py:42-56`) admits only an absent origin or a
 loopback hostname (`localhost`, `127.0.0.1`, `::1`); any cross-origin browser
 origin is rejected with 403. Callers authenticate by API key, so the Origin
 guard is a DNS-rebinding defense layered on top of caller auth, not a
@@ -153,9 +153,9 @@ admitted and the SSRF boundary is intentionally relaxed.
 
 | Guarantee | Where it lives | Test proving it |
 |---|---|---|
-| Address classification incl. IPv4-mapped/6to4/Teredo, resolver-numeric forms | `crawlutron/models/address_class.py:28-164` | `tests/test_ssrf_route_subresources.py`, `tests/transport/test_dns_cache.py` |
-| Per-fetch fresh pin; validation cached, pin never cached | `crawlutron/transport/pinned_dns.py:206`, `:174`, `:189` | `tests/transport/test_dns_cache.py:30-52` |
-| Redirect re-anchor, hop budget `MAX_REDIRECT_HOPS = 5`, credential strip | `crawlutron/transport/pinned_transport.py:172`, `:163`, `:201` | `tests/transport/test_redirect_target.py:61-142` |
-| Browser Host-rewrite pin, stable-answer double resolve | `crawlutron/transport/browser_targets.py:40`, `:70` | `tests/transport/test_browser_target_stability.py:22-72` |
-| MCP Origin check, non-loopback → 403, Origin never echoed | `crawlutron/api/middleware.py:22-41`, `crawlutron/mcp/server.py:42-56` | `tests/api/test_origin_guard.py:9-43` |
-| Private-target guard; warned once per enabled value at first use | `crawlutron/models/host_policy.py:85-160` | `tests/transport/test_dns_cache.py:55-66` |
+| Address classification incl. IPv4-mapped/6to4/Teredo, resolver-numeric forms | `packages/core/crawlutron/models/address_class.py:28-164` | `tests/test_ssrf_route_subresources.py`, `tests/transport/test_dns_cache.py` |
+| Per-fetch fresh pin; validation cached, pin never cached | `packages/core/crawlutron/transport/pinned_dns.py:206`, `:174`, `:189` | `tests/transport/test_dns_cache.py:30-52` |
+| Redirect re-anchor, hop budget `MAX_REDIRECT_HOPS = 5`, credential strip | `packages/core/crawlutron/transport/pinned_transport.py:172`, `:163`, `:201` | `tests/transport/test_redirect_target.py:61-142` |
+| Browser Host-rewrite pin, stable-answer double resolve | `packages/core/crawlutron/transport/browser_targets.py:40`, `:70` | `tests/transport/test_browser_target_stability.py:22-72` |
+| MCP Origin check, non-loopback → 403, Origin never echoed | `packages/core/crawlutron/api/middleware.py:22-41`, `packages/core/crawlutron/mcp/server.py:42-56` | `tests/api/test_origin_guard.py:9-43` |
+| Private-target guard; warned once per enabled value at first use | `packages/core/crawlutron/models/host_policy.py:85-160` | `tests/transport/test_dns_cache.py:55-66` |

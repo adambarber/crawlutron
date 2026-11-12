@@ -197,7 +197,7 @@ def test_discovery_result_projection_has_exactly_one_definition():
         if node.name == _DISCOVERY_PROJECTION
     ]
     assert len(definitions) == 1, f"the discovery projection was defined again: {definitions}"
-    assert "crawlutron/transport/content_pipeline.py" in definitions[0], definitions
+    assert "packages/core/crawlutron/transport/content_pipeline.py" in definitions[0], definitions
 
 
 RULES = Registry(

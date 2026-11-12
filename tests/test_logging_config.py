@@ -77,9 +77,7 @@ def test_uvicorn_loggers_route_through_the_service_sink():
     import logging.config
     from pathlib import Path
 
-    import crawlutron.main
-
-    config_path = Path(crawlutron.main.__file__).resolve().parent.parent / "uvicorn-log-config.json"
+    config_path = Path(__file__).resolve().parents[1] / "uvicorn-log-config.json"
     config = json.loads(config_path.read_text())
     root = logging.getLogger()
     saved_handlers = root.handlers[:]

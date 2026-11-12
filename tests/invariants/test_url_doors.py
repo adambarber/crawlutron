@@ -139,7 +139,7 @@ def test_scope_matcher_has_exactly_one_definition():
     """
     defs = _scope_matcher_definitions()
     assert len(defs) == 1, f"scope matcher duplicated again: {defs}"
-    assert "crawlutron/admission/scope_match.py" in defs[0], defs
+    assert "packages/core/crawlutron/admission/scope_match.py" in defs[0], defs
 
 
 def test_no_pinned_url_leaks_into_final_url():

@@ -11,7 +11,7 @@ from tests.chokepoint_walks import APP_ROOT
 from tests.invariants._shared import REPO_ROOT
 
 _SEAMS = ("prune", "purge_robots_cache")
-_MAINTENANCE_MODULE = "crawlutron/service/cache_sweep.py"
+_MAINTENANCE_MODULE = "packages/core/crawlutron/service/cache_sweep.py"
 
 
 def _call_names(tree: ast.AST) -> set[str]:

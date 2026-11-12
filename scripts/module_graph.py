@@ -20,10 +20,15 @@ _PACKAGE = "crawlutron"
 
 
 def _app_root() -> pathlib.Path:
-    """The package's source dir, derived from SCAN_ROOTS membership (never a bare path)."""
-    if _PACKAGE not in SCAN_ROOTS:
-        raise AssertionError(f"package {_PACKAGE!r} absent from scan surface: {SCAN_ROOTS}")
-    return REPO_ROOT / _PACKAGE
+    """The package's source dir, found under a scan root (never a bare path)."""
+    for root in SCAN_ROOTS:
+        candidate = REPO_ROOT / root
+        if candidate.name == _PACKAGE:
+            return candidate
+        nested = candidate / _PACKAGE
+        if nested.is_dir():
+            return nested
+    raise AssertionError(f"package {_PACKAGE!r} not found under any scan root: {SCAN_ROOTS}")
 
 
 APP_ROOT = _app_root()

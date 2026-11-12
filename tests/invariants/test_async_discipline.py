@@ -122,7 +122,7 @@ READINESS_SLOTS_GO_THROUGH_THE_GATE = Rule(
         "admit/release is how a rejected request holds its slot for the life of the process"
     ),
     skip=frozenset(
-        {"crawlutron/service/main_helpers.py"}
+        {"packages/core/crawlutron/service/main_helpers.py"}
     ),  # owner: request_gate admits and releases inside itself
     bite=lambda: (
         Bites("def f():\n    readiness_state.begin_request()\n", "begin_request"),

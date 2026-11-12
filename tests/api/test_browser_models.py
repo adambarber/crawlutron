@@ -160,11 +160,11 @@ class TestBrowserProfileVocabularyIsClosed:
         """Every allowed key must have a reader, or allowing it is a lie.
 
         ``state`` was allowed and read nowhere; each key must appear as a
-        literal read somewhere in ``crawlutron/``, asserted directly."""
+        literal read somewhere in the crawlutron package, asserted directly."""
         import ast
         import pathlib
 
-        app_root = pathlib.Path(__file__).resolve().parents[2] / "crawlutron"
+        app_root = pathlib.Path(__file__).resolve().parents[2] / "packages" / "core" / "crawlutron"
         reads: set[str] = set()
         for path in app_root.rglob("*.py"):
             tree = ast.parse(path.read_text(encoding="utf-8"))

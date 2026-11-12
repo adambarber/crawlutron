@@ -109,8 +109,8 @@ def test_fail_on_empty_is_no_longer_a_required_cli_flag(monkeypatch, capsys) -> 
 def test_source_floor_fails_on_thin_scan(monkeypatch) -> None:
     """An aggregate below MIN_SOURCES is refused: the gate names the thin scan.
 
-    Each of the five roots reports below the 200-source aggregate floor, so the
-    run cannot be a real scan of the tree (#888 adds the admission root)."""
+    Each of the four roots reports below the 200-source aggregate floor, so the
+    run cannot be a real scan of the tree."""
     _stub_report(monkeypatch, [], sources=30)
 
     assert gate._run(_args()) == 1
@@ -121,7 +121,7 @@ def test_a_tree_that_scanned_nothing_fails(monkeypatch, capsys) -> None:
     _stub_report(
         monkeypatch,
         [],
-        sources={"admission": 0, "crawlutron": 0, "tests": 200, "scripts": 200},
+        sources={"packages/core": 0, "tests": 200, "scripts": 200},
     )
 
     assert gate._run(_args()) == 1
@@ -169,7 +169,9 @@ def test_checked_in_scan_config_is_owned_by_the_gate() -> None:
     res._validate_scan_config(gate.CONFIG_PATH)
 
 
-@pytest.mark.parametrize("glob", ["**/*.py", "crawlutron/*.py", "**/zz_probe_clone.py", "*", "**"])
+@pytest.mark.parametrize(
+    "glob", ["**/*.py", "packages/core/crawlutron/*.py", "**/zz_probe_clone.py", "*", "**"]
+)
 def test_python_source_globs_are_never_a_sanctioned_exception(glob) -> None:
     """The ignore list exists to skip caches and vendored trees, never source."""
     with pytest.raises(ValueError, match="Python source|whole tree"):
@@ -254,7 +256,9 @@ def test_the_same_content_in_two_trees_is_two_findings_not_one(monkeypatch, caps
     _stub_report(
         monkeypatch,
         [
-            _duplicate("crawlutron/one.py", "crawlutron/two.py", fragment="shared"),
+            _duplicate(
+                "packages/core/crawlutron/one.py", "packages/core/crawlutron/two.py", fragment="shared"
+            ),
             _duplicate("tests/one.py", "tests/two.py", fragment="shared"),
         ],
     )

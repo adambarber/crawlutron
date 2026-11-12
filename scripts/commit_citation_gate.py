@@ -13,7 +13,7 @@ _TYPES = ("feat", "fix", "docs", "chore", "refactor", "test", "build", "ci", "pe
 _SUBJECT = re.compile(rf"^({'|'.join(_TYPES)})(\([^()\s]+\))?!?: \S")
 _CITATION = re.compile(r"#\d+\b")
 _BREAKING_FEAT = re.compile(r"^feat(\([^()\s]+\))?!:", re.MULTILINE)
-_POLICY_PATH = "crawlutron/models/crawl_policy.py"
+_POLICY_PATH = "packages/core/crawlutron/models/crawl_policy.py"
 _ADDED_DECL = re.compile(r'^\+POLICY_SCHEMA_VERSION\s*=\s*"([^"]*)"', re.MULTILINE)
 _REMOVED_DECL = re.compile(r'^-POLICY_SCHEMA_VERSION\s*=\s*"([^"]*)"', re.MULTILINE)
 _DIFF_CMD = ("git", "diff", "--name-only", "HEAD")
