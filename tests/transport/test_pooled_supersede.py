@@ -28,9 +28,47 @@ def _clean_pooled_state():
     bounded drain-then-reset teardown instead."""
     process_state.reset_all_process_state()
     yield
-    if process_state.has_any_process_state():
+    if _pool_owned_state_exists():
         _drain_then_reset()
-    assert not process_state.has_any_process_state(), "the pooled state outlived the test that used it"
+    assert not _pool_owned_state_exists(), "the pooled state outlived the test that used it"
+
+
+_POOL_OWNED_OWNERS = (
+    "crawlutron.transport.pooled_clients",
+    "crawlutron.transport.pooled_client_release",
+    "crawlutron.transport.pooled_cffi",
+)
+
+
+def _pool_owned_state_exists() -> bool:
+    """Any pool-owned owner holding state; a sibling leak cannot count (#881)."""
+    registered = set(process_state.registered_owners())
+    return any(owner in registered and process_state.owner_has_state(owner) for owner in _POOL_OWNED_OWNERS)
+
+
+def test_a_non_pool_sibling_leak_cannot_trip_the_scoped_pool_check() -> None:
+    """A permanent-True non-pool fake is a global leak but never a pool leak.
+
+    The scoped check reads only pool-owned owners, so a sibling's registration
+    can no longer masquerade as pooled state that outlived its test."""
+    process_state.register("some.sibling.leak", lambda: None, lambda: True)
+    try:
+        assert process_state.has_any_process_state(), "the sibling probe was not set"
+        assert not _pool_owned_state_exists(), "a sibling's leak counted as a pool leak"
+    finally:
+        process_state.unregister("some.sibling.leak")
+
+
+def test_a_genuine_pool_owned_leak_still_trips_the_scoped_pool_check(stub_builder) -> None:
+    """A real pooled client leak must still register as pooled state.
+
+    Scoping must not throw away pool-leak detection: a client acquired through
+    the real door holds pool-owned state until drained and reset."""
+    _supersede_without_loop(stub_builder, "http", "get_async_http_client", _build_httpx_fake)
+    try:
+        assert _pool_owned_state_exists(), "a real pooled client was invisible to the scoped check"
+    finally:
+        _drain_then_reset()
 
 
 async def _drain_bounded() -> None:

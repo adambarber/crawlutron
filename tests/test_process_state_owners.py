@@ -86,15 +86,35 @@ def test_conformers_register() -> None:
     assert not missing, f"known owners never registered: {sorted(missing)}"
 
 
-def test_registry_reset_actually_runs_every_registration() -> None:
-    """A registration the sweep skips is a reset that silently never happened."""
-    from crawlutron.runtime import process_state
+def _run_registration_probe(calls: list[str]) -> None:
+    """Register the reset-probe fakes, run the sweep, drop them when done.
 
-    calls: list[str] = []
+    A leaked permanent-True probe trips every pooled teardown that reads the global
+    registry (#881); unregister is part of the probe, not optional cleanup."""
     process_state.register("test-fake-a", lambda: calls.append("a"), lambda: bool(calls))
     process_state.register("test-fake-b", lambda: calls.append("b"), lambda: bool(calls))
-    process_state.reset_all_process_state()
+    try:
+        process_state.reset_all_process_state()
+    finally:
+        process_state.unregister("test-fake-a")
+        process_state.unregister("test-fake-b")
+
+
+def test_registry_reset_actually_runs_every_registration() -> None:
+    """A registration the sweep skips is a reset that silently never happened."""
+    calls: list[str] = []
+    _run_registration_probe(calls)
     assert calls == ["a", "b"], f"the registry reset ran {calls}, not every registration"
+
+
+def test_fake_owners_are_unregistered_after_every_registration() -> None:
+    """The reset probe unregisters its fakes: a leak can't poison sibling teardowns."""
+    calls: list[str] = []
+    _run_registration_probe(calls)
+    for owner in ("test-fake-a", "test-fake-b"):
+        assert owner not in process_state.registered_owners(), (
+            f"{owner} leaked a permanent-True probe into the shared registry"
+        )
 
 
 def test_probe_agrees_with_reset() -> None:
@@ -104,8 +124,11 @@ def test_probe_agrees_with_reset() -> None:
     holder = {"k": 1}
     process_state.register("test-fake-probe", lambda: holder.clear(), lambda: bool(holder))
     assert process_state.owner_has_state("test-fake-probe"), "the probe lied about populated state"
-    process_state.reset_all_process_state()
-    assert not process_state.owner_has_state("test-fake-probe"), "the reset emptied nothing"
+    try:
+        process_state.reset_all_process_state()
+        assert not process_state.owner_has_state("test-fake-probe"), "the reset emptied nothing"
+    finally:
+        process_state.unregister("test-fake-probe")
 
 
 def test_one_failing_reset_cannot_strand_the_rest() -> None:
