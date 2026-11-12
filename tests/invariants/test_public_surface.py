@@ -9,7 +9,7 @@ import ast
 import pathlib
 import re
 
-from tests.chokepoint_walks import REPO_ROOT, assignment_targets, parsed, relative_posix
+from tests.chokepoint_walks import APP_ROOT, REPO_ROOT, assignment_targets, parsed, relative_posix
 from tests.invariants._shared import _declared_public_symbols
 from tests.invariants._surface_ratchet import (
     DECLARED_SURFACE_RATCHET as _DECLARED_SURFACE_RATCHET,
@@ -92,7 +92,7 @@ def test_property_owner_public_surfaces_equal_all():
     assert not offenders, "property owner public surface drifted: " + ", ".join(offenders)
 
 
-def _all_surface_modules(root: pathlib.Path = REPO_ROOT / "crawlutron") -> set[str]:
+def _all_surface_modules(root: pathlib.Path = APP_ROOT) -> set[str]:
     """Every module (outside ``crawlutron/models``) that declares a literal ``__all__``.
     crawlutron/models is governed by the models section below, not this gate.
     """
@@ -152,7 +152,7 @@ def test_property_owner_public_surface_budgets_are_tight():
 # --------------------------------------------------------------------------- crawlutron/models: one home per
 # declaration, and that home is the file's name
 
-_MODELS_ROOT = REPO_ROOT / "crawlutron" / "models"
+_MODELS_ROOT = APP_ROOT / "models"
 
 
 # The two modules here that hold a concern rather than a type.

@@ -24,7 +24,7 @@ from tests._ratchet import (
 from tests._ratchet import (
     report as ratchet_report,
 )
-from tests.chokepoint_walks import REPO_ROOT, nodes_of, trees_under
+from tests.chokepoint_walks import APP_ROOT, REPO_ROOT, nodes_of, trees_under
 
 _METRIC = "undeclared record"
 _ANY = "bare Any"
@@ -202,7 +202,7 @@ _TEST_BUDGETS = {_METRIC: 0, _ANY: 0}
 
 suite_offenders, suite_measurement = _gate(REPO_ROOT / "tests")
 
-crawlutron_offenders, _crawlutron_measurement = _gate(REPO_ROOT / "crawlutron")
+crawlutron_offenders, _crawlutron_measurement = _gate(APP_ROOT)
 
 
 _TESTS_REMEDY = (

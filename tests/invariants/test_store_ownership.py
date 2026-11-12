@@ -6,7 +6,7 @@ import ast
 import pathlib
 
 from tests.chokepoint_walks import (
-    REPO_ROOT,
+    APP_ROOT,
     assignment_targets,
     class_defs,
     functions,
@@ -25,14 +25,12 @@ _BROWSER_RELEASE_FIELDS = ("_browser_cm", "_browser", "_browser_reused")
 
 #: The file that owns the fields and the chokepoint today, and therefore the path the bite proof is planted
 #: at.
-_BROWSER_RELEASE_OWNER = REPO_ROOT / "crawlutron" / "transport" / "browser_driver.py"
+_BROWSER_RELEASE_OWNER = APP_ROOT / "transport" / "browser_driver.py"
 
 
 #: Both files, not one. Sweeping the pair keeps the invariant whole across the split: a field reintroduced on
 #: either side is still caught by whichever file spells the clear.
-_BROWSER_RELEASE_OWNERS = frozenset(
-    {_BROWSER_RELEASE_OWNER, REPO_ROOT / "crawlutron" / "transport" / "browser.py"}
-)
+_BROWSER_RELEASE_OWNERS = frozenset({_BROWSER_RELEASE_OWNER, APP_ROOT / "transport" / "browser.py"})
 
 
 _BROWSER_RELEASE_CHOKEPOINT = "_release_browser"
@@ -174,7 +172,7 @@ BROWSER_RELEASE_CALLS_HAVE_DECLARED_OWNERS = Rule(
         "        except Exception:\n"
         "            await self._driver.close()\n",
         "releases a browser",
-        at=REPO_ROOT / "crawlutron" / "transport" / "browser.py",
+        at=APP_ROOT / "transport" / "browser.py",
     ),
     clean=lambda: (
         # A close method is a declared owner: it may delegate the teardown.
@@ -253,7 +251,7 @@ STORES_SERIALIZE_ON_THE_FILES_PROCESS_LOCK = Rule(
         "so a write can run straight through a migration in flight; serialize on "
         "process_lock(store_lock_key(db_path))"
     ),
-    proof_path=REPO_ROOT / "crawlutron" / "crawl" / "store.py",
+    proof_path=APP_ROOT / "crawl" / "store.py",
     bite=lambda: (
         Bites(
             "class Store:\n"

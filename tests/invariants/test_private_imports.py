@@ -12,6 +12,7 @@ from collections.abc import Iterator
 import pytest
 
 from tests.chokepoint_walks import (
+    APP_ROOT,
     REPO_ROOT,
     assignment_targets,
     from_imports,
@@ -209,9 +210,6 @@ def test_no_rule_violations():
 # ---------------------------------------------------------------------------
 
 
-_APP_DIR = REPO_ROOT / "crawlutron"
-
-
 def _module_of(path: pathlib.Path) -> str:
     return ".".join(path.relative_to(REPO_ROOT).with_suffix("").parts)
 
@@ -336,7 +334,7 @@ def _owner_public_names() -> dict[str, frozenset[str]]:
     """``module -> public names`` for every crawlutron module, parsed once per process."""
     global _OWNER_PUBLIC
     if _OWNER_PUBLIC is None:
-        _OWNER_PUBLIC = {_module_of(path): _module_public_names(tree) for path, tree in trees_under(_APP_DIR)}
+        _OWNER_PUBLIC = {_module_of(path): _module_public_names(tree) for path, tree in trees_under(APP_ROOT)}
     return _OWNER_PUBLIC
 
 

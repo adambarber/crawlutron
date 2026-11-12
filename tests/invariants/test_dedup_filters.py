@@ -8,7 +8,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from tests.chokepoint_walks import (
-    REPO_ROOT,
+    APP_ROOT,
     app_python_files,
     calls_named,
     comprehensions,
@@ -41,7 +41,7 @@ def _reinline_js_endpoints_filter_offenders(tree: ast.AST, path: pathlib.Path) -
     return offenders
 
 
-_JS_EGRESS_ELSEWHERE = REPO_ROOT / "crawlutron" / "transport" / "content_cache.py"
+_JS_EGRESS_ELSEWHERE = APP_ROOT / "transport" / "content_cache.py"
 
 
 # The chokepoint's own comprehension really is the matched shape: the file exemption is what keeps the real
@@ -80,7 +80,7 @@ JS_ENDPOINTS_FILTER_IS_NOT_REINLINED = Rule(
         "def f(endpoints, base):\n    return filter_js_endpoints(endpoints, resolve_against=base)\n",
         # The very same chokepoint comprehension stays clean at its own path: validation.py is where the
         # filter legitimately lives.
-        Silent(_JS_ENDPOINTS_VALIDATION_SOURCE, at=REPO_ROOT / "crawlutron" / "safety" / "validation.py"),
+        Silent(_JS_ENDPOINTS_VALIDATION_SOURCE, at=APP_ROOT / "safety" / "validation.py"),
     ),
 )
 
@@ -148,7 +148,7 @@ ROBOTS_PATTERN_COMPILE_LIVES_BEHIND_THE_PER_HOST_CACHE = Rule(
         "            return _compile_robots_pattern(pattern)\n"
         "        return build()\n",
     ),
-    proof_path=REPO_ROOT / "crawlutron" / "_synthetic.py",
+    proof_path=APP_ROOT / "_synthetic.py",
 )
 
 _COMMENT_CLONE_MIN_LINES = 3

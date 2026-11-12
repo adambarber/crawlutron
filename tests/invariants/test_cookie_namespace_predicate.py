@@ -6,9 +6,9 @@ under the store lock.
 import ast
 import pathlib
 
-from tests.chokepoint_walks import REPO_ROOT, parsed
+from tests.chokepoint_walks import APP_ROOT, parsed
 
-_STORE = REPO_ROOT / "crawlutron" / "storage" / "coordination_cookies.py"
+_STORE = APP_ROOT / "storage" / "coordination_cookies.py"
 
 
 def test_every_cookie_table_read_is_namespace_scoped() -> None:

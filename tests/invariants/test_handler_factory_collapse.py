@@ -5,10 +5,10 @@ dispatch function, so the handler factories and their module-level handle_* alia
 
 from __future__ import annotations
 
-from tests.chokepoint_walks import REPO_ROOT, parsed
+from tests.chokepoint_walks import APP_ROOT, parsed
 from tests.invariants.test_public_surface import _owned_public_symbols
 
-_HANDLERS = REPO_ROOT / "crawlutron/mcp/handlers.py"
+_HANDLERS = APP_ROOT / "mcp/handlers.py"
 
 #: The bindings the factories produced, keyed by the tool they served.
 _FACTORY_BINDINGS = frozenset(

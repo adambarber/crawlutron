@@ -11,14 +11,14 @@ import inspect
 import pathlib
 from collections.abc import Iterator
 
-from tests.chokepoint_walks import trees_under
+from tests.chokepoint_walks import APP_ROOT, trees_under
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 def _model_declared_names() -> dict[str, str]:
     """Every public name crawlutron/models/ declares, mapped to the module that declares it."""
-    models_root = REPO_ROOT / "crawlutron" / "models"
+    models_root = APP_ROOT / "models"
     declared: dict[str, str] = {}
     for path, tree in trees_under(models_root):
         for node in tree.body:
@@ -256,7 +256,7 @@ def test_a_tests_module_never_mirrors_a_production_field_shape() -> None:
     Superset-or-equal fires (a grown double is still the copy); a subset and a
     single-field record (<2 fields) stay silent. Governed transitively (#412).
     """
-    model_shapes = _declared_shapes(REPO_ROOT / "crawlutron" / "models")
+    model_shapes = _declared_shapes(APP_ROOT / "models")
     assert model_shapes, "the shape census came back empty; the detector would govern nothing"
     findings: dict[tuple[str, ...], tuple[list[str], list[str]]] = {}
     for shape, modules in _declared_shapes(REPO_ROOT / "tests").items():
@@ -270,7 +270,7 @@ def _smallest_production_entry() -> tuple[frozenset[str], str, str]:
     """The alphabetically-first three-field production record: (shape, module, class),
     derived from the live census so the planted doubles aim at a record that exists."""
     entries: list[tuple[frozenset[str], str, str]] = []
-    census = _RecordCensus(list(trees_under(REPO_ROOT / "crawlutron" / "models")))
+    census = _RecordCensus(list(trees_under(APP_ROOT / "models")))
     for module, name, shape in census.records():
         entries.append((shape, module, name))
     assert entries, "no multi-field production record exists; re-derive the planted doubles"
@@ -279,7 +279,7 @@ def _smallest_production_entry() -> tuple[frozenset[str], str, str]:
 
 def _planted_finding(source: str, label: str) -> tuple[list[str], list[str]] | None:
     """The finding one planted tests-side tree produces against the real census."""
-    model_shapes = _declared_shapes(REPO_ROOT / "crawlutron" / "models")
+    model_shapes = _declared_shapes(APP_ROOT / "models")
     planted = _shapes_from_trees([(REPO_ROOT / label, ast.parse(source))])
     for shape, modules in planted.items():
         for model_shape, model_modules in model_shapes.items():

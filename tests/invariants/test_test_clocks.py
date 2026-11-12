@@ -9,7 +9,7 @@ import fnmatch
 import pathlib
 from collections.abc import Iterator
 
-from tests.chokepoint_walks import REPO_ROOT, offender_at
+from tests.chokepoint_walks import APP_ROOT, REPO_ROOT, offender_at
 from tests.invariants._clock_family import (
     CLOCK_HOME,
     WALL_MEMBERS,
@@ -143,7 +143,7 @@ TESTS_DEFINE_NO_LOCAL_CLOCKS = Rule(
         ),
         # Path-keyed: the same clock def OUTSIDE tests/** stays quiet -- the
         # law governs the test suite's timelines, not production's.
-        Silent("def clocked_fixture():\n    return None\n", at=REPO_ROOT / "crawlutron" / "_synthetic.py"),
+        Silent("def clocked_fixture():\n    return None\n", at=APP_ROOT / "_synthetic.py"),
         # The elsewhere half (a path no bite claims): a module the sweep owns
         # whose names simply are not clock-like stays quiet.
         Silent("def helper():\n    return 1\n", at=REPO_ROOT / "tests" / "_synthetic_elsewhere.py"),

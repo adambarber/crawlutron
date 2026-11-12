@@ -6,18 +6,18 @@ import ast
 import pathlib
 from collections.abc import Iterator
 
-from tests.chokepoint_walks import REPO_ROOT, functions, offender_at
+from tests.chokepoint_walks import APP_ROOT, REPO_ROOT, functions, offender_at
 from tests.invariants._clock_family import dotted_name
 from tests.invariants._proof_paths import ELSEWHERE as _ELSEWHERE
 from tests.rules import Bites, Registry, Rule, Silent
 
 # Derived from the tree, not a hardcoded tuple: a scheduler sibling module is
 # governed the moment it exists (adversarial review of #580, hole 4).
-_TRANSPORT = REPO_ROOT / "crawlutron" / "transport"
+_TRANSPORT = APP_ROOT / "transport"
 _SCHEDULER_PACKAGE = tuple(_TRANSPORT.glob("scheduler*.py"))
 
-_SCHED = REPO_ROOT / "crawlutron" / "transport" / "scheduler.py"
-_SCHED_STATE = REPO_ROOT / "crawlutron" / "transport" / "scheduler_domain_state.py"
+_SCHED = APP_ROOT / "transport" / "scheduler.py"
+_SCHED_STATE = APP_ROOT / "transport" / "scheduler_domain_state.py"
 
 
 # The wall consumers DELEGATED by doctrine (#580 inventory): justified reads,

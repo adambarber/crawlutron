@@ -12,6 +12,7 @@ import re
 from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
 from crawlutron.storage.migrations.manifest import LEGACY_COLUMNS, StoreSchema
 from tests.chokepoint_walks import (
+    APP_ROOT,
     REPO_ROOT,
     SANCTIONED,
     call_keyword_values,
@@ -127,7 +128,7 @@ def _unsanctioned_envelope_adapter_offenders(tree, path):
     ]
 
 
-_ENVELOPE_ADAPTER_PROOF_PATH = REPO_ROOT / "crawlutron" / "api" / "crawl_endpoint.py"
+_ENVELOPE_ADAPTER_PROOF_PATH = APP_ROOT / "api" / "crawl_endpoint.py"
 
 
 CRAWL_RESPONSE_ENVELOPE_IS_ADAPTED_BY_ONE_OWNER = Rule(
@@ -166,7 +167,7 @@ CRAWL_RESPONSE_ENVELOPE_IS_ADAPTED_BY_ONE_OWNER = Rule(
             "async def f(request_id):\n"
             "    return await abuild_unified_crawl_response([], "
             "options=EnvelopeOptions(request_id=request_id, success=False))\n",
-            at=REPO_ROOT / "crawlutron" / "service" / "async_crawl_runner.py",
+            at=APP_ROOT / "service" / "async_crawl_runner.py",
         ),
     ),
 )
@@ -197,7 +198,7 @@ def _hand_rolled_envelope_fields_offenders(tree, path):
     return offenders
 
 
-_HAND_ROLLED_ENVELOPE_PROOF_PATH = REPO_ROOT / "crawlutron" / "api" / "crawl_endpoint.py"
+_HAND_ROLLED_ENVELOPE_PROOF_PATH = APP_ROOT / "api" / "crawl_endpoint.py"
 
 
 def _hand_rolled_envelope_source(fn_name: str) -> str:
@@ -326,7 +327,7 @@ RENDER_OPTIONS_BUILT_ONLY_BY_THE_RESOLVER = Rule(
         # exemption -- so it has to be proved at the real path.
         Silent(
             "def f(request, defaults):\n    return RenderOptions(**kwargs)\n",
-            at=REPO_ROOT / "crawlutron" / "crawl" / "render_options.py",
+            at=APP_ROOT / "crawl" / "render_options.py",
         ),
     ),
 )

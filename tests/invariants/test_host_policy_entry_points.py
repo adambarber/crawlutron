@@ -3,7 +3,7 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from tests.chokepoint_walks import REPO_ROOT, app_trees, local_nodes, nodes_of, resolved_call_name
+from tests.chokepoint_walks import APP_ROOT, REPO_ROOT, app_trees, local_nodes, nodes_of, resolved_call_name
 from tests.invariants._shared import DefinitionNode, _module_definition_index
 
 _DECISION_NAMES = frozenset(
@@ -159,7 +159,7 @@ def test_host_policy_entry_table_matches_ast_discovery():
 def test_host_policy_discovery_rejects_undeclared_entry_point():
     modules = _app_modules() + (
         (
-            REPO_ROOT / "crawlutron/api/_undeclared_entry.py",
+            APP_ROOT / "api/_undeclared_entry.py",
             ast.parse(
                 "from crawlutron.models.host_policy import HostPolicy\n"
                 "from crawlutron.models.normalized_url import admit_or_none\n"

@@ -5,7 +5,14 @@ Providers and selectors: one contract, one flow."""
 import ast
 import pathlib
 
-from tests.chokepoint_walks import REPO_ROOT, class_defs, functions, nodes_of, offender_at, resolved_expr_name
+from tests.chokepoint_walks import (
+    APP_ROOT,
+    class_defs,
+    functions,
+    nodes_of,
+    offender_at,
+    resolved_expr_name,
+)
 from tests.rules import Bites, Registry, Rule
 
 # --------------------------------------------------------------------------- Search-provider result
@@ -143,7 +150,7 @@ THE_SELECTOR_PAIR_IS_ONE_CONTRACT = Rule(
         # A function that takes no selector is somebody else's business.
         "def extract_document(body, url) -> ExtractedContent:\n    ...\n",
     ),
-    proof_path=REPO_ROOT / "crawlutron" / "crawl" / "_synthetic.py",
+    proof_path=APP_ROOT / "crawl" / "_synthetic.py",
 )
 
 
@@ -246,7 +253,7 @@ KEYED_PROVIDERS_INHERIT_THE_SHARED_RESPONSE_FLOW = Rule(
         "    async def search(self, query, limit, timeout_seconds):\n"
         "        return []\n",
     ),
-    proof_path=REPO_ROOT / "crawlutron" / "search" / "_synthetic.py",
+    proof_path=APP_ROOT / "search" / "_synthetic.py",
 )
 
 

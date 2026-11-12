@@ -5,7 +5,11 @@ from __future__ import annotations
 import ast
 import re
 
-from tests._walk_primitives import REPO_ROOT, SCAN_ROOTS
+from tests._walk_primitives import APP_ROOT, REPO_ROOT, SCAN_ROOTS
+
+#: The scan-surface root that the derived app-root door (``APP_ROOT``) stands for:
+#: walking APP_ROOT IS walking this member, so a docstring claiming it is honest.
+_APP_ROOT_NAME = APP_ROOT.name
 
 #: A scope claim is a root name in TREE position; a bare mention is a subject. Claim shapes: verb-led
 #: and list continuation; a deeper path is a reference, not a claim -- the slash must end the segment.
@@ -38,9 +42,10 @@ def _claimed_roots(text: str) -> set[str]:
 
 
 def _root_bindings(tree: ast.Module) -> set[str]:
-    """Root names bound or defaulted at any level: ``X = REPO_ROOT / "<root>"``
-    assignments and ``def f(root: Path = REPO_ROOT)``-style ``/ "<root>"``
-    defaults anywhere in the tree."""
+    """Root names bound/defaulted as ``REPO_ROOT / "<root>"``, plus the app-root door.
+
+    The derived app-root door (``APP_ROOT`` / app-tree walks) IS the ``crawlutron``
+    root, so a docstring claiming it is honest, not a mismatch to flag."""
     bound: set[str] = set()
     for node in ast.walk(tree):
         if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)):
@@ -57,6 +62,9 @@ def _root_bindings(tree: ast.Module) -> set[str]:
             root_name = node.right.left.value
         if root_name in SCAN_ROOTS:
             bound.add(root_name)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id == "APP_ROOT" and isinstance(node.ctx, ast.Load):
+            bound.add(_APP_ROOT_NAME)
     return bound
 
 

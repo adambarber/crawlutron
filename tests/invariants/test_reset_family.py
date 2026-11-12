@@ -9,7 +9,7 @@ import ast
 import pathlib
 
 from tests._walk_primitives import offender
-from tests.chokepoint_walks import nodes_of
+from tests.chokepoint_walks import APP_ROOT, nodes_of
 from tests.invariants._shared import function_defs, module_level_bindings
 from tests.rules import Bites, Rule
 
@@ -113,7 +113,7 @@ def _hand_copied_pair_offenders() -> list[str]:
     from tests.chokepoint_walks import REPO_ROOT
 
     offenders: list[str] = []
-    for path in sorted((REPO_ROOT / "crawlutron").rglob("*.py")):
+    for path in sorted(APP_ROOT.rglob("*.py")):
         if path.name == "process_state.py":
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))

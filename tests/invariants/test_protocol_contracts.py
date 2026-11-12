@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from tests.chokepoint_walks import (
+    APP_ROOT,
     REPO_ROOT,
     app_trees,
     attribute_reads,
@@ -114,7 +115,7 @@ CYCLE_GUARD_IS_CONSULTED_IN_EXACTLY_ONE_PLACE = Rule(
         "an arm re-inlines the 'descend, give up if already on the path' pair it "
         "was deduped away from, so route every arm through the owner"
     ),
-    proof_path=REPO_ROOT / "crawlutron" / "models.py",
+    proof_path=APP_ROOT / "models.py",
     bite=lambda: (
         Bites(
             "def arm(value, seen):\n    entered = _entered(value, seen)\n    return entered\n",
@@ -140,7 +141,7 @@ def test_cycle_guard_detector_respects_the_owner_parameter():
     # rather than about a literal spelling.
     assert _cycle_guard_offenders(
         ast.parse("def other(value, seen):\n    return _entered(value, seen)\n"),
-        REPO_ROOT / "crawlutron" / "models.py",
+        APP_ROOT / "models.py",
         owner="different_owner",
     ), "a guard call must fire when the sanctioned owner is renamed"
 
@@ -200,7 +201,7 @@ THE_META_KEY_REJECTION_REASON_IS_AUTHORED_ONCE = Rule(
         'def validate_meta(meta):\n    raise ProtocolValidationError("Missing _meta block")\n',
         'def validate_meta(meta):\n    reason = f"Missing required _meta key: {key}"\n',
     ),
-    proof_path=REPO_ROOT / "crawlutron" / "mcp" / "protocol.py",
+    proof_path=APP_ROOT / "mcp" / "protocol.py",
 )
 
 

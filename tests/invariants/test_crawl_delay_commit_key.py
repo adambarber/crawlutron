@@ -6,7 +6,7 @@ import ast
 import pathlib
 
 from tests.chokepoint_walks import (
-    REPO_ROOT,
+    APP_ROOT,
     call_nodes,
     local_nodes,
     offender_at,
@@ -19,7 +19,7 @@ from tests.rules import Bites, Rule
 _SEAM_NAME = "commit_crawl_delay"
 
 #: The one file whose seam parameter the law constrains directly.
-_SEAM_MODULE = REPO_ROOT / "crawlutron" / "admission" / "admission_links.py"
+_SEAM_MODULE = APP_ROOT / "admission" / "admission_links.py"
 
 
 def _site_keyed(node: ast.AST, tree: ast.Module) -> bool:

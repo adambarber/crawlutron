@@ -5,9 +5,9 @@ recency refresh goes through the explicit ``touch`` door.
 
 import ast
 
-from tests.chokepoint_walks import REPO_ROOT, parsed, stmt_offenders
+from tests.chokepoint_walks import APP_ROOT, parsed, stmt_offenders
 
-_STORE = REPO_ROOT / "crawlutron" / "storage" / "coordination_cookies.py"
+_STORE = APP_ROOT / "storage" / "coordination_cookies.py"
 
 
 def test_load_is_read_only() -> None:

@@ -8,7 +8,7 @@ import ast
 import pathlib
 from collections.abc import Iterator
 
-from tests.chokepoint_walks import REPO_ROOT, offender_at
+from tests.chokepoint_walks import APP_ROOT, REPO_ROOT, offender_at
 from tests.invariants._clock_family import suite_trees, wall_names, wall_read
 from tests.rules import Bites, Rule, Silent
 
@@ -154,7 +154,7 @@ WALL_ASSERTIONS_CARRY_THE_MARKER = Rule(
         Silent(
             "import time\n\ndef test_bound():\n    start = time.perf_counter()\n"
             "    assert time.perf_counter() - start < 1.0\n",
-            at=REPO_ROOT / "crawlutron" / "_synthetic.py",
+            at=APP_ROOT / "_synthetic.py",
         ),
         # The elsewhere half (a path no bite claims): an unmarked test without
         # a wall assert stays quiet.

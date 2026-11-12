@@ -7,7 +7,14 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from tests.chokepoint_walks import REPO_ROOT, call_nodes, nodes_of, offender_at, subscript_reads, with_blocks
+from tests.chokepoint_walks import (
+    APP_ROOT,
+    call_nodes,
+    nodes_of,
+    offender_at,
+    subscript_reads,
+    with_blocks,
+)
 from tests.invariants._shared import function_defs
 from tests.rules import Bites, Registry, Rule
 
@@ -74,7 +81,7 @@ def _threading_lock_bindings(tree: ast.AST) -> set[str]:
     return names
 
 
-_OWNER_PATH = REPO_ROOT / "crawlutron" / "transport" / "browser.py"
+_OWNER_PATH = APP_ROOT / "transport" / "browser.py"
 
 
 _OWNER_MODULE = "crawlutron/transport/browser.py"

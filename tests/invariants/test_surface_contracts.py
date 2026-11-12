@@ -8,6 +8,7 @@ import re
 import typing
 
 from tests.chokepoint_walks import (
+    APP_ROOT,
     REPO_ROOT,
     app_trees,
     call_nodes,
@@ -69,7 +70,7 @@ DDL_IS_CONFINED_TO_THE_MIGRATIONS_PACKAGE = Rule(
         # other module.
         Silent(
             "def apply(conn):\n    conn.execute('CREATE TABLE x (id TEXT)')\n",
-            at=REPO_ROOT / "crawlutron" / "storage" / "migrations" / "0001_crawl_jobs_initial.py",
+            at=APP_ROOT / "storage" / "migrations" / "0001_crawl_jobs_initial.py",
         ),
     ),
 )

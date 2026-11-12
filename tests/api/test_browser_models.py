@@ -286,11 +286,9 @@ class TestTheRendererAgreesWithTheVocabulary:
         that hands the chain an undeclared action key is a type error."""
         import ast
 
-        from tests.chokepoint_walks import REPO_ROOT
+        from tests.chokepoint_walks import APP_ROOT
 
-        tree = ast.parse(
-            (REPO_ROOT / "crawlutron" / "transport" / "browser_driver.py").read_text(encoding="utf-8")
-        )
+        tree = ast.parse((APP_ROOT / "transport" / "browser_driver.py").read_text(encoding="utf-8"))
         action_class = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "_ActionStep")
         annotation = next(
             stmt.annotation

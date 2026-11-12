@@ -4,7 +4,7 @@ import ast
 import pathlib
 
 from tests.chokepoint_walks import (
-    REPO_ROOT,
+    APP_ROOT,
     assignment_targets,
     call_nodes,
     calls_to_any,
@@ -68,7 +68,7 @@ JOB_ENGINE_PAYLOAD_USES_SINGLE_BUILDER = Rule(
         "Build whole-site engine payloads only with job_engine_payload, "
         "so a new call site to _execute_crawl cannot silently skip the builder"
     ),
-    proof_path=REPO_ROOT / "crawlutron" / "service" / "job_runner.py",
+    proof_path=APP_ROOT / "service" / "job_runner.py",
     bite=lambda: (
         Bites(
             "async def run(job, batch):\n"
@@ -143,7 +143,7 @@ STRATEGY_RUNNERS_ARE_CALLED_UNDER_A_GUARD = Rule(
         "moves on from, not an exception that escapes the chain; call each runner "
         "inside a try with an except Exception"
     ),
-    proof_path=REPO_ROOT / "crawlutron" / "crawl" / "strategy_chain.py",
+    proof_path=APP_ROOT / "crawl" / "strategy_chain.py",
     bite=lambda: (
         # Both runners called bare, outside any try: each unguarded call is a finding.
         Bites(

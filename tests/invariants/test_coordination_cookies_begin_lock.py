@@ -3,9 +3,9 @@
 import ast
 
 from tests._walk_assertions import assert_detectors_clean
-from tests.chokepoint_walks import REPO_ROOT, offender_at, parent_map, parsed
+from tests.chokepoint_walks import APP_ROOT, offender_at, parent_map, parsed
 
-_STORE = REPO_ROOT / "crawlutron" / "storage" / "coordination_cookies.py"
+_STORE = APP_ROOT / "storage" / "coordination_cookies.py"
 
 _READ_METHODS = ("load", "slots_for_namespace")
 _WRITE_METHODS = ("merge", "put", "touch", "clear")

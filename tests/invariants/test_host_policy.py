@@ -10,7 +10,7 @@ import ast
 import pathlib
 
 from tests.chokepoint_walks import (
-    REPO_ROOT,
+    APP_ROOT,
     functions,
     local_nodes,
     local_subtree,
@@ -474,7 +474,7 @@ def test_host_policy_detector_accepts_fixed_extraction_boundaries():
     An extraction boundary takes a bound, not a policy; if the detector
     ever flags these, the sanction needs a second look.
     """
-    path = REPO_ROOT / "crawlutron" / "extraction" / "content.py"
+    path = APP_ROOT / "extraction" / "content.py"
     tree = parsed(path)
     assert not [
         offender

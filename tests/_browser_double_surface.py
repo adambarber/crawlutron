@@ -9,9 +9,9 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from tests.chokepoint_walks import REPO_ROOT
+from tests.chokepoint_walks import APP_ROOT, REPO_ROOT
 
-_PROTOCOL_HOME = REPO_ROOT / "crawlutron" / "transport" / "render_page.py"
+_PROTOCOL_HOME = APP_ROOT / "transport" / "render_page.py"
 _PAGE_DOUBLE_HOME = REPO_ROOT / "tests" / "_browser_page_doubles.py"
 
 

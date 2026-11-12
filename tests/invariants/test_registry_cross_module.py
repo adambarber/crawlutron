@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import ast
 
-from tests.chokepoint_walks import REPO_ROOT, nodes_of
+from tests.chokepoint_walks import APP_ROOT, nodes_of
 from tests.invariants._registry_machinery import (
     _owner_definition_ids,
     _property,
@@ -149,7 +149,7 @@ def test_property_registry_rejects_duplicate_owner_count():
 def test_property_owner_duplicate_is_not_sanctioned():
     prop = _property("bool-env")
     tree = ast.parse(DUPLICATE_DEF_SOURCE)
-    path = REPO_ROOT / "crawlutron" / "config" / "env.py"
+    path = APP_ROOT / "config" / "env.py"
     owner_ids = _owner_definition_ids(tree, path, prop)
     duplicate = _duplicate_def_nodes(tree)[1]
     assert len(owner_ids) == 1, (

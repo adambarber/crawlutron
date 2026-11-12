@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from tests._walk_primitives import REPO_ROOT, SCAN_ROOTS
+from tests._walk_primitives import REPO_ROOT, SCAN_ROOTS, declared_root_files
 
 #: The root-literal tuples the completeness gate names; SCAN_ROOTS members
 #: appearing as a local loop/parametrize tuple are the drift machine.
@@ -71,3 +71,51 @@ def test_the_completeness_audit_itself_spans_the_derived_surface() -> None:
     assert _local_root_tuples(probe), "audit lost the full-surface shape"
     subset = ast.parse("x = ('crawlutron', 'tests')\n")
     assert _local_root_tuples(subset), "audit lost the subset shape"
+
+
+#: The one sanctioned home of an app-root path literal: the APP_ROOT derivation.
+_APP_ROOT_OWNER = "tests/_walk_primitives.py"
+
+
+def _app_root_literal_hits(tree: ast.Module, path: pathlib.Path) -> list[str]:
+    """Every ``REPO_ROOT / "crawlutron"...`` expression: a walk fed by a hand-listed
+    app path that a layout move would silently vacate (the scanner greens on nothing)."""
+    hits: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.BinOp) or not isinstance(node.op, ast.Div):
+            continue
+        left = node.left
+        if not (
+            isinstance(left, ast.Name)
+            and left.id == "REPO_ROOT"
+            and isinstance(node.right, ast.Constant)
+            and isinstance(node.right.value, str)
+            and node.right.value.split("/", 1)[0] == "crawlutron"
+        ):
+            continue
+        hits.append(str(node.lineno))
+    return hits
+
+
+def test_no_app_root_path_literal_survives_the_derived_door() -> None:
+    """Zero ``REPO_ROOT / "crawlutron"`` hand-lists in tests/: every walk feeds the
+    derived APP_ROOT door, so a layout move under Wave A cannot silently empty a scan."""
+    offenders: list[str] = []
+    for path in declared_root_files("tests"):
+        if path.relative_to(REPO_ROOT).as_posix() == _APP_ROOT_OWNER:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for lineno in _app_root_literal_hits(tree, path):
+            offenders.append(f"{path.relative_to(REPO_ROOT)}:{lineno}")
+    assert not offenders, "REPO_ROOT / 'crawlutron' hand-lists must use the derived APP_ROOT:\n" + "\n".join(
+        offenders
+    )
+
+
+def test_the_root_literal_audit_detects_a_planted_literal() -> None:
+    """The detector fires on any app-root path literal, including the sanctioned owner's."""
+
+    violation = ast.parse("x = REPO_ROOT / 'crawlutron' / 'crawl'\n")
+    assert _app_root_literal_hits(violation, pathlib.Path("x.py")) == ["1"]
+    owner_shape = ast.parse("APP_ROOT = REPO_ROOT / 'crawlutron'\n")
+    assert _app_root_literal_hits(owner_shape, pathlib.Path("x.py")) == ["1"]

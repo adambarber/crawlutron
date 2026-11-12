@@ -9,13 +9,13 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from tests.chokepoint_walks import REPO_ROOT, offender_at, trees_under
+from tests.chokepoint_walks import APP_ROOT, REPO_ROOT, offender_at, trees_under
 from tests.invariants._clock_family import dotted_name
 from tests.rules import Bites, Rule, Silent
 
 _ADMISSION = REPO_ROOT / "admission"
 _SYNTHETIC = _ADMISSION / "_synthetic.py"
-_ELSEWHERE = REPO_ROOT / "crawlutron" / "admission" / "policy.py"
+_ELSEWHERE = APP_ROOT / "admission" / "policy.py"
 
 #: The time module's CLOCK members: the names whose call reads a timeline.
 _TIME_CLOCK_MEMBERS = frozenset(
@@ -145,7 +145,7 @@ ADMISSION_USES_NO_CONCRETE_TIME_OR_SLEEP = Rule(
         # spare it (the exact collision the descriptor exists to prevent).
         Silent(
             "import time\n\nSTART = time.time()\n",
-            at=REPO_ROOT / "crawlutron" / "admission" / "_synthetic.py",
+            at=APP_ROOT / "admission" / "_synthetic.py",
         ),
         # A kernel module that references only the injected names stays quiet.
         Silent(

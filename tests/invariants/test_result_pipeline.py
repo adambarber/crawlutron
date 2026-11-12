@@ -6,7 +6,7 @@ import ast
 import pathlib
 
 from tests.chokepoint_walks import (
-    REPO_ROOT,
+    APP_ROOT,
     SANCTIONED,
     app_trees,
     functions,
@@ -81,7 +81,7 @@ def _extraction_reach_past_offenders(tree: ast.AST, path: pathlib.Path) -> list[
     return offenders
 
 
-_EXTRACTION_PROOF_PATH = REPO_ROOT / "crawlutron" / "transport" / "_synthetic.py"
+_EXTRACTION_PROOF_PATH = APP_ROOT / "transport" / "_synthetic.py"
 
 
 def _assert_owner_extraction_still_fires() -> None:

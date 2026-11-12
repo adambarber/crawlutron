@@ -5,7 +5,14 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from tests.chokepoint_walks import REPO_ROOT, app_trees, local_subtree, nodes_of, offender, resolved_call_name
+from tests.chokepoint_walks import (
+    APP_ROOT,
+    app_trees,
+    local_subtree,
+    nodes_of,
+    offender,
+    resolved_call_name,
+)
 from tests.invariants._registry_machinery import (
     _OBSERVERS,
     _PROPERTY_MODULES,
@@ -88,7 +95,7 @@ def test_public_target_detector_quiet_on_runtime_computed_name():
     )
     assert not public_target_offenders(
         runtime_name,
-        REPO_ROOT / "crawlutron" / "_synthetic.py",
+        APP_ROOT / "_synthetic.py",
         _property("public-target"),
     )
 

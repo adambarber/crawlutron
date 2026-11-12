@@ -6,10 +6,10 @@ here, not from another test module's internals.
 
 from __future__ import annotations
 
-from tests.chokepoint_walks import REPO_ROOT
+from tests.chokepoint_walks import APP_ROOT
 
 __all__ = ["ELSEWHERE"]
 
 #: A sanctioned `at=` path outside a rule's owner module: the "proves quiet
 #: elsewhere" half of a path-keyed bite.
-ELSEWHERE = REPO_ROOT / "crawlutron" / "crawl" / "content_cache.py"
+ELSEWHERE = APP_ROOT / "crawl" / "content_cache.py"

@@ -6,9 +6,9 @@ readyState poll, the poll itself on ``self._async_sleep(1)``.
 import ast
 
 from tests._walk_assertions import assert_detectors_clean
-from tests.chokepoint_walks import REPO_ROOT, attribute_call_on, offender_at, parsed
+from tests.chokepoint_walks import APP_ROOT, attribute_call_on, offender_at, parsed
 
-_BROWSER = REPO_ROOT / "crawlutron" / "transport" / "browser.py"
+_BROWSER = APP_ROOT / "transport" / "browser.py"
 
 
 def test_challenge_wait_injected_clock_two_extracts() -> None:

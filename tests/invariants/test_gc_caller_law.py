@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ast
 
+from tests.chokepoint_walks import APP_ROOT
 from tests.invariants._shared import REPO_ROOT
 
 _SEAMS = ("prune", "purge_robots_cache")
@@ -38,7 +39,7 @@ def test_no_other_production_call_site_is_required_to_exist():
     and is the only production caller, so a second divergent reaper cannot
     quietly appear without this test naming it."""
     callers: list[str] = []
-    for path in (REPO_ROOT / "crawlutron").rglob("*.py"):
+    for path in APP_ROOT.rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         calls = _call_names(tree)
         if any(seam in calls for seam in _SEAMS):

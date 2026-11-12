@@ -6,7 +6,7 @@ import ast
 import pathlib
 
 from tests.chokepoint_walks import (
-    REPO_ROOT,
+    APP_ROOT,
     assignment_targets,
     calls_named_leaf,
     functions,
@@ -266,7 +266,7 @@ def test_no_rule_violations():
 
 def test_the_holder_is_one_value_with_exactly_the_two_fields():
     """Single holder: the semaphore and its loop are one dataclass value, not two globals."""
-    source = (REPO_ROOT / "crawlutron/service/async_crawl_runner.py").read_text(encoding="utf-8")
+    source = (APP_ROOT / "service/async_crawl_runner.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
     holders = [
         node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "_SemaphoreHolder"

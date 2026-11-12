@@ -8,7 +8,7 @@ import ast
 import pathlib
 
 from tests.chokepoint_walks import (
-    REPO_ROOT,
+    APP_ROOT,
     app_trees,
     enclosing_function,
     functions,
@@ -149,7 +149,7 @@ RAW_WEBHOOK_URL_MOVES_THROUGH_THE_ADMITTED_TARGET = Rule(
         Bites(
             "def crawl(webhook_url: str | None) -> None:\n    return None\n",
             "raw webhook URLs may enter only as WebhookTarget",
-            at=REPO_ROOT / "crawlutron" / "orchestration" / "request_pipeline.py",
+            at=APP_ROOT / "orchestration" / "request_pipeline.py",
         ),
     ),
     clean=lambda: (
@@ -157,20 +157,20 @@ RAW_WEBHOOK_URL_MOVES_THROUGH_THE_ADMITTED_TARGET = Rule(
         Silent(
             "async def _deliver_webhook(webhook_url: WebhookTarget | None, payload: dict) -> None:\n"
             "    return None\n",
-            at=REPO_ROOT / "crawlutron" / "service" / "async_crawl_runner.py",
+            at=APP_ROOT / "service" / "async_crawl_runner.py",
         ),
         # Inside a sanctioned door the raw str parameter is the wire form.
         Silent(
             "def ensure_https_webhook_url(webhook_url: str) -> None:\n    return None\n",
-            at=REPO_ROOT / "crawlutron" / "service" / "webhooks.py",
+            at=APP_ROOT / "service" / "webhooks.py",
         ),
         Silent(
             "def store(webhook_url: str | None) -> None:\n    return None\n",
-            at=REPO_ROOT / "crawlutron" / "storage" / "watch_store.py",
+            at=APP_ROOT / "storage" / "watch_store.py",
         ),
         Silent(
             "def admit(payload, *, webhook_url: str | None) -> None:\n    return None\n",
-            at=REPO_ROOT / "crawlutron" / "api" / "watch_router.py",
+            at=APP_ROOT / "api" / "watch_router.py",
         ),
     ),
 )
@@ -202,18 +202,18 @@ RAW_URL_ESCAPES_ONLY_THROUGH_THE_DELIVERY_DOOR = Rule(
     bite=lambda: Bites(
         "def log_target(target: WebhookTarget) -> None:\n    print(target.delivery_url())\n",
         "delivery_url() read outside the delivery/persistence doors",
-        at=REPO_ROOT / "crawlutron" / "orchestration" / "request_pipeline.py",
+        at=APP_ROOT / "orchestration" / "request_pipeline.py",
     ),
     clean=lambda: (
         Silent(
             "def show(target: WebhookTarget) -> None:\n    print(target.redacted())\n",
-            at=REPO_ROOT / "crawlutron" / "orchestration" / "request_pipeline.py",
+            at=APP_ROOT / "orchestration" / "request_pipeline.py",
         ),
         # The path-keyed second half: a sanctioned reader stays quiet (this is
         # the shape the doors actually spell, proved at the delivery edge).
         Silent(
             "def deliver(target: WebhookTarget) -> None:\n    print(target.delivery_url())\n",
-            at=REPO_ROOT / "crawlutron" / "api" / "crawl_endpoint.py",
+            at=APP_ROOT / "api" / "crawl_endpoint.py",
         ),
     ),
 )

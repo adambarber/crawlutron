@@ -9,10 +9,10 @@ import ast
 
 import pytest
 
-from tests.chokepoint_walks import REPO_ROOT
+from tests.chokepoint_walks import APP_ROOT
 from tests.invariants.test_harness_doubles import node_names
 
-_ENGINE = REPO_ROOT / "crawlutron" / "orchestration" / "engine.py"
+_ENGINE = APP_ROOT / "orchestration" / "engine.py"
 
 #: The transport cache modules whose instances the engine must never own.
 _TRANSPORT_CACHE_MODULES = {

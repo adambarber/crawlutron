@@ -6,7 +6,7 @@ import ast
 import pathlib
 
 from tests.chokepoint_walks import (
-    REPO_ROOT,
+    APP_ROOT,
     app_trees,
     assignment_targets,
     enclosing_function,
@@ -215,7 +215,7 @@ JOB_FRONTIER_GROWTH_ONLY_USES_FUNNEL = Rule(
         if relative == "crawlutron/admission/admission_links.py"
         else {}
     ),
-    proof_path=REPO_ROOT / "crawlutron" / "api" / "job_runner.py",
+    proof_path=APP_ROOT / "api" / "job_runner.py",
     bite=lambda: (
         Bites(
             "def run(job, url):\n    job.frontier.append(url)\n",
@@ -319,7 +319,7 @@ SHARED_ADMISSION_FILTER_SET_HAS_NO_TWIN_LIST = Rule(
 
 
 def test_job_frontier_detector_sanction_is_narrow():
-    path = REPO_ROOT / "crawlutron" / "crawl" / "job_store.py"
+    path = APP_ROOT / "crawl" / "job_store.py"
     allowed = frozenset({"normalize_job_state", "_persist"})
     bad = ast.parse("def grow_frontier(job):\n    job.frontier.append('x')\n")
     assert _direct_frontier_growth_offenders(bad, path, allowed_functions=allowed)

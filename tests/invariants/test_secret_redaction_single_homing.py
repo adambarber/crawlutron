@@ -7,7 +7,7 @@ import ast
 from pathlib import Path
 
 from tests._walk_primitives import string_constants
-from tests.chokepoint_walks import REPO_ROOT
+from tests.chokepoint_walks import APP_ROOT, REPO_ROOT
 
 #: The one sanctioned home for masking implementation.
 HOME = Path("crawlutron/safety/url_redaction.py")
@@ -83,7 +83,7 @@ def _split_rebuild_mask(func: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
 
 
 def test_secret_redaction_is_single_homed_in_url_redaction():
-    for path in sorted((REPO_ROOT / "crawlutron").rglob("*.py")):
+    for path in sorted(APP_ROOT.rglob("*.py")):
         if path == REPO_ROOT / HOME:
             continue
         tree = ast.parse(path.read_text())

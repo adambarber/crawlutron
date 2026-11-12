@@ -5,6 +5,7 @@ import contextlib
 import pathlib
 
 from tests.chokepoint_walks import (
+    APP_ROOT,
     REPO_ROOT,
     TESTS_DIR,
     call_nodes,
@@ -66,7 +67,7 @@ ROBOTS_LINE_SCANNER_LIVES_IN_ONE_PLACE = Rule(
         "    for raw in text.lstrip('\\ufeff').splitlines():\n"
         "        yield raw.strip()\n",
     ),
-    proof_path=REPO_ROOT / "crawlutron" / "crawl" / "_synthetic.py",
+    proof_path=APP_ROOT / "crawl" / "_synthetic.py",
 )
 
 
@@ -222,7 +223,7 @@ ASDICT_IS_NEVER_UNPACKED_INTO_A_CONSTRUCTOR = Rule(
         "import dataclasses\ndef f(s):\n    data = dataclasses.asdict(s)\n    data['x'] = 1\n    "
         "return data\n",
     ),
-    proof_path=REPO_ROOT / "crawlutron" / "_synthetic.py",
+    proof_path=APP_ROOT / "_synthetic.py",
 )
 
 

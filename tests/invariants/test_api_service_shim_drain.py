@@ -8,11 +8,11 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from tests.chokepoint_walks import REPO_ROOT
+from tests.chokepoint_walks import APP_ROOT, REPO_ROOT
 
 __all__ = ["_api_shim_offenders"]
 
-_API_ROOT = REPO_ROOT / "crawlutron" / "api"
+_API_ROOT = APP_ROOT / "api"
 
 _SHIM_DOCSTRING_MARKERS = ("re-export shim", "Narrow re-export")
 

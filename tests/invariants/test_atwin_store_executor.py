@@ -6,9 +6,9 @@ the default executor, which crawl saturation can exhaust.
 import ast
 
 from tests._walk_assertions import assert_detectors_clean
-from tests.chokepoint_walks import REPO_ROOT, attribute_call_on, call_offenders, parsed
+from tests.chokepoint_walks import APP_ROOT, attribute_call_on, call_offenders, parsed
 
-_STORE = REPO_ROOT / "crawlutron" / "storage" / "coordination_store.py"
+_STORE = APP_ROOT / "storage" / "coordination_store.py"
 
 
 def test_async_store_calls_run_on_a_dedicated_executor() -> None:

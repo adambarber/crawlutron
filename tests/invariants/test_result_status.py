@@ -6,7 +6,7 @@ import ast
 import pathlib
 
 from tests.chokepoint_walks import (
-    REPO_ROOT,
+    APP_ROOT,
     SANCTIONED,
     call_nodes,
     offender_at,
@@ -84,7 +84,7 @@ RESULTS_DERIVE_THEIR_STATUS_FROM_THE_TAXONOMY = Rule(
         # The same spelled pair inside the chokepoint module is the definition.
         Silent(
             "CrawlStrategyAttempt(strategy=s, status='failed', classification=label)\n",
-            at=REPO_ROOT / "crawlutron/transport/results.py",
+            at=APP_ROOT / "transport/results.py",
         ),
     ),
 )

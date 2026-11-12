@@ -10,12 +10,12 @@ import ast
 import pathlib
 from collections.abc import Iterable
 
-from tests.chokepoint_walks import REPO_ROOT, trees_under
+from tests.chokepoint_walks import APP_ROOT, REPO_ROOT, trees_under
 from tests.rules import Bites, Rule, Silent
 
 _ADMISSION = REPO_ROOT / "admission"
 _SYNTHETIC = _ADMISSION / "_synthetic.py"
-_ELSEWHERE = REPO_ROOT / "crawlutron" / "crawl" / "content_cache.py"
+_ELSEWHERE = APP_ROOT / "crawl" / "content_cache.py"
 
 
 def _crawlutron_import_offenders(tree: ast.Module, path: pathlib.Path) -> Iterable[str]:
