@@ -58,27 +58,6 @@ def test_scale_linear_between_target_and_hard():
     assert g.batch_scale_factor() == pytest.approx(0.5, abs=1e-6)
 
 
-async def test_wait_returns_when_below_hard():
-    g = _stub([0.50])
-    await g.wait_while_saturated(max_wait_seconds=1)
-    assert True  # did not block
-
-
-async def test_wait_releases_once_drained():
-    # Starts saturated (>= hard), then drains below hard on the next sample.
-    reads: list[float] = []
-    series = iter([0.99, 0.10])
-
-    def sensor() -> float:
-        reading = next(series, 0.10)
-        reads.append(reading)
-        return reading
-
-    g = ResourceGauge(target=0.90, poll_seconds=0.01, max_wait_seconds=5.0, usage_ratio=sensor)
-    await g.wait_while_saturated(max_wait_seconds=5)
-    assert len(reads) >= 2  # it actually re-sampled and saw the drain
-
-
 def test_cgroup_read_cache_memoizes_within_ttl(tmp_path):
     p = tmp_path / "val"
     p.write_text("100")

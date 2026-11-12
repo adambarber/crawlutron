@@ -198,23 +198,6 @@ class ResourceGate:
         # shed load proportionally when it falls behind its scheduled cadence.
         return base * self._lag_probe.factor()
 
-    async def wait_while_saturated(self, max_wait_seconds: float | None = None) -> None:
-        """Block while *either* resource is saturated, bounded by the budget.
-
-        One injected ``clock`` bounds this wait and both sub-gates' waits; it is read
-        back off ``memory`` (the budget's home) so the two cannot disagree.
-        """
-        budget = self.memory.max_wait_seconds if max_wait_seconds is None else max_wait_seconds
-        deadline = self.memory.clock() + budget
-        while True:
-            mem_r = self.memory.usage_ratio()
-            cpu_r = self.cpu.usage_ratio()
-            if mem_r < self.memory.hard and cpu_r < self.cpu.hard:
-                return
-            if self.memory.clock() >= deadline:
-                return
-            await asyncio.sleep(self._poll_seconds)
-
     def http_scale_factor(self) -> float:
         """Scale factor for HTTP-only (browser-free) tasks.
 

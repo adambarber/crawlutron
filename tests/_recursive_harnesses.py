@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     # runtime imports so this file does not restate the module's own import block.
     from crawlutron.models.crawl_result import EngineCrawlResult
     from crawlutron.models.host_policy import HostPolicy
-    from crawlutron.runtime.pressure_sizing import WeightedAdmission
+    from crawlutron.runtime.pressure_sizing import AdmissionGate
     from crawlutron.transport.scheduler import DomainScheduler
 
 __all__ = [
@@ -56,10 +56,6 @@ class ContentionFreeGate(FakeResourceGauge):
     def cpu_ratio(self) -> float:
         return 0.0
 
-    async def wait_while_saturated(self, max_wait_seconds: float | None = None) -> None:
-        """Present because ``ResourceGate`` has it, never called by the recursive path."""
-        raise AssertionError("the recursive loop must not stop the world for admission")
-
 
 class RecursiveRun(NamedTuple):
     """What one ``drive_recursive_crawl`` call left behind."""
@@ -87,7 +83,7 @@ async def drive_recursive_crawl(
     scheduler: FakeScheduler | DomainScheduler | None = None,
     gate: ContentionFreeGate | None = None,
     gate_scale: float = 1.0,
-    admission: WeightedAdmission | None = None,
+    admission: AdmissionGate | None = None,
     host_policy: HostPolicy | None = None,
     **overrides: object,
 ) -> RecursiveRun:

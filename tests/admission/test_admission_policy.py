@@ -1,6 +1,5 @@
 """Page budgets, policy derivation and requeue overcommit fail closed."""
 
-import asyncio
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -14,15 +13,12 @@ from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.host_policy import HostPolicy as _HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.runtime.pressure_sizing import (
-    BROWSER_RAM_FRACTION,
     TaskRamBudget,
-    WeightedAdmission,
     build_admission_policy,
 )
 from crawlutron.storage.job_store import FrontierEntry
 from crawlutron.storage.job_store_collections import OrderedUrlSet
 from crawlutron.storage.job_store_state import CrawlJobState
-from tests._admission_doubles import FakeResourceGauge
 from tests._admission_doubles import no_crawl_delay as _no_crawl_delay
 from tests._fetcher_factories import crawled_results
 from tests._policy_factories import admit, canonical, crawl_policy
@@ -147,83 +143,6 @@ class TestPolicyDerivation:
             budget=TaskRamBudget(doc_workers=2),
         )
         assert policy.doc_pool_reserve_bytes == 2 * TaskRamBudget().doc_task_bytes
-
-
-class TestWeightedAdmission:
-    def test_headroom_from_most_contended_resource(self):
-        gate = FakeResourceGauge(mem=0.3, cpu=0.8)
-        a = WeightedAdmission(gate, _policy())
-        # Min(1-0.3, 1-0.8) = 0.2
-        assert a.headroom_fraction() == pytest.approx(0.2)
-
-    def test_http_capacity_scales_with_headroom(self):
-        gate = FakeResourceGauge(mem=0.0, cpu=0.0)
-        policy = _policy()
-        a = WeightedAdmission(gate, policy)
-        assert a.http_capacity() == policy.max_http_concurrency
-        gate2 = FakeResourceGauge(mem=0.5, cpu=0.5)
-        a2 = WeightedAdmission(gate2, policy)
-        assert a2.http_capacity() == pytest.approx(policy.max_http_concurrency * 0.5, rel=0.01)
-
-    async def test_admit_grants_all_when_headroom_full(self):
-        policy = _policy()
-        a = WeightedAdmission(FakeResourceGauge(mem=0.0, cpu=0.0), policy)
-        # Request exactly the tier ceiling so the claim ("grants everything asked while headroom is full")
-        # tracks the sizing default, whatever it is.
-        h, b = await a.admit(want_http=policy.max_http_concurrency, want_browser=2)
-        assert h == policy.max_http_concurrency
-        assert b == 2
-
-    async def test_admit_caps_browser_tier(self):
-        # Want more browsers than the tier allows; HTTP still granted.
-        a = WeightedAdmission(FakeResourceGauge(mem=0.0, cpu=0.0), _policy())
-        h, b = await a.admit(want_http=10, want_browser=99)
-        assert b == a.browser_capacity()  # capped
-        assert h == 10
-
-    async def test_admit_shrinks_http_under_memory_pressure(self):
-        a = WeightedAdmission(FakeResourceGauge(mem=0.9, cpu=0.0), _policy())
-        h, b = await a.admit(want_http=200, want_browser=0)
-        # Headroom 0.1 -> http capacity ~10% of ceiling
-        assert h < 200
-        assert h > 0
-
-    async def test_admit_yields_briefly_when_fully_saturated(self):
-        # Saturated (headroom 0) with demand -> returns (0,0) after a short yield instead of parking the whole
-        # crawl indefinitely.
-        a = WeightedAdmission(FakeResourceGauge(mem=1.0, cpu=1.0), _policy())
-        t0 = asyncio.get_event_loop().time()
-        h, b = await a.admit(want_http=5, want_browser=1)
-        elapsed = asyncio.get_event_loop().time() - t0
-        assert (h, b) == (0, 0)
-        assert 0 < elapsed < 1.0  # yielded, did not block forever
-
-
-class TestBrowserTierDoesNotDoubleScale:
-    """The browser pool's RAM is reserved up front, so the tier must not
-    shrink against its own reserved footprint — only usage beyond the fraction
-    the pool sizing already assumed should yield browser capacity."""
-
-    def test_full_capacity_while_within_the_reserved_fraction(self):
-        # Browsers using exactly the fraction derive_browser_pool_size assumed is the steady state, not
-        # pressure.
-        policy = _policy()
-        a = WeightedAdmission(FakeResourceGauge(mem=BROWSER_RAM_FRACTION, cpu=0.0), policy)
-        assert a.browser_capacity() == policy.max_browser_concurrency
-
-    def test_decays_only_for_usage_beyond_the_reserved_fraction(self):
-        policy = _policy()
-        a = WeightedAdmission(FakeResourceGauge(mem=BROWSER_RAM_FRACTION + 0.2, cpu=0.0), policy)
-        # 20 points of surplus usage out of a 50-point ramp to exhaustion -> 60% of the tier still admits.
-        assert a.browser_capacity() == pytest.approx(policy.max_browser_concurrency * 0.6, abs=1)
-
-    def test_never_admits_when_saturated(self):
-        a = WeightedAdmission(FakeResourceGauge(mem=1.0, cpu=0.0), _policy())
-        assert a.browser_capacity() == 0
-
-    def test_cpu_saturation_still_shrinks_the_browser_tier(self):
-        a = WeightedAdmission(FakeResourceGauge(mem=0.0, cpu=1.0), _policy())
-        assert a.browser_capacity() == 0
 
 
 class TestHTTPTaskRamEstimate:

@@ -10,7 +10,7 @@ import pathlib
 
 import pytest
 
-from tests._walk_primitives import comment_lines, string_constants
+from tests._walk_primitives import comment_lines, is_exempt, string_constants
 from tests.chokepoint_walks import REPO_ROOT
 
 __all__ = ["MOVED_MODULES"]
@@ -103,11 +103,7 @@ def _comment_mentions(source: str) -> list[tuple[int, str]]:
 
 
 def _exempt(relative: str, value: str) -> bool:
-    for pattern, allowed, _justification in EXEMPTIONS:
-        if pathlib.PurePosixPath(relative).match(pattern) or relative == pattern:
-            if allowed in value:
-                return True
-    return False
+    return is_exempt(relative, value, EXEMPTIONS)
 
 
 def _drift_offenders(root: pathlib.Path = _TESTS_ROOT) -> list[str]:

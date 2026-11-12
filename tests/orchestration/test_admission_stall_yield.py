@@ -1,20 +1,31 @@
-"""The zero-admission dispatch pass must yield, not hot-spin the gates (#526)."""
+"""The zero-admission dispatch pass must yield, not hot-spin the gates (#526).
+
+A saturated kernel admit never returns (0,0) -- it parks inside or grants a
+floor, so the empty-pass is a robots-filtered batch, and it must still yield."""
+
+from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 
-from crawlutron.orchestration.admission_stall import AdmissionStallGuard
+from crawlutron.orchestration.admission_stall import AdmissionStallGuard, BatchStages, crawl_batches
+from crawlutron.orchestration.recursive import (
+    admit_recursive_batch,
+    commit_recursive_results,
+    crawl_recursive_batch,
+)
+from crawlutron.runtime.metrics import get_metrics
 from crawlutron.runtime.pressure_gates import ResourceGate
-from crawlutron.runtime.pressure_sizing import AdmissionPolicy, WeightedAdmission
-from tests._recursive_harnesses import drive_recursive_crawl, make_crawl_task
-
-
-async def _allows(url):
-    return True
+from crawlutron.runtime.pressure_sizing import build_admission_gate
+from tests._admission_runs import minimum_admission_run
+from tests._recursive_harnesses import make_crawl_task
 
 
 class _ZeroGate(ResourceGate):
-    """A gate reporting zero use; the saturated override consults none of it,
-    but the surface must be the real ResourceGate, not a duck."""
+    """A real ResourceGate reporting zero use, wired to the kernel gate.
+
+    Stays a genuine ``ResourceGate`` subclass: the sanctioned double the
+    doubles-inventory docstring flags explicitly, not a duck."""
 
     def memory_ratio(self) -> float:
         return 0.0
@@ -25,42 +36,22 @@ class _ZeroGate(ResourceGate):
     def batch_scale_factor(self) -> float:
         return 1.0
 
-    async def wait_while_saturated(self, max_wait_seconds: float | None = None) -> None:
-        raise AssertionError("the saturated admission never waits on the gate")
+
+async def _refuse_all(url):
+    return False
 
 
-class SaturatedNeverAwaiting(WeightedAdmission):
-    """(0,0) every pass, without ever awaiting: the ONLY yield must be the loop's.
+async def _refused_result(job):
+    from tests._result_builders import engine_result
 
-    Subclasses the real admission so the double is structurally the production
-    type, not a duck it merely resembles; the zero policy is what makes it."""
-
-    def __init__(self, stop_event: asyncio.Event) -> None:
-        super().__init__(
-            _ZeroGate(),
-            AdmissionPolicy(
-                http_task_bytes=0,
-                browser_task_bytes=0,
-                browser_pool_reserve_bytes=0,
-                max_http_concurrency=0,
-                max_browser_concurrency=0,
-            ),
-        )
-        self.calls = 0
-        self._stop = stop_event
-
-    async def admit(self, want_http: int, want_browser: int) -> tuple[int, int]:
-        self.calls += 1
-        if self.calls >= 3:
-            self._stop.set()
-        return 0, 0
+    return engine_result(job.normalized_url, "robots_disallowed", status="skipped")
 
 
 async def test_zero_admission_pass_yields_instead_of_hot_spinning(monkeypatch):
-    """A pass that admits nothing, while not yet stalled, must yield to the loop.
+    """An empty pass (robots-filtered, not a (0,0) admission) yields to the loop.
 
-    The stall deadline exists to STOP the loop; until it fires the loop still
-    owes the event loop a turn per pass instead of hot gate-sampling (#526)."""
+    Until the stall deadline fires the loop owes the event loop a turn per empty
+    pass instead of hot gate-sampling (#526)."""
     delays: list[float] = []
     real_sleep = asyncio.sleep
 
@@ -69,23 +60,16 @@ async def test_zero_admission_pass_yields_instead_of_hot_spinning(monkeypatch):
         return await real_sleep(delay)
 
     monkeypatch.setattr("crawlutron.orchestration.admission_stall.asyncio.sleep", sleep_spy)
-    stop = asyncio.Event()
-
-    async def worker(job):
-        raise AssertionError(f"nothing dispatches under a (0,0) admission: {job}")
-
-    admission = SaturatedNeverAwaiting(stop)
-    await drive_recursive_crawl(
-        [make_crawl_task(0, "a"), make_crawl_task(1, "a")],
-        worker,
-        allows=_allows,
-        admission=admission,
-        stall_guard=AdmissionStallGuard(clock=lambda: 0.0, no_progress_seconds=60.0),
-        shutdown_event=stop,
+    jobs = [make_crawl_task(0, "a"), make_crawl_task(1, "a")]
+    base_run, state, _ = minimum_admission_run(jobs, http_quota=8, browser_quota=0)
+    run = replace(
+        base_run,
+        respect_robots=True,
+        robots_allows=_refuse_all,
+        robots_disallowed=_refused_result,
+        admission=build_admission_gate(_ZeroGate()),
     )
-
-    assert admission.calls == 3, "the shutdown hand-off never reached the loop"
-    assert len(delays) == admission.calls, (
-        "the zero-admission passes did not yield between admissions: the loop "
-        f"hot-sampled the gates {admission.calls} times with no sleep request"
-    )
+    guard = AdmissionStallGuard(clock=lambda: 0.0, no_progress_seconds=60.0)
+    stages = BatchStages(admit_recursive_batch, crawl_recursive_batch, commit_recursive_results)
+    await crawl_batches(run, state, guard, asyncio.Event(), get_metrics(), 50, stages)
+    assert 0 in delays, f"the empty pass did not yield a sleep(0) to the loop: {delays}"

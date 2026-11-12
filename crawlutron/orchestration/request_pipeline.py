@@ -7,6 +7,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, cast
 
+from admission import AdmissionGate
 from crawlutron.admission.admission import normalize_sitemap_candidates
 from crawlutron.admission.admission_links import gather_robots_decisions
 from crawlutron.admission.policy import DiscoveryFlags, discovery_flags
@@ -27,10 +28,11 @@ from crawlutron.runtime.pressure_gates import ResourceGate
 from crawlutron.runtime.pressure_memory import read_memory_stats
 from crawlutron.runtime.pressure_sizing import (
     TaskRamBudget,
-    WeightedAdmission,
+    build_admission_gate,
     build_admission_policy,
     derive_browser_pool_size,
     doc_worker_count,
+    kernel_admit,
     max_http_concurrency_for,
 )
 from crawlutron.safety.safe_regex import BoundedPattern
@@ -289,18 +291,20 @@ async def _spill_one(state: PipelineState, index: int, result: EngineCrawlResult
     await state.spill.aput(state.request_id, index, result)
 
 
-def _build_admission(state: PipelineState) -> WeightedAdmission:
-    """The RAM-weighted admission gate for one crawl, shared by both the
+def _build_admission(state: PipelineState) -> AdmissionGate:
+    """The kernel admission gate for one crawl, shared by both the
     recursive and non-recursive paths so they cannot drift on the same bound.
     """
-    return WeightedAdmission(
+    budget = TaskRamBudget(doc_workers=doc_worker_count())
+    return build_admission_gate(
         state.dependencies.resource_gate,
         build_admission_policy(
             read_memory_stats().total_bytes or 0,
             pool_size=derive_browser_pool_size(),
             max_concurrent_pages=state.settings.max_concurrent_pages,
-            budget=TaskRamBudget(doc_workers=doc_worker_count()),
+            budget=budget,
         ),
+        budget=budget,
     )
 
 
@@ -333,18 +337,17 @@ async def _dispatch_paced(
     """
     admission = _build_admission(state)
     remaining = list(jobs)
-    floor = admission.saturated_dispatch_floor()
     while remaining:
         http_jobs, browser_jobs = _bucket_tasks_by_tier(scheduler, remaining, state.policy)
-        admit_http, admit_browser = await admission.admit(len(http_jobs), len(browser_jobs))
+        admit_http, admit_browser = await kernel_admit(admission, len(http_jobs), len(browser_jobs))
         take_http = http_jobs[:admit_http] if admit_http else []
         take_browser = browser_jobs[:admit_browser] if admit_browser else []
-        # Saturated gate: bounded progress floor -- dispatch k jobs (a fraction of
-        # the HTTP ramp) so a pinned gate cannot leave the batch in flight forever.
+        # The kernel grants a floor >= 1 whenever a lane fits; an empty grant is
+        # a terminal OVERSIZE. Dispatch the head job so the batch drains.
         if not take_http and not take_browser and remaining:
             if http_jobs:
-                take_http = http_jobs[:floor]
-            elif browser_jobs:
+                take_http = http_jobs[:1]
+            else:
                 take_browser = browser_jobs[:1]
         chunk = take_http + take_browser
         remaining = http_jobs[len(take_http) :] + browser_jobs[len(take_browser) :]

@@ -15,7 +15,6 @@ from crawlutron.orchestration.admission_stall import AdmissionStallGuard
 from crawlutron.orchestration.recursive import admit_recursive_batch
 from crawlutron.runtime.metrics import get_metrics
 from crawlutron.runtime.pressure_gates import ResourceGate
-from crawlutron.runtime.pressure_sizing import AdmissionPolicy, WeightedAdmission
 from crawlutron.transport.scheduler import DomainScheduler
 from crawlutron.vocabulary.strategies import BROWSER_HEADLESS
 from tests._admission_runs import link as _link
@@ -420,40 +419,23 @@ async def test_in_flight_pages_count_against_the_cap_at_expansion():
 
 
 async def test_saturated_admission_loop_terminates_within_bounded_interval():
-    """A (0,0) admission must not spin: the loop stops at the injected-clock
-    bound and reports every unconsumed URL as a capacity-stalled failure."""
-
-    class SaturatedAdmission(WeightedAdmission):
-        """A real (0,0) admission: zero capacities, one yield per admit."""
-
-        def __init__(self) -> None:
-            super().__init__(
-                ResourceGate(memory_ratio=lambda: 0.0, cpu_ratio=lambda: 0.0),
-                AdmissionPolicy(
-                    http_task_bytes=0,
-                    browser_task_bytes=0,
-                    browser_pool_reserve_bytes=0,
-                    max_http_concurrency=0,
-                    max_browser_concurrency=0,
-                ),
-            )
-
-        async def admit(self, want_http: int, want_browser: int) -> tuple[int, int]:
-            await asyncio.sleep(0)  # yield so the injected-clock guard observes
-            return 0, 0
+    """A saturated gate must not spin: the (0,0)-and-yield admission is retired;
+    the kernel admits nothing (OVERSIZE -> empty pass) and the loop stops at the
+    injected-clock bound, reporting every unconsumed URL as stalled."""
 
     async def worker(job):
-        raise AssertionError(f"nothing dispatches under a (0,0) admission: {job}")
+        raise AssertionError(f"nothing dispatches under a saturated admission: {job}")
 
     jobs = [make_crawl_task(0, "a"), make_crawl_task(1, "a")]
-    # A constant clock with a 0s bound trips on the first spin; the wait_for
-    # only defends a re-introduced infinite loop from hanging this suite.
+    saturated = ResourceGate(memory_ratio=lambda: 0.99, cpu_ratio=lambda: 0.99)
+    # A constant clock with a 0s bound trips on the first stalled pass; the
+    # wait_for only defends a re-introduced infinite loop from hanging this suite.
     result = await asyncio.wait_for(
         drive_recursive_crawl(
             jobs,
             worker,
             allows=_allows,
-            admission=SaturatedAdmission(),
+            resource_gate=saturated,
             stall_guard=AdmissionStallGuard(clock=lambda: 0.0, no_progress_seconds=0.0),
         ),
         timeout=0.5,

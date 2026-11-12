@@ -5,7 +5,6 @@ rides near a target (~92%), scaling down smoothly below the hard ceiling and pau
 
 from __future__ import annotations
 
-import asyncio
 import os
 import resource
 import sys
@@ -150,20 +149,7 @@ class ResourceGauge:
         return min(0.999, target + 0.05)
 
     def batch_scale_factor(self) -> float:
-        # Both wait_while_saturated and scale read the same usage_ratio signal.
         return batch_scale(self.usage_ratio(), 1.0, self.target, hard=self.hard)
-
-    async def wait_while_saturated(self, max_wait_seconds: float | None = None) -> None:
-        """Block while at/above the hard ceiling; release below it, with a deadline
-        read from the injected ``clock`` so the bound is not demonstrated in real time.
-        The rate samplers still use ``time.monotonic`` to measure intervals.
-        """
-        budget = self.max_wait_seconds if max_wait_seconds is None else max_wait_seconds
-        deadline = self.clock() + budget
-        while self.usage_ratio() >= self.hard:
-            if self.clock() >= deadline:
-                return
-            await asyncio.sleep(self.poll_seconds)
 
     def headroom_fraction(self) -> float:
         """Fraction of the resource ceiling still available before the hard limit.

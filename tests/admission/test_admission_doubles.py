@@ -1,19 +1,20 @@
-"""Inventory of the admission doubles (row 9): every call site is a pure
-FakeResourceGauge. 13 migrated PinnedGate sites plus the ContentionFreeGate
-harness; 4 pinned_resource_gate factories deferred to C2 on the real gate."""
+"""Inventory of the admission doubles (row 9): migration doubles are pure
+FakeResourceGauge; the one real ResourceGate subclass that survives is the
+sanctioned _ZeroGate, pinned by the completeness scan below."""
 
 from __future__ import annotations
 
+import inspect
+
 import tests._admission_doubles as doubles
 from crawlutron.runtime.pressure_gates import ResourceGate
-from tests._admission_doubles import pinned_resource_gate
 
 
-def test_admission_doubles_inventory(monkeypatch):
-    """13 migrated PinnedGate sites -> FakeResourceGauge; ContentionFreeGate migrated;
-    4 pinned_resource_gate factories deferred to C2 on the real ResourceGate."""
-    # PinnedGate is removed: any site still importing/constructing it reds here.
+def test_admission_doubles_inventory():
+    """13 migrated PinnedGate sites -> FakeResourceGauge; ContentionFreeGate
+    migrated; the retired pinned_resource_gate factory is gone."""
     assert not hasattr(doubles, "PinnedGate"), "PinnedGate must not survive the migration"
+    assert not hasattr(doubles, "pinned_resource_gate"), "the pinned_resource_gate factory is retired"
 
     # The replacement double: structural ResourceGate double, no production base, real init.
     fake_gauge = doubles.FakeResourceGauge
@@ -33,6 +34,44 @@ def test_admission_doubles_inventory(monkeypatch):
         0.0,
     ), "ContentionFreeGate must answer the full gauge protocol"
 
-    # Deferred to C2: pinned_resource_gate still hands out a real ResourceGate.
-    gate, _waited = pinned_resource_gate(monkeypatch, cpu_ratio=lambda: 0.0, memory_ratio=lambda: 0.0)
-    assert isinstance(gate, ResourceGate), "deferred pinned_resource_gate must remain a real ResourceGate"
+
+def test_every_real_resource_gate_subclass_in_tests_is_sanctioned():
+    """Any ``ResourceGate`` subclass in tests/ is a sanctioned exception.
+
+    Only ``_ZeroGate`` survives (it hands the kernel gate a real ResourceGate);
+    a stray subclass is a regression of the migration."""
+    suspected: list[str] = []
+    for _module, name, cls in _resource_gate_subclasses():
+        if cls.__name__ == "_ZeroGate":
+            continue  # the one sanctioned real-gate double, documented above
+        suspected.append(f"{_module.__name__}.{name}")
+    assert not suspected, f"an unsanctioned ResourceGate subclass exists: {suspected}"
+
+
+def _import_optional(name: str):
+    """Import a module, or ``None`` when its environment cannot load it."""
+    import importlib
+
+    try:
+        return importlib.import_module(name)
+    except Exception:
+        return None
+
+
+def _resource_gate_subclasses():
+    """Yield every ``tests/**`` module member that subclasses ``ResourceGate``."""
+    import pkgutil
+
+    import tests
+
+    found = []
+    for modinfo in pkgutil.walk_packages(tests.__path__, prefix="tests."):
+        if modinfo.ispkg:
+            continue
+        mod = _import_optional(modinfo.name)
+        if mod is None:
+            continue
+        for name, obj in vars(mod).items():
+            if inspect.isclass(obj) and obj is not ResourceGate and issubclass(obj, ResourceGate):
+                found.append((mod, name, obj))
+    return found

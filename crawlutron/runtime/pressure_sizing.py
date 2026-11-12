@@ -3,10 +3,33 @@
 from __future__ import annotations
 
 import asyncio
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from admission import Bytes, Cost, Count, LaneId, LaneSpec, MinAll
+from admission import (
+    AdmissionGate,
+    AdmissionRefused,
+    Bytes,
+    Cost,
+    Count,
+    FloorDivisor,
+    Instant,
+    LaneId,
+    LaneSpec,
+    Limits,
+    MinAll,
+    Multiplier,
+    PacingPolicy,
+    Ratio,
+    ResourceId,
+    Sensing,
+    SensorBinding,
+    Signal,
+    Want,
+)
+from admission.gauge import ResourceGauge as KernelResourceGauge
 from crawlutron.config.env import get_env_float, get_env_int
 from crawlutron.runtime.pressure_gates import CpuGate, ResourceGate
 from crawlutron.runtime.pressure_memory import read_memory_stats
@@ -15,7 +38,10 @@ from crawlutron.runtime.pressure_probes import LoopLagProbe, read_cpu_quota, rea
 __all__ = [
     "CpuGate",
     "LoopLagProbe",
+    "ResourceGate",
+    "build_admission_gate",
     "default_executor_workers",
+    "kernel_admit",
     "kernel_lane_specs",
     "read_cpu_quota",
     "read_cpu_usage_seconds",
@@ -61,9 +87,6 @@ def default_executor_workers() -> int:
     except ValueError:
         configured = _DEFAULT_EXECUTOR_FLOOR
     return max(_DEFAULT_EXECUTOR_FLOOR, min(_DEFAULT_EXECUTOR_CAP, configured))
-
-
-_ADMIT_YIELD_SECONDS = get_env_float("CRAWLUTRON_ADMIT_YIELD_SECONDS", 0.05, lo=0.0)
 
 
 _MAX_HTTP_CONCURRENCY = get_env_int("CRAWLUTRON_MAX_HTTP_CONCURRENCY", 512, lo=1)
@@ -154,7 +177,7 @@ class TaskRamBudget:
 
 @dataclass
 class AdmissionPolicy:
-    """Sizing inputs for :class:`WeightedAdmission` (all in bytes / counts)."""
+    """Sizing inputs for the kernel gate's lane specs (all in bytes / counts)."""
 
     http_task_bytes: int
     browser_task_bytes: int
@@ -219,68 +242,138 @@ def kernel_lane_specs(policy: AdmissionPolicy, budget: TaskRamBudget) -> dict[La
     }
 
 
-def default_admission_policy(gate: ResourceGate) -> WeightedAdmission:
-    """A conservative policy used when the caller does not supply one.
-
-    Assumes a 2-process browser pool and the default doc worker count, so tests
-    and minimal deployments stay safe; production passes the real pools.
-    """
-    stats = read_memory_stats()
-    limit = stats.total_bytes or (4 * 1024 * 1024 * 1024)
-    return WeightedAdmission(
-        gate,
-        build_admission_policy(
-            limit,
-            pool_size=2,
-            max_concurrent_pages=3,
-            budget=TaskRamBudget(doc_workers=doc_worker_count()),
-        ),
-    )
-
-
 class _GaugeSurface(Protocol):
     """The seam's structural gate door: the ratio surface satisfied by both the
-    real ResourceGate and the pure FakeResourceGauge. WeightedAdmission, the
-    transitional pressure_* consumer, is retired when C4 deletes those sites."""
+    real ResourceGate and the pure FakeResourceGauge."""
 
     def memory_ratio(self) -> float: ...
 
     def cpu_ratio(self) -> float: ...
 
 
-class WeightedAdmission:
-    """RAM/CPU-weighted, two-tier batch admission.
-    HTTP tasks are cheap and browser tasks expensive (the persistent browser pool
-    holds most RAM), so tiers are budgeted separately; ``admit`` yields rather than parks the crawl.
-    """
+class _SeamGauge(KernelResourceGauge):
+    """A kernel gauge over one seam ratio reader, always-warm (v1 seam posture).
 
-    def __init__(self, gate: _GaugeSurface, policy: AdmissionPolicy) -> None:
-        self._gate = gate
-        self._p = policy
+    The seam's ResourceGate reads current cgroup ratios; the kernel's cold/stale
+    machinery stays test-side. Warm + current means no cold cap and no STALE park."""
 
-    def headroom_fraction(self) -> float:
-        return min(1.0 - self._gate.memory_ratio(), 1.0 - self._gate.cpu_ratio())
+    def __init__(self, ratio: Callable[[], float]) -> None:
+        self._ratio = ratio
 
-    def http_capacity(self) -> int:
-        return max(0, int(self._p.max_http_concurrency * self.headroom_fraction()))
+    def is_warm(self) -> bool:
+        return True
 
-    def browser_capacity(self) -> int:
-        # Full while usage stays within the fraction the pool sizing assumed,
-        # then ramps to zero as the box exhausts; never admit when saturated.
-        ratio = self._gate.memory_ratio()
-        span = max(1e-9, 1.0 - self._p.browser_ram_fraction)
-        usable = min(max(0.0, (1.0 - ratio) / span), 1.0 - self._gate.cpu_ratio())
-        return max(0, int(self._p.max_browser_concurrency * usable))
+    def read_usage(self) -> Ratio:
+        return Ratio(max(0.0, min(1.0, self._ratio())))
 
-    async def admit(self, want_http: int, want_browser: int) -> tuple[int, int]:
-        h = min(want_http, self.http_capacity())
-        b = min(want_browser, self.browser_capacity())
-        if h + b == 0 and (want_http + want_browser) > 0:
-            await asyncio.sleep(_ADMIT_YIELD_SECONDS)
-        return h, b
+    def last_sample_age(self, now: float) -> float:
+        return 0.0
 
-    def saturated_dispatch_floor(self) -> int:
-        """The per-pass dispatch floor under a saturated gate (#618): a quarter of
-        the HTTP ramp, minimum one. A floor of one made a large batch under memory
-        pressure pay one re-bucket + admit cycle per dispatched job."""
-        return max(1, self._p.max_http_concurrency // 4)
+
+class _MonotonicClock:
+    """The kernel's monotonic Clock bound to the real monotonic timeline."""
+
+    def now(self) -> Instant:
+        return Instant._of(time.monotonic())
+
+
+def _seam_signal() -> Signal:
+    """A fresh asyncio-backed Signal for one kernel gate."""
+
+    class _EventSignal:
+        def __init__(self) -> None:
+            self._event = asyncio.Event()
+
+        async def wait(self, timeout: float | None = None) -> bool:
+            try:
+                await asyncio.wait_for(self._event.wait(), timeout)
+                return True
+            except TimeoutError:
+                return False
+
+        def set(self) -> None:
+            self._event.set()
+
+    return _EventSignal()
+
+
+def _subgate_limits(gate: _GaugeSurface, which: str, default_target: float, default_hard: float) -> Limits:
+    """The seam sub-gate's target/hard, or sane defaults on a gauge double."""
+    sub = getattr(gate, which, None)
+    if sub is not None and hasattr(sub, "target") and hasattr(sub, "hard"):
+        return Limits(target=Ratio(sub.target), hard=Ratio(sub.hard))
+    return Limits(target=Ratio(default_target), hard=Ratio(default_hard))
+
+
+def build_admission_gate(
+    gate: _GaugeSurface,
+    policy: AdmissionPolicy | None = None,
+    budget: TaskRamBudget | None = None,
+) -> AdmissionGate:
+    """The kernel gate for one crawl, adapting the seam's ResourceGate.
+
+    With no policy, a conservative one is derived (2-process browser pool, default
+    doc workers) so tests and minimal deployments stay safe."""
+    sizing = budget or TaskRamBudget(doc_workers=doc_worker_count())
+    if policy is None:
+        stats = read_memory_stats()
+        limit = stats.total_bytes or (4 * 1024 * 1024 * 1024)
+        policy = build_admission_policy(
+            limit,
+            pool_size=2,
+            max_concurrent_pages=3,
+            budget=sizing,
+        )
+    sensing = Sensing(
+        {
+            ResourceId.MEMORY: SensorBinding(
+                _subgate_limits(gate, "memory", 0.85, 0.90),
+                _SeamGauge(gate.memory_ratio),
+            ),
+            ResourceId.CPU: SensorBinding(
+                _subgate_limits(gate, "cpu", 0.90, 0.95),
+                _SeamGauge(gate.cpu_ratio),
+            ),
+        }
+    )
+    lanes = kernel_lane_specs(policy, sizing)
+    # A ramp pre-warmed to 16x the widest ceiling keeps the unsaturated band
+    # granting fully (seam parity); saturation pacing comes from free slots.
+    warm = 16 * max(policy.max_http_concurrency, policy.max_browser_concurrency)
+    pacing = PacingPolicy(
+        ramp_floor=Count(warm),
+        ramp_max=Count(warm),
+        ramp_multiplier=Multiplier(1.10),
+        floor_fraction=FloorDivisor(4),
+        initial_ramp=Count(warm),
+    )
+    # The budget covers a fully-saturated box, so the kernel's memory term never
+    # binds below the RAM-derived ceilings (which already encode capacity).
+    fully_loaded = (
+        policy.max_http_concurrency * sizing.http_task_bytes
+        + policy.max_browser_concurrency * sizing.browser_task_bytes
+    )
+    return AdmissionGate(
+        pacing=pacing,
+        lanes=lanes,
+        sensing=sensing,
+        clock=_MonotonicClock(),
+        signal=_seam_signal(),
+        memory_budget=Bytes(max(fully_loaded, 1)),
+    )
+
+
+async def kernel_admit(gate: AdmissionGate, want_http: int, want_browser: int) -> tuple[int, int]:
+    """Admit a batch through the kernel gate; a refusal (OVERSIZE) yields (0, 0).
+    The kernel parks internally under pressure and grants a floor >= 1."""
+    if want_http + want_browser < 1:
+        return 0, 0
+    want = Want.of(general=Count(want_http), heavy=Count(want_browser))
+    try:
+        async with gate.admit(want) as granted:
+            return (
+                granted.allocation.for_lane(LaneId.GENERAL).value,
+                granted.allocation.for_lane(LaneId.HEAVY).value,
+            )
+    except AdmissionRefused:
+        return 0, 0

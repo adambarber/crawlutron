@@ -7,8 +7,10 @@ imports these from here, not from another test's internals.
 from __future__ import annotations
 
 from collections import deque
-from typing import cast
+from contextlib import asynccontextmanager
+from typing import NamedTuple, cast
 
+from admission import AdmissionGate, Allocation, AllocationEntry, Count, LaneId, Want
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.crawl_task import CrawlTask
 from crawlutron.models.discovered_link import DiscoveredLink
@@ -16,7 +18,6 @@ from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.orchestration.recursive import CrawlRun
 from crawlutron.runtime.pressure_gates import ResourceGate
-from crawlutron.runtime.pressure_sizing import WeightedAdmission
 from crawlutron.transport.scheduler import DomainScheduler
 from crawlutron.vocabulary.strategies import BROWSER_HEADLESS
 from tests._policy_factories import canonical
@@ -92,13 +93,29 @@ class FixedAdmission:
         self.h, self.b = h, b
         self.last_want = None
 
-    async def admit(self, want_http, want_browser):
-        self.last_want = (want_http, want_browser)
-        return min(want_http, self.h), min(want_browser, self.b)
+    @asynccontextmanager
+    async def admit(self, want: Want):
+        self.last_want = (
+            want.lanes[LaneId.GENERAL].value,
+            want.lanes[LaneId.HEAVY].value,
+        )
+        allocation = Allocation(
+            {
+                LaneId.GENERAL: AllocationEntry(Count(min(want.lanes[LaneId.GENERAL].value, self.h))),
+                LaneId.HEAVY: AllocationEntry(Count(min(want.lanes[LaneId.HEAVY].value, self.b))),
+            }
+        )
+        yield _FixedGranted(allocation)
 
 
-# The admission path must never dispatch on the crawl-carrying fields; each stub
-# is a typed no-op that FAILS LOUDLY if the path ever touches it.
+class _FixedGranted(NamedTuple):
+    """The kernel-Granted shape the admission door reads: just the allocation."""
+
+    allocation: Allocation
+
+
+# The admission path must never dispatch on the crawl-carrying fields; each stub is a typed no-op that FAILS
+# LOUDLY if the path ever touches it.
 async def _must_not_worker(task: CrawlTask) -> EngineCrawlResult:
     raise AssertionError("the admission path dispatched on worker")
 
@@ -162,7 +179,7 @@ def minimum_admission_run(frontier, *, http_quota, browser_quota, batch_pages=10
         global_concurrency=4,
         seed_sitemaps=False,
         resource_gate=cast("ResourceGate", ContentionFreeGate(1.0)),  # provenance: structurally satisfied
-        admission=cast("WeightedAdmission", admission),  # provenance: FixedAdmission is the admit() shape
+        admission=cast("AdmissionGate", admission),  # provenance: FixedAdmission is the admit() shape
         host_policy=HostPolicy.unrestricted(),
         ramp_max=128,
         http_heavy_lookahead=128 * ENGINE_BATCH_CONCURRENCY_MULTIPLIER,

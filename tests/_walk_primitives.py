@@ -126,6 +126,17 @@ def scan_roots(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
 SCAN_ROOTS = scan_roots()
 
 
+def is_exempt(relative: str, value: str, exemptions: tuple[tuple[str, str, str], ...]) -> bool:
+    """True if a (path-pattern, allowed-substring) exemption row covers ``value``.
+    Shared by the string-drift invariant gates so their ``_exempt`` is one home."""
+    for pattern, allowed, _justification in exemptions:
+        path = pathlib.PurePosixPath(relative)
+        if path == pathlib.PurePosixPath(pattern) or path.match(pattern):
+            if allowed in value:
+                return True
+    return False
+
+
 APP_ROOT = REPO_ROOT / "crawlutron"
 
 

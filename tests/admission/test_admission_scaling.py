@@ -6,11 +6,11 @@ import time
 import pytest
 
 from crawlutron.orchestration.recursive import batch_is_http_heavy
+from crawlutron.runtime.metrics import get_metrics
 from crawlutron.runtime.pressure_memory import batch_scale
 from crawlutron.runtime.pressure_sizing import ResourceGate
 from crawlutron.vocabulary.strategies import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
 from tests._admission_doubles import FakeResourceGauge
-from tests._admission_doubles import pinned_resource_gate as _pinned_resource_gate
 from tests._fetcher_factories import LINKED_PAIR_LIMITS, crawled_results, site_linking_to
 from tests._recursive_harnesses import drive_recursive_crawl, make_crawl_task
 from tests._scheduler_doubles import FakeScheduler as _Scheduler
@@ -34,33 +34,36 @@ def test_batch_scale_scales_linearly_between_target_and_hard():
     assert abs(s - 0.5) < 0.2
 
 
-async def _crawl_under_pressure(monkeypatch, *, cpu_ratio, memory_ratio):
+async def _crawl_under_pressure(*, cpu_ratio, memory_ratio):
     """Run the two-page fixture crawl against a gate with pinned sampler ratios.
+    Returns the ``(envelope, throttle_count)`` pair; the pinned resource drives
+    the throttle, and the gate is handed to the engine as its collaborator."""
+    from crawlutron.runtime.pressure_gates import ResourceGate
 
-    Returns the ``(envelope, waits)`` pair; only the pinned resource drives the
-    throttle, and the engine is handed the pinned gate as its collaborator.
-    """
-    gate, waits = _pinned_resource_gate(monkeypatch, cpu_ratio=cpu_ratio, memory_ratio=memory_ratio)
-
+    gate = ResourceGate(memory_ratio=lambda: memory_ratio, cpu_ratio=lambda: cpu_ratio)
+    before = get_metrics().snapshot().resource_throttle_batches_total
     pages = site_linking_to("/a")
-    return await crawled_results(pages, limits=LINKED_PAIR_LIMITS, resource_gate=gate), waits
+    out = await crawled_results(pages, limits=LINKED_PAIR_LIMITS, resource_gate=gate)
+    throttled = get_metrics().snapshot().resource_throttle_batches_total - before
+    return out, throttled
 
 
 @pytest.mark.parametrize(
     ("cpu_ratio", "memory_ratio", "saturated"),
-    [(0.0, 0.99, "memory"), (0.99, 0.0, "CPU")],
+    [(0.0, 0.89, "memory"), (0.93, 0.0, "CPU")],
     ids=["memory", "cpu"],
 )
-async def test_engine_throttles_batches_under_pressure(monkeypatch, cpu_ratio, memory_ratio, saturated):
-    """Integration: with one sampler pinned at 99%, the engine pauses dispatch
-    (gate waits) yet the crawl still completes, the other resource idle."""
-    out, waits = await _crawl_under_pressure(monkeypatch, cpu_ratio=cpu_ratio, memory_ratio=memory_ratio)
+async def test_engine_throttles_batches_under_pressure(cpu_ratio, memory_ratio, saturated):
+    """Integration: with one sampler in the soft zone, the engine throttles its
+    batches (kernel floor-law pacing) yet the crawl still completes, the other
+    resource idle."""
+    out, throttled = await _crawl_under_pressure(cpu_ratio=cpu_ratio, memory_ratio=memory_ratio)
     # Engine results carry the value object; identity is its ``.raw`` text.
     assert {r.normalized_url.raw for r in out["results"]} == {
         "http://example.com/",
         "http://example.com/a",
     }
-    assert waits, f"engine dispatched without consulting the resource gate under {saturated} pressure"
+    assert throttled > 0, f"engine dispatched unthrottled under {saturated} soft-zone pressure"
 
 
 def test_direct_reads_do_not_perturb_slope(monkeypatch):

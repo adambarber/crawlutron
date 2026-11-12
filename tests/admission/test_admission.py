@@ -1,13 +1,24 @@
 """Admission control: CPU and memory gates, weighted strategy admission and page-budget bounds."""
 
+from __future__ import annotations
+
+import asyncio
+
 import pytest
 
+from admission import AdmissionRefused, Count, IdleReason, LaneId, Want
 from crawlutron.health.readiness import ReadinessState
 from crawlutron.runtime.metrics import get_metrics
-from crawlutron.runtime.pressure_memory import MemoryGate, MemoryStats, read_memory_stats
+from crawlutron.runtime.pressure_memory import MemoryStats, read_memory_stats
 from crawlutron.runtime.pressure_sizing import CpuGate, ResourceGate, read_cpu_quota, read_cpu_usage_seconds
-from tests._admission_doubles import pinned_resource_gate as _pinned_resource_gate
-from tests._timing_harnesses import recorder
+from tests.admission_kernel._doors import _GENERAL_ONE, _finish, _live
+from tests.admission_kernel._gate_factory import GateSpec, build_gate
+
+
+async def _hold_in_task(gate):
+    """Acquire a GENERAL grant inside its own task, keeping this context's lease
+    marker clear so a sibling admit elsewhere is not a false nested admit."""
+    return await asyncio.wait_for(asyncio.create_task(_live(gate, _GENERAL_ONE)), 1.0)
 
 
 class TestReadinessState:
@@ -177,78 +188,50 @@ def test_cpu_gate_scales_between_target_and_hard(monkeypatch):
     assert abs(s - 0.5) < 0.2
 
 
-# The two sub-gates a throttle can be asked about, named once.
-GATE_KINDS = (
-    ("cpu", lambda: CpuGate(target=0.90)),
-    ("memory", lambda: MemoryGate(target=0.92)),
-)
-
-
-_GATE_KIND_IDS = [kind for kind, _ in GATE_KINDS]
-
-
 async def test_cpu_gate_unbounded_is_noop(monkeypatch):
     """No cgroup quota and no manual budget -> never throttles."""
     gate = CpuGate(target=0.90)
     monkeypatch.setattr("crawlutron.runtime.pressure_gates.read_cpu_quota", lambda root="": None)
     monkeypatch.setattr("crawlutron.runtime.pressure_gates.read_cpu_usage_seconds", lambda root="": 999.0)
     assert gate.batch_scale_factor() == 1.0
-    sleeps = recorder(monkeypatch)
-    await gate.wait_while_saturated(max_wait_seconds=10)
-    assert sleeps.delays == []
-
-
-@pytest.mark.parametrize(("kind", "make_gate"), GATE_KINDS, ids=_GATE_KIND_IDS)
-async def test_gate_blocks_above_hard_ceiling_until_usage_drains(monkeypatch, kind, make_gate):
-    """Above the hard ceiling the gate makes callers wait; it releases once
-    usage drains back under the target."""
-    sleeps = recorder(monkeypatch)
-    gate = make_gate()
-    samples = iter([0.99, 0.98, 0.80])
-    gate.usage_ratio = lambda: next(samples)
-    await gate.wait_while_saturated(max_wait_seconds=10)
-    assert len(sleeps.delays) >= 2, f"the {kind} gate returned before usage drained"
-    assert sleeps.delays[-1] <= 1.0  # short polling intervals, never long ones
-
-
-@pytest.mark.parametrize(("kind", "make_gate"), GATE_KINDS, ids=_GATE_KIND_IDS)
-async def test_gate_returns_immediately_under_target(monkeypatch, kind, make_gate):
-    gate = make_gate()
-    gate.usage_ratio = lambda: 0.50
-    sleeps = recorder(monkeypatch)
-    await gate.wait_while_saturated(max_wait_seconds=10)  # must not block
-    assert sleeps.delays == [], f"the {kind} gate blocked while it was under target"
 
 
 # --- combined ResourceGate ---
 
 
-async def test_resource_gate_waits_while_either_saturated(monkeypatch):
-    gate, waited = _pinned_resource_gate(monkeypatch, cpu_ratio=0.99, memory_ratio=0.0)
-    # Memory idle, CPU saturated -> gate must still wait (either resource binds).
-    await gate.wait_while_saturated()
-    assert waited, "ResourceGate returned without waiting while CPU was saturated"
-    assert sum(waited) >= gate.memory.max_wait_seconds, (
-        f"the gate gave up after {sum(waited)}s of a {gate.memory.max_wait_seconds}s "
-        "budget; the wait has to be bounded by the bound, not by returning early"
+async def test_admit_parks_while_capacity_consumed_and_releases():
+    """Kernel-door: an admit that cannot fit a wanted lane parks internally and
+    returns a grant once a release frees capacity -- the absorbed wait contract."""
+    gate, _ = build_gate(GateSpec(general_ceiling=1, memory_usage=0.2, cpu_usage=0.2))
+    cm, first = await _hold_in_task(gate)
+    parked = asyncio.create_task(_live(gate, _GENERAL_ONE))
+    await asyncio.sleep(0.02)
+    assert parked.done() is False, "a saturated want returned without parking"
+    first.lease.release()  # a release wakes the parked admit to re-decide
+    await _finish(cm)
+    parker_cm, parker_grant = await asyncio.wait_for(parked, 1.0)
+    await _finish(parker_cm)
+    assert parker_grant.allocation.for_lane(LaneId.GENERAL).value == 1
+
+
+async def test_admit_returns_immediately_when_idle():
+    """Kernel-door: with capacity free, admit returns without parking."""
+    gate, _ = build_gate(GateSpec(general_ceiling=8, memory_usage=0.2, cpu_usage=0.2))
+    cm, granted = await asyncio.wait_for(_live(gate, _GENERAL_ONE), 1.0)
+    assert granted.allocation.for_lane(LaneId.GENERAL).value >= 1
+    await _finish(cm)
+
+
+async def test_oversize_want_refuses_bounded_rather_than_spinning():
+    """Kernel-door: a want nothing can fit raises OVERSIZE immediately -- the
+    bounded terminal that replaces the old (0,0)-and-spin wait."""
+    gate, _ = build_gate(
+        GateSpec(general_ceiling=8, heavy_ceiling=8, heavy_cost_mib=700, memory_budget_mib=50)
     )
-
-
-async def test_resource_gate_returns_when_both_idle(monkeypatch):
-    gate, waited = _pinned_resource_gate(monkeypatch, cpu_ratio=0.0, memory_ratio=0.0)
-    await gate.wait_while_saturated()
-    assert waited == []
-
-
-async def test_resource_gate_explicit_budget_overrides_the_pinned_bound(monkeypatch):
-    """The argument still wins over the gate's own bound, observably.
-
-    This pins the other half of the contract -- "no argument" must not mean
-    "the argument is ignored" -- so 0.25s of budget is three polls, 0.05s is one.
-    """
-    gate, waited = _pinned_resource_gate(monkeypatch, cpu_ratio=0.99, memory_ratio=0.0)
-    await gate.wait_while_saturated(max_wait_seconds=0.25)
-    assert len(waited) == 3, f"a 0.25s budget produced {len(waited)} polls, not 3: {waited}"
+    # A HEAVY want beyond the 50MiB budget can never fit: an immediate OVERSIZE.
+    with pytest.raises(AdmissionRefused) as exc:
+        await asyncio.wait_for(_live(gate, Want.of(general=Count(0), heavy=Count(1))), 1.0)
+    assert exc.value.reason is IdleReason.OVERSIZE
 
 
 def test_resource_gate_scale_is_min_of_resources(monkeypatch):

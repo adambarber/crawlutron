@@ -10,6 +10,7 @@ from dataclasses import dataclass, field, replace
 from itertools import islice
 from typing import Protocol, cast
 
+from admission import AdmissionGate
 from crawlutron.admission.admission_links import (
     AdmittedLink,
     admit_discovered_links,
@@ -28,10 +29,7 @@ from crawlutron.orchestration.admission_stall import (
 )
 from crawlutron.runtime.metrics import MetricsStore, get_metrics
 from crawlutron.runtime.pressure_gates import ResourceGate
-from crawlutron.runtime.pressure_sizing import (
-    WeightedAdmission,
-    default_admission_policy,
-)
+from crawlutron.runtime.pressure_sizing import build_admission_gate, kernel_admit
 from crawlutron.safety.safe_regex import BoundedPattern
 from crawlutron.safety.url_redaction import redact_url
 from crawlutron.storage.result_store import CrawlSpillStore
@@ -75,7 +73,7 @@ class CrawlRun:
     global_concurrency: int
     seed_sitemaps: bool
     resource_gate: ResourceGate
-    admission: WeightedAdmission
+    admission: AdmissionGate
     host_policy: HostPolicy
     ramp_max: int
     http_heavy_lookahead: int
@@ -216,7 +214,7 @@ async def _resource_admitted_batch(
         metrics.record_throttle()
     http_items, browser_items = _take_and_bucket(state.frontier, run.scheduler, batch_size)
     want_http, want_browser = len(http_items), len(browser_items)
-    admit_http, admit_browser = await run.admission.admit(want_http, want_browser)
+    admit_http, admit_browser = await kernel_admit(run.admission, want_http, want_browser)
     if admit_http + admit_browser < batch_size:
         metrics.record_throttle()
         batch_size = admit_http + admit_browser
@@ -433,7 +431,7 @@ async def run_recursive_crawl(
     global_concurrency: int,
     seed_sitemaps: bool,
     resource_gate: ResourceGate,
-    admission: WeightedAdmission | None = None,
+    admission: AdmissionGate | None = None,
     host_policy: HostPolicy,
     robots_timeout_seconds: float = 30.0,
     stall_guard: AdmissionStallGuard | None = None,
@@ -456,7 +454,7 @@ async def run_recursive_crawl(
         global_concurrency=global_concurrency,
         seed_sitemaps=seed_sitemaps,
         resource_gate=resource_gate,
-        admission=admission or default_admission_policy(resource_gate),
+        admission=admission or build_admission_gate(resource_gate),
         host_policy=host_policy,
         robots_timeout_seconds=robots_timeout_seconds,
         ramp_max=RECURSIVE_RAMP_MAX,
