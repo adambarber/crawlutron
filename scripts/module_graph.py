@@ -24,14 +24,17 @@ def _module_name(path: pathlib.Path) -> str:
     return ".".join(parts)
 
 
-def _resolve(name: str) -> str | None:
-    """Map an imported name to a module file, or None if it is not ours."""
+def _resolve(name: str, package_ok: bool = True) -> str | None:
+    """Map an imported name to a module file or package dir, or None if not ours."""
     root = name.split(".")[0]
     if root in STDLIB:
         return None
-    if not (APP_ROOT.parent / name.replace(".", "/")).with_suffix(".py").exists():
-        return None
-    return name
+    candidate = APP_ROOT.parent / name.replace(".", "/")
+    if candidate.with_suffix(".py").exists():
+        return name
+    if package_ok and candidate.is_dir() and any(candidate.glob("*.py")):
+        return name
+    return None
 
 
 def _imports(tree: ast.AST) -> set[str]:
@@ -67,10 +70,15 @@ def _resolved(statements: list[ast.AST]) -> set[str]:
                 if (resolved := _resolve(alias.name)) is not None:
                     found.add(resolved)
         elif isinstance(node, ast.ImportFrom):
-            if node.level:
+            if node.level or not node.module:
                 continue
-            if node.module and (resolved := _resolve(node.module)) is not None:
+            # A package dir is not the from-module target: its __init__ imports
+            # the submodules that import the package back — record the alias edge.
+            if (resolved := _resolve(node.module, package_ok=False)) is not None:
                 found.add(resolved)
+            for alias in node.names:
+                if (resolved := _resolve(f"{node.module}.{alias.name}")) is not None:
+                    found.add(resolved)
     return found
 
 
