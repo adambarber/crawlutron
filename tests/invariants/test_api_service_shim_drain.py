@@ -1,10 +1,6 @@
-"""The api→service shim drain is complete: zero re-export shims remain.
-
-The rearchitecture spine moved every core module to ``crawlutron/service``; the
-narrow re-export shims under ``crawlutron/api`` are dead surface the moment
-their last consumer repoints. This gate holds the tree at zero shims -- a
-re-added shim (or any new ``crawlutron/api`` module re-exporting a
-``crawlutron.service`` module) is named file:line, never silently absorbed.
+"""The api->service shim drain is complete: zero re-export shims remain. The rearchitecture spine moved every
+core module to ``crawlutron/service``; the narrow re-export shims under ``crawlutron/api`` are dead
+surface the moment their last consumer repoints.
 """
 
 from __future__ import annotations

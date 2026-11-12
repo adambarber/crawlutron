@@ -1,8 +1,7 @@
 """Recursive-crawl admission/task doubles shared across orchestration tests.
 
-Declared support surface (#476): moved verbatim from
-test_recursive_dispatch.py so a sibling test module imports these from here,
-not from another test's internals.
+Declared support surface (#476): moved verbatim from test_recursive_dispatch.py so a sibling test module
+imports these from here, not from another test's internals.
 """
 
 from __future__ import annotations

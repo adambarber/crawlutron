@@ -1,9 +1,6 @@
-"""CLI flag-mapping pin: every wire-bound CLI flag names a real OpenAPI field.
-
-The flag→field table is DERIVED from ``crawlutron.cli.__main__``'s
-``_build_payload`` at test time via AST (no hand-maintained copy, #649 law)
-and validated against the OpenAPI-derived schema components, so
-flag→renamed-field drift reds at collection (#726/#766 class).
+"""CLI flag-mapping pin: every wire-bound CLI flag names a real OpenAPI field. The flag->field table is
+DERIVED from ``crawlutron.cli.__main__``'s ``_build_payload`` at test time via AST and validated against
+the OpenAPI-derived schema components, so flag->renamed-field drift reds at collection.
 """
 
 from __future__ import annotations

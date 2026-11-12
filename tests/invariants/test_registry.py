@@ -1,8 +1,6 @@
-"""The property registry keeps owners real and detectors honest.
-
-The shared machinery (resolution, owner keys, observation plumbing) lives in
-``tests.invariants._registry_machinery``; this module holds the registry's own
-tests and the cross-detector acceptance those tests pin.
+"""The property registry keeps owners real and detectors honest. The shared machinery (resolution, owner
+keys, observation plumbing) lives in ``tests.invariants._registry_machinery``; this module holds the
+registry's own tests and the cross-detector acceptance those tests pin.
 """
 
 from __future__ import annotations

@@ -1,8 +1,6 @@
-"""SDK-owned pydantic v2 wire mirrors of the crawlutron service contract.
-
-Request models use ``extra="forbid"`` except WatchCreateRequest (``extra="allow"``);
-response models tolerate unknown future fields with ``extra="allow"``. The SDK does
-not import crawlutron. Shape-pinned against the served OpenAPI; drift reds.
+"""SDK-owned pydantic v2 wire mirrors of the service contract: request models forbid extra fields
+(WatchCreateRequest allows), responses tolerate them. The SDK never imports crawlutron and is shape-pinned
+against the served OpenAPI -- drift reds.
 """
 
 from __future__ import annotations

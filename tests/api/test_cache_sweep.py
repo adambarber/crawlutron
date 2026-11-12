@@ -42,10 +42,10 @@ class TestMaintenanceTick:
 
 class TestNamespaceCoverage:
     def test_production_constructs_exactly_one_content_cache(self):
-        """Bypass attack: a second cache dir would be swept by nothing -- the
-        maintenance pass prunes the shared instance only. Production must
-        construct exactly one ContentCache (inside shared_content_cache), so
-        the shared dir IS the only live dir."""
+        """Bypass attack: a second cache dir would be swept by nothing -- the maintenance pass prunes the
+        shared instance only. Production must construct exactly one ContentCache (inside
+        shared_content_cache), so the shared dir IS the only live dir.
+        """
         import re
 
         root = pathlib.Path(__file__).resolve().parents[2] / "crawlutron"

@@ -26,11 +26,9 @@ def test_base_image_is_digest_pinned_3_14() -> None:
 
 
 def test_compose_supplies_the_seed_context() -> None:
-    """A `--mount=type=bind,from=seed` RUN resolves the named context at build
-    start -- absent it, BuildKit tries docker.io/library/seed and the build
-    fails before the `if [ -d /seed ]` fallback can ever run (probed live,
-    #625). Compose must always declare the context; bare builds pass
-    --build-context pointing at any dir, empty or a real cache.
+    """A ``--mount=type=bind,from=seed`` RUN resolves the named context at build start -- absent it, BuildKit
+    tries docker.io/library/seed and the build fails before the ``if [ -d /seed ]`` fallback can ever run
+    (probed live, #625). Compose must always declare the context.
     """
     document = yaml.safe_load(COMPOSE_PATH.read_text(encoding="utf-8"))
     assert isinstance(document, dict), "compose must be a mapping"

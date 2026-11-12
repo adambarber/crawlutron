@@ -1,8 +1,7 @@
 """CLI knob-exclusion clause of the facade knob-parity gate.
 
-The CLI forwards POST /v1/crawl only (audit-1: intentionally thin); this
-module pins that the declared route table stays stale-free against the
-same OpenAPI-derived enumeration the MCP/SDK clauses consume.
+The CLI forwards POST /v1/crawl only (audit-1: intentionally thin); this module pins that the declared
+route table stays stale-free against the same OpenAPI-derived enumeration the MCP/SDK clauses consume.
 """
 
 from __future__ import annotations

@@ -429,12 +429,10 @@ def test_cross_list_duplicate_keeps_shallowest_depth():
 
 
 def test_read_row_normalizes_outside_the_store_lock():
-    """``_read_row`` must not deserialize or normalize under ``self._lock``.
-
-    ``row_to_state``/``normalize_job_state`` re-derive the whole job's
-    identity per load; holding the store lock across that work blocks every
-    writer behind one reader's CPU. Asserted on the live source: the row and
-    its accumulators are read under the lock, the walk runs after it."""
+    """``_read_row`` must not deserialize or normalize under ``self._lock``:
+    ``row_to_state``/``normalize_job_state`` re-derive the whole job's identity per load, and holding the
+    store lock across that work blocks every writer behind one reader's CPU.
+    """
     offenders = calls_inside_self_lock(
         "crawlutron/storage/job_store.py",
         ("_read_row", "_row_to_job"),
@@ -447,11 +445,9 @@ def test_read_row_normalizes_outside_the_store_lock():
 
 
 def test_same_length_results_replacement_is_persisted(job_store):
-    """Same-length replacement of results must be persisted, not skipped.
-
-    The accumulator short-circuits on ``persisted == len(results)``; with a
-    same-length swap that length is unchanged, so the old content survives
-    unless the persist is keyed on content identity.
+    """Same-length replacement of results must be persisted, not skipped: the accumulator short-circuits on
+    ``persisted == len(results)``, so with a same-length swap the old content survives unless the persist
+    is keyed on content identity.
     """
     job = job_store.create("http://example.com/", CrawlPolicy())
     job.results = [{"url": "http://example.com/a", "status": "success"}]

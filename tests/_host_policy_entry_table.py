@@ -6,11 +6,9 @@ __all__ = ["host_policy_entry_table"]
 
 
 def host_policy_entry_table() -> set[str]:
-    """Every module:symbol entry point the host policy must guard.
-
-    #645: handle_crawl/_and_extract left as closures, and handle_map/render/search
-    left with the split -- AST discovery keys `handler=` to the defining module
-    (registry.py), so none are discoverable; the policy seams stay guarded.
+    """Every module:symbol entry point the host policy must guard. #645: handle_crawl/_and_extract left as
+    closures, and handle_map/render/search left with the split -- AST discovery keys `handler=` to the
+    defining module (registry.py), so none are discoverable; the policy seams stay guarded.
     """
     return {
         "crawlutron/service/admit_endpoint.py:admit_url",

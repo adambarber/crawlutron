@@ -1,16 +1,4 @@
-"""The zero-suppression law: the tree carries NO inline suppressor, anywhere.
-
-The law (AGENTS.md, owner directive 2026-11-05) bans every inline lint/type
-suppression -- noqa directives, type-ignore comments and friends -- in
-crawlutron/ AND tests/: a checker complaint is resolved structurally or the
-code is rewritten. This gate asserts that unconditionally. There is no budget,
-no exemption table and no allowlist: at zero the only honest gate is the
-assertion itself.
-
-The scan is token-precise: ``tokenize`` yields the real COMMENT tokens, so a
-prose sentence that mentions a directive (like this docstring's) is not a hit,
-and a ``#`` inside a string literal is not either.
-"""
+"""The zero-suppression law: the tree carries NO inline suppressor, anywhere."""
 
 from __future__ import annotations
 

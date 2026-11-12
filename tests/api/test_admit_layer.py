@@ -1,8 +1,6 @@
-"""The /v1/admit layer inheritance (#664): the robots arm is metered.
-
-The route inherits caller identity + the request gate from the layer, so a
-credential in key-verify cooldown refuses 429 before any outbound fetch; the
-pure base check keeps its I/O-free, anonymous-capable contract.
+"""The /v1/admit layer inheritance (#664): the robots arm is metered. The route inherits caller identity +
+the request gate from the layer, so a credential in key-verify cooldown refuses 429 before any outbound
+fetch; the pure base check keeps its I/O-free, anonymous-capable contract.
 """
 
 from __future__ import annotations

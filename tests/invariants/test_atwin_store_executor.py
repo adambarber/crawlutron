@@ -1,12 +1,6 @@
-"""Every async store call runs on the dedicated store executor, never the default.
-
-``atwin`` is the single chokepoint for every async store call (all stores, all
-methods). Routing it through ``asyncio.to_thread`` funnels store work onto the
-default executor (min(32, cpu + 4)), which crawl saturation can exhaust and
-queue every store call. ``atwin`` must instead run on ``_STORE_EXECUTOR``, a
-bounded dedicated pool, so store saturation can never starve the rest of the
-loop. The RLock already serializes in-process store access, so the executor
-bound is modest.
+"""Every async store call runs on the dedicated store executor, never the default. ``atwin`` is the single
+chokepoint for every async store call; routing it through ``asyncio.to_thread`` funnels store work onto
+the default executor, which crawl saturation can exhaust.
 """
 
 import ast

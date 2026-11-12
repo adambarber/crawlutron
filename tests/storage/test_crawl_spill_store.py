@@ -1,8 +1,7 @@
 """CrawlSpillStore: SQLite spill rows replace the file spill's contract.
 
-The engine's spill shape -- incremental per-result write, ordered read-back,
-age-based reclamation -- with the database owning durability. Same behavior the
-file spill pinned, one mechanism fewer.
+The engine's spill shape -- incremental per-result write, ordered read-back, age-based reclamation -- with
+the database owning durability. Same behavior the file spill pinned, one mechanism fewer.
 """
 
 from __future__ import annotations

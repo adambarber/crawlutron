@@ -14,7 +14,7 @@ from collections.abc import Callable
 import pytest
 
 from scripts.extract_comments import over_line_docstrings
-from tests._walk_primitives import declared_root_files, parsed
+from tests._walk_primitives import SCAN_ROOTS, declared_root_files, parsed
 from tests.chokepoint_walks import REPO_ROOT
 
 #: The most consecutive full-line ``#`` comments a block may run.
@@ -89,11 +89,9 @@ _ENTRY_POINTS = ("scripts/gate", "scripts/run-tests.sh")
 def _root_findings[T](
     root: str, collect: Callable[[str], list[T]], *, include_gate_bash: bool = False
 ) -> dict[str, list[T]]:
-    """Every ``collect`` hit under one root, as ``{file: [findings]}``.
-
-    ``include_gate_bash`` adds the entry-point scripts (scripts/gate and
-    scripts/run-tests.sh) to the sweep; the docstring scan never asks for them.
-    ``collect`` gets the file's source; tree-taking readers parse via ``parsed``.
+    """Every ``collect`` hit under one root, as ``{file: [findings]}``. ``include_gate_bash`` adds the
+    entry-point scripts (scripts/gate and scripts/run-tests.sh) to the sweep; the docstring scan never
+    asks for them. ``collect`` gets the file's source; tree-taking readers parse via ``parsed``.
     """
     files = list(declared_root_files(root))
     if include_gate_bash and root == "scripts":
@@ -229,14 +227,14 @@ def test_zero_long_comment_runs_everywhere() -> None:
 
 
 def test_no_overlong_docstring_anywhere() -> None:
-    """Zero over-limit docstrings in crawlutron/, tests/ and scripts/ -- no budget, no exemption."""
-    offenders = [
-        _format_overlong_docstring(name, item)
+    """Zero over-limit docstrings across SCAN_ROOTS -- no budget, no exemption."""
+    offenders: list[str] = []
+    for root in SCAN_ROOTS:
         for name, items in _root_tree_findings(
-            "crawlutron", lambda tree, _p: over_line_docstrings(tree, DOC_LIMIT)
-        ).items()
-        for item in items
-    ]
+            root, lambda tree, _p: over_line_docstrings(tree, DOC_LIMIT)
+        ).items():
+            for item in items:
+                offenders.append(_format_overlong_docstring(name, item))
     assert not offenders, "\n".join(offenders)
 
 
@@ -271,11 +269,10 @@ def test_no_comment_block_ends_mid_clause() -> None:
 def test_declared_scan_roots_fail_loud_when_vacuous(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A gate iterating a missing or file-less root is SILENTLY vacuous: the
-    package rename left this gate scanning app/ (nonexistent) for months.
-    Both seams fail loud: the walk entry refuses a root resolving to nothing,
-    and the AST loader refuses a nonexistent file -- a gate can no longer
-    scan an empty iterator and report a green."""
+    """A gate iterating a missing or file-less root is SILENTLY vacuous: the package rename left this gate
+    scanning app/ for months. Both seams fail loud -- the walk entry refuses a root resolving to nothing,
+    the AST loader refuses a nonexistent file.
+    """
     import tests._walk_primitives as walk
 
     monkeypatch.setattr(walk, "REPO_ROOT", tmp_path)

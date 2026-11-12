@@ -1,13 +1,6 @@
-"""Capability layers never import up into orchestration.
-
-Orchestration decides *what to do*; extraction, admission and transport are the
-layers it calls. A lower layer importing orchestration inverts the dependency
-(the engine imports extraction, admission and transport; they must not import
-the engine's home package). Ownership moves fix violations; this gate refuses
-new ones.
-#163 sealed the extraction band, #162 the admission band, #564 the transport
-band (classification/results/worker_dispatch primitives moved to their owning
-layers).
+"""Capability layers never import up into orchestration: extraction, admission and transport are the layers
+the engine calls, and a lower layer importing orchestration inverts the dependency. Ownership moves fix
+violations; this gate refuses new ones.
 """
 
 from __future__ import annotations

@@ -22,11 +22,9 @@ class _Result:
 
 
 def test_scheduler_instances_have_independent_state():
-    """Two schedulers built from identical settings share no per-domain state.
-
-    A cooldown, min-delay floor, circuit trip, latency EMA, or token bucket
-    recorded on one must be invisible on the other. Guards against class-level
-    mutable state regressions and documents instance scope.
+    """Two schedulers built from identical settings share no per-domain state. A cooldown, min-delay floor,
+    circuit trip, latency EMA, or token bucket recorded on one must be invisible on the other. Guards
+    against class-level mutable state regressions and documents instance scope.
     """
     settings = CrawlerSettings.from_mapping(
         {

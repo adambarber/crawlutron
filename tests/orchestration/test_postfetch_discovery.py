@@ -248,9 +248,8 @@ async def test_both_strategies_agree_on_the_discovery_result_fields(monkeypatch)
 def test_the_discovery_envelope_declares_its_seven_keys():
     """The post-fetch envelope is a declared TypedDict, not a dict[str, Any].
 
-    The key set lives once, at the producer; every consumer annotation names
-    it, so a producer that stops selecting a key fails here, not silently at
-    a reader.
+    The key set lives once, at the producer; every consumer annotation names it, so a producer that stops
+    selecting a key fails here, not silently at a reader.
     """
     from crawlutron.extraction.discovery import PostFetchDiscovery
 

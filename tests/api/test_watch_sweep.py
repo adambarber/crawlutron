@@ -1,7 +1,6 @@
-"""The origin is a real HTTP server answering genuine ``304``s, so revalidation
-is answered by the wire; the delivery call is the one stub here (the sweeper's
-scheduling/announcement decisions), while the funnel is ``webhooks``' contract.
-Terminal-refusal deactivations live in test_watch_refusal_deactivation.py.
+"""The origin is a real HTTP server answering genuine ``304``s, so revalidation is answered by the wire; the
+delivery call is the one stub here (the sweeper's scheduling/announcement decisions), while the funnel is
+``webhooks``' contract. Terminal-refusal deactivations live in test_watch_refusal_deactivation.py.
 """
 
 import asyncio
@@ -201,10 +200,10 @@ async def test_a_poll_only_watch_is_checked_and_announces_to_nobody(
 async def test_a_failed_check_keeps_what_it_knew_and_announces_nothing(
     sweeper, watch_store, announced, monkeypatch
 ):
-    """A check that reached no verdict is a failure, not a change: the stored
-    validators survive and the streak grows, but it is not announced and is not
-    deactivated (that is for a terminal refusal, #335). The crawl is stubbed so
-    the failure is genuinely transient -- no admission verdict at all."""
+    """A check that reached no verdict is a failure, not a change: the stored validators survive and the
+    streak grows, but it is not announced and is not deactivated (that is for a terminal refusal, #335).
+    The crawl is stubbed so the failure is genuinely transient -- no admission verdict at all.
+    """
     watch = register(watch_store, canonical(DEAD_ORIGIN))
     watch_store.claim_due(INTERVAL, "sweeper-a", claim_seconds=300.0)
     watch_store.record_check(

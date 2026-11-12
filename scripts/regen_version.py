@@ -1,10 +1,6 @@
-"""Regenerate the hatch-vcs version file from git describe -- no pip needed.
-
-The shared venv carries no pip, so hardstand's old `pip install -e .` setup
-step could never run (every fresh `hardstand up` died at setup). This script
-writes a dev-sufficient ``crawlutron/_version.py`` instead: same module shape
-hatch-vcs emits, version derived from ``git describe``. A real build
-(`pip install -e .` from a pip-bearing venv, or hatchling) overwrites it.
+"""Regenerate the hatch-vcs version file from ``git describe`` -- no pip needed. The shared venv carries no
+pip, so hardstand's old ``pip install -e .`` setup died on every fresh workspace up; this writes a
+dev-sufficient ``crawlutron/_version.py`` (same module shape hatch-vcs emits). A real build overwrites it.
 """
 
 from __future__ import annotations

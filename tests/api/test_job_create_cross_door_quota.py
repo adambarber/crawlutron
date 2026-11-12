@@ -1,8 +1,7 @@
 """Red-first cross-door probe for #647: REST create must honor the tracker.
 
-A tracker-reserved sync crawl holds the caller's only slot; the REST create
-door then refuses 429 quota_exceeded because create_job_core sees the same
-tracker the sync door reserved against.
+A tracker-reserved sync crawl holds the caller's only slot; the REST create door then refuses 429
+quota_exceeded because create_job_core sees the same tracker the sync door reserved against.
 """
 
 from __future__ import annotations

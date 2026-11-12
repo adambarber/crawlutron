@@ -1,8 +1,7 @@
 """MCP read_crawl_result / read_crawl_trace over the stored crawl record.
 
-The tools answer from the same stored rows the REST replay doors read, never
-re-validating URL fields; a still-running job is a STRUCTURED NON-ERROR result
-(status: running), not an is_error tool result.
+The tools answer from the same stored rows the REST replay doors read, never re-validating URL fields; a
+still-running job is a STRUCTURED NON-ERROR result (status: running), not an is_error tool result.
 """
 
 from __future__ import annotations

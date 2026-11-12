@@ -107,11 +107,9 @@ def test_no_bare_env_int_or_float_in_app():
 
 
 def test_operator_token_read_through_settings_home():
-    """#142: ``CRAWLUTRON_KEY_ADMIN_TOKEN`` is declared once (CrawlerSettings,
-    wired in settings._search_fields) and every read routes through that home.
-    A raw ``os.environ.get`` re-declares the token's source and drifts the
-    moment the settings home is re-homed (a mapping face, a file, a secret
-    store) -- the caller-side copy silently keeps reading the environment.
+    """#142: ``CRAWLUTRON_KEY_ADMIN_TOKEN`` is declared once and every read routes through that home. A raw
+    ``os.environ.get`` re-declares the token's source and drifts the moment the settings home is re-homed
+    -- the caller-side copy silently keeps reading the environment.
     """
     offenders = []
     for path, tree in app_trees(exclude=frozenset()):

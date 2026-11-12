@@ -20,13 +20,9 @@ from tests._jscpd_gate_helpers import stub_resolver_probe
 
 @pytest.fixture
 def service_root(tmp_path: Path, monkeypatch) -> Path:
-    """A scratch tree whose ``.venv/bin`` tests can plant tools into, with the
-    interpreter's own bin pinned onto PATH first.
-
-    The fall-through assertions need a real tool on PATH, and the only one this
-    repo guarantees is next to the running pytest -- pinning it makes every
-    sanctioned invocation (``.venv/bin/python -m pytest``) self-sufficient
-    instead of silently depending on the caller's shell (the #576 follow-up).
+    """A scratch tree whose ``.venv/bin`` tests can plant tools into, with the interpreter's own bin pinned
+    onto PATH first: the fall-through assertions need a real tool on PATH and the only one this repo
+    guarantees is next to the running pytest.
     """
     (tmp_path / ".venv" / "bin").mkdir(parents=True)
     venv_bin = str(Path(sys.executable).parent)

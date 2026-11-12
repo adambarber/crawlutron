@@ -1,8 +1,7 @@
 """MCP policy_suggestions tool over the analysis core (the REST door's twin).
 
-The tool is a door over :mod:`crawlutron.service.policy_suggestions` -- zero logic
-duplication: the same rollup, the same per-tenant scoping, the same refusal of
-anonymous callers.
+The tool is a door over :mod:`crawlutron.service.policy_suggestions` -- zero logic duplication: the same
+rollup, the same per-tenant scoping, the same refusal of anonymous callers.
 """
 
 from __future__ import annotations

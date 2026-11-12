@@ -1,8 +1,6 @@
-"""#599 (redaction half): credentialed URLs never reach a log line.
-
-The chokepoints are the objects: ``WebhookTarget`` admits (refusing userinfo)
-and projects redacted everywhere; ``redact_url`` is its internal mechanism.
-Every webhook log path emits ``target.redacted()``, proven here.
+"""#599 (redaction half): credentialed URLs never reach a log line. The chokepoints are the objects:
+``WebhookTarget`` admits (refusing userinfo) and projects redacted everywhere; ``redact_url`` is its
+internal mechanism. Every webhook log path emits ``target.redacted()``, proven here.
 """
 
 from __future__ import annotations
@@ -288,10 +286,10 @@ _DELIMITERS = ["_", "-", "."]
 @pytest.mark.parametrize("delimiter", _DELIMITERS)
 @pytest.mark.parametrize("position", ["prefix", "suffix", "only"])
 def test_invariant_compound_secret_names_mask_property_shaped(word, delimiter, position):
-    """#662 INVARIANT (property-shaped): for every vocabulary word x delimiter
-    x position, a compound name whose secret word is the whole final segment
-    (or a full delimited segment) must mask. Reads the module's own vocabulary,
-    never is_secret_name, so it fails independently of the production table."""
+    """#662 INVARIANT (property-shaped): for every vocabulary word x delimiter x position, a compound name
+    whose secret word is the whole final segment (or a full delimited segment) must mask. Reads the
+    module's own vocabulary, never is_secret_name, so it fails independently of the production table.
+    """
     word_for_name = word.replace("_", delimiter) if delimiter != "_" else word
     if position == "prefix":
         name = f"{word_for_name}{delimiter}id"

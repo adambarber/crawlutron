@@ -1,18 +1,6 @@
-"""Every caller-supplied numeric wire knob carries its bound constraints.
-
-The numeric-knob family (#718 NaN changed_since, #787 negative timeout)
-regenerated because nothing refused the next unbounded field; this invariant
-closes the class: a pydantic registry walk over both wire homes (crawlutron
-models package and crawlutron_sdk/models.py) starting from every ``*Request``
-model, following nested/Annotated model references transitively, demanding
-``ge/gt`` (a floor) and ``allow_inf_nan=False`` for floats.
-
-Boundary drawn here, pinned by :data:`_OUT_OF_SCOPE_FIELDS`: caller-supplied
-REQUEST numerics need a floor; server-owned OUTPUT numerics (counters,
-timestamps, diagnostics echoed back) are the operator's to bound -- the walk
-covers only what a caller can send. Documented sentinels (the #788
-disposition) are accepted only as a module-level named constant default plus
-an explanatory comment; silent ``0``/``-1`` literals still red.
+"""Every caller-supplied numeric wire knob carries its bound constraints: a pydantic registry walk over both
+wire homes from every ``*Request`` model, following nested/Annotated references transitively, demanding
+``ge/gt`` and ``allow_inf_nan=False`` for floats.
 """
 
 import ast

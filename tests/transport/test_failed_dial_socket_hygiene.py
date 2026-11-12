@@ -1,10 +1,5 @@
-"""A failed dial through the pooled client must leave no live socket behind.
-
-The unraisable-teardown flake family: a socket whose dial failed (or whose
-loop closed before its close ran) is GC'd with an open transport, and
-``_SelectorTransport.__del__`` fires ``PytestUnraisableExceptionWarning``
-at some later test's teardown. This detector drives the REAL fetch door and
-asserts the suite's own reset seam reclaims every dial socket.
+"""A failed dial through the pooled client must leave no live socket behind: the unraisable-teardown flake
+family.
 """
 
 import asyncio

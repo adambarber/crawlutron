@@ -94,12 +94,10 @@ async def service_client(
     with_results: bool = False,
     wire: Callable[[FastAPI], None] | None = None,
 ) -> AsyncGenerator[tuple[AsyncClient, JobStore, CallerKeyStore], None]:
-    """Serve a keyed HTTP client over one register and one key admin and ``routers``.
-
-    ``with_results`` also wires a result store and propagates the job store to
-    ``app.state`` for the MCP door. ``wire`` runs once the app is mounted, so a
-    test substitutes app-wiring state (e.g. the admission port) at the same
-    injection point production uses. Yields the client, job store, and key store."""
+    """Serve a keyed HTTP client over one register, one key admin and ``routers``; ``with_results`` also
+    wires a result store and propagates the job store to ``app.state`` for the MCP door. ``wire`` runs
+    once mounted, so a test substitutes wiring at production's injection point.
+    """
     job_store, results, keys = stores(tmp_path)
     app = harness_app(*routers.values())
     app.state.job_store = job_store
@@ -132,11 +130,10 @@ async def keyed_result_client(
     tmp_path: Path,
     routers: tuple[APIRouter, ...],
 ) -> AsyncGenerator[tuple[AsyncClient, CrawlResultStore, CallerKeyStore], None]:
-    """A keyed client over ``routers`` with a result store the rollup reads.
-
-    Own settings/shutdown/result overrides so the door reads the store handed
-    to it, and stashes the store on app.state for the MCP door; yields the
-    client, result store, and key store."""
+    """A keyed client over ``routers`` with a result store the rollup reads. Owns settings/shutdown/result
+    overrides so the door reads the store handed to it, and stashes the store on app.state for the MCP
+    door; yields the client, result store, and key store.
+    """
     _, results, keys = stores(tmp_path)
     app = harness_app(*routers)
     app.state.result_store = results

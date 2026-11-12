@@ -1,8 +1,6 @@
-"""The typed concurrency-tracker dependency: the app-state contract is load-bearing.
-
-A served app that forgot ``app.state.concurrency_tracker`` must be refused loudly
-at the door (500, tracker_missing), never silently degraded to job-store-rows-only
-quota -- the getattr-None scatter made the missing stash invisible.
+"""The typed concurrency-tracker dependency: the app-state contract is load-bearing. A served app that forgot
+``app.state.concurrency_tracker`` must be refused loudly at the door (500, tracker_missing), never
+silently degraded to job-store-rows-only quota.
 """
 
 from __future__ import annotations

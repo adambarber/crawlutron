@@ -1,21 +1,6 @@
-"""Hermetic benchmark: per-request in-memory spill store setup cost.
-
-Measures:
-  (a) the direct per-request spill lifecycle -- construct + migrate a fresh
-      ``CrawlSpillStore(":memory:")``, release its fence, close it -- which is
-      the exact per-crawl tax taken when no shared store is supplied
-      (``crawlutron/orchestration/engine.py::_bind_spill``);
-  (b) end-to-end overhead on representative sync crawls (1/10/100 pages) with a
-      private per-crawl spill store versus a shared, pre-migrated spill store,
-      isolating per-request spill setup+teardown from the crawl body.
-
-No real network: fetches are answered by a local ``FetcherDouble``. Sleeps are
-pinned to a zero-yield (mirroring the suite's ``fast_sleeps`` fixture) so the
-crawl body is network-latency-free; that *maximises* the spill setup's share of
-crawl time, making the reported percentage a conservative upper bound on
-materiality (with real network fetch the share is smaller still).
-
-Prints a markdown table and optionally writes the same numbers as JSON.
+"""Hermetic benchmark of per-request in-memory spill setup: the construct+migrate+release+close lifecycle and
+end-to-end crawl overhead, private vs shared pre-migrated store. Local fetch doubles, zero-yield sleeps --
+the reported setup share is a conservative upper bound on materiality. Prints markdown and JSON.
 """
 
 from __future__ import annotations
@@ -87,13 +72,9 @@ async def _bench_crawl_async(
     settings: CrawlerSettings,
     repeats: int,
 ) -> list[float]:
-    """Run ``repeats`` crawls of ``pages`` pages in one event loop, timed each.
-
-    ``make_store`` returns the spill store for a crawl (constructed outside the
-    timed region). Return ``None`` for the private path (the crawl constructs
-    its own :memory: store inside the timed region) or a fresh shared store for
-    the shared path (setup paid once, untimed; a fresh store per repeat keeps
-    the shared body from being inflated by accumulated rows).
+    """Run ``repeats`` crawls of ``pages`` pages in one event loop, timed each; ``make_store`` returns the
+    crawl's spill store, built outside the timed region. ``None`` is the private path -- the store is
+    built inside the timed region.
     """
     times: list[float] = []
     for _ in range(repeats):

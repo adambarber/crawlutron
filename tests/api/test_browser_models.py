@@ -132,12 +132,9 @@ class TestBrowserProfileVocabularyIsClosed:
 
     @pytest.mark.parametrize("key", sorted(BROWSER_PROFILE_KEYS))
     def test_every_allowed_profile_key_is_accepted(self, key):
-        """Parametrised over the constant, not over a hand-kept list of keys.
-
-        The list replaced included ``state``, which nothing in ``app/`` reads;
-        a key added to the constant must therefore earn a reader. Values are
-        typed now (BrowserProfileRecord), so each key carries a value its
-        declared type admits.
+        """Parametrised over the constant, not over a hand-kept list of keys: the replaced list included
+        ``state``, which nothing in ``app/`` reads, so a key added to the constant must earn a reader.
+        Values are typed (BrowserProfileRecord), so each key carries a value its declared type admits.
         """
         from crawlutron.models.crawl_policy import CrawlPolicy
 

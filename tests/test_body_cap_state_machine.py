@@ -167,12 +167,10 @@ async def test_refusal_reports_the_cap_it_enforced():
 
 
 async def test_unparsable_content_length_is_refused_with_the_malformed_posture():
-    """A malformed CL header refuses 413 (#675 unification). OLD PIN (#619
-    posture, deleted by the #675 order): fall through to the wrapper and
-    truncate -- 'a malformed CL cannot be compared to a cap'. The #675 ticket
-    names that swallow a DIFFERENT wrong posture (a negative CL serves an
-    empty body, a non-int CL silently truncates) and orders ONE refusal shape
-    for every malformed declaration -- the new pin is strictly stronger."""
+    """A malformed CL header refuses 413. OLD PIN: fall through to the wrapper and truncate -- 'a malformed
+    CL cannot be compared to a cap'; the #675 ticket names that swallow a DIFFERENT wrong posture and
+    orders ONE refusal shape for every malformed declaration -- the new pin is strictly stronger.
+    """
     request = two_chunk_request([(b"content-length", b"not-a-number")])
     seen: dict[str, bytes] = {}
 
@@ -331,11 +329,10 @@ def _dribble_receive(interval: float):
 
 
 async def test_slow_collect_client_is_refused_within_the_deadline(monkeypatch):
-    """A dribbling client that never delivers the declared length holds
-    _collect open; the deadline refuses the truncated body instead of
-    pinning the task. The dribble holds on an Event, not sleeps: fast_sleeps
-    would otherwise deliver the declared bytes instantly and flip the
-    assertion (the #769 flake class)."""
+    """A dribbling client that never delivers the declared length holds _collect open; the deadline refuses
+    the truncated body instead of pinning the task. The dribble holds on an Event, not sleeps: fast_sleeps
+    would deliver the bytes instantly and flip the assertion (#769 flake class).
+    """
     import asyncio
 
     import crawlutron.api.middleware as mw

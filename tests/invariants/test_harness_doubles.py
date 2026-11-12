@@ -366,11 +366,9 @@ def test_the_result_builder_declares_the_record_s_url_union() -> None:
 
 
 def test_the_browser_page_fakes_carry_the_production_protocol_surface() -> None:
-    """The browser-family extension of the superset-or-equal law: a page or
-    context double that stands in for a ``crawlutron.transport.render_page``
-    Protocol must declare every member of it -- a fake that DROPPED a
-    production member (say ``content`` or ``route``) would fail inside a
-    render phase instead of at this gate.
+    """The browser-family extension of the superset-or-equal law: a page or context double standing in for a
+    ``crawlutron.transport.render_page`` Protocol must declare every member -- a fake that DROPPED one
+    would fail inside a render phase instead of at this gate.
     """
     from tests._browser_double_surface import _protocol_members, _standin_members
 

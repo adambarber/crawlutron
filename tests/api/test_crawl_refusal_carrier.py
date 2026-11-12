@@ -1,8 +1,6 @@
-"""The executor's refusal carrier, at its own seam.
-
-The sweep's deactivation decision reads the reason off the exception; these
-pins close the carrier's contract: every constructor refusal survives as data,
-and foreign text degrades to the named fallback instead of entering the enum.
+"""The executor's refusal carrier, at its own seam. The sweep's deactivation decision reads the reason off
+the exception; these pins close the carrier's contract: every constructor refusal survives as data, and
+foreign text degrades to the named fallback instead of entering the enum.
 """
 
 from __future__ import annotations

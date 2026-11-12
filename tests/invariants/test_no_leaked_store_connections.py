@@ -1,12 +1,7 @@
-"""No sqlite3.Connection opened during a test may outlive the session unclosed.
-
-Leaked store connections are the unraisable-ResourceWarning flake family under
-Python 3.14 finalization (#838): GC closes them at a nondeterministic moment,
-so a different invariant test reds each run. The ledger holds a STRONG
-reference — nothing finalizes mid-run — and the SESSION-finish sweep is exact:
-a tracked connection that still executes was never closed (one that refuses
-was). The ratchet stays at ``filterwarnings=error`` — this is the structural
-fix, not an ignore row."""
+"""No sqlite3.Connection opened during a test may outlive the session unclosed. Leaked store connections are
+the unraisable-ResourceWarning flake family under Python 3.14 finalization: GC closes them at a
+nondeterministic moment, so a different invariant test reds each run.
+"""
 
 from __future__ import annotations
 

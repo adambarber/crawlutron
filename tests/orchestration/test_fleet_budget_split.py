@@ -84,12 +84,9 @@ def test_http_concurrency_is_split_across_workers(monkeypatch):
 
 
 def test_doc_worker_count_is_a_per_process_knob_whose_fleet_total_is_exact(monkeypatch):
-    """The knob is per process: the fleet spends knob x workers, exactly.
-
-    The old floor-division made the fleet total drift: 2 configured across 3
-    workers spawned 3 pools (2 // 3 floored to 1, x3 workers), and 3 across 2
-    workers under-delivered the operator's knob (#666). The honest derivation
-    reads the knob per process; the fleet total is knob x worker_count().
+    """The knob is per process: the fleet spends knob x workers, exactly. The old floor-division drifted the
+    total -- 2 configured across 3 workers spawned 3 pools; the honest derivation reads the knob per
+    process, and the fleet total is knob x worker_count().
     """
     for knob, workers in ((2, 3), (3, 2), (2, 1), (5, 4)):
         monkeypatch.setenv("CRAWLUTRON_EXTRACTION_DOC_WORKERS", str(knob))

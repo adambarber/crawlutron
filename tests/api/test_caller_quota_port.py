@@ -1,10 +1,4 @@
-"""The caller-quota admission PORT: doors consume the injected interface, not the module.
-
-``crawlutron.service.caller_auth`` is the framework-free admission core; the
-doors (REST and MCP) must depend on the :class:`CallerQuotaAdmission` interface
-injected at app construction, so a test double substitutes without patching
-any module. The wiring site is app.state -- ONE injection point.
-"""
+"""The caller-quota admission PORT: doors consume the injected interface, not the module."""
 
 from __future__ import annotations
 

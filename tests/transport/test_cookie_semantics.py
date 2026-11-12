@@ -362,11 +362,9 @@ def test_the_reap_scopes_its_slot_writes_to_the_tombstones_own_namespace(tmp_pat
 
 
 async def _cffi_redirect_walk(url: str, responses, monkeypatch, stub_builder):
-    """The impersonating fetcher against a scripted cffi session, installed
-    through the public pooled-builder seam. Each scripted answer is a real
-    httpx.Response-shaped header set wrapped in the queue/STREAM_END contract
-    the cffi stream reader consumes, so the walk, the pin, and the jar all run
-    production code.
+    """The impersonating fetcher against a scripted cffi session, installed through the public pooled-builder
+    seam. Each scripted answer is a real httpx.Response-shaped header set wrapped in the queue/STREAM_END
+    contract the cffi stream reader consumes, so the walk, the pin, and the jar all run production code.
     """
     from curl_cffi.requests.models import STREAM_END
 

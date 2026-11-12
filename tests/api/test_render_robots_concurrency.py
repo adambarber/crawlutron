@@ -1,8 +1,6 @@
-"""#323: render robots admission must not serialize distinct origins.
-
-A batch render touching many cold origins used to pay one serial robots fetch
-per origin before any browser worker started; the crawl path has been
-bounded-concurrent since #544/P10, and render shares that doctrine.
+"""#323: render robots admission must not serialize distinct origins. A batch render touching many cold
+origins used to pay one serial robots fetch per origin before any browser worker started; the crawl path
+has been bounded-concurrent since #544/P10, and render shares that doctrine.
 """
 
 import asyncio

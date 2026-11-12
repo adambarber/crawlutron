@@ -1,10 +1,5 @@
-"""The park must never shorten a standing cooldown (#580, cycle 3, attack 4).
-
-An origin's Retry-After is a debt the scheduler holds against itself; the
-breaker park stamps its own capped debt on the same field. A stamp that
-overwrites lets the breaker's (capped) remaining TRUNCATE a longer 429
-window -- the NEXT batch then fires 300s+ early. Debts only grow: the
-setter max-combines, and the second batch must wait out what remains.
+"""The park must never shorten a standing cooldown: an origin's Retry-After is a debt the scheduler holds
+against itself, and the breaker park stamps its own capped debt on the same field.
 """
 
 from tests._clocks import parking_clock
@@ -14,10 +9,10 @@ from tests.transport.test_breaker_park import _task
 
 
 async def test_breaker_park_never_truncates_a_longer_429_window(monkeypatch):
-    """429(900) stands; a breaker (400s window) is still open at t=300 when the
-    job reaches the breaker check (the pre-semaphore nap burned 300): the park's
-    capped stamp must not TRUNCATE the 429 debt -- the second batch may not
-    fetch before t=900. Overwrite fires it at t=400 (500s early)."""
+    """429(900) stands; a breaker (400s window) is still open at t=300 when the job reaches the breaker
+    check: the park's capped stamp must not TRUNCATE the 429 debt -- the second batch may not fetch before
+    t=900. Overwrite fires it at t=400, 500s early.
+    """
     clock, requested = parking_clock(monkeypatch)
     scheduler = make_scheduler(circuit_cooldown_base=400.0, clock=clock)
     scheduler.set_domain_cooldown("example.com", 900.0)

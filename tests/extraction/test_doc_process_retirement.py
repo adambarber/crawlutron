@@ -22,14 +22,10 @@ class _EofPipe:
 
 
 def test_clean_exit_skips_native_teardown(monkeypatch):
-    """A worker that sees pipe EOF must exit through os._exit(0), never return
-    into interpreter shutdown.
-
-    #510: onnxruntime's telemetry WorkerThread aborts the process during native
-    module finalization ('libc++abi: recursive_mutex lock failed'). The abort is
-    not suppressible from our side -- the only seal is that the worker never
-    runs native teardown at all. os._exit(0) on the clean path removes the
-    faulty code path (masking would be swallowing the abort line instead)."""
+    """A worker that sees pipe EOF must exit through os._exit(0), never return into interpreter shutdown:
+    #510 -- onnxruntime's telemetry WorkerThread aborts the process during native module finalization;
+    the only seal is that the worker never runs native teardown at all.
+    """
     exits: list[int] = []
     monkeypatch.setattr(os, "_exit", lambda code=0: exits.append(code))
     monkeypatch.setattr(dp, "configure_doc_worker_runtime", lambda: None)
@@ -45,11 +41,10 @@ def test_clean_exit_skips_native_teardown(monkeypatch):
 
 
 def test_doc_worker_runtime_disables_onnxruntime_telemetry(monkeypatch):
-    """The worker entry must disable onnxruntime telemetry events.
-
-    onnxruntime's telemetry thread is the one that aborts with the libc++
-    recursive-mutex noise when a worker is torn down mid-flight, and it makes a
-    network call a worker has no business making."""
+    """The worker entry must disable onnxruntime telemetry events: its telemetry thread is the one that
+    aborts with the libc++ recursive-mutex noise when a worker is torn down mid-flight, and it makes a
+    network call a worker has no business making.
+    """
     import crawlutron.extraction.doc_pool as dp
 
     calls: list[str] = []

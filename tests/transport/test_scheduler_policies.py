@@ -303,14 +303,8 @@ class TestTokenBucketConcurrency:
     """
 
     async def test_an_overlapping_burst_reserves_in_arrival_order(self, monkeypatch):
-        """The scheduler-level herd: seven jobs on one domain, gathered like
-        ``run``'s fan-out, must request SERIALLY increasing waits -- never the
-        same deficit twice. #577's reservation folds in as a max(): the waits
-        are nondecreasing and spaced, whichever debt is larger.
-
-        The clock is frozen: real wall time between the two queued consumes
-        refills the bucket (a 1.6ms gap at rate 1 erodes a 1s wait past the
-        1e-3 tolerance) -- a timing artifact, not the ordering claim.
+        """The scheduler-level herd: seven jobs on one domain, gathered like ``run``'s fan-out, must request
+        SERIALLY increasing waits.
         """
         sleeps = recorder(monkeypatch)
         scheduler = make_scheduler(
@@ -332,11 +326,9 @@ class TestTokenBucketConcurrency:
         ), f"a repeated wait means two jobs observed the same deficit: {sleeps.delays}"
 
     async def test_drained_bucket_serializes_two_gathered_consumes(self, monkeypatch):
-        """Two gathered consumers on a drained bucket must wait SERIALLY: the
-        second observes what the first reserved and waits ~1/rate longer.
-
-        Frozen clock, same reason as the burst test: wall-time refill between
-        the two consumes erodes the waits past the tolerance.
+        """Two gathered consumers on a drained bucket must wait SERIALLY: the second observes what the first
+        reserved and waits ~1/rate longer. Frozen clock, same reason as the burst test: wall-time refill
+        erodes the waits past the tolerance.
         """
         sleeps = recorder(monkeypatch)
         bucket = TokenBucket(rate=2.0, capacity=0, clock=lambda: 0.0)

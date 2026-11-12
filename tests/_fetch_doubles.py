@@ -1,9 +1,7 @@
-"""The one import door for every fetch double (#314, 3.3).
-
-One construction per concern: ``FetcherDouble`` is the primitive, ``make_fetch``
-builds the result it answers with, and ``Route``/``PageData``/``PageMap`` are the
-input grammar a test expresses its answer in. Callers write the small answer
-closure at the site when the response depends on request or state."""
+"""The one import door for every fetch double (#314, 3.3): ``FetcherDouble`` is the primitive, ``make_fetch``
+builds its result, and ``Route``/``PageData``/``PageMap`` are the input grammar. Callers write the small
+answer closure at the site when the response depends on request or state.
+"""
 
 import inspect
 from collections.abc import Callable

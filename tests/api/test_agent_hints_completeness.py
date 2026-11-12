@@ -42,9 +42,8 @@ def test_each_extraction_method_is_described_in_the_vocabulary(method):
 def test_hints_disclose_per_request_scope_of_domain_limits():
     """The machine-readable hints state that per-domain limits are per request.
 
-    Without this disclosure a caller reading `per_domain_concurrency` could
-    believe a service-wide bound; two concurrent requests each enforce
-    independently (#481).
+    Without this disclosure a caller reading `per_domain_concurrency` could believe a service-wide bound;
+    two concurrent requests each enforce independently (#481).
     """
     guidance = " ".join(agent_hints_payload()["guidance"]).lower()
     assert "within one request" in guidance

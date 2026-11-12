@@ -1,10 +1,6 @@
-"""The challenge-wait poll uses the injected clock and extracts at most twice.
-
-``extract_with_challenge_wait`` must not re-extract the full DOM
-(``page.content()``) on every 1 s tick, and must not sleep raw
-(``asyncio.sleep``) so tests can inject the clock. One initial extract and one
-final extract after the readyState poll; the poll itself uses
-``self._async_sleep(1)`` (the injected clock).
+"""The challenge-wait poll uses the injected clock and extracts at most twice: no full-DOM re-extract
+(``page.content()``) per 1s tick and no raw ``asyncio.sleep`` -- one initial extract, one final after the
+readyState poll, the poll itself on ``self._async_sleep(1)``.
 """
 
 import ast

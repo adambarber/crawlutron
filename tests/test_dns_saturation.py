@@ -1,13 +1,5 @@
-"""A saturated resolver refuses fast; it never queues the request path (#C10).
-
-A RUNNING getaddrinfo cannot be cancelled -- the thread stays occupied. A
-hostile or slow DNS server can therefore occupy all 32 DNS_EXECUTOR workers,
-and every later resolve waits the full budget before its timeout: the request
-path is hostage to the queue. The saturation chokepoint fails fast instead.
-
-Saturation is driven through the real resolve door (parked getaddrinfo calls
-via tests._transport_doubles.ParkedResolver), never a production test door:
-the verdict is proven at the same entry point a hostile resolver would hit.
+"""A saturated resolver refuses fast; it never queues the request path. A RUNNING getaddrinfo cannot be
+cancelled -- the thread stays occupied.
 """
 
 import asyncio
@@ -91,10 +83,10 @@ def _parked_scenario():
 
 
 def test_the_async_path_is_registered_too():
-    """bounded_thread_resolve is the ASYNC DNS entry point (browser targets,
-    search providers) -- its futures must register in the same saturation
-    registry, or the chokepoint's guarantee holds for only one of two paths
-    (adversarial pass 5, confirmed defect)."""
+    """bounded_thread_resolve is the ASYNC DNS entry point -- its futures must register in the same
+    saturation registry, or the chokepoint's guarantee holds for only one of two paths (adversarial pass
+    5, confirmed defect).
+    """
     started, hold, worker_returned, submitted = _parked_scenario()
 
     async def scenario():
@@ -147,10 +139,10 @@ def _join_via_polling(seconds: float = 5.0) -> None:
 
 
 def test_a_timed_out_wait_still_counts_the_worker(monkeypatch):
-    """The registry must hold a future until the RESOLVER THREAD completes, not
-    until the caller's wait times out: a getaddrinfo still running inside its
-    worker after the wait expires is exactly the blind window the saturation
-    law exists to close (wave-3 N1). Released via Events, no wall-clock sleeps."""
+    """The registry must hold a future until the RESOLVER THREAD completes, not until the caller's wait times
+    out: a getaddrinfo still running after the wait expires is exactly the blind window the saturation law
+    exists to close. Released via Events, no wall-clock sleeps.
+    """
     started, hold, worker_returned, submitted = _parked_scenario()
 
     async def scenario():

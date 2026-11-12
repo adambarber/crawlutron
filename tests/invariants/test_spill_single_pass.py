@@ -1,7 +1,6 @@
-"""Structural rules for the spill loader and pipeline wiring: the spill store's
-``load_ordered`` reassembles in one pass (the ORDER BY lives in the SQL, never a
-client-side sort) and the browser-pool size derives at the construction site --
-contracts no behavior test can observe.
+"""Structural rules for the spill loader and pipeline wiring: the spill store's ``load_ordered`` reassembles
+in one pass (the ORDER BY lives in the SQL, never a client-side sort) and the browser-pool size derives at
+the construction site -- contracts no behavior test can observe.
 """
 
 from __future__ import annotations

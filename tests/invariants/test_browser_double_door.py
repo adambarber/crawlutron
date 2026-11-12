@@ -1,9 +1,6 @@
-"""Every browser double imports only through ``tests._browser_doubles``.
-
-The browser family had four import homes (#844); the consolidation made
-``tests._browser_doubles`` the one door, with one page-fake and one
-pool-fake implementation behind it. A from-import off an implementation
-module is the second altitude the door exists to refuse.
+"""Every browser double imports only through ``tests._browser_doubles``: the browser family had four import
+homes (#844); the consolidation made one door with one page-fake and one pool-fake implementation behind
+it. A from-import off an implementation module is the second altitude the door exists to refuse.
 """
 
 from __future__ import annotations

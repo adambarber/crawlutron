@@ -1,10 +1,6 @@
-"""Residual-state probes: no test may leak env or cwd; stores close (#840).
-
-A leak is observable only when a later test can SEE it: the arrange test
-pollutes ``os.environ`` and ``os.getcwd`` with no cleanup, the assertion test
-(a different test function, later or earlier under random ordering) demands
-the pristine baseline. chdir lands under ``tmp_path`` — pytest restores that
-directory only at session scope, not per-test, so a leaked cwd is observable.
+"""Residual-state probes: no test may leak env or cwd; stores close. A leak is observable only when a later
+test can SEE it: the arrange test pollutes ``os.environ`` and ``os.getcwd`` with no cleanup, and the
+assertion test -- a different function, later or earlier under random ordering.
 """
 
 import os

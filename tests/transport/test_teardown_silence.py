@@ -1,8 +1,6 @@
-"""The teardown-silence class (#678): a failed best-effort teardown leaves evidence.
-
-Four sites suppress close/harvest failures; each now records the condition in
-the #643 decline record -- structured fields, bounded by key space, never log
-parsing. The success path records NOTHING (bounded logging means bounded).
+"""The teardown-silence class (#678): a failed best-effort teardown leaves evidence. Four sites suppress
+close/harvest failures; each now records the condition in the #643 decline record -- structured fields,
+bounded by key space, never log parsing. The success path records NOTHING (bounded logging means bounded).
 """
 
 import asyncio

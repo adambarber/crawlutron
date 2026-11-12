@@ -53,10 +53,8 @@ class TestWireModel:
         assert key_admin_token(request) == "settings-token"
 
     def test_the_default_arm_reads_the_env_once(self, monkeypatch):
-        """#636, superseded by #666: the memoized env-default arm is deleted.
-
-        The ONE home is the state's settings object, read with no
-        from_mapping() re-derivation -- and with no settings the door is
+        """#636, superseded by #666: the memoized env-default arm is deleted. The ONE home is the state's
+        settings object, read with no from_mapping() re-derivation -- and with no settings the door is
         sealed (fail closed), not env-sourced.
         """
         from types import SimpleNamespace
@@ -294,11 +292,10 @@ class TestIpv6AndTrailingDotOrigins:
         assert dict(again.credentials) == dict(policy.credentials)
 
     def test_an_ipv6_credential_row_loads_from_the_job_store(self, tmp_path):
-        """The #518 corruption: a whole-site job whose policy carries an
-        IPv6-port credential failed read_policy on EVERY load and the row
-        returned None (job_store_load_corrupt). The row itself must still be
-        loadable; the credential value is redacted at rest, so the loaded
-        policy carries the marker and the reload refusal is the resume law."""
+        """The #518 corruption: a whole-site job whose policy carries an IPv6-port credential failed
+        read_policy on EVERY load. The row itself must stay loadable; the credential is redacted at rest,
+        so the loaded policy carries the marker and the reload refusal is the resume law.
+        """
         from tests._policy_factories import UNRESTRICTED_HOST_POLICY as unrestricted
         from tests._policy_factories import job_store
 

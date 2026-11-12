@@ -1,9 +1,6 @@
-"""The suite's one clock home (#843): every clock-like symbol lives here.
-
-Arrangement clocks construct stale/future state (wall reads are legitimate
-there); instruments prove timing claims with zero wall clock. A clock-like
-def anywhere else in tests/** is refused by the tests-define-no-local-clocks
-invariant -- one home, so the suite's timelines are auditable from one file.
+"""The suite's one clock home (#843): every clock-like symbol lives here. Arrangement clocks construct
+stale/future state; instruments prove timing claims with zero wall clock; a clock-like def elsewhere in
+tests/** reds at the tests-define-no-local-clocks invariant.
 """
 
 from __future__ import annotations

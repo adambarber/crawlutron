@@ -1,19 +1,6 @@
-"""The engine binds no transport cache instance at module level and no in-function
-transport imports (external architecture review, #684 family).
-
-The engine's shared caches are registry-owned transport singletons handed down
-through the pipeline; a module-level binding or ``global`` rebind of a cache
-instance (whatever the name -- the prefix check alone had a rename-shaped
-bypass) or a function-level ``crawlutron.transport`` import reintroduces the
-seam the collapse removed, so each reds naming the line.
-
-Residual blind shapes, exact: the binding detector sees only a direct
-constructor call (``HttpCache()``) or a class alias of an imported cache
-type on the RHS. A binding via a factory call (``_C = _factory()``) is
-invisible, and the rebind detector is DERIVED from the binding set, so it
-inherits that blind spot -- a `global` on a factory-bound name also passes.
-Stacked-mutant discipline: the rebind detector's proof must be isolated
-against its feeder's blind shape, never presented as independent reach.
+"""The engine binds no transport cache at module level and takes no in-function transport imports: caches are
+registry-owned singletons; a module-level binding, ``global`` rebind, or function-level
+``crawlutron.transport`` import reds naming the line.
 """
 
 from __future__ import annotations

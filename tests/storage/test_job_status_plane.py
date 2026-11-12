@@ -387,10 +387,9 @@ class TestErrorStampingGatedOnTheFailedCas:
         assert won.status is JobStatus.FAILED
 
     async def test_a_persisted_error_never_carries_a_credentialed_url(self, tmp_path):
-        """#666: str(exc) lands raw httpx error text -- including REDIRECT-TARGET
-        URLs carrying userinfo or secret queries -- in the durable error field
-        the status wire reads. The persist door scrubs through the redaction
-        chokepoint; the red: a credentialed URL survived verbatim.
+        """#666: str(exc) lands raw httpx error text -- including REDIRECT-TARGET URLs carrying userinfo or
+        secret queries -- in the durable error field the status wire reads. The persist door scrubs
+        through the redaction chokepoint; the red: a credentialed URL survived verbatim.
         """
         from crawlutron.service.job_runner import arecord_terminal_failure
 

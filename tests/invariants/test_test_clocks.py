@@ -1,11 +1,5 @@
-"""The test suite reads ONE clock: tests/_clocks.py (#843).
-
-The clock family by NAME SHAPE, never a hand list: a new clock-like symbol in
-tests/** is governed the moment its name matches a family pattern. Re-exports
-from ``tests._clocks`` are the sanctioned second half of a definition; the
-invariant suite itself and the clock home are exempt (they are the law, not
-the population it governs). Methods and inline arrange closures are not
-module-level symbols, so they stay free.
+"""The test suite reads ONE clock: tests/_clocks.py. The clock family is matched BY NAME SHAPE, never a hand
+list: a new clock-like symbol in tests/** is governed the moment its name matches a family pattern.
 """
 
 from __future__ import annotations

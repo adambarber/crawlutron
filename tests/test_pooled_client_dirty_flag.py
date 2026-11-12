@@ -1,9 +1,6 @@
-"""S5 contract: the pooled-client dirty flag tracks builds through the public door.
-
-The harness's per-test autouse reset reads this flag so a test that never
-touches the pooled client skips the loop-bound drain entirely; a test that
-builds a client still drains on teardown. No magic comments, no issue numbers
-in names.
+"""S5 contract: the pooled-client dirty flag tracks builds through the public door. The harness's per-test
+autouse reset reads this flag so a test that never touches the pooled client skips the loop-bound drain
+entirely, while a test that builds a client still drains on teardown.
 """
 
 from crawlutron.transport import pooled_clients

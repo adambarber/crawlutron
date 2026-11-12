@@ -60,11 +60,10 @@ def _render_scheduler_of(settings: CrawlerSettings) -> DomainScheduler:
 
 
 def test_render_scheduler_builds_through_from_settings():
-    """#142: /v1/render must construct its scheduler through the one declared
-    path, not a parallel DomainScheduler(...) call. Render has no policy
-    carrier, so max_rps stays the service posture (0.0), but the adaptive-knob
-    settings home must reach the batch: an operator's
-    CRAWLUTRON_ADAPTIVE_THROTTLING=false is honored on /v1/render too."""
+    """#142: /v1/render must construct its scheduler through the one declared path, not a parallel
+    DomainScheduler(...) call. Render has no policy carrier, so max_rps stays the service posture, but the
+    adaptive-knob settings home must reach the batch.
+    """
     settings = CrawlerSettings.from_mapping(
         {
             "CRAWLUTRON_GLOBAL_CONCURRENCY": "7",

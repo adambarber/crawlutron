@@ -27,19 +27,9 @@ from tests._ci_contract import (
 
 
 def test_all_hooks_share_one_trigger() -> None:
-    """The ENFORCEMENT hooks' ``files:`` values are one YAML anchor.
-
-    The trigger was copied five times and never compared -- a ``.gitignore`` edit
-    slipped through with every hook Skipped; they are now ``&service_trigger``.
-
-    #557: coverage is a measurement surface, not an enforcement gate. Its
-    scope is ``^(app|tests)/`` and its stage is pre-push, so the divergent
-    files value cannot silently skip a gate; the one-surface law holds it.
-
-    #588: the commit-MSG hooks are exempt from the files law entirely:
-    a commit-msg hook receives the MESSAGE FILE, not changed filenames, so a
-    files trigger there only ever SUPPRESSED the gate (the citation gate ran
-    on no non-service commit). Their trigger is the stage itself.
+    """The ENFORCEMENT hooks' ``files:`` values are one YAML anchor: the trigger was copied five times and
+    never compared; they are now ``&service_trigger``. #557: coverage is a measurement surface, not
+    enforcement, so a divergent files value cannot silently skip a gate.
     """
     hooks = _hook_blocks(CONFIG_PATH.read_text(encoding="utf-8"))
     message_stage = {hook_id for hook_id, block in hooks if "commit-msg" in str(_field(block, "stages"))}

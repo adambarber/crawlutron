@@ -61,9 +61,8 @@ def test_amortized_purge_still_runs_on_set_domain_cooldown():
 def test_in_flight_reservation_is_never_purged():
     """#577: a future fire time keeps the record alive through a mid-run purge.
 
-    The herd re-formation the defect describes happens exactly when a 429
-    cadence purge fires while peers hold reservations; a record carrying
-    ``next_fire > now`` must survive it.
+    The herd re-formation the defect describes happens exactly when a 429 cadence purge fires while peers
+    hold reservations; a record carrying ``next_fire > now`` must survive it.
     """
     now = [1000.0]
     s = _scheduler(clock=lambda: now[0], delay_seconds=10.0)

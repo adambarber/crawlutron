@@ -96,14 +96,8 @@ _FAST_STARTED = asyncio.Event()
 def _nap_until_peer_recorded(
     monkeypatch, real_sleep, committed: asyncio.Event, clock: list[float] | None = None
 ):
-    """Sequenced sleep shim: every nap blocks until ``committed`` fires, so the
-    napped job's post-nap re-check cannot race the peer's commit; every
-    requested delay is still recorded. Zero wall clock, and -- with an injected
-    ``clock`` box -- the clock ADVANCES by each recorded delay, so floor-based
-    assertions are exact instead of racing the real monotonic under xdist.
-    (#577: the first fire takes no nap at all -- its wait is zero -- so the FIRST
-    nap is the peer's reservation and waiting on it is deadlock-free; the trip's
-    worker naps nothing before committing.)
+    """Sequenced sleep shim: every nap blocks until ``committed`` fires, so the napped job's post-nap
+    re-check cannot race the peer's commit, and every requested delay is still recorded.
     """
     sleeps = recorder(monkeypatch)
 
@@ -192,10 +186,10 @@ class TestJitterSleepDoesNotHoldTheDomainGate:
         assert _FAST_STARTED.is_set(), "the fast domain was never served"
 
     async def test_a_cooldown_firing_during_the_nap_is_not_skipped(self, monkeypatch):
-        """A 429 cooldown that lands while a peer naps must park the peer before
-        its worker: the nap re-checks the domain's cooldown on the way back in.
-        Injected clock (advanced by the shim) -- the real monotonic made the
-        50ms floor a timing race under xdist (adversarial pass 4)."""
+        """A 429 cooldown that lands while a peer naps must park the peer before its worker: the nap
+        re-checks the domain's cooldown on the way back in. Injected clock (advanced by the shim) -- the
+        real monotonic made the 50ms floor a timing race under xdist (adversarial pass 4).
+        """
         real_sleep = asyncio.sleep  # bound before the patch: the shim's own yields
         now = [1000.0]
         scheduler = make_scheduler(delay_seconds=0.05, adaptive=False, clock=lambda: now[0])
@@ -224,11 +218,10 @@ class TestJitterSleepDoesNotHoldTheDomainGate:
         )
 
     async def test_a_breaker_trip_during_the_nap_parks_the_napped_job(self, monkeypatch):
-        """The circuit half of the same re-check: a trip that lands while a peer
-        naps must PARK it on the open breaker -- the park is the proof. On the
-        injected clock the window then elapses honestly and the job proceeds
-        (the real-clock twin asserted a post-park skip, an artifact of the real
-        clock never advancing; adversarial pass 4 migrated it)."""
+        """The circuit half of the same re-check: a trip that lands while a peer naps must PARK it on the
+        open breaker -- the park is the proof. On the injected clock the window then elapses honestly and
+        the job proceeds.
+        """
         real_sleep = asyncio.sleep  # bound before the patch: the shim's own yields
         now = [1000.0]
         scheduler = make_scheduler(

@@ -208,10 +208,9 @@ async def _run_crawl(
 
 
 async def test_crawl_holds_exactly_one_slot_for_the_whole_request(monkeypatch):
-    """#576: a successful sync /v1/crawl samples the counter from inside the crawl
-    it waits on, so the slot is proven taken once for the work, not twice -- a
-    second nested gate would pass a before/after check only via the refusal it
-    causes, so the count inside is what proves the double-acquire fixed.
+    """#576: a successful sync /v1/crawl samples the counter from inside the crawl it waits on, so the slot
+    is proven taken once for the work, not twice -- a second nested gate would pass a before/after check
+    only via the refusal it causes, so the count inside is what proves the double-acquire fixed.
     """
     held: list[int] = []
 

@@ -1,8 +1,6 @@
-"""Admission test doubles shared by the capacity, scaling and policy gates.
-
-Declared support surface (#476): moved verbatim from
-test_admission.py / test_admission_scaling.py / test_admission_policy.py so a
-sibling test module imports these from here, not from another test's internals.
+"""Admission test doubles shared by the capacity, scaling and policy gates. Declared support surface (#476):
+moved verbatim from test_admission.py / test_admission_scaling.py / test_admission_policy.py so a sibling
+test module imports these from here, not from another test's internals.
 """
 
 from __future__ import annotations

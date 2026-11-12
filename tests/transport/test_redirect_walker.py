@@ -1,11 +1,6 @@
-"""Direct unit pins for ``RedirectWalker``: cookie capture lives in the walker
-(not the backends), one stream cap per hop, ``BodyTooLarge`` -> http_413 with a
-logical ``final_url`` (never the pinned IP), re-pin per redirect hop, and the
-declared-length gate passing through.
-
-These tests drive :class:`crawlutron.transport.redirect_walker.RedirectWalker`
-directly with doubles of the :class:`crawlutron.transport.Transport` protocol, so
-walker behaviour is pinned independent of either backend.
+"""Direct unit pins for ``RedirectWalker``: cookie capture lives in the walker, one stream cap per hop,
+``BodyTooLarge`` -> http_413 with a logical ``final_url``, re-pin per hop, and the declared-length gate
+passing through.
 """
 
 from __future__ import annotations
@@ -132,12 +127,9 @@ async def _run_walk(
 
 
 async def test_cookie_capture_lives_in_walker_not_backend():
-    """C1 structural pin: the walker plants each hop's Set-Cookie exactly once
-    per hop, and the transport never touches cookies.
-
-    Hop 1 is a 302 carrying Set-Cookie hop=1; hop 2 is terminal carrying
-    Set-Cookie hop=2. The walker defers hop 1's cookie until hop 2's pin
-    admits, then plants hop 2's cookie on hop 2's logical URL.
+    """C1 structural pin: the walker plants each hop's Set-Cookie exactly once per hop, and the transport
+    never touches cookies. Hop 1 is a 302 carrying Set-Cookie hop=1, hop 2 terminal carrying hop=2; hop
+    1's cookie defers until hop 2's pin admits.
     """
     result, transport, pin, store = await _run_walk(
         [_redirect("/y"), _terminal(headers={"set-cookie": "hop=2"})],
@@ -157,10 +149,9 @@ async def test_cookie_capture_lives_in_walker_not_backend():
 
 
 async def test_stream_cap_applied_once_per_hop_with_fresh_budget():
-    """The stream cap is applied per hop at ``max_bytes`` each: a redirect hop
-    reads no body, so the terminal hop receives a full fresh budget. When the
-    terminal hop's transport raises ``BodyTooLarge`` the walker maps it to
-    http_413 with a logical ``final_url`` -- never the pinned IP/connect URL."""
+    """The stream cap is applied per hop at ``max_bytes`` each: a redirect hop reads no body, so the
+    terminal hop receives a full fresh budget. When the terminal hop raises ``BodyTooLarge`` the
+    walker maps it to http_413 with a logical ``final_url`` -- never the pinned IP/connect URL."""
     max_bytes = 100
     result, transport, pin, store = await _run_walk(
         [_redirect("/y"), BodyTooLarge("streamed body exceeds cap")],
@@ -203,10 +194,9 @@ async def test_body_over_cap_breaches_on_first_hop():
 
 
 async def test_re_pin_per_redirect_hop():
-    """The pin rule is re-run for every redirect hop, each time with the
-    current (advanced) logical URL -- re-validation per hop, not a single
-    admission pinned to the original URL. Headers ride each re-pin within one
-    origin."""
+    """The pin rule is re-run for every redirect hop with the current (advanced) logical URL --
+    re-validation per hop, not a single admission pinned to the original URL. Headers ride each
+    re-pin within one origin."""
     result, transport, pin, store = await _run_walk(
         [_redirect("/y"), _terminal()],
         [_pinned(ORIGINAL), _pinned(TARGET)],
@@ -314,11 +304,9 @@ def _assert_terminal(
 
 
 async def test_unified_walker_one_verdict_per_chain():
-    """One chain yields one verdict: RedirectWalker is the single redirect-walk
-    implementation. A multi-hop chain with deferred cookies produces exactly one
-    terminal result -- no second walk implementation interposes a divergent
-    verdict. Each hop's Set-Cookie defers until the next pin admits, then plants
-    on the origin that sent it."""
+    """One chain yields one verdict: RedirectWalker is the single redirect-walk implementation --
+    a multi-hop chain with deferred cookies produces exactly one terminal result. Each hop's
+    Set-Cookie defers until the next pin admits, then plants on the origin that sent it."""
     result, transport, pin, store = await _run_walk(
         [
             _result(302, url=ORIGINAL, final_url=ORIGINAL, headers={"set-cookie": "hop=1"}, location="/y"),

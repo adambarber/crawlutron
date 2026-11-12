@@ -1,10 +1,6 @@
-"""Pinned cffi hop: the one-shot session must stay alive until the terminal body
-is fully consumed, then close exactly once on every exit path.
-
-The doubles model curl_cffi's real AsyncSession.close() semantics: closing the
-session tears down the curl multi and aborts the in-flight transfer, surfacing
-``STREAM_END`` and losing anything the queue has not yet drained. A double whose
-``close()`` leaves the stream draining would false-green this suite.
+"""Pinned cffi hop: the one-shot session must stay alive until the terminal body is fully consumed, then
+close exactly once on every exit path. The doubles model curl_cffi's real AsyncSession.close semantics:
+closing tears down the curl multi and aborts the in-flight transfer.
 """
 
 from __future__ import annotations
@@ -26,12 +22,9 @@ EXPECTED_BODY = b"the-entire-terminal-body-must-arrive-complete"
 
 
 class _AbortingQueue:
-    """A curl_cffi stream queue: chunks are produced until the transfer ends.
-
-    ``abort()`` models :meth:`curl_cffi.requests.AsyncSession.close()` tearing
-    down the curl multi: the in-flight transfer ends early, anything not yet
-    drained is lost, and ``STREAM_END`` surfaces immediately. A double that
-    ignores close timing would false-green this suite.
+    """A curl_cffi stream queue: chunks are produced until the transfer ends. ``abort()`` models
+    AsyncSession.close() tearing down the curl multi: the transfer ends early, undrained content is lost,
+    and a double ignoring close timing would false-green this suite.
     """
 
     def __init__(self, chunks: list[object], wedge: asyncio.Event | None = None) -> None:

@@ -1,7 +1,7 @@
-"""Anonymous IP-bucket metering (#668): the rate-limit law over the unguarded
-surfaces -- every ex-exempt GET, the docs GETs, /mcp anonymous traffic, the
-route-miss oracle, and any response with no matched route: one request-stage
-unit each."""
+"""Anonymous IP-bucket metering (#668): the rate-limit law over the unguarded surfaces -- every ex-exempt
+GET, the docs GETs, /mcp anonymous traffic, the route-miss oracle, and any response with no matched route
+-- one request-stage unit each.
+"""
 
 from __future__ import annotations
 
@@ -65,10 +65,10 @@ def test_no_client_ip_shares_one_fixed_bucket():
 
 
 def test_lru_eviction_is_bounded_and_never_resets_an_active_ip():
-    """Attacker IP rotation beyond the capacity evicts the QUIESCENT victim:
-    memory is bounded at capacity, and an ip touched DURING the flood (MRU
-    end on every touch) keeps its accumulated ledger -- its next touch still
-    refuses past budget, where a reset ledger would admit it."""
+    """Attacker IP rotation beyond capacity evicts the QUIESCENT victim: memory is bounded at capacity, and
+    an ip touched DURING the flood (MRU on every touch) keeps its accumulated ledger -- its next touch
+    still refuses past budget, where a reset ledger would admit it.
+    """
     _state, throttle = _throttle_on_arranged_time()
     assert _burst(throttle, "10.0.0.1", MAX_REQUESTS_PER_WINDOW) == 0
     for i in range(BUCKET_CAPACITY):
@@ -181,10 +181,10 @@ async def test_conforming_404s_keep_their_exact_shape():
 
 
 async def test_405_route_miss_is_metered_and_shape_unchanged_within_budget():
-    """F4 widened law (old pin: 405 shape only, metering unpinned -- the
-    enumeration-oracle gap the review named): a 405 on a known route keeps
-    its exact envelope shape within budget AND meters -- over budget the
-    refusal is JSON-RPC RATE_LIMITED-shaped... envelope here (REST surface)."""
+    """F4 widened law (old pin: 405 shape only, metering unpinned -- the enumeration-oracle gap): a 405 on a
+    known route keeps its exact envelope shape within budget AND meters -- over budget the refusal is the
+    JSON-RPC RATE_LIMITED-shaped envelope here (REST surface).
+    """
     process_state_reset()
     async with _app_client() as client:
         resp = await client.post("/health")
@@ -223,11 +223,10 @@ async def test_every_exempt_get_is_metered(path):
 
 
 async def test_healthcheck_hits_consume_the_same_ip_budget():
-    """Owner ruling option (a): /health and /ready meter on the SAME per-IP
-    anonymous budget as everything else (measured cadence: Docker HEALTHCHECK
-    interval=30s = 2 hits/window = 1.7% of 120 -- no collision, so no
-    budget-class ratchet row). A healthcheck from a busy host IP shares that
-    host's budget: the law, never a shadow exemption."""
+    """Owner ruling option (a): /health and /ready meter on the SAME per-IP anonymous budget as everything
+    else -- measured cadence 2 hits/window = 1.7% of 120, no collision, no ratchet row. A healthcheck from
+    a busy host IP shares that host's budget: the law, never a shadow exemption.
+    """
     process_state_reset()
     async with _app_client() as client:
         for _ in range(MAX_REQUESTS_PER_WINDOW):
@@ -253,13 +252,9 @@ async def test_validation_422_consumes_exactly_one_anonymous_unit():
 
 
 async def test_405_on_a_caller_metered_route_is_anonymously_metered():
-    """HIGH-1 (old pin: response-stage gated on scope['route'] ABSENCE -- but
-    FastAPI sets scope['route'] to the PARTIALLY-matched route on a method
-    mismatch, so OPTIONS /v1/crawl burst was a free method-enumeration oracle).
-    The law: every request consumes one anonymous unit at the REQUEST stage,
-    so a 405 -- caller's key or not -- burns the anonymous IP bucket; an
-    unmatched method is not caller work. Red-first: failed at MAX+1 (no 429)
-    before the fix."""
+    """HIGH-1. The law: every request consumes one anonymous unit at the REQUEST stage -- a 405, caller's key
+    or not, burns the anonymous IP bucket.
+    """
     process_state_reset()
     async with _app_client() as client:
         for _ in range(MAX_REQUESTS_PER_WINDOW):
@@ -271,10 +266,10 @@ async def test_405_on_a_caller_metered_route_is_anonymously_metered():
 
 
 async def test_oversized_body_413_consumes_exactly_one_anonymous_unit():
-    """HIGH-2: middleware ordering made the throttle INNERMOST, so the 413/403
-    short-circuited before it saw the request -- the docstring claimed rejected
-    requests consume budget and the code disagreed. Fix: the throttle is now
-    OUTERMOST (last registered). One 413 burns exactly one unit."""
+    """HIGH-2: middleware ordering made the throttle INNERMOST, so 413/403 short-circuited before it saw the
+    request -- the docstring claimed rejected requests consume budget and the code disagreed. Fix: the
+    throttle is now OUTERMOST; one 413 burns one unit.
+    """
     process_state_reset()
     async with _app_client() as client:
         await _fill_baseline(client)

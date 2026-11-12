@@ -1,8 +1,6 @@
-"""An unknowable memory ceiling fails CLOSED, not open (#C11).
-
-_total_system_ram returned 0 when sysconf has no answer (containers without
-/proc); read_memory_stats fell through to total_bytes=0 and the gate read 0.0
-usage -- fully open, forever: a misconfigured container ran ungated.
+"""An unknowable memory ceiling fails CLOSED, not open (#C11). _total_system_ram returned 0 when sysconf has
+no answer (containers without /proc); read_memory_stats fell through to total_bytes=0 and the gate read
+0.0 usage -- fully open, forever: a misconfigured container ran ungated.
 """
 
 import pytest

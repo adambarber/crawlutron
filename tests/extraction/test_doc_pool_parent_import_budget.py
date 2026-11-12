@@ -1,11 +1,6 @@
-"""The parent process must not pay markitdown's import cost on cold start (#484).
-
-The #6693 readiness handshake moved the *worker's* import into the acquisition
-budget, but ``crawlutron.extraction.doc_pool`` still imported ``MarkItDown`` at module
-level -- so the parent pays the full import on first touch of the pool module,
-even when no document is ever extracted. The child (which converts) imports it
-inside ``doc_worker_main`` before the ready signal, inside the acquisition
-budget.
+"""The parent process must not pay markitdown's import cost on cold start: ``crawlutron.extraction.doc_pool``
+imported ``MarkItDown`` at module level, so the parent paid the full import on first touch of the pool
+module even when no document is ever extracted.
 """
 
 import subprocess

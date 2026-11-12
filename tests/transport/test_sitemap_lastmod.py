@@ -53,13 +53,9 @@ async def _walk(body: str, max_urls: int) -> set[tuple[str, str | None]]:
 
 
 async def test_lastmod_association_is_linear_not_quadratic():
-    """4x the entries must not cost ~16x the work (#526).
-
-    Both walks are CPU-bound parsing/association work, so each side is warmed
-    then timed best-of-N on process_time. The base input is scaled so the
-    small baseline clears ~100ms -- a 24ms denominator flaked under the 10x
-    bound once (#611) -- and the best-of-N sampling keeps a descheduled
-    process from reading as super-linear.
+    """4x the entries must not cost ~16x the work. Both walks are CPU-bound parsing/association work, so each
+    side is warmed then timed best-of-N on process_time; the base input is scaled so the small baseline
+    clears ~100ms, and the best-of-N sampling keeps a descheduled process from reading as super-linear.
     """
     small_elapsed = await _warmed_best(_entries(_BASE), _BASE + 1)
     large_elapsed = await _warmed_best(_entries(_BASE * _GROW_STEP), _BASE * _GROW_STEP + 1)

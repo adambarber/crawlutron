@@ -1,8 +1,6 @@
-"""The service-layer seal: no module under ``crawlutron.service`` REACHES fastapi.
-
-DFS over ``scripts.module_graph`` edges (TYPE_CHECKING excluded) from every service
-module; fastapi/starlette reach names the offender. Wire lives in api/health only. As
-with the mcp seal, ``importlib.import_module`` string forms are outside this walk.
+"""The service-layer seal: no module under ``crawlutron.service`` REACHES fastapi. DFS over
+``scripts.module_graph`` edges from every service module; fastapi/starlette reach names the offender. Wire
+lives in api/health only.
 """
 
 from scripts.module_graph import build_graph

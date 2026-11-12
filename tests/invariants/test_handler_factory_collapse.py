@@ -1,8 +1,6 @@
-"""The handler-factory collapse invariant (#ARCH-1, data-driven dispatch off ToolSpec).
-
-Four factory families produced near-identical handle_* bindings. The collapse
-lands DoorBinding data on ToolSpec and ONE dispatch function, so the handler
-factories and their module-level handle_* aliases are gone.
+"""The handler-factory collapse invariant (#ARCH-1, data-driven dispatch off ToolSpec). Four factory families
+produced near-identical handle_* bindings. The collapse lands DoorBinding data on ToolSpec and ONE
+dispatch function, so the handler factories and their module-level handle_* aliases are gone.
 """
 
 from __future__ import annotations

@@ -1,20 +1,6 @@
-"""The MCP layering seal: no module under ``crawlutron.mcp`` REACHES ``crawlutron.api``.
-
-Reach is transitive: a one-level import scan misses ``mcp -> service -> api``, so
-this gate walks the runtime import graph (``scripts.module_graph``, TYPE_CHECKING
-edges excluded) from every ``crawlutron.mcp`` module and refuses any module that
-reaches ``crawlutron.api``, naming the witness chain's both endpoints. The boundary
-is import-STATEMENT reach (``ast.walk`` catches nested/lazy imports); a runtime
-``importlib.import_module`` string form is a different mechanism this gate does not
-scan — nothing under ``crawlutron/mcp/`` uses it. The MCP protocol layer imports
-service (and models/vocabulary/storage), never api, even transitively; api owns the
-HTTP-wire door (``api.mcp_router``).
-
-The residual table is sealed empty: every mcp->api edge that ever existed was
-drained by #849/C4 and #861, and the offender count is zero, so no exemption
-surface survives the sealed gate. `test_no_mcp_module_reaches_api()` is the
-unconditional assertion — it reds on any live mcp->api reach, naming both module
-endpoints. Weakening the seal is a defect, not a fix.
+"""The MCP layering seal: no module under ``crawlutron.mcp`` REACHES ``crawlutron.api``. Reach is transitive,
+so the gate walks the runtime import graph and names the witness chain's endpoints; string-form importlib
+is outside the walk.
 """
 
 from scripts.module_graph import build_graph

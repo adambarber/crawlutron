@@ -1,10 +1,6 @@
-"""Harness app middleware parity: every test-built ASGI app rides the service stack.
-
-Clause one is the derived enumeration (no hand list): any tests/ function that
-constructs a FastAPI app and mounts a crawlutron router is a harness app, and
-harness apps are built only in the one builder module. Clause two pins the
-builder's middleware chain to the service app's, walked from the built stack
-(decorator-form middleware is invisible to user_middleware), by dispatch identity.
+"""Harness app middleware parity: every test-built ASGI app rides the service stack. Clause one is the
+derived enumeration: any tests/ function constructing a FastAPI app and mounting a crawlutron router is a
+harness app, built only in the one builder module.
 """
 
 from __future__ import annotations
@@ -58,11 +54,10 @@ def _harness_functions() -> list[tuple[str, str]]:
 
 
 def _stack_opt_outs() -> list[tuple[str, str]]:
-    """Functions outside the builder module passing safety_stack=False.
-
-    The opt-out is the declared way to get a stack-less probe, but it is only
-    gate-visible when it lives in the builder module's own vocabulary: an
-    out-of-home caller opting out recreates the drift this gate kills."""
+    """Functions outside the builder module passing safety_stack=False: the opt-out is the declared way to
+    get a stack-less probe, but it is only gate-visible in the builder module's own vocabulary -- an
+    out-of-home caller opting out recreates the drift this gate kills.
+    """
     return _tests_functions(lambda node: _calls(node, "harness_app", keyword="safety_stack"))
 
 

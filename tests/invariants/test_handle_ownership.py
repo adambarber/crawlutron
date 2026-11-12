@@ -63,12 +63,9 @@ HANDLE_MINTING_IS_SINGLE_SOURCED = Rule(
 
 
 def _unbounded_domain_delay_writes(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """Flag direct writes to the domain's ``min_delay`` outside ``set_domain_min_delay``.
-
-    Only that setter clamps the robots Crawl-delay floor; a bare write
-    elsewhere drops an ``inf`` straight into ``asyncio.sleep``. #577 moved the
-    state into ``DomainState.min_delay``; the detector follows the field, not
-    the old map name.
+    """Flag direct writes to the domain's ``min_delay`` outside ``set_domain_min_delay``: only that setter
+    clamps the robots Crawl-delay floor, and a bare write elsewhere drops an ``inf`` straight into
+    ``asyncio.sleep``. The detector follows the field, not the old map name.
     """
     offenders: list[str] = []
     # __init__ is the field's zero default, not a floor installation; only the clamped setter may raise it.

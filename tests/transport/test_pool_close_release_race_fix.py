@@ -8,10 +8,10 @@ from tests._browser_doubles import GatedCloseRenderer, SpyRenderer, close_mid_sw
 
 
 async def test_release_during_sweep_await_window_never_double_closes():
-    """Two renderers, both released, then one re-acquired so the queue order
-    puts the idle one first in the sweep: a release landing while the sweep
-    awaits that first close must not let the sweep reach the released one too
-    -- the deferred close already owns it (#590)."""
+    """Two renderers, both released, then one re-acquired so the queue order puts the idle one first in the
+    sweep: a release landing while the sweep awaits that first close must not let the sweep reach the
+    released one too -- the deferred close already owns it (#590).
+    """
     first, second = GatedCloseRenderer("first"), GatedCloseRenderer("second")
     pool = BrowserPool.for_testing([first, second])
 
@@ -36,11 +36,7 @@ async def test_release_during_sweep_await_window_never_double_closes():
 
 
 async def test_invariant_no_pool_path_closes_a_renderer_twice():
-    """INVARIANT (#590): release() is exact over pool state -- a renderer whose
-    close is scheduled or done is owned by the ``_close_owned`` chokepoint and
-    can never be closed again by any pool path: no release re-schedules it, and
-    the sweep skips it. Exercised at every release timing, with the close gated
-    so ownership genuinely outlives close()'s return."""
+    """INVARIANT: release is exact over pool state."""
     for timing in (
         "before_close",
         "during_sweep",
@@ -73,12 +69,10 @@ async def test_invariant_no_pool_path_closes_a_renderer_twice():
 
 
 async def test_double_release_during_sweep_closes_once():
-    """#590: two releases of the SAME checked-out renderer while the sweep is
-    blocked on another renderer's gated close. Release #1 takes the retired
-    path (schedules the close, but the old code left the renderer in
-    ``_checked_out``); release #2 then takes the closing branch and schedules a
-    SECOND close. The retired release must also discard ``_checked_out`` so the
-    second release falls through to the not-checked-out refusal."""
+    """#590: two releases of the SAME checked-out renderer while the sweep is blocked on another renderer's
+    gated close -- release #1 takes the retired path, release #2 then schedules a SECOND close. The
+    retired release must also discard ``_checked_out`` so release #2 hits the not-checked-out refusal.
+    """
     target, blocker = GatedCloseRenderer("target"), GatedCloseRenderer("blocker")
     pool = BrowserPool.for_testing([target, blocker])
 

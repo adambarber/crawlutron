@@ -1,8 +1,6 @@
-"""S6 contract: the AST parse cache persists source under .pytest_cache/.
-
-parsed() persists each module's source under .pytest_cache/ast_parse/, keyed on
-(path, mtime_ns, size, py_version), so repeat sessions reuse it instead of
-re-reading the source file. The tree is parsed once per session.
+"""S6 contract: the AST parse cache persists source under .pytest_cache/. parsed() persists each module's
+source under .pytest_cache/ast_parse/, keyed on (path, mtime_ns, size, py_version), so repeat sessions
+reuse it instead of re-reading the source file. The tree is parsed once per session.
 """
 
 import ast

@@ -474,11 +474,10 @@ def test_doc_symbol_detector_spared_clean_references(tmp_path):
 
 
 def test_a_dotted_citation_naming_a_real_nested_module_passes(tmp_path):
-    """crawlutron.<pkg>.<module> cites a module file, not a symbol in one.
-
-    RED against the join bug: parts[1:-1] built <pkg>.py, refusing the true
-    module crawlutron/config/settings.py (found by the #677 reviewer's skill
-    prose). The last dotted part may BE the module."""
+    """crawlutron.<pkg>.<module> cites a module file, not a symbol in one. RED against the join bug:
+    parts[1:-1] built <pkg>.py, refusing the true module crawlutron/config/settings.py (found by the #677
+    reviewer's skill prose). The last dotted part may BE the module.
+    """
     (tmp_path / "probe.md").write_text(
         "Build it via ``crawlutron/config/settings.CrawlerSettings``; module: "
         "``crawlutron/config/settings``.\n",

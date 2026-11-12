@@ -91,9 +91,9 @@ def test_set_get_roundtrip():
 def test_set_writes_disk_outside_the_lock():
     """``set`` performs the disk write outside the commit lock, like ``aset``.
 
-    The write seam must not sit inside ``with self._lock:``: one slow disk
-    write would block every other cache operation. Asserted on the live
-    source so the two set twins cannot drift apart again."""
+    The write seam must not sit inside ``with self._lock:``: one slow disk write would block every other
+    cache operation. Asserted on the live source so the two set twins cannot drift apart again.
+    """
     offenders = calls_inside_self_lock("crawlutron/transport/content_cache.py", ("set",), ("write_data",))
     assert offenders == [], (
         "set() calls write_data inside the commit lock: one slow disk write "

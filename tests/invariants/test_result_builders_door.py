@@ -1,9 +1,4 @@
-"""The engine-result door: one builder, one declaring home (#314, 3.3).
-
-The suite builds a fake ``EngineCrawlResult`` through ``engine_result`` on
-``tests._result_builders`` and nothing else importable: any second import home
-for a builder name, or any new public constructor on the door, is the
-harness-sprawl defect this gate names by file and line."""
+"""The engine-result door: one builder, one declaring home."""
 
 from __future__ import annotations
 

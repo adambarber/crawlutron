@@ -1,8 +1,7 @@
 """Extraction test harnesses shared across the extraction test modules.
 
-Declared support surface (#476): moved verbatim from
-test_extraction.py / test_doc_pool.py so a sibling test module imports these
-from here, not from another test's internals.
+Declared support surface (#476): moved verbatim from test_extraction.py / test_doc_pool.py so a sibling
+test module imports these from here, not from another test's internals.
 """
 
 from __future__ import annotations

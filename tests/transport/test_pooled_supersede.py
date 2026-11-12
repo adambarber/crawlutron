@@ -315,11 +315,10 @@ class _NeverClosedClient:
 
 
 def _discard_probe(install: asyncio.AbstractEventLoop | None) -> list[bool]:
-    """Run discard_if_unowned_loop with ``install`` as the current loop
-    (None means none); return whether close was called.
-
-    The condition is installed for real via set_event_loop instead of
-    monkeypatching asyncio.get_event_loop, so the probe pins behavior."""
+    """Run discard_if_unowned_loop with ``install`` as the current loop (None means none); return whether
+    close was called. The condition is installed for real via set_event_loop instead of monkeypatching
+    asyncio.get_event_loop, so the probe pins behavior.
+    """
     from crawlutron.transport.pooled_clients import PooledClient, discard_if_unowned_loop
 
     closed: list[bool] = []

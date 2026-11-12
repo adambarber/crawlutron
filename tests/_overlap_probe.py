@@ -1,14 +1,6 @@
-"""Concurrency observation as one capability, not per-test machinery.
-
-Every test that must prove "these fetches ran concurrently" used to hand-roll
-the same racy observation: a shared set, a widest counter, and a sleep as the
-delivery mechanism — the sleep-race flake family (#829, #830, and the
-recursive-concurrency sighting). OverlapProbe replaces all of it: the widest
-in-flight point is recorded by arrival/departure accounting that never depends
-on scheduler timing, and `rendezvous_at` deterministically holds fetchers
-until n are in flight together, so the peak assertion bites without any sleep
-and a sequential regression fails on an expired bounded wait — a failure,
-never a hang (the 120s global law).
+"""Concurrency observation as one capability, not per-test machinery: the hand-rolled racy form is replaced
+by arrival/departure accounting and a deterministic rendezvous; a sequential regression fails on a bounded
+wait -- a failure, never a hang.
 """
 
 from __future__ import annotations
@@ -23,14 +15,9 @@ __all__ = ["OverlapProbe"]
 
 
 class OverlapProbe:
-    """Wrap an async callable and measure its true concurrent peak.
-
-    `peak()` returns the widest number of calls in flight at any moment —
-    recorded synchronously at arrival, so no scheduler interleaving can hide
-    overlap. With `rendezvous_at=n`, each wrapped call parks (bounded) until n
-    calls are in flight together; the fetch still completes honestly either
-    way, so a sequential regression surfaces as a peak-assert failure, not an
-    error.
+    """Wrap an async callable and measure its true concurrent peak: ``peak()`` is the widest number of calls
+    in flight, recorded synchronously at arrival so no interleaving can hide overlap. With
+    ``rendezvous_at=n`` each call parks (bounded) until n are in flight together.
     """
 
     def __init__(self, *, rendezvous_at: int = 0, rendezvous_seconds: float = 0.5) -> None:
@@ -46,11 +33,9 @@ class OverlapProbe:
         *,
         participate: Callable[..., bool] | None = None,
     ) -> Callable[..., Awaitable[T]]:
-        """Instrument ``answer``; hand the wrapped callable to the code under test.
-
-        ``participate(args...)`` gates which calls park at the rendezvous (e.g.
-        the seed fetch must not: nothing can join it until it returns). All
-        calls record the peak regardless.
+        """Instrument ``answer``; hand the wrapped callable to the code under test. ``participate(args...)``
+        gates which calls park at the rendezvous -- the seed fetch must not, since nothing can join it
+        until it returns; all calls record the peak regardless.
         """
 
         async def observed(*args: object, **kwargs: object) -> T:

@@ -1,8 +1,7 @@
 """cffi doubles: a recording session and a stream-shaped response.
 
-Shared by the cffi visibility and streaming tests; the queue shape matches the
-production drain (`_drain_capped_stream`), so a double that passes here keeps
-the drain contract honest.
+Shared by the cffi visibility and streaming tests; the queue shape matches the production drain
+(`_drain_capped_stream`), so a double that passes here keeps the drain contract honest.
 """
 
 from __future__ import annotations

@@ -1,13 +1,4 @@
-"""The scheduler package reads ONE clock: the injected one (#580).
-
-#580: cooldowns stamped wall time while breakers ran monotonic -- three clock
-families in one state object, and a partially dead ``clock=`` knob. Three
-rules foreclose the category (one per sweep, so each bite's message names its
-own walk): no clock read anywhere in the ``scheduler*.py`` modules except the
-sanctioned constructor clock defaults. The law covers the ``time`` module
-family BY NAME (any member, any alias); ``datetime`` is a second family the
-coverage test records but does not sweep (#580 cycle 3).
-"""
+"""The scheduler package reads ONE clock: the injected one."""
 
 from __future__ import annotations
 
@@ -72,10 +63,10 @@ _TIME_CLOCK_MEMBERS = frozenset(
 
 
 def _mentions_time_module(tree: ast.Module) -> bool:
-    """Whether the module's CODE binds or reads a clock family: an import of
-    ``time`` or ``datetime``, or any Name rooted at one. The one-timeline law
-    sweeps the time family by name; datetime is recorded as a boundary (a
-    datetime pressure clock in scheduler* would need its own sweep)."""
+    """Whether the module's CODE binds or reads a clock family: an import of ``time`` or ``datetime``, or any
+    Name rooted at one. The one-timeline law sweeps the time family by name; datetime is recorded as a
+    boundary.
+    """
     return any(
         (
             isinstance(node, ast.Import)
@@ -94,13 +85,10 @@ def _mentions_time_module(tree: ast.Module) -> bool:
 
 
 def test_the_governing_glob_covers_every_transport_module_mentioning_time():
-    """Coverage arming (adversarial pass 2, hole 4; rglob pass 3): a module that
-    escapes the ``scheduler*`` set -- renamed, or in a NESTED package -- while
-    touching a clock family fails here; the rule's reach is proved, not
-    assumed. The doctrine delegates justified wall reads (cookie-jar RFC 6265
-    epochs, HTTP-date instants, HMAC windows, persisted stamps) to named
-    consumers; the one-timeline law governs the DOMAIN PRESSURE state (the
-    scheduler*.py modules), never those."""
+    """Coverage arming (adversarial pass 2, hole 4; rglob pass 3): a module that escapes the ``scheduler*``
+    set -- renamed, or in a NESTED package -- while touching a clock family fails here. Justified wall
+    reads are delegated to named consumers; the law governs the DOMAIN PRESSURE state only.
+    """
     governed = {p.name for p in _SCHEDULER_PACKAGE} | _DELEGATED_WALL_CONSUMERS
     escapees = [
         p.relative_to(REPO_ROOT)
@@ -170,11 +158,10 @@ def _from_imported_clocks(tree: ast.Module) -> set[str]:
 
 
 def _clock_call_offenders(tree: ast.Module, path: pathlib.Path) -> Iterator[str]:
-    """Every ``time.<member>(...)`` (or aliased-root) call in the WHOLE module
-    AST (cycle 2: module-level calls outside any def were ungoverned); the
-    sanctioned clock defaults are exempt -- the default EXPRESSION only, by
-    identity, never the enclosing body (cycle 3: a line-span exemption blessed
-    a raw mono call inside TokenBucket.__init__'s body)."""
+    """Every ``time.<member>(...)`` (or aliased-root) call in the WHOLE module AST (cycle 2: module-level
+    calls outside any def were ungoverned); sanctioned clock defaults are exempt -- the default EXPRESSION
+    only, by identity, never the enclosing body.
+    """
     if path not in _SCHEDULER_PACKAGE:
         return
     aliased_roots = _aliased_time_roots(tree)
@@ -214,11 +201,10 @@ def _from_import_offenders(tree: ast.Module, path: pathlib.Path) -> Iterator[str
 
 
 def _wall_default_offenders(tree: ast.Module, path: pathlib.Path) -> Iterator[str]:
-    """Clock defaults of the wrong family: a wall default is the original #580
-    defect in two tokens, invisible to any call-site sweep. Covers both
-    spellings -- the dotted ``time.time`` and the from-imported alias used as
-    the default (``from time import time as wall; def f(clock=wall)``), which
-    hid from BOTH sweeps (cycle 4, hole 2)."""
+    """Clock defaults of the wrong family: a wall default is the original #580 defect in two tokens,
+    invisible to any call-site sweep. Covers both spellings -- the dotted ``time.time`` and the
+    from-imported alias used as the default.
+    """
     if path not in _SCHEDULER_PACKAGE:
         return
     imported = _from_imported_clocks(tree)

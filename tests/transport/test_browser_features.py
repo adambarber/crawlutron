@@ -189,9 +189,9 @@ class TestBrowserReuse:
     async def test_a_transient_failure_retries_on_the_same_browser(self):
         """C3: a page-level exception is an attempt lifecycle, not a browser one.
 
-        The retry loop must never tear down the browser between attempts: the
-        driver's recycle bound and shutdown own that, so attempt 2 renders on the
-        browser attempt 1 launched, entered exactly once."""
+        The retry loop must never tear down the browser between attempts: the driver's recycle bound and
+        shutdown own that, so attempt 2 renders on the browser attempt 1 launched, entered exactly once.
+        """
         browser, cm, renderer = _reuse_renderer()
         browser.fail_first_goto = TimeoutError("navigation timeout")
         result = await _render(renderer)

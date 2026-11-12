@@ -1,10 +1,6 @@
-"""The pydantic default statement must sit where a checker can see it.
-
-The type chargers read a default written inside ``Field(...)`` as "no default",
-so such a model looks required to every constructor call -- and where the
-assignment repeats the default, the two statements of one value can drift.
-No checker surfaces this (it is a structural hazard, not a type error); this
-AST walk enforces the one statement of a default: on the assignment.
+"""The pydantic default statement must sit where a checker can see it: a default written inside ``Field``
+reads as "no default", so the model looks required to every constructor call, and a repeated default on
+the assignment can drift from it.
 """
 
 from __future__ import annotations

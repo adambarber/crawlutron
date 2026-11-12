@@ -1,8 +1,6 @@
-"""The one cookie-retry chain scenario the cffi-retry tests share.
-
-Both the cookie-bootstrap contract and the retry's attempt-counting drive the
-same flow -- cookies planted, http denies, cffi succeeds only WITH the cookie,
-browser renders -- so it is written once (jscpd's zero clone-pairs) here.
+"""The one cookie-retry chain scenario the cffi-retry tests share. Both the cookie-bootstrap contract and the
+retry's attempt-counting drive the same flow -- cookies planted, http denies, cffi succeeds only WITH the
+cookie, browser renders -- so it is written once (jscpd's zero clone-pairs) here.
 """
 
 from collections.abc import Callable

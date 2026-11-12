@@ -274,9 +274,8 @@ def _requeue_context():
 def test_requeue_honors_the_threaded_known_set():
     """A threaded ``known`` (#548) is used as-is, not re-derived (#558).
 
-    The dead re-derivation wiped the threaded set on every transient retry
-    -- an O(visited) backslide the caller's discard-then-requeue sequencing
-    accidentally masked.
+    The dead re-derivation wiped the threaded set on every transient retry -- an O(visited) backslide the
+    caller's discard-then-requeue sequencing accidentally masked.
     """
     job = _requeue_job(
         policy=read_policy(crawl_policy(limits={"max_pages": 5})), visited=["https://far.test/"]

@@ -1,8 +1,7 @@
 """Typed error hierarchy for the crawlutron service facade.
 
-Every service refusal carries a wire envelope ``{code, message, details}`` and an
-HTTP status. The hierarchy mirrors the status families the service emits so
-callers can catch by family or by exact status.
+Every service refusal carries a wire envelope ``{code, message, details}`` and an HTTP status. The
+hierarchy mirrors the status families the service emits so callers can catch by family or by exact status.
 """
 
 from __future__ import annotations

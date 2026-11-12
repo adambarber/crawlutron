@@ -1,10 +1,5 @@
-"""The shared CI-contract surface: paths, constants and config parsing.
-
-Declared support surface (#476): the pre-commit/CI/hook/Makefile contract test
-modules import these from here, not from each other's internals. Bodies moved
-verbatim from test_ci_enforcement.py; the jscpd fixture config migrated here
-when its single consumer (test_makefile_contract.py) outlived the module that
-first owned it.
+"""The shared CI-contract surface: paths, constants and config parsing (#476). Contract modules import these
+from here, not from each other's internals; bodies moved verbatim from test_ci_enforcement.py.
 """
 
 from __future__ import annotations

@@ -1,9 +1,6 @@
-"""The URL-secrets law, as one zero-exemption AST gate over the whole app tree.
-
-Every rule here sweeps ``crawlutron/`` with no allowlist, no budget and no
-per-file exclusions; a new violation of any clause fails the run naming
-file+line. The bite proofs are synthetic modules planted at the chokepoints'
-own paths, so each injection is shown to fire where the real sink lives."""
+"""The URL-secrets law, as one zero-exemption AST gate over the whole app tree: every rule here sweeps
+``crawlutron/`` with no allowlist, no budget and no per-file exclusions.
+"""
 
 from __future__ import annotations
 
@@ -53,12 +50,9 @@ def _is_target_or_normalized(annotation: ast.expr | None) -> bool:
 
 
 def _raw_webhook_url_param_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """Flag any production parameter named ``webhook_url`` that holds raw ``str``.
-
-    Outside the two admission edges, the delivery POST site and the persistence
-    owner, the sanctioned shape is WebhookTarget / NormalizedUrl / None; a
-    ``str`` (or untyped) parameter is a sink the type system cannot stop
-    receiving a credential-carrying URL.
+    """Flag any production parameter named ``webhook_url`` that holds raw ``str``. Outside the two admission
+    edges, the delivery POST site and the persistence owner, the sanctioned shape is WebhookTarget /
+    NormalizedUrl / None -- a ``str`` parameter is a sink the type system cannot guard.
     """
     if relative_posix(path) in _SANCTIONED_RAW_STR_MODULES:
         return []
@@ -234,11 +228,9 @@ _MASK_TOKENS = ("[redacted]", "***", "*****")
 
 
 def _manual_masking_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """Flag hand-rolled credential masking outside the chokepoint.
-
-    A two-arg ``.replace(...)`` whose arguments read as a secret name or a
-    mask token is per-site string munging -- the law says redact_url, not a
-    site-local mask that drifts from the chokepoint's bypass shapes.
+    """Flag hand-rolled credential masking outside the chokepoint: a two-arg ``.replace(...)`` whose
+    arguments read as a secret name or a mask token is per-site string munging -- the law says redact_url,
+    not a site-local mask.
     """
     if relative_posix(path) == _REDACTION_CHOKEPOINT:
         return []

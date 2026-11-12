@@ -1,8 +1,7 @@
 """The one module-graph reach walk both layering seals run.
 
-``_reachable`` (DFS over ``scripts.module_graph``'s edge map) and the sealed-vs-
-forbidden offender sweep live here so sibling seals cannot drift into divergent
-walks; each seal declares only its layers.
+``_reachable`` (DFS over ``scripts.module_graph``'s edge map) and the sealed-vs- forbidden offender sweep
+live here so sibling seals cannot drift into divergent walks; each seal declares only its layers.
 """
 
 from __future__ import annotations

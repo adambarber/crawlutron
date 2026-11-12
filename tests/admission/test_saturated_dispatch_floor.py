@@ -1,9 +1,6 @@
-"""The sync batch's saturated-dispatch floor (#618).
-
-Under a saturated gate the floor is the only progress mechanism: a floor of one
-forces a full re-bucket + admit cycle per dispatched job, so a large batch under
-memory pressure takes one sequential pass per task -- the amplification the
-issue names. The floor dispatches a fraction of the HTTP ramp per pass.
+"""The sync batch's saturated-dispatch floor (#618): under a saturated gate the floor is the only progress
+mechanism -- a floor of one forces a full re-bucket + admit cycle per dispatched job, one sequential pass
+per task. The floor dispatches a fraction of the HTTP ramp per pass.
 """
 
 from __future__ import annotations

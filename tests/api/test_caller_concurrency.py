@@ -8,11 +8,9 @@ from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
 
 
 class TestCallerConcurrencyTrackerLocks:
-    """#665: per-caller slot locks persist for the tracker's lifetime.
-
-    The admit path serializes count->insert through the caller's lock; a
-    release must never evict it, or a concurrent admit that already fetched
-    the lock ends up serialized against a DIFFERENT lock than the next admit.
+    """#665: per-caller slot locks persist for the tracker's lifetime. The admit path serializes
+    count->insert through the caller's lock; a release must never evict it, or a concurrent admit that
+    already fetched the lock ends up serialized against a DIFFERENT lock than the next admit.
     """
 
     def test_lock_identity_is_stable_across_release_to_zero(self):

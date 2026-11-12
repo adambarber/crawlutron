@@ -37,11 +37,9 @@ def scan(base: pathlib.Path, *, include_gate: bool = False) -> dict[str, int]:
 
 
 def overlong(root: str) -> dict[str, int]:
-    """Every overlong file under one declared repo root, as ``{file: lines}``.
-
-    ``scripts`` is the one root with an extensionless helper every hook routes
-    through, so it is swept with the gate included. The root walk goes through
-    the fail-loud helper: a missing root is a gate defect, never an empty scan.
+    """Every overlong file under one declared repo root, as ``{file: lines}``. ``scripts`` is the one root
+    with an extensionless helper every hook routes through, so it is swept with the gate included; the
+    root walk goes through the fail-loud helper -- a missing root is a gate defect, never an empty scan.
     """
     candidates = list(declared_root_files(root))
     if root == "scripts":
@@ -77,11 +75,9 @@ def test_scan_includes_the_extensionless_gate_helper(tmp_path: pathlib.Path) -> 
 
 
 def test_every_python_bearing_root_is_scanned_by_the_duplication_gate() -> None:
-    """A top-level dir holding ``*.py`` that TREE_ROOTS misses is invisible to jscpd.
-
-    crawlutron_sdk escaped exactly this way: a later cohort added the tree and
-    no gate compared the scanned roots to the trees that exist. Same derivation
-    as the budget row pin above -- derived by walking REPO_ROOT, never hand-listed.
+    """A top-level dir holding ``*.py`` that TREE_ROOTS misses is invisible to jscpd -- crawlutron_sdk escaped
+    exactly this way (a later cohort added the tree and no gate compared scanned roots to existing trees).
+    Same derivation as the budget row pin: derived by walking, never hand-listed.
     """
     from scripts.jscpd_gate import TREE_ROOTS
 

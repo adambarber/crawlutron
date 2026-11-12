@@ -1,14 +1,6 @@
-"""The MCP framework-freeness seal: no module under ``crawlutron.mcp`` imports
-fastapi or starlette.
-
-An AST scan of every ``crawlutron/mcp`` source catches the import however it is
-spelled: ``from fastapi import X`` (any alias), ``import fastapi.y``, and local
-rebinds of an imported name. Attribute-form use (``fastapi.HTTPException``)
-requires the import first, so the import scan is the reach chokepoint. The scan
-is one-level by design: a transitive mcp -> non-mcp -> fastapi chain is sealed by
-the service-layer seal's module-graph work (see the issue_871 join point) once
-the service/health boundary stops reaching fastapi; mcp-internal chains are
-covered because every mcp module is scanned directly.
+"""The MCP framework-freeness seal: no module under ``crawlutron.mcp`` imports fastapi or starlette. The AST
+scan catches the import however spelled; attribute-form use requires the import first, so the import scan
+is the reach chokepoint.
 """
 
 from __future__ import annotations
