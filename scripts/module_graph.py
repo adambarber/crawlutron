@@ -12,7 +12,21 @@ import pathlib
 import sys
 from collections import defaultdict
 
-APP_ROOT = pathlib.Path(__file__).resolve().parent.parent / "crawlutron"
+from tests._walk_primitives import REPO_ROOT, SCAN_ROOTS
+
+#: The package under analysis, validated against the derived scan surface so a layout move
+#: raises here instead of resolving a stale path the seals would green over.
+_PACKAGE = "crawlutron"
+
+
+def _app_root() -> pathlib.Path:
+    """The package's source dir, derived from SCAN_ROOTS membership (never a bare path)."""
+    if _PACKAGE not in SCAN_ROOTS:
+        raise AssertionError(f"package {_PACKAGE!r} absent from scan surface: {SCAN_ROOTS}")
+    return REPO_ROOT / _PACKAGE
+
+
+APP_ROOT = _app_root()
 STDLIB = set(sys.stdlib_module_names)
 
 
@@ -93,7 +107,13 @@ def _is_type_checking_guard(node: ast.If) -> bool:
 def build_graph() -> tuple[dict[str, set[str]], dict[str, set[str]]]:
     modules: dict[str, set[str]] = {}
     importers: dict[str, set[str]] = defaultdict(set)
-    for path in sorted(APP_ROOT.rglob("*.py")):
+    paths = sorted(APP_ROOT.rglob("*.py"))
+    if not paths:
+        raise AssertionError(
+            f"module graph walked zero modules under {APP_ROOT}: the layering seals "
+            "would green over an empty graph (vacuity kill-switch)"
+        )
+    for path in paths:
         name = _module_name(path)
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))

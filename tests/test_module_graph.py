@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import ast
 
+import pytest
+
 from scripts import module_graph
 from scripts.module_graph import _imports
 
@@ -61,6 +63,16 @@ def test_a_package_dir_with_only_subpackages_still_resolves(tmp_path, monkeypatc
     (nested / "leaf.py").write_text("x = 1\n", encoding="utf-8")
     monkeypatch.setattr(module_graph, "APP_ROOT", tmp_path / "crawlutron")
     assert module_graph._resolve("crawlutron.pkg") == "crawlutron.pkg"
+
+
+def test_a_vacuous_app_root_is_refused_not_greened(tmp_path, monkeypatch) -> None:
+    """The seal kill-switch: an empty APP_ROOT builds no graph, and build_graph raises,
+    so the MCP/service layering seals cannot green over a scanned-nothing walk."""
+    empty = tmp_path / "crawlutron"
+    empty.mkdir()
+    monkeypatch.setattr(module_graph, "APP_ROOT", empty)
+    with pytest.raises(AssertionError, match="walked zero modules"):
+        module_graph.build_graph()
 
 
 def test_a_package_form_import_records_the_edge_into_the_package() -> None:
