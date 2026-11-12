@@ -121,7 +121,13 @@ def _numeric_knob_offenders(extra_entries: list[type[BaseModel]] | None = None) 
                 continue
             has_bound, inf_nan_disabled = _constraints(field_info)
             source_file, line = _field_lineno(cls, field_name)
-            label = f"{source_file.relative_to(pathlib.Path.cwd())}:{line} {cls.__name__}.{field_name}"
+            # cwd and __file__ can differ in spelling on a firmlink checkout; a label
+            # must never crash the walk, so fall back to the exact absolute path.
+            try:
+                label_rel = source_file.relative_to(pathlib.Path.cwd())
+            except ValueError:
+                label_rel = source_file
+            label = f"{label_rel}:{line} {cls.__name__}.{field_name}"
             if is_float and not (has_bound and inf_nan_disabled):
                 missing = [] if has_bound else ["a floor bound"]
                 if not inf_nan_disabled:
