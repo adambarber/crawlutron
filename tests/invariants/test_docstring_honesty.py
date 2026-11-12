@@ -62,9 +62,22 @@ def _root_bindings(tree: ast.Module) -> set[str]:
 
 def _derives_scope(source: str, tree: ast.Module) -> bool:
     """True when the gate's walk is rooted in the derived surface, or honestly rooted elsewhere: a
-    single-root walk makes a single-root claim TRUE -- dishonesty is a claim the walk cannot honor
-    (multi-root claim, narrower walk). Derives from SCAN_ROOTS, or walks the claimed roots."""
-    if "SCAN_ROOTS" in source:
+    single-root walk makes a single-root claim TRUE -- dishonesty is a claim the walk cannot honor.
+    Derivation is an AST FACT (import or name reference), never a substring: the mention bypass."""
+    derives = any(
+        isinstance(node, ast.ImportFrom)
+        and node.module == "tests._walk_primitives"
+        and any(alias.name == "SCAN_ROOTS" for alias in node.names)
+        or (isinstance(node, ast.Name) and node.id == "SCAN_ROOTS" and isinstance(node.ctx, ast.Load))
+        or (
+            isinstance(node, ast.Attribute)
+            and node.attr == "SCAN_ROOTS"
+            and isinstance(node.value, ast.Name)
+            and node.value.id in {"walk_primitives", "wp"}
+        )
+        for node in ast.walk(tree)
+    )
+    if derives:
         return True
     claimed: set[str] = set()
     for doc in _docstrings(tree):
@@ -126,3 +139,18 @@ def test_path_references_are_not_scope_claims() -> None:
     subtree = '"""Nothing in ``crawlutron/models`` is a grab-bag."""\nx = 1\n'
     assert _claimed_roots(reference) == set()
     assert _claimed_roots(subtree) == set()
+
+
+def test_a_prose_mention_of_the_constant_is_not_a_derivation() -> None:
+    """The mention-shaped bypass (review Attack 1): a gate with the historical lie shape and a
+    docstring that merely SAYS "SCAN_ROOTS" must stay an offender -- derivation is an AST binding
+    (import or name reference), never a substring test."""
+    bypass = (
+        '"""Sweeps crawlutron/, tests/ and scripts/ for violations. The scope law (SCAN_ROOTS)'
+        ' says every gate must derive its surface."""\nx = 1\n'
+    )
+    tree = ast.parse(bypass)
+    assert _claimed_roots(bypass) == {"crawlutron", "tests", "scripts"}
+    assert _derives_scope(bypass, tree) is False, (
+        "a prose mention of SCAN_ROOTS counted as a derivation -- the lie walks"
+    )
