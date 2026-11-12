@@ -5,6 +5,9 @@ GET, the docs GETs, /mcp anonymous traffic, the route-miss oracle, and any respo
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+
 import httpx
 import pytest
 
@@ -102,6 +105,23 @@ def _app_client() -> httpx.AsyncClient:
 
     transport = httpx.ASGITransport(app=service_app())
     return httpx.AsyncClient(transport=transport, base_url="http://test")
+
+
+@asynccontextmanager
+async def _auth_app_client() -> AsyncGenerator[httpx.AsyncClient, None]:
+    """An app configured with an operator token, stores closed on teardown (#914)."""
+    from crawlutron.config.settings import CrawlerSettings
+    from crawlutron.service.store_shutdown import close_app_stores
+    from crawlutron_rest.main import app as _module_app
+    from crawlutron_rest.main import create_app
+
+    app = create_app(CrawlerSettings.from_mapping({"CRAWLUTRON_KEY_ADMIN_TOKEN": "test-admin-token"}))
+    try:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            yield client
+    finally:
+        await close_app_stores(app, _module_app)
 
 
 async def test_docs_served_and_metered():
@@ -317,3 +337,81 @@ async def test_every_docs_surface_is_metered(path):
         for _ in range(MAX_REQUESTS_PER_WINDOW):
             await client.get(path)
         assert (await client.get(path)).status_code == 429
+
+
+async def test_operator_token_metrics_never_ip_throttled():
+    """#914 row 1: an operator-token /metrics scrape is the operator's own caller,
+    so it must never strand on the shared anonymous IP bucket (the declared set
+    omits /metrics -- it is operator-guarded, not anonymous-metered)."""
+    process_state_reset()
+    async with _auth_app_client() as client:
+        # Anonymous scrapes fill the shared IP bucket to the ceiling.
+        for _ in range(MAX_REQUESTS_PER_WINDOW):
+            resp = await client.get("/metrics")
+            assert resp.status_code == 200, resp.status_code
+        # The operator scrape must ride the token, not the anonymous bucket.
+        operator = await client.get("/metrics", headers={"x-api-key": "test-admin-token"})
+        assert operator.status_code == 200, operator.text
+
+
+async def test_anonymous_metrics_still_meters():
+    """#914 row 2: a genuine anonymous /metrics (no token) stays on the IP bucket
+    -- an overactive anonymous scraper still 429s."""
+    process_state_reset()
+    async with _auth_app_client() as client:
+        for _ in range(MAX_REQUESTS_PER_WINDOW):
+            resp = await client.get("/metrics")
+            assert resp.status_code == 200, resp.status_code
+        refused = await client.get("/metrics")
+        assert refused.status_code == 429, refused.text
+        assert refused.json()["code"] == "anonymous_throttled"
+
+
+async def test_operator_token_health_still_meters():
+    """#914 row 3: the operator-token skip is scoped to /metrics only; /health is
+    anonymous-metered (in ANONYMOUS_METERED), so an operator token does not free it."""
+    process_state_reset()
+    async with _auth_app_client() as client:
+        for _ in range(MAX_REQUESTS_PER_WINDOW):
+            resp = await client.get("/health", headers={"x-api-key": "test-admin-token"})
+            assert resp.status_code == 200, resp.status_code
+        refused = await client.get("/health", headers={"x-api-key": "test-admin-token"})
+        assert refused.status_code == 429, refused.text
+        assert refused.json()["code"] == "anonymous_throttled"
+
+
+async def test_credentialed_caller_route_still_burns_ip_bucket():
+    """#914 row 4: caller-guarded routes are NOT un-metered by a credential -- the
+    IP bucket is the request-count backstop, so a credentialed request to a
+    non-/metrics caller-keyed path still consumes an anonymous unit."""
+    process_state_reset()
+    await _call_through("/v1/crawl", {"x-api-key": "test-admin-token"})
+    # One credentialed caller-keyed request consumed exactly one IP-bucket unit.
+    assert shared_anonymous_throttle().residence() == 1
+
+
+async def _call_through(path: str, headers: dict[str, str]) -> None:
+    """Drive the anonymous middleware with a built request and a pass-through tail."""
+    from starlette.requests import Request
+
+    scope = {
+        "type": "http",
+        "http_version": "1.1",
+        "method": "POST" if path != "/metrics" else "GET",
+        "path": path,
+        "raw_path": path.encode(),
+        "headers": httpx.Headers(headers).raw,
+        "client": ("10.0.0.9", 1234),
+        "server": ("test", 80),
+        "scheme": "http",
+        "query_string": b"",
+        "root_path": "",
+    }
+    request = Request(scope)
+
+    async def call_next(_request: Request) -> str:
+        return "passed"
+
+    from crawlutron_rest.api.anonymous_throttle import throttle_anonymous_surfaces
+
+    assert await throttle_anonymous_surfaces(request, call_next) == "passed"

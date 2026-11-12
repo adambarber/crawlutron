@@ -98,16 +98,21 @@ register_shared_meter(__name__, _SHARED)
 #: docs pages; exempt GETs meter through the middleware (ANONYMOUS_METERED).
 METERED_PREFIXES = ("/docs", "/redoc")
 METERED_EXACT = ("/mcp",)
+#: The operator-guarded surface: a credentialed scrape is the operator's caller,
+#: never the anonymous bucket (the declared ANONYMOUS_METERED set omits it).
+_OPERATOR_METERED_EXACT = ("/metrics",)
 
 
 async def throttle_anonymous_surfaces(request, call_next):
     """HTTP middleware meter over every surface with no caller to key on.
 
-    Registered OUTERMOST, counting at the REQUEST stage: every request consumes
-    one anonymous unit (413/403 included); /mcp with a credential skips (#664).
+    Registered OUTERMOST, counting at the REQUEST stage: /mcp and the operator
+    /metrics scrape skip only when a credential is presented (#664/#914).
     """
     path = request.url.path
-    if path in METERED_EXACT and _presents_credential(request):
+    credentialed = _presents_credential(request)
+    operator_surface = path in _OPERATOR_METERED_EXACT
+    if credentialed and (path in METERED_EXACT or operator_surface):
         return await call_next(request)
     try:
         shared_anonymous_throttle().check(_remote(request))
