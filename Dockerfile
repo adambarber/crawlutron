@@ -183,15 +183,15 @@ COPY --from=camoufox-binary /camoufox-bundle /home/appuser/.cache/camoufox
 # mount is never persisted into the image), which is the whole requirement.
 RUN /app/.venv/bin/python -m fpgen fetch --decompress
 
-# Copy application code. Post-Wave-A the importable trees live under packages/ and
-# the root crawlutron_sdk/: all four must be present at /app to resolve the CMD's
-# `uvicorn crawlutron_rest.main:app` with PYTHONPATH=/app. The packages/core
-# wheel ships both the `crawlutron` and `admission` import names, so both trees
-# must land at /app (pressure_sizing imports ``admission`` directly).
+# Copy application code. Post-Wave-A the importable trees all live under packages/:
+# four must be present at /app to resolve the CMD's `uvicorn crawlutron_rest.main:app`
+# with PYTHONPATH=/app. The packages/core wheel ships both the `crawlutron` and
+# `admission` import names, so both trees land at /app (pressure_sizing imports
+# ``admission`` directly).
 COPY --chown=appuser:appuser packages/core/crawlutron /app/crawlutron
 COPY --chown=appuser:appuser packages/core/admission /app/admission
 COPY --chown=appuser:appuser packages/rest/crawlutron_rest /app/crawlutron_rest
-COPY --chown=appuser:appuser crawlutron_sdk /app/crawlutron_sdk
+COPY --chown=appuser:appuser packages/sdk/crawlutron_sdk /app/crawlutron_sdk
 
 # uvicorn applies its logging config in ``Config.__init__`` -- BEFORE the app
 # is imported -- so the service's JSON sink must exist by then or uvicorn's own

@@ -16,21 +16,18 @@
 # The sources, from the Dockerfile's own COPY lines:
 #   pyproject.toml            builder, camoufox-binary, development
 #   uv.lock                   builder, camoufox-binary, development
-#   packages/                 runtime (crawlutron + admission + crawlutron_rest)
-#   crawlutron_sdk/           runtime
+#   packages/                 runtime (crawlutron + admission + crawlutron_rest + crawlutron_sdk)
 #   uvicorn-log-config.json   runtime
 #   Dockerfile                the build itself
 *
 !packages/
 !packages/**
-!crawlutron_sdk/
-!crawlutron_sdk/**
 !pyproject.toml
 !uv.lock
 !uvicorn-log-config.json
 !Dockerfile
 
-# `!packages/**` / `!crawlutron_sdk/**` re-admit local bytecode sitting beside the
+# `!packages/**` re-admits local bytecode sitting beside the
 # source, which the leading `*` had already excluded, so it has to be excluded again
 # after the negation. These are stale .pyc files for sources edited since they were written.
 **/__pycache__/
