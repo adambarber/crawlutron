@@ -7,6 +7,7 @@ import pathlib
 from collections.abc import Iterator
 
 from tests.chokepoint_walks import REPO_ROOT, functions, offender_at
+from tests.invariants._clock_family import dotted_name
 from tests.invariants._proof_paths import ELSEWHERE as _ELSEWHERE
 from tests.rules import Bites, Registry, Rule, Silent
 
@@ -102,24 +103,10 @@ def test_the_governing_glob_covers_every_transport_module_mentioning_time():
     )
 
 
-def _dotted(node: ast.expr | None) -> str | None:
-    """``time.monotonic`` as a dotted string; None for anything else."""
-    if not isinstance(node, ast.Attribute):
-        return None
-    parts = []
-    while isinstance(node, ast.Attribute):
-        parts.append(node.attr)
-        node = node.value
-    if isinstance(node, ast.Name):
-        parts.append(node.id)
-        return ".".join(reversed(parts))
-    return None
-
-
 def _has_clock_default(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     """Whether ``fn`` declares any parameter defaulting to time.monotonic."""
     defaults = (fn.args.kw_defaults or []) + list(fn.args.defaults)
-    return any(_dotted(default) == "time.monotonic" for default in defaults)
+    return any(dotted_name(default) == "time.monotonic" for default in defaults)
 
 
 def _is_default_expression(fn: ast.FunctionDef | ast.AsyncFunctionDef, node: ast.AST) -> bool:
@@ -168,7 +155,7 @@ def _clock_call_offenders(tree: ast.Module, path: pathlib.Path) -> Iterator[str]
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
             continue
-        dotted = _dotted(node.func)
+        dotted = dotted_name(node.func)
         if not _offending_time_call(dotted, aliased_roots):
             continue
         exempt = dotted == "time.monotonic" and any(
@@ -212,7 +199,7 @@ def _wall_default_offenders(tree: ast.Module, path: pathlib.Path) -> Iterator[st
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         for default in (node.args.kw_defaults or []) + list(node.args.defaults):
-            dotted = _dotted(default)
+            dotted = dotted_name(default)
             wrong_dotted = dotted is not None and dotted.startswith("time.") and dotted != "time.monotonic"
             aliased = isinstance(default, ast.Name) and default.id in imported
             if wrong_dotted or aliased:

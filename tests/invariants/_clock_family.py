@@ -15,6 +15,7 @@ from tests.chokepoint_walks import REPO_ROOT
 __all__ = [
     "CLOCK_HOME",
     "WALL_MEMBERS",
+    "dotted_name",
     "from_imports",
     "from_time_imports",
     "single_target_assigns",
@@ -26,6 +27,23 @@ __all__ = [
 CLOCK_HOME = REPO_ROOT / "tests" / "_clocks.py"
 
 WALL_MEMBERS = frozenset({"perf_counter", "perf_counter_ns", "time", "time_ns"})
+
+
+def dotted_name(node: ast.expr | None) -> str | None:
+    """``time.monotonic`` as a dotted string; None for anything else.
+
+    The shared chain decomposer both clock-family detectors read, so a renamed
+    member is updated in one place (#649)."""
+    if not isinstance(node, ast.Attribute):
+        return None
+    parts = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+        return ".".join(reversed(parts))
+    return None
 
 
 def wall_names(tree: ast.Module) -> set[str]:

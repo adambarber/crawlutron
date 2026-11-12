@@ -16,6 +16,7 @@ LIMIT = 500
 #: Files over the ceiling per root. Exact both ways; a split wave lowers it here.
 #: Keyed by declared scan root -- a missing root fails loud, not silently empty.
 _BUDGETS = {
+    "admission": 0,
     "crawlutron": 0,
     "crawlutron_sdk": 0,
     "tests": 0,
