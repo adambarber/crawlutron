@@ -5,6 +5,7 @@ import hashlib
 import io
 import pathlib
 import tokenize
+import tomllib
 import weakref
 from functools import cache
 
@@ -55,6 +56,74 @@ def python_bearing_roots(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
 
 
 SCAN_ROOTS = python_bearing_roots()
+
+
+def uv_workspace_members(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...] | None:
+    """``[tool.uv.workspace].members`` from the root pyproject, or None when absent.
+
+    The packaging truth's key: when a UV workspace declares members, PACKAGE_ROOTS
+    derives from them; until then the current-layout fallback stands."""
+    pyproject = base / "pyproject.toml"
+    if not pyproject.is_file():
+        return None
+    try:
+        with pyproject.open("rb") as handle:
+            table = tomllib.load(handle)
+    except tomllib.TOMLDecodeError:
+        return None
+    tool = table.get("tool")
+    if not isinstance(tool, dict):
+        return None
+    workspace = tool.get("uv", {}).get("workspace") if isinstance(tool.get("uv"), dict) else None
+    if not isinstance(workspace, dict):
+        return None
+    members = workspace.get("members")
+    if not isinstance(members, list):
+        return None
+    return tuple(str(m) for m in members if isinstance(m, str))
+
+
+def _member_package_roots(base: pathlib.Path, members: tuple[str, ...]) -> tuple[str, ...]:
+    """The python-bearing member dirs of a UV workspace, named repo-relatively.
+
+    A member that holds any ``*.py`` is its own package root; a member with none
+    is a stub (docs-only), not part of the packaging surface."""
+    roots = [
+        member
+        for member in members
+        if any("__pycache__" not in q.parts for q in (base / member).rglob("*.py"))
+        if (base / member).is_dir()
+    ]
+    assert roots, f"uv workspace members declare no python-bearing dirs under {base}: {members}"
+    return tuple(sorted(roots))
+
+
+def package_roots(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
+    """The importable package dirs (derived packaging truth), sorted.
+
+    A UV workspace declaration keys it; without one, the current-layout fallback
+    (every top-level python-bearing dir) stands until the Wave A manifest arrives."""
+    members = uv_workspace_members(base)
+    if members is not None:
+        return _member_package_roots(base, members)
+    return python_bearing_roots(base)
+
+
+#: The importable package dirs. SCAN_ROOTS consumes this, so a Wave A manifest
+#: swap-in re-derives both here, once.
+PACKAGE_ROOTS = package_roots()
+
+
+def scan_roots(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
+    """Every python-bearing dir under ``base``, computed through PACKAGE_ROOTS.
+
+    The scan surface is the package roots plus non-package python-bearing top-level
+    dirs (tests, scripts); SCAN_ROOTS consumes PACKAGE_ROOTS, one re-derivation."""
+    packages = set(PACKAGE_ROOTS) if base == REPO_ROOT else set(package_roots(base))
+    return tuple(sorted(packages | set(python_bearing_roots(base))))
+
+
+SCAN_ROOTS = scan_roots()
 
 
 APP_ROOT = REPO_ROOT / "crawlutron"
