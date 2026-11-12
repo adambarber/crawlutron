@@ -13,7 +13,7 @@ from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.json_value import JsonValue
 from crawlutron.runtime.metrics import MetricsStore
 from crawlutron.storage.caller_key_store import CallerKeyStore
-from crawlutron.storage.job_store import JobStatus, JobStore
+from crawlutron.storage.job_store import CrawlJobState, JobStatus, JobStore
 from crawlutron.storage.result_store import CrawlResultStore
 from crawlutron_rest.api.caller_auth import (
     check_page_quota,
@@ -34,13 +34,18 @@ from tests.factories.store import complete_job, seed_owned_job
 from tests.factories.store import job_store as make_store
 
 
-def test_single_shot_job_carries_its_owner(tmp_path):
+def _owned_job(tmp_path) -> tuple[JobStore, CrawlJobState]:
+    """A store with the ``crawl_owned`` job seeded, plus the loaded row: the
+    ownership-seed-and-load setup these isolation tests share."""
     store = make_store(tmp_path / "jobs.db")
-
     seed_owned_job(store)
-
     loaded = store.load("crawl_owned")
     assert loaded is not None
+    return store, loaded
+
+
+def test_single_shot_job_carries_its_owner(tmp_path):
+    _store, loaded = _owned_job(tmp_path)
     assert loaded.owner == "key_a"
 
 
@@ -115,11 +120,7 @@ def test_status_list_exists_and_delete_all_scope_to_owner(tmp_path):
 
 
 def test_saving_a_job_never_transfers_ownership(tmp_path):
-    store = make_store(tmp_path / "jobs.db")
-    seed_owned_job(store)
-
-    loaded = store.load("crawl_owned")
-    assert loaded is not None
+    store, loaded = _owned_job(tmp_path)
     loaded.owner = "key_b"
     store.save(loaded)
 

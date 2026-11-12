@@ -49,6 +49,15 @@ class TestRevalidationFetchesOnce:
             "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50},
         }
 
+    async def _run_crawl(self, url, fetcher, cache, content_cache):
+        """Run one strategy pass and pin the success verdict: every test re-crawls
+        the same way, and a non-200 is a fixture bug no individual test should forgive."""
+        result = await run_http_strategy(
+            url=url, policy=self._policy(), http_fetcher=fetcher, cache=cache, content_cache=content_cache
+        )
+        assert result.status == "success"
+        return result
+
     async def test_validator_hit_with_200_origin_does_not_refetch(self, tmp_path):
         fetcher = _CountingFetcher()
         url = "http://example.com/etagged"
@@ -56,17 +65,11 @@ class TestRevalidationFetchesOnce:
         content_cache = ContentCache(cache_dir=str(tmp_path / "cc"), default_ttl=3600)
 
         # First crawl: no cache entry yet, one fetch, stores it with its etag.
-        first = await run_http_strategy(
-            url=url, policy=self._policy(), http_fetcher=fetcher, cache=cache, content_cache=content_cache
-        )
-        assert first.status == "success"
+        await self._run_crawl(url, fetcher, cache, content_cache)
         assert fetcher.calls == 1, fetcher.calls
 
         # Second crawl: cache hit with a validator.
-        second = await run_http_strategy(
-            url=url, policy=self._policy(), http_fetcher=fetcher, cache=cache, content_cache=content_cache
-        )
-        assert second.status == "success"
+        await self._run_crawl(url, fetcher, cache, content_cache)
         assert fetcher.calls == 2, f"expected one fetch for the revalidation, got {fetcher.calls - 1}"
         # The second fetch must be the conditional one, not an unconditional repeat.
         assert fetcher.header_sets[1].get("If-None-Match") == "v1"
@@ -99,22 +102,15 @@ class TestRevalidationFetchesOnce:
         cache = HttpCache()
         content_cache = ContentCache(cache_dir=str(tmp_path / "cc"), default_ttl=3600)
 
-        async def _crawl():
-            result = await run_http_strategy(
-                url=url, policy=self._policy(), http_fetcher=fetcher, cache=cache, content_cache=content_cache
-            )
-            assert result.status == "success"
-            return result
-
         fetcher.body = b"<html><body>ORIGINAL-BODY</body></html>"
-        await _crawl()  # crawl 1: one fetch, stores ORIGINAL
+        await self._run_crawl(url, fetcher, cache, content_cache)  # crawl 1: stores ORIGINAL
         fetcher.calls = 0
         fetcher.body = b"<html><body>FRESH-BODY</body></html>"
-        second = await _crawl()  # crawl 2: conditional 200 -> FRESH must be stored
+        second = await self._run_crawl(url, fetcher, cache, content_cache)  # crawl 2: conditional 200
         assert "FRESH-BODY" in second.text or "FRESH-BODY" in second.markdown
         assert fetcher.calls == 1
 
-        third = await _crawl()  # crawl 3: conditional 200 -> serves the freshly-revalidated body
+        third = await self._run_crawl(url, fetcher, cache, content_cache)  # crawl 3: serves the fresh body
         body = third.text or third.markdown or ""
         assert "FRESH-BODY" in body, (
             "a later 200 served the stale pre-revalidation body: the revalidated 200 was never stored"

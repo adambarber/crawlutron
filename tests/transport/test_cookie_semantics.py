@@ -21,6 +21,12 @@ def _header_for(jar: CookieJar, url: str, *, namespace: str = "") -> str:
     return jar.cookie_header_for(canonical(url), namespace=namespace)
 
 
+def _assert_dead_past_rfc_lifetime(jar: CookieJar, monkeypatch, now: float) -> None:
+    """A cookie past the RFC max lifetime is dead: it never earns the header."""
+    monkeypatch.setattr(cookie_jar.time, "time", lambda: now + _RFC_MAX_LIFETIME_SECONDS + 60)
+    assert _header_for(jar, "https://a.example/") == ""
+
+
 # RFC 6265 4.1.2.2 / 5.3 step 15: Max-Age=0 is a deletion, not an empty value.
 
 
@@ -62,8 +68,7 @@ def test_huge_numeric_max_age_is_clamped_to_the_rfc_lifetime(monkeypatch):
     monkeypatch.setattr(cookie_jar.time, "time", lambda: now + _RFC_MAX_LIFETIME_SECONDS - 60)
     assert _header_for(jar, "https://a.example/") == "bad=x"
     # Past the cap it is dead: a site cannot pin a cookie in the jar for ever.
-    monkeypatch.setattr(cookie_jar.time, "time", lambda: now + _RFC_MAX_LIFETIME_SECONDS + 60)
-    assert _header_for(jar, "https://a.example/") == ""
+    _assert_dead_past_rfc_lifetime(jar, monkeypatch, now)
 
 
 def test_huge_expires_date_is_clamped_to_the_rfc_lifetime_too(monkeypatch):
@@ -75,8 +80,7 @@ def test_huge_expires_date_is_clamped_to_the_rfc_lifetime_too(monkeypatch):
     # parse_ns_headers folds an Expires date into an epoch; a year-3000 date is
     # a far-future epoch without ever being a malformed one.
     jar.add_cookie_header(canonical("https://a.example/"), "bad=x; Expires=Fri, 01 Jan 3000 00:00:00 GMT")
-    monkeypatch.setattr(cookie_jar.time, "time", lambda: now + _RFC_MAX_LIFETIME_SECONDS + 60)
-    assert _header_for(jar, "https://a.example/") == ""
+    _assert_dead_past_rfc_lifetime(jar, monkeypatch, now)
 
 
 def test_malformed_max_age_never_escapes_the_store_path():

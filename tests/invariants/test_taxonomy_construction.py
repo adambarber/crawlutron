@@ -123,21 +123,27 @@ def test_generic_membership_subsumes_the_per_field_detectors():
     )
 
 
+def _success_attempt():
+    """The member-valid BROWSER_HEADLESS attempt every success build shares."""
+    from crawlutron.models.crawl_strategy_attempt import CrawlStrategyAttempt
+
+    return CrawlStrategyAttempt(
+        strategy="BROWSER_HEADLESS",
+        status="success",
+        classification=Classification.rendered,
+        http_status=200,
+        content_type=None,
+        elapsed_ms=0,
+    )
+
+
 def _member_crawl_result():
     """Built, not spelled: each value goes to the field's own type."""
     from crawlutron.models.crawl_result import CrawlResult
-    from crawlutron.models.crawl_strategy_attempt import CrawlStrategyAttempt
 
     return CrawlResult(
         url=canonical("http://a/"),
-        attempt=CrawlStrategyAttempt(
-            strategy="BROWSER_HEADLESS",
-            status="success",
-            classification=Classification.rendered,
-            http_status=200,
-            content_type=None,
-            elapsed_ms=0,
-        ),
+        attempt=_success_attempt(),
         final_url=None,
         html=None,
         text=None,
@@ -154,7 +160,7 @@ def test_result_construction_enforces_membership_at_the_dataclass():
     from crawlutron.models.crawl_result import EngineCrawlResult
     from crawlutron.models.crawl_strategy_attempt import CrawlStrategyAttempt
     from crawlutron.models.serialization import from_wire, to_dict
-    from crawlutron.models.taxonomy import Classification, CrawlError, CrawlStrategyName
+    from crawlutron.models.taxonomy import CrawlError, CrawlStrategyName
     from crawlutron.vocabulary.taxonomy import ResultStatus
     from tests._policy_factories import UNRESTRICTED_HOST_POLICY
     from tests._result_builders import engine_result
@@ -170,14 +176,7 @@ def test_result_construction_enforces_membership_at_the_dataclass():
 
     # A direct construction with all-member values is accepted: the gate must not reject legitimate direct
     # builds (tests and the primitives both do it).
-    CrawlStrategyAttempt(
-        strategy="BROWSER_HEADLESS",
-        status="success",
-        classification=Classification.rendered,
-        http_status=200,
-        content_type=None,
-        elapsed_ms=0,
-    )
+    _success_attempt()
     assert rebuilt_engine_result == baseline
     # A non-member on each Literal axis raises at the wire rebuild too.
     for field, invented in (

@@ -287,13 +287,7 @@ async def test_slow_drain_client_is_refused_within_the_deadline(monkeypatch):
     """A slow-post client that stalls inside an over-cap declared body must be
     refused with the 413 within the body deadline -- byte caps alone pin the
     middleware task forever when receive() never returns."""
-    import asyncio
-
-    import crawlutron_rest.api.middleware as mw
-
-    monkeypatch.setattr(mw, "BODY_DEADLINE_SECONDS", 0.05)
-
-    stalled = asyncio.Event()
+    _mw, stalled = _stalled_body_under_test(monkeypatch, 0.05)
 
     async def stalled_receive() -> Message:
         await stalled.wait()
@@ -328,18 +322,23 @@ def _dribble_receive(interval: float):
     return dribble
 
 
+def _stalled_body_under_test(monkeypatch, deadline: float):
+    """The middleware module under a patched body deadline, plus a hold-Event: the
+    setup the two stall shapes share (imports, deadline patch, the Event)."""
+    import asyncio
+
+    import crawlutron_rest.api.middleware as mw
+
+    monkeypatch.setattr(mw, "BODY_DEADLINE_SECONDS", deadline)
+    return mw, asyncio.Event()
+
+
 async def test_slow_collect_client_is_refused_within_the_deadline(monkeypatch):
     """A dribbling client that never delivers the declared length holds _collect open; the deadline refuses
     the truncated body instead of pinning the task. The dribble holds on an Event, not sleeps: fast_sleeps
     would deliver the bytes instantly and flip the assertion (#769 flake class).
     """
-    import asyncio
-
-    import crawlutron_rest.api.middleware as mw
-
-    monkeypatch.setattr(mw, "BODY_DEADLINE_SECONDS", 0.05)
-
-    stalled = asyncio.Event()
+    _mw, stalled = _stalled_body_under_test(monkeypatch, 0.05)
     delivered = 0
 
     async def dribble_then_stall() -> Message:

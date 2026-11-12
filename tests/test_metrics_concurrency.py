@@ -10,6 +10,7 @@ import threading
 
 from crawlutron.runtime.metrics import MetricsStore
 from crawlutron.storage.coordination_counters import CoordinationCounters
+from tests._thread_fanout import run_threads
 
 THREADS = 10
 INCREMENT_EACH = 100
@@ -29,11 +30,7 @@ def _hammer(store, work) -> None:
         except Exception as exc:  # the failure IS the result
             failures.append(exc)
 
-    threads = [threading.Thread(target=run) for _ in range(THREADS)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
+    run_threads(run, count=THREADS)
     sys.setswitchinterval(5e-3)
     assert not failures, failures
 
@@ -72,11 +69,7 @@ def test_concurrent_series_registration_never_crosses_the_cap(tmp_path):
         start.wait()
         store.observe_crawl(caller_id=f"new-{threading.get_ident()}")
 
-    threads = [threading.Thread(target=register_new) for _ in range(THREADS)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
+    run_threads(register_new, count=THREADS)
 
     arrivals.extend(store.snapshot().caller_counts)
     # 256 distinct caller series + one reserved overflow series -- the same

@@ -129,13 +129,7 @@ async def test_changed_fingerprint_is_changed(monkeypatch, tmp_path):
 async def test_shape_change_between_baseline_and_recrawl_is_not_fingerprint_changed(monkeypatch, tmp_path):
     """A baseline stored at shape A (html stripped) compared against a re-crawl at
     shape B (include_html) must not classify changed via fingerprint_diff."""
-    tmpdir = str(tmp_path)
-    result_store, _ = _stores(tmpdir)
-    seed_baseline_row(
-        result_store,
-        "baseline-1",
-        results=[baseline_row((URL, URL), markdown="one")],
-    )
+    result_store, tmpdir = _seeded_single_row(tmp_path, URL, URL)
     payload = CrawlRequest(url=URL, baseline_request_id="baseline-1")
     response = await _run(
         monkeypatch,
@@ -162,6 +156,19 @@ def _seeded_request(tmpdir: str) -> CrawlRequest:
     """Seed the shared baseline-1 row for caller-a and return its reuse request."""
     _seed_baseline(_stores(tmpdir)[0], "baseline-1", "caller-a", markdown="one")
     return CrawlRequest(url=URL, baseline_request_id="baseline-1")
+
+
+def _seeded_single_row(tmp_path, url: str, resolved: str) -> tuple[CrawlResultStore, str]:
+    """Seed one baseline-1 row over the given current+resolved URLs and return
+    the store plus the directory: the single-row seed shape these tests reuse."""
+    tmpdir = str(tmp_path)
+    result_store, _ = _stores(tmpdir)
+    seed_baseline_row(
+        result_store,
+        "baseline-1",
+        results=[baseline_row((url, resolved), markdown="one")],
+    )
+    return result_store, tmpdir
 
 
 async def test_older_last_modified_is_unchanged(monkeypatch, tmp_path):
@@ -258,13 +265,7 @@ async def test_baseline_alias_spelling_answered_is_not_removed(monkeypatch, tmp_
     """A baseline page whose ORIGINAL text differs from the resubmitted spelling
     is served when the run answers any of its identities: removed stays 0 and
     the page is never listed as not_in_admitted_set."""
-    tmpdir = str(tmp_path)
-    result_store, _ = _stores(tmpdir)
-    seed_baseline_row(
-        result_store,
-        "baseline-1",
-        results=[baseline_row((ALIAS_URL, ALIAS_NORMALIZED), markdown="one")],
-    )
+    result_store, tmpdir = _seeded_single_row(tmp_path, ALIAS_URL, ALIAS_NORMALIZED)
     response = await _run(
         monkeypatch,
         CrawlRequest(url=ALIAS_NORMALIZED, baseline_request_id="baseline-1"),
