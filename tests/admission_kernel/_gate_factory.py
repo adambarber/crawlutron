@@ -25,6 +25,7 @@ from admission import (
     Multiplier,
     PacingPolicy,
     Ratio,
+    ResourceGauge,
     ResourceId,
     ScaleSource,
     Sensing,
@@ -105,9 +106,9 @@ class FakeSignal:
 def _make_gauges(
     memory_usage: float,
     cpu_usage: float,
-    mem_gauge: FakeGauge | None,
-    cpu_gauge: FakeGauge | None,
-) -> tuple[FakeGauge, FakeGauge]:
+    mem_gauge: ResourceGauge | None,
+    cpu_gauge: ResourceGauge | None,
+) -> tuple[ResourceGauge, ResourceGauge]:
     """The two gauges, defaulting to a flat usage when no gauge is injected."""
     return (mem_gauge or FakeGauge(memory_usage), cpu_gauge or FakeGauge(cpu_usage))
 
@@ -119,8 +120,8 @@ def _make_sensing(
     mem_hard: float,
     cpu_target: float,
     cpu_hard: float,
-    mem_gauge: FakeGauge | None,
-    cpu_gauge: FakeGauge | None,
+    mem_gauge: ResourceGauge | None,
+    cpu_gauge: ResourceGauge | None,
 ) -> Sensing:
     """A sensing set over {MEMORY, CPU} with the given target/hard ceilings."""
     mem_g, cpu_g = _make_gauges(memory_usage, cpu_usage, mem_gauge, cpu_gauge)
@@ -178,8 +179,8 @@ class GateSpec:
     initial_ramp: int | None = None
     loop_lag: float = 1.0
     scale_source: ScaleSource | None = None
-    mem_gauge: FakeGauge | None = None
-    cpu_gauge: FakeGauge | None = None
+    mem_gauge: ResourceGauge | None = None
+    cpu_gauge: ResourceGauge | None = None
     memory_budget_mib: int | None = None
     ramp_growth_window: int = 3
 

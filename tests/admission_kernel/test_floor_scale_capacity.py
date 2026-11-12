@@ -10,8 +10,8 @@ import dataclasses
 
 import pytest
 
-from admission import AdmissionRefused, Count, IdleReason, LaneId, Want
 from admission.values import Allocation
+from tests.admission_kernel._doors import AdmissionRefused, Count, IdleReason, LaneId, Want
 from tests.admission_kernel._gate_factory import GateSpec, build_gate
 
 
@@ -68,13 +68,22 @@ async def _assert_oversized(gate, want: Want) -> None:
     assert exc.value.reason is IdleReason.OVERSIZE
 
 
-async def test_oversize_raises_for_unfit_want_but_mixed_want_fits() -> None:
-    """A HEAVY-only want at free=600 MiB raises OVERSIZE; GENERAL un-wanted does not fit.
+def _heavy_underfunded():
+    """A gate whose HEAVY cost (700 MiB) exceeds the 600 MiB memory budget."""
+    return build_gate(dataclasses.replace(GateSpec(), heavy_cost_mib=700, memory_budget_mib=600))
 
-    The evaluator reads WANTED lanes only: adding a GENERAL that fits turns the same
-    freed memory into a live grant."""
-    gate, _ = build_gate(dataclasses.replace(GateSpec(), heavy_cost_mib=700, memory_budget_mib=600))
+
+async def test_oversize_want_raises_refused_with_reason_oversize() -> None:
+    """A want that can fit no unit with zero in flight raises AdmissionRefused(OVERSIZE)."""
+    gate, _ = _heavy_underfunded()
     await _assert_oversized(gate, Want.of(general=Count(0), heavy=Count(1)))
+
+
+async def test_oversize_evaluates_wanted_lanes_only() -> None:
+    """The evaluator reads WANTED lanes only: a fitting GENERAL turns the same memory live."""
+    gate, _ = _heavy_underfunded()
+    # A larger HEAVY ask is still OVERSIZE alone (wanted-lanes-only evaluates HEAVY).
+    await _assert_oversized(gate, Want.of(general=Count(0), heavy=Count(2)))
     # The contrast: a mixed want (GENERAL also wanted) does not oversize.
     mixed = Want.of(general=Count(1), heavy=Count(1))
     allocation = await _grant(gate, mixed)

@@ -1,14 +1,43 @@
-"""Shared arrange helpers for kernel acceptance tests.
+"""Shared arrange helpers and door symbols for kernel acceptance tests.
 
-Lets a test acquire a live grant and exit it deliberately instead of
-auto-releasing inside the ``with`` body.
+Lets a test acquire a live grant and exit it deliberately; re-exports the
+admission door symbols so sibling test files share one import preamble.
 """
 
 from __future__ import annotations
 
-from admission import Allocation, Count, Want
+from admission import (
+    AdmissionRefused,
+    Allocation,
+    Count,
+    Duration,
+    Granted,
+    IdleReason,
+    LaneId,
+    StallGuard,
+    Want,
+    WrongGateError,
+)
 
 _GENERAL_ONE = Want.of(general=Count(1), heavy=Count(0))
+
+__all__ = [
+    "_GENERAL_ONE",
+    "_auto",
+    "_finish",
+    "_hold_one",
+    "_live",
+    "AdmissionRefused",
+    "Allocation",
+    "Count",
+    "Duration",
+    "Granted",
+    "IdleReason",
+    "LaneId",
+    "StallGuard",
+    "Want",
+    "WrongGateError",
+]
 
 
 async def _live(gate, want: Want):
@@ -29,12 +58,6 @@ async def _auto(gate, want: Want) -> Allocation:
         return granted.allocation
 
 
-_GENERAL_ONE = Want.of(general=Count(1), heavy=Count(0))
-
-
 async def _hold_one(gate):
     """A live single-GENERAL grant and its still-open context manager."""
     return await _live(gate, _GENERAL_ONE)
-
-
-__all__ = ["_GENERAL_ONE", "_auto", "_finish", "_hold_one", "_live"]
