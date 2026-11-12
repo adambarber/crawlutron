@@ -2,7 +2,7 @@
 # Build context is this repository's root, where this Dockerfile lives, so the
 # build is `docker build .` (or `docker compose build`) from the repository root
 # with no extra flags. `.dockerignore` is written for that same root: it
-# allowlists the five things the stages below COPY, which holds the build
+# allowlists the context sources the stages below COPY, which holds the build
 # context to ~2.6 MB instead of the whole working tree.
 #
 # The base image is pinned by tag AND digest (CRAWLUTRON_BASE_IMAGE below) so a
