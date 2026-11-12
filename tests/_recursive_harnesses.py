@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, NamedTuple
 from crawlutron.models.crawl_task import CrawlTask
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.orchestration.recursive import run_recursive_crawl
+from tests._admission_doubles import FakeResourceGauge
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 from tests._result_builders import Spill, engine_result
 from tests._scheduler_doubles import FakeScheduler
@@ -34,13 +35,14 @@ __all__ = [
 ]
 
 
-class ContentionFreeGate:
-    """A ``ResourceGate`` that reports a fixed scale and no memory or CPU use, so a
+class ContentionFreeGate(FakeResourceGauge):
+    """A FakeResourceGauge that reports a fixed scale and no memory or CPU use, so a
     dispatch test's result does not depend on the machine; ``scale=0.0`` forces a
     batch floor of one job, and ``consultations`` counts the one method it invokes.
     """
 
     def __init__(self, scale: float = 1.0) -> None:
+        super().__init__()
         self.scale = scale
         self.consultations = 0
 

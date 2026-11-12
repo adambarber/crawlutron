@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from typing import Protocol
 
 from admission import Bytes, Cost, Count, LaneId, LaneSpec, MinAll
 from crawlutron.config.env import get_env_float, get_env_int
@@ -237,13 +238,23 @@ def default_admission_policy(gate: ResourceGate) -> WeightedAdmission:
     )
 
 
+class _GaugeSurface(Protocol):
+    """The seam's structural gate door: the ratio surface satisfied by both the
+    real ResourceGate and the pure FakeResourceGauge. WeightedAdmission, the
+    transitional pressure_* consumer, is retired when C4 deletes those sites."""
+
+    def memory_ratio(self) -> float: ...
+
+    def cpu_ratio(self) -> float: ...
+
+
 class WeightedAdmission:
     """RAM/CPU-weighted, two-tier batch admission.
     HTTP tasks are cheap and browser tasks expensive (the persistent browser pool
     holds most RAM), so tiers are budgeted separately; ``admit`` yields rather than parks the crawl.
     """
 
-    def __init__(self, gate: ResourceGate, policy: AdmissionPolicy) -> None:
+    def __init__(self, gate: _GaugeSurface, policy: AdmissionPolicy) -> None:
         self._gate = gate
         self._p = policy
 

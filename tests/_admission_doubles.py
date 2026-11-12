@@ -10,7 +10,13 @@ import asyncio
 from crawlutron.models.result_record import ProducerEnvelope
 from crawlutron.runtime.pressure_sizing import ResourceGate
 
-__all__ = ["PinnedGate", "pinned_resource_gate", "no_crawl_delay", "simple_page_route", "run_sync_batch"]
+__all__ = [
+    "FakeResourceGauge",
+    "pinned_resource_gate",
+    "no_crawl_delay",
+    "simple_page_route",
+    "run_sync_batch",
+]
 
 
 async def no_crawl_delay(url: str) -> float | None:
@@ -44,11 +50,11 @@ def pinned_resource_gate(monkeypatch, *, cpu_ratio, memory_ratio, max_wait_secon
     return gate, waited
 
 
-class PinnedGate(ResourceGate):
-    """A ResourceGate with fixed scales and ratios, recording consultations.
+class FakeResourceGauge:
+    """A ResourceGate double with fixed scales and ratios, recording consultations.
 
-    It subclasses the production type so dispatch is compiled against the same
-    boundary, and skips ``__init__`` to avoid live gates reading the host cgroup.
+    A pure fake: structurally compatible with the production gate but never a
+    subclass, so a double cannot accidentally inherit live cgroup reads.
     """
 
     def __init__(self, *, batch=1.0, http=1.0, mem=0.0, cpu=0.0):
@@ -58,23 +64,18 @@ class PinnedGate(ResourceGate):
         self._cpu = cpu
         self.calls: list[str] = []
 
-    async def wait_while_saturated(self, max_wait_seconds: float | None = None):
-        # The parameter is part of the signature this double stands in for. Dropping it would let a caller
-        # passing a budget through be type-checked against a gate that silently cannot receive one.
-        self.calls.append("wait")
-
-    def batch_scale_factor(self):
+    def batch_scale_factor(self) -> float:
         self.calls.append("batch")
         return self.batch
 
-    def http_scale_factor(self):
+    def http_scale_factor(self) -> float:
         self.calls.append("http")
         return self.http
 
-    def memory_ratio(self):
+    def memory_ratio(self) -> float:
         return self._mem
 
-    def cpu_ratio(self):
+    def cpu_ratio(self) -> float:
         return self._cpu
 
 
