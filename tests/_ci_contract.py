@@ -10,6 +10,8 @@ from pathlib import Path
 
 import yaml
 
+from tests._walk_primitives import package_roots
+
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 
 CONFIG_PATH = SERVICE_ROOT / ".pre-commit-config.yaml"
@@ -32,9 +34,9 @@ REPORTING_JOBS = {"enforcement", "test-fast", "test-browser", "audit", "secret-s
 # code is its last line's without errexit.
 ERREXIT_SHELL = "bash -e {0}"
 
-# Every file the gates read to decide what to enforce. A commit that edits one of them must run the
-# enforcement: the config that decides what is checked cannot itself be the one change that skips the check.
-ENFORCEMENT_INPUTS = (
+# The config-only inputs every hook resolves to, before the derived manifests/Dockerfiles are
+# appended below: a commit editing one of them must not skip the enforcement that checks it.
+_ENFORCEMENT_BASE_INPUTS = (
     "packages/core/crawlutron/config/settings.py",
     "tests/_jscpd_gate_helpers.py",
     # The duplication gate's own implementation.
@@ -62,6 +64,14 @@ DOCKER_IMAGES = (
         for path in sorted((SERVICE_ROOT / "docker").glob("*/"))
         if path.is_dir() and f"docker/{path.name}" != "docker/browser-crawler"
     ),
+)
+
+# Every file the gates read to decide what to enforce: the config/entry-point files plus the derived
+# member manifests and image Dockerfiles -- a new package or image cannot skip enforcement.
+ENFORCEMENT_INPUTS = (
+    *_ENFORCEMENT_BASE_INPUTS,
+    *(f"{root}/pyproject.toml" for root in package_roots()),
+    *(f"{image}/Dockerfile" for image in DOCKER_IMAGES),
 )
 
 # The single trigger pattern every hook shares, held as one YAML anchor (*service_trigger). re.escape

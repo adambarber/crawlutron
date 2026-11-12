@@ -26,6 +26,7 @@ from tests._ci_contract import (
     _hook_blocks,
     _jobs,
 )
+from tests._walk_primitives import package_roots
 
 # pre-commit exports GIT_* env vars to hook processes; a git subprocess that
 # inherits them ignores -C and answers for THIS repo.
@@ -137,6 +138,26 @@ def test_a_non_image_docker_path_is_not_enforced() -> None:
     """
     assert "docker/README" not in DOCKER_IMAGES
     assert not re.search(ENFORCEMENT_TRIGGER_PATTERN, "docker/README")
+
+
+def test_every_member_manifest_is_an_enforcement_input() -> None:
+    """A new uv member package's manifest must fire the enforcement hooks.
+
+    ENFORCEMENT_INPUTS derives each member manifest from the uv workspace.
+    """
+    for root in package_roots():
+        assert f"{root}/pyproject.toml" in ENFORCEMENT_INPUTS, (
+            f"{root}/pyproject.toml is not an enforcement input"
+        )
+
+
+def test_every_image_dockerfile_is_an_enforcement_input() -> None:
+    """A new image's Dockerfile must fire the enforcement hooks.
+
+    ENFORCEMENT_INPUTS derives each image Dockerfile from DOCKER_IMAGES.
+    """
+    for image in DOCKER_IMAGES:
+        assert f"{image}/Dockerfile" in ENFORCEMENT_INPUTS, f"{image}/Dockerfile is not an enforcement input"
 
 
 def test_the_workflow_is_written_for_the_repository_root_it_will_run_from() -> None:
