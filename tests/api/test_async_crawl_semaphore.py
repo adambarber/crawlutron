@@ -106,3 +106,55 @@ class TestSemaphoreHoldsTheCrawlOnly:
 
         assert job_store.load(request_id).status == JobStatus.COMPLETED, "delivery never ran"
         assert not delivery_seen_inside, "the webhook was delivered while still holding the crawl semaphore"
+
+    @pytest.mark.parametrize("with_webhook", [False, True])
+    async def test_a_shutdown_cancelled_crawl_is_terminalized_failed(self, job_store, tmp_path, with_webhook):
+        """Mid-flight cancel writes the RUNNING->FAILED terminal, then re-raises.
+
+        Since 3.11 CancelledError is a BaseException, an uninstrumented handler leaves the
+        row RUNNING with no webhook; an admitted webhook learns the cancelled FAILED (#758).
+        """
+
+        request_id = "crawl_cancelled_shutdown"
+        _seed_single_shot(job_store, request_id)
+
+        started = asyncio.Event()
+        release = asyncio.Event()
+        deliveries: list[dict[str, object]] = []
+
+        async def mid_flight_crawl(*args, **kwargs):
+            started.set()
+            await release.wait()  # deterministic mid-flight point inside the semaphore block
+            return _quick_crawl_result(request_id)
+
+        async def recording_webhook(target, payload):
+            deliveries.append(payload)
+
+        target = admitted_webhook("https://webhook.example.com/cb") if with_webhook else None
+
+        with patch("crawlutron.service.async_crawl_runner.execute_crawl", new=mid_flight_crawl):
+            with patch("crawlutron.service.webhooks.post_webhook_guarded", new=recording_webhook):
+                runner = asyncio.create_task(
+                    run_async_crawl(
+                        request_id,
+                        CrawlRequest.model_validate({"url": "http://example.com/"}),
+                        target,
+                        CrawlerSettings.from_mapping(),
+                        job_store,
+                        CrawlResultStore(tmp_path / "results.db"),
+                        asyncio.Event(),
+                    )
+                )
+                try:
+                    await asyncio.wait_for(started.wait(), timeout=10)
+                    runner.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await asyncio.wait_for(runner, timeout=10)
+                finally:
+                    release.set()
+
+        job = job_store.load(request_id)
+        assert job.status == JobStatus.FAILED, "a cancelled crawl must leave a terminal FAILED write"
+        assert job.error == "cancelled_shutdown"
+        if with_webhook:
+            assert deliveries, "the cancelled FAILED terminal must announce itself via the webhook"

@@ -133,6 +133,11 @@ async def run_async_crawl(
             owner=job.owner,
             webhook_url=webhook_url,
         )
+    except asyncio.CancelledError:
+        # Since 3.11 CancelledError is a BaseException, so it would bypass the
+        # generic handler and leave the row RUNNING with no terminal write (#758).
+        await _record_failure(request_id, job_store, "cancelled_shutdown", webhook_url)
+        raise
     except Exception as exc:
         await _record_failure(request_id, job_store, str(exc), webhook_url)
 
