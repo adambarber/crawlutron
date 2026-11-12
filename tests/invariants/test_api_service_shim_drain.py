@@ -18,10 +18,13 @@ _SHIM_DOCSTRING_MARKERS = ("re-export shim", "Narrow re-export")
 
 
 def _is_all_assignment(node: ast.stmt) -> bool:
-    """True for a plain ``__all__ = [...]`` statement (a shim's declaration, not its body)."""
+    """True for a plain or annotated ``__all__`` declaration (a shim's declaration, not its body)."""
     if isinstance(node, ast.Assign):
         return all(isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets)
-    return False
+    if not isinstance(node, ast.AnnAssign):
+        return False
+    target = node.target
+    return isinstance(target, ast.Name) and target.id == "__all__"
 
 
 def _is_service_reexport_shim(tree: ast.Module) -> bool:
@@ -88,6 +91,19 @@ def test_shim_detector_bites(tmp_path: pathlib.Path) -> None:
     )
     offenders = _api_shim_offenders(tmp_path)
     assert [name.split(":")[0] for name in offenders] == ["drain_probe_shim.py"], offenders
+
+
+def test_annotated_all_reexport_shim_is_named(tmp_path: pathlib.Path) -> None:
+    """A marker-less re-export shim whose __all__ is annotated is still drained."""
+    _write(
+        tmp_path,
+        "annotated_shim.py",
+        "from __future__ import annotations\n\n"
+        "from crawlutron.service.map_endpoint import map_site\n\n"
+        '__all__: list[str] = ["map_site"]\n',
+    )
+    offenders = _api_shim_offenders(tmp_path)
+    assert [name.split(":")[0] for name in offenders] == ["annotated_shim.py"], offenders
 
 
 def test_markerless_pure_reexport_shim_is_named(tmp_path: pathlib.Path) -> None:

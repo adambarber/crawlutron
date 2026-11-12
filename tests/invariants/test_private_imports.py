@@ -318,10 +318,15 @@ _OWNER_PUBLIC: dict[str, frozenset[str]] | None = None
 def _declared_all(tree: ast.Module) -> set[str]:
     """The module's own ``__all__`` entries: its declared public doors."""
     for node in tree.body:
-        if isinstance(node, ast.Assign) and any(
-            isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets
-        ):
-            return {str(e.value) for e in getattr(node.value, "elts", ()) if isinstance(e, ast.Constant)}
+        if isinstance(node, ast.Assign):
+            if not any(isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets):
+                continue
+        elif isinstance(node, ast.AnnAssign):
+            if not (isinstance(node.target, ast.Name) and node.target.id == "__all__"):
+                continue
+        else:
+            continue
+        return {str(e.value) for e in getattr(node.value, "elts", ()) if isinstance(e, ast.Constant)}
     return set()
 
 
@@ -401,6 +406,29 @@ PUBLIC_OWNER_WELDS = Rule(
 
 def test_app_imports_public_names_from_their_owners():
     Registry((PUBLIC_OWNER_WELDS,)).check_all_clean()
+
+
+def test_annotated_all_declares_public_doors() -> None:
+    """A name exported only through an annotated __all__ is still a module's public door."""
+    source = "from crawlutron.other import helper\n\n__all__: tuple[str, ...] = ('helper',)\n"
+    assert "helper" in _module_public_names(ast.parse(source))
+
+
+def test_annotated_all_literal_shapes_yield_their_doors() -> None:
+    """tuple/list/set literals in an annotated __all__ each declare their doors."""
+    for literal in ('("helper",)', '["helper"]', '{"helper"}'):
+        source = f"__all__: list[object] = {literal}\n"
+        assert _declared_all(ast.parse(source)) == {"helper"}
+
+
+def test_annotated_all_without_value_yields_no_doors() -> None:
+    """__all__ with only an annotation (no value) must not crash and declare no doors."""
+    assert _declared_all(ast.parse("__all__: list[str]\n")) == set()
+
+
+def test_non_all_annassign_is_not_picked_up() -> None:
+    """An annotated assignment to a non-__all__ name is not a door declaration."""
+    assert _declared_all(ast.parse('helper: str = "x"\n')) == set()
 
 
 def test_app_has_no_cross_module_private_welds():
