@@ -33,6 +33,8 @@ def test_main_skips_and_names_an_unparseable_file(tmp_path: Path, capsys, monkey
     good = tmp_path / "good.py"
     good.write_text("# a comment\nx = 1\n", encoding="utf-8")
     out = tmp_path / "out.txt"
+    for var in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+        monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr("scripts.extract_comments.REPO_ROOT", tmp_path)
     assert main(["-o", str(out)]) == 0
     err = capsys.readouterr().err

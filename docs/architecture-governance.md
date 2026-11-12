@@ -40,22 +40,22 @@ All gates run whole-tree through `scripts/gate_fanout`, which starts every
 gate child at once and lets each wait only on its own child, so wall time is
 the slowest gate, not the sum; each child is hard-killed after 60 s
 (`scripts/gate_fanout.py:21`). The declared hooks
-(`.pre-commit-config.yaml:86-268`):
+(`.pre-commit-config.yaml:86-249`):
 
 - `ruff check crawlutron tests scripts` — whole-tree style/safety lint; inline `noqa` is banned by project rule (`:89-97`).
 - `ruff format --check crawlutron tests scripts` — formatter as a gate; `check` reports drift instead of rewriting (`:104-112`).
 - `basedpyright` whole tree — zero annotation lies; fails close (`:132-140`).
 - `jscpd` at 2 lines / 30 tokens, threshold 0 — zero copy/clone tolerance, no exemption path (`:152-163`).
-- `mypy` — `mypy.ini`'s `files` is the scope (`:183-191`).
-- `vulture` dead code, min-confidence 90, zero tolerance, no ignore-names/excludes/whitelist (`:205-213`).
-- `commit-citation` (commit-msg) — every commit message cites an issue (`:217-227`).
-- `coverage` (pre-push) — measured-descriptive surface only (**no threshold, no fail-under, no ratchet** until the owner rules one) (`:244-252`).
-- `safety-invariants` — the chokepoint safety predicates, the real architecture gate (`:256-263`).
+- `mypy` — `mypy.ini`'s `files` is the scope (`:168-176`).
+- `vulture` dead code, min-confidence 90, zero tolerance, no ignore-names/excludes/whitelist (`:190-198`).
+- `commit-citation` (commit-msg) — every commit message cites an issue (`:202-212`).
+- `coverage` (pre-push) — measured-descriptive surface only (**no threshold, no fail-under, no ratchet** until the owner rules one) (`:229-237`).
+- `battery` — the full randomized test suite as commit admission control; exactly ONE pytest child runs at pre-commit and it covers the whole collected suite (`:239-250`).
 
 ## Coverage: an explicit stated refusal
 
 No coverage badge or coverage ratchet is claimed. The pre-push `coverage`
 hook is measured-descriptive only — no threshold, no fail-under, no ratchet
-until the owner rules one (`.pre-commit-config.yaml:244-252`). Coverage is a
+until the owner rules one (`.pre-commit-config.yaml:229-237`). Coverage is a
 measurement, not a safety boundary; the safety boundary is the invariant
 suite and the fail-closed SSRF/auth guards.
