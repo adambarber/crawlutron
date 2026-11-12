@@ -6,6 +6,7 @@ symbol is a module-level def (the tests-define-no-local-clocks rule governs thos
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass, field
 
 from admission import (
@@ -70,10 +71,18 @@ class FakeGauge:
 
 @dataclass
 class GateHandles:
-    """Time/signal handles the test owns while a gate is alive."""
+    """Time/signal handles the test owns while a gate is alive.
+
+    ``now`` is an offset applied over a real-time anchor, so the gate's clock
+    advances during genuine waits (a STALE park genuinely bounds)."""
 
     now: float = 0.0
     signal: FakeSignal | None = None
+    _anchor: float = field(default_factory=time.monotonic)
+
+    def read(self) -> float:
+        """The gate's current clock value: the offset over real elapsed time."""
+        return self.now + (time.monotonic() - self._anchor)
 
 
 @dataclass
@@ -188,7 +197,7 @@ def build_gate(spec: GateSpec | None = None) -> tuple[AdmissionGate, GateHandles
 
     class _Clock:
         def now(self) -> Instant:
-            return Instant._of(handles.now)
+            return Instant._of(handles.read())
 
     clock: Clock = _Clock()
     signal = FakeSignal()

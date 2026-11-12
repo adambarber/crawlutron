@@ -114,7 +114,8 @@ class AdmissionGate:
         self._cold_in_flight = 0
         self._scale_full_streak = 0
         self._memory_budget = memory_budget
-        self._progress = Progress(last_advance=clock.now(), last_decision=clock.now())
+        now0 = clock.now()
+        self._progress = Progress(last_advance=now0, last_decision=now0)
         self._staleness_onset: float | None = None
         self._lease_ctx: contextvars.ContextVar[bool] = contextvars.ContextVar(
             "admission_lease_active", default=False
@@ -236,6 +237,12 @@ class AdmissionGate:
         oversize = bool(wanted) and all(capacity[lane] < 1 for lane in wanted) and not in_flight
         if oversize:
             return Decision(kind=DecisionKind.OVERSIZE, scale=scale_map[LaneId.GENERAL], cold=cold)
+        # Cold-probe cap: while a resource is cold, admit only the bounded probing
+        # allowance; a box past its probe park is a RETRY_PRESSURE park, not an oversize.
+        cold_probe_exhausted = cold and self._cold_in_flight >= self._pacing.cold_probe.value
+        wanted_fits = any(capacity[lane] >= 1 for lane in wanted)
+        if cold_probe_exhausted and wanted_fits:
+            return Decision(kind=DecisionKind.PARK, scale=scale_map[LaneId.GENERAL], cold=cold)
 
         # Floor law: per-lane floors (clamped by want), a swept floor still grants 1.
         floor_global = max(1, self._ramp // self._pacing.floor_fraction.value)
@@ -246,7 +253,8 @@ class AdmissionGate:
         granted: dict[LaneId, int] = {}
         for lane in LaneId:
             if lane in wanted and capacity[lane] >= 1:
-                granted[lane] = min(capacity[lane], floor_for[lane])
+                free_slots = max(0, capacity[lane] - self._in_flight[lane])
+                granted[lane] = min(free_slots, floor_for[lane])
             else:
                 granted[lane] = 0
         if sum(granted.values()) < 1:
@@ -275,7 +283,12 @@ class AdmissionGate:
             if granted is not None:
                 completed = sys.exc_info()[0] is None
                 granted.lease.release(work_completed=completed)
-            self._lease_ctx.reset(_token)
+            try:
+                self._lease_ctx.reset(_token)
+            except ValueError:
+                # An async generator closed from a foreign context cannot reset the
+                # token; clear the lease marker so it never leaks across tasks.
+                self._lease_ctx.set(False)
 
     async def _park_until_grant(self, want: Want) -> Granted:
         """Decide, parking internally, until a live grant is possible (BLOCKER-1)."""
@@ -326,7 +339,7 @@ class AdmissionGate:
             granted_alloc = Allocation(allocation_entries)
             lease = Lease._of(self, per_lane, cold=decision.cold)
             now = self._clock.now().value
-            self._record_decision(now, granted_alloc)
+            self._record_decision(now, granted_alloc, cold=decision.cold)
         return Granted(
             allocation=granted_alloc,
             scale=decision.scale or Scale(1.0),
@@ -334,12 +347,16 @@ class AdmissionGate:
             lease=lease,
         )
 
-    def _record_decision(self, now: float, allocation: Allocation) -> None:
+    def _record_decision(self, now: float, allocation: Allocation, *, cold: bool = False) -> None:
         """Ramp growth/decay and progress advance for one granting decision (4.1, 4.4)."""
         self._progress = Progress(
             last_advance=Instant._of(max(now, self._progress.last_advance.value)),
             last_decision=Instant._of(max(now, self._progress.last_decision.value)),
         )
+        if cold:
+            # Cold posture grows no ramp: no current sample means no throughput proof.
+            self._scale_full_streak = 0
+            return
         # Growth only after scale-full over a window; the streak is consumed here.
         self._scale_full_streak += 1
         if self._scale_full_streak >= self._pacing.ramp_growth_window.value:
@@ -371,7 +388,8 @@ class AdmissionGate:
                 unit = self._lanes[lane].cost.memory_bytes.value
                 self._in_flight[lane] -= amount
                 self._in_flight_bytes -= amount * unit
-                self._cold_in_flight = max(0, self._cold_in_flight - (amount if lease._cold else 0))
+            if lease._cold:
+                self._cold_in_flight = max(0, self._cold_in_flight - 1)
             self._version += 1
             now = self._clock.now().value
             if work_completed:
@@ -379,6 +397,7 @@ class AdmissionGate:
                     last_advance=Instant._of(max(now, self._progress.last_advance.value)),
                     last_decision=self._progress.last_decision,
                 )
+            self._signal.set()
             self._decay_ramp()
 
 
