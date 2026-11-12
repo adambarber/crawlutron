@@ -1,64 +1,49 @@
-"""The MCP framework-freeness seal: no module under ``crawlutron.mcp`` imports fastapi or starlette. The AST
-scan catches the import however spelled; attribute-form use requires the import first, so the import scan
-is the reach chokepoint.
+"""The MCP framework-freeness seal: no ``crawlutron.mcp`` module reaches fastapi or starlette.
+Reach is transitive via the shared walk, naming the violating (mcp module -> forbidden) pair;
+the alias-proof import resolution lives in the module graph, the reach chokepoint.
 """
 
 from __future__ import annotations
 
 import ast
-import pathlib
 
-_MCP_ROOT = pathlib.Path(__file__).resolve().parents[2] / "crawlutron" / "mcp"
-_FORBIDDEN_ROOTS = ("fastapi", "starlette")
+from scripts import module_graph
+from scripts.module_graph import build_graph
+from tests.invariants._seal_walk import offender_pairs as _walk_offenders
 
-
-def _imported_roots(tree: ast.AST) -> set[str]:
-    """Top-level roots of every import in the tree, alias-proof."""
-    roots: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            roots.update(alias.name.split(".")[0] for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            roots.add(node.module.split(".")[0])
-    return roots
-
-
-def _mcp_sources() -> dict[str, ast.AST]:
-    return {
-        str(path.relative_to(_MCP_ROOT)): ast.parse(path.read_text(encoding="utf-8"))
-        for path in sorted(_MCP_ROOT.rglob("*.py"))
-    }
+_SEALED_LAYER = "crawlutron.mcp."
+_FORBIDDEN_LAYERS = ("fastapi", "starlette")
 
 
 def test_no_mcp_module_imports_fastapi_or_starlette() -> None:
-    """The seal: any mcp module importing a forbidden root is named file+line."""
-    offenders: list[str] = []
-    for name, tree in _mcp_sources().items():
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.Import, ast.ImportFrom)):
-                continue
-            root = (
-                node.names[0].name.split(".")[0]
-                if isinstance(node, ast.Import)
-                else (node.module or "").split(".")[0]
-            )
-            if root in _FORBIDDEN_ROOTS:
-                offenders.append(f"crawlutron/mcp/{name}:{node.lineno} imports {ast.unparse(node)}")
+    """The seal: DFS over the runtime import graph; any offender is a finding."""
+    modules, _importers = build_graph()
+    offenders = _walk_offenders(modules, _SEALED_LAYER, _FORBIDDEN_LAYERS)
     assert not offenders, (
-        "crawlutron.mcp imports fastapi/starlette; the MCP protocol layer is "
-        "framework-free so it can embed in any ASGI server:\n" + "\n".join(offenders)
+        "crawlutron.mcp reaches fastapi/starlette; the MCP protocol layer is "
+        "framework-free so it can embed in any ASGI server:\n" + "\n".join(sorted(offenders))
     )
 
 
+def test_seal_names_the_bare_package_root_source() -> None:
+    """The package root (crawlutron/mcp/__init__.py) is a sealed source itself."""
+    planted = {
+        "crawlutron.mcp": {"fastapi"},
+        "fastapi": set(),
+    }
+    offenders = _walk_offenders(planted, _SEALED_LAYER, _FORBIDDEN_LAYERS)
+    assert "crawlutron.mcp -> fastapi" in offenders, offenders
+
+
 def test_seal_catches_aliased_and_nested_import_shapes() -> None:
-    """Alias and submodule spellings are the same reach: a planted module reds
-    whichever form it uses."""
-    forms = [
+    """Aliased/spelled imports reach the forbidden root via the production resolver.
+    The test drives module_graph._imports directly because no public door serves synthetic
+    source strings; its output is what build_graph feeds the walk (module_graph.py:123)."""
+    for form in (
         "from fastapi import HTTPException as HX",
         "import fastapi.responses",
         "from starlette.middleware import base",
         "import starlette as st",
-    ]
-    for form in forms:
-        roots = _imported_roots(ast.parse(form))
-        assert roots & set(_FORBIDDEN_ROOTS), f"the seal missed the planted form: {form}"
+    ):
+        reached = module_graph._imports(ast.parse(form))
+        assert reached & set(_FORBIDDEN_LAYERS), f"the module graph missed the planted form: {form}"

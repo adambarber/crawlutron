@@ -27,7 +27,8 @@ def offender_pairs(
 ) -> set[str]:
     """Every (sealed module -> forbidden module) reachability pair, DFS closure."""
     offenders: set[str] = set()
-    sealed = [name for name in modules if name.startswith(sealed_prefix)]
+    bare = sealed_prefix.rstrip(".")
+    sealed = [name for name in modules if name == bare or name.startswith(sealed_prefix)]
     for name in sorted(sealed):
         offenders.update(
             f"{name} -> {reached}"
