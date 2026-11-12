@@ -21,4 +21,4 @@ source = "vcs"
 raw-options = { search_parent_directories = true }
 
 [tool.hatch.build.targets.wheel]
-packages = ["crawlutron_mcp"]
+packages = ["src/crawlutron_mcp"]

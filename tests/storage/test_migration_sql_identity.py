@@ -28,7 +28,7 @@ from crawlutron.storage.migrations.manifest import (
 )
 
 MIGRATIONS_ROOT = (
-    pathlib.Path(__file__).parents[2] / "packages" / "core" / "crawlutron" / "storage" / "migrations"
+    pathlib.Path(__file__).parents[2] / "packages" / "core" / "src" / "crawlutron" / "storage" / "migrations"
 )
 
 #: A step's apply and rollback: a statement string, or a callable that runs it.

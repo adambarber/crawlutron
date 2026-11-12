@@ -99,7 +99,7 @@ def _all_surface_modules(root: pathlib.Path = APP_ROOT) -> set[str]:
     found: set[str] = set()
     for path in sorted(root.rglob("*.py")):
         rel = relative_posix(path)
-        if path.name == "__init__.py" or rel.startswith("packages/core/crawlutron/models/"):
+        if path.name == "__init__.py" or rel.startswith("packages/core/src/crawlutron/models/"):
             continue
         if _declared_public_symbols(parsed(path)) is None:
             continue
@@ -227,7 +227,7 @@ def _models_reexport_offenders(root: pathlib.Path = _MODELS_ROOT) -> list[str]:
     import cleanly -- the drift one-concept-per-file makes impossible."""
     tree = parsed(root / "__init__.py")
     return [
-        f"packages/core/crawlutron/models/__init__.py imports "
+        f"packages/core/src/crawlutron/models/__init__.py imports "
         f"{', '.join(alias.name for alias in node.names)} -- re-exporting makes a type"
         " findable from anywhere, which is what the one-home rule forbids"
         for node in tree.body
@@ -346,8 +346,9 @@ def test_models_typing_detectors_bite(tmp_path):
         '"""A barrel."""\n\nfrom crawlutron.models.crawl_task import CrawlTask\n\n__all__ = ["CrawlTask"]\n'
     )
     assert _models_reexport_offenders(tmp_path) == [
-        "packages/core/crawlutron/models/__init__.py imports CrawlTask -- re-exporting makes a type findable"
-        " from anywhere, which is what the one-home rule forbids"
+        "packages/core/src/crawlutron/models/__init__.py imports CrawlTask --"
+        " re-exporting makes a type findable from anywhere, which is what the"
+        " one-home rule forbids"
     ]
     (tmp_path / "__init__.py").write_text('"""A barrel."""\n\nimport os\n')
     assert len(_models_reexport_offenders(tmp_path)) == 1, "a bare import is a re-export too"

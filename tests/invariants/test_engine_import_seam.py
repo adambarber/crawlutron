@@ -93,7 +93,7 @@ def _function_level_transport_imports(tree: ast.Module) -> list[tuple[str, int]]
 def test_engine_import_seam_is_collapsed(detector) -> None:
     offenders = detector(ast.parse(_ENGINE.read_text(encoding="utf-8")))
     assert not offenders, (
-        f"packages/core/crawlutron/orchestration/engine.py reintroduced the engine-transport "
+        f"packages/core/src/crawlutron/orchestration/engine.py reintroduced the engine-transport "
         f"cache/import seam: {offenders} (name, line) -- shared caches are "
         f"transport-owned singletons; transport imports are top-level"
     )

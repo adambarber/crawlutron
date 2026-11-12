@@ -10,7 +10,7 @@ from tests._walk_primitives import string_constants
 from tests.chokepoint_walks import APP_ROOT, REPO_ROOT
 
 #: The one sanctioned home for masking implementation.
-HOME = Path("packages/core/crawlutron/safety/url_redaction.py")
+HOME = Path("packages/core/src/crawlutron/safety/url_redaction.py")
 
 #: String-literal markers that betray a masking implementation.
 MASKING_MARKERS = ("[REDACTED]", "[unparseable-webhook-url]")

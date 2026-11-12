@@ -24,4 +24,4 @@ version-file = "crawlutron/_version.py"
 [tool.hatch.build.targets.wheel]
 # Dist name (crawlutron-core) and import names (crawlutron, admission) are
 # independent: importing either resolves into this one wheel.
-packages = ["crawlutron", "admission"]
+packages = ["src/crawlutron", "src/admission"]

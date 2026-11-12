@@ -6,7 +6,7 @@
 > in-file comment "ALL batches landed (1-4): ZERO undeclared records, ZERO bare
 > Any, no budget table left"). This roadmap is HISTORICAL: the "Remaining 198
 > offenders" below counted app/ paths that no longer exist (the tree is now
-> `packages/core/crawlutron/`), and the blockers section describes a tree state that has long
+> `packages/core/src/crawlutron/`), and the blockers section describes a tree state that has long
 > since been resolved. Kept for history only — do not work from this list.
 
 Baseline measured on a detached worktree at HEAD: **204/204**. After the first
@@ -19,7 +19,7 @@ described — see the blockers section. One commit, `c5ab69d`, is packaged as
 ## Doctrine (three remedies, exactly two legal moves)
 
 1. **Domain record** (known key set, known value types) → declare a `TypedDict`
-   in `packages/core/crawlutron/models/` (models live one-per-file per #4740). First-class, not counted.
+   in `packages/core/src/crawlutron/models/` (models live one-per-file per #4740). First-class, not counted.
 2. **System type** (known class, unconstrained contents): `JsonValue` for a
    payload that really is arbitrary JSON; `bytes`/`str`. Genuine narrowing, not counted.
 3. **Exit** (a record whose key set the code depends on, no annotation) → the
@@ -40,10 +40,10 @@ Rules that bite (from memory #4666 and the previous failed pass):
 
 | File | Position | Move |
 |---|---|---|
-| `packages/core/crawlutron/models/error_response.py` | `ErrorEnvelope` (new TypedDict) | record |
-| `packages/rest/crawlutron_rest/api/exceptions.py:18,32,52` | `error_envelope`/`error_envelope_from_detail`/`http_error` | return `ErrorEnvelope`; `details` → `JsonValue`; guarded `cast` at pydantic validation |
-| `packages/core/crawlutron/models/discovery_response.py` | `DiscoveryPayload` (new TypedDict) | record |
-| `packages/core/crawlutron/discovery/well_known.py:11,62` | `discovery_payload`/handler | return `DiscoveryPayload` seed identity keys explicitly |
+| `packages/core/src/crawlutron/models/error_response.py` | `ErrorEnvelope` (new TypedDict) | record |
+| `packages/rest/src/crawlutron_rest/api/exceptions.py:18,32,52` | `error_envelope`/`error_envelope_from_detail`/`http_error` | return `ErrorEnvelope`; `details` → `JsonValue`; guarded `cast` at pydantic validation |
+| `packages/core/src/crawlutron/models/discovery_response.py` | `DiscoveryPayload` (new TypedDict) | record |
+| `packages/core/src/crawlutron/discovery/well_known.py:11,62` | `discovery_payload`/handler | return `DiscoveryPayload` seed identity keys explicitly |
 
 Verified: mypy clean, ruff check + format clean, docstring gate, file-size,
 duplication, typing-budget gate all green (run from the main venv against the
@@ -52,7 +52,7 @@ worktree; the worktree has no `.venv`, so the pre-commit hooks cannot run there 
 
 ## Remaining 198 offenders, classified per module
 
-Entanglement is the dominant blocker: many `packages/core/crawlutron/` factories/tables are consumed
+Entanglement is the dominant blocker: many `packages/core/src/crawlutron/` factories/tables are consumed
 from the 8 forbidden files, so retyping a value the forbidden file then key-reads
 or holds forces an edit there. Every module below is marked **doable now** or
 **blocked by <forbidden file>**.
@@ -62,7 +62,7 @@ or holds forces an edit there. Every module below is marked **doable now** or
   `CapabilitiesPayload` TypedDict alongside `CapabilitiesResponse`; spread the
   identity keys explicitly (the `**SERVICE_IDENTITY`-into-TypedDict trick that
   worked for `DiscoveryPayload`). Router caller is internal.
-- `agent_hints.py:105,122` (2) + `packages/core/crawlutron/models/agent_hints_response.py` (1):
+- `agent_hints.py:105,122` (2) + `packages/core/src/crawlutron/models/agent_hints_response.py` (1):
   `agent_hints_payload` → `AgentHintsPayload` TypedDict; `example_policies`
   values are arbitrary nested policy JSON → `dict[str, JsonValue]`.
   Caveat: `AgentHintsResponse.example_policies: dict[str, dict[str, Any]]` is a
@@ -72,7 +72,7 @@ or holds forces an edit there. Every module below is marked **doable now** or
 ### app/admission — mixed
 - `payload_helpers.py:27,58,90` (3): the admission wire payload (`urls`/`url`/
   `policy`) is the textbook record the task named. **Blocked**: it is threaded
-  through `packages/rest/crawlutron_rest/api/crawl_endpoint.py:115` (forbidden). Retype the helper params to
+  through `packages/rest/src/crawlutron_rest/api/crawl_endpoint.py:115` (forbidden). Retype the helper params to
   `AdmissionWire` TypedDict only after the parallel agent lands, else mypy breaks
   crawl_endpoint.
 - `policy.py:159-342` (13): the policy repair machinery operates on arbitrary
@@ -124,7 +124,7 @@ or holds forces an edit there. Every module below is marked **doable now** or
 - `classify.py:147,178` — forbidden.
 - `output_formats.py:52,75,136` (3): `serialize_results`/`_to_markdown`/`_to_csv`
   read the unified result by key (`final_url`,`status`,...) → a `CrawlResultWire`
-  TypedDict. **Blocked**: sole caller is `packages/rest/crawlutron_rest/api/crawl_endpoint.py:92` (forbidden).
+  TypedDict. **Blocked**: sole caller is `packages/rest/src/crawlutron_rest/api/crawl_endpoint.py:92` (forbidden).
 - `trees.py:121-208` (6), `discovery.py:21,37,89` (3), `llm_format.py:105`,
   `document_text.py`/`documents.py`: DOM/tree node records; the list members are
   output records → TypedDicts. Moderate, check forbiddden consumers.
@@ -133,8 +133,8 @@ or holds forces an edit there. Every module below is marked **doable now** or
 ### app/mcp — doable (protocol types)
 - `protocol.py:58,65` (2), `tools.py:79,85,120,246` (4). These already use
   `JsonValue` elsewhere; the `dict[str, Any]` remnants that are MCP JSON-RPC
-  params/results → `JsonValue` / records. `packages/mcp/crawlutron_mcp/server.py` is not forbidden.
-  Check `packages/mcp/crawlutron_mcp/server.py:216` (1) — not in the forbidden list, doable.
+  params/results → `JsonValue` / records. `packages/mcp/src/crawlutron_mcp/server.py` is not forbidden.
+  Check `packages/mcp/src/crawlutron_mcp/server.py:216` (1) — not in the forbidden list, doable.
 - `well_known.py` done.
 
 ### app/orchestration
@@ -150,7 +150,7 @@ or holds forces an edit there. Every module below is marked **doable now** or
 ### app/storage
 - `result_store.py:45,67,100,104` (4): `put`/`get`/`aput`/`aget` genuinely
   pass-through arbitrary stored JSON (`json.dumps`/`json.loads`) → **JsonValue**.
-  **Blocked**: `aget` return is key-read by `packages/rest/crawlutron_rest/api/crawl_endpoint.py:179`
+  **Blocked**: `aget` return is key-read by `packages/rest/src/crawlutron_rest/api/crawl_endpoint.py:179`
   (forbidden) and `aput` is fed by `crawl_endpoint.py:317`; retyping to JsonValue
   breaks those without narrowing edits in the forbidden file.
 - `job_store_state.py` (5) — forbidden.

@@ -8,7 +8,7 @@ from __future__ import annotations
 from tests.chokepoint_walks import REPO_ROOT, parsed
 from tests.invariants.test_public_surface import _owned_public_symbols
 
-_HANDLERS = REPO_ROOT / "packages/mcp/crawlutron_mcp/handlers.py"
+_HANDLERS = REPO_ROOT / "packages/mcp/src/crawlutron_mcp/handlers.py"
 
 #: The bindings the factories produced, keyed by the tool they served.
 _FACTORY_BINDINGS = frozenset(

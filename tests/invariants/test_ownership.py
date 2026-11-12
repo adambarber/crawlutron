@@ -84,7 +84,7 @@ def _threading_lock_bindings(tree: ast.AST) -> set[str]:
 _OWNER_PATH = APP_ROOT / "transport" / "browser.py"
 
 
-_OWNER_MODULE = "packages/core/crawlutron/transport/browser.py"
+_OWNER_MODULE = "packages/core/src/crawlutron/transport/browser.py"
 
 
 LOCK_HELD_ACROSS_AN_AWAIT = Rule(

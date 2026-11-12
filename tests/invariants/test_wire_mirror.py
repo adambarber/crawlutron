@@ -13,7 +13,7 @@ from tests.chokepoint_walks import REPO_ROOT, file_tree, parsed
 
 # --- A wire model may not silently drop a domain model's field ---- crawlutron/models/taxonomy.py holds
 # the internal dataclasses and the pydantic response models are the ones under crawlutron/models/
-_WIRE_MODEL_DIR = "packages/core/crawlutron/models"
+_WIRE_MODEL_DIR = "packages/core/src/crawlutron/models"
 
 
 def _stem_pairs(package: str) -> dict[str, tuple[pathlib.Path, ast.ClassDef, ast.ClassDef]]:
@@ -148,12 +148,12 @@ def test_wire_models_mirror_every_domain_field():
 
 _ADVERTISED_PAYLOADS = (
     (
-        "packages/rest/crawlutron_rest/discovery/capabilities.py",
+        "packages/rest/src/crawlutron_rest/discovery/capabilities.py",
         "capabilities_payload",
         "CapabilitiesResponse",
     ),
     (
-        "packages/rest/crawlutron_rest/discovery/agent_hints.py",
+        "packages/rest/src/crawlutron_rest/discovery/agent_hints.py",
         "agent_hints_payload",
         "AgentHintsResponse",
     ),
@@ -248,8 +248,8 @@ def _constructor_keywords(tree: ast.Module, function_name: str, callee: str) -> 
 # The two terminal funnels re-spell the shared attempt shape (memory #4729);
 # they now live in two modules -- terminal_attempt below transport, the engine funnel here.
 _FUNNEL_ATTEMPT_FIELDS = (
-    "packages/core/crawlutron/models/result_factory.py:terminal_attempt",
-    "packages/core/crawlutron/transport/results.py:terminal_engine_result",
+    "packages/core/src/crawlutron/models/result_factory.py:terminal_attempt",
+    "packages/core/src/crawlutron/transport/results.py:terminal_engine_result",
 )
 
 

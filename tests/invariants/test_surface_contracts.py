@@ -23,16 +23,16 @@ from tests.rules import Bites, Registry, Rule, Silent
 
 _MIGRATION_DDL_PROPERTY = Property(
     name="migration-ddl",
-    owner_module="packages/core/crawlutron/storage/migrations/",
+    owner_module="packages/core/src/crawlutron/storage/migrations/",
     owner_symbols=(),
-    definition_site="packages/core/crawlutron/storage/migrations/",
+    definition_site="packages/core/src/crawlutron/storage/migrations/",
     fingerprints=("ddl",),
     reason="Schema changes must remain ordered and reversible in the migration package.",
 )
 
 
 def _ddl_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[str]:
-    if _relative_app_path(path).startswith("packages/core/crawlutron/storage/migrations/"):
+    if _relative_app_path(path).startswith("packages/core/src/crawlutron/storage/migrations/"):
         return []
     found: list[str] = []
     for node in nodes_of(tree):
@@ -78,7 +78,7 @@ DDL_IS_CONFINED_TO_THE_MIGRATIONS_PACKAGE = Rule(
 
 # Two descriptions of one contract, neither derived from the other -- and the advertised one claimed
 # additionalProperties: False for a request model that in fact ignores extras.
-_MCP_TOOLS_MODULE = "packages/mcp/crawlutron_mcp/registry.py"
+_MCP_TOOLS_MODULE = "packages/mcp/src/crawlutron_mcp/registry.py"
 
 
 def _mcp_unvalidated_tool_offenders(tree, path, *, tools_module):

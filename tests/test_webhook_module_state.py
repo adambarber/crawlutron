@@ -48,7 +48,7 @@ def test_deliver_pinned_webhook_is_called_only_from_post_webhook():
     """
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     callers: set[str] = set()
-    for path in sorted((repo_root / "packages" / "core" / "crawlutron").rglob("*.py")):
+    for path in sorted((repo_root / "packages" / "core" / "src" / "crawlutron").rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in nodes_of(tree):
             if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):

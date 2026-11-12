@@ -48,7 +48,7 @@ class TestNamespaceCoverage:
         """
         import re
 
-        root = pathlib.Path(__file__).resolve().parents[2] / "packages" / "core" / "crawlutron"
+        root = pathlib.Path(__file__).resolve().parents[2] / "packages" / "core" / "src" / "crawlutron"
         sites = [
             str(p.relative_to(root))
             for p in root.rglob("*.py")

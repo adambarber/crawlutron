@@ -17,6 +17,7 @@ from tests._walk_membership import (
     real_members,
 )
 from tests._walk_primitives import (
+    ADMISSION_ROOT,
     APP_ROOT,
     REPO_ROOT,
     TESTS_DIR,
@@ -86,6 +87,7 @@ from tests._walk_trees import (
 )
 
 __all__ = [
+    "ADMISSION_ROOT",
     "APP_ROOT",
     "REPO_ROOT",
     "SANCTIONED",

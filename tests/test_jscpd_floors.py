@@ -178,6 +178,15 @@ def test_python_source_globs_are_never_a_sanctioned_exception(glob) -> None:
         res._reject_source_masking([glob])
 
 
+def test_only_the_named_generated_version_file_may_be_ignored_as_py_source() -> None:
+    """The one sanctioned generated .py exception never becomes a wildcard: a
+    sibling-suffixed named file (or the old flat path) still reds as a mask."""
+    res._reject_source_masking(["**/packages/core/src/crawlutron/_version.py"])
+    for glob in ("**/packages/core/src/crawlutron/_version2.py", "packages/core/crawlutron/_version.py"):
+        with pytest.raises(ValueError, match="Python source"):
+            res._reject_source_masking([glob])
+
+
 @pytest.mark.parametrize(
     "unsanctioned",
     [{"maxLines": 500}, {"skipLocal": True}],
@@ -257,7 +266,9 @@ def test_the_same_content_in_two_trees_is_two_findings_not_one(monkeypatch, caps
         monkeypatch,
         [
             _duplicate(
-                "packages/core/crawlutron/one.py", "packages/core/crawlutron/two.py", fragment="shared"
+                "packages/core/src/crawlutron/one.py",
+                "packages/core/src/crawlutron/two.py",
+                fragment="shared",
             ),
             _duplicate("tests/one.py", "tests/two.py", fragment="shared"),
         ],

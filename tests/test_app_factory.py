@@ -42,8 +42,9 @@ def test_import_configures_nothing(tmp_path):
     # Pin THIS tree so the probe observes the factory under test, not another worktree:
     # the member roots rest imports (core, and mcp since #917).
     rest_root = Path(crawlutron_rest.main.__file__).resolve().parents[1]
-    core_root = rest_root.parent / "core"
-    mcp_root = rest_root.parent / "mcp"
+    packages = rest_root.parent.parent
+    core_root = packages / "core" / "src"
+    mcp_root = packages / "mcp" / "src"
     probe = (
         "import logging, os, sys\n"
         "import crawlutron_rest.main\n"

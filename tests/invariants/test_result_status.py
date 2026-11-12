@@ -21,7 +21,10 @@ _RESULT_CONSTRUCTORS = frozenset({"CrawlStrategyAttempt", "EngineCrawlResult"})
 
 
 _RESULT_CHOKEPOINT_MODULES = frozenset(
-    {"packages/core/crawlutron/transport/results.py", "packages/core/crawlutron/models/result_factory.py"}
+    {
+        "packages/core/src/crawlutron/transport/results.py",
+        "packages/core/src/crawlutron/models/result_factory.py",
+    }
 )
 
 

@@ -204,6 +204,7 @@ class TestMigrationCarriesTheQueue:
             pathlib.Path(__file__).parents[2]
             / "packages"
             / "core"
+            / "src"
             / "crawlutron"
             / "storage"
             / "migrations"

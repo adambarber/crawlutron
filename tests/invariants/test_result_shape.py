@@ -98,7 +98,7 @@ CRAWL_RESPONSE_BUILT_ONLY_BY_THE_SHAPING_CHOKEPOINT = Rule(
 # The rules below close both ends of that: the envelope is adapted in one module, and its scalar fields are
 # passed in one function. ---------------------------------------------------------------------------
 
-_ENVELOPE_OWNER_MODULE = "packages/core/crawlutron/service/response_shaping.py"
+_ENVELOPE_OWNER_MODULE = "packages/core/src/crawlutron/service/response_shaping.py"
 
 
 _ENVELOPE_OWNER_FUNCTION = "_response_envelope"
@@ -109,8 +109,8 @@ _ENVELOPE_BUILDERS = ("abuild_unified_crawl_response", "build_unified_crawl_resp
 
 _ENVELOPE_ADAPTER_EXEMPT = frozenset(
     {
-        "packages/core/crawlutron/service/async_crawl_runner.py",
-        "packages/mcp/crawlutron_mcp/handlers.py",
+        "packages/core/src/crawlutron/service/async_crawl_runner.py",
+        "packages/mcp/src/crawlutron_mcp/handlers.py",
     }  # adapters, not wire endpoints
 )
 

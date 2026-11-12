@@ -11,7 +11,7 @@
     // owner of project-specific safety predicates; this file is the single owner
     // of "the type annotation is a lie". Gated by a pre-commit hook running
     // basedpyright directly, whose finding count is zero-or-fail.
-    "include": ["packages/core/crawlutron", "packages/mcp/crawlutron_mcp"],
+    "include": ["packages/core/src/crawlutron", "packages/mcp/src/crawlutron_mcp"],
     "exclude": [
         "tests",
         "scripts",
@@ -19,14 +19,15 @@
         "**/.pytest_cache"
     ],
 
-    // The crawler is a workspace member nested under packages/core, so that
-    // directory is an import root: a file under packages/core/crawlutron is the
-    // module ``crawlutron.*``, not ``packages.core.crawlutron.*``. Naming the
+    // The crawler is a workspace member nested under packages/core; the src/
+    // layer holds its importable tree, so packages/core/src is an import root:
+    // a file under packages/core/src/crawlutron is the module ``crawlutron.*``,
+    // not ``packages.core.src.crawlutron.*``. Naming the
     // execution root keeps the two identities from colliding on one package.
     "executionEnvironments": [
         {
-            "root": "packages/core",
-            "extraPaths": ["packages/core"]
+            "root": "packages/core/src",
+            "extraPaths": ["packages/core/src"]
         }
     ],
 

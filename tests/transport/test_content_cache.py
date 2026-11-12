@@ -95,7 +95,7 @@ def test_set_writes_disk_outside_the_lock():
     cache operation. Asserted on the live source so the two set twins cannot drift apart again.
     """
     offenders = calls_inside_self_lock(
-        "packages/core/crawlutron/transport/content_cache.py", ("set",), ("write_data",)
+        "packages/core/src/crawlutron/transport/content_cache.py", ("set",), ("write_data",)
     )
     assert offenders == [], (
         "set() calls write_data inside the commit lock: one slow disk write "

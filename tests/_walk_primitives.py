@@ -186,15 +186,19 @@ def is_exempt(relative: str, value: str, exemptions: tuple[tuple[str, str, str],
     return False
 
 
-APP_ROOT = REPO_ROOT / "packages" / "core" / "crawlutron"
+APP_ROOT = REPO_ROOT / "packages" / "core" / "src" / "crawlutron"
+
+
+#: The standalone admission kernel's importable root.
+ADMISSION_ROOT = REPO_ROOT / "packages" / "core" / "src" / "admission"
 
 
 #: Every production app/package surface the sweep laws cover (core + rest + mcp,
 #: Wave A #900/#902/#917); sweeps must span all three or a law vacates one of them.
 APP_ROOTS = (
     APP_ROOT,
-    REPO_ROOT / "packages" / "rest" / "crawlutron_rest",
-    REPO_ROOT / "packages" / "mcp" / "crawlutron_mcp",
+    REPO_ROOT / "packages" / "rest" / "src" / "crawlutron_rest",
+    REPO_ROOT / "packages" / "mcp" / "src" / "crawlutron_mcp",
 )
 
 

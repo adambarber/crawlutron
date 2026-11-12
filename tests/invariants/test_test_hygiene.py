@@ -358,7 +358,7 @@ def _scheduler_run_positional_names() -> tuple[str, ...]:
             args = node.args
             return tuple(a.arg for a in args.posonlyargs + args.args if a.arg not in {"self", "cls"})
     raise AssertionError(
-        "(packages/core/crawlutron/transport/scheduler.py) no longer has a run(); the rule it "
+        "(packages/core/src/crawlutron/transport/scheduler.py) no longer has a run(); the rule it "
         "backs is unverifiable"
     )
 

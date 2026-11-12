@@ -16,7 +16,7 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-Logging is configured by ``packages/core/crawlutron/runtime.logging_config.configure_service_logging``
+Logging is configured by ``packages/core/src/crawlutron/runtime.logging_config.configure_service_logging``
 and lives entirely in this repository; no external shared-tree package is
 required.
 
@@ -83,32 +83,32 @@ preference. `CODE_OF_CONDUCT.md` states the expectations in full.
 
 These require explicit review from a maintainer before merge:
 
-- `packages/core/crawlutron/models/normalized_url.py` and `packages/core/crawlutron/models/host_policy.py` — the URL
+- `packages/core/src/crawlutron/models/normalized_url.py` and `packages/core/src/crawlutron/models/host_policy.py` — the URL
   admission chokepoint: the `NormalizedUrl` constructor is the single place
   raw URL text is parsed, and the public/SSRF egress verdict plus the
   private-target opt-in are decided here.
-- `packages/core/crawlutron/transport/pinned_transport.py` — transport SSRF guard
+- `packages/core/src/crawlutron/transport/pinned_transport.py` — transport SSRF guard
   (`check_ssrf_protection`, `resolve_and_pin_host`), request pinning,
   redirect-target admission, `Host:` header construction.
-- `packages/core/crawlutron/transport/cookie_jar.py` — per-tenant cookie namespace
+- `packages/core/src/crawlutron/transport/cookie_jar.py` — per-tenant cookie namespace
   (`COOKIE_NAMESPACE` ContextVar) and cookie isolation.
-- `packages/core/crawlutron/transport/browser.py` and `browser_driver.py` — browser SSRF,
+- `packages/core/src/crawlutron/transport/browser.py` and `browser_driver.py` — browser SSRF,
   storage_state path validation, opt-in cookie-consent auto-acceptance.
-- `packages/core/crawlutron/transport/robots.py` and `packages/core/crawlutron/transport/robots_parse.py` — robots policy and
+- `packages/core/src/crawlutron/transport/robots.py` and `packages/core/src/crawlutron/transport/robots_parse.py` — robots policy and
   rule cache; `parse_robots_rules` / `parse_robots_crawl_delay` must use
   `USER_AGENT_TOKEN`.
-- `packages/core/crawlutron/safety/validation.py` — egress filter for scraped JS-endpoint URLs
+- `packages/core/src/crawlutron/safety/validation.py` — egress filter for scraped JS-endpoint URLs
   (`filter_js_endpoints`), resolved-address public check
   (`is_public_ip_value`).
-- `packages/core/crawlutron/runtime/pressure_sizing.py` and `packages/core/crawlutron/transport/browser_pool.py` —
+- `packages/core/src/crawlutron/runtime/pressure_sizing.py` and `packages/core/src/crawlutron/transport/browser_pool.py` —
   browser-pool sizing from cgroup memory limits; `BROWSER_RAM_FRACTION`.
-- `packages/rest/crawlutron_rest/main.py` — middleware order, body-size limits, error envelopes.
-- `packages/core/crawlutron/service/webhooks.py` — webhook delivery (`deliver_pinned_webhook`).
-- `packages/core/crawlutron/config/env.py` — `parse_bool_env` and the operator environment reads,
+- `packages/rest/src/crawlutron_rest/main.py` — middleware order, body-size limits, error envelopes.
+- `packages/core/src/crawlutron/service/webhooks.py` — webhook delivery (`deliver_pinned_webhook`).
+- `packages/core/src/crawlutron/config/env.py` — `parse_bool_env` and the operator environment reads,
   including the private-target opt-in.
-- `packages/core/crawlutron/extraction/output_formats.py` — CSV serialization (``_to_csv``),
+- `packages/core/src/crawlutron/extraction/output_formats.py` — CSV serialization (``_to_csv``),
   response serialization.
-- `packages/core/crawlutron/config/settings.py` — defaults (paths, security knobs); changing a
+- `packages/core/src/crawlutron/config/settings.py` — defaults (paths, security knobs); changing a
   default is a security decision.
 
 If your PR modifies any of these, please call it out in the description

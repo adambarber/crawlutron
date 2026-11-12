@@ -164,7 +164,7 @@ class TestBrowserProfileVocabularyIsClosed:
         import ast
         import pathlib
 
-        app_root = pathlib.Path(__file__).resolve().parents[2] / "packages" / "core" / "crawlutron"
+        app_root = pathlib.Path(__file__).resolve().parents[2] / "packages" / "core" / "src" / "crawlutron"
         reads: set[str] = set()
         for path in app_root.rglob("*.py"):
             tree = ast.parse(path.read_text(encoding="utf-8"))

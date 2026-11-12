@@ -242,7 +242,7 @@ def test_a_tests_module_never_declares_a_name_app_models_declares() -> None:
         "the model census came back empty or blind; the detector would govern nothing"
     )
     assert "JsonValue" in models, (
-        "packages/core/crawlutron/models declares JsonValue via a PEP 695 type alias; a census blind "
+        "packages/core/src/crawlutron/models declares JsonValue via a PEP 695 type alias; a census blind "
         "to that form cannot govern a tests/ module re-declaring it"
     )
     doubles = _tests_declared_names()
@@ -302,7 +302,7 @@ def test_a_double_whose_base_is_an_aliased_import_fires() -> None:
     # The planted shape may superset several production frames; any named
     # declaring module proves the detector found the production side.
     assert production_modules and all(
-        m.startswith("packages/core/crawlutron/models/") for m in production_modules
+        m.startswith("packages/core/src/crawlutron/models/") for m in production_modules
     )
 
 
@@ -325,7 +325,7 @@ def test_a_double_split_across_a_local_record_base_fires() -> None:
     planted_modules, production_modules = finding
     assert planted_modules == ["tests/_planted_double.py"]
     assert production_modules and all(
-        m.startswith("packages/core/crawlutron/models/") for m in production_modules
+        m.startswith("packages/core/src/crawlutron/models/") for m in production_modules
     )
 
 

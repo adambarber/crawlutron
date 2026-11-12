@@ -188,10 +188,10 @@ RUN /app/.venv/bin/python -m fpgen fetch --decompress
 # with PYTHONPATH=/app. The packages/core wheel ships both the `crawlutron` and
 # `admission` import names, so both trees land at /app (pressure_sizing imports
 # ``admission`` directly).
-COPY --chown=appuser:appuser packages/core/crawlutron /app/crawlutron
-COPY --chown=appuser:appuser packages/core/admission /app/admission
-COPY --chown=appuser:appuser packages/rest/crawlutron_rest /app/crawlutron_rest
-COPY --chown=appuser:appuser packages/sdk/crawlutron_sdk /app/crawlutron_sdk
+COPY --chown=appuser:appuser packages/core/src/crawlutron /app/crawlutron
+COPY --chown=appuser:appuser packages/core/src/admission /app/admission
+COPY --chown=appuser:appuser packages/rest/src/crawlutron_rest /app/crawlutron_rest
+COPY --chown=appuser:appuser packages/sdk/src/crawlutron_sdk /app/crawlutron_sdk
 
 # uvicorn applies its logging config in ``Config.__init__`` -- BEFORE the app
 # is imported -- so the service's JSON sink must exist by then or uvicorn's own

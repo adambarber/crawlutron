@@ -61,8 +61,16 @@ SANCTIONED_IGNORE_GLOBS = (
     "**/.pytest_cache/**",  # pytest cache, not source
     "**/node_modules/**",  # vendored third-party tree, not source
     "**/.git/**",  # git metadata, not source
-    "**/packages/core/crawlutron/storage/migrations/**",  # generated DDL snapshots, not hand-written source
+    "**/packages/core/src/crawlutron/storage/migrations/**",  # generated DDL snapshots
+    # The generated version artifact (hatch-vcs/regen_version), gitignored and
+    # absent in CI; scanning it pairs it against its own generator template.
+    "**/packages/core/src/crawlutron/_version.py",
 )
+
+
+#: The ONE generated .py path legitimately absent from the duplication surface.
+#: An exact-string membership: a sibling/forked path is source-masking, never allowed.
+_SANCTIONED_PY_GLOBS = frozenset(glob for glob in SANCTIONED_IGNORE_GLOBS if glob.rstrip("/").endswith(".py"))
 
 
 def _reject_source_masking(ignore: list[str]) -> None:
@@ -73,6 +81,8 @@ def _reject_source_masking(ignore: list[str]) -> None:
     """
     for glob in ignore:
         if glob.rstrip("/").endswith(".py") or "*.py" in glob:
+            if glob in _SANCTIONED_PY_GLOBS:
+                continue
             raise ValueError(f"jscpd ignore glob would hide Python source: {glob!r}")
         if not glob.strip("*./"):
             raise ValueError(f"jscpd ignore glob would hide the whole tree: {glob!r}")

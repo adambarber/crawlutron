@@ -9,7 +9,7 @@ repo is private). Everything below is grounded in the live files named.
 
 `[tool.hatch.version] source = "vcs"` in `pyproject.toml` resolves the
 version from the newest git tag at build time; the generated
-`packages/core/crawlutron/_version.py` is a build artifact and is gitignored. There is
+`packages/core/src/crawlutron/_version.py` is a build artifact and is gitignored. There is
 no hand-edited version anywhere. Cutting a release is: tag `vX.Y.Z`,
 push the tag, build — the sdist/wheel carries that exact version. An
 untagged or dirty tree builds with a `dev` suffix instead.
@@ -27,7 +27,7 @@ laws, each refusal naming the law that fired:
 - **Format**: subject is a Conventional Commit, `type(scope): ...` with
   type in feat/fix/docs/chore/refactor/test/build/ci/perf. `feat:` maps
   to MINOR, `fix:` to PATCH, `feat!:` to MAJOR.
-- **Schema**: a `feat!` touching `packages/core/crawlutron/models/crawl_policy.py`
+- **Schema**: a `feat!` touching `packages/core/src/crawlutron/models/crawl_policy.py`
   must bump `POLICY_SCHEMA_VERSION` in the same commit.
 
 ## Release flow (release-please)

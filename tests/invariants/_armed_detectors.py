@@ -12,7 +12,7 @@ _INVARIANTS = pathlib.Path(__file__).resolve().parent
 
 #: The transport source the challenge-wait detectors sweep, named once so the
 #: armed-detector premises don't each restate the moved member path.
-_BROWSER = "packages/core/crawlutron/transport/browser.py"
+_BROWSER = "packages/core/src/crawlutron/transport/browser.py"
 
 
 @dataclass(frozen=True)
@@ -130,27 +130,27 @@ def hand_rolled_detectors() -> tuple[ArmedHandRolled, ...]:
     chokepoint = [
         _subject_detector(
             "test_coordination_cookies_begin_lock.py",
-            "packages/core/crawlutron/storage/coordination_cookies.py",
+            "packages/core/src/crawlutron/storage/coordination_cookies.py",
             "_read_methods_must_use_store_lock",
         ),
         _subject_detector(
             "test_coordination_cookies_begin_lock.py",
-            "packages/core/crawlutron/storage/coordination_cookies.py",
+            "packages/core/src/crawlutron/storage/coordination_cookies.py",
             "_begin_immediate_outside_lock",
         ),
         _subject_detector(
             "test_atwin_store_executor.py",
-            "packages/core/crawlutron/storage/coordination_store.py",
+            "packages/core/src/crawlutron/storage/coordination_store.py",
             "_asyncio_to_thread_offenders",
         ),
         _subject_detector(
             "test_atwin_store_executor.py",
-            "packages/core/crawlutron/storage/coordination_store.py",
+            "packages/core/src/crawlutron/storage/coordination_store.py",
             "_atwin_executor_offenders",
         ),
         _subject_detector(
             "test_cookie_load_read_only.py",
-            "packages/core/crawlutron/storage/coordination_cookies.py",
+            "packages/core/src/crawlutron/storage/coordination_cookies.py",
             "_load_mutation_offenders",
         ),
         _subject_detector("test_challenge_wait_poll.py", _BROWSER, "_raw_sleep_offenders"),

@@ -97,7 +97,7 @@ def test_a_module_form_import_still_resolves_the_module_file() -> None:
 
 def test_the_graph_walks_every_import_root_not_just_crawlutron() -> None:
     """Wave A (#917): the graph must walk every derived import root, so a package that
-    leaves core (mcp -> packages/mcp/crawlutron_mcp) is still walked and its seal never
+    leaves core (mcp -> packages/mcp/src/crawlutron_mcp) is still walked and its seal never
     greens over an empty set. Red-first: the single-package graph named only crawlutron."""
     modules, _importers = build_graph()
     prefixes = {name.split(".", 1)[0] for name in modules}

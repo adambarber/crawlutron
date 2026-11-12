@@ -10,11 +10,10 @@ import ast
 import pathlib
 from collections.abc import Iterable
 
-from tests.chokepoint_walks import APP_ROOT, REPO_ROOT, trees_under
+from tests.chokepoint_walks import ADMISSION_ROOT, APP_ROOT, REPO_ROOT, trees_under
 from tests.rules import Bites, Rule, Silent
 
-_ADMISSION = REPO_ROOT / "packages" / "core" / "admission"
-_SYNTHETIC = _ADMISSION / "_synthetic.py"
+_SYNTHETIC = ADMISSION_ROOT / "_synthetic.py"
 _ELSEWHERE = APP_ROOT / "crawl" / "content_cache.py"
 
 
@@ -23,7 +22,7 @@ def _crawlutron_import_offenders(tree: ast.Module, path: pathlib.Path) -> Iterab
 
     Path-keyed: the detector owns only ``admission/**``, so a crawlutron import
     elsewhere (the legitimate seam) stays quiet."""
-    if _ADMISSION not in path.parents and path.parent != _ADMISSION:
+    if ADMISSION_ROOT not in path.parents and path.parent != ADMISSION_ROOT:
         return []
     offenders: list[str] = []
     for node in ast.walk(tree):
@@ -44,7 +43,7 @@ ADMISSION_IMPORTS_NO_CRAWLUTRON = Rule(
         "no admission/** module may import the crawler: the kernel is a "
         "standalone library with zero crawlutron coupling"
     ),
-    scope=lambda *, exclude: trees_under(_ADMISSION),
+    scope=lambda *, exclude: trees_under(ADMISSION_ROOT),
     proof_path=_SYNTHETIC,
     bite=lambda: (
         Bites("import crawlutron\n\nX = 1\n", "imports crawlutron", at=_SYNTHETIC),

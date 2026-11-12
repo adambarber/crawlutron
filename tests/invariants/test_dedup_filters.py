@@ -218,7 +218,7 @@ def _duplicated_comment_runs(
 
 
 def test_no_comment_block_is_written_twice():
-    """packages/core/crawlutron/ states each multi-line WHY once, not once per call site."""
+    """packages/core/src/crawlutron/ states each multi-line WHY once, not once per call site."""
     offenders = _duplicated_comment_runs(
         (path, path.read_text(encoding="utf-8")) for path in app_python_files(exclude=frozenset())
     )

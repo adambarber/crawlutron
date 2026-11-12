@@ -10,20 +10,22 @@ import importlib
 import pathlib
 import re
 
-_CRAWLUtron_IMPORT = re.compile(r"^\s*(import crawlutron\b|from crawlutron\b)")
+_CRAWLUTRON_IMPORT = re.compile(r"^\s*(import crawlutron\b|from crawlutron\b)")
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
-SDK_ROOT = REPO_ROOT / "packages/sdk/crawlutron_sdk"
+SDK_ROOT = REPO_ROOT / "packages/sdk"
+# The importable package sits under src/ in the uv src-layout; the member root holds the pyproject.
+_SDK_SRC = SDK_ROOT / "src" / "crawlutron_sdk"
 
 
 def _sdk_sources():
-    return sorted(SDK_ROOT.glob("*.py"))
+    return sorted(_SDK_SRC.glob("*.py"))
 
 
 def test_sdk_modules_do_not_import_crawrutron():
     for module in _sdk_sources():
         for line in module.read_text().splitlines():
-            assert not _CRAWLUtron_IMPORT.match(line), (module.name, line)
+            assert not _CRAWLUTRON_IMPORT.match(line), (module.name, line)
 
 
 def test_sdk_is_importable():
@@ -40,5 +42,5 @@ def test_crawlutron_client_exists():
 def test_sdk_wheel_packages_include_sdk():
     """The SDK's OWN wheel ships the import name, not the root's (#898 retired
     the root wheel; a root-substring assert now greens coincidentally)."""
-    pyproject = (SDK_ROOT.parent / "pyproject.toml").read_text()
+    pyproject = (SDK_ROOT / "pyproject.toml").read_text()
     assert "crawlutron_sdk" in pyproject

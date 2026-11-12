@@ -171,7 +171,7 @@ def _parser_definition(tree: ast.AST, path: pathlib.Path, node: ast.AST) -> bool
         return False
     _source, _literals = _source_and_literals(node)
     name = node.name.lower()
-    if _relative_app_path(path) == "packages/core/crawlutron/transport/robots_parse.py" and (
+    if _relative_app_path(path) == "packages/core/src/crawlutron/transport/robots_parse.py" and (
         "robot" in name or "parse" in name
     ):
         return True

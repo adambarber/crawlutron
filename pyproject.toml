@@ -327,11 +327,11 @@ max-statements = 87
     "S404",
     "S603",
 ]
-# crawlutron/cli/docker.py shells out to the docker CLI to start the service
+# crawlutron_rest/cli/docker.py shells out to the docker CLI to start the service
 # (crawl up, Spike A, issue #710). The argv is built from the operator's explicit
 # --image/--tag (never caller input, never credentials), so importing and invoking
 # subprocess is intentional, not a bypassable sink.
-"packages/rest/crawlutron_rest/cli/docker.py" = [
+"packages/rest/src/crawlutron_rest/cli/docker.py" = [
     "S404",  # intentional: the docker CLI is the only way to start the service
     "S603",  # intentional: argv is operator-supplied image/tag, never caller credentials
 ]

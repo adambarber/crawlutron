@@ -124,8 +124,8 @@ def test_scope_regex_compiler_has_exactly_one_definition():
     bounds = [label for label in found if "length bound" in label]
     assert len(compilers) == 1, f"scope-regex compiler duplicated again: {compilers}"
     assert len(bounds) == 1, f"scope-regex length bound duplicated again: {bounds}"
-    assert "packages/core/crawlutron/admission/admission_links.py" in compilers[0], compilers
-    assert "packages/core/crawlutron/admission/admission_links.py" in bounds[0], bounds
+    assert "packages/core/src/crawlutron/admission/admission_links.py" in compilers[0], compilers
+    assert "packages/core/src/crawlutron/admission/admission_links.py" in bounds[0], bounds
 
 
 def _frontier_expression(node: ast.AST) -> bool:
@@ -134,7 +134,7 @@ def _frontier_expression(node: ast.AST) -> bool:
 
 # The admission chokepoint owns the pattern it bans: admit_job_links is the one function allowed to grow a
 # frontier, so the sweep that bans direct growth everywhere else has to skip the module that defines it.
-_ADMISSION_CHOKEPOINT = "packages/core/crawlutron/admission/admission_links.py"
+_ADMISSION_CHOKEPOINT = "packages/core/src/crawlutron/admission/admission_links.py"
 
 
 def _direct_frontier_growth_offenders(
@@ -205,18 +205,18 @@ JOB_FRONTIER_GROWTH_ONLY_USES_FUNNEL = Rule(
         "replacement, alias or slice mutation elsewhere re-opens the funnel every "
         "other entry point is collapsed through"
     ),
-    skip=frozenset({"packages/core/crawlutron/admission/admission.py"}),  # admit_job_links lives here
+    skip=frozenset({"packages/core/src/crawlutron/admission/admission.py"}),  # admit_job_links lives here
     kwargs_for=lambda relative: (
         {"allowed_functions": frozenset({"normalize_job_state"})}
         if relative
         in (
-            "packages/core/crawlutron/storage/job_store_state.py",
-            "packages/core/crawlutron/storage/job_store_read.py",
+            "packages/core/src/crawlutron/storage/job_store_state.py",
+            "packages/core/src/crawlutron/storage/job_store_read.py",
         )
         else {"allowed_functions": frozenset({"_persist"})}
-        if relative == "packages/core/crawlutron/storage/job_store.py"
+        if relative == "packages/core/src/crawlutron/storage/job_store.py"
         else {"allowed_functions": frozenset({"admit_discovered_links", "_admit_chunk"})}
-        if relative == "packages/core/crawlutron/admission/admission_links.py"
+        if relative == "packages/core/src/crawlutron/admission/admission_links.py"
         else {}
     ),
     proof_path=APP_ROOT / "api" / "job_runner.py",

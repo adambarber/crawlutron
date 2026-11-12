@@ -37,7 +37,7 @@ ERREXIT_SHELL = "bash -e {0}"
 # The config-only inputs every hook resolves to, before the derived manifests/Dockerfiles are
 # appended below: a commit editing one of them must not skip the enforcement that checks it.
 _ENFORCEMENT_BASE_INPUTS = (
-    "packages/core/crawlutron/config/settings.py",
+    "packages/core/src/crawlutron/config/settings.py",
     "tests/_jscpd_gate_helpers.py",
     # The duplication gate's own implementation.
     "scripts/jscpd_gate.py",

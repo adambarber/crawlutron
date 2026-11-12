@@ -12,15 +12,15 @@ from tests.rules import Bites, Registry, Rule, Silent
 
 # The enforcement half: the jar has exactly one write door, and that door is the shared tail.
 
-_COOKIE_TAIL = "packages/core/crawlutron/transport/fetchers.py"
+_COOKIE_TAIL = "packages/core/src/crawlutron/transport/fetchers.py"
 
 
-_COOKIE_HELPER = "packages/core/crawlutron/transport/request_profile.py"
+_COOKIE_HELPER = "packages/core/src/crawlutron/transport/request_profile.py"
 
 
 # The door's own implementation module: the jar's methods are the write door,
 # including its RFC 6265 send matching, which shares the stdlib method name.
-_COOKIE_DOOR = "packages/core/crawlutron/transport/cookie_jar.py"
+_COOKIE_DOOR = "packages/core/src/crawlutron/transport/cookie_jar.py"
 
 
 _COOKIE_TAIL_FN = "_store_hop_cookies"

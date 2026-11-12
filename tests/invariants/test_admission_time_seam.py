@@ -9,12 +9,11 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from tests.chokepoint_walks import APP_ROOT, REPO_ROOT, offender_at, trees_under
+from tests.chokepoint_walks import ADMISSION_ROOT, APP_ROOT, offender_at, trees_under
 from tests.invariants._clock_family import dotted_name
 from tests.rules import Bites, Rule, Silent
 
-_ADMISSION = REPO_ROOT / "packages" / "core" / "admission"
-_SYNTHETIC = _ADMISSION / "_synthetic.py"
+_SYNTHETIC = ADMISSION_ROOT / "_synthetic.py"
 _ELSEWHERE = APP_ROOT / "admission" / "policy.py"
 
 #: The time module's CLOCK members: the names whose call reads a timeline.
@@ -86,7 +85,7 @@ def _time_seam_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
 
     Path-keyed: the detector owns only ``admission/**``, so the URL-admission
     package's legitimate time reads stay quiet."""
-    if _ADMISSION not in path.parents and path.parent != _ADMISSION:
+    if ADMISSION_ROOT not in path.parents and path.parent != ADMISSION_ROOT:
         return []
     time_roots, asyncio_roots = _roots(tree)
     offenders: list[str] = []
@@ -106,7 +105,7 @@ ADMISSION_USES_NO_CONCRETE_TIME_OR_SLEEP = Rule(
         "no admission/** module may read a clock or await a concrete event: "
         "the injected Clock/Signal are the package's only time surfaces (\u00a78)"
     ),
-    scope=lambda *, exclude: trees_under(_ADMISSION),
+    scope=lambda *, exclude: trees_under(ADMISSION_ROOT),
     proof_path=_SYNTHETIC,
     bite=lambda: (
         Bites(

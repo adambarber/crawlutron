@@ -39,7 +39,7 @@ def _documented_browser_knobs() -> set[str] | None:
 
 
 def _settings_fields() -> set[str]:
-    tree = file_tree("packages/core/crawlutron/config/settings.py")[1]
+    tree = file_tree("packages/core/src/crawlutron/config/settings.py")[1]
     for node in class_defs(tree):
         if node.name == "CrawlerSettings":
             return {
@@ -87,7 +87,7 @@ def _production_browser_knob_references() -> set[str]:
                     references.add(environment)
             if (
                 isinstance(node, ast.Attribute)
-                and _relative_app_path(path) != "packages/core/crawlutron/config/settings.py"
+                and _relative_app_path(path) != "packages/core/src/crawlutron/config/settings.py"
             ):
                 environment = ENVIRONMENT_FIELD_ALIASES.get(node.attr)
                 if environment is not None:

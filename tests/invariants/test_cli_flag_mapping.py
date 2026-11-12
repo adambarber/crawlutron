@@ -15,6 +15,7 @@ _CLI_MAIN = (
     pathlib.Path(__file__).resolve().parents[2]
     / "packages"
     / "rest"
+    / "src"
     / "crawlutron_rest"
     / "cli"
     / "__main__.py"
