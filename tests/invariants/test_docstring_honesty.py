@@ -44,8 +44,8 @@ def _claimed_roots(text: str) -> set[str]:
 def _root_bindings(tree: ast.Module) -> set[str]:
     """Root names bound/defaulted as ``REPO_ROOT / "<root>"``, plus the app-root door.
 
-    The derived app-root door (``APP_ROOT`` / app-tree walks) IS the ``crawlutron``
-    root, so a docstring claiming it is honest, not a mismatch to flag."""
+    The app-root door (``APP_ROOT``) binds its scan-surface root only when the module
+    carries a real app-tree walk; a bare path reference is no scan and no derivation."""
     bound: set[str] = set()
     for node in ast.walk(tree):
         if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)):
@@ -62,10 +62,36 @@ def _root_bindings(tree: ast.Module) -> set[str]:
             root_name = node.right.left.value
         if root_name in SCAN_ROOTS:
             bound.add(root_name)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Name) and node.id == "APP_ROOT" and isinstance(node.ctx, ast.Load):
-            bound.add(_APP_ROOT_NAME)
+    if _has_app_walk(tree):
+        bound.add(_APP_ROOT_NAME)
     return bound
+
+
+#: The walk-call shapes that make ``APP_ROOT`` a real app-tree scan, never a path lookup.
+def _has_app_walk(tree: ast.Module) -> bool:
+    """Whether the module calls a real app-tree walk over ``APP_ROOT``.
+
+    Recognizes the sanctioned doors (app_trees, trees_under(APP_ROOT),
+    assert_trees_clean) and APP_ROOT.rglob; a bare path reaches one file, no scope."""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Name) and func.id in {"app_trees", "assert_trees_clean"}:
+            return True
+        if (
+            isinstance(func, ast.Name)
+            and func.id == "trees_under"
+            and node.args
+            and isinstance(node.args[0], ast.Name)
+            and node.args[0].id == "APP_ROOT"
+        ):
+            return True
+        if isinstance(func, ast.Attribute) and func.attr == "rglob":
+            value = func.value
+            if isinstance(value, ast.Name) and value.id == "APP_ROOT":
+                return True
+    return False
 
 
 def _derives_scope(source: str, tree: ast.Module) -> bool:
@@ -161,4 +187,19 @@ def test_a_prose_mention_of_the_constant_is_not_a_derivation() -> None:
     assert _claimed_roots(bypass) == {"crawlutron", "tests", "scripts"}
     assert _derives_scope(bypass, tree) is False, (
         "a prose mention of SCAN_ROOTS counted as a derivation -- the lie walks"
+    )
+
+
+def test_a_bare_app_root_reference_without_a_walk_does_not_claim_scope() -> None:
+    """The reviewer's lie shape: claiming crawlutron scope while reaching APP_ROOT only as a
+    path (never walking the app tree) must fail the audit -- the H2 "claim a scan, don't scan"
+    lie the gate exists to stop, not a derivation the door wrongly buys."""
+    lie = (
+        '"""Sweeps crawlutron/ for ownership violations."""\n'
+        "return [str(APP_ROOT / 'service' / 'webhooks.py')]\n"
+    )
+    tree = ast.parse(lie)
+    assert _claimed_roots(lie) == {"crawlutron"}
+    assert _derives_scope(lie, tree) is False, (
+        "a bare APP_ROOT path reference counted as a walk -- the claim lies un-scanned"
     )
