@@ -6,10 +6,8 @@ build-backend = "hatchling.build"
 name = "crawlutron-rest"
 dynamic = ["version"]
 description = "FastAPI HTTP surface for the policy-driven web crawler and content-extraction service"
-readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
-license-files = ["LICENSE"]
 keywords = [
     "crawler",
     "scraper",
