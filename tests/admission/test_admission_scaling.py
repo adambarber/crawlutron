@@ -9,7 +9,7 @@ from crawlutron.orchestration.recursive import batch_is_http_heavy
 from crawlutron.runtime.pressure_memory import batch_scale
 from crawlutron.runtime.pressure_sizing import ResourceGate
 from crawlutron.vocabulary.strategies import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
-from tests._admission_doubles import PinnedGate
+from tests._admission_doubles import FakeResourceGauge
 from tests._admission_doubles import pinned_resource_gate as _pinned_resource_gate
 from tests._fetcher_factories import LINKED_PAIR_LIMITS, crawled_results, site_linking_to
 from tests._recursive_harnesses import drive_recursive_crawl, make_crawl_task
@@ -190,7 +190,7 @@ class TestDispatcherStrategyAwareScaling:
             }
         )
         jobs = [make_crawl_task(0, "a.gov"), make_crawl_task(0, "b.gov")]
-        gate = PinnedGate(batch=0.0, http=1.0)
+        gate = FakeResourceGauge(batch=0.0, http=1.0)
         await _run_with_gate(sched, gate, jobs)
 
         # The dispatcher consults http_scale_factor for an HTTP-heavy batch and uses its value (http=1.0) so
@@ -213,7 +213,7 @@ class TestDispatcherStrategyAwareScaling:
     )
     async def test_batch_uses_the_combined_scale(self, _case, pins):
         jobs = [make_crawl_task(0, "a.gov"), make_crawl_task(0, "b.gov")]
-        gate = PinnedGate(batch=1.0, http=1.0)
+        gate = FakeResourceGauge(batch=1.0, http=1.0)
         await _run_with_gate(_Scheduler(pins), gate, jobs)
 
         assert "batch" in gate.calls
