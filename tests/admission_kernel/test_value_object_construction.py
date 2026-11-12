@@ -108,10 +108,6 @@ def test_sensing_must_be_complete_over_memory_and_cpu() -> None:
     assert set(sensing.sensors) == {ResourceId.MEMORY, ResourceId.CPU}
     with pytest.raises(ValueError):
         Sensing({ResourceId.MEMORY: mem_binding})
-    extra = dict(good)
-    extra[ResourceId.LOOP_LAG] = cpu_binding
-    with pytest.raises(ValueError):
-        Sensing(extra)
 
 
 def test_allocation_must_be_complete_over_lane_id() -> None:
@@ -139,16 +135,16 @@ def test_granted_requires_positive_total_and_a_live_lease() -> None:
     from tests.admission_kernel._gate_factory import build_gate
 
     gate, _handles = build_gate()
-    lease = Lease(lane=LaneId.GENERAL, amount=Count(1), gate=gate)
+    lease = Lease._of(gate, {LaneId.GENERAL: 1}, cold=False, scale=Scale(1.0))
     bad_allocation = Allocation(
         {LaneId.GENERAL: AllocationEntry(Count(0)), LaneId.HEAVY: AllocationEntry(Count(0))}
     )
     with pytest.raises(ValueError):
-        Granted(allocation=bad_allocation, scale=Scale(1.0), paced=False, lease=lease)
+        Granted(allocation=bad_allocation, scale=Scale(1.0), lease=lease)
     good_allocation = Allocation(
         {LaneId.GENERAL: AllocationEntry(Count(1)), LaneId.HEAVY: AllocationEntry(Count(0))}
     )
-    granted = Granted(allocation=good_allocation, scale=Scale(1.0), paced=False, lease=lease)
+    granted = Granted(allocation=good_allocation, scale=Scale(1.0), lease=lease)
     assert granted.lease is lease
 
 

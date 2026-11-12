@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from admission import (
@@ -206,10 +207,12 @@ class GateSpec:
     cold_probe: int = 1
     initial_ramp: int | None = None
     loop_lag: float = 1.0
+    loop_lag_fn: Callable[[], Ratio] | None = None
     scale_source: ScaleSource | None = None
     mem_gauge: ResourceGauge | None = None
     cpu_gauge: ResourceGauge | None = None
     memory_budget_mib: int | None = None
+    reserved_mib: int | None = None
     ramp_growth_window: int = 3
     thread_safe_signal: bool = False
 
@@ -254,7 +257,6 @@ def build_gate(spec: GateSpec | None = None) -> tuple[AdmissionGate, GateHandles
         stale_bound=Duration(s.stale_bound),
         cold_probe=Count(s.cold_probe),
         initial_ramp=None if s.initial_ramp is None else Count(s.initial_ramp),
-        yield_interval=Duration(0.0),
         ramp_growth_window=Count(s.ramp_growth_window),
     )
     gate = AdmissionGate(
@@ -263,7 +265,8 @@ def build_gate(spec: GateSpec | None = None) -> tuple[AdmissionGate, GateHandles
         sensing=sensing,
         clock=clock,
         signal=signal,
-        loop_lag_multiplier=Ratio(s.loop_lag),
+        loop_lag=s.loop_lag_fn if s.loop_lag_fn is not None else (lambda: Ratio(s.loop_lag)),
         memory_budget=None if s.memory_budget_mib is None else Bytes(s.memory_budget_mib * mib),
+        reserved=None if s.reserved_mib is None else Bytes(s.reserved_mib * mib),
     )
     return gate, handles
