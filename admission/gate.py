@@ -296,14 +296,16 @@ class AdmissionGate:
                 self._lease_ctx.set(False)
 
     async def _park_until_grant(self, want: Want) -> Granted:
-        """Decide, parking internally, until a live grant is possible (BLOCKER-1)."""
+        """Decide-and-commit as one atomic lock hold; a live grant returns within it."""
         while True:
             now = self._clock.now().value
             readings = self._snapshot_readings(now)
             with self._lock:
                 decision = self._decide(want, readings)
-            if decision.kind is DecisionKind.GRANT:
-                return self._commit_grant(decision)
+                if decision.kind is DecisionKind.GRANT:
+                    # Decide and commit under one lock hold (B1): a released lock
+                    # between them let two admits over-commit the ceiling.
+                    return self._commit_grant_locked(decision)
             if decision.kind is DecisionKind.OVERSIZE:
                 raise AdmissionRefused(IdleReason.OVERSIZE)
             if decision.kind is DecisionKind.STALE:
@@ -326,28 +328,27 @@ class AdmissionGate:
         if self._version == version_before:
             return
 
-    def _commit_grant(self, decision: Decision) -> Granted:
-        """Commit the in-flight reservation under the lock and build the lease."""
+    def _commit_grant_locked(self, decision: Decision) -> Granted:
+        """Commit an already-decided GRANT; the caller holds the state lock."""
         if decision.per_lane is None:
             raise RuntimeError("commit requires a GRANT decision with per-lane amounts")
-        with self._lock:
-            allocation_entries: dict[LaneId, AllocationEntry] = {}
-            per_lane = {lane: decision.per_lane[lane] for lane in LaneId}
-            for lane, amount in per_lane.items():
-                allocation_entries[lane] = AllocationEntry(Count(amount))
-                if amount > 0:
-                    unit = self._lanes[lane].cost.memory_bytes.value
-                    self._in_flight[lane] += amount
-                    self._in_flight_bytes += amount * unit
-            # One cold-probe debit per DECISION (any cold lane the grant spans), NOT
-            # per lane: a dual-lane cold grant consumes one slot, released once (§7.2).
-            if decision.cold:
-                self._cold_in_flight += 1
-            granted_alloc = Allocation(allocation_entries)
-            lease = Lease._of(self, per_lane, cold=decision.cold)
-            now = self._clock.now().value
-            decision_scale = decision.scale or Scale(1.0)
-            self._record_decision(now, granted_alloc, cold=decision.cold, scale=decision_scale)
+        allocation_entries: dict[LaneId, AllocationEntry] = {}
+        per_lane = {lane: decision.per_lane[lane] for lane in LaneId}
+        for lane, amount in per_lane.items():
+            allocation_entries[lane] = AllocationEntry(Count(amount))
+            if amount > 0:
+                unit = self._lanes[lane].cost.memory_bytes.value
+                self._in_flight[lane] += amount
+                self._in_flight_bytes += amount * unit
+        # One cold-probe debit per DECISION (any cold lane the grant spans), NOT
+        # per lane: a dual-lane cold grant consumes one slot, released once (§7.2).
+        if decision.cold:
+            self._cold_in_flight += 1
+        granted_alloc = Allocation(allocation_entries)
+        lease = Lease._of(self, per_lane, cold=decision.cold)
+        now = self._clock.now().value
+        decision_scale = decision.scale or Scale(1.0)
+        self._record_decision(now, granted_alloc, cold=decision.cold, scale=decision_scale)
         return Granted(
             allocation=granted_alloc,
             scale=decision_scale,
@@ -389,11 +390,17 @@ class AdmissionGate:
             raise WrongGateError(lease_owner=lease.gate, gate=self)
         with self._lock:
             per_lane = lease._per_lane
+            # Validate every lane before decrementing ANY (B2): a silent mid-loop
+            # return half-releases and starves parked waiters. Mismatch is corruption.
+            for lane, amount in per_lane.items():
+                if amount > 0 and self._in_flight[lane] < amount:
+                    raise AssertionError(
+                        f"release counter mismatch on {lane}: "
+                        f"in_flight {self._in_flight[lane]} < lease {amount}"
+                    )
             for lane, amount in per_lane.items():
                 if amount <= 0:
                     continue
-                if self._in_flight[lane] < amount:
-                    return
                 unit = self._lanes[lane].cost.memory_bytes.value
                 self._in_flight[lane] -= amount
                 self._in_flight_bytes -= amount * unit
