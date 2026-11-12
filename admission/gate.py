@@ -350,7 +350,6 @@ class AdmissionGate:
         return Granted(
             allocation=granted_alloc,
             scale=decision_scale,
-            paced=False,
             lease=lease,
         )
 

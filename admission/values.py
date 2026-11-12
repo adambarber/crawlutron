@@ -86,11 +86,10 @@ def _int_ge(value: int, name: str, *, minimum: int, reject_bool: bool = True) ->
 
 
 class ResourceId(enum.StrEnum):
-    """The closed resource vocabulary: MEMORY/CPU/LOOP_LAG."""
+    """The closed resource vocabulary: MEMORY and CPU."""
 
     MEMORY = "memory"
     CPU = "cpu"
-    LOOP_LAG = "loop_lag"
 
     @classmethod
     def members(cls) -> tuple[ResourceId, ...]:
@@ -99,7 +98,7 @@ class ResourceId(enum.StrEnum):
 
     @classmethod
     def from_value(cls, value: str) -> ResourceId:
-        """Case-exact mapping from wire value to member (LOOP_LAG requires the underscore)."""
+        """Case-exact mapping from wire value to member."""
         return cls(value)
 
 
@@ -381,14 +380,13 @@ class Lease:
 class Granted:
     """A live grant: positive allocation plus a committed lease."""
 
-    __slots__ = ("allocation", "scale", "paced", "lease")
+    __slots__ = ("allocation", "scale", "lease")
 
     def __init__(
         self,
         *,
         allocation: Allocation,
         scale: Scale,
-        paced: bool,
         lease: Lease,
     ) -> None:
         if allocation.total.value < 1:
@@ -397,5 +395,4 @@ class Granted:
             raise ValueError("Granted requires a live lease: a grant without a reservation is a lie")
         self.allocation = allocation
         self.scale = scale
-        self.paced = paced
         self.lease = lease

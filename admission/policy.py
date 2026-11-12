@@ -43,7 +43,6 @@ class PacingPolicy:
     ramp_max: Count
     ramp_multiplier: Multiplier
     floor_fraction: FloorDivisor
-    yield_interval: Duration = Duration(0.0)
     ramp_growth_window: Count = Count(3)
     cold_probe: Count = Count(1)
     stale_bound: Duration = Duration(30.0)

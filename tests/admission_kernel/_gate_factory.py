@@ -255,7 +255,6 @@ def build_gate(spec: GateSpec | None = None) -> tuple[AdmissionGate, GateHandles
         stale_bound=Duration(s.stale_bound),
         cold_probe=Count(s.cold_probe),
         initial_ramp=None if s.initial_ramp is None else Count(s.initial_ramp),
-        yield_interval=Duration(0.0),
         ramp_growth_window=Count(s.ramp_growth_window),
     )
     gate = AdmissionGate(
