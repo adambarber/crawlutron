@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 
+from admission import Bytes, Cost, Count, LaneId, LaneSpec, MinAll
 from crawlutron.config.env import get_env_float, get_env_int
 from crawlutron.runtime.pressure_gates import CpuGate, ResourceGate
 from crawlutron.runtime.pressure_memory import read_memory_stats
@@ -14,6 +15,7 @@ __all__ = [
     "CpuGate",
     "LoopLagProbe",
     "default_executor_workers",
+    "kernel_lane_specs",
     "read_cpu_quota",
     "read_cpu_usage_seconds",
 ]
@@ -194,6 +196,26 @@ def build_admission_policy(
         max_browser_concurrency=max(1, pool_size * max_concurrent_pages),
         doc_pool_reserve_bytes=sizing.doc_workers * sizing.doc_task_bytes,
     )
+
+
+def kernel_lane_specs(policy: AdmissionPolicy, budget: TaskRamBudget) -> dict[LaneId, LaneSpec]:
+    """The two kernel LaneSpecs for one sized policy (C3, seam-only).
+
+    HTTP->GENERAL, BROWSER->HEAVY (spec 2); ceilings are the RAM-derived tier
+    caps and per-unit costs are the task RAM weights, all in bytes.
+    """
+    return {
+        LaneId.GENERAL: LaneSpec(
+            ceiling=Count(policy.max_http_concurrency),
+            cost=Cost(Bytes(budget.http_task_bytes)),
+            scale_source=MinAll(),
+        ),
+        LaneId.HEAVY: LaneSpec(
+            ceiling=Count(policy.max_browser_concurrency),
+            cost=Cost(Bytes(budget.browser_task_bytes)),
+            scale_source=MinAll(),
+        ),
+    }
 
 
 def default_admission_policy(gate: ResourceGate) -> WeightedAdmission:
