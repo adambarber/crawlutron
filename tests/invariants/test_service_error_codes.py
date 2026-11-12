@@ -80,19 +80,37 @@ def _raise_sites(tree: ast.AST, source_name: str) -> list[tuple[str, int, str]]:
 
 
 def _http_error_calls(tree: ast.AST) -> list[ast.Call]:
-    """EVERY Call whose func resolves to the name http_error, however the name
-    was bound (direct import or local alias) -- the census aliases cannot dodge."""
-    aliased = {
-        node.targets[0].id
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Assign)
-        and isinstance(node.targets[0], ast.Name)
-        and "http_error" in ast.unparse(node.value)
-    } | {"http_error"}
+    """EVERY Call shaped like http_error, however the name was bound: direct
+    import, local alias (Assign or ImportFrom-as), or attribute form. The
+    census matches on the CALL SHAPE, not on binding resolution -- so an
+    aliased attribute (``z.http_error(...)``) is seen by the attribute match
+    without tracking the base binding. Sentinel classification stays with the
+    args via _triplet_args, unchanged."""
+    aliased = (
+        {
+            node.targets[0].id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Assign)
+            and isinstance(node.targets[0], ast.Name)
+            and "http_error" in ast.unparse(node.value)
+        }
+        | {
+            alias.asname
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            for alias in node.names
+            if alias.name == "http_error" and alias.asname
+        }
+        | {"http_error"}
+    )
     return [
         node
         for node in ast.walk(tree)
-        if isinstance(node, ast.Call) and getattr(node.func, "id", None) in aliased
+        if isinstance(node, ast.Call)
+        and (
+            getattr(node.func, "id", None) in aliased
+            or (isinstance(node.func, ast.Attribute) and node.func.attr == "http_error")
+        )
     ]
 
 
@@ -246,3 +264,46 @@ def test_wire_codes_shared_with_the_sdk_agree_on_status():
             f"{source} answers status {status} for wire code {code!r} but the SDK class "
             f"{classes[0]} declares status_code={sdk_class.status_code}."
         )
+
+
+def _census_from_source(text: str) -> int:
+    return len(_http_error_calls(ast.parse(text)))
+
+
+def test_census_sees_attribute_form_http_error_calls():
+    """module.http_error(...) has an ast.Attribute func; the census matches it
+    regardless of how the module binding arrived, so it cannot dodge."""
+    text = "import m\n\ndef f():\n    m.http_error(404, 'gone')\n"
+    assert _census_from_source(text) == 1
+
+
+def test_census_sees_import_alias_bindings():
+    """from x import http_error as he: the alias is an ast.ImportFrom name,
+    not an ast.Assign, so the old alias-learning never saw it."""
+    text = "from x import http_error as he\n\ndef f():\n    he(500, 'bad')\n"
+    assert _census_from_source(text) == 1
+
+
+def test_census_sees_aliased_attribute_combination():
+    """Nested combination (from x import y as z; z.http_error(...)): the census
+    matches the attribute form without tracking the base binding -- every
+    http_error-shaped call is seen by census; classification stays with args."""
+    text = "from x import y as z\n\ndef f():\n    z.http_error(500, 'bad')\n"
+    assert _census_from_source(text) == 1
+
+
+def test_census_widening_leaves_the_live_tree_derived_set_unchanged():
+    """The widening is provably non-behavioral on the real tree: the live
+    sources carry exactly the one plain-import call, no new sites appear."""
+    plain = sum(
+        sum(
+            isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "http_error"
+            for n in ast.walk(ast.parse(text))
+        )
+        for text in _module_sources().values()
+    )
+    live = sum(_census_from_source(text) for text in _module_sources().values())
+    assert live == plain, (
+        f"the widened census counts {live} http_error calls across the live sources but only "
+        f"{plain} plain-name sites exist -- the widening introduced new sites; re-derive this pin."
+    )
