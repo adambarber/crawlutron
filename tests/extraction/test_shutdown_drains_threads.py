@@ -25,6 +25,7 @@ def _spawn(count, flavour, settings):
             args=(_HTML, "http://example.com/"),
             kwargs={"selectors": Selectors(css=".x"), "settings": settings},
             name=f"{flavour}-{i}",
+            daemon=True,
         )
         for i in range(count)
     ]
@@ -47,6 +48,7 @@ def _run_shutdown_when_held(shutdown_done):
             shutdown_done.set(),
         ),
         name="shutdown",
+        daemon=True,
     ).start()
 
 
@@ -73,33 +75,39 @@ def test_shutdown_refuses_queued_work_instead_of_orphaning_it(monkeypatch):
     threads = _spawn(4, "parked", settings)  # saturate the 4 workers
     for t in threads:
         t.start()
-    assert saturated.wait(timeout=5), "workers never saturated the pool"
+    try:
+        saturated.wait(timeout=5)
+        assert not saturated.broken, "workers never saturated the pool"
 
-    def queued_work():
-        with lock:
-            executed.append(1)
-        return []
+        def queued_work():
+            with lock:
+                executed.append(1)
+            return []
 
-    executor = docex.extraction_executor()
-    queued_futs = [executor.submit(queued_work) for _ in range(4)]
-    shutdown_done = threading.Event()
-    _run_shutdown_when_held(shutdown_done)
-    refused_now = _await_all(queued_futs, 5) and not shutdown_done.is_set()
-    if not refused_now:
-        release.set()  # orphan watchdog: never leave the fixture parked on a bug
-        shutdown_done.wait(timeout=10)
+        executor = docex.extraction_executor()
+        queued_futs = [executor.submit(queued_work) for _ in range(4)]
+        shutdown_done = threading.Event()
+        _run_shutdown_when_held(shutdown_done)
+        refused_now = _await_all(queued_futs, 5) and not shutdown_done.is_set()
+        if not refused_now:
+            release.set()  # orphan watchdog: never leave the fixture parked on a bug
+            shutdown_done.wait(timeout=10)
+            for t in threads:
+                t.join(timeout=5)
+        assert refused_now, (
+            "shutdown did not cancel queued-but-unstarted futures while running "
+            "workers were still held; queued work was allowed to survive shutdown"
+        )
+
+        release.set()  # unpark the held workers only after refusal is proven
+        assert shutdown_done.wait(timeout=10), "shutdown never finished after unparking"
         for t in threads:
             t.join(timeout=5)
-    assert refused_now, (
-        "shutdown did not cancel queued-but-unstarted futures while running "
-        "workers were still held; queued work was allowed to survive shutdown"
-    )
-
-    release.set()  # unpark the held workers only after refusal is proven
-    assert shutdown_done.wait(timeout=10), "shutdown never finished after unparking"
-    for t in threads:
-        t.join(timeout=5)
-    assert executed == [], (
-        f"{len(executed)} queued futures ran after shutdown: shutdown must "
-        "refuse queued work, not orphan it into later thread activity"
-    )
+        assert executed == [], (
+            f"{len(executed)} queued futures ran after shutdown: shutdown must "
+            "refuse queued work, not orphan it into later thread activity"
+        )
+    finally:
+        # A failure above must still unpark the workers: the pool owns non-daemon
+        # threads whose teardown shutdown(wait=True) parks forever otherwise.
+        release.set()

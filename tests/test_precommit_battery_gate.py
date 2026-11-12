@@ -76,6 +76,23 @@ def test_the_battery_child_runs_the_whole_suite_with_default_addopts() -> None:
         assert not token.endswith(".py"), f"file argument {token!r} narrows the battery"
 
 
+def test_the_coverage_child_is_the_battery_child_plus_coverage_switches() -> None:
+    """Kills the push-gate drift mutant: `-o addopts=""` or a re-spelled
+    -n/--dist on the coverage hook reds — the push gate must run exactly the
+    suite the battery certifies, plus coverage (2026-11-12)."""
+    hooks = _hook_blocks(_config())
+    battery = shlex.split(_entry(_battery(hooks)).split(" -- ", 1)[1])
+    coverage = [block for hook_id, block in hooks if hook_id == "coverage"]
+    assert len(coverage) == 1, "exactly one coverage hook required"
+    # The coverage hook runs pytest directly (no gate_fanout wrapper), so its
+    # command starts after the shared gate-helper prologue, not after a `--`.
+    cov_argv = shlex.split(_entry(coverage[0]).partition("' gate ")[2].strip())
+    assert cov_argv[:3] == battery[:3] == [".venv/bin/python", "-m", "pytest"]
+    assert cov_argv[3:] == battery[3:] + ["--cov=crawlutron", "--cov-report="], (
+        f"coverage child drifted from battery + coverage: {cov_argv[3:]}"
+    )
+
+
 def test_the_fanout_discovers_every_precommit_pytest_child() -> None:
     """Kill the un-wired-battery mutant: a battery hook the fanout's parser misses
     would run pytest at commit OUTSIDE the fanout; every pre-commit pytest child must

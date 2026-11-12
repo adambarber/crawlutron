@@ -222,6 +222,14 @@ repos:
       # The report is a separate untimed step (`python -m coverage report
       # --skip-covered`) so the timed pass measures tracing only.
       #
+      # The child is the BATTERY child plus the coverage switches -- the same
+      # `pytest -q`, inheriting the same ini addopts (marker filter + workers).
+      # It used to run `-o addopts=""`, re-spelling -n/--dist and executing the
+      # browser/slow population the battery deselects, which reddened on timing
+      # tests three times under tracing (2026-11-12, push-gate audit). No
+      # override, no re-declared flags: it is identical to the pre-commit gate
+      # plus coverage, and tests/test_precommit_battery_gate.py pins that identity.
+      #
       # Depth is NOT configured here: the deeper surface (branch +
       # dynamic_context="test_function", weekly / pre-release) pairs with the
       # mutation-proof evidence story and is documented in pyproject's
@@ -230,7 +238,7 @@ repos:
         name: coverage (measured-descriptive, pre-push)
         entry: >-
           bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
-          .venv/bin/python -m pytest -q -o addopts="" -n 4 --dist worksteal --cov=crawlutron --cov-report=
+          .venv/bin/python -m pytest -q --cov=crawlutron --cov-report=
         language: system
         files: ^(crawlutron|tests)/
         pass_filenames: false
