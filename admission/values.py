@@ -86,11 +86,10 @@ def _int_ge(value: int, name: str, *, minimum: int, reject_bool: bool = True) ->
 
 
 class ResourceId(enum.StrEnum):
-    """The closed resource vocabulary: MEMORY/CPU/LOOP_LAG."""
+    """The closed resource vocabulary: MEMORY and CPU."""
 
     MEMORY = "memory"
     CPU = "cpu"
-    LOOP_LAG = "loop_lag"
 
     @classmethod
     def members(cls) -> tuple[ResourceId, ...]:
@@ -99,7 +98,7 @@ class ResourceId(enum.StrEnum):
 
     @classmethod
     def from_value(cls, value: str) -> ResourceId:
-        """Case-exact mapping from wire value to member (LOOP_LAG requires the underscore)."""
+        """Case-exact mapping from wire value to member."""
         return cls(value)
 
 
@@ -316,10 +315,9 @@ class Want:
         return cls({LaneId.GENERAL: general, LaneId.HEAVY: heavy})
 
 
+@dataclass(frozen=True, slots=True)
 class MinAll:
     """The MIN_ALL scale source: the lane honours combined resource pressure."""
-
-    __slots__ = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -335,36 +333,40 @@ ScaleSource = MinAll | RideCpuWhenFree
 class Lease:
     """A live, committed reservation created only by a grant on a specific gate.
 
-    ``release`` is synchronous and idempotent: the first call frees the
-    amount; a wrong-gate release raises. The gate records the full per-lane map."""
+    ``release`` is synchronous and idempotent; a wrong-gate release raises. The
+    gate records the per-lane map and the grant's decision scale (M2)."""
 
-    __slots__ = ("_lane", "_amount", "_gate", "_per_lane", "_cold", "_released")
+    __slots__ = ("_gate", "_per_lane", "_cold", "_grant_scale", "_released")
 
-    def __init__(self, *, lane: LaneId, amount: Count, gate: AdmissionGate) -> None:
-        self._lane = lane
-        self._amount = amount
+    def __init__(
+        self,
+        gate: AdmissionGate,
+        per_lane: dict[LaneId, int],
+        *,
+        cold: bool,
+        scale: Scale,
+    ) -> None:
         self._gate = gate
-        self._per_lane = {lane: amount.value}
-        self._cold = False
+        self._per_lane = dict(per_lane)
+        self._cold = cold
+        self._grant_scale = scale
         self._released = False
 
     @classmethod
-    def _of(cls, gate: AdmissionGate, per_lane: dict[LaneId, int], *, cold: bool = False) -> Lease:
-        """The gate-only door: a lease carrying a multi-lane allocation."""
-        positive = {lane: n for lane, n in per_lane.items() if n > 0}
-        primary = next(iter(positive)) if positive else LaneId.GENERAL
-        lease = cls(lane=primary, amount=Count(sum(per_lane.values())), gate=gate)
-        lease._per_lane = dict(per_lane)
-        lease._cold = cold
-        return lease
+    def _of(
+        cls,
+        gate: AdmissionGate,
+        per_lane: dict[LaneId, int],
+        *,
+        cold: bool = False,
+        scale: Scale | None = None,
+    ) -> Lease:
+        """The gate-side alias for constructing a lease for a committed grant."""
+        return cls(gate, per_lane, cold=cold, scale=scale if scale is not None else Scale(1.0))
 
     @property
-    def lane(self) -> LaneId:
-        return self._lane
-
-    @property
-    def amount(self) -> Count:
-        return self._amount
+    def per_lane(self) -> dict[LaneId, int]:
+        return dict(self._per_lane)
 
     @property
     def gate(self) -> AdmissionGate:
@@ -382,14 +384,13 @@ class Lease:
 class Granted:
     """A live grant: positive allocation plus a committed lease."""
 
-    __slots__ = ("allocation", "scale", "paced", "lease")
+    __slots__ = ("allocation", "scale", "lease")
 
     def __init__(
         self,
         *,
         allocation: Allocation,
         scale: Scale,
-        paced: bool,
         lease: Lease,
     ) -> None:
         if allocation.total.value < 1:
@@ -398,5 +399,4 @@ class Granted:
             raise ValueError("Granted requires a live lease: a grant without a reservation is a lie")
         self.allocation = allocation
         self.scale = scale
-        self.paced = paced
         self.lease = lease

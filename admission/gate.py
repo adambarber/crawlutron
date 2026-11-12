@@ -10,7 +10,7 @@ import asyncio
 import contextvars
 import sys
 import threading
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from enum import Enum
@@ -85,8 +85,9 @@ class AdmissionGate:
         sensing: Sensing,
         clock: Clock,
         signal: Signal,
-        loop_lag_multiplier: Ratio | None = None,
+        loop_lag: Callable[[], Ratio] | None = None,
         memory_budget: Bytes | None = None,
+        reserved: Bytes | None = None,
     ) -> None:
         if set(lanes) != {LaneId.GENERAL, LaneId.HEAVY}:
             raise ValueError("gate requires a lane spec for every LaneId")
@@ -95,7 +96,7 @@ class AdmissionGate:
         self._sensing = sensing
         self._clock = clock
         self._signal = signal
-        self._loop_lag = loop_lag_multiplier if loop_lag_multiplier is not None else Ratio(1.0)
+        self._loop_lag = loop_lag if loop_lag is not None else (lambda: Ratio(1.0))
         if memory_budget is None:
             memory_budget = Bytes(
                 max(
@@ -114,6 +115,7 @@ class AdmissionGate:
         self._cold_in_flight = 0
         self._scale_full_streak = 0
         self._memory_budget = memory_budget
+        self._reserved = reserved if reserved is not None else Bytes(0)
         now0 = clock.now()
         self._progress = Progress(last_advance=now0, last_decision=now0)
         self._staleness_onset: float | None = None
@@ -140,6 +142,10 @@ class AdmissionGate:
                 last_advance=Instant._of(self._progress.last_advance.value),
                 last_decision=Instant._of(self._progress.last_decision.value),
             )
+
+    def now(self) -> Instant:
+        """The gate's current clock reading, for liveness checks."""
+        return self._clock.now()
 
     def reset_ramp_for_quiescence(self) -> None:
         """Restore the cold initial ramp; guarded against running mid-flight."""
@@ -187,7 +193,7 @@ class AdmissionGate:
             base = cpu if 1.0 - cpu_usage > source.threshold.value else Ratio(min(mem.value, cpu.value))
         else:
             base = Ratio(min(mem.value, cpu.value))
-        return Scale(max(0.0, base.value) * self._loop_lag.value)
+        return Scale(max(0.0, base.value) * self._loop_lag().value)
 
     def _scale_of(self, reading: _ResourceReading, limits) -> Ratio:
         """The §5.1 law: full at/by target, zero at/by hard, linear between."""
@@ -209,7 +215,7 @@ class AdmissionGate:
         return any(r.cold for r in readings.values())
 
     def _free_bytes(self) -> int:
-        return max(0, self._memory_budget.value - self._in_flight_bytes)
+        return max(0, self._memory_budget.value - self._reserved.value - self._in_flight_bytes)
 
     def _capacity_for(self, lane: LaneId, want_count: int, scale: Scale) -> int:
         """capacity_lane = min(round(ceiling*scale), ceiling, want, free//cost) (§5.2)."""
@@ -296,14 +302,16 @@ class AdmissionGate:
                 self._lease_ctx.set(False)
 
     async def _park_until_grant(self, want: Want) -> Granted:
-        """Decide, parking internally, until a live grant is possible (BLOCKER-1)."""
+        """Decide-and-commit as one atomic lock hold; a live grant returns within it."""
         while True:
             now = self._clock.now().value
             readings = self._snapshot_readings(now)
             with self._lock:
                 decision = self._decide(want, readings)
-            if decision.kind is DecisionKind.GRANT:
-                return self._commit_grant(decision)
+                if decision.kind is DecisionKind.GRANT:
+                    # Decide and commit under one lock hold (B1): a released lock
+                    # between them let two admits over-commit the ceiling.
+                    return self._commit_grant_locked(decision)
             if decision.kind is DecisionKind.OVERSIZE:
                 raise AdmissionRefused(IdleReason.OVERSIZE)
             if decision.kind is DecisionKind.STALE:
@@ -316,42 +324,36 @@ class AdmissionGate:
             await self._bounded_wait(self._signal, None)
 
     async def _bounded_wait(self, signal: Signal, timeout: float | None) -> None:
-        """The single gate-side wait site: Signal + version re-check (5.4, 4.3)."""
-        version_before = self._version
+        """The single gate-side wait site: Signal, optional wall deadline (5.4)."""
         try:
             await asyncio.wait_for(signal.wait(timeout), timeout=timeout)
         except TimeoutError:
             pass
-        # Wake-then-recheck: a version bump since the decision re-decides (4.3).
-        if self._version == version_before:
-            return
 
-    def _commit_grant(self, decision: Decision) -> Granted:
-        """Commit the in-flight reservation under the lock and build the lease."""
+    def _commit_grant_locked(self, decision: Decision) -> Granted:
+        """Commit an already-decided GRANT; the caller holds the state lock."""
         if decision.per_lane is None:
             raise RuntimeError("commit requires a GRANT decision with per-lane amounts")
-        with self._lock:
-            allocation_entries: dict[LaneId, AllocationEntry] = {}
-            per_lane = {lane: decision.per_lane[lane] for lane in LaneId}
-            for lane, amount in per_lane.items():
-                allocation_entries[lane] = AllocationEntry(Count(amount))
-                if amount > 0:
-                    unit = self._lanes[lane].cost.memory_bytes.value
-                    self._in_flight[lane] += amount
-                    self._in_flight_bytes += amount * unit
-            # One cold-probe debit per DECISION (any cold lane the grant spans), NOT
-            # per lane: a dual-lane cold grant consumes one slot, released once (§7.2).
-            if decision.cold:
-                self._cold_in_flight += 1
-            granted_alloc = Allocation(allocation_entries)
-            lease = Lease._of(self, per_lane, cold=decision.cold)
-            now = self._clock.now().value
-            decision_scale = decision.scale or Scale(1.0)
-            self._record_decision(now, granted_alloc, cold=decision.cold, scale=decision_scale)
+        allocation_entries: dict[LaneId, AllocationEntry] = {}
+        per_lane = {lane: decision.per_lane[lane] for lane in LaneId}
+        for lane, amount in per_lane.items():
+            allocation_entries[lane] = AllocationEntry(Count(amount))
+            if amount > 0:
+                unit = self._lanes[lane].cost.memory_bytes.value
+                self._in_flight[lane] += amount
+                self._in_flight_bytes += amount * unit
+        # One cold-probe debit per DECISION (any cold lane the grant spans), NOT
+        # per lane: a dual-lane cold grant consumes one slot, released once (§7.2).
+        if decision.cold:
+            self._cold_in_flight += 1
+        granted_alloc = Allocation(allocation_entries)
+        now = self._clock.now().value
+        decision_scale = decision.scale or Scale(1.0)
+        lease = Lease._of(self, per_lane, cold=decision.cold, scale=decision_scale)
+        self._record_decision(now, granted_alloc, cold=decision.cold, scale=decision_scale)
         return Granted(
             allocation=granted_alloc,
             scale=decision_scale,
-            paced=False,
             lease=lease,
         )
 
@@ -389,11 +391,17 @@ class AdmissionGate:
             raise WrongGateError(lease_owner=lease.gate, gate=self)
         with self._lock:
             per_lane = lease._per_lane
+            # Validate every lane before decrementing ANY (B2): a silent mid-loop
+            # return half-releases and starves parked waiters. Mismatch is corruption.
+            for lane, amount in per_lane.items():
+                if amount > 0 and self._in_flight[lane] < amount:
+                    raise AssertionError(
+                        f"release counter mismatch on {lane}: "
+                        f"in_flight {self._in_flight[lane]} < lease {amount}"
+                    )
             for lane, amount in per_lane.items():
                 if amount <= 0:
                     continue
-                if self._in_flight[lane] < amount:
-                    return
                 unit = self._lanes[lane].cost.memory_bytes.value
                 self._in_flight[lane] -= amount
                 self._in_flight_bytes -= amount * unit
@@ -407,14 +415,17 @@ class AdmissionGate:
                     last_decision=self._progress.last_decision,
                 )
             self._signal.set()
-            self._decay_ramp()
+            # A grant that ran at full scale did not decay the ramp during its
+            # lease, so the release skips the (re-reading) decay pass (M2).
+            if lease._grant_scale.value < 1.0:
+                self._decay_ramp()
 
 
 class StallGuard:
-    """Gate-liveness detection keyed on the gate's own clock and Progress.
+    """Gate-liveness detection keyed on the gate's own clock and progress.
 
-    ``last_advance`` advancing (a grant or completed release) suppresses the stall; an
-    uncompleted early-return or exceptioned body freezes progress. No ``clock`` param.
+    ``last_advance`` advancing (a grant or a completed release) keeps the gate live;
+    a stall freezes progress past the bound. No ``clock`` param.
     """
 
     def __init__(self, gate: AdmissionGate, *, no_progress_stall: Duration | None = None) -> None:
@@ -424,6 +435,6 @@ class StallGuard:
 
     def stalled(self) -> bool:
         """Whether gate liveness froze past the bound, on the injected clock."""
-        now = self._gate._clock.now().value
-        last = self._gate._progress.last_advance.value
-        return (now - last) > self._bound
+        now = self._gate.now()
+        last = self._gate.progress().last_advance
+        return (now.value - last.value) > self._bound
