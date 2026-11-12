@@ -134,10 +134,13 @@ class TestScheduler:
         the old herd requested two copies of the delay and fired together.
         """
         sleeps = recorder(monkeypatch)
-        scheduler = make_scheduler(delay_seconds=0.1, adaptive=False)
+        now = [0.0]
+        scheduler = make_scheduler(delay_seconds=0.1, adaptive=False, clock=lambda: now[0])
         jobs = [make_job(0, "http://example.com/a"), make_job(1, "http://example.com/b")]
         results = await scheduler.run(jobs, ok_worker, failed_result=engine_envelope)
         assert results is not None
+        # The recorded sleep is the jitter draw minus elapsed real time between
+        # reservations; the frozen clock pins the residual to the draw.
         spacing = sleeps.in_range(0.08, 0.12)
         assert len(spacing) == 1, f"one spaced fire past the free first fire, saw {sleeps.delays}"
 
