@@ -37,6 +37,8 @@ def test_crawlutron_client_exists():
     assert CrawlutronClientSync is not None
 
 
-def test_wheel_packages_include_sdk():
-    pyproject = (REPO_ROOT / "pyproject.toml").read_text()
+def test_sdk_wheel_packages_include_sdk():
+    """The SDK's OWN wheel ships the import name, not the root's (#898 retired
+    the root wheel; a root-substring assert now greens coincidentally)."""
+    pyproject = (SDK_ROOT.parent / "pyproject.toml").read_text()
     assert "crawlutron_sdk" in pyproject
