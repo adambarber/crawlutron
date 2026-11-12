@@ -6,6 +6,7 @@ import ast
 import re
 from functools import lru_cache
 
+from tests._walk_primitives import SCAN_ROOTS
 from tests.chokepoint_walks import REPO_ROOT, parsed
 from tests.invariants._env_knobs import _consumed_knobs
 
@@ -21,8 +22,9 @@ def _documented_env() -> dict[str, str]:
 
 
 def _app_and_scripts_sources() -> list[tuple[str, ast.Module]]:
+    """(relative path, tree) for every source the env-documentation sweeps read."""
     found: list[tuple[str, ast.Module]] = []
-    for base in ("crawlutron", "scripts"):
+    for base in SCAN_ROOTS:
         for path in sorted((REPO_ROOT / base).rglob("*.py")):
             if "__pycache__" in path.parts:
                 continue
@@ -165,11 +167,14 @@ def _script_consumed_undocumented() -> list[str]:
 
 
 def _value_drift_offenders() -> list[str]:
-    """Documented values that disagree with the code default at every read site."""
+    """Documented values disagreeing with the code default at every read site. Test files ride the
+    sweep for name-coverage walks only: a suite-harness env face (conftest's scratch cache dir) is
+    not a knob default, so drift checks read production and scripts/ sites alone.
+    """
     offenders: list[str] = []
     for knob, raw in sorted(_documented_env().items()):
         for relative, line, default in _code_default_sites(knob):
-            if not _value_matches(raw, default):
+            if "tests/" not in relative and not _value_matches(raw, default):
                 offenders.append(
                     f"{knob}={raw} in .env.example but {relative}:{line} defaults to {default!r}"
                 )

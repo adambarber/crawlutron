@@ -1,13 +1,4 @@
-"""Reads and writes both take the store lock; one transaction at a time.
-
-``load`` and ``slots_for_namespace`` now take ``self._lock`` so no thread can
-execute on the shared connection while a writer holds ``BEGIN IMMEDIATE``.
-Every read method must be found inside ``with self._lock:``; any read that
-touches ``self._conn`` without the lock is an offender.
-
-``merge``/``put``/``touch``/``clear`` still begin inside the lock, so every
-``BEGIN IMMEDIATE`` remains inside ``with self._lock:``.
-"""
+"""Reads and writes both take the store lock; one transaction at a time."""
 
 import ast
 

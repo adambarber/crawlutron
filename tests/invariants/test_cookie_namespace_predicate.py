@@ -1,11 +1,6 @@
-"""Every coordination_cookies read carries the namespace predicate.
-
-The defect this forecloses: ``all_slots()`` ran an unfiltered full-table
-SELECT, so every per-request cookie read deserialized every other tenant's
-rows under the store lock. Namespace scoping lives on the SQL statement, and
-this gate refuses any statement that reads or deserializes payloads without
-it. ``clear()``'s full-table DELETE is the one named exception: it removes
-rows without reading or deserializing them.
+"""Every coordination_cookies read carries the namespace predicate. The defect foreclosed: ``all_slots`` ran
+an unfiltered full-table SELECT, so every per-request cookie read deserialized every other tenant's rows
+under the store lock.
 """
 
 import ast

@@ -49,11 +49,9 @@ class TestSameDomainSpacing:
         )
 
     async def test_different_domains_are_never_serialized_by_each_other(self, monkeypatch):
-        """Registrable-distinct domains with different delays owe each other nothing.
-
-        Two same-domain jobs PER domain, magnitude-separated: each domain's second
-        fire waits its own delay -- a cross-domain-serialized scheme would push
-        the fast domain into the slow band instead.
+        """Registrable-distinct domains with different delays owe each other nothing: two same-domain jobs
+        PER domain, magnitude-separated, and each domain's second fire waits its own delay -- a
+        cross-domain-serialized scheme would push the fast domain into the slow band instead.
         """
 
         class Separated(DomainScheduler):
@@ -79,12 +77,9 @@ class TestSameDomainSpacing:
         )
 
     async def test_spacing_preserves_per_domain_concurrency(self, monkeypatch):
-        """Three same-domain jobs at limit 2: staggered reservations, capped workers.
-
-        Fires are staggered cumulatively by the delay (the last fire waits ~two
-        delays) and the gate still caps concurrent workers at the limit -- a
-        scheme that holds the gate for the sleep serializes to one-at-a-time
-        and a scheme without reservations fires all three at once.
+        """Three same-domain jobs at limit 2: staggered reservations, capped workers. Fires are staggered
+        cumulatively by the delay and the gate still caps workers at the limit -- a gate-held-for-sleep
+        scheme serializes to one-at-a-time, a no-reservation scheme fires all three at once.
         """
         sleeps = recorder(monkeypatch)
         scheduler = make_scheduler(global_limit=2, per_domain_limit=2, delay_seconds=0.1, adaptive=False)
@@ -129,11 +124,9 @@ class TestZeroDelayNeverInventsPoliteness:
 
 class TestMidRunPurgeKeepsState:
     async def test_a_cooldown_firing_mid_run_does_not_void_spacing_state(self, monkeypatch):
-        """The amortized purge (429 cadence) must not erase a live reservation.
-
-        A same-domain peer taking a 429 mid-run purges; the sleeping job's
-        spacing must survive it, or the herd re-forms exactly under rate
-        limiting -- the one scenario politeness exists for.
+        """The amortized purge (429 cadence) must not erase a live reservation: a same-domain peer taking a
+        429 mid-run purges, and the sleeping job's spacing must survive it, or the herd re-forms exactly
+        under rate limiting -- the one scenario politeness exists for.
         """
         sleeps = recorder(monkeypatch)
         scheduler = make_scheduler(delay_seconds=0.1, adaptive=False)

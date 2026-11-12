@@ -36,11 +36,9 @@ def test_crawl_strategy_name_members_match_vocabulary():
 
 
 def test_classification_alias_is_the_enum_itself():
-    """``Classification`` and ``CrawlClassification`` are ONE declaration.
-
-    The dual-declaration drift pin (get_args equality both directions) died
-    with the unification: the alias IS the class, so drift is unrepresentable.
-    The pin survives as an identity assert so a future re-split reds here.
+    """``Classification`` and ``CrawlClassification`` are ONE declaration. The dual-declaration drift pin
+    (get_args equality both directions) died with the unification: the alias IS the class, so drift is
+    unrepresentable. The pin survives as an identity assert so a future re-split reds here.
     """
     from crawlutron.models.taxonomy import Classification
     from crawlutron.vocabulary.taxonomy import CrawlClassification

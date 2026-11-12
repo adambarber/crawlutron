@@ -169,10 +169,10 @@ async def test_a_valid_caller_key_cannot_list_keys(tmp_path):
 
 
 async def test_wrong_admin_token_guesses_trip_the_cooldown(tmp_path):
-    """#659: failed admin-token guesses on /v1/keys meter through the shared
-    KeyVerifyThrottle's dedicated 'admin' bucket -- guess-pacing, not CPU
-    protection (compare_digest is cheap); after MAX_FAILURES misses the door
-    refuses 429 before spending any comparison work."""
+    """#659: failed admin-token guesses on /v1/keys meter through the shared KeyVerifyThrottle's dedicated
+    'admin' bucket -- guess-pacing, not CPU protection (compare_digest is cheap); after MAX_FAILURES
+    misses the door refuses 429 before spending any comparison work.
+    """
     async with isolation_client(tmp_path) as (client, _store, _results, _keys):
         for i in range(KeyVerifyThrottle.MAX_FAILURES):
             response = await client.get("/v1/keys", headers={"X-API-Key": f"wrong-guess-{i}"})
@@ -224,12 +224,9 @@ def _request_with(headers: dict[str, str]) -> Request:
 
 
 def test_operator_token_rotation_is_honored_not_memoized():
-    """#666: the operator token has ONE home, the settings object.
-
-    The old lru_cache'd env fallback kept authenticating the rotated-away
-    token (and refusing the new one) for the process lifetime -- a rotation
-    was not a rotation. The red: after re-setting the env, the old token still
-    authenticated and the new one was refused.
+    """#666: the operator token has ONE home, the settings object. The old lru_cache'd env fallback kept
+    authenticating the rotated-away token for the process lifetime -- a rotation was not a rotation. The
+    red: after re-setting the env, the old token still authenticated and the new one was refused.
     """
     from types import SimpleNamespace
 

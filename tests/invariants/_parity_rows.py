@@ -1,9 +1,6 @@
-"""The parity exclusion tables' single home.
-
-``test_rest_mcp_parity``, ``_facade_tables``, and ``test_facade_knob_parity``
-import from here (three importers, one table) -- a test-to-test import of a
-shared production-adjacent constant is the #670 one-owner law applied to the
-parity plane.
+"""The parity exclusion tables' single home. ``test_rest_mcp_parity``, ``_facade_tables``, and
+``test_facade_knob_parity`` import from here (three importers, one table) -- a test-to-test import of a
+shared production-adjacent constant is the #670 one-owner law applied to the parity plane.
 """
 
 from __future__ import annotations

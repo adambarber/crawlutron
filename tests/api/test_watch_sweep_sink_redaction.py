@@ -1,8 +1,6 @@
-"""#640: the sweep's log sinks emit the redacted projection, never the raw URL.
-
-The watch_sweep call sites are the category's live surface: every ``url``-keyed
-value a watch_sweep record carries must be a WatchState redaction, so a raw
-credentialed URL cannot reemerge in a sink without this failing.
+"""#640: the sweep's log sinks emit the redacted projection, never the raw URL. The watch_sweep call sites
+are the category's live surface: every ``url``-keyed value a watch_sweep record carries must be a
+WatchState redaction, so a raw credentialed URL cannot reemerge in a sink without this failing.
 """
 
 from __future__ import annotations
@@ -53,11 +51,9 @@ async def test_the_check_failure_sink_emits_the_redacted_url(caplog, watch_store
 
 
 async def test_the_webhook_admission_failure_sink_emits_the_redacted_url(caplog, watch_store, etag_server):
-    """``watch_webhook_admission_failed`` logs the redacted webhook, never the raw one.
-
-    The watch checks against a live origin; the webhook's host is denied by the
-    live policy, so ``watch.target()`` re-admission refuses exactly as production
-    does.
+    """``watch_webhook_admission_failed`` logs the redacted webhook, never the raw one. The watch checks
+    against a live origin; the webhook's host is denied by the live policy, so ``watch.target()``
+    re-admission refuses exactly as production does.
     """
     # Built past admission (a secret-named query param is refused at the door
     # now); this pins the sweep's re-admission refusal log redaction behind it.

@@ -1,9 +1,6 @@
-"""The parity gate's reach is total: nothing the app mounts escapes the walk.
-
-`test_rest_mcp_parity` walks ROUTER_MODULES only; a router added directly in
-`main._include_routers` would serve routes the gate never sees. This gate
-asserts the mounting inventory itself is closed: every router the app mounts
-is accounted for by the registry, the factory builders, or the MCP router.
+"""The parity gate's reach is total: nothing the app mounts escapes the walk. ``test_rest_mcp_parity`` walks
+ROUTER_MODULES only; a router added directly in ``main._include_routers`` would serve routes the gate
+never sees.
 """
 
 from __future__ import annotations

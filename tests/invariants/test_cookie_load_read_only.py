@@ -1,9 +1,6 @@
-"""``SharedCookieStore.load`` is read-only: a SELECT and a decode, nothing more.
-
-Every read used to be a write transaction (SELECT + UPDATE touched_at + commit),
-generating WAL frames and checkpoint pressure on read-heavy workloads. ``load``
-must stay a pure read; recency refresh goes through the explicit ``touch``
-door. No UPDATE/INSERT/DELETE/COMMIT/ROLLBACK may appear in ``load``'s body.
+"""``SharedCookieStore.load`` is read-only: a SELECT and a decode, nothing more. Every read used to be a
+write transaction (SELECT + UPDATE touched_at + commit), generating WAL frames on read-heavy workloads;
+recency refresh goes through the explicit ``touch`` door.
 """
 
 import ast

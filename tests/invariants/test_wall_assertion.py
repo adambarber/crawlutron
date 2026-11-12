@@ -1,10 +1,5 @@
-"""Wall assertions carry the ``wall_assertion`` marker (#843).
-
-A test that reads a wall clock and then asserts on the elapsed delta is the
-flake-seed class: the claim is a bet on machine speed. The marker is the
-sanctioned spelling; the sweep refuses UNMARKED wall-elapsed assertions found
-by a conservative AST walk. False positives go to the exemption table with a
-justification, and the table only ever shrinks.
+"""Wall assertions carry the ``wall_assertion`` marker: a test that reads a wall clock and then asserts on
+the elapsed delta is the flake-seed class.
 """
 
 from __future__ import annotations

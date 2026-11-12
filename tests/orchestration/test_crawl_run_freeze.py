@@ -1,8 +1,7 @@
 """The run carrier's immutability law: config is fixed at run start.
 
-A stage that rewrites a run constant (depth cap, page budget, gate) would
-silently change every later batch; the frozen carrier makes that a defect at
-the write site instead of a mystery in the results.
+A stage that rewrites a run constant (depth cap, page budget, gate) would silently change every later
+batch; the frozen carrier makes that a defect at the write site instead of a mystery in the results.
 """
 
 from __future__ import annotations

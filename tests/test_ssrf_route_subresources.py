@@ -61,10 +61,10 @@ def _pinned_handler(monkeypatch, lookups: list[str]):
 
 
 async def test_https_subresource_revalidates_fresh_per_request(monkeypatch) -> None:
-    """HTTPS validation must not trust a cached answer: the browser re-resolves
-    at connect, so a cached validation up to the TTL stale would let a rebind in
-    that window past -- each subresource validates against fresh resolves (#387),
-    doubled for the #540 stability verdict (two fresh answers must agree)."""
+    """HTTPS validation must not trust a cached answer: the browser re-resolves at connect, so a cached
+    validation up to the TTL stale would let a rebind in that window past -- each subresource validates
+    against fresh resolves (#387), doubled for the #540 stability verdict (two fresh answers must agree).
+    """
     lookups: list[str] = []
     handler = _pinned_handler(monkeypatch, lookups)
     await handler(FakeRoute(), FakeRequest("https://1.2.3.4/a", "document"))

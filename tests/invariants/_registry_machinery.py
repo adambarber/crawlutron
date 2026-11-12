@@ -1,8 +1,6 @@
-"""The property-registry machinery the registry detector modules share.
-
-Moved here (#476) from test_registry.py: four detector modules were importing
-this machinery from a sibling test module's internals; shared machinery lives
-on the declared support surface, not in another test's namespace.
+"""The property-registry machinery the registry detector modules share. Moved here (#476) from
+test_registry.py: four detector modules were importing this machinery from a sibling test module's
+internals; shared machinery lives on the declared support surface, not in another test's namespace.
 """
 
 from __future__ import annotations

@@ -368,10 +368,9 @@ class TestSpillAssemblyOffTheEventLoop:
             assert reads == [1]
 
     async def test_a_failed_crawl_still_closes_its_private_spill_store(self, monkeypatch, tmp_path) -> None:
-        """A raise in the crawl BODY must still close the crawl's private
-        in-memory spill store; the caller-supplied store is never closed here
-        (it outlives the crawl), so the private one is the close-on-error path
-        the old file spill's close-on-error guard pinned (#221).
+        """A raise in the crawl BODY must still close the crawl's private in-memory spill store; the
+        caller-supplied store is never closed here (it outlives the crawl), so the private one is the
+        close-on-error path the old file spill's close-on-error guard pinned (#221).
         """
         import crawlutron.orchestration.request_pipeline as pipeline
 

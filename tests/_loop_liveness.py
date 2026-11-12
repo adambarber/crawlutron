@@ -1,8 +1,7 @@
 """A liveness probe shared by the event-loop discipline tests.
 
-Declared support surface (#476): moved verbatim from
-test_event_loop_non_blocking.py so a sibling test module imports it from here,
-not from another test module's internals.
+Declared support surface (#476): moved verbatim from test_event_loop_non_blocking.py so a sibling test
+module imports it from here, not from another test module's internals.
 """
 
 from __future__ import annotations

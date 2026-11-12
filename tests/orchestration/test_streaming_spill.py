@@ -1,8 +1,7 @@
 """Streaming spill: page results persist as each batch completes.
 
-Peak memory scales with batch size, not total pages; ``crawl_request`` writes
-one spill row per page through the injected store, and the response reassembles
-from the rows in submission order.
+Peak memory scales with batch size, not total pages; ``crawl_request`` writes one spill row per page
+through the injected store, and the response reassembles from the rows in submission order.
 """
 
 from __future__ import annotations

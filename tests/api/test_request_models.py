@@ -42,9 +42,9 @@ def test_exactly_one_url_source_accepted(model):
 def test_job_control_request_refuses_unknown_actions_at_the_model_edge():
     """#602: the model, not the router, is the admission edge for the action set.
 
-    The only consumer of ``action`` is control_job, which supports exactly
-    {pause, resume, cancel}; an unknown action must 422 at validation before
-    the router sees it."""
+    The only consumer of ``action`` is control_job, which supports exactly {pause, resume, cancel}; an
+    unknown action must 422 at validation before the router sees it.
+    """
     from crawlutron.models.job_control_request import JobControlRequest
 
     with pytest.raises(ValidationError, match="action"):
@@ -331,9 +331,9 @@ class TestRequestCollectionsAreBounded:
     def test_the_render_model_caps_urls_too_and_map_has_no_batch(self):
         """The cap must travel with the shared url-source base, not just CrawlRequest.
 
-        RenderRequest binds URLs through the same base as CrawlRequest, so the
-        ceiling applies there too; MapRequest takes exactly one root url -- a
-        urls key is forbidden outright, not capped."""
+        RenderRequest binds URLs through the same base as CrawlRequest, so the ceiling applies there too;
+        MapRequest takes exactly one root url -- a urls key is forbidden outright, not capped.
+        """
         from crawlutron.models.map_request import MapRequest
         from crawlutron.models.render_request import RenderRequest
         from crawlutron.models.single_url_source_request import MAX_URLS_PER_REQUEST

@@ -1,7 +1,5 @@
-"""Malformed Content-Length headers refuse, never degrade (#675).
-
-A nonempty Content-Length that is not a non-negative decimal integer is a
-malformed declaration: negative parses as int and serves an empty body,
+"""Malformed Content-Length headers refuse, never degrade (#675). A nonempty Content-Length that is not a
+non-negative decimal integer is a malformed declaration: negative parses as int and serves an empty body,
 non-int silently truncates. Both answer the truncation envelope, 413.
 """
 
@@ -23,10 +21,10 @@ def _declared_request(value: bytes, body: bytes = b"Z" * 40):
 
 
 async def test_negative_content_length_is_refused_never_empty_body():
-    """Content-Length: -5 parses as int, passes the cap, and the declared
-    collect loop runs zero times -- serving an empty body as success. It must
-    refuse like every other malformed declaration (drain first, like the
-    oversized path)."""
+    """Content-Length: -5 parses as int, passes the cap, and the declared collect loop runs zero times --
+    serving an empty body as success. It must refuse like every other malformed declaration (drain first,
+    like the oversized path).
+    """
     request = _declared_request(b"-5")
     ran: list[Request] = []
 

@@ -1,9 +1,6 @@
-"""MCP watch tools (register_watch, list_watches, get_watch, delete_watch) over the watch store.
-
-The tools mirror the /v1/watches REST doors: the same caller scoping, the same
-store reads, the same JSON the REST door answers with, and the poll-only
-ruling -- a webhook_url over MCP is refused (WebhookTarget admission is
-REST-only).
+"""MCP watch tools (register_watch, list_watches, get_watch, delete_watch) over the watch store: they mirror
+the /v1/watches REST doors -- same caller scoping, same store reads, same JSON -- under the poll-only
+ruling (a webhook_url over MCP is refused).
 """
 
 from __future__ import annotations

@@ -1,8 +1,7 @@
 """Classification test data shared by the taxonomy and classification modules.
 
-Declared support surface (#476): moved verbatim from
-test_classification.py so a sibling test module imports these from here,
-not from another test's internals.
+Declared support surface (#476): moved verbatim from test_classification.py so a sibling test module
+imports these from here, not from another test's internals.
 """
 
 from __future__ import annotations

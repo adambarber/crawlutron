@@ -128,11 +128,10 @@ def test_store_rejects_a_hostile_namespace_as_data(tmp_path):
 
 
 def test_concurrent_merge_touch_load_same_slot_union(store_path):
-    """Concurrent merge/touch/load on one SharedCookieStore, same slot:
-    the final slot is the union of every concurrent write, and no thread
-    hits "cannot start a transaction within a transaction" on the shared
-    connection. Reads and writes serialize on self._lock now; on the
-    lock-free-read variant this race surfaces as a sqlite3 error."""
+    """Concurrent merge/touch/load on one SharedCookieStore, same slot: the final slot is the union of every
+    concurrent write, and no thread hits "cannot start a transaction within a transaction" on the shared
+    connection.
+    """
     store = SharedCookieStore(store_path)
     ns, host = "tenant-a", "example.com"
 

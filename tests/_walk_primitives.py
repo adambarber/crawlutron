@@ -38,6 +38,27 @@ def comment_lines(source: str) -> list[tuple[int, str]]:
 REPO_ROOT = TESTS_DIR.parent
 
 
+@cache
+def python_bearing_roots(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
+    """Every top-level dir under ``base`` holding any ``*.py``, sorted. Hidden dirs and symlinked trees
+    (venvs) are skipped -- caches and environments, not shipped code. Derived by walking, never
+    hand-listed: the app/ rename and crawlutron_sdk's late arrival were hand-list blindness.
+    """
+    roots = [
+        d.name
+        for d in base.iterdir()
+        if d.is_dir()
+        and not d.is_symlink()
+        and not d.name.startswith(".")
+        and any("__pycache__" not in q.parts for q in d.rglob("*.py"))
+    ]
+    assert roots, f"no python-bearing roots under {base}: repo surface is empty"
+    return tuple(sorted(roots))
+
+
+SCAN_ROOTS = python_bearing_roots()
+
+
 APP_ROOT = REPO_ROOT / "crawlutron"
 
 
@@ -86,16 +107,9 @@ def _read_source(path: pathlib.Path, stat: os.stat_result) -> str:
 
 
 def parsed(path: pathlib.Path) -> ast.Module:
-    """The AST of `path`, parsed once per session and shared.
-
-    Keyed on mtime, size and Python version so an edited file is re-parsed,
-    never stale: a detector reading the cache still sees a freshly planted
-    violation. The source is persisted under .pytest_cache/ast_parse/ so
-    repeat sessions reuse it instead of re-reading the source file.
-
-    A nonexistent path blows up here -- the ONE seam every tree-taking reader
-    goes through -- so a gate walking a renamed/missing root fails loud at
-    the ask, never silently scans an empty iterator green.
+    """The AST of `path`, parsed once per session and shared. Keyed on mtime, size and Python version so an
+    edited file is re-parsed, never stale, with the source persisted under .pytest_cache/ast_parse/ for
+    reuse. A nonexistent path raises here -- the ONE seam every tree-taking reader goes through.
     """
     if not path.is_file():
         raise FileNotFoundError(f"ast requested for a nonexistent source file: {path}")
@@ -187,12 +201,10 @@ def trees_under(directory: pathlib.Path) -> tuple[tuple[pathlib.Path, ast.Module
 
 @cache
 def declared_root_files(root: str) -> tuple[pathlib.Path, ...]:
-    """Every .py file under a declared repo-relative scan root; missing/empty FAILS LOUD.
-
-    A gate iterating a nonexistent root is silently vacuous (zero offenders,
-    zero files scanned) -- the app/ rename made the comment gate blind for
-    months. A declared root that does not exist or carries no .py file is a
-    gate defect, never a green."""
+    """Every .py file under a declared repo-relative scan root; missing/empty FAILS LOUD. A gate iterating a
+    nonexistent root is silently vacuous -- the app/ rename made the comment gate blind for months -- so a
+    root resolving to nothing is a gate defect, never a green.
+    """
     base = REPO_ROOT / root
     if not base.is_dir():
         raise AssertionError(f"declared scan root does not exist: {root}/ (gate would scan nothing)")

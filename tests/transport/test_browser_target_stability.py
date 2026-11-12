@@ -1,12 +1,6 @@
-"""#540: the browser's HTTPS/wss check-then-dial residual window.
-
-The browser performs its own DNS and connect after the route/ws handler's
-validation (no dial ownership -- #387), so the last verifiable moment is the
-handler itself: fail-closed on instability (two fresh resolves must return the
-identical public answer set). A changed answer is the rebinding signature; the
-documented residual (a stable-through-check flip before the browser's own
-resolve) needs dial ownership to close and is refused by architecture -- no
-MITM proxy, no CDP. Full analysis lives on the ticket.
+"""#540: the browser's HTTPS/wss check-then-dial residual window. The browser performs its own DNS and
+connect after the route/ws handler's validation, so the last verifiable moment is the handler itself:
+fail-closed on instability.
 """
 
 from __future__ import annotations

@@ -127,12 +127,10 @@ def engine_result(
     final_url: str | NormalizedUrl | None | Unset = _UNSET,
     **overrides: Unpack[_EngineResultOverrides],
 ):
-    """The one ``EngineCrawlResult`` builder: an absent baseline plus what is named.
-
-    The absent baseline is a result that never got a response. Passing ``links``
-    (strings, converted through ``_link``) or ``raw_links`` marks the page
-    rendered -- ``final_url`` then follows ``canonical(url)`` like a real
-    response would, unless named."""
+    """The one ``EngineCrawlResult`` builder: an absent baseline (a result that never got a response) plus
+    what is named. Passing ``links`` (strings via ``_link``) or ``raw_links`` marks the page rendered --
+    ``final_url`` then follows ``canonical(url)`` like a real response would, unless named.
+    """
     from crawlutron.vocabulary.taxonomy import status_for_classification
 
     if "discovered_link_count" in overrides:

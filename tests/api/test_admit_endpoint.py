@@ -370,21 +370,9 @@ def _producers_missing_rows(endpoint_path: Path, known: frozenset[str]) -> list[
 
 
 class TestProducerVocabularyLoop:
-    """Every ValueError reason the admission producers can raise has a table row.
-
-    Derives the raisable vocabulary from the live raise/return sites by AST, so a
-    new producer refusal without a _REASON_TABLE row reds here naming file+line.
-
-    Boundary: only ValueError raise sites with a LITERAL first arg are seen.
-    Non-literal messages (urllib's port parse, "Invalid IPv6 URL") are NOT a
-    live blind shape anymore -- the constructor boundary in NormalizedUrl.__init__
-    maps any foreign ValueError explicitly to a named refusal -- but the wrap is
-    the closure, not the scan: the derivation still cannot SEE a non-literal
-    raise, it only cannot LEAK one. The producer closure is ONE hop deep
-    (normalized_url + its models imports); a two-hop chain raising its own
-    refusals is unscanned. host_policy verdicts are found by NAMING CONVENTION
-    (``host_*_reason`` return literals); a variable-form raise outside that
-    pattern goes blind silently.
+    """Every ValueError reason admission producers can raise has a table row, derived from live raise/return
+    sites by AST: a new refusal without a row reds naming file+line. Boundary: only literal raise sites
+    are seen, the scan is one hop, and host_policy verdicts ride the ``host_*_reason`` naming convention.
     """
 
     def test_every_producer_reason_has_a_table_row(self):
@@ -394,10 +382,10 @@ class TestProducerVocabularyLoop:
         assert missing == [], "producer->table loop broken:\n" + "\n".join(missing)
 
     def test_the_boundary_refusal_set_matches_the_constructor_vocabulary(self):
-        """One vocabulary in both directions: every raisable constructor literal is
-        in the boundary pass-through set (else it is remapped to invalid_url, and
-        its table row is dead), and every set entry is table-mapped (else the
-        boundary passes a value the wire cannot name)."""
+        """One vocabulary in both directions: every raisable constructor literal is in the pass-through set
+        -- else it is remapped to invalid_url and its table row is dead -- and every set entry is
+        table-mapped, else the boundary passes a value the wire cannot name.
+        """
         import crawlutron.service.admit_endpoint as endpoint_module
         from crawlutron.models.normalized_url import refusal_literals
 

@@ -110,13 +110,9 @@ def _hand_rolled_rule(entry: ArmedHandRolled) -> ArmedRule:
 
 
 def hand_rolled_armings() -> Iterator[ArmedRule]:
-    """The audit's second half: detectors no ``Rule`` declares, as armed rules.
-
-    Each detector module registers its observer in ``_OBSERVERS`` at import
-    time. Import them here, before any premise runs, so a worker that hasn't
-    collected the detector modules yet still sees registered observers --
-    otherwise order dependence across xdist workers can make a premise's
-    ``_observed_property_count`` check see an empty registry (#692).
+    """The audit's second half: detectors no ``Rule`` declares, as armed rules. Each detector module
+    registers its observer in ``_OBSERVERS`` at import time -- import them here, before any premise runs,
+    so a worker that hasn't collected the detector modules yet still sees registered observers.
     """
     import importlib
 

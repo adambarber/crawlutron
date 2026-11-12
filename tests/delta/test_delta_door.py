@@ -1,8 +1,6 @@
-"""Door-level delta tests: the sync ``/v1/crawl`` door classifies per result and
-rolls ``delta_summary`` up, with caller-isolated baselines loaded from the store.
-
-No network, no async job runner: ``execute_crawl`` is swapped for a scripted
-stand-in so every engine result is exact.
+"""Door-level delta tests: the sync ``/v1/crawl`` door classifies per result and rolls ``delta_summary`` up,
+with caller-isolated baselines loaded from the store. No network, no async job runner: ``execute_crawl``
+is swapped for a scripted stand-in so every engine result is exact.
 """
 
 from __future__ import annotations

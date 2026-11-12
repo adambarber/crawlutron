@@ -333,10 +333,10 @@ async def _real_door_client(tmp_path):
 
 
 async def test_the_operator_token_reaches_the_cross_tenant_rollup_through_the_real_door(tmp_path):
-    """The operator token on the real CallerDep door: 200 with the cross-tenant
-    rollup. Before the operator arm existed in the identity resolver, this very
-    request 401'd (invalid_api_key) -- the documented operator view was
-    unreachable by anyone."""
+    """The operator token on the real CallerDep door: 200 with the cross-tenant rollup. Before the operator
+    arm existed in the identity resolver, this very request 401'd (invalid_api_key) -- the documented
+    operator view was unreachable by anyone.
+    """
     async with _real_door_client(tmp_path) as (client, keys, results):
         await results.aput(_FOREIGN_TRACE_NAME, _foreign_row(), owner="key_b")
 

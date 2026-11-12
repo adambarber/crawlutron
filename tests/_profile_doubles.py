@@ -6,9 +6,8 @@ from collections.abc import Mapping
 class StatefulRequestProfile(Mapping[str, object]):
     """Answers with the first resolution's values through the first full pass.
 
-    Pydantic probes declared keys with ``.get`` before iterating, then reads
-    the keys it iterated; both passes are the one resolution, so the second
-    state only starts after the first is complete.
+    Pydantic probes declared keys with ``.get`` before iterating, then reads the keys it iterated; both
+    passes are the one resolution, so the second state only starts after the first is complete.
     """
 
     def __init__(self) -> None:

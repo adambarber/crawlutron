@@ -1,7 +1,5 @@
-"""Floors on the /v1/render caller timeout knobs (#787, #819).
-
-timeout_seconds below 1 and a negative max_retries used to cross validation
-silently: a negative timeout fired gather_deadline_bounded's deadline
+"""Floors on the /v1/render caller timeout knobs (#787, #819). timeout_seconds below 1 and a negative
+max_retries used to cross validation silently: a negative timeout fired gather_deadline_bounded's deadline
 immediately, so every URL failed closed as robots-refused behind a 200.
 """
 

@@ -1,10 +1,6 @@
-"""Module-level mutable state has a reset door (#621).
-
-A container bound at module level and mutated by the module's own functions is
-process state: when nothing in the module empties it, a test that leaks state
-into it has no public way to clean up. The reset family lives once, in
-``crawlutron.runtime.process_state``; this gate forbids both a mutated
-container with no reset door and a hand-copied reset pair.
+"""Module-level mutable state has a reset door: a container bound at module level and mutated by the module's
+own functions is process state, and when nothing in the module empties it, a test that leaks state into it
+has no public way to clean up.
 """
 
 from __future__ import annotations
@@ -77,11 +73,10 @@ def _mutations_by_line(tree: ast.Module) -> dict[str, int]:
 
 
 def _mutated_without_reset_door_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
-    """Every mutated module-level container no module-level function ever empties.
-
-    Only a ``.clear()`` call counts: ``pop``/``discard`` remove one element and a
-    rebind is invisible to holders of the old object. The registry module itself
-    is the recursion base case -- its table IS the reset family's spine."""
+    """Every mutated module-level container no module-level function ever empties. Only a ``.clear()`` call
+    counts -- ``pop``/``discard`` remove one element and a rebind is invisible to holders of the old
+    object; the registry module itself is the recursion base case.
+    """
     if path.name == "process_state.py":
         return []
     mutated = _mutations_by_line(tree)
@@ -173,10 +168,9 @@ def test_no_module_hand_copies_the_reset_pair():
 
 
 def _reset_shaped_but_unregistered_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
-    """Modules with a reset-shaped door (a function emptying a mutated module-level
-    container) that never call ``process_state.register(...)`` in their own body.
-    The call IS the registration: the runtime membership cross-check lives in
-    test_process_state_owners.test_conformers_register over the live registry.
+    """Modules with a reset-shaped door -- a function emptying a mutated module-level container -- that never
+    call ``process_state.register(...)`` in their own body: the call IS the registration, cross-checked
+    over the live registry.
     """
     if path.name == "process_state.py":
         return []

@@ -1,9 +1,6 @@
-"""Schema-shape gate: the SDK mirror pinned against the served OpenAPI.
-
-Every SDK model class is derived from ``service_app().openapi()`` at test
-time (no hand lists, #649 law): field sets both directions, type identity,
-required-ness, and the per-class extra= policy (requests forbid / responses
-allow — the models.py docstring law, now enforced).
+"""Schema-shape gate: the SDK mirror pinned against the served OpenAPI. Every SDK model class is derived from
+``service_app.openapi`` at test time: field sets both directions, type identity, required-ness, and the
+per-class extra= policy.
 """
 
 from __future__ import annotations

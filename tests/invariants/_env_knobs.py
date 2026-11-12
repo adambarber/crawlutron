@@ -1,8 +1,7 @@
 """The environment-knob walk the documentation gates share.
 
-Declared support surface (#476): the knob-contract, doc-contract and
-env-documentation modules import these from here, not from each other's
-internals. Bodies moved verbatim from test_knob_contracts.py.
+Declared support surface (#476): the knob-contract, doc-contract and env-documentation modules import
+these from here, not from each other's internals. Bodies moved verbatim from test_knob_contracts.py.
 """
 
 from __future__ import annotations

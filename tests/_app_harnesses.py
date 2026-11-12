@@ -1,9 +1,6 @@
-"""The one builder every harness app derives from: the app-shape contract.
-
-Every harness app mounts the same middleware stack and exception handlers as
-``service_app`` -- via ``install_error_surface`` -- so safety wiring added to
-the real app cannot silently miss a test surface. ``safety_stack=False`` is the
-declared, gate-visible opt-out for unit-level probes that need no middleware.
+"""The one builder every harness app derives from: the app-shape contract. Every harness app mounts the same
+middleware stack and exception handlers as ``service_app`` via ``install_error_surface``, so safety wiring
+added to the real app cannot silently miss a test surface.
 """
 
 from __future__ import annotations

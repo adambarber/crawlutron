@@ -1,9 +1,6 @@
-"""#532: the warmup page.goto must carry a render-phase budget.
-
-Every other navigation on the render path is budgeted through the
-render_phase_seconds vocabulary (#482); the warmup goto inherited Playwright's
-default (30s or indefinite), letting a slow-warmup origin hold the render
-worker's navigation slot unbounded.
+"""#532: the warmup page.goto must carry a render-phase budget. Every other navigation on the render path is
+budgeted through the render_phase_seconds vocabulary (#482); the warmup goto inherited Playwright's
+default, letting a slow origin hold the render worker's navigation slot unbounded.
 """
 
 from __future__ import annotations

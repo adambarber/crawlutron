@@ -1,8 +1,6 @@
-"""Facade knob-parity, core clauses: MCP advertisement and #808 execution reach.
-
-The field set is DERIVED from the OpenAPI schema (wire truth off the served
-app), never hand-listed (#649 law); see ``_facade_tables`` for the derivation
-owner and the shared exclusion tables.
+"""Facade knob-parity, core clauses: MCP advertisement and #808 execution reach. The field set is DERIVED
+from the OpenAPI schema (wire truth off the served app), never hand-listed (#649 law); see
+``_facade_tables`` for the derivation owner and the shared exclusion tables.
 """
 
 from __future__ import annotations
@@ -68,11 +66,9 @@ def _consumed_field_names() -> frozenset[str]:
 
 
 def test_accepted_knob_reaches_execution():
-    """#808: every accepted knob is read in the app tree or refused at a door.
-
-    Dict-typed bodies (policy/validators) prove reach at the route boundary:
-    their model classes are extra=forbid at the validation chokepoint and the
-    sub-knob vocabulary is that model's own field set (parent ruling 3).
+    """#808: every accepted knob is read in the app tree or refused at a door. Dict-typed bodies
+    (policy/validators) prove reach at the route boundary: their model classes are extra=forbid at the
+    validation chokepoint and the sub-knob vocabulary is that model's own field set (parent ruling 3).
     """
     consumed = _consumed_field_names()
     dropped = [

@@ -46,12 +46,9 @@ def host_resolves_to(monkeypatch, ip: str, *, resolver=None):
 
 
 def resolves_in_sequence(monkeypatch, *ips: str) -> list[str]:
-    """A fresh-resolve stub answering with ``ips`` in order (the last repeats),
-    recording every host it was asked for.
-
-    The browser stability check (#540) is a verdict over CONSECUTIVE fresh
-    answers, so the stub hands out a scripted sequence rather than one pinned
-    IP: answer n goes to lookup n.
+    """A fresh-resolve stub answering with ``ips`` in order (the last repeats), recording every host it was
+    asked for. The browser stability check (#540) is a verdict over CONSECUTIVE fresh answers, so the stub
+    hands out a scripted sequence rather than one pinned IP: answer n goes to lookup n.
     """
     import socket
 

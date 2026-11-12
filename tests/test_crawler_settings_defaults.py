@@ -89,10 +89,10 @@ class TestFromMappingHardening:
 
 
 class TestBatchSizeLoBound:
-    """A negative or zero batch size must clamp to the lo bound like the sibling
-    knobs (extraction_max_markdown, max_watches_per_caller): a typo'd negative
-    silently refuses every batch through batch_size_exceeded, so the read is
-    bounded at the settings read, not at each door."""
+    """A negative or zero batch size must clamp to the lo bound like the sibling knobs
+    (extraction_max_markdown, max_watches_per_caller): a typo'd negative silently refuses every batch
+    through batch_size_exceeded, so the read is bounded at the settings read, not at each door.
+    """
 
     @pytest.mark.parametrize(
         ("raw", "expected"),

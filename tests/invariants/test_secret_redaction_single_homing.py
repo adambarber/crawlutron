@@ -1,9 +1,6 @@
-"""Invariant: every secret-redaction implementation lives in one module (#660).
-
-Direction analysis: this gate seals the dangerous direction only — masking
-implementation appearing OUTSIDE the home. Adding pure delegation
-(call-through into url_redaction) anywhere stays legal, so growth of the
-caller population cannot red; the only red is a second implementation.
+"""Invariant: every secret-redaction implementation lives in one module (#660). Direction analysis: the gate
+seals the dangerous direction only -- masking implementation appearing OUTSIDE the home; pure delegation
+stays legal, so caller growth cannot red -- the only red is a second implementation.
 """
 
 import ast

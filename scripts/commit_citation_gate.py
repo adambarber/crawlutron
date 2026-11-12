@@ -1,9 +1,6 @@
-"""Commit-msg gate, two laws, one chokepoint (#561).
-
-Citation law: every commit cites `#<number>`. Format law: a Conventional
-Commit subject, `type(scope): ...` with type in _TYPES (scope optional).
-Schema law: a breaking-feat commit touching crawl_policy.py must bump
-POLICY_SCHEMA_VERSION in the same commit. Refusals name which law fired.
+"""Commit-msg gate, two laws, one chokepoint (#561): every commit cites ``#<number>``; every subject is a
+Conventional Commit ``type(scope): ...`` with type in _TYPES. A breaking-feat commit touching
+crawl_policy.py must bump POLICY_SCHEMA_VERSION in the same commit. Refusals name which law fired.
 """
 
 from __future__ import annotations

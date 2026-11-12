@@ -1,12 +1,6 @@
-"""Typed async HTTP facade over a running crawlutron service.
-
-The client serializes JSON, deserializes envelopes, and raises typed errors.
-The server is the sole enforcement chokepoint; the SDK reimplements no
-admission, policy, robots, metering, or extraction logic.
-
-The async client owns one :class:`httpx.AsyncClient` (lazily created, closed on
-:meth:`aclose` / ``__aexit__``). :meth:`sync` returns a blocking mirror that
-owns its own :class:`httpx.Client` configured identically.
+"""Typed async HTTP facade over a running crawlutron service: JSON in, envelopes out, typed errors. The
+server is the sole enforcement chokepoint -- the SDK reimplements no admission, policy, robots, metering,
+or extraction logic. One lazy httpx.AsyncClient; sync() mirrors it with a blocking httpx.Client.
 """
 
 from __future__ import annotations

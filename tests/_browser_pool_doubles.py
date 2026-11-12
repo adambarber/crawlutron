@@ -68,12 +68,10 @@ def _as_gate_owner(worker: BrowserRenderer) -> _GateOwner:
 
 
 async def close_mid_sweep(pool: BrowserPool, holder: BrowserRenderer) -> asyncio.Task[None]:
-    """The shared #590 arrange: start close(), let it go mid-sweep holding the
-    lock, release the holder into the sweep, then open the close gate.
-
-    holder must own a gate -- that's true of every pool a test builds here
-    (enforced by construction, not by the pool's type), so the cast below is
-    provenance-documented, not assumed."""
+    """The shared #590 arrange: start close(), let it go mid-sweep holding the lock, release the holder into
+    the sweep, then open the close gate. ``holder`` must own a gate -- true of every pool a test builds
+    here by construction, so the cast below is provenance-documented, not assumed.
+    """
     gated = _as_gate_owner(holder)
     close_task = asyncio.ensure_future(pool.close())
     await asyncio.sleep(0.01)  # close holds the lock, mid-sweep

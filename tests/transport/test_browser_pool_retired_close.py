@@ -30,16 +30,7 @@ async def _assert_queue_holds_no_duplicate(pool: BrowserPool) -> None:
 
 
 async def test_drain_joins_a_close_scheduled_while_draining():
-    """Mutation-discriminated drain-recheck loop.
-
-    Three closes chained mid-drain: first gated inside drain's initial
-    gather; second scheduled while drain is joined on first; third scheduled
-    from within second's close -- strictly inside drain. A snapshot gather
-    (the pre-consolidation hand-rolled shape) abandons second and third; a
-    single-shot ``if`` recheck joins second but abandons third (third is
-    still gated when drain returns); only the committed ``while`` recheck
-    follows the chain to the end and joins all three.
-    """
+    """Mutation-discriminated drain-recheck loop: three closes chained mid-drain."""
     owner: DeferredClose[_GatedRenderer] = DeferredClose(aclose=lambda r: r.close())
     first = _GatedRenderer()
     second = _GatedRenderer(on_close=lambda: owner.schedule(third))
@@ -86,10 +77,10 @@ async def test_schedule_outside_any_loop_declines_honestly():
 
 
 async def test_release_closes_a_renderer_retired_by_close():
-    """Checkout, then close the pool mid-render, then release: the pool must not
-    close the checked-out renderer mid-flight (close()'s per-renderer sweep
-    races the active render and its failure is swallowed), and the RETIRED
-    path -- release -- must await the close instead."""
+    """Checkout, then close the pool mid-render, then release: the pool must not close the checked-out
+    renderer mid-flight -- close()'s per-renderer sweep races the active render and its failure is
+    swallowed -- so the RETIRED path, release, must await the close instead.
+    """
     spy = _SpyRenderer()
     pool = BrowserPool.for_testing([spy])
 
@@ -160,12 +151,9 @@ async def test_close_reaps_every_retired_renderer_scheduled_after_the_drain():
 
 
 class _GatedRenderer(BrowserRenderer):
-    """Renderer whose close blocks on an event, so the drain is observable.
-
-    ``started`` fires once the close coroutine is running inside the owner's
-    gather; ``finished`` once the close body has run. ``on_close``, if given,
-    is awaited at the end of ``close`` -- used to schedule a third close
-    strictly mid-drain (re-entrant schedule during drain).
+    """Renderer whose close blocks on an event, so the drain is observable: ``started`` fires once the close
+    coroutine is running inside the owner's gather, ``finished`` once the close body has run, and
+    ``on_close`` is awaited at the end of ``close`` -- used to schedule a third close strictly mid-drain.
     """
 
     def __init__(self, on_close: Callable[[], None] | None = None) -> None:

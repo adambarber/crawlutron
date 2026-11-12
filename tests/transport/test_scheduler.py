@@ -93,11 +93,10 @@ class TestScheduler:
         )
 
     async def test_cooldown_delay_applied_to_domain(self, monkeypatch):
-        """A domain in cooldown must have the cooldown awaited before the worker.
-
-        Asserted on the *request*, not the wall time -- and on the INJECTED
-        clock, so the window cannot decay while the worker spins up (the real
-        monotonic clock made the 90% floor a timing race under xdist)."""
+        """A domain in cooldown must have the cooldown awaited before the worker. Asserted on the *request*,
+        not the wall time -- and on the INJECTED clock, so the window cannot decay while the worker spins
+        up (the real monotonic clock made the 90% floor a timing race under xdist).
+        """
         sleeps, now, scheduler, job = self._cooled_rig(monkeypatch, window=0.3)
 
         async def worker(ran_job: CrawlJob) -> EngineCrawlResult:

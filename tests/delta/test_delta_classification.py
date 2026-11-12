@@ -209,10 +209,10 @@ def test_baseline_fingerprint_fields_record_what_was_hashed():
 
 
 def test_fingerprint_compared_over_baseline_field_set_not_whole_result():
-    """The current result carries extra content fields the baseline stripped:
-    the comparison hashes only the baseline's fields, so shape B vs shape A is
-    unchanged when the shared fields match, and None-field incomparability
-    degrades to validators, never a shifted-hash changed."""
+    """The current result carries extra content fields the baseline stripped: the comparison hashes only the
+    baseline's fields, so shape B vs shape A is unchanged when the shared fields match, and None-field
+    incomparability degrades to validators, never a shifted-hash changed.
+    """
     fingerprint = content_fingerprint(engine_result(URL, "rendered", markdown="body"))
     baseline = replace(_baseline_evidence(fingerprint=fingerprint)[URL], fingerprint_fields=("markdown",))
     evidence_dict = {URL: baseline}

@@ -1,8 +1,7 @@
 """The policy-schema law holds in history and in the gate (#561).
 
-Two pins, one law: any feat!-shaped commit touching crawl_policy.py in the
-recorded history bumped POLICY_SCHEMA_VERSION, and the commit-msg gate
-refuses a synthetic breaking-feat touch without a bump.
+Two pins, one law: any feat!-shaped commit touching crawl_policy.py in the recorded history bumped
+POLICY_SCHEMA_VERSION, and the commit-msg gate refuses a synthetic breaking-feat touch without a bump.
 """
 
 from __future__ import annotations

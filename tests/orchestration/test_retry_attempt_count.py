@@ -1,7 +1,5 @@
-"""The retry's attempts are recorded ONCE (#C9).
-
-retry_cookies routes through execute, so the retry result carries its own
-attempt; if the retry path ALSO extends state.attempts again, the ladder's
+"""The retry's attempts are recorded ONCE (#C9). retry_cookies routes through execute, so the retry result
+carries its own attempt; if the retry path ALSO extends state.attempts again, the ladder's
 attempted_strategies counts inflate -- diagnostics lie about how much was tried.
 """
 

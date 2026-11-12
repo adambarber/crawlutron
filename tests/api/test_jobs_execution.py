@@ -100,10 +100,10 @@ def test_every_job_endpoint_declares_its_providers_through_an_alias():
 
 
 def test_creating_and_controlling_a_job_need_the_same_core_providers():
-    """The identity claim behind the shared aliases, checked against signatures:
-    create_job and control_job name the same four core providers; create_job
-    alone adds get_tracking, because only creation enters the concurrency
-    register (control's transition is admission-free by design)."""
+    """The identity claim behind the shared aliases, checked against signatures: create_job and control_job
+    name the same four core providers; create_job alone adds get_tracking, because only creation enters
+    the concurrency register (control's transition is admission-free by design).
+    """
 
     def _providers(handler) -> dict[str, Callable[..., object]]:
         declared: dict[str, Callable[..., object]] = {}

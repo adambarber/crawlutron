@@ -19,11 +19,9 @@ def _page_html(path: str) -> str:
 
 
 async def test_recursive_crawl_fetches_links_concurrently():
-    """Discovered links are fetched concurrently, within the configured gates.
-
-    The probe's rendezvous holds four discovered-link fetchers in flight
-    together; awaiting links one at a time never gathers four and the bounded
-    wait expires, so the peak assert fails deterministically (no sleep-race).
+    """Discovered links are fetched concurrently, within the configured gates. The probe's rendezvous holds
+    four discovered-link fetchers in flight together; awaiting links one at a time never gathers four and
+    the bounded wait expires, so the peak assert fails deterministically (no sleep-race).
     """
     probe = OverlapProbe(rendezvous_at=4)
 

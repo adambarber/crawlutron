@@ -88,13 +88,14 @@ if ROOT.exists() and str(ROOT) not in sys.path:
 # (the secure default).
 os.environ.setdefault("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
 
-# `crawlutron.main` binds `DATABASE_PATH = settings.cache_dir + "/crawler.db"` at import; every test
-# the same process-wide `JobStore` built on it.
+# `crawlutron.main` binds `DATABASE_PATH` from settings.cache_dir at import; every test gets the same
+# process-wide `JobStore` built on it. (Not a CRAWLUTRON_CACHE_DIR default: a suite-scratch env face.)
 _SCRATCH_CACHE_DIR = (
     Path(tempfile.gettempdir())
     / f"crawlutron-tests-{os.environ.get('PYTEST_XDIST_WORKER', 'master')}-{os.getpid()}"
 )
 _INHERITED_CACHE_DIR = os.environ.get("CRAWLUTRON_CACHE_DIR", "")
+# (Suite plumbing, not a knob default: the gate reads the settings-home default, never this face.)
 _INHERITED_IS_SUITE_SCRATCH = (
     _INHERITED_CACHE_DIR.startswith(f"{Path(tempfile.gettempdir())}{os.sep}")
     and "crawlutron-tests-" in _INHERITED_CACHE_DIR
@@ -243,11 +244,9 @@ def real_pbkdf2_iterations() -> int:
 
 @pytest.fixture(autouse=True)
 def fast_sleeps(request):
-    """Zero ``time.sleep`` and ``asyncio.sleep`` unless the test opts out.
-
-    Timing-true tests carry the ``real_sleeps`` marker instead. The patch is a
-    stable dispatcher (module level, below): never a ``mock.patch`` whose
-    restore a sibling monkeypatch can capture and re-install."""
+    """Zero ``time.sleep`` and ``asyncio.sleep`` unless the test opts out; timing-true
+    tests carry the ``real_sleeps`` marker instead. The patch is a stable module-level
+    dispatcher, never a ``mock.patch`` whose restore a sibling monkeypatch can capture."""
     _SLEEP_MODE["fast"] = not request.node.get_closest_marker("real_sleeps")
     yield
     _SLEEP_MODE["fast"] = False
@@ -308,13 +307,9 @@ def _cleanup_extraction_executors():
 
 @pytest.fixture(autouse=True)
 def _document_pool_per_test(monkeypatch):
-    """Each test that touches the document pool gets a fresh one, built lazily.
-
-    The pool is a process global whose teardown is terminal: a test that ran
-    the lifespan closed it for every later test in the same worker. Building
-    it eagerly for every test cost a spawn+teardown per test (#615), so the
-    patched global is a lazy proxy: the real pool is built on first attribute
-    use and torn down at fixture finalization if it was ever built.
+    """Each test that touches the document pool gets a fresh one, built lazily: a test that ran the lifespan
+    closed the process-global pool for every later test in the worker, and an eager build cost a
+    spawn+teardown per test.
     """
     import crawlutron.extraction.content as ext_mod
     import crawlutron.extraction.documents as docex
@@ -376,14 +371,10 @@ _MODULE_GLOBAL_RESETS = (_clear_global_http_state,)
 
 @pytest.fixture(autouse=True)
 async def _reset_pooled_sockets_on_the_live_loop():
-    """Release the pooled HTTP clients while the test's loop still runs.
-
-    The pooled client is loop-bound: a reset that runs after pytest-asyncio
-    closed the loop cannot legally close its transports (a foreign-loop close
-    leaves them "closing" forever -- the unraisable __del__ flake family).
-    Closing on the owning loop before it dies is the structural fix; the sync
-    reset below stays as the safety net for stateless owners. Pure unit tests
-    that never build a pooled client skip the loop-bound drain entirely."""
+    """Release the pooled HTTP clients while the test's loop still runs: the pooled client is loop-bound, and
+    a reset after pytest-asyncio closed the loop leaves its transports "closing" forever -- the unraisable
+    __del__ flake family. The sync reset stays the safety net; pure unit tests skip the loop-bound drain.
+    """
     from crawlutron.transport import pooled_clients
 
     pooled = pooled_clients.http_singleton()
@@ -411,12 +402,10 @@ def _reset_module_globals():
 
 @pytest.fixture(autouse=True)
 async def owned_job_runtime():
-    """Hand every test the job runtime, and take it back at the end.
-
-    The task registry and shutdown event are module-global: a crawl from one
-    test stayed visible to the next. Teardown is where the reset belongs. When
-    no job task was started during the test, the loop-bound shutdown is a
-    no-op (the seam reset still runs)."""
+    """Hand every test the job runtime, and take it back at the end: the task registry and shutdown event are
+    module-global, so a crawl from one test stayed visible to the next. When no job task was started, the
+    loop-bound shutdown is a no-op.
+    """
     from crawlutron.runtime import process_state
     from crawlutron.service import job_runner
     from tests._app_factory import service_app
@@ -432,14 +421,10 @@ async def owned_job_runtime():
 
 @pytest.fixture(autouse=True)
 def _every_store_connection_a_test_opens_it_closes(monkeypatch, request):
-    """Track every sqlite3.connect the test performs (#838).
-
-    A leaked store connection finalizes at a GC-chosen moment under Python
-    3.14, raising ResourceWarning inside whichever test is running — the
-    rotating invariant-victim flake family. The ledger holds STRONG references
-    so nothing finalizes mid-run; at SESSION finish the sweep is exact: a
-    connection that still executes was never closed — the defect this gate
-    exists to name. Closed-by-finalize stores are fine: the close happened."""
+    """Track every sqlite3.connect the test performs (#838): a leaked store connection finalizes at a
+    GC-chosen moment under Python 3.14, raising ResourceWarning inside whichever test is running. The
+    ledger holds STRONG references so nothing finalizes mid-run; the session-finish sweep is exact.
+    """
     import tests.invariants.test_no_leaked_store_connections as ledger_mod
     from tests.invariants.test_no_leaked_store_connections import (
         _LEDGER,

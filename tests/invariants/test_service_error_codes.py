@@ -1,9 +1,4 @@
-"""Service raise sites and SDK error classes must agree on the wire code and status.
-
-The SDK pins in ``tests/test_sdk_errors.py`` compare class constants against string
-literals, so a service wire-code change leaves them green; this invariant reads the
-LIVE service refusal at its raise site and asserts equality against the SDK class.
-"""
+"""Service raise sites and SDK error classes must agree on the wire code and status."""
 
 from __future__ import annotations
 

@@ -1,9 +1,6 @@
-"""The operator gate meters its negative guesses (#664/#659 parity).
-
-/v1/keys and /metrics pace wrong-token guesses through the shared admin
-bucket: 5 misses, then a 60s cooldown refusing 429 before any comparison
-work. policy-suggestions meters wrong-token guesses per-credential only
-(its operator arm records successes; the #826 ruling owns the posture).
+"""The operator gate meters its negative guesses: /v1/keys and /metrics pace wrong-token guesses through the
+shared admin bucket -- 5 misses, then a 60s cooldown refusing 429 before any comparison work.
+policy-suggestions meters wrong-token guesses per-credential only.
 """
 
 from __future__ import annotations

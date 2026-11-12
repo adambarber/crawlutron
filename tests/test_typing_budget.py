@@ -1,7 +1,6 @@
-"""The annotation ratchet: every declared record and bare ``Any`` is counted, and
-zero means the tree's annotations are true -- nothing about an absent one, since
-``JobStatusView`` was ``dict[str, Any]`` with twelve keys declared nowhere, so a
-dropped key reached no response until one TypedDict fixed it.
+"""The annotation ratchet: every declared record and bare ``Any`` is counted, and zero means the tree's
+annotations are true -- nothing about an absent one, since ``JobStatusView`` was ``dict[str, Any]`` with
+twelve keys declared nowhere, so a dropped key reached no response until one TypedDict fixed it.
 """
 
 from __future__ import annotations

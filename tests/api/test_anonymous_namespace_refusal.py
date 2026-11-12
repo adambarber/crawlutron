@@ -1,10 +1,4 @@
-"""#559: anonymous callers may not declare a cookie namespace -- refused at every door.
-
-Anonymous is ONE bounded shared identity (M1 #206), so a declared namespace is
-not a tenant boundary; the doors answer 422 ``anonymous_cookie_namespace``
-instead of the #537-style silent downgrade. The walk-past scenario (two
-anonymous callers, one declared namespace, a shared jar) lives here too.
-"""
+"""#559: anonymous callers may not declare a cookie namespace."""
 
 from __future__ import annotations
 

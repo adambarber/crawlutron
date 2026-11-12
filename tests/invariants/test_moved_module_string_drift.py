@@ -1,11 +1,6 @@
-"""The moved-module string-drift invariant (#849): the ledger is EMPTY.
-
-Every moved module's shim is drained: consumers import from
-``crawlutron.service`` directly, no ``crawlutron.api.<m>`` string or import
-remains, and the api→service re-export shims are deleted outright
-(test_api_service_shim_drain holds that at zero). The detector below stays as
-the standing tripwire for any FUTURE move: register the module in
-MOVED_MODULES when its api shim lands, delete the row when the shim dies.
+"""The moved-module string-drift invariant (#849): the ledger is EMPTY. Consumers import from
+``crawlutron.service`` directly; the detector stays as the standing tripwire for any FUTURE move --
+register the module in MOVED_MODULES when its api shim lands, delete the row when the shim dies.
 """
 
 from __future__ import annotations

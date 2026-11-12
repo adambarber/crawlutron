@@ -1,10 +1,6 @@
-"""Red-first probes for #548: the occupied set is threaded across the job loop.
-
-Main built the whole occupied set per batch twice -- once unconditionally in
-``_pop_frontier`` (``set(job.visited) | {in_flight}`` before the guard that is
-its only consumer) and once in ``_absorb_batch`` (a fresh
-``admitted_page_identities`` rebuild). Both are killed by seeding ``known`` once
-in ``run_job`` and threading it through the loop; these tests pin that.
+"""Red-first probes for #548: main built the whole occupied set per batch twice -- unconditionally in
+``_pop_frontier`` and again in ``_absorb_batch``; both are killed by seeding ``known`` once in ``run_job``
+and threading it through the loop.
 """
 
 from __future__ import annotations
@@ -193,11 +189,10 @@ async def test_pop_frontier_no_set_build_on_unlimited_job(tmp_path, monkeypatch)
 
 @pytest.mark.asyncio
 async def test_transient_requeue_survives_known_threading(tmp_path):
-    """#548: a transient entry must still be requeued under the threaded known
-    set. The caller discards the identity from ``known`` before requeueing so
-    the retry can re-admit; the frontier must end with exactly one copy (#558:
-    production pops the batch out of the frontier first, so the seeded copy is
-    removed here to mirror that)."""
+    """#548: a transient entry must still requeue under the threaded known set -- the caller discards the
+    identity from ``known`` before requeueing so the retry can re-admit, and the frontier must end with
+    exactly one copy.
+    """
     state = _make_state(frontier_pages=1)
     entry = state.frontier[0]
     state.frontier.clear()  # _pop_frontier removed the batch; absorb requeues it

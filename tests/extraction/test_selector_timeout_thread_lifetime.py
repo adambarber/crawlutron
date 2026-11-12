@@ -1,12 +1,5 @@
-"""A timed-out selector's worker must not outlive extraction teardown (#560).
-
-The #521 cancel leaves a *started* runaway running on the shared extraction
-executor: ``extract_selected`` returns, and the thread keeps executing until
-the pathological selector finishes on its own. After
-``shutdown_doc_extraction_executor`` that thread is still alive -- exactly the
-unbounded-lifetime violation the ticket names. The probe: park a select in the
-timeout path, shut extraction down, and assert no ``extraction``-prefixed
-thread survives the shutdown.
+"""A timed-out selector's worker must not outlive extraction teardown: the #521 cancel leaves a *started*
+runaway on the shared extraction executor.
 """
 
 import asyncio

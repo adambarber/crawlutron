@@ -77,10 +77,9 @@ def test_the_battery_child_runs_the_whole_suite_with_default_addopts() -> None:
 
 
 def test_the_fanout_discovers_every_precommit_pytest_child() -> None:
-    """Kills the un-wired-battery mutant: a battery hook the fanout's parser
-    misses (wrong stage, entry without the engine module) would run pytest at
-    commit OUTSIDE the fanout. Every pre-commit pytest child must be a
-    _gate_argv() key carrying its own declared argv."""
+    """Kill the un-wired-battery mutant: a battery hook the fanout's parser misses
+    would run pytest at commit OUTSIDE the fanout; every pre-commit pytest child must
+    be a _gate_argv() key carrying its own declared argv."""
     gates = _gate_argv()
     assert BATTERY_HOOK_ID in gates, f"fanout misses the battery child: {sorted(gates)}"
     assert gates[BATTERY_HOOK_ID][-3:] == ["-m", "pytest", "-q"]

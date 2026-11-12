@@ -139,13 +139,8 @@ class TestEnvelopeFromDetail:
         }
 
     async def test_unknown_route_404_reports_the_malformed_synthetic_code(self, async_client):
-        """#668 wire-shape EVOLUTION (owner's 404 ruling): a route-miss surfaces as
-        the not_found envelope metered through the anonymous bucket, with BOTH
-        discovery links in details -- a 404 oracle is a route-enumeration tool,
-        never an exemption. Old pin: code == malformed_error_detail +
-        {"status_code": 404}. Surviving owner of the deleted weaker sibling
-        test_unknown_route_404_is_the_envelope_not_fastapi_detail: this pin's
-        set(body) assertion (envelope family, never FastAPI's bare detail).
+        """#668 wire-shape EVOLUTION: a route-miss surfaces as the not_found envelope metered through the
+        anonymous bucket, with BOTH discovery links in details.
         """
         resp = await async_client.get("/v1/definitely-not-a-route")
         assert resp.status_code == 404
@@ -167,12 +162,9 @@ class TestEnvelopeFromDetail:
         assert body["details"] == {"status_code": 405}
 
     async def test_unhandled_in_handler_exception_is_a_envelope_500(self):
-        """A generic exception escaping a handler must yield the envelope, not
-        Starlette's text/plain 'Internal Server Error' (raise_app_exceptions=False, as
-        ServerErrorMiddleware always re-raises after sending for logging).
-
-        A throwaway app carrying the REAL error surface, so the shared app's
-        route table is never mutated (a leaked /boom reds the discovery gate).
+        """A generic exception escaping a handler must yield the envelope, not Starlette's text/plain
+        'Internal Server Error' -- ServerErrorMiddleware always re-raises after sending for logging. A
+        throwaway app carries the REAL error surface so the shared route table is never mutated.
         """
         import httpx
         from fastapi import FastAPI

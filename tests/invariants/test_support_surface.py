@@ -1,8 +1,6 @@
-"""The suite imports shared test helpers only through the declared support surface.
-
-The private-import gate (#476) keeps app/ honest; this gate keeps the suite
-itself honest: a ``test_*`` module's internals are that test's own seam, and
-shared machinery lives on ``tests/_*.py`` / ``tests/invariants/_*.py``.
+"""The suite imports shared test helpers only through the declared support surface. The private-import gate
+(#476) keeps app/ honest; this gate keeps the suite itself honest: a ``test_*`` module's internals are
+that test's own seam, and shared machinery lives on ``tests/_*.py`` / ``tests/invariants/_*.py``.
 """
 
 from __future__ import annotations
@@ -18,12 +16,10 @@ _TESTS_DIR = pathlib.Path(__file__).resolve().parents[1] / "tests"
 
 
 def _cross_test_private_names(tree: ast.Module, path: pathlib.Path) -> dict[str, int]:
-    """``module.name -> lineno`` for private names imported from sibling test modules.
-
-    A ``test_*`` module's internals are that test's own seam; a shared helper
-    lives on the declared surface (``tests/_*.py``, ``tests/factories/``,
-    ``tests/invariants/_*.py``), so reaching into a sibling test module is the
-    weld this rule refuses."""
+    """``module.name -> lineno`` for private names imported from sibling test modules. A ``test_*`` module's
+    internals are that test's own seam; a shared helper lives on the declared surface, so reaching into a
+    sibling test module is the weld this rule refuses.
+    """
     here = relative_posix(path) if path.is_absolute() else path.as_posix()
     return _private_from_import_names(
         tree,

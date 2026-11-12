@@ -1,8 +1,7 @@
 """The engine spills page results into the store as each batch completes.
 
-The file spill (mkstemp + flock + NDJSON) is gone: the same write/read shape
-rides the crawl_spills table -- incremental INSERT per result, ordered read-back
-for the response, rows reclaimed by age.
+The file spill (mkstemp + flock + NDJSON) is gone: the same write/read shape rides the crawl_spills table
+-- incremental INSERT per result, ordered read-back for the response, rows reclaimed by age.
 """
 
 from __future__ import annotations

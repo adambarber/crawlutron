@@ -1,8 +1,6 @@
-"""The admin audit trail: every key-admin action gets one durable, structured row.
-
-Tests through public doors: an admin action at the keys door, then the audit
-read back through the store's public list door. Red-first per chokepoint: a
-mutant that drops the audit write at one chokepoint reds exactly its test.
+"""The admin audit trail: every key-admin action gets one durable, structured row. Tests through public
+doors: an admin action at the keys door, then the audit read back through the store's public list door.
+Red-first per chokepoint: a mutant that drops the audit write at one chokepoint reds exactly its test.
 """
 
 from __future__ import annotations

@@ -363,12 +363,9 @@ class _CertMismatchPage(BrowserFakePage):
 
 
 async def test_a_cert_identity_mismatch_is_a_classified_refusal_not_silence(monkeypatch):
-    """The pin law observed, not assumed: when the presented certificate's
-    identity does not match the pinned hostname, the render ends in a terminal
-    ``tls_error`` classification reaching the caller -- never a silent success
-    and never an unclassified unknown. Hostname dialing is what makes the
-    browser's default cert verification bind the pinned identity; this test
-    proves the mismatch path is visible when it fires."""
+    """The pin law observed, not assumed: a presented certificate whose identity does not match the pinned
+    hostname ends the render in a terminal ``tls_error`` classification reaching the caller.
+    """
     block_private_targets(monkeypatch)
     _stub_dns_to_example_com(monkeypatch)
     from crawlutron.transport.browser_targets import resolve_browser_target as _resolve

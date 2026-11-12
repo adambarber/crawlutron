@@ -131,12 +131,9 @@ def allow_scripted_egress(monkeypatch, ip: str = "1.2.3.4") -> None:
 
 
 class ParkedResolver:
-    """Parked DNS workers: the saturation registry is seeded through the real
-    resolve door, so the module needs no production test-door symbols.
-
-    Each ``occupy``d slot is one ``bounded_addrinfo`` call whose getaddrinfo
-    parks on an event -- the future registers exactly as a real resolve's;
-    ``release`` lets every parked worker return.
+    """Parked DNS workers: the saturation registry is seeded through the real resolve door, so the module
+    needs no production test-door symbols. Each ``occupy``d slot parks on an event -- the future registers
+    exactly as a real resolve's; ``release`` lets every parked worker return.
     """
 
     def __init__(self, monkeypatch) -> None:

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pathlib
 
-from tests._walk_primitives import REPO_ROOT, declared_root_files
+from tests._walk_primitives import declared_root_files, python_bearing_roots
 
 #: Total lines one file may hold.
 LIMIT = 500
@@ -37,11 +37,9 @@ def scan(base: pathlib.Path, *, include_gate: bool = False) -> dict[str, int]:
 
 
 def overlong(root: str) -> dict[str, int]:
-    """Every overlong file under one declared repo root, as ``{file: lines}``.
-
-    ``scripts`` is the one root with an extensionless helper every hook routes
-    through, so it is swept with the gate included. The root walk goes through
-    the fail-loud helper: a missing root is a gate defect, never an empty scan.
+    """Every overlong file under one declared repo root, as ``{file: lines}``. ``scripts`` is the one root
+    with an extensionless helper every hook routes through, so it is swept with the gate included; the
+    root walk goes through the fail-loud helper -- a missing root is a gate defect, never an empty scan.
     """
     candidates = list(declared_root_files(root))
     if root == "scripts":
@@ -76,37 +74,30 @@ def test_scan_includes_the_extensionless_gate_helper(tmp_path: pathlib.Path) -> 
     assert found[gate.as_posix()] == 502
 
 
-def _python_bearing_roots() -> set[str]:
-    """Top-level dirs holding any ``*.py``, derived by walking REPO_ROOT.
-
-    Hidden dirs are skipped: they hold environment/cache trees, not shipped
-    code, and a dot-named root could never be a declared scan root."""
-    return {
-        d.name
-        for d in REPO_ROOT.iterdir()
-        if d.is_dir()
-        and not d.name.startswith(".")
-        and any("__pycache__" not in q.parts for q in d.rglob("*.py"))
-    }
-
-
 def test_every_python_bearing_root_is_scanned_by_the_duplication_gate() -> None:
-    """A top-level dir holding ``*.py`` that TREE_ROOTS misses is invisible to jscpd.
-
-    crawlutron_sdk escaped exactly this way: a later cohort added the tree and
-    no gate compared the scanned roots to the trees that exist. Same derivation
-    as the budget row pin above -- derived by walking REPO_ROOT, never hand-listed.
+    """A top-level dir holding ``*.py`` that TREE_ROOTS misses is invisible to jscpd -- crawlutron_sdk escaped
+    exactly this way (a later cohort added the tree and no gate compared scanned roots to existing trees).
+    Same derivation as the budget row pin: derived by walking, never hand-listed.
     """
     from scripts.jscpd_gate import TREE_ROOTS
 
     scanned = {root for roots in TREE_ROOTS.values() for root in roots}
-    assert scanned == _python_bearing_roots()
+    assert scanned == set(python_bearing_roots())
 
 
 def test_every_declared_scan_root_has_a_budget_row() -> None:
     """The derived side seals: no undeclared python root escapes the ceiling.
     The table side seals: no dead budget row points at a vanished root."""
-    assert set(_BUDGETS) == _python_bearing_roots()
+    assert set(_BUDGETS) == set(python_bearing_roots())
+
+
+def test_over_line_counts_boundary_is_exact(tmp_path: pathlib.Path) -> None:
+    """The off-by-one the stale twin pinned: 501 lines is over, 500 is not."""
+    over = tmp_path / "over.py"
+    over.write_text("\n" * LIMIT + "x\n")
+    at = tmp_path / "at.py"
+    at.write_text("\n" * (LIMIT - 1) + "x\n")
+    assert _over_line_counts([over, at]) == {over.as_posix(): LIMIT + 1}
 
 
 def test_every_root_is_at_its_declared_file_budget() -> None:

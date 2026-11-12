@@ -38,12 +38,9 @@ def _guarded_keys() -> set[tuple[str, str]]:
 
 
 def _served_routes(*, include_foreign: bool = False) -> set[tuple[str, str]]:
-    """Every (method, path) the real app serves, factory routers included.
-
-    ``include_foreign`` keeps framework-owned routes (FastAPI's docs closures
-    live in site-packages) for EXISTENCE checks -- a declared metered surface
-    must exist as a route even when its code is not ours. The package filter
-    stays on for ownership tests (the converse, offender naming).
+    """Every the real app serves, factory routers included. ``include_foreign`` keeps framework-owned routes
+    for EXISTENCE checks -- a declared metered surface must exist as a route even when its code is not
+    ours; the package filter stays on for ownership tests.
     """
     keys: set[tuple[str, str]] = set()
 
@@ -58,15 +55,9 @@ def _served_routes(*, include_foreign: bool = False) -> set[tuple[str, str]]:
 
 
 def _walk_served(visit: Callable[[object], None], *, include_foreign: bool = False) -> None:
-    """Depth-first over the real app's production routes.
-
-    Test-added routes (a door probe mounting /boom on the shared app) are
-    pollution, not service surface: only endpoints whose code object lives
-    inside the crawlutron PACKAGE count -- a mutant planted there is still
-    caught. The boundary is a Path comparison against the package root, not a
-    checkout-path substring: a checkout not named crawlutron still greens
-    honestly (review F3 artifact, mutation-proven). ``include_foreign`` adds
-    framework-owned routes for existence checks only.
+    """Depth-first over the real app's production routes. Test-added routes are pollution, not surface: only
+    endpoints whose code lives inside the crawlutron PACKAGE count -- a Path comparison, not a
+    checkout-path substring; ``include_foreign`` adds framework-owned routes for existence checks only.
     """
     import crawlutron
 
@@ -124,12 +115,9 @@ def test_exempt_ratchet_never_increases():
 
 
 def test_every_served_route_is_guarded_or_exempt():
-    """The converse: nothing the app serves escapes the layer silently.
-
-    served - guarded - exempt must be empty. The #664 PENDING table was sealed
-    at zero (#668): every previously-pending surface meters through the
-    anonymous bucket (api/anonymous_throttle.py), so the table and its pins
-    are gone -- this unconditional assertion is the converse guard.
+    """The converse: nothing the app serves escapes the layer silently -- served - guarded - exempt must be
+    empty. The #664 PENDING table was sealed at zero (#668): every previously-pending surface meters
+    through the anonymous bucket, so this unconditional assertion is the converse guard.
     """
     guarded = _guarded_keys()
     exempt = {(row.method, row.path.split(":")[0]) for row in LAYER_EXEMPT_RATCHET}
@@ -159,11 +147,9 @@ def test_anonymous_rows_match_real_routes():
 
 
 def test_anonymous_ratchet_never_increases():
-    """The pinned literal moves only in the commit that earns it (#668 fix-up:
-    4 -> 10 is the review's completeness LANDING of the enumerated exempt GETs
-    (six: health, ready, well-known, capabilities, agent-hints, openapi.json --
-    the directive's "five" count was off by one against its own list) -- a
-    scope-completion move, authorized in the commit body, not a budget raise)."""
+    """The pinned literal moves only in the commit that earns it -- a scope-completion move authorized in the
+    commit body, not a budget raise.
+    """
     assert len(ANONYMOUS_METERED) == 10, (
         "ANONYMOUS_METERED is pinned at 10; adding a row demands the metering "
         "landed in the same commit and this literal lowered/raised deliberately"

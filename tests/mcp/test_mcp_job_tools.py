@@ -1,8 +1,7 @@
 """MCP job tools (create_job, list_jobs, get_job, control_job, delete_job) over the job store.
 
-The tools mirror the /v1/jobs REST doors: the same caller scoping, the same
-store reads, and -- for the reads and the control action -- the same JSON the
-REST door answers with.
+The tools mirror the /v1/jobs REST doors: the same caller scoping, the same store reads, and -- for the
+reads and the control action -- the same JSON the REST door answers with.
 """
 
 from __future__ import annotations

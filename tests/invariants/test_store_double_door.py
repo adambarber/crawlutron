@@ -1,9 +1,4 @@
-"""Every loop-guard store double imports only through ``tests._job_store_doubles``.
-
-``tests.api._offload_doubles`` was a second home for the same store seams
-(#844); the consolidation made ``tests._job_store_doubles`` the one declaring
-home, so a from-import off the old module is the drift the door refuses.
-"""
+"""Every loop-guard store double imports only through ``tests._job_store_doubles``:"""
 
 from __future__ import annotations
 

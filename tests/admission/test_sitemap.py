@@ -312,9 +312,9 @@ def test_parse_lastmod_variants():
 def _cache_with_fresh(tmp_path, url, lastmod, policy, *, namespace=""):
     """Seed the content cache so ``url`` is fresh as of ``lastmod``.
 
-    The key must match what sitemap seeding looks up, so the caller passes
-    the exact policy the engine derives; ``namespace`` keys the entry as the
-    fetch path would."""
+    The key must match what sitemap seeding looks up, so the caller passes the exact policy the engine
+    derives; ``namespace`` keys the entry as the fetch path would.
+    """
     cache = ContentCache(str(tmp_path), clock=lambda: 1_700_000_000.0)
     strategy = list(policy.strategies) or ["HTTP_DECLARED_CRAWLER"]
     target = canonical(url)

@@ -1,8 +1,6 @@
-"""Lightweight typed HTTP client SDK for a running crawlutron service.
-
-``crawlutron_sdk`` is a thin facade over the service's wire contract. The
-server is the sole enforcement chokepoint; this package reimplements no
-admission, policy, robots, metering, or extraction logic.
+"""Lightweight typed HTTP client SDK for a running crawlutron service. ``crawlutron_sdk`` is a thin facade
+over the service's wire contract. The server is the sole enforcement chokepoint; this package reimplements
+no admission, policy, robots, metering, or extraction logic.
 """
 
 from __future__ import annotations

@@ -1,9 +1,6 @@
-"""#577 adversarial findings, pinned as behavior (F1, F2).
-
-F1: the purge must never drop a record whose gate is in use -- a re-minted
-gate is FULL, so the per-domain concurrency cap silently widens mid-crawl.
-F2: jobs waking from a 429 cooldown nap re-reserve, or the wake-up instant
-is itself a herd.
+"""#577 adversarial findings, pinned as behavior (F1, F2). F1: the purge must never drop a record whose gate
+is in use -- a re-minted gate is FULL, so the per-domain concurrency cap silently widens mid-crawl. F2:
+jobs waking from a 429 cooldown nap re-reserve, or the wake-up instant is itself a herd.
 """
 
 from __future__ import annotations
@@ -110,17 +107,16 @@ class TestPurgeNeverDropsAnInUseGate:
 
 
 class TestCooldownWakeReReserves:
-    """F2: peers waking from the same 429 cooldown must still space their
-    fires -- the wake instant is not a synchronized free-for-all. Suite rules:
-    conftest patches asyncio.sleep to zero-second yields, so spacing is
-    observed through the REQUESTED waits (SleepRecorder), never wall time.
+    """F2: peers waking from the same 429 cooldown must still space their fires -- the wake instant is not a
+    synchronized free-for-all. Suite rules: conftest patches asyncio.sleep to zero-second yields, so
+    spacing is observed through the REQUESTED waits (SleepRecorder), never wall time.
     """
 
     async def test_peers_waking_from_one_cooldown_re_reserve(self, monkeypatch):
-        """Zero real sleep: the ONE injected clock advances whenever a wait is
-        requested -- cooldown naps and spacing waits share it since #580, so
-        every requested sleep just moves the clock. The 429 expiry passes
-        deterministically and instantly."""
+        """Zero real sleep: the ONE injected clock advances whenever a wait is requested -- cooldown naps and
+        spacing waits share it since #580, so every requested sleep just moves the clock. The 429 expiry
+        passes deterministically and instantly.
+        """
         real_sleep = asyncio.sleep
         requested: list[float] = []
         now = {"t": 1000.0}

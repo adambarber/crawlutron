@@ -12,12 +12,10 @@ from tests._process_doubles import StubSpawner, stub_worker
 
 
 def test_teardown_terminates_workers_outside_the_lock(monkeypatch):
-    """The retire loop must not hold the pool lock.
-
-    ``terminate_doc_process`` can take seconds (grace, escalation), so holding
-    the lock across it blocks every acquisition. Asserted behaviorally: while
-    one teardown is parked mid-terminate, a concurrent ``acquire`` still
-    completes -- it reads the closed pool's answer, not the lock."""
+    """The retire loop must not hold the pool lock: ``terminate_doc_process`` can take seconds, so holding
+    the lock across it blocks every acquisition. Asserted behaviorally: while one teardown is parked
+    mid-terminate, a concurrent ``acquire`` still completes.
+    """
     worker = stub_worker(31337)
     spawner = StubSpawner(worker)
     pool = DocExtractionPool(spawn=spawner, worker_count=lambda: 1, enabled=lambda: True)

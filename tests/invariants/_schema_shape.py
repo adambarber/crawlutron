@@ -1,8 +1,7 @@
 """Type-identity helpers: one shape vocabulary shared by both pin clauses.
 
-The SDK annotation and the OpenAPI projection each reduce to a ``Shape``:
-a literal vocabulary, an ``object`` mark, or a wire type-set. A vocabulary
-equals a vocabulary; type-sets must be wire-compatible.
+The SDK annotation and the OpenAPI projection each reduce to a ``Shape``: a literal vocabulary, an
+``object`` mark, or a wire type-set. A vocabulary equals a vocabulary; type-sets must be wire-compatible.
 """
 
 from __future__ import annotations

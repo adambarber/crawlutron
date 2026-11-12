@@ -1,9 +1,6 @@
-"""The discovery payload is derived truth, never a hand-maintained copy.
-
-The well-known recommendation list and the agent-hints MCP guidance must be
-computed from the live surface (OpenAPI + TOOL_SPECS), so a route or tool that
-lands without updating discovery REDS here -- the reverse of the historical
-staleness tests, which only caught advertised-but-dead entries.
+"""The discovery payload is derived truth, never a hand-maintained copy: the well-known recommendation list
+and the agent-hints MCP guidance are computed from the live surface, so a route or tool that lands without
+updating discovery REDS here.
 """
 
 from __future__ import annotations
@@ -77,10 +74,10 @@ def test_recommended_endpoints_are_derived_not_hand_listed():
 
 
 def test_no_hand_listed_endpoints_in_the_discovery_package():
-    """The no-hand-list scan covers every discovery module EXCEPT
-    recommended_surface.py -- the declared derivation input, where the doors
-    and the operator trust plane legitimately live. A hand list planted in
-    well_known.py, recommended.py, or agent_hints.py REDS here."""
+    """The no-hand-list scan covers every discovery module EXCEPT recommended_surface.py -- the declared
+    derivation input, where the doors and the operator trust plane legitimately live. A hand list planted
+    in any other discovery module REDS here.
+    """
     import ast
     import pathlib
 

@@ -1,7 +1,6 @@
-"""The GC-caller law for the cache maintenance seams: a reaping seam with zero
-production callers is dead surface, so ``ContentCache.prune`` and the robots
-``purge_robots_cache`` export must each have a live production call site --
-today the app-lifespan maintenance pass in ``crawlutron.service.cache_sweep``.
+"""The GC-caller law for the cache maintenance seams: a reaping seam with zero production callers is dead
+surface, so ``ContentCache.prune`` and the robots ``purge_robots_cache`` export must each have a live
+production call site -- today the app-lifespan maintenance pass in ``crawlutron.service.cache_sweep``.
 """
 
 from __future__ import annotations

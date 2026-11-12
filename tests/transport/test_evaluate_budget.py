@@ -1,8 +1,6 @@
-"""Every render-path page read carries the evaluate ceiling -- no bare holes.
-
-Round 2 of the wedged-renderer law: content(), shadow flattening, readyState
-polls, lazy-scroll probes, and the consent fallback were still unbounded; a
-never-returning await in any of them parks the pooled page past every bound.
+"""Every render-path page read carries the evaluate ceiling -- no bare holes. Round 2 of the wedged-renderer
+law: content(), shadow flattening, readyState polls, lazy-scroll probes, and the consent fallback were
+still unbounded; a never-returning await in any of them parks the pooled page past every bound.
 """
 
 from __future__ import annotations
@@ -110,12 +108,10 @@ def _real_consent_driver(page) -> _CloseRecordingDriver:
 async def _wedge_verdict(
     wedge: str, driver, *, include_html: bool = True, warmup_urls: list[str] | None = None
 ) -> tuple[CrawlResult, int]:
-    """Render through the public door with the wedged read; hang-guarded.
-
-    The outer wait_for exceeds the 5s evaluate ceiling, so a green render
-    answers inside it and a red is a named failure, never a hang.
-    ``warmup_urls`` routes the wedge through the warmup phase's bare
-    wait_for_ready, the one readyState path no navigation budget wraps."""
+    """Render through the public door with the wedged read; hang-guarded: the outer wait_for exceeds the 5s
+    evaluate ceiling, so a green render answers inside it and a red is a named failure, never a hang.
+    ``warmup_urls`` routes the wedge through the bare wait_for_ready path.
+    """
     page = _WedgedReadPage(wedge)
     driver.page = page
     # extract=None restores the renderer's REAL extract path (the builder

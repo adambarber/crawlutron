@@ -80,11 +80,10 @@ def _sleep_refs(node, aliases: set[str]) -> bool:
 
 
 def _spawns_sleep(call: ast.Call, aliases: set[str]) -> bool:
-    """A Thread/executor call handing a sleep reference to a spawned body
-    (``target=`` keyword, or ``submit(sleep, ...)`` as the first argument).
-    The sleep runs in the spawned thread even when the spawn sits in the test
-    body, so this shape does not require a nested def. Reported on the spawn
-    call itself, so a lambda-wrapped sleep is one offender, not two."""
+    """A Thread/executor call handing a sleep reference to a spawned body: the sleep runs in the spawned
+    thread even when the spawn sits in the test body, so this shape does not require a nested def.
+    Reported on the spawn call itself, so a lambda-wrapped sleep is one offender, not two.
+    """
     if any(kw.arg == "target" and _sleep_refs(kw.value, aliases) for kw in call.keywords):
         return True
     return (
@@ -107,10 +106,10 @@ def _test_sleep_aliases(fn, aliases: set[str]) -> set[str]:
 
 
 def _mechanism_sleep_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
-    """``time.sleep`` inside a nested def/class of an unmarked test: the sleep is
-    the mechanism (a handler or thread body holding a request open), and
-    fast_sleeps' no-op patch silently deletes it -- a bound observed against no
-    hold can green with the bound broken."""
+    """``time.sleep`` inside a nested def/class of an unmarked test: the sleep is the mechanism (a handler or
+    thread body holding a request open), and fast_sleeps' no-op patch silently deletes it -- a bound
+    observed against no hold can green with the bound broken.
+    """
     offenders: list[str] = []
     aliases = _sleep_aliases(tree)
     for scope in tree.body:

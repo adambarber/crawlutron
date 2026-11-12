@@ -1,8 +1,6 @@
-"""Terminal refusals deactivate a watch: one concept, four refusal causes.
-
-The sweep's deactivation decision (same lifecycle as a revoked owner) for a
-watch the live policy no longer admits, robots refusal, or a foreign refusal
-reason; and its negation -- a transient failure deactivates nothing.
+"""Terminal refusals deactivate a watch: one concept, four refusal causes. The sweep's deactivation decision
+(same lifecycle as a revoked owner) for a watch the live policy no longer admits, robots refusal, or a
+foreign refusal reason; and its negation -- a transient failure deactivates nothing.
 """
 
 import pytest
@@ -52,10 +50,10 @@ async def test_a_watch_the_live_policy_no_longer_admits_is_deactivated(
 async def test_a_host_denied_watch_is_deactivated_and_the_pass_survives(
     watch_store, etag_server, announced, monkeypatch
 ):
-    """The headline scenario: an operator denies the watched host. The refusal
-    reason crosses the executor as data, so the sweep deactivates the row with
-    host_denied recorded AND the pass still serves a co-scheduled watch -- the
-    enum-cast defect raised out of the except arm and starved them all."""
+    """The headline scenario: an operator denies the watched host. The refusal reason crosses the executor as
+    data, so the sweep deactivates the row with host_denied recorded AND the pass still serves a
+    co-scheduled watch -- the enum-cast defect raised out of the except arm and starved them all.
+    """
     denied_watch = register_watch(watch_store, canonical(loopback_url(etag_server)), owner="key_d")
     healthy = register_watch(watch_store, canonical(DEAD_ORIGIN))
 

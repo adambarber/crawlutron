@@ -283,9 +283,9 @@ def _private_from_import_names(
 ) -> dict[str, int]:
     """``module.name -> lineno`` for private names from-imported across a boundary.
 
-    Both private-import gates (app/-internal and the suite's support surface)
-    walk the same shape: every ``from X import _y`` whose module passes
-    ``targets`` and is not the importing module's own name."""
+    Both private-import gates (app/-internal and the suite's support surface) walk the same shape: every
+    ``from X import _y`` whose module passes ``targets`` and is not the importing module's own name.
+    """
     found: dict[str, int] = {}
     from tests.chokepoint_walks import from_imports
 

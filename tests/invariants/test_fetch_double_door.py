@@ -1,9 +1,7 @@
-"""Every fetch double imports only through ``tests._fetch_doubles`` (#314, 3.3).
-
-One declaring home per name: a fetch-double name imports only from the door, and
-the door's public surface is exactly the two constructions plus the route
-grammar. A re-export shim, a sibling module, or a new public constructor on the
-door is the harness-sprawl defect the chokepoint exists to make obvious."""
+"""Every fetch double imports only through ``tests._fetch_doubles`` (#314, 3.3): one declaring home per name,
+and the door's public surface is exactly the two constructions plus the route grammar. A re-export shim or
+a new public constructor on the door is harness sprawl.
+"""
 
 from __future__ import annotations
 
@@ -66,11 +64,10 @@ def _fetch_double_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
 
 
 def _surface_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
-    """A public name off the door outside its sanctioned surface, file and line named.
-
-    The door owns exactly two constructions and the route grammar; a public name
-    beyond that set is a new fetch constructor, which is the proliferation the
-    chokepoint forbids."""
+    """A public name off the door outside its sanctioned surface, file and line named: the door owns exactly
+    two constructions and the route grammar, and a public name beyond that set is a new fetch constructor
+    -- the proliferation the chokepoint forbids.
+    """
     out: list[str] = []
     for node in from_imports(tree):
         if node.module != _FETCH_DOUBLES_DOOR:
@@ -138,11 +135,10 @@ DOOR_SURFACE_IS_EXACTLY_THE_TWO_CONSTRUCTIONS = Rule(
 
 
 def _staged_transport_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
-    """A staged-HTTP-answer double imported off its own module, file and line named.
-
-    ``tests._transport_doubles`` and ``tests._http_fetch_doubles`` hold real
-    doubles the fetch door re-exports; importing either directly is a second
-    altitude of the same wire answer, the drift site #844 consolidates."""
+    """A staged-HTTP-answer double imported off its own module, file and line named:
+    ``tests._transport_doubles`` and ``tests._http_fetch_doubles`` hold real doubles the fetch door
+    re-exports; importing either directly is a second altitude of the same wire answer.
+    """
     out: list[str] = []
     for node in from_imports(tree):
         if node.module in {"tests._transport_doubles", "tests._http_fetch_doubles"}:

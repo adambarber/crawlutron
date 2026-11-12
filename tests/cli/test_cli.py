@@ -1,8 +1,7 @@
 """CLI behavior: exit codes, output modes, async/wait, error passthrough, Docker lifecycle.
 
-All service calls are hermetic: httpx.MockTransport stands in for the crawl
-service, and subprocess is scripted for ``crawl up``. No real Docker daemon,
-no network, no SSRF/policy imports in the CLI package.
+All service calls are hermetic: httpx.MockTransport stands in for the crawl service, and subprocess is
+scripted for ``crawl up``. No real Docker daemon, no network, no SSRF/policy imports in the CLI package.
 """
 
 from __future__ import annotations
