@@ -81,7 +81,7 @@ _PARSE_CACHE: dict[tuple[str, str], ast.Module] = {}
 def parsed(path: pathlib.Path) -> ast.Module:
     """The AST of `path`, parsed once per session and shared. Keyed on the source's SHA-256 so a rewritten
     file -- even one unchanged in size and mtime -- is re-parsed from fresh bytes, never stale. A
-    nonexistent path raises here -- the ONE seam every tree-taking reader goes through.
+    nonexistent path raises here -- the ONE CACHED seam every cached reader uses.
     """
     if not path.is_file():
         raise FileNotFoundError(f"ast requested for a nonexistent source file: {path}")
