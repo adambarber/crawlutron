@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import html
 import inspect
 import re as _re
 from bisect import bisect_right as _bisect_right
@@ -213,7 +214,7 @@ def _collect_page_entries(
 
     Matched by byte offsets so wrapped and bare entry shapes both parse; the
     ascending lastmod offsets bisect in, keeping large sitemaps linear."""
-    loc_items = [(m.start(), m.group(1)) for m in _LOC_PATTERN.finditer(text)]
+    loc_items = [(m.start(), html.unescape(m.group(1))) for m in _LOC_PATTERN.finditer(text)]
     lastmod_items = [(m.start(), m.group(1).strip()) for m in _LASTMOD_PATTERN.finditer(text)]
     # finditer yields ascending offsets, so these positions are already sorted.
     lastmod_positions = [pos for pos, _ in lastmod_items]
@@ -304,7 +305,7 @@ _INFLIGHT_SITEMAP: dict[tuple[str, HostPolicy], asyncio.Task[set]] = {}
 def _scan_sitemap_text(text: str) -> tuple[list[str], str]:
     """(locs, lowered) for one sitemap body -- the loop-blocking scan that
     large bodies offload."""
-    return _LOC_PATTERN.findall(text), text.lower()
+    return [html.unescape(loc) for loc in _LOC_PATTERN.findall(text)], text.lower()
 
 
 def _cache_walk_result(

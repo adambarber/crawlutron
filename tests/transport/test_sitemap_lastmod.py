@@ -40,6 +40,25 @@ def _sitemap_fetcher(body: str):
     )
 
 
+def _index_fetcher():
+    """One root index whose child loc carries an XML entity, answered by a page body."""
+
+    def answer(u, _sent_headers, *_: object):
+        return make_fetch(
+            url=u.raw,
+            final_url=u.raw,
+            status=200,
+            headers={"content-type": "application/xml"},
+            body=(
+                b"<sitemapindex><sitemap><loc>http://x.test/child?a=1&amp;b=2</loc></sitemap></sitemapindex>"
+                if u.raw == "http://x.test/sitemap.xml"
+                else b"<url><loc>http://x.test/page</loc></url>"
+            ),
+        )
+
+    return FetcherDouble(answer)
+
+
 async def _walk(body: str, max_urls: int) -> set[tuple[str, str | None]]:
     """One public-door walk; the cache entry is discarded either way."""
     url = canonical("http://x.test/sitemap.xml")
@@ -50,6 +69,25 @@ async def _walk(body: str, max_urls: int) -> set[tuple[str, str | None]]:
         return {(loc.raw, lastmod) for loc, lastmod in resolved}
     finally:
         SITEMAP_CACHE.discard((url.raw, UNRESTRICTED_HOST_POLICY))
+
+
+async def test_loc_xml_entity_decodes_and_dedupes_against_href_twin():
+    """A <loc> with &amp; resolves to the same NormalizedUrl as the single-& href twin."""
+    body = "<url><loc>http://x.test/p?a=1&amp;b=2</loc></url>"
+    pairs = await _walk(body, 10)
+    href_twin = canonical("http://x.test/p?a=1&b=2")
+    assert pairs == {(href_twin.raw, None)}, pairs
+
+
+async def test_index_child_loc_xml_entity_decodes():
+    """A sitemapindex child <loc> keeps its real & through resolution too."""
+    fetcher = _index_fetcher()
+    url = canonical("http://x.test/sitemap.xml")
+    try:
+        await fetch_sitemap_urls(fetcher, url, 30_000, max_urls=10, host_policy=UNRESTRICTED_HOST_POLICY)
+    finally:
+        SITEMAP_CACHE.discard((url.raw, UNRESTRICTED_HOST_POLICY))
+    assert "http://x.test/child?a=1&b=2" in fetcher.calls, fetcher.calls
 
 
 async def test_lastmod_association_is_linear_not_quadratic():
