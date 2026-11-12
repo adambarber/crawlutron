@@ -103,40 +103,28 @@ def _intercept_declared_files(monkeypatch, duplicates: list[JscpdDuplicate]) -> 
 
 
 def _scoped_duplicates(duplicates: list[JscpdDuplicate], roots: list[str]) -> list[JscpdDuplicate]:
-    """The duplicates one invocation reports, named the way jscpd names them."""
+    """The duplicates the one whole-repo invocation reports, named as jscpd names
+    them: handed every root at once, jscpd strips each side's own root from its
+    path, leaving a name the gate resolves back against the filesystem.
+    """
 
-    def _inside(name: str) -> bool:
-        return any(name == root or name.startswith(root + "/") for root in roots)
+    def _root_of(name: str) -> str | None:
+        return next((root for root in roots if name == root or name.startswith(root + "/")), None)
 
-    def _straddles(duplicate: JscpdDuplicate) -> bool:
-        sides = [duplicate[side]["name"] for side in ("firstFile", "secondFile")]
-        return len({_root_of(side) for side in sides}) > 1
-
-    def _root_of(name: str) -> str:
-        return next(root for root in roots if name == root or name.startswith(root + "/"))
-
-    if len(roots) == 1:
-        # One root per invocation: only pairs inside it are reported, named relative to it.
-        return [
+    named: list[JscpdDuplicate] = []
+    for duplicate in duplicates:
+        first_root = _root_of(duplicate["firstFile"]["name"])
+        second_root = _root_of(duplicate["secondFile"]["name"])
+        if first_root is None or second_root is None:
+            continue
+        named.append(
             {
                 **duplicate,
-                "firstFile": _stripped(duplicate["firstFile"], roots[0]),
-                "secondFile": _stripped(duplicate["secondFile"], roots[0]),
+                "firstFile": _stripped(duplicate["firstFile"], first_root),
+                "secondFile": _stripped(duplicate["secondFile"], second_root),
             }
-            for duplicate in duplicates
-            if _inside(duplicate["firstFile"]["name"]) and _inside(duplicate["secondFile"]["name"])
-        ]
-    # The cross-tree pass: pairs that SPAN roots, named without their root so they are unattributable
-    # until the gate resolves them.
-    return [
-        {
-            **duplicate,
-            "firstFile": _stripped(duplicate["firstFile"], _root_of(duplicate["firstFile"]["name"])),
-            "secondFile": _stripped(duplicate["secondFile"], _root_of(duplicate["secondFile"]["name"])),
-        }
-        for duplicate in duplicates
-        if _straddles(duplicate)
-    ]
+        )
+    return named
 
 
 def _sources_found(sources: int | dict[str, int], roots: list[str]) -> int:

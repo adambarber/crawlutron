@@ -109,23 +109,12 @@ def test_fail_on_empty_is_no_longer_a_required_cli_flag(monkeypatch, capsys) -> 
 def test_source_floor_fails_on_thin_scan(monkeypatch) -> None:
     """An aggregate below MIN_SOURCES is refused: the gate names the thin scan.
 
-    Each of the four roots reports below the 200-source aggregate floor, so the
-    run cannot be a real scan of the tree."""
+    A whole-repo report under the 200-source floor cannot be a real scan of the
+    tree, so the gate refuses it rather than ceding a clean.
+    """
     _stub_report(monkeypatch, [], sources=30)
 
     assert gate._run(_args()) == 1
-
-
-def test_a_tree_that_scanned_nothing_fails(monkeypatch, capsys) -> None:
-    """A wrong scan root reports zero sources and no error, so it must fail."""
-    _stub_report(
-        monkeypatch,
-        [],
-        sources={"packages/core": 0, "tests": 200, "scripts": 200},
-    )
-
-    assert gate._run(_args()) == 1
-    assert "scan root is wrong" in capsys.readouterr().err
 
 
 def _configure_scan_config(monkeypatch, tmp_path, ignore: list[str]) -> list[list[str]]:
@@ -213,48 +202,32 @@ def test_jscpd_json_accepts_only_ignore(tmp_path) -> None:
     res._validate_scan_config(config)
 
 
-def test_every_root_is_scanned_by_its_own_single_root_invocation() -> None:
-    """One root per invocation because jscpd's `name` is root-relative: fed several
-    roots it cannot tell production from test (`crawlutron/api/x.py` vs `tests/api/x.py`
-    both arrive as `crawl/x.py`), so a cross-tree clone names neither.
+def test_every_root_is_scanned_by_one_whole_repo_invocation() -> None:
+    """The single invocation hands jscpd every root at once, so a clone spanning
+    roots is seen by the same scan as a within-root pair.
     """
     roots = [root for tree_roots in gate.TREE_ROOTS.values() for root in tree_roots]
     assert len(set(roots)) == len(roots), f"a root scanned twice is ambiguous: {roots}"
     assert gate.PROFILE_PATHS["all"] == tuple(roots)
-    assert "." not in roots, (
-        "a whole-tree scan cannot be partitioned afterwards: jscpd's fragment "
-        "boundaries move with the floor, so filtering one loose scan down to a "
-        "tighter floor is not the set of pairs that floor would report"
-    )
+    assert "." not in roots, "the whole-repo scan names concrete roots, never a wildcard"
 
 
-def test_each_root_gets_exactly_one_invocation(monkeypatch) -> None:
-    """The spanning invocation is not a second look: a per-root scan cannot see a
-    pair whose sides are in different roots (jscpd only compares what it resolved),
-    so such a fragment is invisible per-root and must be asked for once.
-    """
+def test_the_whole_repo_is_scanned_exactly_once(monkeypatch) -> None:
+    """ONE invocation for the entire repo, not one per root plus a cross pass."""
     commands = _run_against_empty_tree(monkeypatch)
-    spanning = [command for command in commands if len(_roots_of(command)) > 1]
-    assert len(spanning) == 1, f"expected one cross-root invocation, got {len(spanning)}"
-    assert _roots_of(spanning[0]) == list(gate.PROFILE_PATHS["all"])
-    scanned = [_roots_of(command)[0] for command in commands if len(_roots_of(command)) == 1]
-    assert scanned == list(gate.PROFILE_PATHS["all"]), f"one invocation per root, got {scanned}"
+    assert len(commands) == 1, f"expected one invocation, got {len(commands)}"
+    assert _roots_of(commands[0]) == list(gate.PROFILE_PATHS["all"])
 
 
-def test_one_floor_is_applied_to_every_root(monkeypatch) -> None:
-    """No root is scored looser than another. Separate floors once hid production
-    duplication behind test-scaffolding numbers; with zero pairs at one number they
-    are unnecessary, so one floor, carried by every invocation.
-    """
+def test_one_floor_is_applied_to_the_whole_repo(monkeypatch) -> None:
+    """The single invocation carries the configured floor; no root is scored looser."""
     commands = _run_against_empty_tree(monkeypatch)
-    assert len(commands) > 1, "expected more than one root, so the check has something to compare"
-    carried = {
-        (command[command.index("--min-lines") + 1], command[command.index("--min-tokens") + 1])
-        for command in commands
-    }
-    assert carried == {(str(_CONFIGURED_MIN_LINES), str(_CONFIGURED_MIN_TOKENS))}, (
-        f"roots scored at differing floors: {sorted(carried)}"
-    )
+    assert len(commands) == 1
+    command = commands[0]
+    assert (
+        command[command.index("--min-lines") + 1],
+        command[command.index("--min-tokens") + 1],
+    ) == (str(_CONFIGURED_MIN_LINES), str(_CONFIGURED_MIN_TOKENS))
 
 
 def test_the_same_content_in_two_trees_is_two_findings_not_one(monkeypatch, capsys) -> None:

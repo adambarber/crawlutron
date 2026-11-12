@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from scripts import _jscpd_pair_resolution as res
 from scripts import jscpd_gate as gate
 from scripts._jscpd_report_types import JscpdDuplicate
 from scripts.executables import require_repo_tool
@@ -31,15 +30,6 @@ def _cross_tree_duplicate() -> JscpdDuplicate:
     )
 
 
-def _stubbed_scan(duplicates: list[JscpdDuplicate], sources: int = 400) -> dict[str, object]:
-    """A cross-tree scan result, for the cases that replace the real one."""
-    return {"statistics": {"total": {"sources": sources}}, "duplicates": duplicates}
-
-
-def _without_cross_tree_scan(monkeypatch, duplicates: list[JscpdDuplicate], sources: int = 400) -> None:
-    monkeypatch.setattr(res, "_cross_tree_scan", lambda floor, args: _stubbed_scan(duplicates, sources))
-
-
 def test_a_clone_spanning_two_trees_fails(monkeypatch, capsys) -> None:
     _stub_report(monkeypatch, [_cross_tree_duplicate()])
 
@@ -50,36 +40,26 @@ def test_a_clone_spanning_two_trees_fails(monkeypatch, capsys) -> None:
     assert "tests/_recursive_harnesses.py" in error
 
 
-def test_per_root_scans_alone_cannot_see_a_cross_tree_clone(monkeypatch) -> None:
-    """The gap this pass exists to close, asserted rather than remembered.
-
-    The planted clone passes without the cross-tree scan; if per-root scans
-    ever gain cross-tree reach, drop the spanning invocation."""
-    _stub_report(monkeypatch, [_cross_tree_duplicate()])
-    _without_cross_tree_scan(monkeypatch, [])
-
-    assert gate._run(_args()) == 0
-
-
 def test_a_pair_inside_one_tree_is_not_also_reported_as_cross_tree(monkeypatch, capsys) -> None:
-    """A within-tree pair is scored once, by the pass that owns its tree.
+    """A within-tree pair is scored once and stays in its own tree's column.
 
-    The spanning invocation re-reports within-tree clones; charging them twice
-    would double-count one duplicate against the floor."""
-    _stub_report(monkeypatch, [])
-    _without_cross_tree_scan(
+    In the single whole-repo report every pair is reported once; a within-tree
+    pair is attributed to its tree, never also to the cross column."""
+    _stub_report(
         monkeypatch,
         [
             {
-                "firstFile": {"name": "src/crawlutron/storage/ids.py", "start": 10, "end": 20},
-                "secondFile": {"name": "src/crawlutron/storage/ids.py", "start": 30, "end": 40},
+                "firstFile": {"name": "packages/core/src/crawlutron/storage/ids.py", "start": 10, "end": 20},
+                "secondFile": {"name": "packages/core/src/crawlutron/storage/ids.py", "start": 30, "end": 40},
                 "fragment": "within-app-only",
             }
         ],
     )
 
-    assert gate._run(_args()) == 0
-    assert "[cross] 0 pairs" in capsys.readouterr().out
+    assert gate._run(_args()) == 1
+    error = capsys.readouterr().err
+    assert "[production]" in error
+    assert "[cross]" not in error
 
 
 def test_jscpd_command_resolves_the_service_copy(monkeypatch) -> None:

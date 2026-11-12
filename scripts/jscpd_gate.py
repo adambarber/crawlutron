@@ -83,13 +83,6 @@ __all__ = [
 
 MIN_SOURCES = {"all": 200}
 
-# The scan flows' shapes, named once: the tree pass accumulates per-tree totals
-# and returns (sources, duplicates); the cross pass counts only spanned pairs.
-TreeTotals = dict[str, int]
-TotalsByTree = dict[str, TreeTotals]
-ScanTotals = tuple[int, int]
-CrossScanTotals = tuple[int, int]
-
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -108,127 +101,45 @@ def _footprint(duplicate: JscpdDuplicate) -> int:
 
 
 def _run(args: argparse.Namespace) -> int:
+    """One whole-repo jscpd invocation, scored as a gate."""
     resolver._validate_scan_config(resolver.CONFIG_PATH)
     _require_configured_floor(args)
     floor = (args.min_lines, args.min_tokens)
-    totals: TotalsByTree = {}
-    sources, duplicated = _scan_trees(args, floor, totals)
-    if sources < 0:
-        return 1
-
-    # The cross-tree pass reads the same files a second time; counting them twice
-    # would let the MIN_SOURCES floor be met with half the sources it names.
-    cross_sources, cross_pairs = _scan_cross_tree(args, floor)
-    if cross_sources < 0:
-        return 1
-    duplicated += cross_pairs
-    totals[resolver.CROSS_TREE] = {
-        "lines": 0,
-        "duplicatedLines": 0,
-        "pairs": cross_pairs,
-        "sources": cross_sources,
-    }
-    # The cross pass reads the same files a second time; its sources stay out
-    # of the MIN_SOURCES check (double-counting would halve the named floor).
-
+    report = resolver._whole_tree_scan(floor, args)
+    statistics = report["statistics"]["total"]
+    sources = int(statistics["sources"])
     if sources < MIN_SOURCES[args.profile]:
         print(f"jscpd {args.profile}: analyzed only {sources} sources", file=sys.stderr)
         return 1
 
+    duplicated_lines = int(statistics["duplicatedLines"])
+    total_lines = int(statistics.get("lines", 0))
+    percentage = 100 * duplicated_lines / total_lines if total_lines else 0.0
+    duplicates = report["duplicates"]
+    for duplicate in duplicates:
+        print(
+            f"jscpd {args.profile}: [{resolver._tree_of(duplicate, args.profile)}] "
+            f"duplicate: {resolver._pair_for(duplicate, args.profile)}",
+            file=sys.stderr,
+        )
+
     # A duplicate at the floor fails the gate: the hook runs at --threshold 0,
     # so every duplicate is a finding.
-    if duplicated:
+    if duplicates:
         return 1
 
-    for tree, tree_totals in totals.items():
-        failed = _report_tree(args, floor, tree, tree_totals)
-        if failed:
-            return 1
-    return 0
-
-
-def _scan_trees(args: argparse.Namespace, floor: tuple[int, int], totals: TotalsByTree) -> ScanTotals:
-    """Scan every tree root at the floor; (sources, duplicates), failures -1."""
-    sources = 0
-    duplicated = 0
-    for tree, roots in TREE_ROOTS.items():
-        for root in roots:
-            report = resolver._scan(root, floor, args)
-            statistics = report["statistics"]["total"]
-            found_sources = int(statistics["sources"])
-            if found_sources < 1:
-                print(
-                    f"jscpd {args.profile}: [{tree}] {root} analyzed {found_sources} sources; "
-                    f"the scan root is wrong or the tree is empty",
-                    file=sys.stderr,
-                )
-                return -1, 0
-            sources += found_sources
-            tree_totals = totals.setdefault(
-                tree, {"lines": 0, "duplicatedLines": 0, "pairs": 0, "sources": 0}
-            )
-            tree_totals["lines"] += int(statistics.get("lines", 0))
-            tree_totals["duplicatedLines"] += int(statistics["duplicatedLines"])
-            tree_totals["sources"] += found_sources
-            for duplicate in report["duplicates"]:
-                tree_totals["pairs"] += 1
-                duplicated += 1
-                print(
-                    f"jscpd {args.profile}: [{tree}] duplicate: {resolver._pair_id(duplicate, root)}",
-                    file=sys.stderr,
-                )
-    return sources, duplicated
-
-
-def _scan_cross_tree(args: argparse.Namespace, floor: tuple[int, int]) -> CrossScanTotals:
-    """The cross-tree pass; (sources, spanned pairs), failures (-1, 0).
-
-    Only pairs that SPAN two roots count; reporting a pair twice charges one
-    clone against two passes.
-    """
-    cross = resolver._cross_tree_scan(floor, args)
-    cross_sources = int(cross["statistics"]["total"]["sources"])
-    if cross_sources < 1:
-        print(
-            f"jscpd {args.profile}: [cross] {resolver.CROSS_TREE_ROOT} analyzed {cross_sources} sources; "
-            f"the scan root is wrong or every tree is empty",
-            file=sys.stderr,
-        )
-        return -1, 0
-    cross_pairs = 0
-    for duplicate in cross["duplicates"]:
-        if not resolver._spans_trees(duplicate, args.profile):
-            continue
-        cross_pairs += 1
-        print(
-            f"jscpd {args.profile}: [cross] duplicate: {resolver._cross_pair_id(duplicate, args.profile)}",
-            file=sys.stderr,
-        )
-    return cross_sources, cross_pairs
-
-
-def _report_tree(
-    args: argparse.Namespace,
-    floor: tuple[int, int],
-    tree: str,
-    tree_totals: TreeTotals,
-) -> bool:
-    """One tree's percentage report; True when it exceeds the threshold."""
-    total_lines = tree_totals["lines"]
-    percentage = 100 * tree_totals["duplicatedLines"] / total_lines if total_lines else 0.0
     if percentage > args.threshold:
         print(
-            f"jscpd {args.profile}: [{tree}] {percentage:.6f}% duplicated exceeds {args.threshold:.6f}%",
+            f"jscpd {args.profile}: {percentage:.6f}% duplicated exceeds {args.threshold:.6f}%",
             file=sys.stderr,
         )
-        return True
+        return 1
+
     print(
-        f"jscpd {args.profile}: [{tree}] {tree_totals['pairs']} pairs at "
-        f"{floor[0]} lines/{floor[1]} tokens, "
-        f"{tree_totals['duplicatedLines']} duplicated lines of {total_lines} "
-        f"({tree_totals['sources']} sources)"
+        f"jscpd {args.profile}: 0 pairs at {floor[0]} lines/{floor[1]} tokens, "
+        f"{duplicated_lines} duplicated lines of {total_lines} ({sources} sources)"
     )
-    return False
+    return 0
 
 
 def main() -> int:

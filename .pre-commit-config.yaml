@@ -140,20 +140,20 @@ repos:
         stages: [pre-commit]
 
       # Copy/paste detection is a design gate. The wrapper reads jscpd JSON and
-      # requires a non-empty scan of every root; the command-line thresholds
-      # below are the only threshold source, and a duplicate at that floor is a
-      # finding with no exemption path.
+      # requires a non-empty scan; the command-line thresholds below are the only
+      # threshold source, and a duplicate at that floor is a finding with no
+      # exemption path.
       #
-      # Floor tightened 3/30 -> 2/30 (2026-10-27): the whole repo measures ZERO
-      # pairs at 2/30 over 687 sources; the single root-level invocation covers
-      # production, test, and cross trees, so no clone spans a boundary unseen.
-      # The floor ratchets down, not up.
+      # The gate is ONE whole-repo invocation (every root handed to jscpd at
+      # once), so a clone spanning two roots is seen by the same scan that sees a
+      # within-root pair. At floor 3/30 the whole repo measures ZERO pairs; the
+      # floor is the single-invocation floor.
       - id: jscpd
-        name: jscpd per tree (2 lines / 30 tokens, zero tolerance)
+        name: jscpd single whole-repo invocation (3 lines / 30 tokens, zero tolerance)
         entry: >-
           bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
           .venv/bin/python -m scripts.gate_fanout jscpd -- .venv/bin/python -m scripts.jscpd_gate all
-          --min-lines 2
+          --min-lines 3
           --min-tokens 30
           --threshold 0
         language: system

@@ -34,11 +34,6 @@ _IS_FILE: Callable[[Path], bool] = Path.is_file
 CROSS_TREE = "cross"
 
 
-# The scan root that sees every tree at once; per-root scans cannot substitute
-# for it (see ``_cross_tree_scan``).
-CROSS_TREE_ROOT = "."
-
-
 # One jscpd invocation per root: attribution requires one scan per root. Derived from
 # the uv members and the scan surface (#8510/#858), never a literal tuple.
 _MEMBER_ROOTS = package_roots()
@@ -202,45 +197,54 @@ def jscpd_report(
         return None
 
 
-def _scan(root: str, floor: tuple[int, int], args: argparse.Namespace) -> JscpdReport:
-    """One jscpd invocation over one root at one floor, scored as a gate."""
-    report = jscpd_report(root, floor, threshold=args.threshold, fail_on_empty=True)
-    if report is None:
-        raise OSError(f"jscpd found no sources under {root}")
-    return report
+def _whole_tree_scan(floor: tuple[int, int], args: argparse.Namespace) -> JscpdReport:
+    """Every root in ONE jscpd invocation; the single whole-repo report.
 
-
-def _cross_tree_scan(floor: tuple[int, int], args: argparse.Namespace) -> JscpdReport:
-    """Every root in ONE invocation so a pair spanning two of them is visible -- a
-    per-root scan names the other root's files relative to the one it was given, so a
-    cross-tree fragment is reported by neither. Attributed via ``_resolve_root``.
+    A per-root scan would miss a pair spanning two roots; handing every root
+    together sees them all, and ``_resolve_roots`` puts the roots back on.
     """
     report = jscpd_report(
-        CROSS_TREE_ROOT,
+        args.profile,
         floor,
         threshold=args.threshold,
         fail_on_empty=True,
         paths=_scanned_roots(args.profile),
     )
     if report is None:
-        raise OSError(f"jscpd found no sources under {CROSS_TREE_ROOT}")
+        raise OSError("jscpd found no sources under the whole repository")
     return report
 
 
-def _spans_trees(duplicate: JscpdDuplicate, profile: str) -> bool:
-    """True when the two sides of a pair could resolve to different roots ("could",
-    not "must"): a single-root pair was scored per-root already; an unattributable
-    multi-root name is kept rather than guessed -- bias toward reporting this blind class.
+def _tree_of(duplicate: JscpdDuplicate, profile: str) -> str:
+    """The owning tree of a pair, resolved via the filesystem: ''production'' when
+    both sides live under production roots, ''test'' when under test roots, and
+    the cross label when a pair spans the two.
     """
-    first = _resolve_roots(duplicate["firstFile"]["name"], profile)
-    second = _resolve_roots(duplicate["secondFile"]["name"], profile)
-    if not first or not second:
+    trees = {
+        tree
+        for side in ("firstFile", "secondFile")
+        for root in _resolve_roots(duplicate[side]["name"], profile)
+        for tree, tree_roots in TREE_ROOTS.items()
+        if root in tree_roots
+    }
+    if not trees:
         raise ValueError(
             f"jscpd reported a clone between {duplicate['firstFile']['name']!r} and "
             f"{duplicate['secondFile']['name']!r}, and at least one is under none of the "
             f"scanned roots {list(_scanned_roots(profile))}"
         )
-    return len(first) > 1 or len(second) > 1 or first != second
+    return trees.pop() if len(trees) == 1 else CROSS_TREE
+
+
+def _pair_for(duplicate: JscpdDuplicate, profile: str) -> LocationPair:
+    """A pair's repo-relative location. Same-root pairs reuse ``_pair_id``; a pair
+    whose sides sit under different roots names each side's own root (``_cross_pair_id``).
+    """
+    first = _resolve_roots(duplicate["firstFile"]["name"], profile)
+    second = _resolve_roots(duplicate["secondFile"]["name"], profile)
+    if first == second and len(first) == 1:
+        return _pair_id(duplicate, first[0])
+    return _cross_pair_id(duplicate, profile)
 
 
 def _cross_pair_id(duplicate: JscpdDuplicate, profile: str) -> LocationPair:
