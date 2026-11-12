@@ -14,7 +14,6 @@ from fastapi.responses import JSONResponse, Response
 from crawlutron.api.caller_auth import get_caller_identity
 from crawlutron.api.dependencies import get_concurrency_tracker, get_settings, get_shutdown_event
 from crawlutron.mcp.constants import INVALID_API_KEY, INVALID_REQUEST, PARSE_ERROR
-from crawlutron.mcp.handlers import http_exception_message
 from crawlutron.mcp.protocol import error_response
 from crawlutron.mcp.server import handle_mcp_request
 from crawlutron.models.caller_identity import CallerIdentity
@@ -22,6 +21,17 @@ from crawlutron.models.error_response import ErrorResponse
 from crawlutron.service.errors import DomainError
 
 router = APIRouter(tags=["MCP"])
+
+
+def _auth_denial_message(error: HTTPException | DomainError) -> str:
+    """Render a caller-auth refusal: a DomainError carries ``message``; an
+    HTTPException's conforming detail (``dict`` with ``message``) unwraps to it."""
+    if isinstance(error, DomainError):
+        return str(error.message)
+    detail = error.detail
+    if isinstance(detail, dict):
+        return str(detail.get("message") or detail)
+    return str(detail) if detail else str(error)
 
 
 @router.post(
@@ -52,10 +62,9 @@ async def mcp_endpoint(
     try:
         caller: CallerIdentity = await get_caller_identity(request)
     except (HTTPException, DomainError) as error:
-        message = str(error.message) if isinstance(error, DomainError) else http_exception_message(error)
         return JSONResponse(
             status_code=401,
-            content=error_response(None, INVALID_API_KEY, message),
+            content=error_response(None, INVALID_API_KEY, _auth_denial_message(error)),
         )
     try:
         body = await request.json()
