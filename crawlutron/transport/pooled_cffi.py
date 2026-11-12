@@ -104,9 +104,9 @@ def owns_process_state() -> bool:
     return _DEFAULT_CFFI_SESSION is not None
 
 
-def close_queued_session() -> None:
+def close_queued_session(reset: bool = False) -> None:
     """Release the pooled session, closing it only when no loop owns it."""
-    discard_if_unowned_loop(close_cffi_session, "_DEFAULT_CFFI_SESSION", globals())
+    discard_if_unowned_loop(close_cffi_session, "_DEFAULT_CFFI_SESSION", globals(), reset=reset)
 
 
 def session_singleton() -> LoopBoundPooledClient:
@@ -116,7 +116,7 @@ def session_singleton() -> LoopBoundPooledClient:
 
 def _reset() -> None:
     """Release the pooled session, closing it only when no loop owns it."""
-    close_queued_session()
+    close_queued_session(reset=True)
 
 
 process_state.register(__name__, _reset, owns_process_state)

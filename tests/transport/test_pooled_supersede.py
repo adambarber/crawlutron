@@ -1,7 +1,7 @@
 """Superseded clients queue for close; drains stay bounded."""
 
 import asyncio
-from typing import Protocol
+from typing import Protocol, cast
 
 import pytest
 
@@ -408,6 +408,54 @@ async def test_discard_if_unowned_loop_closes_client_on_running_loop():
 
     assert closed, "client was dropped without being closed on a running loop"
     assert namespace["_slot"] is None
+
+
+def _reset_twice_results() -> list[bool]:
+    """Reset twice, returning whether the chain left state each time."""
+    process_state.reset_all_process_state()
+    first = process_state.has_any_process_state()
+    process_state.reset_all_process_state()  # idempotent: a second reset is a no-op
+    return [first, process_state.has_any_process_state()]
+
+
+def test_reset_from_inside_the_pools_own_loop_leaves_no_survivors(stub_builder):
+    """A reset from the pool's own loop must end empty, arming or not (#880).
+
+    Scheduling a close onto a loop that cannot run it re-arms a tracked task the
+    release clear already passed; an armed task must not survive either.
+    """
+    from crawlutron.transport.pooled_clients import discard_if_unowned_loop as _discard
+
+    stub_builder("http", _builder_for(_build_httpx_fake))
+
+    async def _acquire_arm() -> list[bool]:
+        client = cast(PooledClient, http_mod.get_async_http_client())
+        # Arm a tracked close onto this running loop, as a supersede would.
+        namespace: dict[str, PooledClient | None] = {"_slot": client}
+        _discard(client.aclose, "_slot", namespace)
+        await asyncio.sleep(0)  # let the cleared tracked close finish its teardown
+        return _reset_twice_results()
+
+    first, second = asyncio.run(_acquire_arm())
+    assert first is False, "a reset from the owning loop left tracked close state"
+    assert second is False, "a second reset from the same loop was not a no-op"
+
+
+def test_cffi_reset_from_its_own_loop_leaves_no_survivor(stub_builder):
+    """The cffi pool has the same reset shape; it must also end empty (#880).
+
+    A cffi session bound to the loop running the reset hits the same scheduling
+    chokepoint as the httpx client -- the reset path must not re-arm it.
+    """
+    stub_builder("cffi", _builder_for(_build_cffi_fake))
+
+    async def _acquire_then_reset() -> list[bool]:
+        assert http_mod.get_cffi_session() is not None
+        return _reset_twice_results()
+
+    first, second = asyncio.run(_acquire_then_reset())
+    assert first is False, "a cffi reset from its own loop left tracked close state"
+    assert second is False, "a cffi second reset from the same loop was not a no-op"
 
 
 def test_a_closed_current_loop_never_poisons_the_reset_chain(stub_builder):

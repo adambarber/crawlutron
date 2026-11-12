@@ -335,19 +335,17 @@ def _reset() -> None:
     queue holding a released client outlives its loop, so resetting one without the rest leaves a wrong state.
     """
     from crawlutron.transport.pooled_client_release import (
-        clear_live_loop_close_tasks,
         clear_pending_client_closes,
     )
     from crawlutron.transport.pooled_socket_abort import abort_transport_sockets
 
-    clear_live_loop_close_tasks()
     if _DEFAULT_HTTP_CLIENT is not None:
         bound = _loop_bound_to(_DEFAULT_HTTP_CLIENT)
         if bound is not None and bound.is_closed():
             # The owning loop is dead: no loop can complete its transports'
             # close, so abort the sockets directly (the unraisable __del__ family).
             abort_transport_sockets((bound,))
-        discard_if_unowned_loop(close_async_http_client, "_DEFAULT_HTTP_CLIENT", globals())
+        discard_if_unowned_loop(close_async_http_client, "_DEFAULT_HTTP_CLIENT", globals(), reset=True)
     # Failed rebuild can leave current=None with a queued superseded client;
     # close it instead of dropping it (socket-leak family).
     with PENDING_CLIENT_CLOSE_LOCK:
