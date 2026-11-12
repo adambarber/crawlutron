@@ -4,8 +4,8 @@
 # pattern below is therefore context-relative, so this file is correct whether
 # the service sits in a monorepo subdirectory or is the repo root.
 #
-# An allowlist, not a denylist, for two reasons. The image is built from exactly
-# five sources (listed at the bottom), and an allowlist states that as a fact
+# An allowlist, not a denylist, for two reasons. The image is built from a known
+# source list (at the bottom), and an allowlist states that as a fact
 # rather than guessing what some future directory might weigh. And it cannot go
 # stale: the local-only trees this context used to ship -- .venv alone was 771 MB
 # of an 867 MB context, alongside cache/, logs/, tmp/, report/, .cortexkit/,
@@ -13,22 +13,25 @@
 # being named, so none of them needs a line here to stay out. Being wrong costs
 # a loud `COPY failed: not found`, never a silently missing file.
 #
-# The five sources, from the Dockerfile's own COPY lines:
+# The sources, from the Dockerfile's own COPY lines:
 #   pyproject.toml            builder, camoufox-binary, development
 #   uv.lock                   builder, camoufox-binary, development
-#   crawlutron/               runtime
+#   packages/                 runtime (crawlutron + admission + crawlutron_rest)
+#   crawlutron_sdk/           runtime
 #   uvicorn-log-config.json   runtime
 #   Dockerfile                the build itself
 *
-!crawlutron/
-!crawlutron/**
+!packages/
+!packages/**
+!crawlutron_sdk/
+!crawlutron_sdk/**
 !pyproject.toml
 !uv.lock
 !uvicorn-log-config.json
 !Dockerfile
 
-# `!crawlutron/**` re-admits local bytecode sitting beside the source, which the leading
-# `*` had already excluded, so it has to be excluded again after the negation.
-# These are stale .pyc files for sources edited since they were written.
+# `!packages/**` / `!crawlutron_sdk/**` re-admit local bytecode sitting beside the
+# source, which the leading `*` had already excluded, so it has to be excluded again
+# after the negation. These are stale .pyc files for sources edited since they were written.
 **/__pycache__/
 **/*.py[cod]

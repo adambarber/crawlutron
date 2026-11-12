@@ -175,9 +175,15 @@ COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
 # invalidate the browser download cache.
 COPY --from=camoufox-binary /camoufox-bundle /home/appuser/.cache/camoufox
 
-# Copy application code. The logging helper is in-tree at
-# ``crawlutron/runtime/logging_config.py`` (no external shared-tree copy is needed).
-COPY --chown=appuser:appuser crawlutron /app/crawlutron
+# Copy application code. Post-Wave-A the importable trees live under packages/ and
+# the root crawlutron_sdk/: all four must be present at /app to resolve the CMD's
+# `uvicorn crawlutron_rest.main:app` with PYTHONPATH=/app. The packages/core
+# wheel ships both the `crawlutron` and `admission` import names, so both trees
+# must land at /app (pressure_sizing imports ``admission`` directly).
+COPY --chown=appuser:appuser packages/core/crawlutron /app/crawlutron
+COPY --chown=appuser:appuser packages/core/admission /app/admission
+COPY --chown=appuser:appuser packages/rest/crawlutron_rest /app/crawlutron_rest
+COPY --chown=appuser:appuser crawlutron_sdk /app/crawlutron_sdk
 
 # uvicorn applies its logging config in ``Config.__init__`` -- BEFORE the app
 # is imported -- so the service's JSON sink must exist by then or uvicorn's own
