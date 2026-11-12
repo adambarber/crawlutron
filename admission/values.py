@@ -23,6 +23,7 @@ __all__ = [
     "Duration",
     "FloorDivisor",
     "Granted",
+    "IdleReason",
     "Instant",
     "LaneId",
     "Lease",

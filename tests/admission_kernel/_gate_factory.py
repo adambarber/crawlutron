@@ -78,7 +78,7 @@ class GateHandles:
     advances during genuine waits (a STALE park genuinely bounds)."""
 
     now: float = 0.0
-    signal: FakeSignal | None = None
+    signal: FakeSignal | ThreadSafeSignal | None = None
     _anchor: float = field(default_factory=time.monotonic)
 
     def read(self) -> float:
@@ -93,14 +93,42 @@ class FakeSignal:
     _event: asyncio.Event = field(default_factory=asyncio.Event)
 
     async def wait(self, timeout: float | None = None) -> bool:
-        try:
-            await asyncio.wait_for(self._event.wait(), timeout)
-            return True
-        except TimeoutError:
-            return False
+        return await _await_event(self._event, timeout)
 
     def set(self) -> None:
         self._event.set()
+
+
+@dataclass
+class ThreadSafeSignal:
+    """A signal whose ``set`` is safe to call from another OS thread.
+
+    ``wait`` captures the running loop; a cross-thread ``set`` schedules the
+    event via ``call_soon_threadsafe`` (the B-2 cross-thread handoff).
+    """
+
+    _event: asyncio.Event = field(default_factory=asyncio.Event)
+    _loop: asyncio.AbstractEventLoop | None = None
+
+    async def wait(self, timeout: float | None = None) -> bool:
+        if self._loop is None:
+            self._loop = asyncio.get_running_loop()
+        return await _await_event(self._event, timeout)
+
+    def set(self) -> None:
+        if self._loop is None:
+            self._event.set()
+        else:
+            self._loop.call_soon_threadsafe(self._event.set)
+
+
+async def _await_event(event: asyncio.Event, timeout: float | None) -> bool:
+    """Wait on ``event`` honoring ``timeout``; True when it fired, False on timeout."""
+    try:
+        await asyncio.wait_for(event.wait(), timeout)
+        return True
+    except TimeoutError:
+        return False
 
 
 def _make_gauges(
@@ -183,9 +211,10 @@ class GateSpec:
     cpu_gauge: ResourceGauge | None = None
     memory_budget_mib: int | None = None
     ramp_growth_window: int = 3
+    thread_safe_signal: bool = False
 
 
-__all__ = ["FakeGauge", "GateHandles", "GateSpec", "build_gate"]
+__all__ = ["FakeGauge", "GateHandles", "GateSpec", "ThreadSafeSignal", "build_gate"]
 
 
 def build_gate(spec: GateSpec | None = None) -> tuple[AdmissionGate, GateHandles]:
@@ -202,7 +231,7 @@ def build_gate(spec: GateSpec | None = None) -> tuple[AdmissionGate, GateHandles
             return Instant._of(handles.read())
 
     clock: Clock = _Clock()
-    signal = FakeSignal()
+    signal: FakeSignal | ThreadSafeSignal = ThreadSafeSignal() if s.thread_safe_signal else FakeSignal()
     handles.signal = signal
     sensing = _make_sensing(
         s.memory_usage,

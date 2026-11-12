@@ -128,6 +128,11 @@ class AdmissionGate:
         with self._lock:
             return Count(self._ramp)
 
+    def cold_in_flight(self) -> Count:
+        """The number of cold-probe grants currently live (one per granting decision)."""
+        with self._lock:
+            return Count(self._cold_in_flight)
+
     def progress(self) -> Progress:
         """The current progress record."""
         with self._lock:
@@ -334,8 +339,10 @@ class AdmissionGate:
                     unit = self._lanes[lane].cost.memory_bytes.value
                     self._in_flight[lane] += amount
                     self._in_flight_bytes += amount * unit
-                    if decision.cold:
-                        self._cold_in_flight += 1
+            # One cold-probe debit per DECISION (any cold lane the grant spans), NOT
+            # per lane: a dual-lane cold grant consumes one slot, released once (§7.2).
+            if decision.cold:
+                self._cold_in_flight += 1
             granted_alloc = Allocation(allocation_entries)
             lease = Lease._of(self, per_lane, cold=decision.cold)
             now = self._clock.now().value

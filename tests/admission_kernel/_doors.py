@@ -6,6 +6,8 @@ admission door symbols so sibling test files share one import preamble.
 
 from __future__ import annotations
 
+import dataclasses
+
 from admission import (
     AdmissionRefused,
     Allocation,
@@ -24,7 +26,9 @@ _GENERAL_ONE = Want.of(general=Count(1), heavy=Count(0))
 __all__ = [
     "_GENERAL_ONE",
     "_auto",
+    "_ceiling_one_gate",
     "_finish",
+    "_followup_grants",
     "_hold_one",
     "_live",
     "AdmissionRefused",
@@ -61,3 +65,21 @@ async def _auto(gate, want: Want) -> Allocation:
 async def _hold_one(gate):
     """A live single-GENERAL grant and its still-open context manager."""
     return await _live(gate, _GENERAL_ONE)
+
+
+async def _followup_grants(gate, want: Want) -> int:
+    """A fresh admit after a release still grants exactly one GENERAL unit."""
+    cm = gate.admit(want)
+    g = await cm.__aenter__()
+    got = g.allocation.for_lane(LaneId.GENERAL).value
+    g.lease.release(work_completed=True)
+    await cm.__aexit__(None, None, None)
+    return got
+
+
+def _ceiling_one_gate():
+    """A gate with GENERAL ceiling 1 plus the single-GENERAL want that fills it."""
+    from tests.admission_kernel._gate_factory import GateSpec, build_gate
+
+    gate, _ = build_gate(dataclasses.replace(GateSpec(), general_ceiling=1))
+    return gate, _GENERAL_ONE
