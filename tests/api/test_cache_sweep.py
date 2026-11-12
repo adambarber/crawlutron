@@ -8,7 +8,6 @@ import os
 import pathlib
 
 from tests._clocks import advance_clock, arrange_clock
-from tests._lifespan_doubles import stub_heavy_teardown
 
 
 class TestMaintenanceTick:
@@ -87,11 +86,9 @@ class TestSweepLoop:
 
 class TestLifespanWiring:
     async def test_the_lifespan_starts_and_drains_the_maintenance_task(self, monkeypatch, tmp_path):
-        from crawlutron_rest import main as main_mod
+        from tests._app_factory import wired_app
 
-        monkeypatch.setenv("CRAWLUTRON_CACHE_DIR", str(tmp_path))
-        stub_heavy_teardown(monkeypatch)
-        app = main_mod.create_app()
+        app = wired_app(monkeypatch, tmp_path)
 
         async with app.router.lifespan_context(app):
             task = app.state.cache_maintenance_task

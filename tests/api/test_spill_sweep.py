@@ -9,8 +9,6 @@ import asyncio
 import sqlite3
 from contextlib import closing
 
-from tests._lifespan_doubles import stub_heavy_teardown
-
 
 class TestSpillSweepTick:
     async def test_the_tick_reclaims_released_rows_past_the_age_and_spares_fenced_ones(self, tmp_path):
@@ -96,11 +94,9 @@ class TestSpillSweepLoop:
 
 class TestSpillSweepWiring:
     def _wired_app(self, monkeypatch, tmp_path):
-        from crawlutron_rest import main as main_mod
+        from tests._app_factory import wired_app
 
-        monkeypatch.setenv("CRAWLUTRON_CACHE_DIR", str(tmp_path))
-        stub_heavy_teardown(monkeypatch)
-        return main_mod.create_app()
+        return wired_app(monkeypatch, tmp_path)
 
     async def test_the_lifespan_starts_and_drains_the_spill_sweep_task(self, monkeypatch, tmp_path):
         app = self._wired_app(monkeypatch, tmp_path)

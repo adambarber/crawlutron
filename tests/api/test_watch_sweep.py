@@ -34,6 +34,22 @@ WEBHOOK = WATCH_WEBHOOK
 DEAD_ORIGIN = "http://127.0.0.1:9/"
 
 
+async def _sweep(watch_store, stop: asyncio.Event, clock):
+    """Drive the sweeper to shutdown under a hard wait_for: the bounded-run call
+    shape every infinite-sweep test needs, so its timeout can never hang a suite."""
+    await asyncio.wait_for(
+        sweep_watches_forever(
+            watch_store,
+            host_policy=UNRESTRICTED_HOST_POLICY,
+            settings=CrawlerSettings.from_mapping(),
+            shutdown_event=stop,
+            interval_seconds=0.0,
+            clock=clock,
+        ),
+        timeout=30,
+    )
+
+
 @pytest.fixture
 def sweeper(watch_store):
     """A sweeper over this test's store."""
@@ -253,17 +269,7 @@ async def test_the_sweep_loop_passes_on_the_injected_clock_and_stops_on_the_even
             stop.set()
         return passes["n"] * INTERVAL
 
-    await asyncio.wait_for(
-        sweep_watches_forever(
-            watch_store,
-            host_policy=UNRESTRICTED_HOST_POLICY,
-            settings=CrawlerSettings.from_mapping(),
-            shutdown_event=stop,
-            interval_seconds=0.0,
-            clock=clock,
-        ),
-        timeout=30,
-    )
+    await _sweep(watch_store, stop, clock)
 
     assert watch_store.get(watch.watch_id).consecutive_failures == 3
 
@@ -282,18 +288,12 @@ async def test_a_pass_that_raises_does_not_end_the_sweep(watch_store, monkeypatc
 
     monkeypatch.setattr(watch_sweep, "execute_crawl", _explode)
 
-    await asyncio.wait_for(
-        sweep_watches_forever(
-            watch_store,
-            host_policy=UNRESTRICTED_HOST_POLICY,
-            settings=CrawlerSettings.from_mapping(),
-            shutdown_event=stop,
-            interval_seconds=0.0,
-            # Each pass advances past the rescheduled ``next_check_at`` of a
-            # raising watch, so the clock follows the attempt counter to stay due.
-            clock=lambda: (len(attempts) + 1) * INTERVAL,
-        ),
-        timeout=30,
+    await _sweep(
+        watch_store,
+        stop,
+        # Each pass advances past the rescheduled ``next_check_at`` of a
+        # raising watch, so the clock follows the attempt counter to stay due.
+        clock=lambda: (len(attempts) + 1) * INTERVAL,
     )
 
     assert len(attempts) == 3

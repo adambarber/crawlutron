@@ -24,3 +24,14 @@ def fresh_app() -> FastAPI:
     from crawlutron_rest.main import create_app
 
     return create_app()
+
+
+def wired_app(monkeypatch, tmp_path) -> FastAPI:
+    """A fresh app pointed at a tmp cache dir with the heavy teardown stubbed:
+    the lifespan-wiring setup the cache/spill sweep tests share."""
+    from crawlutron_rest.main import create_app
+    from tests._lifespan_doubles import stub_heavy_teardown
+
+    monkeypatch.setenv("CRAWLUTRON_CACHE_DIR", str(tmp_path))
+    stub_heavy_teardown(monkeypatch)
+    return create_app()
