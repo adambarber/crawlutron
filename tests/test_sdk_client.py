@@ -280,6 +280,38 @@ def test_sync_client_crawl():
     assert response.request_id == "abc"
 
 
+# Async-only surfaces the sync twin cannot mirror. Derived, not hand-listed per
+# the #876 invariant-scope doctrine; each name is a live `dir()` disclosure.
+_ASYNC_ONLY_SUBSET = frozenset(
+    {
+        "aclose",  # async client cleanup; sync exposes its blocking twin `close`.
+        "crawl_stream",  # async generator; no sync form exists.
+        "sync",  # async->sync factory; meaningless on the sync client.
+    }
+)
+
+
+def _public_methods(cls: type) -> frozenset[str]:
+    """The live public-method surface of a client class (underscore-free)."""
+    return frozenset(name for name in dir(cls) if not name.startswith("_"))
+
+
+def test_sync_client_mirrors_every_async_public_method():
+    """The lock: every public async method has a same-named sync twin."""
+    async_public = _public_methods(CrawlutronClient)
+    sync_public = _public_methods(CrawlutronClientSync)
+    missing = async_public - sync_public - _ASYNC_ONLY_SUBSET
+    assert not missing, f"sync client missing async-twins: {sorted(missing)}"
+
+
+def test_sync_client_adds_no_unmirrored_public_method():
+    """The mirror holds both ways: sync public methods are async twins or `close`."""
+    async_public = _public_methods(CrawlutronClient) | _ASYNC_ONLY_SUBSET
+    sync_public = _public_methods(CrawlutronClientSync) - {"close"}
+    extra = sync_public - async_public
+    assert not extra, f"sync client has unmirrored public methods: {sorted(extra)}"
+
+
 @pytest.mark.asyncio
 async def test_crawl_stream_yields_response():
     calls = iter([202, 200])

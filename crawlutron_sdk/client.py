@@ -314,7 +314,9 @@ class CrawlutronClient(_ClientBase):
 
 
 class CrawlutronClientSync(_ClientBase):
-    """Blocking typed client mirroring :class:`CrawlutronClient`."""
+    """Blocking typed mirror of :class:`CrawlutronClient`: sync twins for every
+    public endpoint; async-only surfaces (``crawl_stream``, ``aclose``) are absent.
+    """
 
     _client: httpx.Client | None = None
 
@@ -377,6 +379,51 @@ class CrawlutronClientSync(_ClientBase):
     def admit(self, payload: AdmitRequest) -> AdmitResponse:
         response = self._request("POST", "/v1/admit", json=_payload_dict(payload))
         return self._finish(response, AdmitResponse)
+
+    def create_job(self, payload: JobCreateRequest) -> JobCreateResponse:
+        response = self._request("POST", "/v1/jobs", json=_payload_dict(payload))
+        return self._finish(response, JobCreateResponse)
+
+    def list_jobs(self) -> JobListResponse:
+        response = self._request("GET", "/v1/jobs")
+        return self._finish(response, JobListResponse)
+
+    def get_job(self, job_id: str) -> JobStatusResponse:
+        response = self._request("GET", f"/v1/jobs/{job_id}")
+        return self._finish(response, JobStatusResponse)
+
+    def control_job(self, job_id: str, action: Literal["pause", "resume", "cancel"]) -> JobStatusResponse:
+        payload = JobControlRequest(action=action)
+        response = self._request("POST", f"/v1/jobs/{job_id}/control", json=_payload_dict(payload))
+        return self._finish(response, JobStatusResponse)
+
+    def delete_job(self, job_id: str) -> None:
+        response = self._request("DELETE", f"/v1/jobs/{job_id}")
+        self._check(response)
+
+    def search(self, payload: SearchRequest) -> SearchResponse:
+        response = self._request("POST", "/v1/search", json=_payload_dict(payload))
+        return self._finish(response, SearchResponse)
+
+    def create_watch(self, payload: WatchCreateRequest) -> WatchState:
+        response = self._request("POST", "/v1/watches", json=_payload_dict(payload))
+        return self._finish(response, WatchState)
+
+    def list_watches(self) -> WatchListResponse:
+        response = self._request("GET", "/v1/watches")
+        return self._finish(response, WatchListResponse)
+
+    def get_watch(self, watch_id: str) -> WatchState:
+        response = self._request("GET", f"/v1/watches/{watch_id}")
+        return self._finish(response, WatchState)
+
+    def delete_watch(self, watch_id: str) -> None:
+        response = self._request("DELETE", f"/v1/watches/{watch_id}")
+        self._check(response)
+
+    def agent_hints(self) -> AgentHintsResponse:
+        response = self._request("GET", "/v1/agent-hints")
+        return self._finish(response, AgentHintsResponse)
 
     def capabilities(self) -> CapabilitiesResponse:
         response = self._request("GET", "/v1/capabilities")
