@@ -210,6 +210,7 @@ class GateSpec:
     mem_gauge: ResourceGauge | None = None
     cpu_gauge: ResourceGauge | None = None
     memory_budget_mib: int | None = None
+    reserved_mib: int | None = None
     ramp_growth_window: int = 3
     thread_safe_signal: bool = False
 
@@ -265,5 +266,6 @@ def build_gate(spec: GateSpec | None = None) -> tuple[AdmissionGate, GateHandles
         signal=signal,
         loop_lag_multiplier=Ratio(s.loop_lag),
         memory_budget=None if s.memory_budget_mib is None else Bytes(s.memory_budget_mib * mib),
+        reserved=None if s.reserved_mib is None else Bytes(s.reserved_mib * mib),
     )
     return gate, handles

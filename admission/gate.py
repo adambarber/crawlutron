@@ -87,6 +87,7 @@ class AdmissionGate:
         signal: Signal,
         loop_lag_multiplier: Ratio | None = None,
         memory_budget: Bytes | None = None,
+        reserved: Bytes | None = None,
     ) -> None:
         if set(lanes) != {LaneId.GENERAL, LaneId.HEAVY}:
             raise ValueError("gate requires a lane spec for every LaneId")
@@ -114,6 +115,7 @@ class AdmissionGate:
         self._cold_in_flight = 0
         self._scale_full_streak = 0
         self._memory_budget = memory_budget
+        self._reserved = reserved if reserved is not None else Bytes(0)
         now0 = clock.now()
         self._progress = Progress(last_advance=now0, last_decision=now0)
         self._staleness_onset: float | None = None
@@ -209,7 +211,7 @@ class AdmissionGate:
         return any(r.cold for r in readings.values())
 
     def _free_bytes(self) -> int:
-        return max(0, self._memory_budget.value - self._in_flight_bytes)
+        return max(0, self._memory_budget.value - self._reserved.value - self._in_flight_bytes)
 
     def _capacity_for(self, lane: LaneId, want_count: int, scale: Scale) -> int:
         """capacity_lane = min(round(ceiling*scale), ceiling, want, free//cost) (§5.2)."""
