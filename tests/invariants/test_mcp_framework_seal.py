@@ -9,6 +9,7 @@ import ast
 
 from scripts import module_graph
 from scripts.module_graph import build_graph
+from tests.invariants._seal_walk import assert_sealed_layer_present as _assert_present
 from tests.invariants._seal_walk import offender_pairs as _walk_offenders
 
 _SEALED_LAYER = "crawlutron_mcp."
@@ -16,8 +17,10 @@ _FORBIDDEN_LAYERS = ("fastapi", "starlette")
 
 
 def test_no_mcp_module_imports_fastapi_or_starlette() -> None:
-    """The seal: DFS over the runtime import graph; any offender is a finding."""
+    """The seal: DFS over the runtime import graph; the sealed layer must be present
+    first, or a vanished/mis-typed root would green vacuously over an empty set."""
     modules, _importers = build_graph()
+    _assert_present(modules, _SEALED_LAYER)
     offenders = _walk_offenders(modules, _SEALED_LAYER, _FORBIDDEN_LAYERS)
     assert not offenders, (
         "crawlutron_mcp reaches fastapi/starlette; the MCP protocol layer is "

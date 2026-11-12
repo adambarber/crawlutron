@@ -107,3 +107,16 @@ def test_the_graph_walks_every_import_root_not_just_crawlutron() -> None:
         "the module graph walks only a subset of the derived import roots; an "
         "unwalked root's sealed layer would green over empty (missing: " + repr(missing) + ")"
     )
+
+
+def test_the_walk_pins_each_canonical_package_root_vs_a_vanishing_member() -> None:
+    """Pin the canonical package roots: the derived-vs-walked check greens when a member
+    vanishes from BOTH sides together, so a disappeared mcp must red the walk explicitly."""
+    modules, _importers = build_graph()
+    prefixes = {name.split(".", 1)[0] for name in modules}
+    canonical = {"admission", "crawlutron", "crawlutron_mcp", "crawlutron_rest", "crawlutron_sdk"}
+    not_walked = sorted(canonical - prefixes)
+    assert not not_walked, (
+        "the module graph no longer walks these canonical package roots; a vanished "
+        "root's sealed layer would green over empty (not walked: " + repr(not_walked) + ")"
+    )

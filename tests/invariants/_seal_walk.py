@@ -6,7 +6,7 @@ live here so sibling seals cannot drift into divergent walks; each seal declares
 
 from __future__ import annotations
 
-__all__ = ["reachable", "offender_pairs"]
+__all__ = ["reachable", "offender_pairs", "assert_sealed_layer_present"]
 
 
 def reachable(modules: dict[str, set[str]], start: str) -> set[str]:
@@ -36,3 +36,14 @@ def offender_pairs(
             if reached.startswith(forbidden_prefixes)
         )
     return offenders
+
+
+def assert_sealed_layer_present(modules: dict[str, set[str]], sealed_prefix: str) -> None:
+    """Seal refuses vacuity: the offender sweep selects by prefix, so an absent
+    layer greens; both reach seals assert presence on the live graph first."""
+    bare = sealed_prefix.rstrip(".")
+    present = any(name == bare or name.startswith(sealed_prefix) for name in modules)
+    assert present, (
+        f"the sealed layer {bare!r} is absent from the walked module graph; "
+        "the seal would green vacuously over empty"
+    )
