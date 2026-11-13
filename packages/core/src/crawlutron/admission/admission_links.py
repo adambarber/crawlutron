@@ -313,17 +313,23 @@ def remaining_page_capacity(admitted_count: int, max_pages: int) -> int | None:
     return max(0, max_pages - max(0, admitted_count))
 
 
+def _is_position_anchored(pattern: str) -> bool:
+    """True when the caller wrote a real position anchor (leading ``^`` or
+    trailing ``$``); a ``^`` inside a character class ([^/]) is negation, not."""
+    return pattern.startswith("^") or pattern.endswith("$")
+
+
 def compile_scope_pattern(scope_regex: str | JsonValue | None) -> BoundedPattern | None:
     """Compile a user-supplied scope regex; ``None`` means no restriction declared.
 
     Matches ``scheme://host/path`` (query stripped); unanchored patterns are anchored
-    at the host start, an explicit ``^``/``$`` keeps raw semantics.
+    at the host start, an explicit position anchor keeps raw semantics.
     """
     if not isinstance(scope_regex, str) or not scope_regex:
         return None
     pattern = scope_regex
     overhead = 0
-    if "^" not in pattern and "$" not in pattern:
+    if not _is_position_anchored(pattern):
         # Anchor unanchored patterns to the host start (after any scheme://) so
         # ``example\.com`` refuses ``evil-example.com`` and never matches a query.
         pattern = rf"^{_SCOPE_ANCHOR_PREFIX}(?:{pattern})"
