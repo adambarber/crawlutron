@@ -453,6 +453,7 @@ def test_same_length_results_replacement_is_persisted(job_store):
     job.results = [{"url": "http://example.com/a", "status": "success"}]
     job_store.save(job)
 
+    job = job_store.load(job.job_id)
     job.results = [{"url": "http://example.com/b", "status": "success"}]
     job_store.save(job)
 
@@ -468,12 +469,11 @@ def test_same_length_visited_replacement_is_persisted(job_store):
     job.visited = OrderedUrlSet([canonical("http://example.com/a")])
     job_store.save(job)
 
-    job_id = job.job_id
-    job = job_store.load(job_id)
+    job = job_store.load(job.job_id)
     job.visited = OrderedUrlSet([canonical("http://example.com/b")])
     job_store.save(job)
 
-    loaded = job_store.load(job_id)
+    loaded = job_store.load(job.job_id)
     assert loaded is not None
     assert loaded.visited == OrderedUrlSet([canonical("http://example.com/b")])
 
