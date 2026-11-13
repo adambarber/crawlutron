@@ -72,8 +72,8 @@ jobs:
       # #949: on a cold-cache runner the gate battery (the full randomized suite
       # via scripts/gate_fanout) is hard-killed at scripts/gate_fanout.py's 60s
       # wall. Precompiling bytecode over the derived member src roots turns the
-      # first pre-commit battery's imports into .pyc hits (the S4 pattern the
-      # test-fast job already uses) so the cold run starts warm within the wall.
+      # first pre-commit battery's imports into .pyc hits (the S4 pattern) so the
+      # cold run starts warm within the wall.
       - name: Pre-warm bytecode for the gate battery
         run: .venv/bin/python -m compileall -q packages/*/src tests scripts
       - name: Run all configured hooks
@@ -84,38 +84,6 @@ jobs:
           # wall so the battery completes. Commit-admission keeps the 60s
           # default via gate_fanout's unchanged default (owner directive).
           GATE_FANOUT_WALL_SECONDS: "120"
-
-  test-fast:
-    name: Test suite (fast)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: "3.14"
-      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
-        with:
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-      - name: Install package + dev dependencies
-        run: uv sync --frozen --extra dev
-      # #949: the version artifact is gitignored; regenerate so the battery's
-      # version-derivation gate sees the real git-describe version.
-      - name: Regenerate the version artifact
-        run: .venv/bin/python scripts/regen_version.py
-      # Precompile bytecode once so every xdist worker reuses .pyc instead of
-      # recompiling ~90k lines per run (S4). The scope derives from the uv
-      # member src roots, not a hand-listed pre-src-layout package dir (#949).
-      - name: Precompile bytecode
-        run: .venv/bin/python -m compileall -q packages/*/src tests scripts
-      # Includes the project-specific safety predicates (tests/invariants/ and
-      # friends): those detectors are the only exit path for the chokepoint
-      # rules, and they run inside the default marker set.
-      - name: Run pytest (fast)
-        run: .venv/bin/python -m pytest
 
   test-browser:
     name: Test suite (browser)
@@ -196,14 +164,16 @@ jobs:
   # One required check. A repository ruleset should require exactly
   # this job: GitHub treats a skipped job as success, so the individual jobs
   # stay unconditional and this aggregate fails if any of them did not succeed.
-  # The gate-carrying jobs are enforcement (every pre-commit hook), test-fast
-  # (the suite), test-browser (the Camoufox suite), audit and secret-scan (#623); there is no separate lint
-  # or typecheck job because pre-commit already runs ruff, mypy and basedpyright
-  # inside `enforcement`.
+  # The gate-carrying jobs are enforcement (every pre-commit hook, including the
+  # full randomized battery), test-browser (the Camoufox suite), audit and
+  # secret-scan (#623); there is no separate lint, typecheck or fast-suite job
+  # because pre-commit already runs ruff, mypy and basedpyright, and its battery
+  # hook already runs the whole default suite -- a second job would pay for the
+  # same suite twice on every push.
   required:
     name: Required quality gate
     if: ${{ always() }}
-    needs: [enforcement, test-fast, test-browser, audit, secret-scan]
+    needs: [enforcement, test-browser, audit, secret-scan]
     runs-on: ubuntu-latest
     steps:
       - name: Require every gate to have succeeded
@@ -216,7 +186,6 @@ jobs:
         shell: bash -e {0}
         run: |
           test "${{ needs.enforcement.result }}" = "success"
-          test "${{ needs.test-fast.result }}" = "success"
           test "${{ needs.test-browser.result }}" = "success"
           test "${{ needs.audit.result }}" = "success"
           test "${{ needs.secret-scan.result }}" = "success"

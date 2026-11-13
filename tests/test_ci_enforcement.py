@@ -25,6 +25,7 @@ from tests._ci_contract import (
     _jobs,
     _require_exactly_one_jscpd_gate,
     _required_needs,
+    job_steps,
 )
 
 # The version-triggered GHCR publish workflow (#949), contracted alongside ci.yml.
@@ -192,6 +193,50 @@ def test_no_ci_job_reruns_a_precommit_hook_command() -> None:
     assert_no_hook_command_rerun(WORKFLOW_PATH.read_text(encoding="utf-8"), hook_tools)
 
 
+def test_no_ci_job_reruns_the_default_suite() -> None:
+    """`enforcement`'s battery hook already runs the whole default suite, so a
+    bare `pytest` in another job is a second copy: the two can drift, and every
+    push pays twice. A `-m` selection is a different surface, and may stand.
+    """
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    _assert_no_default_suite_rerun(workflow)
+
+
+def test_a_ci_job_that_reruns_the_default_suite_is_caught() -> None:
+    """Bites: re-adding a bare-pytest job fails the check."""
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    needle = "  test-browser:"
+    inserted = (
+        "  test-fast:\n"
+        "    name: Test suite (fast)\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - name: Run pytest (fast)\n"
+        "        run: .venv/bin/python -m pytest\n\n"
+        "  test-browser:"
+    )
+    broken = workflow.replace(needle, inserted)
+    assert broken != workflow, "the injection did not apply; the probe proves nothing"
+    with pytest.raises(AssertionError):
+        _assert_no_default_suite_rerun(broken)
+
+
+def _assert_no_default_suite_rerun(workflow: str) -> None:
+    """The check above, callable on a mutated workflow so the probe can bite.
+
+    Only pytest's own args count: the interpreter's ``-m`` is not a marker
+    filter, so a bare ``pytest`` and a ``-m browser`` run are told apart.
+    """
+    for name, run in _job_run_steps(workflow):
+        if "pytest" not in run:
+            continue
+        pytest_args = run.split("pytest", 1)[1]
+        assert re.search(r"(?:^|\s)-m(?:\s|=)", pytest_args), (
+            f"job {name} runs the default suite ({run.strip()!r}): enforcement's "
+            "battery hook already runs it; give a second suite its own marker filter"
+        )
+
+
 def test_a_ci_job_that_reruns_a_hook_command_is_caught() -> None:
     """Bites: adding a job that re-runs a hook command fails the check."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
@@ -220,8 +265,7 @@ def test_browser_job_selects_only_browser_marked_tests() -> None:
     """The browser job exists to run the browser suite: a filter that admits
     anything else re-runs the fast suite (~3,400 tests) on every push."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-    steps = _jobs(workflow)["test-browser"].get("steps")
-    assert isinstance(steps, list)
+    steps = job_steps(workflow, "test-browser")
     browser_step = str(
         next(
             step.get("run")
@@ -237,8 +281,8 @@ def test_enforcement_job_caches_gate_state() -> None:
     re-work on warm runs; keyed on the lock + pyproject so dependency bumps
     invalidate."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-    steps = _jobs(workflow)["enforcement"].get("steps")
-    assert isinstance(steps, list)
+    steps = job_steps(workflow, "enforcement")
+    assert steps
     caches = [
         step
         for step in steps
@@ -267,14 +311,14 @@ def test_conftest_leaves_bytecode_writing_enabled() -> None:
     )
 
 
-def test_ci_precompiles_bytecode_once_in_test_fast() -> None:
-    """S4: the test-fast job precompiles .pyc once after install so every worker
-    reuses them instead of recompiling ~90k lines per run."""
+def test_ci_precompiles_bytecode_before_the_battery() -> None:
+    """S4: the enforcement job precompiles .pyc once after install so every
+    worker reuses them instead of recompiling ~90k lines per run."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-    steps = _jobs(workflow)["test-fast"].get("steps")
-    assert isinstance(steps, list)
+    steps = job_steps(workflow, "enforcement")
+    assert steps
     runs = " ".join(str(step.get("run", "")) for step in steps if isinstance(step, dict))
-    assert "compileall" in runs, "test-fast must precompile bytecode with compileall"
+    assert "compileall" in runs, "the enforcement job must precompile bytecode with compileall"
     # #949: the compile scope derives from the uv member src roots (glob, never a
     # hand-listed pre-src-layout package dir); this pins that derived glob.
     assert "packages/*/src" in runs, "compileall must derive its scope from the member src roots"
@@ -303,10 +347,8 @@ def test_ci_regenerates_the_version_artifact_before_the_suite() -> None:
     regen_version writes it; both gate-carrying jobs must see the git-describe
     version."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-    for job in ("enforcement", "test-fast"):
-        steps = _jobs(workflow)[job].get("steps")
-        assert isinstance(steps, list)
-        regen = [str(step.get("run", "")) for step in steps if isinstance(step, dict)]
+    for job in ("enforcement",):
+        regen = [str(step.get("run", "")) for step in job_steps(workflow, job)]
         assert any("scripts/regen_version.py" in run for run in regen), (
             f"job {job} must regenerate the version artifact before running tests"
         )

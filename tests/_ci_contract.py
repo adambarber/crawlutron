@@ -28,7 +28,7 @@ ENFORCEMENT_COMMAND = f".venv/bin/pre-commit run --all-files --config {WORKFLOW_
 
 # Every job that reports a result the aggregate must depend on. `audit` and
 # `secret-scan` are the supply-chain gates added by #623.
-REPORTING_JOBS = {"enforcement", "test-fast", "test-browser", "audit", "secret-scan"}
+REPORTING_JOBS = {"enforcement", "test-browser", "audit", "secret-scan"}
 
 # GitHub's template form for an errexit shell. The required aggregate is a chain of `test` lines, so its exit
 # code is its last line's without errexit.
@@ -155,6 +155,17 @@ def _required_steps(workflow: str) -> list[dict[str, object]]:
     steps = _required_job(workflow).get("steps")
     assert isinstance(steps, list) and steps, "the required aggregate must declare steps"
     return steps
+
+
+def job_steps(workflow: str, name: str) -> list[dict[str, object]]:
+    """One job's steps, asserted to be a list. The single door for reading a job's
+    step records, so every check reads the same shape and a missing job names itself.
+    """
+    job = _jobs(workflow).get(name)
+    assert isinstance(job, dict), f"CI must declare the {name} job"
+    steps = job.get("steps")
+    assert isinstance(steps, list), f"the {name} job must declare steps"
+    return [step for step in steps if isinstance(step, dict)]
 
 
 def _required_gate_script(workflow: str) -> str:
