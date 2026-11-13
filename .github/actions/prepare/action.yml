@@ -1,0 +1,46 @@
+name: Prepare a gate environment
+description: >
+  Everything a gate needs before it can run: the checkout at full depth (hatch-vcs
+  derives the version from the tags), the 3.14 interpreter, the frozen install,
+  and the regenerated version artifact. One definition, so a new gate job cannot
+  drift from the environment the others use.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      with:
+        fetch-depth: 0
+        fetch-tags: true
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      with:
+        python-version: "3.14"
+    # The venv is the service's own: the hook entries resolve `.venv/bin/...`
+    # relative to the service root, and every hook is `language: system`, so this
+    # is the only place the tools come from. Installed from the frozen lock
+    # (#622) -- an unpinned install would re-resolve the transitive graph.
+    - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+      with:
+        enable-cache: true
+        cache-dependency-glob: uv.lock
+    - name: Install the frozen environment
+      run: uv sync --frozen --extra dev
+      shell: bash
+    # The version artifact is gitignored, so a fresh checkout has none until the
+    # build backend writes it. hatch-vcs does that during the sync above; this
+    # step only covers a checkout whose artifact the sync did not touch, so the
+    # version-derivation gate always sees the real ref.
+    - name: Regenerate the version artifact
+      run: .venv/bin/python scripts/regen_version.py
+      shell: bash
+    # Gate state the hooks persist across runs (mypy's incremental cache, ruff's
+    # cache, the gate-fanout status dir), keyed on the lock + pyproject so a
+    # dependency or config bump invalidates it.
+    - name: Cache gate state
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: |
+          .mypy_cache
+          .ruff_cache
+          .gate_fanout
+        key: gate-state-${{ runner.os }}-${{ hashFiles('uv.lock', 'pyproject.toml') }}

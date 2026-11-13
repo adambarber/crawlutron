@@ -21,14 +21,59 @@ MAKEFILE_PATH = SERVICE_ROOT / "Makefile"
 
 WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "ci.yml"
 
+# The one gate environment every job starts from.
+PREPARE_ACTION_PATH = SERVICE_ROOT / ".github" / "actions" / "prepare" / "action.yml"
+
 # The config as the workflow must name it.
 WORKFLOW_ROOT_CONFIG = CONFIG_PATH.relative_to(SERVICE_ROOT).as_posix()
 
-ENFORCEMENT_COMMAND = f".venv/bin/pre-commit run --all-files --config {WORKFLOW_ROOT_CONFIG}"
+# How a CI job runs one hook: the hook itself, so its definition stays in the
+# config and CI cannot drift from a local commit.
+HOOK_RUN_PREFIX = ".venv/bin/pre-commit run"
 
-# Every job that reports a result the aggregate must depend on. `audit` and
-# `secret-scan` are the supply-chain gates added by #623.
-REPORTING_JOBS = {"enforcement", "test-browser", "audit", "secret-scan"}
+
+def hook_run(hook_id: str) -> str:
+    """The command a CI job uses to run one hook."""
+    return f"{HOOK_RUN_PREFIX} {hook_id} --all-files"
+
+
+def precommit_hook_ids(config: str) -> tuple[str, ...]:
+    """Hook ids that run at the pre-commit stage (no ``stages`` means pre-commit).
+
+    Derived from the config's own statement, not a list kept in step by hand.
+    """
+    document = yaml.safe_load(config)
+    repos = document.get("repos") if isinstance(document, dict) else None
+    assert isinstance(repos, list), "the pre-commit config must declare repos"
+    ids: list[str] = []
+    for repo in repos:
+        hooks = repo.get("hooks") if isinstance(repo, dict) else None
+        if not isinstance(hooks, list):
+            continue
+        for hook in hooks:
+            if not isinstance(hook, dict) or "id" not in hook:
+                continue
+            stages = hook.get("stages")
+            if stages is None or "pre-commit" in stages:
+                ids.append(str(hook["id"]))
+    assert ids, "the pre-commit config declares no pre-commit-stage hooks"
+    return tuple(ids)
+
+
+# Every job that reports a result the aggregate must depend on: one per gate,
+# plus the two supply-chain gates added by #623.
+REPORTING_JOBS = {
+    "ruff",
+    "ruff-format",
+    "basedpyright",
+    "jscpd",
+    "mypy",
+    "vulture",
+    "battery",
+    "test-browser",
+    "audit",
+    "secret-scan",
+}
 
 # GitHub's template form for an errexit shell. The required aggregate is a chain of `test` lines, so its exit
 # code is its last line's without errexit.
@@ -231,7 +276,6 @@ def _assert_failure_propagation(workflow: str) -> None:
             _assert_no_continue_on_error(step, f"a step in {name}")
 
     needs = _required_needs(workflow)
-    assert "enforcement" in needs, "the required aggregate must depend on enforcement"
     assert REPORTING_JOBS <= needs, (
         f"the required aggregate must depend on every reporting job, missing {REPORTING_JOBS - needs}"
     )

@@ -196,10 +196,8 @@ def test_the_aggregate_script_is_what_fails_not_just_what_it_says() -> None:
     script = _required_gate_script(workflow)
     assert _required_gate_shell(workflow) == ERREXIT_SHELL
     assert _run_script(_render_results(script, {job: "success" for job in needs})).returncode == 0
-    failed = _run_script(
-        _render_results(script, dict.fromkeys(needs, "success") | {"enforcement": "failure"})
-    )
-    assert failed.returncode != 0, "a failed enforcement job must fail the required aggregate"
+    failed = _run_script(_render_results(script, dict.fromkeys(needs, "success") | {"battery": "failure"}))
+    assert failed.returncode != 0, "a failed battery job must fail the required aggregate"
     # The same script under a shell without errexit reports success, which is why the declared shell above is
     # a gate and not a style preference.
     without_errexit = subprocess.run(

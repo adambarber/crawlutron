@@ -9,6 +9,14 @@ name: CI
 # `working-directory` for the same reason -- the root is already the service.
 # tests/test_ci_enforcement.py (via tests/_ci_contract.py) asserts both.
 
+# One job per gate, and every gate job runs ITS HOOK: `pre-commit run <id>
+# --all-files`. The gate's definition therefore lives exactly once, in
+# .pre-commit-config.yaml, and CI cannot drift from what a local commit runs.
+# There is no wrapper job: a single `pre-commit run --all-files` fans every gate
+# out inside one runner, so the battery's xdist workers fought the other gates
+# for the same cores and hit the wall clock. The contract test fails if a
+# pre-commit hook has no job, or if a job re-runs a command the hook owns.
+
 on:
   push:
     branches: [main]
@@ -26,64 +34,66 @@ on:
 permissions: read-all
 
 jobs:
-  enforcement:
-    name: Pre-commit enforcement
+  ruff:
+    name: ruff
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: "3.14"
-          # No pip cache: this project installs from uv.lock through uv, which
-          # caches on its own. A pip cache here finds no ~/.cache/pip, warns, and
-          # fails the job on a path that never existed.
-      # The venv is the service's own, because the hook entries resolve
-      # `.venv/bin/python` relative to the service root. Every hook is
-      # `language: system`, so this is the only place the tools come from.
-      # Installed from the frozen lock (#622): an unpinned install would
-      # re-resolve the transitive graph at install time.
-      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
-        with:
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-      - name: Install CI hook environment
-        run: uv sync --frozen --extra dev
-      # Gate state the hooks persist across runs: mypy's incremental cache,
-      # ruff's cache and the gate-fanout status dir. Keyed on lock+pyproject
-      # so a dependency or config bump invalidates (mirrors the Camoufox
-      # cache pattern: key on the pin, re-validate on a miss).
-      - name: Cache gate state
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: |
-            .mypy_cache
-            .ruff_cache
-            .gate_fanout
-          key: gate-state-${{ runner.os }}-${{ hashFiles('uv.lock', 'pyproject.toml') }}
-      # #949: the version artifact is gitignored, so a fresh checkout never has
-      # it. Regenerate from git describe so the battery's version-derivation
-      # gate (and every wire version surface) carries the real ref -- the same
-      # step hardstand.toml runs on workspace up.
-      - name: Regenerate the version artifact
-        run: .venv/bin/python scripts/regen_version.py
-      # #949: on a cold-cache runner the gate battery (the full randomized suite
-      # via scripts/gate_fanout) is hard-killed at scripts/gate_fanout.py's 60s
-      # wall. Precompiling bytecode over the derived member src roots turns the
-      # first pre-commit battery's imports into .pyc hits (the S4 pattern) so the
-      # cold run starts warm within the wall.
-      - name: Pre-warm bytecode for the gate battery
+      - uses: ./.github/actions/prepare
+      - name: ruff
+        run: .venv/bin/pre-commit run ruff --all-files
+
+  ruff-format:
+    name: ruff format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/prepare
+      - name: ruff format
+        run: .venv/bin/pre-commit run ruff-format --all-files
+
+  basedpyright:
+    name: basedpyright
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/prepare
+      - name: basedpyright
+        run: .venv/bin/pre-commit run basedpyright --all-files
+
+  jscpd:
+    name: jscpd
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/prepare
+      - name: jscpd
+        run: .venv/bin/pre-commit run jscpd --all-files
+
+  mypy:
+    name: mypy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/prepare
+      - name: mypy
+        run: .venv/bin/pre-commit run mypy --all-files
+
+  vulture:
+    name: vulture
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/prepare
+      - name: vulture
+        run: .venv/bin/pre-commit run vulture --all-files
+
+  battery:
+    name: Test suite (battery)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/prepare
+      # #949: on a cold-cache runner the battery's first imports are compile
+      # misses. Precompiling bytecode over the derived member src roots turns
+      # them into .pyc hits (the S4 pattern) so the run starts warm.
+      - name: Pre-warm bytecode for the battery
         run: .venv/bin/python -m compileall -q packages/*/src tests scripts
-      - name: Run all configured hooks
-        run: .venv/bin/pre-commit run --all-files --config .pre-commit-config.yaml
-        env:
-          # Cold-cache CI runners are hard-killed at scripts/gate_fanout.py's
-          # 60s wall once the battery lands above ~53s; raise the CI-side
-          # wall so the battery completes. Commit-admission keeps the 60s
-          # default via gate_fanout's unchanged default (owner directive).
-          GATE_FANOUT_WALL_SECONDS: "120"
+      - name: battery
+        run: .venv/bin/pre-commit run battery --all-files
 
   test-browser:
     name: Test suite (browser)
@@ -94,22 +104,11 @@ jobs:
     # reflects a real browser rather than a double. The suite costs ~20s here
     # and a Camoufox fetch, which is cheap enough to pay on every push.
     #
-    # It selects ONLY the `browser` marker: the job exists to run the
-    # browser suite, and any wider filter re-runs the fast suite (~3,400
-    # tests) on every push.
+    # It selects ONLY the `browser` marker: the job exists to run the browser
+    # suite, and any wider filter re-runs the fast suite (~5,700 tests) on every
+    # push.
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: "3.14"
-      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
-        with:
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-      - name: Install package + dev dependencies
-        run: uv sync --frozen --extra dev
+      - uses: ./.github/actions/prepare
       # Camoufox downloads ~200 MB of Firefox on first use (#490). The binary
       # lands in the platform cache dir (camoufox.utils.INSTALL_DIR --
       # ~/.cache/camoufox on Linux) and is version-locked by the pin in
@@ -123,11 +122,11 @@ jobs:
       - name: Install Camoufox browser binary
         run: .venv/bin/python -m camoufox fetch
       - name: Run pytest (browser)
-    # Selects the `browser` marker, and only that. The previous `-m "not
-    # slow"` admitted the whole fast suite (the fast job already runs it),
-    # re-running ~3,400 tests per push in a job that exists to add one
-    # marker. This still keeps `--strict-markers` and the rest of the
-    # addopts configuration intact.
+        # Selects the `browser` marker, and only that. The previous `-m "not
+        # slow"` admitted the whole fast suite (the battery job already runs it),
+        # re-running ~5,700 tests per push in a job that exists to add one
+        # marker. This still keeps `--strict-markers` and the rest of the
+        # addopts configuration intact.
         run: .venv/bin/python -m pytest -m "browser"
 
   # #623: dependency audit against the frozen lock. The export/pip-audit tools
@@ -164,16 +163,20 @@ jobs:
   # One required check. A repository ruleset should require exactly
   # this job: GitHub treats a skipped job as success, so the individual jobs
   # stay unconditional and this aggregate fails if any of them did not succeed.
-  # The gate-carrying jobs are enforcement (every pre-commit hook, including the
-  # full randomized battery), test-browser (the Camoufox suite), audit and
-  # secret-scan (#623); there is no separate lint, typecheck or fast-suite job
-  # because pre-commit already runs ruff, mypy and basedpyright, and its battery
-  # hook already runs the whole default suite -- a second job would pay for the
-  # same suite twice on every push.
   required:
     name: Required quality gate
     if: ${{ always() }}
-    needs: [enforcement, test-browser, audit, secret-scan]
+    needs:
+      - ruff
+      - ruff-format
+      - basedpyright
+      - jscpd
+      - mypy
+      - vulture
+      - battery
+      - test-browser
+      - audit
+      - secret-scan
     runs-on: ubuntu-latest
     steps:
       - name: Require every gate to have succeeded
@@ -185,7 +188,13 @@ jobs:
         # a step-level `shell:`, or a different runner takes it away silently.
         shell: bash -e {0}
         run: |
-          test "${{ needs.enforcement.result }}" = "success"
+          test "${{ needs.ruff.result }}" = "success"
+          test "${{ needs.ruff-format.result }}" = "success"
+          test "${{ needs.basedpyright.result }}" = "success"
+          test "${{ needs.jscpd.result }}" = "success"
+          test "${{ needs.mypy.result }}" = "success"
+          test "${{ needs.vulture.result }}" = "success"
+          test "${{ needs.battery.result }}" = "success"
           test "${{ needs.test-browser.result }}" = "success"
           test "${{ needs.audit.result }}" = "success"
           test "${{ needs.secret-scan.result }}" = "success"

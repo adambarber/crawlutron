@@ -170,7 +170,13 @@ def test_the_workflow_is_written_for_the_repository_root_it_will_run_from() -> N
     assert "docker/browser-crawler" not in workflow, (
         "the workflow names a path that will not exist once the service is its own repository"
     )
-    assert f"--config {WORKFLOW_ROOT_CONFIG}" in workflow
+    # Jobs run `pre-commit run <id> --all-files`, the developer's own command, so
+    # pre-commit finds the repo-root config by default; a CI-only --config would differ.
+    assert ".venv/bin/pre-commit run" in workflow
+    assert f"--config {WORKFLOW_ROOT_CONFIG}" not in workflow, (
+        "the jobs must run the hook the way a developer does; a CI-only --config "
+        "makes the two invocations differ"
+    )
     for name, job in _jobs(workflow).items():
         defaults = job.get("defaults")
         assert isinstance(defaults, dict) or defaults is None

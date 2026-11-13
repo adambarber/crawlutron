@@ -10,8 +10,8 @@ import yaml
 from scripts import jscpd_gate as gate
 from tests._ci_contract import (
     CONFIG_PATH,
-    ENFORCEMENT_COMMAND,
     ENFORCEMENT_TRIGGER_PATTERN,
+    PREPARE_ACTION_PATH,
     REPORTING_JOBS,
     SERVICE_ROOT,
     WORKFLOW_PATH,
@@ -25,7 +25,9 @@ from tests._ci_contract import (
     _jobs,
     _require_exactly_one_jscpd_gate,
     _required_needs,
+    hook_run,
     job_steps,
+    precommit_hook_ids,
 )
 
 # The version-triggered GHCR publish workflow (#949), contracted alongside ci.yml.
@@ -71,35 +73,15 @@ def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
     )
     assert _field(jscpd, "files") == ENFORCEMENT_TRIGGER_PATTERN
 
-    assert workflow.count(ENFORCEMENT_COMMAND) == 1
+    assert workflow.count(".venv/bin/pre-commit run") == len(
+        precommit_hook_ids(CONFIG_PATH.read_text(encoding="utf-8"))
+    )
     assert "scripts/jscpd_gate.py" not in workflow
-    _assert_frozen_lock_install(workflow)
     required = _required_needs(workflow)
     assert required == REPORTING_JOBS
     # The enforcement job builds its venv from the frozen lock's dev extra;
     # re-installing a specific tool on top reintroduces a drifting declaration.
-    assert "--extra dev" in workflow
-    assert "pip install" not in workflow
     _assert_failure_propagation(workflow)
-
-
-def _assert_frozen_lock_install(workflow: str) -> None:
-    """Every job that installs dependencies installs from the frozen lock via uv
-    (#622): a bare `pip install -e .[dev]` re-resolves the transitive graph at
-    install time, so CI tests against versions the lock never froze.
-    """
-    runs = _job_run_steps(workflow)
-    for name, run in runs:
-        assert "pip install" not in run, (
-            f"job {name} installs with pip: the lock freezes the graph and "
-            "pip re-resolves it; install with `uv sync --frozen --extra dev`"
-        )
-    for name, run in runs:
-        if "uv sync" in run:
-            assert "--frozen" in run, f"job {name} syncs without --frozen"
-    installs = [run for _, run in runs if "uv sync" in run]
-    assert len(installs) >= 2, f"expected the install jobs to sync from the lock, found {len(installs)}"
-    assert "uv.lock" in workflow, "CI must key its cache on uv.lock"
 
 
 def test_ci_runs_a_dependency_audit_and_secret_scan() -> None:
@@ -178,19 +160,70 @@ def test_release_workflow_has_write_only_on_packages() -> None:
     assert "v*" in str(push.get("tags")), "the release workflow must trigger on v* tag pushes"
 
 
-def test_no_ci_job_reruns_a_precommit_hook_command() -> None:
-    """CI must not run a gate twice in one run: `lint`/`typecheck` used to re-run
-    what `enforcement`'s hooks already execute -- three gates twice, nothing
-    comparing the copies. Any `run:` must not repeat a tool a hook runs.
+def test_every_precommit_hook_has_a_ci_job_that_runs_the_hook() -> None:
+    """One definition per gate: every pre-commit hook has a job, and that job runs
+    the hook itself. CI therefore cannot drift from what a local commit runs, and
+    a new hook cannot arrive without a job that enforces it.
     """
-    hook_tools = {
-        "python -m ruff check",
-        "python -m mypy",
-        "python -m scripts.jscpd_gate",
-        "basedpyright",
-        "tests/invariants/",
-    }
-    assert_no_hook_command_rerun(WORKFLOW_PATH.read_text(encoding="utf-8"), hook_tools)
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    config = CONFIG_PATH.read_text(encoding="utf-8")
+    _assert_every_hook_has_a_job(workflow, precommit_hook_ids(config))
+
+
+def test_a_new_precommit_hook_without_a_ci_job_is_caught() -> None:
+    """Bites: adding a hook the workflow does not run fails the check."""
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    config = CONFIG_PATH.read_text(encoding="utf-8")
+    with pytest.raises(AssertionError):
+        _assert_every_hook_has_a_job(workflow, (*precommit_hook_ids(config), "drift-gate"))
+
+
+def _assert_every_hook_has_a_job(workflow: str, hook_ids) -> None:
+    """The check above, callable with an injected hook id so the probe can bite."""
+    runs = [run.strip() for _, run in _job_run_steps(workflow)]
+    for hook_id in hook_ids:
+        assert hook_run(hook_id) in runs, (
+            f"hook {hook_id!r} has no CI job running `{hook_run(hook_id)}`: "
+            "CI must enforce every pre-commit hook, not a subset"
+        )
+
+
+def test_the_prepare_action_installs_the_frozen_lock_and_regenerates_the_version() -> None:
+    """One gate environment, defined once: every job starts from the same prepare
+    action, so the frozen install, the 3.14 interpreter and the gitignored version
+    artifact cannot drift between jobs.
+    """
+    action = PREPARE_ACTION_PATH.read_text(encoding="utf-8")
+    assert 'python-version: "3.14"' in action, "the prepare action must pin the 3.14 interpreter"
+    assert "uv sync --frozen --extra dev" in action, (
+        "the prepare action must install from the frozen lock: a bare install "
+        "re-resolves the graph CI never froze"
+    )
+    assert "scripts/regen_version.py" in action, (
+        "the prepare action must regenerate the gitignored version artifact"
+    )
+    assert "pip install" not in action, "the prepare action installs with uv, not pip"
+    assert "actions/cache@" in action, "the prepare action must cache gate state"
+    for cache_dir in (".mypy_cache", ".ruff_cache", ".gate_fanout"):
+        assert cache_dir in action, f"the prepare action must cache {cache_dir}"
+
+
+def test_every_gate_job_starts_from_the_prepare_action() -> None:
+    """The one environment is the one every gate uses: a job that repeats the
+    install steps by hand is a second copy that can drift.
+    """
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    for name in REPORTING_JOBS:
+        if name in {"audit", "secret-scan"}:
+            continue
+        steps = job_steps(workflow, name)
+        assert any(str(step.get("uses", "")).startswith("./.github/actions/prepare") for step in steps), (
+            f"job {name} must start from ./.github/actions/prepare"
+        )
+    for name, run in _job_run_steps(workflow):
+        assert "pip install" not in run, (
+            f"job {name} installs with pip: the lock freezes the graph and pip re-resolves it"
+        )
 
 
 def test_no_ci_job_reruns_the_default_suite() -> None:
@@ -237,30 +270,6 @@ def _assert_no_default_suite_rerun(workflow: str) -> None:
         )
 
 
-def test_a_ci_job_that_reruns_a_hook_command_is_caught() -> None:
-    """Bites: adding a job that re-runs a hook command fails the check."""
-    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-    needle = f"- name: Run all configured hooks\n        run: {ENFORCEMENT_COMMAND}"
-    inserted = f"{needle}\n      - name: Drift copy\n        run: python -m ruff check app tests scripts"
-    broken = workflow.replace(needle, inserted)
-    with pytest.raises(AssertionError):
-        assert_no_hook_command_rerun(broken, {"python -m ruff check"})
-
-
-def assert_no_hook_command_rerun(workflow: str, hook_tools) -> None:
-    """No CI job re-runs a command the enforcement job already runs: the duplicate and
-    the gate are two copies of one check, only the edited one drifts -- the error names
-    the job so the step is findable from the failure alone.
-    """
-    for name, run in _job_run_steps(workflow):
-        for tool in hook_tools:
-            assert tool not in run, (
-                f"job {name} re-runs a pre-commit hook command ({tool!r}): "
-                "enforcement already runs it; a duplicate is a second copy "
-                "that can drift from the gate"
-            )
-
-
 def test_browser_job_selects_only_browser_marked_tests() -> None:
     """The browser job exists to run the browser suite: a filter that admits
     anything else re-runs the fast suite (~3,400 tests) on every push."""
@@ -274,28 +283,6 @@ def test_browser_job_selects_only_browser_marked_tests() -> None:
         )
     )
     assert browser_step.strip() == '.venv/bin/python -m pytest -m "browser"', browser_step
-
-
-def test_enforcement_job_caches_gate_state() -> None:
-    """Gate-state caches (.mypy_cache/.ruff_cache/.gate_fanout) skip cold-start
-    re-work on warm runs; keyed on the lock + pyproject so dependency bumps
-    invalidate."""
-    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-    steps = job_steps(workflow, "enforcement")
-    assert steps
-    caches = [
-        step
-        for step in steps
-        if isinstance(step, dict) and str(step.get("name", "")).startswith("Cache gate state")
-    ]
-    assert len(caches) == 1, f"exactly one gate-state cache step expected, found {len(caches)}"
-    with_block = caches[0].get("with")
-    assert isinstance(with_block, dict)
-    paths = str(with_block["path"])
-    for expected in (".mypy_cache", ".ruff_cache", ".gate_fanout"):
-        assert expected in paths, f"gate-state cache missing {expected}"
-    key = str(with_block["key"])
-    assert "hashFiles('uv.lock', 'pyproject.toml')" in key, key
 
 
 def test_conftest_leaves_bytecode_writing_enabled() -> None:
@@ -312,10 +299,10 @@ def test_conftest_leaves_bytecode_writing_enabled() -> None:
 
 
 def test_ci_precompiles_bytecode_before_the_battery() -> None:
-    """S4: the enforcement job precompiles .pyc once after install so every
-    worker reuses them instead of recompiling ~90k lines per run."""
+    """S4: the battery job precompiles .pyc once after install so every worker
+    reuses them instead of recompiling ~90k lines per run."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-    steps = job_steps(workflow, "enforcement")
+    steps = job_steps(workflow, "battery")
     assert steps
     runs = " ".join(str(step.get("run", "")) for step in steps if isinstance(step, dict))
     assert "compileall" in runs, "the enforcement job must precompile bytecode with compileall"
@@ -343,12 +330,10 @@ def test_ci_release_workflow_pins_version_consistency() -> None:
 
 
 def test_ci_regenerates_the_version_artifact_before_the_suite() -> None:
-    """#949: the version artifact is gitignored, so a CI checkout has none until
-    regen_version writes it; both gate-carrying jobs must see the git-describe
-    version."""
-    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-    for job in ("enforcement",):
-        regen = [str(step.get("run", "")) for step in job_steps(workflow, job)]
-        assert any("scripts/regen_version.py" in run for run in regen), (
-            f"job {job} must regenerate the version artifact before running tests"
-        )
+    """#949: the version artifact is gitignored, so a CI checkout has none until the
+    build backend writes it; the prepare action every gate uses must leave it in
+    place."""
+    action = PREPARE_ACTION_PATH.read_text(encoding="utf-8")
+    assert "scripts/regen_version.py" in action, (
+        "the prepare action must regenerate the version artifact before any gate runs"
+    )
