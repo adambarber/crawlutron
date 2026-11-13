@@ -402,6 +402,65 @@ async def test_a_wrong_credential_is_401_through_the_real_door(tmp_path):
         _assert_401_envelope(response)
 
 
+async def _assert_suggestions_admin_pacing(tmp_path, *, make_guesses, keys_status, keys_code) -> None:
+    """Drive the #826 scenario: reset the admin bucket, flood /v1/policy-suggestions
+    with the guesses ``make_guesses(client, keys)`` builds, then assert /v1/keys
+    answers (keys_status, keys_code) -- the admin-bucket pacing discriminator."""
+    from crawlutron.runtime.process_state import reset_all_process_state
+
+    reset_all_process_state()
+    async with _real_door_client(tmp_path) as (client, keys, _results):
+        for credential, expected in make_guesses(client, keys):
+            got = await client.get("/v1/policy-suggestions", headers={"X-API-Key": credential})
+            assert got.status_code == expected, got.text
+        resp = await client.get("/v1/keys", headers={"X-API-Key": "still-wrong"})
+    assert resp.status_code == keys_status, resp.text
+    assert resp.json()["code"] == keys_code
+
+
+async def test_wrong_operator_guesses_on_suggestions_arm_the_shared_admin_bucket(tmp_path):
+    """#826: the suggestions door was the ONE unpaced channel for the operator
+    secret. A wrong token lands ``record is None`` and (post-fix) records a shared
+    admin failure, so line-speed guesses arm the cooldown /v1/keys enforces."""
+    from crawlutron.service import key_throttle
+
+    def op_guesses(_client, _keys):
+        return [(f"op-guess-{i}", 401) for i in range(key_throttle.KeyVerifyThrottle.MAX_FAILURES)]
+
+    await _assert_suggestions_admin_pacing(
+        tmp_path, make_guesses=op_guesses, keys_status=429, keys_code="key_verify_throttled"
+    )
+
+
+async def test_wrong_caller_key_guesses_on_suggestions_arm_the_admin_bucket(tmp_path):
+    """#826: a wrong CALLER key is also ``record is None``, so garbage key guesses
+    pace the shared admin bucket just like wrong operator tokens -- every non-key
+    secret on this door fails toward the cooldown, not just token-shaped guesses."""
+    from crawlutron.service import key_throttle
+
+    def garbage_guesses(_client, _keys):
+        return [(f"ck_0{i:016x}.garbage", 401) for i in range(key_throttle.KeyVerifyThrottle.MAX_FAILURES)]
+
+    await _assert_suggestions_admin_pacing(
+        tmp_path, make_guesses=garbage_guesses, keys_status=429, keys_code="key_verify_throttled"
+    )
+
+
+async def test_valid_caller_key_flood_never_arms_the_admin_bucket(tmp_path):
+    """#826 griefing-safe: a VALID caller key resolves to a row (success arm) and
+    never records an admin failure, so a keyed flood cannot lock the operator out
+    of /v1/keys. The shared admin bucket stays cold after the flood."""
+    from crawlutron.service import key_throttle
+
+    def valid_guesses(_client, keys):
+        issued = keys.issue_key("agent-a")
+        return [(issued.secret, 200) for _ in range(key_throttle.KeyVerifyThrottle.MAX_FAILURES * 2)]
+
+    await _assert_suggestions_admin_pacing(
+        tmp_path, make_guesses=valid_guesses, keys_status=401, keys_code="invalid_api_key"
+    )
+
+
 def _assert_401_envelope(response) -> None:
     """The 401 refusal shape every unauthenticated caller reads."""
     assert response.status_code == 401, response.text

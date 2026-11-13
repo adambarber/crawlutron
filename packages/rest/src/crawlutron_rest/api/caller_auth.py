@@ -153,6 +153,9 @@ async def _caller_from_secret(request: Request, secret: str) -> CallerIdentity:
     record = await store.averify_key(secret) if store is not None else None
     if record is None:
         throttle.record_failure(secret, remote)
+        # A non-key secret also paces the shared admin bucket (#826): guesses arm
+        # the cooldown /v1/keys enforces. Valid keys never reach this refusal arm.
+        throttle.record_admin_failure()
         _raise_invalid_api_key()
     throttle.record_success(secret, remote)
     return identity_for_key(record)
