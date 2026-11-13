@@ -15,6 +15,7 @@ import logging
 import os
 import time
 from collections.abc import Mapping
+from urllib.parse import urlparse
 
 import httpx
 
@@ -76,12 +77,11 @@ process_state.register(__name__, _reset, _has)
 
 def ensure_https_webhook_url(webhook_url: str) -> None:
     """The one scheme law for both webhook doors: https-only (#651);
-    raises ValueError."""
-    if not webhook_url.lower().startswith("http://"):
-        return
-    raise ValueError(
-        "webhook_url must use https:// -- the HMAC signature and payload would ride an unencrypted hop"
-    )
+    raises ValueError unless the parsed scheme is exactly https."""
+    if urlparse(webhook_url).scheme != "https":
+        raise ValueError(
+            "webhook_url must use https:// -- the HMAC signature and payload would ride an unencrypted hop"
+        )
 
 
 def webhook_max_attempts() -> int:

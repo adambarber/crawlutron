@@ -76,6 +76,20 @@ class TestHttpsOnlyWebhookRefusal:
     def test_an_https_webhook_url_is_accepted(self):
         ensure_https_webhook_url("https://receiver.example/hook")
 
+    @pytest.mark.parametrize(
+        "scheme_url",
+        [
+            "ftp://example.com/hook",
+            "ws://example.com/hook",
+            "wss://example.com/hook",
+        ],
+    )
+    def test_ensure_https_webhook_url_refuses_non_https_schemes(self, scheme_url):
+        """ftp://, ws:// and wss:// are unencrypted and must be refused like
+        http://, not passed through to delivery (#958)."""
+        with pytest.raises(ValueError, match="https://"):
+            ensure_https_webhook_url(scheme_url)
+
 
 class TestWebhookDeliveryPinning:
     async def test_delivery_posts_to_pinned_ip(self, monkeypatch):
