@@ -137,3 +137,10 @@ def test_a_workspace_of_only_stub_members_fails_loud(tmp_path: pathlib.Path) -> 
     )
     with pytest.raises(AssertionError, match="no python-bearing dirs"):
         package_roots(tmp_path)
+
+
+def test_uv_workspace_is_declared() -> None:
+    """The uv member manifest is present and expands to a python-bearing member."""
+    members = uv_workspace_members()
+    assert members is not None, "pyproject.toml declares no [tool.uv.workspace].members"
+    assert package_roots(), "pyproject.toml's uv members expand to no python-bearing member"
