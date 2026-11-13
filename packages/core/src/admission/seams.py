@@ -37,3 +37,10 @@ class Signal(Protocol):
     def set(self) -> None:
         """Wake every waiter."""
         ...
+
+    def clear(self) -> None:
+        """Reset so a later ``wait`` does not inherit a set state.
+
+        Edge-triggered signals have no level latch to clear: no-op here.
+        Level-latched ones clear so a waiter after a set genuinely suspends."""
+        ...

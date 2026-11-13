@@ -87,26 +87,43 @@ class GateHandles:
         return self.now + (time.monotonic() - self._anchor)
 
 
+async def _consume_on_wake(event: asyncio.Event, timeout: float | None) -> bool:
+    """Wait on ``event`` and consume the latch once a waiter is woken.
+
+    Consuming the latch means a later waiter genuinely suspends instead of
+    inheriting a stale latch. One shared helper avoids duplicating the wait body.
+    """
+    fired = await _await_event(event, timeout)
+    if fired:
+        event.clear()
+    return fired
+
+
 @dataclass
 class FakeSignal:
-    """An asyncio-backed signal the gate awaits; ``set`` wakes parked admits."""
+    """An asyncio-backed signal the gate awaits; ``set`` wakes parked admits.
+
+    A waiter that wakes consumes the latch, so no stale latch is inherited by a
+    later waiter.
+    """
 
     _event: asyncio.Event = field(default_factory=asyncio.Event)
 
     async def wait(self, timeout: float | None = None) -> bool:
-        return await _await_event(self._event, timeout)
+        return await _consume_on_wake(self._event, timeout)
 
     def set(self) -> None:
         self._event.set()
+
+    def clear(self) -> None:
+        self._event.clear()
 
 
 @dataclass
 class ThreadSafeSignal:
     """A signal whose ``set`` is safe to call from another OS thread.
-
-    ``wait`` captures the running loop; a cross-thread ``set`` schedules the
-    event via ``call_soon_threadsafe`` (the B-2 cross-thread handoff).
-    """
+    ``wait`` captures the running loop; a cross-thread ``set`` schedules the event via
+    ``call_soon_threadsafe`` (B-2). A waiter that wakes consumes the latch."""
 
     _event: asyncio.Event = field(default_factory=asyncio.Event)
     _loop: asyncio.AbstractEventLoop | None = None
@@ -114,13 +131,16 @@ class ThreadSafeSignal:
     async def wait(self, timeout: float | None = None) -> bool:
         if self._loop is None:
             self._loop = asyncio.get_running_loop()
-        return await _await_event(self._event, timeout)
+        return await _consume_on_wake(self._event, timeout)
 
     def set(self) -> None:
         if self._loop is None:
             self._event.set()
         else:
             self._loop.call_soon_threadsafe(self._event.set)
+
+    def clear(self) -> None:
+        self._event.clear()
 
 
 async def _await_event(event: asyncio.Event, timeout: float | None) -> bool:

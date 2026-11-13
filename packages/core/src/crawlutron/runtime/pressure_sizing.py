@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -278,23 +279,52 @@ class _MonotonicClock:
 
 
 def _seam_signal() -> Signal:
-    """A fresh asyncio-backed Signal for one kernel gate."""
+    """A fresh edge-triggered Signal for one kernel gate."""
 
-    class _EventSignal:
+    class _FutureSignal:
+        """Per-waiter-future signal: each ``wait`` allocates a fresh future resolved
+        by a later ``set`` -- no level latch to inherit; ``set`` resolves each parked
+        future once via ``call_soon_threadsafe``; ``clear`` is a no-op."""
+
         def __init__(self) -> None:
-            self._event = asyncio.Event()
+            self._waiters: list[asyncio.Future[bool]] = []
+            self._lock = threading.Lock()
+            self._loop: asyncio.AbstractEventLoop | None = None
 
         async def wait(self, timeout: float | None = None) -> bool:
+            loop = asyncio.get_running_loop()
+            fut: asyncio.Future[bool] = loop.create_future()
+            with self._lock:
+                self._loop = loop
+                self._waiters.append(fut)
             try:
-                await asyncio.wait_for(self._event.wait(), timeout)
-                return True
+                return await asyncio.wait_for(fut, timeout)
             except TimeoutError:
                 return False
+            finally:
+                with self._lock:
+                    if fut in self._waiters:
+                        self._waiters.remove(fut)
 
         def set(self) -> None:
-            self._event.set()
+            with self._lock:
+                loop = self._loop
+                waiters = self._waiters[:]
+                self._waiters.clear()
+            if loop is None:
+                return  # no waiter has ever waited: nothing to wake
+            for fut in waiters:
+                loop.call_soon_threadsafe(self._wake, fut)
 
-    return _EventSignal()
+        def _wake(self, fut: asyncio.Future[bool]) -> None:
+            """Resolve one parked waiter; tolerant of a concurrent timeout/cancel."""
+            if not fut.done():
+                fut.set_result(True)
+
+        def clear(self) -> None:
+            """No-op: an edge-triggered signal has no level latch to clear."""
+
+    return _FutureSignal()
 
 
 def _subgate_limits(gate: _GaugeSurface, which: str, default_target: float, default_hard: float) -> Limits:
