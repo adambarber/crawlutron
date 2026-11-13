@@ -152,6 +152,36 @@ async def test_mcp_anonymous_metered():
         assert refused.json()["error"]["code"] == -32029
 
 
+def _assert_anonymous_throttle(refused: httpx.Response, path: str) -> None:
+    """The anonymous refusal names its window and keeps the surface's shape:
+    JSON-RPC error code on /mcp, envelope code elsewhere."""
+    body = refused.json()
+    if path == "/mcp":
+        assert body["error"]["code"] == -32029
+    else:
+        assert body["code"] == "anonymous_throttled"
+    assert refused.headers.get("retry-after") == "60"
+
+
+@pytest.mark.parametrize("method,path", [("POST", "/mcp"), ("GET", "/docs")])
+async def test_throttled_response_carries_retry_after(method: str, path: str):
+    """Every anonymous 429 names its pacing window (#775): whether the /mcp
+    RATE_LIMITED shape or the envelope, the client sees Retry-After: 60 rather
+    than a blind-retry guess."""
+    body = {"jsonrpc": "2.0", "id": 1, "method": "ping"} if path == "/mcp" else None
+    process_state_reset()
+
+    async def get_response(client: httpx.AsyncClient) -> httpx.Response:
+        return await client.request(method, path, json=body)
+
+    async with _app_client() as client:
+        for _ in range(MAX_REQUESTS_PER_WINDOW):
+            await get_response(client)
+        refused = await get_response(client)
+        assert refused.status_code == 429
+        _assert_anonymous_throttle(refused, path)
+
+
 def process_state_reset() -> None:
     from crawlutron.runtime import process_state
 

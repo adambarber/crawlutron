@@ -33,11 +33,18 @@ class Throttled(Exception):
     Field names avoid ``status`` (the job-store plane's reserved word).
     """
 
-    def __init__(self, refusal_status: int, refusal_code: str, refusal_message: str) -> None:
+    def __init__(
+        self,
+        refusal_status: int,
+        refusal_code: str,
+        refusal_message: str,
+        refusal_window_seconds: float = 0.0,
+    ) -> None:
         super().__init__(refusal_message)
         self.refusal_status = refusal_status
         self.refusal_code = refusal_code
         self.refusal_message = refusal_message
+        self.refusal_window_seconds = refusal_window_seconds
 
 
 class _Bucket:
@@ -75,7 +82,7 @@ class AnonymousThrottle(MeterLedger):
                 from crawlutron.runtime.metrics import get_metrics
 
                 get_metrics().record_anonymous_throttle_refusal()
-                raise Throttled(429, "anonymous_throttled", "Too many requests; retry later")
+                raise Throttled(429, "anonymous_throttled", "Too many requests; retry later", WINDOW_SECONDS)
 
     def _evict_or_mint(self, now: float) -> _Bucket:
         """Mint a bucket, evicting the least-recently-used one at capacity."""
@@ -147,4 +154,8 @@ def _refuse(path: str, throttled: Throttled) -> JSONResponse:
         content: object = error_response(None, RATE_LIMITED, throttled.refusal_message)
     else:
         content = error_envelope(throttled.refusal_code, throttled.refusal_message)
-    return JSONResponse(status_code=throttled.refusal_status, content=content)
+    return JSONResponse(
+        status_code=throttled.refusal_status,
+        headers={"Retry-After": str(int(throttled.refusal_window_seconds))},
+        content=content,
+    )
