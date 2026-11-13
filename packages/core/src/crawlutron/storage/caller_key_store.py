@@ -6,6 +6,7 @@ the caller presents and compares digests only, one primary-key lookup."""
 from __future__ import annotations
 
 import hashlib
+import logging
 import secrets
 import threading
 import time
@@ -15,6 +16,10 @@ from crawlutron.models.caller_key import CallerKey
 from crawlutron.models.issued_key import IssuedKey
 from crawlutron.storage.coordination_store import CoordinationStore, atwin
 from crawlutron.storage.migrations.manifest import StoreSchema
+
+#: The audit write is best-effort: a failing trail must not take the key door
+#: down or orphan a fresh secret (fail-open, per the auth posture).
+_logger = logging.getLogger(__name__)
 
 _KEY_ID_BYTES = 8
 _SECRET_BODY_BYTES = 32
@@ -119,7 +124,12 @@ class CallerKeyStore(CoordinationStore):
         """Commit the in-flight write and record one admin audit row."""
         self._conn.commit()
         if self._audit is not None:
-            self._audit.record_event(actor="admin", action=action, target_key_id=key_id, outcome="granted")
+            try:
+                self._audit.record_event(
+                    actor="admin", action=action, target_key_id=key_id, outcome="granted"
+                )
+            except Exception:
+                _logger.warning("admin_audit_write_failed", extra={"action": action, "key_id": key_id})
 
     def issue_key(self, label: str, *, max_pages: int = 0, max_concurrency: int = 0) -> IssuedKey:
         """Mint a key for ``label``; the secret is returned once, never stored."""

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import secrets
 import sqlite3
 import threading
@@ -372,3 +373,46 @@ def test_revocation_during_derivation_does_not_grant(tmp_path, monkeypatch):
         assert result["v"] is None, "revoked-during-derive key still granted"
     finally:
         store.close()
+
+
+class _FailingAudit:
+    """An audit sink whose write always raises (disk-full shape).
+
+    The auth door must survive an audit store outage without orphaning the
+    freshly minted secret (#771 fail-open).
+    """
+
+    def record_event(self, **kwargs) -> None:
+        raise RuntimeError("audit store unavailable")
+
+
+def test_an_audit_write_failure_does_not_fail_the_mint(tmp_path, caplog):
+    """A raising audit write after the commit must not 500 a successful mint."""
+    store = CallerKeyStore(tmp_path / "keys.db")
+    store.attach_audit(_FailingAudit())
+
+    with caplog.at_level(logging.WARNING, logger="crawlutron.storage.caller_key_store"):
+        issued = store.issue_key("agent-a")
+
+    assert issued.secret.startswith("ck_")
+    assert store.verify_key(issued.secret) is not None  # row committed, usable
+    assert any(record.message == "admin_audit_write_failed" for record in caplog.records), (
+        f"audit failure not logged: {[record.message for record in caplog.records]}"
+    )
+
+
+def test_an_audit_write_failure_does_not_fail_a_rotate(tmp_path, caplog):
+    """rotate_key rides the same chokepoint: a raising audit write is best-effort."""
+    store = CallerKeyStore(tmp_path / "keys.db")
+    issued = store.issue_key("agent-a")
+    store.attach_audit(_FailingAudit())
+    new_secret = _rotated_secret_for(issued.key_id)
+
+    with caplog.at_level(logging.WARNING, logger="crawlutron.storage.caller_key_store"):
+        rotated = store.rotate_key(issued.key_id, new_secret)
+
+    assert rotated is True
+    assert store.verify_key(new_secret) is not None  # rotation committed, usable
+    assert any(record.message == "admin_audit_write_failed" for record in caplog.records), (
+        f"audit failure not logged: {[record.message for record in caplog.records]}"
+    )
