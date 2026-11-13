@@ -83,7 +83,9 @@ jobs:
           TAG="${{ steps.version.outputs.tag }}"
           NAME="crawlutron-smoke"
           docker rm -f "$NAME" >/dev/null 2>&1 || true
-          docker run -d --name "$NAME" -p 8765:8765 "$IMAGE:$TAG"
+          # The CMD binds loopback by default; Docker -p cannot reach a loopback-
+          # bound process, so bind 0.0.0.0 exactly as docker-compose.yml does.
+          docker run -d --name "$NAME" -e CRAWLUTRON_HOST=0.0.0.0 -p 8765:8765 "$IMAGE:$TAG"
           trap 'docker rm -f "$NAME" >/dev/null 2>&1 || true' EXIT
           for _ in $(seq 1 15); do
             curl -fsS http://127.0.0.1:8765/health >/dev/null && break

@@ -8,7 +8,6 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 TEMPLATE = """\
@@ -70,4 +69,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

@@ -291,6 +291,11 @@ def test_ci_release_workflow_pins_version_consistency() -> None:
     assert "steps.version.outputs.native" in joined, (
         "the smoke must compare the baked version against the git-describe version"
     )
+    # The image's CMD binds loopback by default; Docker -p cannot reach a
+    # loopback-bound process, so the smoke must bind 0.0.0.0 (compose precedent).
+    assert "-e CRAWLUTRON_HOST=0.0.0.0" in joined, (
+        "the smoke must set CRAWLUTRON_HOST=0.0.0.0 for -p to reach the service"
+    )
 
 
 def test_ci_regenerates_the_version_artifact_before_the_suite() -> None:
