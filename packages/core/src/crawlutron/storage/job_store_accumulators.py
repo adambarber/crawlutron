@@ -32,13 +32,13 @@ _FULL_TABLE_SQL = {
 }
 
 
-def _table_row_items(collection: str, row: sqlite3.Row) -> dict:
+def _table_row_items(collection: str, row: sqlite3.Row) -> dict | str:
     """One DB row as the same item shape the live collection holds, so
     digest comparison across the table boundary is exact."""
     if collection == "results":
         return json.loads(row["payload"])
     if collection == "visited":
-        return {"url": row["url"]}
+        return row["url"]
     return {"url": row["url"], "depth": row["depth"]}
 
 
