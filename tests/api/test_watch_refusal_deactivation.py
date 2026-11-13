@@ -128,3 +128,39 @@ async def test_a_robots_disallowed_watch_is_deactivated(watch_store, announced):
     assert reloaded.status is WatchStatus.DEACTIVATED
     # A deactivated watch is no longer swept: it is not due next interval.
     assert watch_store.due(NOW + WATCH_INTERVAL) == []
+
+
+async def test_deactivation_passes_the_sweepers_claim_token(watch_store, etag_server, monkeypatch):
+    """Every sweep deactivation carries this sweeper's claim token: the
+    adeactivate call sites pass ``claimed_by=self._claim_token``, so a stale
+    sweeper's deactivate is refused by the store's predicate (#956)."""
+    watch = register_watch(watch_store, canonical(loopback_url(etag_server)))
+    block_private_targets(monkeypatch)
+    sweeper = default_sweeper(watch_store)
+    captured: dict[str, str | None] = {}
+    real_adeactivate = sweeper._store.adeactivate
+
+    async def _spy(
+        watch_id: str,
+        *,
+        now: float,
+        next_check_at: float,
+        reason: CrawlClassification,
+        claimed_by: str | None = None,
+    ) -> None:
+        captured["claimed_by"] = claimed_by
+        await real_adeactivate(
+            watch_id,
+            now=now,
+            next_check_at=next_check_at,
+            reason=reason,
+            claimed_by=claimed_by,
+        )
+
+    monkeypatch.setattr(sweeper._store, "adeactivate", _spy)
+
+    outcomes = await sweeper.sweep_once(now=NOW)
+
+    assert outcomes == [CrawlClassification.private_network_target]
+    assert captured["claimed_by"] is sweeper._claim_token
+    assert watch_store.get(watch.watch_id).status is WatchStatus.DEACTIVATED

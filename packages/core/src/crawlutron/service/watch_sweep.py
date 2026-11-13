@@ -138,7 +138,12 @@ class WatchSweeper:
                 "watch_owner_revoked_deactivated",
                 extra={"watch_id": watch.watch_id, "owner": watch.owner},
             )
-            await self._store.adeactivate(watch.watch_id, now=now, next_check_at=now + watch.interval_seconds)
+            await self._store.adeactivate(
+                watch.watch_id,
+                now=now,
+                next_check_at=now + watch.interval_seconds,
+                claimed_by=self._claim_token,
+            )
             return CrawlClassification.site_error
         try:
             outcome = await self._check(watch, now=now)
@@ -187,6 +192,7 @@ class WatchSweeper:
             now=now,
             next_check_at=now + watch.interval_seconds,
             reason=reason,
+            claimed_by=self._claim_token,
         )
         return reason
 
@@ -229,6 +235,7 @@ class WatchSweeper:
                 now=now,
                 next_check_at=now + watch.interval_seconds,
                 reason=classification,
+                claimed_by=self._claim_token,
             )
             return classification
         # A delivered change is what a webhook exists to say: any success-status

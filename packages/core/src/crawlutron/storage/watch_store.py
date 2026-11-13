@@ -255,12 +255,15 @@ class WatchStore(CoordinationStore):
         now: float,
         next_check_at: float,
         reason: CrawlClassification = CrawlClassification.site_error,
+        claimed_by: str | None = None,
     ) -> None:
-        """Stop a watch being checked: terminal status plus a reschedule far out.
-        ``reason`` carries the terminal classification to the row; the
-        row and its history stay for the operator to read.
+        """Stop a watch: terminal status plus a far-out reschedule; the row and
+        its history stay readable. ``claimed_by`` narrows the UPDATE to the
+        claim's holder -- a stale sweeper's deactivate is a no-op.
         """
         with self._lock:
+            # ``claimed_by = NULL`` matches nothing: without a token the first
+            # disjunct is true, so any row matches (pre-fix behavior).
             self._conn.execute(
                 """
                 UPDATE watches SET
@@ -272,8 +275,17 @@ class WatchStore(CoordinationStore):
                     claimed_by = NULL,
                     updated_at = ?
                 WHERE watch_id = ?
+                  AND (? IS NULL OR claimed_by = ?)
                 """,
-                (WatchStatus.DEACTIVATED, reason, next_check_at, now, watch_id),
+                (
+                    WatchStatus.DEACTIVATED,
+                    reason,
+                    next_check_at,
+                    now,
+                    watch_id,
+                    claimed_by,
+                    claimed_by,
+                ),
             )
             self._conn.commit()
 

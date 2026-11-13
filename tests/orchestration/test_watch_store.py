@@ -7,6 +7,7 @@ call, so no test (and no production path) depends on wall time.
 import pytest
 
 from crawlutron.models.host_policy import HostPolicy
+from crawlutron.models.watch_status import WatchStatus
 from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.vocabulary.taxonomy import CrawlClassification
 from tests._policy_factories import canonical
@@ -303,3 +304,24 @@ def test_deactivate_records_the_terminal_reason_it_was_given(watch_store):
     assert reloaded.last_outcome == CrawlClassification.robots_disallowed, (
         "deactivate hardcoded site_error, losing the robots refusal reason"
     )
+
+
+@pytest.mark.parametrize(
+    "token,expected",
+    [
+        ("sweeper-a", WatchStatus.DEACTIVATED),
+        ("sweeper-b", WatchStatus.ACTIVE),
+    ],
+)
+def test_deactivate_respects_the_claim_token(watch_store, token, expected):
+    """A deactivate lands under the row's claim token and is refused under a
+    foreign one: the store is the claim-ownership chokepoint (#956)."""
+    state = register(watch_store)
+    watch_store.claim_due(NOW + INTERVAL, "sweeper-a", claim_seconds=300.0)
+    watch_store.deactivate(
+        state.watch_id,
+        now=NOW + INTERVAL,
+        next_check_at=NOW + 2 * INTERVAL,
+        claimed_by=token,
+    )
+    assert watch_store.get(state.watch_id).status is expected
