@@ -69,6 +69,11 @@ def build_pinned_request(url: NormalizedUrl, headers: dict[str, str]) -> PinnedR
         connect_url = f"{connect_url}?{url.query}"
     out_headers = dict(headers)
     out_headers["Host"] = f"[{url.host}]{port}" if ":" in url.host else f"{url.host}{port}"
+    tls = url.tls_hostname
+    if tls is not None:
+        # Close the connection: the pool keys this hop by the pinned IP, so two
+        # hosts on one IP would share one TLS session; reuse is a perf nicety.
+        out_headers["Connection"] = "close"
     return PinnedRequest(connect_url=connect_url, headers=out_headers, url=url)
 
 
