@@ -32,6 +32,7 @@ from tests._ci_contract import (
 
 # The version-triggered GHCR publish workflow (#949), contracted alongside ci.yml.
 RELEASE_WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "release.yml"
+PACKAGING_WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "packaging.yml"
 
 
 def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
@@ -117,7 +118,7 @@ def test_every_action_is_sha_pinned_and_permissions_are_declared() -> None:
     full-length commit SHA, and the workflow must declare its permissions so
     the default write-all token scope cannot leak into a compromised step.
     """
-    for workflow_path in (WORKFLOW_PATH, RELEASE_WORKFLOW_PATH):
+    for workflow_path in (WORKFLOW_PATH, RELEASE_WORKFLOW_PATH, PACKAGING_WORKFLOW_PATH):
         document = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
         assert isinstance(document, dict)
 
@@ -144,20 +145,66 @@ def test_every_action_is_sha_pinned_and_permissions_are_declared() -> None:
     )
 
 
-def test_release_workflow_has_write_only_on_packages() -> None:
-    """#949: the GHCR publish needs write scope ci.yml's read-all forbids, so the
-    release workflow declares it narrowly -- packages write, contents read."""
+def test_release_workflow_publishes_nothing_without_a_tag() -> None:
+    """#949/#1014: only a tag-triggered workflow may publish, and ci.yml cannot.
+
+    ci.yml stays read-all, so the write scope lives here and only here; the jobs
+    that do not publish must not inherit it.
+    """
     assert RELEASE_WORKFLOW_PATH.is_file(), "a version-triggered release workflow must exist"
     document = yaml.safe_load(RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8"))
     assert isinstance(document, dict)
-    permissions = document.get("permissions")
-    assert isinstance(permissions, dict)
-    assert permissions.get("packages") == "write"
-    assert permissions.get("contents") == "read"
     triggers = document["on"] if isinstance(document.get("on"), dict) else document.get(True)
     assert isinstance(triggers, dict), "the release workflow must declare an 'on' trigger"
-    push = triggers.get("push") or {}
-    assert "v*" in str(push.get("tags")), "the release workflow must trigger on v* tag pushes"
+    assert "v*" in str((triggers.get("push") or {}).get("tags")), (
+        "the release workflow must trigger on v* tag pushes"
+    )
+
+    jobs = document.get("jobs")
+    assert isinstance(jobs, dict)
+    image = jobs.get("image")
+    assert isinstance(image, dict)
+    assert (image.get("permissions") or {}).get("packages") == "write", (
+        "the image job needs packages:write, scoped to itself"
+    )
+    distributions = jobs.get("distributions")
+    assert isinstance(distributions, dict)
+    assert (distributions.get("permissions") or {}).get("id-token") == "write", (
+        "the publish job needs id-token:write for trusted publishing"
+    )
+
+
+def test_packaging_workflow_publishes_nothing() -> None:
+    """Every commit proves the packaging; only a tag may publish.
+
+    A packaging workflow that could upload would make "released" and "merged"
+    the same event, which is exactly what the tag gate exists to prevent.
+    """
+    assert PACKAGING_WORKFLOW_PATH.is_file(), "a packaging workflow must exist"
+    workflow = PACKAGING_WORKFLOW_PATH.read_text(encoding="utf-8")
+    document = yaml.safe_load(workflow)
+    assert isinstance(document, dict)
+    assert document.get("permissions") == "read-all", "the packaging workflow needs no write scope"
+    for banned in ("pypa/gh-action-pypi-publish", "twine upload", "docker push", "push: true"):
+        assert banned not in workflow, f"the packaging workflow must not publish ({banned!r})"
+    assert "twine check --strict" in workflow, "the packaging workflow must inspect every artifact"
+    assert "scripts/check_packaging.py" in workflow, "every wheel must install and import"
+
+
+def test_release_please_is_gone() -> None:
+    """#1014: two sources of truth for one version is the defect being removed.
+
+    release-please edits a static version field, while this project's version is
+    derived from the git tag, so it could never have worked.
+    """
+    for path in (
+        ".github/release-please.yml",
+        "release-please-config.json",
+        ".release-please-manifest.json",
+    ):
+        assert not (SERVICE_ROOT / path).exists(), f"{path} is dead configuration: the tag is the version"
+    workflow = SERVICE_ROOT.joinpath(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert "release-please" not in workflow
 
 
 def test_every_precommit_hook_has_a_ci_job_that_runs_the_hook() -> None:

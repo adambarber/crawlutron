@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 TEMPLATE = """\
@@ -65,6 +66,11 @@ def main() -> None:
     version, parts = _version_parts(_describe())
     write_target = Path("packages/core/src/crawlutron/_version.py")
     write_target.write_text(TEMPLATE.format(ver=version, vt=parts))
+    # The release workflow needs the derived version on stdout without parsing the
+    # human line, so `--print` emits the version alone.
+    if "--print" in sys.argv[1:]:
+        print(version)
+        return
     print(f"wrote {write_target}: {version}")
 
 

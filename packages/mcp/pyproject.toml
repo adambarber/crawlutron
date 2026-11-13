@@ -1,18 +1,19 @@
 [build-system]
-requires = ["hatchling", "hatch-vcs>=0.4"]
+requires = ["hatchling", "hatch-vcs>=0.4.0.dev0"]
 build-backend = "hatchling.build"
 
 [project]
 name = "crawlutron-mcp"
 dynamic = ["version"]
 description = "Transport-agnostic Model Context Protocol (2026-07-28) surface for the Crawlutron crawler"
+readme = "README.md"
 requires-python = ">=3.14"
 license = "MIT"
 dependencies = [
     # mcp is the framework-free MCP protocol/tools wheel; rest (the FastAPI
     # carrier) depends on this wheel, never the reverse. The core floor is the
     # first release that shipped the disjoint packages/ surfaces (Wave A).
-    "crawlutron-core>=0.4",
+    "crawlutron-core>=0.4.0.dev0",
     "pydantic",
 ]
 

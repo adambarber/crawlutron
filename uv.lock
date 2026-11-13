@@ -536,30 +536,11 @@ wheels = [
 name = "crawlutron"
 source = { editable = "." }
 dependencies = [
-    { name = "beautifulsoup4" },
-    { name = "brotli" },
-    { name = "camoufox" },
-    { name = "charset-normalizer" },
     { name = "crawlutron-core" },
     { name = "crawlutron-mcp" },
     { name = "crawlutron-rest" },
-    { name = "crawlutron-safe-url" },
+    { name = "crawlutron-safe-url", extra = ["psl"] },
     { name = "crawlutron-sdk" },
-    { name = "curl-cffi" },
-    { name = "fastapi" },
-    { name = "h2" },
-    { name = "httpx" },
-    { name = "lxml" },
-    { name = "markdownify" },
-    { name = "markitdown", extra = ["docx", "pdf", "pptx", "xlsx"] },
-    { name = "pdfplumber" },
-    { name = "publicsuffixlist" },
-    { name = "pydantic" },
-    { name = "regex" },
-    { name = "soupsieve" },
-    { name = "trafilatura" },
-    { name = "uvicorn", extra = ["standard"] },
-    { name = "yoyo-migrations" },
 ]
 
 [package.optional-dependencies]
@@ -587,30 +568,16 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "basedpyright", marker = "extra == 'dev'", specifier = "==1.40.2" },
-    { name = "beautifulsoup4", specifier = "==4.15.0" },
-    { name = "brotli", specifier = "==1.2.1" },
     { name = "brotli-stubs", marker = "extra == 'dev'", specifier = "==1.2.1" },
-    { name = "camoufox", specifier = "==0.5.9" },
-    { name = "charset-normalizer", specifier = "==3.5.2" },
     { name = "coverage", marker = "extra == 'dev'", specifier = "==7.17.0" },
     { name = "crawlutron-core", editable = "packages/core" },
     { name = "crawlutron-mcp", editable = "packages/mcp" },
     { name = "crawlutron-rest", editable = "packages/rest" },
-    { name = "crawlutron-safe-url", editable = "packages/safe-url" },
+    { name = "crawlutron-safe-url", extras = ["psl"], editable = "packages/safe-url" },
     { name = "crawlutron-sdk", editable = "packages/sdk" },
-    { name = "curl-cffi", specifier = "==0.17.0" },
-    { name = "fastapi", specifier = "==0.162.0" },
-    { name = "h2", specifier = "==4.4.1" },
-    { name = "httpx", specifier = "==0.28.1" },
     { name = "jscpd", marker = "extra == 'dev'", specifier = "==5.3.2" },
-    { name = "lxml", specifier = "==6.1.3" },
-    { name = "markdownify", specifier = "==1.2.3" },
-    { name = "markitdown", extras = ["docx", "pdf", "pptx", "xlsx"], specifier = "==0.1.9" },
     { name = "mypy", marker = "extra == 'dev'", specifier = "==2.4.1" },
-    { name = "pdfplumber", specifier = "==0.11.10" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = "==4.7.0" },
-    { name = "publicsuffixlist", specifier = "==1.1.2.20261101" },
-    { name = "pydantic", specifier = "==2.14.2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = "==9.2.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = "==1.4.1.post1" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = "==7.1.0" },
@@ -618,22 +585,57 @@ requires-dist = [
     { name = "pytest-timeout", marker = "extra == 'dev'", specifier = "==2.4.0" },
     { name = "pytest-xdist", marker = "extra == 'dev'", specifier = "==3.8.0" },
     { name = "pyyaml", marker = "extra == 'dev'", specifier = "==6.0.3" },
-    { name = "regex", specifier = "==2026.9.29" },
     { name = "ruff", marker = "extra == 'dev'", specifier = "==0.17.3" },
-    { name = "soupsieve", specifier = "==4.0.0" },
-    { name = "trafilatura", specifier = "==2.3.1" },
     { name = "types-lxml", marker = "extra == 'dev'", specifier = "==2026.2.16" },
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = "==6.0.12.20261030" },
     { name = "types-regex", marker = "extra == 'dev'", specifier = "==2026.9.29.20261030" },
-    { name = "uvicorn", extras = ["standard"], specifier = "==0.54.0" },
     { name = "vulture", marker = "extra == 'dev'", specifier = "==2.16" },
-    { name = "yoyo-migrations", specifier = "==9.0.0" },
 ]
 provides-extras = ["dev"]
 
 [[package]]
 name = "crawlutron-core"
 source = { editable = "packages/core" }
+dependencies = [
+    { name = "beautifulsoup4" },
+    { name = "brotli" },
+    { name = "camoufox" },
+    { name = "charset-normalizer" },
+    { name = "crawlutron-safe-url" },
+    { name = "curl-cffi" },
+    { name = "fastapi" },
+    { name = "h2" },
+    { name = "httpx" },
+    { name = "lxml" },
+    { name = "markdownify" },
+    { name = "markitdown", extra = ["docx", "pdf", "pptx", "xlsx"] },
+    { name = "pdfplumber" },
+    { name = "pydantic" },
+    { name = "soupsieve" },
+    { name = "trafilatura" },
+    { name = "yoyo-migrations" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "beautifulsoup4", specifier = "==4.15.0" },
+    { name = "brotli", specifier = "==1.2.1" },
+    { name = "camoufox", specifier = "==0.5.9" },
+    { name = "charset-normalizer", specifier = "==3.5.2" },
+    { name = "crawlutron-safe-url", editable = "packages/safe-url" },
+    { name = "curl-cffi", specifier = "==0.17.0" },
+    { name = "fastapi", specifier = "==0.162.0" },
+    { name = "h2", specifier = "==4.4.1" },
+    { name = "httpx", specifier = "==0.28.1" },
+    { name = "lxml", specifier = "==6.1.3" },
+    { name = "markdownify", specifier = "==1.2.3" },
+    { name = "markitdown", extras = ["docx", "pdf", "pptx", "xlsx"], specifier = "==0.1.9" },
+    { name = "pdfplumber", specifier = "==0.11.10" },
+    { name = "pydantic", specifier = "==2.14.2" },
+    { name = "soupsieve", specifier = "==4.0.0" },
+    { name = "trafilatura", specifier = "==2.3.1" },
+    { name = "yoyo-migrations", specifier = "==9.0.0" },
+]
 
 [[package]]
 name = "crawlutron-mcp"
@@ -655,19 +657,20 @@ source = { editable = "packages/rest" }
 dependencies = [
     { name = "crawlutron-core" },
     { name = "fastapi" },
+    { name = "uvicorn", extra = ["standard"] },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "crawlutron-core", editable = "packages/core" },
     { name = "fastapi", specifier = "==0.162.0" },
+    { name = "uvicorn", extras = ["standard"], specifier = "==0.54.0" },
 ]
 
 [[package]]
 name = "crawlutron-safe-url"
 source = { editable = "packages/safe-url" }
 dependencies = [
-    { name = "crawlutron-core" },
     { name = "regex" },
 ]
 
@@ -678,7 +681,6 @@ psl = [
 
 [package.metadata]
 requires-dist = [
-    { name = "crawlutron-core", editable = "packages/core" },
     { name = "publicsuffixlist", marker = "extra == 'psl'", specifier = "==1.1.2.20261101" },
     { name = "regex", specifier = "==2026.9.29" },
 ]

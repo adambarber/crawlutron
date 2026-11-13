@@ -1,62 +1,118 @@
-name: Release image
+name: Release
 
-# Builds and pushes the crawlutron OCI image to GitHub Container Registry when
-# the version changes: on a v* tag push (the release-please tag cut per
-# docs/RELEASE.md, which is the moment a new semver exists). The image is tagged
-# :{version} (lowercased for GHCR, docker-ref-sanitized) and :latest.
+# The tag is the release act. hatch-vcs derives the version from the newest git
+# tag, so cutting a release is `git tag vX.Y.Z && git push --tags`; this workflow
+# turns that tag into artifacts and publishes nothing else, ever.
 #
-# #8433: this pushes during its own release workflow -- the sanctioned path --
-# it does not gate on/require manual `git push`. ci.yml carries
-# `permissions: read-all` by contract (#624) and so CANNOT push packages; this
-# workflow declares the narrow write scope it needs and nothing else.
-
-permissions:
-  contents: read
-  packages: write
+# Publishing to PyPI uses trusted publishing (OIDC): there is no stored token to
+# leak, and the workflow identity is the credential. Each project needs one
+# trusted publisher configured on pypi.org (see docs/RELEASE.md); a name that is
+# not yet claimed needs a pending publisher.
+#
+# ci.yml stays `permissions: read-all` and cannot publish (#624). Only this
+# tag-triggered workflow carries write scope, and each job carries the narrowest
+# set it needs.
 
 on:
   push:
     tags: ["v*"]
 
+permissions:
+  contents: read
+
 jobs:
-  build-and-publish:
-    name: Build and publish GHCR image
+  distributions:
+    name: Build and publish to PyPI
     runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      # Trusted publishing exchanges this OIDC token for a short-lived upload
+      # token; it is never a long-lived credential.
+      id-token: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
           fetch-tags: true
-
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.14"
 
-      - name: Install package + dev dependencies
+      - name: Assert the tag carries the version the build will derive
+        # A mis-tagged release must fail before anything is published: a tag that
+        # does not match the tree would ship `0.0.0.dev0` under a semver name.
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME#v}"
+          uv build --all-packages --out-dir dist >/dev/null
+          uv run --no-project --python 3.14 python - "$TAG" <<'PY'
+          import pathlib
+          import sys
+          import tarfile
+
+          tag = sys.argv[1]
+          sdists = sorted(pathlib.Path("dist").glob("*.tar.gz"))
+          if not sdists:
+              sys.exit("no sdist built")
+          bad = []
+          for sdist in sdists:
+              with tarfile.open(sdist) as tf:
+                  name = tf.getnames()[0].split("/")[0]
+              # An sdist directory is `{name}-{version}`; a dev suffix means the
+              # tag did not reach the tree this built from.
+              version = name.split("-", 1)[1]
+              print(f"{sdist.name}: {version}")
+              if version != tag:
+                  bad.append(f"{sdist.name} carries {version}, tag is {tag}")
+          for line in bad:
+              print(f"::error::{line}")
+          sys.exit(1 if bad else 0)
+          PY
+
+      - name: Inspect every artifact
+        run: uvx twine check --strict dist/*
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1
+        with:
+          packages-dir: dist/
+
+  image:
+    name: Publish the container image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install the frozen environment
         run: uv sync --frozen --extra dev
-
-      # The version artifact is gitignored, so it is not in the checkout; write
-      # it from git describe so the *baked* image carries the real semver
-      # (hatch-vcs would write the same at a real build).
-      - name: Regenerate the version artifact
-        run: .venv/bin/python scripts/regen_version.py
 
       - name: Resolve the release version
         id: version
         run: |
-          VERSION="$(
-            .venv/bin/python -c "from crawlutron._version import __version__; print(__version__)"
-          )"
+          set -euo pipefail
+          VERSION="$(.venv/bin/python scripts/regen_version.py --print)"
           echo "native=${VERSION}"
-          # GHCR image names are lowercase and docker refs reject '+'.
+          # GHCR names are lowercase and docker refs reject '+'.
           TAG="$(printf %s "$VERSION" | tr '[:upper:]' '[:lower:]' | tr '+' '-')"
           echo "tag=${TAG}"
           echo "native=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3
+      - uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -73,9 +129,6 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/crawlutron:${{ steps.version.outputs.tag }}
             ghcr.io/${{ github.repository_owner }}/crawlutron:latest
 
-      # One-command smoke (per #730 rails): run the pushed image, map the port so
-      # the runner can hit its loopback, assert the baked version equals the tag
-      # it was pushed as, and that /health and /ready answer.
       - name: Smoke the pushed image
         run: |
           set -euo pipefail
@@ -95,3 +148,31 @@ jobs:
           curl -fsS http://127.0.0.1:8765/ready >/dev/null
           BAKED="$(docker exec "$NAME" /app/.venv/bin/python -c 'import crawlutron; print(crawlutron.__version__)')"
           test "$BAKED" = "${{ steps.version.outputs.native }}"
+
+  github-release:
+    name: Publish the GitHub release
+    needs: [distributions, image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Build the SBOM from the frozen lock
+        run: |
+          uv export --frozen --no-dev --no-emit-workspace --format requirements-txt -o /tmp/crawlutron-lock.txt
+          uv tool run --from cyclonedx-bom==8.0.1 cyclonedx-py requirements /tmp/crawlutron-lock.txt -o sbom.cdx.json --of json
+      - name: Create the release with its notes and SBOM
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            sbom.cdx.json

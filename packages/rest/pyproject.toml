@@ -1,11 +1,12 @@
 [build-system]
-requires = ["hatchling", "hatch-vcs>=0.4"]
+requires = ["hatchling", "hatch-vcs>=0.4.0.dev0"]
 build-backend = "hatchling.build"
 
 [project]
 name = "crawlutron-rest"
 dynamic = ["version"]
 description = "FastAPI HTTP surface for the policy-driven web crawler and content-extraction service"
+readme = "README.md"
 requires-python = ">=3.14"
 license = "MIT"
 keywords = [
@@ -20,8 +21,9 @@ dependencies = [
     # rest is the FastAPI-carrying package; core is framework-free and never
     # imports this wheel. The floor is the first release that shipped the
     # disjoint api/main/cli surface under packages/rest (Wave A, #900/#902).
-    "crawlutron-core>=0.4",
+    "crawlutron-core>=0.4.0.dev0",
     "fastapi==0.162.0",
+    "uvicorn[standard]==0.54.0",
 ]
 
 [project.scripts]

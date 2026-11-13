@@ -1,11 +1,12 @@
 [build-system]
-requires = ["hatchling", "hatch-vcs>=0.4"]
+requires = ["hatchling", "hatch-vcs>=0.4.0.dev0"]
 build-backend = "hatchling.build"
 
 [project]
 name = "crawlutron-sdk"
 dynamic = ["version"]
 description = "Python client for the Crawlutron execution service"
+readme = "README.md"
 requires-python = ">=3.14"
 license = "MIT"
 dependencies = [
