@@ -80,11 +80,13 @@ def _error_413(max_bytes: int) -> JSONResponse:
     )
 
 
-async def _collect_declared_body(original_receive: Receive, *, declared: int) -> list[Message] | None:
-    """Read a declared body up front, verifying the declared length arrives.
+async def _collect_declared_body(
+    original_receive: Receive, *, declared: int, overflow: list[bool]
+) -> list[Message] | None:
+    """Verify a declared length arrives, buffering EXACTLY those bytes (#921).
 
-    Returns the buffered messages for replay, or ``None`` when the stream ended
-    short -- truncation the app must never process (#619).
+    The buffer sums to the declared bytes and ends ``more_body: False``; ``None``
+    is truncation the app must never process (#619). A crossing chunk is split.
     """
     buffered: list[Message] = []
     received = 0
@@ -100,8 +102,16 @@ async def _collect_declared_body(original_receive: Receive, *, declared: int) ->
             # A non-request message mid-collect is a disconnect (uvicorn
             # re-delivers it forever): the body is truncated (#619), not spinnable.
             return None
+        body = message.get("body", b"") or b""
+        excess = (received + len(body)) - declared
+        if excess > 0:
+            keep = len(body) - excess
+            buffered.append({**message, "body": body[:keep], "more_body": False})
+            overflow[0] = True
+            overflow[1] = bool(message.get("more_body", False))
+            return buffered
         buffered.append(message)
-        received += len(message.get("body", b"") or b"")
+        received += len(body)
         if received >= declared:
             return buffered
         if not message.get("more_body", False):
@@ -109,18 +119,30 @@ async def _collect_declared_body(original_receive: Receive, *, declared: int) ->
     return buffered
 
 
-def _replaying_receive(buffered: list[Message], original_receive: Receive, *, max_bytes: int) -> Receive:
-    """Serve the buffered declared body, then pass through to the capped stream:
-    the fall-through stays under the cap, or a client that declared small and
-    streams big hands downstream readers an uncapped firehose (#666)."""
+def _replaying_receive(
+    buffered: list[Message], original_receive: Receive, *, max_bytes: int, overflow: list[bool]
+) -> Receive:
+    """Serve the buffered declared body, then the capped pass-through (#666);
+    a body that overflowed its declaration (#921) yields nothing past the split."""
     replay = iter(buffered)
     declared = sum(len(message.get("body", b"") or b"") for message in buffered)
-    capped = _capped_receive_for(original_receive, max_bytes=max_bytes - declared, truncated=[False])
+    if overflow[0]:
+        # Split already ended the body (more_body False on the final message); a
+        # further app receive must hand it nothing (never the over-declared bytes).
+        empty = {"type": "http.request", "body": b"", "more_body": False}
 
-    async def receive() -> Message:
-        for message in replay:
-            return message
-        return await capped()
+        async def receive() -> Message:
+            for message in replay:
+                return message
+            return empty
+
+    else:
+        capped = _capped_receive_for(original_receive, max_bytes=max_bytes - declared, truncated=[False])
+
+        async def receive() -> Message:
+            for message in replay:
+                return message
+            return await capped()
 
     return receive
 
@@ -156,11 +178,20 @@ def _capped_receive_for(original_receive: Receive, *, max_bytes: int, truncated:
 
 
 async def limit_request_body(request: Request, call_next, *, max_bytes: int = MAX_REQUEST_BODY_BYTES):
-    """ASGI middleware: cap request bodies at ``max_bytes`` and refuse a body
-    that never delivers its declared Content-Length (#619); a malformed
-    Content-Length refuses 413 like an oversized one (#675)."""
+    """Cap declared request bodies; overflow is split, never routed (#921). #619
+    truncation and #675 malformed length both refuse 413 like an oversize body."""
     original_receive = request.receive
     content_length = request.headers.get("content-length")
+    conflicting = {
+        value.decode("latin-1")
+        for name, value in request.scope.get("headers", [])
+        if name == b"content-length"
+    }
+    if len(conflicting) > 1:
+        # Two distinct Content-Length values are a framing contradiction; drain
+        # and refuse rather than serve whichever the parser happened to read.
+        await _drain_declared_body(original_receive, max_bytes=max_bytes)
+        return _error_413(max_bytes)
     declared = 0
     if content_length is not None:
         # A nonempty header that is not a plain non-negative decimal refuses
@@ -175,11 +206,21 @@ async def limit_request_body(request: Request, call_next, *, max_bytes: int = MA
             await _drain_declared_body(original_receive, max_bytes=max_bytes)
             return _error_413(max_bytes)
     if declared:
-        buffered = await _collect_declared_body(original_receive, declared=declared)
+        overflow: list[bool] = [False, False]
+        buffered = await _collect_declared_body(original_receive, declared=declared, overflow=overflow)
         if buffered is None:
             return _error_413(max_bytes)
-        request._receive = _replaying_receive(buffered, original_receive, max_bytes=max_bytes)
-        return await call_next(request)
+        request._receive = _replaying_receive(
+            buffered, original_receive, max_bytes=max_bytes, overflow=overflow
+        )
+        response = await call_next(request)
+        if overflow[0]:
+            # Drain any body the split chunk flagged as still-coming (capped) so a
+            # keep-alive reuse cannot read it as the next request (#921).
+            if overflow[1]:
+                await _drain_declared_body(original_receive, max_bytes=max_bytes)
+            response.headers["Connection"] = "close"
+        return response
 
     truncating: list[bool] = [False]
     request._receive = _capped_receive_for(original_receive, max_bytes=max_bytes, truncated=truncating)
