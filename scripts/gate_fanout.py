@@ -25,7 +25,8 @@ SCAN_ROOTS_MARKER = "{{SCAN_ROOTS}}"
 
 
 #: Seconds a gate child may hold the run before its session is killed.
-WALL_SECONDS = 60.0
+#: CI overrides via GATE_FANOUT_WALL_SECONDS; default 60s guards commit-admission.
+WALL_SECONDS = float(os.environ.get("GATE_FANOUT_WALL_SECONDS", "60"))
 #: Any status artifact this old is a dead run's residue: discard it.
 STALE_SECONDS = 600.0
 

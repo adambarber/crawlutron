@@ -77,6 +77,12 @@ jobs:
         run: .venv/bin/python -m compileall -q packages/*/src tests scripts
       - name: Run all configured hooks
         run: .venv/bin/pre-commit run --all-files --config .pre-commit-config.yaml
+        env:
+          # Cold-cache CI runners are hard-killed at scripts/gate_fanout.py's
+          # 60s wall once the battery lands above ~53s; raise the CI-side
+          # wall so the battery completes. Commit-admission keeps the 60s
+          # default via gate_fanout's unchanged default (owner directive).
+          GATE_FANOUT_WALL_SECONDS: "120"
 
   test-fast:
     name: Test suite (fast)

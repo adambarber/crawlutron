@@ -15,11 +15,11 @@ services:
       # build would run the service in hot-reload dev mode under a supervisor
       # process. The runtime stage is the production command.
       target: runtime
-      # The Dockerfile's camoufox-binary stage binds a named `seed` context
-      # (#625): without it BuildKit resolves docker.io/library/seed and the
-      # build fails before the in-RUN fallback can run. Compose supplies a
-      # committed empty dir; point SEED_CACHE_DIR at ~/Library/Caches/camoufox
-      # (or set it in .env) to short-circuit the fetch offline.
+      # Compose supplies a committed empty seed dir (``${SEED_CACHE_DIR:-.dockerseed}``)
+      # so the camoufox-binary stage can short-circuit the browser fetch offline
+      # (point SEED_CACHE_DIR at ~/Library/Caches/camoufox). Bare ``docker build .``
+      # declares no seed context and fetches over the wire instead, so no seed
+      # context is mandatory for a clean-checkout build.
       additional_contexts:
         - "seed=${SEED_CACHE_DIR:-.dockerseed}"
     image: crawlutron:local

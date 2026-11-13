@@ -84,16 +84,12 @@ RUN uv pip install --no-cache-dir --python /usr/local/bin/python \
 # the mount only persists the finished install across rebuilds.
 #
 # OFFLINE SEED (option B): a named `seed` build context (a real camoufox cache,
-# e.g. ~/Library/Caches/camoufox) is bound directly by its name and copied into
-# the mount so the fetch short-circuits without the network; an empty seed dir
-# (compose's default) hits the `if [ -d /seed ]` guard and the RUN fetches over
-# the wire exactly as before. The context is MANDATORY: a build without
-# --build-context seed= makes BuildKit resolve docker.io/library/seed and fail
-# before this RUN starts (#625, probed live) -- compose supplies
-# .dockerseed by default; bare builds pass --build-context seed=<dir>.
+# e.g. ~/Library/Caches/camoufox) may be bound with --build-context seed=<dir>
+# and is copied into the mount so the fetch short-circuits without the network.
+# Without a seed context the RUN fetches the browser binary over the wire
+# exactly as before -- bare `docker build .` works with no extra flags.
 RUN --mount=type=cache,target=/root/.cache/camoufox-mount,sharing=locked \
-    --mount=type=bind,from=seed,target=/seed \
-    sh -c 'if [ -d /seed ]; then mkdir -p /root/.cache/camoufox-mount && (cp -a /seed/camoufox /root/.cache/camoufox-mount/ 2>/dev/null || cp -a /seed/. /root/.cache/camoufox-mount/camoufox/); fi; PYTHONPATH=/camoufox-deps XDG_CACHE_HOME=/root/.cache/camoufox-mount python -m camoufox fetch; test -d /root/.cache/camoufox-mount/camoufox && mkdir -p /camoufox-bundle && cp -a /root/.cache/camoufox-mount/camoufox/. /camoufox-bundle/'
+    sh -c 'PYTHONPATH=/camoufox-deps XDG_CACHE_HOME=/root/.cache/camoufox-mount python -m camoufox fetch; test -d /root/.cache/camoufox-mount/camoufox && mkdir -p /camoufox-bundle && cp -a /root/.cache/camoufox-mount/camoufox/. /camoufox-bundle/'
 
 # ==========================================
 # 2. Runtime Stage: Lean production image
@@ -192,6 +188,10 @@ COPY --chown=appuser:appuser packages/core/src/crawlutron /app/crawlutron
 COPY --chown=appuser:appuser packages/core/src/admission /app/admission
 COPY --chown=appuser:appuser packages/rest/src/crawlutron_rest /app/crawlutron_rest
 COPY --chown=appuser:appuser packages/sdk/src/crawlutron_sdk /app/crawlutron_sdk
+# Priority: the REST app imports crawlutron_mcp at import time
+# (crawlutron_rest.discovery.agent_hints -> registry.TOOL_SPECS), so its tree
+# must land at /app too or uvicorn dies before serving a single request.
+COPY --chown=appuser:appuser packages/mcp/src/crawlutron_mcp /app/crawlutron_mcp
 
 # uvicorn applies its logging config in ``Config.__init__`` -- BEFORE the app
 # is imported -- so the service's JSON sink must exist by then or uvicorn's own
