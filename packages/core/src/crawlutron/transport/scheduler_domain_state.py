@@ -105,8 +105,6 @@ class DomainState:
             return True
         if self.failures > 0 or self.trips > 0:
             return True
-        if self.min_delay > 0:
-            return True
         if self.pin is not None and now - self.pin[1] <= pin_ttl:
             return True
         if self.ema is not None and self.last_seen is not None and self.last_seen > now - window:

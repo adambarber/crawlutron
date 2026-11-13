@@ -34,3 +34,44 @@ class TestGateLiveness:
         """The defect: ``live()`` raised AttributeError on any gate lacking the
         private ``_value`` counter; the public occupancy is the only source."""
         assert _state(gate_occupancy=1).gate.occupancy == 1
+
+
+class TestCrawlDelayLiveness:
+    """A robots Crawl-delay floor does not keep a record live by itself:
+    only recent activity (ema/last_seen within window) does."""
+
+    def _record(self, *, min_delay: float, ema: float | None, last_seen: float | None) -> DomainState:
+        state = DomainState()
+        state.min_delay = min_delay
+        state.ema = ema
+        state.last_seen = last_seen
+        return state
+
+    def test_domain_with_only_crawl_delay_and_stale_activity_is_dead(self):
+        """min_delay > 0 is not liveness: a floor-only record with a stale
+        last_seen is purgeable -- the old short-circuit kept it forever."""
+        state = self._record(min_delay=5.0, ema=100.0, last_seen=0.0)
+        assert not state.live(now=1000.0, window=600.0, pin_ttl=300.0)
+
+    def test_domain_with_crawl_delay_and_recent_activity_stays_live(self):
+        """min_delay plus a fresh last_seen/ema is live: liveness now comes
+        from the age check, not the floor alone."""
+        state = DomainState()
+        state.min_delay = 5.0
+        state.feed_latency(100.0, smoothing=0.2, clock_now=990.0)
+        assert state.live(now=1000.0, window=600.0, pin_ttl=300.0)
+
+    def test_domain_with_only_crawl_delay_within_window_stays_live(self):
+        """A floor-only record whose last_seen is inside the window is live
+        through the age check."""
+        state = self._record(min_delay=5.0, ema=100.0, last_seen=990.0)
+        assert state.live(now=1000.0, window=600.0, pin_ttl=300.0)
+
+    def test_domain_at_the_window_edge_is_not_live(self):
+        """last_seen == now - window is already dead: the check is strict."""
+        state = self._record(min_delay=5.0, ema=100.0, last_seen=400.0)
+        assert not state.live(now=1000.0, window=600.0, pin_ttl=300.0)
+
+    def test_domain_just_inside_the_window_stays_live(self):
+        state = self._record(min_delay=5.0, ema=100.0, last_seen=400.0 + 1e-6)
+        assert state.live(now=1000.0, window=600.0, pin_ttl=300.0)

@@ -38,14 +38,13 @@ class TestSameDomainSpacing:
         )
 
     async def test_committed_crawl_delay_spaces_successive_requests(self, monkeypatch):
-        """A robots Crawl-delay committed at admission paces the whole batch.
-
-        The floor flows through the public commit path; the second request on
-        the domain waits the floor past the first, not concurrently with it.
+        """A committed Crawl-delay paces an ACTIVE batch: the record is live at
+        run()'s up-front purge, so the floor survives it (#954).
         """
         sleeps = recorder(monkeypatch)
         scheduler = _frozen_scheduler(delay_seconds=0.0, adaptive=False)
         scheduler.set_domain_min_delay("example.com", 0.5)
+        scheduler.record_latency("example.com", 100.0)
         jobs = _two_jobs("http://example.com/a", "http://example.com/b")
         await scheduler.run(jobs, ok_worker, failed_result=engine_envelope)
         spacing = sleeps.in_range(0.4, 0.6)

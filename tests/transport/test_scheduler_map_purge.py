@@ -2,6 +2,8 @@
 
 import asyncio
 
+import pytest
+
 from crawlutron.transport.scheduler import COOLDOWN_PURGE_INTERVAL, DomainScheduler, TokenBucket
 from tests._result_builders import make_job
 from tests._scheduler_doubles import make_scheduler
@@ -85,14 +87,37 @@ def test_charged_failure_ladder_survives_the_purge():
     assert s.snapshot()["failing.test"].failures == 1
 
 
-def test_committed_politeness_floor_survives_the_purge():
-    """#577: the robots Crawl-delay floor is committed once (request_pipeline
-    :347) and consumed across repeated run() calls, each purging up front --
-    it must never be time-elapsed state."""
+def test_committed_politeness_floor_survives_purge_while_domain_is_active():
+    """#577: an actively crawled domain keeps its committed floor across the
+    up-front purge -- liveness comes from last_seen, not min_delay alone."""
     s = _scheduler(adaptive=False)
+    s.record_latency("delayed.test", 100.0)
     s.set_domain_min_delay("delayed.test", 5.0)
     s.purge_expired()
-    assert s.current_delay("delayed.test") == 5.0, "the floor was purged"
+    assert s.current_delay("delayed.test") == 5.0
+
+
+@pytest.mark.parametrize(
+    ("idle_for", "survives"),
+    [
+        pytest.param(0.0, True, id="recently_active_survives_purge"),
+        pytest.param(None, False, id="purges_after_window"),
+    ],
+)
+def test_domain_with_only_crawl_delay_purges_after_window(idle_for, survives):
+    """min_delay is not liveness by itself (#954): an idle floor-only record
+    drops out once last_seen is older than the window, while a recently
+    crawled record keeps its floor through purge."""
+    now = [1000.0]
+    s = _scheduler(clock=lambda: now[0], adaptive=False)
+    s.record_latency("paused.test", 100.0)
+    s.set_domain_min_delay("paused.test", 5.0)
+    now[0] += s._circuit_cooldown_max * 2 if idle_for is None else idle_for
+    s.purge_expired()
+    if survives:
+        assert s.current_delay("paused.test") == 5.0
+    else:
+        assert "paused.test" not in s.snapshot()
 
 
 def test_a_fully_inert_record_is_dropped():
