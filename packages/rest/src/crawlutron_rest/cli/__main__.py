@@ -144,8 +144,8 @@ def _add_auth_trace_exit_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--base-url",
         metavar="URL",
-        default=DEFAULT_BASE_URL,
-        help="Service base URL (env CRAWLUTRON_BASE_URL, default %(default)s).",
+        default=None,
+        help=f"Service base URL (env CRAWLUTRON_BASE_URL, default {DEFAULT_BASE_URL}).",
     )
     parser.add_argument("--trace", action="store_true", help="Also print the crawl trace.")
     parser.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
@@ -305,7 +305,7 @@ def run_crawl(
     args = parsed
 
     api_key = args.key or os.environ.get("CRAWLUTRON_API_KEY")
-    base_url = os.environ.get("CRAWLUTRON_BASE_URL") or args.base_url
+    base_url = args.base_url or os.environ.get("CRAWLUTRON_BASE_URL") or DEFAULT_BASE_URL
     payload = _build_payload(args)
 
     own_client = False
@@ -313,7 +313,7 @@ def run_crawl(
         client = CrawlClient(base_url=base_url, api_key=api_key, timeout=DEFAULT_HTTP_TIMEOUT)
         own_client = True
     try:
-        async_door = args.wait or args.async_mode
+        async_door = args.wait or args.async_mode or bool(args.webhook)
         if async_door:
             payload = dict(payload)
             payload["async_mode"] = True
