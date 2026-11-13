@@ -52,6 +52,16 @@ pre-automation history verbatim.
 - Deploy, fleet concerns, and the Homebrew / npx channels are deferred
   per the #561 owner ruling.
 
+## CI publishes the image when the version changes (#949)
+
+`.github/workflows/release.yml` triggers on a `v*` tag push (the release-please
+tag cut) and builds + pushes the root Dockerfile's `runtime` target to GHCR
+with the narrow write scope it needs (ci.yml stays `read-all` and cannot push
+packages). The image is tagged `:{version}` (lowercased / docker-ref-sanitized)
+and `:latest`, and its smoke asserts the baked `crawlutron.__version__` equals
+the tag it was pushed as. Creating the next tagged version is: tag `vX.Y.Z`,
+push the tag; the release workflow builds and publishes the image.
+
 ## Release artifacts
 
 #699: when release-please publishes a release, the release-please workflow

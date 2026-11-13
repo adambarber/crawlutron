@@ -13,6 +13,7 @@ from tests._ci_contract import (
     ENFORCEMENT_COMMAND,
     ENFORCEMENT_TRIGGER_PATTERN,
     REPORTING_JOBS,
+    SERVICE_ROOT,
     WORKFLOW_PATH,
     _assert_failure_propagation,
     _assert_no_config_exclude,
@@ -25,6 +26,9 @@ from tests._ci_contract import (
     _require_exactly_one_jscpd_gate,
     _required_needs,
 )
+
+# The version-triggered GHCR publish workflow (#949), contracted alongside ci.yml.
+RELEASE_WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "release.yml"
 
 
 def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
@@ -130,29 +134,47 @@ def test_every_action_is_sha_pinned_and_permissions_are_declared() -> None:
     full-length commit SHA, and the workflow must declare its permissions so
     the default write-all token scope cannot leak into a compromised step.
     """
-    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-    document = yaml.safe_load(workflow)
-    assert isinstance(document, dict)
-    permissions = document.get("permissions")
+    for workflow_path in (WORKFLOW_PATH, RELEASE_WORKFLOW_PATH):
+        document = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+        assert isinstance(document, dict)
+
+        def walk(value: object, file_name: str = workflow_path.name) -> None:
+            if isinstance(value, dict):
+                uses = value.get("uses")
+                if isinstance(uses, str) and "@" in uses:
+                    ref = uses.rsplit("@", 1)[1]
+                    assert re.fullmatch(r"[0-9a-f]{40}", ref), (
+                        f"action ref {uses!r} in {file_name} is not a full-length commit SHA"
+                    )
+                for child in value.values():
+                    walk(child)
+            elif isinstance(value, list):
+                for child in value:
+                    walk(child)
+
+        walk(document.get("jobs"))
+    ci = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+    assert isinstance(ci, dict)
+    permissions = ci.get("permissions")
     assert permissions == "read-all", (
         f"CI must declare top-level permissions: read-all, found {permissions!r}"
     )
 
-    def walk(value: object) -> None:
-        if isinstance(value, dict):
-            uses = value.get("uses")
-            if isinstance(uses, str) and "@" in uses:
-                ref = uses.rsplit("@", 1)[1]
-                assert re.fullmatch(r"[0-9a-f]{40}", ref), (
-                    f"action ref {uses!r} is not a full-length commit SHA"
-                )
-            for child in value.values():
-                walk(child)
-        elif isinstance(value, list):
-            for child in value:
-                walk(child)
 
-    walk(document.get("jobs"))
+def test_release_workflow_has_write_only_on_packages() -> None:
+    """#949: the GHCR publish needs write scope ci.yml's read-all forbids, so the
+    release workflow declares it narrowly -- packages write, contents read."""
+    assert RELEASE_WORKFLOW_PATH.is_file(), "a version-triggered release workflow must exist"
+    document = yaml.safe_load(RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8"))
+    assert isinstance(document, dict)
+    permissions = document.get("permissions")
+    assert isinstance(permissions, dict)
+    assert permissions.get("packages") == "write"
+    assert permissions.get("contents") == "read"
+    triggers = document["on"] if isinstance(document.get("on"), dict) else document.get(True)
+    assert isinstance(triggers, dict), "the release workflow must declare an 'on' trigger"
+    push = triggers.get("push") or {}
+    assert "v*" in str(push.get("tags")), "the release workflow must trigger on v* tag pushes"
 
 
 def test_no_ci_job_reruns_a_precommit_hook_command() -> None:
@@ -253,4 +275,33 @@ def test_ci_precompiles_bytecode_once_in_test_fast() -> None:
     assert isinstance(steps, list)
     runs = " ".join(str(step.get("run", "")) for step in steps if isinstance(step, dict))
     assert "compileall" in runs, "test-fast must precompile bytecode with compileall"
-    assert "crawlutron" in runs and "tests" in runs, "compileall must cover the imported trees"
+    # #949: the compile scope derives from the uv member src roots (glob, never a
+    # hand-listed pre-src-layout package dir); this pins that derived glob.
+    assert "packages/*/src" in runs, "compileall must derive its scope from the member src roots"
+    assert "tests" in runs and "scripts" in runs, "compileall must cover the test and script trees"
+
+
+def test_ci_release_workflow_pins_version_consistency() -> None:
+    """#949: the smoke asserts the BAKED version equals the tag it was pushed as,
+    so the image cannot carry a version that disagrees with its :{version} tag."""
+    runs = [str(run) for _, run in _job_run_steps(RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8"))]
+    joined = "\n".join(runs)
+    assert "ghcr.io/" in joined, "the release workflow must push to GHCR"
+    assert "tr '[:upper:]' '[:lower:]'" in joined, "GHCR tag must be lowercased"
+    assert "steps.version.outputs.native" in joined, (
+        "the smoke must compare the baked version against the git-describe version"
+    )
+
+
+def test_ci_regenerates_the_version_artifact_before_the_suite() -> None:
+    """#949: the version artifact is gitignored, so a CI checkout has none until
+    regen_version writes it; both gate-carrying jobs must see the git-describe
+    version."""
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    for job in ("enforcement", "test-fast"):
+        steps = _jobs(workflow)[job].get("steps")
+        assert isinstance(steps, list)
+        regen = [str(step.get("run", "")) for step in steps if isinstance(step, dict)]
+        assert any("scripts/regen_version.py" in run for run in regen), (
+            f"job {job} must regenerate the version artifact before running tests"
+        )

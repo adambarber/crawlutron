@@ -1,0 +1,95 @@
+name: Release image
+
+# Builds and pushes the crawlutron OCI image to GitHub Container Registry when
+# the version changes: on a v* tag push (the release-please tag cut per
+# docs/RELEASE.md, which is the moment a new semver exists). The image is tagged
+# :{version} (lowercased for GHCR, docker-ref-sanitized) and :latest.
+#
+# #8433: this pushes during its own release workflow -- the sanctioned path --
+# it does not gate on/require manual `git push`. ci.yml carries
+# `permissions: read-all` by contract (#624) and so CANNOT push packages; this
+# workflow declares the narrow write scope it needs and nothing else.
+
+permissions:
+  contents: read
+  packages: write
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build-and-publish:
+    name: Build and publish GHCR image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install package + dev dependencies
+        run: uv sync --frozen --extra dev
+
+      # The version artifact is gitignored, so it is not in the checkout; write
+      # it from git describe so the *baked* image carries the real semver
+      # (hatch-vcs would write the same at a real build).
+      - name: Regenerate the version artifact
+        run: .venv/bin/python scripts/regen_version.py
+
+      - name: Resolve the release version
+        id: version
+        run: |
+          VERSION="$(
+            .venv/bin/python -c "from crawlutron._version import __version__; print(__version__)"
+          )"
+          echo "native=${VERSION}"
+          # GHCR image names are lowercase and docker refs reject '+'.
+          TAG="$(printf %s "$VERSION" | tr '[:upper:]' '[:lower:]' | tr '+' '-')"
+          echo "tag=${TAG}"
+          echo "native=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push the runtime image
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73c547607 # v6
+        with:
+          context: .
+          target: runtime
+          file: Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/crawlutron:${{ steps.version.outputs.tag }}
+            ghcr.io/${{ github.repository_owner }}/crawlutron:latest
+
+      # One-command smoke (per #730 rails): run the pushed image, map the port so
+      # the runner can hit its loopback, assert the baked version equals the tag
+      # it was pushed as, and that /health and /ready answer.
+      - name: Smoke the pushed image
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER}/crawlutron"
+          TAG="${{ steps.version.outputs.tag }}"
+          NAME="crawlutron-smoke"
+          docker rm -f "$NAME" >/dev/null 2>&1 || true
+          docker run -d --name "$NAME" -p 8765:8765 "$IMAGE:$TAG"
+          trap 'docker rm -f "$NAME" >/dev/null 2>&1 || true' EXIT
+          for _ in $(seq 1 15); do
+            curl -fsS http://127.0.0.1:8765/health >/dev/null && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8765/health >/dev/null
+          curl -fsS http://127.0.0.1:8765/ready >/dev/null
+          BAKED="$(docker exec "$NAME" /app/.venv/bin/python -c 'import crawlutron; print(crawlutron.__version__)')"
+          test "$BAKED" = "${{ steps.version.outputs.native }}"
