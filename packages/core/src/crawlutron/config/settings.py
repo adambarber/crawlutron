@@ -7,7 +7,11 @@ from typing import TypedDict
 
 from crawlutron.config.env import get_mapping_float, get_mapping_int, in_range, parse_bool_value
 from crawlutron.runtime.pressure_memory import read_memory_stats
-from crawlutron.runtime.pressure_sizing import derive_browser_pool_size, max_http_concurrency_for
+from crawlutron.runtime.pressure_sizing import (
+    derive_browser_pool_size,
+    doc_worker_count,
+    max_http_concurrency_for,
+)
 from crawlutron.vocabulary.limits import (
     DEFAULT_CHALLENGE_WAIT_SECONDS,
     DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS,
@@ -36,7 +40,14 @@ def default_http_max_connections() -> int:
         limit = 4 * _DEF_MB * 1024
     # Floor of 100 keeps a usable pool on tiny/unlimited boxes; the derived value
     # (3 GiB -> 139) is the admission's real HTTP concurrency.
-    return max(100, max_http_concurrency_for(limit, derive_browser_pool_size(limit)))
+    return max(
+        100,
+        max_http_concurrency_for(
+            limit,
+            derive_browser_pool_size(limit),
+            doc_workers=doc_worker_count(),
+        ),
+    )
 
 
 def default_http_keepalive() -> int:

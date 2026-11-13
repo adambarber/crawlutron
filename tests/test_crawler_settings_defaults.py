@@ -9,6 +9,7 @@ import pytest
 
 import crawlutron.config.settings as settings_mod
 from crawlutron.config.settings import CrawlerSettings
+from crawlutron.runtime.pressure_sizing import TaskRamBudget, build_admission_policy, doc_worker_count
 
 
 def test_parallelism_defaults():
@@ -148,7 +149,11 @@ def _expected_connections(limit: int) -> int:
     """
     return max(
         100,
-        settings_mod.max_http_concurrency_for(limit, settings_mod.derive_browser_pool_size(limit)),
+        settings_mod.max_http_concurrency_for(
+            limit,
+            settings_mod.derive_browser_pool_size(limit),
+            doc_workers=doc_worker_count(),
+        ),
     )
 
 
@@ -179,6 +184,44 @@ def test_3gib_limit_scales_up():
         # With the honest per-task RAM estimate the 3 GiB derivation sits at the floor; the floor keeps the
         # minimal-deployment pool usable (a bigger box still scales above it -- see
         assert expected >= 100
+
+
+@pytest.mark.parametrize(
+    ("limit_mib", "doc_workers"),
+    [(16384, 2), (24576, 2), (16384, 4), (16384, 1)],
+    ids=[
+        "16gib-two-doc-workers",
+        "24gib-two-doc-workers",
+        "16gib-four-doc-workers",
+        "16gib-one-doc-worker",
+    ],
+)
+def test_the_connection_ceiling_matches_the_admission_allowance(limit_mib, doc_workers):
+    """Settings cannot size the HTTP pool larger than admission's RAM-derived
+    allowance when doc_workers>0: both derive from max_http_concurrency_for, so a
+    doc_workers pass that omits the doc-pool reserve diverges them.
+    """
+    limit = limit_mib * 1024 * 1024
+    with (
+        patch.object(settings_mod, "read_memory_stats", lambda: _FakeStats(limit)),
+        patch.dict(
+            "os.environ",
+            {
+                "CRAWLUTRON_EXTRACTION_DOC_WORKERS": str(doc_workers),
+                "CRAWLUTRON_BROWSER_POOL_SIZE": "0",
+                "CRAWLUTRON_WORKERS": "1",
+            },
+        ),
+    ):
+        pool = settings_mod.derive_browser_pool_size(limit)
+        admission = build_admission_policy(
+            limit,
+            pool_size=pool,
+            max_concurrent_pages=3,
+            budget=TaskRamBudget(doc_workers=doc_worker_count()),
+        ).max_http_concurrency
+        ceiling = settings_mod.default_http_max_connections()
+    assert ceiling == admission
 
 
 def test_env_override_still_wins():
