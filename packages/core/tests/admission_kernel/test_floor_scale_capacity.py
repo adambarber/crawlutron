@@ -10,6 +10,7 @@ import dataclasses
 
 import pytest
 
+from admission import Bytes, Cost, LaneSpec, MinAll, Scale
 from admission.values import Allocation
 from tests._support._doors import AdmissionRefused, Count, IdleReason, LaneId, Want
 from tests._support._gate_factory import GateSpec, build_gate
@@ -102,3 +103,27 @@ async def test_heavy_only_want_grants_at_least_one_when_it_fits() -> None:
     want = Want.of(general=Count(0), heavy=Count(1))
     allocation = await _grant(gate, want)
     assert allocation.for_lane(LaneId.HEAVY).value >= 1
+
+
+def test_zero_memory_cost_lane_is_not_granted_zero_capacity() -> None:
+    """Bytes(0) means "no memory per unit": the memory dimension must not bound the lane.
+
+    unit == 0 must exclude free_fits from the min; the old ``else 0`` forced
+    capacity to 0 forever (silently ungrantable, no config-time warning).
+    """
+    gate, _ = build_gate()
+    gate._lanes = {
+        **gate._lanes,
+        LaneId.GENERAL: LaneSpec(ceiling=Count(32), cost=Cost(Bytes(0)), scale_source=MinAll()),
+    }
+    capacity = gate._capacity_for(LaneId.GENERAL, want_count=10, scale=Scale(1.0))
+    # Only scale_slots(32), ceiling(32), want(10) bound an uncosted lane.
+    assert capacity == min(32, 32, 10), capacity
+
+
+def test_nonzero_memory_cost_lane_keeps_memory_bound() -> None:
+    """unit > 0: free_fits still constrains the lane (existing behavior preserved)."""
+    gate, _ = build_gate(dataclasses.replace(GateSpec(), memory_budget_mib=100, general_cost_mib=48))
+    capacity = gate._capacity_for(LaneId.GENERAL, want_count=10, scale=Scale(1.0))
+    # free_bytes = 100 MiB, unit = 48 MiB -> free_fits = 2; min(32, 32, 10, 2) = 2.
+    assert capacity == 2, capacity

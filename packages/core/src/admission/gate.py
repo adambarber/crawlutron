@@ -244,9 +244,11 @@ class AdmissionGate:
         spec = self._lanes[lane]
         scale_slots = int(round(spec.ceiling.value * scale.value)) - self._in_flight[lane]
         ceiling = spec.ceiling.value - self._in_flight[lane]
+        bounds = [scale_slots, ceiling, want_count]
         unit = spec.cost.memory_bytes.value
-        free_fits = self._free_bytes() // unit if unit > 0 else 0
-        return max(0, min(scale_slots, ceiling, want_count, free_fits))
+        if unit > 0:
+            bounds.append(self._free_bytes() // unit)
+        return max(0, min(bounds))
 
     def _decide(self, want: Want, readings: dict[ResourceId, _ResourceReading]) -> Decision:
         """Decide under the lock; capacity is ADDITIONAL (in-flight already subtracted).
