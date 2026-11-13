@@ -218,16 +218,20 @@ class AdmissionGate:
         return max(0, self._memory_budget.value - self._reserved.value - self._in_flight_bytes)
 
     def _capacity_for(self, lane: LaneId, want_count: int, scale: Scale) -> int:
-        """capacity_lane = min(round(ceiling*scale), ceiling, want, free//cost) (§5.2)."""
+        """ADDITIONAL capacity: TOTAL ceiling/scale minus in-flight, memory already additional.
+
+        capacity_lane = min(scale_slots - in_flight, ceiling - in_flight, want, free//cost).
+        free//cost is already net of in-flight bytes, so it is never re-subtracted."""
         spec = self._lanes[lane]
-        scale_slots = int(round(spec.ceiling.value * scale.value))
-        ceiling = spec.ceiling.value
+        scale_slots = int(round(spec.ceiling.value * scale.value)) - self._in_flight[lane]
+        ceiling = spec.ceiling.value - self._in_flight[lane]
         unit = spec.cost.memory_bytes.value
         free_fits = self._free_bytes() // unit if unit > 0 else 0
         return max(0, min(scale_slots, ceiling, want_count, free_fits))
 
     def _decide(self, want: Want, readings: dict[ResourceId, _ResourceReading]) -> Decision:
-        """Decide under the state lock: STALE-first -> OVERSIZE -> RETRY_PRESSURE (4.3)."""
+        """Decide under the lock; capacity is ADDITIONAL (in-flight already subtracted).
+        STALE-first -> OVERSIZE -> RETRY_PRESSURE (4.3); capacity is never re-subtracted."""
         now = self._clock.now().value
         wanted = [lane for lane in LaneId if want.lanes[lane].value >= 1]
         if self._lane_stale(readings) and wanted:
@@ -264,8 +268,7 @@ class AdmissionGate:
         granted: dict[LaneId, int] = {}
         for lane in LaneId:
             if lane in wanted and capacity[lane] >= 1:
-                free_slots = max(0, capacity[lane] - self._in_flight[lane])
-                granted[lane] = min(free_slots, floor_for[lane])
+                granted[lane] = min(capacity[lane], floor_for[lane])
             else:
                 granted[lane] = 0
         if sum(granted.values()) < 1:
