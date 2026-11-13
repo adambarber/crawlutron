@@ -174,10 +174,9 @@ def _eval_selector[SelectorResult](
     try:
         return fut.result(timeout=timeout)
     except (concurrent.futures.TimeoutError, concurrent.futures.CancelledError):
-        # Cancel once the runaway finishes; without this four pathological
-        # selectors pin the pool. CancelledError: shutdown refused the work.
+        # Fire-and-discard: cancel frees a queued-but-unstarted slot; a running
+        # runaway cannot be cancelled, so do not wait out a second deadline.
         fut.cancel()
-        concurrent.futures.wait([fut], timeout=timeout)
         return _EXTRACTION_SELECTOR_SENTINEL
 
 
