@@ -212,22 +212,22 @@ Migrations live in `packages/core/src/crawlutron/storage/migrations/`. Every sto
 
 ```bash
 # Apply pending migrations (normally automatic when the store opens).
-.venv/bin/python -m app.storage.migrations apply cache/crawler.db crawl_jobs
-.venv/bin/python -m app.storage.migrations apply cache/crawler.db results
+PYTHONPATH=packages/core/src .venv/bin/python -m crawlutron.storage.migrations apply cache/crawler.db crawl_jobs
+PYTHONPATH=packages/core/src .venv/bin/python -m crawlutron.storage.migrations apply cache/crawler.db results
 
 # Add a migration: add a versioned schema to manifest.py, point CURRENT_SCHEMAS at it,
 # then add a yoyo step with apply and rollback SQL under the migration directory.
-$EDITOR crawlutron/storage/migrations/manifest.py
-$EDITOR crawlutron/storage/migrations/0001_crawl_jobs_initial.py
+$EDITOR packages/core/src/crawlutron/storage/migrations/manifest.py
+$EDITOR packages/core/src/crawlutron/storage/migrations/0001_crawl_jobs_initial.py
 
 # Stamp an existing database after checking it against the declared schema.
-.venv/bin/python -m app.storage.migrations stamp cache/crawler.db crawl_jobs
-.venv/bin/python -m app.storage.migrations stamp cache/crawler.db results
+PYTHONPATH=packages/core/src .venv/bin/python -m crawlutron.storage.migrations stamp cache/crawler.db crawl_jobs
+PYTHONPATH=packages/core/src .venv/bin/python -m crawlutron.storage.migrations stamp cache/crawler.db results
 
 # Roll back one schema's applied migrations in reverse order; do not open the
 # store afterward. Rolling one schema back leaves the others applied.
-.venv/bin/python -m app.storage.migrations rollback cache/crawler.db crawl_jobs
-.venv/bin/python -m app.storage.migrations rollback cache/crawler.db results
+PYTHONPATH=packages/core/src .venv/bin/python -m crawlutron.storage.migrations rollback cache/crawler.db crawl_jobs
+PYTHONPATH=packages/core/src .venv/bin/python -m crawlutron.storage.migrations rollback cache/crawler.db results
 ```
 
 ---
@@ -497,34 +497,34 @@ with `422`.
 ├── pyproject.toml        # Package metadata + deps (single source; uv.lock pins every pin)
 ├── uv.lock               # Frozen transitive dependency graph + hashes
 ├── Makefile              # Gates + convenience targets mirroring scripts/run-tests.sh
-├── crawlutron/
-│   ├── main.py           # FastAPI factory (≈441 lines) — lifespan, app.state, router wiring
-│   ├── api/              # Door plane: one router per concern, mounted in main.py
-│   │   ├── crawl_router.py      # POST /v1/crawl, GET /v1/crawl/{id}, GET .../{id}/trace
-│   │   ├── identity_router.py   # POST /v1/map, POST /v1/render, POST /v1/search
-│   │   ├── jobs_router.py       # POST/GET/DELETE /v1/jobs*
-│   │   ├── watch_router.py      # POST/GET/DELETE /v1/watches*
-│   │   ├── policy_router.py     # GET /v1/policy-suggestions
-│   │   ├── keys_router.py       # POST/GET/DELETE /v1/keys
-│   │   ├── metrics_router.py    # GET /metrics
-│   │   ├── crawl_endpoint.py / render_endpoint.py / map_endpoint.py  # Handler bodies
-│   │   ├── crawl_executor.py / async_crawl_runner.py / response_shaping.py
-│   │   └── middleware.py / exceptions.py / dependencies.py / webhooks.py
-│   ├── orchestration/    # engine.py — orchestration + fallback-chain scheduling
-│   ├── transport/        # Strategy implementations: http.py, browser.py, document.py,
-│   │   │                 #   browser_pool.py, content_cache.py, scheduler.py, robots.py, ...
-│   ├── admission/        # Caller admission, policy, scope matching
-│   ├── config/           # env.py + settings.py (CRAWLUTRON_* environment surface)
-│   ├── discovery/        # /v1/capabilities, /v1/agent-hints, /.well-known
-│   ├── extraction/       # classify.py, content.py, document_text.py, output_formats.py
-│   ├── health/           # /health, /ready (READINESS_STATE singleton)
-│   ├── mcp/              # MCP 2026-07-28 endpoint (POST /mcp): protocol, tools, server
-│   ├── models/           # Pydantic/dataclass wire + domain models
-│   ├── runtime/          # metrics, memory pressure, worker dispatch, resource lifecycle
-│   ├── safety/           # validation, bounded I/O, safe regex, SSRF helpers
-│   ├── search/           # /v1/search provider abstraction (Tavily/Brave/Serper/DuckDuckGo)
-│   ├── storage/          # job_store.py, result_store.py, watch_store.py, sqlite_store.py
-│   └── vocabulary/       # taxonomy.py (the 36-value classification enum), strategy names
+├── packages/             # uv workspace member packages, src layout under packages/*/src/
+│   ├── core/
+│   │   └── src/crawlutron/   # core engine: admission kernel, models, transport, storage, service, …
+│   │       ├── api/          # door-plane handler bodies (crawl_endpoint, render_endpoint, map_endpoint)
+│   │       ├── cli/          # crawler CLI entry points
+│   │       ├── config/       # env.py + settings.py (CRAWLUTRON_* environment surface)
+│   │       ├── discovery/    # /v1/capabilities, /v1/agent-hints, /.well-known
+│   │       ├── extraction/   # documents.py (trafilatura + selector extraction)
+│   │       ├── health/       # /health, /ready (READINESS_STATE singleton)
+│   │       ├── mcp/          # MCP protocol support shared with crawlutron_mcp
+│   │       ├── models/       # Pydantic/dataclass wire + domain models
+│   │       ├── orchestration/# engine.py — orchestration + fallback-chain scheduling
+│   │       ├── runtime/      # metrics, memory pressure, worker dispatch, resource lifecycle
+│   │       ├── safety/       # validation, bounded I/O, safe regex, SSRF helpers
+│   │       ├── search/       # /v1/search provider abstraction (Tavily/Brave/Serper/DuckDuckGo)
+│   │       ├── service/      # store_bootstrap, watch_cores, job lifecycle, …
+│   │       ├── storage/      # job_store, result_store, watch_store, sqlite_store, migrations/
+│   │       ├── transport/    # http.py, browser.py, document.py, content_cache.py, scheduler.py, robots.py
+│   │       └── vocabulary/   # taxonomy.py (36-value classification enum), strategy names
+│   ├── rest/
+│   │   └── src/crawlutron_rest/   # REST facade: FastAPI app + routers + CLI
+│   │       ├── main.py        # FastAPI factory (lifespan, app.state, router wiring)
+│   │       ├── api/           # one router per concern (crawl, jobs, watches, keys, metrics, policy-suggestions, …)
+│   │       └── cli/           # CLI entry (__main__, output, docker, client)
+│   ├── mcp/
+│   │   └── src/crawlutron_mcp/  # MCP 2026-07-28 endpoint (protocol, tools, server)
+│   └── sdk/
+│       └── src/crawlutron_sdk/  # client SDK mirroring the REST wire surface
 ├── tests/                # Behavior tests (no mocks; real HTTP + real Camoufox)
 ├── docs/                 # Reviews, testing guide, agent contract (docs/references/)
 ├── scripts/run-tests.sh  # Full battery entrypoint (mirrored by make targets)
