@@ -46,12 +46,22 @@ The same probe is runnable locally: `uv build --all-packages --out-dir dist` the
 ## One-time PyPI setup (owner)
 
 Publishing uses **trusted publishing** (OIDC): there is no stored token, and the
-workflow identity is the credential. Each project needs a publisher on pypi.org
-pointing at this repository, workflow `release.yml`, environment `pypi`. For a
-name that has never been published, PyPI offers a *pending* publisher that claims
-the name on first upload. The environment `pypi` already exists in this repository
-with a tag-only deployment policy; add required reviewers there if a release
-should need a human click.
+workflow identity is the credential.
+
+PyPI dedupes *pending* publishers on the workflow identity, and each pending
+publisher is bound to one project name and consumed by that name's first upload. So
+the names cannot all be pre-registered: register one, release, register the next.
+
+To avoid six release cycles, bootstrap instead: create a scoped PyPI API token,
+add it as the repository secret `PYPI_API_TOKEN`, and push the tag. The release
+job publishes with the token while the secret is set and with trusted publishing
+when it is not. Once every name exists, add each project's trusted publisher (owner
+`adambarber`, repository `crawlutron`, workflow `release.yml`, environment `pypi`)
+and delete the secret.
+
+The environment `pypi` already exists in this repository with a tag-only
+deployment policy; add required reviewers there if a release should need a human
+click.
 
 ## What was removed
 
