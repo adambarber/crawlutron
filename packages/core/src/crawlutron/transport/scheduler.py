@@ -149,10 +149,20 @@ class DomainScheduler:
         adaptive_latency_factor: float = 1.0,
         adaptive_smoothing: float = 0.2,
         clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], Awaitable[None]] | None = None,
     ) -> None:
         # THE one clock: every timestamp here flows through it, monotonic --
         # an in-memory timeline no wall step can bend (#580).
         self._clock = clock
+        # Late-bound: tests that patch asyncio.sleep after construction still work.
+        if sleep is not None:
+            self._sleep = sleep
+        else:
+
+            async def _late_sleep(delay: float) -> None:
+                await asyncio.sleep(delay)
+
+            self._sleep = _late_sleep
         self._global_limit = max(1, global_limit)
         self._per_domain_limit = max(1, per_domain_limit)
         self._delay_seconds = max(0.0, delay_seconds)
@@ -373,7 +383,7 @@ class DomainScheduler:
             reserve_wait = self._reserve_fire(job.domain)
         wait = max(bucket_wait, reserve_wait)
         if wait > 0:
-            await asyncio.sleep(wait)
+            await self._sleep(wait)
 
     async def _run_one_gated(
         self,
@@ -404,7 +414,7 @@ class DomainScheduler:
             async with self._state(job.domain).gate:
                 reserve_wait = self._reserve_fire(job.domain)
             if reserve_wait > 0:
-                await asyncio.sleep(reserve_wait)
+                await self._sleep(reserve_wait)
         async with self._state(job.domain).gate:
             async with batch_gate:
                 try:

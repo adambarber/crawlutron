@@ -135,7 +135,9 @@ class TestScheduler:
         """
         sleeps = recorder(monkeypatch)
         now = [0.0]
-        scheduler = make_scheduler(delay_seconds=0.1, adaptive=False, clock=lambda: now[0])
+        scheduler = make_scheduler(
+            delay_seconds=0.1, adaptive=False, clock=lambda: now[0], sleep=sleeps.sleep
+        )
         jobs = [make_job(0, "http://example.com/a"), make_job(1, "http://example.com/b")]
         results = await scheduler.run(jobs, ok_worker, failed_result=engine_envelope)
         assert results is not None
