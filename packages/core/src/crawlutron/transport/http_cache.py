@@ -148,11 +148,13 @@ async def _revalidate_with_validator(ctx: HttpStrategyContext, ckey: str, valida
         ctx.max_content_length,
     )
     cached = cast(SerializedResponse, await ctx.content_cache.aget(ckey) if ctx.content_cache else None)
-    if ctx.response.status_code == 304:
+    if ctx.response.status_code == 304 and cached is not None:
         ctx.response = rebuild_response(cached, ctx)
         ctx.retry_diagnostics = {**ctx.retry_diagnostics, "content_cache": "hit_revalidated"}
         ctx.revalidated_304 = True
     else:
+        # A 304 whose cached entry was evicted between the two reads has no body to
+        # replay; treat it as a fresh empty 304 rather than rebuilding from None.
         ctx.retry_diagnostics = {**ctx.retry_diagnostics, "content_cache": "revalidated_fresh"}
 
 

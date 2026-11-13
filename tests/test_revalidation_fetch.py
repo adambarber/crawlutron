@@ -3,12 +3,18 @@ conditional GET, and a 200 answer must be used and stored -- the code once fell
 through to a second unconditional fetch (double load for one crawl).
 """
 
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING
+
 from crawlutron.models.http_fetch_result import HttpFetchResult
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.transport.cache import HttpCache
 from crawlutron.transport.content_cache import ContentCache
 from tests._fetch_doubles import make_fetch
 from tests._fetcher_factories import run_http_strategy
+
+if TYPE_CHECKING:
+    from crawlutron.models.crawl_result import EngineCrawlResult
 
 
 class _CountingFetcher:
@@ -118,38 +124,78 @@ class TestRevalidationFetchesOnce:
         assert fetcher.calls == 2  # one conditional GET per crawl, as designed
 
 
-async def test_content_cache_revalidation_304_reports_not_modified(tmp_path):
-    """A content-cache revalidation that earns a 304 must classify not_modified, not a fresh render.
-    WatchSweeper keys on not_modified to suppress a change webhook; a 304 served as 'rendered'
-    fires modified forever (the #236 regression)."""
+async def _cached_content_crawler(
+    tmp_path, url, body_text
+) -> tuple[ContentCache, Callable[[], Awaitable["EngineCrawlResult"]]]:
+    """A content-cache harness: the first crawl stores body_text against a validator,
+    later crawls revalidate and earn an empty 304. Returns the cache and a crawl."""
     from tests._fetch_doubles import FetcherDouble
 
     etag = '"v1"'
 
-    def respond(url, headers):
+    def respond(_url, headers):
         if headers.get("If-None-Match") == etag:
             return {"status": 304, "headers": {"etag": etag}, "body": b""}
-        return {"status": 200, "headers": {"etag": etag}, "body": b"<html>STOC</html>"}
+        return {"status": 200, "headers": {"etag": etag}, "body": f"<html>{body_text}</html>".encode()}
 
-    fetcher = FetcherDouble(lambda url, sent_headers, *_: respond(url, sent_headers))
+    fetcher = FetcherDouble(lambda request_url, sent_headers, *_: respond(request_url, sent_headers))
     cache = HttpCache()
     content_cache = ContentCache(cache_dir=str(tmp_path / "cc"), default_ttl=3600)
 
-    async def _crawl():
+    async def crawl() -> "EngineCrawlResult":
         return await run_http_strategy(
-            url="http://example.com/reval",
+            url=url,
             policy={},
             http_fetcher=fetcher,
             cache=cache,
             content_cache=content_cache,
         )
 
-    first = await _crawl()  # stores body + validator
+    return content_cache, crawl
+
+
+async def test_content_cache_revalidation_304_reports_not_modified(tmp_path):
+    """A content-cache revalidation that earns a 304 must classify not_modified, not a fresh render.
+    WatchSweeper keys on not_modified to suppress a change webhook; a 304 served as 'rendered'
+    fires modified forever (the #236 regression)."""
+    _, crawl = await _cached_content_crawler(tmp_path, "http://example.com/reval", "STOC")
+
+    first = await crawl()  # stores body + validator
     assert first.status == "success"
 
-    second = await _crawl()  # content-cache revalidation -> origin 304
+    second = await crawl()  # content-cache revalidation -> origin 304
     assert second.status == "success"
     assert second.classification == "not_modified", second.classification
     assert second.http_status == 304
     # The stored body rides along so a watcher can diff, but the verdict is not_modified.
     assert "STOC" in (second.text or second.markdown or "")
+
+
+async def test_304_revalidation_after_cache_eviction_is_not_an_error(tmp_path, monkeypatch):
+    """An evicted-304 replay honors the empty body as fresh: not_modified, no TypeError.
+    The revalidation read sees None (the entry was evicted), so no stale body is
+    replayed; the result carries revalidated_fresh diagnostics."""
+    content_cache, crawl = await _cached_content_crawler(tmp_path, "http://example.com/evicted-reval", "SEED")
+
+    first = await crawl()  # seeds the content cache
+    assert first.status == "success"
+
+    # Evict between the two reads: the seeding (pre-network) read still sees the
+    # entry, the revalidation (post-network) read sees None -- the eviction race.
+    real_aget = content_cache.aget
+    reads = {"count": 0}
+
+    async def evicting_aget(key: str):
+        reads["count"] += 1
+        if reads["count"] == 2:
+            return None
+        return await real_aget(key)
+
+    monkeypatch.setattr(content_cache, "aget", evicting_aget)
+
+    second = await crawl()
+    assert second.status == "success"  # not a TypeError crash misread as a network error
+    assert second.classification == "not_modified"
+    assert second.http_status == 304
+    assert second.diagnostics["retry"]["content_cache"] == "revalidated_fresh"
+    assert not (second.text or second.markdown or second.html)  # no false body claim
