@@ -1,5 +1,6 @@
 """#921: a declared Content-Length bounds the body the app sees -- over-declared
-chunks are split, the remainder drained, never routed (an HTTP framing vector)."""
+chunks are split, the remainder drained, never routed (an HTTP framing vector).
+Declared verifies delivery (#619); max_bytes is the hard bound (#666)."""
 
 import json
 
@@ -65,15 +66,51 @@ async def test_split_serves_nothing_past_the_declared_body():
     )
 
 
-def _conflicting_lengths(values: list[bytes]):
-    """A request whose raw headers carry several Content-Length values."""
+async def test_post_declared_bytes_flow_through_capped_pass_through():
+    """Declared exactly met with more_body True: post-declared bytes flow
+    through the capped pass-through up to max_bytes (#666) -- declared verifies
+    delivery arrival, max_bytes bounds the streamed body. Not a desync."""
+    request = make_request(
+        [
+            {"type": "http.request", "body": b"W" * 4, "more_body": True},
+            {"type": "http.request", "body": b"K" * 24, "more_body": False},
+            *_drain_terminator(),
+        ],
+        headers=[(b"content-length", b"4")],
+    )
+    seen: dict[str, bytes] = {}
+    response = await limit_request_body(request, body_reader_call_next(seen), max_bytes=10)
+    assert seen["body"] == b"W" * 4 + b"K" * 6, seen["body"]
+    assert response.status_code == 200
+
+
+async def test_overflow_drain_consumes_follower_before_next_request():
+    """Removing the overflow drain leaves follower bytes on original_receive,
+    so a subsequent keep-alive read would observe them (#921)."""
+    sentinel = {"type": "http.request", "body": b"GET /next", "more_body": False}
+    messages = [
+        {"type": "http.request", "body": b"X" * 100, "more_body": True},
+        {"type": "http.request", "body": b"Y" * 60, "more_body": True},
+        {"type": "http.request", "body": b"Z" * 1, "more_body": False},
+        sentinel,
+    ]
+    request = make_request(messages, headers=[(b"content-length", b"10")])
+    response = await limit_request_body(request, pass_through, max_bytes=CAP)
+    assert response.status_code == 200
+    assert response.headers["Connection"] == "close"
+    assert messages == [sentinel], f"follower not drained: {messages}"
+
+
+def _conflicting_body(values: list[bytes], body: bytes = b"H" * 10):
+    """Request with several Content-Length values and a body that WOULD succeed
+    absent the conflict refusal: 10 bytes bounded by max_bytes for declared 10."""
     headers = [(b"content-length", value) for value in values]
-    return make_request([*_drain_terminator()], headers=headers)
+    return make_request([{"type": "http.request", "body": body, "more_body": False}], headers=headers)
 
 
 async def _conflict_envelope(values: list[bytes]):
     """The 413 envelope ``limit_request_body`` answers for conflicting values."""
-    response = await limit_request_body(_conflicting_lengths(values), pass_through, max_bytes=CAP)
+    response = await limit_request_body(_conflicting_body(values), pass_through, max_bytes=CAP)
     return response, json.loads(bytes(response.body))
 
 
@@ -81,7 +118,7 @@ async def test_conflicting_content_length_headers_refuse_413():
     """Distinct Content-Length values on one request are a framing contradiction
     and must refuse 413, never serve whichever value the parser happened to pick."""
     response = await limit_request_body(
-        _conflicting_lengths([b"10", b"20"]),
+        _conflicting_body([b"10", b"20"]),
         refuse_never("a conflicting Content-Length must never reach the app"),
         max_bytes=CAP,
     )

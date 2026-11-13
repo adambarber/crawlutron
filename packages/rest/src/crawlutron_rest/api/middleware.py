@@ -83,11 +83,10 @@ def _error_413(max_bytes: int) -> JSONResponse:
 async def _collect_declared_body(
     original_receive: Receive, *, declared: int, overflow: list[bool]
 ) -> list[Message] | None:
-    """Verify a declared length arrives, buffering EXACTLY those bytes (#921).
+    """Verify a declared length arrives, buffering at most those bytes (#921).
 
-    The buffer sums to the declared bytes and ends ``more_body: False``; ``None``
-    is truncation the app must never process (#619). A crossing chunk is split.
-    """
+    A crossing chunk is split so nothing past the declaration is buffered; a body
+    ending at the declaration with more streaming flows capped-through (#666)."""
     buffered: list[Message] = []
     received = 0
     deadline = time.monotonic() + BODY_DEADLINE_SECONDS
@@ -123,7 +122,7 @@ def _replaying_receive(
     buffered: list[Message], original_receive: Receive, *, max_bytes: int, overflow: list[bool]
 ) -> Receive:
     """Serve the buffered declared body, then the capped pass-through (#666);
-    a body that overflowed its declaration (#921) yields nothing past the split."""
+    only a body that crossed its declaration (#921) yields nothing past the split."""
     replay = iter(buffered)
     declared = sum(len(message.get("body", b"") or b"") for message in buffered)
     if overflow[0]:
