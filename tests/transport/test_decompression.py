@@ -162,6 +162,30 @@ def test_encoding_tokens_are_case_and_space_insensitive():
     assert decompress_body(body, "  GZIP,\tBr ", max_output_bytes=_CAP) == b"stacked payload"
 
 
+def test_total_stacked_output_is_capped_across_layers():
+    """A stack whose TOTAL decoded size beats the cap refuses even when each
+    layer alone would fit its own cap.
+    """
+    payload = b"A" * 9_990
+    compressed = gzip.compress(gzip.compress(payload))
+    # The inner gzip(payload) is 46 bytes; total decoded = 46 + 9_990 > 10_000
+    # while each layer's own output is under 10_000, so only a shared budget refuses.
+    with pytest.raises(DecompressionTooLargeError):
+        decompress_body(compressed, "gzip, gzip", max_output_bytes=10_000)
+
+
+def test_single_layer_body_decodes_byte_identical():
+    payload = b"A" * 9_990
+    compressed = gzip.compress(payload)
+    assert decompress_body(compressed, "gzip", max_output_bytes=10_000) == payload
+
+
+def test_multi_layer_under_cap_decodes_fully():
+    payload = b"stacked under-cap payload"
+    compressed = gzip.compress(gzip.compress(payload))
+    assert decompress_body(compressed, "gzip, gzip", max_output_bytes=10_000) == payload
+
+
 def test_decode_valid_utf8_strict():
     body = "héllo wörld".encode()
     assert decode_body(body, "text/html; charset=utf-8") == "héllo wörld"

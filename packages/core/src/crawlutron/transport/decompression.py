@@ -126,8 +126,10 @@ def decompress_body(
     if not codings or not set(codings) <= DECODABLE_ENCODINGS:
         return _passthrough(body)
     decoded: bytes | bytearray | memoryview = body
+    remaining = max_output_bytes
     for coding in reversed(codings):
-        decoded = _decode_one(decoded, coding, max_output_bytes)
+        decoded = _decode_one(decoded, coding, remaining)
+        remaining -= len(decoded)
     return _passthrough(decoded)
 
 
