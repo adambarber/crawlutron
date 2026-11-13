@@ -72,4 +72,7 @@ def as_classification(
     one -- so an untriaged code from a string boundary degrades instead of
     widening the type. The table is the enum's own membership, derived.
     """
-    return Classification(value) if value in Classification.__members__ else default
+    try:
+        return Classification(value)
+    except ValueError:
+        return default
