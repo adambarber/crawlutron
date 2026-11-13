@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "crawlutron-core"
 dynamic = ["version"]
 description = "Policy-driven, self-hosted web crawler and content-extraction service built around FastAPI"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 license = "MIT"
 
 [tool.hatch.version]

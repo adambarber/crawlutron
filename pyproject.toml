@@ -18,7 +18,7 @@ name = "crawlutron"
 dynamic = ["version"]
 description = "Policy-driven, self-hosted web crawler and content-extraction service built around FastAPI"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [
@@ -39,7 +39,7 @@ classifiers = [
     "Intended Audience :: Developers",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Internet :: WWW/HTTP",
     "Topic :: Text Processing :: Markup :: HTML",
 ]
@@ -162,7 +162,7 @@ bypass-selection = true
 
 # Coverage engine config -- the ONE declaration the pre-push coverage hook and
 # any future CI consumer read. `core = "sysmon"` (PEP 669 sys.monitoring) is
-# the overhead lever on Python 3.12: tracing via the interpreter's native
+# the overhead lever on Python 3.14: tracing via the interpreter's native
 # monitoring hooks instead of the C trace function roughly halves the cost of
 # the tracer (measured below, see the hook's comment). `branch` stays off for
 # the default surface -- statement coverage is the measured number; branch is

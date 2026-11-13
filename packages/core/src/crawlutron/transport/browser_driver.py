@@ -7,7 +7,6 @@ steps do nothing; the action vocabulary lives in ``crawlutron.vocabulary.browser
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import time
 from collections.abc import Awaitable, Callable, Mapping
@@ -278,8 +277,12 @@ class BrowserDriver:
         self._browser = None
         self._browser_reused = False
         if cm is not None:
-            with contextlib.suppress(Exception):  # best-effort teardown
+            try:
                 await cm.__aexit__(None, None, None)
+            except Exception:
+                # Never silent: a failed exit leaves the browser and its asyncio
+                # pipes to the GC, surfacing later as an unraisable ResourceWarning.
+                logger.warning("browser_release_failed", exc_info=True)
 
     async def wait_for_ready_state(self, page: RenderPage) -> None:
         for _ in range(10):

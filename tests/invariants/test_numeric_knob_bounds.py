@@ -190,7 +190,7 @@ def test_an_unbounded_numeric_field_reds_naming_it():
 
 
 def test_the_union_walk_sees_pep_604_unions():
-    """int | None (types.UnionType on 3.12) is recognized, not just typing.Union."""
+    """int | None (types.UnionType on 3.14) is recognized, not just typing.Union."""
     got = _numeric_chain(_UnboundedOptionalInt.model_fields["retries"].annotation)
     assert got == (int, False), got
     got = _numeric_chain(_NanAdmittableOptionalFloat.model_fields["ratio"].annotation)

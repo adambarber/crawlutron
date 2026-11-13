@@ -152,8 +152,8 @@ class TestPolicyValidation:
             NormalizedUrl("http://[fe80::1%25eth0]/", policy=UNRESTRICTED_HOST_POLICY)
 
     def test_scoped_public_ipv6_zone_id_refused(self, monkeypatch):
-        # #496: Python 3.12 ipaddress parses scoped literals as PUBLIC, so the
-        # NOT_AN_ADDRESS-only guard admitted them; refusal is unconditional.
+        # #496: a scoped literal is refused unconditionally -- the stdlib's range
+        # answer for a zone id has moved between versions.
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
         with pytest.raises(ValueError):
             NormalizedUrl("http://[2606:4700::1111%25eth0]/", policy=UNRESTRICTED_HOST_POLICY)

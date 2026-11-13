@@ -31,10 +31,10 @@
         }
     ],
 
-    // The service runs 3.12. This was pinned to 3.11 and had never been run
+    // The service runs 3.14. This was pinned to 3.11 and had never been run
     // against the real interpreter, so every finding it would have produced was
     // hypothetical. A config nobody executes is documentation, not a gate.
-    "pythonVersion": "3.12",
+    "pythonVersion": "3.14",
     "typeCheckingMode": "basic",
 
     // Pyright honoring mypy's `# type: ignore` meant a suppression that satisfied

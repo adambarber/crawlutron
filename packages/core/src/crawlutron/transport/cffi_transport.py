@@ -151,15 +151,12 @@ class CffiTransport:
             await close_one_shot()
             raise
 
-        async def release(response: _CffiResponse) -> None:
-            """Release this hop: close the one-shot pinned session exactly once.
-
-            The session stays alive until the terminal body is fully consumed, so
-            this runs only after the drain (or abandon) is complete.
-            """
+        async def release(_response: _CffiResponse) -> None:
             await close_one_shot()
 
-        return response, release
+        # curl_cffi 0.17.0 types ``queue`` as a sync queue.Queue (models.py:130) yet
+        # awaits it on its async path (models.py:405); the runtime object satisfies this.
+        return cast(_CffiResponse, response), release
 
     async def _handle_response(
         self,

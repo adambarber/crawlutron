@@ -220,7 +220,7 @@ repos:
       # --no-verify -- and `files:` scopes it to crawlutron/tests so docs-only
       # commits skip it entirely. The engine config lives once in
       # pyproject.toml ([tool.coverage.run], core = "sysmon" via PEP 669 on
-      # Python 3.12, the lever that holds tracer overhead to a measured
+      # Python 3.14, the lever that holds tracer overhead to a measured
       # median-of-3 figure recorded in the coverage hook's ticket evidence).
       # The report is a separate untimed step (`python -m coverage report
       # --skip-covered`) so the timed pass measures tracing only.
