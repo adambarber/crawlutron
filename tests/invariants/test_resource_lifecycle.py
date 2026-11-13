@@ -83,7 +83,7 @@ def test_the_protocol_names_the_release_shape():
 
 _RELEASE_VERBS = ("close", "release", "shutdown", "dispose", "teardown")
 _RELEASE_CALL_ATTRS = frozenset({"close", "shutdown", "teardown", "dispose", "terminate", "aclose", "cancel"})
-_RELEASE_CALL_NAMES = frozenset({"discard_if_unowned_loop"})
+_RELEASE_CALL_NAMES = frozenset({"discard_if_unowned_loop", "_await_off_loop_shutdown"})
 
 
 def _module_release_paths(trees) -> set[str]:
@@ -91,8 +91,8 @@ def _module_release_paths(trees) -> set[str]:
 
     A release VERB in the name AND a release-shaped call in the body; a
     shutdown-shaped name that releases nothing is bookkeeping, not a release path.
-    """  # discard_if_unowned_loop is itself a release call (#415): a close* that
-    # delegates to it is release-shaped without any ``.attr`` call.
+    """  # discard_if_unowned_loop (#415) and _await_off_loop_shutdown (#937)
+    # are release calls: a close*/shutdown* that delegates to them is release-shaped.
     found: set[str] = set()
     for _path, tree in trees:
         for node in tree.body:

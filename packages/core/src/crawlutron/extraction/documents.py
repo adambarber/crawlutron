@@ -111,21 +111,48 @@ def build_doc_pool() -> DocExtractionPool:
 DOC_POOL = build_doc_pool()
 
 
+# Bound on one shutdown step: a stuck worker must not stall the loop forever;
+# the process is already dying and threads are daemonic, so a cap is safe.
+EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS = 30.0
+
+
+def _shutdown_executor_blocking(executor: concurrent.futures.ThreadPoolExecutor) -> None:
+    """Run one executor's coordinated shutdown to completion off the loop.
+    Refuses queued-but-unstarted futures, then awaits every running thread.
+    """
+    executor.shutdown(wait=True, cancel_futures=True)
+
+
+async def _await_off_loop_shutdown(name: str, fn: Callable[[], None]) -> None:
+    """Run the blocking shutdown ``fn`` off-loop, bounded against a hang.
+    On timeout, log a warning naming the caller's component and continue."""
+    try:
+        await asyncio.wait_for(asyncio.to_thread(fn), timeout=EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS)
+    except TimeoutError:
+        logger.warning(
+            "%s took longer than %.1fs to shut down; continuing past it",
+            name,
+            EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS,
+        )
+
+
 async def shutdown_doc_extraction_executor() -> None:
     """Terminate every persistent extraction worker, process and thread alike.
     Both pools shut down here, once: the caller used to check them separately
     and had to know there were two, so a new pool could ship never closed.
     """
-    DOC_POOL.teardown()
+    await _await_off_loop_shutdown("doc_pool", DOC_POOL.teardown)
     global _EXTRACTION_EXECUTOR, _DOC_EXECUTOR
     executor, _EXTRACTION_EXECUTOR = _EXTRACTION_EXECUTOR, None
     if executor is not None:
-        # Refuse queued-but-unstarted work, then await every running future:
-        # no extraction thread outlives the shutdown.
-        executor.shutdown(wait=True, cancel_futures=True)
+        await _await_off_loop_shutdown(
+            "extraction_executor", functools.partial(_shutdown_executor_blocking, executor)
+        )
     doc_executor, _DOC_EXECUTOR = _DOC_EXECUTOR, None
     if doc_executor is not None:
-        doc_executor.shutdown(wait=True, cancel_futures=True)
+        await _await_off_loop_shutdown(
+            "doc_executor", functools.partial(_shutdown_executor_blocking, doc_executor)
+        )
 
 
 # Extraction deadlines live in CrawlerSettings (env-mapped, operator-tunable).
