@@ -32,7 +32,7 @@ jobs:
       - name: Generate SBOM from the frozen lock
         if: ${{ steps.release.outputs.release_created == 'true' }}
         run: |
-          uv export --frozen --no-dev --no-emit-project --format requirements-txt -o /tmp/crawlutron-lock.txt
+          uv export --frozen --no-dev --no-emit-workspace --format requirements-txt -o /tmp/crawlutron-lock.txt
           uv tool run --from cyclonedx-bom==8.0.1 cyclonedx-py requirements /tmp/crawlutron-lock.txt -o sbom.cdx.json --of json
       - name: Upload SBOM to the release
         if: ${{ steps.release.outputs.release_created == 'true' }}

@@ -177,7 +177,7 @@ jobs:
           cache-dependency-glob: uv.lock
       - name: Audit the frozen lock
         run: |
-          uv export --frozen --no-dev --no-emit-project --format requirements-txt -o /tmp/lock.txt
+          uv export --frozen --no-dev --no-emit-workspace --format requirements-txt -o /tmp/lock.txt
           uv tool run pip-audit -r /tmp/lock.txt --strict
 
   # #623: secret scanning over the whole tree and its history.
