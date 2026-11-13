@@ -279,22 +279,27 @@ class _MonotonicClock:
 
 
 def _seam_signal() -> Signal:
-    """A fresh edge-triggered Signal for one kernel gate."""
+    """A fresh Signal for one kernel gate: edge-triggered, cross-thread safe."""
 
     class _FutureSignal:
-        """Per-waiter-future signal: each ``wait`` allocates a fresh future resolved
-        by a later ``set`` -- no level latch to inherit; ``set`` resolves each parked
-        future once via ``call_soon_threadsafe``; ``clear`` is a no-op."""
+        """Each ``wait`` allocates a fresh future, so no waiter inherits another's
+        wake; a ``set`` with no parked waiter is remembered, because the park loop
+        re-decides only after waking and PARK has no deadline.
+        """
 
         def __init__(self) -> None:
             self._waiters: list[asyncio.Future[bool]] = []
             self._lock = threading.Lock()
             self._loop: asyncio.AbstractEventLoop | None = None
+            self._pending = False
 
         async def wait(self, timeout: float | None = None) -> bool:
             loop = asyncio.get_running_loop()
-            fut: asyncio.Future[bool] = loop.create_future()
             with self._lock:
+                if self._pending:
+                    self._pending = False
+                    return True
+                fut: asyncio.Future[bool] = loop.create_future()
                 self._loop = loop
                 self._waiters.append(fut)
             try:
@@ -311,6 +316,9 @@ def _seam_signal() -> Signal:
                 loop = self._loop
                 waiters = self._waiters[:]
                 self._waiters.clear()
+                if not waiters:
+                    self._pending = True
+                    return
             if loop is None:
                 return  # no waiter has ever waited: nothing to wake
             for fut in waiters:
