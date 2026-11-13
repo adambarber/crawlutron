@@ -1,4 +1,5 @@
-"""The Dockerfile's offline-seed contract: named contexts are mandatory."""
+"""The Dockerfile's offline-seed contract: the seed context is optional for
+offline builds; bare `docker build .` fetches the browser over the wire."""
 
 from __future__ import annotations
 
