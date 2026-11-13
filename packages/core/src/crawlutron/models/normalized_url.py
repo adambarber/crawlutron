@@ -98,6 +98,35 @@ def _bracketed_netloc(host: str, port: int | None) -> str:
     return host_part if port is None else f"{host_part}:{port}"
 
 
+def _reject_control_chars(text: str) -> None:
+    """Refuse raw C0 controls and DEL in a wire segment.
+
+    A control byte ends the segment differently in lenient clients, so the
+    canonical form must never carry one; ``%``-escapes stay literal and pass.
+    """
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in text):
+        raise ValueError("invalid_url")
+
+
+def _reject_raw_wire_controls(url: str, *, scheme: str) -> None:
+    """Refuse raw whitespace/control bytes in the authority and path/query tail.
+
+    Whitespace in the authority is not a host and urlparse drops control chars
+    from path/params/query, so both checks ride the raw text before parsing.
+    """
+    start = url.lower().find(f"{scheme}://")
+    if start < 0:
+        return
+    rest = url[start + len(scheme) + 3 :]
+    cuts = [i for i in (rest.find(c) for c in "/?#") if i >= 0]
+    boundary = min(cuts) if cuts else len(rest)
+    authority = rest[:boundary]
+    if any(ch.isspace() for ch in authority):
+        raise ValueError("invalid_url")
+    _reject_control_chars(authority)
+    _reject_control_chars(rest[boundary:])
+
+
 def _canonical_parts(url: str, *, policy: HostPolicy) -> tuple[str, str, str, str, int | None, str, str]:
     """(canonical, scheme, host, site, port, path, query), or raise with the refusal reason."""
     try:
@@ -110,15 +139,7 @@ def _canonical_parts(url: str, *, policy: HostPolicy) -> tuple[str, str, str, st
         raise ValueError("unsupported_scheme")
     if not parsed.hostname:
         raise ValueError("invalid_url")
-    # Whitespace in the authority is not a host: urlparse drops control
-    # characters and tolerates spaces, so the check rides the raw text.
-    start = url.lower().find(f"{parsed.scheme}://")
-    if start >= 0:
-        rest = url[start + len(parsed.scheme) + 3 :]
-        cuts = [i for i in (rest.find(c) for c in "/?#") if i >= 0]
-        authority = rest[: min(cuts)] if cuts else rest
-        if any(ch.isspace() for ch in authority):
-            raise ValueError("invalid_url")
+    _reject_raw_wire_controls(url, scheme=parsed.scheme)
     if parsed.username or parsed.password:
         # Userinfo is not a crawlable identity: credentials belong in
         # policy.credentials (origin-scoped), never in the URL itself.
