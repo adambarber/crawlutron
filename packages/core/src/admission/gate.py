@@ -7,7 +7,9 @@ Door: ``async with gate.admit(want) as granted:`` -- a live :class:`Granted`, or
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import contextvars
+import logging
 import sys
 import threading
 from collections.abc import AsyncGenerator, Callable
@@ -37,6 +39,8 @@ from admission.values import (
     Sensing,
     Want,
 )
+
+_logger = logging.getLogger(__name__)
 
 __all__ = ["AdmissionGate", "Decision", "DecisionKind", "StallGuard"]
 
@@ -180,6 +184,14 @@ class AdmissionGate:
 
     def _gauge_failure(self, _resource: ResourceId) -> None:
         """A gauge raised: record it (hard-saturation is applied by the caller)."""
+        # Never die mute (#939): surface the dead sensor, but a raising reporter
+        # must never crash the admission path (hard-saturation stays the caller's).
+        with contextlib.suppress(Exception):  # best-effort: observability never breaks admission
+            _logger.warning(
+                "admission gauge %s failed; hard-saturated and marked stale",
+                _resource,
+                exc_info=True,
+            )
 
     # -- decision --------------------------------------------------------
 
