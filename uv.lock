@@ -16,6 +16,7 @@ members = [
     "crawlutron-core",
     "crawlutron-mcp",
     "crawlutron-rest",
+    "crawlutron-safe-url",
     "crawlutron-sdk",
 ]
 
@@ -542,6 +543,7 @@ dependencies = [
     { name = "crawlutron-core" },
     { name = "crawlutron-mcp" },
     { name = "crawlutron-rest" },
+    { name = "crawlutron-safe-url" },
     { name = "crawlutron-sdk" },
     { name = "curl-cffi" },
     { name = "fastapi" },
@@ -594,6 +596,7 @@ requires-dist = [
     { name = "crawlutron-core", editable = "packages/core" },
     { name = "crawlutron-mcp", editable = "packages/mcp" },
     { name = "crawlutron-rest", editable = "packages/rest" },
+    { name = "crawlutron-safe-url", editable = "packages/safe-url" },
     { name = "crawlutron-sdk", editable = "packages/sdk" },
     { name = "curl-cffi", specifier = "==0.17.0" },
     { name = "fastapi", specifier = "==0.162.0" },
@@ -659,6 +662,27 @@ requires-dist = [
     { name = "crawlutron-core", editable = "packages/core" },
     { name = "fastapi", specifier = "==0.162.0" },
 ]
+
+[[package]]
+name = "crawlutron-safe-url"
+source = { editable = "packages/safe-url" }
+dependencies = [
+    { name = "crawlutron-core" },
+    { name = "regex" },
+]
+
+[package.optional-dependencies]
+psl = [
+    { name = "publicsuffixlist" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "crawlutron-core", editable = "packages/core" },
+    { name = "publicsuffixlist", marker = "extra == 'psl'", specifier = "==1.1.2.20261101" },
+    { name = "regex", specifier = "==2026.9.29" },
+]
+provides-extras = ["psl"]
 
 [[package]]
 name = "crawlutron-sdk"

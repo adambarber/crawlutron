@@ -11,6 +11,7 @@ members = ["packages/*"]
 crawlutron-core = { workspace = true }
 crawlutron-mcp = { workspace = true }
 crawlutron-rest = { workspace = true }
+crawlutron-safe-url = { workspace = true }
 crawlutron-sdk = { workspace = true }
 
 [project]
@@ -51,6 +52,7 @@ dependencies = [
     "crawlutron-core>=0.4",
     "crawlutron-mcp>=0.4",
     "crawlutron-rest>=0.4",
+    "crawlutron-safe-url>=0.4",
     "crawlutron-sdk>=0.4",
     # Single source of truth for the runtime dependency set. Exact pins for
     # reproducibility; the transitive graph is frozen by uv.lock.

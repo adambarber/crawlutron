@@ -6,8 +6,22 @@ build-backend = "hatchling.build"
 name = "crawlutron-safe-url"
 dynamic = ["version"]
 description = "SSRF-safe URL admission: NormalizedUrl, HostPolicy, IDNA canonicalization, registrable domain, private-target guard, credential-safe redaction"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 license = "MIT"
+dependencies = [
+    # Regex engine for the bounded matcher: the stdlib cannot be interrupted.
+    "regex==2026.9.29",
+    # Pinned floor only; the workspace source below resolves it from this repo.
+    "crawlutron-core>=0.4",
+]
+
+[project.optional-dependencies]
+# Public-suffix dataset for registrable_domain (safe_url/registrable_domain.py):
+# without it the suffix heuristic silently degrades.
+psl = ["publicsuffixlist==1.1.2.20261101"]
+
+[tool.uv.sources]
+crawlutron-core = { workspace = true }
 
 [tool.hatch.version]
 source = "vcs"
@@ -15,13 +29,3 @@ raw-options = { search_parent_directories = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/safe_url"]
-
-[project.dependencies]
-# crawlutron-core provides crawlutron.safety.safe_regex used by safe_url/scope_match.py.
-crawlutron-core = ">=0.0.0"
-regex = "==2026.9.29"
-
-[project.optional-dependencies]
-# Public-suffix dataset for registrable_domain (safe_url/registrable_domain.py):
-# without it the suffix heuristic silently degrades.
-psl = ["publicsuffixlist==1.1.2.20261101"]
