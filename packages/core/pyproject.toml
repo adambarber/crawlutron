@@ -18,8 +18,9 @@ source = "vcs"
 raw-options = { search_parent_directories = true }
 
 [tool.hatch.build.hooks.vcs]
-# Written at build/editable-install time; regenerated, never committed.
-version-file = "crawlutron/_version.py"
+# Written at build/editable-install time; regenerated, never committed. The path
+# follows the src layout the member adopted in #945.
+version-file = "src/crawlutron/_version.py"
 
 [tool.hatch.build.targets.wheel]
 # Dist name (crawlutron-core) and import names (crawlutron, admission) are

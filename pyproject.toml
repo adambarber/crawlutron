@@ -5,6 +5,14 @@ build-backend = "hatchling.build"
 [tool.uv.workspace]
 members = ["packages/*"]
 
+[tool.uv.sources]
+# Resolve the member wheels from the workspace, never PyPI: their versions are
+# git-derived at build time and each lives in this repository.
+crawlutron-core = { workspace = true }
+crawlutron-mcp = { workspace = true }
+crawlutron-rest = { workspace = true }
+crawlutron-sdk = { workspace = true }
+
 [project]
 name = "crawlutron"
 dynamic = ["version"]
@@ -36,6 +44,14 @@ classifiers = [
     "Topic :: Text Processing :: Markup :: HTML",
 ]
 dependencies = [
+    # The app is the union of its member wheels: depending on them is what makes
+    # a bare `uv sync` produce an importable environment (CI's test job runs
+    # plain `pytest` with no PYTHONPATH). The members stay independent, each
+    # installable on its own.
+    "crawlutron-core>=0.4",
+    "crawlutron-mcp>=0.4",
+    "crawlutron-rest>=0.4",
+    "crawlutron-sdk>=0.4",
     # Single source of truth for the runtime dependency set. Exact pins for
     # reproducibility; the transitive graph is frozen by uv.lock.
     "fastapi==0.162.0",
@@ -135,8 +151,11 @@ source = "vcs"
 [tool.hatch.build.targets.wheel]
 # The root project ships no wheel: it is only the uv workspace container. Every
 # importable package (core, rest, the SDK) is a member with its own wheel; the
-# SDK gained its own in #898, having shipped from the root until then.
-packages = []
+# SDK gained its own in #898, having shipped from the root until then. An empty
+# `packages` list is not enough -- hatchling falls back to its name heuristic,
+# finds no `crawlutron/` directory and refuses the editable build, so file
+# selection is bypassed outright.
+bypass-selection = true
 
 # Coverage engine config -- the ONE declaration the pre-push coverage hook and
 # any future CI consumer read. `core = "sysmon"` (PEP 669 sys.monitoring) is
