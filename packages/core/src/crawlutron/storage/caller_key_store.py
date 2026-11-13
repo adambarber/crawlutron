@@ -81,6 +81,23 @@ _DUMMY_SALT = b"crawlutron-dummy-salt"
 _DUMMY_VERIFIER = f"{_DUMMY_SALT.hex()}${_hash_secret('', _DUMMY_SALT)}"
 
 
+def _stored_salt_and_digest(stored: str | None) -> tuple[bytes, str] | None:
+    """Split a stored ``salt$hash`` into (salt, digest); None when malformed."""
+    if not isinstance(stored, str):
+        return None
+    parts = stored.split("$", 1)
+    if len(parts) != 2:
+        return None
+    salt_hex, digest_hex = parts
+    try:
+        salt = bytes.fromhex(salt_hex)
+    except ValueError:
+        return None
+    if not digest_hex.isascii():
+        return None
+    return salt, digest_hex
+
+
 def _secret_id_and_body(secret: str) -> tuple[str, str] | None:
     """Split a ``ck_<id-hex>.<body>`` secret into (key_id, body), or None."""
     dot = secret.find(".")
@@ -172,9 +189,7 @@ class CallerKeyStore(CoordinationStore):
     def verify_key(self, secret: str) -> CallerKey | None:
         """The record for ``secret``, or None when it names no live key.
 
-        Current first, then ``previous`` inside the grace window: one PBKDF2
-        for current, at most one more for previous; a miss burns a fixed dummy.
-        """
+        A corrupted stored ``salt$hash`` fails closed: None, never a raise."""
         parsed = _secret_id_and_body(secret)
         key_id = parsed[0] if parsed is not None else None
         body = parsed[1] if parsed is not None else ""
@@ -182,8 +197,10 @@ class CallerKeyStore(CoordinationStore):
         # Current first: one PBKDF2; on a miss, ``previous`` inside the grace
         # window gets one more -- at most two derivations, body-independent timing.
         stored = row[2] if row is not None else _DUMMY_VERIFIER
-        salt_hex, _, digest_hex = stored.partition("$")
-        computed = _hash_secret(body, bytes.fromhex(salt_hex))
+        parsed_stored = _stored_salt_and_digest(stored)
+        salt = parsed_stored[0] if parsed_stored is not None else _DUMMY_SALT
+        digest_hex = parsed_stored[1] if parsed_stored is not None else ""
+        computed = _hash_secret(body, salt)
         if row is not None:
             # Re-read under the lock: the row may have been revoked or rotated
             # while the derivation ran; the post-derive row decides.
@@ -191,9 +208,11 @@ class CallerKeyStore(CoordinationStore):
         if row is not None and secrets.compare_digest(computed, digest_hex):
             return _record_from_row(row)
         if row is not None and row[6] and row[7] is not None and time.time() - row[7] <= GRACE_WINDOW_SECONDS:
-            salt_hex, _, digest_hex = row[6].partition("$")
-            computed = _hash_secret(body, bytes.fromhex(salt_hex))
-            if secrets.compare_digest(computed, digest_hex):
+            parsed_previous = _stored_salt_and_digest(row[6])
+            previous_salt = parsed_previous[0] if parsed_previous is not None else _DUMMY_SALT
+            previous_digest = parsed_previous[1] if parsed_previous is not None else ""
+            computed = _hash_secret(body, previous_salt)
+            if secrets.compare_digest(computed, previous_digest):
                 return _record_from_row(row)
         return None
 
