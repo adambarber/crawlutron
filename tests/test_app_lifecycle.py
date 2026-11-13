@@ -206,13 +206,16 @@ class TestAppLifecycleEdges:
 
 
 class TestLifespanContextManager:
-    async def test_lifespan_is_handed_the_app_it_is_managing(self):
+    async def test_lifespan_is_handed_the_app_it_is_managing(self, monkeypatch):
         """The lifespan publishes onto the app it was given.
 
         The ``_lifespan(None)`` shape wrote the event to ``_app.state``, so
         ``None`` raised at startup; the decorator cannot see that."""
         from crawlutron_rest.main import app
 
+        # The lifespan runs on the app the module holds; its teardown is the
+        # heavy one, so it is neutralised here (#923), not destroying stores.
+        stub_heavy_teardown(monkeypatch)
         # The lifespan runs on the app the module holds; assert its presence so
         # the union-narrowing is explicit about which arm the test needs.
         assert app is not None, "the lifespan-set app is absent"
@@ -245,3 +248,74 @@ class TestShutdownEventBelongsToOneLifespanRun:
             "the second lifespan run inherited the first run's shutdown signal, so every "
             "crawl it starts is cancelled before it does any work"
         )
+
+
+class TestStoreShutdownClosesConnections:
+    """#923: shutdown's store step closes the app's own stores and the cookie
+    jar's shared store, idempotently."""
+
+    def _app_with_cookie_jar(self, tmp_path):
+        """A create_app app whose cookie jar is backed by the shared store."""
+        import dataclasses
+
+        from crawlutron.config.settings import CrawlerSettings
+        from crawlutron.storage.coordination_cookies import SharedCookieStore
+        from crawlutron.transport.cookie_jar import CookieJar
+        from crawlutron_rest import main as main_mod
+
+        settings = dataclasses.replace(
+            CrawlerSettings.from_mapping({"CRAWLUTRON_CACHE_DIR": str(tmp_path)}),
+            cookie_persistence_enabled=True,
+        )
+        app = main_mod.create_app(settings)
+        # Mirror the production ``_load_cookie_jar`` store through public doors.
+        app.state.cookie_jar = CookieJar(SharedCookieStore(str(app.state.job_store.db_path)))
+        return app
+
+    def _captured_stores(self, app):
+        """The six create_app stores plus the cookie jar's shared store."""
+        stores = {
+            "job_store": app.state.job_store,
+            "result_store": app.state.result_store,
+            "spill_store": app.state.spill_store,
+            "watch_store": app.state.watch_store,
+            "caller_key_store": app.state.caller_key_store,
+            "audit_store": app.state.audit_store,
+        }
+        stores["cookie_jar"] = app.state.cookie_jar.store
+        return stores
+
+    async def test_close_app_stores_closes_every_store_and_the_cookie_jar(self, tmp_path):
+        """Shutdown closes the app's own stores even when state is the singleton's."""
+        import sqlite3
+
+        from crawlutron.service.store_shutdown import close_app_stores
+
+        app = self._app_with_cookie_jar(tmp_path)
+        stores = self._captured_stores(app)
+        for store in stores.values():
+            assert store is not None
+            store._conn.execute("SELECT 1")
+
+        await close_app_stores(app)
+
+        for store in stores.values():
+            with pytest.raises(sqlite3.ProgrammingError):
+                store._conn.execute("SELECT 1")
+
+    async def test_close_app_stores_is_idempotent(self, tmp_path):
+        """A second close passes without error and leaves the stores closed."""
+        import sqlite3
+
+        from crawlutron.service.store_shutdown import close_app_stores
+
+        app = self._app_with_cookie_jar(tmp_path)
+        stores = self._captured_stores(app)
+
+        await close_app_stores(app)
+        await close_app_stores(app)
+
+        for store in stores.values():
+            assert store is not None
+            with pytest.raises(sqlite3.ProgrammingError):
+                store._conn.execute("SELECT 1")

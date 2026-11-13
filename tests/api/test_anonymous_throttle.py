@@ -113,7 +113,6 @@ async def _auth_app_client() -> AsyncGenerator[httpx.AsyncClient, None]:
     """An app configured with an operator token, stores closed on teardown (#914)."""
     from crawlutron.config.settings import CrawlerSettings
     from crawlutron.service.store_shutdown import close_app_stores
-    from crawlutron_rest.main import app as _module_app
     from crawlutron_rest.main import create_app
 
     app = create_app(CrawlerSettings.from_mapping({"CRAWLUTRON_KEY_ADMIN_TOKEN": "test-admin-token"}))
@@ -122,7 +121,7 @@ async def _auth_app_client() -> AsyncGenerator[httpx.AsyncClient, None]:
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             yield client
     finally:
-        await close_app_stores(app, _module_app)
+        await close_app_stores(app)
 
 
 async def test_docs_served_and_metered():

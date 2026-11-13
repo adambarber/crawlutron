@@ -437,7 +437,7 @@ async def _shutdown_services(_app: FastAPI) -> None:
     from crawlutron.service.store_shutdown import close_app_stores
 
     async def _close_app_stores_step() -> None:
-        await close_app_stores(_app, module_app())
+        await close_app_stores(_app)
 
     async def _unbind_metric_counters() -> None:
         from crawlutron.runtime.metrics import unbind_metric_counters
