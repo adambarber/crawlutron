@@ -77,6 +77,9 @@ dependencies = [
     # Public-suffix dataset for registrable_domain (crawlutron/models/registrable_domain.py):
     # without it the suffix heuristic silently degrades.
     "publicsuffixlist==1.1.2.20261101",
+    # CVE-2026-126190: soupsieve < 4.0.0; pinned explicitly so the audit gate
+    # and the lock agree on the fixed floor.
+    "soupsieve==4.0.0",
 ]
 
 [project.optional-dependencies]
