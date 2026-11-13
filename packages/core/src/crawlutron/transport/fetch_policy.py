@@ -28,6 +28,7 @@ from crawlutron.transport.classification import classify_error_code
 from crawlutron.transport.decompression import decompress_body as _decompress_body
 from crawlutron.transport.robots_parse import parse_robots_crawl_delay, parse_robots_sitemaps
 from crawlutron.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES, DISCOVERY_BODY_MAX_BYTES
+from crawlutron.vocabulary.taxonomy import is_transient_classification
 
 _RETRY_BACKOFF_BASE_SECONDS = 0.25
 _RETRY_BACKOFF_CAP_SECONDS = 2.0
@@ -99,8 +100,11 @@ async def fetch_with_retries(
                 "content_cache": "miss",
             }
         except Exception as error:
-            transient_errors.append(classify_error_code(error))
-            if attempt >= max_attempts:
+            classified = classify_error_code(error)
+            transient_errors.append(classified)
+            # The taxonomy's OWN law decides whether another pass is worth it;
+            # a terminal refusal (SSRF pin, value_error, ...) re-raises at once.
+            if attempt >= max_attempts or not is_transient_classification(classified):
                 raise
             # Capped exponential backoff so a failing origin sees widening
             # gaps; the bound keeps a large retry budget from parking a URL.

@@ -176,6 +176,34 @@ class TestFetchRetries:
         with pytest.raises(ConnectionError):
             await fetch_with_retries(_raise_fetcher, canonical("http://x/"), {}, 5, 0)
 
+    async def test_terminal_refusal_is_not_retried(self) -> None:
+        """A refusal the taxonomy labels non-transient re-raises on the first
+        attempt; only transient errors consume the retry budget."""
+        calls = []
+
+        def _terminal_fetcher(url, *_):
+            calls.append(url)
+            raise ValueError("refused")
+
+        # ValueError classifies to the non-transient ``value_error`` member, so
+        # even an unused retry budget must not schedule a second attempt.
+        with pytest.raises(ValueError, match="refused"):
+            await fetch_with_retries(_terminal_fetcher, canonical("http://x/"), {}, 5, 3)
+        assert calls == [canonical("http://x/")]
+
+    async def test_transient_error_is_retried_to_exhaustion(self) -> None:
+        """A transient error keeps retrying, so the gate does not over-block."""
+        calls = []
+
+        def _transient_fetcher(url, *_):
+            calls.append(url)
+            raise ConnectionError("transient")
+
+        with pytest.raises(ConnectionError):
+            await fetch_with_retries(_transient_fetcher, canonical("http://x/"), {}, 5, 2)
+        # max_retries=2 -> max_attempts=3: the transient error retries every attempt.
+        assert calls == [canonical("http://x/")] * 3
+
     def test_retry_backoff_is_exponential_and_capped(self) -> None:
         """Each retry gap doubles from the base and plateaus at the ceiling."""
         assert retry_backoff_seconds(1) == pytest.approx(0.25)
