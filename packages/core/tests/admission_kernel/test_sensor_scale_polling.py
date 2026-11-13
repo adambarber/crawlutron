@@ -8,8 +8,8 @@ from __future__ import annotations
 import dataclasses
 
 from admission import Ratio
-from tests.admission_kernel._doors import _finish, _hold_one
-from tests.admission_kernel._gate_factory import FakeGauge, GateSpec, build_gate
+from tests._support._doors import _finish, _hold_one
+from tests._support._gate_factory import FakeGauge, GateSpec, build_gate
 
 
 class _CountingGauge(FakeGauge):

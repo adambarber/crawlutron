@@ -9,8 +9,8 @@ import asyncio
 import dataclasses
 
 from admission import Count, LaneId, Want
-from tests.admission_kernel._doors import _GENERAL_ONE, Granted, _finish, _live
-from tests.admission_kernel._gate_factory import GateSpec, build_gate
+from tests._support._doors import _GENERAL_ONE, Granted, _finish, _live
+from tests._support._gate_factory import GateSpec, build_gate
 
 _GENERAL_SIX = Want.of(general=Count(6), heavy=Count(0))
 

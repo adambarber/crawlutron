@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import configparser
 import pathlib
 
 from tests._walk_primitives import (
     PACKAGE_ROOTS,
+    REPO_ROOT,
     SCAN_ROOTS,
     package_roots,
     python_bearing_roots,
     scan_roots,
     uv_workspace_members,
 )
+from tests._walk_primitives import test_roots as derived_test_roots
 
 
 def test_scan_roots_equal_every_python_bearing_tree() -> None:
@@ -144,3 +147,39 @@ def test_uv_workspace_is_declared() -> None:
     members = uv_workspace_members()
     assert members is not None, "pyproject.toml declares no [tool.uv.workspace].members"
     assert package_roots(), "pyproject.toml's uv members expand to no python-bearing member"
+
+
+_PYTEST_INI = REPO_ROOT / "pytest.ini"
+_PYPROJECT = REPO_ROOT / "pyproject.toml"
+
+
+def test_pytest_testpaths_equal_the_derived_test_roots() -> None:
+    """pytest.ini testpaths is the derived test surface (#908): a per-package
+    home must be a named testpath or the battery stops collecting it (the RED
+    this cohort recorded), and a stray testpath naming nothing derived must red."""
+    parser = configparser.ConfigParser()
+    parser.read(_PYTEST_INI)
+    declared = set(parser["pytest"]["testpaths"].split())
+    for root in derived_test_roots():
+        assert root in declared, f"pytest.ini testpaths is missing the derived test root {root!r}"
+    assert declared <= set(derived_test_roots()), (
+        "pytest.ini testpaths names non-derived test roots: "
+        + repr(sorted(declared - set(derived_test_roots())))
+    )
+
+
+def test_a_ruff_per_file_ignore_covers_every_derived_test_home() -> None:
+    """Every derived test home has a ruff per-file-ignore glob, so a moved test
+    keeps its flat test-tree lint exemptions (#908); a future ``packages/
+    <member>/tests`` without one reds here naming it."""
+    import fnmatch
+    import tomllib
+
+    with _PYPROJECT.open("rb") as handle:
+        table = tomllib.load(handle)
+    ruff = table["tool"]["ruff"]["lint"]["per-file-ignores"]
+    ignore_globs = list(ruff)
+    for root in derived_test_roots():
+        probe = f"{root}/probe.py"
+        covered = any(fnmatch.fnmatchcase(probe, glob) for glob in ignore_globs)
+        assert covered, f"no ruff per-file-ignore glob covers the derived test home {root!r}"

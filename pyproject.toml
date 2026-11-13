@@ -318,6 +318,23 @@ max-statements = 87
     "PLR0912",
     "PLR0915",
 ]
+# A per-package test home under packages/*/tests/ is ruff's own test surface too
+# (#908): the S-family's assert/exe rules, and the complexity ratchets, apply no
+# more to a moved test than to a flat one. Keep the set identical to tests/** so
+# a behavior-equivalent test is lint-clean in either home.
+"packages/*/tests/**" = [
+    "S101",
+    "S104",
+    "S105",
+    "S106",
+    "S311",
+    "S404",
+    "S603",
+    "S608",
+    "C901",
+    "PLR0912",
+    "PLR0915",
+]
 # `scripts/extract_comments.py` is the one script that spawns a process, and
 # it is the same pair the tests carry, for the same reason: importing
 # subprocess is not the risk, and the resolved executable is a path rather than

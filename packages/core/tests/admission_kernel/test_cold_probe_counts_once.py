@@ -9,8 +9,8 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 
-from tests.admission_kernel._doors import Count, LaneId, Want
-from tests.admission_kernel._gate_factory import FakeGauge, GateSpec, build_gate
+from tests._support._doors import Count, LaneId, Want
+from tests._support._gate_factory import FakeGauge, GateSpec, build_gate
 
 _DUAL = Want.of(general=Count(1), heavy=Count(1))
 

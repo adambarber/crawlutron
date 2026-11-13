@@ -6,11 +6,13 @@ import configparser
 import json
 
 from tests._walk_primitives import import_roots
+from tests._walk_primitives import test_roots as derived_test_roots
 from tests.chokepoint_walks import REPO_ROOT
 
 _MYPY_INI = REPO_ROOT / "mypy.ini"
-_SCOPE_TERM = "tests"
-_TESTS = REPO_ROOT / "tests"
+#: The derived test scope terms mypy.ini must carry; one per python-bearing
+#: test home (the flat ``tests`` plus each ``packages/<member>/tests``).
+_TEST_TERMS = set(derived_test_roots())
 
 
 def _declared_scope_files() -> str:
@@ -25,9 +27,27 @@ def _declared_scope_terms() -> tuple[str, ...]:
     return tuple(term.strip() for term in _declared_scope_files().split(","))
 
 
+def _test_terms() -> tuple[str, ...]:
+    """The currently declared test-scope terms (the ``files`` terms that also
+    name a derived test home), sorted."""
+    return tuple(sorted(set(_declared_scope_terms()) & _TEST_TERMS))
+
+
+def _production_scope_terms() -> set[str]:
+    """The ``files`` terms that are not test-scope terms, as a set."""
+    return set(_declared_scope_terms()) - _TEST_TERMS
+
+
 def _tree_test_modules() -> tuple[str, ...]:
-    """Every ``tests/**/*.py`` module in the tree, as repo-relative posix strings."""
-    return tuple(sorted(str(path.relative_to(REPO_ROOT).as_posix()) for path in _TESTS.rglob("*.py")))
+    """Every test module under a derived test home, as repo-relative posix strings."""
+    modules: list[str] = []
+    for root in derived_test_roots():
+        base = REPO_ROOT / root
+        for path in base.rglob("*.py"):
+            relative = path.relative_to(REPO_ROOT).as_posix()
+            if "__pycache__" not in relative:
+                modules.append(relative)
+    return tuple(sorted(modules))
 
 
 def _scope_matches(module: str) -> bool:
@@ -37,14 +57,16 @@ def _scope_matches(module: str) -> bool:
 
 
 def test_the_scope_names_the_tests_tree() -> None:
-    """mypy.ini must scope the whole tests tree, not a private-module glob that
+    """mypy.ini must scope every derived test home, not a private-module glob that
     leaves every public test module checked only by transitive-import luck."""
-    assert _SCOPE_TERM in _declared_scope_terms(), (
+    terms = set(_declared_scope_terms())
+    missing = sorted(_TEST_TERMS - terms)
+    assert not missing, (
         "mypy.ini files = "
         + _declared_scope_files()
-        + " does not contain the "
-        + _SCOPE_TERM
-        + " term; test modules outside the named set are then checked by luck"
+        + " is missing the derived test scope terms "
+        + str(missing)
+        + "; a test module outside every named set is checked by luck"
     )
 
 
@@ -72,20 +94,27 @@ def test_the_scope_covers_the_real_test_tree() -> None:
     assert (REPO_ROOT / "tests" / "_policy_factories.py").exists(), (
         "the reach proof's module is gone; re-ground this gate in the live tree"
     )
+    assert (REPO_ROOT / "packages" / "core" / "tests" / "admission_kernel").is_dir(), (
+        "the first per-package test home is gone from the scope's reach; re-ground this gate in the live tree"
+    )
 
 
 def test_the_old_harness_glob_scope_fails_the_gate() -> None:
     """The pre-#314 scope (production + the private-module glob) fails the invariant:
     it left every public test module outside the checker."""
-    old_scope = "crawlutron, tests/**/_*.py"
-    assert _SCOPE_TERM not in (term.strip() for term in old_scope.split(",")), (
-        "the old scope must not reach the tests tree"
+    old_terms = set("crawlutron, tests/**/_*.py".split(","))
+    assert not (_TEST_TERMS & old_terms), "the old scope must not reach any derived test home"
+
+
+def test_declared_test_scope_terms_equal_the_derived_test_roots() -> None:
+    """The test-scope terms in mypy.ini EQUAL the derived test roots, so a new
+    ``packages/<member>/tests`` home is picked up by mypy without a hand-edit (#908)."""
+    assert _test_terms() == tuple(sorted(_TEST_TERMS)), (
+        "mypy.ini files test terms "
+        + repr(_test_terms())
+        + " must equal the derived test roots "
+        + repr(sorted(_TEST_TERMS))
     )
-
-
-def _production_scope_terms() -> set[str]:
-    """The ``files`` terms that are not the ``tests`` term, as a set."""
-    return set(_declared_scope_terms()) - {_SCOPE_TERM}
 
 
 def test_production_scope_terms_equal_the_derived_import_roots() -> None:

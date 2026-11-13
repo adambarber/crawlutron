@@ -9,8 +9,8 @@ import pytest
 
 from admission import LaneId
 from admission.values import Lease
-from tests.admission_kernel._doors import _finish, _hold_one
-from tests.admission_kernel._gate_factory import build_gate
+from tests._support._doors import _finish, _hold_one
+from tests._support._gate_factory import build_gate
 
 _MISMATCHED = {LaneId.GENERAL: 10}  # ten units against a gate holding zero
 

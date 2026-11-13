@@ -11,8 +11,8 @@ from crawlutron.health.readiness import ReadinessState
 from crawlutron.runtime.metrics import get_metrics
 from crawlutron.runtime.pressure_memory import MemoryStats, read_memory_stats
 from crawlutron.runtime.pressure_sizing import CpuGate, ResourceGate, read_cpu_quota, read_cpu_usage_seconds
-from tests.admission_kernel._doors import _GENERAL_ONE, _finish, _live
-from tests.admission_kernel._gate_factory import GateSpec, build_gate
+from tests._support._doors import _GENERAL_ONE, _finish, _live
+from tests._support._gate_factory import GateSpec, build_gate
 
 
 async def _hold_in_task(gate):

@@ -11,8 +11,8 @@ import dataclasses
 import queue
 import threading
 
-from tests.admission_kernel._doors import Count, Granted, LaneId, Want
-from tests.admission_kernel._gate_factory import GateSpec, build_gate
+from tests._support._doors import Count, Granted, LaneId, Want
+from tests._support._gate_factory import GateSpec, build_gate
 
 _WANT = Want.of(general=Count(1), heavy=Count(0))
 

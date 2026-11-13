@@ -158,10 +158,26 @@ def import_roots(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
     return tuple(sorted(set(roots)))
 
 
+def _holds_python(directory: pathlib.Path) -> bool:
+    """True if a directory holds any code, ``__pycache__`` aside."""
+    return directory.is_dir() and any("__pycache__" not in q.parts for q in directory.rglob("*.py"))
+
+
+def test_roots(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
+    """The python-bearing test homes: the flat ``tests`` dir plus each
+    ``packages/<member>/tests`` home, named repo-relatively and sorted. Each
+    home is first-class: named, never merely covered by a member root."""
+    flat = ("tests",) if _holds_python(base / "tests") else ()
+    member_homes = sorted(
+        f"{member}/tests" for member in package_roots(base) if _holds_python(base / member / "tests")
+    )
+    return tuple(sorted(set(flat) | set(member_homes)))
+
+
 def scan_roots(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
-    """Every python-bearing dir under ``base``: the package roots plus the
-    top-level python-bearing roots, minus member-package containers that a
-    member root already covers (``packages/`` once ``packages/core`` is one)."""
+    """Every python-bearing dir under ``base``: package and top-level roots,
+    minus the member containers a member root already covers. Per-package
+    test homes go to :func:`test_roots` (a member root covers them, #908)."""
     packages = set(PACKAGE_ROOTS) if base == REPO_ROOT else set(package_roots(base))
     package_paths = {pathlib.PurePosixPath(p) for p in packages}
     containers = {

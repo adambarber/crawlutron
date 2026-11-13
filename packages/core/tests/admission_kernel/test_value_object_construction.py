@@ -132,7 +132,7 @@ def test_want_of_requires_all_lanes_and_rejects_empty() -> None:
 
 def test_granted_requires_positive_total_and_a_live_lease() -> None:
     """A zero-total Granted is a lie unconstructible by type."""
-    from tests.admission_kernel._gate_factory import build_gate
+    from tests._support._gate_factory import build_gate
 
     gate, _handles = build_gate()
     lease = Lease._of(gate, {LaneId.GENERAL: 1}, cold=False, scale=Scale(1.0))

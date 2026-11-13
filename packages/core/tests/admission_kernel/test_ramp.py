@@ -11,8 +11,8 @@ import dataclasses
 import pytest
 
 from admission import Count, Want
-from tests.admission_kernel._doors import _finish, _live
-from tests.admission_kernel._gate_factory import GateSpec, build_gate
+from tests._support._doors import _finish, _live
+from tests._support._gate_factory import GateSpec, build_gate
 
 _GENERAL = Want.of(general=Count(1), heavy=Count(0))
 

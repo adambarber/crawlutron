@@ -79,7 +79,7 @@ async def _followup_grants(gate, want: Want) -> int:
 
 def _ceiling_one_gate():
     """A gate with GENERAL ceiling 1 plus the single-GENERAL want that fills it."""
-    from tests.admission_kernel._gate_factory import GateSpec, build_gate
+    from tests._support._gate_factory import GateSpec, build_gate
 
     gate, _ = build_gate(dataclasses.replace(GateSpec(), general_ceiling=1))
     return gate, _GENERAL_ONE

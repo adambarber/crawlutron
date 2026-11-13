@@ -11,8 +11,8 @@ import dataclasses
 import pytest
 
 from admission.values import Allocation
-from tests.admission_kernel._doors import AdmissionRefused, Count, IdleReason, LaneId, Want
-from tests.admission_kernel._gate_factory import GateSpec, build_gate
+from tests._support._doors import AdmissionRefused, Count, IdleReason, LaneId, Want
+from tests._support._gate_factory import GateSpec, build_gate
 
 
 async def _grant(gate, want: Want) -> Allocation:

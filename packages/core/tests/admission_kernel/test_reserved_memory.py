@@ -10,8 +10,8 @@ import dataclasses
 import pytest
 
 from admission import AdmissionRefused, IdleReason
-from tests.admission_kernel._doors import _GENERAL_ONE
-from tests.admission_kernel._gate_factory import GateSpec, build_gate
+from tests._support._doors import _GENERAL_ONE
+from tests._support._gate_factory import GateSpec, build_gate
 
 
 async def test_reserved_memory_never_admitted() -> None:

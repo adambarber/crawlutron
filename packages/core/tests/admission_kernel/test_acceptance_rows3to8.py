@@ -22,8 +22,8 @@ from admission import (
     Want,
     WrongGateError,
 )
-from tests.admission_kernel._doors import _GENERAL_ONE, _auto, _finish, _hold_one, _live
-from tests.admission_kernel._gate_factory import FakeGauge, GateSpec, build_gate
+from tests._support._doors import _GENERAL_ONE, _auto, _finish, _hold_one, _live
+from tests._support._gate_factory import FakeGauge, GateSpec, build_gate
 
 _STALE_CPU = FakeGauge(0.5, warm=False, stale=True)
 

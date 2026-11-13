@@ -10,8 +10,8 @@ import sys
 import threading
 
 from admission import LaneId
-from tests.admission_kernel._doors import _GENERAL_ONE
-from tests.admission_kernel._gate_factory import GateSpec, build_gate
+from tests._support._doors import _GENERAL_ONE
+from tests._support._gate_factory import GateSpec, build_gate
 
 _THREADS = 8
 _ROUNDS = 250

@@ -10,7 +10,7 @@ import asyncio
 
 import pytest
 
-from tests.admission_kernel._doors import Want, _ceiling_one_gate, _followup_grants
+from tests._support._doors import Want, _ceiling_one_gate, _followup_grants
 
 
 async def test_lease_releases_on_cancellation() -> None:
