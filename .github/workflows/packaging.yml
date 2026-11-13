@@ -26,6 +26,11 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
+      # hatch-vcs derives the version from the newest tag. A checkout is not
+      # guaranteed to carry them, and a tagless tree builds 0.1.devN, which fails
+      # the members' `>=0.4.0.dev0` floor when the probe resolves them.
+      - name: Fetch the tags the version comes from
+        run: git fetch --tags --force
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
         with:
           enable-cache: true
@@ -53,11 +58,11 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-      - uses: docker/setup-buildx-action@8d2750c68442942b65b6f74ee94a6079a0f74eb5 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Build the runtime image
         # Loaded into the local daemon rather than pushed: this asserts the image
         # still builds after a packaging change, nothing more.
-        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73c547607 # v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           target: runtime

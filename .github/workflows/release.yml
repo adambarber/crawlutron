@@ -42,6 +42,10 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
+      # The tag is the version. If the checkout carries none, hatch-vcs falls back
+      # to 0.1.devN and the version assertion below fails the release loudly.
+      - name: Fetch the tags the version comes from
+        run: git fetch --tags --force
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
         with:
           enable-cache: true
@@ -127,14 +131,14 @@ jobs:
           echo "native=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push the runtime image
-        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73c547607 # v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           target: runtime
