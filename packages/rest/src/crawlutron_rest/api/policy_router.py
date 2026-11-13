@@ -6,14 +6,25 @@ router stays trivial and the rollup is testable without FastAPI machinery.
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import Depends, Request
 
 from crawlutron.models.policy_suggestions_response import PolicySuggestionsResponse
+from crawlutron.service.main_helpers import request_gate
 from crawlutron.service.policy_suggestions import policy_suggestions as policy_suggestions_handler
 from crawlutron_rest.api.caller_auth import is_operator
-from crawlutron_rest.api.dependencies import CallerDep, get_result_store, get_settings
+from crawlutron_rest.api.dependencies import (
+    AdmissionDep,
+    CallerDep,
+    TrackingDep,
+    get_result_store,
+    get_settings,
+)
 from crawlutron_rest.api.exceptions import http_error
 from crawlutron_rest.api.route_layer import guarded_router
+
+logger = logging.getLogger(__name__)
 
 router = guarded_router(tags=["Crawler"])
 
@@ -34,15 +45,19 @@ router = guarded_router(tags=["Crawler"])
 async def policy_suggestions_endpoint(
     request: Request,
     caller: CallerDep,
+    tracking: TrackingDep,
+    admission: AdmissionDep,
     result_store=Depends(get_result_store),
     settings=Depends(get_settings),
 ) -> PolicySuggestionsResponse:
-    # Anonymity is refused and the rollup is per-tenant: the cross-tenant view is
-    # the operator's, mirroring the /metrics caller-detail gate.
+    # Anonymity is refused and the rollup is per-tenant: the operator's view is
+    # the /metrics caller-detail gate; the gate/admit wrap meters the presented key.
     if not caller.authenticated:
         raise http_error(401, "invalid_api_key", "Unauthenticated: an API key is required")
     owner = None if is_operator(request) else caller.caller_id
-    return await policy_suggestions_handler(result_store=result_store, settings=settings, owner=owner)
+    with request_gate("policy_suggestions_request_rejected", logger=logger):
+        async with admission.admit(caller, 0, tracking=tracking):
+            return await policy_suggestions_handler(result_store=result_store, settings=settings, owner=owner)
 
 
 __all__ = ["router"]

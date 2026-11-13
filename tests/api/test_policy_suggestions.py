@@ -360,6 +360,26 @@ async def test_a_live_caller_key_still_gets_the_per_tenant_rollup(tmp_path):
     assert body["records_examined"] == 0
 
 
+async def test_a_keyed_caller_past_concurrency_quota_is_refused(tmp_path, monkeypatch):
+    """#934: the suggestions door rides the per-caller admit meter (mirrors search)."""
+    from tests._concurrency_probe import assert_second_concurrent_refused, make_blocking_callable
+
+    blocker, entered, released = make_blocking_callable(result=[])
+    async with _real_door_client(tmp_path) as (client, keys, results):
+        monkeypatch.setattr(results, "apayloads_page", blocker)
+        issued = keys.issue_key("key_a", max_concurrency=1)
+        await assert_second_concurrent_refused(
+            client,
+            url="/v1/policy-suggestions",
+            headers={"X-API-Key": issued.secret},
+            body={},
+            entered=entered,
+            released=released,
+            first_ok=(200,),
+            method="get",
+        )
+
+
 async def test_no_credential_is_401_through_the_real_door(tmp_path):
     """Boundary class 1: no credential is refused exactly as before."""
     async with _real_door_client(tmp_path) as (client, _keys, _results):

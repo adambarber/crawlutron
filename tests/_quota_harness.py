@@ -134,13 +134,17 @@ async def keyed_result_client(
     overrides so the door reads the store handed to it, and stashes the store on app.state for the MCP
     door; yields the client, result store, and key store.
     """
-    _, results, keys = stores(tmp_path)
+    job_store, results, keys = stores(tmp_path)
     app = harness_app(*routers)
     app.state.result_store = results
+    # The suggestions door rides the per-caller meter after #934, so admission's
+    # tracking needs the job store wired on app.state like every metered door.
+    app.state.job_store = job_store
     async with keyed_client(
         app,
         keys=keys,
         overrides={
+            get_job_store: lambda: job_store,
             get_result_store: lambda: results,
             get_settings: lambda: CrawlerSettings.from_mapping({}),
             get_shutdown_event: asyncio.Event,
@@ -149,5 +153,6 @@ async def keyed_result_client(
         try:
             yield client, results, keys
         finally:
+            job_store.close()
             results.close()
             keys.close()

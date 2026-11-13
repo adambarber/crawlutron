@@ -148,7 +148,7 @@ DECLARED_SURFACE_RATCHET = {
     "packages/core/src/crawlutron/service/admit_endpoint.py": (3, 2),
     "packages/core/src/crawlutron/service/key_throttle.py": (2, 2),
     "packages/core/src/crawlutron/service/policy_defaults.py": (2, 0),
-    "packages/rest/src/crawlutron_rest/api/policy_router.py": (2, 1),
+    "packages/rest/src/crawlutron_rest/api/policy_router.py": (3, 1),  # #934 metering adds the module logger
     "packages/rest/src/crawlutron_rest/api/mcp_router.py": (2, 1),
     # RAISED to (14, 12) by #854: the CallerQuotaAdmission port (Protocol, concrete
     # binding, default instance) joins the core so doors consume the interface.

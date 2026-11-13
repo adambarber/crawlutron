@@ -6,8 +6,8 @@ then resuming the first, so that choreography lives here once, not in each door.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Iterable
-from typing import NamedTuple
+from collections.abc import Callable, Coroutine, Iterable
+from typing import Any, NamedTuple
 
 _SYNC_RESULT = {"request_id": "sync", "results": [], "submitted_count": 0, "policy_schema_version": ""}
 
@@ -89,17 +89,22 @@ async def assert_second_concurrent_refused(
     first_ok: Iterable[int],
     second_url: str | None = None,
     second_body: dict[str, object] | None = None,
+    method: str = "post",
 ) -> None:
-    """Start one POST, let it reach the blocking handler, then confirm the second is 429.
+    """Start one POST (or GET), let it reach the blocking handler, confirm the second is 429.
 
     The second request may target a different door (``second_url``/``second_body``):
     the cross-door probes pin that both doors read the SAME register."""
-    first = asyncio.create_task(client.post(url, headers=headers, json=body))
+    handler = getattr(client, method)
+
+    def _issue(target: str, payload: dict[str, object]) -> Coroutine[Any, Any, Any]:
+        kwargs = {"headers": headers, "json": payload} if method == "post" else {"headers": headers}
+        return handler(target, **kwargs)
+
+    first = asyncio.create_task(_issue(url, body))
     await asyncio.wait_for(entered.wait(), timeout=5)
     try:
-        second = await asyncio.wait_for(
-            client.post(second_url or url, headers=headers, json=second_body or body), timeout=3
-        )
+        second = await asyncio.wait_for(_issue(second_url or url, second_body or body), timeout=3)
     except TimeoutError:
         released.set()
         await asyncio.wait_for(first, timeout=5)
