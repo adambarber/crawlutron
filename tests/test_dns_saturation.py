@@ -138,6 +138,7 @@ def _join_via_polling(seconds: float = 5.0) -> None:
         time.sleep(0.01)
 
 
+@pytest.mark.real_sleeps
 def test_a_timed_out_wait_still_counts_the_worker(monkeypatch):
     """The registry must hold a future until the RESOLVER THREAD completes, not until the caller's wait times
     out: a getaddrinfo still running after the wait expires is exactly the blind window the saturation law
@@ -153,6 +154,14 @@ def test_a_timed_out_wait_still_counts_the_worker(monkeypatch):
         assert pt.dns_in_flight_resolves() >= 1, "the parked resolve never registered"
         occupied = ParkedResolver(monkeypatch)
         occupied.occupy(pt, pt.DNS_WORKERS - 1)
+        # occupy() waits for >= DNS_WORKERS - 1 futures, but that count includes
+        # the 1 pre-registered parked worker; wait for full saturation instead.
+        deadline = time.monotonic() + 5.0
+        while pt.dns_in_flight_resolves() < pt.DNS_WORKERS and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert pt.dns_in_flight_resolves() >= pt.DNS_WORKERS, (
+            "resolver not fully saturated before the refusal probe"
+        )
         try:
             with pytest.raises(pt.ResolverBudgetExceeded, match="budget"):
                 await task  # the caller's wait expires; the WORKER is still parked
