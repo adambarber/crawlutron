@@ -88,7 +88,12 @@ def _secret_id_and_body(secret: str) -> tuple[str, str] | None:
         bytes.fromhex(id_hex)
     except ValueError:
         return None
-    return f"key_{id_hex}", secret[dot + 1 :]
+    body = secret[dot + 1 :]
+    # #927: an empty body (``ck_<id>.``) would set a hash-of-empty credential;
+    # the secret must carry a non-empty body to be an adversarial choice.
+    if not body:
+        return None
+    return f"key_{id_hex}", body
 
 
 class CallerKeyStore(CoordinationStore):

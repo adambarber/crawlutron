@@ -250,6 +250,33 @@ def test_rotation_rejects_a_secret_for_another_key_id(tmp_path):
     assert store.verify_key(issued.secret) is not None  # untouched
 
 
+def test_rotate_refuses_an_empty_body_secret(tmp_path):
+    """#927: ck_<id>. keeps the key's credential from degrading to hash-of-empty."""
+    store = CallerKeyStore(tmp_path / "keys.db")
+    issued = store.issue_key("agent-a")
+
+    assert store.rotate_key(issued.key_id, f"ck_{issued.key_id[4:]}.") is False
+    assert store.verify_key(issued.secret) is not None  # untouched
+
+
+def test_verify_refuses_an_empty_body_secret(tmp_path):
+    """#927: an empty-body secret names no live key; the miss stays fail-closed."""
+    store = CallerKeyStore(tmp_path / "keys.db")
+    issued = store.issue_key("agent-a")
+
+    assert store.verify_key(f"ck_{issued.key_id[4:]}.") is None
+
+
+def test_rotate_still_admits_a_single_char_body_secret(tmp_path):
+    """#927: the guard refuses only the empty body, not a legitimate rotation."""
+    store = CallerKeyStore(tmp_path / "keys.db")
+    issued = store.issue_key("agent-a")
+    secret = f"ck_{issued.key_id[4:]}.x"
+
+    assert store.rotate_key(issued.key_id, secret) is True
+    assert store.verify_key(secret) is not None
+
+
 def test_verify_cost_one_pbkdf2_on_current_hit_two_on_previous_hit(tmp_path):
     from crawlutron.storage import caller_key_store
 
