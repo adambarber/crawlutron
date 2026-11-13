@@ -6,7 +6,9 @@ Drives the renderer over a fake Playwright-compatible page, no mocks; no
 
 import base64
 
+from crawlutron.models.json_value import JsonValue
 from crawlutron.models.render_options import RenderOptions
+from crawlutron.models.screenshot_diagnostics import ScreenshotDiagnostics
 from crawlutron.transport.browser_driver import BrowserDriver
 from crawlutron.vocabulary.browser import BrowserAction
 from tests._browser_doubles import BrowserFakeContextManager, ScriptedPage, scripted_renderer
@@ -174,6 +176,95 @@ class TestElementScreenshot:
         for s in shots:
             decoded = base64.b64decode(s["screenshot"])
             assert decoded == b"elementpng"
+
+
+class OversizedElement(FakeElement):
+    """A matched element whose screenshot bytes blow past the cap."""
+
+    def __init__(self, size: int):
+        super().__init__("")
+        self.size = size
+
+    async def screenshot(self) -> bytes:
+        return b"\xff" * self.size
+
+
+class ScreenshotPage(FakePage):
+    """A scripted page whose full-page screenshot returns a fixed byte payload."""
+
+    def __init__(self, screenshot_bytes: bytes = b"fakepngbytes"):
+        super().__init__()
+        self._screenshot_bytes = screenshot_bytes
+
+    async def screenshot(self, **kwargs: object) -> bytes:
+        return self._screenshot_bytes
+
+
+class OversizedPage(FakePage):
+    """A scripted page whose element store has one oversize screenshot element."""
+
+    def __init__(self, element_size: int):
+        super().__init__()
+        self.elements["#big"] = OversizedElement(element_size)
+
+
+async def _no_capture_shots(page, selectors) -> list[ScreenshotDiagnostics]:
+    """An element-screenshot capture that records nothing."""
+    return []
+
+
+def _carries_refusal(payload: object, oversized: bytes, cap: int) -> None:
+    """The screenshot field is a bounded refusal diagnostic, never the oversized payload."""
+    assert isinstance(payload, str)
+    assert payload != base64.b64encode(oversized).decode("ascii")
+    assert payload.startswith("refused: screenshot")
+    assert str(cap) in payload
+
+
+class TestScreenshotCapRefusal:
+    """Screenshot bytes are capped at the capture chokepoint, not embedded unbounded."""
+
+    async def test_full_page_oversize_is_a_bounded_refusal_not_the_payload(self):
+        from crawlutron.models.screenshot_diagnostics import MAX_SCREENSHOT_BYTES
+        from crawlutron.transport.browser_render_phases import attach_screenshots
+
+        oversized = b"\xff" * (MAX_SCREENSHOT_BYTES + 1)
+        metadata: dict[str, JsonValue] = {}
+        await attach_screenshots(
+            ScreenshotPage(oversized),
+            metadata,
+            capture_element_shots=_no_capture_shots,
+            profile={"include_screenshot": True},
+        )
+        _carries_refusal(metadata["screenshot"], oversized, MAX_SCREENSHOT_BYTES)
+
+    async def test_element_oversize_is_a_bounded_refusal_not_the_payload(self):
+        from crawlutron.models.screenshot_diagnostics import MAX_SCREENSHOT_BYTES
+
+        oversized = b"\xff" * (MAX_SCREENSHOT_BYTES + 1)
+        shots = await BrowserDriver().capture_element_screenshots(
+            OversizedPage(MAX_SCREENSHOT_BYTES + 1), ["#big"]
+        )
+        assert len(shots) == 1
+        _carries_refusal(shots[0]["screenshot"], oversized, MAX_SCREENSHOT_BYTES)
+
+    async def test_in_budget_screenshots_embed_byte_identically(self):
+        from crawlutron.transport.browser_render_phases import attach_screenshots
+
+        metadata: dict[str, JsonValue] = {}
+        await attach_screenshots(
+            ScreenshotPage(),
+            metadata,
+            capture_element_shots=_no_capture_shots,
+            profile={"include_screenshot": True},
+        )
+        assert metadata["screenshot"] == base64.b64encode(b"fakepngbytes").decode("ascii")
+
+    async def test_exactly_at_the_cap_is_embedded_not_refused(self):
+        from crawlutron.models.screenshot_diagnostics import MAX_SCREENSHOT_BYTES, screenshot_payload
+
+        at_cap = b"a" * MAX_SCREENSHOT_BYTES
+        assert screenshot_payload(at_cap) == base64.b64encode(at_cap).decode("ascii")
 
 
 class TestBrowserReuse:

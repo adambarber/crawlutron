@@ -7,7 +7,6 @@ page) so the render loop reads as the sequence of phases a reviewer can name.
 from __future__ import annotations
 
 import asyncio
-import base64
 import time
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, NamedTuple, cast
@@ -21,7 +20,7 @@ from crawlutron.models.intercepted_xhr_record import InterceptedXhrRecord
 from crawlutron.models.json_value import JsonValue
 from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.result_factory import terminal_attempt
-from crawlutron.models.screenshot_diagnostics import ScreenshotDiagnostics
+from crawlutron.models.screenshot_diagnostics import ScreenshotDiagnostics, screenshot_payload
 from crawlutron.runtime.resource_lifecycle import record_declined_close
 from crawlutron.transport.browser_cookies import harvest_session_cookies
 from crawlutron.transport.browser_driver import BrowserDriver
@@ -236,7 +235,7 @@ async def attach_screenshots(
     """Optional full-page screenshot plus targeted element screenshots."""
     if _profile_bool(profile, "include_screenshot"):
         screenshot_bytes = await page.screenshot(full_page=True)
-        metadata["screenshot"] = base64.b64encode(screenshot_bytes).decode("ascii")
+        metadata["screenshot"] = screenshot_payload(screenshot_bytes)
     element_shots = _profile_selectors(profile)
     if element_shots:
         # The shots are bounded JSON records (selector + base64 string).

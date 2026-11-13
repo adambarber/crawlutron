@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import base64
 import contextlib
 from collections.abc import Callable
 
-from crawlutron.models.screenshot_diagnostics import ScreenshotDiagnostics
+from crawlutron.models.screenshot_diagnostics import ScreenshotDiagnostics, screenshot_payload
 from crawlutron.transport.driver_config import async_sleep
 from crawlutron.transport.render_page import PageElement, RenderPage
 from crawlutron.transport.timeouts import bounded_evaluate
@@ -148,6 +147,5 @@ async def capture_element_screenshots(page: RenderPage, selectors: list[str]) ->
             element: PageElement | None = await page.query_selector(selector)
             if element is None:
                 continue
-            data = base64.b64encode(await element.screenshot()).decode("ascii")
-            shots.append({"selector": selector, "screenshot": data})
+            shots.append({"selector": selector, "screenshot": screenshot_payload(await element.screenshot())})
     return shots
