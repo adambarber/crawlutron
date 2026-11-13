@@ -9,8 +9,9 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
+from safe_url.host_policy import HostPolicy
+
 from crawlutron.models.crawl_result import EngineCrawlResult
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.json_value import JsonValue
 from crawlutron.models.serialization import from_wire, to_dict
 from crawlutron.storage.coordination_store import CoordinationStore, atwin

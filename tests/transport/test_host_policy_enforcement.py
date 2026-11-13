@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import httpx
 import pytest
+from safe_url.normalized_url import NormalizedUrl
 
 import crawlutron.transport.fetchers as fetchers_mod
 import crawlutron.transport.http_client_pool as pool_mod
 import crawlutron.transport.pinned_dns as pinned_mod
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.extraction.content import extract_post_fetch_discovery
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.orchestration.engine import crawl_request
 from tests._browser_doubles import _fake_browser
 from tests._fetch_doubles import FetcherDouble, make_fetch

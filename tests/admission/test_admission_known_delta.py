@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import builtins
 
+from safe_url.normalized_url import NormalizedUrl
+
 import crawlutron.admission.admission_links as admission_links
-from crawlutron.models.normalized_url import NormalizedUrl
 from tests._policy_factories import admit, canonical
 
 

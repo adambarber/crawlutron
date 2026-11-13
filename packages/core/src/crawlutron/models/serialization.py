@@ -10,10 +10,11 @@ from collections.abc import Callable, Mapping
 from dataclasses import MISSING, fields, is_dataclass
 from typing import Union, cast, get_args, get_origin, get_type_hints
 
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.models.freezable_record import FreezableRecord
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.json_value import JsonValue
-from crawlutron.models.normalized_url import NormalizedUrl
 
 
 def to_dict(result: FreezableRecord) -> dict[str, JsonValue]:

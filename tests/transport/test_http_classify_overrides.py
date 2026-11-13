@@ -9,10 +9,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 import pytest
+from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.models.content_metrics import ContentMetrics
 from crawlutron.models.crawl_policy import CrawlPolicy
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.transport.http_classify import classify_extracted_content
 from crawlutron.transport.http_response import (
     ExtractedHttpContent,

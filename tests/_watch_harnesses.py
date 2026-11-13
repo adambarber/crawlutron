@@ -8,10 +8,10 @@ from __future__ import annotations
 import asyncio
 
 from httpx import ASGITransport, AsyncClient
+from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models import watch_state
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.service import watch_sweep
 from crawlutron.service.watch_sweep import WatchSweeper

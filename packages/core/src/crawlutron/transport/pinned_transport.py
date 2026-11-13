@@ -12,9 +12,9 @@ from typing import Protocol
 from urllib.parse import urlparse
 
 import httpx
+from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.models.json_value import JsonValue
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.transport import pinned_dns as _dns
 from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE, global_cookie_jar
 

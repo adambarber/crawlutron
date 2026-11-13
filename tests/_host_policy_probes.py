@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Mapping, MutableMapping
 
-from crawlutron.models.host_policy import HostPolicy
+from safe_url.host_policy import HostPolicy
 
 _BLOCKED_URL = "https://blocked.test/secret"
 

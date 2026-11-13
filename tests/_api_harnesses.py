@@ -83,16 +83,18 @@ async def run_with_webhook(request_id, execute_fn, webhook_url, job_store, resul
 
 
 def _webhook_policy():
+    from safe_url.host_policy import HostPolicy
+
     from crawlutron.config.settings import CrawlerSettings
-    from crawlutron.models.host_policy import HostPolicy
 
     return HostPolicy.from_settings(CrawlerSettings.from_mapping())
 
 
 def admitted_webhook(raw: str):
     """An admitted WebhookTarget for tests that pass a target to the runner."""
+    from safe_url.host_policy import HostPolicy
+
     from crawlutron.config.settings import CrawlerSettings
-    from crawlutron.models.host_policy import HostPolicy
     from crawlutron.models.webhook_target import WebhookTarget
 
     policy = HostPolicy.from_settings(CrawlerSettings.from_mapping())

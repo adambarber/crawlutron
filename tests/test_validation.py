@@ -4,9 +4,9 @@ import logging
 from functools import partial
 
 import pytest
+from safe_url.host_policy import HostPolicy, allow_private_targets, reset_private_target_memo
+from safe_url.normalized_url import NormalizedUrl
 
-from crawlutron.models.host_policy import HostPolicy, allow_private_targets, reset_private_target_memo
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.safety.validation import filter_js_endpoints as _filter_js_endpoints
 
 _HOST_POLICY = HostPolicy.unrestricted()
@@ -47,24 +47,23 @@ class TestNormalizationGuardMemoization:
     URL = "https://MEMO-T2-9E16C.TEST:443/path/?b=2&utm_source=x&a=1#frag"
 
     def _spy(self, monkeypatch):
-        import crawlutron.config.env as config_env
-        import crawlutron.models.host_policy as host_policy
+        import safe_url.host_policy as host_policy
 
-        counts = {"env": 0, "ip": 0}
+        counts = {"parse": 0, "ip": 0}
 
         host_policy.reset_private_target_memo()
-        real_bool = config_env.parse_bool_value
+        real_parse = host_policy._parse_private_target_env
         real_classify = host_policy.classify
 
-        def counting_bool(raw, default, *, env_name):
-            counts["env"] += 1
-            return real_bool(raw, default, env_name=env_name)
+        def counting_parse(raw):
+            counts["parse"] += 1
+            return real_parse(raw)
 
         def counting_classify(host):
             counts["ip"] += 1
             return real_classify(host)
 
-        monkeypatch.setattr(config_env, "parse_bool_value", counting_bool)
+        monkeypatch.setattr(host_policy, "_parse_private_target_env", counting_parse)
         # Spy on the classification primitive rather than on ``ipaddress``.
         monkeypatch.setattr(host_policy, "classify", counting_classify)
         return counts
@@ -73,17 +72,17 @@ class TestNormalizationGuardMemoization:
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
         counts = self._spy(monkeypatch)
         first = admit(self.URL)
-        env_after_first = counts["env"]
+        parse_after_first = counts["parse"]
         ip_after_first = counts["ip"]
         second = admit(self.URL)
         assert second == first
         assert first.raw == "https://memo-t2-9e16c.test/path/?a=1&b=2"
         # The guard really ran on the first call, then nothing re-ran on the second.
-        assert env_after_first >= 1
+        assert parse_after_first >= 1
         assert ip_after_first >= 1
         # The second identical call consulted env and the IP classifier zero extra times: both decisions are
         # memoized.
-        assert counts["env"] == env_after_first
+        assert counts["parse"] == parse_after_first
         assert counts["ip"] == ip_after_first
 
     def test_env_flip_between_calls_still_visible(self, monkeypatch):
@@ -136,7 +135,7 @@ class TestSsrfPrivateTargetGuardWarning:
         else:
             monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", env)
         reset_private_target_memo()
-        with caplog.at_level(logging.WARNING, logger="crawlutron.models.host_policy"):
+        with caplog.at_level(logging.WARNING, logger="safe_url.host_policy"):
             allow_private_targets()
         warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
         assert len(warnings) == 0
@@ -151,7 +150,7 @@ class TestSsrfPrivateTargetGuardWarning:
     def test_warning_emitted_when_guard_disabled(self, env, calls, caplog, monkeypatch):
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", env)
         reset_private_target_memo()
-        with caplog.at_level(logging.WARNING, logger="crawlutron.models.host_policy"):
+        with caplog.at_level(logging.WARNING, logger="safe_url.host_policy"):
             for _ in range(calls):
                 allow_private_targets()
         recorded = [r for r in caplog.records if r.levelno == logging.WARNING]
@@ -163,7 +162,7 @@ class TestSsrfPrivateTargetGuardWarning:
         """A change to the env value triggers a new warning."""
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "1")
         reset_private_target_memo()
-        with caplog.at_level(logging.WARNING, logger="crawlutron.models.host_policy"):
+        with caplog.at_level(logging.WARNING, logger="safe_url.host_policy"):
             allow_private_targets()
         first_warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
         assert len(first_warnings) == 1

@@ -215,6 +215,7 @@ APP_ROOTS = (
     APP_ROOT,
     REPO_ROOT / "packages" / "rest" / "src" / "crawlutron_rest",
     REPO_ROOT / "packages" / "mcp" / "src" / "crawlutron_mcp",
+    REPO_ROOT / "packages" / "safe-url" / "src" / "safe_url",
 )
 
 

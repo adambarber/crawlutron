@@ -5,9 +5,10 @@ circuit/backoff. Canonical key is ``NormalizedUrl.site`` (everywhere else).
 
 from collections import deque
 
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.admission.admission_links import AdmittedLink
 from crawlutron.models.discovered_link import DiscoveredLink
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.orchestration.recursive import CrawlState
 from tests._policy_factories import canonical
 

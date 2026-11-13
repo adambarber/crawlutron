@@ -10,9 +10,9 @@ from typing import TypeGuard
 
 import httpx
 import pytest
+from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.models.http_fetch_result import HttpFetchResult
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.safety.bounded_io import BodyTooLarge
 from crawlutron.transport.pinned_transport import PinnedRequest
 from crawlutron.transport.redirect_walker import RedirectWalker

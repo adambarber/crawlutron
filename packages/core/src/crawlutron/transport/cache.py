@@ -9,7 +9,8 @@ import itertools
 import threading
 from collections.abc import Callable
 
-from crawlutron.models.normalized_url import NormalizedUrl
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.runtime import process_state
 from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE
 from crawlutron.transport.freshness import default_clock, expiry_for, is_expired, stores_for_ttl

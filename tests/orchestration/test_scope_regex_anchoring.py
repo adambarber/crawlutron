@@ -1,8 +1,9 @@
 """scope_regex anchors to the host and ignores the query unless the caller
 anchors explicitly: a natural host pattern must not over-admit egress."""
 
+from safe_url.scope_match import scope_allows
+
 from crawlutron.admission.admission_links import compile_scope_pattern
-from crawlutron.admission.scope_match import scope_allows
 
 
 def _allows(pattern: str, url: str) -> bool:

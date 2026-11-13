@@ -12,9 +12,9 @@ from multiprocessing.queues import Queue
 
 import httpx
 import pytest
+from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.models.http_fetch_result import HttpFetchResult
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.transport.transport import FetchRequest
 from crawlutron.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 from tests._fetch_outcome import FetchFailed, FetchOutcome

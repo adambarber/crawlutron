@@ -308,7 +308,7 @@ complete-over-enum construction checks.
 
 All frozen (`@dataclass(frozen=True)` or slotted class), validated in
 `__post_init__`, refusal-shaped literals at the boundary, `__all__` explicit —
-the `NormalizedUrl` bar (`packages/core/src/crawlutron/models/normalized_url.py:161-320`):
+the `NormalizedUrl` bar (`packages/safe-url/src/safe_url/normalized_url.py:161-320`):
 construction-IS-admission, one chokepoint, refusal-shaped spelling via a
 `refusal_literals()` door, foreign errors mapped explicitly.
 

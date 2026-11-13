@@ -9,8 +9,8 @@ from __future__ import annotations
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from lxml import html as lxml_html
+from safe_url.host_policy import HostPolicy
 
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.search import providers as _providers
 from crawlutron.search.providers import (
     DUCKDUCKGO_REDIRECT,

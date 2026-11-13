@@ -19,12 +19,14 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 def _model_declared_names() -> dict[str, str]:
     """Every public name crawlutron/models/ declares, mapped to the module that declares it."""
     models_root = APP_ROOT / "models"
+    safe_url_root = REPO_ROOT / "packages" / "safe-url" / "src" / "safe_url"
     declared: dict[str, str] = {}
-    for path, tree in trees_under(models_root):
-        for node in tree.body:
-            for name in node_names(node):
-                if not name.startswith("_"):
-                    declared[name] = path.relative_to(REPO_ROOT).as_posix()
+    for root in (models_root, safe_url_root):
+        for path, tree in trees_under(root):
+            for node in tree.body:
+                for name in node_names(node):
+                    if not name.startswith("_"):
+                        declared[name] = path.relative_to(REPO_ROOT).as_posix()
     return declared
 
 

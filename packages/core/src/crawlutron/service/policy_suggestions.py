@@ -10,14 +10,14 @@ import asyncio
 import logging
 
 from pydantic import ValidationError
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import admit_or_none
 
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.classification_evidence import ClassificationEvidence
 from crawlutron.models.crawl_status import CrawlStatus
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.host_policy_suggestion import CandidateRule, HostPolicySuggestion
 from crawlutron.models.json_value import JsonValue
-from crawlutron.models.normalized_url import admit_or_none
 from crawlutron.models.policy_suggestions_response import PolicySuggestionsResponse
 from crawlutron.models.trace_response import TraceResponse
 from crawlutron.storage.result_store import CrawlResultStore

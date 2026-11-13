@@ -31,7 +31,7 @@ from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical, crawl_p
 from tests._timing_harnesses import cpu_seconds
 
 if TYPE_CHECKING:
-    from crawlutron.models.host_policy import HostPolicy
+    from safe_url.host_policy import HostPolicy
 
 
 def robots_entry_key(origin: str) -> tuple[str, HostPolicy]:

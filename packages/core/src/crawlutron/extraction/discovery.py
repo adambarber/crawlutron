@@ -7,6 +7,9 @@ from html import unescape
 from typing import TypedDict, cast
 
 from lxml import etree
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl as NormalizedUrl
+from safe_url.normalized_url import admit_or_none
 
 from crawlutron.extraction.documents import ExtractedContent
 from crawlutron.extraction.llm_format import (
@@ -15,10 +18,7 @@ from crawlutron.extraction.llm_format import (
 from crawlutron.extraction.llm_format import llm_metadata_from_tree
 from crawlutron.extraction.trees import html_diagnostics, parse_html_tree
 from crawlutron.models.discovered_link import DiscoveredLink
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.json_value import JsonValue
-from crawlutron.models.normalized_url import NormalizedUrl as NormalizedUrl
-from crawlutron.models.normalized_url import admit_or_none
 from crawlutron.safety.validation import filter_js_endpoints
 
 

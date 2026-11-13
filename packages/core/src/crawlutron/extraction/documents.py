@@ -14,13 +14,13 @@ from typing import Literal, NamedTuple, TypeVar
 import trafilatura
 from lxml import etree
 from markdownify import markdownify as html_to_md
+from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.config.env import get_env_int, parse_bool_env
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.extraction.doc_pool import DocExtractionPool, doc_task_hooks
 from crawlutron.extraction.llm_format import text_from_html
 from crawlutron.extraction.trees import parse_html_tree
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.runtime.pressure_sizing import doc_worker_count
 
 logger = logging.getLogger(__name__)

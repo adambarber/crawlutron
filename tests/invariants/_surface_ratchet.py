@@ -14,7 +14,7 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     # gather_deadline_bounded is public (#323): render admission reuses the crawl-path gather.
     "packages/core/src/crawlutron/admission/admission_links.py": (13, 6),
     # RAISED to (14, 11) then LOWERED to (7, 6), (5, 5), (4, 4), then (2, 2): HostPolicy and
-    # registrable_domain
+    # registrable_domain moved to safe_url (#998).
     "packages/core/src/crawlutron/safety/validation.py": (2, 2),
     # RAISED to (8, 6) by #621: EnvDecisionMemo is the one shared env-decision memo
     # (it replaced two hand-copied lumps; net surface across the memo modules went DOWN).
@@ -49,10 +49,8 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     # to (8, 7) when the pure constructors moved to crawlutron/models/result_factory.py (#160).
     "packages/core/src/crawlutron/transport/results.py": (8, 7),
     "packages/core/src/crawlutron/transport/fetch_policy.py": (5, 5),
-    # LOWERED to (5, 5): HOST_POLICY_ENTRY_POINTS moved into the test helper.
-    "packages/core/src/crawlutron/models/host_policy.py": (5, 5),
-    # The two latest surface modules: the gate must not silently drop a module
-    # added since the list was pinned (these prune handlers/helpers via __all__).
+    # #998: HostPolicy moved to safe_url/host_policy.py; this file is gone.
+    # The next two surface modules are new since the list was pinned.
     "packages/rest/src/crawlutron_rest/api/keys_router.py": (4, 3),
     # #645: the two read cores joined. #714: delta_context_for is the shared
     # delta loader. #849: the cores moved to service.crawl_endpoint_cores.
@@ -84,6 +82,16 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
         11,
         8,
     ),  # saturation via the real resolve door (ParkedResolver)
+    # #998: safe-url package modules.
+    "packages/safe-url/src/safe_url/address_class.py": (3, 2),
+    "packages/safe-url/src/safe_url/host_canonical.py": (2, 2),
+    "packages/safe-url/src/safe_url/host_policy.py": (5, 5),
+    "packages/safe-url/src/safe_url/mapped_value_errors.py": (3, 3),
+    "packages/safe-url/src/safe_url/normalized_url.py": (6, 4),
+    "packages/safe-url/src/safe_url/process_state.py": (6, 6),
+    "packages/safe-url/src/safe_url/registrable_domain.py": (3, 2),
+    "packages/safe-url/src/safe_url/scope_match.py": (1, 1),
+    "packages/safe-url/src/safe_url/url_redaction.py": (4, 4),
 }
 
 # Former #215 exemptions: their __all__ deliberately does not enumerate every public

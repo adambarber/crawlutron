@@ -21,9 +21,10 @@ class TestContentCacheStoreSerializationOffTheEventLoop:
     offloaded boundary, not on the event loop while a >1 MiB body is encoded (#535)."""
 
     async def test_large_body_store_does_not_block_the_event_loop(self, tmp_path, monkeypatch) -> None:
+        from safe_url.host_policy import HostPolicy
+        from safe_url.normalized_url import NormalizedUrl
+
         import crawlutron.transport.http_cache as hc
-        from crawlutron.models.host_policy import HostPolicy
-        from crawlutron.models.normalized_url import NormalizedUrl
         from crawlutron.transport.http_cache import store_http_caches
         from crawlutron.transport.http_response import FetchedResponse, HttpStrategyContext
         from tests._fetch_doubles import make_fetch
@@ -83,10 +84,11 @@ class TestSpillWriteDictOffTheEventLoop:
     async def test_large_result_spill_write_does_not_block_the_event_loop(
         self, tmp_path, monkeypatch
     ) -> None:
+        from safe_url.host_policy import HostPolicy
+        from safe_url.normalized_url import NormalizedUrl
+
         import crawlutron.storage.result_store as result_store_module
         from crawlutron.models.crawl_strategy_attempt import CrawlStrategyAttempt
-        from crawlutron.models.host_policy import HostPolicy
-        from crawlutron.models.normalized_url import NormalizedUrl
         from crawlutron.models.result_factory import build_engine_result
 
         liveness = _LoopLiveness()

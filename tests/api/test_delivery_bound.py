@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 
-from crawlutron.models.host_policy import HostPolicy
+from safe_url.host_policy import HostPolicy
+
 from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.service import webhooks
 from tests._webhook_doubles import record_webhook_delivery

@@ -8,13 +8,14 @@ from collections.abc import Awaitable, Callable, Iterable, Iterator, MutableSequ
 from dataclasses import dataclass
 from typing import TypeVar
 
-from crawlutron.admission.scope_match import scope_allows
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl, admit_or_none
+from safe_url.scope_match import scope_allows
+from safe_url.url_redaction import redact_url
+
 from crawlutron.models.discovered_link import DiscoveredLink
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.json_value import JsonValue as JsonValue
-from crawlutron.models.normalized_url import NormalizedUrl, admit_or_none
 from crawlutron.safety.safe_regex import BoundedPattern, UnsafePattern, compile_untrusted
-from crawlutron.safety.url_redaction import redact_url
 from crawlutron.storage.job_store import FrontierEntry
 
 #: The candidate shapes link admission accepts: the extraction record itself, a

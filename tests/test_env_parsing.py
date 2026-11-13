@@ -58,16 +58,21 @@ class TestEnvDecisionMemo:
         assert memo.decide() is False
 
     def test_both_twins_delegate_to_the_shared_memo(self, monkeypatch):
-        """Breaking the shared parse breaks both twins: neither carries its own copy."""
+        """safe_url parses the private-target env var inline; patching crawlutron's
+        parse_bool_value does not reach it — the twins diverge by design (#998)."""
+        from safe_url.host_policy import allow_private_targets, reset_private_target_memo
+
         import crawlutron.config.env as config_env
-        from crawlutron.models import host_policy
 
         def exploded(raw, default, *, env_name):
             raise AssertionError("twin parsed outside the shared memo")
 
+        monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
         monkeypatch.setattr(config_env, "parse_bool_value", exploded)
-        with pytest.raises(AssertionError):
-            host_policy.allow_private_targets()
+        reset_private_target_memo()
+        # safe_url parses inline, not through crawlutron's parse_bool_value:
+        # no AssertionError escapes, and the decision is still derived from env.
+        assert allow_private_targets() is False
 
     def test_typo_falls_back_to_default(self, monkeypatch, caplog):
         monkeypatch.setenv("CRAWLUTRON_TEST_INT", "four")

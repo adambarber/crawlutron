@@ -11,6 +11,9 @@ import re
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import replace
 
+from safe_url.normalized_url import NormalizedUrl, admit_or_none
+from safe_url.url_redaction import redact_url
+
 from crawlutron.admission.admission import (
     JobAdmissionContext,
     admit_job_links,
@@ -25,9 +28,7 @@ from crawlutron.admission.policy import read_policy
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.crawl_result import EngineCrawlResult
-from crawlutron.models.normalized_url import NormalizedUrl, admit_or_none
 from crawlutron.models.result_record import ProducerEnvelope
-from crawlutron.safety.url_redaction import redact_url
 from crawlutron.service.crawl_executor import execute_crawl as _real_execute_crawl
 from crawlutron.service.job_lifecycle import (
     cancel_all_tasks,

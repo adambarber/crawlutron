@@ -103,7 +103,7 @@ class TestRefusedClassifications:
 
     async def test_private_network_target(self, admit_settings, monkeypatch):
         monkeypatch.delenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", raising=False)
-        from crawlutron.models.host_policy import reset_private_target_memo
+        from safe_url.host_policy import reset_private_target_memo
 
         reset_private_target_memo()
         async with serve_admit(_admit_app(admit_settings)) as client:
@@ -359,9 +359,11 @@ def _raisable_producer_reasons(normalized_url_path: Path) -> set[str]:
     return reasons
 
 
-def _producers_missing_rows(endpoint_path: Path, known: frozenset[str]) -> list[str]:
+def _producers_missing_rows(known: frozenset[str]) -> list[str]:
     """Raisable producer reasons with no table row, as file:line findings."""
-    normalized_url_path = endpoint_path.parents[1] / "models" / "normalized_url.py"
+    from tests.chokepoint_walks import REPO_ROOT
+
+    normalized_url_path = REPO_ROOT / "packages" / "safe-url" / "src" / "safe_url" / "normalized_url.py"
     return [
         f"{path}:{lineno}: {reason!r} is raisable but has no _REASON_TABLE row"
         for path, collect in _producer_set(normalized_url_path)
@@ -379,7 +381,7 @@ class TestProducerVocabularyLoop:
     def test_every_producer_reason_has_a_table_row(self):
         import crawlutron.service.admit_endpoint as endpoint_module
 
-        missing = _producers_missing_rows(Path(endpoint_module.__file__), endpoint_module.known_reasons())
+        missing = _producers_missing_rows(endpoint_module.known_reasons())
         assert missing == [], "producer->table loop broken:\n" + "\n".join(missing)
 
     def test_the_boundary_refusal_set_matches_the_constructor_vocabulary(self):
@@ -387,11 +389,12 @@ class TestProducerVocabularyLoop:
         -- else it is remapped to invalid_url and its table row is dead -- and every set entry is
         table-mapped, else the boundary passes a value the wire cannot name.
         """
-        import crawlutron.service.admit_endpoint as endpoint_module
-        from crawlutron.models.normalized_url import refusal_literals
+        from safe_url.normalized_url import refusal_literals
 
-        endpoint_path = Path(endpoint_module.__file__)
-        models_dir = endpoint_path.parents[1] / "models"
+        import crawlutron.service.admit_endpoint as endpoint_module
+        from tests.chokepoint_walks import REPO_ROOT
+
+        models_dir = REPO_ROOT / "packages" / "safe-url" / "src" / "safe_url"
         raisable = _raisable_producer_reasons(models_dir / "normalized_url.py")
         boundary_gaps = raisable - refusal_literals()
         table_gaps = refusal_literals() - set(endpoint_module.known_reasons())

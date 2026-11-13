@@ -18,14 +18,14 @@ from collections.abc import Mapping
 from urllib.parse import urlparse
 
 import httpx
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
+from safe_url.url_redaction import redact_urls_in_text
 
 from crawlutron.config.env import get_env_int, get_mapping_int
-from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.runtime import process_state
 from crawlutron.safety.bounded_io import BodyTooLarge, read_capped_async
-from crawlutron.safety.url_redaction import redact_urls_in_text
 from crawlutron.transport.timeouts import Timeouts
 
 logger = logging.getLogger(__name__)

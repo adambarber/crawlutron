@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.models.crawl_task import scheduler_domain_key
-from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.render_options import RenderOptions
 
 

@@ -3,8 +3,9 @@
 import asyncio
 from functools import partial
 
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.admission.policy import read_policy
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.orchestration.engine import fresh_seeds, parse_lastmod, seed_is_fresh
 from crawlutron.transport.content_cache import ContentCache
 from crawlutron.transport.content_cache_key import build_content_cache_key

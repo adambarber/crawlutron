@@ -11,11 +11,12 @@ from enum import StrEnum
 from functools import lru_cache
 from typing import TypedDict
 
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl, admit_or_none
+
 from crawlutron.admission.policy import PolicyTier, read_policy
 from crawlutron.models.crawl_policy import CrawlPolicy
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.json_value import JsonValue as JsonValue
-from crawlutron.models.normalized_url import NormalizedUrl, admit_or_none
 
 
 class OrderedUrlSet(dict[NormalizedUrl, None]):

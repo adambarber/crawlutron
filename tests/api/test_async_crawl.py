@@ -258,7 +258,8 @@ class TestAsyncCrawlApi:
         never ride a response body. The target is built past admission (a secret-named query param is
         refused at the door now); the redaction law this test pins is defense-in-depth behind it.
         """
-        from crawlutron.models.normalized_url import NormalizedUrl
+        from safe_url.normalized_url import NormalizedUrl
+
         from crawlutron.models.webhook_target import WebhookTarget
 
         recorded = recorded_webhook_posts(monkeypatch)

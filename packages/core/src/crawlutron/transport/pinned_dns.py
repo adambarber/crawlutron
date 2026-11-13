@@ -11,8 +11,9 @@ import concurrent.futures
 import socket
 from collections.abc import Callable
 
-from crawlutron.models.host_policy import allow_private_targets
-from crawlutron.models.normalized_url import NormalizedUrl
+from safe_url.host_policy import allow_private_targets
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.runtime import process_state
 from crawlutron.safety.bounded_ttl import BoundedTTLCache
 from crawlutron.safety.validation import is_public_ip_value

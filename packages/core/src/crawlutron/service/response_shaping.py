@@ -10,12 +10,13 @@ import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl, admit_or_none
+
 from crawlutron.admission.admission_links import LinkCandidate
 from crawlutron.delta import DeltaContext, delta_summary_for, removed_entry_keys
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.crawl_status import CrawlStatus
-from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.normalized_url import NormalizedUrl, admit_or_none
 from crawlutron.models.result_record import AnyResult, ProducerEnvelope, RenderEnvelope
 from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
 from crawlutron.models.unified_crawl_result import UnifiedCrawlResult

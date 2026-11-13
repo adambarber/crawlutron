@@ -33,11 +33,12 @@ from crawlutron.vocabulary.extraction import (
 )
 
 if TYPE_CHECKING:
+    from safe_url.host_policy import HostPolicy
+    from safe_url.normalized_url import NormalizedUrl
+
     from crawlutron.models.crawl_diagnostics import CrawlDiagnostics
     from crawlutron.models.crawl_extraction_method import CrawlExtractionMethod
     from crawlutron.models.crawl_policy import CrawlPolicy
-    from crawlutron.models.host_policy import HostPolicy
-    from crawlutron.models.normalized_url import NormalizedUrl
 
 
 @dataclass(frozen=True)

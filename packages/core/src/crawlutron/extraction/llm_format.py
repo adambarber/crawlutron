@@ -9,11 +9,11 @@ from html import unescape
 from typing import cast, get_args, get_type_hints
 
 from lxml import etree
+from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.extraction.classify import strip_html_noise
 from crawlutron.extraction.trees import parse_html_tree
 from crawlutron.models.json_value import JsonValue
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.page_metadata import PageMetadata
 from crawlutron.safety.bounded_io import truncate_html_input
 

@@ -45,6 +45,7 @@ def test_import_configures_nothing(tmp_path):
     packages = rest_root.parent.parent
     core_root = packages / "core" / "src"
     mcp_root = packages / "mcp" / "src"
+    safe_url_root = packages / "safe-url" / "src"
     probe = (
         "import logging, os, sys\n"
         "import crawlutron_rest.main\n"
@@ -58,7 +59,10 @@ def test_import_configures_nothing(tmp_path):
     )
     env = {
         k: v
-        for k, v in {**os.environ, "PYTHONPATH": f"{str(rest_root)}:{str(core_root)}:{str(mcp_root)}"}.items()
+        for k, v in {
+            **os.environ,
+            "PYTHONPATH": f"{str(rest_root)}:{str(core_root)}:{str(mcp_root)}:{str(safe_url_root)}",
+        }.items()
         if not k.startswith("CRAWLUTRON_")
     }
     result = subprocess.run(

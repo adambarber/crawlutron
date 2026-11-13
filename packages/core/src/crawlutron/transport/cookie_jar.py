@@ -16,8 +16,9 @@ from http.cookiejar import Cookie, DefaultCookiePolicy
 from http.cookiejar import CookieJar as StdCookieJar
 from typing import TYPE_CHECKING, TypedDict, cast
 
-from crawlutron.models.normalized_url import NormalizedUrl
-from crawlutron.models.registrable_domain import is_public_suffix
+from safe_url.normalized_url import NormalizedUrl
+from safe_url.registrable_domain import is_public_suffix
+
 from crawlutron.runtime import process_state
 from crawlutron.storage.coordination_cookies import DEFAULT_MAX_HOSTS_PER_NAMESPACE
 from crawlutron.storage.coordination_store import atwin

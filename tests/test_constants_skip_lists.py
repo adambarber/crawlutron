@@ -3,7 +3,8 @@
 domain there is data poisoning -- tracking stays skipped, content never enters.
 """
 
-from crawlutron.models.normalized_url import ANALYTICS_HOST_SUFFIXES
+from safe_url.normalized_url import ANALYTICS_HOST_SUFFIXES
+
 from tests._policy_factories import canonical
 
 

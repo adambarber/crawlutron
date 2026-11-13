@@ -249,14 +249,14 @@ JOB_FRONTIER_GROWTH_ONLY_USES_FUNNEL = Rule(
 _FILTER_NAMES = {
     "is_analytics_host": "is_analytics_host",
     "is_document_url": "is_document_url",
-    "crawlutron.admission.scope_match.scope_allows": "scope_allows",
+    "safe_url.scope_match.scope_allows": "scope_allows",
 }
 
 
 def _imported_filter_names(tree: ast.Module) -> dict[str, str]:
     aliases: dict[str, str] = {}
     for node in nodes_of(tree):
-        if isinstance(node, ast.ImportFrom) and node.module == "crawlutron.admission.scope_match":
+        if isinstance(node, ast.ImportFrom) and node.module == "safe_url.scope_match":
             for imported in node.names:
                 canonical = f"{node.module}.{imported.name}"
                 if canonical in _FILTER_NAMES:

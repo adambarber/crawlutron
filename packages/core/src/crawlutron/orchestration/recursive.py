@@ -10,6 +10,10 @@ from dataclasses import dataclass, field, replace
 from itertools import islice
 from typing import Protocol, cast
 
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
+from safe_url.url_redaction import redact_url
+
 from admission import AdmissionGate
 from crawlutron.admission.admission_links import (
     AdmittedLink,
@@ -19,8 +23,6 @@ from crawlutron.admission.admission_links import (
 )
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.crawl_task import CrawlTask
-from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.orchestration.admission_stall import (
     AdmissionStallGuard,
     BatchStages,
@@ -31,7 +33,6 @@ from crawlutron.runtime.metrics import MetricsStore, get_metrics
 from crawlutron.runtime.pressure_gates import ResourceGate
 from crawlutron.runtime.pressure_sizing import build_admission_gate, kernel_admit
 from crawlutron.safety.safe_regex import BoundedPattern
-from crawlutron.safety.url_redaction import redact_url
 from crawlutron.storage.result_store import CrawlSpillStore
 from crawlutron.transport.results import failed_result_for
 from crawlutron.transport.scheduler import DomainScheduler

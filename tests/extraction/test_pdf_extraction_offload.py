@@ -4,7 +4,8 @@ The sync extractor called directly would stall the whole loop for one PDF's
 parse -- the same defect the to_thread sweeps killed -- so it is offloaded.
 """
 
-from crawlutron.models.normalized_url import NormalizedUrl
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.models.render_options import RenderOptions
 from crawlutron.transport.browser import BrowserRenderer
 from tests._assertions import install_to_thread_spy

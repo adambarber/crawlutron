@@ -3,10 +3,10 @@
 import base64
 
 import pytest
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.models.crawl_result import CrawlResult
-from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.render_options import RenderOptions
 from crawlutron.orchestration.engine import crawl_request
 from crawlutron.transport.browser import BrowserRenderer

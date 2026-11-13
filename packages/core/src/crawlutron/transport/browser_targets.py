@@ -10,9 +10,10 @@ from collections.abc import (
 )
 from typing import TYPE_CHECKING, Protocol, cast
 
-from crawlutron.models.host_policy import HostPolicy
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.models.intercepted_xhr_record import InterceptedXhrRecord
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.safety.json_safe import json_default
 from crawlutron.transport.pinned_dns import (
     bounded_thread_resolve,

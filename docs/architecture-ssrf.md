@@ -12,7 +12,7 @@ hatch — each with the file:line or test that proves it.
 ## The classification primitive (address_class.py)
 
 Every address is parsed once, unwrapped once, and read against a range in
-`packages/core/src/crawlutron/models/address_class.py:134` (`classify`). The verdicts are
+`packages/safe-url/src/safe_url/address_class.py:134` (`classify`). The verdicts are
 `PUBLIC`, `PRIVATE`, `LOOPBACK`, `LINK_LOCAL`, `CGNAT` (`100.64.0.0/10`),
 `UNIQUE_LOCAL` (`fc00::/7`), `NAT64` (`64:ff9b::/96` and the RFC 8215
 `64:ff9b:1::/48`), `MULTICAST`, `UNSPECIFIED`, `RESERVED`, and
@@ -153,9 +153,9 @@ admitted and the SSRF boundary is intentionally relaxed.
 
 | Guarantee | Where it lives | Test proving it |
 |---|---|---|
-| Address classification incl. IPv4-mapped/6to4/Teredo, resolver-numeric forms | `packages/core/src/crawlutron/models/address_class.py:28-164` | `tests/test_ssrf_route_subresources.py`, `tests/transport/test_dns_cache.py` |
+| Address classification incl. IPv4-mapped/6to4/Teredo, resolver-numeric forms | `packages/safe-url/src/safe_url/address_class.py:28-164` | `tests/test_ssrf_route_subresources.py`, `tests/transport/test_dns_cache.py` |
 | Per-fetch fresh pin; validation cached, pin never cached | `packages/core/src/crawlutron/transport/pinned_dns.py:206`, `:174`, `:189` | `tests/transport/test_dns_cache.py:30-52` |
 | Redirect re-anchor, hop budget `MAX_REDIRECT_HOPS = 5`, credential strip | `packages/core/src/crawlutron/transport/pinned_transport.py:172`, `:163`, `:201` | `tests/transport/test_redirect_target.py:61-142` |
 | Browser Host-rewrite pin, stable-answer double resolve | `packages/core/src/crawlutron/transport/browser_targets.py:40`, `:70` | `tests/transport/test_browser_target_stability.py:22-72` |
 | MCP Origin check, non-loopback → 403, Origin never echoed | `packages/rest/src/crawlutron_rest/api/middleware.py:22-41`, `packages/mcp/src/crawlutron_mcp/server.py:42-56` | `tests/api/test_origin_guard.py:9-43` |
-| Private-target guard; warned once per enabled value at first use | `packages/core/src/crawlutron/models/host_policy.py:85-160` | `tests/transport/test_dns_cache.py:55-66` |
+| Private-target guard; warned once per enabled value at first use | `packages/safe-url/src/safe_url/host_policy.py:85-160` | `tests/transport/test_dns_cache.py:55-66` |

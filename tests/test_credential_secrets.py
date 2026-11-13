@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
+from safe_url.url_redaction import redacted_marker
 
 from crawlutron.models.credential import Credential
-from crawlutron.safety.url_redaction import redacted_marker
 
 
 def test_credential_repr_does_not_leak_secrets():

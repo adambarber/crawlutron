@@ -10,10 +10,10 @@ from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.crawl_result import EngineCrawlResult
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.result_record import ProducerEnvelope
 from crawlutron.models.taxonomy import Classification
 from crawlutron.service import job_runner

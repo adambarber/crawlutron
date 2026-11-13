@@ -151,3 +151,11 @@ def redact_urls_in_text(text: str) -> str:
         pos = match.end()
     pieces.append(text[pos:])
     return _redact_secret_params_in_text("".join(pieces))
+
+
+__all__ = [
+    "is_secret_name",
+    "redact_url",
+    "redact_urls_in_text",
+    "redacted_marker",
+]

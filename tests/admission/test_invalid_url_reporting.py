@@ -2,11 +2,12 @@
 
 import asyncio
 
+from safe_url.host_policy import HostPolicy as HostPolicy
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.admission.admission_links import AdmissionOutcome, admit_discovered_links
 from crawlutron.models.discovered_link import DiscoveredLink
-from crawlutron.models.host_policy import HostPolicy as HostPolicy
 from crawlutron.models.json_value import JsonValue
-from crawlutron.models.normalized_url import NormalizedUrl
 
 
 def _run(links: list[DiscoveredLink | dict[str, JsonValue] | str]) -> AdmissionOutcome:

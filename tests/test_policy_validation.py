@@ -3,9 +3,9 @@
 from urllib.parse import urlparse
 
 import pytest
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
 
-from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.normalized_url import NormalizedUrl
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 from tests._validation_helpers import admit_or_none, assert_url_refused, registrable_domain
 
@@ -193,7 +193,7 @@ class TestPolicyValidation:
         assert registrable_domain("a.b.c.example.com", psl=None) == "example.com"
 
     def test_public_suffix_detection(self):
-        from crawlutron.models.registrable_domain import is_public_suffix
+        from safe_url.registrable_domain import is_public_suffix
 
         # The cookie admission edge refuses a Domain= naming one of these
         # (#438): every TLD, and every listed multi-label suffix.
@@ -203,7 +203,7 @@ class TestPolicyValidation:
         assert not is_public_suffix("example.co.uk")
 
     def test_public_suffix_detection_falls_back_without_dataset(self):
-        from crawlutron.models.registrable_domain import is_public_suffix
+        from safe_url.registrable_domain import is_public_suffix
 
         # Without the dataset every single label is still a TLD, and the known
         # two-part suffixes stay suffixes (the heuristic's whole fidelity).

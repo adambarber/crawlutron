@@ -119,8 +119,9 @@ def _page_with_cookies(cookies):
 def _run_harvest(page, *, namespace=None):
     import asyncio
 
-    from crawlutron.models.host_policy import HostPolicy
-    from crawlutron.models.normalized_url import NormalizedUrl
+    from safe_url.host_policy import HostPolicy
+    from safe_url.normalized_url import NormalizedUrl
+
     from crawlutron.transport.browser_cookies import harvest_session_cookies
 
     url = NormalizedUrl("http://example.com/", policy=HostPolicy.unrestricted())

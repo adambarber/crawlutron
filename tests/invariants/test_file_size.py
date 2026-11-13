@@ -19,6 +19,7 @@ _BUDGETS = {
     "packages/core": 0,
     "packages/mcp": 0,
     "packages/rest": 0,
+    "packages/safe-url": 0,
     "packages/sdk": 0,
     "tests": 0,
     "scripts": 0,

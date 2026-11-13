@@ -9,9 +9,10 @@ from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
-from crawlutron.models.host_policy import HostPolicy
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.models.http_fetcher import HttpFetcher
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.safety.bounded_ttl import BoundedTTLCache
 from crawlutron.transport.fetch_helpers import fetch_and_decode as default_fetch_and_decode
 from crawlutron.transport.fetch_helpers import single_flight

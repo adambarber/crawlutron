@@ -8,8 +8,8 @@ from typing import cast
 from unittest import mock
 
 import pytest
+from safe_url.host_policy import HostPolicy
 
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.json_value import JsonValue
 from crawlutron.search.providers import (
     PROVIDER_ENDPOINTS,

@@ -112,8 +112,8 @@ def test_cli_package_has_no_admission_policy_or_ssrf_imports():
     package = os.path.dirname(crawlutron_rest.cli.__file__)
     forbidden = (
         "crawlutron.admission",
-        "crawlutron.models.host_policy",
-        "crawlutron.models.normalized_url",
+        "safe_url.host_policy",
+        "safe_url.normalized_url",
         "crawlutron.safety",
         "validate_wire_policy",
     )

@@ -21,7 +21,8 @@ from tests._app_harnesses import harness_app
 from tests._dependency_overrides import bind_base_overrides
 
 if TYPE_CHECKING:
-    from crawlutron.models.normalized_url import NormalizedUrl
+    from safe_url.normalized_url import NormalizedUrl
+
     from crawlutron.models.result_record import ProducerEnvelope
 
 from tests._job_drivers import (

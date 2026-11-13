@@ -124,7 +124,7 @@ def test_http_fetcher_alias_carries_the_documented_argument_types():
     """The alias is the documented contract, so its argument types must be the
     (url, headers, timeout_seconds, max_content_length) tuple the concrete
     fetchers accept -- not the three-parameter shape it drifted to."""
-    from crawlutron.models.normalized_url import NormalizedUrl
+    from safe_url.normalized_url import NormalizedUrl
 
     alias = _http_fetcher_alias_signature()
     assert [param.annotation for param in _parameters_of_kind(alias, _POSITIONAL)] == [
@@ -295,7 +295,7 @@ class TestNormalizedUrlIsAValueNotAString:
     concatenation unchecked); it is now a frozen value lending text at the edge."""
 
     def test_the_type_is_a_value_not_a_newtype_over_str(self):
-        from crawlutron.models.normalized_url import NormalizedUrl
+        from safe_url.normalized_url import NormalizedUrl
 
         # The attribute a ``NewType`` carries at runtime is what a reader looks for first; its absence is the
         # design.
@@ -305,17 +305,19 @@ class TestNormalizedUrlIsAValueNotAString:
     def test_the_admission_boundary_is_typed_as_the_value(self):
         from typing import get_type_hints
 
+        from safe_url.normalized_url import NormalizedUrl
+
         from crawlutron.admission.admission_links import AdmittedLink
-        from crawlutron.models.normalized_url import NormalizedUrl
 
         assert get_type_hints(AdmittedLink)["normalized_url"] is NormalizedUrl
 
     def test_records_carry_the_value_and_the_wire_carries_text(self):
         from typing import get_type_hints
 
+        from safe_url.normalized_url import NormalizedUrl
+
         from crawlutron.models.crawl_task import CrawlTask
         from crawlutron.models.discovered_link import DiscoveredLink
-        from crawlutron.models.normalized_url import NormalizedUrl
         from crawlutron.models.serialization import to_dict
 
         # Both cross a boundary: ``DiscoveredLink`` is rebuilt from the spill file, and ``CrawlTask`` is
@@ -332,8 +334,8 @@ class TestNormalizedUrlIsAValueNotAString:
         assert isinstance(to_dict(link)["normalized_url"], str)
 
     def test_the_constructor_is_the_admission_decision(self, monkeypatch):
-        from crawlutron.models.host_policy import HostPolicy
-        from crawlutron.models.normalized_url import NormalizedUrl
+        from safe_url.host_policy import HostPolicy
+        from safe_url.normalized_url import NormalizedUrl
 
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
         policy = HostPolicy.unrestricted()
@@ -345,8 +347,8 @@ class TestNormalizedUrlIsAValueNotAString:
             NormalizedUrl("file:///etc/passwd", policy=policy)
 
     def test_host_and_site_are_derived_once_at_construction(self):
-        from crawlutron.models.host_policy import HostPolicy
-        from crawlutron.models.normalized_url import NormalizedUrl
+        from safe_url.host_policy import HostPolicy
+        from safe_url.normalized_url import NormalizedUrl
 
         value = NormalizedUrl("https://Deep.Sub.Example.co.uk:443/p/", policy=HostPolicy.unrestricted())
         assert value.raw == "https://deep.sub.example.co.uk/p/"  # #520: path text survives verbatim
@@ -354,8 +356,8 @@ class TestNormalizedUrlIsAValueNotAString:
         assert value.site == "example.co.uk"
 
     def test_equal_canonical_strings_are_equal_values(self):
-        from crawlutron.models.host_policy import HostPolicy
-        from crawlutron.models.normalized_url import NormalizedUrl
+        from safe_url.host_policy import HostPolicy
+        from safe_url.normalized_url import NormalizedUrl
 
         policy = HostPolicy.unrestricted()
         # #520: path text is identity, so slash-equivalence is no longer normalized away;

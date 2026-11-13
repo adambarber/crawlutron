@@ -6,9 +6,10 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import closing
 
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.json_value import JsonValue
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.storage.job_store import JobStore
 from tests._policy_factories import canonical
 from tests._policy_factories import job_store as store_on

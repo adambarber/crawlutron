@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from crawlutron.models.normalized_url import NormalizedUrl
+from safe_url.normalized_url import NormalizedUrl
 
 
 def scheduler_domain_key(url: NormalizedUrl) -> str:

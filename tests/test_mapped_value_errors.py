@@ -1,10 +1,10 @@
 """The constructor belt's foreign-ValueError mapping is recorded, not silent."""
 
 import pytest
+import safe_url.normalized_url as nu
+from safe_url.mapped_value_errors import clear_mapped_value_errors, mapped_value_errors
+from safe_url.normalized_url import NormalizedUrl
 
-import crawlutron.models.normalized_url as nu
-from crawlutron.models.normalized_url import NormalizedUrl
-from crawlutron.runtime.resource_lifecycle import clear_mapped_value_errors, mapped_value_errors
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 

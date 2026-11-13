@@ -2,15 +2,16 @@ from dataclasses import replace
 from typing import TypedDict, Unpack
 from urllib.parse import urljoin
 
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl, admit_or_none
+from safe_url.registrable_domain import registrable_domain
+
 from crawlutron.models.crawl_diagnostics import CrawlDiagnostics
 from crawlutron.models.crawl_job import CrawlJob
 from crawlutron.models.crawl_result import CrawlResult, EngineCrawlResult
 from crawlutron.models.crawl_strategy_attempt import CrawlStrategyAttempt
 from crawlutron.models.discovered_link import DiscoveredLink
-from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.normalized_url import NormalizedUrl, admit_or_none
 from crawlutron.models.page_metadata import PageMetadata
-from crawlutron.models.registrable_domain import registrable_domain
 from crawlutron.models.render_options import RenderOptions
 from crawlutron.models.result_factory import terminal_attempt
 from crawlutron.models.taxonomy import Classification, CrawlError, CrawlStrategyName

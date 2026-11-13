@@ -14,14 +14,15 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import cast
 
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.admission.policy import DiscoveryFlags, discovery_flags
 from crawlutron.models.crawl_diagnostics import CrawlDiagnostics
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.fetch_envelope import RetryDiagnostics
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.http_fetch_result import HttpFetchResult as _HttpFetchResult
 from crawlutron.models.http_fetcher import HttpFetcher
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.robots_diagnostics import RobotsDiagnostics
 from crawlutron.transport.body_decode import decode_body
 from crawlutron.transport.classification import classify_error_code

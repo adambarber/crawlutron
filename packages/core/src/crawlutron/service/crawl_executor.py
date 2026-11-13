@@ -9,9 +9,10 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.config.settings import CrawlerSettings
-from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.taxonomy import as_classification
 from crawlutron.orchestration.engine import crawl_request
 from crawlutron.service.errors import BrowserPoolUnavailable

@@ -1,8 +1,8 @@
 """Raw C0 controls and DEL are refused in every wire segment of an admitted URL."""
 
 import pytest
+from safe_url.normalized_url import NormalizedUrl
 
-from crawlutron.models.normalized_url import NormalizedUrl
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 # The wire-framing class: every C0 control and DEL, spread across boundary ends.

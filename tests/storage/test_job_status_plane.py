@@ -8,8 +8,9 @@ import ast
 import asyncio
 import threading
 
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.models.crawl_policy import CrawlPolicy
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.storage.job_store import CrawlJobState, JobStatus, JobStore
 from tests._job_harnesses import frontier, loaded_job, make_job_store, run_to_terminal
 from tests._policy_factories import canonical

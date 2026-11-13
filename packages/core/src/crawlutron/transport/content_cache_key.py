@@ -9,9 +9,10 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.config.env import get_env_int
 from crawlutron.models.crawl_policy_limits import CrawlPolicyLimits
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.runtime.pressure_sizing import worker_count
 from crawlutron.transport.content_cache import ContentCache
 from crawlutron.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES

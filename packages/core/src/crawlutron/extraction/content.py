@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.extraction.discovery import (
     PostFetchDiscovery,
     detect_pagination,
@@ -34,7 +36,6 @@ from crawlutron.extraction.trees import (
     parse_html_tree,
     walkable,
 )
-from crawlutron.models.normalized_url import NormalizedUrl
 
 __all__ = [
     "DOC_POOL",

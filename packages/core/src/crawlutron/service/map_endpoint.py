@@ -4,10 +4,11 @@ import asyncio
 import logging
 import time
 
+from safe_url.host_policy import HostPolicy
+
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.discovery_config import DiscoveryConfig
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.map_request import MapRequest
 from crawlutron.models.site_map_response import SiteMapPayload
 from crawlutron.service.crawl_executor import execute_crawl

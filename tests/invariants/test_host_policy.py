@@ -413,7 +413,7 @@ URL_RETURNING_HELPERS_REQUIRE_HOST_POLICY = Rule(
             "returns URLs without required HostPolicy",
         ),
         Bites(
-            "from crawlutron.models.normalized_url import admit_or_none\n"
+            "from safe_url.normalized_url import admit_or_none\n"
             "def resolve(url, *, policy: HostPolicy):\n"
             "    validator = admit_or_none\n"
             "    return validator(url)\n",
@@ -438,28 +438,28 @@ URL_RETURNING_HELPERS_REQUIRE_HOST_POLICY = Rule(
         ),
     ),
     clean=lambda: (
-        "from crawlutron.models.normalized_url import admit_or_none\n"
+        "from safe_url.normalized_url import admit_or_none\n"
         "def validated(url, *, policy: HostPolicy):\n"
         "    return admit_or_none(url, policy=policy)\n",
-        "from crawlutron.models.normalized_url import admit_or_none\n"
+        "from safe_url.normalized_url import admit_or_none\n"
         "class JobStore:\n"
         "    def __init__(self, host_policy):\n"
         "        self._host_policy = host_policy\n"
         "    def canonical_root(self, root_url):\n"
         "        return str(admit_or_none(root_url, policy=self._host_policy))\n",
         "from urllib.parse import urljoin\n"
-        "from crawlutron.models.normalized_url import admit_or_none\n"
+        "from safe_url.normalized_url import admit_or_none\n"
         "def resolve(root, path, *, policy: HostPolicy):\n"
         "    return admit_or_none(urljoin(root, path), policy=policy)\n",
         "class Client:\n"
         "    policy: HostPolicy\n"
         "    def emit(self, url):\n"
         "        return admit_or_none(url, policy=self.policy)\n",
-        "from crawlutron.models.normalized_url import admit_or_none as validate\n"
+        "from safe_url.normalized_url import admit_or_none as validate\n"
         "def resolve(url, *, policy: HostPolicy):\n"
         "    return validate(url, policy=policy)\n",
         "from urllib.parse import urlunsplit\n"
-        "from crawlutron.models.normalized_url import admit_or_none\n"
+        "from safe_url.normalized_url import admit_or_none\n"
         "def rebuild(parts, *, policy: HostPolicy):\n"
         "    return admit_or_none(urlunsplit(parts), policy=policy)\n",
         # A parameter annotated NormalizedUrl is admitted at its own construction boundary -- the sole

@@ -13,14 +13,15 @@ from contextvars import Token
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
 
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.admission.admission_links import compile_scope_pattern
 from crawlutron.admission.payload_helpers import checked_payload_urls, payload_policy
 from crawlutron.admission.policy import PolicyTier
 from crawlutron.config.env import get_env_int
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_request import CrawlRequest
-from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.result_record import ProducerEnvelope
 from crawlutron.orchestration.request_pipeline import (
     PipelineDependencies,

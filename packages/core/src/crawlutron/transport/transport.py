@@ -11,8 +11,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.models.http_fetch_result import HttpFetchResult
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.transport.decompression import (
     DecompressionTooLargeError,
 )

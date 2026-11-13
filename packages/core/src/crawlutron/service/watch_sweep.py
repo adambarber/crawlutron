@@ -12,6 +12,8 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from safe_url.host_policy import HostPolicy
+
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.crawl_policy import CrawlPolicy
@@ -19,7 +21,6 @@ from crawlutron.models.crawl_policy_limits import CrawlPolicyLimits
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.crawl_strategy import CrawlStrategy
 from crawlutron.models.fetch_validators import FetchValidators
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.watch_announcement import WatchAnnouncement
 from crawlutron.models.watch_state import WatchState
 from crawlutron.service.caller_auth import Tracking, admit, anonymous_caller, identity_for_key

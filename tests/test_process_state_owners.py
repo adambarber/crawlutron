@@ -29,7 +29,6 @@ KNOWN = (
     "crawlutron.storage.sqlite_store",
     "crawlutron.service.async_crawl_runner",
     "crawlutron.service.job_lifecycle",
-    "crawlutron.models.host_policy",
     "crawlutron.runtime.metrics",
 )
 

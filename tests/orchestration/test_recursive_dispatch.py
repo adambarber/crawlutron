@@ -6,10 +6,10 @@ batch-sizing and admission-gate logic are covered without the full engine."""
 import asyncio
 
 import pytest
+from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.crawl_task import CrawlTask
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.taxonomy import Classification
 from crawlutron.orchestration.admission_stall import AdmissionStallGuard
 from crawlutron.orchestration.recursive import admit_recursive_batch

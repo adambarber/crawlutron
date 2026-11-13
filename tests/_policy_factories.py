@@ -9,11 +9,12 @@ import pathlib
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.admission.admission_links import admit_discovered_links
 from crawlutron.admission.payload_helpers import payload_policy
 from crawlutron.admission.policy import PolicyTier, read_policy
-from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.storage.job_store import CrawlJobState, JobStore
 
 if TYPE_CHECKING:

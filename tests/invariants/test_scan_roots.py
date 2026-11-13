@@ -27,6 +27,7 @@ def test_scan_roots_equal_every_python_bearing_tree() -> None:
         "packages/core",
         "packages/mcp",
         "packages/rest",
+        "packages/safe-url",
         "packages/sdk",
         "scripts",
         "tests",
@@ -74,12 +75,15 @@ def test_scan_roots_never_names_the_member_container(tmp_path: pathlib.Path) -> 
         "packages/rest/crawlutron_rest",
         "packages/sdk",
         "packages/sdk/crawlutron_sdk",
+        "packages/safe-url",
+        "packages/safe-url/src/safe_url",
     ):
         (tmp_path / member).mkdir(parents=True)
     (tmp_path / "packages/core/crawlutron/mod.py").write_text("x = 1\n")
     (tmp_path / "packages/mcp/crawlutron_mcp/mod.py").write_text("x = 1\n")
     (tmp_path / "packages/rest/crawlutron_rest/mod.py").write_text("x = 1\n")
     (tmp_path / "packages/sdk/crawlutron_sdk/mod.py").write_text("x = 1\n")
+    (tmp_path / "packages/safe-url/src/safe_url/mod.py").write_text("x = 1\n")
     (tmp_path / "pyproject.toml").write_text(
         '[tool.uv.workspace]\nmembers = ["packages/*"]\n',
         encoding="utf-8",

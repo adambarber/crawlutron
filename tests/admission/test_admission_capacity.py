@@ -1,8 +1,8 @@
 """Discovered links commit in order and stop at remaining capacity."""
 
 import pytest
+from safe_url.normalized_url import NormalizedUrl
 
-from crawlutron.models.normalized_url import NormalizedUrl
 from tests._admission_doubles import no_crawl_delay as _no_crawl_delay
 from tests._policy_factories import admit, canonical
 

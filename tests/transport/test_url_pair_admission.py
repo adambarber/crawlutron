@@ -4,13 +4,13 @@ import asyncio
 from collections.abc import Callable
 
 import pytest
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.admission.payload_helpers import checked_payload_urls
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.crawl_request import CrawlRequest
-from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.orchestration.request_pipeline import PipelineDependencies, PipelineState, build_jobs
 from crawlutron.runtime.pressure_gates import ResourceGate
 from crawlutron.storage.result_store import CrawlSpillStore

@@ -9,9 +9,10 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.admission.policy import PolicyLike, PolicyTier, read_policy
-from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.storage.coordination_store import atwin
 from crawlutron.storage.ids import new_job_id
 from crawlutron.storage.migrations import StoreSchema

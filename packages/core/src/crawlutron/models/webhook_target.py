@@ -9,9 +9,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from urllib.parse import parse_qsl, urlsplit
 
-from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.normalized_url import NormalizedUrl
-from crawlutron.safety.url_redaction import is_secret_name, redact_url
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
+from safe_url.url_redaction import is_secret_name, redact_url
 
 
 @dataclass(frozen=True, slots=True)

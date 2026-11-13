@@ -234,7 +234,7 @@ RAW_URL_ESCAPES_ONLY_THROUGH_THE_DELIVERY_DOOR = Rule(
 # ========================================================================= clause 2: the redaction chokepoint
 
 #: The ONE redaction mechanism; nowhere else is credential masking spelled.
-_REDACTION_CHOKEPOINT = "packages/core/src/crawlutron/safety/url_redaction.py"
+_REDACTION_CHOKEPOINT = "packages/safe-url/src/safe_url/url_redaction.py"
 
 _SECRET_NAME_WORDS = ("token", "secret", "password", "passwd", "apikey", "api_key", "key=")
 _MASK_TOKENS = ("[redacted]", "***", "*****")
@@ -265,7 +265,7 @@ def _manual_masking_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
                     path,
                     node,
                     f"manual credential masking {needle!r} -> {replacement!r} -- "
-                    "route every redaction through crawlutron.safety.url_redaction",
+                    "route every redaction through safe_url.url_redaction",
                 )
             )
     return offenders

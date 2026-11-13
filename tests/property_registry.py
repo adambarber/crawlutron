@@ -25,7 +25,7 @@ class Property:
 PROPERTY_REGISTRY = (
     Property(
         name="public-target",
-        owner_module="packages/core/src/crawlutron/models/address_class.py",
+        owner_module="packages/safe-url/src/safe_url/address_class.py",
         owner_symbols=(
             "classify",
             "_parse",
@@ -33,7 +33,7 @@ PROPERTY_REGISTRY = (
             "_resolver_numeric_ipv4",
             "_resolver_numeric_part",
         ),
-        definition_site="packages/core/src/crawlutron/models/address_class.py:classify",
+        definition_site="packages/safe-url/src/safe_url/address_class.py:classify",
         fingerprints=("ipaddress_range_verdict",),
         reason=(
             "Address ranges are classified once; every egress, pinning and bind "
@@ -47,6 +47,28 @@ PROPERTY_REGISTRY = (
         definition_site="packages/core/src/crawlutron/config/env.py:parse_bool_value",
         fingerprints=("bool_literal_set",),
         reason="Environment boolean spelling is one policy across settings and feature gates.",
+        suppressions=(
+            _Suppression(
+                module="packages/safe-url/src/safe_url/host_policy.py",
+                symbol="_decide_private_targets",
+                fingerprint="bool_literal_set",
+                reason=(
+                    "safe_url's private-target escape hatch parses the same bool "
+                    "spellings; the shared crawlutron parse_bool_value remains the "
+                    "canonical implementation."
+                ),
+            ),
+            _Suppression(
+                module="packages/safe-url/src/safe_url/host_policy.py",
+                symbol="_parse_private_target_env",
+                fingerprint="bool_literal_set",
+                reason=(
+                    "safe_url's private-target escape hatch parses the same bool "
+                    "spellings; the shared crawlutron parse_bool_value remains the "
+                    "canonical implementation."
+                ),
+            ),
+        ),
     ),
     Property(
         name="robots-policy",

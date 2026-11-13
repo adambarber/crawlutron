@@ -8,9 +8,10 @@ from collections.abc import Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager, suppress
 from typing import TYPE_CHECKING
 
+from safe_url.address_class import is_loopback_bind
+from safe_url.host_policy import HostPolicy
+
 from crawlutron.config.settings import CrawlerSettings
-from crawlutron.models.address_class import is_loopback_bind
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.runtime.app_module_ref import set_module_app_provider
 from crawlutron.runtime.pressure_sizing import default_executor_workers
 from crawlutron.service.store_bootstrap import build_stores

@@ -8,11 +8,11 @@ from __future__ import annotations
 import logging
 
 import pytest
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
+from safe_url.url_redaction import is_secret_name, redact_url
 
-from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.webhook_target import WebhookTarget
-from crawlutron.safety.url_redaction import is_secret_name, redact_url
 
 
 def _secret_target(url: str) -> WebhookTarget:
@@ -189,9 +189,9 @@ def test_redaction_vocabulary_covers_credential_secret_fields():
     from typing import get_args
 
     from pydantic import SecretStr
+    from safe_url.url_redaction import is_secret_name
 
     from crawlutron.models.credential import Credential
-    from crawlutron.safety.url_redaction import is_secret_name
 
     for name, field in Credential.model_fields.items():
         candidates = (field.annotation, *get_args(field.annotation))

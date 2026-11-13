@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import dataclasses
 
+from safe_url.host_policy import HostPolicy
+
 from crawlutron.admission.policy import PolicyTier
 from crawlutron.config.env import get_env_float, get_env_int
 from crawlutron.config.settings import CrawlerSettings
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.storage import (
     admin_audit_store as audit_store_mod,
 )

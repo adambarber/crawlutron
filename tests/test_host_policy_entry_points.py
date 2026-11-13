@@ -175,7 +175,8 @@ async def _probe_site_map(monkeypatch, tmp_path):
     entry point filters instead of raising, so the claim is the output, and the shape
     with no normalized root is where aggregation consults policy.
     """
-    from crawlutron.models.host_policy import HostPolicy
+    from safe_url.host_policy import HostPolicy
+
     from crawlutron.models.result_record import ProducerEnvelope
     from crawlutron.service.site_map import build_site_map
     from tests._result_builders import engine_result
@@ -367,8 +368,8 @@ async def test_render_probe_fails_when_policy_enforcement_is_removed(monkeypatch
     from crawlutron.admission import payload_helpers
 
     def allow(url, *, policy):
-        from crawlutron.models.host_policy import HostPolicy
-        from crawlutron.models.normalized_url import NormalizedUrl
+        from safe_url.host_policy import HostPolicy
+        from safe_url.normalized_url import NormalizedUrl
 
         return NormalizedUrl(url, policy=HostPolicy.unrestricted())
 

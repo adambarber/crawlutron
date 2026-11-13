@@ -11,9 +11,10 @@ import os
 from collections.abc import Iterable, Mapping
 from typing import Protocol, runtime_checkable
 
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.admission.credentials import apply_credentials as apply_credentials
 from crawlutron.models.crawl_policy import CrawlPolicy
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.request_profile_record import RequestProfileRecord
 from crawlutron.transport import cookie_jar
 from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE

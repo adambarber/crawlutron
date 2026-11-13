@@ -7,8 +7,8 @@ from contextlib import suppress
 from importlib import import_module
 from typing import Protocol, cast
 
-from crawlutron.models.address_class import AddressClass, classify
-from crawlutron.models.host_canonical import idna_host
+from safe_url.address_class import AddressClass, classify
+from safe_url.host_canonical import idna_host
 
 TWO_PART_PUBLIC_SUFFIXES = {"co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au"}
 

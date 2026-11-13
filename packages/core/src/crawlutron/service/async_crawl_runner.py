@@ -12,11 +12,12 @@ import logging
 import time
 from dataclasses import dataclass
 
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.config.env import get_env_int
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.delta import DeltaContext
 from crawlutron.models.crawl_request import CrawlRequest
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
 from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.runtime import process_state

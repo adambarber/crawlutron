@@ -2,9 +2,9 @@
 
 from functools import partial
 
-from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.normalized_url import NormalizedUrl as _NormalizedUrl
-from crawlutron.models.normalized_url import admit_or_none
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl as _NormalizedUrl
+from safe_url.normalized_url import admit_or_none
 
 admit = partial(
     _NormalizedUrl,

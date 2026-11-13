@@ -10,9 +10,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from safe_url.host_policy import HostPolicy
+    from safe_url.normalized_url import NormalizedUrl
+
     from crawlutron.models.crawl_policy import CrawlPolicy
-    from crawlutron.models.host_policy import HostPolicy
-    from crawlutron.models.normalized_url import NormalizedUrl
     from crawlutron.models.taxonomy import CrawlStrategyName
 
 

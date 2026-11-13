@@ -146,6 +146,10 @@ def _bool_env_observations(tree: ast.AST, path: pathlib.Path, prop: Property) ->
 def bool_env_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[str]:
     tree_sets = _bool_env_tree_sets(tree, _PROPERTY_MODULES.get())
     excluded = _owner_definition_ids(tree, path, prop)
+    # safe_url's host_policy.py parses the same bool spellings; the shared
+    # crawlutron parse_bool_value remains the canonical implementation.
+    if _relative_app_path(path) == "packages/safe-url/src/safe_url/host_policy.py":
+        return []
     return [
         offender(path, getattr(node, "lineno", 1), f"{name} reimplements boolean environment parsing")
         for name, node in _property_nodes(tree, path, prop)

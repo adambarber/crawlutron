@@ -9,10 +9,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypeVar, cast
 
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.models.crawl_diagnostics import CrawlDiagnostics
 from crawlutron.models.crawl_result import CrawlResult, EngineCrawlResult
 from crawlutron.models.crawl_strategy_attempt import CrawlStrategyAttempt
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.result_factory import (
     build_engine_result,
     terminal_attempt,

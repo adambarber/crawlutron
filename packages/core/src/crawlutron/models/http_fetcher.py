@@ -7,8 +7,9 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.models.http_fetch_result import HttpFetchResult
-from crawlutron.models.normalized_url import NormalizedUrl
 
 
 class HttpFetcher(Protocol):

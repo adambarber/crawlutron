@@ -4,14 +4,14 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from safe_url.host_policy import HostPolicy as _HostPolicy
+from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.admission.admission import requeue_admitted_pages
 from crawlutron.admission.payload_helpers import payload_policy
 from crawlutron.admission.policy import PolicyTier, read_policy, validate_wire_policy
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.crawl_request import CrawlRequest
-from crawlutron.models.host_policy import HostPolicy as _HostPolicy
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.runtime.pressure_sizing import (
     TaskRamBudget,
     build_admission_policy,

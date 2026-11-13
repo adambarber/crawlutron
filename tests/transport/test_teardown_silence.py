@@ -7,7 +7,8 @@ import asyncio
 import logging
 from typing import cast
 
-from crawlutron.models.normalized_url import NormalizedUrl
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.runtime.resource_lifecycle import (
     clear_declined_closes,
     declined_closes,

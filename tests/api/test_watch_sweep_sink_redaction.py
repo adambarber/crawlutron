@@ -7,8 +7,9 @@ from __future__ import annotations
 
 import logging
 
-from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.normalized_url import NormalizedUrl
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
+
 from tests._policy_factories import canonical
 from tests._watch_harnesses import (
     UNRESTRICTED_HOST_POLICY,

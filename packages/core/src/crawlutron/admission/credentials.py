@@ -8,9 +8,10 @@ from __future__ import annotations
 import base64
 from collections.abc import Mapping
 
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.models.credential import Credential
-from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.safety.header_values import reject_injectable_header_value
 
 __all__ = ["apply_credentials", "authorization_value", "origin_of"]

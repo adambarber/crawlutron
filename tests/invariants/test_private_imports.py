@@ -395,7 +395,7 @@ PUBLIC_OWNER_WELDS = Rule(
     ),
     clean=lambda: (
         # The definition site is the whole point.
-        "from crawlutron.models.host_policy import HostPolicy\n",
+        "from safe_url.host_policy import HostPolicy\n",
         # A declared __all__ re-export is a public door.
         "from crawlutron.storage.job_store import job_max_pages\n",
         "from crawlutron.transport.http_client_pool import get_async_http_client\n",

@@ -5,12 +5,12 @@ from typing import cast
 
 import httpx
 import pytest
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.admission.policy import PolicyTier, read_policy, validate_wire_policy
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.http_fetch_result import HttpFetchResult as _HttpFetchResult
 from crawlutron.models.json_value import JsonValue
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.request_profile_record import RequestProfileRecord
 from tests._fetch_doubles import FetcherDouble
 from tests._fetch_outcome import FetchFailed

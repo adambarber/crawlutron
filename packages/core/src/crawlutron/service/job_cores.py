@@ -8,10 +8,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
+from safe_url.host_policy import HostPolicy
+
 from crawlutron.admission.payload_helpers import checked_payload_urls
 from crawlutron.admission.policy import read_policy
 from crawlutron.models.crawl_request import CrawlRequest
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.job_control_tool_request import JobControlToolRequest
 from crawlutron.models.job_create_response import JobCreateResponse
 from crawlutron.models.job_deleted_response import JobDeletedResponse

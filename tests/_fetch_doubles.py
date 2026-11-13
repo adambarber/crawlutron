@@ -7,8 +7,9 @@ import inspect
 from collections.abc import Callable
 from typing import Any
 
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.models.http_fetch_result import HttpFetchResult
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 from tests._policy_factories import canonical
 

@@ -3,10 +3,10 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from safe_url.host_policy import HostPolicy
 
 from crawlutron.admission.admission import RobotsGate
 from crawlutron.models.crawl_policy import CrawlPolicy
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.json_value import JsonValue
 from crawlutron.orchestration.engine import crawl_request
 from crawlutron.transport.robots import (

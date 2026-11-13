@@ -5,9 +5,9 @@ from __future__ import annotations
 from typing import Annotated
 
 from pydantic import BaseModel, Field
+from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.models.crawl_status import CrawlStatus
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.vocabulary.taxonomy import CrawlClassification
 
 

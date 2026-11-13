@@ -9,7 +9,8 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from typing import cast
 
-from crawlutron.models.normalized_url import NormalizedUrl
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.runtime import process_state
 from crawlutron.transport.browser_cookies import get_browser_cookies_for, harvest_session_cookies
 from crawlutron.transport.browser_driver import BrowserDriver

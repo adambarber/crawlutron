@@ -9,8 +9,7 @@ from typing import TypedDict
 
 from lxml import etree
 from lxml.etree import ParserError
-
-from crawlutron.models.normalized_url import NormalizedUrl
+from safe_url.normalized_url import NormalizedUrl
 
 # --- Structured discovery diagnostics: links, frames, forms ---
 

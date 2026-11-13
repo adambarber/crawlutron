@@ -6,8 +6,9 @@ through to a second unconditional fetch (double load for one crawl).
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.models.http_fetch_result import HttpFetchResult
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.transport.cache import HttpCache
 from crawlutron.transport.content_cache import ContentCache
 from tests._fetch_doubles import make_fetch

@@ -5,9 +5,9 @@ from __future__ import annotations
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationInfo, field_validator, model_validator
+from safe_url.url_redaction import redacted_marker
 
 from crawlutron.safety.header_values import reject_injectable_header_value
-from crawlutron.safety.url_redaction import redacted_marker
 
 
 class Credential(BaseModel):

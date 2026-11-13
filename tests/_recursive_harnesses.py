@@ -10,8 +10,9 @@ import inspect
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, NamedTuple
 
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.models.crawl_task import CrawlTask
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.orchestration.recursive import run_recursive_crawl
 from tests._admission_doubles import FakeResourceGauge
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
@@ -21,8 +22,9 @@ from tests._scheduler_doubles import FakeScheduler
 if TYPE_CHECKING:
     # The types the harness only names, not the ones it builds: kept out of the
     # runtime imports so this file does not restate the module's own import block.
+    from safe_url.host_policy import HostPolicy
+
     from crawlutron.models.crawl_result import EngineCrawlResult
-    from crawlutron.models.host_policy import HostPolicy
     from crawlutron.runtime.pressure_sizing import AdmissionGate
     from crawlutron.transport.scheduler import DomainScheduler
 

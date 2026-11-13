@@ -4,10 +4,10 @@ import ipaddress
 import socket
 
 import pytest
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
 
 import crawlutron.transport.pinned_dns as http_mod
-from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.transport.pinned_dns import check_ssrf_protection, resolve_and_pin_host
 from crawlutron.transport.pinned_transport import build_pinned_request
 from crawlutron.transport.redirect_walker import RedirectWalker
@@ -396,7 +396,8 @@ def test_allow_private_preserves_host_for_webhook_style_urls(monkeypatch):
 
 
 def test_shared_public_target_verdict_matches_reserved_range_corpus(monkeypatch):
-    from crawlutron.models.host_policy import host_egress_reason, reset_private_target_memo
+    from safe_url.host_policy import host_egress_reason, reset_private_target_memo
+
     from crawlutron.safety.validation import is_public_ip_value
 
     # The corpus claim is about the host verdict, so the escape hatch must be off: with it on,

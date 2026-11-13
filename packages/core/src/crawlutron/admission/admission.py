@@ -7,6 +7,10 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl, admit_or_none
+from safe_url.scope_match import scope_allows
+
 from crawlutron.admission.admission_links import (
     AdmissionOutcome,
     LinkCandidate,
@@ -15,10 +19,7 @@ from crawlutron.admission.admission_links import (
     remaining_page_capacity,
 )
 from crawlutron.admission.policy import PolicyLike, PolicyTier, discovery_flags, read_policy
-from crawlutron.admission.scope_match import scope_allows
 from crawlutron.models.crawl_extraction_method import CrawlExtractionMethod
-from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.normalized_url import NormalizedUrl, admit_or_none
 from crawlutron.safety.safe_regex import BoundedPattern
 from crawlutron.storage.job_store import CrawlJobState, FrontierEntry, job_max_pages
 from crawlutron.transport.fetch_helpers import fetch_sitemap_urls

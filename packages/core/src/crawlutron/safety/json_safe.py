@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import datetime
 
-from crawlutron.safety.url_redaction import redacted_marker
+from safe_url.url_redaction import redacted_marker
 
 
 def json_default(obj: object) -> object:

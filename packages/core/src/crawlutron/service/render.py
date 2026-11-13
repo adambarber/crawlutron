@@ -10,6 +10,8 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from safe_url.host_policy import HostPolicy
+
 from crawlutron.admission.admission_links import gather_deadline_bounded
 from crawlutron.admission.payload_helpers import checked_payload_urls
 from crawlutron.admission.render_options import resolve_render_options
@@ -17,7 +19,6 @@ from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_job import CrawlJob
 from crawlutron.models.crawl_policy import POLICY_SCHEMA_VERSION
 from crawlutron.models.crawl_result import CrawlResult
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.render_request import RenderRequest
 from crawlutron.models.result_factory import terminal_crawl_result
 from crawlutron.models.taxonomy import Classification
@@ -39,10 +40,11 @@ from crawlutron.vocabulary.robots import RobotsSource
 _ALLOWED_POLICY = RobotsRules([], [], None, RobotsSource.policy)
 
 if TYPE_CHECKING:
+    from safe_url.normalized_url import NormalizedUrl
+
     from crawlutron.models.crawl_result import EngineCrawlResult
     from crawlutron.models.crawl_worker import CrawlWorker
     from crawlutron.models.json_value import JsonValue
-    from crawlutron.models.normalized_url import NormalizedUrl
     from crawlutron.models.render_options import RenderOptions
     from crawlutron.models.result_record import RenderEnvelope
 

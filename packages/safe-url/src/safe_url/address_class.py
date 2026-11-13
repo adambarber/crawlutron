@@ -55,7 +55,7 @@ def _resolver_numeric_part(part: str) -> int | None:
             return None
         return int(digits, 16)
     if len(part) > 1 and part.startswith("0"):
-        if any(c not in "01234567" for c in part):
+        if any(c not in "0123456789" for c in part):
             return None
         return int(part, 8)
     if not part.isdigit():

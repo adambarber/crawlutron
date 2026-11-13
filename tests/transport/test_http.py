@@ -1,10 +1,11 @@
 """HTTP fetch strategy behavior against a real local server (no mocks)."""
 
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.admission.policy import read_policy
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.crawl_strategy_attempt import CrawlStrategyAttempt
 from crawlutron.models.json_value import JsonValue
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.transport.cache import HttpCache
 from crawlutron.transport.fetch_policy import looks_like_binary_body
 from crawlutron.transport.fetchers import default_http_fetcher

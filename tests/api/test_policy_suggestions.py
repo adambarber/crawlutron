@@ -225,7 +225,8 @@ async def test_validation_and_rollup_run_off_the_event_loop(tmp_path, monkeypatc
     either running on the loop stalls every concurrent request."""
     import asyncio
 
-    from crawlutron.models.normalized_url import admit_or_none
+    from safe_url.normalized_url import admit_or_none
+
     from crawlutron.models.trace_response import TraceResponse
 
     store = CrawlResultStore(tmp_path / "offloop.db")

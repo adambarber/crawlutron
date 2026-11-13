@@ -12,7 +12,7 @@ from tests._walk_primitives import import_roots
 
 # Real modules of this tree, so _resolve's on-disk check accepts them: they stand
 # in for any two modules whose only mutual reference is a type-checking one.
-A, B = "crawlutron.models.host_policy", "crawlutron.vocabulary.identity"
+A, B = "safe_url.host_policy", "crawlutron.vocabulary.identity"
 
 _ALPHA = (
     "from __future__ import annotations\n"

@@ -4,10 +4,10 @@ from collections import deque
 from typing import TYPE_CHECKING
 
 import pytest
+from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.models.crawl_job import CrawlJob
 from crawlutron.models.crawl_result import CrawlResult
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.render_options import RenderOptions
 from crawlutron.transport.browser_pool import BrowserPool, PooledBrowserWorker
 from crawlutron.vocabulary.strategies import BROWSER_HEADLESS

@@ -7,6 +7,9 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, cast
 
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import admit_or_none
+
 from admission import AdmissionGate
 from crawlutron.admission.admission import normalize_sitemap_candidates
 from crawlutron.admission.admission_links import gather_robots_decisions
@@ -19,8 +22,6 @@ from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.crawl_task import CrawlTask
 from crawlutron.models.crawl_worker import CrawlWorker
-from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.normalized_url import admit_or_none
 from crawlutron.models.taxonomy import Classification
 from crawlutron.orchestration.recursive import run_recursive_crawl
 from crawlutron.orchestration.strategy_chain import execute_crawl_chain
@@ -52,8 +53,9 @@ from crawlutron.transport.scheduler import DomainScheduler
 from crawlutron.vocabulary.strategies import BROWSER_STRATEGIES
 
 if TYPE_CHECKING:
+    from safe_url.normalized_url import NormalizedUrl
+
     from crawlutron.models.http_fetcher import HttpFetcher
-    from crawlutron.models.normalized_url import NormalizedUrl
     from crawlutron.models.result_record import ProducerEnvelope
     from crawlutron.models.webhook_target import WebhookTarget
     from crawlutron.orchestration.engine import SeedCache

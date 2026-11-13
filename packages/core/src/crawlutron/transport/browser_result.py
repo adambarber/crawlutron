@@ -25,13 +25,14 @@ from crawlutron.transport.strategy_request import StrategyRequest
 from crawlutron.vocabulary.extraction import EXTRACTION_METHOD_DOM_TEXT
 
 if TYPE_CHECKING:
+    from safe_url.host_policy import HostPolicy
+    from safe_url.normalized_url import NormalizedUrl
+
     from crawlutron.config.settings import CrawlerSettings
     from crawlutron.models.crawl_result import CrawlResult, EngineCrawlResult
     from crawlutron.models.crawl_worker import CrawlWorker
-    from crawlutron.models.host_policy import HostPolicy
     from crawlutron.models.intercepted_xhr_record import InterceptedXhrRecord
     from crawlutron.models.json_value import JsonValue
-    from crawlutron.models.normalized_url import NormalizedUrl
     from crawlutron.models.render_options import RenderOptions
     from crawlutron.models.screenshot_diagnostics import ScreenshotDiagnostics
 

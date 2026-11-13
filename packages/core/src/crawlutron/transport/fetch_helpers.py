@@ -16,10 +16,11 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import NamedTuple, cast
 
-from crawlutron.models.host_policy import HostPolicy
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.models.http_fetch_result import HttpFetchResult as HttpFetchResult
 from crawlutron.models.http_fetcher import HttpFetcher as HttpFetcher
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.runtime import process_state
 from crawlutron.safety.bounded_ttl import BoundedTTLCache
 from crawlutron.transport.body_decode import decode_body

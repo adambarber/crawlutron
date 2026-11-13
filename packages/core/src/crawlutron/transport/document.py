@@ -12,8 +12,8 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
 import pdfplumber
+from safe_url.normalized_url import NormalizedUrl
 
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.transport.httpx_transport import HttpxTransport
 from crawlutron.transport.timeouts import Timeouts
 

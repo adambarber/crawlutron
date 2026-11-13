@@ -12,8 +12,8 @@ import tracemalloc
 import unittest.mock as mock
 
 import pytest
+from safe_url.host_policy import HostPolicy
 
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.service import webhooks
 

@@ -7,6 +7,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Protocol, TypedDict, cast
 
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.content_metrics import ContentMetrics
 from crawlutron.models.crawl_extraction_method import CrawlExtractionMethod
@@ -14,10 +17,8 @@ from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.crawl_policy_limits import CrawlPolicyLimits
 from crawlutron.models.crawl_strategy_attempt import CrawlStrategyAttempt
 from crawlutron.models.fetch_envelope import RetryDiagnostics, SerializedResponse
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.http_fetch_result import HttpFetchResult
 from crawlutron.models.http_fetcher import HttpFetcher
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.request_profile_record import RequestProfileRecord
 from crawlutron.models.taxonomy import CrawlStrategyName
 from crawlutron.transport.cache import HttpCache

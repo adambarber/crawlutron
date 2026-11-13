@@ -11,8 +11,9 @@ import dataclasses
 import gc
 import tracemalloc
 
-from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.normalized_url import NormalizedUrl
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.transport.http_response import serialize_response
 
 

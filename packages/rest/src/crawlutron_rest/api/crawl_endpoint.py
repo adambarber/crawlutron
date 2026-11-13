@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import Request
 from fastapi.responses import JSONResponse, Response
+from safe_url.host_policy import HostPolicy
 
 from crawlutron.admission.payload_helpers import checked_payload_urls
 from crawlutron.config.settings import CrawlerSettings
@@ -18,7 +19,6 @@ from crawlutron.extraction.output_formats import serialize_results
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.crawl_pending import CrawlPendingError
 from crawlutron.models.crawl_request import CrawlRequest
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.trace_response import TraceResponse
 from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.runtime.metrics import get_metrics
@@ -42,8 +42,9 @@ from crawlutron_rest.api.exceptions import http_error
 if TYPE_CHECKING:
     # Annotation-only vocabulary: the endpoint's signatures name the shared record
     # types; none of these is constructed or called at runtime here.
+    from safe_url.normalized_url import NormalizedUrl
+
     from crawlutron.models.json_value import JsonValue
-    from crawlutron.models.normalized_url import NormalizedUrl
     from crawlutron.models.result_record import ProducerEnvelope
     from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
 

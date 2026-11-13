@@ -9,8 +9,7 @@ from __future__ import annotations
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-
-from crawlutron.models.normalized_url import NormalizedUrl
+from safe_url.normalized_url import NormalizedUrl
 
 #: The refusal vocabulary the endpoint reports, one spelling of the constructor's
 #: reasons plus the robots arm.

@@ -6,11 +6,12 @@ from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, TypedDict, Unpack
 from urllib.parse import urlparse
 
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.admission.policy import read_policy
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.http_fetch_result import HttpFetchResult
 from crawlutron.models.json_value import JsonValue
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.orchestration.engine import crawl_request
 from crawlutron.storage.result_store import CrawlSpillStore
 from crawlutron.transport.cache import HttpCache

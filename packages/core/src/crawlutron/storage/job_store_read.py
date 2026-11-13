@@ -10,10 +10,11 @@ import json
 import sqlite3
 from typing import TypedDict
 
+from safe_url import HostPolicy
+from safe_url.normalized_url import NormalizedUrl, admit_or_none
+
 from crawlutron.admission.policy import PolicyTier, read_policy
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.json_value import JsonValue
-from crawlutron.models.normalized_url import NormalizedUrl, admit_or_none
 
 from .job_store_collections import FrontierEntry, FrontierEntryDict, OrderedUrlSet
 from .job_store_state import CrawlJobRow, CrawlJobState, _normalized_stats

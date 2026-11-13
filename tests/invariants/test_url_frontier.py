@@ -295,7 +295,7 @@ def _normalize_or_none_offenders(tree, path):
                     path,
                     node,
                     "NormalizedUrl(...) + except ValueError "
-                    "re-inlined; use crawlutron.models.normalized_url.admit_or_none",
+                    "re-inlined; use safe_url.normalized_url.admit_or_none",
                 )
 
 

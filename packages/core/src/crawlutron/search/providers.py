@@ -12,9 +12,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import httpx
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl, admit_or_none
 
-from crawlutron.models.host_policy import HostPolicy
-from crawlutron.models.normalized_url import NormalizedUrl, admit_or_none
 from crawlutron.safety.bounded_io import BodyTooLarge, read_capped_async
 from crawlutron.transport.http_client_pool import get_async_http_client
 from crawlutron.transport.pinned_dns import ResolverBudgetExceeded, bounded_thread_resolve

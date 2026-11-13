@@ -8,10 +8,10 @@ from __future__ import annotations
 import ipaddress
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
-from crawlutron.models.host_canonical import idna_host
-from crawlutron.models.host_policy import HostPolicy, host_egress_reason, host_policy_reason
-from crawlutron.models.registrable_domain import registrable_domain
-from crawlutron.runtime.resource_lifecycle import record_mapped_value_error
+from safe_url.host_canonical import idna_host
+from safe_url.host_policy import HostPolicy, host_egress_reason, host_policy_reason
+from safe_url.mapped_value_errors import record_mapped_value_error
+from safe_url.registrable_domain import registrable_domain
 
 #: Tracking/ad/social-feed infrastructure: recorded as links, never enqueued; apex
 #: or any subdomain. Dotted-suffix tuple so ``endswith`` is one C-level call.
@@ -338,7 +338,14 @@ class NormalizedUrl:
         return {"type": "string"}
 
 
-__all__ = ["NormalizedUrl", "admit_or_none", "admit_with_reason", "refusal_literals"]
+__all__ = [
+    "ANALYTICS_HOST_SUFFIXES",
+    "DOCUMENT_URL_EXTENSIONS",
+    "NormalizedUrl",
+    "admit_or_none",
+    "admit_with_reason",
+    "refusal_literals",
+]
 
 
 def refusal_literals() -> frozenset[str]:

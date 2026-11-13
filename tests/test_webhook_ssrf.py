@@ -4,8 +4,8 @@ pinned IP (DNS-rebinding safe) while preserving the original Host header.
 """
 
 import pytest
+from safe_url.host_policy import HostPolicy
 
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.service.webhooks import (
     ensure_https_webhook_url,

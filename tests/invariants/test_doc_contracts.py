@@ -102,7 +102,7 @@ def _broken_doc_reference_offenders(
     return offenders
 
 
-_DOTTED_APP_SYMBOL = re.compile(r"^crawlutron[\w./]+$")
+_DOTTED_APP_SYMBOL = re.compile(r"^(?:crawlutron|safe_url)[\w./]+$")
 _FILE_EXTENSIONS = frozenset(
     {".py", ".md", ".toml", ".json", ".yaml", ".yml", ".ini", ".cfg", ".txt", ".in", ".sh"}
 )
@@ -204,24 +204,24 @@ _NON_SYMBOL_WORDS = frozenset(
 
 
 def _app_symbol_definitions(root: pathlib.Path = REPO_ROOT) -> dict[str, frozenset[str]]:
-    """Every top-level name defined in the crawlutron package, mapped to the module files that define it.
-
-    A bare backticked name in a doc can only be checked against this index: if no
-    module defines it, the doc is citing something that doesn't exist as a crawlutron symbol.
-    """
+    """Every top-level name in crawlutron/safe_url packages, mapped to its defining module file."""
     definitions: dict[str, set[str]] = {}
-    for path in sorted((root / "packages" / "core" / "src" / "crawlutron").rglob("*.py")):
-        tree = parsed(path)
-        relative = path.relative_to(root).as_posix()
-        for node in tree.body:
-            if isinstance(node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
-                definitions.setdefault(node.name, set()).add(relative)
-            elif isinstance(node, ast.Assign):
-                for target in node.targets:
-                    if isinstance(target, ast.Name):
-                        definitions.setdefault(target.id, set()).add(relative)
-            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-                definitions.setdefault(node.target.id, set()).add(relative)
+    for pkg_root in (
+        root / "packages" / "core" / "src" / "crawlutron",
+        root / "packages" / "safe-url" / "src" / "safe_url",
+    ):
+        for path in sorted(pkg_root.rglob("*.py")):
+            tree = parsed(path)
+            relative = path.relative_to(root).as_posix()
+            for node in tree.body:
+                if isinstance(node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+                    definitions.setdefault(node.name, set()).add(relative)
+                elif isinstance(node, ast.Assign):
+                    for target in node.targets:
+                        if isinstance(target, ast.Name):
+                            definitions.setdefault(target.id, set()).add(relative)
+                elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                    definitions.setdefault(node.target.id, set()).add(relative)
     return {name: frozenset(modules) for name, modules in definitions.items()}
 
 
@@ -271,23 +271,21 @@ def _check_dotted_symbol(name: str, candidate: str, app_root: pathlib.Path) -> l
     parts = candidate.replace("/", ".").split(".")
     if len(parts) < 3:
         return []
-    if _module_file(app_root, parts).exists():
-        return []
     symbol = parts[-1]
-    module_path = (
-        app_root / "packages" / "core" / "src" / "crawlutron" / pathlib.Path(*parts[1:-1]).with_suffix(".py")
-    )
-    if not module_path.exists():
-        return [f"{name}: `{candidate}` module does not exist"]
-    tree = ast.parse(module_path.read_text(encoding="utf-8"))
-    if not _symbol_defined_in(tree, symbol):
-        return [f"{name}: `{candidate}` symbol not defined in {module_path.relative_to(app_root)}"]
-    return []
-
-
-def _module_file(app_root: pathlib.Path, parts: list[str]) -> pathlib.Path:
-    """The citation read as a MODULE path: crawlutron/<pkg...>/<name>.py."""
-    return (app_root / "packages" / "core" / "src" / "crawlutron").joinpath(*parts[1:]).with_suffix(".py")
+    for src_root, pkg_dir in (
+        (app_root / "packages" / "core" / "src", "crawlutron"),
+        (app_root / "packages" / "safe-url" / "src", "safe_url"),
+    ):
+        full_module_path = src_root / pkg_dir / pathlib.Path(*parts[1:]).with_suffix(".py")
+        if full_module_path.exists():
+            return []
+        module_path = src_root / pkg_dir / pathlib.Path(*parts[1:-1]).with_suffix(".py")
+        if module_path.exists():
+            tree = ast.parse(module_path.read_text(encoding="utf-8"))
+            if _symbol_defined_in(tree, symbol):
+                return []
+            return [f"{name}: `{candidate}` symbol not defined in {module_path.relative_to(app_root)}"]
+    return [f"{name}: `{candidate}` module does not exist"]
 
 
 def _check_bare_symbol(name: str, candidate: str, symbols: dict[str, frozenset[str]]) -> list[str]:
@@ -479,7 +477,7 @@ def test_doc_symbol_detector_spared_clean_references(tmp_path):
     document = REPO_ROOT / "CONTRIBUTING.md"
     (tmp_path / "CONTRIBUTING.md").write_text(
         document.read_text(encoding="utf-8")
-        + "\nSee ``crawlutron/models/host_policy.HostPolicy`` and ``filter_js_endpoints``.\n"
+        + "\nSee ``safe_url/host_policy.HostPolicy`` and ``filter_js_endpoints``.\n"
         + "And ``git``, ``main`` and ``PEP 8`` are not symbols.\n",
         encoding="utf-8",
     )
@@ -487,10 +485,7 @@ def test_doc_symbol_detector_spared_clean_references(tmp_path):
 
 
 def test_a_dotted_citation_naming_a_real_nested_module_passes(tmp_path):
-    """crawlutron.<pkg>.<module> cites a module file, not a symbol in one. RED against the join bug:
-    parts[1:-1] built <pkg>.py, refusing the true module crawlutron/config/settings.py (found by the #677
-    reviewer's skill prose). The last dotted part may BE the module.
-    """
+    """crawlutron.<pkg>.<module> cites a module file, not a symbol in one."""
     (tmp_path / "probe.md").write_text(
         "Build it via ``crawlutron/config/settings.CrawlerSettings``; module: "
         "``crawlutron/config/settings``.\n",

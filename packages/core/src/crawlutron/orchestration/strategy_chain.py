@@ -24,15 +24,16 @@ from crawlutron.transport.strategy_request import StrategyRequest
 from crawlutron.vocabulary.strategies import BROWSER_STRATEGIES, HTTP_CFFI_IMPERSONATE, HTTP_STRATEGIES
 
 if TYPE_CHECKING:
+    from safe_url.host_policy import HostPolicy
+    from safe_url.normalized_url import NormalizedUrl
+
     from crawlutron.config.settings import CrawlerSettings
     from crawlutron.models.crawl_diagnostics import CrawlDiagnostics
     from crawlutron.models.crawl_policy import CrawlPolicy
     from crawlutron.models.crawl_result import EngineCrawlResult
     from crawlutron.models.crawl_strategy_attempt import CrawlStrategyAttempt
     from crawlutron.models.crawl_worker import CrawlWorker
-    from crawlutron.models.host_policy import HostPolicy
     from crawlutron.models.http_fetcher import HttpFetcher
-    from crawlutron.models.normalized_url import NormalizedUrl
     from crawlutron.models.taxonomy import CrawlError
     from crawlutron.transport.scheduler import DomainScheduler
 

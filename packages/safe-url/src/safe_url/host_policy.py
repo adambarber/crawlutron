@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from functools import lru_cache
 from urllib.parse import urlparse
 
-from crawlutron.config.env import EnvDecisionMemo
-from crawlutron.models.address_class import AddressClass, classify
-from crawlutron.models.host_canonical import punycode_host
-from crawlutron.runtime import process_state
+import crawlutron.runtime.process_state as process_state
+from safe_url.address_class import AddressClass, classify
+from safe_url.host_canonical import punycode_host
 
 
 def _normalize_policy_host(host: str) -> str:
@@ -82,22 +82,53 @@ def host_policy_reason(host: str, *, policy: HostPolicy) -> str | None:
     return None
 
 
+#: (raw env value, parsed decision) for CRAWLUTRON_ALLOW_PRIVATE_TARGETS.
+#: Dict keyed by the raw value; unchanged value hits the cache.
+_PRIVATE_TARGET_CACHE: dict[str | None, bool] = {}
+
 #: Hosts that name this machine rather than a site on the internet.
 _PRIVATE_HOSTS = frozenset({"localhost", "host.docker.internal"})
 
-#: (raw env value, parsed decision) for CRAWLUTRON_ALLOW_PRIVATE_TARGETS.
-#: Value-keyed: an env change lands on the next call, an unchanged one skips it.
-_PRIVATE_TARGET_DECISION = EnvDecisionMemo(
-    "CRAWLUTRON_ALLOW_PRIVATE_TARGETS",
-    default=False,
-    logger_name="crawlutron.models.host_policy",
-    warning=(
+#: Spelling variants that enable the private-target escape hatch.
+_ON_SPELLINGS = frozenset({"1", "true", "yes", "on"})
+
+
+def _private_target_default() -> bool:
+    return False
+
+
+def _parse_private_target_env(raw: str | None) -> bool:
+    """Parse the raw env value into a private-target decision."""
+    return (raw or "").strip().lower() in _ON_SPELLINGS
+
+
+def _private_target_warning(raw: str | None) -> str:
+    return (
         "SSRF private-target guard DISABLED by CRAWLUTRON_ALLOW_PRIVATE_TARGETS=%r: "
         "caller-supplied URLs may now reach private, loopback, and link-local "
         "addresses, including cloud metadata endpoints. Unset it, or set it to 0, "
         "outside local development."
-    ),
-)
+    )
+
+
+def _decide_private_targets() -> bool:
+    """Read the private-target escape hatch from env (inverted default).
+
+    The raw env string is the cache key: an unchanged value skips the parse.
+    """
+    raw = os.environ.get("CRAWLUTRON_ALLOW_PRIVATE_TARGETS")
+    if raw in _PRIVATE_TARGET_CACHE:
+        return _PRIVATE_TARGET_CACHE[raw]
+    decision = _parse_private_target_env(raw)
+    _PRIVATE_TARGET_CACHE[raw] = decision
+    if decision:
+        import logging
+
+        logging.getLogger("safe_url.host_policy").warning(
+            _private_target_warning(raw),
+            extra={"env_name": "CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "env_value": raw},
+        )
+    return decision
 
 
 def allow_private_targets() -> bool:
@@ -106,16 +137,16 @@ def allow_private_targets() -> bool:
     Host verdicts are a pure function of the host and never go stale; the env
     decision memo warns once per distinct value, not per call.
     """
-    return _PRIVATE_TARGET_DECISION.decide()
+    return _decide_private_targets()
 
 
 def reset_private_target_memo() -> None:
-    """Drop the memoized env decision (tests that count parse calls only).
+    """Drop the memoized env decision (tests that count parse calls).
 
     Host verdicts are a pure function of the host and never go stale, so the
     verdict memo deliberately is not touched here.
     """
-    _PRIVATE_TARGET_DECISION.reset()
+    _PRIVATE_TARGET_CACHE.clear()
 
 
 def _reset() -> None:
@@ -125,7 +156,7 @@ def _reset() -> None:
 
 def _has() -> bool:
     """Whether an env decision is memoized right now."""
-    return _PRIVATE_TARGET_DECISION._decision is not None
+    return bool(_PRIVATE_TARGET_CACHE)
 
 
 process_state.register(__name__, _reset, _has)

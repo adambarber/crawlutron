@@ -3,7 +3,7 @@
 A policy-driven, self-hosted web crawler and content-extraction service built around
 FastAPI. It exposes a single, machine-readable crawl contract that supports:
 
-**Positioning.** crawlutron is a self-hosted, policy-driven crawler for public pages. Its caller security boundary is built-in per-caller authentication (API keys issued and revoked through `/v1/keys`, operator-token gated; keyed jobs and results are readable only under their key, anonymous crawls share a bounded identity). SSRF is architecture, not an add-on: every egress target is classified, fresh-resolved, IP-pinned, and re-validated per hop and per browser subresource — `when the private-target guard is enabled`, warned once per enabled value at first use (`packages/core/src/crawlutron/models/host_policy.py:88-100`). A transport-auth reverse proxy is recommended when exposing beyond localhost (TLS termination, `Server` header stripping, request-id logging), but built-in per-caller auth is the caller security boundary; the proxy is transport hardening, not a substitute for it. The rule framework (`tests/invariants/`) arms and bites every rule, and the pre-commit hook chain gates every commit. See `docs/architecture-ssrf.md`, `docs/architecture-governance.md`, and `SECURITY.md`.
+**Positioning.** crawlutron is a self-hosted, policy-driven crawler for public pages. Its caller security boundary is built-in per-caller authentication (API keys issued and revoked through `/v1/keys`, operator-token gated; keyed jobs and results are readable only under their key, anonymous crawls share a bounded identity). SSRF is architecture, not an add-on: every egress target is classified, fresh-resolved, IP-pinned, and re-validated per hop and per browser subresource — `when the private-target guard is enabled`, warned once per enabled value at first use (`packages/safe-url/src/safe_url/host_policy.py:88-100`). A transport-auth reverse proxy is recommended when exposing beyond localhost (TLS termination, `Server` header stripping, request-id logging), but built-in per-caller auth is the caller security boundary; the proxy is transport hardening, not a substitute for it. The rule framework (`tests/invariants/`) arms and bites every rule, and the pre-commit hook chain gates every commit. See `docs/architecture-ssrf.md`, `docs/architecture-governance.md`, and `SECURITY.md`.
 
 - **HTTP fetch strategies** — transparent declared-crawler HTTP and TLS-fingerprint
   impersonation (curl_cffi).
@@ -59,7 +59,7 @@ guards them stated:
 ### Dangerous environment escape hatches
 
 Every `CRAWLUTRON_*` variable that weakens a safety default (derived from the
-live settings/env code — `packages/core/src/crawlutron/models/host_policy.py`,
+live settings/env code — `packages/safe-url/src/safe_url/host_policy.py`,
 `packages/core/src/crawlutron/service/webhooks.py`, `packages/core/src/crawlutron/config/settings.py`,
 `packages/core/src/crawlutron/transport/driver_config.py`):
 
@@ -464,7 +464,7 @@ instead of queueing behind an uncancellable `getaddrinfo`.
 | `CRAWLUTRON_LOG_MAX_BYTES` | `10485760` | Log rotation size. |
 | `CRAWLUTRON_LOG_BACKUP_COUNT` | `3` | Number of rotated log files to keep. |
 
-Host policy is applied at the shared public-URL chokepoint before the SSRF/private-target check. Entries are normalized as case-insensitive IDNA hostnames (`_policy_host_entry` in `packages/core/src/crawlutron/models/host_policy.py` parses each value via `urlparse(...).hostname`); a port in a config value is stripped during normalization and never matched — an entry is a hostname, not a `host:port` pair. A denied host wins over an allowed host, while an empty allowlist permits every otherwise-valid public host.
+Host policy is applied at the shared public-URL chokepoint before the SSRF/private-target check. Entries are normalized as case-insensitive IDNA hostnames (`_policy_host_entry` in `packages/safe-url/src/safe_url/host_policy.py` parses each value via `urlparse(...).hostname`); a port in a config value is stripped during normalization and never matched — an entry is a hostname, not a `host:port` pair. A denied host wins over an allowed host, while an empty allowlist permits every otherwise-valid public host.
 
 > The container's production command also reads `CRAWLUTRON_WORKERS` (uvicorn worker count). **Keep this at `1`.** The browser pool is a single global pool sized to the container RAM budget; running more than one uvicorn worker multiplies the browser-pool count across workers (e.g. 4 workers × pool_size 2 = 8 Camoufox processes ≈ 5+ GiB) and blows the 3 GiB memory limit. Do not raise it.
 

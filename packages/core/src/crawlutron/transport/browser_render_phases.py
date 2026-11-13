@@ -11,6 +11,8 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, NamedTuple, cast
 
+from safe_url.normalized_url import NormalizedUrl
+
 from crawlutron.extraction.classify import classify_page
 from crawlutron.models.browser_profile_record import BrowserProfileRecord
 from crawlutron.models.crawl_result import CrawlResult
@@ -18,7 +20,6 @@ from crawlutron.models.crawl_result import CrawlResult
 # Page identity: re-normalized against the policy at the result boundary.
 from crawlutron.models.intercepted_xhr_record import InterceptedXhrRecord
 from crawlutron.models.json_value import JsonValue
-from crawlutron.models.normalized_url import NormalizedUrl
 from crawlutron.models.result_factory import terminal_attempt
 from crawlutron.models.screenshot_diagnostics import ScreenshotDiagnostics, screenshot_payload
 from crawlutron.runtime.resource_lifecycle import record_declined_close
@@ -38,7 +39,8 @@ from crawlutron.transport.timeouts import (
 from crawlutron.vocabulary.browser import BrowserAction
 
 if TYPE_CHECKING:
-    from crawlutron.models.host_policy import HostPolicy
+    from safe_url.host_policy import HostPolicy
+
     from crawlutron.models.render_options import RenderOptions
     from crawlutron.models.taxonomy import Classification
     from crawlutron.vocabulary.taxonomy import ResultStatus

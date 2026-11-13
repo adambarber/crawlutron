@@ -14,9 +14,10 @@ from crawlutron.models.result_record import ProducerEnvelope
 from tests._crawl_runners import crawled_results
 
 if TYPE_CHECKING:
-    from crawlutron.models.host_policy import HostPolicy
+    from safe_url.host_policy import HostPolicy
+    from safe_url.normalized_url import NormalizedUrl
+
     from crawlutron.models.http_fetcher import HttpFetcher
-    from crawlutron.models.normalized_url import NormalizedUrl
 
 
 def _doc_pages():
@@ -176,8 +177,8 @@ class TestSitemapCandidateBuilderUsesTheCanonicalOrigin:
         ],
     )
     async def test_the_origin_is_canonical_regardless_of_how_the_root_was_spelled(self, root_url):
-        from crawlutron.models.host_policy import HostPolicy
-        from crawlutron.models.normalized_url import NormalizedUrl
+        from safe_url.host_policy import HostPolicy
+        from safe_url.normalized_url import NormalizedUrl
 
         canonical = NormalizedUrl(root_url, policy=HostPolicy.unrestricted())
         expected = f"{canonical.origin}/sitemap.xml"

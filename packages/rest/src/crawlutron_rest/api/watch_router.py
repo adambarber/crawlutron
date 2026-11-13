@@ -7,9 +7,9 @@ belongs to the sweep (:mod:`crawlutron.service.watch_sweep`). This router owns r
 from __future__ import annotations
 
 from fastapi import Response
+from safe_url.host_policy import HostPolicy
 
 from crawlutron.models.error_response import ErrorResponse
-from crawlutron.models.host_policy import HostPolicy
 from crawlutron.models.watch_create_request import WatchCreateRequest
 from crawlutron.models.watch_id_request import WatchIdRequest
 from crawlutron.models.watch_list_response import WatchListResponse

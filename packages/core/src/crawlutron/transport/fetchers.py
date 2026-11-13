@@ -10,11 +10,11 @@ import logging
 from collections.abc import Callable, Mapping
 
 from curl_cffi.requests.exceptions import SSLError
+from safe_url.normalized_url import NormalizedUrl
+from safe_url.url_redaction import redact_url
 
 from crawlutron.models.http_fetch_result import HttpFetchResult
 from crawlutron.models.http_fetcher import HttpFetcher
-from crawlutron.models.normalized_url import NormalizedUrl
-from crawlutron.safety.url_redaction import redact_url
 from crawlutron.transport import pinned_transport, pooled_clients
 from crawlutron.transport.cffi_transport import CffiTransport
 from crawlutron.transport.httpx_transport import HttpxTransport

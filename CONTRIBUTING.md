@@ -83,7 +83,7 @@ preference. `CODE_OF_CONDUCT.md` states the expectations in full.
 
 These require explicit review from a maintainer before merge:
 
-- `packages/core/src/crawlutron/models/normalized_url.py` and `packages/core/src/crawlutron/models/host_policy.py` — the URL
+- `packages/safe-url/src/safe_url/normalized_url.py` and `packages/safe-url/src/safe_url/host_policy.py` — the URL
   admission chokepoint: the `NormalizedUrl` constructor is the single place
   raw URL text is parsed, and the public/SSRF egress verdict plus the
   private-target opt-in are decided here.
