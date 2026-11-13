@@ -53,3 +53,20 @@ def test_dockerfile_builds_bare_without_seed_context() -> None:
     assert "type=bind,from=seed,target=/seed" not in text, (
         "no mandatory seed bind mount: bare docker build . must not need --build-context seed="
     )
+
+
+def test_every_stage_that_syncs_the_workspace_first_copies_the_members() -> None:
+    """`uv sync --frozen` resolves the workspace members, so a stage must copy them.
+
+    A stage holding only `pyproject.toml` and `uv.lock` dies at "Distribution not
+    found at: file:///app/packages/core".
+    """
+    text = DOCKERFILE_PATH.read_text(encoding="utf-8")
+    stages = [stage for stage in text.split("\nFROM ") if "uv sync --frozen" in stage]
+    assert stages, "no stage runs uv sync --frozen; the gate would pass vacuously"
+    for stage in stages:
+        copy = next(line for line in stage.splitlines() if line.startswith("COPY "))
+        assert any(line.startswith("COPY ") and "packages" in line for line in stage.splitlines()), (
+            "a stage runs `uv sync --frozen` without copying packages/: the workspace "
+            f"members it resolves live there, and the first COPY is {copy!r}"
+        )

@@ -1,18 +1,19 @@
 name: Packaging
 
-# Every member of the uv workspace must be publishable, and that is checked on
-# every push rather than at release time. Building, inspecting, installing and
-# importing each wheel is what a consumer does; a packaging break that only a
+# Every member of the uv workspace must be publishable, and that is checked
+# after CI is green rather than at release time. Building, inspecting, installing
+# and importing each wheel is what a consumer does; a packaging break that only a
 # release discovers is a break that reaches a user.
 #
-# Publishes nothing: this workflow carries no write scope and uploads no artifact
-# anywhere. `release.yml` is the only publishing path, and it runs on a tag.
+# The ordering is the point: packaging runs on the CI run's result, so a red
+# commit never reaches it and a packaging break cannot be confused with a gate
+# break. It publishes nothing: no write scope, no upload anywhere. `release.yml`
+# is the only publishing path.
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
   workflow_dispatch:
 
 permissions: read-all
@@ -21,9 +22,23 @@ jobs:
   distributions:
     name: Build and check every distribution
     runs-on: ubuntu-latest
+    # Only a green CI run, and only on the branches that publish.
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch'
+        || (
+          github.event.workflow_run.conclusion == 'success'
+          && (
+            github.event.workflow_run.head_branch == 'main'
+            || startsWith(github.event.workflow_run.head_branch, 'v')
+          )
+        )
+      }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
+          # The commit CI actually ran, not whatever the default branch points at.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
           fetch-tags: true
       # hatch-vcs derives the version from the newest tag. A checkout is not
@@ -31,11 +46,11 @@ jobs:
       # the members' `>=0.4.0.dev0` floor when the probe resolves them.
       - name: Fetch the tags the version comes from
         run: git fetch --tags --force
-      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.14"
 
@@ -54,15 +69,27 @@ jobs:
   image:
     name: Build the container image
     runs-on: ubuntu-latest
+    if: >-
+      ${
+        github.event_name == 'workflow_dispatch'
+        || (
+          github.event.workflow_run.conclusion == 'success'
+          && (
+            github.event.workflow_run.head_branch == 'main'
+            || startsWith(github.event.workflow_run.head_branch, 'v')
+          )
+        )
+      }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
       - name: Build the runtime image
         # Loaded into the local daemon rather than pushed: this asserts the image
         # still builds after a packaging change, nothing more.
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           target: runtime

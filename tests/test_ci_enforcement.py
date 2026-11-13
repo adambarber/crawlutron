@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
 import yaml
@@ -146,32 +147,84 @@ def test_every_action_is_sha_pinned_and_permissions_are_declared() -> None:
 
 
 def test_release_workflow_publishes_nothing_without_a_tag() -> None:
-    """#949/#1014: only a tag-triggered workflow may publish, and ci.yml cannot.
+    """#949/#1014: only a CI-gated workflow may publish, and ci.yml cannot.
 
     ci.yml stays read-all, so the write scope lives here and only here; the jobs
     that do not publish must not inherit it.
     """
-    assert RELEASE_WORKFLOW_PATH.is_file(), "a version-triggered release workflow must exist"
-    document = yaml.safe_load(RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8"))
-    assert isinstance(document, dict)
-    triggers = document["on"] if isinstance(document.get("on"), dict) else document.get(True)
-    assert isinstance(triggers, dict), "the release workflow must declare an 'on' trigger"
-    assert "v*" in str((triggers.get("push") or {}).get("tags")), (
-        "the release workflow must trigger on v* tag pushes"
+    document = _workflow_document(RELEASE_WORKFLOW_PATH)
+    triggers = _triggers(document)
+    # Publishing is downstream of CI, never of the tag push itself: the tag makes
+    # it a release, a green CI run is what makes it publishable.
+    assert set(triggers) == {"workflow_run"}, (
+        f"the release workflow must be gated on CI, found triggers {sorted(triggers)}"
     )
+    gated = _mapping(triggers["workflow_run"], "a workflow_run gate")
+    assert gated.get("workflows") == ["CI"], "the release must follow the CI workflow"
+    assert "completed" in str(gated.get("types")), "the release must run on CI completion"
 
-    jobs = document.get("jobs")
-    assert isinstance(jobs, dict)
-    image = jobs.get("image")
-    assert isinstance(image, dict)
-    assert (image.get("permissions") or {}).get("packages") == "write", (
+    _assert_ci_gated(document, require_tag=True)
+    jobs = _mapping(document.get("jobs"), "jobs")
+    image = _mapping(jobs.get("image"), "an image job")
+    assert _mapping(image.get("permissions"), "image permissions").get("packages") == "write", (
         "the image job needs packages:write, scoped to itself"
     )
-    distributions = jobs.get("distributions")
-    assert isinstance(distributions, dict)
-    assert (distributions.get("permissions") or {}).get("id-token") == "write", (
+    publish = _mapping(jobs.get("distributions"), "a distributions job")
+    assert _mapping(publish.get("permissions"), "publish permissions").get("id-token") == "write", (
         "the publish job needs id-token:write for trusted publishing"
     )
+
+
+def _workflow_document(path: Path) -> dict[object, object]:
+    """One workflow file, parsed. The single reader, so every check sees one shape."""
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert isinstance(document, dict), f"{path.name} is not a workflow"
+    return document
+
+
+def _mapping(value: object, what: str) -> dict[str, object]:
+    """A workflow block narrowed to a string-keyed mapping, or a named refusal."""
+    assert isinstance(value, dict), f"the workflow must declare {what}"
+    return {str(key): item for key, item in value.items()}
+
+
+def _triggers(document: dict[object, object]) -> dict[str, object]:
+    """The ``on`` block, whichever spelling the YAML parser used for the key."""
+    raw = document.get("on")
+    return _mapping(raw if isinstance(raw, dict) else document.get(True), "an 'on' trigger")
+
+
+def _assert_ci_gated(document: dict[object, object], *, require_tag: bool) -> None:
+    """Every job runs only after a green CI run, on the branches this workflow serves.
+
+    ``require_tag`` adds the release's own condition: the tag makes it a release,
+    the green run makes it publishable, and neither alone is sufficient.
+    """
+    gate = _mapping(_triggers(document).get("workflow_run"), "a workflow_run gate")
+    assert gate.get("workflows") == ["CI"], "must follow CI"
+    assert "completed" in str(gate.get("types")), "on completion"
+    for name, job in _mapping(document.get("jobs"), "jobs").items():
+        condition = str(_mapping(job, f"job {name}").get("if", ""))
+        assert "workflow_run.conclusion == 'success'" in condition, (
+            f"job {name} does not require a green CI run"
+        )
+        if require_tag:
+            assert "startsWith(github.event.workflow_run.head_branch, 'v')" in condition, (
+                f"job {name} does not require a v* tag"
+            )
+
+
+def test_packaging_runs_only_after_a_green_ci_run() -> None:
+    """Packaging is downstream of the gates, so a red commit never reaches it.
+
+    Running the two in parallel makes a failure ambiguous: a packaging break and a
+    gate break look the same, and a red commit is judged on a build it never cleared.
+    """
+    assert PACKAGING_WORKFLOW_PATH.is_file(), "a packaging workflow must exist"
+    document = _workflow_document(PACKAGING_WORKFLOW_PATH)
+    assert "workflow_run" in _triggers(document), "packaging runs on a CI run's completion"
+    assert "push" not in _triggers(document), "packaging must not run on the push itself"
+    _assert_ci_gated(document, require_tag=False)
 
 
 def test_packaging_workflow_publishes_nothing() -> None:

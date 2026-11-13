@@ -37,8 +37,12 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 # pyproject.toml + uv.lock are the single source of truth for the dependency
 # graph (requirements*.txt were deleted in dc6f2bbe). ``uv sync --frozen``
-# installs exactly the locked pins, with no hash-check drift.
+# installs exactly the locked pins, with no hash-check drift. The workspace
+# members come along first: the root project resolves every member through
+# ``[tool.uv.sources]`` into ``packages/<name>``, so a stage holding only the
+# lockfile dies at "Distribution not found at: file:///app/packages/core".
 COPY pyproject.toml uv.lock ./
+COPY packages/ ./packages/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project --python /usr/local/bin/python
 
@@ -221,8 +225,11 @@ USER root
 
 # Install uv and sync the dev extra (pytest, pytest-asyncio, ruff, etc.) into
 # the venv the runtime stage already copied in, on top of the exact locked pins.
+# The workspace members arrive with the lockfile for the same reason as the
+# builder stage: `uv sync` resolves every member through `[tool.uv.sources]`.
 COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /uvx /bin/
 COPY pyproject.toml uv.lock ./
+COPY packages/ ./packages/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --extra dev --no-install-project --python /app/.venv/bin/python
 
