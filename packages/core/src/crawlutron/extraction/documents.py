@@ -11,9 +11,9 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Literal, NamedTuple, TypeVar
 
+import trafilatura
 from lxml import etree
 from markdownify import markdownify as html_to_md
-from trafilatura import extract as _trafilatura_extract
 
 from crawlutron.config.env import get_env_int, parse_bool_env
 from crawlutron.config.settings import CrawlerSettings
@@ -359,27 +359,42 @@ def extract_html(
     html: str,
     url: NormalizedUrl | None,
     selectors: Selectors | None = None,
+    settings: CrawlerSettings | None = None,
 ) -> ExtractedContent:
-    """The single owner of the HTML selector dispatch, for both callers: the unified
-    extract_content entry and the trafilatura-only path both route HTML here, so
-    one place decides selector-targeted vs full-page and they cannot disagree.
+    """Single owner of the HTML dispatch: selector-targeted and full-page both route
+    here; the full-page path is bounded by the input byte cap and the selector
+    deadline so a pathological page cannot burn CPU unbounded.
     """
+    active = settings or CrawlerSettings.from_mapping()
     if selectors:
-        return extract_selected(html, url, selectors=selectors)
+        return extract_selected(html, url, selectors=selectors, settings=active)
+    if len(html) > EXTRACTION_DOC_MAX_INPUT_BYTES:
+        # Full-page passes run untimed on the caller thread: refuse hostile-size payloads.
+        logger.warning(
+            "extraction_html_payload_too_large",
+            extra={"size_bytes": len(html), "max_bytes": EXTRACTION_DOC_MAX_INPUT_BYTES},
+        )
+        return ExtractedContent(None, None)
     try:
         with suppress_trafilatura_chatter():
-            md = _trafilatura_extract(
-                html,
-                url=url.raw if url is not None else None,
-                output_format="markdown",
-                favor_recall=True,
-                include_comments=False,
-                include_tables=True,
-                include_formatting=True,
-                include_links=True,
-                deduplicate=True,
+            md = _eval_selector(
+                lambda: trafilatura.extract(
+                    html,
+                    url=url.raw if url is not None else None,
+                    output_format="markdown",
+                    favor_recall=True,
+                    include_comments=False,
+                    include_tables=True,
+                    include_formatting=True,
+                    include_links=True,
+                    deduplicate=True,
+                ),
+                active.extraction_selector_timeout,
             )
     except Exception:
+        md = None
+    if isinstance(md, _SelectorTimedOut):
+        logger.warning("extraction_selector_timeout", extra={"selector_type": "trafilatura"})
         md = None
     if not md or not md.strip():
         # Fallback to markdownify before the plain-text extractor so that
