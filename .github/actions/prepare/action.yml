@@ -1,17 +1,14 @@
 name: Prepare a gate environment
 description: >
-  Everything a gate needs before it can run: the checkout at full depth (hatch-vcs
-  derives the version from the tags), the 3.14 interpreter, the frozen install,
-  and the regenerated version artifact. One definition, so a new gate job cannot
-  drift from the environment the others use.
+  Everything a gate needs after the checkout: the 3.14 interpreter, the frozen
+  install, and the regenerated version artifact. One definition, so a new gate job
+  cannot drift from the environment the others use. The checkout itself stays in
+  the job: GitHub resolves a local action before any step runs, so an action that
+  checked out would run before the repository existed on disk.
 
 runs:
   using: composite
   steps:
-    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      with:
-        fetch-depth: 0
-        fetch-tags: true
     - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
       with:
         python-version: "3.14"

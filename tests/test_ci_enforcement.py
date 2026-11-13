@@ -204,6 +204,10 @@ def test_the_prepare_action_installs_the_frozen_lock_and_regenerates_the_version
     )
     assert "pip install" not in action, "the prepare action installs with uv, not pip"
     assert "actions/cache@" in action, "the prepare action must cache gate state"
+    assert "actions/checkout" not in action, (
+        "checkout belongs in the job: GitHub resolves a local action before any step "
+        "runs, so an action that checks out runs before the repo is on disk"
+    )
     for cache_dir in (".mypy_cache", ".ruff_cache", ".gate_fanout"):
         assert cache_dir in action, f"the prepare action must cache {cache_dir}"
 
@@ -219,6 +223,9 @@ def test_every_gate_job_starts_from_the_prepare_action() -> None:
         steps = job_steps(workflow, name)
         assert any(str(step.get("uses", "")).startswith("./.github/actions/prepare") for step in steps), (
             f"job {name} must start from ./.github/actions/prepare"
+        )
+        assert any(str(step.get("uses", "")).split("@")[0] == "actions/checkout" for step in steps), (
+            f"job {name} must check out before using the local prepare action"
         )
     for name, run in _job_run_steps(workflow):
         assert "pip install" not in run, (
