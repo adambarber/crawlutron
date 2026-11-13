@@ -89,8 +89,9 @@ def test_persisting_overlapping_batches_never_selects_the_stored_visited_set(tmp
     store, job = _traced_crawled_job(
         tmp_path, statements, 20, grown=("https://example.com/p0", "https://example.com/fresh")
     )
-    statements.clear()  # the seed reads belong to the first save; measure only the delta saves
-    store.save(job)  # resave with nothing new
+    statements.clear()  # the seed/grow reads belong to the first save; measure only the delta saves
+    job.visited.update({canonical("https://example.com/delta"): None})  # growth: add one new row
+    store.save(job)
 
     visited_reads = _visited_statements(statements, "SELECT")
     assert visited_reads == [], f"the persist re-read the stored visited set: {visited_reads}"

@@ -23,6 +23,24 @@ if TYPE_CHECKING:
 
 __all__ = ["JobAccumulators"]
 
+# Full-table read SQL per collection for the post-growth no-op tie-break
+# when stored full_digest is None (no prior load). Same item shape as live.
+_FULL_TABLE_SQL = {
+    "results": 'SELECT payload FROM "crawl_job_results" WHERE job_id = ? ORDER BY seq',
+    "visited": 'SELECT url FROM "crawl_job_visited" WHERE job_id = ?',
+    "frontier": 'SELECT url, depth FROM "crawl_job_frontier" WHERE job_id = ? ORDER BY pos',
+}
+
+
+def _table_row_items(collection: str, row: sqlite3.Row) -> dict:
+    """One DB row as the same item shape the live collection holds, so
+    digest comparison across the table boundary is exact."""
+    if collection == "results":
+        return json.loads(row["payload"])
+    if collection == "visited":
+        return {"url": row["url"]}
+    return {"url": row["url"], "depth": row["depth"]}
+
 
 class JobAccumulators:
     """The growing part of a job: its append-only page history, visited set and
@@ -89,10 +107,16 @@ class JobAccumulators:
 
     def _content_full_matches(self, job_id: str, collection: str, full_digest: str) -> bool:
         """Full-digest tie-break for the ambiguous tail-empty case (mark == length).
-        Separates a no-op from a same-length replacement; keeps resync byte-identical.
+        When the stored full digest is on file, compare directly; when it is None
+        (post-growth write, no prior load), read the table fresh and compare.
         """
         stored = self._stored(job_id, collection)
-        return stored is not None and stored[2] is not None and stored[2] == full_digest
+        if stored is None:
+            return False
+        if stored[2] is not None:
+            return stored[2] == full_digest
+        rows = self._conn.execute(_FULL_TABLE_SQL[collection], (job_id,)).fetchall()
+        return self._digest([_table_row_items(collection, row) for row in rows]) == full_digest
 
     def _record_content(
         self,
@@ -243,8 +267,7 @@ class JobAccumulators:
             self._frontier_resync(job_id)
             mark = 0
         elif mark == len(job.frontier):
-            # Tail empty: no-op and same-length replacement share mark + tail;
-            # the full-digest tie-break separates them when one is on file.
+            # Tail empty: no-op and same-length replacement share mark + tail.
             full_digest = self._digest(
                 [{"url": entry.url.raw, "depth": entry.depth} for entry in job.frontier]
             )
@@ -253,14 +276,9 @@ class JobAccumulators:
                 job.frontier_mark = len(job.frontier)
                 self._record_content(job_id, "frontier", len(job.frontier), self._digest([]), full_digest)
                 return
-            stored = self._stored(job_id, "frontier")
-            if stored is not None and stored[2] is None:
-                # Post-growth no-op: table already equals live content.
-                skip_write = True
-            else:
-                # Same-length replacement: resync the whole queue, byte-identical.
-                self._frontier_resync(job_id)
-                mark = 0
+            # Same-length replacement: resync the whole queue, byte-identical.
+            self._frontier_resync(job_id)
+            mark = 0
         elif self._content_matches(job_id, "frontier", mark, self._digest(self._frontier_tail(job, mark))):
             # Growth tail already persisted: nothing to write.
             skip_write = True
@@ -287,25 +305,19 @@ class JobAccumulators:
                 # No-op: the tail is already persisted. Keep the stored full digest.
                 return
         else:
-            # Ambiguous: tail empty -- a no-op and a same-length replacement look
+            # Ambiguous: tail empty -- no-op and same-length replacement look
             # identical to mark + tail; whole-collection digest tie-breaks.
             full_digest = self._digest(results)
             if self._content_full_matches(job_id, "results", full_digest):
                 # No-op: the table already holds the live history.
                 self._record_content(job_id, "results", len(results), self._digest([]), full_digest)
                 return
-            stored = self._stored(job_id, "results")
-            if stored is not None and stored[2] is None:
-                # Post-growth no-op: nothing rewritten since the last write.
-                return
-            # Same-length replacement: fall through to resync below.
+            # Same-length replacement or shrink: fall through to resync below.
         if table and self._digest(results[: len(table)]) != self._digest(table):
+            # Table head differs from live head (out-of-band change): resync whole.
             self._conn.execute('DELETE FROM "crawl_job_results" WHERE job_id = ?', (job_id,))
             table = []
-        row = self._conn.execute(
-            'SELECT max(seq) FROM "crawl_job_results" WHERE job_id = ?', (job_id,)
-        ).fetchone()
-        persisted = 0 if row["max(seq)"] is None else row["max(seq)"] + 1
+            persisted = 0
         if persisted >= len(results):
             # Shrank or same-length replacement: resync so the table matches exactly.
             self._conn.execute('DELETE FROM "crawl_job_results" WHERE job_id = ?', (job_id,))
@@ -340,14 +352,9 @@ class JobAccumulators:
                 job.visited_mark = len(job.visited)
                 self._record_content(job_id, "visited", len(job.visited), self._digest([]), full_digest)
                 return
-            stored = self._stored(job_id, "visited")
-            if stored is not None and stored[2] is None:
-                # Post-growth no-op: table already equals live content.
-                skip_write = True
-            else:
-                # Same-length replacement: resync.
-                self._conn.execute('DELETE FROM "crawl_job_visited" WHERE job_id = ?', (job_id,))
-                mark = 0
+            # Same-length replacement: resync.
+            self._conn.execute('DELETE FROM "crawl_job_visited" WHERE job_id = ?', (job_id,))
+            mark = 0
         elif self._content_matches(job_id, "visited", mark, tail_digest):
             # Growth tail already persisted: nothing to write.
             skip_write = True
