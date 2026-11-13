@@ -19,7 +19,7 @@ from crawlutron.models.job_list_response import JobListResponse
 from crawlutron.models.job_status_response import JobStatusResponse
 from crawlutron.service import job_runner
 from crawlutron.service.job_control import control_job_core, raise_job_not_found
-from crawlutron.service.job_cores import create_job_core
+from crawlutron.service.job_cores import create_job_core, delete_job_core
 from crawlutron.service.main_helpers import build_job_status
 from crawlutron.vocabulary.limits import DEFAULT_JOB_LIST_LIMIT, MAX_JOB_LIST_LIMIT
 from crawlutron_rest.api.caller_auth import (
@@ -28,6 +28,7 @@ from crawlutron_rest.api.caller_auth import (
 from crawlutron_rest.api.dependencies import (
     CallerDep,
     JobStoreDep,
+    ResultStoreDep,
     SettingsDep,
     ShutdownEventDep,
     TrackingDep,
@@ -36,6 +37,10 @@ from crawlutron_rest.api.exceptions import validation_http_error
 from crawlutron_rest.api.route_layer import guarded_router
 
 router = guarded_router(prefix="/v1/jobs", tags=["Crawler"])
+
+# The create/delete doors delegate to cores that start/cancel jobs via job_runner;
+# exposing it here lets host-policy probes monkeypatch start_job on this module.
+_ = job_runner
 
 
 @router.post(
@@ -158,14 +163,25 @@ async def control_job(
         404: {"model": ErrorResponse, "description": "Job not found."},
     },
 )
-async def delete_job(job_id: str, job_store: JobStoreDep, caller: CallerDep) -> JobDeletedResponse:
-    if not await job_store.aexists_for_caller(job_id, caller.caller_id):
-        raise_job_not_found(job_id)
-    if job_runner.is_running(job_id):
-        job_runner.cancel_job_task(job_id)
-    if not await job_store.adelete_for_caller(job_id, caller.caller_id):
-        raise_job_not_found(job_id)
-    return JobDeletedResponse(deleted=True, job_id=job_id)
+async def delete_job(
+    job_id: str,
+    job_store: JobStoreDep,
+    result_store: ResultStoreDep,
+    caller: CallerDep,
+) -> JobDeletedResponse:
+    from crawlutron.models.job_id_request import JobIdRequest
+
+    try:
+        return await delete_job_core(
+            JobIdRequest(job_id=job_id),
+            job_store,
+            None,
+            None,
+            caller,
+            result_store=result_store,
+        )
+    except ValueError as error:
+        raise validation_http_error(error) from error
 
 
 __all__ = ["router"]

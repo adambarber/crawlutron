@@ -298,7 +298,9 @@ async def _store_tool(payload: BaseModel, door: DoorEnv, door_data: DoorBinding)
     if door_data.wants_shutdown_event:
         args.append(door.shutdown_event)
     args.append(caller_for(door.caller))
-    return await tool_result(core(*args, **door_data.core_kwargs))
+    core_kwargs = dict(door_data.core_kwargs)
+    core_kwargs["result_store"] = door.result_store
+    return await tool_result(core(*args, **core_kwargs))
 
 
 async def _crawl_door(payload: BaseModel, door: DoorEnv, projection: CrawlProjection) -> ToolResult:

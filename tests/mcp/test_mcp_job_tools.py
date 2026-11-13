@@ -16,22 +16,39 @@ from typing import TYPE_CHECKING
 import pytest
 
 from crawlutron.service import job_runner
+from crawlutron_rest.api.crawl_router import router as crawl_router
 from crawlutron_rest.api.jobs_router import router as jobs_router
 from crawlutron_rest.api.keys_router import router as keys_router
 from crawlutron_rest.api.mcp_router import router as mcp_router
+from tests._api_harnesses import (
+    assert_crawl_result_served,
+    isolated_delete_job_client,
+    seed_completed_crawl,
+)
 from tests._job_harnesses import ScriptedExecute, _execution_policy, post_api_job
 from tests._policy_factories import canonical
 from tests._quota_harness import service_client
 from tests._result_builders import engine_result
-from tests.mcp._tool_calls import issue_key
+from tests.mcp._tool_calls import KeyedToolCaller, issue_key
+
+_DELETE_JOB_ROUTERS = {
+    "crawl": crawl_router,
+    "jobs": jobs_router,
+    "keys": keys_router,
+    "mcp": mcp_router,
+}
+
+_JOBS_KEYS_MCP_ROUTERS = {
+    "jobs": jobs_router,
+    "keys": keys_router,
+    "mcp": mcp_router,
+}
 
 if TYPE_CHECKING:
     from httpx import AsyncClient
 
     from crawlutron.storage.caller_key_store import CallerKeyStore
     from crawlutron.storage.job_store import JobStore
-
-from tests.mcp._tool_calls import KeyedToolCaller
 
 
 @contextlib.asynccontextmanager
@@ -224,3 +241,50 @@ class TestJobToolDiscovery:
         assert "list_jobs" in guidance
         assert "create_job" in guidance
         assert "delete_job" in guidance
+
+
+class TestDeleteJobPurgesResultStoreMCP:
+    """DELETE job via the MCP delete_job tool must purge the result-store row,
+    so GET /v1/crawl/{id} stops serving a permanently removed job's content.
+    """
+
+    async def test_deleting_a_completed_job_purges_its_result_row(self, tmp_path):
+        from tests.mcp._tool_calls import tool_structured
+
+        async with isolated_delete_job_client(tmp_path, _DELETE_JOB_ROUTERS) as (
+            client,
+            store,
+            results,
+            keys,
+        ):
+            secret = await issue_key(client)
+            record = keys.verify_key(secret)
+            assert record is not None
+            owner = record.key_id
+            headers = {"X-API-Key": secret}
+            request_id = "crawl-completed-mcp-773"
+            await seed_completed_crawl(store, results, owner, request_id)
+            await assert_crawl_result_served(client, request_id, headers)
+
+            structured = await tool_structured(client, "delete_job", {"job_id": request_id}, key=secret)
+            assert structured == {"deleted": True, "job_id": request_id}
+
+            after = await client.get(f"/v1/crawl/{request_id}", headers=headers)
+            assert after.status_code == 404, after.text
+
+    async def test_deleting_a_nonexistent_job_is_a_tool_error(self, tmp_path):
+        from tests._api_harnesses import isolated_client
+        from tests.mcp._tool_calls import tool_error_text
+
+        async with isolated_client(tmp_path, routers=_JOBS_KEYS_MCP_ROUTERS) as (
+            client,
+            store,
+            results,
+            keys,
+        ):
+            secret = await issue_key(client)
+
+            text = await tool_error_text(
+                client, "delete_job", {"job_id": "crawl-never-happened-mcp-773"}, key=secret
+            )
+            assert "crawl-never-happened-mcp-773" in text

@@ -39,9 +39,10 @@ def get_job_store(request: Request) -> JobStore:
     return request.app.state.job_store
 
 
-def get_result_store(request: Request) -> CrawlResultStore:
-    """FastAPI dependency: return the :class:`CrawlResultStore` for the running app."""
-    return request.app.state.result_store
+def get_result_store(request: Request) -> CrawlResultStore | None:
+    """FastAPI dependency: return the :class:`CrawlResultStore` for the running app,
+    or None when the app wires none -- the delete door then fails open."""
+    return getattr(request.app.state, "result_store", None)
 
 
 def get_spill_store(request: Request) -> CrawlSpillStore | None:
@@ -100,7 +101,7 @@ KeysCallerDep = Annotated[CallerIdentity, Depends(get_keys_caller)]
 SettingsDep = Annotated[CrawlerSettings, Depends(get_settings)]
 ShutdownEventDep = Annotated[asyncio.Event, Depends(get_shutdown_event)]
 JobStoreDep = Annotated[JobStore, Depends(get_job_store)]
-ResultStoreDep = Annotated[CrawlResultStore, Depends(get_result_store)]
+ResultStoreDep = Annotated[CrawlResultStore | None, Depends(get_result_store)]
 SpillStoreDep = Annotated[CrawlSpillStore | None, Depends(get_spill_store)]
 WatchStoreDep = Annotated[WatchStore, Depends(get_watch_store)]
 TrackingDep = Annotated[Tracking, Depends(get_tracking)]

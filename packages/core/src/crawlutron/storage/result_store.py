@@ -198,11 +198,20 @@ class CrawlResultStore(_PayloadStoreGuardrails):
                 ).fetchone()
         return int(row[0]) if row is not None else 0
 
+    def delete(self, request_id: str) -> bool:
+        """Drop a stored result row so a deleted job's content is not served past TTL.
+        Returns True iff a live row matched; ownership established upstream."""
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM results WHERE request_id = ?", (request_id,))
+            self._conn.commit()
+        return cur.rowcount == 1
+
     # One ``atwin`` twin per operation: the sync signature is declared once and
     # ``owner=`` rides through **kwargs, so the twins cannot drift from the base.
     aput = atwin(put)
     aget = atwin(get)
     aget_for_caller = atwin(get_for_caller)
+    adelete = atwin(delete)
     apayloads_page = atwin(payloads_page)
     aretained_count = atwin(retained_count)
 

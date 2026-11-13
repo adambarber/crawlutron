@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from crawlutron.models.job_list_request import JobListRequest
     from crawlutron.models.job_status_response import JobStatusResponse
     from crawlutron.storage.job_store import JobStatusView, JobStore
+    from crawlutron.storage.result_store import CrawlResultStore
 
 
 async def create_job_core(
@@ -90,7 +91,12 @@ async def create_job_core(
 
 
 async def list_jobs_core(
-    payload: JobListRequest, job_store, settings, shutdown_event, caller: CallerIdentity
+    payload: JobListRequest,
+    job_store,
+    settings,
+    shutdown_event,
+    caller: CallerIdentity,
+    result_store: CrawlResultStore | None = None,
 ) -> JobListResponse:
     """The owned, newest-first page GET /v1/jobs answers."""
     caller_id = caller.caller_id
@@ -101,7 +107,12 @@ async def list_jobs_core(
 
 
 async def get_job_core(
-    payload: JobIdRequest, job_store, settings, shutdown_event, caller: CallerIdentity
+    payload: JobIdRequest,
+    job_store,
+    settings,
+    shutdown_event,
+    caller: CallerIdentity,
+    result_store: CrawlResultStore | None = None,
 ) -> JobStatusResponse:
     """The owned status view GET /v1/jobs/{job_id} answers."""
     row = await job_store.astatus_for_caller(payload.job_id, caller.caller_id)
@@ -111,22 +122,39 @@ async def get_job_core(
 
 
 async def control_job(
-    payload: JobControlToolRequest, job_store, settings, shutdown_event, caller: CallerIdentity
+    payload: JobControlToolRequest,
+    job_store,
+    settings,
+    shutdown_event,
+    caller: CallerIdentity,
+    result_store: CrawlResultStore | None = None,
 ) -> JobStatusResponse:
     """The pause/resume/cancel transition POST /v1/jobs/{job_id}/control runs."""
     return await control_job_core(payload.job_id, payload.action, job_store, settings, shutdown_event, caller)
 
 
 async def delete_job_core(
-    payload: JobIdRequest, job_store, settings, shutdown_event, caller: CallerIdentity
+    payload: JobIdRequest,
+    job_store,
+    settings,
+    shutdown_event,
+    caller: CallerIdentity,
+    *,
+    result_store: CrawlResultStore | None = None,
 ) -> JobDeletedResponse:
-    """The REST delete door's cancel-then-tombstone, as a typed body."""
+    """The REST delete door's cancel-then-tombstone, as a typed body.
+
+    Purges the job's CrawlResultStore row so GET /v1/crawl/{id} stops serving
+    a permanently removed job's content.
+    """
     if not await job_store.aexists_for_caller(payload.job_id, caller.caller_id):
         raise_job_not_found(payload.job_id)
     if job_runner.is_running(payload.job_id):
         job_runner.cancel_job_task(payload.job_id)
     if not await job_store.adelete_for_caller(payload.job_id, caller.caller_id):
         raise_job_not_found(payload.job_id)
+    if result_store is not None:
+        await result_store.adelete(payload.job_id)
     return JobDeletedResponse(deleted=True, job_id=payload.job_id)
 
 

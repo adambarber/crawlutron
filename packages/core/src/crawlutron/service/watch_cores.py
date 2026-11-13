@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from crawlutron.models.watch_create_request import WatchCreateRequest
     from crawlutron.models.watch_id_request import WatchIdRequest
     from crawlutron.models.webhook_target import WebhookTarget
+    from crawlutron.storage.result_store import CrawlResultStore
     from crawlutron.storage.watch_store import WatchStore
 
 __all__ = ["delete_watch_core", "get_watch_core", "list_watches_core", "register_watch_core"]
@@ -54,6 +55,7 @@ async def register_watch_core(
     watch_store: WatchStore,
     settings: CrawlerSettings,
     caller: CallerIdentity,
+    result_store: CrawlResultStore | None = None,
     *,
     webhook_url: WebhookTarget | None = None,
     interval_floor: float,
@@ -91,14 +93,22 @@ async def register_watch_core(
 
 
 async def list_watches_core(
-    payload, watch_store: WatchStore, settings, caller: CallerIdentity
+    payload,
+    watch_store: WatchStore,
+    settings,
+    caller: CallerIdentity,
+    result_store: CrawlResultStore | None = None,
 ) -> WatchListResponse:
     """The owned listing GET /v1/watches answers."""
     return WatchListResponse(watches=await watch_store.alist_for_caller(caller.caller_id))
 
 
 async def get_watch_core(
-    payload: WatchIdRequest, watch_store: WatchStore, settings, caller: CallerIdentity
+    payload: WatchIdRequest,
+    watch_store: WatchStore,
+    settings,
+    caller: CallerIdentity,
+    result_store: CrawlResultStore | None = None,
 ) -> WatchState:
     """The owned state view GET /v1/watches/{watch_id} answers."""
     watch = await watch_store.aget_for_caller(payload.watch_id, caller.caller_id)
@@ -108,7 +118,11 @@ async def get_watch_core(
 
 
 async def delete_watch_core(
-    payload: WatchIdRequest, watch_store: WatchStore, settings, caller: CallerIdentity
+    payload: WatchIdRequest,
+    watch_store: WatchStore,
+    settings,
+    caller: CallerIdentity,
+    result_store: CrawlResultStore | None = None,
 ) -> WatchDeletedResponse:
     """The delete DELETE /v1/watches/{watch_id} runs; a foreign id reads a miss."""
     if not await watch_store.adelete_for_caller(payload.watch_id, caller.caller_id):

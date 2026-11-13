@@ -279,6 +279,10 @@ class LoopGuardResultStore(CrawlResultStore):
         _refuse_on_loop("CrawlResultStore.retained_count")
         return super().retained_count(owner=owner)
 
+    def delete(self, request_id):
+        _refuse_on_loop("CrawlResultStore.delete")
+        return super().delete(request_id)
+
     def close(self):
         _refuse_on_loop("CrawlResultStore.close")
         return super().close()
