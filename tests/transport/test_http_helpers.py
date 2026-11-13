@@ -1,8 +1,8 @@
 """Validation, headers, retries and parsing stay pure and total."""
 
-import asyncio
 import datetime
 from collections.abc import Callable
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -16,6 +16,7 @@ from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.json_value import JsonValue
 from crawlutron.models.render_request import RenderRequest
 from crawlutron.service.render import render_options_for
+from crawlutron.transport import fetch_policy
 from crawlutron.transport.fetch_policy import (
     fetch_with_retries,
     looks_like_binary_body,
@@ -216,10 +217,12 @@ class TestFetchRetries:
         """A failing fetch is retried after a bounded backoff gap, not hammered."""
         sleeps: list[float] = []
 
-        async def _rec_sleep(delay):
+        async def _rec_sleep(delay: float) -> None:
             sleeps.append(delay)
 
-        monkeypatch.setattr(asyncio, "sleep", _rec_sleep)
+        # Scope the recorder to this module: patching asyncio.sleep itself also
+        # captures a leaked spinner's delays; fetch_policy sees only its own reference.
+        monkeypatch.setattr(fetch_policy, "asyncio", SimpleNamespace(sleep=_rec_sleep))
 
         state = {"n": 0}
         answer = make_fetch(status=200, body=b"ok", final_url="http://x/")
