@@ -188,6 +188,32 @@ def _assert_every_hook_has_a_job(workflow: str, hook_ids) -> None:
         )
 
 
+def _cache_step_paths(action: str) -> str:
+    """The ``path:`` block of the action's cache step, as one string.
+
+    Scoped to that block so a comment elsewhere explaining what must NOT be cached
+    cannot satisfy (or defeat) the check.
+    """
+    lines = action.splitlines()
+    start = next((i for i, line in enumerate(lines) if "uses: actions/cache@" in line), None)
+    assert start is not None, "no cache step"
+    path_indent = None
+    body: list[str] = []
+    for line in lines[start + 1 :]:
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip())
+        if path_indent is None:
+            if line.strip().startswith("path:"):
+                path_indent = indent
+                body.append(line.strip())
+            continue
+        if indent <= path_indent:
+            break
+        body.append(line.strip())
+    return "\n".join(body)
+
+
 def test_the_prepare_action_installs_the_frozen_lock_and_regenerates_the_version() -> None:
     """One gate environment, defined once: every job starts from the same prepare
     action, so the frozen install, the 3.14 interpreter and the gitignored version
@@ -208,8 +234,15 @@ def test_the_prepare_action_installs_the_frozen_lock_and_regenerates_the_version
         "checkout belongs in the job: GitHub resolves a local action before any step "
         "runs, so an action that checks out runs before the repo is on disk"
     )
-    for cache_dir in (".mypy_cache", ".ruff_cache", ".gate_fanout"):
-        assert cache_dir in action, f"the prepare action must cache {cache_dir}"
+    # Per-run pidfiles must never ride a shared cache: every gate job uses this
+    # cache key, so a pid from one runner read on another is a stranger's process.
+    cached = _cache_step_paths(action)
+    assert cached, "the prepare action must declare a cache step with path inputs"
+    assert ".gate_fanout" not in cached, (
+        "the gate-fanout status dir holds per-run pidfiles and must not be cached"
+    )
+    for cache_dir in (".mypy_cache", ".ruff_cache"):
+        assert cache_dir in cached, f"the prepare action must cache {cache_dir}"
 
 
 def test_every_gate_job_starts_from_the_prepare_action() -> None:

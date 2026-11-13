@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 import shlex
@@ -109,18 +110,32 @@ def _spawn(hook_id: str, argv: list[str], status_dir: Path) -> None:
         pid_out.write(str(child.pid))
 
 
+def _child_is_running(pidfile: Path) -> bool:
+    """True when a live child of ours still owns this pidfile.
+
+    Past the wall it is a hung child (killed, then respawned by the caller); a dead or
+    foreign group is dropped, never signalled, because a reused pid is someone else's.
+    """
+    try:
+        pid = int(pidfile.read_text())
+    except ValueError:
+        return False
+    if not _alive(pid):
+        return False
+    if time.time() - pidfile.stat().st_mtime <= WALL_SECONDS:
+        return True
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(pid, 9)
+    return False
+
+
 def _dispatch(status_dir: Path) -> None:
     for hook_id, argv in _gate_argv().items():
         if (status_dir / f"{hook_id}.rc").is_file():
             continue
         pidfile = status_dir / f"{hook_id}.pid"
-        if pidfile.is_file():
-            pid = int(pidfile.read_text())
-            if _alive(pid):
-                if time.time() - pidfile.stat().st_mtime > WALL_SECONDS:
-                    os.killpg(pid, 9)  # a hung child from an earlier run
-                else:
-                    continue
+        if pidfile.is_file() and _child_is_running(pidfile):
+            continue
         pidfile.unlink(missing_ok=True)
         _spawn(hook_id, argv, status_dir)
 

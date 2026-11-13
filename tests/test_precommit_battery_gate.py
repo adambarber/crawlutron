@@ -6,8 +6,10 @@ regression could land hooks-green. Each test names the mutant it kills.
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
+import time
 
 import pytest
 
@@ -122,3 +124,60 @@ def test_the_fanout_refuses_a_config_with_zero_gates(monkeypatch, tmp_path) -> N
     monkeypatch.setattr(gate_fanout, "CONFIG_PATH", empty)
     with pytest.raises(ValueError, match="declares no"):
         gate_fanout._gate_argv()
+
+
+def test_a_stale_pidfile_from_another_runner_is_not_a_hung_child(tmp_path, monkeypatch) -> None:
+    """The red: a pidfile whose group is gone used to kill the whole gate.
+
+    Every gate job shares one CI cache key, so a pidfile from another runner reads as
+    "a hung child from an earlier run": `killpg` on a missing group raised and died.
+    """
+    status = tmp_path / ".gate_fanout"
+    status.mkdir()
+    pidfile = status / "mypy.pid"
+    pidfile.write_text(str(2**31 - 1), encoding="utf-8")  # no such process
+    stale = time.time() - gate_fanout.WALL_SECONDS - 1
+    os.utime(pidfile, (stale, stale))
+
+    monkeypatch.setattr(gate_fanout, "_alive", lambda pid: True)  # stale but "live"
+
+    assert gate_fanout._child_is_running(pidfile) is False
+
+
+def test_a_foreign_pid_group_is_never_signalled(tmp_path, monkeypatch) -> None:
+    """The hazard behind the crash: a reused pid names someone else's group.
+
+    A stale pid can be alive as an unrelated process on the same host, so the kill
+    must be refused, not delivered -- otherwise CI takes out a process it never owned.
+    """
+    status = tmp_path / ".gate_fanout"
+    status.mkdir()
+    pidfile = status / "mypy.pid"
+    pidfile.write_text("4242", encoding="utf-8")
+    stale = time.time() - gate_fanout.WALL_SECONDS - 1
+    os.utime(pidfile, (stale, stale))
+
+    signalled: list[int] = []
+    monkeypatch.setattr(gate_fanout, "_alive", lambda pid: True)
+
+    def refuse(pid: int, sig: int) -> None:
+        signalled.append(pid)
+        raise PermissionError
+
+    monkeypatch.setattr(gate_fanout.os, "killpg", refuse)
+
+    assert gate_fanout._child_is_running(pidfile) is False
+    assert signalled == [4242], "the kill was attempted, so the refusal path is what was exercised"
+
+
+def test_a_fresh_live_child_is_left_alone(tmp_path, monkeypatch) -> None:
+    """The other direction: a live child inside the wall keeps running."""
+    status = tmp_path / ".gate_fanout"
+    status.mkdir()
+    pidfile = status / "mypy.pid"
+    pidfile.write_text("4242", encoding="utf-8")
+
+    monkeypatch.setattr(gate_fanout, "_alive", lambda pid: True)
+    monkeypatch.setattr(gate_fanout.os, "killpg", lambda pid, sig: pytest.fail("killed a live child"))
+
+    assert gate_fanout._child_is_running(pidfile) is True
