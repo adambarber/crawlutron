@@ -60,7 +60,7 @@ class TestRecursiveCrawl:
         assert validate_wire_policy({"limits": {"max_pages": 0}}).limits.max_pages > 0
 
     async def test_scope_regex_limits_discovered_links(self):
-        urls = await run_scoped_crawl(r"/keep/")
+        urls = await run_scoped_crawl(r"example\.com/keep/")
         assert "http://example.com/keep/x" in urls
         assert "http://example.com/drop/y" not in urls
 

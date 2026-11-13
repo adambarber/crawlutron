@@ -62,6 +62,6 @@ async def test_recursive_scope_regex_timeout_fails_closed(monkeypatch):
 
 async def test_recursive_scope_regex_still_filters_with_valid_pattern(monkeypatch):
     # Valid scope patterns must still filter links, now via the compiled pattern.
-    urls = await run_scoped_crawl(r"/keep/")
+    urls = await run_scoped_crawl(r"example\.com/keep/")
     assert "http://example.com/keep/x" in urls
     assert "http://example.com/drop/y" not in urls

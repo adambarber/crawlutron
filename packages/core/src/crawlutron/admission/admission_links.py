@@ -44,6 +44,9 @@ RobotsCrawlDelay = Callable[[NormalizedUrl], Awaitable[float | None]]
 CommitCrawlDelay = Callable[[str, float], None]
 T = TypeVar("T")
 _MAX_SCOPE_PATTERN_LEN = 256
+#: The optional ``scheme://`` prefix; an unanchored scope pattern anchored at the
+#: host start ties to the host, never the raw string, query, or a sibling host.
+_SCOPE_ANCHOR_PREFIX = r"(?:[a-zA-Z][a-zA-Z0-9+.-]*://)?"
 # One chunk carries a whole default batch: the chunk is a fan-out bound,
 # not politeness -- same-origin fetches coalesce in the robots cache below.
 _ROBOTS_ADMISSION_CHUNK_SIZE = 50
@@ -311,15 +314,22 @@ def remaining_page_capacity(admitted_count: int, max_pages: int) -> int | None:
 
 
 def compile_scope_pattern(scope_regex: str | JsonValue | None) -> BoundedPattern | None:
-    """Compile a user-supplied scope regex: ``None`` means no restriction declared.
+    """Compile a user-supplied scope regex; ``None`` means no restriction declared.
 
-    A declared pattern that fails to compile raises -- consumers read ``None`` as
-    "allow everything". Bounded execution lives in :mod:`crawlutron.safety.safe_regex`.
+    Matches ``scheme://host/path`` (query stripped); unanchored patterns are anchored
+    at the host start, an explicit ``^``/``$`` keeps raw semantics.
     """
     if not isinstance(scope_regex, str) or not scope_regex:
         return None
+    pattern = scope_regex
+    overhead = 0
+    if "^" not in pattern and "$" not in pattern:
+        # Anchor unanchored patterns to the host start (after any scheme://) so
+        # ``example\.com`` refuses ``evil-example.com`` and never matches a query.
+        pattern = rf"^{_SCOPE_ANCHOR_PREFIX}(?:{pattern})"
+        overhead = len(pattern) - len(scope_regex)
     try:
-        return compile_untrusted(scope_regex, max_len=_MAX_SCOPE_PATTERN_LEN)
+        return compile_untrusted(pattern, max_len=_MAX_SCOPE_PATTERN_LEN + overhead)
     except UnsafePattern as exc:
         raise ValueError(f"scope_regex does not compile: {exc}") from exc
 

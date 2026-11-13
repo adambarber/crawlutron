@@ -14,14 +14,18 @@ from crawlutron.safety.url_redaction import redact_url
 logger = logging.getLogger(__name__)
 
 
-def scope_allows(compiled, url: str) -> bool:
-    """Bounded scope check: a RegexTimeout fails CLOSED (link excluded).
+def _scope_target(url: str) -> str:
+    """``scheme://host/path`` without the query: a scope is about hosts and
+    paths, so a query-string match must never decide it."""
+    return url.split("?", 1)[0]
 
-    A pathological pattern must never hang the crawl or BFS loop, so a wall-clock
-    budget fire treats the URL as out-of-scope and the crawl continues.
+
+def scope_allows(compiled, url: str) -> bool:
+    """Bounded scope check against ``scheme://host/path`` (query stripped); a
+    RegexTimeout fails CLOSED (link excluded), never hangs the crawl or BFS loop.
     """
     try:
-        return match_bounded(compiled, url) is not None
+        return match_bounded(compiled, _scope_target(url)) is not None
     except RegexTimeout:
         logger.warning("scope_regex_timeout", extra={"url": redact_url(url)})
         return False

@@ -137,9 +137,13 @@ class CrawlPolicy(BaseModel):
     scope_regex: Annotated[
         str | None,
         Field(
-            description="Optional regex applied to each canonical discovered-link identity before recursive "
-            "frontier admission. Non-matching links may still be reported in discovered_links but are not "
-            "followed by /v1/crawl or /v1/jobs.",
+            description="Optional regex matched against each discovered link's "
+            "scheme://host/path (the query string is stripped before matching). "
+            "An unanchored pattern is anchored to the host start, so a pattern like "
+            "example\\\\.com scopes the host and never matches a sibling host or a "
+            "query string; a pattern that anchors explicitly (a ^ or $) keeps raw "
+            "regex semantics. Non-matching links may still be reported in "
+            "discovered_links but are not followed by /v1/crawl or /v1/jobs.",
         ),
     ] = None
     css_selector: Annotated[
