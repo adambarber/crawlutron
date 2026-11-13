@@ -10,7 +10,7 @@ import pytest
 
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_policy import CrawlPolicy
-from crawlutron.service import job_runner
+from crawlutron.service import job_lifecycle, job_runner
 from crawlutron.storage.job_store import FrontierEntry, JobStatus, JobStore
 from tests._job_harnesses import (
     ScriptedExecute,
@@ -161,6 +161,39 @@ class TestJobControlOverRunner:
             canonical(GRAPH_CHILD),
             canonical("http://example.test/c"),
         }
+
+    async def test_a_cancel_before_dispatch_records_nothing_and_stops(self, client, job_store, monkeypatch):
+        """A cancel that lands before the runner dispatches is a clean stop, not a wedge.
+
+        The runner is parked between its claim and its batch write, so the cancel CAS
+        is the only write: nothing ran, and work never dispatched cannot be lost.
+        """
+        park = asyncio.Event()
+        real_reload = job_store.areload_state
+
+        async def parked_reload(job_id):
+            await park.wait()
+            return await real_reload(job_id)
+
+        monkeypatch.setattr(job_store, "areload_state", parked_reload)
+        hang = asyncio.Event()
+        job_id = await _create_api_job(client, GRAPH_ROOT, ScriptedExecute(results=_root_child(), hang=hang))
+        await _wait_status(job_store, job_id, {"running"})
+
+        cancel = await client.post(f"/v1/jobs/{job_id}/control", json={"action": "cancel"})
+        assert cancel.status_code == 200
+        park.set()
+        hang.set()
+        await _wait_status(job_store, job_id, {"cancelled"})
+        # Cancelled is not a joinable status -- the control call never waits for the
+        # runner to unwind -- so the row is read after that runner is actually done.
+        runner = job_lifecycle.tracked_task(job_id)
+        assert runner is not None, "the runner must be tracked to be awaited"
+        await asyncio.wait_for(runner, timeout=10)
+
+        row = job_store.load(job_id)
+        assert not row.in_flight, "a runner cancelled before dispatch left work in flight"
+        assert row.stats.get("total_crawled", 0) == 0, "nothing ran, so nothing was recorded"
 
     async def test_cancel_persists_terminal_state(self, client, job_store):
         job_id, release = await self._blocked(client, job_store, _root_child())

@@ -205,13 +205,14 @@ def raw_job_row(job_store):
 async def submit_blocked_job(client, job_store, root_url: str, results, policy=None):
     """Submit a job whose engine blocks; return ``(job_id, release)``.
 
-    A control-plane test flips a bit while the runner is in flight; without a
-    block the job may be terminal first. ``release`` answers the in-flight batch."""
-    from tests._job_harnesses import ScriptedExecute, _wait_status
+    A control-plane test flips a bit while the runner is in flight; the claim alone
+    is not enough -- the runner stops on a cancelled row -- so wait for its dispatch."""
+    from tests._job_harnesses import ScriptedExecute, _wait_status, _wait_until
 
     hang = asyncio.Event()
     job_id = await _create_api_job(client, root_url, ScriptedExecute(results=results, hang=hang), policy)
     await _wait_status(job_store, job_id, {"running"})
+    await _wait_until(job_store, job_id, lambda job: bool(job.in_flight))
     return job_id, hang
 
 
