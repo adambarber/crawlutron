@@ -186,6 +186,16 @@ def test_multi_layer_under_cap_decodes_fully():
     assert decompress_body(compressed, "gzip, gzip", max_output_bytes=10_000) == payload
 
 
+def test_remaining_layers_refuse_when_prior_layer_consumes_the_full_budget():
+    payload = b"stacked amplification" * 40
+    inner = gzip.compress(payload)
+    bomb = gzip.compress(inner)
+    # The first decoded layer produces exactly the cap, so remaining hits 0 and
+    # the next layer must refuse a nonzero decode rather than underflow.
+    with pytest.raises(DecompressionTooLargeError):
+        decompress_body(bomb, "gzip, gzip", max_output_bytes=len(inner))
+
+
 def test_decode_valid_utf8_strict():
     body = "héllo wörld".encode()
     assert decode_body(body, "text/html; charset=utf-8") == "héllo wörld"
