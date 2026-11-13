@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 from safe_url import (
     AddressClass,
@@ -20,9 +22,8 @@ from safe_url import (
     registrable_domain,
     scope_allows,
 )
-from safe_url.host_policy import reset_private_target_memo
-
-from crawlutron.safety.safe_regex import compile_untrusted
+from safe_url.host_policy import allow_private_targets, reset_private_target_memo
+from safe_url.safe_regex import compile_untrusted
 
 UNRESTRICTED = HostPolicy.unrestricted()
 STRICT = HostPolicy.from_strings("example.com", "")
@@ -78,6 +79,17 @@ def test_host_policy_reason_allows_listed_host():
 def test_host_egress_reason_blocks_private():
     assert host_egress_reason("127.0.0.1") == "private_network_target"
     assert host_egress_reason("8.8.8.8") is None
+
+
+def test_garbage_private_target_env_warns_and_falls_back(monkeypatch, caplog):
+    """CRAWLUTRON_ALLOW_PRIVATE_TARGETS=2 warns and falls back to the secure default."""
+    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "2")
+    reset_private_target_memo()
+    caplog.set_level(logging.WARNING, logger="safe_url.host_policy")
+    assert allow_private_targets() is False
+    assert any(
+        "invalid_bool_env for CRAWLUTRON_ALLOW_PRIVATE_TARGETS" in r.getMessage() for r in caplog.records
+    )
 
 
 def test_address_classification_precedence():

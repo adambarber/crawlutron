@@ -168,7 +168,7 @@ class CrawlPolicy(BaseModel):
     @field_validator("scope_regex")
     @classmethod
     def _validate_scope_regex(cls, value: str | None) -> str | None:
-        from crawlutron.safety.safe_regex import UnsafePattern, compile_untrusted
+        from safe_url.safe_regex import UnsafePattern, compile_untrusted
 
         if value is None:
             return None

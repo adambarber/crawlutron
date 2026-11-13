@@ -12,6 +12,7 @@ from typing import Protocol, cast
 
 from safe_url.host_policy import HostPolicy
 from safe_url.normalized_url import NormalizedUrl
+from safe_url.safe_regex import BoundedPattern
 from safe_url.url_redaction import redact_url
 
 from admission import AdmissionGate
@@ -32,7 +33,6 @@ from crawlutron.orchestration.admission_stall import (
 from crawlutron.runtime.metrics import MetricsStore, get_metrics
 from crawlutron.runtime.pressure_gates import ResourceGate
 from crawlutron.runtime.pressure_sizing import build_admission_gate, kernel_admit
-from crawlutron.safety.safe_regex import BoundedPattern
 from crawlutron.storage.result_store import CrawlSpillStore
 from crawlutron.transport.results import failed_result_for
 from crawlutron.transport.scheduler import DomainScheduler

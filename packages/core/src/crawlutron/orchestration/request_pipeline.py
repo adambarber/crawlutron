@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, cast
 
 from safe_url.host_policy import HostPolicy
 from safe_url.normalized_url import admit_or_none
+from safe_url.safe_regex import BoundedPattern
 
 from admission import AdmissionGate
 from crawlutron.admission.admission import normalize_sitemap_candidates
@@ -36,7 +37,6 @@ from crawlutron.runtime.pressure_sizing import (
     kernel_admit,
     max_http_concurrency_for,
 )
-from crawlutron.safety.safe_regex import BoundedPattern
 from crawlutron.storage.ids import new_request_id
 from crawlutron.storage.result_store import CrawlSpillStore
 from crawlutron.transport import robots as robots_policy

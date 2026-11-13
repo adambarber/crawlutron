@@ -5,7 +5,7 @@ The bounded record of constructor-belt remaps, so a bug is not silently 422.
 
 from __future__ import annotations
 
-import crawlutron.runtime.process_state as process_state
+import safe_url.process_state as process_state
 
 _RECORD: dict[tuple[str], int] = {}
 

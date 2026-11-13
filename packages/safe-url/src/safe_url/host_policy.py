@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from functools import lru_cache
 from urllib.parse import urlparse
 
-import crawlutron.runtime.process_state as process_state
+import safe_url.process_state as process_state
 from safe_url.address_class import AddressClass, classify
 from safe_url.host_canonical import punycode_host
 
@@ -98,8 +99,28 @@ def _private_target_default() -> bool:
 
 
 def _parse_private_target_env(raw: str | None) -> bool:
-    """Parse the raw env value into a private-target decision."""
-    return (raw or "").strip().lower() in _ON_SPELLINGS
+    """Parse the raw env value into a private-target decision.
+
+    Garbage warns and falls back to the default; unset/on/off parse cleanly.
+    """
+    if raw is None or not raw.strip():
+        return False
+    lowered = raw.strip().lower()
+    if lowered in _ON_SPELLINGS:
+        return True
+    if lowered in {"0", "false", "no", "off"}:
+        return False
+    logging.getLogger("safe_url.host_policy").warning(
+        "invalid_bool_env for CRAWLUTRON_ALLOW_PRIVATE_TARGETS: %r (using default %r)",
+        raw,
+        False,
+        extra={
+            "env_name": "CRAWLUTRON_ALLOW_PRIVATE_TARGETS",
+            "env_value": raw,
+            "fallback": False,
+        },
+    )
+    return False
 
 
 def _private_target_warning(raw: str | None) -> str:
@@ -122,8 +143,6 @@ def _decide_private_targets() -> bool:
     decision = _parse_private_target_env(raw)
     _PRIVATE_TARGET_CACHE[raw] = decision
     if decision:
-        import logging
-
         logging.getLogger("safe_url.host_policy").warning(
             _private_target_warning(raw),
             extra={"env_name": "CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "env_value": raw},

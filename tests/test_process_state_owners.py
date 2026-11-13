@@ -9,11 +9,12 @@ import ast
 import importlib
 
 import pytest
+from safe_url import process_state as safe_url_process_state
 
 from crawlutron.runtime import process_state
 
-# Registered owners the registry tests reach into directly (the third invariant
-# drives exhaustive membership from registered_owners(); these pin the names).
+# Registered owners the registry tests reach into directly (these pin the names).
+# safe_url owns a separate seam (no crawlutron import); its owners use safe_url's registry, not core's.
 KNOWN = (
     "crawlutron.runtime.cgroup_sense",
     "crawlutron.orchestration.engine",
@@ -30,7 +31,29 @@ KNOWN = (
     "crawlutron.service.async_crawl_runner",
     "crawlutron.service.job_lifecycle",
     "crawlutron.runtime.metrics",
+    "safe_url.host_policy",
+    "safe_url.mapped_value_errors",
 )
+
+
+def _registry_for(module_path: str):
+    """The process-state seam a module registers with: its own package's.
+
+    core modules register with crawlutron.runtime.process_state; safe_url modules
+    register with safe_url's standalone mirror. The two registries are independent.
+    """
+    if module_path.startswith("safe_url."):
+        return safe_url_process_state
+    return process_state
+
+
+def _all_registered() -> tuple[str, ...]:
+    """Every owner registered in either seam, de-duplicated, registration order."""
+    return tuple(
+        dict.fromkeys(
+            list(process_state.registered_owners()) + list(safe_url_process_state.registered_owners())
+        )
+    )
 
 
 def _module_level_state(module: ast.Module) -> set[str]:
@@ -46,15 +69,16 @@ def _module_level_state(module: ast.Module) -> set[str]:
 @pytest.mark.parametrize("module_path", KNOWN)
 def test_owner_registered_its_pair(module_path: str) -> None:
     importlib.import_module(module_path)
-    process_state.owner_has_state(module_path)  # raises KeyError when unregistered
+    _registry_for(module_path).owner_has_state(module_path)  # raises KeyError when unregistered
 
 
 @pytest.mark.parametrize("module_path", KNOWN)
 def test_reset_is_idempotent(module_path: str) -> None:
     importlib.import_module(module_path)
-    process_state.reset_all_process_state()
-    process_state.reset_all_process_state()
-    assert not process_state.owner_has_state(module_path), (
+    registry = _registry_for(module_path)
+    registry.reset_all_process_state()
+    registry.reset_all_process_state()
+    assert not registry.owner_has_state(module_path), (
         f"{module_path} still holds process state right after the registry reset -- "
         f"a probe that cannot say False certifies nothing"
     )
@@ -79,8 +103,8 @@ def test_conformers_register() -> None:
     be silently missed -- the registry's membership is checked against this list."""
     for module_path in KNOWN:
         importlib.import_module(module_path)
-    registered = process_state.registered_owners()
-    assert registered, "the registry is empty: every owner went unregistered"
+    registered = _all_registered()
+    assert registered, "the registries are empty: every owner went unregistered"
     missing = set(KNOWN) - set(registered)
     assert not missing, f"known owners never registered: {sorted(missing)}"
 

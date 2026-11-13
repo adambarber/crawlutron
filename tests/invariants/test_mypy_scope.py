@@ -117,6 +117,21 @@ def test_declared_test_scope_terms_equal_the_derived_test_roots() -> None:
     )
 
 
+def test_declared_scope_equals_derived_roots() -> None:
+    """mypy.ini ``files`` EQUALS the derived surface (import roots + test roots) -- a
+    new uv member is picked up by mypy automatically, never a hand-edit (#906)."""
+    parser = configparser.ConfigParser()
+    parser.read(_MYPY_INI)
+    declared = set(term.strip() for term in parser["mypy"]["files"].split(","))
+    derived = set(import_roots()) | set(derived_test_roots())
+    assert declared == derived, (
+        "mypy.ini files = "
+        + parser["mypy"]["files"]
+        + " must equal the derived surface "
+        + repr(sorted(derived))
+    )
+
+
 def test_production_scope_terms_equal_the_derived_import_roots() -> None:
     """mypy.ini production terms EQUAL the derived import roots (#906, owner
     2026-11-12); a moved or new member reds here by name, never needs a hand-edit."""

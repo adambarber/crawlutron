@@ -1,37 +1,49 @@
 """Process-state registry: modules register a reset/probe pair.
 
-The harness drives resets between tests so no state leaks across cases.
+A behaviourally equivalent mirror of ``crawlutron.runtime.process_state``; safe_url owns its own reset seam.
 """
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 
+__all__ = [
+    "register",
+    "unregister",
+    "reset_all_process_state",
+    "has_any_process_state",
+    "owner_has_state",
+    "registered_owners",
+]
+
 _Pairs: dict[str, tuple[Callable[[], None], Callable[[], bool]]] = {}
+_Gate = threading.Lock()
 
 
-def register(owner: str, reset: Callable[[], None], has: Callable[[], bool]) -> None:
-    """Register ``owner``'s reset/probe pair; re-registration replaces the old one.
+def register(owner: str, reset: Callable[[], None], probe: Callable[[], bool]) -> None:
+    """Store ``owner``'s reset/probe pair, replacing any earlier entry for it.
 
-    The probe must read what the reset empties: ``False`` over a populated store
-    certifies a reset that failed.
+    The probe reports whether ``owner`` still holds state after a reset; a probe
+    that says ``False`` over populated state certifies a failed reset.
     """
-    _Pairs[owner] = (reset, has)
+    with _Gate:
+        _Pairs[owner] = (reset, probe)
 
 
 def reset_all_process_state() -> None:
-    """Drop every registered owner's state, in registration order.
+    """Run every registered reset, in registration order, then re-raise the first failure.
 
-    One owner's failure never strands the rest: each reset runs, and the first
-    failure is re-raised with its owner named once the chain completes (#643).
+    A failing reset does not strand the later owners: every reset runs, and the
+    first failure surfaces afterward, attributed to its owner (#643).
     """
     failing: tuple[str, BaseException] | None = None
-    for name, (drop, _) in list(_Pairs.items()):
+    for owner, (drop, _) in list(_Pairs.items()):
         try:
             drop()
-        except BaseException as exc:
+        except Exception as exc:
             if failing is None:
-                failing = (name, exc)
+                failing = (owner, exc)
     if failing is not None:
         who, err = failing
         raise RuntimeError(f"process-state reset failed for {who}") from err
@@ -43,35 +55,22 @@ def has_any_process_state() -> bool:
 
 
 def unregister(owner: str) -> bool:
-    """Remove one owner's registration; True when it was present.
-
-    Test probes must remove their fake owners: a leftover registration
-    pollutes ``registered_owners()`` and lies to the exhaustiveness invariants.
-    """
-    if owner in _Pairs:
-        del _Pairs[owner]
-        return True
+    """Drop ``owner``'s registration; True when it was present."""
+    with _Gate:
+        if owner in _Pairs:
+            del _Pairs[owner]
+            return True
     return False
 
 
 def owner_has_state(owner: str) -> bool:
-    """The probe of one registered owner, for tests asserting one module's state."""
-    pair = _Pairs.get(owner)
-    if pair is None:
+    """Return ``owner``'s probe result, or raise when it never registered."""
+    entry = _Pairs.get(owner)
+    if entry is None:
         raise KeyError(f"{owner} never registered a process-state pair")
-    return pair[1]()
+    return entry[1]()
 
 
 def registered_owners() -> tuple[str, ...]:
-    """Every registered owner's module name, in registration order."""
+    """The registered owner names, in registration order."""
     return tuple(_Pairs)
-
-
-__all__ = [
-    "has_any_process_state",
-    "owner_has_state",
-    "register",
-    "registered_owners",
-    "reset_all_process_state",
-    "unregister",
-]

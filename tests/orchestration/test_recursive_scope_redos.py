@@ -40,7 +40,7 @@ async def test_recursive_scope_regex_uses_safe_compilation(monkeypatch):
 async def test_recursive_scope_regex_timeout_fails_closed(monkeypatch):
     # A pathological pattern that defeats the regex engine's optimizer must raise RegexTimeout, which the
     # scope filter treats as out-of-scope (fail-closed): the crawl completes, nothing hangs.
-    from crawlutron.safety.safe_regex import RegexTimeout
+    from safe_url.safe_regex import RegexTimeout
 
     calls = {"n": 0}
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 
-from crawlutron.safety.safe_regex import RegexTimeout, match_bounded
+from safe_url.safe_regex import RegexTimeout, match_bounded
 from safe_url.url_redaction import redact_url
 
 __all__ = ["scope_allows"]

@@ -4,8 +4,7 @@ import threading
 import time
 
 import pytest
-
-from crawlutron.safety.safe_regex import (
+from safe_url.safe_regex import (
     RegexTimeout,
     UnsafePattern,
     compile_untrusted,

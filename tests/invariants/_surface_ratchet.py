@@ -32,7 +32,6 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     # RAISED to (10, 8) by #314/F2: connection_data_version is the one PRAGMA read
     # chokepoint outside configure_store_connection, backing the table-trust digest.
     "packages/core/src/crawlutron/storage/sqlite_store.py": (11, 9),
-    "packages/core/src/crawlutron/safety/safe_regex.py": (7, 2),
     # robots_pattern_to_regex is public (#190) -- robots_allows itself calls it; the matcher class
     # behind it stays private, and RobotsMatcher stays public as the function's return type.
     "packages/core/src/crawlutron/transport/robots.py": (13, 4),
@@ -90,6 +89,7 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     "packages/safe-url/src/safe_url/normalized_url.py": (6, 4),
     "packages/safe-url/src/safe_url/process_state.py": (6, 6),
     "packages/safe-url/src/safe_url/registrable_domain.py": (3, 2),
+    "packages/safe-url/src/safe_url/safe_regex.py": (7, 2),
     "packages/safe-url/src/safe_url/scope_match.py": (1, 1),
     "packages/safe-url/src/safe_url/url_redaction.py": (4, 4),
 }

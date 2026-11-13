@@ -359,9 +359,12 @@ def _clear_global_http_state() -> None:
     tests; the close is loop-aware (drop for GC) to avoid running a second loop."""
     import asyncio
 
+    from safe_url import process_state as safe_url_process_state
+
     from crawlutron.runtime import process_state
 
     process_state.reset_all_process_state()
+    safe_url_process_state.reset_all_process_state()
     # The real app's shutdown event is module-global and shared by every ASGI test.
     service_app().state.shutdown_event = asyncio.Event()
 
