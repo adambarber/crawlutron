@@ -101,7 +101,7 @@ def real_members(type_name: str) -> frozenset[str]:
 
     ``str``-Enum: values; ``Literal`` alias: ``literal_members`` (total over
     the union); a non-taxonomy raises ``LookupError`` -- never silence."""
-    from crawlutron.models import taxonomy
+    import crawlutron.models.taxonomy as taxonomy
 
     for module in (taxonomy, *_model_modules(), *_vocabulary_modules()):
         owner = getattr(module, type_name, None)
