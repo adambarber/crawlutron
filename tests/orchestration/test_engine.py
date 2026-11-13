@@ -87,14 +87,19 @@ class TestEngineCrawlRequest:
                 policy=job.host_policy,
             )
 
-        result = await crawled_result(
-            f"{base_url}/",
-            strategies=[HTTP_DECLARED_CRAWLER, BROWSER_HEADLESS],
-            timeout_seconds=20,
-            max_discovered_links=50,
-            http_fetcher=failing_fetcher,
-            browser_worker=browser_worker,
-        )
+        try:
+            result = await crawled_result(
+                f"{base_url}/",
+                strategies=[HTTP_DECLARED_CRAWLER, BROWSER_HEADLESS],
+                timeout_seconds=20,
+                max_discovered_links=50,
+                http_fetcher=failing_fetcher,
+                browser_worker=browser_worker,
+            )
+        finally:
+            # An unclosed renderer leaves a live browser process whose pipes the
+            # GC reports as unraisable ResourceWarnings in some later test.
+            await renderer.close()
         assert result.status == "success"
         assert result.classification == "rendered"
         assert "Example Org" in (result.markdown or "")
