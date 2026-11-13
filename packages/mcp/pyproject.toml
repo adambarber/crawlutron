@@ -22,3 +22,8 @@ raw-options = { search_parent_directories = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/crawlutron_mcp"]
+
+[tool.uv.sources]
+# Resolve the sibling wheel from the workspace, not PyPI: core is a member of
+# this workspace and its version is git-derived at build time.
+crawlutron-core = { workspace = true }

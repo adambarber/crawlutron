@@ -29,6 +29,11 @@ dependencies = [
 # forwarding to the service). It moved here with the api/main surface in #902.
 crawl = "crawlutron_rest.cli.__main__:main"
 
+[tool.uv.sources]
+# Resolve the sibling wheel from the workspace, not PyPI: core is a member of
+# this workspace and its version is git-derived at build time.
+crawlutron-core = { workspace = true }
+
 [tool.hatch.version]
 source = "vcs"
 raw-options = { search_parent_directories = true }

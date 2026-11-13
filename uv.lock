@@ -20,6 +20,9 @@ resolution-markers = [
 members = [
     "crawlutron",
     "crawlutron-core",
+    "crawlutron-mcp",
+    "crawlutron-rest",
+    "crawlutron-sdk",
 ]
 
 [[package]]
@@ -752,6 +755,48 @@ provides-extras = ["dev"]
 [[package]]
 name = "crawlutron-core"
 source = { editable = "packages/core" }
+
+[[package]]
+name = "crawlutron-mcp"
+source = { editable = "packages/mcp" }
+dependencies = [
+    { name = "crawlutron-core" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "crawlutron-core", editable = "packages/core" },
+    { name = "pydantic" },
+]
+
+[[package]]
+name = "crawlutron-rest"
+source = { editable = "packages/rest" }
+dependencies = [
+    { name = "crawlutron-core" },
+    { name = "fastapi" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "crawlutron-core", editable = "packages/core" },
+    { name = "fastapi", specifier = "==0.162.0" },
+]
+
+[[package]]
+name = "crawlutron-sdk"
+source = { editable = "packages/sdk" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx" },
+    { name = "pydantic" },
+]
 
 [[package]]
 name = "cryptography"
