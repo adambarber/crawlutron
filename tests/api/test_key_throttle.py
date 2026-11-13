@@ -9,6 +9,7 @@ from __future__ import annotations
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
+import httpx
 import pytest
 
 from crawlutron.service.errors import KeyVerifyThrottled
@@ -73,6 +74,43 @@ def test_successful_verify_resets_the_counter(tmp_path):
     throttle.check(issued.secret)
 
 
+def _flood_remote(throttle: KeyVerifyThrottle, remote: str, failures: int) -> None:
+    """Record ``failures`` distinct bad secrets from one remote IP."""
+    for i in range(failures):
+        throttle.record_failure(f"ck_{i:016x}.secret-{i}", remote)
+
+
+def _assert_ip_refuses(throttle: KeyVerifyThrottle, presented: str, remote: str) -> None:
+    """The presented credential from ``remote`` refuses with the 429 shape."""
+    with pytest.raises(KeyVerifyThrottled) as raised:
+        throttle.check(presented, remote)
+    assert raised.value.status == 429
+
+
+def test_per_ip_cap_aggregates_distinct_secrets():
+    """Distinct secrets from one IP share one IP bucket; a different IP is clean."""
+    throttle = KeyVerifyThrottle()
+    remote = "203.0.113.9"
+    other_ip = "203.0.113.10"
+
+    _flood_remote(throttle, remote, KeyVerifyThrottle.IP_MAX_FAILURES)
+    # The per-IP cap is hit even though THIS secret's own bucket is not full:
+    # each secret fails alone, but the IP ledger aggregates them.
+    _assert_ip_refuses(throttle, "ck_feedface00000000.a-fresh-secret", remote)
+    throttle.check("ck_feedface00000000.a-fresh-secret", other_ip)
+
+
+def test_success_does_not_launder_an_ips_failure_count():
+    """A valid secret's success clears its own bucket, never the remote IP's."""
+    throttle = KeyVerifyThrottle()
+    remote = "203.0.113.11"
+    _flood_remote(throttle, remote, KeyVerifyThrottle.IP_MAX_FAILURES - 1)
+    throttle.record_success("ck_cafebabe00000000.good", remote)
+    # One more bad secret reaches the cap and cools the IP bucket despite the hit.
+    throttle.record_failure("ck_0123456789abcdef.last-bad", remote)
+    _assert_ip_refuses(throttle, "ck_9999999900000000.any-secret", remote)
+
+
 def test_throttle_state_is_registered_process_state():
     """The meter is process state like every other holder (#621): it registers
     a reset/probe pair with the registry."""
@@ -99,6 +137,34 @@ def _refuses(throttle: KeyVerifyThrottle, presented: str) -> None:
     _assert_429(raised.value)
 
 
+async def _crawl_key_refusals(
+    client, secrets: list[str], last: str
+) -> tuple[list[httpx.Response], httpx.Response]:
+    """POST each garbage secret to /v1/crawl; return the 401s then one 429."""
+    responses = []
+    for secret in secrets:
+        responses.append(
+            await client.post(
+                "/v1/crawl",
+                headers={"X-API-Key": secret},
+                json={"url": "http://example.com/", "async_mode": True},
+            )
+        )
+    final = await client.post(
+        "/v1/crawl",
+        headers={"X-API-Key": last},
+        json={"url": "http://example.com/", "async_mode": True},
+    )
+    return responses, final
+
+
+def _assert_all_401_then_429(responses, throttled) -> None:
+    """Every key-verify miss is a 401; the capped one is a key_verify 429."""
+    assert all(r.status_code == 401 for r in responses), [r.status_code for r in responses]
+    assert throttled.status_code == 429, throttled.text
+    assert throttled.json()["code"] == "key_verify_throttled"
+
+
 async def test_door_refuses_throttled_key_without_pbkdf2(tmp_path):
     """Over HTTP: N garbage keys from one bucket hit 401 PBKDF2 cost then 429;
     the meter refuses without running another PBKDF2."""
@@ -107,26 +173,26 @@ async def test_door_refuses_throttled_key_without_pbkdf2(tmp_path):
 
     garbage = "ck_0123456789abcdef.wrong-body"
     async with isolation_client(tmp_path) as (client, _store, _results, _keys):
-        responses = []
         calls_before = caller_key_store.pbkdf2_calls
-        for _ in range(KeyVerifyThrottle.MAX_FAILURES):
-            responses.append(
-                await client.post(
-                    "/v1/crawl",
-                    headers={"X-API-Key": garbage},
-                    json={"url": "http://example.com/", "async_mode": True},
-                )
-            )
-        assert all(r.status_code == 401 for r in responses), [r.status_code for r in responses]
-        throttled = await client.post(
-            "/v1/crawl",
-            headers={"X-API-Key": garbage},
-            json={"url": "http://example.com/", "async_mode": True},
+        responses, throttled = await _crawl_key_refusals(
+            client, [garbage] * KeyVerifyThrottle.MAX_FAILURES, garbage
         )
-        assert throttled.status_code == 429, throttled.text
-        assert throttled.json()["code"] == "key_verify_throttled"
+        _assert_all_401_then_429(responses, throttled)
         after = caller_key_store.pbkdf2_calls - calls_before
         assert after == KeyVerifyThrottle.MAX_FAILURES, f"burned {after} PBKDF2 calls"
+
+
+async def test_rotating_garbage_secrets_hits_per_ip_cap(tmp_path):
+    """Rotating DISTINCT garbage secrets from one IP trips the per-IP key-verify
+    cap -- the (IP_MAX_FAILURES+1)th distinct secret is refused 429."""
+    from tests.factories.client import isolation_client
+
+    async with isolation_client(tmp_path) as (client, _store, _results, _keys):
+        rotations = [f"ck_{i:016x}.rotating-{i}" for i in range(KeyVerifyThrottle.IP_MAX_FAILURES)]
+        responses, throttled = await _crawl_key_refusals(
+            client, rotations, "ck_faceb00c00000000.rotating-last"
+        )
+        _assert_all_401_then_429(responses, throttled)
 
 
 def test_cooldown_survives_a_capacity_flood():
@@ -179,10 +245,10 @@ class _RacyThrottle(KeyVerifyThrottle):
         super().__init__(clock=clock)
         self._read_gate = gate
 
-    def _record_bucket_failure(self, key: str) -> None:
+    def _record_bucket_failure(self, key: str, max_failures: int) -> None:
         # Pre-fix shape: resolve under the lock, then mutate outside it.
         with self._lock:
-            bucket = self._locked_get_or_mint(key, self._clock())
+            bucket = self._locked_get_or_mint(key, self._clock(), max_failures)
         self._record_failure_into(bucket, self._clock())
 
     def _record_failure_into(self, bucket, now):

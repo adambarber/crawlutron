@@ -4,9 +4,22 @@ from __future__ import annotations
 
 import pytest
 
+from crawlutron.service.key_throttle import KeyVerifyThrottle
 from tests.mcp.test_mcp import _META as META
 from tests.mcp.test_mcp import _body, _error_of
 from tests.mcp.test_mcp import _mcp as mcp_post
+
+
+async def test_key_verify_throttle_from_mcp_is_429_not_401(async_client):
+    """#929: when the key-verify meter refuses (the per-secret cooldown), the mcp
+    endpoint answers 429, never the 401 an invalid-key collapse would produce."""
+    body = _body("server/discover")
+    for _ in range(KeyVerifyThrottle.MAX_FAILURES):
+        resp = await mcp_post(async_client, body, {"X-API-Key": "throttled-key"})
+        assert resp.status_code == 401, resp.text
+    throttled = await mcp_post(async_client, body, {"X-API-Key": "throttled-key"})
+    assert throttled.status_code == 429, throttled.text
+    assert _error_of(throttled)["code"] == -32029
 
 
 def _assert_401_api_key(resp):

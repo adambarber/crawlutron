@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 
-from crawlutron_mcp.constants import INVALID_API_KEY, INVALID_REQUEST, PARSE_ERROR
+from crawlutron_mcp.constants import INVALID_API_KEY, INVALID_REQUEST, PARSE_ERROR, RATE_LIMITED
 from crawlutron_mcp.protocol import error_response
 from crawlutron_mcp.server import handle_mcp_request
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse, Response
 
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.error_response import ErrorResponse
-from crawlutron.service.errors import DomainError
+from crawlutron.service.errors import DomainError, KeyVerifyThrottled
 from crawlutron_rest.api.caller_auth import get_caller_identity
 from crawlutron_rest.api.dependencies import get_concurrency_tracker, get_settings, get_shutdown_event
 
@@ -58,9 +58,14 @@ async def mcp_endpoint(
     shutdown_event=Depends(get_shutdown_event),
 ):
     # The disallowed-Origin gate is the middleware's (one gate, per-surface shape).
-    # An invalid credential must be a 401, never a benign 200 (no key stays anonymous).
+    # A key-verify THROTTLE is a 429 (#929), never the 401 an invalid key gets.
     try:
         caller: CallerIdentity = await get_caller_identity(request)
+    except KeyVerifyThrottled as throttled:
+        return JSONResponse(
+            status_code=429,
+            content=error_response(None, RATE_LIMITED, str(throttled.message)),
+        )
     except (HTTPException, DomainError) as error:
         return JSONResponse(
             status_code=401,

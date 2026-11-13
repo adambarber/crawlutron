@@ -106,13 +106,13 @@ _OPERATOR_METERED_EXACT = ("/metrics",)
 async def throttle_anonymous_surfaces(request, call_next):
     """HTTP middleware meter over every surface with no caller to key on.
 
-    Registered OUTERMOST, counting at the REQUEST stage: /mcp and the operator
-    /metrics scrape skip only when a credential is presented (#664/#914).
+    Registered OUTERMOST at the REQUEST stage: only a credentialed /metrics scrape
+    skips; /mcp always meters per remote-IP before auth (#929).
     """
     path = request.url.path
     credentialed = _presents_credential(request)
     operator_surface = path in _OPERATOR_METERED_EXACT
-    if credentialed and (path in METERED_EXACT or operator_surface):
+    if credentialed and operator_surface:
         return await call_next(request)
     try:
         shared_anonymous_throttle().check(_remote(request))

@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 
 import httpx
 import pytest
+from starlette.requests import Request
 
 from crawlutron_rest.api.anonymous_throttle import (
     BUCKET_CAPACITY,
@@ -140,9 +141,9 @@ async def test_docs_served_and_metered():
 
 
 async def test_mcp_anonymous_metered():
-    """/mcp anonymous traffic meters through the IP bucket (JSON-RPC refusal);
-    a presented credential skips the anonymous bucket (the #664 layer meters
-    it through the caller's own quota)."""
+    """/mcp anonymous traffic meters through the IP bucket (JSON-RPC refusal),
+    and #929 closes the header-presence skip: a presented credential no longer
+    exempts /mcp -- every /mcp request meters per remote-IP before auth."""
     process_state_reset()
     async with _app_client() as client:
         for _ in range(MAX_REQUESTS_PER_WINDOW):
@@ -311,17 +312,21 @@ async def test_origin_rejected_403_consumes_exactly_one_anonymous_unit():
         await _assert_next_unit_refuses(client)
 
 
-async def test_presented_credential_mcp_still_skips_after_reorder():
-    """HIGH-2 regression walk: after the throttle moved OUTERMOST, /mcp with a
-    presented credential still skips the anonymous bucket entirely (the #664
-    layer meters it); MAX+5 credential requests never refuse."""
+async def test_credentialed_mcp_burns_anonymous_ip_bucket():
+    """#929: /mcp meters per remote-IP before auth -- a presented credential no
+    longer skips the anonymous bucket on header presence alone (MAX+1 refuses)."""
+    from crawlutron_rest.api.anonymous_throttle import throttle_anonymous_surfaces
+
     process_state_reset()
-    async with _app_client() as client:
-        for _ in range(MAX_REQUESTS_PER_WINDOW + 5):
-            resp = await client.post(
-                "/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "ping"}, headers={"x-api-key": "some-key"}
-            )
-            assert resp.status_code != 429, resp.status_code
+    request = _built_request("/mcp", {"x-api-key": "any-key"})
+
+    async def call_next(_request: Request) -> str:
+        return "passed"
+
+    for _ in range(MAX_REQUESTS_PER_WINDOW):
+        assert await throttle_anonymous_surfaces(request, call_next) == "passed"
+    refused = await throttle_anonymous_surfaces(request, call_next)
+    assert refused.status_code == 429
 
 
 @pytest.mark.parametrize(
@@ -390,8 +395,8 @@ async def test_credentialed_caller_route_still_burns_ip_bucket():
     assert shared_anonymous_throttle().residence() == 1
 
 
-async def _call_through(path: str, headers: dict[str, str]) -> None:
-    """Drive the anonymous middleware with a built request and a pass-through tail."""
+def _built_request(path: str, headers: dict[str, str]) -> Request:
+    """A constructed ASGI HTTP request scope with a fixed remote client."""
     from starlette.requests import Request
 
     scope = {
@@ -407,7 +412,12 @@ async def _call_through(path: str, headers: dict[str, str]) -> None:
         "query_string": b"",
         "root_path": "",
     }
-    request = Request(scope)
+    return Request(scope)
+
+
+async def _call_through(path: str, headers: dict[str, str]) -> None:
+    """Drive the anonymous middleware with a built request and a pass-through tail."""
+    request = _built_request(path, headers)
 
     async def call_next(_request: Request) -> str:
         return "passed"

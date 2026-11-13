@@ -1,7 +1,7 @@
 """Key-verification metering (#653): the pre-auth PBKDF2 amplifier is throttled.
 
-Every X-API-Key request costs one PBKDF2-SHA256 at 210k iterations; consecutive
-failed verifies trip a fail-closed cooldown (#621). #675: FULL-secret buckets.
+Failures trip a fail-closed cooldown, one chokepoint (#621, #675, #929):
+full-secret buckets plus a per-IP cap stops secret rotation from dodging it.
 """
 
 from __future__ import annotations
@@ -27,40 +27,51 @@ def _throttled() -> DomainError:
 
 
 class _Bucket:
-    """One presented-credential's failure ledger under the meter's lock."""
+    """One failure ledger: a presented secret, or one remote IP's key-verify
+    failures aggregated across every secret presented from it (#929)."""
 
-    __slots__ = ("cooldown_until", "failures", "window_started")
+    __slots__ = ("cooldown_until", "failures", "max_failures", "window_started")
 
-    def __init__(self) -> None:
+    def __init__(self, *, max_failures: int) -> None:
         self.failures = 0
         self.window_started = time.monotonic()
         self.cooldown_until = 0.0
+        self.max_failures = max_failures
 
 
 class KeyVerifyThrottle(MeterLedger[_Bucket]):
     """Fail-closed cooldown over failed key verifications, one chokepoint.
 
-    Buckets key on a hash of the FULL presented secret (#675): poisoning requires
-    the victim's secret itself. LRU-capped; a cooling bucket is never evicted.
+    Buckets key on the FULL secret (#675); with a remote IP a per-IP bucket
+    aggregates failures across secrets (#929), LRU-capped.
     """
 
+    #: Per-presented-secret cooldown threshold (full-secret keying, #675).
     MAX_FAILURES = 5
+    #: Per-IP key-verify cap (#929): distinct secrets from one IP share one
+    #: bucket, so rotating garbage secrets cannot dodge the cooldown.
+    IP_MAX_FAILURES = 5
     #: The dedicated bucket every /v1/keys admin-token guess meters against
     #: (#659): one shared ledger minting cannot dilute.
     ADMIN_BUCKET = "admin"
 
-    def check(self, presented: str) -> None:
-        """Refuse while the credential's bucket is cooling; a caller-readable
-        429-shaped refusal, raised by the auth wrapper, not the store."""
+    def check(self, presented: str, remote: str | None = None) -> None:
+        """Refuse while the credential's bucket (or its IP bucket) is cooling;
+        a caller-readable 429-shaped refusal, raised by the auth wrapper."""
         self._check_bucket(self._key_for(presented))
+        if remote is not None:
+            self._check_bucket(self._ip_key_for(remote))
 
-    def record_failure(self, presented: str) -> None:
+    def record_failure(self, presented: str, remote: str | None = None) -> None:
         """Count one failed verify; the Nth consecutive failure within the
         window starts the cooldown (fail-closed: even the live key refuses)."""
-        self._record_bucket_failure(self._key_for(presented))
+        self._record_bucket_failure(self._key_for(presented), self.MAX_FAILURES)
+        if remote is not None:
+            self._record_bucket_failure(self._ip_key_for(remote), self.IP_MAX_FAILURES)
 
-    def record_success(self, presented: str) -> None:
-        """A hit clears the bucket: one fat-finger is not a hair-trigger."""
+    def record_success(self, presented: str, remote: str | None = None) -> None:
+        """A hit clears the credential's bucket; the IP bucket is intentionally
+        NOT cleared, so a valid key cannot launder an IP's failure count."""
         with self._lock:
             self._buckets.pop(self._key_for(presented), None)
 
@@ -73,7 +84,7 @@ class KeyVerifyThrottle(MeterLedger[_Bucket]):
         from crawlutron.runtime.metrics import get_metrics
 
         get_metrics().record_admin_auth_failure()
-        self._record_bucket_failure(self.ADMIN_BUCKET)
+        self._record_bucket_failure(self.ADMIN_BUCKET, self.MAX_FAILURES)
 
     def record_admin_success(self) -> None:
         """A correct admin token clears the admin bucket (not a hair-trigger)."""
@@ -98,14 +109,14 @@ class KeyVerifyThrottle(MeterLedger[_Bucket]):
             get_metrics().record_key_verify_throttle_trip()
             raise _throttled()
 
-    def _locked_get_or_mint(self, key: str, now: float) -> _Bucket:
+    def _locked_get_or_mint(self, key: str, now: float, max_failures: int) -> _Bucket:
         """Under the lock: the bucket for key, or an LRU-priced new one."""
         bucket = self._buckets.get(key)
         if bucket is not None:
             self._buckets.move_to_end(key)
             return bucket
         self._evict_lru(now)
-        bucket = _Bucket()
+        bucket = _Bucket(max_failures=max_failures)
         bucket.window_started = now
         self._buckets[key] = bucket
         return bucket
@@ -122,10 +133,10 @@ class KeyVerifyThrottle(MeterLedger[_Bucket]):
                 return
             del self._buckets[lru_key]
 
-    def _record_bucket_failure(self, key: str) -> None:
+    def _record_bucket_failure(self, key: str, max_failures: int) -> None:
         with self._lock:
             now = self._clock()
-            bucket = self._locked_get_or_mint(key, now)
+            bucket = self._locked_get_or_mint(key, now, max_failures)
             # #661: an EXPIRED cooldown re-arms the ladder -- clear the bucket
             # under the lock, so one stale failure cannot re-cool instantly.
             if bucket.cooldown_until and bucket.cooldown_until <= now:
@@ -143,12 +154,17 @@ class KeyVerifyThrottle(MeterLedger[_Bucket]):
             bucket.failures = 0
             bucket.window_started = now
         bucket.failures += 1
-        if bucket.failures >= self.MAX_FAILURES:
+        if bucket.failures >= bucket.max_failures:
             bucket.cooldown_until = now + _COOLDOWN_SECONDS
 
     def _key_for(self, presented: str) -> str:
         """The bucket key: a SHA-256 of the FULL presented secret (#675)."""
         return hashlib.sha256(presented.encode("utf-8")).hexdigest()
+
+    def _ip_key_for(self, remote: str) -> str:
+        """The per-IP bucket key: the remote IP aggregates key-verify failures
+        across every secret presented from it (#929)."""
+        return f"ip:{remote}"
 
 
 _SHARED = KeyVerifyThrottle()

@@ -143,17 +143,18 @@ async def get_keys_caller(request: Request) -> CallerIdentity:
 async def _caller_from_secret(request: Request, secret: str) -> CallerIdentity:
     """Resolve a presented secret to an identity or raise 401.
 
-    The meter runs BEFORE the PBKDF2: a credential in cooldown refuses without
-    burning another derivation (#653). One per-entry-point chokepoint.
+    The meter runs BEFORE the PBKDF2, keying the full secret PLUS the remote IP
+    (#929): a cooldown refuses without another derivation (#653).
     """
     throttle = shared_throttle()
-    throttle.check(secret)
+    remote = request.client.host if request.client else None
+    throttle.check(secret, remote)
     store = getattr(request.app.state, "caller_key_store", None)
     record = await store.averify_key(secret) if store is not None else None
     if record is None:
-        throttle.record_failure(secret)
+        throttle.record_failure(secret, remote)
         _raise_invalid_api_key()
-    throttle.record_success(secret)
+    throttle.record_success(secret, remote)
     return identity_for_key(record)
 
 
