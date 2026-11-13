@@ -69,17 +69,7 @@ jobs:
   image:
     name: Build the container image
     runs-on: ubuntu-latest
-    if: >-
-      ${
-        github.event_name == 'workflow_dispatch'
-        || (
-          github.event.workflow_run.conclusion == 'success'
-          && (
-            github.event.workflow_run.head_branch == 'main'
-            || startsWith(github.event.workflow_run.head_branch, 'v')
-          )
-        )
-      }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && (github.event.workflow_run.head_branch == 'main' || startsWith(github.event.workflow_run.head_branch, 'v'))) }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
