@@ -16,6 +16,7 @@ from pathlib import Path
 import httpx
 
 from crawlutron_rest.cli.__main__ import (
+    DEFAULT_DEEP_CRAWL_BFS_DEPTH,
     EXIT_PARTIAL,
     EXIT_SERVER_OR_TRANSPORT,
     EXIT_SIGINT,
@@ -444,3 +445,35 @@ def test_run_up_no_wait_for_health_starts_without_curl():
     assert code == EXIT_SUCCESS
     assert any(c[1] == "run" for c in calls)
     assert not any(c[0] == "curl" for c in calls)
+
+
+def _sent_limits(argv: list[str]) -> dict[str, object]:
+    """The policy.limits map for a CLI invocation, via the real crawl request."""
+    captured: list[httpx.Request] = []
+    assert _run(captured, argv) == EXIT_SUCCESS
+    body = json.loads(captured[0].content or b"{}")
+    policy = body["policy"]
+    assert isinstance(policy, dict)
+    limits = policy.get("limits")
+    assert isinstance(limits, dict)
+    return limits
+
+
+def test_explicit_max_depth_survives_default_deep_crawl():
+    """--max-depth 2 with deep-crawl absent (defaults none) reaches limits.max_depth."""
+    assert _sent_limits([DEFAULT_URL, "--max-depth", "2"])["max_depth"] == 2
+
+
+def test_no_max_depth_defaults_to_zero_for_single_page():
+    """Absent --max-depth with deep-crawl none maps max_depth to 0."""
+    assert _sent_limits([DEFAULT_URL])["max_depth"] == 0
+
+
+def test_bfs_without_max_depth_uses_bfs_default():
+    """--deep-crawl bfs with absent --max-depth maps to the bfs depth default."""
+    assert _sent_limits([DEFAULT_URL, "--deep-crawl", "bfs"])["max_depth"] == DEFAULT_DEEP_CRAWL_BFS_DEPTH
+
+
+def test_explicit_max_depth_wins_over_bfs_default():
+    """Explicit --max-depth overrides the bfs-default depth."""
+    assert _sent_limits([DEFAULT_URL, "--deep-crawl", "bfs", "--max-depth", "2"])["max_depth"] == 2

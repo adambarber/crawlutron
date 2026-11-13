@@ -189,7 +189,7 @@ def _build_payload(args: argparse.Namespace) -> dict[str, object]:
         limits["respect_robots"] = args.robots
     if args.deep_crawl == "bfs" and args.max_depth is None:
         limits["max_depth"] = DEFAULT_DEEP_CRAWL_BFS_DEPTH
-    if args.deep_crawl == "none":
+    if args.deep_crawl == "none" and args.max_depth is None:
         limits["max_depth"] = 0
 
     if limits:
