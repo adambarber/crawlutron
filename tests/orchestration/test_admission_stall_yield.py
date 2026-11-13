@@ -47,11 +47,56 @@ async def _refused_result(job):
     return engine_result(job.normalized_url, "robots_disallowed", status="skipped")
 
 
+async def _oversized_admit(_run, _state, _metrics):
+    return []
+
+
+async def _unreachable_crawl(_run, _allowed):
+    raise AssertionError("crawl_batch must not run on an empty OVERSIZE pass")
+
+
+async def _unreachable_commit(_run, _state, _allowed, _results):
+    raise AssertionError("commit_batch must not run on an empty OVERSIZE pass")
+
+
+async def test_sustained_oversize_admission_backs_off_not_hot_spins(monkeypatch):
+    """Sustained OVERSIZE lets the empty pass back off, not hot-poll, yet the
+    stall guard is still the terminal path. A sleep(0) hot-loop never reaches
+    the guard (zero clock progress per pass) and is stopped only by the bound."""
+    simulated = {"now": 0.0}
+
+    def clock() -> float:
+        return simulated["now"]
+
+    delays: list[float] = []
+    real_sleep = asyncio.sleep
+
+    async def clocked_sleep(delay=None):
+        d = 0.0 if delay is None else delay
+        delays.append(d)
+        simulated["now"] += d
+        if d == 0.0:
+            await real_sleep(0)
+        return None
+
+    monkeypatch.setattr("crawlutron.orchestration.admission_stall.asyncio.sleep", clocked_sleep)
+    jobs = [make_crawl_task(0, "oversized-a"), make_crawl_task(1, "oversized-a")]
+    base_run, state, _ = minimum_admission_run(jobs, http_quota=8, browser_quota=0)
+    guard = AdmissionStallGuard(clock=clock, no_progress_seconds=1.0)
+    stages = BatchStages(_oversized_admit, _unreachable_crawl, _unreachable_commit)
+    await asyncio.wait_for(
+        crawl_batches(base_run, state, guard, asyncio.Event(), get_metrics(), 50, stages),
+        timeout=2.0,
+    )
+    assert delays, "the empty pass never slept"
+    assert all(d > 0.0 for d in delays), f"empty pass hot-polled with sleep(0): {delays}"
+
+
 async def test_zero_admission_pass_yields_instead_of_hot_spinning(monkeypatch):
     """An empty pass (robots-filtered, not a (0,0) admission) yields to the loop.
 
-    Until the stall deadline fires the loop owes the event loop a turn per empty
-    pass instead of hot gate-sampling (#526)."""
+    Until the stall deadline fires the loop owes the event loop a bounded backoff
+    per empty pass instead of hot gate-sampling (#526)."""
     delays: list[float] = []
     real_sleep = asyncio.sleep
 
@@ -72,4 +117,4 @@ async def test_zero_admission_pass_yields_instead_of_hot_spinning(monkeypatch):
     guard = AdmissionStallGuard(clock=lambda: 0.0, no_progress_seconds=60.0)
     stages = BatchStages(admit_recursive_batch, crawl_recursive_batch, commit_recursive_results)
     await crawl_batches(run, state, guard, asyncio.Event(), get_metrics(), 50, stages)
-    assert 0 in delays, f"the empty pass did not yield a sleep(0) to the loop: {delays}"
+    assert delays, f"the empty pass never yielded to the loop: {delays}"

@@ -24,6 +24,10 @@ if TYPE_CHECKING:
 # How long a recursion tolerates admission making NO progress before it stops.
 NO_PROGRESS_STALL_SECONDS: float = 60.0
 
+# Empty-pass backoff under sustained admission contention (e.g. OVERSIZE): bounded
+# so a saturated admission yields instead of hot-polling, yet far under the stall bound.
+_ZERO_ADMISSION_BACKOFF_SECONDS: float = 0.2
+
 
 def spill_result(run: CrawlRun, index: int, result: EngineCrawlResult) -> Awaitable[None]:
     """One result to the crawl's spill rows; a None spill drops it (a caller that
@@ -121,8 +125,8 @@ async def crawl_batches(
                 await fail_remaining_frontier(run, state.frontier)
             return
         if not allowed_jobs:
-            # Zero-admission pass: yield the turn -- never hot-spin the gates.
-            await asyncio.sleep(0)
+            # Zero-admission pass: back off meaningfully -- never hot-spin the gates.
+            await asyncio.sleep(_ZERO_ADMISSION_BACKOFF_SECONDS)
             continue
         scheduled_results = await stages.crawl_batch(run, allowed_jobs)
         await stages.commit_batch(run, state, allowed_jobs, scheduled_results)
