@@ -122,6 +122,12 @@ jobs:
         run: .venv/bin/python -m compileall -q packages/*/src tests scripts
       - name: battery
         run: .venv/bin/pre-commit run battery --all-files
+        env:
+          # The battery is the one gate that legitimately runs for a minute: ~50s
+          # warm, longer on a cold runner. The fan-out wall exists to stop a hung
+          # gate hanging the job forever, so it gets hang-guard room here rather
+          # than a budget. Commit admission keeps the 60s default.
+          GATE_FANOUT_WALL_SECONDS: "300"
 
   test-browser:
     name: Test suite (browser)
@@ -152,6 +158,11 @@ jobs:
           key: camoufox-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
       - name: Install Camoufox browser binary
         run: .venv/bin/python -m camoufox fetch
+        env:
+          # camoufox resolves its release through the GitHub API, which answers an
+          # unauthenticated runner at 60 req/h: the fetch 403s on a busy day. The
+          # job's own token lifts it to the repository's rate limit.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Run pytest (browser)
         # Selects the `browser` marker, and only that. The previous `-m "not
         # slow"` admitted the whole fast suite (the battery job already runs it),
