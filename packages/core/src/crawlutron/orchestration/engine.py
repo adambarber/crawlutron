@@ -149,14 +149,14 @@ def seed_is_fresh(
     return False
 
 
-def stale_seeds(
+def fresh_seeds(
     candidates: Iterable[tuple[NormalizedUrl, str | None]],
     content_cache: SeedCache | None,
     policy: CrawlPolicy,
 ) -> set[NormalizedUrl]:
-    """Batch the sitemap freshness filter (call from a worker thread): each verdict
-    reads the candidate's envelope from disk, so a big sitemap must not pay that
-    cost on the event loop. ``seed_is_fresh`` stays fail-open to re-crawl.
+    """Batch the sitemap freshness filter (call from a worker thread), returning
+    the cached-fresh seeds the caller excludes; ``seed_is_fresh`` stays fail-open
+    to re-crawl.
     """
     return {url for url, lastmod in candidates if seed_is_fresh(url, lastmod, content_cache, policy)}
 
@@ -275,7 +275,7 @@ def _pipeline_dependencies(
     return PipelineDependencies(
         get_content_cache=shared_content_cache,
         compile_scope_regex_safe=compile_scope_pattern,
-        stale_seeds=stale_seeds,
+        fresh_seeds=fresh_seeds,
         fetch_and_decode=fetch_and_decode,
         shared_http_cache=shared_http_cache(),
         resource_gate=resource_gate if resource_gate is not None else _resource_gate,

@@ -5,7 +5,7 @@ from functools import partial
 
 from crawlutron.admission.policy import read_policy
 from crawlutron.models.normalized_url import NormalizedUrl
-from crawlutron.orchestration.engine import parse_lastmod, seed_is_fresh, stale_seeds
+from crawlutron.orchestration.engine import fresh_seeds, parse_lastmod, seed_is_fresh
 from crawlutron.transport.content_cache import ContentCache
 from crawlutron.transport.content_cache_key import build_content_cache_key
 from crawlutron.transport.fetch_helpers import SITEMAP_CACHE, fetch_sitemap_urls
@@ -404,7 +404,7 @@ def test_seed_freshness_key_matches_fetch_path_key():
     assert cache.queries == [fetch_key]
 
 
-class TestStaleSeedBatch:
+class TestFreshSeedBatch:
     def test_batch_matches_per_url_verdicts(self, tmp_path):
         """The batch helper returns exactly the URLs whose cached copy is
         fresh (the same verdicts the per-URL helper produced before )."""
@@ -413,12 +413,12 @@ class TestStaleSeedBatch:
         cache = _cache_with_fresh(tmp_path, fresh, "2020-01-01T00:00:00Z", _POLICY_SEED_BATCH())
         policy = _POLICY_SEED_BATCH()
 
-        stale_set = stale_seeds(
+        fresh_set = fresh_seeds(
             [(canonical(fresh), "2020-01-01T00:00:00Z"), (canonical(stale), "2025-01-01T00:00:00Z")],
             cache,
             read_policy(policy),
         )
-        assert {u.raw for u in stale_set} == {fresh}
+        assert {u.raw for u in fresh_set} == {fresh}
 
     def test_unreadable_or_missing_entries_fail_open(self, tmp_path):
         """A cache read error must never cause a seed to be skipped: an
@@ -429,12 +429,12 @@ class TestStaleSeedBatch:
 
         # An unadmittable loc ("" here) never reaches this helper any more: the resolve chokepoint drops it at
         # extraction, reported as skipped. Fail-open is still proven by the never-cached candidate below.
-        stale_set = stale_seeds(
+        fresh_set = fresh_seeds(
             [(canonical("http://seed-batch.test/never-cached"), "2020-01-01")],
             cache,
             read_policy(policy),
         )
-        assert stale_set == set()
+        assert fresh_set == set()
 
 
 class TestSeedingIsOffLoop:
@@ -477,7 +477,7 @@ class TestSeedingIsOffLoop:
 
         await crawl_request(payload, http_fetcher=fetcher, content_cache=cache)
 
-        assert "stale_seeds" in seen, "freshness filtering was not offloaded off the loop"
+        assert "fresh_seeds" in seen, "freshness filtering was not offloaded off the loop"
         # The fresh seed was skipped: only robots.txt, the sitemap and the crawled origin were fetched --
         # never the cached page itself.
         assert fresh_url not in fetched

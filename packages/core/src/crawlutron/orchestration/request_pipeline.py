@@ -63,7 +63,7 @@ if TYPE_CHECKING:
 class PipelineDependencies:
     get_content_cache: Callable[[], ContentCache]
     compile_scope_regex_safe: Callable[[str | None], BoundedPattern | None]
-    stale_seeds: Callable[
+    fresh_seeds: Callable[
         [Iterable[tuple[NormalizedUrl, str | None]], SeedCache | None, CrawlPolicy],
         set[NormalizedUrl],
     ]
@@ -259,9 +259,9 @@ async def _seeds_for_job(state: PipelineState, job: CrawlTask) -> list[Normalize
         found,
         scope_pattern=state.scope_pattern,
     )
-    stale = (
+    fresh = (
         await asyncio.to_thread(
-            state.dependencies.stale_seeds,
+            state.dependencies.fresh_seeds,
             candidates,
             state.content_cache,
             state.policy,
@@ -269,7 +269,7 @@ async def _seeds_for_job(state: PipelineState, job: CrawlTask) -> list[Normalize
         if candidates
         else set()
     )
-    return [url for url, _lastmod in candidates if url not in stale]
+    return [url for url, _lastmod in candidates if url not in fresh]
 
 
 async def _sitemap_seed_urls(state: PipelineState) -> list[NormalizedUrl]:

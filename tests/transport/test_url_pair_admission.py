@@ -105,7 +105,7 @@ class TestBuildJobsConsumesPairs:
             dependencies=PipelineDependencies(
                 get_content_cache=lambda: ContentCache(url_pairs and "" or ""),
                 compile_scope_regex_safe=lambda compiled: None,
-                stale_seeds=lambda seed, cache, policy: set(),
+                fresh_seeds=lambda seed, cache, policy: set(),
                 fetch_and_decode=None,
                 shared_http_cache=HttpCache(),
                 resource_gate=_idle_gate(),  # nothing fires

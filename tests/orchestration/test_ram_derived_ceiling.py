@@ -64,7 +64,7 @@ def _never_read_dependencies() -> PipelineDependencies:
     return PipelineDependencies(
         get_content_cache=lambda: ContentCache(""),  # the ceiling never reads it
         compile_scope_regex_safe=lambda _compiled: None,
-        stale_seeds=lambda _seed, _cache, _policy: set(),
+        fresh_seeds=lambda _seed, _cache, _policy: set(),
         fetch_and_decode=None,
         shared_http_cache=HttpCache(),
         resource_gate=ResourceGate(memory_ratio=lambda: 0.0, cpu_ratio=lambda: 0.0),  # idle by construction
