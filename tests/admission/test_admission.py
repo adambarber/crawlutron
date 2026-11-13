@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from admission import AdmissionRefused, Count, IdleReason, LaneId, Want
+from admission import AdmissionRefused, Count, IdleReason, LaneId, Ratio, RideCpuWhenFree, Want
 from crawlutron.health.readiness import ReadinessState
 from crawlutron.runtime.metrics import get_metrics
 from crawlutron.runtime.pressure_memory import MemoryStats, read_memory_stats
@@ -232,6 +232,46 @@ async def test_oversize_want_refuses_bounded_rather_than_spinning():
     with pytest.raises(AdmissionRefused) as exc:
         await asyncio.wait_for(_live(gate, Want.of(general=Count(0), heavy=Count(1))), 1.0)
     assert exc.value.reason is IdleReason.OVERSIZE
+
+
+# --- ramp decay follows the same scale law as admit (bifurcation seam) ---
+
+
+async def test_ramp_decay_follows_the_same_scale_law_as_admit_under_loop_lag():
+    """Decay multiplies by loop-lag exactly as admit does: one scale law."""
+    lag = 0.5
+    gate, _ = build_gate(
+        GateSpec(
+            memory_usage=0.75,  # 1 - 0.15/0.3 -> mem scale 0.5
+            cpu_usage=0.2,  # cpu scale 1.0
+            initial_ramp=100,
+            loop_lag_fn=lambda: Ratio(lag),
+        )
+    )
+    cm, granted = await _live(gate, _GENERAL_ONE)
+    assert granted.scale.value == 0.5 * lag  # the admit law: min(mem, cpu) x lag
+    granted.lease.release()  # sub-full grant -> release decays the ramp
+    await _finish(cm)
+    assert gate.ramp().value == int(100 * 0.5 * lag)  # decay == admit scale
+
+
+async def test_ramp_decay_honours_the_general_ride_source_like_admit():
+    """A GENERAL RideCpuWhenFree lane decays the ramp on the RIDE branch."""
+    lag = 0.5
+    gate, _ = build_gate(
+        GateSpec(
+            memory_usage=0.8,  # mem scale ~0.333, ignored while CPU is free
+            cpu_usage=0.2,  # headroom 0.8 > threshold -> RIDE uses cpu scale 1.0
+            initial_ramp=100,
+            loop_lag_fn=lambda: Ratio(lag),
+            scale_source=RideCpuWhenFree(Ratio(0.5)),
+        )
+    )
+    cm, granted = await _live(gate, _GENERAL_ONE)
+    assert granted.scale.value == 1.0 * lag  # RIDE branch: cpu scale x lag
+    granted.lease.release()
+    await _finish(cm)
+    assert gate.ramp().value == int(100 * 1.0 * lag)  # RIDE x lag, not min x lag
 
 
 def test_resource_gate_scale_is_min_of_resources(monkeypatch):

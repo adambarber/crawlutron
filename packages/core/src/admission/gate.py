@@ -36,6 +36,7 @@ from admission.values import (
     ResourceId,
     RideCpuWhenFree,
     Scale,
+    ScaleSource,
     Sensing,
     Want,
 )
@@ -195,17 +196,23 @@ class AdmissionGate:
 
     # -- decision --------------------------------------------------------
 
-    def _scale_for(self, lane: LaneId, readings: dict[ResourceId, _ResourceReading]) -> Scale:
-        """The effective per-lane scale: min-all over the lane's resources, times lag."""
+    def _effective_scale(self, source: ScaleSource, readings: dict[ResourceId, _ResourceReading]) -> Scale:
+        """The single effective-scale law: min-all or RIDE, times loop-lag.
+
+        Both admit and decay derive from this seam; decay passes the GENERAL
+        lane's source, so loop-lag and RIDE apply identically to admit."""
         mem = self._scale_of(readings[ResourceId.MEMORY], self._sensing.sensors[ResourceId.MEMORY].limits)
         cpu = self._scale_of(readings[ResourceId.CPU], self._sensing.sensors[ResourceId.CPU].limits)
-        source = self._lanes[lane].scale_source
         if isinstance(source, RideCpuWhenFree):
             cpu_usage = readings[ResourceId.CPU].usage.value
             base = cpu if 1.0 - cpu_usage > source.threshold.value else Ratio(min(mem.value, cpu.value))
         else:
             base = Ratio(min(mem.value, cpu.value))
         return Scale(max(0.0, base.value) * self._loop_lag().value)
+
+    def _scale_for(self, lane: LaneId, readings: dict[ResourceId, _ResourceReading]) -> Scale:
+        """The effective per-lane scale: the shared law under the lane's source."""
+        return self._effective_scale(self._lanes[lane].scale_source, readings)
 
     def _scale_of(self, reading: _ResourceReading, limits) -> Ratio:
         """The §5.1 law: full at/by target, zero at/by hard, linear between."""
@@ -394,10 +401,9 @@ class AdmissionGate:
     def _decay_ramp(self) -> None:
         """Decay the ramp below full scale: ramp = max(ramp_floor, ramp*scale) (4.1)."""
         read = self._snapshot_readings(self._clock.now().value)
-        scale = min(
-            self._scale_of(read[ResourceId.MEMORY], self._sensing.sensors[ResourceId.MEMORY].limits).value,
-            self._scale_of(read[ResourceId.CPU], self._sensing.sensors[ResourceId.CPU].limits).value,
-        )
+        # Same law as admit under the GENERAL lane's source: loop-lag applied
+        # identically (single source of truth; the ramp is the GENERAL lane's).
+        scale = self._effective_scale(self._lanes[LaneId.GENERAL].scale_source, read).value
         self._ramp = max(self._ramp_floor, int(self._ramp * scale))
 
     def _release_lease(self, lease: Lease, *, work_completed: bool) -> None:
