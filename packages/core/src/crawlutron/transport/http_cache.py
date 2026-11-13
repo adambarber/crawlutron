@@ -102,7 +102,8 @@ async def revalidate_content_cache(ctx: HttpStrategyContext) -> None:
         cookie_namespace=cookie_namespace_for(ctx.policy.request_profile),
     )
     ctx.ckey = ckey
-    cached_headers = _cached_headers_or_none(await ctx.content_cache.aget(ckey))
+    cached = await ctx.content_cache.aget(ckey)
+    cached_headers = _cached_headers_or_none(cached)
     if cached_headers is None:
         return
 
@@ -121,20 +122,21 @@ async def revalidate_content_cache(ctx: HttpStrategyContext) -> None:
     if not validator:
         if must_revalidate:
             return  # no validator to revalidate with: never serve stale, re-fetch.
-        await _replay_cached_body(ctx, ckey)
+        await _replay_cached_body(ctx, ckey, cached)
         return
-    await _revalidate_with_validator(ctx, ckey, validator)
+    await _revalidate_with_validator(ctx, ckey, validator, cached)
 
 
-async def _replay_cached_body(ctx: HttpStrategyContext, ckey: str) -> None:
+async def _replay_cached_body(ctx: HttpStrategyContext, ckey: str, cached: JsonValue | None) -> None:
     """Serve the cached body outright; the envelope re-admits as written."""
-    cached = cast(SerializedResponse, await ctx.content_cache.aget(ckey) if ctx.content_cache else None)
-    ctx.response = rebuild_response(cached, ctx)
+    ctx.response = rebuild_response(cast(SerializedResponse, cached), ctx)
     ctx.content_hit = True
     ctx.retry_diagnostics = {"attempts": 0, "transient_errors": [], "content_cache": "hit"}
 
 
-async def _revalidate_with_validator(ctx: HttpStrategyContext, ckey: str, validator: dict[str, str]) -> None:
+async def _revalidate_with_validator(
+    ctx: HttpStrategyContext, ckey: str, validator: dict[str, str], cached: JsonValue | None
+) -> None:
     """Conditional re-fetch against the origin; a 304 replays the cached body."""
     revalidation_headers = dict(ctx.base_headers)
     revalidation_headers.update(validator)
@@ -147,14 +149,13 @@ async def _revalidate_with_validator(ctx: HttpStrategyContext, ckey: str, valida
         ctx.max_retries,
         ctx.max_content_length,
     )
-    cached = cast(SerializedResponse, await ctx.content_cache.aget(ckey) if ctx.content_cache else None)
-    if ctx.response.status_code == 304 and cached is not None:
-        ctx.response = rebuild_response(cached, ctx)
+    if ctx.response.status_code == 304:
+        ctx.response = rebuild_response(cast(SerializedResponse, cached), ctx)
         ctx.retry_diagnostics = {**ctx.retry_diagnostics, "content_cache": "hit_revalidated"}
         ctx.revalidated_304 = True
     else:
-        # A 304 whose cached entry was evicted between the two reads has no body to
-        # replay; treat it as a fresh empty 304 rather than rebuilding from None.
+        # The revalidation answered fresh (a non-304); the stored body is not
+        # replayed, and ``store_http_caches`` persists the fresh answer later.
         ctx.retry_diagnostics = {**ctx.retry_diagnostics, "content_cache": "revalidated_fresh"}
 
 

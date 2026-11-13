@@ -171,31 +171,22 @@ async def test_content_cache_revalidation_304_reports_not_modified(tmp_path):
     assert "STOC" in (second.text or second.markdown or "")
 
 
-async def test_304_revalidation_after_cache_eviction_is_not_an_error(tmp_path, monkeypatch):
-    """An evicted-304 replay honors the empty body as fresh: not_modified, no TypeError.
-    The revalidation read sees None (the entry was evicted), so no stale body is
-    replayed; the result carries revalidated_fresh diagnostics."""
+async def test_an_entry_evicted_before_the_envelope_read_is_never_replayed(tmp_path, monkeypatch):
+    """An entry gone before the single read is never replayed: no stale body, no
+    crash, and the crawl proceeds to a fresh answer, not a 304-with-body."""
     content_cache, crawl = await _cached_content_crawler(tmp_path, "http://example.com/evicted-reval", "SEED")
 
     first = await crawl()  # seeds the content cache
     assert first.status == "success"
 
-    # Evict between the two reads: the seeding (pre-network) read still sees the
-    # entry, the revalidation (post-network) read sees None -- the eviction race.
-    real_aget = content_cache.aget
-    reads = {"count": 0}
-
     async def evicting_aget(key: str):
-        reads["count"] += 1
-        if reads["count"] == 2:
-            return None
-        return await real_aget(key)
+        return None  # the entry is already gone at the single envelope read
 
     monkeypatch.setattr(content_cache, "aget", evicting_aget)
 
     second = await crawl()
     assert second.status == "success"  # not a TypeError crash misread as a network error
-    assert second.classification == "not_modified"
+    body = second.text or second.markdown or second.html or ""
+    assert not body  # the evicted body must never be replayed
     assert second.http_status == 304
-    assert second.diagnostics["retry"]["content_cache"] == "revalidated_fresh"
-    assert not (second.text or second.markdown or second.html)  # no false body claim
+    assert second.classification == "not_modified"
