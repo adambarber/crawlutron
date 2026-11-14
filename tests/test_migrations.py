@@ -14,8 +14,8 @@ from crawlutron.storage.admin_audit_store import AdminAuditStore
 from crawlutron.storage.caller_key_store import CallerKeyStore
 from crawlutron.storage.coordination_cookies import SharedCookieStore
 from crawlutron.storage.coordination_counters import CoordinationCounters
-from crawlutron.storage.coordination_throttle_store import CoordinationThrottleStore
 from crawlutron.storage.coordination_sync_slots import CoordinationSyncSlotsStore
+from crawlutron.storage.coordination_throttle_store import CoordinationThrottleStore
 from crawlutron.storage.job_store import CrawlJobState, JobStatus, JobStore
 from crawlutron.storage.migrations import (
     CURRENT_SCHEMAS,

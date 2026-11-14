@@ -81,14 +81,22 @@ class MetricsStore:
     # turned into one CountersSnapshot.
 
     def _add(self, key: str, delta: float) -> None:
-        if self._counters is not None:
-            self._counters.add(key, delta)
+        store = self._counters
+        if store is not None:
+            store.add_pending(key, delta)
             return
         with self._write_lock:
             self._local[key] = self._local.get(key, 0.0) + delta
 
+    def _flush_pending(self) -> None:
+        """Commit accumulated deltas to the shared store in one transaction."""
+        store = self._counters
+        if store is not None:
+            store.flush()
+
     def _source(self) -> dict[str, float]:
-        return self._counters.snapshot() if self._counters is not None else self._local
+        store = self._counters
+        return store.snapshot() if store is not None else self._local
 
     def _labelled(self, source: dict[str, float], prefix: str) -> dict[str, float]:
         return {key.removeprefix(prefix): value for key, value in source.items() if key.startswith(prefix)}
@@ -173,6 +181,7 @@ class MetricsStore:
                     self._add(_STRATEGY_PREFIX + str(strategy), 1)
         self._add("total_elapsed_ms", elapsed_ms)
         self._add("crawl_errors_total", errors)
+        self._flush_pending()
 
     def observe_search(
         self,
@@ -190,36 +199,30 @@ class MetricsStore:
             self._add(_PROVIDER_PREFIX + provider, results)
         self._record_caller_series(_SEARCH_CALLER_PREFIX, caller_id)
         self._add("search_total_elapsed_ms", elapsed_ms)
+        self._flush_pending()
+
+    def _record(self, name: str) -> None:
+        """Count one event, then commit the batch in one transaction."""
+        self._add(name, 1)
+        self._flush_pending()
 
     def record_throttle(self) -> None:
-        """Count one batch shrunk by the admission gate; a method rather than
-        ``+= 1`` on a property, because a setter cannot know its own delta without
-        a read-then-write that loses increments under concurrent setters.
-        """
-        self._add("resource_throttle_batches_total", 1)
+        self._record("resource_throttle_batches_total")
 
     def record_doc_pool_unavailable(self) -> None:
-        """Count one document acquisition that degraded: no worker within the
-        budget (a wedged or retired slot), or a spawn that never became ready.
-        The doc-pool wedge alert -- a warning log alone is invisible.
-        """
-        self._add("extraction_doc_pool_unavailable_total", 1)
+        self._record("extraction_doc_pool_unavailable_total")
 
     def record_auth_refusal(self) -> None:
-        """Count one 401-class credential refusal at the single auth funnel."""
-        self._add("auth_refusals_total", 1)
+        self._record("auth_refusals_total")
 
     def record_key_verify_throttle_trip(self) -> None:
-        """Count one 429 refusal from the key-verify meter's cooldown check."""
-        self._add("key_verify_throttle_trips_total", 1)
+        self._record("key_verify_throttle_trips_total")
 
     def record_anonymous_throttle_refusal(self) -> None:
-        """Count one anonymous-IP 429 refusal past the anonymous budget."""
-        self._add("anonymous_throttle_refusals_total", 1)
+        self._record("anonymous_throttle_refusals_total")
 
     def record_admin_auth_failure(self) -> None:
-        """Count one failed admin-token guess against the shared admin bucket."""
-        self._add("admin_auth_failures_total", 1)
+        self._record("admin_auth_failures_total")
 
     @property
     def counters(self) -> CoordinationCounters | None:
