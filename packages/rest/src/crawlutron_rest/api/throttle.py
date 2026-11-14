@@ -370,6 +370,7 @@ class Throttle(MeterLedger):
     acheck_admin = atwin(check_admin)
     arecord_admin_failure = atwin(record_admin_failure)
     arecord_admin_success = atwin(record_admin_success)
+    aresidence = atwin(residence)
 
 
 _SHARED = Throttle()

@@ -76,13 +76,13 @@ async def await_or_client_gone[Work](
             await asyncio.gather(task, return_exceptions=True)
 
 
-def _crawl_rejection(error: ValueError) -> DomainError:
+async def _crawl_rejection(error: ValueError) -> DomainError:
     """``/v1/crawl``'s refusal: the shared 422 envelope, counted as a crawl error.
 
     This is the gate's ``reject`` hook, so the metric is part of refusing rather
     than a line a handler can forget once the reject tail stopped being its own.
     """
-    get_metrics().observe_crawl(errors=1)
+    await get_metrics().observe_crawl(errors=1)
     return ValidationRefusal(
         "validation_error",
         "Request validation failed",
@@ -122,7 +122,7 @@ async def crawl(
     active_caller = caller if caller is not None else port.anonymous_caller()
     # One admission for both doors: sync holds a slot for the crawl's life; async
     # persists a durable job row. The whole dispatch stays under the gate.
-    with request_gate("crawl_request_rejected", logger=_logger, reject=_crawl_rejection):
+    async with request_gate("crawl_request_rejected", logger=_logger, reject=_crawl_rejection):
         if payload.output_format:
             # Format is validated pre-branch: the async path fails unseen.
             _serialize_or_reject([], payload.output_format)
@@ -258,7 +258,7 @@ async def _accepted_async(
             delta_context=delta_context,
         ),
     )
-    get_metrics().observe_crawl(accepted=True, caller_id=owner)
+    await get_metrics().observe_crawl(accepted=True, caller_id=owner)
     return JSONResponse(
         status_code=202,
         content={
@@ -291,7 +291,7 @@ async def _run_sync_crawl(
         result = await crawl_awaitable
     else:
         result = await await_or_client_gone(crawl_awaitable, request)
-    record_crawl_completion(
+    await record_crawl_completion(
         result,
         _crawl_started,
         event="crawl_request_completed",

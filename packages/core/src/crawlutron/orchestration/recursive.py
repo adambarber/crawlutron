@@ -212,12 +212,12 @@ async def _resource_admitted_batch(
             metrics.resource_cpu_utilization,
         )
         batch_size = max(1, int(batch_size * scale))
-        metrics.record_throttle()
+        await metrics.record_throttle()
     http_items, browser_items = _take_and_bucket(state.frontier, run.scheduler, batch_size)
     want_http, want_browser = len(http_items), len(browser_items)
     admit_http, admit_browser = await kernel_admit(run.admission, want_http, want_browser)
     if admit_http + admit_browser < batch_size:
-        metrics.record_throttle()
+        await metrics.record_throttle()
         batch_size = admit_http + admit_browser
     selected = http_items[:admit_http] + browser_items[:admit_browser]
     excess = http_items[admit_http:] + browser_items[admit_browser:]

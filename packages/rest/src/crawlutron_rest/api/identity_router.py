@@ -58,7 +58,7 @@ async def map(
 ) -> SiteMapPayload:
     # Request_gate OUTER (the readiness count includes quota-
     # rejected requests), admit INNER -- the one order every door shares.
-    with request_gate("map_request_rejected", logger=logger):
+    async with request_gate("map_request_rejected", logger=logger):
         async with admission.admit(
             caller, payload.policy.limits.max_pages, tracking=tracking, payload=payload
         ):
@@ -83,7 +83,7 @@ async def render(
     settings=settings_dep,
 ) -> UnifiedCrawlResponse:
     requested = len(payload.urls) if payload.urls is not None else 1
-    with request_gate("render_request_rejected", logger=logger, reject=render_rejection):
+    async with request_gate("render_request_rejected", logger=logger, reject=render_rejection):
         async with admission.admit(caller, requested, tracking=tracking):
             # The render door has no policy carrier, so the caller's cookie
             # namespace is bound here -- a keyed harvest never lands in the shared slot.
@@ -119,7 +119,7 @@ async def search(
     admission: AdmissionDep,
     settings=settings_dep,
 ) -> SearchResponse:
-    with request_gate("search_request_rejected", logger=logger):
+    async with request_gate("search_request_rejected", logger=logger):
         async with admission.admit(caller, 0, tracking=tracking):
             return await search_handler(payload, settings=settings, caller=caller)
 

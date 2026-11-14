@@ -407,13 +407,13 @@ def _caller_metrics(tmp_path: Path) -> MetricsStore:
     return MetricsStore(counters=CoordinationCounters(tmp_path / "counters.db"))
 
 
-def test_crawl_metrics_carry_a_caller_dimension(tmp_path):
+async def test_crawl_metrics_carry_a_caller_dimension(tmp_path):
     metrics = _caller_metrics(tmp_path)
 
-    metrics.observe_crawl(caller_id="key_a")
-    metrics.observe_crawl(caller_id="key_a")
-    metrics.observe_crawl(caller_id="key_b")
-    metrics.observe_crawl()
+    await metrics.observe_crawl(caller_id="key_a")
+    await metrics.observe_crawl(caller_id="key_a")
+    await metrics.observe_crawl(caller_id="key_b")
+    await metrics.observe_crawl()
 
     record = metrics.snapshot()
     assert record.caller_counts == {"key_a": 2.0, "key_b": 1.0}
@@ -422,14 +422,14 @@ def test_crawl_metrics_carry_a_caller_dimension(tmp_path):
     assert 'crawler_crawl_requests_by_caller_total{caller="key_b"} 1.0' in exposition
 
 
-def test_search_metrics_have_their_own_caller_family(tmp_path):
+async def test_search_metrics_have_their_own_caller_family(tmp_path):
     """#298: search caller counts live in a search-specific family, not the crawl one.
     A search by the same caller id must not inflate the crawl request count for it.
     """
     metrics = _caller_metrics(tmp_path)
 
-    metrics.observe_crawl(caller_id="key_a")
-    metrics.observe_search(provider="tavily", caller_id="key_a")
+    await metrics.observe_crawl(caller_id="key_a")
+    await metrics.observe_search(provider="tavily", caller_id="key_a")
 
     record = metrics.snapshot()
     assert record.caller_counts == {"key_a": 1.0}

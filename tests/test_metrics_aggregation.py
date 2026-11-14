@@ -3,18 +3,20 @@ worker's numbers used to read as total traffic, and the gate tunes itself from
 them. Counter/gauge is the design: counters sum, gauges (shared cgroup) never.
 """
 
+import asyncio
+
 from crawlutron.runtime.metrics import MetricsStore
 from crawlutron.storage.coordination_counters import CoordinationCounters
 from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from tests._result_builders import engine_result
 
 
-def _observe_one_success(metrics: MetricsStore) -> None:
+async def _observe_one_success(metrics: MetricsStore) -> None:
     """One successful result against `metrics`, named because five tests need exactly
     this and ``results`` is a declared record now -- spelling the two-line call five
     times is five chances for one to drift into a dict and test nothing.
     """
-    metrics.observe_crawl(results=[engine_result("http://example.com/a", "rendered")])
+    await metrics.observe_crawl(results=[engine_result("http://example.com/a", "rendered")])
 
 
 def _two_workers(path):
@@ -23,29 +25,29 @@ def _two_workers(path):
     )
 
 
-def test_counters_are_summed_across_workers(tmp_path):
+async def test_counters_are_summed_across_workers(tmp_path):
     """The defect, stated as a test."""
     first, second = _two_workers(tmp_path / "coordination.db")
 
-    _observe_one_success(first)
-    _observe_one_success(second)
+    await _observe_one_success(first)
+    await _observe_one_success(second)
 
     # Each worker alone saw one result; the endpoint must report two.
     assert "crawler_crawl_results_total 2.0" in first.as_prometheus()
 
 
-def test_a_worker_reports_totals_it_did_not_produce(tmp_path):
+async def test_a_worker_reports_totals_it_did_not_produce(tmp_path):
     """Reading one worker must still show the whole service: otherwise a scraper gets
     a different answer by which worker the load balancer picked -- an answer that
     looks live, worse than a stale one.
     """
     first, second = _two_workers(tmp_path / "coordination.db")
-    second.observe_search(provider="tavily", results=7)
+    await second.observe_search(provider="tavily", results=7)
 
     assert "crawler_search_results_total 7.0" in first.as_prometheus()
 
 
-def test_labelled_series_are_summed_not_overwritten(tmp_path):
+async def test_labelled_series_are_summed_not_overwritten(tmp_path):
     """Strategy and classification counts are labels on one series.
 
     Two workers each using the same strategy must not overwrite each other's
@@ -53,8 +55,8 @@ def test_labelled_series_are_summed_not_overwritten(tmp_path):
     """
     first, second = _two_workers(tmp_path / "coordination.db")
     named = engine_result("http://example.com/a", "rendered", selected_strategy=HTTP_DECLARED_CRAWLER)
-    first.observe_crawl(results=[named])
-    second.observe_crawl(results=[named])
+    await first.observe_crawl(results=[named])
+    await second.observe_crawl(results=[named])
 
     assert (
         f'crawler_strategy_results_total{{strategy="{HTTP_DECLARED_CRAWLER}"}} 2.0' in first.as_prometheus()
@@ -75,44 +77,44 @@ def test_gauges_are_reported_per_worker_and_never_summed(tmp_path):
     assert "crawler_resource_memory_utilization 0.5000" not in text
 
 
-def test_a_worker_with_no_shared_store_still_reports_its_own_counters():
+async def test_a_worker_with_no_shared_store_still_reports_its_own_counters():
     """Single-process operation must not require a database.
 
     The store is what makes the numbers a service total; without it they are
     one process's, which is the whole service in the deployment that ships.
     """
     metrics = MetricsStore()
-    metrics.observe_crawl(results=[engine_result("http://example.com/a", "rendered")])
+    await metrics.observe_crawl(results=[engine_result("http://example.com/a", "rendered")])
 
     assert "crawler_crawl_results_total 1.0" in metrics.as_prometheus()
 
 
-def test_reset_clears_the_shared_store_not_just_local_fields(tmp_path):
+async def test_reset_clears_the_shared_store_not_just_local_fields(tmp_path):
     """A reset that only cleared memory would leave the next read unchanged.
 
     Test isolation depends on it, and so does an operator who resets counters
     after an incident and expects the endpoint to agree.
     """
     first, second = _two_workers(tmp_path / "coordination.db")
-    _observe_one_success(first)
-    _observe_one_success(second)
+    await _observe_one_success(first)
+    await _observe_one_success(second)
 
-    first.reset()
+    await asyncio.to_thread(first.reset)
 
     assert "crawler_crawl_results_total 0.0" in second.as_prometheus()
 
 
-def test_the_counters_read_as_one_record(tmp_path):
+async def test_the_counters_read_as_one_record(tmp_path):
     """The counters read as one typed record handed out by the store, not as a
     pile of per-name accessors: every family lands on a named field built from
     one read of the backing store."""
     store = MetricsStore(counters=CoordinationCounters(tmp_path / "record.db"))
-    store.observe_crawl(
+    await store.observe_crawl(
         results=[engine_result("http://example.com/a", "rendered", selected_strategy=HTTP_DECLARED_CRAWLER)],
         elapsed_ms=12.5,
     )
-    store.observe_search(provider="tavily", results=2, elapsed_ms=3.5)
-    store.record_throttle()
+    await store.observe_search(provider="tavily", results=2, elapsed_ms=3.5)
+    await store.record_throttle()
 
     record = store.snapshot()
 
@@ -146,20 +148,20 @@ def test_the_exposition_reads_the_backing_store_once(tmp_path, monkeypatch):
     assert reads[0] == 1, f"the exposition read the backing store {reads[0]} times"
 
 
-def test_a_late_bind_carries_counters_recorded_before_it(tmp_path):
+async def test_a_late_bind_carries_counters_recorded_before_it(tmp_path):
     """The bind must add to the shared store, never replace what it finds: a worker
     that served requests during boot has counters the new store lacks, and treating a
     non-empty store as propagated drops them invisibly for the process's life.
     """
     metrics = MetricsStore()
-    metrics.observe_crawl(results=[engine_result("http://example.com/before", "rendered")])
+    await metrics.observe_crawl(results=[engine_result("http://example.com/before", "rendered")])
 
     shared = CoordinationCounters(str(tmp_path / "late-bind.db"))
     peer = MetricsStore()
-    peer.bind_counters(shared)
-    peer.observe_crawl(results=[engine_result("http://example.com/peer", "rendered")])
+    await peer.bind_counters(shared)
+    await peer.observe_crawl(results=[engine_result("http://example.com/peer", "rendered")])
 
-    metrics.bind_counters(shared)
+    await metrics.bind_counters(shared)
 
     total = shared.snapshot()["crawl_results_total"]
     assert total == 2.0, f"the pre-bind counter was dropped: {total} instead of 2"

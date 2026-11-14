@@ -87,7 +87,7 @@ async def test_request_gate_capacity_refusal_is_capacity_exceeded():
     helpers.readiness_state = state
     try:
         with pytest.raises(CapacityExceeded) as exc_info:
-            with request_gate("test_request_rejected", logger=logging.getLogger(__name__)):
+            async with request_gate("test_request_rejected", logger=logging.getLogger(__name__)):
                 pass
     finally:
         helpers.readiness_state = original
@@ -99,7 +99,7 @@ async def test_request_gate_value_error_maps_to_validation_envelope():
     from crawlutron.service.errors import ValidationRefusal
 
     with pytest.raises(ValidationRefusal) as exc_info:
-        with request_gate("test_request_rejected", logger=logging.getLogger(__name__)):
+        async with request_gate("test_request_rejected", logger=logging.getLogger(__name__)):
             raise ValueError("nothing crawlable here")
     assert (exc_info.value.status, exc_info.value.code) == (422, "validation_error")
     assert exc_info.value.details == {"errors": [{"msg": "nothing crawlable here"}]}

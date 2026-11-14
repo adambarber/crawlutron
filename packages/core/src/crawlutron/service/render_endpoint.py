@@ -17,7 +17,7 @@ from crawlutron.transport.browser_pool import PooledBrowserWorker, get_browser_p
 _logger = logging.getLogger(__name__)
 
 
-def render_rejection(error: ValueError) -> DomainError:
+async def render_rejection(error: ValueError) -> DomainError:
     """``/v1/render``'s reject envelope: 400, ValueError text as the message.
 
     ``code`` is the machine-readable contract clients branch on, so this is a named

@@ -5,8 +5,8 @@ The service module carries the live ``readiness_state`` global the suites patch.
 
 import logging
 import time
-from collections.abc import Callable, Generator
-from contextlib import contextmanager
+from collections.abc import Awaitable, Callable
+from contextlib import asynccontextmanager
 from contextvars import ContextVar
 
 from crawlutron.models.job_status_response import JobStatusResponse
@@ -28,7 +28,7 @@ def build_job_status(view: JobStatusView) -> JobStatusResponse:
     return JobStatusResponse(**view)
 
 
-def record_crawl_completion(
+async def record_crawl_completion(
     result: ProducerEnvelope,
     started: float,
     *,
@@ -37,7 +37,7 @@ def record_crawl_completion(
     caller_id: str = "",
 ) -> None:
     results = result.get("results", [])
-    get_metrics().observe_crawl(
+    await get_metrics().observe_crawl(
         results=results,
         elapsed_ms=(time.monotonic() - started) * 1000,
         caller_id=caller_id,
@@ -45,13 +45,13 @@ def record_crawl_completion(
     logger.info(event, extra={"url_count": len(results)})
 
 
-@contextmanager
-def request_gate(
+@asynccontextmanager
+async def request_gate(
     event: str,
     *,
     logger: logging.Logger,
-    reject: Callable[[ValueError], DomainError] | None = None,
-) -> Generator[None, None, None]:
+    reject: Callable[[ValueError], Awaitable[DomainError]] | None = None,
+):
     """Admit one readiness-tracked request and own the whole tail: the
     ``begin_request`` admission, the rejection envelope, and the ``end_request``
     release. A fixed-cap refusal happens before admission; re-entry is a defect.
@@ -66,7 +66,8 @@ def request_gate(
             yield
         except ValueError as error:
             logger.warning(event, extra={"error": str(error)})
-            raise (reject(error) if reject is not None else _validation_refusal(error)) from error
+            refused = await reject(error) if reject is not None else _validation_refusal(error)
+            raise refused from error
         finally:
             readiness_state.end_request()
     finally:

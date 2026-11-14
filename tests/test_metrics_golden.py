@@ -129,12 +129,12 @@ _GOLDEN_CALLER_DETAIL = _assemble_golden()
 _GOLDEN_WITHOUT_CALLER_DETAIL = _GOLDEN_CALLER_DETAIL.replace(_CALLER_DETAIL_BLOCK, "")
 
 
-def _observed_store() -> MetricsStore:
+async def _observed_store() -> MetricsStore:
     """One store after a known, deterministic sequence of observations."""
     store = MetricsStore()
     store.resource_memory_utilization = 0.25
     store.resource_cpu_utilization = 0.5
-    store.observe_crawl(
+    await store.observe_crawl(
         accepted=True,
         results=[
             engine_result("http://example.com/a", "rendered", selected_strategy=HTTP_DECLARED_CRAWLER),
@@ -144,21 +144,21 @@ def _observed_store() -> MetricsStore:
         errors=2,
         caller_id="key-1",
     )
-    store.observe_crawl(caller_id="key-1")
-    store.observe_search(provider="tavily", results=5, elapsed_ms=2_500, caller_id="key-1")
-    store.observe_search(provider="brave", results=4, errors=1)
+    await store.observe_crawl(caller_id="key-1")
+    await store.observe_search(provider="tavily", results=5, elapsed_ms=2_500, caller_id="key-1")
+    await store.observe_search(provider="brave", results=4, errors=1)
     store.record_doc_pool_unavailable()
-    store.record_throttle()
+    await store.record_throttle()
     return store
 
 
-def test_the_full_exposition_matches_the_golden():
+async def test_the_full_exposition_matches_the_golden():
     """Any dropped, renamed, reordered or reformatted line is a failure with a diff.
 
     The whole exposition is the golden, both caller_detail states, so the
     labelled families and the HELP/TYPE lines nothing substring-checked are held.
     """
-    store = _observed_store()
+    store = await _observed_store()
     assert store.as_prometheus(caller_detail=True) == _GOLDEN_CALLER_DETAIL
     assert store.as_prometheus(caller_detail=False) == _GOLDEN_WITHOUT_CALLER_DETAIL
 

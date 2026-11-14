@@ -39,11 +39,11 @@ def record_operator_auth_failure(audit, *, actor: str = "anonymous") -> None:
     audit.record_event(actor=actor, action="operator_auth_failure", target_key_id=None, outcome="refused")
 
 
-def _raise_invalid_api_key() -> NoReturn:
+async def _raise_invalid_api_key() -> NoReturn:
     """Shared 401 for any failed /v1/keys credential."""
     from crawlutron.runtime.metrics import get_metrics
 
-    get_metrics().record_auth_refusal()
+    await get_metrics().record_auth_refusal()
     raise AuthRefusal("invalid_api_key", "Unknown or revoked API key")
 
 
@@ -89,13 +89,13 @@ async def get_keys_caller(request: Request) -> CallerIdentity:
     secret = presented_key(request)
     admin_token = key_admin_token(request)
     if not secret or not admin_token:
-        _raise_invalid_api_key()
+        await _raise_invalid_api_key()
     throttle = shared_throttle()
     await throttle.acheck_admin()
     if not constant_time_eq(secret, admin_token):
         await throttle.arecord_admin_failure()
         record_operator_auth_failure(_audit_store(request))
-        _raise_invalid_api_key()
+        await _raise_invalid_api_key()
     await throttle.arecord_admin_success()
     return operator_caller()
 
@@ -116,7 +116,7 @@ async def _caller_from_secret(request: Request, secret: str) -> CallerIdentity:
         # A non-key secret also paces the shared admin bucket (#826): guesses arm
         # the cooldown /v1/keys enforces. Valid keys never reach this refusal arm.
         await throttle.arecord_admin_failure()
-        _raise_invalid_api_key()
+        await _raise_invalid_api_key()
     await throttle.arecord_success(secret, remote)
     return identity_for_key(record)
 

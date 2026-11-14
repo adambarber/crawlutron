@@ -342,14 +342,14 @@ async def _startup_services(_app: FastAPI, settings: CrawlerSettings, database_p
     # with no second pool global.
     await initialize_browser_pool(settings)
     _load_cookie_jar(settings, _app, database_path)
-    _bind_metrics(database_path)
+    await _bind_metrics(database_path)
     from crawlutron_rest.api.throttle import shared_throttle
 
     shared_throttle().bind_shared_db(database_path)
     await _recover_jobs_and_start_sweep(_app, settings)
 
 
-def _bind_metrics(database_path: str) -> None:
+async def _bind_metrics(database_path: str) -> None:
     """Bind the shared-store counters; gauges stay process-local.
 
     /metrics reports the service, not this worker: counters go to the shared
@@ -358,7 +358,7 @@ def _bind_metrics(database_path: str) -> None:
     from crawlutron.runtime.metrics import get_metrics
     from crawlutron.storage.coordination_counters import CoordinationCounters
 
-    get_metrics().bind_counters(CoordinationCounters(database_path))
+    await get_metrics().bind_counters(CoordinationCounters(database_path))
 
 
 async def _recover_jobs_and_start_sweep(_app: FastAPI, settings: CrawlerSettings) -> None:

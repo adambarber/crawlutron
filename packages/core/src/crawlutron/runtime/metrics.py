@@ -5,6 +5,7 @@ without one the counters are a plain process-local dict.
 
 from __future__ import annotations
 
+import asyncio
 import threading
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -12,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.runtime import process_state
+from crawlutron.storage.safe_db import allow_on_loop
 
 if TYPE_CHECKING:
     from crawlutron.storage.coordination_counters import CoordinationCounters
@@ -153,7 +155,7 @@ class MetricsStore:
             series = self._caller_series(self._source(), prefix, caller_id)
             self._add(prefix + series, 1)
 
-    def observe_crawl(
+    async def observe_crawl(
         self,
         *,
         accepted: bool = False,
@@ -181,9 +183,11 @@ class MetricsStore:
                     self._add(_STRATEGY_PREFIX + str(strategy), 1)
         self._add("total_elapsed_ms", elapsed_ms)
         self._add("crawl_errors_total", errors)
-        self._flush_pending()
+        store = self._counters
+        if store is not None:
+            await store.aflush()
 
-    def observe_search(
+    async def observe_search(
         self,
         *,
         provider: str,
@@ -199,21 +203,30 @@ class MetricsStore:
             self._add(_PROVIDER_PREFIX + provider, results)
         self._record_caller_series(_SEARCH_CALLER_PREFIX, caller_id)
         self._add("search_total_elapsed_ms", elapsed_ms)
-        self._flush_pending()
+        store = self._counters
+        if store is not None:
+            await store.aflush()
+
+    async def _commit(self, name: str) -> None:
+        """Record one counter and commit the batch off the event loop."""
+        self._add(name, 1)
+        store = self._counters
+        if store is not None:
+            await store.aflush()
 
     def _record(self, name: str) -> None:
         """Count one event, then commit the batch in one transaction."""
         self._add(name, 1)
         self._flush_pending()
 
-    def record_throttle(self) -> None:
-        self._record("resource_throttle_batches_total")
+    async def record_throttle(self) -> None:
+        await self._commit("resource_throttle_batches_total")
 
     def record_doc_pool_unavailable(self) -> None:
         self._record("extraction_doc_pool_unavailable_total")
 
-    def record_auth_refusal(self) -> None:
-        self._record("auth_refusals_total")
+    async def record_auth_refusal(self) -> None:
+        await self._commit("auth_refusals_total")
 
     def record_key_verify_throttle_trip(self) -> None:
         self._record("key_verify_throttle_trips_total")
@@ -231,7 +244,7 @@ class MetricsStore:
         once this is a store rather than this process's own dict."""
         return self._counters
 
-    def bind_counters(self, counters: CoordinationCounters) -> None:
+    async def bind_counters(self, counters: CoordinationCounters) -> None:
         """Attach shared storage mid-life, carrying over any local counters --
         carried over unconditionally, since a non-empty store can be a sibling's
         and is not evidence this process's counts reached it.
@@ -241,17 +254,22 @@ class MetricsStore:
             return
         carried = self._local
         self._counters = counters
-        for key, value in carried.items():
-            counters.add(key, value)
+        if carried:
+            await counters.a_add_many(carried)
         self._local = {}
 
     def reset(self) -> None:
-        """Zero every counter and gauge in place, including the shared store; a
-        reset that cleared only process memory would leave the endpoint's next read
-        unchanged, but an operator expects agreement after an incident.
+        """Zero every counter and gauge; ``allow_on_loop`` guards the store
+        reset so test teardown on the loop passes ``txn_write``.
         """
         if self._counters is not None:
-            self._counters.reset()
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                self._counters.reset()
+            else:
+                with allow_on_loop():
+                    self._counters.reset()
         else:
             self._local.clear()
         self.resource_memory_utilization = 0.0
@@ -441,25 +459,6 @@ def _exposition(record: CountersSnapshot, store: MetricsStore, *, caller_detail:
             continue
         lines.extend(_family_lines(family, record, store))
     return "\n".join(lines) + "\n"
-
-
-def _gauge_and_throttle_lines(record: CountersSnapshot, store: MetricsStore) -> list[str]:
-    """The gauges (process-local, so still off the store) and throttle counter."""
-    lines = [
-        "# HELP crawler_resource_memory_utilization Current memory usage as a fraction of the "
-        "cgroup memory limit (or host RAM). >1 means over the hard ceiling.",
-        "# TYPE crawler_resource_memory_utilization gauge",
-        f"crawler_resource_memory_utilization {store.resource_memory_utilization:.4f}",
-        "# HELP crawler_resource_cpu_utilization Current CPU utilization as a fraction of the "
-        "cgroup CPU quota (or manual budget). >1 means over budget / being throttled.",
-        "# TYPE crawler_resource_cpu_utilization gauge",
-        f"crawler_resource_cpu_utilization {store.resource_cpu_utilization:.4f}",
-        "# HELP crawler_resource_throttle_batches_total Crawl batches shrunk by resource admission "
-        "control (memory and/or CPU pressure).",
-        "# TYPE crawler_resource_throttle_batches_total counter",
-        f"crawler_resource_throttle_batches_total {record.resource_throttle_batches_total}",
-    ]
-    return lines
 
 
 metrics = MetricsStore()

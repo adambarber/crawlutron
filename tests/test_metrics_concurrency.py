@@ -5,6 +5,7 @@ The local RMW needs one lock; the series check-then-insert must not cross the ca
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import threading
 
@@ -35,39 +36,37 @@ def _hammer(store, work) -> None:
     assert not failures, failures
 
 
-def test_concurrent_local_increments_are_never_lost():
-    """One thousand increments from ten threads must read one thousand."""
-    store = MetricsStore()
-
-    _hammer(store, store.record_throttle)
-
-    total = store.snapshot().resource_throttle_batches_total
-    assert total == THREADS * INCREMENT_EACH, f"lost updates: {total} of {THREADS * INCREMENT_EACH}"
-
-
-def test_concurrent_shared_store_increments_are_never_lost(tmp_path):
-    """The SQL upsert path stays exact under the same hammer."""
-    store = MetricsStore(counters=CoordinationCounters(tmp_path / "shared.db"))
-
-    _hammer(store, store.record_throttle)
-
+def _assert_throttle_total(store) -> None:
+    _hammer(store, lambda: asyncio.run(store.record_throttle()))
     total = store.snapshot().resource_throttle_batches_total
     assert total == THREADS * INCREMENT_EACH
 
 
-def test_concurrent_series_registration_never_crosses_the_cap(tmp_path):
+async def test_concurrent_local_increments_are_never_lost():
+    """One thousand increments from ten threads must read one thousand."""
+    store = MetricsStore()
+    _assert_throttle_total(store)
+
+
+async def test_concurrent_shared_store_increments_are_never_lost(tmp_path):
+    """The SQL upsert path stays exact under the same hammer."""
+    store = MetricsStore(counters=CoordinationCounters(tmp_path / "shared.db"))
+    _assert_throttle_total(store)
+
+
+async def test_concurrent_series_registration_never_crosses_the_cap(tmp_path):
     """Callers registering past the cap while others race must fold, not overflow."""
     counters = CoordinationCounters(tmp_path / "series.db")
     store = MetricsStore(counters=counters)
     for existing in range(255):
-        store.observe_crawl(caller_id=f"seed-{existing}")
+        await store.observe_crawl(caller_id=f"seed-{existing}")
 
     start = threading.Barrier(THREADS)
     arrivals: list[str] = []
 
     def register_new() -> None:
         start.wait()
-        store.observe_crawl(caller_id=f"new-{threading.get_ident()}")
+        asyncio.run(store.observe_crawl(caller_id=f"new-{threading.get_ident()}"))
 
     run_threads(register_new, count=THREADS)
 

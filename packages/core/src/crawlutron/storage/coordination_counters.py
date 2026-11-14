@@ -8,8 +8,9 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 
-from crawlutron.storage.coordination_store import CoordinationStore
+from crawlutron.storage.coordination_store import CoordinationStore, atwin
 from crawlutron.storage.migrations.manifest import StoreSchema
+from crawlutron.storage.safe_db import txn_write
 
 __all__ = ["CoordinationCounters"]
 
@@ -58,12 +59,12 @@ class CoordinationCounters(CoordinationStore):
         if not params:
             return
         with self._lock:
-            self._conn.executemany(
-                "INSERT INTO coordination_counters (name, value) VALUES (?, ?) "
-                "ON CONFLICT(name) DO UPDATE SET value = value + excluded.value",
-                params,
-            )
-            self._conn.commit()
+            with txn_write(self._conn, owner="coordination_counters.add_many"):
+                self._conn.executemany(
+                    "INSERT INTO coordination_counters (name, value) VALUES (?, ?) "
+                    "ON CONFLICT(name) DO UPDATE SET value = value + excluded.value",
+                    params,
+                )
 
     def add(self, name: str, delta: float = 1.0) -> None:
         """Add ``delta`` to ``name``, creating the counter at zero if new.
@@ -99,5 +100,9 @@ class CoordinationCounters(CoordinationStore):
         """Drop every counter. Test isolation and operator reset."""
         with self._lock:
             self._pending = None
-            self._conn.execute("DELETE FROM coordination_counters")
-            self._conn.commit()
+            with txn_write(self._conn, owner="coordination_counters.reset"):
+                self._conn.execute("DELETE FROM coordination_counters")
+
+    aflush = atwin(flush)
+    a_add_many = atwin(add_many)
+    a_reset = atwin(reset)

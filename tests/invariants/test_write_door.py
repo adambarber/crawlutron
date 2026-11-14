@@ -22,7 +22,6 @@ _EXEMPT_MODULES = frozenset(
     {
         "packages/core/src/crawlutron/storage/admin_audit_store.py": "awaiting the admin-audit arc",
         "packages/core/src/crawlutron/storage/caller_key_store.py": "awaiting the caller-key arc",
-        "packages/core/src/crawlutron/storage/coordination_counters.py": "awaiting the counters arc",
         "packages/core/src/crawlutron/storage/coordination_cookies.py": "awaiting the cookies arc",
         "packages/core/src/crawlutron/storage/coordination_sync_slots.py": "awaiting the sync-slots arc",
         "packages/core/src/crawlutron/storage/job_store.py": "awaiting the job-store arc",

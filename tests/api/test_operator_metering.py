@@ -27,7 +27,7 @@ async def test_metrics_exhausted_bucket_still_serves_base_exposition():
     /metrics stays 200 with base families only."""
     throttle = shared_throttle()
     for _ in range(Throttle.MAX_FAILURES):
-        throttle.record_admin_failure()
+        await throttle.arecord_admin_failure()
     async with serve(fresh_app()) as client:
         response = await client.get("/metrics")
         assert response.status_code == 200, response.text

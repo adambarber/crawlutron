@@ -45,7 +45,7 @@ async def map_site(
         settings=active_settings,
         shutdown_event=shutdown_event,
     )
-    record_crawl_completion(
+    await record_crawl_completion(
         result,
         _crawl_started,
         event="map_request_completed",

@@ -80,11 +80,11 @@ async def test_admin_guess_is_counted(tmp_path):
     await _refused_keys_request("admin_auth_failures", tmp_path)
 
 
-def test_admin_failure_recording_is_counted():
+async def test_admin_failure_recording_is_counted():
     """The admin bucket increment in the throttle bumps its counter."""
 
     throttle = Throttle()
-    throttle.record_admin_failure()
+    await throttle.arecord_admin_failure()
     assert _meter_snapshot()["admin_auth_failures"] == 1.0
 
 

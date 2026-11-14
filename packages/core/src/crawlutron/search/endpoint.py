@@ -44,14 +44,14 @@ async def search(
     try:
         results = await provider.search(payload.query, limit, float(settings.search_timeout_seconds))
     except SearchProviderError as error:
-        get_metrics().observe_search(provider=provider.name, errors=1, caller_id=caller_id)
+        await get_metrics().observe_search(provider=provider.name, errors=1, caller_id=caller_id)
         logger.warning(
             "search_request_provider_error",
             extra={"provider": provider.name, "error": str(error)},
         )
         raise DomainProviderError(str(error)) from error
     elapsed_ms = (time.monotonic() - started) * 1000
-    get_metrics().observe_search(
+    await get_metrics().observe_search(
         provider=provider.name, results=len(results), elapsed_ms=elapsed_ms, caller_id=caller_id
     )
     logger.info(

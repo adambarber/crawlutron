@@ -47,7 +47,7 @@ def _denied_by_batch_cap() -> CrawlerSettings:
 async def test_gate_holds_exactly_one_slot_for_the_body_and_releases_it():
     before = _active()
     held: list[int] = []
-    with request_gate("test_request_rejected", logger=logger):
+    async with request_gate("test_request_rejected", logger=logger):
         held.append(_active())
     assert held == [before + 1]
     assert _active() == before
@@ -61,7 +61,7 @@ async def test_gate_releases_the_slot_when_the_body_is_rejected(caplog):
     """
     before = _active()
     with caplog.at_level(logging.WARNING, logger=logger.name), pytest.raises(DomainError) as exc_info:
-        with request_gate("test_request_rejected", logger=logger):
+        async with request_gate("test_request_rejected", logger=logger):
             raise ValueError("nothing crawlable here")
     assert exc_info.value.status == 422
     assert (exc_info.value.code, exc_info.value.message, exc_info.value.details) == (
@@ -76,8 +76,9 @@ async def test_gate_releases_the_slot_when_the_body_is_rejected(caplog):
 async def test_gate_releases_the_slot_when_the_body_fails_outright():
     """A non-validation failure is not converted, and is still released."""
     before = _active()
-    with pytest.raises(RuntimeError), request_gate("test_request_rejected", logger=logger):
-        raise RuntimeError("boom")
+    with pytest.raises(RuntimeError):
+        async with request_gate("test_request_rejected", logger=logger):
+            raise RuntimeError("boom")
     assert _active() == before
 
 
@@ -156,7 +157,7 @@ async def test_request_gate_refuses_requests_over_the_cap(monkeypatch):
     monkeypatch.setattr(main_helpers, "readiness_state", state)
 
     with pytest.raises(DomainError) as exc_info:
-        with request_gate("test_request_rejected", logger=logger):
+        async with request_gate("test_request_rejected", logger=logger):
             pass
     assert exc_info.value.status == 503
     assert exc_info.value.code == "capacity_exceeded"
@@ -169,7 +170,7 @@ async def test_request_gate_admits_requests_under_the_cap(monkeypatch):
     assert state.begin_request()
     monkeypatch.setattr(main_helpers, "readiness_state", state)
 
-    with request_gate("test_request_rejected", logger=logger):
+    async with request_gate("test_request_rejected", logger=logger):
         pass
     assert state.snapshot().active_requests == 1
 
@@ -182,7 +183,7 @@ async def test_request_gate_is_unbounded_without_a_cap(monkeypatch):
     monkeypatch.setattr(main_helpers, "readiness_state", state)
 
     # No 503: unpinned states never refuse, and the gate's own slot is released.
-    with request_gate("test_request_rejected", logger=logger):
+    async with request_gate("test_request_rejected", logger=logger):
         pass
     assert state.snapshot().active_requests == 10
 

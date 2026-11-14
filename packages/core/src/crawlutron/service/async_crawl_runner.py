@@ -232,7 +232,7 @@ async def _crawl_and_build_response(
         spill_store=spill_store,
     )
     result["request_id"] = request_id
-    record_crawl_completion(
+    await record_crawl_completion(
         result,
         _crawl_started,
         event="crawl_request_completed",

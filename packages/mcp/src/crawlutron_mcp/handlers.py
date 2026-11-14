@@ -201,7 +201,7 @@ async def _admit_tool(
     # request_gate OUTER, admit INNER: the count takes the slot first, so a quota-
     # rejected request holds it only for the brief admission (the HTTP door order).
     try:
-        with request_gate("mcp_request_rejected", logger=_logger):
+        async with request_gate("mcp_request_rejected", logger=_logger):
             async with port.admit(caller, pages, tracking=tracking, payload=payload):
                 return await work()
     except DomainError as error:

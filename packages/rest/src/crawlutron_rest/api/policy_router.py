@@ -55,7 +55,7 @@ async def policy_suggestions_endpoint(
     if not caller.authenticated:
         raise http_error(401, "invalid_api_key", "Unauthenticated: an API key is required")
     owner = None if is_operator(request) else caller.caller_id
-    with request_gate("policy_suggestions_request_rejected", logger=logger):
+    async with request_gate("policy_suggestions_request_rejected", logger=logger):
         async with admission.admit(caller, 0, tracking=tracking):
             return await policy_suggestions_handler(result_store=result_store, settings=settings, owner=owner)
 
