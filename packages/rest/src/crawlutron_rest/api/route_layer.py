@@ -71,7 +71,7 @@ async def operator_guard(request: Request) -> bool:
         await throttle.arecord_admin_success()
     else:
         await throttle.arecord_admin_failure()
-        record_operator_auth_failure(getattr(getattr(request.app, "state", None), "audit_store", None))
+        await record_operator_auth_failure(getattr(getattr(request.app, "state", None), "audit_store", None))
     request.state.caller = matched
     return matched
 

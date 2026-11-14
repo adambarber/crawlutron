@@ -30,13 +30,18 @@ from crawlutron_rest.api.credentials import constant_time_eq, is_operator, key_a
 from crawlutron_rest.api.throttle import shared_throttle
 
 
-def record_operator_auth_failure(audit, *, actor: str = "anonymous") -> None:
-    """One durable audit row per failed operator authentication (#697); the #696
-    counter stays the metric, this the durable record -- never both wired.
-    No-op when no audit store is wired (tests)."""
+async def record_operator_auth_failure(audit, *, actor: str = "anonymous") -> None:
+    """One durable audit row per failed operator auth (#697). No-op when
+    no audit store is wired. Runs off the loop via arecord_event so
+    txn_write's off-loop assertion never trips on an async handler."""
     if audit is None:
         return
-    audit.record_event(actor=actor, action="operator_auth_failure", target_key_id=None, outcome="refused")
+    await audit.arecord_event(
+        actor=actor,
+        action="operator_auth_failure",
+        target_key_id=None,
+        outcome="refused",
+    )
 
 
 async def _raise_invalid_api_key() -> NoReturn:
@@ -94,7 +99,7 @@ async def get_keys_caller(request: Request) -> CallerIdentity:
     await throttle.acheck_admin()
     if not constant_time_eq(secret, admin_token):
         await throttle.arecord_admin_failure()
-        record_operator_auth_failure(_audit_store(request))
+        await record_operator_auth_failure(_audit_store(request))
         await _raise_invalid_api_key()
     await throttle.arecord_admin_success()
     return operator_caller()

@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from crawlutron.storage.coordination_store import CoordinationStore, atwin
 from crawlutron.storage.migrations.manifest import StoreSchema
+from crawlutron.storage.safe_db import in_txn, txn_write
 
 #: The trail's size bound. Key-admin actions are operator-paced, so the
 #: population is bounded by admin activity; 10k rows is under a megabyte.
@@ -56,15 +57,15 @@ class AdminAuditStore(CoordinationStore):
     def record_event(self, *, actor: str, action: str, target_key_id: str | None, outcome: str) -> None:
         """Append one event, then roll retention: the append is the roll point."""
         with self._lock:
-            self._conn.execute(
-                "INSERT INTO key_admin_events (sequence, recorded_at, actor, action,"
-                " target_key_id, outcome)"
-                " VALUES ((SELECT COALESCE(MAX(sequence), 0) + 1 FROM key_admin_events),"
-                " ?, ?, ?, ?, ?)",
-                (self._clock(), actor, action, target_key_id, outcome),
-            )
-            self._roll()
-            self._conn.commit()
+            with txn_write(self._conn, owner="admin_audit_store.record_event"):
+                self._conn.execute(
+                    "INSERT INTO key_admin_events (sequence, recorded_at, actor, action,"
+                    " target_key_id, outcome)"
+                    " VALUES ((SELECT COALESCE(MAX(sequence), 0) + 1 FROM key_admin_events),"
+                    " ?, ?, ?, ?, ?)",
+                    (self._clock(), actor, action, target_key_id, outcome),
+                )
+                self._roll()
 
     def list_events(self, *, limit: int | None = None) -> list[AdminAuditEvent]:
         """The retained trail, newest first; a bounded page by default."""
@@ -85,15 +86,17 @@ class AdminAuditStore(CoordinationStore):
         """Drop rows past the age window or beyond the cap, inside the append."""
         now = self._clock()
         if self._retention_seconds > 0:
+            with in_txn(self._conn):
+                self._conn.execute(
+                    "DELETE FROM key_admin_events WHERE recorded_at < ?",
+                    (now - self._retention_seconds,),
+                )
+        with in_txn(self._conn):
             self._conn.execute(
-                "DELETE FROM key_admin_events WHERE recorded_at < ?",
-                (now - self._retention_seconds,),
+                "DELETE FROM key_admin_events WHERE sequence NOT IN"
+                " (SELECT sequence FROM key_admin_events ORDER BY sequence DESC LIMIT ?)",
+                (self._max_events,),
             )
-        self._conn.execute(
-            "DELETE FROM key_admin_events WHERE sequence NOT IN"
-            " (SELECT sequence FROM key_admin_events ORDER BY sequence DESC LIMIT ?)",
-            (self._max_events,),
-        )
 
     arecord_event = atwin(record_event)
     alist_events = atwin(list_events)

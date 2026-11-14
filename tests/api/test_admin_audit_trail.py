@@ -128,13 +128,13 @@ async def test_retention_sweep_drops_lapsed_rows_at_the_roll_point(tmp_path):
     """The append rolls retention: rows beyond the bound or older than the window
     are dropped at the next append, never on the read path."""
     audit = _audit(tmp_path)
-    audit.record_event(actor="admin", action="key_mint", target_key_id="key_old", outcome="granted")
+    await audit.arecord_event(actor="admin", action="key_mint", target_key_id="key_old", outcome="granted")
     # Backdate the row past the retention window directly at the stored table.
     with closing(sqlite3.connect(tmp_path / "audit.db")) as conn:
         conn.execute("UPDATE key_admin_events SET recorded_at = 0.0")
         conn.commit()
 
-    audit.record_event(actor="admin", action="key_mint", target_key_id="key_new", outcome="granted")
+    await audit.arecord_event(actor="admin", action="key_mint", target_key_id="key_new", outcome="granted")
 
     assert [event.target_key_id for event in audit.list_events()] == ["key_new"]
 
@@ -143,7 +143,9 @@ async def test_the_event_cap_bounds_the_trail_under_a_mint_flood(tmp_path):
     """Worst-case ledger is the capacity cap: the oldest rows leave at the roll."""
     audit = AdminAuditStore(tmp_path / "audit.db", max_events=5)
     for index in range(8):
-        audit.record_event(actor="admin", action="key_mint", target_key_id=f"key_{index}", outcome="granted")
+        await audit.arecord_event(
+            actor="admin", action="key_mint", target_key_id=f"key_{index}", outcome="granted"
+        )
 
     events = audit.list_events()
     assert len(events) == 5
@@ -166,16 +168,16 @@ async def test_the_store_method_writes_flow_through_the_wired_audit_store(tmp_pa
     audit = _audit(tmp_path)
     keys.attach_audit(audit)
 
-    issued = keys.issue_key("agent-a")
-    keys.revoke_key(issued.key_id)
+    issued = await keys.aissue_key("agent-a")
+    await keys.arevoke_key(issued.key_id)
 
     actions = [event.action for event in audit.list_events()]
     assert actions == ["key_revoke", "key_mint"]
 
 
-def test_the_401_raiser_records_the_audit_event(tmp_path):
+async def test_the_401_raiser_records_the_audit_event(tmp_path):
     """The auth failure records through the store, one site, from the raiser."""
     audit = _audit(tmp_path)
-    caller_auth.record_operator_auth_failure(audit, actor="anonymous")
+    await caller_auth.record_operator_auth_failure(audit, actor="anonymous")
 
     assert [event.action for event in audit.list_events()] == ["operator_auth_failure"]
