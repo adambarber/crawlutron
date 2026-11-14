@@ -6,7 +6,6 @@ The caller-auth CORE (quota law, admit, the cookie-namespace binding) lives in
 
 from __future__ import annotations
 
-import secrets
 from typing import NoReturn, TypedDict
 
 from fastapi import Request
@@ -27,24 +26,8 @@ from crawlutron.service.caller_auth import (
     resolve_page_limit,
 )
 from crawlutron.service.errors import AuthRefusal
+from crawlutron_rest.api.credentials import constant_time_eq, is_operator, key_admin_token, presented_key
 from crawlutron_rest.api.throttle import shared_throttle
-
-
-def _presented_key(request: Request) -> str | None:
-    """The caller's key from the header or Bearer token, if one was sent."""
-    header = request.headers.get("x-api-key", "").strip()
-    if header:
-        return header
-    scheme, _, token = request.headers.get("authorization", "").partition(" ")
-    if scheme.lower() == "bearer" and token.strip():
-        return token.strip()
-    return None
-
-
-def presented_key(request: Request) -> str | None:
-    """The one credential-parsing funnel's public door: every guard that extracts
-    a presented secret reads it here, never re-parses headers itself."""
-    return _presented_key(request)
 
 
 def record_operator_auth_failure(audit, *, actor: str = "anonymous") -> None:
@@ -97,42 +80,19 @@ def quota_denials() -> dict[int | str, dict[str, object]]:
     return {k: dict(v) for k, v in QUOTA_DENIAL.items()}
 
 
-def key_admin_token(request: Request) -> str:
-    """The configured operator token, or '' when unset -- ONE home: the settings
-    object stashed on app.state (#666). No env fallback, no memo: a memoized
-    second home authenticated a rotated-away token for the process lifetime.
-    """
-    app = request.scope.get("app")
-    state = getattr(app, "state", None) if app is not None else None
-    settings = getattr(state, "crawler_settings", None) if state is not None else None
-    token = getattr(settings, "key_admin_token", None)
-    return token if isinstance(token, str) else ""
-
-
-def _constant_time_eq(secret: str, token: str) -> bool:
-    """Constant-time compare that tolerates non-ASCII str.
-
-    ``secrets.compare_digest`` raises TypeError on non-ASCII str, which would
-    500 a keys-door denial; encoding both sides to bytes fixes it.
-    """
-    return (
-        bool(secret) and bool(token) and secrets.compare_digest(secret.encode("utf-8"), token.encode("utf-8"))
-    )
-
-
 async def get_keys_caller(request: Request) -> CallerIdentity:
     """FastAPI dependency: the operator token is the only /v1/keys caller.
 
     A caller key never enters; an unconfigured token seals it (fail closed).
     Failed guesses meter through the shared throttle's ``admin`` bucket (#659).
     """
-    secret = _presented_key(request)
+    secret = presented_key(request)
     admin_token = key_admin_token(request)
     if not secret or not admin_token:
         _raise_invalid_api_key()
     throttle = shared_throttle()
     await throttle.acheck_admin()
-    if not _constant_time_eq(secret, admin_token):
+    if not constant_time_eq(secret, admin_token):
         await throttle.arecord_admin_failure()
         record_operator_auth_failure(_audit_store(request))
         _raise_invalid_api_key()
@@ -166,7 +126,7 @@ async def get_caller_identity(request: Request) -> CallerIdentity:
 
     The configured operator token resolves to the operator identity (fail-closed
     when unset); any other presented secret rides the keyed path unchanged."""
-    secret = _presented_key(request)
+    secret = presented_key(request)
     if not secret:
         return anonymous_caller()
     if verify_admin_secret(secret, request):
@@ -186,20 +146,7 @@ def _audit_store(request: Request):
 def verify_admin_secret(secret: str, request: Request) -> bool:
     """Constant-time admin-token check, public for the layer's soft gate."""
     admin_token = key_admin_token(request)
-    return bool(admin_token) and _constant_time_eq(secret, admin_token)
-
-
-def is_operator(request: Request) -> bool:
-    """Whether the presented credential is the configured operator token.
-
-    Soft gate, not a 401: ``/metrics`` keeps its base exposition loopback-accessible
-    and only per-caller detail needs the token (constant-time compare).
-    """
-    secret = _presented_key(request)
-    if not secret:
-        return False
-    admin_token = key_admin_token(request)
-    return bool(admin_token) and _constant_time_eq(secret, admin_token)
+    return bool(admin_token) and constant_time_eq(secret, admin_token)
 
 
 __all__ = [
@@ -217,7 +164,6 @@ __all__ = [
     "get_keys_caller",
     "identity_for_key",
     "is_operator",
-    "key_admin_token",
     "operator_caller",
     "presented_key",
     "quota_denials",

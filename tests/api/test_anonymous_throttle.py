@@ -413,10 +413,9 @@ async def test_operator_token_health_still_meters():
         assert refused.json()["code"] == "anonymous_throttled"
 
 
-async def test_credentialed_caller_route_still_burns_ip_bucket():
-    """#914 row 4: caller-guarded routes are NOT un-metered by a credential -- the
-    IP bucket is the request-count backstop, so a credentialed request to a
-    non-/metrics caller-keyed path still consumes an anonymous unit."""
+async def test_operator_token_on_a_caller_route_still_burns_ip_bucket():
+    """#914 row 4 / #986: the OPERATOR token is not a caller key, so it buys no
+    exemption -- a non-/metrics request carrying it still consumes an anonymous unit."""
     process_state_reset()
     await _call_through("/v1/crawl", {"x-api-key": "test-admin-token"})
     assert shared_throttle().residence() == 1

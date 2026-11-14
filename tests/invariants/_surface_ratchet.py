@@ -117,7 +117,8 @@ DECLARED_SURFACE_RATCHET = {
     # inline create_app assembly is the library-mode entrance now.
     "packages/core/src/crawlutron/service/store_bootstrap.py": (2, 1),
     # #849: the core moved to service/caller_auth; Request plumbing stays api.
-    "packages/rest/src/crawlutron_rest/api/caller_auth.py": (11, 9),
+    "packages/rest/src/crawlutron_rest/api/caller_auth.py": (8, 6),
+    "packages/rest/src/crawlutron_rest/api/credentials.py": (4, 4),
     "packages/core/src/crawlutron/service/caller_concurrency.py": (2, 2),
     # #674 raised 1,1 -> 2,2: CrawlRefusalError is the typed refusal carrier the
     # sweep's deactivation arm reads (reason as an enum member, not boundary text).

@@ -7,7 +7,6 @@ externally-reachable surface and every pre-auth key-verify path.
 from __future__ import annotations
 
 import hashlib
-import secrets
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +17,7 @@ from crawlutron.service.errors import DomainError, KeyVerifyThrottled
 from crawlutron.service.meter_ledger import MeterLedger, register_shared_meter
 from crawlutron.storage.coordination_store import atwin
 from crawlutron.storage.coordination_throttle_store import CoordinationThrottleStore
+from crawlutron_rest.api.credentials import is_operator, presented_key
 
 __all__ = [
     "ANON_MAX_REQUESTS",
@@ -393,21 +393,13 @@ async def throttle_anonymous_surfaces(request, call_next):
     path = request.url.path
     if _verified(request):
         return await call_next(request)
-    if path in _OPERATOR_METERED_EXACT and _is_operator(request):
+    if path in _OPERATOR_METERED_EXACT and is_operator(request):
         return await call_next(request)
     try:
         await shared_throttle().acheck_anon(_remote(request))
     except Throttled as t:
         return _refuse(path, t)
     return await call_next(request)
-
-
-def _presented_key(request) -> str | None:
-    for name in ("x-api-key", "authorization"):
-        value = request.headers.get(name, "").strip()
-        if value:
-            return value
-    return None
 
 
 def _request_state(request) -> object | None:
@@ -430,28 +422,7 @@ def _verified(request) -> bool:
     store = getattr(state, "caller_key_store", None)
     if store is None:
         return False
-    return store.key_present(_presented_key(request) or "")
-
-
-def _is_operator(request) -> bool:
-    """Whether the presented secret is the operator token.
-
-    Inlined to avoid importing caller_auth (which imports shared_throttle
-    from this module). Constant-time compare; /metrics regression skip.
-    """
-    state = _request_state(request)
-    if state is None:
-        return False
-    settings = getattr(state, "crawler_settings", None)
-    if settings is None:
-        return False
-    token = getattr(settings, "key_admin_token", None)
-    if not token or not isinstance(token, str):
-        return False
-    presented = _presented_key(request)
-    if not presented:
-        return False
-    return secrets.compare_digest(presented.encode("utf-8"), token.encode("utf-8"))
+    return store.key_present(presented_key(request) or "")
 
 
 def _remote(request) -> str | None:
