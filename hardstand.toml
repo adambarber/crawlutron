@@ -14,6 +14,9 @@ base_branch = "main"
 # the child's CWD = the workspace), so tool-resolution via shutil.which and
 # bare `python`/`git` find the venv's tools (#557).
 PATH = ".venv/bin:/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"
+# Workspace source packages first so hardstand exec/run resolves the workspace
+# tree, not the shared venv's editable install pointing at the main checkout.
+PYTHONPATH = "packages/core/src:packages/mcp/src:packages/rest/src:packages/safe-url/src:packages/sdk/src"
 
 [[resource]]
 kind          = "worktree"
