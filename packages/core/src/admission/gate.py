@@ -301,7 +301,8 @@ class AdmissionGate:
         if cold_probe_exhausted and wanted_fits:
             return Decision(kind=DecisionKind.PARK, scale=scale_map[LaneId.GENERAL], cold=cold)
 
-        # Floor law: per-lane floors (clamped by want), a swept floor still grants 1.
+        # Floor law: floors are clamped by want and by the reconciled pool — a lane whose
+        # unit no longer fits after a larger lane draws first may still get 0.
         floor_global = max(1, self._ramp // self._pacing.floor_fraction.value)
         lane_spread = max(1, len(wanted))
         floor_for = {
