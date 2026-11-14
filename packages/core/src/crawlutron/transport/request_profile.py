@@ -16,9 +16,9 @@ from safe_url.normalized_url import NormalizedUrl
 from crawlutron.admission.credentials import apply_credentials as apply_credentials
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.request_profile_record import RequestProfileRecord
+from crawlutron.safety.header_authority import service_identity_headers
 from crawlutron.transport import cookie_jar
 from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE
-from crawlutron.vocabulary.identity import DEFAULT_USER_AGENT
 from crawlutron.vocabulary.strategies import HTTP_CFFI_IMPERSONATE
 
 
@@ -136,14 +136,6 @@ def select_fingerprint(profile: RequestProfileRecord, url: NormalizedUrl) -> dic
     return out
 
 
-def _accept_encoding() -> str:
-    """The encodings this process will actually decode -- a constant, since every
-    one is a declared dependency. It once declined ``br`` on a probe, but a server
-    returning a body this process refuses to decode fails a chosen crawl.
-    """
-    return "gzip, deflate, br"
-
-
 def headers_for_strategy(
     strategy: str,
     policy: CrawlPolicy,
@@ -152,15 +144,7 @@ def headers_for_strategy(
     profile: RequestProfileRecord | None = None,
 ) -> dict[str, str]:
     resolved_profile = profile if profile is not None else policy.request_profile
-    headers = {
-        "User-Agent": DEFAULT_USER_AGENT,
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": _accept_encoding(),
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "none",
-    }
+    headers = service_identity_headers()
     user_agent_family = str(resolved_profile.get("user_agent_family", "generic_crawler"))
     is_browser_like = strategy == HTTP_CFFI_IMPERSONATE or user_agent_family == "desktop_chrome"
     # Fingerprint injection/rotation: deterministic per-host selection so a single

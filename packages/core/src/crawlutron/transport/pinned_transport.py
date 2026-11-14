@@ -15,6 +15,7 @@ import httpx
 from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.models.json_value import JsonValue
+from crawlutron.safety.header_authority import survives_cross_origin
 from crawlutron.transport import pinned_dns as _dns
 from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE, global_cookie_jar
 
@@ -148,10 +149,6 @@ MAX_REDIRECT_HOPS = 5
 _REDIRECT_STATUSES = frozenset((301, 302, 303, 307, 308))
 
 
-# Headers that must never survive a cross-host redirect hop.
-_CREDENTIAL_HEADERS = frozenset({"cookie", "authorization", "proxy-authorization"})
-
-
 async def redirect_target(
     current_url: NormalizedUrl,
     request_headers: dict[str, str],
@@ -182,12 +179,12 @@ async def redirect_target(
 
 
 async def _stripped_credentials(headers: dict[str, str], new_url: NormalizedUrl) -> dict[str, str]:
-    """Drop caller credentials, then attach the new origin's own jar cookies.
+    """Drop caller credentials, then attach the new origin's jar cookies.
 
-    Caller-supplied credentials never cross origins; the jar read is SQLite
-    under the store lock, so this is awaited, never on the loop.
+    Only service-owned identity headers cross an origin; a caller name such as
+    ``X-Api-Key`` is dropped, and the jar read is awaited off the loop.
     """
-    stripped = {k: v for k, v in headers.items() if k.lower() not in _CREDENTIAL_HEADERS}
+    stripped = {k: v for k, v in headers.items() if survives_cross_origin(k)}
     jar_cookie = await global_cookie_jar().acookie_header_for(new_url, namespace=COOKIE_NAMESPACE.get())
     if jar_cookie:
         stripped["Cookie"] = jar_cookie

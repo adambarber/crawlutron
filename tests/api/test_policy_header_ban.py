@@ -132,6 +132,28 @@ def test_framing_refusal_names_the_header_and_the_reason(header):
     assert header in message, message
 
 
+#: Forwarding metadata and hop-by-hop names the name-only table used to accept.
+#: The owner refuses these by class and by the ``x-forwarded-*`` prefix.
+NEWLY_REFUSED = (
+    ("Via", "forwarding metadata; the hop's path is not the caller's to describe"),
+    ("Forwarded", "forwarding metadata; the hop's path is not the caller's to describe"),
+    ("X-Forwarded-Proto", "forwarding metadata; the hop's path is not the caller's to describe"),
+    ("Proxy-Connection", "hop-by-hop header; the connection is not the caller's to describe"),
+    ("Expect", "hop-by-hop header; the connection is not the caller's to describe"),
+    ("X-Forwarded-Port", "forwarding metadata; the hop's path is not the caller's to describe"),
+)
+
+
+@pytest.mark.parametrize(("header", "reason"), NEWLY_REFUSED)
+def test_newly_refused_headers_are_rejected_at_the_policy_chokepoint(header, reason):
+    """RED 1: these names were accepted by the name-only table; the owner refuses
+    them by hop-by-hop class and by the ``x-forwarded-*`` prefix."""
+    from crawlutron.models.crawl_policy import CrawlPolicy
+
+    with pytest.raises(ValidationError, match=reason):
+        CrawlPolicy(headers={header: "whatever"})
+
+
 def test_a_smuggling_attempt_is_refused_whole():
     """The realistic attack shape: the two framing headers that disagree.
 

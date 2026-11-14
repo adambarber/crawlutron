@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, ClassVar, cast
+from typing import Annotated, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 from pydantic.json_schema import JsonDict
@@ -19,6 +19,7 @@ from crawlutron.models.crawl_strategy import CrawlStrategy
 from crawlutron.models.credential import Credential
 from crawlutron.models.discovery_config import DiscoveryConfig
 from crawlutron.models.request_profile_record import RequestProfileRecord
+from crawlutron.safety.header_authority import refusal_reason
 from crawlutron.safety.header_values import reject_injectable_header_name, reject_injectable_header_values
 from crawlutron.vocabulary.limits import MAX_CRAWL_STRATEGIES, MAX_HEADER_VALUE_BYTES
 
@@ -30,28 +31,6 @@ __all__ = ["CrawlPolicy", "POLICY_SCHEMA_VERSION"]
 
 class CrawlPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    # See the module preamble: why each name is rejected, in three kinds.
-    _BANNED_HEADERS: ClassVar[dict[str, str]] = {
-        "if-none-match": "conditional headers belong to the validators map",
-        "if-modified-since": "conditional headers belong to the validators map",
-        "cookie": "the cookie jar owns Cookie, and request_profile.cookies is its sanctioned second door; "
-        "a raw header bypasses both",
-        "host": "Host is owned by the pinned-request chokepoint and is never forwarded verbatim",
-        "proxy-authorization": "proxy credentials are not a crawl input",
-        "authorization": "the origin-scoped credential door is policy.credentials; a raw header bypasses "
-        "its origin scoping and redirect re-scoping",
-        "x-forwarded-for": "origin-side identity headers must not be caller-controlled",
-        "x-forwarded-host": "origin-side identity headers must not be caller-controlled",
-        "x-real-ip": "origin-side identity headers must not be caller-controlled",
-        "content-length": "body framing belongs to the HTTP client, not to a crawl input",
-        "transfer-encoding": "body framing belongs to the HTTP client, not to a crawl input",
-        "connection": "hop-by-hop header; the connection is not the caller's to describe",
-        "te": "hop-by-hop header; transfer coding is negotiated per connection",
-        "trailer": "hop-by-hop header; trailers are framed by the client, not declared here",
-        "upgrade": "hop-by-hop header; protocol upgrade is not a crawl input",
-        "keep-alive": "hop-by-hop header; connection persistence is the client's decision",
-    }
-
     schema_version: Annotated[
         str,
         Field(
@@ -236,19 +215,10 @@ class CrawlPolicy(BaseModel):
     @field_validator("headers")
     @classmethod
     def _reject_banned_headers(cls, value: dict[str, str]) -> dict[str, str]:
-        """Reject chokepoint-bypassing and credential header names, anchored on
-        ``CrawlPolicy`` so every endpoint inherits the ban from one site.
-        """
+        """Reject chokepoint-bypassing and credential header names, decided by
+        ``crawlutron.safety.header_authority`` from one site."""
         for key in value:
-            lowered = key.strip().lower()
-            if lowered == "authorization":
-                # Authorization is a credential: it must go through
-                # policy.credentials, origin-scoped and redirect re-scoped.
-                raise ValueError(
-                    f"header '{key}' is not permitted in policy.headers: Authorization must be sent "
-                    "through policy.credentials, which scopes it to one origin"
-                )
-            reason = cls._BANNED_HEADERS.get(lowered)
+            reason = refusal_reason(key)
             if reason is not None:
                 raise ValueError(f"header '{key}' is not permitted in policy.headers: {reason}")
         return value
