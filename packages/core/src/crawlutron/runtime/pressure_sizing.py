@@ -123,15 +123,21 @@ def doc_worker_count() -> int:
         return _DEFAULT_DOC_WORKERS
 
 
-def derive_browser_pool_size(limit_bytes: int | None = None) -> int:
-    """Browser-pool size *for this process* from the cgroup memory limit: honors
-    CRAWLUTRON_BROWSER_POOL_SIZE, else derives this process's share up to
-    BROWSER_RAM_FRACTION, falling back to 1; the cap is a fleet total, not per process.
+def derive_browser_pool_size(limit_bytes: int | None = None, *, worker_index: int | None = None) -> int:
+    """Browser-pool size for this process from cgroup memory limit or explicit fleet size.
+
+    Explicit size is a fleet budget distributed across workers without exceeding total.
     """
     workers = worker_count()
     explicit = get_env_int("CRAWLUTRON_BROWSER_POOL_SIZE", 0, lo=0)
     if explicit > 0:
-        return max(1, explicit // workers)
+        if explicit < workers:
+            raise ValueError(f"explicit browser pool size {explicit} is less than worker count {workers}")
+        base = explicit // workers
+        remainder = explicit % workers
+        if worker_index is None:
+            return base
+        return base + (1 if worker_index < remainder else 0)
     limit = limit_bytes if limit_bytes is not None else read_memory_stats().total_bytes
     if limit and limit > 0:
         # A fleet ceiling, not per-process: undivided, N workers each take

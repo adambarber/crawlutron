@@ -148,6 +148,20 @@ def test_an_explicit_content_cap_is_not_divided(monkeypatch):
     assert cck.effective_max_content_length(explicit, global_concurrency=1) == 5 * 1024 * 1024
 
 
+def test_explicit_pool_size_distributes_without_exceeding_operator_total(monkeypatch):
+    """#944: explicit pool size is a fleet budget, never exceeded at W>1."""
+    monkeypatch.setenv("CRAWLUTRON_BROWSER_POOL_SIZE", "3")
+    monkeypatch.setenv("CRAWLUTRON_WORKERS", "2")
+    assert rp.derive_browser_pool_size(worker_index=0) == 2
+    assert rp.derive_browser_pool_size(worker_index=1) == 1
+    assert sum(rp.derive_browser_pool_size(worker_index=i) for i in range(2)) == 3
+
+    monkeypatch.setenv("CRAWLUTRON_BROWSER_POOL_SIZE", "1")
+    monkeypatch.setenv("CRAWLUTRON_WORKERS", "4")
+    with pytest.raises(ValueError, match="less than worker count"):
+        rp.derive_browser_pool_size(worker_index=0)
+
+
 def test_a_worker_always_gets_at_least_one_slot(monkeypatch):
     """Division must never produce a zero budget.
 
