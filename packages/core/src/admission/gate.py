@@ -344,8 +344,9 @@ class AdmissionGate:
                     raise AdmissionRefused(IdleReason.STALE)
                 await self._bounded_wait(self._signal, remaining)
                 continue
-            # PARK (RETRY_PRESSURE / cold probe) — event-bounded, no wall deadline.
-            await self._bounded_wait(self._signal, None)
+            # PARK (RETRY_PRESSURE / cold probe) — re-checks under the stale
+            # bound so a signal-less park cannot hang forever.
+            await self._bounded_wait(self._signal, self._pacing.stale_bound.value)
 
     async def _bounded_wait(self, signal: Signal, timeout: float | None) -> None:
         """The single gate-side wait site: Signal, optional wall deadline (5.4)."""

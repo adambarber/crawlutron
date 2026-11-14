@@ -290,7 +290,7 @@ def _seam_signal() -> Signal:
     class _FutureSignal:
         """Each ``wait`` allocates a fresh future, so no waiter inherits another's
         wake; a ``set`` with no parked waiter is remembered, because the park loop
-        re-decides only after waking and PARK has no deadline.
+        re-decides only after waking and PARK re-checks under the stale bound.
         """
 
         def __init__(self) -> None:
