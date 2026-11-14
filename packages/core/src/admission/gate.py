@@ -250,6 +250,27 @@ class AdmissionGate:
             bounds.append(self._free_bytes() // unit)
         return max(0, min(bounds))
 
+    def _reconcile(
+        self, wanted: list[LaneId], capacity: dict[LaneId, int], floor_for: dict[LaneId, int]
+    ) -> dict[LaneId, int]:
+        """Grant largest units first from ONE remaining pool, so one grant conserves bytes.
+
+        Per-lane capacities each read the whole free pool; taken together they over-commit.
+        """
+        granted: dict[LaneId, int] = dict.fromkeys(LaneId, 0)
+        free = self._free_bytes()
+        order = sorted(LaneId, key=lambda lane: self._lanes[lane].cost.memory_bytes.value, reverse=True)
+        for lane in order:
+            unit = self._lanes[lane].cost.memory_bytes.value
+            if lane not in wanted or capacity[lane] < 1:
+                continue
+            count = min(capacity[lane], floor_for[lane])
+            if unit > 0:
+                count = min(count, free // unit)
+            granted[lane] = max(0, count)
+            free -= granted[lane] * unit
+        return granted
+
     def _decide(self, want: Want, readings: dict[ResourceId, _ResourceReading]) -> Decision:
         """Decide under the lock; capacity is ADDITIONAL (in-flight already subtracted).
         STALE-first -> OVERSIZE -> RETRY_PRESSURE (4.3); capacity is never re-subtracted."""
@@ -286,12 +307,7 @@ class AdmissionGate:
         floor_for = {
             lane: max(1, min(want.lanes[lane].value, floor_global // lane_spread)) for lane in LaneId
         }
-        granted: dict[LaneId, int] = {}
-        for lane in LaneId:
-            if lane in wanted and capacity[lane] >= 1:
-                granted[lane] = min(capacity[lane], floor_for[lane])
-            else:
-                granted[lane] = 0
+        granted: dict[LaneId, int] = self._reconcile(wanted, capacity, floor_for)
         if sum(granted.values()) < 1:
             # Nothing granted: park until a release/sensing wake reopens capacity.
             return Decision(kind=DecisionKind.PARK, scale=scale_map[LaneId.GENERAL], cold=cold)

@@ -22,7 +22,7 @@ def _cold_dual_gate():
         dataclasses.replace(
             GateSpec(cold_probe=1),
             cpu_gauge=cpu_cold,
-            memory_budget_mib=700,
+            memory_budget_mib=800,
         )
     )
     return gate
