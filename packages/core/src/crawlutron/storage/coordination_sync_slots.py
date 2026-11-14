@@ -11,6 +11,7 @@ import time
 from crawlutron.storage.coordination_store import CoordinationStore, atwin
 from crawlutron.storage.ids import new_sync_slot_id
 from crawlutron.storage.migrations.manifest import StoreSchema
+from crawlutron.storage.safe_db import txn_write
 
 __all__ = ["CoordinationSyncSlotsStore"]
 
@@ -41,8 +42,7 @@ class CoordinationSyncSlotsStore(CoordinationStore):
         stamp = time.time() if now is None else now
         slot_id = f"{caller_id}:{new_sync_slot_id()}"
         with self._lock:
-            self._conn.execute("BEGIN IMMEDIATE")
-            try:
+            with txn_write(self._conn, owner="coordination_sync_slots.reserve"):
                 self._conn.execute(
                     "DELETE FROM coordination_sync_slots WHERE reserved_at <= ?",
                     (stamp - _STALENESS_SECONDS,),
@@ -53,28 +53,23 @@ class CoordinationSyncSlotsStore(CoordinationStore):
                 ).fetchone()
                 held = 0 if row is None else int(row[0])
                 if already_active + held >= max_concurrency:
-                    self._conn.execute("COMMIT")
                     return None
                 self._conn.execute(
                     "INSERT INTO coordination_sync_slots (caller_id, slot_id, reserved_at) VALUES (?, ?, ?)",
                     (caller_id, slot_id, stamp),
                 )
-                self._conn.execute("COMMIT")
                 return slot_id
-            except BaseException:
-                self._conn.execute("ROLLBACK")
-                raise
 
     def release(self, caller_id: str, slot_id: str) -> None:
         """Delete one reserved sync slot; the unbounded sentinel reserves nothing."""
         if not slot_id:
             return
         with self._lock:
-            self._conn.execute(
-                "DELETE FROM coordination_sync_slots WHERE caller_id = ? AND slot_id = ?",
-                (caller_id, slot_id),
-            )
-            self._conn.commit()
+            with txn_write(self._conn, owner="coordination_sync_slots.release"):
+                self._conn.execute(
+                    "DELETE FROM coordination_sync_slots WHERE caller_id = ? AND slot_id = ?",
+                    (caller_id, slot_id),
+                )
 
     def count_active(self, caller_id: str, now: float | None = None) -> int:
         """Non-stale reserved slots for ``caller_id`` at ``now``."""
@@ -89,11 +84,11 @@ class CoordinationSyncSlotsStore(CoordinationStore):
     def stale(self, cutoff: float) -> int:
         """Delete slots older than ``cutoff``; return the count deleted."""
         with self._lock:
-            cursor = self._conn.execute(
-                "DELETE FROM coordination_sync_slots WHERE reserved_at <= ?",
-                (cutoff,),
-            )
-            self._conn.commit()
+            with txn_write(self._conn, owner="coordination_sync_slots.stale"):
+                cursor = self._conn.execute(
+                    "DELETE FROM coordination_sync_slots WHERE reserved_at <= ?",
+                    (cutoff,),
+                )
             return cursor.rowcount
 
     areserve = atwin(reserve)

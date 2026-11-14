@@ -7,29 +7,32 @@ import asyncio
 from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
 
 
+def _tracker_with_lock(caller: str = "test-caller"):
+    """One tracker with a slot lock already fetched; shared setup for lock-identity tests."""
+    tracker = CallerConcurrencyTracker()
+    lock = tracker.slot_lock(caller)
+    return tracker, caller, lock
+
+
 class TestCallerConcurrencyTrackerLocks:
     """#665: per-caller slot locks persist for the tracker's lifetime. The admit path serializes
     count->insert through the caller's lock; a release must never evict it, or a concurrent admit that
     already fetched the lock ends up serialized against a DIFFERENT lock than the next admit.
     """
 
-    def test_lock_identity_is_stable_across_release_to_zero(self):
-        tracker = CallerConcurrencyTracker()
-        caller = "test-caller"
-        lock = tracker.slot_lock(caller)
-        tracker.reserve(caller)
-        tracker.release(caller)
+    async def test_lock_identity_is_stable_across_release_to_zero(self):
+        tracker, caller, lock = _tracker_with_lock()
+        await tracker.reserve(caller)
+        await tracker.release(caller)
         assert tracker.slot_lock(caller) is lock
 
-    def test_release_to_zero_keeps_lock_identity(self):
-        tracker = CallerConcurrencyTracker()
-        caller = "test-caller"
-        lock = tracker.slot_lock(caller)
-        tracker.reserve(caller)
-        tracker.reserve(caller)
-        tracker.release(caller)  # count drops to 1
+    async def test_release_to_zero_keeps_lock_identity(self):
+        tracker, caller, lock = _tracker_with_lock()
+        await tracker.reserve(caller)
+        await tracker.reserve(caller)
+        await tracker.release(caller)  # count drops to 1
         assert tracker.sync_in_flight(caller) == 1
-        tracker.release(caller)  # count drops to 0: the eviction trigger
+        await tracker.release(caller)  # count drops to 0: the eviction trigger
         assert tracker.sync_in_flight(caller) == 0
         assert tracker.slot_lock(caller) is lock
 
@@ -53,10 +56,10 @@ class TestCallerConcurrencyTrackerRace:
             tracker = CallerConcurrencyTracker()
             caller = "test-caller"
             tracker.slot_lock(caller)
-            tracker.reserve(caller)
+            await tracker.reserve(caller)
             lock_b = tracker.slot_lock(caller)  # B's admit path fetched the lock
             # B is preempted before entering. A completes: release to zero.
-            tracker.release(caller)
+            await tracker.release(caller)
             async with lock_b:  # B enters the (unregistered) lock: its admit window
                 lock_c = tracker.slot_lock(caller)  # C arrives
                 return lock_c is lock_b

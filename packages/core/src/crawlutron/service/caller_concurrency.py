@@ -35,7 +35,7 @@ class CallerConcurrencyTracker:
         if coordination_db_path is not None:
             self._coord = CoordinationHandle(coordination_db_path)
 
-    def reserve(
+    async def reserve(
         self,
         caller_id: str,
         *,
@@ -48,19 +48,19 @@ class CallerConcurrencyTracker:
             return
         if max_concurrency is None:
             raise ValueError("max_concurrency required when using coordination")
-        slot_id = self._coord.reserve(caller_id, max_concurrency, already_active)
+        slot_id = await self._coord.areserve(caller_id, max_concurrency, already_active)
         if slot_id is None:
             raise QuotaRefusal(
                 f"Caller concurrency quota is {max_concurrency}, quota already filled",
             )
         self._held.setdefault(caller_id, []).append(slot_id)
 
-    def release(self, caller_id: str) -> None:
+    async def release(self, caller_id: str) -> None:
         """Release one sync slot for ``caller_id``."""
         if self._coord is not None:
             held = self._held.get(caller_id)
             if held:
-                self._coord.release(caller_id, held.pop())
+                await self._coord.arelease(caller_id, held.pop())
             return
         count = self._in_flight.get(caller_id, 0) - 1
         if count <= 0:
@@ -96,13 +96,13 @@ class CoordinationHandle:
 
         self._store = CoordinationSyncSlotsStore(db_path)
 
-    def reserve(self, caller_id: str, max_concurrency: int, already_active: int) -> str | None:
+    async def areserve(self, caller_id: str, max_concurrency: int, already_active: int) -> str | None:
         """Reserve one slot at the current time; ``None`` refuses."""
-        return self._store.reserve(caller_id, max_concurrency, already_active, time.time())
+        return await self._store.areserve(caller_id, max_concurrency, already_active, time.time())
 
-    def release(self, caller_id: str, slot_id: str) -> None:
+    async def arelease(self, caller_id: str, slot_id: str) -> None:
         """Release one reserved slot."""
-        self._store.release(caller_id, slot_id)
+        await self._store.arelease(caller_id, slot_id)
 
     def count_active(self, caller_id: str) -> int:
         """Non-stale reserved slots for ``caller_id``."""

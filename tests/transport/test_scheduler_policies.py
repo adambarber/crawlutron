@@ -74,23 +74,23 @@ class TestSchedulerPolicies:
         """A full bucket, since the constructor already starts one there."""
         return TokenBucket(rate=rate, capacity=capacity)
 
-    def test_token_bucket_basic(self):
+    async def test_token_bucket_basic(self):
         from crawlutron.transport.scheduler import TokenBucket as _Bucket
 
         bucket = _Bucket(rate=10.0, capacity=5)
-        wait = bucket.consume(1.0)
+        wait = await bucket.consume(1.0)
         assert wait == 0.0
-        wait = bucket.consume(4.0)
+        wait = await bucket.consume(4.0)
         assert wait == 0.0
-        wait = bucket.consume(1.0)
+        wait = await bucket.consume(1.0)
         assert wait > 0.0
 
-    def test_token_bucket_refill(self):
+    async def test_token_bucket_refill(self):
         bucket = self._bucket_at_full(rate=100.0, capacity=10)
-        bucket.consume(10.0)
+        await bucket.consume(10.0)
         # Manually refill tokens as if 0.1s passed (at 100 tokens/s, that's 10 more)
         bucket.tokens = 10.0
-        wait = bucket.consume(1.0)
+        wait = await bucket.consume(1.0)
         assert wait == 0.0
 
     def test_circuit_breaker_opens(self):
@@ -335,7 +335,7 @@ class TestTokenBucketConcurrency:
         taken: list[float] = []
 
         async def one() -> None:
-            wait = bucket.consume(1.0)
+            wait = await bucket.consume(1.0)
             taken.append(wait)
             await asyncio.sleep(wait)  # the real caller's shape: fire after the wait
 

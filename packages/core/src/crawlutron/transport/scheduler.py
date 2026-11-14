@@ -379,7 +379,7 @@ class DomainScheduler:
             state = self._state(job.domain)
             if state.bucket is None:
                 state.bucket = TokenBucket(rate=self._max_rps, clock=self._clock)
-            bucket_wait = state.bucket.consume(1.0)
+            bucket_wait = await state.bucket.consume(1.0)
         # Reserve under the gate, sleep OUTSIDE it: no gate sees a sleep, and
         # per-domain slots stay live during the nap.
         async with self._state(job.domain).gate:

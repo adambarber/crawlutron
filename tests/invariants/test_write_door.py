@@ -20,7 +20,6 @@ _STORAGE_DIR = REPO_ROOT / "packages" / "core" / "src" / "crawlutron" / "storage
 #: The set shrinks one store per arc until the gate seals at zero; the throttle store is the mutation target.
 _EXEMPT_MODULES = frozenset(
     {
-        "packages/core/src/crawlutron/storage/coordination_sync_slots.py": "awaiting the sync-slots arc",
         "packages/core/src/crawlutron/storage/job_store.py": "awaiting the job-store arc",
         "packages/core/src/crawlutron/storage/job_store_accumulators.py": "awaiting the accumulators arc",
         "packages/core/src/crawlutron/storage/job_store_lease.py": "awaiting the job-store arc",

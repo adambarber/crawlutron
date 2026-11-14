@@ -399,7 +399,7 @@ async def test_a_owner_at_quota_watch_check_skips_the_row_without_a_failure_reco
     the next sweep retries -- a full parking lot does not make the car broken."""
     calls: list[str] = []
     tracker, record, sweeper = await _keyed_sweeper(watch_store, tmp_path, monkeypatch, capture=calls)
-    tracker.reserve(record.key_id)  # the owner's one slot is already taken
+    await tracker.reserve(record.key_id)  # the owner's one slot is already taken
     watch = watch_store.list_watches()[0]
     before = watch_store.get(watch.watch_id)
 

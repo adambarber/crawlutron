@@ -200,7 +200,7 @@ async def admit(
             return
         # The reservation re-counts job rows and slots in one write transaction:
         # the store's write lock is the shared admit mutex across workers.
-        concurrency_tracker.reserve(
+        await concurrency_tracker.reserve(
             active.caller_id,
             max_concurrency=active.max_concurrency,
             already_active=job_active,
@@ -208,7 +208,7 @@ async def admit(
     try:
         yield active.caller_id
     finally:
-        concurrency_tracker.release(active.caller_id)
+        await concurrency_tracker.release(active.caller_id)
 
 
 def _apply_payload_policy(payload: PolicyCarrier, active: CallerIdentity, resolved: int) -> CrawlPolicy:

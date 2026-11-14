@@ -43,7 +43,9 @@ def jittered_delay(base_delay: float) -> float:
 
 
 class TokenBucket:
-    """Token bucket rate limiter: refills at ``rate`` tokens/sec, caps at ``capacity``."""
+    """Token bucket refilling at ``rate`` tokens/sec, capped at ``capacity``;
+    consumers serialize on ``_lock`` so overlapping callers queue behind what
+    was taken."""
 
     def __init__(
         self, rate: float, capacity: int = 5, *, clock: Callable[[], float] = time.monotonic
@@ -53,16 +55,18 @@ class TokenBucket:
         self.tokens = float(capacity)
         self._clock = clock
         self.last_refill = clock()
+        self._lock = asyncio.Lock()
 
-    def consume(self, tokens: float = 1.0) -> float:
+    async def consume(self, tokens: float = 1.0) -> float:
         """Reserve ``tokens``, returning seconds to wait before firing (0 if
         available). A short caller drives the balance negative, so overlapping
         callers queue behind what was taken (the max_rps herd)."""
-        now = self._clock()
-        self.tokens = min(self.capacity, self.tokens + (now - self.last_refill) * self.rate)
-        self.last_refill = now
-        self.tokens -= tokens
-        return max(0.0, -self.tokens / self.rate)
+        async with self._lock:
+            now = self._clock()
+            self.tokens = min(self.capacity, self.tokens + (now - self.last_refill) * self.rate)
+            self.last_refill = now
+            self.tokens -= tokens
+            return max(0.0, -self.tokens / self.rate)
 
 
 def remaining_until(expiry: float | None, now: float) -> float:
