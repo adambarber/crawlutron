@@ -66,17 +66,17 @@ def test_commits_per_crawl_is_bounded_not_linear(tmp_path) -> None:
         counters.close()
 
 
-def test_snapshot_sees_unflushed_deltas(tmp_path) -> None:
-    """A ``snapshot()`` right after ``observe_crawl`` includes the increments."""
-    counters, store = _meter(tmp_path, "unflushed.db")
-    store.observe_crawl(results=_rendered(1), elapsed_ms=42.0, caller_id="u1")
+def test_snapshot_merges_pending_before_flush(tmp_path) -> None:
+    """A buffered increment is readable before it is committed."""
+    counters = coordination_counters.CoordinationCounters(str(tmp_path / "pending.db"))
+    counters.add_pending("crawl_results_total", 3.0)
 
-    snap = store.snapshot()
+    assert counters.snapshot()["crawl_results_total"] == 3.0
+    assert counters.get("crawl_results_total") == 0.0
 
-    assert snap.crawl_results_total >= 1.0
-    assert snap.total_elapsed_ms >= 42.0
-    assert snap.caller_counts.get("u1", 0) >= 1.0
-    assert snap.strategy_counts.get(_STRATEGY, 0) >= 1.0
+    counters.flush()
+    assert counters.get("crawl_results_total") == 3.0
+    assert counters.snapshot()["crawl_results_total"] == 3.0
     counters.close()
 
 
