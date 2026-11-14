@@ -49,21 +49,20 @@ def test_noop_save_cost_does_not_grow_with_history(tmp_path):
 def test_noop_save_cost_is_far_below_a_full_digest(tmp_path):
     """A no-op save must not digest the history it already persisted."""
     store = store_on(tmp_path / "jobs.db")
-    job = _job_with(store, 500)
-
-    cost = _noop_cost(store, job)
-
-    # One page is ~520 bytes serialized; a full-history digest is ~260 KiB.
-    assert cost < 5000, f"no-op save digested the whole history ({cost} bytes)"
-    store._conn.close()
+    try:
+        cost = _noop_cost(store, _job_with(store, 500))
+        # One page is ~520 bytes serialized; a full-history digest is ~260 KiB.
+        assert cost < 5000, f"no-op save digested the whole history ({cost} bytes)"
+    finally:
+        store._conn.close()
 
 
 def test_three_consecutive_noops_stay_constant(tmp_path):
     """Repeated saves of an unchanged job keep the same small cost."""
     store = store_on(tmp_path / "jobs.db")
-    job = _job_with(store, 500)
-
-    costs = [_noop_cost(store, job) for _ in range(3)]
-
-    assert max(costs) < 5000, f"no-op saves grew: {costs}"
-    store._conn.close()
+    try:
+        job = _job_with(store, 500)
+        costs = [_noop_cost(store, job) for _ in range(3)]
+        assert max(costs) < 5000, f"no-op saves grew: {costs}"
+    finally:
+        store._conn.close()
