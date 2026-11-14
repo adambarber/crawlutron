@@ -78,10 +78,10 @@ class TestJobStateWaitContract:
         gate = threading.Event()
         real_set_status = job_store.set_status
 
-        def gated_set_status(job_id, new, *, expected, error=None):
+        def gated_set_status(job_id, new, *, expected, error=None, **kwargs):
             if new is JobStatus.RUNNING:
                 gate.wait(timeout=10)
-            return real_set_status(job_id, new, expected=expected, error=error)
+            return real_set_status(job_id, new, expected=expected, error=error, **kwargs)
 
         monkeypatch.setattr(job_store, "set_status", gated_set_status)
 

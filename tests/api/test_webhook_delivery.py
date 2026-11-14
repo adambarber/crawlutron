@@ -156,17 +156,16 @@ class TestAsyncCrawlTerminalCasControlsWhatIsPublished:
             "crawl announced a completion that did not happen"
         )
 
-    async def test_a_crawl_rewound_to_pending_is_published_so_the_client_is_not_stranded(
+    async def test_a_crawl_rewound_to_pending_is_not_published_without_running_ownership(
         self, job_store, tmp_path
     ):
+        """#987: a runner must not complete/publish a row it no longer owns as RUNNING."""
         result_store, post_webhook = await self._displaced_crawl(job_store, tmp_path, JobStatus.PENDING)
-        # `recover_orphaned_running_jobs` rewinds RUNNING to PENDING on startup on the assumption that nothing
-        # is in flight.
-        assert result_store.get(self.REQUEST_ID) is not None, (
-            "the terminal write lost to PENDING and the results were dropped, so this job can never complete"
+        assert result_store.get(self.REQUEST_ID) is None, (
+            "a crawl displaced off RUNNING must not publish results without ownership"
         )
-        assert job_store.load(self.REQUEST_ID).status == JobStatus.COMPLETED
-        assert post_webhook.await_count == 1, post_webhook.await_count
+        assert job_store.load(self.REQUEST_ID).status == JobStatus.PENDING
+        assert post_webhook.await_count == 0, post_webhook.await_count
 
 
 class TestWebhookValidationRunsOffLoop:

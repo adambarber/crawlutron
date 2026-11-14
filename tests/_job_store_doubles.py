@@ -70,9 +70,9 @@ class _StoreListener:
         self._bus.discard(self)
 
 
-def _publishing_set_status(self, job_id, new, *, expected, error=None) -> bool:
+def _publishing_set_status(self, job_id, new, *, expected, error=None, **kwargs) -> bool:
     """The real CAS, then a bus publish when the write landed."""
-    changed = self._real_set_status(job_id, new, expected=expected, error=error)
+    changed = self._real_set_status(job_id, new, expected=expected, error=error, **kwargs)
     if changed:
         self.status_bus.publish(job_id)
     return changed
@@ -191,9 +191,37 @@ class LoopGuardJobStore(JobStore):
         _refuse_on_loop("JobStore.save")
         return super().save(job)
 
-    def set_status(self, job_id, new: JobStatus, *, expected=None, error=None):
+    def set_status(self, job_id, new: JobStatus, *, expected=None, error=None, **kwargs):
         _refuse_on_loop("JobStore.set_status")
-        return super().set_status(job_id, new, expected=expected, error=error)
+        return super().set_status(job_id, new, expected=expected, error=error, **kwargs)
+
+    def claim_running(self, job_id, token, *, now, claim_seconds=300.0):
+        _refuse_on_loop("JobStore.claim_running")
+        return super().claim_running(job_id, token, now=now, claim_seconds=claim_seconds)
+
+    def renew_job_claim(self, job_id, token, *, now):
+        _refuse_on_loop("JobStore.renew_job_claim")
+        return super().renew_job_claim(job_id, token, now=now)
+
+    def release_job_claim(self, job_id, token):
+        _refuse_on_loop("JobStore.release_job_claim")
+        return super().release_job_claim(job_id, token)
+
+    def clear_job_claim(self, job_id):
+        _refuse_on_loop("JobStore.clear_job_claim")
+        return super().clear_job_claim(job_id)
+
+    def running_claim(self, job_id):
+        _refuse_on_loop("JobStore.running_claim")
+        return super().running_claim(job_id)
+
+    def is_job_claim_fresh(self, job_id, *, now, claim_seconds=300.0):
+        _refuse_on_loop("JobStore.is_job_claim_fresh")
+        return super().is_job_claim_fresh(job_id, now=now, claim_seconds=claim_seconds)
+
+    def retire_orphan_running(self, job_id, new, *, now, claim_seconds=300.0, error=None):
+        _refuse_on_loop("JobStore.retire_orphan_running")
+        return super().retire_orphan_running(job_id, new, now=now, claim_seconds=claim_seconds, error=error)
 
     def load(self, job_id):
         _refuse_on_loop("JobStore.load")

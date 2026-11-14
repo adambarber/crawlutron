@@ -95,16 +95,55 @@ class _SpyExecuteCrawl:
 
 
 def _loop_store(state: CrawlJobState) -> MagicMock:
-    """A store mock that serves ``state`` for every reload (no persistence)."""
+    """A stateful mock store that reflects runner mutations across reloads."""
+    current = state
+
+    async def aload(job_id: str):
+        return current
 
     async def areload_state(job_id: str):
-        return state
+        return replace(
+            current,
+            frontier=list(current.frontier),
+            in_flight=list(current.in_flight),
+            results=list(current.results),
+            visited=OrderedUrlSet(current.visited),
+            transient_retries=dict(current.transient_retries),
+            stats=dict(current.stats),
+        )
+
+    async def asave(job: CrawlJobState):
+        nonlocal current
+        current = job
+
+    async def aset_status(job_id, new, *, expected, **kwargs):
+        nonlocal current
+        current.status = new
+        if kwargs.get("claimed_by") is not None and kwargs.get("claim_now") is not None:
+            current.claimed_by = kwargs["claimed_by"]
+            current.claimed_at = kwargs["claim_now"]
+        if kwargs.get("clear_claim"):
+            current.claimed_by = None
+            current.claimed_at = None
+        return True
+
+    async def aclaim_running(job_id, claimed_by, *, now, claim_seconds=300.0):
+        nonlocal current
+        current.claimed_by = claimed_by
+        current.claimed_at = now
+        current.status = JobStatus.RUNNING
+        return True
 
     store = MagicMock(spec=JobStore)
-    store.aload = AsyncMock(return_value=state)
-    store.areload_state = areload_state
-    store.asave = AsyncMock()
-    store.aset_status = AsyncMock(return_value=True)
+    store.aload = AsyncMock(side_effect=aload)
+    store.areload_state = AsyncMock(side_effect=areload_state)
+    store.asave = AsyncMock(side_effect=asave)
+    store.aset_status = AsyncMock(side_effect=aset_status)
+    store.aclaim_running = AsyncMock(side_effect=aclaim_running)
+    store.arenew_job_claim = AsyncMock(return_value=True)
+    store.ais_job_claim_fresh = AsyncMock(return_value=True)
+    store.aclear_job_claim = AsyncMock(return_value=True)
+    store.aretire_orphan_running = AsyncMock(return_value=True)
     return store
 
 

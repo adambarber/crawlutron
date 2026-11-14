@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Callable
 
 from crawlutron.config.settings import CrawlerSettings
-from crawlutron.service.job_lifecycle import is_running, start_tracked_task
-from crawlutron.storage.job_store import JobKind, JobStatus, JobStore
+from crawlutron.service.job_lifecycle import start_tracked_task
+from crawlutron.storage.job_store import DEFAULT_JOB_CLAIM_SECONDS, JobKind, JobStatus, JobStore
 
 # The spawn seam is injected so this module never imports the runner; it
 # spawns a job the way ``crawlutron.service.job_runner.start_job`` does.
@@ -27,25 +28,28 @@ def _is_resumable_kind(kind: str) -> bool:
     return kind == JobKind.WHOLE_SITE.value
 
 
-async def recover_orphaned_running_jobs(job_store: JobStore) -> int:
+async def recover_orphaned_running_jobs(
+    job_store: JobStore,
+    *,
+    now: float | None = None,
+    claim_seconds: float = DEFAULT_JOB_CLAIM_SECONDS,
+) -> int:
     """Retire crash orphans: rewind the resumable, fail the rest.
 
-    Async: the lifespan calls it with a live loop, and it reads every job row.
+    A RUNNING row with a fresh lease is a live foreign worker and is left alone.
+    Only unclaimed or stale-claimed rows are retired.
     """
     recovered = 0
+    at = time.time() if now is None else now
     for summary in await job_store.alist_jobs():
         if summary.get("status") != JobStatus.RUNNING.value:
             continue
-        # A RUNNING job this process still drives is owned, not orphaned; boot
-        # time recovery must not rewind another live worker's in-flight work.
-        if is_running(summary["job_id"]):
+        if await job_store.ais_job_claim_fresh(summary["job_id"], now=at, claim_seconds=claim_seconds):
             continue
-        # A job that cannot be resumed gets its terminal status here, while
-        # this is the only place that knows the service gave up on it.
         retired = JobStatus.PENDING if _is_resumable_kind(summary["kind"]) else JobStatus.FAILED
-        # Control-plane CAS: retires the row without rewriting its data;
-        # save() no longer carries status anyway.
-        if await job_store.aset_status(summary["job_id"], retired, expected=JobStatus.RUNNING):
+        if await job_store.aretire_orphan_running(
+            summary["job_id"], retired, now=at, claim_seconds=claim_seconds
+        ):
             recovered += 1
     return recovered
 
@@ -81,13 +85,16 @@ async def recover_and_start_pending_jobs(
     settings: CrawlerSettings,
     shutdown_event: asyncio.Event,
     start_runner: _StartRunner,
+    *,
+    now: float | None = None,
+    claim_seconds: float = DEFAULT_JOB_CLAIM_SECONDS,
 ) -> int:
     """Lifespan startup: retire crash orphans, then run every PENDING job.
 
     ``start_runner`` is injected by the caller (usually ``job_runner.start_job``)
     so recovery never imports the runner; the bound is the runner-cap rule.
     """
-    await recover_orphaned_running_jobs(job_store)
+    await recover_orphaned_running_jobs(job_store, now=now, claim_seconds=claim_seconds)
     limit = recovery_start_limit(settings)
     started = 0
     live: set[asyncio.Task] = set()

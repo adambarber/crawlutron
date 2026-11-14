@@ -83,6 +83,20 @@ class CrawlJobRow(TypedDict):
     stats: dict[str, int]
     in_flight: list[FrontierEntryDict]
     transient_retries: dict[str, int]
+    claimed_by: str | None
+    claimed_at: float | None
+
+
+def _read_claim_fields(data: CrawlJobRow) -> tuple[str | None, float | None]:
+    claimed_by = data.get("claimed_by")
+    claimed_at = data.get("claimed_at")
+    owner = str(claimed_by) if isinstance(claimed_by, str) and claimed_by else None
+    at = (
+        float(claimed_at)
+        if isinstance(claimed_at, (int, float)) and not isinstance(claimed_at, bool)
+        else None
+    )
+    return owner, at
 
 
 @dataclass
@@ -97,6 +111,9 @@ class CrawlJobState:
     # (``_job_row_params``) flattens it to the store's JSON spelling.
     policy: CrawlPolicy = field(default_factory=CrawlPolicy)
     status: JobStatus = JobStatus.PENDING
+    # Runner lease: who owns this RUNNING row and when they last renewed it.
+    claimed_by: str | None = None
+    claimed_at: float | None = None
     # Whole-site fields (used when kind == WHOLE_SITE)
     frontier: list[FrontierEntry] = field(default_factory=list)
     # The live-only frontier sync: ``frontier_mark`` is the persisted prefix and
@@ -125,25 +142,17 @@ class CrawlJobState:
 
     @classmethod
     def from_json(cls, data: CrawlJobRow, *, host_policy: HostPolicy, tier: PolicyTier) -> CrawlJobState:
-        """Build one live record from the declared row record.
-
-        Collections normalize here; the cross-list identity re-derivation runs
-        once per load at the read walk.
-        """
+        """Build one live record from the declared row record."""
         status = data.get("status", JobStatus.PENDING.value)
         kind = data.get("kind", JobKind.WHOLE_SITE.value)
         policy = read_policy(data["policy"], tier)
         root_url = str(data.get("root_url") or "")
         admitted_root = admit_or_none(root_url, policy=host_policy)
         root_url = admitted_root.raw if admitted_root is not None else ""
-        # The queue's rows are url-keyed, so a duplicate identity in the stored
-        # entries leaves a row the merged list no longer holds.
         frontier, deduped = normalize_frontier(
-            data.get("frontier", []),
-            root_url=root_url,
-            policy=policy,
-            host_policy=host_policy,
+            data.get("frontier", []), root_url=root_url, policy=policy, host_policy=host_policy
         )
+        claimed_by, claimed_at = _read_claim_fields(data)
         job = cls(
             job_id=str(data.get("job_id") or ""),
             kind=JobKind(kind),
@@ -151,13 +160,12 @@ class CrawlJobState:
             owner=str(data.get("owner") or ""),
             policy=policy,
             status=JobStatus(status),
+            claimed_by=claimed_by,
+            claimed_at=claimed_at,
             frontier=frontier,
             visited=normalize_visited(list(data.get("visited", [])), host_policy=host_policy),
             in_flight=normalize_frontier(
-                data.get("in_flight", []),
-                root_url=root_url,
-                policy=policy,
-                host_policy=host_policy,
+                data.get("in_flight", []), root_url=root_url, policy=policy, host_policy=host_policy
             )[0],
             transient_retries=read_transient_retries(
                 dict(data.get("transient_retries", {})), host_policy=host_policy
@@ -170,11 +178,7 @@ class CrawlJobState:
             host_policy=host_policy,
             tier=tier,
         )
-        # A load's visited set IS the persisted set: this process starts its
-        # delta at the end of it (a create starts at 0 -- the default).
         job.visited_mark = len(job.visited)
-        # The queue is the same story: every loaded entry has its row,
-        # except the identities the normalize deduped away.
         job.frontier_mark = len(job.frontier)
         job.frontier_removed.extend(NormalizedUrl(raw, policy=host_policy) for raw in deduped)
         return job
@@ -183,19 +187,19 @@ class CrawlJobState:
 #: Late-save tombstone defense: a post-tombstone upsert is a no-op, so a racing
 #: late ``save()`` cannot resurrect data columns on a tombstoned row.
 _UPSERT_JOB_ROW_SQL = """
-      INSERT INTO crawl_jobs (job_id, kind, root_url, policy, status,
-                               created_at, updated_at, error, stats, in_flight, transient_retries,
-                               owner)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO crawl_jobs (
+          job_id, kind, root_url, policy, status, created_at, updated_at,
+          error, stats, in_flight, transient_retries, owner, claimed_by, claimed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(job_id) DO UPDATE SET
     kind=excluded.kind,
     root_url=excluded.root_url,
     policy=excluded.policy,
     updated_at=excluded.updated_at,
     error=excluded.error,
-          stats=excluded.stats,
-          in_flight=excluded.in_flight,
-          transient_retries=excluded.transient_retries
+    stats=excluded.stats,
+    in_flight=excluded.in_flight,
+    transient_retries=excluded.transient_retries
 WHERE deleted_at IS NULL
 """
 
@@ -227,6 +231,8 @@ def _job_row_params(job: CrawlJobState) -> tuple[object, ...]:
         _json([_entry_payload(entry) for entry in job.in_flight]),
         _json(_retries_payload(job.transient_retries)),
         job.owner,
+        job.claimed_by,
+        job.claimed_at,
     )
 
 

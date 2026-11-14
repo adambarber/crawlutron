@@ -68,6 +68,9 @@ CRAWL_JOBS_SCHEMA = TableSchema(
         ColumnSchema("owner", "TEXT", True, "''"),
         # Deleted-at tombstone: a timestamp hides the row and a late save no-ops.
         ColumnSchema("deleted_at", "REAL", False, None),
+        # Runner lease: the worker owning this RUNNING row and when it last renewed.
+        ColumnSchema("claimed_by", "TEXT", False, None),
+        ColumnSchema("claimed_at", "REAL", False, None),
     ),
 )
 
@@ -266,6 +269,7 @@ MIGRATION_SEQUENCES = {
         "0004_crawl_jobs_add_owner",
         "0005_crawl_jobs_add_deleted_at",
         "0006_crawl_jobs_split_frontier",
+        "0007_crawl_jobs_add_runner_claim",
     ),
     StoreSchema.RESULTS: ("0001_results_initial", "0002_results_add_owner"),
     StoreSchema.COORDINATION_COUNTERS: ("0001_coordination_counters_initial",),

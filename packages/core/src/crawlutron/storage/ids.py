@@ -24,3 +24,8 @@ def new_request_id() -> str:
 def new_watch_id() -> str:
     """Mint a watch id: full 32-hex UUID entropy."""
     return uuid.uuid4().hex
+
+
+def new_handle_hex() -> str:
+    """Mint a raw 32-hex handle for internal tokens/nonces."""
+    return uuid.uuid4().hex

@@ -82,6 +82,10 @@ _ADD_COLUMN_SQL: dict[str, list[tuple[str, str, str]]] = {
     ],
     "0004_crawl_jobs_add_owner": [("crawl_jobs", "owner", "owner TEXT NOT NULL DEFAULT ''")],
     "0005_crawl_jobs_add_deleted_at": [("crawl_jobs", "deleted_at", "deleted_at REAL")],
+    "0007_crawl_jobs_add_runner_claim": [
+        ("crawl_jobs", "claimed_by", "claimed_by TEXT"),
+        ("crawl_jobs", "claimed_at", "claimed_at REAL"),
+    ],
     "0002_caller_keys_add_previous": [
         ("caller_keys", "previous_hash", "previous_hash TEXT"),
         ("caller_keys", "previous_rotated_at", "previous_rotated_at REAL"),

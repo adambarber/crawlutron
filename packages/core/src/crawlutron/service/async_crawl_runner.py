@@ -29,7 +29,11 @@ from crawlutron.service.response_shaping import (
     abuild_unified_crawl_response,
 )
 from crawlutron.service.unified_shaping import build_unified_result
-from crawlutron.storage.job_store import TERMINAL_STATUSES, CrawlJobState, JobStatus
+from crawlutron.storage.job_store import (
+    DEFAULT_JOB_CLAIM_SECONDS,
+    CrawlJobState,
+    JobStatus,
+)
 from crawlutron.storage.result_store import CrawlSpillStore
 
 logger = logging.getLogger(__name__)
@@ -106,26 +110,32 @@ async def run_async_crawl(
     """Run a single-shot crawl in the background, persisting results to job_store
     through PENDING -> RUNNING -> COMPLETED/FAILED and POSTing when ``webhook_url``
     is set. ``url_pairs`` carries the gate's admitted batch, never rebuilt."""
+    claim_token = f"async:{request_id}:{time.monotonic_ns()}"
+    claim_seconds = DEFAULT_JOB_CLAIM_SECONDS
     try:
-        # Claim RUNNING only after the semaphore is ours; a queued job must
-        # not read RUNNING nor count in aactive_count_for_caller while it waits.
         async with async_crawl_semaphore():
-            job = await _claim_running(request_id, job_store)
+            job = await _claim_running(request_id, job_store, claim_token, claim_seconds)
             if job is None:
                 return
-            response_payload = await _crawl_and_build_response(
-                request_id,
-                payload,
-                crawl_settings,
-                shutdown_event,
-                url_pairs,
-                job,
-                job_store,
-                spill_store=spill_store,
-                delta_context=delta_context,
+            stop = asyncio.Event()
+            heartbeat = asyncio.create_task(
+                _heartbeat_claim(request_id, job_store, claim_token, claim_seconds, stop)
             )
-        # Deliver outside the semaphore -- a retrying webhook (up to 60s
-        # of backoff) must not gate another caller's crawl capacity.
+            try:
+                response_payload = await _crawl_and_build_response(
+                    request_id,
+                    payload,
+                    crawl_settings,
+                    shutdown_event,
+                    url_pairs,
+                    job,
+                    job_store,
+                    spill_store=spill_store,
+                    delta_context=delta_context,
+                )
+            finally:
+                stop.set()
+                await heartbeat
         await _publish_success(
             request_id,
             job_store=job_store,
@@ -133,30 +143,47 @@ async def run_async_crawl(
             response_payload=response_payload,
             owner=job.owner,
             webhook_url=webhook_url,
+            claim_token=claim_token,
         )
     except asyncio.CancelledError:
-        # Since 3.11 CancelledError is a BaseException, so it would bypass the
-        # generic handler and leave the row RUNNING with no terminal write (#758).
-        await _record_failure(request_id, job_store, "cancelled_shutdown", webhook_url)
+        await _record_failure(request_id, job_store, "cancelled_shutdown", webhook_url, claim_token)
         raise
     except Exception as exc:
-        await _record_failure(request_id, job_store, str(exc), webhook_url)
+        await _record_failure(request_id, job_store, str(exc), webhook_url, claim_token)
 
 
-async def _claim_running(request_id: str, job_store) -> CrawlJobState | None:
-    """Load the job and claim RUNNING via CAS; a lost claim means the row was
-    deleted or already transitioned (post-semaphore-acquire)."""
+async def _claim_running(
+    request_id: str, job_store, claim_token: str, claim_seconds: float
+) -> CrawlJobState | None:
+    """Load the job and claim RUNNING via CAS with a runner lease."""
     job = await job_store.aload(request_id)
     if job is None:
         logger.error("async_crawl_job_missing", extra={"request_id": request_id})
         return None
-    # Claim RUNNING on the control plane: status moves only via CAS;
-    # a lost claim means the row was deleted or already transitioned).
-    claimed = await job_store.aset_status(request_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
+    claimed = await job_store.aset_status(
+        request_id,
+        JobStatus.RUNNING,
+        expected=JobStatus.PENDING,
+        claimed_by=claim_token,
+        claim_now=time.time(),
+        claim_seconds=claim_seconds,
+    )
     if not claimed:
         logger.error("async_crawl_claim_lost", extra={"request_id": request_id})
         return None
-    return job
+    return await job_store.aload(request_id)
+
+
+async def _heartbeat_claim(
+    request_id: str, job_store, claim_token: str, claim_seconds: float, stop: asyncio.Event
+) -> None:
+    interval = max(1.0, min(30.0, claim_seconds / 3))
+    while not stop.is_set():
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval)
+            return
+        except TimeoutError:
+            await job_store.arenew_job_claim(request_id, claim_token, now=time.time())
 
 
 __all__ = ["run_async_crawl", "async_crawl_semaphore"]
@@ -239,34 +266,27 @@ async def _publish_success(
     response_payload: dict[str, object],
     owner,
     webhook_url: WebhookTarget | None,
+    claim_token: str,
 ) -> None:
     """CAS COMPLETED, store the payload, and POST the webhook.
 
-    The terminal write is a CAS that can lose to pause_job, so its result
-    decides finished; a stranded re-claim publishes against the real state.
+    Terminal writes are ownership-guarded so a runner that lost its lease
+    cannot clobber a foreign owner.
     """
-    published = await job_store.aset_status(request_id, JobStatus.COMPLETED, expected=JobStatus.RUNNING)
-    if not published:
-        stranded = await job_store.aload(request_id)
-        if stranded is not None and stranded.status not in {
-            JobStatus.PAUSED,
-            JobStatus.CANCELLED,
-            *TERMINAL_STATUSES,
-        }:
-            logger.warning(
-                "async_crawl_terminal_cas_lost",
-                extra={"request_id": request_id, "status": stranded.status.value},
-            )
-            published = await job_store.aset_status(request_id, JobStatus.COMPLETED, expected=stranded.status)
-
+    published = await job_store.aset_status(
+        request_id,
+        JobStatus.COMPLETED,
+        expected=JobStatus.RUNNING,
+        claimed_by=claim_token,
+        require_owner=True,
+        clear_claim=True,
+    )
     if not published:
         return
     try:
         await result_store.aput(request_id, response_payload, owner=owner)
     except Exception:
         logger.warning("crawl_result_store_failed", extra={"request_id": request_id})
-    # The webhook rides with the terminal write in both branches, so it
-    # means "finished" -- announcing a paused crawl hands back a dead one.
     await _deliver_webhook(webhook_url, response_payload)
 
 
@@ -284,14 +304,11 @@ async def _record_failure(
     job_store,
     error: str,
     webhook_url: WebhookTarget | None,
+    claim_token: str,
 ) -> None:
-    """Record the terminal FAILED write and POST the error webhook when it won.
-
-    The error webhook announces a terminal FAILED write; only deliver it when
-    the CAS won. A paused/cancelled job's terminal write lost, so no callback.
-    """
+    """Record the terminal FAILED write and POST the error webhook when it won."""
     logger.error("async_crawl_failed", extra={"request_id": request_id, "error": error})
-    recorded = await arecord_terminal_failure(job_store, request_id, error)
+    recorded = await arecord_terminal_failure(job_store, request_id, error, claimed_by=claim_token)
     if webhook_url is not None and recorded:
         with contextlib.suppress(Exception):
             error_payload = (

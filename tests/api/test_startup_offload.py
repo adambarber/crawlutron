@@ -165,19 +165,24 @@ class TestStartupRecoveryStaysOffTheLoop:
         assert reloaded is not None and reloaded.status.value == "pending"
 
     async def test_recovery_skips_a_running_job_owned_by_this_process(self, loop_guard_store):
-        """A booting/other worker must not rewind a RUNNING job its own process is
-        driving: the task registry is the ownership check, so a live task means
-        the row is not a crash orphan (#220)."""
+        """A RUNNING job with a fresh DB lease is live, not a crash orphan."""
         from crawlutron.service.job_lifecycle import start_tracked_task
         from crawlutron.service.job_runner import recover_orphaned_running_jobs
 
         owned = await _off_loop(
             _seed_job, loop_guard_store, _ROOT, {"limits": {"max_depth": 1}}, running=True
         )
+        await _off_loop(
+            loop_guard_store.claim_running,
+            owned.job_id,
+            "runner:owned",
+            now=1000.0,
+            claim_seconds=300.0,
+        )
         blocker = asyncio.Event()
         start_tracked_task(owned.job_id, lambda: blocker.wait())
         try:
-            rewound = await recover_orphaned_running_jobs(loop_guard_store)
+            rewound = await recover_orphaned_running_jobs(loop_guard_store, now=1001.0)
         finally:
             blocker.set()
         assert rewound == 0, "recovery rewound a job this process is still running"
