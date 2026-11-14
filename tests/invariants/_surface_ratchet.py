@@ -118,7 +118,7 @@ DECLARED_SURFACE_RATCHET = {
     "packages/core/src/crawlutron/service/store_bootstrap.py": (2, 1),
     # #849: the core moved to service/caller_auth; Request plumbing stays api.
     "packages/rest/src/crawlutron_rest/api/caller_auth.py": (11, 9),
-    "packages/core/src/crawlutron/service/caller_concurrency.py": (1, 1),
+    "packages/core/src/crawlutron/service/caller_concurrency.py": (2, 2),
     # #674 raised 1,1 -> 2,2: CrawlRefusalError is the typed refusal carrier the
     # sweep's deactivation arm reads (reason as an enum member, not boundary text).
     "packages/core/src/crawlutron/service/crawl_executor.py": (2, 2),
@@ -224,6 +224,7 @@ DECLARED_SURFACE_RATCHET = {
     "packages/core/src/crawlutron/storage/admin_audit_store.py": (4, 1),
     "packages/core/src/crawlutron/storage/coordination_cookies.py": (2, 1),
     "packages/core/src/crawlutron/storage/coordination_counters.py": (1, 1),
+    "packages/core/src/crawlutron/storage/coordination_sync_slots.py": (1, 1),
     "packages/core/src/crawlutron/storage/coordination_store.py": (4, 2),
     "packages/core/src/crawlutron/storage/coordination_throttle_store.py": (1, 1),
     "packages/core/src/crawlutron/storage/job_store.py": (2, 1),

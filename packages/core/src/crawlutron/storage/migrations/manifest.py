@@ -16,6 +16,7 @@ class StoreSchema(StrEnum):
     COORDINATION_COUNTERS = "coordination_counters"
     COORDINATION_COOKIES = "coordination_cookies"
     COORDINATION_THROTTLE_BUCKETS = "coordination_throttle_buckets"
+    COORDINATION_SYNC_SLOTS = "coordination_sync_slots"
     WATCHES = "watches"
     CALLER_KEYS = "caller_keys"
     CRAWL_SPILLS = "crawl_spills"
@@ -179,6 +180,17 @@ COORDINATION_THROTTLE_BUCKETS_SCHEMA = TableSchema(
     indexes=(IndexSchema("coordination_throttle_buckets_touched", ("kind", "touched_at")),),
 )
 
+# One sync-crawl slot per row: a durable reservation that keeps the
+# per-caller max_concurrency quota correct across all worker processes.
+COORDINATION_SYNC_SLOTS_SCHEMA = TableSchema(
+    name="coordination_sync_slots",
+    columns=(
+        ColumnSchema("caller_id", "TEXT", False, None, 1),
+        ColumnSchema("slot_id", "TEXT", False, None, 2),
+        ColumnSchema("reserved_at", "REAL", False, None),
+    ),
+)
+
 # One row per registered watch: a watch is a single URL and its revalidation
 # history, rewritten per check -- no append-only page history to split out.
 WATCHES_SCHEMA = TableSchema(
@@ -264,6 +276,7 @@ CURRENT_SCHEMAS = {
     StoreSchema.COORDINATION_COUNTERS: COORDINATION_COUNTERS_SCHEMA,
     StoreSchema.COORDINATION_COOKIES: COORDINATION_COOKIES_SCHEMA,
     StoreSchema.COORDINATION_THROTTLE_BUCKETS: COORDINATION_THROTTLE_BUCKETS_SCHEMA,
+    StoreSchema.COORDINATION_SYNC_SLOTS: COORDINATION_SYNC_SLOTS_SCHEMA,
     StoreSchema.WATCHES: WATCHES_SCHEMA,
     StoreSchema.CALLER_KEYS: CALLER_KEYS_SCHEMA,
     StoreSchema.CRAWL_SPILLS: CRAWL_SPILLS_SCHEMA,
@@ -284,6 +297,7 @@ LEGACY_COLUMNS = {
     StoreSchema.COORDINATION_COUNTERS: (),
     StoreSchema.COORDINATION_COOKIES: (),
     StoreSchema.COORDINATION_THROTTLE_BUCKETS: (),
+    StoreSchema.COORDINATION_SYNC_SLOTS: (),
     StoreSchema.WATCHES: (),
     StoreSchema.CALLER_KEYS: (),
     StoreSchema.CRAWL_SPILLS: (),
@@ -304,6 +318,7 @@ MIGRATION_SEQUENCES = {
     StoreSchema.COORDINATION_COUNTERS: ("0001_coordination_counters_initial",),
     StoreSchema.COORDINATION_COOKIES: ("0001_coordination_cookies_initial",),
     StoreSchema.COORDINATION_THROTTLE_BUCKETS: ("0001_coordination_throttle_buckets_initial",),
+    StoreSchema.COORDINATION_SYNC_SLOTS: ("0001_coordination_sync_slots_initial",),
     StoreSchema.WATCHES: ("0001_watches_initial", "0002_watches_add_owner", "0003_watches_add_claimed_at"),
     StoreSchema.CALLER_KEYS: ("0001_caller_keys_initial", "0002_caller_keys_add_previous"),
     StoreSchema.CRAWL_SPILLS: (

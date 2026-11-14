@@ -189,17 +189,22 @@ async def admit(
     # One admit at a time per caller, so no two requests read the same
     # count before either has inserted its row or reserved its slot.
     async with concurrency_tracker.slot_lock(active.caller_id):
-        active_count = (
+        job_active = (
             await job_store.aactive_count_for_caller(active.caller_id) if job_store is not None else 0
         )
-        active_count += concurrency_tracker.sync_in_flight(active.caller_id)
-        check_concurrency_quota(active, active_count)
+        check_concurrency_quota(active, job_active + concurrency_tracker.sync_in_flight(active.caller_id))
         if not reserve_slot:
             # The row insert runs inside the lock; once it lands, the durable
             # row is the reservation the next admit counts.
             yield active.caller_id
             return
-        concurrency_tracker.reserve(active.caller_id)
+        # The reservation re-counts job rows and slots in one write transaction:
+        # the store's write lock is the shared admit mutex across workers.
+        concurrency_tracker.reserve(
+            active.caller_id,
+            max_concurrency=active.max_concurrency,
+            already_active=job_active,
+        )
     try:
         yield active.caller_id
     finally:

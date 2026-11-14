@@ -1,41 +1,67 @@
-"""Per-caller in-flight register for the sync door: sync crawls create no
-job row to count concurrency with, so this in-memory per-caller counter is summed
-with the async job-row count so one limit binds both doors."""
+"""Per-caller in-flight sync-crawl register.
+
+At ``CRAWLUTRON_WORKERS > 1`` the sync count lives in a coordination table
+shared by every worker process so one quota binds across all workers.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import time
 from collections import defaultdict
+from pathlib import Path
+
+from crawlutron.service.errors import QuotaRefusal
+
+__all__ = ["CallerConcurrencyTracker"]
 
 
 class CallerConcurrencyTracker:
-    """Per-caller count of in-flight sync crawls, released to zero on completion.
+    """Per-caller in-flight sync count, released to zero on completion.
 
-    Also owns the per-caller admit lock that serializes the count->insert window.
+    Also owns the per-caller admit lock; when ``coordination_db_path`` is
+    given, slot reservations are durable across all worker processes.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        coordination_db_path: str | Path | None = None,
+    ) -> None:
         self._in_flight: dict[str, int] = defaultdict(int)
         self._slot_locks: dict[str, asyncio.Lock] = {}
+        self._held: dict[str, list[str]] = {}
+        self._coord: CoordinationHandle | None = None
+        if coordination_db_path is not None:
+            self._coord = CoordinationHandle(coordination_db_path)
 
-    def slot_lock(self, caller_id: str) -> asyncio.Lock:
-        """The admit mutex for ``caller_id``; one per caller, lazily created.
-
-        Locks persist for the tracker's lifetime (#665): bounded by the keyed
-        caller population; eviction/sweep timers refused by owner ruling.
-        """
-        return self._slot_locks.setdefault(caller_id, asyncio.Lock())
-
-    def reserve(self, caller_id: str) -> None:
-        """Mark one more sync crawl in flight for ``caller_id``."""
-        self._in_flight[caller_id] += 1
+    def reserve(
+        self,
+        caller_id: str,
+        *,
+        max_concurrency: int | None = None,
+        already_active: int = 0,
+    ) -> None:
+        """Reserve one sync slot; the coordination store enforces the quota."""
+        if self._coord is None:
+            self._in_flight[caller_id] += 1
+            return
+        if max_concurrency is None:
+            raise ValueError("max_concurrency required when using coordination")
+        slot_id = self._coord.reserve(caller_id, max_concurrency, already_active)
+        if slot_id is None:
+            raise QuotaRefusal(
+                f"Caller concurrency quota is {max_concurrency}, quota already filled",
+            )
+        self._held.setdefault(caller_id, []).append(slot_id)
 
     def release(self, caller_id: str) -> None:
-        """Mark one sync crawl done; a caller at zero is dropped, never clamped.
-
-        The slot lock persists for the tracker's lifetime (#665): evicting it
-        races a concurrent admit that already fetched the lock.
-        """
+        """Release one sync slot for ``caller_id``."""
+        if self._coord is not None:
+            held = self._held.get(caller_id)
+            if held:
+                self._coord.release(caller_id, held.pop())
+            return
         count = self._in_flight.get(caller_id, 0) - 1
         if count <= 0:
             self._in_flight.pop(caller_id, None)
@@ -44,7 +70,43 @@ class CallerConcurrencyTracker:
 
     def sync_in_flight(self, caller_id: str) -> int:
         """How many sync crawls ``caller_id`` currently has running (0 when none)."""
+        if self._coord is not None:
+            return self._coord.count_active(caller_id)
         return self._in_flight.get(caller_id, 0)
 
+    def slot_lock(self, caller_id: str) -> asyncio.Lock:
+        """The admit mutex for ``caller_id``; persists for the tracker's lifetime (#665)."""
+        return self._slot_locks.setdefault(caller_id, asyncio.Lock())
 
-__all__ = ["CallerConcurrencyTracker"]
+    def close(self) -> None:
+        """Close the coordination store connection."""
+        if self._coord is not None:
+            self._coord.close()
+
+
+class CoordinationHandle:
+    """Thin wrapper around a ``CoordinationSyncSlotsStore`` instance."""
+
+    __slots__ = ("_store",)
+
+    def __init__(self, db_path: str | Path) -> None:
+        from crawlutron.storage.coordination_sync_slots import (
+            CoordinationSyncSlotsStore,
+        )
+
+        self._store = CoordinationSyncSlotsStore(db_path)
+
+    def reserve(self, caller_id: str, max_concurrency: int, already_active: int) -> str | None:
+        """Reserve one slot at the current time; ``None`` refuses."""
+        return self._store.reserve(caller_id, max_concurrency, already_active, time.time())
+
+    def release(self, caller_id: str, slot_id: str) -> None:
+        """Release one reserved slot."""
+        self._store.release(caller_id, slot_id)
+
+    def count_active(self, caller_id: str) -> int:
+        """Non-stale reserved slots for ``caller_id``."""
+        return self._store.count_active(caller_id, time.time())
+
+    def close(self) -> None:
+        self._store.close()

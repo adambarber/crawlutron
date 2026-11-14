@@ -48,8 +48,8 @@ def test_every_close_implementer_conforms_to_the_lifecycle_protocol():
     assert not offenders, "close implementers drifted:\n  " + "\n  ".join(offenders)
 
 
-def test_the_eight_declared_implementers_are_still_the_eight():
-    """The protocol's census: the tree's public close implementers are the eight
+def test_the_ten_declared_implementers_are_still_the_ten():
+    """The protocol's census: the tree's public close implementers are the ten
     the issue names, so a new resource class cannot grow a private release path
     without this gate seeing it."""
     implementers = {
@@ -62,6 +62,8 @@ def test_the_eight_declared_implementers_are_still_the_eight():
         "BrowserDriver",
         "BrowserPool",
         "BrowserRenderer",
+        "CallerConcurrencyTracker",
+        "CoordinationHandle",
         "CoordinationStore",
         "CrawlClient",
         "HttpCache",

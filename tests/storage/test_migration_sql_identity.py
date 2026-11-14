@@ -19,6 +19,7 @@ from crawlutron.storage.migrations.manifest import (
     COORDINATION_COOKIES_SCHEMA,
     COORDINATION_COUNTERS_SCHEMA,
     COORDINATION_THROTTLE_BUCKETS_SCHEMA,
+    COORDINATION_SYNC_SLOTS_SCHEMA,
     CRAWL_JOBS_SCHEMA,
     CRAWL_SPILL_LEASES_SCHEMA,
     CRAWL_SPILLS_SCHEMA,
@@ -73,6 +74,9 @@ _EXPECTED_SQL: dict[str, list[tuple[str, str]]] = {
     ],
     "0001_coordination_counters_initial": [
         (create_table_sql(COORDINATION_COUNTERS_SCHEMA), 'DROP TABLE "coordination_counters"')
+    ],
+    "0001_coordination_sync_slots_initial": [
+        (create_table_sql(COORDINATION_SYNC_SLOTS_SCHEMA), 'DROP TABLE "coordination_sync_slots"')
     ],
     "0001_crawl_spills_initial": [
         (create_table_sql(CRAWL_SPILLS_SCHEMA), 'DROP TABLE "crawl_spills"'),

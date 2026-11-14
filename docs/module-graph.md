@@ -487,6 +487,8 @@ graph LR
     service_caller_auth --> service_errors
     service_caller_auth --> transport_cookie_jar
     service_caller_auth --> transport_request_profile
+    service_caller_concurrency --> service_errors
+    service_caller_concurrency --> storage_coordination_sync_slots
     service_crawl_endpoint_cores --> delta
     service_crawl_endpoint_cores --> models_crawl_pending
     service_crawl_endpoint_cores --> models_crawl_request
@@ -708,6 +710,9 @@ graph LR
     storage_coordination_counters --> storage_migrations_manifest
     storage_coordination_store --> storage_migrations_manifest
     storage_coordination_store --> storage_sqlite_store
+    storage_coordination_sync_slots --> storage_coordination_store
+    storage_coordination_sync_slots --> storage_ids
+    storage_coordination_sync_slots --> storage_migrations_manifest
     storage_coordination_throttle_store --> storage_coordination_store
     storage_coordination_throttle_store --> storage_migrations_manifest
     storage_job_store --> admission_policy
@@ -741,6 +746,8 @@ graph LR
     storage_migrations_0001_coordination_cookies_initial --> storage_migrations_manifest
     storage_migrations_0001_coordination_counters_initial --> storage_migrations_ddl
     storage_migrations_0001_coordination_counters_initial --> storage_migrations_manifest
+    storage_migrations_0001_coordination_sync_slots_initial --> storage_migrations_ddl
+    storage_migrations_0001_coordination_sync_slots_initial --> storage_migrations_manifest
     storage_migrations_0001_coordination_throttle_buckets_initial --> storage_migrations_ddl
     storage_migrations_0001_coordination_throttle_buckets_initial --> storage_migrations_manifest
     storage_migrations_0001_crawl_jobs_initial --> storage_migrations_ddl

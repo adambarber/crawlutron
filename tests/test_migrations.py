@@ -15,6 +15,7 @@ from crawlutron.storage.caller_key_store import CallerKeyStore
 from crawlutron.storage.coordination_cookies import SharedCookieStore
 from crawlutron.storage.coordination_counters import CoordinationCounters
 from crawlutron.storage.coordination_throttle_store import CoordinationThrottleStore
+from crawlutron.storage.coordination_sync_slots import CoordinationSyncSlotsStore
 from crawlutron.storage.job_store import CrawlJobState, JobStatus, JobStore
 from crawlutron.storage.migrations import (
     CURRENT_SCHEMAS,
@@ -44,6 +45,7 @@ def _open_store(
     | CoordinationCounters
     | SharedCookieStore
     | CoordinationThrottleStore
+    | CoordinationSyncSlotsStore
     | WatchStore
     | CallerKeyStore
     | CrawlSpillStore
@@ -67,6 +69,8 @@ def _open_store(
         return CrawlSpillStore(db_path)
     if schema is StoreSchema.KEY_ADMIN_EVENTS:
         return AdminAuditStore(db_path)
+    if schema is StoreSchema.COORDINATION_SYNC_SLOTS:
+        return CoordinationSyncSlotsStore(db_path)
     # The parametrization above is derived from StoreSchema, so it grows whenever a schema is added.
     raise AssertionError(f"no store opener declared for {schema.value}")
 
