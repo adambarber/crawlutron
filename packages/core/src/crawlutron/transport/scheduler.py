@@ -349,11 +349,13 @@ class DomainScheduler:
                 return
 
         # return_exceptions=True: one job's failure must not cancel the others.
-        await asyncio.gather(*(run_one(job) for job in jobs), return_exceptions=True)
+        outcomes = await asyncio.gather(*(run_one(job) for job in jobs), return_exceptions=True)
         if on_result is not None:
             return None
-        for job in (job for job in jobs if job.index not in results):
-            results[job.index] = failed_result(job, RuntimeError("scheduler result absent"))
+        for job, outcome in zip(jobs, outcomes, strict=True):
+            if job.index not in results:
+                cause = outcome if isinstance(outcome, BaseException) else RuntimeError("absent")
+                results[job.index] = failed_result(job, cause)
         return results
 
     def _reserve_fire(self, domain: str) -> float:
