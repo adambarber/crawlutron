@@ -14,6 +14,13 @@ DOCKERFILE_PATH = SERVICE_ROOT / "Dockerfile"
 COMPOSE_PATH = SERVICE_ROOT / "docker-compose.yml"
 
 
+def _syncing_stages() -> list[str]:
+    text = DOCKERFILE_PATH.read_text(encoding="utf-8")
+    stages = [stage for stage in text.split("\nFROM ") if "uv sync --frozen" in stage]
+    assert stages, "no stage runs uv sync --frozen; the gate would pass vacuously"
+    return stages
+
+
 def test_base_image_is_digest_pinned_3_14() -> None:
     """The 3.14 base must be pinned by tag AND digest, so a rebuild is
     byte-for-byte reproducible and the major version is explicit (#625).
@@ -61,12 +68,27 @@ def test_every_stage_that_syncs_the_workspace_first_copies_the_members() -> None
     A stage holding only `pyproject.toml` and `uv.lock` dies at "Distribution not
     found at: file:///app/packages/core".
     """
-    text = DOCKERFILE_PATH.read_text(encoding="utf-8")
-    stages = [stage for stage in text.split("\nFROM ") if "uv sync --frozen" in stage]
-    assert stages, "no stage runs uv sync --frozen; the gate would pass vacuously"
-    for stage in stages:
+    for stage in _syncing_stages():
         copy = next(line for line in stage.splitlines() if line.startswith("COPY "))
         assert any(line.startswith("COPY ") and "packages" in line for line in stage.splitlines()), (
             "a stage runs `uv sync --frozen` without copying packages/: the workspace "
             f"members it resolves live there, and the first COPY is {copy!r}"
         )
+
+
+def test_every_syncing_stage_accepts_the_vcs_pretend_version() -> None:
+    """The build context ships no `.git`, so a syncing stage must take the version.
+
+    hatch-vcs cannot resolve from a gitless context, so the caller passes
+    SETUPTOOLS_SCM_PRETEND_VERSION as a build arg for `uv sync`.
+    """
+    for stage in _syncing_stages():
+        assert "ARG SETUPTOOLS_SCM_PRETEND_VERSION" in stage
+        assert "SETUPTOOLS_SCM_PRETEND_VERSION" in stage
+
+
+def test_image_builds_pass_the_vcs_pretend_version() -> None:
+    """Every workflow docker build must forward the pretend version into the image."""
+    for name in (".github/workflows/packaging.yml", ".github/workflows/release.yml"):
+        text = SERVICE_ROOT.joinpath(name).read_text(encoding="utf-8")
+        assert "SETUPTOOLS_SCM_PRETEND_VERSION=" in text, f"{name} must pass the pretend version"

@@ -17,8 +17,10 @@ ARG CRAWLUTRON_BASE_IMAGE=python:3.14.10-slim-bookworm@sha256:516b51cb9db2ef061e
 # ==========================================
 FROM ${CRAWLUTRON_BASE_IMAGE} AS builder
 
+ARG SETUPTOOLS_SCM_PRETEND_VERSION
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    SETUPTOOLS_SCM_PRETEND_VERSION=${SETUPTOOLS_SCM_PRETEND_VERSION}
 
 WORKDIR /app
 
@@ -219,6 +221,9 @@ CMD ["sh", "-c", "exec uvicorn crawlutron_rest.main:app --host ${CRAWLUTRON_HOST
 # 3. Development Stage: Hot-reloading and dev tools
 # ==========================================
 FROM runtime AS development
+
+ARG SETUPTOOLS_SCM_PRETEND_VERSION
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=${SETUPTOOLS_SCM_PRETEND_VERSION}
 
 # Switch back to root to install dev dependencies
 USER root
