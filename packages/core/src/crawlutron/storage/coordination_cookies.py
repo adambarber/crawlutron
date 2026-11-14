@@ -13,6 +13,7 @@ from pathlib import Path
 
 from crawlutron.storage.coordination_store import CoordinationStore
 from crawlutron.storage.migrations.manifest import StoreSchema
+from crawlutron.storage.safe_db import in_txn, txn_write
 
 __all__ = ["DEFAULT_MAX_HOSTS_PER_NAMESPACE", "SharedCookieStore"]
 
@@ -55,8 +56,7 @@ class SharedCookieStore(CoordinationStore):
         """
         key = (namespace or "", host)
         with self._lock:
-            self._conn.execute("BEGIN IMMEDIATE")
-            try:
+            with txn_write(self._conn, owner="coordination_cookies.merge"):
                 row = self._conn.execute(
                     "SELECT payload FROM coordination_cookies WHERE namespace = ? AND host = ?",
                     key,
@@ -69,38 +69,24 @@ class SharedCookieStore(CoordinationStore):
                     "ORDER BY touched_at ASC LIMIT -1 OFFSET ?)",
                     (key[0], self._max_hosts),
                 )
-                self._conn.execute("COMMIT")
-            except BaseException:
-                self._conn.execute("ROLLBACK")
-                raise
 
     def clear(self, namespace: str = "") -> None:
         """Clear one namespace, or every slot when ``namespace`` is empty."""
         with self._lock:
-            self._conn.execute("BEGIN IMMEDIATE")
-            try:
+            with txn_write(self._conn, owner="coordination_cookies.clear"):
                 if namespace:
                     self._conn.execute("DELETE FROM coordination_cookies WHERE namespace = ?", (namespace,))
                 else:
                     self._conn.execute("DELETE FROM coordination_cookies")
-                self._conn.execute("COMMIT")
-            except BaseException:
-                self._conn.execute("ROLLBACK")
-                raise
 
     def touch(self, namespace: str, host: str) -> None:
         """Mark one slot recently used (the read path)."""
         with self._lock:
-            self._conn.execute("BEGIN IMMEDIATE")
-            try:
+            with txn_write(self._conn, owner="coordination_cookies.touch"):
                 self._conn.execute(
                     "UPDATE coordination_cookies SET touched_at = ? WHERE namespace = ? AND host = ?",
                     (time.time(), namespace or "", host),
                 )
-                self._conn.execute("COMMIT")
-            except BaseException:
-                self._conn.execute("ROLLBACK")
-                raise
 
     def slots_for_namespace(self, namespace: str) -> dict[str, dict[str, str]]:
         """One namespace's slots as {host: cookies}; every access under self._lock."""
@@ -119,13 +105,8 @@ class SharedCookieStore(CoordinationStore):
         prune cannot resurrect a deleted cookie.
         """
         with self._lock:
-            self._conn.execute("BEGIN IMMEDIATE")
-            try:
+            with txn_write(self._conn, owner="coordination_cookies.put"):
                 self._upsert_slot(namespace or "", host, json.dumps(dict(value)), time.time())
-                self._conn.execute("COMMIT")
-            except BaseException:
-                self._conn.execute("ROLLBACK")
-                raise
 
     @staticmethod
     def _decode(payload: str) -> dict[str, str]:
@@ -138,11 +119,12 @@ class SharedCookieStore(CoordinationStore):
     def _upsert_slot(self, namespace: str, host: str, payload: str, touched_at: float) -> None:
         """The one upsert statement; ``merge`` and ``put`` differ only in their caller.
 
-        Caller must hold self._lock.
+        Caller must hold self._lock and be inside an active txn_write block.
         """
-        self._conn.execute(
-            "INSERT INTO coordination_cookies (namespace, host, payload, touched_at) "
-            "VALUES (?, ?, ?, ?) ON CONFLICT(namespace, host) DO UPDATE SET "
-            "payload = excluded.payload, touched_at = excluded.touched_at",
-            (namespace, host, payload, touched_at),
-        )
+        with in_txn(self._conn):
+            self._conn.execute(
+                "INSERT INTO coordination_cookies (namespace, host, payload, touched_at) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT(namespace, host) DO UPDATE SET "
+                "payload = excluded.payload, touched_at = excluded.touched_at",
+                (namespace, host, payload, touched_at),
+            )
