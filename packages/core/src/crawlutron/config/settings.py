@@ -119,15 +119,15 @@ class CrawlerSettings:
     # Search provider configuration (POST /v1/search): "auto" picks the first
     # configured keyed provider, falling back to keyless DuckDuckGo HTML.
     search_provider: str = "auto"
-    tavily_api_key: str = ""
-    brave_api_key: str = ""
-    serper_api_key: str = ""
+    tavily_api_key: str = field(repr=False, default="")
+    brave_api_key: str = field(repr=False, default="")
+    serper_api_key: str = field(repr=False, default="")
     search_limit_default: int = 5
     search_limit_max: int = 20
     search_timeout_seconds: int = 15
     # Operator token gating /v1/keys issuance, listing, and revocation. Empty
     # disables the HTTP surface for key management (no token, no minting).
-    key_admin_token: str = ""
+    key_admin_token: str = field(repr=False, default="")
     # Per-caller watch cap: registration refuses past this many live watches for
     # one owner; the anonymous bucket shares one finite allowance.
     max_watches_per_caller: int = 100

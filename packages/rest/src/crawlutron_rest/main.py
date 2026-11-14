@@ -20,6 +20,7 @@ from crawlutron.transport.browser_pool import (
     initialize_browser_pool,
 )
 from crawlutron.vocabulary.identity import SERVICE_ID, SERVICE_VERSION
+from crawlutron_rest.policy import build_runtime_policy
 
 if TYPE_CHECKING:
     # Imported for annotations under type checking; the runtime import carries the real classes.
@@ -94,6 +95,7 @@ def create_app(settings: CrawlerSettings | None = None) -> FastAPI:
         audit_store=audit_store,
         lifespan=lifespan,
     )
+    app.state.runtime_policy = build_runtime_policy(settings)
     from crawlutron_rest.api.exempt_route_boot import validate_exempt_routes
 
     validate_exempt_routes(app)
