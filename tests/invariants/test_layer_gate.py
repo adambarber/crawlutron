@@ -1,8 +1,3 @@
-"""Layer gate: module-boundary and import-hygiene rules from the rule table.
-
-Walks the build_graph surface and names every offender at file:line.
-"""
-
 from __future__ import annotations
 
 import ast
@@ -43,23 +38,30 @@ _ALLOWED_SETTINGS = (
     "packages/mcp/src/crawlutron_mcp/",
 )
 _WRITE_MODES = ("w", "a", "x", "r+", "w+", "a+", "x+")
+#: curl_cffi/os flag constants that denote a write (not O_RDONLY).
+_WRITE_FLAG_NAMES = frozenset({"O_WRONLY", "O_RDWR", "O_CREAT", "O_APPEND", "O_TRUNC", "O_EXCL"})
+
+#: The sanctioned egress family: fetchers, pooled_clients and pooled_cffi may construct clients.
+_EGRESS_FAMILY = frozenset(
+    {
+        _FETCHERS,
+        "packages/core/src/crawlutron/transport/pooled_clients.py",
+        "packages/core/src/crawlutron/transport/pooled_cffi.py",
+    }
+)
 
 _SKIP_FASTAPI = frozenset({"packages/core/src/crawlutron/health/readiness.py"})
 _SKIP_EGRESS = frozenset(
     {
-        "packages/core/src/crawlutron/search/providers.py",
-        "packages/core/src/crawlutron/service/webhooks.py",
-        "packages/core/src/crawlutron/transport/classification.py",
-        "packages/core/src/crawlutron/transport/cffi_transport.py",
-        "packages/core/src/crawlutron/transport/pinned_transport.py",
-        "packages/core/src/crawlutron/transport/pooled_clients.py",
-        "packages/core/src/crawlutron/transport/pooled_cffi.py",
-        "packages/core/src/crawlutron/transport/timeouts.py",
         "packages/rest/src/crawlutron_rest/cli/__main__.py",
         "packages/rest/src/crawlutron_rest/cli/client.py",
+        "packages/core/src/crawlutron/transport/pooled_clients.py",
+        "packages/core/src/crawlutron/transport/pooled_cffi.py",
         "packages/sdk/src/crawlutron_sdk/client.py",
     }
 )
+#: pooled_clients.py imports crawlutron.config.settings at runtime (_default_settings)
+#: for pool-config defaults -- a genuine below-service-layer import kept as a skip.
 _SKIP_SETTINGS = frozenset(
     {
         "packages/core/src/crawlutron/extraction/documents.py",
@@ -83,9 +85,6 @@ _SKIP_EXECUTOR = frozenset(
         "packages/rest/src/crawlutron_rest/main.py",
     }
 )
-
-#: crawlutron.models/vocabulary modules that import a higher layer at runtime.
-#: Each entry names an accepted upward edge; the set shrinks one module per arc.
 _SKIP_UPWARD = frozenset(
     {
         "packages/core/src/crawlutron/models/caller_identity.py",
@@ -96,9 +95,6 @@ _SKIP_UPWARD = frozenset(
         "packages/core/src/crawlutron/models/fetch_validators.py",
     }
 )
-
-#: Module-level mutable state holders not yet registered with process_state.
-#: Each should register a reset/probe pair; the set shrinks as owners comply.
 _SKIP_MUTABLE = frozenset(
     {
         "packages/core/src/crawlutron/extraction/llm_format.py",
@@ -107,18 +103,16 @@ _SKIP_MUTABLE = frozenset(
 )
 
 
-def _scope(*, exclude: frozenset[str] = frozenset()) -> tuple[tuple[pathlib.Path, ast.Module], ...]:
-    """Every walked module; ``exclude`` is honored by the Rule's violation filter."""
-    _ = exclude
-    return _WALKED
+def _scope_for(trees: tuple[tuple[pathlib.Path, ast.Module], ...]):
+    def scope(*, exclude: frozenset[str] = frozenset()):
+        _ = exclude
+        return trees
+
+    return scope
 
 
-def _models_vocab_scope(
-    *, exclude: frozenset[str] = frozenset()
-) -> tuple[tuple[pathlib.Path, ast.Module], ...]:
-    """models/vocabulary trees; ``exclude`` is honored by the Rule's violation filter."""
-    _ = exclude
-    return _MODELS_VOCAB_TREES
+_scope = _scope_for(_WALKED)
+_models_vocab_scope = _scope_for(_MODELS_VOCAB_TREES)
 
 
 def _rel(path: pathlib.Path) -> str:
@@ -147,9 +141,10 @@ def _first_match(tree: ast.AST, predicate: Callable[[ast.AST], bool]) -> ast.AST
     return None
 
 
-def _call_mode(call: ast.Call) -> str | None:
-    if len(call.args) >= 2:
-        arg = call.args[1]
+def _extract_mode(call: ast.Call, positional: int) -> str | None:
+    """Mode carried by ``call``: the ``positional``-th positional arg or ``mode=`` keyword."""
+    if len(call.args) > positional:
+        arg = call.args[positional]
         if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
             return arg.value
     for keyword in call.keywords:
@@ -163,88 +158,134 @@ def _call_mode(call: ast.Call) -> str | None:
 
 
 def _upward_imports(tree: ast.Module, path: pathlib.Path) -> list[str]:
-    """crawlutron.models/vocabulary importing a higher layer."""
-    out: list[str] = []
+    found: list[str] = []
     for node in _runtime_imports(tree):
         if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("crawlutron."):
             layer = node.module.split(".")[1]
             if layer not in ("models", "vocabulary"):
-                out.append(offender_at(path, node, f"{node.module} imported above models/vocabulary"))
+                found.append(offender_at(path, node, f"{node.module} imported above models/vocabulary"))
         elif isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.name.startswith("crawlutron."):
                     layer = alias.name.split(".")[1]
                     if layer not in ("models", "vocabulary"):
-                        out.append(offender_at(path, node, f"{alias.name} imported above models/vocabulary"))
-    return out
+                        found.append(
+                            offender_at(path, node, f"{alias.name} imported above models/vocabulary")
+                        )
+    return found
 
 
 def _fastapi_imports(tree: ast.Module, path: pathlib.Path) -> list[str]:
-    """fastapi imported outside packages/rest."""
-    out: list[str] = []
     node = _import_node(tree, "fastapi")
     if node is None or _rel(path).startswith(_REST_PREFIX):
-        return out
+        return []
     return [offender_at(path, node, "fastapi imported outside packages/rest")]
 
 
-def _egress_imports(tree: ast.Module, path: pathlib.Path) -> list[str]:
-    """httpx or curl_cffi imported outside the egress module."""
-    out: list[str] = []
-    if _rel(path) == _FETCHERS:
-        return out
-    for wanted in ("httpx", "curl_cffi"):
-        node = _import_node(tree, wanted)
-        if node is not None:
-            out.append(offender_at(path, node, f"{wanted} imported outside the egress module"))
-    return out
+def _receiver_root(value: ast.expr) -> str | None:
+    if isinstance(value, ast.Name):
+        return value.id
+    if isinstance(value, ast.Attribute):
+        return _receiver_root(value.value)
+    return None
+
+
+def _egress_construction(tree: ast.Module, path: pathlib.Path) -> list[str]:
+    hits: list[str] = []
+    if _rel(path) in _EGRESS_FAMILY:
+        return hits
+    for call in call_nodes(tree):
+        func = call.func
+        if not isinstance(func, ast.Attribute):
+            continue
+        if func.attr in ("AsyncClient", "Client") and _receiver_root(func.value) == "httpx":
+            hits.append(offender_at(path, call, "httpx client constructed outside the egress family"))
+        elif func.attr == "AsyncSession" and _receiver_root(func.value) in ("curl_cffi", "cffi_requests"):
+            hits.append(offender_at(path, call, "curl_cffi client constructed outside the egress family"))
+    return hits
 
 
 def _settings_imports(tree: ast.Module, path: pathlib.Path) -> list[str]:
-    """crawlutron.config.settings imported below the service layer."""
-    out: list[str] = []
+    found: list[str] = []
     node = _import_node(tree, "crawlutron.config.settings")
     if node is None:
-        return out
+        return found
     if any(_rel(path).startswith(prefix) for prefix in _ALLOWED_SETTINGS):
-        return out
+        return found
     return [offender_at(path, node, "crawlutron.config.settings imported below the service layer")]
 
 
 def _uuid4_calls(tree: ast.Module, path: pathlib.Path) -> list[str]:
-    """uuid.uuid4() outside storage/ids.py."""
-    out: list[str] = []
+    found: list[str] = []
     if _rel(path) == _IDS:
-        return out
+        return found
+    attr_names: set[str] = set()
+    bare_names: set[str] = set()
+    for node in _runtime_imports(tree):
+        if isinstance(node, ast.Import):
+            for al in node.names:
+                if al.name == "uuid":
+                    attr_names.add(al.asname or al.name)
+        elif isinstance(node, ast.ImportFrom) and node.module == "uuid":
+            for al in node.names:
+                if al.name == "uuid4":
+                    bare_names.add(al.asname or al.name)
     for call in call_nodes(tree):
         func = call.func
-        if (
-            isinstance(func, ast.Attribute)
-            and func.attr == "uuid4"
-            and isinstance(func.value, ast.Name)
-            and func.value.id == "uuid"
-        ):
-            out.append(offender_at(path, call, "uuid.uuid4() outside storage/ids.py"))
-    return out
+        if isinstance(func, ast.Attribute) and func.attr == "uuid4":
+            if isinstance(func.value, ast.Name) and func.value.id in attr_names:
+                found.append(offender_at(path, call, "uuid.uuid4() outside storage/ids.py"))
+        elif isinstance(func, ast.Name) and func.id in bare_names:
+            found.append(offender_at(path, call, "uuid4() outside storage/ids.py"))
+    return found
 
 
 def _open_calls(tree: ast.Module, path: pathlib.Path) -> list[str]:
-    """write-mode open() outside safety.atomic_write."""
-    out: list[str] = []
+    hits: list[str] = []
     for call in call_nodes(tree):
         func = call.func
-        if not (isinstance(func, ast.Name) and func.id == "open"):
+        if isinstance(func, ast.Name) and func.id == "open":
+            mode = _extract_mode(call, 1)
+            if mode is None or not any(mode.startswith(wm) for wm in _WRITE_MODES):
+                continue
+            hits.append(offender_at(path, call, "write-mode open() outside safety.atomic_write"))
             continue
-        mode = _call_mode(call)
-        if mode is None or not any(mode.startswith(wm) for wm in _WRITE_MODES):
+        if not (isinstance(func, ast.Attribute) and func.attr == "open"):
             continue
-        out.append(offender_at(path, call, "write-mode open() outside safety.atomic_write"))
-    return out
+        if _is_pathlib_open_receiver(func.value):
+            mode = _extract_mode(call, 0)
+            if mode is None or not any(mode.startswith(write_mode) for write_mode in _WRITE_MODES):
+                continue
+            hits.append(offender_at(path, call, "write-mode Path.open() outside safety.atomic_write"))
+            continue
+        if (
+            isinstance(func.value, ast.Name)
+            and func.value.id == "os"
+            and len(call.args) >= 2
+            and _has_write_flags(call.args[1])
+        ):
+            hits.append(offender_at(path, call, "os.open() with write flags outside safety.atomic_write"))
+    return hits
+
+
+def _is_pathlib_open_receiver(value: ast.expr) -> bool:
+    return (
+        isinstance(value, ast.Call)
+        and isinstance(value.func, ast.Attribute)
+        and value.func.attr == "Path"
+        and _receiver_root(value.func.value) == "pathlib"
+    )
+
+
+def _has_write_flags(flags: ast.expr) -> bool:
+    if isinstance(flags, ast.Attribute) and isinstance(flags.value, ast.Name) and flags.value.id == "os":
+        return flags.attr in _WRITE_FLAG_NAMES
+    if isinstance(flags, ast.BinOp) and isinstance(flags.op, ast.BitOr):
+        return _has_write_flags(flags.left) or _has_write_flags(flags.right)
+    return isinstance(flags, ast.Constant) and isinstance(flags.value, int) and flags.value != 0
 
 
 def _executor_calls(tree: ast.Module, path: pathlib.Path) -> list[str]:
-    """ThreadPoolExecutor outside runtime/pool.py."""
-    out: list[str] = []
     node: ast.AST | None = _import_node(tree, "ThreadPoolExecutor")
     if node is None:
         node = _first_match(
@@ -256,34 +297,32 @@ def _executor_calls(tree: ast.Module, path: pathlib.Path) -> list[str]:
             ),
         )
     if node is None or _rel(path) == _POOL:
-        return out
+        return []
     return [offender_at(path, node, "ThreadPoolExecutor outside runtime/pool.py")]
 
 
 def _subprocess_imports(tree: ast.Module, path: pathlib.Path) -> list[str]:
-    """subprocess imported outside sanctioned sites."""
-    out: list[str] = []
     node = _import_node(tree, "subprocess")
     if node is None or _rel(path) == _SANCTIONED_SUBPROCESS:
-        return out
+        return []
     return [offender_at(path, node, "subprocess outside sanctioned sites")]
 
 
 def _is_empty_literal(value: ast.expr) -> bool:
-    """An empty ``[]``/``{}``/``set()`` literal -- a fresh accumulator at module scope."""
     if isinstance(value, (ast.List, ast.Set)):
         return len(value.elts) == 0
     if isinstance(value, ast.Dict):
         return len(value.keys) == 0
-    return False
+    return (
+        isinstance(value, ast.Call)
+        and isinstance(value.func, ast.Name)
+        and value.func.id in ("set", "dict", "list")
+        and not value.args
+        and not value.keywords
+    )
 
 
 def _mutable_containers(tree: ast.Module, path: pathlib.Path) -> list[str]:
-    """module-level empty mutable container not registered with process_state.
-
-    Populated literals (``_CSV_COLUMNS = [...]``) are constant tables, not state;
-    only empty accumulators (``_inflight: dict = {}``) hide mutable global state.
-    """
     out: list[str] = []
     if _rel(path).endswith("process_state.py"):
         return out
@@ -296,7 +335,7 @@ def _mutable_containers(tree: ast.Module, path: pathlib.Path) -> list[str]:
         if name is None or name == "__all__" or (name.startswith("__") and name.endswith("__")):
             continue
         value = stmt.value
-        if isinstance(value, (ast.List, ast.Dict, ast.Set)) and _is_empty_literal(value):
+        if isinstance(value, (ast.List, ast.Dict, ast.Set, ast.Call)) and _is_empty_literal(value):
             out.append(
                 offender_at(path, stmt, "module-level mutable container not registered with process_state")
             )
@@ -333,10 +372,7 @@ RULE_MODELS_VOCAB_IMPORT_NOTHING_ABOVE = Rule(
     summary="crawlutron.models or crawlutron.vocabulary imports a higher layer",
     scope=_models_vocab_scope,
     skip=_SKIP_UPWARD,
-    bite=lambda: Bites(
-        "from crawlutron.service import Engine\n",
-        "imported above models/vocabulary",
-    ),
+    bite=lambda: Bites("from crawlutron.service import Engine\n", "imported above models/vocabulary"),
     clean=lambda: ["from crawlutron.models import CrawlJob\n"],
 )
 
@@ -351,15 +387,15 @@ RULE_FASTAPI_REST_ONLY = Rule(
     clean=lambda: ["import httpx\n"],
 )
 
-#: httpx or curl_cffi imported outside the egress module.
+#: httpx/curl_cffi client construction outside the egress family.
 RULE_EGRESS_ONLY_FETCHERS = Rule(
     name="egress-only-through-fetchers",
-    find=_egress_imports,
-    summary="httpx or curl_cffi imported outside the egress module",
+    find=_egress_construction,
+    summary="httpx/curl_cffi client constructed outside the egress family",
     scope=_scope,
     skip=_SKIP_EGRESS,
-    bite=lambda: Bites("import httpx\n", "httpx"),
-    clean=lambda: ["from pathlib import Path\n"],
+    bite=lambda: Bites("import httpx\nhttpx.AsyncClient(timeout=5)\n", "httpx client constructed"),
+    clean=lambda: ["import httpx\n"],
 )
 
 #: crawlutron.config.settings imported below the service layer.
@@ -369,32 +405,29 @@ RULE_SETTINGS_AT_OR_ABOVE_SERVICE = Rule(
     summary="crawlutron.config.settings imported below the service layer",
     scope=_scope,
     skip=_SKIP_SETTINGS,
-    bite=lambda: Bites(
-        "from crawlutron.config.settings import CrawlerSettings\n",
-        "config.settings",
-    ),
+    bite=lambda: Bites("from crawlutron.config.settings import CrawlerSettings\n", "config.settings"),
     clean=lambda: ["import json\n"],
 )
 
-#: uuid.uuid4() outside storage/ids.py.
+#: uuid.uuid4() or a bare uuid4() outside storage/ids.py.
 RULE_UUID4_ONLY_IDS = Rule(
     name="uuid4-only-in-storage-ids",
     find=_uuid4_calls,
-    summary="uuid.uuid4() outside storage/ids.py",
+    summary="uuid.uuid4() or a bare uuid4() outside storage/ids.py",
     scope=_scope,
     skip=frozenset(),
-    bite=lambda: Bites("import uuid\nx = uuid.uuid4()\n", "uuid.uuid4()"),
+    bite=lambda: Bites("from uuid import uuid4\nx = uuid4()\n", "uuid4()"),
     clean=lambda: ["import uuid\nx = uuid.uuid1()\n"],
 )
 
-#: write-mode open() outside safety.atomic_write.
+#: write-mode open() / Path.open() / os.open() outside safety.atomic_write.
 RULE_WRITE_MODE_OPEN_ATOMIC = Rule(
     name="write-mode-open-only-via-atomic-write",
     find=_open_calls,
-    summary="write-mode open() outside safety.atomic_write",
+    summary="write-mode open() / Path.open() / os.open() outside safety.atomic_write",
     scope=_scope,
     skip=frozenset(),
-    bite=lambda: Bites('open("out.txt", "w")\n', "open("),
+    bite=lambda: Bites('pathlib.Path("out.txt").open("w")\n', "Path.open("),
     clean=lambda: ['open("in.txt")\n'],
 )
 
@@ -430,7 +463,7 @@ RULE_MUTABLE_CONTAINERS_REGISTER_STATE = Rule(
     summary="module-level mutable container not registered with process_state",
     scope=_scope,
     skip=_SKIP_MUTABLE,
-    bite=lambda: Bites("pending: list = []\n", "process_state"),
+    bite=lambda: Bites("_inflight: set = set()\n", "process_state"),
     clean=lambda: ["count = 0\n"],
 )
 
