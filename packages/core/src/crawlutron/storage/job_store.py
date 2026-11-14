@@ -16,7 +16,13 @@ from crawlutron.admission.policy import PolicyLike, PolicyTier, read_policy
 from crawlutron.storage.coordination_store import atwin
 from crawlutron.storage.ids import new_job_id
 from crawlutron.storage.migrations import StoreSchema
-from crawlutron.storage.sqlite_store import bind_conn_lifecycle, connect_store, process_lock, store_lock_key
+from crawlutron.storage.sqlite_store import (
+    bind_conn_lifecycle,
+    connect_store,
+    connection_data_version,
+    process_lock,
+    store_lock_key,
+)
 
 from . import job_store_lease as _lease
 from .job_store_accumulators import JobAccumulators
@@ -225,13 +231,15 @@ class JobStore:
         if self._is_tombstoned(job.job_id):
             return
         self._accumulators._seed_table_truth(job.job_id)
+        # Capture BEFORE our write: a sibling committing during or after this save
+        # bumps data_version past it, so the next save cannot mistake us for last.
+        version = connection_data_version(self._conn)
         job.updated_at = time.time()
         self._conn.execute(_UPSERT_JOB_ROW_SQL, _job_row_params(job))
         self._accumulators.append(job)
         self._conn.commit()
-        # Seed the post-commit version so the next save knows we are the last
-        # writer and can skip the full-table re-read on the no-op path.
-        self._accumulators._seed_version(self._conn, job.job_id)
+        # Stamped only after the write paths ran, so the proof reflects our content.
+        self._accumulators._seed_version(job.job_id, version)
 
     def set_status(
         self,

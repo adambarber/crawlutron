@@ -89,9 +89,9 @@ class JobAccumulators:
         """Stamp ``job_id``'s digests as truth as of ``version`` (reads just ran)."""
         self._seeded_version[job_id] = version
 
-    def _seed_version(self, conn: sqlite3.Connection, job_id: str) -> None:
-        """Record ``data_version`` right after our own commit (the no-op proof)."""
-        self._own_version[job_id] = connection_data_version(conn)
+    def _seed_version(self, job_id: str, version: int) -> None:
+        """Record the version observed before our write (the no-op proof)."""
+        self._own_version[job_id] = version
 
     def _seed_table_truth(self, job_id: str) -> None:
         """Re-read the tables' content when another connection may have written.
