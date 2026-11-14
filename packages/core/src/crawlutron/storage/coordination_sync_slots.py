@@ -15,6 +15,7 @@ from crawlutron.storage.migrations.manifest import StoreSchema
 __all__ = ["CoordinationSyncSlotsStore"]
 
 #: Staleness bound in seconds: a slot older than this is assumed abandoned.
+#: Trade-off: a sync crawl running past the bound can be over-admitted once.
 _STALENESS_SECONDS = 300.0
 
 
