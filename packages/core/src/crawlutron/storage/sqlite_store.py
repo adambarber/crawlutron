@@ -68,6 +68,9 @@ def configure_store_connection(
     # here, so the fsync tax is immaterial (measured directly against this store).
     _set_busy_timeout(conn, busy_timeout_ms)
     _ensure_wal(conn, busy_timeout_ms=busy_timeout_ms, wal_retry_seconds=wal_retry_seconds)
+    conn.isolation_level = None
+    if conn.isolation_level is not None:
+        raise RuntimeError("store connection must run in autocommit mode")
     return conn
 
 

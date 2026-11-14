@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from crawlutron.storage.coordination_store import CoordinationStore, atwin
 from crawlutron.storage.migrations.manifest import StoreSchema
+from crawlutron.storage.safe_db import in_txn, txn_write
 
 __all__ = ["CoordinationThrottleStore"]
 
@@ -30,17 +31,12 @@ class CoordinationThrottleStore(CoordinationStore):
         """Reserve up to `batch` units for `bucket_key` in the current window."""
         want = max(1, int(batch))
         with self._lock:
-            self._conn.execute("BEGIN IMMEDIATE")
-            try:
+            with txn_write(self._conn, owner="coordination_throttle_store.reserve_anonymous"):
                 window_started, count = self._anon_window_state(bucket_key, now, window_seconds, capacity)
                 granted = self._apply_anon_reservation(
                     bucket_key, now, window_started, count, want, max_requests
                 )
-                self._conn.execute("COMMIT")
                 return granted
-            except BaseException:
-                self._conn.execute("ROLLBACK")
-                raise
 
     def _anon_window_state(
         self, bucket_key: str, now: float, window_seconds: float, capacity: int
@@ -101,10 +97,11 @@ class CoordinationThrottleStore(CoordinationStore):
             (_ANON_KIND,),
         ).fetchone()
         if victim is not None:
-            self._conn.execute(
-                "DELETE FROM coordination_throttle_buckets WHERE kind = ? AND bucket_key = ?",
-                (_ANON_KIND, str(victim[0])),
-            )
+            with in_txn(self._conn):
+                self._conn.execute(
+                    "DELETE FROM coordination_throttle_buckets WHERE kind = ? AND bucket_key = ?",
+                    (_ANON_KIND, str(victim[0])),
+                )
 
     def check_key_bucket(
         self,
@@ -121,10 +118,12 @@ class CoordinationThrottleStore(CoordinationStore):
             if row is None:
                 return False, 0.0
             cooldown_until = float(row[0] or 0.0)
-            self._conn.execute(
-                "UPDATE coordination_throttle_buckets SET touched_at = ? WHERE kind = ? AND bucket_key = ?",
-                (now, _KEY_VERIFY_KIND, bucket_key),
-            )
+            with txn_write(self._conn, owner="coordination_throttle_store.check_key_bucket"):
+                self._conn.execute(
+                    "UPDATE coordination_throttle_buckets SET touched_at = ? "
+                    "WHERE kind = ? AND bucket_key = ?",
+                    (now, _KEY_VERIFY_KIND, bucket_key),
+                )
             return cooldown_until > now, cooldown_until
 
     def record_key_failure(
@@ -139,15 +138,10 @@ class CoordinationThrottleStore(CoordinationStore):
     ) -> None:
         """Record one failure and arm cooldown when threshold reached."""
         with self._lock:
-            self._conn.execute("BEGIN IMMEDIATE")
-            try:
+            with txn_write(self._conn, owner="coordination_throttle_store.record_key_failure"):
                 self._apply_key_failure(
                     bucket_key, now, max_failures, failure_window_seconds, cooldown_seconds, bucket_capacity
                 )
-                self._conn.execute("COMMIT")
-            except BaseException:
-                self._conn.execute("ROLLBACK")
-                raise
 
     def _apply_key_failure(
         self,
@@ -195,11 +189,11 @@ class CoordinationThrottleStore(CoordinationStore):
     def record_key_success(self, bucket_key: str) -> None:
         """Clear one key-verify bucket (success path)."""
         with self._lock:
-            self._conn.execute(
-                "DELETE FROM coordination_throttle_buckets WHERE kind = ? AND bucket_key = ?",
-                (_KEY_VERIFY_KIND, bucket_key),
-            )
-            self._conn.commit()
+            with txn_write(self._conn, owner="coordination_throttle_store.record_key_success"):
+                self._conn.execute(
+                    "DELETE FROM coordination_throttle_buckets WHERE kind = ? AND bucket_key = ?",
+                    (_KEY_VERIFY_KIND, bucket_key),
+                )
 
     def count_buckets(self, kind: str) -> int:
         with self._lock:
@@ -211,16 +205,16 @@ class CoordinationThrottleStore(CoordinationStore):
 
     def clear_kind(self, kind: str) -> None:
         with self._lock:
-            self._conn.execute(
-                "DELETE FROM coordination_throttle_buckets WHERE kind = ?",
-                (kind,),
-            )
-            self._conn.commit()
+            with txn_write(self._conn, owner="coordination_throttle_store.clear_kind"):
+                self._conn.execute(
+                    "DELETE FROM coordination_throttle_buckets WHERE kind = ?",
+                    (kind,),
+                )
 
     def clear_all(self) -> None:
         with self._lock:
-            self._conn.execute("DELETE FROM coordination_throttle_buckets")
-            self._conn.commit()
+            with txn_write(self._conn, owner="coordination_throttle_store.clear_all"):
+                self._conn.execute("DELETE FROM coordination_throttle_buckets")
 
     areserve_anonymous = atwin(reserve_anonymous)
     acheck_key_bucket = atwin(check_key_bucket)
@@ -245,10 +239,11 @@ class CoordinationThrottleStore(CoordinationStore):
             ).fetchone()
             if victim is None:
                 return
-            self._conn.execute(
-                "DELETE FROM coordination_throttle_buckets WHERE kind = ? AND bucket_key = ?",
-                (_KEY_VERIFY_KIND, str(victim[0])),
-            )
+            with in_txn(self._conn):
+                self._conn.execute(
+                    "DELETE FROM coordination_throttle_buckets WHERE kind = ? AND bucket_key = ?",
+                    (_KEY_VERIFY_KIND, str(victim[0])),
+                )
             count -= 1
 
     def _upsert(
@@ -263,19 +258,15 @@ class CoordinationThrottleStore(CoordinationStore):
         max_failures: int,
         touched_at: float,
     ) -> None:
-        self._conn.execute(
-            "INSERT INTO coordination_throttle_buckets "
-            "(kind, bucket_key, window_started, count, failures, cooldown_until, max_failures, touched_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(kind, bucket_key) DO UPDATE SET "
-            "window_started = excluded.window_started, count = excluded.count, "
-            "failures = excluded.failures, cooldown_until = excluded.cooldown_until, "
-            "max_failures = excluded.max_failures, touched_at = excluded.touched_at",
-            (kind, bucket_key, window_started, count, failures, cooldown_until, max_failures, touched_at),
-        )
-
-    def _touch(self, kind: str, bucket_key: str, now: float) -> None:
-        self._conn.execute(
-            "UPDATE coordination_throttle_buckets SET touched_at = ? WHERE kind = ? AND bucket_key = ?",
-            (now, kind, bucket_key),
-        )
+        with in_txn(self._conn):
+            self._conn.execute(
+                "INSERT INTO coordination_throttle_buckets "
+                "(kind, bucket_key, window_started, count, failures, "
+                "cooldown_until, max_failures, touched_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(kind, bucket_key) DO UPDATE SET "
+                "window_started = excluded.window_started, count = excluded.count, "
+                "failures = excluded.failures, cooldown_until = excluded.cooldown_until, "
+                "max_failures = excluded.max_failures, touched_at = excluded.touched_at",
+                (kind, bucket_key, window_started, count, failures, cooldown_until, max_failures, touched_at),
+            )
