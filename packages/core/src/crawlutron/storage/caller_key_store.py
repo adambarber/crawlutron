@@ -278,6 +278,18 @@ class CallerKeyStore(CoordinationStore):
             ).fetchone()
         return None if row is None else _record_from_row(row)
 
+    def key_present(self, presented: str) -> bool:
+        """Whether the presented secret names a live key, without derivation.
+
+        Parses the secret to its key id and does an indexed PK lookup — one
+        primary-key SELECT 1. No PBKDF2, no second parser: uses the store's
+        existing ``_secret_id_and_body`` grammar.
+        """
+        parsed = _secret_id_and_body(presented)
+        if parsed is None:
+            return False
+        return self.exists_key(parsed[0])
+
     def exists_key(self, key_id: str) -> bool:
         """Whether a live key row for ``key_id`` exists, without materializing it.
 
@@ -289,6 +301,7 @@ class CallerKeyStore(CoordinationStore):
         return row is not None
 
     aissue_key = atwin(issue_key)
+    akey_present = atwin(key_present)
     averify_key = atwin(verify_key)
     alist_keys = atwin(list_keys)
     arevoke_key = atwin(revoke_key)
