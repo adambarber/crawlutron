@@ -42,6 +42,28 @@ def _table_row_items(collection: str, row: sqlite3.Row) -> dict | str:
     return {"url": row["url"], "depth": row["depth"]}
 
 
+def _last_item_digest(accumulators: JobAccumulators, items: list) -> str:
+    """Content identity of the final row: a whole-list replacement is seen."""
+    return accumulators._digest(items[-1]) if items else ""
+
+
+def _unchanged_since_save(accumulators: JobAccumulators, job_id: str, collection: str, items: list) -> bool:
+    """True when our own last save is still the table's truth and nothing grew."""
+    if accumulators._own_version.get(job_id) != accumulators._data_version():
+        return False
+    shape = accumulators._saved_shape.get((job_id, collection))
+    if shape is None or shape[0] != len(items):
+        return False
+    return shape[1] == _last_item_digest(accumulators, items)
+
+
+def _remember_shape(accumulators: JobAccumulators, job_id: str, collection: str, items: list) -> None:
+    accumulators._saved_shape[(job_id, collection)] = (
+        len(items),
+        _last_item_digest(accumulators, items),
+    )
+
+
 class JobAccumulators:
     """The growing part of a job: its append-only page history, visited set and
     frontier queue, in their own tables so a batch is one INSERT per new row
@@ -56,6 +78,9 @@ class JobAccumulators:
         self._table_rows: dict[str, list] = {}
         self._table_rows_job: str | None = None
         self._digest_work_bytes: int = 0
+        # No-op proof: our post-commit data_version, plus the saved (len, tail) shape.
+        self._own_version: dict[str, int] = {}
+        self._saved_shape: dict[tuple[str, str], tuple[int, str]] = {}
 
     def _data_version(self) -> int:
         return connection_data_version(self._conn)
@@ -63,6 +88,10 @@ class JobAccumulators:
     def _note_table_truth(self, job_id: str, version: int) -> None:
         """Stamp ``job_id``'s digests as truth as of ``version`` (reads just ran)."""
         self._seeded_version[job_id] = version
+
+    def _seed_version(self, conn: sqlite3.Connection, job_id: str) -> None:
+        """Record ``data_version`` right after our own commit (the no-op proof)."""
+        self._own_version[job_id] = connection_data_version(conn)
 
     def _seed_table_truth(self, job_id: str) -> None:
         """Re-read the tables' content when another connection may have written.
@@ -253,6 +282,8 @@ class JobAccumulators:
         persisted prefix from the appended tail: a batch is O(removed+appended).
         """
         job_id = job.job_id
+        if not job.frontier_removed and _unchanged_since_save(self, job_id, "frontier", list(job.frontier)):
+            return
         for url in job.frontier_removed:
             self._conn.execute(
                 'DELETE FROM "crawl_job_frontier" WHERE job_id = ? AND url = ?', (job_id, url.raw)
@@ -275,6 +306,7 @@ class JobAccumulators:
                 # Content identical to the persisted table: nothing to write.
                 job.frontier_mark = len(job.frontier)
                 self._record_content(job_id, "frontier", len(job.frontier), self._digest([]), full_digest)
+                _remember_shape(self, job_id, "frontier", list(job.frontier))
                 return
             # Same-length replacement: resync the whole queue, byte-identical.
             self._frontier_resync(job_id)
@@ -287,6 +319,7 @@ class JobAccumulators:
             self._frontier_write_tail(job_id, mark, self._frontier_tail(job, mark))
         job.frontier_mark = len(job.frontier)
         self._record_content(job_id, "frontier", len(job.frontier), self._digest([]), None)
+        _remember_shape(self, job_id, "frontier", list(job.frontier))
 
     def _append_results(self, job: CrawlJobState) -> None:
         """Insert only the pages this batch added, keyed off the table's high-water
@@ -294,6 +327,8 @@ class JobAccumulators:
         is detected by content identity and resynced."""
         job_id = job.job_id
         results = job.results
+        if _unchanged_since_save(self, job_id, "results", results):
+            return
         table = self._table_rows.get("results", []) if self._table_rows_job == job_id else []
         persisted = self._max_seq_plus_one(job_id)
         tail = results[persisted:]
@@ -303,6 +338,7 @@ class JobAccumulators:
             # Growth: digest only the new tail (O(new rows)).
             if self._content_matches(job_id, "results", persisted, tail_digest):
                 # No-op: the tail is already persisted. Keep the stored full digest.
+                _remember_shape(self, job_id, "results", results)
                 return
         else:
             # Ambiguous: tail empty -- no-op and same-length replacement look
@@ -311,6 +347,7 @@ class JobAccumulators:
             if self._content_full_matches(job_id, "results", full_digest):
                 # No-op: the table already holds the live history.
                 self._record_content(job_id, "results", len(results), self._digest([]), full_digest)
+                _remember_shape(self, job_id, "results", results)
                 return
             # Same-length replacement or shrink: fall through to resync below.
         if table and self._digest(results[: len(table)]) != self._digest(table):
@@ -327,12 +364,15 @@ class JobAccumulators:
             ((job_id, seq, _json(result)) for seq, result in enumerate(results[persisted:], start=persisted)),
         )
         self._record_content(job_id, "results", len(results), self._digest([]), None)
+        _remember_shape(self, job_id, "results", results)
 
     def _append_visited(self, job: CrawlJobState) -> None:
         """Insert only the visited tail this state has not sent yet, keyed off
         the live ``visited_mark`` (the ``_append_results`` pattern): the slice
         after the mark is exactly what is new; replacements resync by identity."""
         job_id = job.job_id
+        if _unchanged_since_save(self, job_id, "visited", list(job.visited)):
+            return
         mark = job.visited_mark
         tail_urls = [url.raw for url in islice(job.visited, mark, None)]
         tail_digest = self._digest(tail_urls)
@@ -351,6 +391,7 @@ class JobAccumulators:
                 # Content identical to the persisted table: nothing to write.
                 job.visited_mark = len(job.visited)
                 self._record_content(job_id, "visited", len(job.visited), self._digest([]), full_digest)
+                _remember_shape(self, job_id, "visited", list(job.visited))
                 return
             # Same-length replacement: resync.
             self._conn.execute('DELETE FROM "crawl_job_visited" WHERE job_id = ?', (job_id,))
@@ -365,6 +406,7 @@ class JobAccumulators:
             )
         job.visited_mark = len(job.visited)
         self._record_content(job_id, "visited", len(job.visited), self._digest([]), None)
+        _remember_shape(self, job_id, "visited", list(job.visited))
 
 
 def _json(value) -> str:

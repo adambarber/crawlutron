@@ -38,8 +38,10 @@ def _replace_visited_and_expect(store, root: str, initial: list[str], replacemen
 
 
 def test_visited_no_load_resave_is_read_free_no_write(job_store):
-    """Growth-save visited, then resave unchanged: the fresh tie-break read runs
-    once and no visited INSERT/DELETE follows (read-free, write-free)."""
+    """Growth-save visited, then resave unchanged: no visited read or write follows.
+
+    #980: the accumulator proves "we were the last writer" from the post-commit
+    data_version, so the no-op resave is read-free, not one-read."""
     store = job_store
     job = store.create("http://no-load-visited-resave.test/", CrawlPolicy())
     job.visited = OrderedUrlSet(
@@ -61,7 +63,7 @@ def test_visited_no_load_resave_is_read_free_no_write(job_store):
 
     assert not _visited_writes(events), f"an unchanged resave wrote to the visited table: {events!r}"
     reads = [stmt for stmt in events if _touches_visited(stmt) and stmt.lstrip().upper().startswith("SELECT")]
-    assert len(reads) == 1, f"expected exactly the fresh tie-break read: {reads!r}"
+    assert reads == [], f"expected a read-free no-op resave: {reads!r}"
 
 
 def test_visited_no_load_same_length_replacement_persists(job_store):

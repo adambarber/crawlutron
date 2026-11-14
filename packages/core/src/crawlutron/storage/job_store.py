@@ -229,6 +229,9 @@ class JobStore:
         self._conn.execute(_UPSERT_JOB_ROW_SQL, _job_row_params(job))
         self._accumulators.append(job)
         self._conn.commit()
+        # Seed the post-commit version so the next save knows we are the last
+        # writer and can skip the full-table re-read on the no-op path.
+        self._accumulators._seed_version(self._conn, job.job_id)
 
     def set_status(
         self,
