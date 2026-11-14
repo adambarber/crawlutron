@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from collections.abc import AsyncGenerator, Callable, Iterator
 from contextlib import asynccontextmanager
 
@@ -62,6 +61,26 @@ async def _served(handler) -> AsyncGenerator[CrawlutronClient, None]:
         yield client
     finally:
         await client.aclose()
+
+
+@asynccontextmanager
+async def _hanging_server() -> AsyncGenerator[str, None]:
+    """Accept a connection and never answer, so only a client timeout ends the wait."""
+    writers: list[asyncio.StreamWriter] = []
+
+    async def _hold(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        writers.append(writer)
+        await reader.read()
+
+    server = await asyncio.start_server(_hold, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        for writer in writers:
+            writer.close()
+        server.close()
+        await server.wait_closed()
 
 
 @asynccontextmanager
@@ -439,53 +458,32 @@ async def test_default_timeout_is_finite():
 
 
 @pytest.mark.asyncio
-async def test_transport_timeout_bounds_hang():
-    client = CrawlutronClient(
-        base_url="http://127.0.0.1:1",
-        timeout=2.0,
-    )
-    try:
-        with pytest.raises(CrawlutronTransportError):
-            await asyncio.wait_for(
-                client.crawl(CrawlRequest(url="https://example.com/")),
-                timeout=5,
-            )
-    finally:
-        await client.aclose()
+async def test_transport_timeout_bounds_a_hang():
+    """A server that accepts and never answers must end at the client timeout."""
+    async with _hanging_server() as base_url:
+        client = CrawlutronClient(base_url=base_url, timeout=1.0)
+        try:
+            with pytest.raises(CrawlutronTransportError):
+                await asyncio.wait_for(client.crawl(CrawlRequest(url="https://example.com/")), timeout=5)
+        finally:
+            await client.aclose()
 
 
 @pytest.mark.asyncio
-async def test_wait_for_uses_monotonic_deadline():
-    now = 100.0
-    original_monotonic = time.monotonic
-    time.monotonic = lambda: now
-    try:
-        states = iter([202, 202, 200])
+async def test_wait_for_deadline_fires_while_still_accepted():
+    """A deadline is a clock bound: fast polls must still terminate at max_wait."""
+    attempts = 0
 
-        def _handler(request: httpx.Request) -> httpx.Response:
-            status = next(states)
-            if status == 200:
-                body = {
-                    "request_id": "abc",
-                    "submitted_count": 1,
-                    "policy_schema_version": "1",
-                    "success": True,
-                    "results": [],
-                }
-                return httpx.Response(200, json=body)
-            accepted = {
-                "status": "accepted",
-                "request_id": "abc",
-                "status_url": "/v1/crawl/abc",
-            }
-            return httpx.Response(202, json=accepted)
+    def _handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        accepted = {"status": "accepted", "request_id": "abc", "status_url": "/v1/crawl/abc"}
+        return httpx.Response(202, json=accepted)
 
-        async with _served(_handler) as client:
-            response = await client.wait_for("abc", poll_interval=0, max_wait=5)
-        assert response.request_id == "abc"
-        assert now >= 100.0
-    finally:
-        time.monotonic = original_monotonic
+    async with _served(_handler) as client:
+        with pytest.raises(CrawlutronTransportError):
+            await asyncio.wait_for(client.wait_for("abc", poll_interval=0, max_wait=0.2), timeout=5)
+    assert attempts > 1
 
 
 @pytest.mark.asyncio

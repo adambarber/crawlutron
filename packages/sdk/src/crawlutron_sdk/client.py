@@ -87,11 +87,8 @@ def _payload_dict(payload: object) -> dict[str, object]:
 
 
 def _job_list_query(limit: int | None, offset: int) -> str:
-    parts: list[str] = []
-    if limit is not None:
-        parts.append(f"limit={limit}")
-    if offset:
-        parts.append(f"offset={offset}")
+    parts = [f"limit={limit}"] if limit is not None else []
+    parts += [f"offset={offset}"] if offset else []
     return f"?{'&'.join(parts)}" if parts else ""
 
 
@@ -159,10 +156,10 @@ class _ClientBase:
     def _transport_failure(self, error: httpx.HTTPError) -> Never:
         raise self._transport_error(error) from error
 
-    def _make_timeout(self, request_id: str) -> CrawlutronTransportError:
+    def _make_timeout(self, request_id: str, max_wait: float | None = None) -> CrawlutronTransportError:
+        bound = f" within {max_wait}s" if max_wait is not None else ""
         return CrawlutronTransportError(
-            f"crawl {request_id} did not reach a terminal state",
-            status_code=None,
+            f"crawl {request_id} did not reach a terminal state{bound}", status_code=None
         )
 
     def _make_wait_deadline(self, max_wait: float | None) -> float | None:
@@ -242,7 +239,7 @@ class CrawlutronClient(_ClientBase):
             lambda: self.get_crawl_result(request_id),
             self._make_wait_deadline(max_wait),
             poll_interval,
-            self._make_timeout,
+            lambda rid: self._make_timeout(rid, max_wait),
         )
 
     async def crawl_and_wait(self, payload: CrawlRequest) -> CrawlResponse:
@@ -416,7 +413,7 @@ class CrawlutronClientSync(_ClientBase):
             except CrawlutronAcceptedError:
                 pass
             if deadline is not None and time.monotonic() >= deadline:
-                raise self._make_timeout(request_id)
+                raise self._make_timeout(request_id, max_wait)
             time.sleep(poll_interval)
 
     def admit(self, payload: AdmitRequest) -> AdmitResponse:
