@@ -2,6 +2,8 @@
 
 import pytest
 
+from tests._job_harnesses import keyed_jobs_client
+
 
 @pytest.fixture
 def client(job_store):
@@ -14,3 +16,9 @@ def client(job_store):
     from tests._job_harnesses import _make_app
 
     return AsyncClient(transport=ASGITransport(app=_make_app(job_store)), base_url="http://test")
+
+
+@pytest.fixture
+def keyed_client(job_store):
+    """An AsyncClient over the jobs app as an authenticated keyed caller."""
+    return keyed_jobs_client(job_store)

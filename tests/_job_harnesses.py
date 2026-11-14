@@ -159,6 +159,20 @@ def _make_app(job_store):
     return app
 
 
+def keyed_jobs_client(store):
+    """An AsyncClient over the jobs app as an authenticated keyed caller."""
+    from httpx import ASGITransport, AsyncClient
+
+    from crawlutron.models.caller_identity import CallerIdentity
+    from crawlutron_rest.api.caller_auth import get_caller_identity
+
+    app = _make_app(store)
+    app.dependency_overrides[get_caller_identity] = lambda: CallerIdentity(
+        caller_id="key_a", authenticated=True
+    )
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+
 async def _join_runner_task(job_id: str) -> bool:
     """Await the runner task for ``job_id`` if one is registered and live.
 

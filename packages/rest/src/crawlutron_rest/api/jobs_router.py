@@ -23,6 +23,7 @@ from crawlutron.service.job_cores import create_job_core, delete_job_core
 from crawlutron.service.main_helpers import build_job_status
 from crawlutron.vocabulary.limits import DEFAULT_JOB_LIST_LIMIT, MAX_JOB_LIST_LIMIT
 from crawlutron_rest.api.caller_auth import (
+    auth_denials,
     quota_denials,
 )
 from crawlutron_rest.api.dependencies import (
@@ -33,7 +34,7 @@ from crawlutron_rest.api.dependencies import (
     ShutdownEventDep,
     TrackingDep,
 )
-from crawlutron_rest.api.exceptions import validation_http_error
+from crawlutron_rest.api.exceptions import http_error, validation_http_error
 from crawlutron_rest.api.route_layer import guarded_router
 
 router = guarded_router(prefix="/v1/jobs", tags=["Crawler"])
@@ -90,6 +91,7 @@ async def create_job(
         "every page."
     ),
     responses={
+        **auth_denials(),
         422: {"model": ErrorResponse, "description": "Invalid limit/offset."},
     },
 )
@@ -101,6 +103,8 @@ async def list_jobs(
 ) -> JobListResponse:
     # FastAPI's Query le/ge bound the page; the store's SQL slice then
     # spares a caller with thousands of rows from re-materializing all of them.
+    if not caller.authenticated:
+        raise http_error(401, "invalid_api_key", "Unauthenticated: an API key is required")
     page_limit = limit if limit is not None else DEFAULT_JOB_LIST_LIMIT
     jobs = await job_store.alist_for_caller(caller.caller_id, limit=page_limit, offset=offset)
     total = await job_store.acount_for_caller(caller.caller_id)

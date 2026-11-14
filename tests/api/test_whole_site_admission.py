@@ -360,18 +360,18 @@ class TestWholeSiteAdmissionContract:
         assert job.stats["total_crawled"] == 13
         assert len(job.results) == 13
 
-    async def test_cap_truncated_is_exposed_by_list_and_control_responses(self, client, job_store):
-        job = job_store.create("https://example.test/root", self._policy(1, 1))
+    async def test_cap_truncated_is_exposed_by_list_and_control_responses(self, keyed_client, job_store):
+        job = job_store.create("https://example.test/root", self._policy(1, 1), owner="key_a")
         job.stats["cap_truncated"] = 1
         job_store.save(job)
         assert job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
 
-        listed = await client.get("/v1/jobs")
+        listed = await keyed_client.get("/v1/jobs")
         assert listed.status_code == 200
         summary = next(item for item in listed.json()["jobs"] if item["job_id"] == job.job_id)
         assert summary["cap_truncated"] is True
 
-        controlled = await client.post(
+        controlled = await keyed_client.post(
             f"/v1/jobs/{job.job_id}/control",
             json={"action": "cancel"},
         )

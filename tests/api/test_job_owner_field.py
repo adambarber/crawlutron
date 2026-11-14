@@ -59,8 +59,15 @@ async def _reported_owner(tmp_path: Path, name: str, caller: CallerIdentity) -> 
         return body["owner"], listed["owner"]
 
 
-async def test_an_anonymous_job_reports_an_empty_owner(tmp_path: Path):
-    assert await _reported_owner(tmp_path, "anon.db", CallerIdentity()) == ("", "")
+async def test_an_anonymous_caller_can_lookup_but_not_list(tmp_path: Path):
+    """Per-record lookup works for anonymous; listing is refused wholesale (#1028)."""
+    store = _store(tmp_path, "anon.db")
+    async with _client(store, CallerIdentity()) as client:
+        job_id = await _create(client)
+        body = (await client.get(f"/v1/jobs/{job_id}")).json()
+        assert body["owner"] == ""
+        listed = await client.get("/v1/jobs")
+        assert listed.status_code == 401
 
 
 async def test_a_keyed_job_reports_its_key_id_as_owner(tmp_path: Path):

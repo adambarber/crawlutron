@@ -11,7 +11,7 @@ from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.vocabulary.taxonomy import CrawlClassification
 from tests._assertions import block_private_targets
 from tests._policy_factories import canonical
-from tests._watch_harnesses import watch_client
+from tests._watch_harnesses import keyed_watches_client, watch_client
 
 TARGET = "http://example.com/feed.xml"
 INTERVAL = 900
@@ -101,7 +101,7 @@ async def test_a_non_positive_interval_is_refused(watch_store):
 
 
 async def test_listing_returns_every_registered_watch(watch_store):
-    async with watch_client(watch_store) as client:
+    async with keyed_watches_client(watch_store) as client:
         first = await client.post("/v1/watches", json={"url": TARGET, "interval_seconds": INTERVAL})
         await client.post(
             "/v1/watches",

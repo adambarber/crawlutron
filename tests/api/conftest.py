@@ -2,10 +2,10 @@
 
 import pytest
 
-from tests._job_harnesses import _make_app
+from tests._job_harnesses import keyed_jobs_client
 from tests._job_store_doubles import LoopGuardJobStore, LoopGuardResultStore, LoopGuardWatchStore
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, deployment_tier
-from tests._watch_harnesses import watch_client
+from tests._watch_harnesses import keyed_watches_client
 
 
 @pytest.fixture
@@ -25,11 +25,9 @@ def loop_guard_watch_store(tmp_path) -> LoopGuardWatchStore:
 
 @pytest.fixture
 def watches_client(loop_guard_watch_store):
-    return watch_client(loop_guard_watch_store)
+    return keyed_watches_client(loop_guard_watch_store)
 
 
 @pytest.fixture
 def jobs_client(loop_guard_store):
-    from httpx import ASGITransport, AsyncClient
-
-    return AsyncClient(transport=ASGITransport(app=_make_app(loop_guard_store)), base_url="http://test")
+    return keyed_jobs_client(loop_guard_store)

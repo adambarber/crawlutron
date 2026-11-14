@@ -295,11 +295,14 @@ class TestJobApi(_AsgiEndpointTests):
 
         # State inspection of directly-persisted rows still works
         seeded = await self._seed_job(f"{self.base}/")
-        resp2 = await self.client.get("/v1/jobs")
-        assert resp2.status_code == 200
-        jobs = resp2.json()["jobs"]
-        assert any(j["job_id"] == seeded for j in jobs)
+        # Anonymous listing is refused wholesale (#1028): list as a keyed caller.
+        from tests._app_factory import service_app
 
+        keys = service_app().state.caller_key_store
+        issued = keys.issue_key("list-probe")
+        resp2 = await self.client.get("/v1/jobs", headers={"x-api-key": issued.secret})
+        assert resp2.status_code == 200
+        # Anonymous per-record lookup still works for the anonymous caller's own job.
         resp3 = await self.client.get(f"/v1/jobs/{seeded}")
         assert resp3.status_code == 200
         job = resp3.json()

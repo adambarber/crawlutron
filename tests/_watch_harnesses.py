@@ -91,6 +91,20 @@ def watch_client(store) -> AsyncClient:
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
+def keyed_watches_client(store) -> AsyncClient:
+    """An AsyncClient over ``/v1/watches`` as an authenticated keyed caller."""
+    from crawlutron.models.caller_identity import CallerIdentity
+    from crawlutron_rest.api.caller_auth import get_caller_identity
+
+    client = watch_client(store)
+    app = getattr(client._transport, "app", None)
+    assert app is not None
+    app.dependency_overrides[get_caller_identity] = lambda: CallerIdentity(
+        caller_id="key_a", authenticated=True
+    )
+    return client
+
+
 __all__ = [
     "ASGITransport",
     "AsyncClient",
@@ -106,6 +120,7 @@ __all__ = [
     "register_watch",
     "stub_transient_failure",
     "watch_client",
+    "keyed_watches_client",
     "watch_router",
     "WebhookTarget",
     "WatchSweeper",
