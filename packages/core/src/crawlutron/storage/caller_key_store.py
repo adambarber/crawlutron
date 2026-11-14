@@ -281,9 +281,7 @@ class CallerKeyStore(CoordinationStore):
     def key_present(self, presented: str) -> bool:
         """Whether the presented secret names a live key, without derivation.
 
-        Parses the secret to its key id and does an indexed PK lookup — one
-        primary-key SELECT 1. No PBKDF2, no second parser: uses the store's
-        existing ``_secret_id_and_body`` grammar.
+        One indexed PK lookup via the store's existing grammar; no PBKDF2.
         """
         parsed = _secret_id_and_body(presented)
         if parsed is None:

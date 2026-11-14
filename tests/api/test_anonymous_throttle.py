@@ -12,6 +12,7 @@ import httpx
 import pytest
 from starlette.requests import Request
 
+from crawlutron.storage.caller_key_store import CallerKeyStore
 from crawlutron_rest.api.throttle import (
     ANON_MAX_REQUESTS,
     Throttle,
@@ -111,19 +112,22 @@ def _app_client() -> httpx.AsyncClient:
 
 
 @asynccontextmanager
-async def _auth_app_client() -> AsyncGenerator[httpx.AsyncClient, None]:
-    """An app configured with an operator token, stores closed on teardown (#914)."""
+async def _admin_app_client() -> AsyncGenerator[tuple[httpx.AsyncClient, CallerKeyStore], None]:
+    """Test app with admin token, stores closed on teardown.
+
+    Yields ``(client, key_store)``; callers that do not need the store
+    ignore the second element.
+    """
     from crawlutron.config.settings import CrawlerSettings
     from crawlutron.service.store_shutdown import close_app_stores
     from crawlutron_rest.main import create_app
 
     app = create_app(CrawlerSettings.from_mapping({"CRAWLUTRON_KEY_ADMIN_TOKEN": "test-admin-token"}))
-    try:
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-            yield client
-    finally:
-        await close_app_stores(app)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        try:
+            yield client, app.state.caller_key_store
+        finally:
+            await close_app_stores(app)
 
 
 async def test_docs_served_and_metered():
@@ -344,8 +348,8 @@ async def test_origin_rejected_403_consumes_exactly_one_anonymous_unit():
 
 
 async def test_credentialed_mcp_burns_anonymous_ip_bucket():
-    """#929: /mcp meters per remote-IP before auth -- a presented credential no
-    longer skips the anonymous bucket on header presence alone (MAX+1 refuses)."""
+    """#929: a presented credential no longer skips the anonymous bucket on
+    header presence alone (MAX+1 refuses)."""
     process_state_reset()
     request = _built_request("/mcp", {"x-api-key": "any-key"})
 
@@ -375,23 +379,21 @@ async def test_every_docs_surface_is_metered(path):
 
 async def _spend_metrics_budget(client) -> None:
     for _ in range(ANON_MAX_REQUESTS):
-        resp = await client.get("/metrics")
-        assert resp.status_code == 200, resp.status_code
+        assert (await client.get("/metrics")).status_code == 200
 
 
 async def test_operator_token_metrics_never_ip_throttled():
-    """#914 row 1: an operator-token /metrics scrape is the operator's own caller."""
+    """#914 row 1: operator-token /metrics scrape is the operator's own caller."""
     process_state_reset()
-    async with _auth_app_client() as client:
+    async with _admin_app_client() as (client, _):
         await _spend_metrics_budget(client)
-        operator = await client.get("/metrics", headers={"x-api-key": "test-admin-token"})
-        assert operator.status_code == 200, operator.text
+        assert (await client.get("/metrics", headers={"x-api-key": "test-admin-token"})).status_code == 200
 
 
 async def test_anonymous_metrics_still_meters():
     """#914 row 2: a genuine anonymous /metrics (no token) stays on the IP bucket."""
     process_state_reset()
-    async with _auth_app_client() as client:
+    async with _admin_app_client() as (client, _):
         await _spend_metrics_budget(client)
         refused = await client.get("/metrics")
         assert refused.status_code == 429, refused.text
@@ -402,7 +404,7 @@ async def test_operator_token_health_still_meters():
     """#914 row 3: the operator-token skip is scoped to /metrics only; /health is
     anonymous-metered (in ANONYMOUS_METERED), so an operator token does not free it."""
     process_state_reset()
-    async with _auth_app_client() as client:
+    async with _admin_app_client() as (client, _):
         for _ in range(ANON_MAX_REQUESTS):
             resp = await client.get("/health", headers={"x-api-key": "test-admin-token"})
             assert resp.status_code == 200, resp.status_code
@@ -418,6 +420,18 @@ async def test_credentialed_caller_route_still_burns_ip_bucket():
     process_state_reset()
     await _call_through("/v1/crawl", {"x-api-key": "test-admin-token"})
     assert shared_throttle().residence() == 1
+
+
+async def test_valid_key_does_not_burn_anonymous_ip_bucket():
+    """#986: verified key is exempt from the anonymous IP bucket."""
+    process_state_reset()
+    async with _admin_app_client() as (client, keys):
+        secret = keys.issue_key("test-key").secret
+        for _ in range(ANON_MAX_REQUESTS):
+            resp = await client.get("/v1/jobs", headers={"X-API-Key": secret})
+            assert resp.status_code == 200, resp.text
+        resp = await client.get("/v1/jobs", headers={"X-API-Key": secret})
+        assert resp.status_code == 200, "valid key should NOT burn the anonymous bucket, got 429"
 
 
 def _built_request(path: str, headers: dict[str, str]) -> Request:
@@ -446,3 +460,22 @@ async def _call_through(path: str, headers: dict[str, str]) -> None:
         return "passed"
 
     assert await throttle_anonymous_surfaces(request, call_next) == "passed"
+
+
+async def test_garbage_key_still_burns_anonymous_ip_bucket():
+    """#986: a garbage key MUST still burn the anonymous IP bucket.
+
+    A garbage key does not parse as a live key, so the anonymous meter
+    runs normally and refuses at the boundary.
+    """
+    process_state_reset()
+    request = _built_request("/v1/jobs", {"x-api-key": "garbage-key"})
+
+    async def call_next(_request: Request) -> str:
+        return "passed"
+
+    for _ in range(ANON_MAX_REQUESTS):
+        result = await throttle_anonymous_surfaces(request, call_next)
+        assert result == "passed"
+    refused = await throttle_anonymous_surfaces(request, call_next)
+    assert refused.status_code == 429

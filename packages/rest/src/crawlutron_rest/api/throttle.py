@@ -7,6 +7,7 @@ externally-reachable surface and every pre-auth key-verify path.
 from __future__ import annotations
 
 import hashlib
+import secrets
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -390,7 +391,9 @@ _OPERATOR_METERED_EXACT = ("/metrics",)
 
 async def throttle_anonymous_surfaces(request, call_next):
     path = request.url.path
-    if _credentialed(request) and path in _OPERATOR_METERED_EXACT:
+    if _verified(request):
+        return await call_next(request)
+    if path in _OPERATOR_METERED_EXACT and _is_operator(request):
         return await call_next(request)
     try:
         await shared_throttle().acheck_anon(_remote(request))
@@ -399,11 +402,56 @@ async def throttle_anonymous_surfaces(request, call_next):
     return await call_next(request)
 
 
-def _credentialed(request) -> bool:
+def _presented_key(request) -> str | None:
     for name in ("x-api-key", "authorization"):
-        if request.headers.get(name, "").strip():
-            return True
-    return False
+        value = request.headers.get(name, "").strip()
+        if value:
+            return value
+    return None
+
+
+def _request_state(request) -> object | None:
+    """Return request.app.state, or None when unavailable."""
+    app = request.scope.get("app")
+    if app is None:
+        return None
+    return getattr(app, "state", None)
+
+
+def _verified(request) -> bool:
+    """Whether the request presents a verified key, cheaply.
+
+    Parses the secret and does a one-row PK lookup against the caller key
+    store. No PBKDF2, no second parser. Verified skips the bucket.
+    """
+    state = _request_state(request)
+    if state is None:
+        return False
+    store = getattr(state, "caller_key_store", None)
+    if store is None:
+        return False
+    return store.key_present(_presented_key(request) or "")
+
+
+def _is_operator(request) -> bool:
+    """Whether the presented secret is the operator token.
+
+    Inlined to avoid importing caller_auth (which imports shared_throttle
+    from this module). Constant-time compare; /metrics regression skip.
+    """
+    state = _request_state(request)
+    if state is None:
+        return False
+    settings = getattr(state, "crawler_settings", None)
+    if settings is None:
+        return False
+    token = getattr(settings, "key_admin_token", None)
+    if not token or not isinstance(token, str):
+        return False
+    presented = _presented_key(request)
+    if not presented:
+        return False
+    return secrets.compare_digest(presented.encode("utf-8"), token.encode("utf-8"))
 
 
 def _remote(request) -> str | None:
