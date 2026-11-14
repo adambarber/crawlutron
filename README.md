@@ -89,25 +89,35 @@ production deployments typically front it with a transport-auth reverse proxy (T
 
 ## Security Posture
 
-crawlutron is a **localhost-only** service. It binds to `127.0.0.1` by
-default. Callers authenticate with an API key presented as `X-API-Key` or
-`Authorization: Bearer` — jobs and results created under a key are readable
-only under it, and key issuance/revocation is operator-gated
-(`CRAWLUTRON_KEY_ADMIN_TOKEN` via `/v1/keys`). Keyless requests crawl as a
-shared anonymous identity with bounded default quotas. Key verification is
-rate-limited (#653): five consecutive failed verifications from the same
-presented credential trip a 60-second cooldown that refuses further attempts
-with `429 key_verify_throttled` before the PBKDF2 derivation runs again, so
-the expensive pre-auth hash cannot be invoked for free in a loop. Buckets
-key on a hash of the full presented secret (#675), so garbage under another
-caller's key id cannot lock the rightful owner out. Anonymous surface
-metering keys on the REMOTE ADDRESS the ASGI transport reports (`client.host`):
-behind a reverse proxy every request shares the PROXY's address and its one
-bucket — when fronting the service with a proxy, run the metering at the
-proxy or deploy as a single-tenant front. Expose it
-beyond localhost only behind a transport-auth reverse proxy; built-in per-caller
-auth (`/v1/keys`) is the caller security boundary, and the proxy is transport
-hardening, not a substitute for it.
+crawlutron is **localhost-bound by default**: it binds to `127.0.0.1` unless
+configured otherwise. This is a safe default, not a guarantee of isolation —
+if you bind or expose it beyond localhost, you must add the controls below.
+
+**Caller access and identity.** Crawl and MCP surfaces accept requests without
+an API key as a **bounded shared anonymous identity** unless you add
+additional access controls. Do not expose unauthenticated crawl/MCP endpoints
+to the public internet or an untrusted network. Present `X-API-Key` or
+`Authorization: Bearer` to authenticate as a keyed caller: jobs and results
+created under a key are readable only under that key, and key
+issuance/revocation is operator-gated (`CRAWLUTRON_KEY_ADMIN_TOKEN` via
+`/v1/keys`). Keyless requests use bounded default quotas as the shared
+anonymous identity, not as an authenticated tenant.
+
+Key verification is rate-limited (#653): five consecutive failed verifications
+from the same presented credential trip a 60-second cooldown that refuses
+further attempts with `429 key_verify_throttled` before the PBKDF2 derivation
+runs again, so the expensive pre-auth hash cannot be invoked for free in a
+loop. Buckets key on a hash of the full presented secret (#675), so garbage
+under another caller's key id cannot lock the rightful owner out. Anonymous
+surface metering keys on the REMOTE ADDRESS the ASGI transport reports
+(`client.host`): behind a reverse proxy every request shares the proxy's
+address and its one bucket — when fronting the service with a proxy, run
+metering at the proxy or deploy as a single-tenant front.
+
+Expose it beyond localhost only behind a transport-auth reverse proxy with
+appropriate access controls; built-in per-caller auth (`/v1/keys`) is the
+caller security boundary, and the proxy is transport hardening (TLS
+termination, header stripping, request-id logging), not a substitute for it.
 
 What the SSRF defenses cover:
 
