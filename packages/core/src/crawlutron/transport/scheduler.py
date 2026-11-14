@@ -316,9 +316,8 @@ class DomainScheduler:
         *,
         failed_result: Callable[[_Job, BaseException], _Result],
     ) -> dict[int, _Result] | None:
-        """Run ``jobs`` through ``worker``: when ``on_result`` is set each result is
-        delivered and NOT retained (peak RAM tracks the in-flight set) and ``run``
-        returns None; else it returns a ``job.index -> result`` mapping (raised jobs absent).
+        """Run ``jobs``: with ``on_result`` nothing is retained; else every job's
+        index is present in the returned mapping, filled by ``failed_result``.
         """
         # Purge stale records up front so the map cannot grow without bound.
         self.purge_expired()
@@ -349,11 +348,12 @@ class DomainScheduler:
             if await self._run_one_gated(job, batch_gate, deliver, worker, failed_result):
                 return
 
-        # return_exceptions=True: one job's failure must not cancel the others;
-        # the failing job is simply absent from the returned mapping.
+        # return_exceptions=True: one job's failure must not cancel the others.
         await asyncio.gather(*(run_one(job) for job in jobs), return_exceptions=True)
         if on_result is not None:
             return None
+        for job in (job for job in jobs if job.index not in results):
+            results[job.index] = failed_result(job, RuntimeError("scheduler result absent"))
         return results
 
     def _reserve_fire(self, domain: str) -> float:

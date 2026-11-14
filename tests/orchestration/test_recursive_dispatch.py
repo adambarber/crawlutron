@@ -474,3 +474,25 @@ async def test_under_throttling_the_full_admitted_http_quota_is_used_across_a_br
     assert all(not (t.domain.startswith("b")) for _, t in selected)
     # The browser head stays in the frontier for a later (browser-capable) batch.
     assert len(state.frontier) == 5
+
+
+async def test_a_job_dropped_by_pacing_still_occupies_its_index():
+    """A job lost to the pacing layer must appear in the mapping, never be absent.
+
+    The recursive commit indexes by ``job.index``; an absent slot raised KeyError
+    and killed the whole crawl instead of degrading one page."""
+    jobs = [_tiered_job(i, "paced") for i in range(3)]
+
+    async def failing_sleep(delay):
+        raise RuntimeError("pacing interrupted")
+
+    scheduler = DomainScheduler(global_limit=8, per_domain_limit=8, delay_seconds=1.0, sleep=failing_sleep)
+
+    results = await scheduler.run(
+        jobs,
+        _tiered_worker(),
+        failed_result=lambda job, exc: engine_result(job.normalized_url, "rendered"),
+    )
+
+    assert results is not None
+    assert set(results) == {0, 1, 2}
