@@ -17,7 +17,7 @@ import time
 from collections.abc import Mapping
 from urllib.parse import urlparse
 
-import httpx
+from httpx import HTTPError
 from safe_url.host_policy import HostPolicy
 from safe_url.normalized_url import NormalizedUrl
 from safe_url.url_redaction import redact_urls_in_text
@@ -26,6 +26,7 @@ from crawlutron.config.env import get_env_int, get_mapping_int
 from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.runtime import process_state
 from crawlutron.safety.bounded_io import BodyTooLarge, read_capped_async
+from crawlutron.transport.http_client_pool import get_async_http_client
 from crawlutron.transport.timeouts import Timeouts
 
 logger = logging.getLogger(__name__)
@@ -133,30 +134,30 @@ async def deliver_pinned_webhook(
         _warn_unsigned_once()
     # Deliberate one-per-delivery cost: pooling would re-resolve by hostname (defeating
     # the pin) or cache the IP across deliveries (reopening the rebinding window).
-    async with httpx.AsyncClient(timeout=Timeouts.defaults().as_httpx()) as client:
-        async with open_pinned_request(
-            client,
-            "POST",
-            pinned,
-            body=PinnedBody(content=payload_bytes),
-            headers=request_headers,
-        ) as response:
-            try:
-                # The webhook RESPONSE is attacker-controlled: drain it through
-                # the bounded_io cap instead of buffering it in RAM.
-                await read_capped_async(response.aiter_bytes(), max_webhook_size())
-            except BodyTooLarge:
-                logger.warning(
-                    "webhook_response_too_large",
-                    extra={"limit_bytes": max_webhook_size()},
-                )
-            status = response.status_code
-            # 3xx is not delivery: the receiver never gave a final verdict at the
-            # callback URL, so it follows the transient policy and is retried.
-            if 300 <= status < 400 or status >= 500 or status == 429:
-                raise DeliveryFailed(f"transient webhook status {status}", retryable=True)
-            if status >= 400:
-                raise DeliveryFailed(f"webhook receiver refused ({status})", retryable=False)
+    client = get_async_http_client()
+    async with open_pinned_request(
+        client,
+        "POST",
+        pinned,
+        body=PinnedBody(content=payload_bytes),
+        headers=request_headers,
+    ) as response:
+        try:
+            # The webhook RESPONSE is attacker-controlled: drain it through
+            # the bounded_io cap instead of buffering it in RAM.
+            await read_capped_async(response.aiter_bytes(), max_webhook_size())
+        except BodyTooLarge:
+            logger.warning(
+                "webhook_response_too_large",
+                extra={"limit_bytes": max_webhook_size()},
+            )
+        status = response.status_code
+        # 3xx is not delivery: the receiver never gave a final verdict at the
+        # callback URL, so it follows the transient policy and is retried.
+        if 300 <= status < 400 or status >= 500 or status == 429:
+            raise DeliveryFailed(f"transient webhook status {status}", retryable=True)
+        if status >= 400:
+            raise DeliveryFailed(f"webhook receiver refused ({status})", retryable=False)
 
 
 def _warn_unsigned_once() -> None:
@@ -214,7 +215,7 @@ async def drain_webhook_deliveries() -> None:
 
 def _should_retry(delivery_exc: Exception, attempt: int, attempts: int) -> bool:
     """A retry/backoff decision: transient overflow-AX or a transport error retries."""
-    transient = isinstance(delivery_exc, httpx.HTTPError) or (
+    transient = isinstance(delivery_exc, HTTPError) or (
         isinstance(delivery_exc, DeliveryFailed) and delivery_exc.retryable
     )
     return transient and attempt < attempts - 1

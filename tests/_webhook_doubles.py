@@ -36,7 +36,7 @@ def record_webhook_delivery(
         kwargs.setdefault("transport", transport)
         return real_client(*args, **kwargs)
 
-    monkeypatch.setattr(httpx, "AsyncClient", _scripted_client)
+    monkeypatch.setattr("crawlutron.service.webhooks.get_async_http_client", _scripted_client)
     return requests
 
 
