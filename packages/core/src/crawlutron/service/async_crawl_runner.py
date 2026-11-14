@@ -118,15 +118,17 @@ async def run_async_crawl(
             if job is None:
                 return
             stop = asyncio.Event()
+            abort = asyncio.Event()
+            forward = asyncio.create_task(_forward_shutdown(shutdown_event, abort))
             heartbeat = asyncio.create_task(
-                _heartbeat_claim(request_id, job_store, claim_token, claim_seconds, stop)
+                _heartbeat_claim(request_id, job_store, claim_token, claim_seconds, stop, abort)
             )
             try:
                 response_payload = await _crawl_and_build_response(
                     request_id,
                     payload,
                     crawl_settings,
-                    shutdown_event,
+                    abort,
                     url_pairs,
                     job,
                     job_store,
@@ -135,6 +137,9 @@ async def run_async_crawl(
                 )
             finally:
                 stop.set()
+                forward.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await forward
                 await heartbeat
         await _publish_success(
             request_id,
@@ -174,8 +179,18 @@ async def _claim_running(
     return await job_store.aload(request_id)
 
 
+async def _forward_shutdown(shutdown_event: asyncio.Event, abort: asyncio.Event) -> None:
+    await shutdown_event.wait()
+    abort.set()
+
+
 async def _heartbeat_claim(
-    request_id: str, job_store, claim_token: str, claim_seconds: float, stop: asyncio.Event
+    request_id: str,
+    job_store,
+    claim_token: str,
+    claim_seconds: float,
+    stop: asyncio.Event,
+    abort: asyncio.Event,
 ) -> None:
     interval = max(1.0, min(30.0, claim_seconds / 3))
     while not stop.is_set():
@@ -183,7 +198,9 @@ async def _heartbeat_claim(
             await asyncio.wait_for(stop.wait(), timeout=interval)
             return
         except TimeoutError:
-            await job_store.arenew_job_claim(request_id, claim_token, now=time.time())
+            if not await job_store.arenew_job_claim(request_id, claim_token, now=time.time()):
+                abort.set()
+                return
 
 
 __all__ = ["run_async_crawl", "async_crawl_semaphore"]

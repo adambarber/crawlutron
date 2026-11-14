@@ -210,6 +210,8 @@ def set_status(
     require_owner: bool = False,
     clear_claim: bool = False,
 ) -> bool:
+    if clear_claim and claim_now is not None:
+        raise ValueError("set_status: clear_claim conflicts with claim_now")
     wanted = {expected} if isinstance(expected, JobStatus) else set(expected)
     now = claim_now if claim_now is not None else time.time()
     wanted_json = json.dumps(sorted(s.value for s in wanted))

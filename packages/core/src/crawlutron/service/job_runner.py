@@ -96,6 +96,7 @@ async def arecord_terminal_failure(
             error=scrubbed,
             claimed_by=claimed_by,
             require_owner=True,
+            clear_claim=True,
         )
     return await job_store.aset_status(job_id, JobStatus.FAILED, expected=JobStatus.RUNNING, error=scrubbed)
 

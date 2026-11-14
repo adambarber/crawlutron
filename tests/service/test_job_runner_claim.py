@@ -153,3 +153,43 @@ class TestRunnerClaimOwnership:
         assert reloaded and reloaded.status is JobStatus.RUNNING and reloaded.claimed_by == "worker-foreign"
         assert reloaded.error is None
         store.close()
+
+    async def test_owned_terminal_failure_clears_runner_lease(self, tmp_path):
+        """Owned terminal failure must release the runner claim on transition."""
+        store = _store(tmp_path)
+        job = _seed_running(store)
+        assert store.claim_running(job.job_id, "worker-owner", now=time.time(), claim_seconds=300.0)
+        recorded = await job_runner.arecord_terminal_failure(
+            store, job.job_id, "boom", claimed_by="worker-owner"
+        )
+        assert recorded is True
+        reloaded = store.load(job.job_id)
+        assert reloaded is not None and reloaded.status is JobStatus.FAILED
+        assert reloaded.error == "boom"
+        assert reloaded.claimed_by is None and reloaded.claimed_at is None
+        store.close()
+
+
+@pytest.mark.wall_assertion
+class TestClaimRenewalAndRetirementEdges:
+    def test_renew_job_claim_requires_live_owner(self, tmp_path):
+        store = _store(tmp_path)
+        job = _seed_running(store)
+        now = time.time()
+        assert store.claim_running(job.job_id, "worker-owner", now=now, claim_seconds=300.0)
+        assert store.renew_job_claim(job.job_id, "worker-owner", now=now + 1.0) is True
+        assert store.renew_job_claim(job.job_id, "worker-other", now=now + 2.0) is False
+        assert store.release_job_claim(job.job_id, "worker-owner") is True
+        assert store.renew_job_claim(job.job_id, "worker-owner", now=now + 3.0) is False
+
+    async def test_retire_orphan_running_requires_abandoned_lease(self, tmp_path):
+        store = _store(tmp_path)
+        job = _seed_running(store)
+        now = 1000.0
+        assert store.claim_running(job.job_id, "worker-live", now=now, claim_seconds=300.0)
+        assert await job_recovery.recover_orphaned_running_jobs(store, now=1200.0, claim_seconds=300.0) == 0
+        assert await job_recovery.recover_orphaned_running_jobs(store, now=1400.1, claim_seconds=300.0) == 1
+        reloaded = store.load(job.job_id)
+        assert reloaded is not None and reloaded.status is JobStatus.PENDING
+        assert reloaded.claimed_by is None and reloaded.claimed_at is None
+        store.close()
