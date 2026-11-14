@@ -391,7 +391,7 @@ _OPERATOR_METERED_EXACT = ("/metrics",)
 
 async def throttle_anonymous_surfaces(request, call_next):
     path = request.url.path
-    if _verified(request):
+    if await _verified(request):
         return await call_next(request)
     if path in _OPERATOR_METERED_EXACT and is_operator(request):
         return await call_next(request)
@@ -410,11 +410,11 @@ def _request_state(request) -> object | None:
     return getattr(app, "state", None)
 
 
-def _verified(request) -> bool:
+async def _verified(request) -> bool:
     """Whether the request presents a verified key, cheaply.
 
-    Parses the secret and does a one-row PK lookup against the caller key
-    store. No PBKDF2, no second parser. Verified skips the bucket.
+    One indexed presence lookup off the loop (the store's atwin twin): no
+    PBKDF2, no second parser. A verified key skips the bucket.
     """
     state = _request_state(request)
     if state is None:
@@ -422,7 +422,7 @@ def _verified(request) -> bool:
     store = getattr(state, "caller_key_store", None)
     if store is None:
         return False
-    return store.key_present(presented_key(request) or "")
+    return await store.akey_present(presented_key(request) or "")
 
 
 def _remote(request) -> str | None:
