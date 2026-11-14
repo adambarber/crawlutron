@@ -108,6 +108,16 @@ CRAWL_JOB_FRONTIER_SCHEMA = TableSchema(
     indexes=(IndexSchema("crawl_job_frontier_order", ("job_id", "pos")),),
 )
 
+# Shared live-writer fence: one row per in-flight request so GC in any process
+# can see active writers and refuse to delete their spill rows.
+CRAWL_SPILL_LEASES_SCHEMA = TableSchema(
+    name="crawl_spill_leases",
+    columns=(
+        ColumnSchema("request_id", "TEXT", False, None, 1),
+        ColumnSchema("expires_at", "REAL", True, None),
+    ),
+)
+
 # Tables in a store schema's lifecycle that are not its single primary table:
 # created, drift-checked and rolled back together, so none can be half-migrated.
 COMPANION_SCHEMAS: dict[StoreSchema, tuple[TableSchema, ...]] = {
@@ -116,6 +126,7 @@ COMPANION_SCHEMAS: dict[StoreSchema, tuple[TableSchema, ...]] = {
         CRAWL_JOB_VISITED_SCHEMA,
         CRAWL_JOB_FRONTIER_SCHEMA,
     ),
+    StoreSchema.CRAWL_SPILLS: (CRAWL_SPILL_LEASES_SCHEMA,),
 }
 
 RESULTS_SCHEMA = TableSchema(
@@ -276,7 +287,10 @@ MIGRATION_SEQUENCES = {
     StoreSchema.COORDINATION_COOKIES: ("0001_coordination_cookies_initial",),
     StoreSchema.WATCHES: ("0001_watches_initial", "0002_watches_add_owner", "0003_watches_add_claimed_at"),
     StoreSchema.CALLER_KEYS: ("0001_caller_keys_initial", "0002_caller_keys_add_previous"),
-    StoreSchema.CRAWL_SPILLS: ("0001_crawl_spills_initial",),
+    StoreSchema.CRAWL_SPILLS: (
+        "0001_crawl_spills_initial",
+        "0002_crawl_spills_shared_fence",
+    ),
     StoreSchema.KEY_ADMIN_EVENTS: ("0001_key_admin_events_initial",),
 }
 

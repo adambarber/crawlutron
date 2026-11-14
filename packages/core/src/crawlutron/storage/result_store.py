@@ -230,6 +230,16 @@ class CrawlSpillStore(_PayloadStoreGuardrails):
 
     schema = StoreSchema.CRAWL_SPILLS
 
+    def __init__(
+        self,
+        db_path: str | Path,
+        *,
+        lease_ttl_seconds: float = 300.0,
+        **guardrails,
+    ) -> None:
+        super().__init__(db_path, **guardrails)
+        self._lease_ttl_seconds = max(0.0, float(lease_ttl_seconds))
+
     def put(self, request_id: str, sequence: int, result: EngineCrawlResult) -> None:
         """Store one page result at its submission index; the encode-and-dump is
         this method's whole body, so the atwin runs the multi-MB walk off the loop.
@@ -239,11 +249,17 @@ class CrawlSpillStore(_PayloadStoreGuardrails):
             raise PayloadTooLargeError(
                 f"serialized payload is {len(blob)} bytes; the cap is {self._max_payload_bytes}"
             )
+        now = self._clock()
+        expires_at = now + self._lease_ttl_seconds
         with self._lock:
-            self._live_requests.add(request_id)
+            self._conn.execute(
+                "INSERT INTO crawl_spill_leases (request_id, expires_at) VALUES (?, ?) "
+                "ON CONFLICT(request_id) DO UPDATE SET expires_at = excluded.expires_at",
+                (request_id, expires_at),
+            )
             self._conn.execute(
                 "INSERT INTO crawl_spills (request_id, sequence, payload, created_at) VALUES (?, ?, ?, ?)",
-                (request_id, sequence, blob, self._clock()),
+                (request_id, sequence, blob, now),
             )
             self._conn.commit()
 
@@ -264,22 +280,23 @@ class CrawlSpillStore(_PayloadStoreGuardrails):
         ended, so they are age-reclaimable again. The fence lives only for the
         crawl's lifetime, so a dead crawl's rows cannot be fenced forever."""
         with self._lock:
-            self._live_requests.discard(request_id)
+            self._conn.execute("DELETE FROM crawl_spill_leases WHERE request_id = ?", (request_id,))
+            self._conn.commit()
 
     def gc_stale_spills(self, max_age_seconds: float) -> int:
         """Delete rows older than ``max_age_seconds`` EXCEPT a live writer's; the
-        return is the row count reclaimed. Rows are request-scoped and the fence
-        is set by the writer itself, so the sweep is one DELETE plus the fence.
+        return is the row count reclaimed. The fence is shared DB state so any
+        worker sees active leases.
         """
-        cutoff = self._clock() - max(0.0, max_age_seconds)
+        now = self._clock()
+        cutoff = now - max(0.0, max_age_seconds)
         with self._lock:
-            # The live-writer fence rides a temp table so the DELETE stays one
-            # parameterized statement -- no string-built IN-list, no drift.
             self._conn.execute("CREATE TEMP TABLE IF NOT EXISTS _spill_fenced (request_id TEXT PRIMARY KEY)")
             self._conn.execute("DELETE FROM _spill_fenced")
-            self._conn.executemany(
-                "INSERT INTO _spill_fenced (request_id) VALUES (?)",
-                ((request_id,) for request_id in self._live_requests),
+            self._conn.execute(
+                "INSERT INTO _spill_fenced (request_id) "
+                "SELECT request_id FROM crawl_spill_leases WHERE expires_at > ?",
+                (now,),
             )
             cursor = self._conn.execute(
                 "DELETE FROM crawl_spills WHERE created_at < ? "

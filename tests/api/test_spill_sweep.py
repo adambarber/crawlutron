@@ -18,7 +18,7 @@ class TestSpillSweepTick:
 
         now = 1000.0
         times = {"t": now}
-        store = CrawlSpillStore(tmp_path / "spills.db", clock=lambda: times["t"])
+        store = CrawlSpillStore(tmp_path / "spills.db", clock=lambda: times["t"], lease_ttl_seconds=10_000.0)
         try:
             store.put("r-old", 0, engine_result("https://spill.test/old", "rendered"))
             store.put("r-live", 0, engine_result("https://spill.test/live", "rendered"))

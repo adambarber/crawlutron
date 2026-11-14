@@ -19,6 +19,7 @@ from crawlutron.storage.migrations.manifest import (
     COORDINATION_COOKIES_SCHEMA,
     COORDINATION_COUNTERS_SCHEMA,
     CRAWL_JOBS_SCHEMA,
+    CRAWL_SPILL_LEASES_SCHEMA,
     CRAWL_SPILLS_SCHEMA,
     KEY_ADMIN_EVENTS_SCHEMA,
     RESULTS_SCHEMA,
@@ -65,6 +66,9 @@ _EXPECTED_SQL: dict[str, list[tuple[str, str]]] = {
             (create_index_sql(CRAWL_SPILLS_SCHEMA, index), f'DROP INDEX "{index.name}"')
             for index in CRAWL_SPILLS_SCHEMA.indexes
         ),
+    ],
+    "0002_crawl_spills_shared_fence": [
+        (create_table_sql(CRAWL_SPILL_LEASES_SCHEMA), 'DROP TABLE "crawl_spill_leases"'),
     ],
     "0001_key_admin_events_initial": [
         (create_table_sql(KEY_ADMIN_EVENTS_SCHEMA), 'DROP TABLE "key_admin_events"'),

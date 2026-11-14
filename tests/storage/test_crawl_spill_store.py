@@ -31,6 +31,12 @@ def _backdated_store(tmp_path, now: float) -> CrawlSpillStore:
     return CrawlSpillStore(tmp_path / "spills.db", clock=lambda: now)
 
 
+def _backdate_db(db_path, created_at: float) -> None:
+    with closing(sqlite3.connect(db_path)) as conn:
+        conn.execute("UPDATE crawl_spills SET created_at = ?", (created_at,))
+        conn.commit()
+
+
 def test_each_result_lands_as_one_row_before_the_crawl_finishes(tmp_path):
     """Incremental write: one row per result, committed per write, so a mid-crawl
     reader sees the rows already written."""
@@ -224,3 +230,128 @@ def test_the_result_store_is_untouched_by_the_spill_schema(tmp_path):
     finally:
         result_store.close()
         spill_store.close()
+
+
+def test_cross_store_gc_does_not_reclaim_a_live_writers_aged_rows(tmp_path):
+    """A live writer's fence is shared DB state: another store's GC cannot delete
+    its rows even when they are past the age cutoff."""
+    db = tmp_path / "shared.db"
+    writer = CrawlSpillStore(db, clock=lambda: 1000.0)
+    other = CrawlSpillStore(db, clock=lambda: 1000.0)
+    try:
+        writer.put("r-live", 0, engine_result("https://spill.test/live", "rendered"))
+        _backdate_db(db, 1000.0 - 7200)
+        assert other.gc_stale_spills(3600.0) == 0
+        rows = writer.load_ordered("r-live", policy=UNRESTRICTED_HOST_POLICY)
+        assert [r.original_url for r in rows] == ["https://spill.test/live"]
+    finally:
+        writer.close()
+        other.close()
+
+
+def test_a_third_store_gc_does_not_reclaim_rows_of_a_leased_request(tmp_path):
+    """Any store sharing the DB sees active leases; none may delete their rows."""
+    db = tmp_path / "shared.db"
+    writer = CrawlSpillStore(db, clock=lambda: 1000.0)
+    observers = [CrawlSpillStore(db, clock=lambda: 1000.0) for _ in range(2)]
+    try:
+        writer.put("r-live", 0, engine_result("https://spill.test/live", "rendered"))
+        _backdate_db(db, 1000.0 - 7200)
+        assert all(store.gc_stale_spills(3600.0) == 0 for store in observers)
+        rows = writer.load_ordered("r-live", policy=UNRESTRICTED_HOST_POLICY)
+        assert len(rows) == 1
+        assert rows[0].original_url == "https://spill.test/live"
+    finally:
+        writer.close()
+        for store in observers:
+            store.close()
+
+
+def test_a_live_writer_heartbeat_renews_the_fence_across_gc_passes(tmp_path):
+    """A writer that keeps putting heartbeats its lease so aged rows survive GC."""
+    times = {"t": 1000.0}
+    db = tmp_path / "spills.db"
+    store = CrawlSpillStore(db, clock=lambda: times["t"], lease_ttl_seconds=60.0)
+    try:
+        store.put("r-live", 0, engine_result("https://spill.test/0", "rendered"))
+        _backdate_db(db, 1000.0 - 7200)
+        times["t"] = 1120.0
+        store.put("r-live", 1, engine_result("https://spill.test/1", "rendered"))
+        _backdate_db(db, 1000.0 - 7200)
+        assert store.gc_stale_spills(3600.0) == 0
+        urls = [r.original_url for r in store.load_ordered("r-live", policy=UNRESTRICTED_HOST_POLICY)]
+        assert urls == ["https://spill.test/0", "https://spill.test/1"]
+    finally:
+        store.close()
+
+
+def test_expired_lease_does_not_protect_aged_rows(tmp_path):
+    """A crashed writer's expired lease lets aged rows be reclaimed."""
+    times = {"t": 1000.0}
+    db = tmp_path / "spills.db"
+    writer = CrawlSpillStore(db, clock=lambda: times["t"], lease_ttl_seconds=60.0)
+    sweeper = CrawlSpillStore(db, clock=lambda: times["t"], lease_ttl_seconds=60.0)
+    try:
+        writer.put("r-stale", 0, engine_result("https://spill.test/0", "rendered"))
+        _backdate_db(db, 1000.0 - 7200)
+        times["t"] = 1200.0
+        assert sweeper.gc_stale_spills(3600.0) == 1
+        assert _row_count(tmp_path) == 0
+    finally:
+        writer.close()
+        sweeper.close()
+
+
+def test_a_lease_protects_only_its_own_request(tmp_path):
+    """A live lease for one request must not fence another request's aged rows."""
+    db = tmp_path / "shared.db"
+    writer = CrawlSpillStore(db, clock=lambda: 1000.0)
+    sweeper = CrawlSpillStore(db, clock=lambda: 1000.0)
+    try:
+        writer.put("r-live", 0, engine_result("https://spill.test/live", "rendered"))
+        with closing(sqlite3.connect(db)) as conn:
+            conn.execute(
+                "INSERT INTO crawl_spills (request_id, sequence, payload, created_at) VALUES (?, ?, ?, ?)",
+                (
+                    "r-other",
+                    0,
+                    json.dumps(
+                        {
+                            "i": 0,
+                            "r": {
+                                "original_url": "https://spill.test/other",
+                                "status": "rendered",
+                                "final_url": "https://spill.test/other",
+                                "url": "https://spill.test/other",
+                                "title": None,
+                                "content_markdown": None,
+                                "links": [],
+                                "error": None,
+                                "browser_used": None,
+                                "extract": None,
+                                "meta": {},
+                            },
+                        }
+                    ),
+                    1000.0 - 7200,
+                ),
+            )
+            conn.commit()
+        _backdate_db(db, 1000.0 - 7200)
+        reclaimed = sweeper.gc_stale_spills(3600.0)
+        assert reclaimed == 1
+        live = sweeper.load_ordered("r-live", policy=UNRESTRICTED_HOST_POLICY)
+        assert [r.original_url for r in live] == ["https://spill.test/live"]
+        assert sweeper.load_ordered("r-other", policy=UNRESTRICTED_HOST_POLICY) == []
+    finally:
+        writer.close()
+        sweeper.close()
+
+
+def test_release_spill_on_unknown_request_is_harmless(tmp_path):
+    """Releasing a request with no rows or lease must not raise."""
+    store = make_spill_store(tmp_path)
+    try:
+        store.release_spill("missing")
+    finally:
+        store.close()
