@@ -10,7 +10,6 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from safe_url.host_canonical import idna_host
 from safe_url.host_policy import HostPolicy, host_egress_reason, host_policy_reason
-from safe_url.mapped_value_errors import record_mapped_value_error
 from safe_url.registrable_domain import registrable_domain
 
 #: Tracking/ad/social-feed infrastructure: recorded as links, never enqueued; apex
@@ -194,8 +193,6 @@ class NormalizedUrl:
             # The constructor boundary: only a refusal-shaped literal leaves as
             # itself; a foreign ValueError maps EXPLICITLY to "invalid_url".
             reason = _refusal_literal(str(error))
-            if reason != str(error):
-                record_mapped_value_error(str(error))
             raise ValueError(reason) from error
         self._raw = canonical
         self._scheme = scheme

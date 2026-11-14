@@ -85,7 +85,6 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     "packages/safe-url/src/safe_url/address_class.py": (3, 2),
     "packages/safe-url/src/safe_url/host_canonical.py": (2, 2),
     "packages/safe-url/src/safe_url/host_policy.py": (5, 5),
-    "packages/safe-url/src/safe_url/mapped_value_errors.py": (3, 3),
     "packages/safe-url/src/safe_url/normalized_url.py": (6, 4),
     "packages/safe-url/src/safe_url/process_state.py": (6, 6),
     "packages/safe-url/src/safe_url/registrable_domain.py": (3, 2),
@@ -233,10 +232,8 @@ DECLARED_SURFACE_RATCHET = {
     "packages/core/src/crawlutron/storage/job_store_collections.py": (11, 6),
     "packages/core/src/crawlutron/storage/job_store_read.py": (3, 2),
     "packages/core/src/crawlutron/storage/job_store_state.py": (2, 1),
-    "packages/core/src/crawlutron/runtime/resource_lifecycle.py": (
-        8,
-        8,
-    ),  # (8,8) #681 mapping record; (5,5) #643 decline
+    "packages/core/src/crawlutron/runtime/resource_lifecycle.py": (5, 5),
+    # (5,5) #643 decline; mapped_value_errors mapping removed (safe_url statelessness)
     "packages/core/src/crawlutron/storage/migrations/runner.py": (5, 4),
     "packages/core/src/crawlutron/storage/migrations/ddl.py": (2, 2),
     "packages/core/src/crawlutron/storage/watch_store.py": (1, 1),

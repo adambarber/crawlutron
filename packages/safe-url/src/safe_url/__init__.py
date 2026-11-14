@@ -11,11 +11,6 @@ from safe_url.host_policy import (
     host_policy_reason,
     reset_private_target_memo,
 )
-from safe_url.mapped_value_errors import (
-    clear_mapped_value_errors,
-    mapped_value_errors,
-    record_mapped_value_error,
-)
 from safe_url.normalized_url import NormalizedUrl, admit_or_none, admit_with_reason, refusal_literals
 from safe_url.registrable_domain import is_public_suffix, registrable_domain
 from safe_url.safe_regex import (
@@ -43,7 +38,6 @@ __all__ = [
     "admit_with_reason",
     "allow_private_targets",
     "classify",
-    "clear_mapped_value_errors",
     "compile_untrusted",
     "host_egress_reason",
     "host_policy_reason",
@@ -51,10 +45,8 @@ __all__ = [
     "is_loopback_bind",
     "is_public_suffix",
     "is_secret_name",
-    "mapped_value_errors",
     "match_bounded",
     "punycode_host",
-    "record_mapped_value_error",
     "redact_url",
     "redact_urls_in_text",
     "redacted_marker",

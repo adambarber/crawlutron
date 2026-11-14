@@ -32,7 +32,6 @@ KNOWN = (
     "crawlutron.service.job_lifecycle",
     "crawlutron.runtime.metrics",
     "safe_url.host_policy",
-    "safe_url.mapped_value_errors",
 )
 
 
