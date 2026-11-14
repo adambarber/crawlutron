@@ -29,14 +29,6 @@ from crawlutron.storage.migrations.manifest import (
     create_table_sql,
 )
 
-
-def step(
-    apply: str, rollback: Callable[[sqlite3.Connection], None]
-) -> tuple[str, Callable[[sqlite3.Connection], None]]:
-    """Wrap a migration step with an explicit rollback callable."""
-    return (apply, rollback)
-
-
 MIGRATIONS_ROOT = (
     pathlib.Path(__file__).parents[2] / "packages" / "core" / "src" / "crawlutron" / "storage" / "migrations"
 )

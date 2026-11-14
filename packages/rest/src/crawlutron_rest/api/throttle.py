@@ -31,7 +31,6 @@ ANON_MAX_REQUESTS = 120
 _ANON_WINDOW = 60.0
 _ANON_CAP = 1024
 _ANON_NO_CLIENT = "unknown"
-_ANON_BATCH = 8
 
 # Key-verify: 5 failures / 300s -> 60s cooldown.
 _KV_WINDOW = 300.0
@@ -178,14 +177,13 @@ class Throttle(MeterLedger):
     def _anon_check_shared(self, key: str) -> None:
         now = self._clock()
         if self._consume_res(key, now):
-            return None
+            return
         store = self._require_store()
         granted, ws, res = store.reserve_anonymous(
             key,
             now=now,
             window_seconds=_ANON_WINDOW,
             max_requests=ANON_MAX_REQUESTS,
-            batch=_ANON_BATCH,
         )
         self._save_reservation(key, granted, ws, res)
         if not granted:
