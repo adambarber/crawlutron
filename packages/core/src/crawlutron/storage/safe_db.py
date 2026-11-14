@@ -87,7 +87,7 @@ def _off_loop() -> None:
 
 
 @contextmanager
-def allow_on_loop(reason: str) -> Generator[None, None, None]:
+def allow_on_loop() -> Generator[None, None, None]:
     """Temporarily permit loop-thread writes (lifespan bootstrap, shutdown sweeps)."""
     _WRITE_TXN.allow_depth = getattr(_WRITE_TXN, "allow_depth", 0) + 1
     try:

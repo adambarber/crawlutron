@@ -137,7 +137,7 @@ def test_allow_on_loop_permits_loop_thread_write() -> None:
     async def main() -> None:
         conn = sqlite3.connect(":memory:")
         try:
-            with allow_on_loop("bootstrap"):
+            with allow_on_loop():
                 with txn_write(conn, owner="m"):
                     conn.execute("CREATE TABLE u (k INTEGER)")
         finally:
