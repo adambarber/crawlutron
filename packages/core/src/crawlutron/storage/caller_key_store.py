@@ -16,6 +16,7 @@ from crawlutron.models.caller_key import CallerKey
 from crawlutron.models.issued_key import IssuedKey
 from crawlutron.storage.coordination_store import CoordinationStore, atwin
 from crawlutron.storage.migrations.manifest import StoreSchema
+from crawlutron.storage.safe_db import txn_write
 
 #: The audit write is best-effort: a failing trail must not take the key door
 #: down or orphan a fresh secret (fail-open, per the auth posture).
@@ -137,14 +138,15 @@ class CallerKeyStore(CoordinationStore):
         """
         self._audit = audit
 
-    def _commit_and_audit(self, action: str, key_id: str) -> None:
-        """Commit the in-flight write and record one admin audit row."""
-        self._conn.commit()
+    def _commit_and_audit(self, action: str, key_id: str, outcome: str = "granted") -> None:
+        """Record one admin audit row for a write that already committed.
+
+        The write itself is wrapped in ``txn_write`` by the caller; this only
+        appends the durable audit row on the audit store's own connection.
+        """
         if self._audit is not None:
             try:
-                self._audit.record_event(
-                    actor="admin", action=action, target_key_id=key_id, outcome="granted"
-                )
+                self._audit.record_event(actor="admin", action=action, target_key_id=key_id, outcome=outcome)
             except Exception:
                 _logger.warning("admin_audit_write_failed", extra={"action": action, "key_id": key_id})
 
@@ -161,13 +163,14 @@ class CallerKeyStore(CoordinationStore):
         # wall: persisted row stamps anchor to wall so they survive restarts.
         created_at = time.time()
         with self._lock:
-            self._conn.execute(
-                "INSERT INTO caller_keys (key_id, label, key_hash, max_pages, max_concurrency,"
-                " created_at, previous_hash, previous_rotated_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (key_id, name, _store_hash(body), max_pages, max_concurrency, created_at, None, None),
-            )
-            self._commit_and_audit("key_mint", key_id)
+            with txn_write(self._conn, owner="caller_key_store.issue_key"):
+                self._conn.execute(
+                    "INSERT INTO caller_keys (key_id, label, key_hash, max_pages, max_concurrency,"
+                    " created_at, previous_hash, previous_rotated_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (key_id, name, _store_hash(body), max_pages, max_concurrency, created_at, None, None),
+                )
+        self._commit_and_audit("key_mint", key_id)
         return IssuedKey(
             key_id=key_id, label=name, secret=secret, max_pages=max_pages, max_concurrency=max_concurrency
         )
@@ -231,15 +234,9 @@ class CallerKeyStore(CoordinationStore):
     def revoke_key(self, key_id: str) -> bool:
         """Drop ``key_id``; True iff a live key went away."""
         with self._lock:
-            cur = self._conn.execute("DELETE FROM caller_keys WHERE key_id = ?", (key_id,))
-            self._conn.commit()
-        if self._audit is not None:
-            self._audit.record_event(
-                actor="admin",
-                action="key_revoke",
-                target_key_id=key_id,
-                outcome="granted" if cur.rowcount > 0 else "refused",
-            )
+            with txn_write(self._conn, owner="caller_key_store.revoke_key"):
+                cur = self._conn.execute("DELETE FROM caller_keys WHERE key_id = ?", (key_id,))
+        self._commit_and_audit("key_revoke", key_id, outcome="granted" if cur.rowcount > 0 else "refused")
         return cur.rowcount > 0
 
     def rotate_key(self, key_id: str, new_secret: str) -> bool:
@@ -257,12 +254,13 @@ class CallerKeyStore(CoordinationStore):
             ).fetchone()
             if row is None:
                 return False
-            self._conn.execute(
-                "UPDATE caller_keys SET key_hash = ?, previous_hash = ?,"
-                " previous_rotated_at = ? WHERE key_id = ?",
-                (_store_hash(parsed[1]), row[0], now, key_id),
-            )
-            self._commit_and_audit("key_rotate", key_id)
+            with txn_write(self._conn, owner="caller_key_store.rotate_key"):
+                self._conn.execute(
+                    "UPDATE caller_keys SET key_hash = ?, previous_hash = ?,"
+                    " previous_rotated_at = ? WHERE key_id = ?",
+                    (_store_hash(parsed[1]), row[0], now, key_id),
+                )
+        self._commit_and_audit("key_rotate", key_id)
         return True
 
     def get_for_id(self, key_id: str) -> CallerKey | None:

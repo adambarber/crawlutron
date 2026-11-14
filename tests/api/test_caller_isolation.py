@@ -22,7 +22,6 @@ from crawlutron_rest.api.caller_auth import (
 )
 from crawlutron_rest.api.crawl_endpoint import get_crawl_result
 from tests._api_harnesses import stored_request as _stored_request
-from tests._async_harnesses import expect_quota_refused
 from tests.factories.client import (
     isolation_client,
     keyed_quota_crawl,
@@ -216,8 +215,7 @@ def test_effective_cookie_namespace_defaults_to_caller(tmp_path):
 
 
 def test_anonymous_crawl_cannot_read_keyed_callers_jar(tmp_path):
-    """#537, subsumed by #559: an anonymous key_*-shaped cookie_namespace declaration
-    gets the shared default, never the keyed jar: two tenants (keyed, anonymous), same domain."""
+    """Anonymous key-id cookie_namespace never reads the keyed jar."""
     from crawlutron.models.caller_identity import CallerIdentity
     from crawlutron.storage.coordination_cookies import SharedCookieStore
     from crawlutron.transport.cookie_jar import CookieJar
@@ -242,17 +240,15 @@ def test_anonymous_crawl_cannot_read_keyed_callers_jar(tmp_path):
 
 
 def test_anonymous_crawl_cannot_read_keyed_callers_jar_via_admission(tmp_path):
-    """#537, tightened by #559: an anonymous key_*-shaped declaration is now refused
-    at the door with 422 (it was 202 + a scrubbed durable row) -- the key id is a
-    declaration like any other, and declarations are refused for anonymous."""
+    """Anonymous key-id cookie_namespace declaration is refused at the door."""
     from tests.factories.client import quota_client
 
     async def run():
         async with quota_client(tmp_path) as (client, store, results, keys):
             # #537: mint the victim key directly; the crawl below is anonymous, so no
             # key-issuance round trip belongs in this scenario.
-            key_id = keys.issue_key("agent-a").key_id
-
+            issued = await keys.aissue_key("agent-a")
+            key_id = issued.key_id
             crawl = await client.post(
                 "/v1/crawl",
                 json={
@@ -387,17 +383,40 @@ def test_concurrency_quota_rejects_a_full_caller():
         check_concurrency_quota(caller, 1)
 
 
-async def test_http_concurrency_quota_rejects_a_full_caller(tmp_path):
+def _concurrency_setup(store: JobStore, issued) -> None:
+    """Seed a running job for the issued key so its one slot is taken."""
+    seed_owned_job(store, job_id="crawl_busy", owner=issued.key_id)
+    store.set_status("crawl_busy", JobStatus.RUNNING, expected=JobStatus.PENDING)
+
+
+@pytest.mark.parametrize(
+    ("key_args", "setup", "refuse"),
+    [
+        pytest.param(
+            {"max_concurrency": 1},
+            _concurrency_setup,
+            lambda client, issued: client.post(
+                "/v1/crawl",
+                headers={"X-API-Key": issued.secret},
+                json={"url": "http://example.com/", "async_mode": True},
+            ),
+            id="concurrency",
+        ),
+        pytest.param(
+            {"max_pages": 1},
+            lambda store, issued: None,
+            lambda client, issued: post_crawl(client, max_pages=50, key=issued.secret),
+            id="pages",
+        ),
+    ],
+)
+async def test_http_quota_refuses_over_budget_calls(tmp_path, key_args, setup, refuse):
+    """Over-budget calls are refused at the HTTP door: concurrency cap and page quota."""
     async with quota_client(tmp_path) as (client, store, results, keys):
-        issued = keys.issue_key("agent-a", max_concurrency=1)
-        seed_owned_job(store, job_id="crawl_busy", owner=issued.key_id)
-        assert store.set_status("crawl_busy", JobStatus.RUNNING, expected=JobStatus.PENDING) is True
-        refused = await client.post(
-            "/v1/crawl",
-            headers={"X-API-Key": issued.secret},
-            json={"url": "http://example.com/", "async_mode": True},
-        )
-        assert refused.status_code == 429, refused.text
+        issued = await keys.aissue_key("agent-a", **key_args)
+        setup(store, issued)
+        response = await refuse(client, issued)
+        assert response.status_code == 429
 
 
 def _caller_metrics(tmp_path: Path) -> MetricsStore:
@@ -439,12 +458,6 @@ async def test_search_metrics_have_their_own_caller_family(tmp_path):
     assert 'crawler_search_requests_by_caller_total{caller="key_a"} 1.0' in exposition
 
 
-async def test_http_page_quota_rejects_over_budget_crawls(tmp_path):
-    async with quota_client(tmp_path) as (client, store, results, keys):
-        issued = keys.issue_key("agent-a", max_pages=1)
-        expect_quota_refused(await post_crawl(client, max_pages=50, key=issued.secret))
-
-
 async def test_scoped_store_twins_round_trip_off_the_loop(tmp_path):
     store = make_store(tmp_path / "jobs.db")
     results = CrawlResultStore(tmp_path / "results.db")
@@ -469,16 +482,8 @@ async def test_anonymous_crawl_stores_the_resolved_page_limit(tmp_path):
         assert stored.policy.limits.max_pages == 100
 
 
-async def test_anonymous_page_quota_refuses_over_budget_crawls(tmp_path):
-    """The anonymous bucket's capability default is a real quota: 101 pages is a 429."""
-    async with quota_client(tmp_path) as (client, store, results, keys):
-        expect_quota_refused(await post_crawl(client, max_pages=101))
-
-
 async def test_keyed_crawl_keeps_an_explicit_zero_page_limit(tmp_path):
-    """#593: /v1/crawl resolves an explicit ``max_pages=0`` to the bounded
-    service default (DEFAULT_MAX_PAGES) and persists that value -- stored ==
-    enforced, so the engine never silently re-expands it to a different cap."""
+    """Explicit ``max_pages=0`` resolves to DEFAULT_MAX_PAGES and persists."""
     async with keyed_quota_crawl(tmp_path, key_max_pages=0) as (store, _, _, response):
         assert keyed_zero_bound(store, response).policy.limits.max_pages == DEFAULT_MAX_PAGES
 

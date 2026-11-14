@@ -32,7 +32,7 @@ class TestDeleteJobPurgesResultStore:
             results,
             keys,
         ):
-            secret, owner, headers = issue_agent_key(keys)
+            secret, owner, headers = await issue_agent_key(keys)
             request_id = "crawl-completed-773"
             await seed_completed_crawl(store, results, owner, request_id)
             await assert_crawl_result_served(client, request_id, headers)
@@ -48,7 +48,7 @@ class TestDeleteJobPurgesResultStore:
             results,
             keys,
         ):
-            secret, owner, headers = issue_agent_key(keys)
+            secret, owner, headers = await issue_agent_key(keys)
             request_id = "crawl-running-773"
 
             store.create_single_shot(request_id, "http://example.com/", {}, owner=owner)
@@ -67,7 +67,7 @@ class TestDeleteJobPurgesResultStore:
             results,
             keys,
         ):
-            secret, owner, headers = issue_agent_key(keys)
+            secret, owner, headers = await issue_agent_key(keys)
 
             response = await client.delete("/v1/jobs/crawl-never-happened-773", headers=headers)
             assert response.status_code == 404, response.text

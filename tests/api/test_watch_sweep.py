@@ -337,13 +337,14 @@ async def test_a_revoked_owner_watch_is_deactivated_by_the_sweep(watch_store, tm
     it rather than running it under a dead identity forever (#207). The anonymous
     watch keeps checking and fails transiently, so it stays active (#335)."""
     keys = CallerKeyStore(tmp_path / "keys.db")
-    secret = keys.issue_key("alice").secret
+    issued = await keys.aissue_key("alice")
+    secret = issued.secret
     record = keys.verify_key(secret)
     assert record is not None
     owned = register(watch_store, canonical(DEAD_ORIGIN), owner=record.key_id)
     # The anonymous watch, by contrast, has no key to revoke and keeps checking.
     anonymous = register(watch_store, canonical(DEAD_ORIGIN))
-    keys.revoke_key(record.key_id)
+    await keys.arevoke_key(record.key_id)
     _stub_transient_failure(monkeypatch)
     sweeper = WatchSweeper(
         watch_store,
@@ -363,12 +364,12 @@ async def test_a_revoked_owner_watch_is_deactivated_by_the_sweep(watch_store, tm
     assert anonymous_after.last_checked_at is not None
 
 
-def _keyed_sweeper(watch_store, tmp_path, monkeypatch, *, capture: list[str] | None = None):
+async def _keyed_sweeper(watch_store, tmp_path, monkeypatch, *, capture: list[str] | None = None):
     """A sweeper over a keyed owner (``max_concurrency=1``) with its register and
     a recording ``execute_crawl``; returns ``(tracker, record, sweeper)``.
     """
     keys = CallerKeyStore(tmp_path / "keys.db")
-    record = keys.verify_key(keys.issue_key("agent-a", max_concurrency=1).secret)
+    record = keys.verify_key((await keys.aissue_key("agent-a", max_concurrency=1)).secret)
     assert record is not None
     register(watch_store, canonical(DEAD_ORIGIN), owner=record.key_id)
     tracker = CallerConcurrencyTracker()
@@ -397,7 +398,7 @@ async def test_a_owner_at_quota_watch_check_skips_the_row_without_a_failure_reco
     skipped (no arecord_check, no streak growth, next_check_at untouched) and
     the next sweep retries -- a full parking lot does not make the car broken."""
     calls: list[str] = []
-    tracker, record, sweeper = _keyed_sweeper(watch_store, tmp_path, monkeypatch, capture=calls)
+    tracker, record, sweeper = await _keyed_sweeper(watch_store, tmp_path, monkeypatch, capture=calls)
     tracker.reserve(record.key_id)  # the owner's one slot is already taken
     watch = watch_store.list_watches()[0]
     before = watch_store.get(watch.watch_id)
@@ -417,7 +418,7 @@ async def test_a_owner_at_quota_watch_check_skips_the_row_without_a_failure_reco
 
 async def test_a_owner_watch_check_releases_the_slot_after_a_check(watch_store, tmp_path, monkeypatch):
     """The concurrency slot a watch check reserves is released on completion (#325)."""
-    tracker, record, sweeper = _keyed_sweeper(watch_store, tmp_path, monkeypatch)
+    tracker, record, sweeper = await _keyed_sweeper(watch_store, tmp_path, monkeypatch)
 
     await sweeper.sweep_once(now=NOW)
 

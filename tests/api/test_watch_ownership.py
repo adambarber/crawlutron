@@ -23,9 +23,9 @@ TARGET = "http://example.com/feed.xml"
 INTERVAL = 900
 
 
-def _issue(keys: CallerKeyStore, label: str, *, max_pages: int = 0) -> str:
+async def _issue(keys: CallerKeyStore, label: str, *, max_pages: int = 0) -> str:
     """Mint a key directly into ``keys`` and return its secret."""
-    return keys.issue_key(label, max_pages=max_pages).secret
+    return (await keys.aissue_key(label, max_pages=max_pages)).secret
 
 
 @asynccontextmanager
@@ -54,8 +54,8 @@ async def _register(client, headers: dict[str, str], url: str) -> dict[str, obje
 async def _two_tenant_client(watch_store, tmp_path):
     """Open the keyed client with two distinct issuers; yield us and their keys."""
     keys = CallerKeyStore(tmp_path / "keys.db")
-    alice = _issue(keys, "alice")
-    bob = _issue(keys, "bob")
+    alice = await _issue(keys, "alice")
+    bob = await _issue(keys, "bob")
     async with _keyed_watch_client(watch_store, keys) as client:
         yield client, alice, bob
 
@@ -89,7 +89,7 @@ async def test_listing_is_owner_scoped(watch_store, tmp_path):
 
 async def test_a_keyed_watch_is_stamped_with_its_owner(watch_store, tmp_path):
     keys = CallerKeyStore(tmp_path / "keys.db")
-    alice = _issue(keys, "alice")
+    alice = await _issue(keys, "alice")
     async with _keyed_watch_client(watch_store, keys) as client:
         created = await _register(client, {"X-API-Key": alice}, TARGET)
 

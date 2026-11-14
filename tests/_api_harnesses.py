@@ -109,13 +109,13 @@ def stored_request(store: JobStore, response):
     return stored
 
 
-def issue_agent_key(keys):
+async def issue_agent_key(keys):
     """Issue one key for agent-a; return ``(secret, owner_id, headers)``.
 
     The sync door variant: the REST tests hold the ``CallerKeyStore`` object
     directly and issue through it, while MCP tests go through the HTTP door.
     """
-    issued = keys.issue_key("agent-a")
+    issued = await keys.aissue_key("agent-a")
     secret = issued.secret
     owner = keys.verify_key(secret).key_id
     return secret, owner, {"X-API-Key": secret}
@@ -182,7 +182,7 @@ async def keyed_quota_client(tmp_path, *, max_concurrency: int = 1) -> AsyncGene
 
     async with quota_client(tmp_path) as (client, store, results, keys):
         tracker = mount_tracker(client)
-        issued = keys.issue_key("agent-a", max_concurrency=max_concurrency)
+        issued = await keys.aissue_key("agent-a", max_concurrency=max_concurrency)
         yield client, store, tracker, issued
 
 

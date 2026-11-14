@@ -350,7 +350,7 @@ async def test_a_live_caller_key_still_gets_the_per_tenant_rollup(tmp_path):
     """Boundary class 2: a live caller key through the real door is 200 with its
     own records only -- the operator arm must not disturb the keyed path."""
     async with _real_door_client(tmp_path) as (client, keys, results):
-        issued = keys.issue_key("key_a")
+        issued = await keys.aissue_key("key_a")
         await results.aput(_FOREIGN_TRACE_NAME, _foreign_row(), owner="key_b")
 
         response = await client.get("/v1/policy-suggestions", headers={"X-API-Key": issued.secret})
@@ -368,7 +368,7 @@ async def test_a_keyed_caller_past_concurrency_quota_is_refused(tmp_path, monkey
     blocker, entered, released = make_blocking_callable(result=[])
     async with _real_door_client(tmp_path) as (client, keys, results):
         monkeypatch.setattr(results, "apayloads_page", blocker)
-        issued = keys.issue_key("key_a", max_concurrency=1)
+        issued = await keys.aissue_key("key_a", max_concurrency=1)
         await assert_second_concurrent_refused(
             client,
             url="/v1/policy-suggestions",
@@ -411,7 +411,10 @@ async def _assert_suggestions_admin_pacing(tmp_path, *, make_guesses, keys_statu
 
     reset_all_process_state()
     async with _real_door_client(tmp_path) as (client, keys, _results):
-        for credential, expected in make_guesses(client, keys):
+        guesses = make_guesses(client, keys)
+        if hasattr(guesses, "__await__"):
+            guesses = await guesses
+        for credential, expected in guesses:
             got = await client.get("/v1/policy-suggestions", headers={"X-API-Key": credential})
             assert got.status_code == expected, got.text
         resp = await client.get("/v1/keys", headers={"X-API-Key": "still-wrong"})
@@ -453,8 +456,8 @@ async def test_valid_caller_key_flood_never_arms_the_admin_bucket(tmp_path):
     of /v1/keys. The shared admin bucket stays cold after the flood."""
     from crawlutron_rest.api.throttle import Throttle
 
-    def valid_guesses(_client, keys):
-        issued = keys.issue_key("agent-a")
+    async def valid_guesses(_client, keys):
+        issued = await keys.aissue_key("agent-a")
         return [(issued.secret, 200) for _ in range(Throttle.MAX_FAILURES * 2)]
 
     await _assert_suggestions_admin_pacing(

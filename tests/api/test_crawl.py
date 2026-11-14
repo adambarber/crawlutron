@@ -299,7 +299,7 @@ class TestJobApi(_AsgiEndpointTests):
         from tests._app_factory import service_app
 
         keys = service_app().state.caller_key_store
-        issued = keys.issue_key("list-probe")
+        issued = await keys.aissue_key("list-probe")
         resp2 = await self.client.get("/v1/jobs", headers={"x-api-key": issued.secret})
         assert resp2.status_code == 200
         # Anonymous per-record lookup still works for the anonymous caller's own job.

@@ -425,7 +425,8 @@ async def test_valid_key_does_not_burn_anonymous_ip_bucket():
     """#986: verified key is exempt from the anonymous IP bucket."""
     process_state_reset()
     async with _admin_app_client() as (client, keys):
-        secret = keys.issue_key("test-key").secret
+        issued = await keys.aissue_key("test-key")
+        secret = issued.secret
         for _ in range(ANON_MAX_REQUESTS):
             resp = await client.get("/v1/jobs", headers={"X-API-Key": secret})
             assert resp.status_code == 200, resp.text

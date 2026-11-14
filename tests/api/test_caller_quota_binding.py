@@ -42,7 +42,7 @@ async def test_keyed_crawl_stores_the_key_bound_when_limits_omitted(tmp_path):
 async def test_keyed_crawl_caps_an_explicit_unbounded_request(tmp_path):
     """An explicit ``max_pages=0`` from a keyed caller resolves to the key's bound."""
     async with quota_client(tmp_path) as (client, store, results, keys):
-        issued = keys.issue_key("agent-a", max_pages=3)
+        issued = await keys.aissue_key("agent-a", max_pages=3)
         stored, _ = await _stored_crawl(client, store, key=issued.secret, max_pages=0)
         assert stored.policy.limits.max_pages == 3
 
@@ -50,7 +50,7 @@ async def test_keyed_crawl_caps_an_explicit_unbounded_request(tmp_path):
 async def test_keyed_crawl_keeps_an_explicit_under_ceiling_limit(tmp_path):
     """A keyed caller who asks for less than the ceiling keeps their own number."""
     async with quota_client(tmp_path) as (client, store, results, keys):
-        issued = keys.issue_key("agent-a", max_pages=10)
+        issued = await keys.aissue_key("agent-a", max_pages=10)
         stored, _ = await _stored_crawl(client, store, key=issued.secret, max_pages=2)
         assert stored.policy.limits.max_pages == 2
 
@@ -113,7 +113,8 @@ async def test_keyed_job_stores_the_key_bound_when_limits_omitted(tmp_path, monk
 
     store = make_store(tmp_path / "jobs.db")
     keys = CallerKeyStore(tmp_path / "keys.db")
-    record = keys.verify_key(keys.issue_key("agent-a", max_pages=1).secret)
+    issued = await keys.aissue_key("agent-a", max_pages=1)
+    record = keys.verify_key(issued.secret)
     assert record is not None
     caller = identity_for_key(record)
     monkeypatch.setattr(jobs_router.job_runner, "start_job", lambda *args, **kwargs: None)

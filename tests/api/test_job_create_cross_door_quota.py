@@ -30,7 +30,7 @@ async def test_rest_create_refuses_when_the_tracker_holds_the_callers_slot(tmp_p
         assert jobs_router_route_app is not None, "the quota client must ride an ASGI transport"
         jobs_router_route_app.include_router(jobs_router)
         mount_tracker(client)
-        issued = keys.issue_key("agent-a", max_concurrency=1)
+        issued = await keys.aissue_key("agent-a", max_concurrency=1)
         record = keys.verify_key(issued.secret)
         assert record is not None
         caller = identity_for_key(record)

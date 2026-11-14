@@ -58,7 +58,7 @@ def test_anonymous_declaration_is_refused_at_the_crawl_door(tmp_path: Path):
         app = isolation_app(store, results, keys)
         app.dependency_overrides[get_settings] = lambda: CrawlerSettings.from_mapping({})
         app.dependency_overrides[get_shutdown_event] = asyncio.Event
-        issued = keys.issue_key("agent-a")
+        issued = await keys.aissue_key("agent-a")
         declared = {
             "url": "http://example.com/",
             "async_mode": True,

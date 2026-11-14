@@ -209,7 +209,7 @@ async def test_keys_door_is_sealed_when_no_operator_token_is_configured(tmp_path
     app = isolation_app(store, results, keys)
     app.state.crawler_settings = CrawlerSettings.from_mapping({"CRAWLUTRON_KEY_ADMIN_TOKEN": ""})
     async with serve(app) as client:
-        issued = keys.issue_key("tenant-a")
+        issued = await keys.aissue_key("tenant-a")
 
         minted = await client.post(
             "/v1/keys", json={"label": "escalated"}, headers={"X-API-Key": issued.secret}

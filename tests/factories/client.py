@@ -100,7 +100,7 @@ async def keyed_crawl(
 
     The arrange triplet (issue key + present secret + crawl POST) stated once;
     the response (and the caller's own assertion about it) stays with the test."""
-    issued = keys.issue_key(label, max_pages=key_max_pages)
+    issued = await keys.aissue_key(label, max_pages=key_max_pages)
     response = await post_crawl(client, max_pages=body_max_pages, key=issued.secret)
     return issued, response
 
