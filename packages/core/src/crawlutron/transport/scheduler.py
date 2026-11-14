@@ -342,6 +342,7 @@ class DomainScheduler:
                 )
 
         async def run_one(job: _Job) -> None:
+            """Drive one job to a delivered result; returns None or raises."""
             # Domain cooldown BEFORE the global semaphore, or one rate-limited
             # domain blocks every other domain's slot (cooldown deadlock).
             await sleep_out(self._state(job.domain).cooldown_until, self._clock)
