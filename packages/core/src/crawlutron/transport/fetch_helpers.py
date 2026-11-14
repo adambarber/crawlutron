@@ -102,7 +102,7 @@ async def _call_fetcher(
     if inspect.iscoroutine(resp):
         # Validated boundary: the async protocol's return is a coroutine whose
         # awaited value is the HttpFetchResult it spells.
-        resp = await resp
+        resp = await asyncio.wait_for(resp, timeout=timeout_seconds)
     return cast(HttpFetchResult, resp)
 
 
@@ -269,8 +269,9 @@ async def _recurse_sitemap(
     if depth > walk.max_depth or current_url in walk.visited or len(walk.page_urls) >= walk.max_urls:
         return etag, last_modified
     walk.visited.add(current_url)
-    text, etag, last_modified, not_modified = await fetch_text(
-        walk.fetcher, current_url, cond_headers, walk.timeout_seconds
+    text, etag, last_modified, not_modified = await asyncio.wait_for(
+        fetch_text(walk.fetcher, current_url, cond_headers, walk.timeout_seconds),
+        timeout=walk.timeout_seconds,
     )
     if not_modified:
         # 304: reuse the previously resolved URLs. get_stale, not get: the

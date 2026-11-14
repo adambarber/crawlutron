@@ -12,7 +12,7 @@ import datetime
 import inspect
 import re
 from collections.abc import Iterable, Mapping
-from typing import cast
+from typing import Final, cast
 
 from safe_url.host_policy import HostPolicy
 from safe_url.normalized_url import NormalizedUrl
@@ -20,6 +20,7 @@ from safe_url.normalized_url import NormalizedUrl
 from crawlutron.admission.policy import DiscoveryFlags, discovery_flags
 from crawlutron.models.crawl_diagnostics import CrawlDiagnostics
 from crawlutron.models.crawl_policy import CrawlPolicy
+from crawlutron.models.discovery_diagnostics import DiscoveryDiagnostics
 from crawlutron.models.fetch_envelope import RetryDiagnostics
 from crawlutron.models.http_fetch_result import HttpFetchResult as _HttpFetchResult
 from crawlutron.models.http_fetcher import HttpFetcher
@@ -30,6 +31,10 @@ from crawlutron.transport.decompression import decompress_body as _decompress_bo
 from crawlutron.transport.robots_parse import parse_robots_crawl_delay, parse_robots_sitemaps
 from crawlutron.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES, DISCOVERY_BODY_MAX_BYTES
 from crawlutron.vocabulary.taxonomy import is_transient_classification
+
+#: Maximum ``Sitemap:`` directives honoured per robots.txt. Beyond it excess
+#: lines are silently dropped so a hostile file cannot spawn a fan-out.
+_ROBOTS_SITEMAP_DIRECTIVE_CAP: Final[int] = 20
 
 _RETRY_BACKOFF_BASE_SECONDS = 0.25
 _RETRY_BACKOFF_CAP_SECONDS = 2.0
@@ -162,11 +167,13 @@ def _robots_diagnostics(evaluation: str, **overrides: object) -> RobotsDiagnosti
 async def _fetch_robots_text(
     http_fetcher: HttpFetcher, robots_url: NormalizedUrl, headers: dict[str, str], timeout_seconds: int
 ) -> str:
-    """Fetch + decode one robots.txt body, tolerating a sync test double."""
+    """Fetch + decode one robots.txt body, tolerating a sync test double.
+
+    The fetch is bounded by ``timeout_seconds`` via ``asyncio.wait_for``.
+    """
     robots_response = http_fetcher(robots_url, headers, timeout_seconds)
     if inspect.iscoroutine(robots_response):
-        # The protocol's return is a coroutine when the fetcher is async.
-        robots_response = await robots_response
+        robots_response = await asyncio.wait_for(robots_response, timeout=timeout_seconds)
     response: _HttpFetchResult = cast(_HttpFetchResult, robots_response)
     robots_headers = {key.lower(): value for key, value in response.headers.items()}
     return decode_body(
@@ -185,23 +192,38 @@ async def _fetch_robot_directives(
     http_fetcher: HttpFetcher,
     headers: dict[str, str],
     timeout_seconds: int,
-) -> tuple[float | None, list[str]]:
+) -> tuple[float | None, list[str], int]:
     """Fetch /robots.txt and fold its crawl-delay and Sitemap directives.
 
-    Returns ``(crawl_delay, sitemaps)``; a failed fetch raises so the caller can
-    classify it into a single error ``robots`` block."""
+    Returns ``(delay, sitemaps, dropped)`` with the discarded directive count."""
     robots_url = normalized_url.resolve("/robots.txt")
     if robots_url is None:
         raise ValueError("no in-scope /robots.txt")
     robots_text = await _fetch_robots_text(http_fetcher, robots_url, headers, timeout_seconds)
     crawl_delay = parse_robots_crawl_delay(robots_text)
-    sitemaps = _resolve_sitemap_urls(parse_robots_sitemaps(robots_text), normalized_url)
-    return crawl_delay, sitemaps
+    resolved_sitemaps, _total, dropped = _resolve_sitemap_urls(
+        parse_robots_sitemaps(robots_text), normalized_url
+    )
+    return crawl_delay, resolved_sitemaps, dropped
 
 
-def _resolve_sitemap_urls(candidates: Iterable[str], normalized_url: NormalizedUrl) -> list[str]:
-    """The candidates that resolve in this request's scope, as raw URLs."""
-    return [admitted.raw for entry in candidates if (admitted := normalized_url.resolve(entry)) is not None]
+def _resolve_sitemap_urls(
+    candidates: Iterable[str], normalized_url: NormalizedUrl
+) -> tuple[list[str], int, int]:
+    """Resolve Sitemap directives: cap at the module limit, keep only
+    same-site results; ``resolve`` admits foreign hosts so this is the
+    security boundary, not a correctness nicety."""
+    resolved: list[str] = []
+    target_site = normalized_url.site
+    total_seen = 0
+    for entry in candidates:
+        total_seen += 1
+        if len(resolved) >= _ROBOTS_SITEMAP_DIRECTIVE_CAP:
+            continue
+        admitted = normalized_url.resolve(entry)
+        if admitted is not None and admitted.site == target_site:
+            resolved.append(admitted.raw)
+    return resolved, total_seen, total_seen - len(resolved)
 
 
 async def _diagnose_robots(
@@ -213,41 +235,54 @@ async def _diagnose_robots(
     flags: DiscoveryFlags,
     engine_robots_sitemaps: list[str] | None,
     robots_evaluated: bool,
-) -> tuple[RobotsDiagnostics | None, list[str]]:
-    """Resolve the ``robots`` block and reusable sitemap list for diagnostics.
+) -> tuple[RobotsDiagnostics | None, list[str], int]:
+    """Resolve the ``robots`` block and sitemap list for diagnostics.
 
-    A ``None`` first value means the caller should not set the ``robots`` key."""
+    Returns ``(diag, sitemaps, drop_count)``; ``diag`` is None when skipped."""
     robots_sitemaps: list[str] = []
+    directive_drop_count: int = 0
     if not robots_evaluated:
-        return _robots_diagnostics("disabled"), robots_sitemaps
+        return _robots_diagnostics("disabled"), robots_sitemaps, directive_drop_count
     if engine_robots_sitemaps is not None:
-        robots_sitemaps = _resolve_sitemap_urls(engine_robots_sitemaps, normalized_url)
-        return _robots_diagnostics(
-            "cached", sitemaps=robots_sitemaps, reused_from_engine=True
-        ), robots_sitemaps
+        robots_sitemaps, _total, dropped = _resolve_sitemap_urls(engine_robots_sitemaps, normalized_url)
+        directive_drop_count = dropped
+        return (
+            _robots_diagnostics("cached", sitemaps=robots_sitemaps, reused_from_engine=True),
+            robots_sitemaps,
+            directive_drop_count,
+        )
     if not flags.robots:
-        return None, robots_sitemaps
+        return None, robots_sitemaps, directive_drop_count
     try:
-        crawl_delay, robots_sitemaps = await _fetch_robot_directives(
+        crawl_delay, robots_sitemaps, dropped = await _fetch_robot_directives(
             normalized_url=normalized_url,
             http_fetcher=http_fetcher,
             headers=headers,
             timeout_seconds=timeout_seconds,
         )
+        directive_drop_count = dropped
         robots_url = normalized_url.resolve("/robots.txt")
-        return _robots_diagnostics(
-            "evaluated",
-            url=robots_url.raw if robots_url is not None else None,
-            crawl_delay_seconds=crawl_delay,
-            sitemaps=robots_sitemaps,
-        ), robots_sitemaps
+        return (
+            _robots_diagnostics(
+                "evaluated",
+                url=robots_url.raw if robots_url is not None else None,
+                crawl_delay_seconds=crawl_delay,
+                sitemaps=robots_sitemaps,
+            ),
+            robots_sitemaps,
+            directive_drop_count,
+        )
     except Exception as error:
         robots_url = normalized_url.resolve("/robots.txt")
-        return _robots_diagnostics(
-            "evaluated",
-            url=robots_url.raw if robots_url is not None else None,
-            error=classify_error_code(error),
-        ), robots_sitemaps
+        return (
+            _robots_diagnostics(
+                "evaluated",
+                url=robots_url.raw if robots_url is not None else None,
+                error=classify_error_code(error),
+            ),
+            robots_sitemaps,
+            directive_drop_count,
+        )
 
 
 async def _collect_sitemaps(
@@ -257,10 +292,14 @@ async def _collect_sitemaps(
     host_policy: HostPolicy,
     timeout_seconds: int,
     candidate_urls: list[str],
-) -> tuple[list[str], dict[str, str]]:
-    """Fetch one or more sitemaps down to ``(loc, lastmod)`` pairs."""
+) -> tuple[list[str], dict[str, str], int]:
+    """Fetch one or more sitemaps down to ``(loc, lastmod)`` pairs.
+
+    Returns ``(locs, lastmod, fetch_count)`` with the document fetch count.
+    """
     locs: list[str] = []
     lastmod: dict[str, str] = {}
+    fetch_count: int = 0
     from crawlutron.transport.fetch_helpers import fetch_sitemap_urls
 
     for sitemap_url in (a for a in (normalized_url.resolve(e) for e in candidate_urls) if a is not None):
@@ -268,11 +307,12 @@ async def _collect_sitemaps(
             found_locs = await fetch_sitemap_urls(
                 http_fetcher, sitemap_url, timeout_seconds, host_policy=host_policy
             )
+            fetch_count += 1
             for loc, timestamp in found_locs:
                 locs.append(loc.raw)
                 if timestamp:
                     lastmod[loc.raw] = timestamp
-    return locs, lastmod
+    return locs, lastmod, fetch_count
 
 
 def _collect_feeds(html: str | None, normalized_url: NormalizedUrl) -> list[str]:
@@ -306,7 +346,8 @@ async def discovery_diagnostics(
     flags = discovery_flags(policy)
     limits = policy.limits
     diagnostics: CrawlDiagnostics = {}
-    robots_diag, robots_sitemaps = await _diagnose_robots(
+    directive_drop_count: int = 0
+    robots_diag, robots_sitemaps, dropped = await _diagnose_robots(
         normalized_url=normalized_url,
         flags=flags,
         timeout_seconds=limits.timeout_seconds,
@@ -315,12 +356,14 @@ async def discovery_diagnostics(
         engine_robots_sitemaps=engine_robots_sitemaps,
         robots_evaluated=robots_evaluated,
     )
+    directive_drop_count = dropped
     if robots_diag is not None:
         diagnostics["robots"] = robots_diag
     sitemap_urls: list[str] = []
+    fetch_count: int = 0
     if flags.sitemaps:
         candidate_sitemaps = robots_sitemaps or ["/sitemap.xml"]
-        sitemap_urls, sitemap_lastmod = await _collect_sitemaps(
+        sitemap_urls, sitemap_lastmod, fetch_count = await _collect_sitemaps(
             normalized_url=normalized_url,
             http_fetcher=http_fetcher,
             host_policy=host_policy,
@@ -333,7 +376,12 @@ async def discovery_diagnostics(
     if flags.feeds:
         feeds = _collect_feeds(html, normalized_url)
     if sitemap_urls or feeds:
-        diagnostics["discovery"] = {"sitemap_urls": sitemap_urls, "feeds": feeds}
+        discovery: DiscoveryDiagnostics = {"sitemap_urls": sitemap_urls, "feeds": feeds}
+        if directive_drop_count:
+            discovery["directive_drop_count"] = directive_drop_count
+        if fetch_count:
+            discovery["fetch_count"] = fetch_count
+        diagnostics["discovery"] = discovery
     return diagnostics
 
 
