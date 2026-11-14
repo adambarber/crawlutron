@@ -154,7 +154,8 @@ DECLARED_SURFACE_RATCHET = {
     "packages/rest/src/crawlutron_rest/api/admit_router.py": (2, 1),
     # #677: known_reasons is the public door the producer->table loop gate reads.
     "packages/core/src/crawlutron/service/admit_endpoint.py": (3, 2),
-    "packages/core/src/crawlutron/service/key_throttle.py": (2, 2),
+    # #941: merged key-verify and anonymous throttle into one rest chokepoint.
+    "packages/rest/src/crawlutron_rest/api/throttle.py": (7, 4),
     "packages/core/src/crawlutron/service/policy_defaults.py": (2, 0),
     "packages/rest/src/crawlutron_rest/api/policy_router.py": (3, 1),  # #934 metering adds the module logger
     "packages/rest/src/crawlutron_rest/api/mcp_router.py": (2, 1),
@@ -204,10 +205,9 @@ DECLARED_SURFACE_RATCHET = {
     "packages/rest/src/crawlutron_rest/api/exempt_route_boot.py": (2, 2),
     # #668: the anonymous IP-bucket meter over the docs surfaces, /mcp
     # anonymous traffic, and the 404 route-miss (metered on the response stage).
-    "packages/rest/src/crawlutron_rest/api/anonymous_throttle.py": (10, 4),
+    "packages/core/src/crawlutron/service/meter_ledger.py": (2, 2),
     # #668: the shared process-meter skeleton the two throttles compose (the
     # jscpd logic gate's extraction, replacing two hand-copied ledger triples).
-    "packages/core/src/crawlutron/service/meter_ledger.py": (2, 2),
     "packages/core/src/crawlutron/service/settings_access.py": (2, 1),
     "packages/core/src/crawlutron/orchestration/admission_stall.py": (6, 4),
     "packages/core/src/crawlutron/orchestration/recursive.py": (11, 7),
@@ -225,6 +225,7 @@ DECLARED_SURFACE_RATCHET = {
     "packages/core/src/crawlutron/storage/coordination_cookies.py": (2, 1),
     "packages/core/src/crawlutron/storage/coordination_counters.py": (1, 1),
     "packages/core/src/crawlutron/storage/coordination_store.py": (4, 2),
+    "packages/core/src/crawlutron/storage/coordination_throttle_store.py": (1, 1),
     "packages/core/src/crawlutron/storage/job_store.py": (2, 1),
     "packages/core/src/crawlutron/storage/job_store_collections.py": (11, 6),
     "packages/core/src/crawlutron/storage/job_store_read.py": (3, 2),

@@ -14,6 +14,7 @@ from crawlutron.storage.admin_audit_store import AdminAuditStore
 from crawlutron.storage.caller_key_store import CallerKeyStore
 from crawlutron.storage.coordination_cookies import SharedCookieStore
 from crawlutron.storage.coordination_counters import CoordinationCounters
+from crawlutron.storage.coordination_throttle_store import CoordinationThrottleStore
 from crawlutron.storage.job_store import CrawlJobState, JobStatus, JobStore
 from crawlutron.storage.migrations import (
     CURRENT_SCHEMAS,
@@ -42,6 +43,7 @@ def _open_store(
     | CrawlResultStore
     | CoordinationCounters
     | SharedCookieStore
+    | CoordinationThrottleStore
     | WatchStore
     | CallerKeyStore
     | CrawlSpillStore
@@ -55,6 +57,8 @@ def _open_store(
         return CoordinationCounters(db_path)
     if schema is StoreSchema.COORDINATION_COOKIES:
         return SharedCookieStore(db_path)
+    if schema is StoreSchema.COORDINATION_THROTTLE_BUCKETS:
+        return CoordinationThrottleStore(db_path)
     if schema is StoreSchema.WATCHES:
         return WatchStore(db_path)
     if schema is StoreSchema.CALLER_KEYS:

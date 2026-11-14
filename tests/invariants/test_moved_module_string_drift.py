@@ -49,19 +49,9 @@ EXEMPTIONS: tuple[tuple[str, str, str], ...] = (
         "cycle-probe subjects; caller_auth stays api until its split",
     ),
     (
-        "tests/invariants/test_layer_exempt_ratchet.py",
-        "packages/core/crawlutron/api/anonymous_throttle.py",
-        "comment naming the module that stays api (HTTP-only ASGI middleware)",
-    ),
-    (
         "tests/_walk_primitives.py",
         "packages/core/crawlutron/service/webhooks.py",
         "docstring example only; the sweep's own docstring may name a moved path",
-    ),
-    (
-        "tests/api/test_anonymous_throttle.py",
-        "crawlutron.api.anonymous_throttle",
-        "anonymous_throttle stays api (HTTP-ONLY ASGI middleware)",
     ),
     (
         "tests/test_error_envelope.py",

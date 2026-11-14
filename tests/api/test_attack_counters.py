@@ -9,11 +9,8 @@ from __future__ import annotations
 import pytest
 
 from crawlutron.runtime.metrics import get_metrics
-from crawlutron.service import key_throttle
 from crawlutron.service.errors import KeyVerifyThrottled
-from crawlutron.service.key_throttle import KeyVerifyThrottle
-from crawlutron_rest.api import anonymous_throttle
-from crawlutron_rest.api.anonymous_throttle import AnonymousThrottle
+from crawlutron_rest.api.throttle import Throttle, Throttled
 
 
 def _meter_snapshot() -> dict[str, float]:
@@ -57,10 +54,10 @@ async def test_invalid_key_401_is_counted(tmp_path):
 
 
 def test_key_verify_throttle_trip_is_counted():
-    """The 429 path in KeyVerifyThrottle._check_bucket bumps its counter."""
-    throttle = key_throttle.KeyVerifyThrottle()
+    """The 429 path in Throttle._kv_check bumps its counter."""
+    throttle = Throttle()
     presented = "ck_0123456789abcdef.trip"
-    for _ in range(KeyVerifyThrottle.MAX_FAILURES):
+    for _ in range(Throttle.MAX_FAILURES):
         throttle.record_failure(presented)
     with pytest.raises(KeyVerifyThrottled) as raised:
         throttle.check(presented)
@@ -70,12 +67,11 @@ def test_key_verify_throttle_trip_is_counted():
 
 def test_anonymous_429_is_counted():
     """The anonymous meter's refusal bumps its counter."""
-    meter = AnonymousThrottle()
-    # MAX consumed + 1 refusal = MAX+1 observable.
-    for _ in range(anonymous_throttle.MAX_REQUESTS_PER_WINDOW):
-        meter.check("10.9.9.9")
-    with pytest.raises(anonymous_throttle.Throttled):
-        meter.check("10.9.9.9")
+    meter = Throttle()
+    for _ in range(120):
+        meter.check_anon("10.9.9.10")
+    with pytest.raises(Throttled):
+        meter.check_anon("10.9.9.10")
     assert _meter_snapshot()["anonymous_throttle_refusals"] == 1.0
 
 
@@ -86,17 +82,18 @@ async def test_admin_guess_is_counted(tmp_path):
 
 def test_admin_failure_recording_is_counted():
     """The admin bucket increment in the throttle bumps its counter."""
-    throttle = key_throttle.KeyVerifyThrottle()
+
+    throttle = Throttle()
     throttle.record_admin_failure()
     assert _meter_snapshot()["admin_auth_failures"] == 1.0
 
 
 def test_throttled_check_does_not_count_a_trip():
     """An in-budget verify does not increment the trip counter."""
-    key_throttle.KeyVerifyThrottle().check("ck_0123456789abcdef.clean")
+    Throttle().check("ck_0123456789abcdef.clean")
     assert _meter_snapshot()["key_verify_throttle_trips"] == 0.0
 
 
 def test_under_budget_anonymous_check_does_not_count_a_refusal():
     """An in-budget anonymous request does not increment the refusal counter."""
-    AnonymousThrottle().check("10.9.9.8")
+    Throttle().check_anon("10.9.9.8")

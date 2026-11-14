@@ -12,43 +12,45 @@ import httpx
 import pytest
 from starlette.requests import Request
 
-from crawlutron_rest.api.anonymous_throttle import (
-    BUCKET_CAPACITY,
-    MAX_REQUESTS_PER_WINDOW,
-    AnonymousThrottle,
+from crawlutron_rest.api.throttle import (
+    ANON_MAX_REQUESTS,
+    Throttle,
     Throttled,
-    shared_anonymous_throttle,
+    shared_throttle,
+    throttle_anonymous_surfaces,
 )
 from tests._clocks import ClockState, arrange_clock
 
+_ANON_CAP = 1024
 
-def _burst(throttle: AnonymousThrottle, remote: str | None, count: int) -> int:
+
+def _burst(throttle: Throttle, remote: str | None, count: int) -> int:
     refused = 0
     for _ in range(count):
         try:
-            throttle.check(remote)
+            throttle.check_anon(remote)
         except Throttled:
             refused += 1
     return refused
 
 
-def _throttle_on_arranged_time(start: float = 0.0) -> tuple[ClockState, AnonymousThrottle]:
-    """An :class:`AnonymousThrottle` over an arrange clock the caller advances."""
+def _throttle_on_arranged_time(start: float = 0.0) -> tuple[ClockState, Throttle]:
+    """A :class:`Throttle` over an arrange clock the caller advances."""
     state, clock = arrange_clock(start=start)
-    return state, AnonymousThrottle(clock=clock)
+    return state, Throttle(clock=clock)
 
 
 def test_burst_over_budget_refuses_under_budget_passes():
     """The budget is a real ceiling: MAX requests pass, the next one refuses."""
     _state, throttle = _throttle_on_arranged_time()
-    assert _burst(throttle, "10.0.0.1", MAX_REQUESTS_PER_WINDOW) == 0
+    assert _burst(throttle, "10.0.0.1", ANON_MAX_REQUESTS) == 0
     assert _burst(throttle, "10.0.0.1", 1) == 1
 
 
 def test_window_rollover_restores_the_budget():
     """A lapsed window resets the bucket: the caller gets a fresh budget."""
     state, throttle = _throttle_on_arranged_time()
-    assert _burst(throttle, "10.0.0.1", MAX_REQUESTS_PER_WINDOW + 5) == 5
+    assert _burst(throttle, "10.0.0.1", ANON_MAX_REQUESTS + 5) == 5
     state["now"] = 61.0
     assert _burst(throttle, "10.0.0.1", 1) == 0
 
@@ -56,7 +58,7 @@ def test_window_rollover_restores_the_budget():
 def test_per_ip_isolation_two_ips_do_not_share_a_bucket():
     """One IP exhausting its budget leaves another IP's budget untouched."""
     _state, throttle = _throttle_on_arranged_time()
-    assert _burst(throttle, "10.0.0.1", MAX_REQUESTS_PER_WINDOW) == 0
+    assert _burst(throttle, "10.0.0.1", ANON_MAX_REQUESTS) == 0
     assert _burst(throttle, "10.0.0.2", 1) == 0
 
 
@@ -64,7 +66,7 @@ def test_no_client_ip_shares_one_fixed_bucket():
     """Transports providing no remote address pool into one fixed bucket, so
     varying nothing cannot mint unlimited buckets."""
     _state, throttle = _throttle_on_arranged_time()
-    assert _burst(throttle, None, MAX_REQUESTS_PER_WINDOW) == 0
+    assert _burst(throttle, None, ANON_MAX_REQUESTS) == 0
     assert _burst(throttle, None, 1) == 1
 
 
@@ -74,31 +76,31 @@ def test_lru_eviction_is_bounded_and_never_resets_an_active_ip():
     still refuses past budget, where a reset ledger would admit it.
     """
     _state, throttle = _throttle_on_arranged_time()
-    assert _burst(throttle, "10.0.0.1", MAX_REQUESTS_PER_WINDOW) == 0
-    for i in range(BUCKET_CAPACITY):
-        throttle.check(f"10.1.{i // 256}.{i % 256}")
+    assert _burst(throttle, "10.0.0.1", ANON_MAX_REQUESTS) == 0
+    for i in range(_ANON_CAP):
+        throttle.check_anon(f"10.1.{i // 256}.{i % 256}")
         with pytest.raises(Throttled) as raised:
-            throttle.check("10.0.0.1")
+            throttle.check_anon("10.0.0.1")
         assert raised.value.refusal_status == 429
-    assert throttle.residence() <= BUCKET_CAPACITY
+    assert throttle.residence() <= _ANON_CAP
 
 
 def test_residence_is_the_probe_door():
     """The meter exposes its live bucket count (the #621 has/reset walk)."""
     _state, throttle = _throttle_on_arranged_time()
     assert throttle.residence() == 0
-    throttle.check("10.0.0.1")
+    throttle.check_anon("10.0.0.1")
     assert throttle.residence() == 1
 
 
 def test_meters_are_registered_process_state():
-    """The anonymous meter registers a reset/probe pair with the registry."""
+    """The merged throttle registers a reset/probe pair with the registry."""
     from crawlutron.runtime import process_state
 
     process_state.reset_all_process_state()
-    assert process_state.owner_has_state("crawlutron_rest.api.anonymous_throttle") is False
-    shared_anonymous_throttle().check("10.0.0.1")
-    assert process_state.owner_has_state("crawlutron_rest.api.anonymous_throttle") is True
+    assert process_state.owner_has_state("crawlutron_rest.api.throttle") is False
+    shared_throttle().check_anon("10.0.0.1")
+    assert process_state.owner_has_state("crawlutron_rest.api.throttle") is True
 
 
 def _app_client() -> httpx.AsyncClient:
@@ -131,7 +133,7 @@ async def test_docs_served_and_metered():
     async with _app_client() as client:
         ok = await client.get("/docs")
         assert ok.status_code == 200
-        for _ in range(MAX_REQUESTS_PER_WINDOW):
+        for _ in range(ANON_MAX_REQUESTS):
             await client.get("/redoc")
         refused = await client.get("/docs")
         assert refused.status_code == 429
@@ -145,7 +147,7 @@ async def test_mcp_anonymous_metered():
     exempts /mcp -- every /mcp request meters per remote-IP before auth."""
     process_state_reset()
     async with _app_client() as client:
-        for _ in range(MAX_REQUESTS_PER_WINDOW):
+        for _ in range(ANON_MAX_REQUESTS):
             await client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "ping"})
         refused = await client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "ping"})
         assert refused.status_code == 429
@@ -175,7 +177,7 @@ async def test_throttled_response_carries_retry_after(method: str, path: str):
         return await client.request(method, path, json=body)
 
     async with _app_client() as client:
-        for _ in range(MAX_REQUESTS_PER_WINDOW):
+        for _ in range(ANON_MAX_REQUESTS):
             await get_response(client)
         refused = await get_response(client)
         assert refused.status_code == 429
@@ -197,7 +199,7 @@ async def _assert_next_unit_refuses(client: httpx.AsyncClient) -> None:
 
 async def _fill_baseline(client: httpx.AsyncClient) -> None:
     """Consume MAX-1 anonymous units so a probe burns exactly one more."""
-    for _ in range(MAX_REQUESTS_PER_WINDOW - 1):
+    for _ in range(ANON_MAX_REQUESTS - 1):
         await client.get("/health")
 
 
@@ -212,7 +214,7 @@ async def test_404_route_miss_is_metered_and_carries_both_discovery_links():
             "capabilities": "/.well-known/crawler-service",
             "docs": "/docs",
         }
-        for _ in range(MAX_REQUESTS_PER_WINDOW):
+        for _ in range(ANON_MAX_REQUESTS):
             await client.get("/v1/definitely-not-a-route")
         refused = await client.get("/v1/definitely-not-a-route")
         assert refused.status_code == 429
@@ -240,7 +242,7 @@ async def test_405_route_miss_is_metered_and_shape_unchanged_within_budget():
         resp = await client.post("/health")
         assert resp.status_code == 405
         assert resp.json()["details"] == {"status_code": 405}
-        for _ in range(MAX_REQUESTS_PER_WINDOW):
+        for _ in range(ANON_MAX_REQUESTS):
             await client.post("/health")
         refused = await client.post("/health")
         assert refused.status_code == 429
@@ -265,7 +267,7 @@ async def test_every_exempt_get_is_metered(path):
     async with _app_client() as client:
         first = await client.get(path)
         assert first.status_code == 200, path
-        for _ in range(MAX_REQUESTS_PER_WINDOW):
+        for _ in range(ANON_MAX_REQUESTS):
             await client.get(path)
         refused = await client.get(path)
         assert refused.status_code == 429, path
@@ -279,7 +281,7 @@ async def test_healthcheck_hits_consume_the_same_ip_budget():
     """
     process_state_reset()
     async with _app_client() as client:
-        for _ in range(MAX_REQUESTS_PER_WINDOW):
+        for _ in range(ANON_MAX_REQUESTS):
             assert (await client.get("/health")).status_code == 200
         refused = await client.get("/health")
         assert refused.status_code == 429
@@ -294,7 +296,7 @@ async def test_validation_422_consumes_exactly_one_anonymous_unit():
     MAX-1 baseline, the next request refuses. Rejected requests are work."""
     process_state_reset()
     async with _app_client() as client:
-        for _ in range(MAX_REQUESTS_PER_WINDOW):
+        for _ in range(ANON_MAX_REQUESTS):
             resp = await client.post("/v1/crawl", json={})
             assert resp.status_code == 422, resp.status_code
         refused = await client.post("/v1/crawl", json={})
@@ -307,7 +309,7 @@ async def test_405_on_a_caller_metered_route_is_anonymously_metered():
     """
     process_state_reset()
     async with _app_client() as client:
-        for _ in range(MAX_REQUESTS_PER_WINDOW):
+        for _ in range(ANON_MAX_REQUESTS):
             resp = await client.options("/v1/crawl")
             assert resp.status_code == 405, resp.status_code
         refused = await client.options("/v1/crawl")
@@ -344,15 +346,13 @@ async def test_origin_rejected_403_consumes_exactly_one_anonymous_unit():
 async def test_credentialed_mcp_burns_anonymous_ip_bucket():
     """#929: /mcp meters per remote-IP before auth -- a presented credential no
     longer skips the anonymous bucket on header presence alone (MAX+1 refuses)."""
-    from crawlutron_rest.api.anonymous_throttle import throttle_anonymous_surfaces
-
     process_state_reset()
     request = _built_request("/mcp", {"x-api-key": "any-key"})
 
     async def call_next(_request: Request) -> str:
         return "passed"
 
-    for _ in range(MAX_REQUESTS_PER_WINDOW):
+    for _ in range(ANON_MAX_REQUESTS):
         assert await throttle_anonymous_surfaces(request, call_next) == "passed"
     refused = await throttle_anonymous_surfaces(request, call_next)
     assert refused.status_code == 429
@@ -368,34 +368,31 @@ async def test_every_docs_surface_is_metered(path):
     async with _app_client() as client:
         first = await client.get(path)
         assert first.status_code == 200
-        for _ in range(MAX_REQUESTS_PER_WINDOW):
+        for _ in range(ANON_MAX_REQUESTS):
             await client.get(path)
         assert (await client.get(path)).status_code == 429
 
 
+async def _spend_metrics_budget(client) -> None:
+    for _ in range(ANON_MAX_REQUESTS):
+        resp = await client.get("/metrics")
+        assert resp.status_code == 200, resp.status_code
+
+
 async def test_operator_token_metrics_never_ip_throttled():
-    """#914 row 1: an operator-token /metrics scrape is the operator's own caller,
-    so it must never strand on the shared anonymous IP bucket (the declared set
-    omits /metrics -- it is operator-guarded, not anonymous-metered)."""
+    """#914 row 1: an operator-token /metrics scrape is the operator's own caller."""
     process_state_reset()
     async with _auth_app_client() as client:
-        # Anonymous scrapes fill the shared IP bucket to the ceiling.
-        for _ in range(MAX_REQUESTS_PER_WINDOW):
-            resp = await client.get("/metrics")
-            assert resp.status_code == 200, resp.status_code
-        # The operator scrape must ride the token, not the anonymous bucket.
+        await _spend_metrics_budget(client)
         operator = await client.get("/metrics", headers={"x-api-key": "test-admin-token"})
         assert operator.status_code == 200, operator.text
 
 
 async def test_anonymous_metrics_still_meters():
-    """#914 row 2: a genuine anonymous /metrics (no token) stays on the IP bucket
-    -- an overactive anonymous scraper still 429s."""
+    """#914 row 2: a genuine anonymous /metrics (no token) stays on the IP bucket."""
     process_state_reset()
     async with _auth_app_client() as client:
-        for _ in range(MAX_REQUESTS_PER_WINDOW):
-            resp = await client.get("/metrics")
-            assert resp.status_code == 200, resp.status_code
+        await _spend_metrics_budget(client)
         refused = await client.get("/metrics")
         assert refused.status_code == 429, refused.text
         assert refused.json()["code"] == "anonymous_throttled"
@@ -406,7 +403,7 @@ async def test_operator_token_health_still_meters():
     anonymous-metered (in ANONYMOUS_METERED), so an operator token does not free it."""
     process_state_reset()
     async with _auth_app_client() as client:
-        for _ in range(MAX_REQUESTS_PER_WINDOW):
+        for _ in range(ANON_MAX_REQUESTS):
             resp = await client.get("/health", headers={"x-api-key": "test-admin-token"})
             assert resp.status_code == 200, resp.status_code
         refused = await client.get("/health", headers={"x-api-key": "test-admin-token"})
@@ -420,14 +417,11 @@ async def test_credentialed_caller_route_still_burns_ip_bucket():
     non-/metrics caller-keyed path still consumes an anonymous unit."""
     process_state_reset()
     await _call_through("/v1/crawl", {"x-api-key": "test-admin-token"})
-    # One credentialed caller-keyed request consumed exactly one IP-bucket unit.
-    assert shared_anonymous_throttle().residence() == 1
+    assert shared_throttle().residence() == 1
 
 
 def _built_request(path: str, headers: dict[str, str]) -> Request:
     """A constructed ASGI HTTP request scope with a fixed remote client."""
-    from starlette.requests import Request
-
     scope = {
         "type": "http",
         "http_version": "1.1",
@@ -450,7 +444,5 @@ async def _call_through(path: str, headers: dict[str, str]) -> None:
 
     async def call_next(_request: Request) -> str:
         return "passed"
-
-    from crawlutron_rest.api.anonymous_throttle import throttle_anonymous_surfaces
 
     assert await throttle_anonymous_surfaces(request, call_next) == "passed"

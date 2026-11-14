@@ -423,10 +423,10 @@ async def test_wrong_operator_guesses_on_suggestions_arm_the_shared_admin_bucket
     """#826: the suggestions door was the ONE unpaced channel for the operator
     secret. A wrong token lands ``record is None`` and (post-fix) records a shared
     admin failure, so line-speed guesses arm the cooldown /v1/keys enforces."""
-    from crawlutron.service import key_throttle
+    from crawlutron_rest.api.throttle import Throttle
 
     def op_guesses(_client, _keys):
-        return [(f"op-guess-{i}", 401) for i in range(key_throttle.KeyVerifyThrottle.MAX_FAILURES)]
+        return [(f"op-guess-{i}", 401) for i in range(Throttle.MAX_FAILURES)]
 
     await _assert_suggestions_admin_pacing(
         tmp_path, make_guesses=op_guesses, keys_status=429, keys_code="key_verify_throttled"
@@ -437,10 +437,10 @@ async def test_wrong_caller_key_guesses_on_suggestions_arm_the_admin_bucket(tmp_
     """#826: a wrong CALLER key is also ``record is None``, so garbage key guesses
     pace the shared admin bucket just like wrong operator tokens -- every non-key
     secret on this door fails toward the cooldown, not just token-shaped guesses."""
-    from crawlutron.service import key_throttle
+    from crawlutron_rest.api.throttle import Throttle
 
     def garbage_guesses(_client, _keys):
-        return [(f"ck_0{i:016x}.garbage", 401) for i in range(key_throttle.KeyVerifyThrottle.MAX_FAILURES)]
+        return [(f"ck_0{i:016x}.garbage", 401) for i in range(Throttle.MAX_FAILURES)]
 
     await _assert_suggestions_admin_pacing(
         tmp_path, make_guesses=garbage_guesses, keys_status=429, keys_code="key_verify_throttled"
@@ -451,11 +451,11 @@ async def test_valid_caller_key_flood_never_arms_the_admin_bucket(tmp_path):
     """#826 griefing-safe: a VALID caller key resolves to a row (success arm) and
     never records an admin failure, so a keyed flood cannot lock the operator out
     of /v1/keys. The shared admin bucket stays cold after the flood."""
-    from crawlutron.service import key_throttle
+    from crawlutron_rest.api.throttle import Throttle
 
     def valid_guesses(_client, keys):
         issued = keys.issue_key("agent-a")
-        return [(issued.secret, 200) for _ in range(key_throttle.KeyVerifyThrottle.MAX_FAILURES * 2)]
+        return [(issued.secret, 200) for _ in range(Throttle.MAX_FAILURES * 2)]
 
     await _assert_suggestions_admin_pacing(
         tmp_path, make_guesses=valid_guesses, keys_status=401, keys_code="invalid_api_key"

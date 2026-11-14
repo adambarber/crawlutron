@@ -108,9 +108,9 @@ async def test_request_gate_value_error_maps_to_validation_envelope():
 
 def test_key_throttle_refusal_is_key_verify_throttled():
     from crawlutron.service.errors import KeyVerifyThrottled
-    from crawlutron.service.key_throttle import KeyVerifyThrottle
+    from crawlutron_rest.api.throttle import Throttle
 
-    throttle = KeyVerifyThrottle()
+    throttle = Throttle()
     for _ in range(throttle.MAX_FAILURES):
         throttle.record_failure("victim-secret")
     with pytest.raises(KeyVerifyThrottled) as exc_info:

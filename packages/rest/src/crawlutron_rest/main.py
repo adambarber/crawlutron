@@ -234,13 +234,13 @@ def install_error_surface(app) -> None:
     from starlette.exceptions import HTTPException as StarletteHTTPException
 
     from crawlutron.service.errors import DomainError
-    from crawlutron_rest.api.anonymous_throttle import throttle_anonymous_surfaces
     from crawlutron_rest.api.exceptions import (
         domain_error_handler,
         http_exception_handler,
         validation_exception_handler,
     )
     from crawlutron_rest.api.middleware import limit_request_body, reject_hostile_origin
+    from crawlutron_rest.api.throttle import throttle_anonymous_surfaces
 
     app.middleware("http")(reject_hostile_origin)
     app.middleware("http")(limit_request_body)
@@ -341,6 +341,9 @@ async def _startup_services(_app: FastAPI, settings: CrawlerSettings, database_p
     await initialize_browser_pool(settings)
     _load_cookie_jar(settings, _app, database_path)
     _bind_metrics(database_path)
+    from crawlutron_rest.api.throttle import shared_throttle
+
+    shared_throttle().bind_shared_db(database_path)
     await _recover_jobs_and_start_sweep(_app, settings)
 
 
@@ -445,6 +448,11 @@ async def _shutdown_services(_app: FastAPI) -> None:
 
         unbind_metric_counters()
 
+    async def _unbind_shared_throttles() -> None:
+        from crawlutron_rest.api.throttle import shared_throttle
+
+        shared_throttle().unbind_shared_db()
+
     # Every step is attempted and failures surface only after the last: a
     # close() that raises partway leaks every pool below it (and its subprocesses).
     await _run_shutdown_steps(
@@ -460,6 +468,7 @@ async def _shutdown_services(_app: FastAPI) -> None:
             # closes them so nothing relies on GC finalization (#838).
             ("close_app_stores", _close_app_stores_step),
             ("unbind_metric_counters", _unbind_metric_counters),
+            ("unbind_shared_throttles", _unbind_shared_throttles),
         )
     )
     # Symmetry with set_utilization_sampler(...): release the closed gate's sampler.

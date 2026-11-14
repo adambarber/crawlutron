@@ -12,8 +12,8 @@ from starlette.requests import Request
 
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.service.errors import AuthRefusal
-from crawlutron.service.key_throttle import KeyVerifyThrottle
 from crawlutron.storage.caller_key_store import CallerKeyStore
+from crawlutron_rest.api.throttle import Throttle
 from tests._async_harnesses import issue_key
 from tests.factories.client import isolation_client, post_crawl, quota_client
 from tests.factories.store import complete_job
@@ -174,7 +174,7 @@ async def test_wrong_admin_token_guesses_trip_the_cooldown(tmp_path):
     misses the door refuses 429 before spending any comparison work.
     """
     async with isolation_client(tmp_path) as (client, _store, _results, _keys):
-        for i in range(KeyVerifyThrottle.MAX_FAILURES):
+        for i in range(Throttle.MAX_FAILURES):
             response = await client.get("/v1/keys", headers={"X-API-Key": f"wrong-guess-{i}"})
             assert response.status_code == 401, response.text
         throttled = await client.get("/v1/keys", headers={"X-API-Key": "wrong-guess-999"})
@@ -186,7 +186,7 @@ async def test_correct_admin_token_still_admits_after_metering(tmp_path):
     """#659: the meter paces guesses, not the operator -- a correct token
     presented under the MAX-failure bar still mints normally."""
     async with isolation_client(tmp_path) as (client, _store, _results, _keys):
-        for i in range(KeyVerifyThrottle.MAX_FAILURES - 1):
+        for i in range(Throttle.MAX_FAILURES - 1):
             await client.get("/v1/keys", headers={"X-API-Key": f"wrong-{i}"})
         issued = await client.post(
             "/v1/keys", json={"label": "agent-a"}, headers={"X-API-Key": "test-admin-token"}

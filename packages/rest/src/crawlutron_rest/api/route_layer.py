@@ -13,7 +13,6 @@ from typing import TypedDict, Unpack
 from fastapi import APIRouter, Depends, Request
 
 from crawlutron.models.caller_identity import CallerIdentity
-from crawlutron.service.key_throttle import shared_throttle
 from crawlutron_rest.api.caller_auth import (
     auth_denials,
     get_keys_caller,
@@ -22,6 +21,7 @@ from crawlutron_rest.api.caller_auth import (
     verify_admin_secret,
 )
 from crawlutron_rest.api.dependencies import CallerDep
+from crawlutron_rest.api.throttle import shared_throttle
 
 #: The resolver names the invariant walk matches route dependencies against.
 GUARD_NAME = "guard_request"
@@ -65,12 +65,12 @@ async def operator_guard(request: Request) -> bool:
     if not secret:
         return False
     throttle = shared_throttle()
-    throttle.check_admin()
+    await throttle.acheck_admin()
     matched = verify_admin_secret(secret, request)
     if matched:
-        throttle.record_admin_success()
+        await throttle.arecord_admin_success()
     else:
-        throttle.record_admin_failure()
+        await throttle.arecord_admin_failure()
         record_operator_auth_failure(getattr(getattr(request.app, "state", None), "audit_store", None))
     request.state.caller = matched
     return matched

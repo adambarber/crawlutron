@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from crawlutron.service.key_throttle import KeyVerifyThrottle, shared_throttle
+from crawlutron_rest.api.throttle import Throttle, shared_throttle
 from tests._app_factory import fresh_app
 from tests._async_harnesses import serve
 
@@ -37,7 +37,7 @@ async def test_the_robots_arm_refuses_an_exhausted_caller():
     outbound robots request to an attacker-chosen host.
     """
     throttle = shared_throttle()
-    for _ in range(KeyVerifyThrottle.MAX_FAILURES):
+    for _ in range(Throttle.MAX_FAILURES):
         throttle.record_failure(_SECRET)
     async with serve(_layered_admit_app()) as client:
         response = await client.post(

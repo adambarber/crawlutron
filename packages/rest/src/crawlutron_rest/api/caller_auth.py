@@ -27,7 +27,7 @@ from crawlutron.service.caller_auth import (
     resolve_page_limit,
 )
 from crawlutron.service.errors import AuthRefusal
-from crawlutron.service.key_throttle import shared_throttle
+from crawlutron_rest.api.throttle import shared_throttle
 
 
 def _presented_key(request: Request) -> str | None:
@@ -131,12 +131,12 @@ async def get_keys_caller(request: Request) -> CallerIdentity:
     if not secret or not admin_token:
         _raise_invalid_api_key()
     throttle = shared_throttle()
-    throttle.check_admin()
+    await throttle.acheck_admin()
     if not _constant_time_eq(secret, admin_token):
-        throttle.record_admin_failure()
+        await throttle.arecord_admin_failure()
         record_operator_auth_failure(_audit_store(request))
         _raise_invalid_api_key()
-    throttle.record_admin_success()
+    await throttle.arecord_admin_success()
     return operator_caller()
 
 
@@ -148,16 +148,16 @@ async def _caller_from_secret(request: Request, secret: str) -> CallerIdentity:
     """
     throttle = shared_throttle()
     remote = request.client.host if request.client else None
-    throttle.check(secret, remote)
+    await throttle.acheck(secret, remote)
     store = getattr(request.app.state, "caller_key_store", None)
     record = await store.averify_key(secret) if store is not None else None
     if record is None:
-        throttle.record_failure(secret, remote)
+        await throttle.arecord_failure(secret, remote)
         # A non-key secret also paces the shared admin bucket (#826): guesses arm
         # the cooldown /v1/keys enforces. Valid keys never reach this refusal arm.
-        throttle.record_admin_failure()
+        await throttle.arecord_admin_failure()
         _raise_invalid_api_key()
-    throttle.record_success(secret, remote)
+    await throttle.arecord_success(secret, remote)
     return identity_for_key(record)
 
 
@@ -170,7 +170,7 @@ async def get_caller_identity(request: Request) -> CallerIdentity:
     if not secret:
         return anonymous_caller()
     if verify_admin_secret(secret, request):
-        shared_throttle().record_admin_success()
+        await shared_throttle().arecord_admin_success()
         return operator_caller()
     return await _caller_from_secret(request, secret)
 

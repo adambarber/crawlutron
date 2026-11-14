@@ -18,6 +18,7 @@ from crawlutron.storage.migrations.manifest import (
     CALLER_KEYS_SCHEMA,
     COORDINATION_COOKIES_SCHEMA,
     COORDINATION_COUNTERS_SCHEMA,
+    COORDINATION_THROTTLE_BUCKETS_SCHEMA,
     CRAWL_JOBS_SCHEMA,
     CRAWL_SPILL_LEASES_SCHEMA,
     CRAWL_SPILLS_SCHEMA,
@@ -27,6 +28,14 @@ from crawlutron.storage.migrations.manifest import (
     create_index_sql,
     create_table_sql,
 )
+
+
+def step(
+    apply: str, rollback: Callable[[sqlite3.Connection], None]
+) -> tuple[str, Callable[[sqlite3.Connection], None]]:
+    """Wrap a migration step with an explicit rollback callable."""
+    return (apply, rollback)
+
 
 MIGRATIONS_ROOT = (
     pathlib.Path(__file__).parents[2] / "packages" / "core" / "src" / "crawlutron" / "storage" / "migrations"
@@ -56,6 +65,19 @@ _EXPECTED_SQL: dict[str, list[tuple[str, str]]] = {
     ],
     "0001_coordination_cookies_initial": [
         (create_table_sql(COORDINATION_COOKIES_SCHEMA), 'DROP TABLE "coordination_cookies"')
+    ],
+    "0001_coordination_throttle_buckets_initial": [
+        (
+            create_table_sql(COORDINATION_THROTTLE_BUCKETS_SCHEMA),
+            'DROP TABLE "coordination_throttle_buckets"',
+        ),
+        *(
+            (
+                create_index_sql(COORDINATION_THROTTLE_BUCKETS_SCHEMA, index),
+                f'DROP INDEX "{index.name}"',
+            )
+            for index in COORDINATION_THROTTLE_BUCKETS_SCHEMA.indexes
+        ),
     ],
     "0001_coordination_counters_initial": [
         (create_table_sql(COORDINATION_COUNTERS_SCHEMA), 'DROP TABLE "coordination_counters"')

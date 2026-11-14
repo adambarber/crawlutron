@@ -15,6 +15,7 @@ class StoreSchema(StrEnum):
     RESULTS = "results"
     COORDINATION_COUNTERS = "coordination_counters"
     COORDINATION_COOKIES = "coordination_cookies"
+    COORDINATION_THROTTLE_BUCKETS = "coordination_throttle_buckets"
     WATCHES = "watches"
     CALLER_KEYS = "caller_keys"
     CRAWL_SPILLS = "crawl_spills"
@@ -163,6 +164,21 @@ COORDINATION_COOKIES_SCHEMA = TableSchema(
     ),
 )
 
+COORDINATION_THROTTLE_BUCKETS_SCHEMA = TableSchema(
+    name="coordination_throttle_buckets",
+    columns=(
+        ColumnSchema("kind", "TEXT", False, None, 1),
+        ColumnSchema("bucket_key", "TEXT", False, None, 2),
+        ColumnSchema("window_started", "REAL", True, "0"),
+        ColumnSchema("count", "INTEGER", True, "0"),
+        ColumnSchema("failures", "INTEGER", True, "0"),
+        ColumnSchema("cooldown_until", "REAL", True, "0"),
+        ColumnSchema("max_failures", "INTEGER", True, "0"),
+        ColumnSchema("touched_at", "REAL", True, "0"),
+    ),
+    indexes=(IndexSchema("coordination_throttle_buckets_touched", ("kind", "touched_at")),),
+)
+
 # One row per registered watch: a watch is a single URL and its revalidation
 # history, rewritten per check -- no append-only page history to split out.
 WATCHES_SCHEMA = TableSchema(
@@ -247,6 +263,7 @@ CURRENT_SCHEMAS = {
     StoreSchema.RESULTS: RESULTS_SCHEMA,
     StoreSchema.COORDINATION_COUNTERS: COORDINATION_COUNTERS_SCHEMA,
     StoreSchema.COORDINATION_COOKIES: COORDINATION_COOKIES_SCHEMA,
+    StoreSchema.COORDINATION_THROTTLE_BUCKETS: COORDINATION_THROTTLE_BUCKETS_SCHEMA,
     StoreSchema.WATCHES: WATCHES_SCHEMA,
     StoreSchema.CALLER_KEYS: CALLER_KEYS_SCHEMA,
     StoreSchema.CRAWL_SPILLS: CRAWL_SPILLS_SCHEMA,
@@ -266,6 +283,7 @@ LEGACY_COLUMNS = {
     StoreSchema.RESULTS: (),
     StoreSchema.COORDINATION_COUNTERS: (),
     StoreSchema.COORDINATION_COOKIES: (),
+    StoreSchema.COORDINATION_THROTTLE_BUCKETS: (),
     StoreSchema.WATCHES: (),
     StoreSchema.CALLER_KEYS: (),
     StoreSchema.CRAWL_SPILLS: (),
@@ -285,6 +303,7 @@ MIGRATION_SEQUENCES = {
     StoreSchema.RESULTS: ("0001_results_initial", "0002_results_add_owner"),
     StoreSchema.COORDINATION_COUNTERS: ("0001_coordination_counters_initial",),
     StoreSchema.COORDINATION_COOKIES: ("0001_coordination_cookies_initial",),
+    StoreSchema.COORDINATION_THROTTLE_BUCKETS: ("0001_coordination_throttle_buckets_initial",),
     StoreSchema.WATCHES: ("0001_watches_initial", "0002_watches_add_owner", "0003_watches_add_claimed_at"),
     StoreSchema.CALLER_KEYS: ("0001_caller_keys_initial", "0002_caller_keys_add_previous"),
     StoreSchema.CRAWL_SPILLS: (
