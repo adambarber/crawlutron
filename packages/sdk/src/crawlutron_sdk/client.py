@@ -1,13 +1,10 @@
-"""Typed async HTTP facade over a running crawlutron service: JSON in, envelopes out, typed errors. The
-server is the sole enforcement chokepoint -- the SDK reimplements no admission, policy, robots, metering,
-or extraction logic. One lazy httpx.AsyncClient; sync() mirrors it with a blocking httpx.Client.
-"""
+"""Typed async HTTP facade over a running crawlutron service."""
 
 from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncIterator
+from collections.abc import Awaitable, Callable
 from typing import Literal, Never, TypedDict, TypeVar
 
 import httpx
@@ -41,34 +38,48 @@ from .models import (
 )
 
 _DEFAULT_BASE_URL = "http://127.0.0.1:8765"
+_DEFAULT_TIMEOUT = 300.0
+
+
+async def _poll_result(
+    request_id: str,
+    fetch: Callable[[], Awaitable[CrawlResponse]],
+    deadline: float | None,
+    poll_interval: float,
+    timeout_factory: Callable[[str], CrawlutronTransportError],
+) -> CrawlResponse:
+    while True:
+        try:
+            return await fetch()
+        except CrawlutronAcceptedError:
+            pass
+        if deadline is not None and time.monotonic() >= deadline:
+            raise timeout_factory(request_id)
+        await asyncio.sleep(poll_interval)
+
 
 _ModelT = TypeVar("_ModelT", bound=BaseModel)
 
 
 class _ClientKwargs(TypedDict):
-    """The shared httpx client constructor options."""
-
     base_url: str
     timeout: float | None
     headers: dict[str, str]
 
 
 def _str_key_dict(data: object) -> dict[str, object]:
-    """Coerce a decoded JSON value to a string-keyed dict."""
     if not isinstance(data, dict):
         return {}
     return {str(key): value for key, value in data.items()}
 
 
 def _json_body(response: httpx.Response) -> dict[str, object]:
-    """Decode a JSON response body without leaking httpx's ``Any``."""
     if not response.content:
         return {}
     return _str_key_dict(response.json())
 
 
 def _payload_dict(payload: object) -> dict[str, object]:
-    """Dump a pydantic model to a plain dict for JSON serialization."""
     dump = getattr(payload, "model_dump", None)
     if callable(dump):
         return _str_key_dict(dump())
@@ -76,7 +87,6 @@ def _payload_dict(payload: object) -> dict[str, object]:
 
 
 def _job_list_query(limit: int | None, offset: int) -> str:
-    """Build the GET /v1/jobs query suffix from the caller's page knobs."""
     parts: list[str] = []
     if limit is not None:
         parts.append(f"limit={limit}")
@@ -86,14 +96,12 @@ def _job_list_query(limit: int | None, offset: int) -> str:
 
 
 class _ClientBase:
-    """Shared configuration, response handling, and error mapping."""
-
     def __init__(
         self,
         *,
         base_url: str = _DEFAULT_BASE_URL,
         api_key: str | None = None,
-        timeout: float | None = None,
+        timeout: float | None = _DEFAULT_TIMEOUT,
         transport: httpx.BaseTransport | httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
@@ -145,26 +153,25 @@ class _ClientBase:
         self._raise_for_status(response.status_code, body, accepted_if_pending=accepted_if_pending)
         return model.model_validate(body)
 
-    def _timeout_error(self, request_id: str, max_wait: float) -> CrawlutronTransportError:
-        return CrawlutronTransportError(
-            f"crawl {request_id} did not reach a terminal state within {max_wait}s",
-            status_code=None,
-        )
-
     def _transport_error(self, error: httpx.HTTPError) -> CrawlutronTransportError:
         return CrawlutronTransportError(str(error), status_code=None)
 
     def _transport_failure(self, error: httpx.HTTPError) -> Never:
         raise self._transport_error(error) from error
 
-    def _check_max_wait(self, request_id: str, elapsed: float, max_wait: float | None) -> None:
-        if max_wait is not None and elapsed >= max_wait:
-            raise self._timeout_error(request_id, max_wait)
+    def _make_timeout(self, request_id: str) -> CrawlutronTransportError:
+        return CrawlutronTransportError(
+            f"crawl {request_id} did not reach a terminal state",
+            status_code=None,
+        )
+
+    def _make_wait_deadline(self, max_wait: float | None) -> float | None:
+        if max_wait is not None:
+            return time.monotonic() + max_wait
+        return None
 
 
 class CrawlutronClient(_ClientBase):
-    """Async typed client: ``async with CrawlutronClient() as client: ...``."""
-
     _client: httpx.AsyncClient | None = None
 
     async def __aenter__(self) -> CrawlutronClient:
@@ -230,20 +237,18 @@ class CrawlutronClient(_ClientBase):
         self, request_id: str, *, poll_interval: float = 1.0, max_wait: float | None = None
     ) -> CrawlResponse:
         """Poll ``get_crawl_result`` until the crawl reaches a terminal state."""
-        elapsed = 0.0
-        while True:
-            try:
-                return await self.get_crawl_result(request_id)
-            except CrawlutronAcceptedError:
-                pass
-            self._check_max_wait(request_id, elapsed, max_wait)
-            await asyncio.sleep(poll_interval)
-            elapsed += poll_interval
+        return await _poll_result(
+            request_id,
+            lambda: self.get_crawl_result(request_id),
+            self._make_wait_deadline(max_wait),
+            poll_interval,
+            self._make_timeout,
+        )
 
-    async def crawl_stream(self, payload: CrawlRequest) -> AsyncIterator[CrawlResponse]:
-        """Crawl asynchronously and yield the unified response when complete."""
+    async def crawl_and_wait(self, payload: CrawlRequest) -> CrawlResponse:
+        """Crawl asynchronously and wait for the unified response."""
         accepted = await self.crawl_async(payload)
-        yield await self.wait_for(accepted.request_id)
+        return await self.wait_for(accepted.request_id)
 
     async def admit(self, payload: AdmitRequest) -> AdmitResponse:
         """Pre-flight admission verdict for one URL."""
@@ -349,10 +354,6 @@ class CrawlutronClient(_ClientBase):
 
 
 class CrawlutronClientSync(_ClientBase):
-    """Blocking typed mirror of :class:`CrawlutronClient`: sync twins for every
-    public endpoint; async-only surfaces (``crawl_stream``, ``aclose``) are absent.
-    """
-
     _client: httpx.Client | None = None
 
     def __enter__(self) -> CrawlutronClientSync:
@@ -407,15 +408,16 @@ class CrawlutronClientSync(_ClientBase):
     def wait_for(
         self, request_id: str, *, max_wait: float | None = None, poll_interval: float = 1.0
     ) -> CrawlResponse:
-        elapsed = 0.0
+        """Poll ``get_crawl_result`` until the crawl reaches a terminal state."""
+        deadline = self._make_wait_deadline(max_wait)
         while True:
             try:
                 return self.get_crawl_result(request_id)
             except CrawlutronAcceptedError:
                 pass
-            self._check_max_wait(request_id, elapsed, max_wait)
+            if deadline is not None and time.monotonic() >= deadline:
+                raise self._make_timeout(request_id)
             time.sleep(poll_interval)
-            elapsed += poll_interval
 
     def admit(self, payload: AdmitRequest) -> AdmitResponse:
         response = self._request("POST", "/v1/admit", json=_payload_dict(payload))

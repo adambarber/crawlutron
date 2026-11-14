@@ -1,7 +1,7 @@
-"""Hermetic unit tests for the SDK client over httpx.MockTransport (no server)."""
-
 from __future__ import annotations
 
+import asyncio
+import time
 from collections.abc import AsyncGenerator, Callable, Iterator
 from contextlib import asynccontextmanager
 
@@ -87,28 +87,25 @@ def _accepted(request: httpx.Request) -> httpx.Response:
 
 
 def _url_handler(path: str, body: dict[str, object]) -> Callable[[httpx.Request], httpx.Response]:
-    """POST handler asserting the path and a url-bearing request body."""
-
-    def handler(request: httpx.Request) -> httpx.Response:
+    def url_handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "POST"
         assert request.url.path == path
         assert '"url":"https://example.com/"' in request.read().decode()
         return httpx.Response(200, json=body)
 
-    return handler
+    return url_handler
 
 
 def _capturing_handler(
     payload: dict[str, object],
 ) -> tuple[list[httpx.Request], Callable[[httpx.Request], httpx.Response]]:
-    """A handler that records the request and answers a fixed body."""
     captured: list[httpx.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def capture_handler(request: httpx.Request) -> httpx.Response:
         captured.append(request)
         return httpx.Response(200, json=payload)
 
-    return captured, handler
+    return captured, capture_handler
 
 
 def _sequential_handler(
@@ -238,7 +235,6 @@ async def test_server_errors_map_to_typed_errors():
 
 @pytest.mark.asyncio
 async def test_unmapped_status_falls_to_generic_base_error():
-    """Boundary: a status with no typed class lands on the generic base."""
     _ = CrawlutronError  # import guard keeps the base in scope for the assert
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -270,7 +266,6 @@ async def test_sync_get_crawl_result_202_raises_accepted():
 
 @pytest.mark.asyncio
 async def test_sync_crawl_202_raises_accepted():
-    """Sync crawl mirrors async: a 202 (async-mode body) is an accepted error."""
     async with _served_sync(_accepted) as client:
         with pytest.raises(CrawlutronAcceptedError) as excinfo:
             client.crawl(CrawlRequest(url="https://example.com/"))
@@ -279,7 +274,6 @@ async def test_sync_crawl_202_raises_accepted():
 
 @pytest.mark.asyncio
 async def test_crawl_202_parity_between_transports():
-    """The same 202 wire event raises the SAME typed class on both clients."""
     async with _served(_accepted) as async_client:
         with pytest.raises(CrawlutronAcceptedError):
             await async_client.crawl(CrawlRequest(url="https://example.com/"))
@@ -310,7 +304,6 @@ def test_sync_client_crawl():
 
 
 def test_sync_mirrors_the_injected_transport():
-    """sync() hands the async client's transport to the sync handle."""
     fired: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -328,14 +321,11 @@ def test_sync_mirrors_the_injected_transport():
 
 
 class _AsyncOnlyTransport(httpx.AsyncBaseTransport):
-    """A genuinely async-only transport a sync client must refuse."""
-
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=_CRAWL_BODY)
 
 
 def test_sync_refuses_an_async_only_transport():
-    """sync() fail-closes: an async-only transport cannot drive a sync client."""
     async_client = CrawlutronClient(transport=_AsyncOnlyTransport(), base_url="http://test")
     sync_handle = async_client.sync()
     try:
@@ -346,7 +336,6 @@ def test_sync_refuses_an_async_only_transport():
 
 
 def test_sync_client_refuses_an_async_only_transport_directly():
-    """The refusal sits at the sync chokepoint for any construction path."""
     client = CrawlutronClientSync(transport=_AsyncOnlyTransport(), base_url="http://test")
     try:
         with pytest.raises(CrawlutronTransportError, match="async-only transport"):
@@ -355,24 +344,14 @@ def test_sync_client_refuses_an_async_only_transport_directly():
         client.close()
 
 
-# Async-only surfaces the sync twin cannot mirror. Derived, not hand-listed per
-# the #876 invariant-scope doctrine; each name is a live `dir()` disclosure.
-_ASYNC_ONLY_SUBSET = frozenset(
-    {
-        "aclose",  # async client cleanup; sync exposes its blocking twin `close`.
-        "crawl_stream",  # async generator; no sync form exists.
-        "sync",  # async->sync factory; meaningless on the sync client.
-    }
-)
+_ASYNC_ONLY_SUBSET = frozenset({"aclose", "crawl_and_wait", "sync"})
 
 
 def _public_methods(cls: type) -> frozenset[str]:
-    """The live public-method surface of a client class (underscore-free)."""
     return frozenset(name for name in dir(cls) if not name.startswith("_"))
 
 
 def test_sync_client_mirrors_every_async_public_method():
-    """The lock: every public async method has a same-named sync twin."""
     async_public = _public_methods(CrawlutronClient)
     sync_public = _public_methods(CrawlutronClientSync)
     missing = async_public - sync_public - _ASYNC_ONLY_SUBSET
@@ -380,7 +359,6 @@ def test_sync_client_mirrors_every_async_public_method():
 
 
 def test_sync_client_adds_no_unmirrored_public_method():
-    """The mirror holds both ways: sync public methods are async twins or `close`."""
     async_public = _public_methods(CrawlutronClient) | _ASYNC_ONLY_SUBSET
     sync_public = _public_methods(CrawlutronClientSync) - {"close"}
     extra = sync_public - async_public
@@ -388,13 +366,12 @@ def test_sync_client_adds_no_unmirrored_public_method():
 
 
 @pytest.mark.asyncio
-async def test_crawl_stream_yields_response():
+async def test_crawl_and_wait_returns_response():
     calls = iter([202, 200])
 
     async with _served(_sequential_handler(calls)) as client:
-        results = [r async for r in client.crawl_stream(CrawlRequest(url="https://example.com/"))]
-    assert len(results) == 1
-    assert results[0].request_id == "abc"
+        response = await client.crawl_and_wait(CrawlRequest(url="https://example.com/"))
+    assert response.request_id == "abc"
 
 
 @pytest.mark.asyncio
@@ -419,7 +396,6 @@ async def test_render_posts_url_and_parses_crawl_response():
 
 @pytest.mark.asyncio
 async def test_render_validator_refuses_both_url_and_urls():
-    """Bypass guard: exactly-one-of url/urls is enforced client-side too."""
     with pytest.raises(ValueError, match="exactly one of 'url' or 'urls'"):
         RenderRequest(url="https://example.com/", urls=["https://example.com/a"])
 
@@ -457,8 +433,63 @@ async def test_policy_suggestions_gets_rollup():
 
 
 @pytest.mark.asyncio
+async def test_default_timeout_is_finite():
+    client = CrawlutronClient()
+    assert client._timeout == 300.0
+
+
+@pytest.mark.asyncio
+async def test_transport_timeout_bounds_hang():
+    client = CrawlutronClient(
+        base_url="http://127.0.0.1:1",
+        timeout=2.0,
+    )
+    try:
+        with pytest.raises(CrawlutronTransportError):
+            await asyncio.wait_for(
+                client.crawl(CrawlRequest(url="https://example.com/")),
+                timeout=5,
+            )
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_wait_for_uses_monotonic_deadline():
+    now = 100.0
+    original_monotonic = time.monotonic
+    time.monotonic = lambda: now
+    try:
+        states = iter([202, 202, 200])
+
+        def _handler(request: httpx.Request) -> httpx.Response:
+            status = next(states)
+            if status == 200:
+                body = {
+                    "request_id": "abc",
+                    "submitted_count": 1,
+                    "policy_schema_version": "1",
+                    "success": True,
+                    "results": [],
+                }
+                return httpx.Response(200, json=body)
+            accepted = {
+                "status": "accepted",
+                "request_id": "abc",
+                "status_url": "/v1/crawl/abc",
+            }
+            return httpx.Response(202, json=accepted)
+
+        async with _served(_handler) as client:
+            response = await client.wait_for("abc", poll_interval=0, max_wait=5)
+        assert response.request_id == "abc"
+        assert now >= 100.0
+    finally:
+        time.monotonic = original_monotonic
+
+
+@pytest.mark.asyncio
 async def test_list_jobs_passes_limit_offset_and_omits_default():
-    """Pagination: limit/offset ride the query; the default offset (0) is omitted."""
     captured, handler = _capturing_handler({"jobs": [], "total": 0})
 
     async with _served(handler) as client:
