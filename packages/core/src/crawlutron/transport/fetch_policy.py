@@ -210,9 +210,10 @@ async def _fetch_robot_directives(
 def _resolve_sitemap_urls(
     candidates: Iterable[str], normalized_url: NormalizedUrl
 ) -> tuple[list[str], int, int]:
-    """Resolve Sitemap directives: cap at the module limit, keep only
-    same-site results; ``resolve`` admits foreign hosts so this is the
-    security boundary, not a correctness nicety."""
+    """Resolve Sitemap directives to at most the cap of SAME-SITE urls.
+
+    ``resolve`` admits foreign hosts, so the site filter is the security
+    boundary; the cap bounds accepted urls, not raw directive lines."""
     resolved: list[str] = []
     target_site = normalized_url.site
     total_seen = 0
@@ -303,11 +304,11 @@ async def _collect_sitemaps(
     from crawlutron.transport.fetch_helpers import fetch_sitemap_urls
 
     for sitemap_url in (a for a in (normalized_url.resolve(e) for e in candidate_urls) if a is not None):
+        fetch_count += 1
         with contextlib.suppress(Exception):
             found_locs = await fetch_sitemap_urls(
                 http_fetcher, sitemap_url, timeout_seconds, host_policy=host_policy
             )
-            fetch_count += 1
             for loc, timestamp in found_locs:
                 locs.append(loc.raw)
                 if timestamp:

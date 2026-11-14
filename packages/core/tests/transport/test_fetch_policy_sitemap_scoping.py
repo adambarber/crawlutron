@@ -12,7 +12,6 @@ import pytest
 
 from crawlutron.admission.policy import read_policy
 from crawlutron.models.crawl_diagnostics import CrawlDiagnostics
-from crawlutron.transport import fetch_policy
 from crawlutron.transport.fetch_policy import discovery_diagnostics
 from tests._fetch_doubles import FetcherDouble
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, admitted
@@ -62,8 +61,9 @@ class TestSitemapDirectiveCap:
 
         await _run_discovery(FetcherDouble(counting_fetcher, calls=calls))
 
-        cap = fetch_policy._ROBOTS_SITEMAP_DIRECTIVE_CAP
-        assert len(calls) <= 1 + cap, f"Expected at most {1 + cap} fetches, got {len(calls)}"
+        # Hard-coded bound, deliberately not the module constant: raising or
+        # removing the cap must red here, which a constant-derived bound cannot.
+        assert len(calls) <= 21, f"Expected at most 21 fetches, got {len(calls)}"
 
     async def test_diagnostics_include_fetch_and_drop_counts(self):
         """The discovery diagnostics block carries fetch/drop counts."""

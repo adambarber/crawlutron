@@ -100,9 +100,9 @@ async def _call_fetcher(
     sent = {} if headers is None else dict(headers)
     resp = fetcher(url, sent, timeout_seconds)
     if inspect.iscoroutine(resp):
-        # Validated boundary: the async protocol's return is a coroutine whose
-        # awaited value is the HttpFetchResult it spells.
-        resp = await asyncio.wait_for(resp, timeout=timeout_seconds)
+        # Callers own the deadline: the sitemap walk and the robots fetch each
+        # wrap this in one wait_for, so a second layer here would double the budget.
+        resp = await resp
     return cast(HttpFetchResult, resp)
 
 
