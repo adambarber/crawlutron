@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from crawlutron.storage.coordination_store import CoordinationStore, atwin
 from crawlutron.storage.migrations.manifest import StoreSchema
-from crawlutron.storage.safe_db import in_txn, txn_write
+from crawlutron.storage.safe_db import (
+    assert_data_version_stable,
+    in_txn,
+    read_data_version,
+    txn_read,
+    txn_write,
+)
 
 __all__ = ["CoordinationThrottleStore"]
 
@@ -111,10 +117,18 @@ class CoordinationThrottleStore(CoordinationStore):
     ) -> tuple[bool, float]:
         """Return (cooling, cooldown_until) for a key-verify bucket."""
         with self._lock:
-            row = self._conn.execute(
-                "SELECT cooldown_until FROM coordination_throttle_buckets WHERE kind = ? AND bucket_key = ?",
-                (_KEY_VERIFY_KIND, bucket_key),
-            ).fetchone()
+            version = read_data_version(self._conn)
+            with txn_read(
+                self._conn,
+                max_rows=1,
+                owner="coordination_throttle_store.check_key_bucket",
+            ):
+                row = self._conn.execute(
+                    "SELECT cooldown_until FROM coordination_throttle_buckets "
+                    "WHERE kind = ? AND bucket_key = ?",
+                    (_KEY_VERIFY_KIND, bucket_key),
+                ).fetchone()
+            assert_data_version_stable(self._conn, version)
             if row is None:
                 return False, 0.0
             cooldown_until = float(row[0] or 0.0)
@@ -197,10 +211,15 @@ class CoordinationThrottleStore(CoordinationStore):
 
     def count_buckets(self, kind: str) -> int:
         with self._lock:
-            row = self._conn.execute(
-                "SELECT COUNT(*) FROM coordination_throttle_buckets WHERE kind = ?",
-                (kind,),
-            ).fetchone()
+            with txn_read(
+                self._conn,
+                max_rows=1,
+                owner="coordination_throttle_store.count_buckets",
+            ):
+                row = self._conn.execute(
+                    "SELECT COUNT(*) FROM coordination_throttle_buckets WHERE kind = ?",
+                    (kind,),
+                ).fetchone()
         return 0 if row is None else int(row[0])
 
     def clear_kind(self, kind: str) -> None:

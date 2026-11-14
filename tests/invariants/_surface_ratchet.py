@@ -226,7 +226,7 @@ DECLARED_SURFACE_RATCHET = {
     "packages/core/src/crawlutron/storage/coordination_counters.py": (1, 1),
     "packages/core/src/crawlutron/storage/coordination_sync_slots.py": (1, 1),
     "packages/core/src/crawlutron/storage/coordination_store.py": (4, 2),
-    "packages/core/src/crawlutron/storage/safe_db.py": (10, 5),
+    "packages/core/src/crawlutron/storage/safe_db.py": (15, 9),  # #1043 read-door primitives
     "packages/core/src/crawlutron/storage/coordination_throttle_store.py": (1, 1),
     "packages/core/src/crawlutron/storage/job_store.py": (2, 1),
     "packages/core/src/crawlutron/storage/job_store_collections.py": (11, 6),

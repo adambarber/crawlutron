@@ -1,21 +1,26 @@
-"""Safe write-door primitives: txn_write, in_txn, txn_read, typed errors."""
+"""Safe read/write/update/destroy primitives on one shared SQLite connection."""
 
 from __future__ import annotations
 
 import asyncio
 import sqlite3
+import time
 from typing import cast
 
 import pytest
 
 from crawlutron.storage.coordination_throttle_store import CoordinationThrottleStore
 from crawlutron.storage.safe_db import (
+    ReadRejected,
     StorageBusy,
     StoreClosed,
     StoreConnectionPoisoned,
     WriteRejected,
     allow_on_loop,
+    allow_on_loop_read,
+    assert_data_version_stable,
     in_txn,
+    read_data_version,
     txn_read,
     txn_write,
     wal_checkpoint,
@@ -207,3 +212,136 @@ def test_check_then_failure_no_longer_wedges_the_connection(tmp_path) -> None:
         store.check_key_bucket("key-1", now=11.0)
     finally:
         store.close()
+
+
+def test_read_rejected_on_loop_thread() -> None:
+    conn = sqlite3.connect(":memory:", isolation_level=None)
+    try:
+
+        async def _run() -> None:
+            with pytest.raises(ReadRejected, match="event-loop thread"):
+                with txn_read(conn):
+                    pass
+
+        asyncio.run(_run())
+    finally:
+        conn.close()
+
+
+def test_allow_on_loop_read_permits_loop_thread_read() -> None:
+    async def main() -> None:
+        conn = sqlite3.connect(":memory:", isolation_level=None)
+        conn.execute("CREATE TABLE t (k INTEGER PRIMARY KEY, v INTEGER)")
+        try:
+            with allow_on_loop_read():
+                with txn_read(conn):
+                    conn.execute("INSERT INTO t (k, v) VALUES (1, 2)")
+        finally:
+            conn.close()
+
+    asyncio.run(main())
+
+
+def test_read_rejects_over_max_rows(tmp_path) -> None:
+    db_path = tmp_path / "rows.db"
+    conn = _connect(db_path)
+    for i in range(10):
+        conn.execute("INSERT INTO t (k, v) VALUES (?, ?)", (i, i))
+    try:
+        with pytest.raises(ReadRejected, match="row cap"):
+            with txn_read(conn, max_rows=5):
+                conn.execute("SELECT * FROM t").fetchall()
+    finally:
+        conn.close()
+
+
+def test_read_rejects_over_max_bytes(tmp_path) -> None:
+    db_path = tmp_path / "bytes.db"
+    conn = _connect(db_path)
+    conn.execute("INSERT INTO t (k, v) VALUES (1, ?)", ("x" * 1000,))
+    try:
+        with pytest.raises(ReadRejected, match="size cap"):
+            with txn_read(conn, max_bytes=100):
+                conn.execute("SELECT * FROM t").fetchall()
+    finally:
+        conn.close()
+
+
+def test_read_rejects_deadline_exceeded(tmp_path) -> None:
+    db_path = tmp_path / "deadline.db"
+    conn = _connect(db_path)
+    for i in range(100):
+        conn.execute("INSERT INTO t (k, v) VALUES (?, ?)", (i, i))
+    try:
+        past = time.monotonic() - 1.0
+        with pytest.raises(ReadRejected, match="deadline"):
+            with txn_read(conn, deadline=past):
+                conn.execute("SELECT * FROM t").fetchall()
+    finally:
+        conn.close()
+
+
+def test_txn_read_commits_and_rolls_back(tmp_path) -> None:
+    db_path = tmp_path / "read_txn.db"
+    conn = _connect(db_path)
+    conn.execute("INSERT INTO t (k, v) VALUES (9, 2)")
+    try:
+        with txn_read(conn, owner="read.m"):
+            row = conn.execute("SELECT v FROM t WHERE k = 9").fetchone()
+        assert row is not None and row[0] == 2
+    finally:
+        conn.close()
+
+    db_path2 = tmp_path / "read_txn_rollback.db"
+    conn2 = _connect(db_path2)
+    conn2.execute("INSERT INTO t (k, v) VALUES (3, 4)")
+    try:
+        with pytest.raises(ValueError, match="boom"):
+            with txn_read(conn2, owner="read.m"):
+                conn2.execute("INSERT INTO t (k, v) VALUES (5, 6)")
+                raise ValueError("boom")
+        assert conn2.execute("SELECT COUNT(*) FROM t").fetchone()[0] == 1
+    finally:
+        conn2.close()
+
+
+def test_txn_read_rejects_nesting(tmp_path) -> None:
+    db_path = tmp_path / "read_nest.db"
+    conn = _connect(db_path)
+    try:
+        with txn_read(conn, owner="a"):
+            with pytest.raises(ReadRejected, match="second concurrent"):
+                with txn_read(conn, owner="b"):
+                    pass
+    finally:
+        conn.close()
+
+
+def test_txn_read_rejects_second_concurrent_txn_same_thread(tmp_path) -> None:
+    conn1 = _connect(tmp_path / "read_one.db")
+    conn2 = _connect(tmp_path / "read_two.db")
+    try:
+        with txn_read(conn1, owner="a"):
+            with pytest.raises(ReadRejected, match="second concurrent"):
+                with txn_read(conn2, owner="b"):
+                    pass
+    finally:
+        conn1.close()
+        conn2.close()
+
+
+def test_read_data_version_detects_concurrent_write(tmp_path) -> None:
+    db_path = tmp_path / "version.db"
+    conn = _connect(db_path)
+    conn.execute("INSERT INTO t (k, v) VALUES (1, 2)")
+    try:
+        before = read_data_version(conn)
+        other = sqlite3.connect(str(db_path), isolation_level=None)
+        try:
+            other.execute("UPDATE t SET v = 99 WHERE k = 1")
+        finally:
+            other.close()
+        with pytest.raises(ReadRejected, match="data_version changed"):
+            assert_data_version_stable(conn, before)
+    finally:
+        conn.close()

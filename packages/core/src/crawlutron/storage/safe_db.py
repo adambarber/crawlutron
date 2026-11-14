@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 import threading
+import time
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -32,7 +33,12 @@ class WriteRejected(StorageError):
     """A write was refused: loop thread, duplicate statement, or size cap."""
 
 
+class ReadRejected(StorageError):
+    """A read was refused: loop thread, row cap, size cap, deadline, or data_version mismatch."""
+
+
 _WRITE_TXN = threading.local()
+_READ_TXN = threading.local()
 
 
 def _exec(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> sqlite3.Cursor:
@@ -86,6 +92,16 @@ def _off_loop() -> None:
         raise WriteRejected(f"storage write on the event-loop thread ({loop!r}); use a store worker")
 
 
+def assert_off_main_thread() -> None:
+    """Raise ReadRejected when the current thread runs a running event loop without read allowance."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    if getattr(_READ_TXN, "allow_depth", 0) == 0:
+        raise ReadRejected(f"storage read on the event-loop thread ({loop!r}); use a store worker")
+
+
 @contextmanager
 def allow_on_loop() -> Generator[None, None, None]:
     """Temporarily permit loop-thread writes (lifespan bootstrap, shutdown sweeps)."""
@@ -94,6 +110,16 @@ def allow_on_loop() -> Generator[None, None, None]:
         yield
     finally:
         _WRITE_TXN.allow_depth = getattr(_WRITE_TXN, "allow_depth", 0) - 1
+
+
+@contextmanager
+def allow_on_loop_read() -> Generator[None, None, None]:
+    """Temporarily permit loop-thread reads (bootstrap, shutdown sweeps)."""
+    _READ_TXN.allow_depth = getattr(_READ_TXN, "allow_depth", 0) + 1
+    try:
+        yield
+    finally:
+        _READ_TXN.allow_depth = getattr(_READ_TXN, "allow_depth", 0) - 1
 
 
 @dataclass
@@ -165,10 +191,58 @@ def in_txn(conn: sqlite3.Connection) -> Generator[None, None, None]:
 
 
 @contextmanager
-def txn_read(conn: sqlite3.Connection) -> Generator[None, None, None]:
-    """BEGIN DEFERRED, commit, roll back on failure for consistent reads."""
-    with _transaction(conn, "BEGIN DEFERRED", state=None):
-        yield
+def txn_read(
+    conn: sqlite3.Connection,
+    *,
+    max_rows: int | None = None,
+    max_bytes: int | None = None,
+    deadline: float | None = None,
+    owner: str = "",
+) -> Generator[None, None, None]:
+    """BEGIN DEFERRED, commit, roll back on failure for consistent reads with bounds."""
+    assert_off_main_thread()
+    depth = getattr(_READ_TXN, "depth", 0)
+    if depth > 0:
+        raise ReadRejected("second concurrent read transaction on this thread")
+    if deadline is not None and time.monotonic() > deadline:
+        raise ReadRejected(f"read deadline exceeded for {owner!r}")
+    _READ_TXN.depth = depth + 1
+
+    stats = {"rows": 0, "bytes": 0}
+
+    original_row_factory = conn.row_factory
+
+    def counting_row_factory(_cursor, row):
+        stats["rows"] += 1
+        stats["bytes"] += sum(len(str(v)) for v in row)
+        if max_rows is not None and stats["rows"] > max_rows:
+            raise ReadRejected(f"read row cap exceeded: {stats['rows']} > {max_rows}")
+        if max_bytes is not None and stats["bytes"] > max_bytes:
+            raise ReadRejected(f"read size cap exceeded: {stats['bytes']} > {max_bytes}")
+        if deadline is not None and time.monotonic() > deadline:
+            raise ReadRejected(f"read deadline exceeded for {owner!r}")
+        return row
+
+    conn.row_factory = counting_row_factory
+    try:
+        with _transaction(conn, "BEGIN DEFERRED", state=None):
+            yield
+    finally:
+        conn.row_factory = original_row_factory
+        _READ_TXN.depth = depth
+
+
+def read_data_version(conn: sqlite3.Connection) -> int:
+    """Capture PRAGMA data_version for optimistic read-then-write consistency."""
+    row = _exec(conn, "PRAGMA data_version").fetchone()
+    return int(row[0])
+
+
+def assert_data_version_stable(conn: sqlite3.Connection, before: int) -> None:
+    """Raise ReadRejected if data_version changed since `before` was captured."""
+    after = read_data_version(conn)
+    if after != before:
+        raise ReadRejected(f"data_version changed from {before} to {after}; concurrent write detected")
 
 
 def wal_checkpoint(conn: sqlite3.Connection) -> None:
@@ -195,8 +269,13 @@ __all__ = [
     "StoreClosed",
     "StoreConnectionPoisoned",
     "WriteRejected",
+    "ReadRejected",
     "allow_on_loop",
+    "allow_on_loop_read",
+    "assert_data_version_stable",
+    "assert_off_main_thread",
     "in_txn",
+    "read_data_version",
     "txn_read",
     "txn_write",
     "wal_checkpoint",
