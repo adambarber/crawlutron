@@ -45,10 +45,6 @@ if TYPE_CHECKING:
     from crawlutron.models.taxonomy import Classification
     from crawlutron.vocabulary.taxonomy import ResultStatus
 
-import logging
-
-logger = logging.getLogger(__name__)
-
 
 class WireGuard(NamedTuple):
     """The collaborators the SSRF guards need: the sync pin, the policy, the budget."""
@@ -56,6 +52,26 @@ class WireGuard(NamedTuple):
     pin_sync: Callable[..., PinnedRequest]
     policy: HostPolicy
     timeout_seconds: float
+
+
+#: First Playwright exposing ``route_web_socket``; below it the SSRF WebSocket
+#: guard cannot be installed, so the render is refused.
+_WS_GUARD_PLAYWRIGHT = "1.62"
+
+
+class WebSocketGuardUnavailable(RuntimeError):
+    """The browser context cannot install the SSRF WebSocket guard: it exposes no
+    ``route_web_socket`` capability, so the render is refused rather than
+    proceeding with an unguarded socket channel (Playwright >= 1.62 required).
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "websocket_guard_unavailable: the page context exposes no `route_web_socket` "
+            f"capability, so the SSRF WebSocket guard cannot be installed "
+            f"(Playwright >= {_WS_GUARD_PLAYWRIGHT} required); refusing the render rather "
+            "than proceeding with an unguarded socket channel"
+        )
 
 
 class PdfOutcome(NamedTuple):
@@ -106,9 +122,14 @@ async def wire_ssrf_guards(
     on_response: list[InterceptedXhrRecord],
 ) -> None:
     """Route-level SSRF guards plus XHR interception, before navigation."""
+    context = page.context
+    # Fail closed: a context without ``route_web_socket`` cannot install the
+    # SSRF WebSocket guard, so the render is refused before any guard is wired.
+    ws_router = getattr(context, "route_web_socket", None)
+    if ws_router is None:
+        raise WebSocketGuardUnavailable()
     # Install at the page's context: every page/worker the context spawns is
     # covered, including ones created after the install.
-    context = page.context
     await context.route(
         "**/*",
         make_ssrf_route_handler(
@@ -120,15 +141,11 @@ async def wire_ssrf_guards(
         ),
     )
     ws_guard = make_ssrf_websocket_handler(policy=wire.policy, timeout_seconds=wire.timeout_seconds)
-    ws_router = getattr(context, "route_web_socket", None)
-    if ws_router is None:
-        logger.warning("websocket_interception_unsupported")
-    else:
-        # route_web_socket is async in Playwright 1.62+ (verified from the
-        # installed source); accept both sync and async for doubles.
-        outcome = ws_router("**/*", ws_guard)
-        if asyncio.iscoroutine(outcome):
-            await outcome
+    # route_web_socket is async in Playwright 1.62+ (verified from the
+    # installed source); accept both sync and async for doubles.
+    outcome = ws_router("**/*", ws_guard)
+    if asyncio.iscoroutine(outcome):
+        await outcome
     # Katana-style XHR/fetch interception.
     page.on("response", make_response_handler(on_response))
 
