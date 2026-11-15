@@ -62,18 +62,19 @@ class MetricsStore:
 
     def __init__(self, counters: CoordinationCounters | None = None) -> None:
         self._counters = counters
-        # The no-store path. One dict for every counter and label, so a counter
-        # is added in one place whether or not a store is attached.
+        #: One dict for every counter and label; a counter is added in one place
+        #: whether or not a store is attached.
         self._local: dict[str, float] = {}
-        # One write lock: the local RMW and the caller-series check-then-insert
-        # are read-modify-writes two threads can interleave.
+        #: One write lock: the local RMW and caller-series check-then-insert
+        #: interleave across threads, so both stay atomic.
         self._write_lock = threading.RLock()
-        # Gauges: instantaneous readings of shared state, never summed.
+        #: (prefix, caller_id) -> series admitted under the series cap;
+        #: __overflow__ is a resolved value, so fold decisions are remembered.
+        self._known_series: dict[tuple[str, str], str] = {}
         self.resource_memory_utilization: float = 0.0
         self.resource_cpu_utilization: float = 0.0
 
-    # Writes happen only in observe/record; every read is one source dict
-    # turned into one CountersSnapshot.
+    # Writes happen in observe/record; reads build one CountersSnapshot from one source dict.
 
     def _add(self, key: str, delta: float) -> None:
         store = self._counters
@@ -81,6 +82,12 @@ class MetricsStore:
             store.add_pending(key, delta)
             return
         with self._write_lock:
+            # A bind can attach the store while we wait: re-check under the
+            # lock so an increment landing mid-bind is pending, not stranded.
+            store = self._counters
+            if store is not None:
+                store.add_pending(key, delta)
+                return
             self._local[key] = self._local.get(key, 0.0) + delta
 
     def _flush_pending(self) -> None:
@@ -99,11 +106,8 @@ class MetricsStore:
         return {key.removeprefix(prefix): value for key, value in source.items() if key.startswith(prefix)}
 
     def _caller_series(self, source: dict[str, float], prefix: str, caller_id: str) -> str:
-        """The series a caller id is written under, bounded by an overflow fold.
-
-        A NEW caller past the cap folds into one reserved overflow series so the
-        label dimension stays bounded while bare and sum(labels) stay exact.
-        """
+        """Caller series under the cap: new callers past it fold into one
+        reserved overflow series, keeping bare and sum(labels) exact."""
         key = prefix + caller_id
         if key in source:
             return caller_id
@@ -142,13 +146,16 @@ class MetricsStore:
     # -- the only counter write paths --------------------------------------
 
     def _record_caller_series(self, prefix: str, caller_id: str) -> None:
-        """Account the call under its caller key, under the series cap.
-        Callers run it off the loop via asyncio.to_thread; the source read
-        and the insert share one write lock, one critical section on the worker."""
+        """Caller series under the cap: hit is a fast path with no store read,
+        miss reads the shared table once under the lock and remembers the
+        fold-or-mint decision -- the cap stays a global bound."""
         if not caller_id:
             return
         with self._write_lock:
-            series = self._caller_series(self._source(), prefix, caller_id)
+            series = self._known_series.get((prefix, caller_id))
+            if series is None:
+                series = self._caller_series(self._source(), prefix, caller_id)
+                self._known_series[(prefix, caller_id)] = series
             self._add(prefix + series, 1)
 
     async def observe_crawl(
@@ -235,9 +242,7 @@ class MetricsStore:
 
     @property
     def counters(self) -> CoordinationCounters | None:
-        """The shared storage backing these counters, or None before the
-        lifespan binds it. A reader in another worker only sees these totals
-        once this is a store rather than this process's own dict."""
+        """The shared storage backing these counters, or None before binding."""
         return self._counters
 
     async def bind_counters(self, counters: CoordinationCounters) -> None:
@@ -247,17 +252,21 @@ class MetricsStore:
         """
         if self._counters is not None:
             self._counters = counters
+            with self._write_lock:
+                self._known_series.clear()
             return
-        carried = self._local
-        self._counters = counters
+        with self._write_lock:
+            carried = self._local
+            self._counters = counters
+            self._known_series.clear()
+            self._local = {}
         if carried:
             await counters.a_add_many(carried)
-        self._local = {}
 
     def reset(self) -> None:
-        """Zero every counter and gauge; ``allow_on_loop`` guards the store
-        reset so test teardown on the loop passes ``txn_write``.
-        """
+        """Zero every counter and gauge; clear the admitted-series cache too."""
+        with self._write_lock:
+            self._known_series.clear()
         if self._counters is not None:
             try:
                 asyncio.get_running_loop()
@@ -272,19 +281,13 @@ class MetricsStore:
         self.resource_cpu_utilization = 0.0
 
     async def as_prometheus(self, *, caller_detail: bool = True) -> str:
-        """Render the exposition; ``caller_detail`` gates the per-caller families.
-
-        The router passes the operator-auth result so the caller-labelled series
-        (a key-identity oracle) only leave the door to an authenticated operator.
-        """
+        """Render the exposition; ``caller_detail`` gates the per-caller families."""
         return _exposition(await self.snapshot(), self, caller_detail=caller_detail)
 
 
 @dataclass(frozen=True)
 class _Family:
-    """One declared exposition family: its name, help, kind, label and
-    source are stated once here; a new counter is one table row plus its write.
-    """
+    """One declared exposition family: name, help, kind, label, source."""
 
     name: str
     help_text: str = ""
@@ -417,6 +420,10 @@ _FAMILIES: tuple[_Family, ...] = (
 COUNTER_FAMILIES = tuple(f for f in _FAMILIES if f.kind == "counter" and f.label is None and f.header)
 
 
+def _escape_label_value(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+
 def _family_value(family: _Family, record: CountersSnapshot, store: MetricsStore) -> str:
     """One family's rendered value."""
     source: MetricsStore | CountersSnapshot = store if family.store else record
@@ -438,17 +445,14 @@ def _family_lines(family: _Family, record: CountersSnapshot, store: MetricsStore
     else:
         counts: dict[str, float] = getattr(record, family.field)
         lines.extend(
-            f'{family.name}{{{family.label}="{key}"}} {value}' for key, value in sorted(counts.items())
+            f'{family.name}{{{family.label}="{_escape_label_value(key)}"}} {value}'
+            for key, value in sorted(counts.items())
         )
     return lines
 
 
 def _exposition(record: CountersSnapshot, store: MetricsStore, *, caller_detail: bool) -> str:
-    """Render the Prometheus text exposition for one counters record.
-
-    Pure formatting over the declared family table: one backing-store
-    read per scrape, and the line contract lives in _FAMILIES, not here.
-    """
+    """Render the Prometheus text exposition for one counters record."""
     lines: list[str] = []
     for family in _FAMILIES:
         if family.caller_detail and not caller_detail:
@@ -476,11 +480,8 @@ process_state.register(__name__, _reset, _has)
 
 
 def get_metrics() -> MetricsStore:
-    """Return the metrics singleton.
-
-    Callers use this accessor rather than importing ``metrics`` so they observe
-    the current store even if a test or harness swaps the singleton.
-    """
+    """Return the metrics singleton; callers observe the current store even
+    if a test or harness swaps the singleton."""
     return metrics
 
 
