@@ -190,3 +190,29 @@ def test_series_cap_holds_under_forced_flush_window(tmp_path):
     arrivals = list(store.snapshot().caller_counts)
     assert len(arrivals) <= 257, f"cap crossed: {len(arrivals)} distinct caller series"
     assert "__overflow__" in arrivals, "post-cap arrivals did not fold into the overflow series"
+
+
+class _RecordingSnapshot(CoordinationCounters):
+    """A counters double that records the thread ident of every snapshot() call."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.snapshot_idents: list[int] = []
+
+    def snapshot(self) -> dict[str, float]:
+        self.snapshot_idents.append(threading.get_ident())
+        return super().snapshot()
+
+
+async def test_caller_series_source_read_runs_off_the_loop(tmp_path):
+    """The caller-series source read runs off the event loop.
+
+    Red before step 2: snapshot() ran on the loop thread; green after it runs
+    on a worker thread via asyncio.to_thread.
+    """
+    loop_ident = threading.get_ident()
+    counters = _RecordingSnapshot(tmp_path / "offloop.db")
+    store = MetricsStore(counters=counters)
+    await store.observe_crawl(caller_id="off-loop")
+    assert counters.snapshot_idents, "store.snapshot was never called"
+    assert all(ident != loop_ident for ident in counters.snapshot_idents)

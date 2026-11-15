@@ -147,8 +147,8 @@ class MetricsStore:
 
     def _record_caller_series(self, prefix: str, caller_id: str) -> None:
         """Account the call under its caller key, under the series cap.
-        Decision and insert hold one lock: a check-then-insert split across
-        them races past the series cap."""
+        Callers run it off the loop via asyncio.to_thread; the source read
+        and the insert share one write lock, one critical section on the worker."""
         if not caller_id:
             return
         with self._write_lock:
@@ -165,7 +165,7 @@ class MetricsStore:
         caller_id: str = "",
     ) -> None:
         self._add("crawl_requests_total", 1)
-        self._record_caller_series(_CALLER_PREFIX, caller_id)
+        await asyncio.to_thread(self._record_caller_series, _CALLER_PREFIX, caller_id)
         if accepted:
             self._add("crawl_requests_accepted_total", 1)
         if results:
@@ -201,7 +201,7 @@ class MetricsStore:
         self._add("search_errors_total", errors)
         if provider:
             self._add(_PROVIDER_PREFIX + provider, results)
-        self._record_caller_series(_SEARCH_CALLER_PREFIX, caller_id)
+        await asyncio.to_thread(self._record_caller_series, _SEARCH_CALLER_PREFIX, caller_id)
         self._add("search_total_elapsed_ms", elapsed_ms)
         store = self._counters
         if store is not None:
