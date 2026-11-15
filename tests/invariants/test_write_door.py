@@ -1,6 +1,6 @@
 """Write-door invariant: every storage write funnels through txn_write/in_txn.
 
-Storage modules not yet migrated are exempt and walked but not judged.
+No storage module is exempt: the gate is sealed and judged unconditionally.
 """
 
 from __future__ import annotations
@@ -15,10 +15,6 @@ from tests.chokepoint_walks import trees_under
 from tests.rules import Rule
 
 _STORAGE_DIR = REPO_ROOT / "packages" / "core" / "src" / "crawlutron" / "storage"
-
-#: Storage modules not yet migrated to txn_write/in_txn; each names why it is still allowed bare writes.
-#: The set shrinks one store per arc until the gate seals at zero; the throttle store is the mutation target.
-_EXEMPT_MODULES: frozenset[str] = frozenset()
 
 _WRITE_METHODS = frozenset({"execute", "executemany", "commit", "rollback", "executescript"})
 _WRITE_KEYWORDS = frozenset({"insert", "update", "delete", "begin"})
@@ -114,11 +110,8 @@ WRITE_DOOR_RULE = Rule(
     scope=lambda *, exclude: (
         (path, tree)
         for path, tree in trees_under(_STORAGE_DIR)
-        if "migrations" not in path.parts
-        and path.name != "sqlite_store.py"
-        and path.relative_to(REPO_ROOT).as_posix() not in _EXEMPT_MODULES
+        if "migrations" not in path.parts and path.name != "sqlite_store.py"
     ),
-    skip=frozenset(_EXEMPT_MODULES),
     bite=lambda: (
         "import crawlutron.storage.safe_db as safe_db\n\n"
         "safe_db.txn_write(conn)\n"
