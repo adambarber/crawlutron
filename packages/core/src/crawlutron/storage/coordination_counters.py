@@ -39,10 +39,12 @@ class CoordinationCounters(CoordinationStore):
             pending[name] = pending.get(name, 0.0) + value
 
     def flush(self) -> None:
-        """Commit every pending increment in one transaction."""
+        """Commit every pending increment in one transaction: swap, commit and
+        clear hold ``_lock`` across the whole handoff so a concurrent
+        snapshot() never observes the batch in neither place."""
         with self._lock:
             batch, self._pending = self._pending or {}, None
-        self.add_many(batch)
+            self.add_many(batch)
 
     def add_many(self, deltas: Mapping[str, float]) -> None:
         """Apply every ``delta`` in one ``BEGIN IMMEDIATE … COMMIT``.
