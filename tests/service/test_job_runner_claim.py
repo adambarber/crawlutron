@@ -121,7 +121,7 @@ class TestRunnerClaimOwnership:
         store = _store(tmp_path)
         job, hang, task = await self._seed_and_start_hung(store)
         try:
-            claim = store.running_claim(job.job_id)
+            claim = await store.arunning_claim(job.job_id)
             assert claim is not None
             assert claim[0] and claim[1] is not None and claim[2] == JobStatus.RUNNING.value
         finally:

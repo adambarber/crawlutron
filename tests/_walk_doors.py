@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 
+from tests import _walk_primitives as _wp
 from tests._walk_resolution import resolved_call_name
 
 
@@ -38,10 +39,9 @@ def _fstring_literal_prefix(node: ast.JoinedStr) -> str | None:
 
 
 def sql_operand(call: ast.Call, tree: ast.Module | None = None) -> str | None:
-    """Decidable SQL for call's first argument, or None when opaque.
-
-    Literal, f-string literal prefix, or module-level string-constant name.
-    Function-local constants and attribute/parameter operands are opaque.
+    """Decidable SQL for call's first argument: literal, f-string prefix, or a
+    string-constant name resolved in the call's enclosing function, then module
+    level; otherwise opaque (parameters and other operands).
     """
     if not call.args:
         return None
@@ -52,18 +52,26 @@ def sql_operand(call: ast.Call, tree: ast.Module | None = None) -> str | None:
         return _fstring_literal_prefix(arg)
     if not isinstance(arg, ast.Name) or tree is None:
         return None
-    # Module-level string-constant assignments only; function locals are opaque.
-    for stmt in tree.body:
-        if not isinstance(stmt, ast.Assign):
-            continue
-        if len(stmt.targets) != 1:
-            continue
-        target = stmt.targets[0]
-        if not isinstance(target, ast.Name) or target.id != arg.id:
-            continue
-        val = stmt.value
-        if isinstance(val, ast.Constant) and isinstance(val.value, str):
-            return val.value
+    # A name bound to a string constant: the call's enclosing function first
+    # (a local shadows a module constant), then module level.
+    scopes: list[list[ast.stmt]] = []
+    parents = _wp.parent_map(tree)
+    owner = _wp.enclosing_function(call, parents)
+    if owner is not None:
+        scopes.append(owner.body)
+    scopes.append(tree.body)
+    for scope in scopes:
+        for stmt in scope:
+            if not isinstance(stmt, ast.Assign):
+                continue
+            if len(stmt.targets) != 1:
+                continue
+            target = stmt.targets[0]
+            if not isinstance(target, ast.Name) or target.id != arg.id:
+                continue
+            val = stmt.value
+            if isinstance(val, ast.Constant) and isinstance(val.value, str):
+                return val.value
     return None
 
 
@@ -81,7 +89,7 @@ def inside_door(
     node: ast.AST | None = call
     while node is not None:
         parent = parents.get(id(node))
-        if isinstance(parent, ast.With):
+        if isinstance(parent, (ast.With, ast.AsyncWith)):
             for item in parent.items:
                 ctx = item.context_expr
                 if (

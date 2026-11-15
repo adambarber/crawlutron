@@ -23,25 +23,35 @@ _READ_METHODS = frozenset({"execute", "executemany"})
 _READ_KEYWORDS = frozenset({"select", "pragma", "with", "explain"})
 _READ_DOOR = frozenset({"txn_read", "txn_write", "in_txn"})
 
-_SCOPE_EXCLUDE = frozenset({"sqlite_store.py"})
+#: sqlite_store.py: PRAGMAs on `conn` before any door can exist.
+#: safe_db.py: `_exec` executes caller-supplied SQL; its callers own the door.
+_SCOPE_EXCLUDE = frozenset({"sqlite_store.py", "safe_db.py"})
+#: Named exclusion with a written reason; never a widened skip.
 
 
 def _bare_read_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
-    """Bare storage reads outside the read door, file and line named."""
+    """Bare storage reads outside the read door, file and line named. A call
+    inside any read door is never an offender; outside a door, an undecidable
+    operand is reported rather than skipped.
+    """
     out: list[str] = []
     parents = _wp.parent_map(tree)
     for call, _callee in _wr.attribute_calls(tree):
         callee = _dw.conn_callee(call, _READ_METHODS)
         if callee is None:
             continue
-        sql = _dw.sql_operand(call, tree)
-        if sql is None:
-            continue
-        if not (head := sql.lstrip().split()) or head[0].lower() not in _READ_KEYWORDS:
+        if _dw.inside_door(call, tree, parents, _READ_DOOR):
             continue
         owner = _wp.enclosing_function(call, parents)
-        configured = owner is not None and owner.name == "configure_store_connection"
-        if _dw.inside_door(call, tree, parents, _READ_DOOR) or configured:
+        if owner is not None and owner.name == "configure_store_connection":
+            continue
+        sql = _dw.sql_operand(call, tree)
+        if sql is None:
+            out.append(
+                _wp.offender_at(path, call, "bare read with an opaque SQL operand outside the read door")
+            )
+            continue
+        if not (head := sql.lstrip().split()) or head[0].lower() not in _READ_KEYWORDS:
             continue
         out.append(_wp.offender_at(path, call, "bare read statement outside the read door"))
     return out
@@ -52,8 +62,8 @@ READ_DOOR_RULE = Rule(
     find=_bare_read_offenders,
     summary=(
         "executes a SELECT/PRAGMA/WITH/EXPLAIN outside txn_read/txn_write/in_txn; "
-        "decidable SQL: literal, f-string literal prefix, module-constant name; "
-        "parameter/attribute SQL operand skipped, not decided"
+        "decidable SQL: literal, f-string literal prefix, module/function-constant name; "
+        "an undecidable operand outside a door is reported, not skipped"
     ),
     scope=lambda *, exclude: (
         (path, tree)
@@ -66,12 +76,16 @@ READ_DOOR_RULE = Rule(
         'alias._conn.execute("SELECT a FROM b")\n',
         'SQL = "SELECT a FROM b"\nconn.execute(SQL)\n',
         'conn.execute(f"SELECT {col} FROM b")\n',
-        'with txn_read(conn):\n    def helper():\n        conn.execute("SELECT a FROM b")\n',
+        'with txn_read(conn):\n    def helper():\n        conn.execute("SELECT a From b")\n',
+        'def helper():\n    SQL = "SELECT a FROM b"\n    conn.execute(SQL)\n',
+        "def helper(statement):\n    conn.execute(statement)\n",
     ),
     clean=lambda: (
         'with txn_read(conn):\n    conn.execute("SELECT count(*) FROM t")\n',
         'with txn_write(conn):\n    conn.execute("SELECT 1 FROM t")\n',
         'with in_txn(conn):\n    conn.execute("SELECT 1 FROM t")\n',
+        'async with txn_read(conn):\n    conn.execute("SELECT a FROM b")\n',
+        'with txn_read(conn):\n    SQL = "SELECT a FROM b"\n    conn.execute(SQL)\n',
         'def helper():\n    with txn_read(conn):\n        conn.execute("SELECT count(*) FROM t")\n',
         'conn.execute("INSERT INTO t (a, b) VALUES (1, 2)")\n',
         'conn.execute("BEGIN")\n',

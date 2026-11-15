@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from crawlutron.storage.coordination_store import CoordinationStore, atwin
 from crawlutron.storage.migrations.manifest import StoreSchema
-from crawlutron.storage.safe_db import in_txn, txn_write
+from crawlutron.storage.safe_db import in_txn, txn_read, txn_write
 
 #: The trail's size bound. Key-admin actions are operator-paced, so the
 #: population is bounded by admin activity; 10k rows is under a megabyte.
@@ -74,12 +74,13 @@ class AdminAuditStore(CoordinationStore):
             " FROM key_admin_events ORDER BY sequence DESC"
         )
         with self._lock:
-            cursor = (
-                self._conn.execute(query + " LIMIT ?", (limit,))
-                if limit is not None
-                else self._conn.execute(query)
-            )
-            rows = cursor.fetchall()
+            with txn_read(self._conn, owner="admin_audit_store.list_events"):
+                cursor = (
+                    self._conn.execute(query + " LIMIT ?", (limit,))
+                    if limit is not None
+                    else self._conn.execute(query)
+                )
+                rows = cursor.fetchall()
         return [AdminAuditEvent(**dict(zip(_COLUMNS, row, strict=False))) for row in rows]
 
     def _roll(self) -> None:

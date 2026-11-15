@@ -77,8 +77,11 @@ def _fetch_owner_row(
     conn: sqlite3.Connection, statement: str, params: tuple[object, ...]
 ) -> sqlite3.Row | None:
     """One owner-filtered row fetch: execute and fetchone, None on miss.
-    The idiom the read sites share; each site owns its own transaction posture."""
-    return conn.execute(statement, params).fetchone()
+    Reentrant txn_read: callers already in txn_read join the outer snapshot;
+    callers with no door (``_has_job_row``) get one here.
+    """
+    with txn_read(conn, owner="job_store._fetch_owner_row"):
+        return conn.execute(statement, params).fetchone()
 
 
 logger = logging.getLogger(__name__)
@@ -327,7 +330,8 @@ class JobStore:
             if limit is not None:
                 statement += " LIMIT ? OFFSET ?"
                 params = (*params, max(0, limit), max(0, offset))
-            rows = self._conn.execute(statement, params).fetchall()
+            with txn_read(self._conn, owner="job_store._read_job_list"):
+                rows = self._conn.execute(statement, params).fetchall()
         return [_status_row(r, *counts.get(r["job_id"], (0, 0))) for r in rows]
 
     def count_jobs(self) -> int:
@@ -339,7 +343,8 @@ class JobStore:
     def _count_jobs(self, owner: str | None) -> int:
         with self._lock:
             statement, params = _owner_statement("SELECT count(*) FROM crawl_jobs", False, "", owner)
-            row = self._conn.execute(statement, params).fetchone()
+            with txn_read(self._conn, owner="job_store._count_jobs"):
+                row = self._conn.execute(statement, params).fetchone()
         return int(row[0])
 
     def status_row(self, job_id: str) -> JobStatusView | None:

@@ -11,7 +11,7 @@ import threading
 import time
 
 from crawlutron.storage.job_store_collections import JobStatus
-from crawlutron.storage.safe_db import txn_write
+from crawlutron.storage.safe_db import txn_read, txn_write
 
 DEFAULT_JOB_CLAIM_SECONDS = 300.0
 
@@ -108,7 +108,8 @@ def running_claim(
     """Return ``(claimed_by, claimed_at, status)`` for the row."""
     statement = "SELECT claimed_by, claimed_at, status FROM crawl_jobs WHERE job_id = ?"
     with lock:
-        row = conn.execute(statement, (job_id,)).fetchone()
+        with txn_read(conn, owner="job_store_lease.running_claim"):
+            row = conn.execute(statement, (job_id,)).fetchone()
     if row is None:
         return None
     claimed_by = row[0] if isinstance(row[0], str) and row[0] else None

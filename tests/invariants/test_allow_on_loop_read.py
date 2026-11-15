@@ -34,7 +34,8 @@ def _offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
         if not isinstance(node, ast.Call):
             continue
         func = node.func
-        if not isinstance(func, ast.Name) or func.id != "allow_on_loop_read":
+        callee_name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+        if callee_name != "allow_on_loop_read":
             continue
         if path.relative_to(REPO_ROOT).as_posix() == _EXCLUDED:
             owner = enclosing_function(node, parents)
@@ -56,7 +57,7 @@ ALLOW_ON_LOOP_READ_RULE = Rule(
     scope=lambda *, exclude: (
         (path, tree) for root in SCAN_ROOTS for path, tree in trees_under(REPO_ROOT / root)
     ),
-    bite=lambda: ("allow_on_loop_read()\n",),
+    bite=lambda: ("allow_on_loop_read()\n", "safe_db.allow_on_loop_read()\n"),
     clean=lambda: (
         "allow_on_loop()\n",
         "def allow_on_loop_read():\n    pass\n",
