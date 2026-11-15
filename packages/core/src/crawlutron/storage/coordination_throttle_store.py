@@ -5,7 +5,6 @@ from __future__ import annotations
 from crawlutron.storage.coordination_store import CoordinationStore, atwin
 from crawlutron.storage.migrations.manifest import StoreSchema
 from crawlutron.storage.safe_db import (
-    assert_data_version_stable,
     in_txn,
     read_data_version,
     txn_read,
@@ -113,7 +112,9 @@ class CoordinationThrottleStore(CoordinationStore):
         *,
         now: float,
     ) -> tuple[bool, float]:
-        """Return (cooling, cooldown_until) for a key-verify bucket."""
+        """Return (cooling, cooldown_until) for a key-verify bucket.
+        The touched_at touch is version-conditioned: applied only when data_version
+        is unchanged between read and write; never raises ReadRejected, skips the touch."""
         with self._lock:
             version = read_data_version(self._conn)
             with txn_read(
@@ -126,16 +127,16 @@ class CoordinationThrottleStore(CoordinationStore):
                     "WHERE kind = ? AND bucket_key = ?",
                     (_KEY_VERIFY_KIND, bucket_key),
                 ).fetchone()
-            assert_data_version_stable(self._conn, version)
             if row is None:
                 return False, 0.0
             cooldown_until = float(row[0] or 0.0)
-            with txn_write(self._conn, owner="coordination_throttle_store.check_key_bucket"):
-                self._conn.execute(
-                    "UPDATE coordination_throttle_buckets SET touched_at = ? "
-                    "WHERE kind = ? AND bucket_key = ?",
-                    (now, _KEY_VERIFY_KIND, bucket_key),
-                )
+            if read_data_version(self._conn) == version:
+                with txn_write(self._conn, owner="coordination_throttle_store.check_key_bucket"):
+                    self._conn.execute(
+                        "UPDATE coordination_throttle_buckets SET touched_at = ? "
+                        "WHERE kind = ? AND bucket_key = ?",
+                        (now, _KEY_VERIFY_KIND, bucket_key),
+                    )
             return cooldown_until > now, cooldown_until
 
     def record_key_failure(

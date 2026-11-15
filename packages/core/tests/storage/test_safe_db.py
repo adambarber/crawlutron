@@ -215,6 +215,36 @@ def test_check_then_failure_no_longer_wedges_the_connection(tmp_path) -> None:
         store.close()
 
 
+def test_check_key_bucket_refuses_nothing_on_foreign_commit(tmp_path) -> None:
+    """After a foreign commit changes data_version, check_key_bucket must not
+    raise ReadRejected into the auth path; it returns the cooldown it read."""
+    store = CoordinationThrottleStore(tmp_path / "race.db")
+    try:
+        with txn_write(store._conn, owner="seed"):
+            store._conn.execute(
+                "INSERT INTO coordination_throttle_buckets "
+                "(kind, bucket_key, window_started, count, cooldown_until, touched_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                ("key_verify", "k1", 10.0, 0, 999.0, 10.0),
+            )
+
+        other = sqlite3.connect(str(tmp_path / "race.db"))
+        try:
+            other.execute(
+                "UPDATE coordination_throttle_buckets SET touched_at = ? WHERE kind = ?",
+                (time.monotonic(), "key_verify"),
+            )
+            other.execute("COMMIT")
+        finally:
+            other.close()
+
+        cooling, until = store.check_key_bucket("k1", now=11.0)
+        assert cooling is True
+        assert until == 999.0
+    finally:
+        store.close()
+
+
 def test_read_rejected_on_loop_thread() -> None:
     conn = sqlite3.connect(":memory:", isolation_level=None)
     try:

@@ -9,6 +9,7 @@ import time
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from typing import cast
 
 from crawlutron.runtime import process_state
 
@@ -190,6 +191,35 @@ def in_txn(conn: sqlite3.Connection) -> Generator[None, None, None]:
         raise
 
 
+def _row_byte_width(row) -> int:
+    """Bytes a row actually carries: None is zero, blobs their length,
+    text its utf-8 width, other scalars their utf-8 rendering."""
+    total = 0
+    for v in row:
+        if v is None:
+            continue
+        if isinstance(v, (bytes, bytearray, memoryview)):
+            total += len(v)
+        elif isinstance(v, str):
+            total += len(v.encode("utf-8"))
+        else:
+            total += len(str(v).encode("utf-8"))
+    return total
+
+
+def _apply_bounds(row, owner: str) -> None:
+    """Accrue one row into every active bound and enforce each cap."""
+    for ctx in getattr(_READ_TXN, "bound_stack", ()):
+        ctx["rows"] += 1
+        if ctx["max_rows"] is not None and ctx["rows"] > ctx["max_rows"]:
+            raise ReadRejected(f"read row cap exceeded: {ctx['rows']} > {ctx['max_rows']}")
+        ctx["bytes"] += _row_byte_width(row)
+        if ctx["max_bytes"] is not None and ctx["bytes"] > ctx["max_bytes"]:
+            raise ReadRejected(f"read size cap exceeded: {ctx['bytes']} > {ctx['max_bytes']}")
+        if ctx["deadline"] is not None and time.monotonic() > ctx["deadline"]:
+            raise ReadRejected(f"read deadline exceeded for {owner!r}")
+
+
 @contextmanager
 def txn_read(
     conn: sqlite3.Connection,
@@ -200,17 +230,22 @@ def txn_read(
     owner: str = "",
 ) -> Generator[None, None, None]:
     """BEGIN DEFERRED for consistent reads.
-
-    Reentrant: a nested call joins the outer snapshot without a second BEGIN;
-    depth is restored on every path, including an exception."""
+    Reentrant: a nested call joins the outer snapshot; depth restored on every path.
+    Bounds stack: the tightest active cap/deadline wins."""
     assert_off_main_thread()
     depth = getattr(_READ_TXN, "depth", 0)
     outer_conn = getattr(_READ_TXN, "conn", None)
     if deadline is not None and time.monotonic() > deadline:
         raise ReadRejected(f"read deadline exceeded for {owner!r}")
-
-    # Reentrant same-connection read joins the outer snapshot; a different
-    # connection on this thread is refused, like a second write.
+    bounded = max_rows is not None or max_bytes is not None or deadline is not None
+    context = None
+    if bounded:
+        context = {"rows": 0, "bytes": 0, "max_rows": max_rows, "max_bytes": max_bytes, "deadline": deadline}
+        stack = cast(list, getattr(_READ_TXN, "bound_stack", None))
+        if stack is None:
+            stack = []
+            _READ_TXN.bound_stack = stack
+        stack.append(context)
     if depth > 0:
         if outer_conn is conn:
             _READ_TXN.depth = depth + 1
@@ -218,28 +253,22 @@ def txn_read(
                 yield
             finally:
                 _READ_TXN.depth = depth
+                if context is not None:
+                    stack.pop()
             return
         raise ReadRejected("second concurrent read transaction on this thread")
     _READ_TXN.depth = depth + 1
     _READ_TXN.conn = conn
 
-    stats = {"rows": 0, "bytes": 0}
-    bounded = max_rows is not None or max_bytes is not None or deadline is not None
+    original_row_factory = conn.row_factory
+
+    def counting_row_factory(_cursor, row):
+        _apply_bounds(row, owner)
+        if original_row_factory is not None:
+            return original_row_factory(_cursor, row)
+        return row
 
     if bounded:
-        original_row_factory = conn.row_factory
-
-        def counting_row_factory(_cursor, row):
-            stats["rows"] += 1
-            stats["bytes"] += sum(len(str(v)) for v in row)
-            if max_rows is not None and stats["rows"] > max_rows:
-                raise ReadRejected(f"read row cap exceeded: {stats['rows']} > {max_rows}")
-            if max_bytes is not None and stats["bytes"] > max_bytes:
-                raise ReadRejected(f"read size cap exceeded: {stats['bytes']} > {max_bytes}")
-            if deadline is not None and time.monotonic() > deadline:
-                raise ReadRejected(f"read deadline exceeded for {owner!r}")
-            return row
-
         conn.row_factory = counting_row_factory
     try:
         with _transaction(conn, "BEGIN DEFERRED", state=None):
@@ -247,6 +276,7 @@ def txn_read(
     finally:
         if bounded:
             conn.row_factory = original_row_factory
+            stack.pop()
         _READ_TXN.depth = depth
         if depth == 0:
             _READ_TXN.conn = None
