@@ -1,7 +1,7 @@
 """Job-runner test harness: stores, fake engine seams, and the job-state waits.
 
-The waits are EDGE-triggered, not a poll racing a deadline: ``set_status`` is
-the complete edge set, so the wait returns the instant the status is committed."""
+The waits are LEVEL-triggered on a store-write generation, not a poll racing a
+deadline: a write that landed before the waiter armed is observed, never lost."""
 
 from __future__ import annotations
 
@@ -213,8 +213,8 @@ async def _next_store_edge(store: JobStore, job_id: str, listener: _StoreListene
             break
     last_state = await store.aload(job_id)
     raise AssertionError(
-        f"no write reached job {job_id} for {STORE_HANG_GUARD_SECONDS}s. The wait is "
-        "edge-triggered, so nothing elapsed: the store was not written to at all, "
+        f"no write reached job {job_id} for {STORE_HANG_GUARD_SECONDS}s. No store-write "
+        "generation advanced in that time: the store was not written to at all, "
         f"which is a wedge rather than slow progress. Last state: {last_state}"
     )
 
