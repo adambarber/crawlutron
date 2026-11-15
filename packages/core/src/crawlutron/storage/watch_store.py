@@ -17,6 +17,7 @@ from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.storage.coordination_store import CoordinationStore, atwin
 from crawlutron.storage.ids import new_watch_id
 from crawlutron.storage.migrations import StoreSchema
+from crawlutron.storage.safe_db import txn_write
 from crawlutron.vocabulary.taxonomy import (
     CrawlClassification,
     status_for_classification,
@@ -64,27 +65,27 @@ class WatchStore(CoordinationStore):
             updated_at=now,
         )
         with self._lock:
-            self._conn.execute(
-                """
-                INSERT INTO watches (
-                    watch_id, owner, url, webhook_url, interval_seconds, status,
-                    validators, next_check_at, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    state.watch_id,
-                    state.owner,
-                    state.url,
-                    webhook_url.delivery_url() if webhook_url is not None else None,
-                    state.interval_seconds,
-                    state.status,
-                    state.validators.model_dump_json(exclude_none=True),
-                    state.next_check_at,
-                    state.created_at,
-                    state.updated_at,
-                ),
-            )
-            self._conn.commit()
+            with txn_write(self._conn, owner="watch_store.create"):
+                self._conn.execute(
+                    """
+                    INSERT INTO watches (
+                        watch_id, owner, url, webhook_url, interval_seconds, status,
+                        validators, next_check_at, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        state.watch_id,
+                        state.owner,
+                        state.url,
+                        webhook_url.delivery_url() if webhook_url is not None else None,
+                        state.interval_seconds,
+                        state.status,
+                        state.validators.model_dump_json(exclude_none=True),
+                        state.next_check_at,
+                        state.created_at,
+                        state.updated_at,
+                    ),
+                )
         return state
 
     def get(self, watch_id: str) -> WatchState | None:
@@ -126,17 +127,17 @@ class WatchStore(CoordinationStore):
     def delete(self, watch_id: str) -> bool:
         """Remove a watch; ``False`` means no such watch existed."""
         with self._lock:
-            cursor = self._conn.execute("DELETE FROM watches WHERE watch_id = ?", (watch_id,))
-            self._conn.commit()
+            with txn_write(self._conn, owner="watch_store.delete"):
+                cursor = self._conn.execute("DELETE FROM watches WHERE watch_id = ?", (watch_id,))
         return cursor.rowcount == 1
 
     def delete_for_caller(self, watch_id: str, caller_id: str) -> bool:
         """Remove ``watch_id`` iff ``caller_id`` owns it; a foreign id deletes nothing."""
         with self._lock:
-            cursor = self._conn.execute(
-                "DELETE FROM watches WHERE watch_id = ? AND owner = ?", (watch_id, caller_id)
-            )
-            self._conn.commit()
+            with txn_write(self._conn, owner="watch_store.delete_for_caller"):
+                cursor = self._conn.execute(
+                    "DELETE FROM watches WHERE watch_id = ? AND owner = ?", (watch_id, caller_id)
+                )
         return cursor.rowcount == 1
 
     def due(self, now: float) -> list[WatchState]:
@@ -158,23 +159,23 @@ class WatchStore(CoordinationStore):
         the claimed rows are returned; a second sweeper's CAS loses and skips.
         """
         with self._lock:
-            self._conn.execute(
-                """
-                UPDATE watches SET claimed_by = ?, claimed_at = ?
-                WHERE status = ? AND next_check_at <= ?
-                  AND (claimed_at IS NULL OR claimed_at < ?)
-                """,
-                (token, now, WatchStatus.ACTIVE, now, now - claim_seconds),
-            )
-            self._conn.commit()
-            rows = self._conn.execute(
-                """
-                SELECT * FROM watches
-                WHERE status = ? AND next_check_at <= ? AND claimed_by = ?
-                ORDER BY next_check_at
-                """,
-                (WatchStatus.ACTIVE, now, token),
-            ).fetchall()
+            with txn_write(self._conn, owner="watch_store.claim_due"):
+                self._conn.execute(
+                    """
+                    UPDATE watches SET claimed_by = ?, claimed_at = ?
+                    WHERE status = ? AND next_check_at <= ?
+                      AND (claimed_at IS NULL OR claimed_at < ?)
+                    """,
+                    (token, now, WatchStatus.ACTIVE, now, now - claim_seconds),
+                )
+                rows = self._conn.execute(
+                    """
+                    SELECT * FROM watches
+                    WHERE status = ? AND next_check_at <= ? AND claimed_by = ?
+                    ORDER BY next_check_at
+                    """,
+                    (WatchStatus.ACTIVE, now, token),
+                ).fetchall()
         return [_row_to_state(row) for row in rows]
 
     def renew_claim(self, watch_id: str, token: str, *, now: float) -> bool:
@@ -183,14 +184,14 @@ class WatchStore(CoordinationStore):
         means ownership was lost -- the caller must skip the row, never rework it.
         """
         with self._lock:
-            cursor = self._conn.execute(
-                """
-                UPDATE watches SET claimed_at = ?
-                WHERE watch_id = ? AND claimed_by = ? AND status = ?
-                """,
-                (now, watch_id, token, WatchStatus.ACTIVE),
-            )
-            self._conn.commit()
+            with txn_write(self._conn, owner="watch_store.renew_claim"):
+                cursor = self._conn.execute(
+                    """
+                    UPDATE watches SET claimed_at = ?
+                    WHERE watch_id = ? AND claimed_by = ? AND status = ?
+                    """,
+                    (now, watch_id, token, WatchStatus.ACTIVE),
+                )
         return cursor.rowcount == 1
 
     def record_check(
@@ -212,41 +213,41 @@ class WatchStore(CoordinationStore):
         modified = status == "success" and outcome != CrawlClassification.not_modified
         error = status not in ("success", "skipped")
         with self._lock:
-            cursor = self._conn.execute(
-                """
-                UPDATE watches SET
-                    last_checked_at = ?,
-                    last_outcome = ?,
-                    -- a delivered change moves the change clock; nothing else does
-                    last_changed_at = CASE WHEN ? THEN ? ELSE last_changed_at END,
-                    -- a failure check extends the streak; any other verdict resets it
-                    consecutive_failures = CASE WHEN ? THEN consecutive_failures + 1 ELSE 0 END,
-                    -- a delivered body replaces the set outright; other verdicts keep it
-                    validators = CASE WHEN ? THEN ? ELSE validators END,
-                    next_check_at = ?,
-                    -- the claim ends with the check: a completed row is unclaimed
-                    claimed_at = NULL,
-                    updated_at = ?
-                WHERE watch_id = ? AND claimed_by = ?
-                """,
-                (
-                    now,
-                    outcome,
-                    modified,
-                    now,
-                    error,
-                    modified,
-                    ContentValidators(
-                        etag=etag if modified else None,
-                        last_modified=(last_modified if modified else None),
-                    ).model_dump_json(exclude_none=True),
-                    next_check_at,
-                    now,
-                    watch_id,
-                    claimed_by,
-                ),
-            )
-            self._conn.commit()
+            with txn_write(self._conn, owner="watch_store.record_check"):
+                cursor = self._conn.execute(
+                    """
+                    UPDATE watches SET
+                        last_checked_at = ?,
+                        last_outcome = ?,
+                        -- a delivered change moves the change clock; nothing else does
+                        last_changed_at = CASE WHEN ? THEN ? ELSE last_changed_at END,
+                        -- a failure check extends the streak; any other verdict resets it
+                        consecutive_failures = CASE WHEN ? THEN consecutive_failures + 1 ELSE 0 END,
+                        -- a delivered body replaces the set outright; other verdicts keep it
+                        validators = CASE WHEN ? THEN ? ELSE validators END,
+                        next_check_at = ?,
+                        -- the claim ends with the check: a completed row is unclaimed
+                        claimed_at = NULL,
+                        updated_at = ?
+                    WHERE watch_id = ? AND claimed_by = ?
+                    """,
+                    (
+                        now,
+                        outcome,
+                        modified,
+                        now,
+                        error,
+                        modified,
+                        ContentValidators(
+                            etag=etag if modified else None,
+                            last_modified=(last_modified if modified else None),
+                        ).model_dump_json(exclude_none=True),
+                        next_check_at,
+                        now,
+                        watch_id,
+                        claimed_by,
+                    ),
+                )
         return cursor.rowcount == 1
 
     def deactivate(
@@ -263,32 +264,32 @@ class WatchStore(CoordinationStore):
         claim's holder -- a stale sweeper's deactivate is a no-op.
         """
         with self._lock:
-            # ``claimed_by = NULL`` matches nothing: without a token the first
-            # disjunct is true, so any row matches (pre-fix behavior).
-            self._conn.execute(
-                """
-                UPDATE watches SET
-                    status = ?,
-                    last_outcome = ?,
-                    next_check_at = ?,
-                    -- the claim ends with the check: a completed row is unclaimed
-                    claimed_at = NULL,
-                    claimed_by = NULL,
-                    updated_at = ?
-                WHERE watch_id = ?
-                  AND (? IS NULL OR claimed_by = ?)
-                """,
-                (
-                    WatchStatus.DEACTIVATED,
-                    reason,
-                    next_check_at,
-                    now,
-                    watch_id,
-                    claimed_by,
-                    claimed_by,
-                ),
-            )
-            self._conn.commit()
+            with txn_write(self._conn, owner="watch_store.deactivate"):
+                # ``claimed_by = NULL`` matches nothing: without a token the first
+                # disjunct is true, so any row matches (pre-fix behavior).
+                self._conn.execute(
+                    """
+                    UPDATE watches SET
+                        status = ?,
+                        last_outcome = ?,
+                        next_check_at = ?,
+                        -- the claim ends with the check: a completed row is unclaimed
+                        claimed_at = NULL,
+                        claimed_by = NULL,
+                        updated_at = ?
+                    WHERE watch_id = ?
+                      AND (? IS NULL OR claimed_by = ?)
+                    """,
+                    (
+                        WatchStatus.DEACTIVATED,
+                        reason,
+                        next_check_at,
+                        now,
+                        watch_id,
+                        claimed_by,
+                        claimed_by,
+                    ),
+                )
 
     # One ``atwin`` twin per operation: the signature is declared once, by the
     # sync method, and an async caller never holds the loop while the lock is.

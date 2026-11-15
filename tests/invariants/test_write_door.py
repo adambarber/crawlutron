@@ -24,7 +24,6 @@ _EXEMPT_MODULES = frozenset(
         "packages/core/src/crawlutron/storage/job_store_accumulators.py": "awaiting the accumulators arc",
         "packages/core/src/crawlutron/storage/job_store_lease.py": "awaiting the job-store arc",
         "packages/core/src/crawlutron/storage/result_store.py": "awaiting the result-store arc",
-        "packages/core/src/crawlutron/storage/watch_store.py": "awaiting the watch-store arc",
     }
 )
 
