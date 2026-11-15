@@ -6,7 +6,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 n="${1:?usage: ticket_arch_review.sh <issue-number>}"
-body=$(gh issue view "$n" --json body -q .body 2>/dev/null) || {
+# Reviews are recorded as comments (the issue body is set once at creation), so
+# the scan reads the body and every comment: the gate must agree with the record.
+body=$(gh issue view "$n" --json body,comments \
+  -q '.body + "\n" + ([.comments[].body] | join("\n"))' 2>/dev/null) || {
   echo "FAIL: issue #$n not found"
   exit 1
 }
