@@ -25,34 +25,20 @@ permissions:
   contents: read
 
 jobs:
-  distributions:
-    name: Build and publish to PyPI
+  guard:
+    name: "Guard: assert the tag version and inspect every artifact"
     runs-on: ubuntu-latest
-    # A green CI run on a tag, and nothing else: the tag is what makes it a
+    # A green CI run on a v* tag, and nothing else: the tag is what makes it a
     # release, the green run is what makes it publishable.
     if: ${{ github.event.workflow_run.conclusion == 'success' && startsWith(github.event.workflow_run.head_branch, 'v') }}
-    environment: pypi
     permissions:
       contents: read
-      # Trusted publishing exchanges this OIDC token for a short-lived upload
-      # token; it is never a long-lived credential.
-      id-token: write
-    env:
-      # Bootstrap escape hatch. PyPI dedupes *pending* publishers on the workflow
-      # identity, so a name that does not exist yet cannot be pre-registered while
-      # another is pending. With this secret set the publish uses a scoped API
-      # token instead; unset, it uses trusted publishing. Delete the secret once
-      # every name is registered.
-      PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          # The commit CI actually ran, not whatever a branch points at now.
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
           fetch-tags: true
-      # The tag is the version. If the checkout carries none, hatch-vcs falls back
-      # to 0.1.devN and the version assertion below fails the release loudly.
       - name: Fetch the tags the version comes from
         run: git fetch --tags --force
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
@@ -62,14 +48,9 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.14"
-
       - name: Assert the tag carries the version the build will derive
-        # A mis-tagged release must fail before anything is published: a tag that
-        # does not match the tree would ship `0.0.0.dev0` under a semver name.
         run: |
           set -euo pipefail
-          # The tag names the release, and under `workflow_run` it lives on the CI
-          # run's head branch; the workflow's own ref there is the default branch.
           TAG="${{ github.event.workflow_run.head_branch }}"
           TAG="${TAG#v}"
           uv build --all-packages --out-dir dist >/dev/null
@@ -86,8 +67,6 @@ jobs:
           for sdist in sdists:
               with tarfile.open(sdist) as tf:
                   name = tf.getnames()[0].split("/")[0]
-              # An sdist directory is `{name}-{version}`; a dev suffix means the
-              # tag did not reach the tree this built from.
               version = name.split("-", 1)[1]
               print(f"{sdist.name}: {version}")
               if version != tag:
@@ -96,16 +75,79 @@ jobs:
               print(f"::error::{line}")
           sys.exit(1 if bad else 0)
           PY
-
       - name: Inspect every artifact
         run: uvx twine check --strict dist/*
 
+  roster:
+    name: Compute the publish roster from the manifest
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' && startsWith(github.event.workflow_run.head_branch, 'v') }}
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.emit.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.14"
+      - name: Emit the manifest-derived roster
+        id: emit
+        run: |
+          set -euo pipefail
+          python scripts/release_roster.py > /tmp/roster.json
+          MATRIX="$(python -c 'import json; print(json.dumps({"selector": [entry["selector"] for entry in json.load(open("/tmp/roster.json"))]}))')"
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+
+  distributions:
+    name: Publish ${{ matrix.selector }} to PyPI
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' && startsWith(github.event.workflow_run.head_branch, 'v') }}
+    needs: [guard, roster]
+    permissions:
+      contents: read
+      id-token: write
+    environment: pypi
+    strategy:
+      fail-fast: true
+      max-parallel: 1
+      matrix: ${{ fromJson(needs.roster.outputs.matrix) }}
+    env:
+      PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Fetch the tags the version comes from
+        run: git fetch --tags --force
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.14"
+      - name: Resolve the release version from the CI run's tag
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.workflow_run.head_branch }}"
+          TAG="${TAG#v}"
+          echo "releasing $TAG for ${{ matrix.selector }}"
+      - name: Build only this distribution
+        run: uv build --package ${{ matrix.selector }} --out-dir dist
+      - name: Inspect this distribution's artifacts
+        run: uvx twine check --strict dist/*
       - name: Publish to PyPI (trusted publishing)
         if: ${{ env.PYPI_API_TOKEN == '' }}
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1
         with:
           packages-dir: dist/
-
       - name: Publish to PyPI (bootstrap token)
         if: ${{ env.PYPI_API_TOKEN != '' }}
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1
@@ -137,7 +179,6 @@ jobs:
         id: version
         run: |
           set -euo pipefail
-          # The tag the CI run was cut from, not whatever the workflow ref says.
           BRANCH="${{ github.event.workflow_run.head_branch }}"
           case "$BRANCH" in
             v*) ;;
@@ -145,7 +186,6 @@ jobs:
           esac
           VERSION="${BRANCH#v}"
           echo "native=${VERSION}"
-          # GHCR names are lowercase and docker refs reject '+'.
           TAG="$(printf %s "$VERSION" | tr '[:upper:]' '[:lower:]' | tr '+' '-')"
           echo "tag=${TAG}"
           echo "native=${VERSION}" >> "$GITHUB_OUTPUT"
@@ -177,8 +217,6 @@ jobs:
           TAG="${{ steps.version.outputs.tag }}"
           NAME="crawlutron-smoke"
           docker rm -f "$NAME" >/dev/null 2>&1 || true
-          # The CMD binds loopback by default; Docker -p cannot reach a loopback-
-          # bound process, so bind 0.0.0.0 exactly as docker-compose.yml does.
           docker run -d --name "$NAME" -e CRAWLUTRON_HOST=0.0.0.0 -p 8765:8765 "$IMAGE:$TAG"
           trap 'docker rm -f "$NAME" >/dev/null 2>&1 || true' EXIT
           for _ in $(seq 1 15); do
