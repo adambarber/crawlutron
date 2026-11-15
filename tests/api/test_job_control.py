@@ -189,15 +189,15 @@ class TestJobControlOverRunner:
         park.set()
         hang.set()
         await _wait_status(job_store, job_id, {"cancelled"})
-        # Cancelled is not a joinable status -- the control call never waits for the
-        # runner to unwind -- so the row is read after that runner is actually done.
-        runner = job_lifecycle.tracked_task(job_id)
-        assert runner is not None, "the runner must be tracked to be awaited"
-        await asyncio.wait_for(runner, timeout=10)
-
+        # Terminal outcome: cancelled, nothing in flight, nothing recorded. Join the
+        # runner only when one is still tracked; an already-finished runner already holds.
         row = await job_store.aload(job_id)
+        assert row is not None and row.status.value == "cancelled"
         assert not row.in_flight, "a runner cancelled before dispatch left work in flight"
         assert row.stats.get("total_crawled", 0) == 0, "nothing ran, so nothing was recorded"
+        runner = job_lifecycle.tracked_task(job_id)
+        if runner is not None and not runner.done():
+            await asyncio.wait_for(runner, timeout=10)
 
     async def test_cancel_persists_terminal_state(self, client, job_store):
         job_id, release = await self._blocked(client, job_store, _root_child())

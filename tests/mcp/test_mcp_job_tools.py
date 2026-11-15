@@ -191,8 +191,12 @@ class TestDeleteJobTool:
 class TestCreateJobTool:
     async def test_the_tool_creates_a_job_the_rest_door_answers(self, tmp_path):
         async with created_over_mcp(tmp_path) as (h, structured):
-            assert structured["status"] == "pending"
+            # The row is born pending; the scheduler may claim it to running before the
+            # tool's status read lands -- both are legal in-flight states.
+            assert structured["status"] in {"pending", "running"}
             assert structured["root_url"] == canonical("http://example.com/").raw
+            # The job exists, the caller owns it (caller-scoped door), and the REST door
+            # answers with a coherent body.
             rest_job = await h.rest_json("get", f"/v1/jobs/{structured['job_id']}")
             assert rest_job["job_id"] == structured["job_id"]
 
