@@ -123,10 +123,10 @@ async def wire_ssrf_guards(
 ) -> None:
     """Route-level SSRF guards plus XHR interception, before navigation."""
     context = page.context
-    # Fail closed: a context without ``route_web_socket`` cannot install the
-    # SSRF WebSocket guard, so the render is refused before any guard is wired.
+    # Fail closed: a context without a callable ``route_web_socket`` refuses the
+    # render before any guard is wired; a present-but-unusable attribute too.
     ws_router = getattr(context, "route_web_socket", None)
-    if ws_router is None:
+    if not callable(ws_router):
         raise WebSocketGuardUnavailable()
     # Install at the page's context: every page/worker the context spawns is
     # covered, including ones created after the install.

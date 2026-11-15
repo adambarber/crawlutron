@@ -24,6 +24,7 @@ from crawlutron.transport.browser_driver import BrowserDriver
 from crawlutron.transport.browser_render_phases import (
     ReleasePlan,
     RenderCollaborators,
+    WebSocketGuardUnavailable,
     WireGuard,
     guarded_render,
     release_page,
@@ -212,6 +213,10 @@ class BrowserRenderer:
             try:
                 result = await self.render_once(url, options, policy=policy)
                 return result
+            except WebSocketGuardUnavailable:
+                # A missing interception capability is permanent: retrying spends
+                # every attempt and buries the named refusal in retry_exhausted.
+                raise
             except Exception as error:
                 classification: Classification = _render_classification(error)
                 last_error = classify_error_code(error)

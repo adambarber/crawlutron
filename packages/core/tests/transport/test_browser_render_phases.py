@@ -10,8 +10,14 @@ from collections.abc import Callable
 from typing import cast
 
 import pytest
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
 
+from crawlutron.models.crawl_result import CrawlResult
 from crawlutron.models.intercepted_xhr_record import InterceptedXhrRecord
+from crawlutron.models.render_options import RenderOptions
+from crawlutron.transport.browser import BrowserRenderer
+from crawlutron.transport.browser_driver import BrowserDriver
 from crawlutron.transport.browser_render_phases import (
     WebSocketGuardUnavailable,
     WireGuard,
@@ -98,3 +104,49 @@ class TestWebSocketGuardInstalledWhenCapable:
         assert context.ws_calls[0][0] == "**/*"
         assert len(context.route_calls) == 1
         assert context.route_calls[0][0] == "**/*"
+
+
+class _IdleDriver:
+    """A driver no render reaches: the render refuses before the page is used."""
+
+    async def close(self) -> None:
+        return None
+
+
+class _UncallableSocketContext(_SocketlessContext):
+    """A context whose ``route_web_socket`` exists but cannot be called."""
+
+    route_web_socket = "unsupported"
+
+
+class _RefusingRenderer(BrowserRenderer):
+    """A renderer whose every attempt hits the missing-capability refusal."""
+
+    attempts: int = 0
+
+    async def render_once(
+        self, url: NormalizedUrl, options: RenderOptions, *, policy: HostPolicy
+    ) -> CrawlResult:
+        self.attempts += 1
+        raise WebSocketGuardUnavailable()
+
+
+class TestWebSocketGuardNotRetried:
+    """A permanent capability refusal is raised once, not retried into a generic failure."""
+
+    async def test_render_raises_the_named_refusal_without_retrying(self):
+        """render() propagates WebSocketGuardUnavailable after a single attempt."""
+        renderer = _RefusingRenderer(driver=cast(BrowserDriver, _IdleDriver()))
+        with pytest.raises(WebSocketGuardUnavailable):
+            await renderer.render(
+                admitted(_TARGET, policy=UNRESTRICTED_HOST_POLICY),
+                RenderOptions(),
+                policy=UNRESTRICTED_HOST_POLICY,
+            )
+        assert renderer.attempts == 1
+
+    async def test_uncallable_route_web_socket_is_refused_the_same_way(self):
+        """A present-but-unusable capability is refused, not left to a TypeError."""
+        page = BrowserFakePage(context=cast(GuardContext, _UncallableSocketContext()))
+        message = await _refuses_render(page)
+        assert "route_web_socket" in message
