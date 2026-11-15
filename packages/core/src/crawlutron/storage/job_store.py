@@ -92,6 +92,8 @@ def _read_job_row(
     statement, params = _owner_statement(_ROW_COLUMNS, True, "", owner)
     try:
         with store._lock:
+            # #1059: JobStore.load is called synchronously from async tests across
+            # nine API/service test modules; narrows the loop ban for this path only.
             with allow_on_loop_read():
                 with txn_read(store._conn, owner="job_store.read_job_row"):
                     row = _fetch_owner_row(store._conn, statement, (job_id, *params))

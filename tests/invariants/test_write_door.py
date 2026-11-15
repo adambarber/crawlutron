@@ -1,6 +1,6 @@
 """Write-door invariant: every storage write funnels through txn_write/in_txn.
 
-Decidable SQL shapes: literal operand, joined/synthetic operand, module-constant name. No module exempt."""
+Decidable SQL: literal, f-string literal prefix, module-constant name; parameter/attribute SQL skipped."""
 
 from __future__ import annotations
 
@@ -51,6 +51,10 @@ def _first_sql_string(call: ast.Call, tree: ast.Module | None = None) -> str | N
     argument = call.args[0]
     if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
         return argument.value
+    if isinstance(argument, ast.JoinedStr):
+        # f-string: decidable only by its literal prefix before the first
+        # substitution; anything after the first {} is opaque to an AST walk.
+        return _fstring_literal_prefix(argument)
     if not isinstance(argument, ast.Name) or tree is None:
         return None
     # Look up the name in module-level string-constant assignments.
@@ -65,6 +69,17 @@ def _first_sql_string(call: ast.Call, tree: ast.Module | None = None) -> str | N
         if isinstance(val, ast.Constant) and isinstance(val.value, str):
             return val.value
     return None
+
+
+def _fstring_literal_prefix(node: ast.JoinedStr) -> str | None:
+    """Constant text before the first f-string substitution, or None if undecidable."""
+    parts: list[str] = []
+    for value in node.values:
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            parts.append(value.value)
+        else:
+            break
+    return "".join(parts) if parts else None
 
 
 def _is_write_statement(sql: str) -> bool:
@@ -123,7 +138,8 @@ WRITE_DOOR_RULE = Rule(
     summary=(
         "executes an INSERT/UPDATE/DELETE/BEGIN, or a direct commit/rollback/"
         "executescript, outside txn_write/in_txn/configure_store_connection; "
-        "decidable SQL: literal, joined/synthetic, module-constant name"
+        "decidable SQL: literal, f-string literal prefix, module-constant name; "
+        "parameter/attribute SQL operand skipped, not decided"
     ),
     scope=lambda *, exclude: (
         (path, tree)
@@ -137,6 +153,7 @@ WRITE_DOOR_RULE = Rule(
         'alias._conn.execute("UPDATE t SET x = 1")\n',
         'SQL = "UPDATE t SET x = 1"\nconn.execute(SQL)\n',
         'store._conn.execute("BEGIN")\n',
+        'conn.execute(f"UPDATE t SET {col} = 1")\n',
     ),
     clean=lambda: (
         'with txn_write(conn):\n    conn.execute("UPDATE t SET x = 1")\n',
@@ -145,6 +162,7 @@ WRITE_DOOR_RULE = Rule(
         'conn.execute("SELECT * FROM t")\n',
         'self._conn.execute("PRAGMA busy_timeout=5000")\n',
         'something._rows.execute("UPDATE t SET x = 1")\n',
+        'conn.execute(f"SELECT * FROM {table}")\n',
     ),
 )
 

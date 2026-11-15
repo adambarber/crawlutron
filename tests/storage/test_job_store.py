@@ -286,7 +286,9 @@ class TestJobStoreEdges:
         store.close()  # closing twice is safe
         try:
             store.load("anything")
-        except (sqlite3.ProgrammingError, StoreClosed):
+        except StoreClosed:
+            # Contract change: closed-store read raises StoreClosed (not
+            # sqlite3.ProgrammingError) through _exec — stated, not masked (#1054).
             pass
         else:
             raise AssertionError("a closed job store must refuse operations")
