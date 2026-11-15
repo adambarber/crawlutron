@@ -11,8 +11,6 @@ import threading
 import time
 from collections.abc import Mapping
 
-import pytest
-
 from crawlutron.runtime.metrics import MetricsStore
 from crawlutron.storage.coordination_counters import CoordinationCounters
 from tests._thread_fanout import run_threads
@@ -220,71 +218,26 @@ async def test_caller_series_source_read_runs_off_the_loop(tmp_path):
     assert all(ident != loop_ident for ident in counters.snapshot_idents)
 
 
-class _LocalAddHarness(MetricsStore):
-    """A metrics store whose local-add read-modify-write can be parked mid-RMW,
-    so an increment can be forced to land while bind_counters carries over
-    ``_local``.
-    """
-
-    def __init__(self, *args, **kwargs) -> None:
-        # Parks the local-add read-modify-write between read and write.
-        super().__init__(*args, **kwargs)
-        self.rmw_read = threading.Event()
-        self.rmw_gate = threading.Event()
-
-
-def _stranded_increment(store: _LocalAddHarness, key: str) -> None:
-    """One local-path increment: read the old value, park, then write old + 1."""
-    with store._write_lock:
-        old = store._local.get(key, 0.0)
-        store.rmw_read.set()
-        store.rmw_gate.wait(timeout=5)
-        store._local[key] = old + 1.0
-
-
-class _ParkedBindCounters(CoordinationCounters):
-    """A store whose add_many observes the mapping and parks the flush window
-    before committing it, so bind_counters' carryover flush is only atomic
-    when it holds the write lock."""
-
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        # bind_counters hands the mapping to add_many; observe it there.
-        self.parked = threading.Event()
-        self.params_seen: list[tuple[str, float]] | None = None
-
-    def add_many(self, deltas: Mapping[str, float]) -> None:
-        self.params_seen = list(deltas.items())
-        self.parked.set()
-        time.sleep(0.05)
-        return super().add_many(dict(self.params_seen or {}))
-
-
-@pytest.mark.real_sleeps
-async def test_bind_counters_holds_write_lock_across_carryover(tmp_path) -> None:
+async def test_bind_holds_write_lock_across_carryover(tmp_path) -> None:
     """An increment parked mid-RMW while bind carries over ``_local`` is
-    flushed with the carryover: bind holds the write lock across the handoff,
-    so the increment is never stranded."""
-    store = _LocalAddHarness()  # no store bound yet
-    store.record_doc_pool_unavailable()  # _local[doc_pool] = 1.0
-    counters = _ParkedBindCounters(tmp_path / "bind.db")
+    flushed with the carryover: bind holds the write lock, so nothing is
+    stranded; unfixed, bind clears ``_local`` mid-RMW and reads 1.0 instead of 2.0."""
+    KEY = "extraction_doc_pool_unavailable_total"
+    store = MetricsStore()  # no store bound yet
+    store.record_doc_pool_unavailable()  # _local[KEY] = 1.0
+    counters = CoordinationCounters(tmp_path / "bind.db")
 
-    increment_thread = threading.Thread(
-        target=_stranded_increment, args=(store, "extraction_doc_pool_unavailable_total")
-    )
-
-    def _release_incrementer() -> None:
-        time.sleep(0.05)
-        store.rmw_gate.set()
-
-    releaser = threading.Thread(target=_release_incrementer)
-    increment_thread.start()
-    releaser.start()
-    assert store.rmw_read.wait(timeout=5), "the increment never reached its read-modify-write"
-    await store.bind_counters(counters)  # fixed: blocks behind the parked increment's lock
-    increment_thread.join(timeout=5)
-    releaser.join(timeout=5)
-    assert not increment_thread.is_alive() and not releaser.is_alive()
+    parked = threading.Event()
+    released = threading.Event()
+    incrementer = threading.Thread(target=store.parked_local_increment, args=(KEY, parked, released))
+    bind_worker = threading.Thread(target=lambda: asyncio.run(store.bind_counters(counters)))
+    incrementer.start()
+    assert parked.wait(timeout=5), "the increment never parked mid read-modify-write"
+    bind_worker.start()  # fixed: blocks behind the parked increment's lock; unfixed: races and loses it
+    released.set()
+    incrementer.join(timeout=5)
+    bind_worker.join(timeout=5)
+    assert not incrementer.is_alive() and not bind_worker.is_alive()
     assert (await store.snapshot()).extraction_doc_pool_unavailable_total == 2.0, (
         "an increment landing mid-bind was stranded and lost"
     )
@@ -331,3 +284,19 @@ async def test_caller_cache_is_cleared_on_bind(tmp_path) -> None:
     await store.observe_crawl(caller_id="repeat")  # cache cleared: re-consults bound
     assert len(bound.snapshot_idents) == 1  # exactly one re-consultation
     assert (await store.snapshot()).caller_counts == {"repeat": 2.0}  # carryover + new
+
+
+async def test_admitted_series_count_stays_at_cap(tmp_path) -> None:
+    """A caller-id flood cannot grow the admitted-series dict past the cap:
+    folded callers are not cached, so the cache stops at the cap while the
+    overflow series keeps bare == sum(labels) exact."""
+    counters = CoordinationCounters(tmp_path / "flood.db")
+    store = MetricsStore(counters=counters)
+    for i in range(400):
+        await store.observe_crawl(caller_id=f"flood-{i}")
+    assert store.admitted_series_count() == 256
+    counts = (await store.snapshot()).caller_counts
+    assert len(counts) == 257
+    assert counts["__overflow__"] >= 1.0
+    await store.observe_crawl(caller_id="flood-7")  # repeat caller: cache hit
+    assert store.admitted_series_count() == 256

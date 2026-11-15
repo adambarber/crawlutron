@@ -15,16 +15,15 @@ from crawlutron.storage.safe_db import allow_on_loop
 if TYPE_CHECKING:
     from crawlutron.storage.coordination_counters import CoordinationCounters
 
-# Labelled families: the store keys a family under "<prefix><label>", so one
-# prefix read yields every series in it.
+# Labelled families: the store keys a family under "<prefix><label>"; one prefix read yields every series.
 _STRATEGY_PREFIX = "strategy:"
 _CLASSIFICATION_PREFIX = "classification:"
 _PROVIDER_PREFIX = "search_provider:"
 _CALLER_PREFIX = "caller:"
 _SEARCH_CALLER_PREFIX = "search_caller:"
 
-# Fail-closed bound on distinct caller-labelled series per family; a NEW caller
-# past it folds into one reserved overflow series so bare and sum stay exact.
+# Fail-closed bound: 256 caller-labelled series per family; a NEW caller past
+# it folds into one reserved overflow series so bare and sum stay exact.
 _MAX_CALLER_SERIES = 256
 _OVERFLOW_SERIES = "__overflow__"
 
@@ -65,11 +64,9 @@ class MetricsStore:
         #: One dict for every counter and label; a counter is added in one place
         #: whether or not a store is attached.
         self._local: dict[str, float] = {}
-        #: One write lock: the local RMW and caller-series check-then-insert
-        #: interleave across threads, so both stay atomic.
+        #: One write lock serializes the local RMW and caller check-then-insert across threads.
         self._write_lock = threading.RLock()
-        #: (prefix, caller_id) -> series admitted under the series cap;
-        #: __overflow__ is a resolved value, so fold decisions are remembered.
+        #: (prefix, caller_id) -> admitted series; __overflow__ fold decisions are remembered.
         self._known_series: dict[tuple[str, str], str] = {}
         self.resource_memory_utilization: float = 0.0
         self.resource_cpu_utilization: float = 0.0
@@ -82,8 +79,7 @@ class MetricsStore:
             store.add_pending(key, delta)
             return
         with self._write_lock:
-            # A bind can attach the store while we wait: re-check under the
-            # lock so an increment landing mid-bind is pending, not stranded.
+            # A bind can attach the store while we wait: re-check under the lock.
             store = self._counters
             if store is not None:
                 store.add_pending(key, delta)
@@ -106,8 +102,8 @@ class MetricsStore:
         return {key.removeprefix(prefix): value for key, value in source.items() if key.startswith(prefix)}
 
     def _caller_series(self, source: dict[str, float], prefix: str, caller_id: str) -> str:
-        """Caller series under the cap: new callers past it fold into one
-        reserved overflow series, keeping bare and sum(labels) exact."""
+        """Caller series under the cap: new callers past it fold into the one
+        overflow series, keeping bare and sum(labels) exact."""
         key = prefix + caller_id
         if key in source:
             return caller_id
@@ -115,7 +111,7 @@ class MetricsStore:
         return _OVERFLOW_SERIES if distinct >= _MAX_CALLER_SERIES else caller_id
 
     async def snapshot(self) -> CountersSnapshot:
-        """Every counter as one typed record; the read runs off the loop via ``asnapshot``."""
+        """Every counter as one typed record."""
         store = self._counters
         source = await store.asnapshot() if store is not None else self._local
         return CountersSnapshot(
@@ -146,17 +142,32 @@ class MetricsStore:
     # -- the only counter write paths --------------------------------------
 
     def _record_caller_series(self, prefix: str, caller_id: str) -> None:
-        """Caller series under the cap: hit is a fast path with no store read,
-        miss reads the shared table once under the lock and remembers the
-        fold-or-mint decision -- the cap stays a global bound."""
+        """Caller series under the cap: hit is a fast path with no store read;
+        misses consult the store once and remember the fold-or-mint decision."""
         if not caller_id:
             return
         with self._write_lock:
             series = self._known_series.get((prefix, caller_id))
             if series is None:
                 series = self._caller_series(self._source(), prefix, caller_id)
-                self._known_series[(prefix, caller_id)] = series
+                #: only own-series admissions are remembered; __overflow__
+                #: resolutions are re-derived from the store so the dict stays capped.
+                if series != _OVERFLOW_SERIES:
+                    self._known_series[(prefix, caller_id)] = series
             self._add(prefix + series, 1)
+
+    def admitted_series_count(self) -> int:
+        """Caller series admitted under their own names (never overflow); bounded by the series cap."""
+        return len(self._known_series)
+
+    def parked_local_increment(self, key: str, parked: threading.Event, released: threading.Event) -> None:
+        """Test seam: one local-path increment read-modify-written with the write
+        lock held and parked between read and write; bind_counters starts parked so carryover is flushed."""
+        with self._write_lock:
+            old = self._local.get(key, 0.0)
+            parked.set()
+            released.wait(timeout=5)
+            self._local[key] = old + 1.0
 
     async def observe_crawl(
         self,
@@ -246,10 +257,7 @@ class MetricsStore:
         return self._counters
 
     async def bind_counters(self, counters: CoordinationCounters) -> None:
-        """Attach shared storage mid-life, carrying over any local counters --
-        carried over unconditionally, since a non-empty store can be a sibling's
-        and is not evidence this process's counts reached it.
-        """
+        """Attach shared storage mid-life, carrying over any local counters unconditionally."""
         if self._counters is not None:
             self._counters = counters
             with self._write_lock:
@@ -264,7 +272,7 @@ class MetricsStore:
             await counters.a_add_many(carried)
 
     def reset(self) -> None:
-        """Zero every counter and gauge; clear the admitted-series cache too."""
+        """Zero every counter and gauge; clear the admitted-series cache."""
         with self._write_lock:
             self._known_series.clear()
         if self._counters is not None:
@@ -415,8 +423,7 @@ _FAMILIES: tuple[_Family, ...] = (
     ),
 )
 
-# The bare counter families, in exposition order -- the declaration the golden
-# test reads; public on purpose so the suite pins it without a private reach.
+# The bare counter families, in exposition order; public so the golden test pins the declaration.
 COUNTER_FAMILIES = tuple(f for f in _FAMILIES if f.kind == "counter" and f.label is None and f.header)
 
 
@@ -471,7 +478,7 @@ def _reset() -> None:
 
 def _has() -> bool:
     """Whether this process holds counter state right now: local totals or
-    increments not yet flushed (the shared table is not process state)."""
+    increments not yet flushed."""
     store = metrics.counters
     return bool(metrics._local) or (store is not None and store.has_pending())
 
@@ -486,8 +493,7 @@ def get_metrics() -> MetricsStore:
 
 
 def unbind_metric_counters() -> None:
-    """Close the bound shared counters and detach them (shutdown, #838): a later
-    reset falls to the process-local arm instead of a closed connection."""
+    """Close the bound shared counters and detach them; reset then uses the process-local arm."""
     counters = metrics.counters
     if counters is not None:
         counters.close()
