@@ -299,7 +299,7 @@ async def test_a_pass_that_raises_does_not_end_the_sweep(watch_store, monkeypatc
     assert len(attempts) == 3
     # The per-watch isolation rescheduled and flagged the raising watch rather than
     # leaving it due forever; a transient raise is not a refusal, so it stays active.
-    reloaded = watch_store.get(watch_store.list_watches()[0].watch_id)
+    reloaded = await watch_store.aget((await watch_store.alist_watches())[0].watch_id)
     assert (reloaded.consecutive_failures, reloaded.status) == (3, WatchStatus.ACTIVE)
 
 
@@ -400,15 +400,15 @@ async def test_a_owner_at_quota_watch_check_skips_the_row_without_a_failure_reco
     calls: list[str] = []
     tracker, record, sweeper = await _keyed_sweeper(watch_store, tmp_path, monkeypatch, capture=calls)
     await tracker.reserve(record.key_id)  # the owner's one slot is already taken
-    watch = watch_store.list_watches()[0]
-    before = watch_store.get(watch.watch_id)
+    watch = (await watch_store.alist_watches())[0]
+    before = await watch_store.aget(watch.watch_id)
 
     outcomes = await sweeper.sweep_once(now=NOW)
 
     # The check never ran: the owner's quota refusal is not the site's health.
     assert calls == []
     assert outcomes == []
-    after = watch_store.get(watch.watch_id)
+    after = await watch_store.aget(watch.watch_id)
     assert (after.consecutive_failures, after.next_check_at, after.last_checked_at) == (
         before.consecutive_failures,
         before.next_check_at,

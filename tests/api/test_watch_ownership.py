@@ -117,4 +117,4 @@ async def test_an_interval_below_the_politeness_floor_is_refused(watch_store, tm
         response = await client.post("/v1/watches", json={"url": TARGET, "interval_seconds": 1})
 
     assert response.status_code == 422, response.text
-    assert watch_store.list_watches() == []
+    assert await watch_store.alist_watches() == []

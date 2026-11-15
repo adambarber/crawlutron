@@ -53,7 +53,7 @@ async def test_a_url_this_deployment_will_not_crawl_is_refused(watch_store, monk
     response = await _register(watch_store, url="http://127.0.0.1:9/", interval_seconds=INTERVAL)
 
     assert response.status_code == 422, response.text
-    assert watch_store.list_watches() == []
+    assert await watch_store.alist_watches() == []
 
 
 async def test_a_webhook_this_deployment_cannot_deliver_to_is_refused(watch_store, monkeypatch):
@@ -63,7 +63,7 @@ async def test_a_webhook_this_deployment_cannot_deliver_to_is_refused(watch_stor
     response = await _register(watch_store, url=TARGET, interval_seconds=INTERVAL, webhook_url=WEBHOOK)
 
     assert response.status_code == 422, response.text
-    assert watch_store.list_watches() == []
+    assert await watch_store.alist_watches() == []
 
 
 async def test_an_http_webhook_is_refused(watch_store):
@@ -76,7 +76,7 @@ async def test_an_http_webhook_is_refused(watch_store):
         webhook_url="http://receiver.example/hook",
     )
     assert response.status_code == 422, response.text
-    assert watch_store.list_watches() == []
+    assert await watch_store.alist_watches() == []
 
 
 async def test_a_webhook_with_a_secret_query_param_is_refused(watch_store):
@@ -91,7 +91,7 @@ async def test_a_webhook_with_a_secret_query_param_is_refused(watch_store):
     )
     assert response.status_code == 422, response.text
     assert "secret123" not in response.text
-    assert watch_store.list_watches() == []
+    assert await watch_store.alist_watches() == []
 
 
 async def test_a_non_positive_interval_is_refused(watch_store):
@@ -176,7 +176,7 @@ async def test_deleting_a_watch_stops_it_being_checked(watch_store):
     assert removed.status_code == 204, removed.text
     assert read.status_code == 404, read.text
     # The row is gone, so a sweep cannot find a watch nobody is watching.
-    assert watch_store.due(10_000.0) == []
+    assert await watch_store.adue(10_000.0) == []
 
 
 async def test_a_watch_url_with_a_credential_shaped_query_param_is_refused(watch_store):
@@ -190,4 +190,4 @@ async def test_a_watch_url_with_a_credential_shaped_query_param_is_refused(watch
 
     assert response.status_code == 422, response.text
     assert "token" in response.text, response.text
-    assert watch_store.list_watches() == []
+    assert await watch_store.alist_watches() == []

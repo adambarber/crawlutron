@@ -248,7 +248,7 @@ async def test_a_late_verdict_from_a_sweeper_that_lost_the_row_records_nothing(
 
     await _release_and_await(release, pass_one)
 
-    reloaded = watch_store.get(watch_store.list_watches()[0].watch_id)
+    reloaded = await watch_store.aget((await watch_store.alist_watches())[0].watch_id)
     assert [url for url, _ in deliveries] == [WEBHOOK]
     assert reloaded.last_outcome == CrawlClassification.rendered
     assert reloaded.consecutive_failures == 0

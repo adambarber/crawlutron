@@ -37,7 +37,7 @@ async def test_a_minted_key_lands_one_mint_event(tmp_path):
         issued = await client.post("/v1/keys", json={"label": "mint-one"}, headers=admin)
         assert issued.status_code == 201, issued.text
 
-        events = audit.list_events()
+        events = await audit.alist_events()
         assert len(events) == 1
         event = events[0]
         assert event.action == "key_mint"
@@ -58,7 +58,7 @@ async def test_a_revoked_key_lands_one_revoke_event(tmp_path):
         revoked = await client.delete(f"/v1/keys/{key_id}", headers=creds)
         assert revoked.status_code == 200, revoked.text
 
-        events = audit.list_events()
+        events = await audit.alist_events()
         assert [event.action for event in events] == ["key_revoke", "key_mint"]
         assert events[0].target_key_id == key_id
 
@@ -72,7 +72,7 @@ async def test_a_key_list_access_lands_one_list_event(tmp_path):
         listed = await client.get("/v1/keys", headers=headers)
         assert listed.status_code == 200, listed.text
 
-        events = audit.list_events()
+        events = await audit.alist_events()
         assert [event.action for event in events] == ["key_list", "key_mint"]
         assert events[0].actor == "admin"
 
@@ -81,11 +81,11 @@ async def test_a_failed_operator_auth_lands_one_durable_event(tmp_path):
     """A failed admin-token guess is recorded durably, not only counted (#696)."""
     app, audit = _app(tmp_path)
     async with serve(app) as client:
-        before = audit.list_events()
+        before = await audit.alist_events()
         response = await client.get("/v1/keys", headers={"X-API-Key": "wrong-token"})
         assert response.status_code == 401
 
-        events = audit.list_events()
+        events = await audit.alist_events()
         assert len(events) == len(before) + 1
         event = events[0]
         assert event.action == "operator_auth_failure"
@@ -118,7 +118,7 @@ async def test_audit_events_are_numbered_by_monotonic_sequence(tmp_path):
         await client.post("/v1/keys", json={"label": "seq-one"}, headers=auth)
         await client.post("/v1/keys", json={"label": "seq-two"}, headers=auth)
 
-        events = audit.list_events()
+        events = await audit.alist_events()
         sequences = [event.sequence for event in events]
         assert sequences == sorted(sequences, reverse=True)
         assert len(set(sequences)) == len(sequences)
@@ -136,7 +136,7 @@ async def test_retention_sweep_drops_lapsed_rows_at_the_roll_point(tmp_path):
 
     await audit.arecord_event(actor="admin", action="key_mint", target_key_id="key_new", outcome="granted")
 
-    assert [event.target_key_id for event in audit.list_events()] == ["key_new"]
+    assert [event.target_key_id for event in await audit.alist_events()] == ["key_new"]
 
 
 async def test_the_event_cap_bounds_the_trail_under_a_mint_flood(tmp_path):
@@ -147,7 +147,7 @@ async def test_the_event_cap_bounds_the_trail_under_a_mint_flood(tmp_path):
             actor="admin", action="key_mint", target_key_id=f"key_{index}", outcome="granted"
         )
 
-    events = audit.list_events()
+    events = await audit.alist_events()
     assert len(events) == 5
     assert events[0].target_key_id == "key_7"
 
@@ -171,7 +171,7 @@ async def test_the_store_method_writes_flow_through_the_wired_audit_store(tmp_pa
     issued = await keys.aissue_key("agent-a")
     await keys.arevoke_key(issued.key_id)
 
-    actions = [event.action for event in audit.list_events()]
+    actions = [event.action for event in await audit.alist_events()]
     assert actions == ["key_revoke", "key_mint"]
 
 
@@ -180,4 +180,4 @@ async def test_the_401_raiser_records_the_audit_event(tmp_path):
     audit = _audit(tmp_path)
     await caller_auth.record_operator_auth_failure(audit, actor="anonymous")
 
-    assert [event.action for event in audit.list_events()] == ["operator_auth_failure"]
+    assert [event.action for event in await audit.alist_events()] == ["operator_auth_failure"]

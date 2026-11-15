@@ -40,11 +40,11 @@ async def test_a_watch_the_live_policy_no_longer_admits_is_deactivated(
     outcomes = await default_sweeper(watch_store).sweep_once(now=NOW)
 
     assert outcomes == [CrawlClassification.private_network_target]
-    reloaded = watch_store.get(watch.watch_id)
+    reloaded = await watch_store.aget(watch.watch_id)
     assert reloaded.status is WatchStatus.DEACTIVATED
     assert reloaded.last_outcome is CrawlClassification.private_network_target
     assert announced == []
-    assert watch_store.due(NOW + WATCH_INTERVAL) == []
+    assert await watch_store.adue(NOW + WATCH_INTERVAL) == []
 
 
 async def test_a_host_denied_watch_is_deactivated_and_the_pass_survives(
@@ -68,12 +68,12 @@ async def test_a_host_denied_watch_is_deactivated_and_the_pass_survives(
     # Both watches got a verdict: the refusal was terminal for its row only, and
     # the survivor rode the transient path instead of being starved by the arm.
     assert outcomes == [CrawlClassification.host_denied, CrawlClassification.unknown_error]
-    denied_after = watch_store.get(denied_watch.watch_id)
+    denied_after = await watch_store.aget(denied_watch.watch_id)
     assert denied_after.status is WatchStatus.DEACTIVATED
     assert denied_after.last_outcome is CrawlClassification.host_denied
     # The refusal was terminal only for the refused row; the survivor stays due.
-    assert [w.watch_id for w in watch_store.due(NOW + WATCH_INTERVAL)] == [healthy.watch_id]
-    assert watch_store.get(healthy.watch_id).status is WatchStatus.ACTIVE
+    assert [w.watch_id for w in await watch_store.adue(NOW + WATCH_INTERVAL)] == [healthy.watch_id]
+    assert (await watch_store.aget(healthy.watch_id)).status is WatchStatus.ACTIVE
 
 
 async def test_a_foreign_refusal_reason_deactivates_with_the_named_fallback(
@@ -91,14 +91,14 @@ async def test_a_foreign_refusal_reason_deactivates_with_the_named_fallback(
     outcomes = await default_sweeper(watch_store).sweep_once(now=NOW)
 
     assert outcomes == [CrawlClassification.unknown_error]
-    reloaded = watch_store.get(watch.watch_id)
+    reloaded = await watch_store.aget(watch.watch_id)
     # The refused row is gone from the schedule; the foreign reason degrades to
     # the NAMED unknown_error fallback, recorded rather than cast.
     assert (reloaded.status, reloaded.last_outcome) == (
         WatchStatus.DEACTIVATED,
         CrawlClassification.unknown_error,
     )
-    assert watch_store.due(NOW + WATCH_INTERVAL) == []
+    assert await watch_store.adue(NOW + WATCH_INTERVAL) == []
 
 
 async def test_a_transient_check_failure_is_not_a_deactivation(watch_store, announced, monkeypatch):
@@ -111,7 +111,7 @@ async def test_a_transient_check_failure_is_not_a_deactivation(watch_store, anno
 
     assert outcomes == [CrawlClassification.unknown_error]
     # Alive and scheduled: a transport failure grows the streak, never deactivates.
-    reloaded = watch_store.get(watch.watch_id)
+    reloaded = await watch_store.aget(watch.watch_id)
     assert (reloaded.status, reloaded.consecutive_failures) == (WatchStatus.ACTIVE, 1)
     assert announced == []
 
@@ -124,10 +124,10 @@ async def test_a_robots_disallowed_watch_is_deactivated(watch_store, announced):
     outcomes = await default_sweeper(watch_store).sweep_once(now=NOW)
 
     assert outcomes == [CrawlClassification.robots_disallowed]
-    reloaded = watch_store.get(watch.watch_id)
+    reloaded = await watch_store.aget(watch.watch_id)
     assert reloaded.status is WatchStatus.DEACTIVATED
     # A deactivated watch is no longer swept: it is not due next interval.
-    assert watch_store.due(NOW + WATCH_INTERVAL) == []
+    assert await watch_store.adue(NOW + WATCH_INTERVAL) == []
 
 
 async def test_deactivation_passes_the_sweepers_claim_token(watch_store, etag_server, monkeypatch):
@@ -163,4 +163,4 @@ async def test_deactivation_passes_the_sweepers_claim_token(watch_store, etag_se
 
     assert outcomes == [CrawlClassification.private_network_target]
     assert captured["claimed_by"] is sweeper._claim_token
-    assert watch_store.get(watch.watch_id).status is WatchStatus.DEACTIVATED
+    assert (await watch_store.aget(watch.watch_id)).status is WatchStatus.DEACTIVATED
