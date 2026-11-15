@@ -11,6 +11,7 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 from safe_url.host_canonical import idna_host
 from safe_url.host_policy import HostPolicy, host_egress_reason, host_policy_reason
 from safe_url.registrable_domain import registrable_domain
+from safe_url.url_redaction import redact_url
 
 #: Tracking/ad/social-feed infrastructure: recorded as links, never enqueued; apex
 #: or any subdomain. Dotted-suffix tuple so ``endswith`` is one C-level call.
@@ -298,7 +299,7 @@ class NormalizedUrl:
         return self._raw
 
     def __repr__(self) -> str:
-        return f"NormalizedUrl({self._raw!r})"
+        return f"NormalizedUrl({redact_url(self._raw)!r})"
 
     def __eq__(self, other: object) -> bool:
         return isinstance(other, NormalizedUrl) and other._raw == self._raw

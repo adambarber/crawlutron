@@ -127,6 +127,14 @@ def test_redact_url_masks_credentials():
     assert "example.com" in redact_url("https://example.com/hook")
 
 
+def test_normalized_url_repr_redacts_the_secret():
+    """repr is the redacted form; str stays the true value (explicit access only)."""
+    url = NormalizedUrl("https://example.com/hook?token=secret123", policy=UNRESTRICTED)
+    assert "secret123" in str(url)
+    assert "secret123" not in repr(url)
+    assert "[REDACTED]" in repr(url)
+
+
 def test_redact_urls_in_text_masks_urls():
     text = "failed https://example.com/hook?token=abc now"
     assert "abc" not in redact_urls_in_text(text)
