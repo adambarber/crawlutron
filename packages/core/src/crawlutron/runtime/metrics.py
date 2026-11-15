@@ -93,15 +93,7 @@ class MetricsStore:
         store = self._counters
         if store is None:
             return self._local
-        result = []
-
-        def _read() -> None:
-            result.append(store.snapshot())
-
-        worker = threading.Thread(target=_read)
-        worker.start()
-        worker.join()
-        return result[0]
+        return store.snapshot()
 
     def _labelled(self, source: dict[str, float], prefix: str) -> dict[str, float]:
         return {key.removeprefix(prefix): value for key, value in source.items() if key.startswith(prefix)}

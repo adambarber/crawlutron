@@ -14,9 +14,11 @@ from pathlib import Path
 
 from crawlutron.models.caller_key import CallerKey
 from crawlutron.models.issued_key import IssuedKey
-from crawlutron.storage import safe_db
 from crawlutron.storage.coordination_store import CoordinationStore, atwin
 from crawlutron.storage.migrations.manifest import StoreSchema
+
+# Safe-db door: txn_read/txn_write guard every SQLite read/write.
+from crawlutron.storage.safe_db import txn_read, txn_write
 
 #: The audit write is best-effort: a failing trail must not take the key door
 #: down or orphan a fresh secret (fail-open, per the auth posture).
@@ -163,7 +165,7 @@ class CallerKeyStore(CoordinationStore):
         # wall: persisted row stamps anchor to wall so they survive restarts.
         created_at = time.time()
         with self._lock:
-            with safe_db.txn_write(self._conn, owner="caller_key_store.issue_key"):
+            with txn_write(self._conn, owner="caller_key_store.issue_key"):
                 self._conn.execute(
                     "INSERT INTO caller_keys (key_id, label, key_hash, max_pages, max_concurrency,"
                     " created_at, previous_hash, previous_rotated_at)"
@@ -180,7 +182,7 @@ class CallerKeyStore(CoordinationStore):
         if key_id is None:
             return None
         with self._lock:
-            with safe_db.txn_read(self._conn, owner="caller_key_store._reread_row"):
+            with txn_read(self._conn, owner="caller_key_store._reread_row"):
                 return self._conn.execute(
                     "SELECT key_id, label, key_hash, max_pages, max_concurrency,"
                     " created_at, previous_hash, previous_rotated_at"
@@ -221,7 +223,7 @@ class CallerKeyStore(CoordinationStore):
     def list_keys(self) -> list[CallerKey]:
         """Every live key record, oldest first."""
         with self._lock:
-            with safe_db.txn_read(self._conn, owner="caller_key_store.list_keys"):
+            with txn_read(self._conn, owner="caller_key_store.list_keys"):
                 rows = self._conn.execute(
                     "SELECT key_id, label, key_hash, max_pages, max_concurrency,"
                     " created_at, previous_hash, previous_rotated_at"
@@ -234,7 +236,7 @@ class CallerKeyStore(CoordinationStore):
     def revoke_key(self, key_id: str) -> bool:
         """Drop ``key_id``; True iff a live key went away."""
         with self._lock:
-            with safe_db.txn_write(self._conn, owner="caller_key_store.revoke_key"):
+            with txn_write(self._conn, owner="caller_key_store.revoke_key"):
                 cur = self._conn.execute("DELETE FROM caller_keys WHERE key_id = ?", (key_id,))
         self._commit_and_audit("key_revoke", key_id, outcome="granted" if cur.rowcount > 0 else "refused")
         return cur.rowcount > 0
@@ -249,13 +251,13 @@ class CallerKeyStore(CoordinationStore):
             return False
         now = time.time()
         with self._lock:
-            with safe_db.txn_read(self._conn, owner="caller_key_store.rotate_key"):
+            with txn_read(self._conn, owner="caller_key_store.rotate_key"):
                 row = self._conn.execute(
                     "SELECT key_hash FROM caller_keys WHERE key_id = ?", (key_id,)
                 ).fetchone()
             if row is None:
                 return False
-            with safe_db.txn_write(self._conn, owner="caller_key_store.rotate_key"):
+            with txn_write(self._conn, owner="caller_key_store.rotate_key"):
                 self._conn.execute(
                     "UPDATE caller_keys SET key_hash = ?, previous_hash = ?,"
                     " previous_rotated_at = ? WHERE key_id = ?",
@@ -269,7 +271,7 @@ class CallerKeyStore(CoordinationStore):
         watch sweep uses it to meter an owner's check against their concurrency.
         """
         with self._lock:
-            with safe_db.txn_read(self._conn, owner="caller_key_store.get_for_id"):
+            with txn_read(self._conn, owner="caller_key_store.get_for_id"):
                 row = self._conn.execute(
                     "SELECT key_id, label, key_hash, max_pages, max_concurrency,"
                     " created_at, previous_hash, previous_rotated_at"
@@ -295,7 +297,7 @@ class CallerKeyStore(CoordinationStore):
         revoked instead of letting a dead owner issue checks forever.
         """
         with self._lock:
-            with safe_db.txn_read(self._conn, owner="caller_key_store.exists_key"):
+            with txn_read(self._conn, owner="caller_key_store.exists_key"):
                 row = self._conn.execute("SELECT 1 FROM caller_keys WHERE key_id = ?", (key_id,)).fetchone()
         return row is not None
 

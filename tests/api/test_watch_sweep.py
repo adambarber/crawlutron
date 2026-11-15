@@ -14,7 +14,6 @@ from crawlutron.service import watch_sweep
 from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
 from crawlutron.service.watch_sweep import WatchSweeper, sweep_watches_forever
 from crawlutron.storage.caller_key_store import CallerKeyStore
-from crawlutron.storage.safe_db import allow_on_loop_read
 from crawlutron.vocabulary.taxonomy import CrawlClassification
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 from tests._watch_harnesses import (
@@ -265,9 +264,10 @@ async def test_the_sweep_loop_passes_on_the_injected_clock_and_stops_on_the_even
 
     def clock() -> float:
         """Three passes' worth of time, the last one raising the shutdown flag."""
-        with allow_on_loop_read():
-            passes["n"] = watch_store.get(watch.watch_id).consecutive_failures + 1
-        if passes["n"] >= 3:
+        passes["n"] += 1
+        # clock() runs once in sweep_once and once in _one_watch per pass;
+        # stop after three full passes (six calls).
+        if passes["n"] >= 6:
             stop.set()
         return passes["n"] * INTERVAL
 
