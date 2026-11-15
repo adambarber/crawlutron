@@ -190,18 +190,33 @@ async def _join_runner_task(job_id: str) -> bool:
 async def _next_store_edge(store: JobStore, job_id: str, listener: _StoreListener) -> None:
     """Block until the next write to ``job_id``, or fail naming what never came.
 
-    A HANG GUARD, not an instrument: edge-triggered, so a slow job takes longer
-    instead of failing; fires only when NOTHING is written (measured, 30s)."""
-    listener.event.clear()
-    try:
-        await asyncio.wait_for(listener.event.wait(), STORE_HANG_GUARD_SECONDS)
-    except TimeoutError as exc:
-        last_state = await store.aload(job_id)
-        raise AssertionError(
-            f"no write reached job {job_id} for {STORE_HANG_GUARD_SECONDS}s. The wait is "
-            "edge-triggered, so nothing elapsed: the store was not written to at all, "
-            f"which is a wedge rather than slow progress. Last state: {last_state}"
-        ) from exc
+    Level-triggered on the generation: a write that landed before the waiter
+    armed is observed instead of being lost to a stale ``clear()``.
+    """
+    deadline = listener.loop.time() + STORE_HANG_GUARD_SECONDS
+    while True:
+        # A write that already landed advanced the generation past what we
+        # observed: observe it instead of clearing the edge and sleeping.
+        if listener.generation != listener._observed:
+            listener._observed = listener.generation
+            return
+        listener.event.clear()
+        if listener.generation != listener._observed:
+            listener._observed = listener.generation
+            return  # a publish raced the clear
+        remaining = deadline - listener.loop.time()
+        if remaining <= 0:
+            break
+        try:
+            await asyncio.wait_for(listener.event.wait(), remaining)
+        except TimeoutError:
+            break
+    last_state = await store.aload(job_id)
+    raise AssertionError(
+        f"no write reached job {job_id} for {STORE_HANG_GUARD_SECONDS}s. The wait is "
+        "edge-triggered, so nothing elapsed: the store was not written to at all, "
+        f"which is a wedge rather than slow progress. Last state: {last_state}"
+    )
 
 
 async def _wait_for(job_store, job_id: str, satisfied, *, join_task: bool):

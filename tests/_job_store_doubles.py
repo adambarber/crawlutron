@@ -51,15 +51,27 @@ class _StoreListener:
     ``call_soon_threadsafe`` -- an ``asyncio.Event`` from a foreign thread is unsafe.
     """
 
-    __slots__ = ("_bus", "event", "job_id", "loop")
+    __slots__ = ("_bus", "_gen_lock", "_generation", "_observed", "event", "job_id", "loop")
 
     def __init__(self, bus: _StatusBus, job_id: str, loop: asyncio.AbstractEventLoop) -> None:
         self._bus = bus
         self.job_id = job_id
         self.loop = loop
         self.event = asyncio.Event()
+        self._generation = 0
+        self._gen_lock = threading.Lock()
+        # Last generation this waiter has observed; touched only on the loop thread.
+        self._observed = 0
+
+    @property
+    def generation(self) -> int:
+        """Writes landed since this listener was created; advances on every publish."""
+        with self._gen_lock:
+            return self._generation
 
     def notify(self) -> None:
+        with self._gen_lock:
+            self._generation += 1
         try:
             self.loop.call_soon_threadsafe(self.event.set)
         except RuntimeError:
