@@ -21,6 +21,7 @@ from crawlutron.storage.safe_db import (
     assert_data_version_stable,
     in_txn,
     read_data_version,
+    read_txn_depth,
     txn_read,
     txn_write,
     wal_checkpoint,
@@ -305,14 +306,26 @@ def test_txn_read_commits_and_rolls_back(tmp_path) -> None:
         conn2.close()
 
 
-def test_txn_read_rejects_nesting(tmp_path) -> None:
-    db_path = tmp_path / "read_nest.db"
+def test_txn_read_reentrant_joins_same_connection(tmp_path) -> None:
+    """A nested txn_read on the same thread+connection joins the outer snapshot."""
+    db_path = tmp_path / "read_reentrant.db"
     conn = _connect(db_path)
     try:
-        with txn_read(conn, owner="a"):
-            with pytest.raises(ReadRejected, match="second concurrent"):
-                with txn_read(conn, owner="b"):
-                    pass
+        depths: list[int] = []
+
+        def trace(sql: str) -> None:
+            pass  # BEGIN counting is not needed; depth tells the story.
+
+        conn.set_trace_callback(trace)
+        try:
+            with txn_read(conn, owner="outer"):
+                depths.append(read_txn_depth())
+                with txn_read(conn, owner="inner"):
+                    depths.append(read_txn_depth())
+                depths.append(read_txn_depth())
+            assert depths == [1, 2, 1], f"depth should be 1->2->1, got {depths}"
+        finally:
+            conn.set_trace_callback(None)
     finally:
         conn.close()
 

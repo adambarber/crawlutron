@@ -199,17 +199,29 @@ def txn_read(
     deadline: float | None = None,
     owner: str = "",
 ) -> Generator[None, None, None]:
-    """BEGIN DEFERRED, commit, roll back on failure for consistent reads with bounds.
+    """BEGIN DEFERRED for consistent reads.
 
-    Bounded invocations install a counting ``row_factory``; unbounded ones leave
-    ``conn.row_factory`` untouched so the caller's factory is not disturbed."""
+    Reentrant: a nested call joins the outer snapshot without a second BEGIN;
+    depth is restored on every path, including an exception."""
     assert_off_main_thread()
     depth = getattr(_READ_TXN, "depth", 0)
-    if depth > 0:
-        raise ReadRejected("second concurrent read transaction on this thread")
+    outer_conn = getattr(_READ_TXN, "conn", None)
     if deadline is not None and time.monotonic() > deadline:
         raise ReadRejected(f"read deadline exceeded for {owner!r}")
+
+    # Reentrant same-connection read joins the outer snapshot; a different
+    # connection on this thread is refused, like a second write.
+    if depth > 0:
+        if outer_conn is conn:
+            _READ_TXN.depth = depth + 1
+            try:
+                yield
+            finally:
+                _READ_TXN.depth = depth
+            return
+        raise ReadRejected("second concurrent read transaction on this thread")
     _READ_TXN.depth = depth + 1
+    _READ_TXN.conn = conn
 
     stats = {"rows": 0, "bytes": 0}
     bounded = max_rows is not None or max_bytes is not None or deadline is not None
@@ -236,12 +248,19 @@ def txn_read(
         if bounded:
             conn.row_factory = original_row_factory
         _READ_TXN.depth = depth
+        if depth == 0:
+            _READ_TXN.conn = None
 
 
 def read_data_version(conn: sqlite3.Connection) -> int:
     """Capture PRAGMA data_version for optimistic read-then-write consistency."""
     row = _exec(conn, "PRAGMA data_version").fetchone()
     return int(row[0])
+
+
+def read_txn_depth() -> int:
+    """Current read-transaction nesting depth on this thread (public door for tests)."""
+    return getattr(_READ_TXN, "depth", 0)
 
 
 def assert_data_version_stable(conn: sqlite3.Connection, before: int) -> None:
@@ -282,6 +301,7 @@ __all__ = [
     "assert_off_main_thread",
     "in_txn",
     "read_data_version",
+    "read_txn_depth",
     "txn_read",
     "txn_write",
     "wal_checkpoint",

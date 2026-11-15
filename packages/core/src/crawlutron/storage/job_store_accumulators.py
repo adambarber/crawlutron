@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from crawlutron.models.json_value import JsonValue
 from crawlutron.safety.json_safe import json_default
-from crawlutron.storage.safe_db import in_txn
+from crawlutron.storage.safe_db import in_txn, txn_read
 from crawlutron.storage.sqlite_store import connection_data_version
 
 from .job_store_collections import FrontierEntryDict
@@ -95,17 +95,24 @@ class JobAccumulators:
     def _seed_table_truth(self, job_id: str) -> None:
         """Re-read the tables' content when another connection may have written.
 
-        A skip must compare against the TABLE, not this process's last write; own
-        commits leave ``data_version`` put, so the no-op path stays read-free.
+        Runs inside the caller's write transaction; reads join it via ``in_txn``.
         """
         version = self._data_version()
         if self._seeded_version.get(job_id) == version:
             return
-        self._table_rows = {
-            "results": self.read_results(job_id),
-            "visited": self.read_visited(job_id),
-            "frontier": self.read_frontier(job_id),
-        }
+        with in_txn(self._conn):
+            self._table_rows = {
+                "results": self._conn.execute(
+                    'SELECT payload FROM "crawl_job_results" WHERE job_id = ? ORDER BY seq', (job_id,)
+                ).fetchall(),
+                "visited": self._conn.execute(
+                    'SELECT url FROM "crawl_job_visited" WHERE job_id = ?', (job_id,)
+                ).fetchall(),
+                "frontier": self._conn.execute(
+                    'SELECT url, depth FROM "crawl_job_frontier" WHERE job_id = ? ORDER BY pos',
+                    (job_id,),
+                ).fetchall(),
+            }
         self._table_rows_job = job_id
         self._seeded_version[job_id] = version
 
@@ -138,7 +145,8 @@ class JobAccumulators:
             return False
         if stored[2] is not None:
             return stored[2] == full_digest
-        rows = self._conn.execute(_FULL_TABLE_SQL[collection], (job_id,)).fetchall()
+        with in_txn(self._conn):
+            rows = self._conn.execute(_FULL_TABLE_SQL[collection], (job_id,)).fetchall()
         return self._digest([_table_row_items(collection, row) for row in rows]) == full_digest
 
     def _record_content(
@@ -157,9 +165,10 @@ class JobAccumulators:
 
     def read_results(self, job_id: str) -> list[dict[str, JsonValue]]:
         """The page history, in the order it was crawled."""
-        rows = self._conn.execute(
-            'SELECT payload FROM "crawl_job_results" WHERE job_id = ? ORDER BY seq', (job_id,)
-        ).fetchall()
+        with txn_read(self._conn, owner="job_store_accumulators.read_results"):
+            rows = self._conn.execute(
+                'SELECT payload FROM "crawl_job_results" WHERE job_id = ? ORDER BY seq', (job_id,)
+            ).fetchall()
         payloads = [json.loads(row["payload"]) for row in rows]
         # The loaded page history is already persisted: remember its identity so a
         # fresh process's first save is a no-op instead of a resync.
@@ -167,9 +176,10 @@ class JobAccumulators:
         return payloads
 
     def read_visited(self, job_id: str) -> list[str]:
-        rows = self._conn.execute(
-            'SELECT url FROM "crawl_job_visited" WHERE job_id = ?', (job_id,)
-        ).fetchall()
+        with txn_read(self._conn, owner="job_store_accumulators.read_visited"):
+            rows = self._conn.execute(
+                'SELECT url FROM "crawl_job_visited" WHERE job_id = ?', (job_id,)
+            ).fetchall()
         urls = [row["url"] for row in rows]
         # The loaded visited set is already persisted: remember its identity so a
         # fresh process's first save is a no-op instead of a resync.
@@ -178,9 +188,10 @@ class JobAccumulators:
 
     def read_frontier(self, job_id: str) -> list[FrontierEntryDict]:
         """The outstanding queue, in queue order."""
-        rows = self._conn.execute(
-            'SELECT url, depth FROM "crawl_job_frontier" WHERE job_id = ? ORDER BY pos', (job_id,)
-        ).fetchall()
+        with txn_read(self._conn, owner="job_store_accumulators.read_frontier"):
+            rows = self._conn.execute(
+                'SELECT url, depth FROM "crawl_job_frontier" WHERE job_id = ? ORDER BY pos', (job_id,)
+            ).fetchall()
         frontier: list[FrontierEntryDict] = [{"url": row["url"], "depth": row["depth"]} for row in rows]
         # The loaded queue is already persisted: remember its identity so a fresh
         # process's first save is a no-op instead of a resync.
@@ -203,30 +214,33 @@ class JobAccumulators:
 
     def counts_by_job(self) -> dict[str, tuple[int, int]]:
         """``{job_id: (visited, results)}`` in one grouped scan, not one query per job."""
-        rows = self._conn.execute(
-            """
-            SELECT job_id,
-                   (SELECT count(*) FROM crawl_job_visited v WHERE v.job_id = j.job_id) AS visited_count,
-                   (SELECT count(*) FROM crawl_job_results r WHERE r.job_id = j.job_id) AS results_count
-              FROM crawl_jobs j
-            """
-        ).fetchall()
+        with txn_read(self._conn, owner="job_store_accumulators.counts_by_job"):
+            rows = self._conn.execute(
+                """
+                SELECT job_id,
+                       (SELECT count(*) FROM crawl_job_visited v WHERE v.job_id = j.job_id) AS visited_count,
+                       (SELECT count(*) FROM crawl_job_results r WHERE r.job_id = j.job_id) AS results_count
+                  FROM crawl_jobs j
+                """
+            ).fetchall()
         return {row["job_id"]: (row["visited_count"], row["results_count"]) for row in rows}
 
     def counts_for(self, job_id: str) -> tuple[int, int]:
         """``(visited, results)`` for one job without reading either list."""
-        row = self._conn.execute(
-            "SELECT (SELECT count(*) FROM crawl_job_visited WHERE job_id = ?) AS visited,"
-            " (SELECT count(*) FROM crawl_job_results WHERE job_id = ?) AS results",
-            (job_id, job_id),
-        ).fetchone()
+        with txn_read(self._conn, owner="job_store_accumulators.counts_for"):
+            row = self._conn.execute(
+                "SELECT (SELECT count(*) FROM crawl_job_visited WHERE job_id = ?) AS visited,"
+                " (SELECT count(*) FROM crawl_job_results WHERE job_id = ?) AS results",
+                (job_id, job_id),
+            ).fetchone()
         return row["visited"], row["results"]
 
     def _max_seq_plus_one(self, job_id: str) -> int:
         """The results high-water mark: one past the highest persisted ``seq``."""
-        row = self._conn.execute(
-            'SELECT max(seq) FROM "crawl_job_results" WHERE job_id = ?', (job_id,)
-        ).fetchone()
+        with in_txn(self._conn):
+            row = self._conn.execute(
+                'SELECT max(seq) FROM "crawl_job_results" WHERE job_id = ?', (job_id,)
+            ).fetchone()
         return 0 if row["max(seq)"] is None else row["max(seq)"] + 1
 
     def _frontier_tail(self, job: CrawlJobState, mark: int) -> list[dict[str, object]]:
@@ -240,12 +254,12 @@ class JobAccumulators:
 
     def _frontier_write_tail(self, job_id: str, mark: int, tail: list[dict[str, object]]) -> None:
         """Append the frontier tail after the table's current high-water pos."""
-        row = self._conn.execute(
-            'SELECT max(pos) AS high FROM "crawl_job_frontier" WHERE job_id = ?', (job_id,)
-        ).fetchone()
-        high = row["high"]
-        start = 0 if high is None else high + 1
         with in_txn(self._conn):
+            row = self._conn.execute(
+                'SELECT max(pos) AS high FROM "crawl_job_frontier" WHERE job_id = ?', (job_id,)
+            ).fetchone()
+            high = row["high"]
+            start = 0 if high is None else high + 1
             self._conn.executemany(
                 # OR REPLACE, not OR IGNORE: a re-inserted identity carries its new
                 # depth and position -- the write edge's decision, not the table's.

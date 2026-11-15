@@ -46,6 +46,7 @@ def _watch_store_teardown_check(tmp_path) -> bool:
     import sqlite3
 
     import tests.fixtures.watch_store as fixture_mod
+    from crawlutron.storage.safe_db import StoreClosed
 
     generator = fixture_mod.watch_store._fixture_function(tmp_path)
     store = next(generator)
@@ -56,7 +57,7 @@ def _watch_store_teardown_check(tmp_path) -> bool:
         pass
     try:
         store.list_watches()
-    except sqlite3.ProgrammingError:
+    except (sqlite3.ProgrammingError, StoreClosed):
         return True
     return False
 

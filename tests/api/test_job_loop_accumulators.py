@@ -60,9 +60,8 @@ async def test_batch_loop_never_reads_full_accumulators(job_store, monkeypatch):
     assert len(finished.results) == pages, (
         f"expected all {pages} results published, got {len(finished.results)}"
     )
-    # Three full reads: the create's first-save table-trust re-seed (#314 F2),
-    # the runner's claim, and the test's own read-back.
-    assert reached == ["read_results", "read_visited"] + ["read_visited", "read_results"] * 2, (
+    # Two full reads: the claim and the read-back; create's re-seed reads via in_txn.
+    assert reached == ["read_visited", "read_results"] * 2, (
         "the batch loop must not read full accumulators per batch: the only "
-        f"full reads are the first-save seed, the claim, and the read-back, got {reached}"
+        f"full reads are the claim and the read-back, got {reached}"
     )

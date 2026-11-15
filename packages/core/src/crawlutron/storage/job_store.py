@@ -16,7 +16,12 @@ from crawlutron.admission.policy import PolicyLike, PolicyTier, read_policy
 from crawlutron.storage.coordination_store import atwin
 from crawlutron.storage.ids import new_job_id
 from crawlutron.storage.migrations import StoreSchema
-from crawlutron.storage.safe_db import allow_on_loop_read, txn_read, txn_write
+from crawlutron.storage.safe_db import (
+    allow_on_loop_read,
+    in_txn,
+    txn_read,
+    txn_write,
+)
 from crawlutron.storage.sqlite_store import (
     bind_conn_lifecycle,
     connect_store,
@@ -74,7 +79,8 @@ def _fetch_owner_row(
 ) -> sqlite3.Row | None:
     """One owner-filtered row fetch: execute and fetchone, None on miss.
     The idiom the read sites share; each site owns its own transaction posture."""
-    return conn.execute(statement, params).fetchone()
+    with txn_read(conn, owner="job_store.fetch_owner_row"):
+        return conn.execute(statement, params).fetchone()
 
 
 logger = logging.getLogger(__name__)
@@ -226,9 +232,9 @@ class JobStore:
         """Write job state to SQLite. Caller must hold ``self._lock``.
         No normalization pass: identity is established at ingress. A tombstoned
         (deleted) job is a no-op here, so a late ``save`` cannot resurrect it."""
-        if self._is_tombstoned(job.job_id):
-            return
         with txn_write(self._conn, owner="job_store.save"):
+            if self._is_tombstoned(job.job_id):
+                return
             self._accumulators._seed_table_truth(job.job_id)
             version = connection_data_version(self._conn)
             job.updated_at = time.time()
@@ -304,9 +310,11 @@ class JobStore:
         return True
 
     def _is_tombstoned(self, job_id: str) -> bool:
-        row = self._conn.execute(
-            "SELECT 1 FROM crawl_jobs WHERE job_id = ? AND deleted_at IS NOT NULL", (job_id,)
-        ).fetchone()
+        with self._lock:
+            with in_txn(self._conn):
+                row = self._conn.execute(
+                    "SELECT 1 FROM crawl_jobs WHERE job_id = ? AND deleted_at IS NOT NULL", (job_id,)
+                ).fetchone()
         return row is not None
 
     def list_jobs(self, *, limit: int | None = None, offset: int = 0) -> list[JobStatusView]:
@@ -319,12 +327,17 @@ class JobStore:
 
     def _read_job_list(self, owner: str | None, *, limit: int | None, offset: int = 0) -> list[JobStatusView]:
         with self._lock:
-            counts = self._accumulators.counts_by_job()
-            statement, params = _owner_statement(_JOB_STATUS_PROJECTION, False, _JOB_LIST_ORDER, owner)
-            if limit is not None:
-                statement += " LIMIT ? OFFSET ?"
-                params = (*params, max(0, limit), max(0, offset))
-            rows = self._conn.execute(statement, params).fetchall()
+            # #1059: list jobs is reached from async callers via atwin; narrows the loop ban.
+            with allow_on_loop_read():
+                with txn_read(self._conn, owner="job_store.read_job_list"):
+                    counts = self._accumulators.counts_by_job()
+                    statement, params = _owner_statement(
+                        _JOB_STATUS_PROJECTION, False, _JOB_LIST_ORDER, owner
+                    )
+                    if limit is not None:
+                        statement += " LIMIT ? OFFSET ?"
+                        params = (*params, max(0, limit), max(0, offset))
+                    rows = self._conn.execute(statement, params).fetchall()
         return [_status_row(r, *counts.get(r["job_id"], (0, 0))) for r in rows]
 
     def count_jobs(self) -> int:
@@ -335,8 +348,11 @@ class JobStore:
 
     def _count_jobs(self, owner: str | None) -> int:
         with self._lock:
-            statement, params = _owner_statement("SELECT count(*) FROM crawl_jobs", False, "", owner)
-            row = self._conn.execute(statement, params).fetchone()
+            # #1059: count jobs is reached from async callers via atwin; narrows the loop ban.
+            with allow_on_loop_read():
+                with txn_read(self._conn, owner="job_store.count_jobs"):
+                    statement, params = _owner_statement("SELECT count(*) FROM crawl_jobs", False, "", owner)
+                    row = self._conn.execute(statement, params).fetchone()
         return int(row[0])
 
     def status_row(self, job_id: str) -> JobStatusView | None:
@@ -347,11 +363,14 @@ class JobStore:
 
     def _read_status_row(self, job_id: str, owner: str | None) -> JobStatusView | None:
         with self._lock:
-            statement, params = _owner_statement(_JOB_STATUS_PROJECTION, True, "", owner)
-            row = _fetch_owner_row(self._conn, statement, (job_id, *params))
-            if row is None:
-                return None
-            visited, results = self._accumulators.counts_for(job_id)
+            # #1059: status row is reached from async callers via atwin; narrows the loop ban.
+            with allow_on_loop_read():
+                with txn_read(self._conn, owner="job_store.status_row"):
+                    statement, params = _owner_statement(_JOB_STATUS_PROJECTION, True, "", owner)
+                    row = _fetch_owner_row(self._conn, statement, (job_id, *params))
+                    if row is None:
+                        return None
+                    visited, results = self._accumulators.counts_for(job_id)
         return _status_row(row, visited, results)
 
     def exists(self, job_id: str) -> bool:
@@ -362,16 +381,23 @@ class JobStore:
 
     def active_count_for_caller(self, caller_id: str) -> int:
         with self._lock:
-            row = self._conn.execute(
-                "SELECT count(*) FROM crawl_jobs WHERE owner = ? AND status IN (?, ?) AND deleted_at IS NULL",
-                (caller_id, JobStatus.PENDING.value, JobStatus.RUNNING.value),
-            ).fetchone()
+            # #1059: active count is reached from async callers via atwin; narrows the loop ban.
+            with allow_on_loop_read():
+                with txn_read(self._conn, owner="job_store.active_count_for_caller"):
+                    row = self._conn.execute(
+                        "SELECT count(*) FROM crawl_jobs WHERE owner = ? AND status IN (?, ?)"
+                        " AND deleted_at IS NULL",
+                        (caller_id, JobStatus.PENDING.value, JobStatus.RUNNING.value),
+                    ).fetchone()
         return int(row[0])
 
     def _has_job_row(self, job_id: str, owner: str | None) -> bool:
         with self._lock:
-            statement, params = _owner_statement("SELECT 1 FROM crawl_jobs", True, "", owner)
-            row = _fetch_owner_row(self._conn, statement, (job_id, *params))
+            # #1059: exists check is reached from async callers via atwin; narrows the loop ban.
+            with allow_on_loop_read():
+                with txn_read(self._conn, owner="job_store.has_job_row"):
+                    statement, params = _owner_statement("SELECT 1 FROM crawl_jobs", True, "", owner)
+                    row = _fetch_owner_row(self._conn, statement, (job_id, *params))
         return row is not None
 
     def claim_running(

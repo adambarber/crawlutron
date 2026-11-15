@@ -17,7 +17,11 @@ from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.storage.coordination_store import CoordinationStore, atwin
 from crawlutron.storage.ids import new_watch_id
 from crawlutron.storage.migrations import StoreSchema
-from crawlutron.storage.safe_db import txn_write
+from crawlutron.storage.safe_db import (
+    allow_on_loop_read,
+    txn_read,
+    txn_write,
+)
 from crawlutron.vocabulary.taxonomy import (
     CrawlClassification,
     status_for_classification,
@@ -90,38 +94,57 @@ class WatchStore(CoordinationStore):
 
     def get(self, watch_id: str) -> WatchState | None:
         with self._lock:
-            row = self._conn.execute("SELECT * FROM watches WHERE watch_id = ?", (watch_id,)).fetchone()
+            # #1059: get is reached from async callers via atwin; narrows the loop ban.
+            with allow_on_loop_read():
+                with txn_read(self._conn, owner="watch_store.get"):
+                    row = self._conn.execute(
+                        "SELECT * FROM watches WHERE watch_id = ?", (watch_id,)
+                    ).fetchone()
         return None if row is None else _row_to_state(row)
 
     def get_for_caller(self, watch_id: str, caller_id: str) -> WatchState | None:
         """The watch iff ``caller_id`` owns it; a foreign row reads the same miss."""
         with self._lock:
-            row = self._conn.execute(
-                "SELECT * FROM watches WHERE watch_id = ? AND owner = ?", (watch_id, caller_id)
-            ).fetchone()
+            # #1059: get_for_caller is reached from async callers via atwin; narrows the loop ban.
+            with allow_on_loop_read():
+                with txn_read(self._conn, owner="watch_store.get_for_caller"):
+                    row = self._conn.execute(
+                        "SELECT * FROM watches WHERE watch_id = ? AND owner = ?", (watch_id, caller_id)
+                    ).fetchone()
         return None if row is None else _row_to_state(row)
 
     def list_watches(self) -> list[WatchState]:
         with self._lock:
-            rows = self._conn.execute("SELECT * FROM watches ORDER BY created_at, watch_id").fetchall()
+            # #1059: list_watches is reached from async callers via atwin; narrows the loop ban.
+            with allow_on_loop_read():
+                with txn_read(self._conn, owner="watch_store.list_watches"):
+                    rows = self._conn.execute(
+                        "SELECT * FROM watches ORDER BY created_at, watch_id"
+                    ).fetchall()
         return [_row_to_state(row) for row in rows]
 
     def list_for_caller(self, caller_id: str) -> list[WatchState]:
         """The caller's own watches; foreign rows are not listed."""
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT * FROM watches WHERE owner = ? ORDER BY created_at, watch_id", (caller_id,)
-            ).fetchall()
+            # #1059: list_for_caller is reached from async callers via atwin; narrows the loop ban.
+            with allow_on_loop_read():
+                with txn_read(self._conn, owner="watch_store.list_for_caller"):
+                    rows = self._conn.execute(
+                        "SELECT * FROM watches WHERE owner = ? ORDER BY created_at, watch_id", (caller_id,)
+                    ).fetchall()
         return [_row_to_state(row) for row in rows]
 
     def count_for_owner(self, owner: str) -> int:
         """How many watches ``owner`` has registered; the per-caller cap reads it.
         Deactivated rows are not counted: the sweep can never run them."""
         with self._lock:
-            row = self._conn.execute(
-                "SELECT count(*) FROM watches WHERE owner = ? AND status = ?",
-                (owner, WatchStatus.ACTIVE),
-            ).fetchone()
+            # #1059: count_for_owner is reached from async callers via atwin; narrows the loop ban.
+            with allow_on_loop_read():
+                with txn_read(self._conn, owner="watch_store.count_for_owner"):
+                    row = self._conn.execute(
+                        "SELECT count(*) FROM watches WHERE owner = ? AND status = ?",
+                        (owner, WatchStatus.ACTIVE),
+                    ).fetchone()
         return int(row[0])
 
     def delete(self, watch_id: str) -> bool:
@@ -143,14 +166,17 @@ class WatchStore(CoordinationStore):
     def due(self, now: float) -> list[WatchState]:
         """Active watches whose next check is at or before ``now``, earliest first."""
         with self._lock:
-            rows = self._conn.execute(
-                """
-                SELECT * FROM watches
-                WHERE status = ? AND next_check_at <= ?
-                ORDER BY next_check_at
-                """,
-                (WatchStatus.ACTIVE, now),
-            ).fetchall()
+            # #1059: due is reached from async callers via atwin; narrows the loop ban.
+            with allow_on_loop_read():
+                with txn_read(self._conn, owner="watch_store.due"):
+                    rows = self._conn.execute(
+                        """
+                        SELECT * FROM watches
+                        WHERE status = ? AND next_check_at <= ?
+                        ORDER BY next_check_at
+                        """,
+                        (WatchStatus.ACTIVE, now),
+                    ).fetchall()
         return [_row_to_state(row) for row in rows]
 
     def claim_due(self, now: float, token: str, *, claim_seconds: float) -> list[WatchState]:
