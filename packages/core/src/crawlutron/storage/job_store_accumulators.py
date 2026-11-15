@@ -93,25 +93,19 @@ class JobAccumulators:
         self._own_version[job_id] = version
 
     def _seed_table_truth(self, job_id: str) -> None:
-        """Re-read the tables' content when another connection may have written.
+        """Re-read table content after a foreign commit; reads join the write txn.
 
-        Runs inside the caller's write transaction; reads join it via ``in_txn``.
+        Rows project through ``_table_row_items`` so :340 digests one domain.
         """
         version = self._data_version()
         if self._seeded_version.get(job_id) == version:
             return
         with in_txn(self._conn):
             self._table_rows = {
-                "results": self._conn.execute(
-                    'SELECT payload FROM "crawl_job_results" WHERE job_id = ? ORDER BY seq', (job_id,)
-                ).fetchall(),
-                "visited": self._conn.execute(
-                    'SELECT url FROM "crawl_job_visited" WHERE job_id = ?', (job_id,)
-                ).fetchall(),
-                "frontier": self._conn.execute(
-                    'SELECT url, depth FROM "crawl_job_frontier" WHERE job_id = ? ORDER BY pos',
-                    (job_id,),
-                ).fetchall(),
+                collection: [
+                    _table_row_items(collection, row) for row in self._conn.execute(sql, (job_id,)).fetchall()
+                ]
+                for collection, sql in _FULL_TABLE_SQL.items()
             }
         self._table_rows_job = job_id
         self._seeded_version[job_id] = version
@@ -337,12 +331,19 @@ class JobAccumulators:
                 _remember_shape(self, job_id, "results", results)
                 return
             # Same-length replacement or shrink: fall through to resync below.
-        if table and self._digest(results[: len(table)]) != self._digest(table):
-            # Table head differs from live head (out-of-band change): resync whole.
-            with in_txn(self._conn):
-                self._conn.execute('DELETE FROM "crawl_job_results" WHERE job_id = ?', (job_id,))
-            table = []
-            persisted = 0
+        if table:
+            if len(table) > len(results):
+                # Peer appended rows: an unchanged save no-ops only when our
+                # history is an exact prefix of the table, so peer rows survive.
+                if self._digest(results) == self._digest(table[: len(results)]):
+                    _remember_shape(self, job_id, "results", results)
+                    return
+            elif self._digest(results[: len(table)]) != self._digest(table):
+                # Table head differs from live head (out-of-band change): resync whole.
+                with in_txn(self._conn):
+                    self._conn.execute('DELETE FROM "crawl_job_results" WHERE job_id = ?', (job_id,))
+                table = []
+                persisted = 0
         if persisted >= len(results):
             # Shrank or same-length replacement: resync so the table matches exactly.
             with in_txn(self._conn):

@@ -5,13 +5,9 @@ from __future__ import annotations
 import pytest
 
 from crawlutron.models.crawl_policy import CrawlPolicy
-from crawlutron.models.json_value import JsonValue
 from crawlutron.storage.job_store_accumulators import JobAccumulators
 from tests._policy_factories import job_store as store_on
-
-
-def _make_result(url: str) -> dict[str, JsonValue]:
-    return {"url": url, "status": "success"}
+from tests._storage_helpers import _make_result
 
 
 @pytest.mark.parametrize("batch_size", [1, 4, 16])
