@@ -145,7 +145,9 @@ def single_shot_job(job_id: str = "test-id", root: str = "http://example.com/"):
     with tempfile.TemporaryDirectory() as tmpdir:
         store = make_job_store(tmpdir)
         try:
-            yield store, store.create_single_shot(job_id, root, CrawlPolicy())
+            with allow_on_loop():
+                job = store.create_single_shot(job_id, root, CrawlPolicy())
+            yield store, job
         finally:
             store.close()
 
@@ -157,7 +159,8 @@ def single_shot_orphan(job_id: str = "test-id", root: str = "http://example.com/
     The crash state: claimed for a crawl that can never resume, so recovery
     retires it. (The FRESH state is :func:`single_shot_job`.)"""
     with single_shot_job(job_id, root) as (store, job):
-        store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
+        with allow_on_loop():
+            store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
         yield store, job
 
 

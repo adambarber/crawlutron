@@ -57,7 +57,8 @@ class TestStatusResponseShape:
 
         A hard-coded one would satisfy the whole-site case while lying to every
         single-shot caller -- the half that decides resumption."""
-        job_store.create_single_shot("shot-1", GRAPH_ROOT, CrawlPolicy())
+        with allow_on_loop():
+            job_store.create_single_shot("shot-1", GRAPH_ROOT, CrawlPolicy())
 
         response = await client.get("/v1/jobs/shot-1")
 
@@ -86,7 +87,8 @@ class TestJobStateWaitContract:
 
         monkeypatch.setattr(job_store, "set_status", gated_set_status)
 
-        job_id = job_store.create(GRAPH_ROOT, CrawlPolicy()).job_id
+        with allow_on_loop():
+            job_id = job_store.create(GRAPH_ROOT, CrawlPolicy()).job_id
         job_runner.install_execute_crawl(ScriptedExecute(results=[engine_result(GRAPH_ROOT, "rendered")]))
         assert job_store.status_bus is not None
 
@@ -116,7 +118,8 @@ class TestJobStateWaitContract:
 
         bare = JobStore(tmp_path / "bare.db", policy=UNRESTRICTED_HOST_POLICY, tier=deployment_tier())
         assert not hasattr(bare, "status_bus")
-        job_id = bare.create(GRAPH_ROOT, CrawlPolicy()).job_id
+        with allow_on_loop():
+            job_id = bare.create(GRAPH_ROOT, CrawlPolicy()).job_id
         with pytest.raises(AssertionError, match="no status bus"):
             await wait_status(bare, job_id, {"completed"})
 
@@ -248,13 +251,15 @@ class TestJobControlTransitions:
         from tests._app_factory import service_app
 
         job_store = service_app().state.job_store
-        job = job_store.create("http://example.com/", CrawlPolicy())
+        with allow_on_loop():
+            job = job_store.create("http://example.com/", CrawlPolicy())
         if seed_terminal:
             with allow_on_loop():
                 job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
                 job_store.set_status(job.job_id, JobStatus.COMPLETED, expected=JobStatus.RUNNING)
         await run_job_control_test(service_app(), job_store, job.job_id, action, expected)
-        job_store.delete(job.job_id)
+        with allow_on_loop():
+            job_store.delete(job.job_id)
 
     async def test_main_job_control_invalid_action(self):
         await self._control("invalid_action", 422)
@@ -315,9 +320,11 @@ class TestTheRunnerClaim:
 
     @staticmethod
     def _seeded(job_store):
-        job = job_store.create(GRAPH_ROOT, CrawlPolicy())
+        with allow_on_loop():
+            job = job_store.create(GRAPH_ROOT, CrawlPolicy())
         job.frontier = [FrontierEntry(url=canonical(GRAPH_ROOT), depth=0)]
-        job_store.save(job)
+        with allow_on_loop():
+            job_store.save(job)
         return job
 
     @staticmethod

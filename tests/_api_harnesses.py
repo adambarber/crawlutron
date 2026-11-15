@@ -127,7 +127,10 @@ async def seed_completed_crawl(store, results, owner, request_id):
     The state a finished async crawl leaves: a terminal job row plus a stored
     result row. Used by the delete-purge tests in both the REST and MCP files.
     """
-    store.create_single_shot(request_id, "http://example.com/", {}, owner=owner)
+    from crawlutron.storage.safe_db import allow_on_loop
+
+    with allow_on_loop():
+        store.create_single_shot(request_id, "http://example.com/", {}, owner=owner)
     await store.aset_status(request_id, JobStatus.COMPLETED, expected=JobStatus.PENDING)
     await results.aput(
         request_id,

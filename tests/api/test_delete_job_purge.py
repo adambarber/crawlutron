@@ -40,6 +40,7 @@ class TestDeleteJobPurgesResultStore:
 
     async def test_deleting_a_running_job_tombstones_without_result_row(self, tmp_path):
         from crawlutron.storage.job_store import JobStatus
+        from crawlutron.storage.safe_db import allow_on_loop
         from tests._api_harnesses import isolated_client
 
         async with isolated_client(tmp_path, routers=_DELETE_JOB_ROUTERS) as (
@@ -51,7 +52,8 @@ class TestDeleteJobPurgesResultStore:
             secret, owner, headers = await issue_agent_key(keys)
             request_id = "crawl-running-773"
 
-            store.create_single_shot(request_id, "http://example.com/", {}, owner=owner)
+            with allow_on_loop():
+                store.create_single_shot(request_id, "http://example.com/", {}, owner=owner)
             await store.aset_status(request_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
             await assert_delete_purges_result(client, request_id, headers)
             assert await store.astatus_for_caller(request_id, owner) is None

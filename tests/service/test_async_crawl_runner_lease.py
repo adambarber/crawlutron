@@ -57,7 +57,8 @@ async def test_renew_failure_aborts_inflight_crawl_without_foreign_clobber(tmp_p
     """A lost lease must stop in-flight work and never publish as owner."""
     store = _store(tmp_path)
     request_id = "crawl_async_lease_lost"
-    job = store.create_single_shot(request_id, "http://example.com/", {}, owner="caller")
+    with allow_on_loop():
+        job = store.create_single_shot(request_id, "http://example.com/", {}, owner="caller")
     assert job.status is JobStatus.PENDING
     aborted = asyncio.Event()
 

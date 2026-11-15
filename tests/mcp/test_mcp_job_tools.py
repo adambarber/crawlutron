@@ -92,7 +92,8 @@ async def job_harness(tmp_path: Path, *, seeded: int = 0, running: bool = False)
         owner = record.key_id
         for index in range(seeded):
             job_id = f"job-{index}"
-            job_store.create_single_shot(job_id, "http://example.com/", {}, owner=owner)
+            with allow_on_loop():
+                job_store.create_single_shot(job_id, "http://example.com/", {}, owner=owner)
             if running:
                 with allow_on_loop():
                     assert job_store.set_status(job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)

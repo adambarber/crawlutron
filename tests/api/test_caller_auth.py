@@ -84,8 +84,11 @@ async def test_revoked_key_is_401(tmp_path):
 
 async def test_wrong_key_on_crawl_read_is_401(tmp_path):
     """#199: an authenticated caller with a wrong key is 401 before any read scope."""
+    from crawlutron.storage.safe_db import allow_on_loop
+
     async with isolation_client(tmp_path) as (client, store, _results, _keys):
-        complete_job(store, "crawl_owned", {"request_id": "crawl_owned"}, owner="key_a")
+        with allow_on_loop():
+            complete_job(store, "crawl_owned", {"request_id": "crawl_owned"}, owner="key_a")
         response = await client.get("/v1/crawl/crawl_owned", headers={"X-API-Key": "definitely-wrong"})
         _assert_401(response)
 

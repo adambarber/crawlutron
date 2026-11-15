@@ -16,6 +16,7 @@ from crawlutron.admission.policy import PolicyLike, PolicyTier, read_policy
 from crawlutron.storage.coordination_store import atwin
 from crawlutron.storage.ids import new_job_id
 from crawlutron.storage.migrations import StoreSchema
+from crawlutron.storage.safe_db import txn_write
 from crawlutron.storage.sqlite_store import (
     bind_conn_lifecycle,
     connect_store,
@@ -230,15 +231,12 @@ class JobStore:
         (deleted) job is a no-op here, so a late ``save`` cannot resurrect it."""
         if self._is_tombstoned(job.job_id):
             return
-        self._accumulators._seed_table_truth(job.job_id)
-        # Capture BEFORE our write: a sibling committing during or after this save
-        # bumps data_version past it, so the next save cannot mistake us for last.
-        version = connection_data_version(self._conn)
-        job.updated_at = time.time()
-        self._conn.execute(_UPSERT_JOB_ROW_SQL, _job_row_params(job))
-        self._accumulators.append(job)
-        self._conn.commit()
-        # Stamped only after the write paths ran, so the proof reflects our content.
+        with txn_write(self._conn, owner="job_store.save"):
+            self._accumulators._seed_table_truth(job.job_id)
+            version = connection_data_version(self._conn)
+            job.updated_at = time.time()
+            self._conn.execute(_UPSERT_JOB_ROW_SQL, _job_row_params(job))
+            self._accumulators.append(job)
         self._accumulators._seed_version(job.job_id, version)
 
     def set_status(
@@ -299,14 +297,13 @@ class JobStore:
 
     def _tombstone_row(self, job_id: str, statement: str, params: tuple[object, ...]) -> bool:
         with self._lock:
-            if self._is_tombstoned(job_id):
-                return False
-            cur = self._conn.execute(statement, (time.time(), time.time(), *params))
-            if cur.rowcount != 1:
-                self._conn.rollback()
-                return False
-            self._accumulators.delete(job_id)
-            self._conn.commit()
+            with txn_write(self._conn, owner="job_store.tombstone"):
+                if self._is_tombstoned(job_id):
+                    return False
+                cur = self._conn.execute(statement, (time.time(), time.time(), *params))
+                if cur.rowcount != 1:
+                    return False
+                self._accumulators.delete(job_id)
         return True
 
     def _is_tombstoned(self, job_id: str) -> bool:

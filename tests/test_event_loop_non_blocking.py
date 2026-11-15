@@ -19,6 +19,7 @@ from crawlutron.models.result_record import ProducerEnvelope
 from crawlutron.service.job_runner import run_job
 from crawlutron.storage.job_store import JobStatus
 from crawlutron.storage.result_store import CrawlSpillStore
+from crawlutron.storage.safe_db import allow_on_loop
 from crawlutron.transport.content_cache import ContentCache
 from tests._cache_fixtures import (
     counting_entry_reads,
@@ -210,7 +211,8 @@ class TestJobRunnerSavesOffTheEventLoop:
 
     async def test_save_does_not_block_the_event_loop(self, monkeypatch, tmp_path) -> None:
         store = make_job_store(str(tmp_path))
-        job = store.create("http://example.com/", CrawlPolicy())
+        with allow_on_loop():
+            job = store.create("http://example.com/", CrawlPolicy())
 
         liveness = _LoopLiveness()
         observed: list[int] = [-1]  # loop progress seen by the blocking save
@@ -258,7 +260,8 @@ class TestAsyncCrawlRunnerSavesOffTheEventLoop:
         from tests._job_harnesses import make_job_store
 
         store = make_job_store(str(tmp_path))
-        job = store.create_single_shot("crawl_loop_test", "http://example.com/", CrawlPolicy())
+        with allow_on_loop():
+            job = store.create_single_shot("crawl_loop_test", "http://example.com/", CrawlPolicy())
 
         liveness = _LoopLiveness()
         observed: list[int] = [-1]  # loop progress seen by the blocking save

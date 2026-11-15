@@ -180,10 +180,13 @@ async def test_sync_crawl_counts_cross_door_with_an_async_job(tmp_path):
     """One keyed async job plus one sync crawl is quota-full at ``max_concurrency=1`` (#194).
     The cross-door sum must bind: an async PENDING row already takes the unkeyed slot.
     """
+    from crawlutron.storage.safe_db import allow_on_loop
+
     async with _keyedquota_client(tmp_path) as (client, store, tracker, issued):
         # A PENDING async row counts toward the key's concurrency without starting a real
         # background crawl that could stray past this test's teardown.
-        store.create_single_shot("async_busy", "http://example.com/", {}, owner=issued.key_id)
+        with allow_on_loop():
+            store.create_single_shot("async_busy", "http://example.com/", {}, owner=issued.key_id)
         assert store.active_count_for_caller(issued.key_id) == 1
         expect_quota_refused(
             await client.post(

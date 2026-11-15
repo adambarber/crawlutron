@@ -12,6 +12,7 @@ from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.storage.job_store import CrawlJobState, JobStatus, JobStore
+from crawlutron.storage.safe_db import allow_on_loop
 from tests._job_harnesses import frontier, loaded_job, make_job_store, run_to_terminal
 from tests._policy_factories import canonical
 from tests.chokepoint_walks import (
@@ -25,14 +26,29 @@ def _store(tmp_path) -> JobStore:
     return make_job_store(tmp_path)
 
 
+def _create_job(store: JobStore, owner: str) -> CrawlJobState:
+    """One PENDING job created on the loop for async tests."""
+    with allow_on_loop():
+        return store.create("http://example.com/", CrawlPolicy(), owner=owner)
+
+
+def _running_store(tmp_path) -> JobStore:
+    """A fresh job store with one RUNNING job seeded on the loop."""
+    store = make_job_store(tmp_path)
+    with allow_on_loop():
+        _running_job(store)
+    return store
+
+
 def _seeded_job(tmp_path, owner: str = "key_a") -> tuple[JobStore, CrawlJobState]:
     """One owned job carrying a visited page; tests add what they need on top."""
     store = _store(tmp_path)
-    job = store.create("http://example.com/", CrawlPolicy(), owner=owner)
+    job = _create_job(store, owner)
     loaded = _loaded(store, job.job_id)
     assert loaded is not None
     loaded.visited.add(canonical("http://example.com/page1"))
-    store.save(loaded)
+    with allow_on_loop():
+        store.save(loaded)
     return store, job
 
 
@@ -75,11 +91,14 @@ def assert_history_intact(
 
 
 def _running_job(store: JobStore, job_id: str = "j1") -> CrawlJobState:
+    from crawlutron.storage.safe_db import allow_on_loop
+
     job = CrawlJobState(
         job_id=job_id, root_url="https://a.example/", frontier=frontier(["https://a.example/"])
     )
-    store.save(job)
-    assert store.set_status(job_id, JobStatus.RUNNING, expected=JobStatus.PENDING) is True
+    with allow_on_loop():
+        store.save(job)
+        assert store.set_status(job_id, JobStatus.RUNNING, expected=JobStatus.PENDING) is True
     return job
 
 
@@ -145,7 +164,7 @@ class TestDeleteFinality:
     async def _deleted_job(tmp_path):
         """A store whose job was deleted but then late-saved by its runner."""
         store = _store(tmp_path)
-        job = store.create("http://example.com/", CrawlPolicy(), owner="key-a")
+        job = _create_job(store, "key-a")
         assert await store.adelete_for_caller(job.job_id, "key-a") is True
         # A runner's final asave lands after the delete committed (delete cancels
         # the task without awaiting it, so the save can win the race).
@@ -222,6 +241,7 @@ def test_set_status_cannot_flip_a_tombstoned_row(tmp_path):
 def test_foreign_delete_for_caller_leaves_history_intact(tmp_path):
     """A foreign caller must not destroy another caller's results + visited + frontier.
     The UPDATE decides ownership before any accumulator row is touched (#C1)."""
+
     store, job = _seeded_job(tmp_path)
     loaded = _loaded(store, job.job_id)
     loaded.visited.add(canonical("http://example.com/page2"))
@@ -257,9 +277,11 @@ def test_foreign_delete_for_caller_leaves_history_intact(tmp_path):
 
 def test_delete_for_caller_owner_tombstones_everything(tmp_path):
     """Owner delete removes row, results, visited, and frontier together."""
-    store, job = _seeded_job_with_results(tmp_path)
+    from crawlutron.storage.safe_db import allow_on_loop
 
-    assert store.delete_for_caller(job.job_id, "key_a") is True
+    store, job = _seeded_job_with_results(tmp_path)
+    with allow_on_loop():
+        assert store.delete_for_caller(job.job_id, "key_a") is True
     assert store.load(job.job_id) is None
     assert store.load_for_caller(job.job_id, "key_a") is None
     assert store.status_for_caller(job.job_id, "key_a") is None
@@ -278,6 +300,7 @@ def test_delete_ownerless_tombstones_a_live_row(tmp_path):
 def test_concurrent_foreign_deletes_preserve_owner_history(tmp_path):
     """Concurrent foreign delete_for_caller calls are idempotent no-ops: each
     returns False and none destroys owner history (serialized by the lock)."""
+
     store, job = _seeded_job_with_results(tmp_path)
     loaded = _loaded(store, job.job_id)
     loaded.frontier_removed.extend(entry.url for entry in loaded.frontier)
@@ -317,6 +340,7 @@ def test_concurrent_foreign_deletes_preserve_owner_history(tmp_path):
 def test_owner_save_interleaved_with_foreign_deletes(tmp_path):
     """Owner ``save()`` interleaved with foreign deletes: foreign deletes return
     False and the owner's published state lands intact (history not destroyed)."""
+
     store, job = _seeded_job_with_results(tmp_path)
     loaded = _loaded(store, job.job_id)
     loaded.visited.add(canonical("http://example.com/page2"))
@@ -349,9 +373,11 @@ class TestErrorStampingGatedOnTheFailedCas:
     async def test_a_lost_cas_leaves_the_error_field_untouched(self, tmp_path):
         from crawlutron.service.job_runner import arecord_terminal_failure
         from crawlutron.storage.job_store import Expected
+        from crawlutron.storage.safe_db import allow_on_loop
 
         store = make_job_store(tmp_path)
-        _running_job(store)
+        with allow_on_loop():
+            _running_job(store)
         # The concurrent transition lands between this path's load and its
         # CAS: the load sees RUNNING, but the FAILED write loses the race.
 
@@ -377,8 +403,7 @@ class TestErrorStampingGatedOnTheFailedCas:
     async def test_a_won_cas_stamps_the_error(self, tmp_path):
         from crawlutron.service.job_runner import arecord_terminal_failure
 
-        store = make_job_store(tmp_path)
-        _running_job(store)
+        store = _running_store(tmp_path)
 
         landed = await arecord_terminal_failure(store, "j1", "engine exploded")
 
@@ -394,8 +419,7 @@ class TestErrorStampingGatedOnTheFailedCas:
         """
         from crawlutron.service.job_runner import arecord_terminal_failure
 
-        store = make_job_store(tmp_path)
-        _running_job(store)
+        store = _running_store(tmp_path)
         raw = "Server error '500 Internal Server Error' for url 'https://user:pass@secret.example/x?key=apikey-value'"
 
         landed = await arecord_terminal_failure(store, "j1", raw)

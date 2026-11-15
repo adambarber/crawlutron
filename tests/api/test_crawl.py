@@ -246,9 +246,11 @@ class TestJobApi(_AsgiEndpointTests):
 
     async def _seed_job(self, root_url):
         """Seed a persisted row directly; create_endpoint refuses."""
+        from crawlutron.storage.safe_db import allow_on_loop
         from tests._app_factory import service_app
 
-        job = service_app().state.job_store.create(root_url, CrawlPolicy())
+        with allow_on_loop():
+            job = service_app().state.job_store.create(root_url, CrawlPolicy())
         self._seeded_ids.append(job.job_id)
         return job.job_id
 
@@ -259,11 +261,13 @@ class TestJobApi(_AsgiEndpointTests):
         bucket counts PENDING+RUNNING rows; #209-family leak)."""
         self._seeded_ids: list[str] = []
         yield
+        from crawlutron.storage.safe_db import allow_on_loop
         from tests._app_factory import service_app
 
         job_store = service_app().state.job_store
-        for job_id in self._seeded_ids:
-            job_store.delete(job_id)
+        with allow_on_loop():
+            for job_id in self._seeded_ids:
+                job_store.delete(job_id)
 
     async def test_v1_jobs_create_runs_and_list_get(self):
         # Create starts a background runner; with the fixture server the job completes a real whole-site crawl

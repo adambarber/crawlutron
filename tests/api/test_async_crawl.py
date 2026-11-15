@@ -347,6 +347,7 @@ class TestAsyncCrawlJobStoreIntegration:
         from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
         from crawlutron.models.unified_crawl_result import UnifiedCrawlResult
         from crawlutron.storage.job_store import JobKind, JobStatus
+        from crawlutron.storage.safe_db import allow_on_loop
         from crawlutron.vocabulary.taxonomy import CrawlClassification
 
         with single_shot_job() as (store, job):
@@ -370,8 +371,9 @@ class TestAsyncCrawlJobStoreIntegration:
             ).model_dump()
 
             job.results = [response_payload]
-            store.save(job)
-            store.set_status("test-id", JobStatus.COMPLETED, expected=JobStatus.PENDING)
+            with allow_on_loop():
+                store.save(job)
+                store.set_status("test-id", JobStatus.COMPLETED, expected=JobStatus.PENDING)
 
             # Load and verify
             loaded = store.load("test-id")
@@ -425,12 +427,13 @@ class TestAsyncCrawlTeardownIsolation:
     from a cancelled test can push a later test over its quota of four."""
 
     async def test_teardown_clears_a_stray_pending_anonymous_job(self):
+        from crawlutron.storage.safe_db import allow_on_loop
         from tests._app_factory import service_app
-
-        job_store = service_app().state.job_store
         from tests._async_harnesses import _drain_running_crawls
 
-        job_store.create_single_shot("stray_pending", "http://example.com/", {}, owner="")
+        job_store = service_app().state.job_store
+        with allow_on_loop():
+            job_store.create_single_shot("stray_pending", "http://example.com/", {}, owner="")
         assert job_store.active_count_for_caller("") >= 1
 
         # This is what the crawl_api fixture runs in its teardown.

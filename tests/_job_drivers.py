@@ -39,12 +39,14 @@ def _seed_job(
     on_seeded: Callable[[object, object], None] | None = None,
     **kw: Unpack[_SeedJobKwargs],
 ):
-    job = job_store.create(root_url, policy if policy is not None else {})
+    with allow_on_loop():
+        job = job_store.create(root_url, policy if policy is not None else {})
     if kw.get("frontier") is not None:
         seed_frontier(job, [FrontierEntry(url=canonical(url), depth=0) for url in kw["frontier"]])
     if kw.get("in_flight") is not None:
         job.in_flight = [FrontierEntry(url=canonical(url), depth=0) for url in kw["in_flight"]]
-    job_store.save(job)
+    with allow_on_loop():
+        job_store.save(job)
     if kw.get("running"):
         with allow_on_loop():
             job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)

@@ -298,6 +298,7 @@ async def _probe_job_runner(monkeypatch, tmp_path):
     from crawlutron.service import job_runner
     from crawlutron.storage.job_store_collections import FrontierEntry, JobStatus
     from crawlutron.storage.job_store_state import CrawlJobState
+    from crawlutron.storage.safe_db import allow_on_loop
     from tests._job_store_doubles import make_job_store
 
     effects = _effects()
@@ -307,15 +308,16 @@ async def _probe_job_runner(monkeypatch, tmp_path):
         effects["fetched"].append(str(url))
         raise AssertionError("a denied job must never fetch")
 
-    job_store.save(
-        CrawlJobState(
-            job_id="blocked-job",
-            root_url=_BLOCKED_URL,
-            policy=_denied_policy(),
-            status=JobStatus.PENDING,
-            frontier=[FrontierEntry(url=canonical(_BLOCKED_URL), depth=0)],
+    with allow_on_loop():
+        job_store.save(
+            CrawlJobState(
+                job_id="blocked-job",
+                root_url=_BLOCKED_URL,
+                policy=_denied_policy(),
+                status=JobStatus.PENDING,
+                frontier=[FrontierEntry(url=canonical(_BLOCKED_URL), depth=0)],
+            )
         )
-    )
     await _assert_refused(
         job_runner.run_job("blocked-job", job_store, _denied_settings(), asyncio.Event(), fetch_and_decode),
         effects,

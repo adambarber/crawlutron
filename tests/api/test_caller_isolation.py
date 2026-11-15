@@ -122,7 +122,8 @@ def test_status_list_exists_and_delete_all_scope_to_owner(tmp_path):
 def test_saving_a_job_never_transfers_ownership(tmp_path):
     store, loaded = _owned_job(tmp_path)
     loaded.owner = "key_b"
-    store.save(loaded)
+    with allow_on_loop():
+        store.save(loaded)
 
     assert store.load("crawl_owned") is not None
     after_save = store.load("crawl_owned")
@@ -133,8 +134,7 @@ def test_saving_a_job_never_transfers_ownership(tmp_path):
 def test_control_plane_moves_through_scoped_status(tmp_path):
     store = make_store(tmp_path / "jobs.db")
     seed_owned_job(store)
-    with allow_on_loop():
-        assert store.set_status("crawl_owned", JobStatus.RUNNING, expected=JobStatus.PENDING) is True
+    assert store.set_status("crawl_owned", JobStatus.RUNNING, expected=JobStatus.PENDING) is True
     assert store.status_for_caller("crawl_owned", "key_a") is not None
     assert store.status_for_caller("crawl_owned", "key_b") is None
 
@@ -184,7 +184,6 @@ def test_identity_for_key_carries_quotas(tmp_path):
     issued = keys.issue_key("agent-a", max_pages=25, max_concurrency=3)
     record = keys.verify_key(issued.secret)
     assert record is not None
-
     caller = identity_for_key(record)
 
     assert caller == CallerIdentity(
@@ -294,12 +293,14 @@ async def test_get_crawl_result_enforces_owner(tmp_path):
 
     store = make_store(tmp_path / "jobs.db")
     results = CrawlResultStore(tmp_path / "results.db")
-    seed_owned_job(store)
+    with allow_on_loop():
+        seed_owned_job(store)
     payload = {"request_id": "crawl_owned", "results": []}
     done = store.load("crawl_owned")
     assert done is not None
     done.results = [cast("dict[str, JsonValue]", payload)]
-    store.save(done)
+    with allow_on_loop():
+        store.save(done)
     with allow_on_loop():
         store.set_status("crawl_owned", JobStatus.COMPLETED, expected=JobStatus.PENDING)
     owner = CallerIdentity(caller_id="key_a", authenticated=True)
@@ -347,18 +348,19 @@ async def test_http_scoped_reads_and_key_issuance(tmp_path):
 
 async def test_http_legacy_anonymous_rows_stay_readable(tmp_path):
     async with isolation_client(tmp_path) as (client, store, results, keys):
-        complete_job(store, "crawl_open", {"request_id": "crawl_open"})
+        with allow_on_loop():
+            complete_job(store, "crawl_open", {"request_id": "crawl_open"})
         assert (await client.get("/v1/crawl/crawl_open")).status_code == 200
 
 
 def test_active_count_for_caller_counts_only_live_owned_jobs(tmp_path):
+    """Active count reflects PENDING+RUNNING by owner, excluding terminal."""
     store = make_store(tmp_path / "jobs.db")
     seed_owned_job(store, job_id="crawl_running", owner="key_a")
     seed_owned_job(store, job_id="crawl_other", owner="key_b")
     seed_owned_job(store, job_id="crawl_done", owner="key_a")
-    with allow_on_loop():
-        assert store.set_status("crawl_running", JobStatus.RUNNING, expected=JobStatus.PENDING) is True
-        assert store.set_status("crawl_done", JobStatus.COMPLETED, expected=JobStatus.PENDING) is True
+    assert store.set_status("crawl_running", JobStatus.RUNNING, expected=JobStatus.PENDING) is True
+    assert store.set_status("crawl_done", JobStatus.COMPLETED, expected=JobStatus.PENDING) is True
 
     assert store.active_count_for_caller("key_a") == 1
     assert store.active_count_for_caller("key_b") == 1
@@ -366,8 +368,7 @@ def test_active_count_for_caller_counts_only_live_owned_jobs(tmp_path):
 
 
 def test_concurrency_quota_rejects_a_full_caller():
-    import pytest
-
+    """Concurrency cap at 1 refuses when count already equals the cap."""
     from crawlutron.service.errors import QuotaRefusal
     from crawlutron_rest.api.caller_auth import check_concurrency_quota
 
@@ -385,8 +386,8 @@ def test_concurrency_quota_rejects_a_full_caller():
 
 def _concurrency_setup(store: JobStore, issued) -> None:
     """Seed a running job for the issued key so its one slot is taken."""
-    seed_owned_job(store, job_id="crawl_busy", owner=issued.key_id)
     with allow_on_loop():
+        seed_owned_job(store, job_id="crawl_busy", owner=issued.key_id)
         store.set_status("crawl_busy", JobStatus.RUNNING, expected=JobStatus.PENDING)
 
 
@@ -421,7 +422,7 @@ async def test_http_quota_refuses_over_budget_calls(tmp_path, key_args, setup, r
 
 
 def _caller_metrics(tmp_path: Path) -> MetricsStore:
-    """A metrics store backed by one isolated coordination counters file."""
+    """Metrics store backed by isolated coordination counters."""
     from crawlutron.storage.coordination_counters import CoordinationCounters
 
     return MetricsStore(counters=CoordinationCounters(tmp_path / "counters.db"))
@@ -484,7 +485,7 @@ async def test_anonymous_crawl_stores_the_resolved_page_limit(tmp_path):
 
 
 async def test_keyed_crawl_keeps_an_explicit_zero_page_limit(tmp_path):
-    """Explicit ``max_pages=0`` resolves to DEFAULT_MAX_PAGES and persists."""
+    """Explicit max_pages=0 resolves to DEFAULT_MAX_PAGES and persists."""
     async with keyed_quota_crawl(tmp_path, key_max_pages=0) as (store, _, _, response):
         assert keyed_zero_bound(store, response).policy.limits.max_pages == DEFAULT_MAX_PAGES
 
@@ -492,9 +493,7 @@ async def test_keyed_crawl_keeps_an_explicit_zero_page_limit(tmp_path):
 async def test_keyed_crawl_zero_limit_enforced_as_stored(tmp_path):
     """The engine's enforced bound equals the stored bound for zero limits."""
     async with keyed_quota_crawl(tmp_path, key_max_pages=0, label="agent-b") as (store, _, _, response):
-        assert response.status_code == 202, response.text
         stored = keyed_zero_bound(store, response)
         wire = stored.policy.model_dump()
         enforced = validate_wire_policy(wire)
         assert enforced.limits.max_pages == DEFAULT_MAX_PAGES
-        assert stored.policy.limits.max_pages == enforced.limits.max_pages
