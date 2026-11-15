@@ -238,7 +238,6 @@ class TestRunnerLifecycle:
 
         job, hang, settings = _started_hung_job(job_store)
         await _wait_status(job_store, job.job_id, {"running"})
-        await asyncio.sleep(0.5)
         wedged = tracked_task(job.job_id)
         assert wedged is not None, "runner must be wedged on the hang before pausing"
         await job_runner.pause_job(job.job_id, job_store)
