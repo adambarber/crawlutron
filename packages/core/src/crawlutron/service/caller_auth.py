@@ -161,12 +161,11 @@ async def admit(
     *,
     tracking: Tracking,
     payload: PolicyCarrier | None = None,
-    reserve_slot: bool = True,
 ) -> AsyncGenerator[str, None]:
     """Admit one request: resolve the page bound, the quotas, the cookie namespace.
 
-    The caller's admit lock spans count->check->insert for async doors
-    (``reserve_slot=False``) and count->check->reserve for sync doors.
+    One durable reservation under BEGIN IMMEDIATE (store write lock = cross-worker
+    mutex) for both doors; the asyncio lock serializes in-process callers only.
     """
     active = caller if caller is not None else anonymous_caller()
     resolved = resolve_page_limit(active, requested_pages)
@@ -186,21 +185,16 @@ async def admit(
         check_concurrency_quota(active, active_count)
         yield active.caller_id
         return
-    # One admit at a time per caller, so no two requests read the same
-    # count before either has inserted its row or reserved its slot.
+    # One admit at a time per caller: the store's write lock (BEGIN IMMEDIATE)
+    # is the cross-worker mutex; the asyncio lock only serializes in-process.
     async with concurrency_tracker.slot_lock(active.caller_id):
         job_active = (
             await job_store.aactive_count_for_caller(active.caller_id) if job_store is not None else 0
         )
         active_count = job_active + await concurrency_tracker.sync_in_flight(active.caller_id)
         check_concurrency_quota(active, active_count)
-        if not reserve_slot:
-            # The row insert runs inside the lock; once it lands, the durable
-            # row is the reservation the next admit counts.
-            yield active.caller_id
-            return
-        # The reservation re-counts job rows and slots in one write transaction:
-        # the store's write lock is the shared admit mutex across workers.
+        # One durable reservation under BEGIN IMMEDIATE (store write lock =
+        # cross-worker mutex); asyncio lock never decides quota.
         await concurrency_tracker.reserve(
             active.caller_id,
             max_concurrency=active.max_concurrency,

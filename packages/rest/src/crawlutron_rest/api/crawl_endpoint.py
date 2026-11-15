@@ -175,7 +175,6 @@ async def _admitted_crawl(
         payload.policy.limits.max_pages,
         tracking=tracking,
         payload=payload,
-        reserve_slot=not async_door,
     ) as owner:
         if async_door:
             crawl_awaitable = None

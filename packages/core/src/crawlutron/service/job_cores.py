@@ -77,7 +77,7 @@ async def create_job_core(
     # A whole-site job persists a durable row; admit reserves a slot across the
     # check->insert window and hands it to the durable row at block exit.
     tracking = Tracking(job_store=job_store, concurrency_tracker=concurrency_tracker)
-    async with admit(caller, bound, tracking=tracking, reserve_slot=False):
+    async with admit(caller, bound, tracking=tracking):
         job = await job_store.acreate(checked[0][0], resolved_policy, owner=caller.caller_id)
     job_runner.start_job(job.job_id, job_store, settings, shutdown_event)
     row = await job_store.astatus(job.job_id)
