@@ -24,3 +24,15 @@ def test_cache_ttl_knob_zero_is_off_not_forever():
     assert negative.cache_ttl_seconds == 0
     huge = CrawlerSettings.from_mapping({"CRAWLUTRON_CACHE_TTL_SECONDS": "999999"})
     assert huge.cache_ttl_seconds == 86_400
+
+
+def test_webhook_secret_lives_in_settings_not_the_service():
+    """CRAWLUTRON_WEBHOOK_SECRET is read in the settings home (repr=False), not
+    via a raw os.environ.get in service/webhooks.py."""
+    settings = CrawlerSettings.from_mapping({"CRAWLUTRON_WEBHOOK_SECRET": "s3cr3t-webhook-key"})
+    assert settings.webhook_secret == "s3cr3t-webhook-key"
+    assert "s3cr3t-webhook-key" not in repr(settings)
+
+
+def test_webhook_secret_defaults_to_empty():
+    assert CrawlerSettings.from_mapping({}).webhook_secret == ""

@@ -23,6 +23,7 @@ from safe_url.normalized_url import NormalizedUrl
 from safe_url.url_redaction import redact_urls_in_text
 
 from crawlutron.config.env import get_env_int, get_mapping_int
+from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.runtime import process_state
 from crawlutron.safety.bounded_io import BodyTooLarge, read_capped_async
@@ -57,7 +58,7 @@ class DeliveryFailed(Exception):
 
 def webhook_secret() -> str:
     """The shared HMAC key for outbound webhook signatures; empty disables signing."""
-    return os.environ.get("CRAWLUTRON_WEBHOOK_SECRET", "")
+    return CrawlerSettings.from_mapping().webhook_secret
 
 
 def _reset() -> None:

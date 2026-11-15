@@ -128,6 +128,8 @@ class CrawlerSettings:
     # Operator token gating /v1/keys issuance, listing, and revocation. Empty
     # disables the HTTP surface for key management (no token, no minting).
     key_admin_token: str = field(repr=False, default="")
+    # Shared HMAC key for outbound webhook signatures; empty disables signing.
+    webhook_secret: str = field(repr=False, default="")
     # Per-caller watch cap: registration refuses past this many live watches for
     # one owner; the anonymous bucket shares one finite allowance.
     max_watches_per_caller: int = 100
@@ -228,6 +230,7 @@ class _SearchFields(TypedDict):
     search_limit_max: int
     search_timeout_seconds: int
     key_admin_token: str
+    webhook_secret: str
     max_watches_per_caller: int
 
 
@@ -417,6 +420,7 @@ def _search_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> _Se
             source, "CRAWLUTRON_SEARCH_TIMEOUT_SECONDS", cls.search_timeout_seconds
         ),
         "key_admin_token": source.get("CRAWLUTRON_KEY_ADMIN_TOKEN", cls.key_admin_token),
+        "webhook_secret": source.get("CRAWLUTRON_WEBHOOK_SECRET", cls.webhook_secret),
         "max_watches_per_caller": get_mapping_int(
             source, "CRAWLUTRON_MAX_WATCHES_PER_CALLER", cls.max_watches_per_caller, lo=1
         ),
