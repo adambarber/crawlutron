@@ -16,7 +16,7 @@ from crawlutron.admission.policy import PolicyLike, PolicyTier, read_policy
 from crawlutron.storage.coordination_store import atwin
 from crawlutron.storage.ids import new_job_id
 from crawlutron.storage.migrations import StoreSchema
-from crawlutron.storage.safe_db import txn_write
+from crawlutron.storage.safe_db import allow_on_loop_read, txn_read, txn_write
 from crawlutron.storage.sqlite_store import (
     bind_conn_lifecycle,
     connect_store,
@@ -92,21 +92,16 @@ def _read_job_row(
     statement, params = _owner_statement(_ROW_COLUMNS, True, "", owner)
     try:
         with store._lock:
-            store._conn.execute("BEGIN")
-            try:
-                row = _fetch_owner_row(store._conn, statement, (job_id, *params))
-                if row is None:
-                    store._conn.execute("COMMIT")
-                    return None
-                factory = store._row_to_job_factory
-                if factory is None:
-                    state = store._read_collections(row, with_accumulators=with_accumulators)
-                else:
-                    state = factory(row, store._row_to_job, with_accumulators=with_accumulators)
-            except BaseException:
-                store._conn.execute("ROLLBACK")
-                raise
-            store._conn.execute("COMMIT")
+            with allow_on_loop_read():
+                with txn_read(store._conn, owner="job_store.read_job_row"):
+                    row = _fetch_owner_row(store._conn, statement, (job_id, *params))
+                    if row is None:
+                        return None
+                    factory = store._row_to_job_factory
+                    if factory is None:
+                        state = store._read_collections(row, with_accumulators=with_accumulators)
+                    else:
+                        state = factory(row, store._row_to_job, with_accumulators=with_accumulators)
             return state
     except (json.JSONDecodeError, ValueError, TypeError) as exc:
         logger.warning("job_store_load_corrupt", extra={"job_id": job_id, "error": str(exc)})

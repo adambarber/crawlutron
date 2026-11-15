@@ -199,7 +199,10 @@ def txn_read(
     deadline: float | None = None,
     owner: str = "",
 ) -> Generator[None, None, None]:
-    """BEGIN DEFERRED, commit, roll back on failure for consistent reads with bounds."""
+    """BEGIN DEFERRED, commit, roll back on failure for consistent reads with bounds.
+
+    Bounded invocations install a counting ``row_factory``; unbounded ones leave
+    ``conn.row_factory`` untouched so the caller's factory is not disturbed."""
     assert_off_main_thread()
     depth = getattr(_READ_TXN, "depth", 0)
     if depth > 0:
@@ -209,26 +212,29 @@ def txn_read(
     _READ_TXN.depth = depth + 1
 
     stats = {"rows": 0, "bytes": 0}
+    bounded = max_rows is not None or max_bytes is not None or deadline is not None
 
-    original_row_factory = conn.row_factory
+    if bounded:
+        original_row_factory = conn.row_factory
 
-    def counting_row_factory(_cursor, row):
-        stats["rows"] += 1
-        stats["bytes"] += sum(len(str(v)) for v in row)
-        if max_rows is not None and stats["rows"] > max_rows:
-            raise ReadRejected(f"read row cap exceeded: {stats['rows']} > {max_rows}")
-        if max_bytes is not None and stats["bytes"] > max_bytes:
-            raise ReadRejected(f"read size cap exceeded: {stats['bytes']} > {max_bytes}")
-        if deadline is not None and time.monotonic() > deadline:
-            raise ReadRejected(f"read deadline exceeded for {owner!r}")
-        return row
+        def counting_row_factory(_cursor, row):
+            stats["rows"] += 1
+            stats["bytes"] += sum(len(str(v)) for v in row)
+            if max_rows is not None and stats["rows"] > max_rows:
+                raise ReadRejected(f"read row cap exceeded: {stats['rows']} > {max_rows}")
+            if max_bytes is not None and stats["bytes"] > max_bytes:
+                raise ReadRejected(f"read size cap exceeded: {stats['bytes']} > {max_bytes}")
+            if deadline is not None and time.monotonic() > deadline:
+                raise ReadRejected(f"read deadline exceeded for {owner!r}")
+            return row
 
-    conn.row_factory = counting_row_factory
+        conn.row_factory = counting_row_factory
     try:
         with _transaction(conn, "BEGIN DEFERRED", state=None):
             yield
     finally:
-        conn.row_factory = original_row_factory
+        if bounded:
+            conn.row_factory = original_row_factory
         _READ_TXN.depth = depth
 
 

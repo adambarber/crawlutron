@@ -1,7 +1,6 @@
 """Write-door invariant: every storage write funnels through txn_write/in_txn.
 
-No storage module is exempt: the gate is sealed and judged unconditionally.
-"""
+Decidable SQL shapes: literal operand, joined/synthetic operand, module-constant name. No module exempt."""
 
 from __future__ import annotations
 
@@ -20,33 +19,51 @@ _WRITE_METHODS = frozenset({"execute", "executemany", "commit", "rollback", "exe
 _WRITE_KEYWORDS = frozenset({"insert", "update", "delete", "begin"})
 _WRITE_DOOR = frozenset({"txn_write", "in_txn"})
 
+#: Scope exclusions, path name -> justification.
+#: ``sqlite_store.py``: connection factory, creates the connection the doors govern; predates any store.
+_SCOPE_EXCLUDE: frozenset[str] = frozenset({"sqlite_store.py"})
+
+
+def _is_conn_receiver(node: ast.AST) -> bool:
+    """True when *node* is ``conn`` or any ``... ._conn``."""
+    if isinstance(node, ast.Name) and node.id == "conn":
+        return True
+    if isinstance(node, ast.Attribute) and node.attr == "_conn":
+        return True
+    return False
+
 
 def _conn_method(call: ast.Call) -> ast.Attribute | None:
-    """``call.func`` when it is ``self._conn.<write-method>``/``conn.<write-method>``."""
+    """``call.func`` when its receiver ends in ``._conn`` or is bare ``conn``."""
     func = call.func
     if not isinstance(func, ast.Attribute):
         return None
     if func.attr not in _WRITE_METHODS:
         return None
-    receiver = func.value
-    if isinstance(receiver, ast.Name) and receiver.id == "conn":
-        return func
-    if (
-        isinstance(receiver, ast.Attribute)
-        and isinstance(receiver.value, ast.Name)
-        and receiver.value.id == "self"
-        and receiver.attr == "_conn"
-    ):
+    if _is_conn_receiver(func.value):
         return func
     return None
 
 
-def _first_sql_string(call: ast.Call) -> str | None:
+def _first_sql_string(call: ast.Call, tree: ast.Module | None = None) -> str | None:
     if not call.args:
         return None
     argument = call.args[0]
     if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
         return argument.value
+    if not isinstance(argument, ast.Name) or tree is None:
+        return None
+    # Look up the name in module-level string-constant assignments.
+    for node in ast.iter_child_nodes(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
+            continue
+        if node.targets[0].id != argument.id:
+            continue
+        val = node.value
+        if isinstance(val, ast.Constant) and isinstance(val.value, str):
+            return val.value
     return None
 
 
@@ -92,7 +109,7 @@ def _bare_write_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
             ):
                 out.append(offender_at(path, call, f"direct {func.attr}() outside the write door"))
             continue
-        sql = _first_sql_string(call)
+        sql = _first_sql_string(call, tree)
         if sql is None or not _is_write_statement(sql):
             continue
         if not _inside_door(call, tree, parents) and not _inside_configure_store_connection(call, parents):
@@ -105,22 +122,29 @@ WRITE_DOOR_RULE = Rule(
     find=_bare_write_offenders,
     summary=(
         "executes an INSERT/UPDATE/DELETE/BEGIN, or a direct commit/rollback/"
-        "executescript, outside txn_write/in_txn/configure_store_connection"
+        "executescript, outside txn_write/in_txn/configure_store_connection; "
+        "decidable SQL: literal, joined/synthetic, module-constant name"
     ),
     scope=lambda *, exclude: (
         (path, tree)
         for path, tree in trees_under(_STORAGE_DIR)
-        if "migrations" not in path.parts and path.name != "sqlite_store.py"
+        if "migrations" not in path.parts and path.name not in _SCOPE_EXCLUDE
     ),
     bite=lambda: (
         "import crawlutron.storage.safe_db as safe_db\n\n"
         "safe_db.txn_write(conn)\n"
-        'conn.execute("UPDATE t SET x = 1")\n'
+        'conn.execute("UPDATE t SET x = 1")\n',
+        'alias._conn.execute("UPDATE t SET x = 1")\n',
+        'SQL = "UPDATE t SET x = 1"\nconn.execute(SQL)\n',
+        'store._conn.execute("BEGIN")\n',
     ),
     clean=lambda: (
         'with txn_write(conn):\n    conn.execute("UPDATE t SET x = 1")\n',
         'with in_txn(conn):\n    conn.execute("UPDATE t SET x = 1")\n',
         'def configure_store_connection(conn):\n    conn.execute("PRAGMA busy_timeout=5000")\n',
+        'conn.execute("SELECT * FROM t")\n',
+        'self._conn.execute("PRAGMA busy_timeout=5000")\n',
+        'something._rows.execute("UPDATE t SET x = 1")\n',
     ),
 )
 

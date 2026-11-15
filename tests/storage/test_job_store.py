@@ -11,6 +11,7 @@ from crawlutron.admission.policy import read_policy
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.storage.job_store import CrawlJobState, FrontierEntry, JobStatus, OrderedUrlSet
+from crawlutron.storage.safe_db import StoreClosed
 from tests._job_harnesses import (
     frontier,
     loaded_job,
@@ -285,7 +286,7 @@ class TestJobStoreEdges:
         store.close()  # closing twice is safe
         try:
             store.load("anything")
-        except sqlite3.ProgrammingError:
+        except (sqlite3.ProgrammingError, StoreClosed):
             pass
         else:
             raise AssertionError("a closed job store must refuse operations")
