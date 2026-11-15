@@ -101,4 +101,19 @@ def test_the_ledger_catches_a_leaked_connection(tmp_path):
             _SITES.pop(id(conn), None)
 
 
+async def test_service_app_teardown_closes_every_connection():
+    """close_app_stores closes every connection an app opened, measured as
+    a delta so prior tests' open connections do not skew the count.
+    """
+    from crawlutron.service.store_shutdown import close_app_stores
+    from tests._app_factory import fresh_app
+
+    before = len(live_ledgered_sites())
+    app = fresh_app()
+    assert app is not None
+    assert len(live_ledgered_sites()) > before, "the app opened connections that teardown must close"
+    await close_app_stores(app)
+    assert len(live_ledgered_sites()) == before, "teardown closed every connection the app opened"
+
+
 __all__ = ["live_ledgered_sites", "test_the_ledger_catches_a_leaked_connection"]

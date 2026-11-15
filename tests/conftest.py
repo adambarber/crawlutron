@@ -216,6 +216,11 @@ def pytest_sessionfinish(session, exitstatus):  # args unused; hook signature
         store = getattr(app.state, attr, None)
         if store is not None:
             store.close()
+    # The concurrency tracker's coordination-store connection is app-owned too;
+    # close it here so teardown is complete (#1092).
+    tracker = getattr(app.state, "concurrency_tracker", None)
+    if tracker is not None:
+        tracker.close()
     from tests.conftest import assert_no_live_session_connections
 
     assert_no_live_session_connections()

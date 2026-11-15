@@ -16,6 +16,10 @@ _STORE_ATTRS = (
     "audit_store",
 )
 
+#: create_app also opens the concurrency tracker's coordination-store
+#: connection; teardown must close it or it outlives store teardown (#1092).
+_TRACKER_ATTR = "concurrency_tracker"
+
 __all__ = ["close_app_stores"]
 
 
@@ -33,3 +37,6 @@ async def close_app_stores(app: FastAPI) -> None:
     cookie_store = getattr(cookie_jar, "store", None)
     if cookie_store is not None:
         cookie_store.close()
+    tracker = getattr(app.state, _TRACKER_ATTR, None)
+    if tracker is not None:
+        tracker.close()
