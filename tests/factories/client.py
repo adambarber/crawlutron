@@ -105,11 +105,11 @@ async def keyed_crawl(
     return issued, response
 
 
-def keyed_zero_bound(store: job_store.JobStore, response):
+async def keyed_zero_bound(store: job_store.JobStore, response):
     """The stored policy of a #593 crawl: an explicit zero resolves to the bound."""
     from tests._api_harnesses import stored_request as _stored_request
 
-    return _stored_request(store, response)
+    return await _stored_request(store, response)
 
 
 @contextlib.asynccontextmanager

@@ -63,7 +63,7 @@ async def run_to_terminal(job_store, job_id: str) -> CrawlJobState:
     from tests._job_harnesses import _SETTLED_STATUSES, _wait_status
 
     status = await _wait_status(job_store, job_id, _SETTLED_STATUSES)
-    finished = job_store.load(job_id)
+    finished = await job_store.aload(job_id)
     assert finished is not None, f"job {job_id} reported {status} with no row"
     assert finished.status.value == status, (
         f"job {job_id} settled {status} but the row it handed back reads "

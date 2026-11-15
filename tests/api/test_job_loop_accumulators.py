@@ -54,7 +54,7 @@ async def test_batch_loop_never_reads_full_accumulators(job_store, monkeypatch):
     )
     await asyncio.wait({task})
 
-    finished = job_store.load(job.job_id)
+    finished = await job_store.aload(job.job_id)
     assert finished is not None and finished.status.value == "completed"
     assert finished.stats["total_crawled"] == pages, f"expected all {pages} pages crawled"
     assert len(finished.results) == pages, (

@@ -29,13 +29,13 @@ def _keyed_headers(key: str) -> dict[str, str]:
 async def _stored_crawl(client, store, *, key: str, max_pages: int = 0):
     """POST one async crawl for ``key`` and return the stored job and response."""
     response = await post_crawl(client, max_pages=max_pages, key=key)
-    return _stored_request(store, response), response
+    return await _stored_request(store, response), response
 
 
 async def test_keyed_crawl_stores_the_key_bound_when_limits_omitted(tmp_path):
     """A key declaring ``max_pages=1`` caps an omitted limits block in the stored policy."""
     async with keyed_quota_crawl(tmp_path, key_max_pages=1, body_max_pages=None) as (store, _, _, response):
-        stored = _stored_request(store, response)
+        stored = await _stored_request(store, response)
         assert stored.policy.limits.max_pages == 1
 
 
@@ -128,7 +128,7 @@ async def test_keyed_job_stores_the_key_bound_when_limits_omitted(tmp_path, monk
         tracking=Tracking(job_store=store),
     )
 
-    job = store.load(response.job_id)
+    job = await store.aload(response.job_id)
     assert job is not None
     assert job.policy.limits.max_pages == 1
 

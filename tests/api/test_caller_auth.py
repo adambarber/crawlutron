@@ -88,7 +88,7 @@ async def test_wrong_key_on_crawl_read_is_401(tmp_path):
 
     async with isolation_client(tmp_path) as (client, store, _results, _keys):
         with allow_on_loop():
-            complete_job(store, "crawl_owned", {"request_id": "crawl_owned"}, owner="key_a")
+            await complete_job(store, "crawl_owned", {"request_id": "crawl_owned"}, owner="key_a")
         response = await client.get("/v1/crawl/crawl_owned", headers={"X-API-Key": "definitely-wrong"})
         _assert_401(response)
 

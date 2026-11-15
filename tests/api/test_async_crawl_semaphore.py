@@ -67,7 +67,7 @@ class TestSemaphoreHoldsTheCrawlOnly:
             # task start; give the queued runner that window to prove it stayed PENDING.
             for _ in range(50):
                 await asyncio.sleep(0.01)
-                assert job_store.load(request_id).status == JobStatus.PENDING, (
+                assert (await job_store.aload(request_id)).status == JobStatus.PENDING, (
                     "a queued job claimed RUNNING before the semaphore was acquired"
                 )
         finally:
@@ -104,7 +104,7 @@ class TestSemaphoreHoldsTheCrawlOnly:
                     asyncio.Event(),
                 )
 
-        assert job_store.load(request_id).status == JobStatus.COMPLETED, "delivery never ran"
+        assert (await job_store.aload(request_id)).status == JobStatus.COMPLETED, "delivery never ran"
         assert not delivery_seen_inside, "the webhook was delivered while still holding the crawl semaphore"
 
     @pytest.mark.parametrize("with_webhook", [False, True])
@@ -153,7 +153,7 @@ class TestSemaphoreHoldsTheCrawlOnly:
                 finally:
                     release.set()
 
-        job = job_store.load(request_id)
+        job = await job_store.aload(request_id)
         assert job.status == JobStatus.FAILED, "a cancelled crawl must leave a terminal FAILED write"
         assert job.error == "cancelled_shutdown"
         if with_webhook:

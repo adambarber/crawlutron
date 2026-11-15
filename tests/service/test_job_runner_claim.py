@@ -54,7 +54,7 @@ class TestRecoveryRespectsJobLease:
         """Recovery must not rewind a RUNNING row owned by a live foreign lease."""
         store, job = _seed_foreign(_store(tmp_path))
         assert await job_recovery.recover_orphaned_running_jobs(store) == 0
-        reloaded = store.load(job.job_id)
+        reloaded = await store.aload(job.job_id)
         assert reloaded and reloaded.status is JobStatus.RUNNING and reloaded.claimed_by == "worker-foreign"
 
     async def test_recovery_retires_unclaimed_running_orphan(self, tmp_path):
@@ -62,7 +62,7 @@ class TestRecoveryRespectsJobLease:
         store = _store(tmp_path)
         job = _seed_running(store)
         assert await job_recovery.recover_orphaned_running_jobs(store) == 1
-        reloaded = store.load(job.job_id)
+        reloaded = await store.aload(job.job_id)
         assert reloaded and reloaded.status is JobStatus.PENDING and reloaded.claimed_by is None
 
     async def test_recovery_retires_stale_claimed_running_orphan(self, tmp_path):
@@ -72,7 +72,7 @@ class TestRecoveryRespectsJobLease:
         with allow_on_loop():
             assert store.claim_running(job.job_id, "worker-dead", now=100.0, claim_seconds=300.0)
         assert await job_recovery.recover_orphaned_running_jobs(store, now=500.0) == 1
-        reloaded = store.load(job.job_id)
+        reloaded = await store.aload(job.job_id)
         assert reloaded is not None and reloaded.status is JobStatus.PENDING
 
     async def test_stale_lease_boundary_is_exclusive(self, tmp_path):
@@ -83,11 +83,11 @@ class TestRecoveryRespectsJobLease:
             for job, owner in ((fresh, "worker-a"), (stale, "worker-b")):
                 assert store.claim_running(job.job_id, owner, now=100.0, claim_seconds=300.0)
         assert await job_recovery.recover_orphaned_running_jobs(store, now=400.0) == 0
-        fresh_job = store.load(fresh.job_id)
+        fresh_job = await store.aload(fresh.job_id)
         assert fresh_job is not None and fresh_job.status is JobStatus.RUNNING
         assert await job_recovery.recover_orphaned_running_jobs(store, now=400.001) == 2
-        fresh_job = store.load(fresh.job_id)
-        stale_job = store.load(stale.job_id)
+        fresh_job = await store.aload(fresh.job_id)
+        stale_job = await store.aload(stale.job_id)
         assert fresh_job is not None and fresh_job.status is JobStatus.PENDING
         assert stale_job is not None and stale_job.status is JobStatus.PENDING
 
@@ -100,7 +100,7 @@ class TestRecoveryRespectsJobLease:
             store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
             assert store.claim_running(job.job_id, "worker-live", now=200.0, claim_seconds=300.0)
             assert store.retire_orphan_running(job.job_id, JobStatus.PENDING, now=250.0) is False
-        reloaded = store.load(job.job_id)
+        reloaded = await store.aload(job.job_id)
         assert reloaded is not None and reloaded.status is JobStatus.RUNNING
 
 
@@ -134,14 +134,14 @@ class TestRunnerClaimOwnership:
         job, hang, task = await self._seed_and_start_hung(store)
         try:
             await _wait_until(store, job.job_id, lambda j: bool(j.in_flight))
-            current = store.load(job.job_id)
+            current = await store.aload(job.job_id)
             assert current is not None and current.claimed_by is not None
             with allow_on_loop():
                 assert store.release_job_claim(job.job_id, current.claimed_by)
                 assert store.claim_running(job.job_id, "worker-foreign", now=time.time(), claim_seconds=300.0)
             hang.set()
             await asyncio.wait({task})
-            reloaded = store.load(job.job_id)
+            reloaded = await store.aload(job.job_id)
             assert reloaded is not None and reloaded.status is JobStatus.RUNNING
             assert reloaded.claimed_by == "worker-foreign"
         finally:
@@ -155,7 +155,7 @@ class TestRunnerClaimOwnership:
             store, job.job_id, "boom", claimed_by="worker-stale"
         )
         assert recorded is False
-        reloaded = store.load(job.job_id)
+        reloaded = await store.aload(job.job_id)
         assert reloaded and reloaded.status is JobStatus.RUNNING and reloaded.claimed_by == "worker-foreign"
         assert reloaded.error is None
         store.close()
@@ -170,7 +170,7 @@ class TestRunnerClaimOwnership:
             store, job.job_id, "boom", claimed_by="worker-owner"
         )
         assert recorded is True
-        reloaded = store.load(job.job_id)
+        reloaded = await store.aload(job.job_id)
         assert reloaded is not None and reloaded.status is JobStatus.FAILED
         assert reloaded.error == "boom"
         assert reloaded.claimed_by is None and reloaded.claimed_at is None
@@ -198,7 +198,7 @@ class TestClaimRenewalAndRetirementEdges:
             assert store.claim_running(job.job_id, "worker-live", now=now, claim_seconds=300.0)
         assert await job_recovery.recover_orphaned_running_jobs(store, now=1200.0, claim_seconds=300.0) == 0
         assert await job_recovery.recover_orphaned_running_jobs(store, now=1400.1, claim_seconds=300.0) == 1
-        reloaded = store.load(job.job_id)
+        reloaded = await store.aload(job.job_id)
         assert reloaded is not None and reloaded.status is JobStatus.PENDING
         assert reloaded.claimed_by is None and reloaded.claimed_at is None
         store.close()

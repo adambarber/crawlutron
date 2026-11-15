@@ -23,10 +23,10 @@ def seed_owned_job(store: JobStore, job_id: str = "crawl_owned", owner: str = "k
         store.create_single_shot(job_id, "http://example.com/", {}, owner=owner)
 
 
-def complete_job(store: JobStore, job_id: str, payload: JsonValue, owner: str = "") -> None:
+async def complete_job(store: JobStore, job_id: str, payload: JsonValue, owner: str = "") -> None:
     """Seed one owned single-shot job and drive it to COMPLETED with ``payload``."""
     seed_owned_job(store, job_id=job_id, owner=owner)
-    done = store.load(job_id)
+    done = await store.aload(job_id)
     assert done is not None
     done.results = [payload if isinstance(payload, dict) else {"payload": payload}]
     with allow_on_loop():

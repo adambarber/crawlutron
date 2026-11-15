@@ -144,7 +144,7 @@ class TestCrashRecovery:
         )
         assert await _wait_status(job_store, job.job_id, {"completed", "failed"}) == "completed"
 
-        job = job_store.load(job.job_id)
+        job = await job_store.aload(job.job_id)
         assert job.visited == {canonical(GRAPH_ROOT)}, "in-flight batch was dropped, not re-crawled"
         assert job.in_flight == []
         assert job.stats["total_crawled"] == 1
@@ -219,7 +219,7 @@ class TestCrashRecovery:
             "host_not_allowed",
             "private_network_target",
         }
-        assert job_store.list_jobs() == []
+        assert await job_store.alist_jobs() == []
         assert started == []
 
 
@@ -241,7 +241,7 @@ class TestWholeSiteJobExecution:
         assert response.status_code == 200, response.text
         job_id = response.json()["job_id"]
 
-        stored = job_store.load(job_id)
+        stored = await job_store.aload(job_id)
         assert stored is not None
         assert stored.policy.request_profile.get("cookie_namespace") == "key_a"
 
@@ -338,7 +338,7 @@ class TestWholeSiteJobExecution:
         status = await _wait_status(job_store, job_id, {"completed", "failed"})
         assert status == "completed"
 
-        job = job_store.load(job_id)
+        job = await job_store.aload(job_id)
         assert_settled(job, visited={GRAPH_ROOT, GRAPH_CHILD}, crawled=2)
         assert job.stats["total_failed"] == 0
         # Discovered link b was crawled in a follow-up batch.
@@ -410,7 +410,7 @@ class TestWholeSiteJobExecution:
             ),
         )
         await _wait_status(job_store, job_id, {"completed", "failed"})
-        job = job_store.load(job_id)
+        job = await job_store.aload(job_id)
         assert job.stats["total_crawled"] == 3
         assert job.visited == {
             canonical(GRAPH_ROOT),

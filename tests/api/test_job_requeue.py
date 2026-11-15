@@ -144,7 +144,7 @@ class TestTransientFailureRequeue:
         )
         assert await _wait_status(job_store, job_id, {"completed", "failed"}) == "completed"
 
-        job = job_store.load(job_id)
+        job = await job_store.aload(job_id)
         assert canonical("https://ok.test/abs") in job.visited
         assert "/rel" not in job.visited
         assert all("/rel" not in batch for batch in crawled)
@@ -163,7 +163,7 @@ class TestTransientFailureRequeue:
         # The string link rides in a second result so a regression that queues raw values is observable before
         # completion too.
         assert await _wait_status(job_store, job_id, {"completed", "failed"}) == "completed"
-        job = job_store.load(job_id)
+        job = await job_store.aload(job_id)
         assert "http://evil.test/x" not in job.visited
         assert bare not in job.visited
         assert job.stats["total_discovered"] == 0
@@ -175,7 +175,7 @@ class TestRunnerLifecycle:
         await _wait_status(job_store, job.job_id, {"running"})
         await job_runner.shutdown_job_runner()
         assert not job_runner.is_running(job.job_id)
-        job = job_store.load(job.job_id)
+        job = await job_store.aload(job.job_id)
         assert job.status in {JobStatus.PAUSED, JobStatus.RUNNING}
 
     async def test_crash_orphan_recovered_to_pending(self, job_store):
@@ -184,7 +184,7 @@ class TestRunnerLifecycle:
 
         recovered = await job_runner.recover_orphaned_running_jobs(job_store)
         assert recovered == 1
-        assert job_store.load(job.job_id).status == JobStatus.PENDING
+        assert (await job_store.aload(job.job_id)).status == JobStatus.PENDING
 
     async def test_pending_single_shot_row_reaches_a_terminal_state_after_recovery(self):
         """A PENDING single-shot row is unresumable: startup must retire it (#461).
@@ -199,7 +199,7 @@ class TestRunnerLifecycle:
                 )
                 == 0
             )
-            assert store.load(job.job_id).status == JobStatus.FAILED, (
+            assert (await store.aload(job.job_id)).status == JobStatus.FAILED, (
                 "a PENDING single-shot row can never resume; leaving it PENDING "
                 "reports 'pending' to its client forever"
             )
@@ -212,7 +212,7 @@ class TestRunnerLifecycle:
         with single_shot_orphan(job_id="orphan-shot") as (store, job):
             await job_runner.recover_orphaned_running_jobs(store)
 
-            assert store.load(job.job_id).status == JobStatus.FAILED, (
+            assert (await store.aload(job.job_id)).status == JobStatus.FAILED, (
                 "a single-shot orphan is not resumable, so leaving it PENDING "
                 "reports 'pending' to a client forever"
             )
@@ -229,7 +229,7 @@ class TestRunnerLifecycle:
             )
 
             assert started == 0
-            assert store.load(job.job_id).status == JobStatus.FAILED
+            assert (await store.aload(job.job_id)).status == JobStatus.FAILED
 
     async def test_resume_waits_out_a_stale_predecessor_before_respawning(self, job_store, monkeypatch):
         """#523 COR-08: resume with a live (wedged) predecessor task must not spawn
@@ -238,19 +238,18 @@ class TestRunnerLifecycle:
 
         job, hang, settings = _started_hung_job(job_store)
         await _wait_status(job_store, job.job_id, {"running"})
+        await asyncio.sleep(0.5)
+        wedged = tracked_task(job.job_id)
+        assert wedged is not None, "runner must be wedged on the hang before pausing"
         await job_runner.pause_job(job.job_id, job_store)
         await _wait_status(job_store, job.job_id, {"paused"})
-        wedged = tracked_task(job.job_id)
-        assert wedged is not None
 
         await job_runner.resume_job(
             job.job_id, job_store, settings, asyncio.Event(), wedge_grace_seconds=0.05
         )
-        assert job_store.load(job.job_id).status is JobStatus.RUNNING
+        assert (await job_store.aload(job.job_id)).status is JobStatus.RUNNING
         live = tracked_task(job.job_id)
         assert live is not None, "resume left a RUNNING row with no runner task"
-        # A wedged predecessor holds the engine hang: the respawn must have
-        # replaced it, not returned the same task (#523 COR-08).
         assert live is not wedged, "resume returned the wedged predecessor task"
 
         hang.set()
@@ -337,7 +336,7 @@ class TestWholeSiteRedirectedUrlResolution:
 
         await drive_job(job_id, job_store, settings=CrawlerSettings.from_mapping({}))
 
-        finished = job_store.load(job_id)
+        finished = await job_store.aload(job_id)
         assert finished is not None
         # The content must land in job.results exactly once (success), not be re-queued until retries exhaust
         # and then dropped.

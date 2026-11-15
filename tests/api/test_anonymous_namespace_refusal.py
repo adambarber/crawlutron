@@ -77,7 +77,7 @@ def test_anonymous_declaration_is_refused_at_the_crawl_door(tmp_path: Path):
             keyed = await client.post("/v1/crawl", headers={"X-API-Key": issued.secret}, json=declared)
             assert keyed.status_code == 202, keyed.text
 
-        stored = store.load(keyed.json()["request_id"])
+        stored = await store.aload(keyed.json()["request_id"])
         assert stored is not None
         # #226: the keyed declaration is pinned to the key id, never the declared text.
         assert stored.policy.request_profile.get("cookie_namespace") == issued.key_id
@@ -136,4 +136,4 @@ async def test_anonymous_jobs_declaration_is_refused_at_the_door(tmp_path: Path)
             json={"root_url": "http://example.com/", "policy": dict(_DECLARED_BODY)},
         )
     _refusal_is_envelope(refused)
-    assert store.list_jobs() == [], "a refused declaration must not create a job"
+    assert await store.alist_jobs() == [], "a refused declaration must not create a job"

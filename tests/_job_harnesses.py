@@ -196,10 +196,11 @@ async def _next_store_edge(store: JobStore, job_id: str, listener: _StoreListene
     try:
         await asyncio.wait_for(listener.event.wait(), STORE_HANG_GUARD_SECONDS)
     except TimeoutError as exc:
+        last_state = await store.aload(job_id)
         raise AssertionError(
             f"no write reached job {job_id} for {STORE_HANG_GUARD_SECONDS}s. The wait is "
             "edge-triggered, so nothing elapsed: the store was not written to at all, "
-            f"which is a wedge rather than slow progress. Last state: {store.load(job_id)}"
+            f"which is a wedge rather than slow progress. Last state: {last_state}"
         ) from exc
 
 
@@ -217,7 +218,7 @@ async def _wait_for(job_store, job_id: str, satisfied, *, join_task: bool):
     listener = bus.subscribe(job_id)
     try:
         while True:
-            job = job_store.load(job_id)
+            job = await job_store.aload(job_id)
             if job is not None and satisfied(job):
                 return job
             if join_task and await _join_runner_task(job_id):

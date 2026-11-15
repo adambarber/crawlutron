@@ -263,7 +263,7 @@ def test_anonymous_crawl_cannot_read_keyed_callers_jar_via_admission(tmp_path):
             body = crawl.json()
             envelope = body if "code" in body else body["detail"]
             assert envelope["code"] == "anonymous_cookie_namespace"
-            assert store.list_jobs() == [], "a refused declaration must not persist a row"
+            assert await store.alist_jobs() == [], "a refused declaration must not persist a row"
 
     import asyncio
 
@@ -296,7 +296,7 @@ async def test_get_crawl_result_enforces_owner(tmp_path):
     with allow_on_loop():
         seed_owned_job(store)
     payload = {"request_id": "crawl_owned", "results": []}
-    done = store.load("crawl_owned")
+    done = await store.aload("crawl_owned")
     assert done is not None
     done.results = [cast("dict[str, JsonValue]", payload)]
     with allow_on_loop():
@@ -325,7 +325,7 @@ async def test_http_scoped_reads_and_key_issuance(tmp_path):
         assert {row["label"] for row in listed.json()} == {"agent-a", "agent-b"}
         assert "secret" not in listed.text
 
-        complete_job(
+        await complete_job(
             store,
             "crawl_owned",
             {
@@ -349,7 +349,7 @@ async def test_http_scoped_reads_and_key_issuance(tmp_path):
 async def test_http_legacy_anonymous_rows_stay_readable(tmp_path):
     async with isolation_client(tmp_path) as (client, store, results, keys):
         with allow_on_loop():
-            complete_job(store, "crawl_open", {"request_id": "crawl_open"})
+            await complete_job(store, "crawl_open", {"request_id": "crawl_open"})
         assert (await client.get("/v1/crawl/crawl_open")).status_code == 200
 
 
@@ -480,20 +480,20 @@ async def test_anonymous_crawl_stores_the_resolved_page_limit(tmp_path):
     the model keeps ``max_pages=0`` legal, so admission writes the bound back."""
     async with quota_client(tmp_path) as (client, store, results, keys):
         response = await post_crawl(client, max_pages=0)
-        stored = _stored_request(store, response)
+        stored = await _stored_request(store, response)
         assert stored.policy.limits.max_pages == 100
 
 
 async def test_keyed_crawl_keeps_an_explicit_zero_page_limit(tmp_path):
     """Explicit max_pages=0 resolves to DEFAULT_MAX_PAGES and persists."""
     async with keyed_quota_crawl(tmp_path, key_max_pages=0) as (store, _, _, response):
-        assert keyed_zero_bound(store, response).policy.limits.max_pages == DEFAULT_MAX_PAGES
+        assert (await keyed_zero_bound(store, response)).policy.limits.max_pages == DEFAULT_MAX_PAGES
 
 
 async def test_keyed_crawl_zero_limit_enforced_as_stored(tmp_path):
     """The engine's enforced bound equals the stored bound for zero limits."""
     async with keyed_quota_crawl(tmp_path, key_max_pages=0, label="agent-b") as (store, _, _, response):
-        stored = keyed_zero_bound(store, response)
+        stored = await keyed_zero_bound(store, response)
         wire = stored.policy.model_dump()
         enforced = validate_wire_policy(wire)
         assert enforced.limits.max_pages == DEFAULT_MAX_PAGES

@@ -164,7 +164,7 @@ class TestAsyncCrawlTerminalCasControlsWhatIsPublished:
         assert result_store.get(self.REQUEST_ID) is None, (
             "a crawl displaced off RUNNING must not publish results without ownership"
         )
-        assert job_store.load(self.REQUEST_ID).status == JobStatus.PENDING
+        assert (await job_store.aload(self.REQUEST_ID)).status == JobStatus.PENDING
         assert post_webhook.await_count == 0, post_webhook.await_count
 
 

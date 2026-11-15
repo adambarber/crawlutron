@@ -150,7 +150,8 @@ class TestStatusPlane:
         _running_job(store)
         assert store.set_status("j1", JobStatus.CANCELLED, expected=JobStatus.RUNNING) is True
         assert store.set_status("j1", JobStatus.COMPLETED, expected=JobStatus.RUNNING) is False
-        assert loaded_job(store, "j1").status is JobStatus.CANCELLED
+        loaded = await store.aload("j1")
+        assert loaded is not None and loaded.status is JobStatus.CANCELLED
 
         settled = await asyncio.wait_for(run_to_terminal(store, "j1"), timeout=5)
         assert settled.status is JobStatus.CANCELLED
@@ -175,10 +176,10 @@ class TestDeleteFinality:
         """The store's delete is a tombstone: a racing asave stays a no-op."""
         store, job = await self._deleted_job(tmp_path)
 
-        assert store.load(job.job_id) is None, "a late save resurrected a deleted job"
-        assert store.exists(job.job_id) is False
-        assert store.list_for_caller("key-a") == []
-        assert store.list_jobs() == []
+        assert await store.aload(job.job_id) is None, "a late save resurrected a deleted job"
+        assert await store.aexists(job.job_id) is False
+        assert [row["job_id"] for row in await store.alist_for_caller("key-a")] == []
+        assert await store.alist_jobs() == []
 
     async def test_restart_recovery_does_not_resume_a_deleted_job(self, tmp_path):
         """A deleted job's resurrected PENDING row must not be re-started on boot."""
@@ -187,7 +188,7 @@ class TestDeleteFinality:
         store, job = await self._deleted_job(tmp_path)
         rewound = await recover_orphaned_running_jobs(store)
         assert rewound == 0, "recovery resurrected a deleted job row"
-        assert store.load(job.job_id) is None, "the deleted job came back from the dead"
+        assert await store.aload(job.job_id) is None, "the deleted job came back from the dead"
 
 
 def _status_assignment_offenders() -> list[str]:
@@ -381,8 +382,10 @@ class TestErrorStampingGatedOnTheFailedCas:
         # The concurrent transition lands between this path's load and its
         # CAS: the load sees RUNNING, but the FAILED write loses the race.
 
+        orig_aload = store.aload
+
         async def racing_aload(job_id: str) -> CrawlJobState | None:
-            return store.load(job_id)
+            return await orig_aload(job_id)
 
         async def failing_aset_status(
             job_id: str, new: JobStatus, *, expected: Expected, error: str | None = None
@@ -396,9 +399,9 @@ class TestErrorStampingGatedOnTheFailedCas:
         landed = await arecord_terminal_failure(store, "j1", "engine exploded")
 
         assert landed is False
-        assert _loaded(store, "j1").error is None, (
-            "the error was stamped on a row the FAILED CAS did not land on"
-        )
+        loaded = await store.aload("j1")
+        assert loaded is not None
+        assert loaded.error is None, "the error was stamped on a row the FAILED CAS did not land on"
 
     async def test_a_won_cas_stamps_the_error(self, tmp_path):
         from crawlutron.service.job_runner import arecord_terminal_failure
@@ -408,7 +411,8 @@ class TestErrorStampingGatedOnTheFailedCas:
         landed = await arecord_terminal_failure(store, "j1", "engine exploded")
 
         assert landed is True
-        won = _loaded(store, "j1")
+        won = await store.aload("j1")
+        assert won is not None
         assert won.error == "engine exploded"
         assert won.status is JobStatus.FAILED
 
@@ -425,6 +429,8 @@ class TestErrorStampingGatedOnTheFailedCas:
         landed = await arecord_terminal_failure(store, "j1", raw)
 
         assert landed is True
-        error = _loaded(store, "j1").error or ""
+        loaded = await store.aload("j1")
+        assert loaded is not None
+        error = loaded.error or ""
         assert "user:pass" not in error, error
         assert "apikey-value" not in error, error

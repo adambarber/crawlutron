@@ -101,10 +101,10 @@ def admitted_webhook(raw: str):
     return WebhookTarget.admit(raw, host_policy=policy)
 
 
-def stored_request(store: JobStore, response):
+async def stored_request(store: JobStore, response):
     """The stored job a 202 crawl response names; the post succeeded."""
     assert response.status_code == 202, response.text
-    stored = store.load(response.json()["request_id"])
+    stored = await store.aload(response.json()["request_id"])
     assert stored is not None
     return stored
 

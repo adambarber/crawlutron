@@ -76,14 +76,14 @@ async def _drain_running_crawls(*, guard: float = 10.0) -> None:
 
     terminal_codes = {status.value for status in TERMINAL_STATUSES}
 
-    def acting() -> list[str]:
+    async def acting() -> list[str]:
         # ``list_jobs`` is the status view, not the state, so this reads the row dict rather than
         # materialising every result payload to ask a question about the status column.
-        return [row["job_id"] for row in job_store.list_jobs() if row["status"] not in terminal_codes]
+        return [row["job_id"] for row in await job_store.alist_jobs() if row["status"] not in terminal_codes]
 
     async def drained() -> bool:
         await asyncio.sleep(0)
-        return not acting()
+        return not await acting()
 
     try:
         # A 5ms poll keeps the DB question off the hot path (a sleep(0) spin ran
@@ -95,7 +95,7 @@ async def _drain_running_crawls(*, guard: float = 10.0) -> None:
         pass
     # A stale PENDING/RUNNING anonymous row would bleed into the next test's quota; a
     # bounded wait that cannot retire it force-cancels it so none leaks.
-    for job_id in acting():
+    for job_id in await acting():
         pending = frozenset({JobStatus.PENDING, JobStatus.RUNNING})
         with allow_on_loop():
             job_store.set_status(job_id, JobStatus.CANCELLED, expected=pending)

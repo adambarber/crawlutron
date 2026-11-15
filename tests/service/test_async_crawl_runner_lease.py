@@ -87,7 +87,7 @@ async def test_renew_failure_aborts_inflight_crawl_without_foreign_clobber(tmp_p
     )
     assert aborted.is_set(), "in-flight crawl must be aborted on renew failure"
     assert result_store.puts == []
-    reloaded = store.load(request_id)
+    reloaded = await store.aload(request_id)
     assert reloaded is not None and reloaded.status is JobStatus.RUNNING
     assert reloaded.claimed_by == "foreign"
     store.close()

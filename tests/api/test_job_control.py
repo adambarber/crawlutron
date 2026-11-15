@@ -99,7 +99,7 @@ class TestJobStateWaitContract:
             # back, and once it runs it reads a `pending` row whose claim is still gated.
             await asyncio.sleep(0)
             assert not waiter.done(), "the wait returned before the job moved"
-            assert job_store.load(job_id).status is JobStatus.PENDING
+            assert (await job_store.aload(job_id)).status is JobStatus.PENDING
 
             gate.set()
             assert await waiter == "completed"
@@ -159,7 +159,7 @@ class TestJobControlOverRunner:
         resume_resp = await client.post(f"/v1/jobs/{job_id}/control", json={"action": "resume"})
         assert resume_resp.status_code == 200
         await _wait_status(job_store, job_id, {"completed"})
-        job = job_store.load(job_id)
+        job = await job_store.aload(job_id)
         assert job.visited == {
             canonical(GRAPH_ROOT),
             canonical(GRAPH_CHILD),
@@ -195,7 +195,7 @@ class TestJobControlOverRunner:
         assert runner is not None, "the runner must be tracked to be awaited"
         await asyncio.wait_for(runner, timeout=10)
 
-        row = job_store.load(job_id)
+        row = await job_store.aload(job_id)
         assert not row.in_flight, "a runner cancelled before dispatch left work in flight"
         assert row.stats.get("total_crawled", 0) == 0, "nothing ran, so nothing was recorded"
 
@@ -236,7 +236,7 @@ class TestJobControlOverRunner:
             lambda: not job_runner.is_running(job_id),
             "the deleted job is still registered as running",
         )
-        assert job_store.load(job_id) is None
+        assert await job_store.aload(job_id) is None
 
 
 class TestJobControlTransitions:
@@ -353,7 +353,7 @@ class TestTheRunnerClaim:
         await drive_job(job.job_id, job_store)
 
         assert engine.attempts == {}, "a second runner claimed a job it never held"
-        assert job_store.load(job.job_id).status is JobStatus.RUNNING
+        assert (await job_store.aload(job.job_id)).status is JobStatus.RUNNING
 
     async def test_resume_still_runs_the_row_it_flipped_itself(self, job_store):
         # The flip is the claim on this path, and only the process that performed it may run the job -- which
@@ -366,7 +366,7 @@ class TestTheRunnerClaim:
 
         assert outcome == "ok"
         assert await _wait_status(job_store, job.job_id, {"completed", "failed"}) == "completed"
-        assert job_store.load(job.job_id).visited == {canonical(GRAPH_ROOT)}
+        assert (await job_store.aload(job.job_id)).visited == {canonical(GRAPH_ROOT)}
 
     async def test_a_row_stopped_between_the_read_and_the_claim_is_not_crawled(self, job_store):
         # The runner read RUNNING; by the time it claimed, the row had stopped. A stale read must not outvote

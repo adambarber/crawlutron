@@ -19,7 +19,7 @@ from tests._assertions import (
 )
 from tests._async_harnesses import crawl_api as _crawl_api
 from tests._fetcher_factories import make_crawl_payload
-from tests._job_harnesses import loaded_job, single_shot_job
+from tests._job_harnesses import single_shot_job
 from tests.helpers.server import spawn_threaded_server
 
 
@@ -115,7 +115,7 @@ class TestAsyncCrawlApi:
         assert response.json()["code"] == "validation_error"
         assert response.json()["details"]["errors"][0]["msg"] == "host_denied"
         assert not [
-            job for job in job_store.list_jobs() if job["root_url"].startswith("https://blocked.test")
+            job for job in await job_store.alist_jobs() if job["root_url"].startswith("https://blocked.test")
         ], "a policy-blocked target created a job"
 
     async def test_v1_crawl_async_mode_status_url_returns_202_then_200(self, crawl_api):
@@ -150,7 +150,7 @@ class TestAsyncCrawlApi:
 
         request_id, _ = await submit_async_crawl(crawl_api.client, crawl_api.payload(async_mode=True))
 
-        row = job_store.load(request_id)
+        row = await job_store.aload(request_id)
         assert row is not None
         assert "total_discovered" not in row.stats
         assert row.stats["total_crawled"] == 1
@@ -187,7 +187,7 @@ class TestAsyncCrawlApi:
 
         job_store = service_app().state.job_store
 
-        job = job_store.load(request_id)
+        job = await job_store.aload(request_id)
         assert job is not None, "Job not found in job_store"
         assert job.kind.value == "single_shot"
         assert job.status.value == "completed"
@@ -218,7 +218,7 @@ class TestAsyncCrawlApi:
             crawl_api.client,
             crawl_api.batch_payload(["/", "/no-such-page-xyz"], async_mode=True),
         )
-        job = loaded_job(job_store, request_id)
+        job = await job_store.aload(request_id)
         assert job.stats["total_failed"] == 1
         assert job.stats["total_crawled"] == 2
 
@@ -376,7 +376,7 @@ class TestAsyncCrawlJobStoreIntegration:
                 store.set_status("test-id", JobStatus.COMPLETED, expected=JobStatus.PENDING)
 
             # Load and verify
-            loaded = store.load("test-id")
+            loaded = await store.aload("test-id")
             assert loaded is not None
             assert loaded.kind == JobKind.SINGLE_SHOT
             assert loaded.status == JobStatus.COMPLETED
