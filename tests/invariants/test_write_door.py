@@ -73,18 +73,18 @@ WRITE_DOOR_RULE = Rule(
         if "migrations" not in path.parts and path.name not in _SCOPE_EXCLUDE
     ),
     bite=lambda: (
-        "import crawlutron.storage.safe_db as safe_db\n\n"
-        "safe_db.txn_write(conn)\n"
-        'conn.execute("UPDATE t SET x = 1")\n'
-        'alias._conn.execute("UPDATE t SET x = 1")\n'
-        'SQL = "UPDATE t SET x = 1"\nconn.execute(SQL)\n'
-        'store._conn.execute("BEGIN")\n'
+        'conn.execute("UPDATE t SET x = 1")\n',
+        'alias._conn.execute("UPDATE t SET x = 1")\n',
+        'SQL = "UPDATE t SET x = 1"\nconn.execute(SQL)\n',
+        'store._conn.execute("BEGIN")\n',
         'conn.execute(f"UPDATE t SET {col} = 1")\n',
+        'with txn_write(conn):\n    def helper():\n        conn.execute("UPDATE t SET x = 1")\n',
     ),
     clean=lambda: (
         'with txn_write(conn):\n    conn.execute("UPDATE t SET x = 1")\n',
         'with in_txn(conn):\n    conn.execute("UPDATE t SET x = 1")\n',
         'def configure_store_connection(conn):\n    conn.execute("PRAGMA busy_timeout=5000")\n',
+        'def helper():\n    with txn_write(conn):\n        conn.execute("UPDATE t SET x = 1")\n',
         'conn.execute("SELECT * FROM t")\n',
         'self._conn.execute("PRAGMA busy_timeout=5000")\n',
         'something._rows.execute("UPDATE t SET x = 1")\n',

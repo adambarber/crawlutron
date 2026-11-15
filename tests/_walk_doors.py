@@ -1,7 +1,7 @@
-"""Shared door-walk primitives for the read and write invariant gates.
+"""Shared door-walk primitives for the read and write gates.
 
-One home for conn_callee, sql_operand, and inside_door so neither gate
-re-derives them differently.
+One home for conn_callee, sql_operand, inside_door; it stops at nested
+def/class/lambda boundaries so door-defined reads read as bare.
 """
 
 from __future__ import annotations
@@ -75,8 +75,8 @@ def inside_door(
 ) -> bool:
     """True when ``call`` sits lexically inside a ``with <door>(...)`` block.
 
-    Walks parent links from the call up to the module. A ``with`` whose
-    context expression resolves to one of ``door_names`` contains the call.
+    Walks up to the module, stopping at nested def/class/lambda boundaries; a
+    door containing a ``def`` does not cover reads defined inside it.
     """
     node: ast.AST | None = call
     while node is not None:
@@ -89,5 +89,7 @@ def inside_door(
                     and resolved_call_name(tree, ctx).rsplit(".", 1)[-1] in door_names
                 ):
                     return True
+        if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            return False
         node = parent
     return False

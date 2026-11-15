@@ -67,11 +67,13 @@ READ_DOOR_RULE = Rule(
         'alias._conn.execute("SELECT a FROM b")\n',
         'SQL = "SELECT a FROM b"\nconn.execute(SQL)\n',
         'conn.execute(f"SELECT {col} FROM b")\n',
+        'with txn_read(conn):\n    def helper():\n        conn.execute("SELECT a FROM b")\n',
     ),
     clean=lambda: (
         'with txn_read(conn):\n    conn.execute("SELECT count(*) FROM t")\n',
         'with txn_write(conn):\n    conn.execute("SELECT 1 FROM t")\n',
         'with in_txn(conn):\n    conn.execute("SELECT 1 FROM t")\n',
+        'def helper():\n    with txn_read(conn):\n        conn.execute("SELECT count(*) FROM t")\n',
         'conn.execute("INSERT INTO t (a, b) VALUES (1, 2)")\n',
         'conn.execute("BEGIN")\n',
         'something._rows.execute("SELECT a FROM b")\n',
