@@ -47,11 +47,12 @@ class CoordinationThrottleStore(CoordinationStore):
     def _anon_window_state(
         self, bucket_key: str, now: float, window_seconds: float, capacity: int
     ) -> tuple[float, int]:
-        row = self._conn.execute(
-            "SELECT window_started, count FROM coordination_throttle_buckets "
-            "WHERE kind = ? AND bucket_key = ?",
-            (_ANON_KIND, bucket_key),
-        ).fetchone()
+        with in_txn(self._conn):
+            row = self._conn.execute(
+                "SELECT window_started, count FROM coordination_throttle_buckets "
+                "WHERE kind = ? AND bucket_key = ?",
+                (_ANON_KIND, bucket_key),
+            ).fetchone()
         if row is None:
             self._evict_anon_buckets(now, window_seconds, capacity)
             return now, 0
@@ -89,19 +90,16 @@ class CoordinationThrottleStore(CoordinationStore):
         )
 
     def _evict_anon_buckets(self, now: float, window_seconds: float, capacity: int) -> None:
-        count_row = self._conn.execute(
-            "SELECT COUNT(*) FROM coordination_throttle_buckets WHERE kind = ?",
-            (_ANON_KIND,),
-        ).fetchone()
-        count = 0 if count_row is None else int(count_row[0])
+        count = self._bucket_count(_ANON_KIND)
         if count < capacity:
             return
         # Prefer evicting expired/quiescent buckets; never evict most-recently active if avoidable.
-        victim = self._conn.execute(
-            "SELECT bucket_key FROM coordination_throttle_buckets "
-            "WHERE kind = ? ORDER BY touched_at ASC LIMIT 1",
-            (_ANON_KIND,),
-        ).fetchone()
+        with in_txn(self._conn):
+            victim = self._conn.execute(
+                "SELECT bucket_key FROM coordination_throttle_buckets "
+                "WHERE kind = ? ORDER BY touched_at ASC LIMIT 1",
+                (_ANON_KIND,),
+            ).fetchone()
         if victim is not None:
             with in_txn(self._conn):
                 self._conn.execute(
@@ -186,11 +184,12 @@ class CoordinationThrottleStore(CoordinationStore):
         )
 
     def _key_failure_state(self, bucket_key: str, now: float) -> tuple[int, float, float]:
-        row = self._conn.execute(
-            "SELECT failures, window_started, cooldown_until FROM coordination_throttle_buckets "
-            "WHERE kind = ? AND bucket_key = ?",
-            (_KEY_VERIFY_KIND, bucket_key),
-        ).fetchone()
+        with in_txn(self._conn):
+            row = self._conn.execute(
+                "SELECT failures, window_started, cooldown_until FROM coordination_throttle_buckets "
+                "WHERE kind = ? AND bucket_key = ?",
+                (_KEY_VERIFY_KIND, bucket_key),
+            ).fetchone()
         if row is None:
             return 0, now, 0.0
         failures = int(row[0] or 0)
@@ -241,21 +240,18 @@ class CoordinationThrottleStore(CoordinationStore):
     arecord_key_success = atwin(record_key_success)
 
     def _evict_key_buckets(self, now: float, capacity: int) -> None:
-        count_row = self._conn.execute(
-            "SELECT COUNT(*) FROM coordination_throttle_buckets WHERE kind = ?",
-            (_KEY_VERIFY_KIND,),
-        ).fetchone()
-        count = 0 if count_row is None else int(count_row[0])
+        count = self._bucket_count(_KEY_VERIFY_KIND)
         if count < capacity:
             return
         # Evict least-recently-touched non-cooling buckets first; cooling exempt.
         while count >= capacity:
-            victim = self._conn.execute(
-                "SELECT bucket_key FROM coordination_throttle_buckets "
-                "WHERE kind = ? AND (cooldown_until IS NULL OR cooldown_until <= ?) "
-                "ORDER BY touched_at ASC LIMIT 1",
-                (_KEY_VERIFY_KIND, now),
-            ).fetchone()
+            with in_txn(self._conn):
+                victim = self._conn.execute(
+                    "SELECT bucket_key FROM coordination_throttle_buckets "
+                    "WHERE kind = ? AND (cooldown_until IS NULL OR cooldown_until <= ?) "
+                    "ORDER BY touched_at ASC LIMIT 1",
+                    (_KEY_VERIFY_KIND, now),
+                ).fetchone()
             if victim is None:
                 return
             with in_txn(self._conn):
@@ -264,6 +260,15 @@ class CoordinationThrottleStore(CoordinationStore):
                     (_KEY_VERIFY_KIND, str(victim[0])),
                 )
             count -= 1
+
+    def _bucket_count(self, kind: str) -> int:
+        """Count buckets of ``kind`` inside the caller's open transaction."""
+        with in_txn(self._conn):
+            count_row = self._conn.execute(
+                "SELECT COUNT(*) FROM coordination_throttle_buckets WHERE kind = ?",
+                (kind,),
+            ).fetchone()
+        return 0 if count_row is None else int(count_row[0])
 
     def _upsert(
         self,

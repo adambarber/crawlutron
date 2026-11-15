@@ -24,7 +24,7 @@ _READ_KEYWORDS = frozenset({"select", "pragma", "with", "explain"})
 _READ_DOOR = frozenset({"txn_read", "txn_write", "in_txn"})
 
 _SCOPE_EXCLUDE = frozenset({"sqlite_store.py"})
-READ_DOOR_BUDGET = 29
+READ_DOOR_BUDGET = 23
 
 
 def _bare_read_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
