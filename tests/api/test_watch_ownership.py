@@ -71,7 +71,7 @@ async def test_a_caller_cannot_read_or_delete_another_callers_watch(watch_store,
     assert read.status_code == 404, read.text
     assert removed.status_code == 404, removed.text
     # Alice's row survives Bob's deletion attempt.
-    assert watch_store.get(watch_id) is not None
+    assert await watch_store.aget(watch_id) is not None
 
 
 async def test_listing_is_owner_scoped(watch_store, tmp_path):
@@ -94,7 +94,7 @@ async def test_a_keyed_watch_is_stamped_with_its_owner(watch_store, tmp_path):
         created = await _register(client, {"X-API-Key": alice}, TARGET)
 
     assert created["owner"]  # non-empty owner for a keyed caller
-    assert watch_store.list_for_caller(created["owner"])
+    assert await watch_store.alist_for_caller(created["owner"])
 
 
 async def test_the_anonymous_bucket_is_bounded_by_a_per_caller_cap(watch_store, tmp_path):

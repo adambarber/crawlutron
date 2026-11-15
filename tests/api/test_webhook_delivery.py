@@ -148,7 +148,7 @@ class TestAsyncCrawlTerminalCasControlsWhatIsPublished:
 
     async def test_a_paused_crawl_publishes_nothing_and_fires_no_webhook(self, job_store, tmp_path):
         result_store, post_webhook = await self._displaced_crawl(job_store, tmp_path, JobStatus.PAUSED)
-        assert result_store.get(self.REQUEST_ID) is None, (
+        assert (await result_store.aget(self.REQUEST_ID)) is None, (
             "a paused crawl published results it will never serve"
         )
         assert post_webhook.await_count == 0, (
@@ -161,7 +161,7 @@ class TestAsyncCrawlTerminalCasControlsWhatIsPublished:
     ):
         """#987: a runner must not complete/publish a row it no longer owns as RUNNING."""
         result_store, post_webhook = await self._displaced_crawl(job_store, tmp_path, JobStatus.PENDING)
-        assert result_store.get(self.REQUEST_ID) is None, (
+        assert (await result_store.aget(self.REQUEST_ID)) is None, (
             "a crawl displaced off RUNNING must not publish results without ownership"
         )
         assert (await job_store.aload(self.REQUEST_ID)).status == JobStatus.PENDING

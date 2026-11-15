@@ -188,7 +188,7 @@ async def test_two_concurrent_sweeps_deliver_one_webhook_not_two(watch_store, et
     await asyncio.wait_for(pass_one, timeout=10)
 
     assert deliveries == [WEBHOOK], f"double-fired: {deliveries}"
-    assert watch_store.get(watch.watch_id).next_check_at == NOW + INTERVAL
+    assert (await watch_store.aget(watch.watch_id)).next_check_at == NOW + INTERVAL
 
 
 async def _release_and_await(release, pass_one, pass_two=None):
@@ -354,7 +354,7 @@ async def test_a_slow_pass_keeps_its_claim_so_a_late_second_sweeper_skips_the_li
 
     # Only the LIVE row is protected: the completed slow row is legitimately
     # stale-claimable. The live row was never re-claimed; the webhook fired once.
-    reloaded = watch_store.get(watched.watch_id)
+    reloaded = await watch_store.aget(watched.watch_id)
     assert outcomes_two == [], f"the second sweeper re-claimed a live row: {outcomes_two}"
     assert reloaded.next_check_at == NOW + INTERVAL
     assert [url for url, _ in deliveries] == [WEBHOOK], f"double-fired: {deliveries}"
@@ -389,7 +389,7 @@ async def test_a_row_reclaimed_by_a_second_sweeper_is_skipped_not_reworked(
     # nothing past its parked check and recorded nothing over the new owner.
     assert len(outcomes_one) == 1, f"the first sweeper reworked a lost row: {outcomes_one}"
     assert [url for url, _ in deliveries] == [WEBHOOK], f"double-fired: {deliveries}"
-    reloaded = watch_store.get(watched.watch_id)
+    reloaded = await watch_store.aget(watched.watch_id)
     assert reloaded.next_check_at == NOW + 400.0 + INTERVAL
 
 
@@ -470,4 +470,4 @@ async def test_a_hanging_webhook_does_not_stall_the_sweep_pass(watch_store, etag
     assert outcomes, "the sweep pass did not complete around the hanging delivery"
     release.set()
     await drain_webhook_deliveries()
-    assert watch_store.get(watch.watch_id).next_check_at == NOW + INTERVAL
+    assert (await watch_store.aget(watch.watch_id)).next_check_at == NOW + INTERVAL
