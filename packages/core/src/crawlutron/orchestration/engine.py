@@ -254,16 +254,15 @@ async def crawl_request(
         return await run_crawl_request(state)
     finally:
         _reset_cookie_namespace(_cookie_token)
-        _teardown_spill(spill, state, private_spill)
+        await _teardown_spill(spill, state, private_spill)
 
 
-def _teardown_spill(spill: CrawlSpillStore, state: PipelineState | None, private_spill: bool) -> None:
-    """The crawl's spill teardown: the writer's own release -- once the crawl has
-    ended its rows are served or dead and the store may age-reclaim them -- then
-    the private store's close, never the shared one's."""
+async def _teardown_spill(spill: CrawlSpillStore, state: PipelineState | None, private_spill: bool) -> None:
+    """The crawl's spill teardown: the writer's release (off-loop via the async
+    twin -- a sync write on the loop is refused), then the private store's close."""
     minted = state.request_id if state is not None else None
     if minted is not None:
-        spill.release_spill(minted)
+        await spill.arelease_spill(minted)
     if private_spill:
         spill.close()
 

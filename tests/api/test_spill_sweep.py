@@ -9,6 +9,8 @@ import asyncio
 import sqlite3
 from contextlib import closing
 
+from crawlutron.storage.safe_db import allow_on_loop
+
 
 class TestSpillSweepTick:
     async def test_the_tick_reclaims_released_rows_past_the_age_and_spares_fenced_ones(self, tmp_path):
@@ -20,15 +22,17 @@ class TestSpillSweepTick:
         times = {"t": now}
         store = CrawlSpillStore(tmp_path / "spills.db", clock=lambda: times["t"], lease_ttl_seconds=10_000.0)
         try:
-            store.put("r-old", 0, engine_result("https://spill.test/old", "rendered"))
-            store.put("r-live", 0, engine_result("https://spill.test/live", "rendered"))
+            with allow_on_loop():
+                store.put("r-old", 0, engine_result("https://spill.test/old", "rendered"))
+                store.put("r-live", 0, engine_result("https://spill.test/live", "rendered"))
             # Backdate both rows past the max age through raw SQL, then age the
             # clock itself so the cutoff lands after them.
             with closing(sqlite3.connect(tmp_path / "spills.db")) as conn:
                 conn.execute("UPDATE crawl_spills SET created_at = created_at - 7200", ())
                 conn.commit()
             times["t"] = now + 7200
-            store.release_spill("r-old")  # served or dead: its rows are age-reclaimable
+            with allow_on_loop():
+                store.release_spill("r-old")  # served or dead: its rows are age-reclaimable
 
             reclaimed = await spill_maintenance_once(store, max_age_seconds=3600.0)
 
@@ -48,7 +52,8 @@ class TestSpillSweepTick:
 
         store = CrawlSpillStore(tmp_path / "spills.db")
         try:
-            store.put("r1", 0, engine_result("https://spill.test/0", "rendered"))
+            with allow_on_loop():
+                store.put("r1", 0, engine_result("https://spill.test/0", "rendered"))
             seen: list[float] = []
 
             async def fake_twin(_self, max_age_seconds):

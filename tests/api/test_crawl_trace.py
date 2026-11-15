@@ -13,11 +13,9 @@ from crawlutron_rest.api.crawl_endpoint import get_crawl_trace
 from tests._assertions import completed_crawl
 from tests._fetcher_factories import make_crawl_payload
 from tests._policy_factories import canonical
+from tests._result_store_fixture import loop_permitted_store
 
-
-@pytest.fixture
-def result_store(tmp_path) -> CrawlResultStore:
-    return CrawlResultStore(tmp_path / "results.db")
+result_store = loop_permitted_store(lambda path: CrawlResultStore(path / "results.db"))
 
 
 async def test_a_trace_reports_every_attempted_strategy(async_client, base_url):

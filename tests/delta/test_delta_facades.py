@@ -15,6 +15,7 @@ from crawlutron_mcp.registry import TOOLS_BY_NAME
 
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_request import CrawlRequest
+from crawlutron.storage.safe_db import allow_on_loop
 from crawlutron_rest.discovery.capabilities import OUTPUT_FIELDS, capabilities_payload
 from tests._job_harnesses import ScriptedExecute, make_job_store, scripted_engine
 from tests._result_builders import engine_result
@@ -69,11 +70,12 @@ def _seed_baseline(result_store, request_id: str, markdown: str, *, extra_urls=(
         }
         for url in extra_urls
     )
-    result_store.put(
-        request_id,
-        {"request_id": request_id, "results": results},
-        owner="",
-    )
+    with allow_on_loop():
+        result_store.put(
+            request_id,
+            {"request_id": request_id, "results": results},
+            owner="",
+        )
 
 
 def _mcp_engine(monkeypatch, scripted: ScriptedExecute) -> None:

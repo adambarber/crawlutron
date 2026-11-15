@@ -6,6 +6,7 @@ import pathlib
 
 from crawlutron.models.json_value import JsonValue
 from crawlutron.storage.result_store import CrawlResultStore, CrawlSpillStore
+from crawlutron.storage.safe_db import allow_on_loop
 
 
 def delta_stores(tmpdir: str) -> tuple[CrawlResultStore, CrawlSpillStore]:
@@ -35,11 +36,12 @@ def seed_baseline_row(
     owner: str = "caller-a",
 ) -> None:
     """Store one baseline response payload the delta loader will read back."""
-    result_store.put(
-        request_id,
-        {"request_id": request_id, "results": results},
-        owner=owner,
-    )
+    with allow_on_loop():
+        result_store.put(
+            request_id,
+            {"request_id": request_id, "results": results},
+            owner=owner,
+        )
 
 
 def baseline_row(

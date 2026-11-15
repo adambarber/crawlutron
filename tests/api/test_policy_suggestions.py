@@ -14,17 +14,16 @@ from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.json_value import JsonValue
 from crawlutron.service.policy_suggestions import policy_suggestions
 from crawlutron.storage.result_store import CrawlResultStore
+from crawlutron.storage.safe_db import allow_on_loop
 from tests._assertions import completed_crawl
 from tests._fetcher_factories import make_crawl_payload
 from tests._policy_factories import canonical
 from tests._policy_harnesses import policy_client
 from tests._policy_harnesses import stored_trace as _stored_trace
 from tests._quota_harness import TEST_ADMIN_TOKEN, keyed_result_client
+from tests._result_store_fixture import loop_permitted_store
 
-
-@pytest.fixture
-def result_store(tmp_path) -> CrawlResultStore:
-    return CrawlResultStore(tmp_path / "results.db")
+result_store = loop_permitted_store(lambda path: CrawlResultStore(path / "results.db"))
 
 
 #: The default keyed caller the endpoint tests crawl and roll up as; records the
@@ -189,7 +188,8 @@ class _PagingStore(CrawlResultStore):
 async def test_the_rollup_reads_bounded_pages_never_the_whole_table(tmp_path):
     """#443: one GET must not stream the table; the rollup scans bounded pages."""
     store = _PagingStore(tmp_path / "paged.db")
-    store.put("crawl_blocked", _stored_trace("crawl_blocked", "https://page.test/x"))
+    with allow_on_loop():
+        store.put("crawl_blocked", _stored_trace("crawl_blocked", "https://page.test/x"))
 
     response = await policy_suggestions(result_store=store, settings=CrawlerSettings.from_mapping({}))
 
@@ -207,11 +207,12 @@ async def test_rows_past_the_read_window_are_reported_not_hidden(tmp_path):
     store = CrawlResultStore(tmp_path / "window.db", ttl_seconds=3600, clock=lambda: now[0])
     # The oldest row is the ONLY evidence for old.test: one past the window.
     now[0] += 1
-    store.put("crawl_old", _stored_trace("crawl_old", "https://old.test/"))
-    # The newest 500 rows are the window (_MAX_RECORDS): all new.test evidence.
-    for i in range(500):
-        now[0] += 1
-        store.put(f"crawl_{i}", _stored_trace(f"crawl_{i}", f"https://new.test/{i}"))
+    with allow_on_loop():
+        store.put("crawl_old", _stored_trace("crawl_old", "https://old.test/"))
+        # The newest 500 rows are the window (_MAX_RECORDS): all new.test evidence.
+        for i in range(500):
+            now[0] += 1
+            store.put(f"crawl_{i}", _stored_trace(f"crawl_{i}", f"https://new.test/{i}"))
 
     response = await policy_suggestions(result_store=store, settings=CrawlerSettings.from_mapping({}))
 
@@ -230,7 +231,8 @@ async def test_validation_and_rollup_run_off_the_event_loop(tmp_path, monkeypatc
     from crawlutron.models.trace_response import TraceResponse
 
     store = CrawlResultStore(tmp_path / "offloop.db")
-    store.put("crawl_blocked", _stored_trace("crawl_blocked", "https://offloop.test/"))
+    with allow_on_loop():
+        store.put("crawl_blocked", _stored_trace("crawl_blocked", "https://offloop.test/"))
 
     on_loop: list[str] = []
     real_validate = TraceResponse.model_validate

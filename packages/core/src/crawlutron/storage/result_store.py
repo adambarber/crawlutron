@@ -16,6 +16,7 @@ from crawlutron.models.json_value import JsonValue
 from crawlutron.models.serialization import from_wire, to_dict
 from crawlutron.storage.coordination_store import CoordinationStore, atwin
 from crawlutron.storage.migrations import StoreSchema
+from crawlutron.storage.safe_db import txn_write
 from crawlutron.transport.freshness import default_clock
 
 # The write-edge byte cap: one retained row is a whole crawl response, so
@@ -88,23 +89,27 @@ class CrawlResultStore(_PayloadStoreGuardrails):
             )
         stored_at = self._clock()
         with self._lock:
-            self._prune(stored_at)
-            self._conn.execute(
-                "INSERT OR REPLACE INTO results (request_id, stored_at, payload, owner) VALUES (?, ?, ?, ?)",
-                (request_id, stored_at, blob, owner),
-            )
-            self._conn.commit()
-            # Enforce entry cap after insert (drop oldest beyond the cap).
-            self._conn.execute(
-                """
-                DELETE FROM results WHERE request_id IN (
-                    SELECT request_id FROM results ORDER BY stored_at DESC
-                    LIMIT -1 OFFSET ?
+            with txn_write(self._conn, owner="result_store.put"):
+                if self._ttl_seconds > 0:
+                    self._conn.execute(
+                        "DELETE FROM results WHERE stored_at < ?",
+                        (stored_at - self._ttl_seconds,),
+                    )
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO results (request_id, stored_at, payload, owner) "
+                    "VALUES (?, ?, ?, ?)",
+                    (request_id, stored_at, blob, owner),
                 )
-                """,
-                (self._max_entries,),
-            )
-            self._conn.commit()
+                # Enforce entry cap after insert (drop oldest beyond the cap).
+                self._conn.execute(
+                    """
+                    DELETE FROM results WHERE request_id IN (
+                        SELECT request_id FROM results ORDER BY stored_at DESC
+                        LIMIT -1 OFFSET ?
+                    )
+                    """,
+                    (self._max_entries,),
+                )
 
     def get(self, request_id: str) -> JsonValue | None:
         """Return the stored payload, or None if absent/expired."""
@@ -203,9 +208,11 @@ class CrawlResultStore(_PayloadStoreGuardrails):
         """Drop a stored result row so a deleted job's content is not served past TTL.
         Returns True iff a live row matched; ownership established upstream."""
         with self._lock:
-            cur = self._conn.execute("DELETE FROM results WHERE request_id = ?", (request_id,))
-            self._conn.commit()
-        return cur.rowcount == 1
+            with txn_write(self._conn, owner="result_store.delete"):
+                rowcount = self._conn.execute(
+                    "DELETE FROM results WHERE request_id = ?", (request_id,)
+                ).rowcount
+        return rowcount == 1
 
     # One ``atwin`` twin per operation: the sync signature is declared once and
     # ``owner=`` rides through **kwargs, so the twins cannot drift from the base.
@@ -215,11 +222,6 @@ class CrawlResultStore(_PayloadStoreGuardrails):
     adelete = atwin(delete)
     apayloads_page = atwin(payloads_page)
     aretained_count = atwin(retained_count)
-
-    def _prune(self, now: float) -> None:
-        if self._ttl_seconds <= 0:
-            return
-        self._conn.execute("DELETE FROM results WHERE stored_at < ?", (now - self._ttl_seconds,))
 
 
 class CrawlSpillStore(_PayloadStoreGuardrails):
@@ -252,16 +254,17 @@ class CrawlSpillStore(_PayloadStoreGuardrails):
         now = self._clock()
         expires_at = now + self._lease_ttl_seconds
         with self._lock:
-            self._conn.execute(
-                "INSERT INTO crawl_spill_leases (request_id, expires_at) VALUES (?, ?) "
-                "ON CONFLICT(request_id) DO UPDATE SET expires_at = excluded.expires_at",
-                (request_id, expires_at),
-            )
-            self._conn.execute(
-                "INSERT INTO crawl_spills (request_id, sequence, payload, created_at) VALUES (?, ?, ?, ?)",
-                (request_id, sequence, blob, now),
-            )
-            self._conn.commit()
+            with txn_write(self._conn, owner="result_store.spill_put"):
+                self._conn.execute(
+                    "INSERT INTO crawl_spill_leases (request_id, expires_at) VALUES (?, ?) "
+                    "ON CONFLICT(request_id) DO UPDATE SET expires_at = excluded.expires_at",
+                    (request_id, expires_at),
+                )
+                self._conn.execute(
+                    "INSERT INTO crawl_spills (request_id, sequence, payload, created_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    (request_id, sequence, blob, now),
+                )
 
     def load_ordered(self, request_id: str, *, policy: HostPolicy) -> list[EngineCrawlResult]:
         """Reassemble one crawl's spilled results in submission order.
@@ -280,8 +283,8 @@ class CrawlSpillStore(_PayloadStoreGuardrails):
         ended, so they are age-reclaimable again. The fence lives only for the
         crawl's lifetime, so a dead crawl's rows cannot be fenced forever."""
         with self._lock:
-            self._conn.execute("DELETE FROM crawl_spill_leases WHERE request_id = ?", (request_id,))
-            self._conn.commit()
+            with txn_write(self._conn, owner="result_store.spill_release"):
+                self._conn.execute("DELETE FROM crawl_spill_leases WHERE request_id = ?", (request_id,))
 
     def gc_stale_spills(self, max_age_seconds: float) -> int:
         """Delete rows older than ``max_age_seconds`` EXCEPT a live writer's; the
@@ -291,21 +294,24 @@ class CrawlSpillStore(_PayloadStoreGuardrails):
         now = self._clock()
         cutoff = now - max(0.0, max_age_seconds)
         with self._lock:
-            self._conn.execute("CREATE TEMP TABLE IF NOT EXISTS _spill_fenced (request_id TEXT PRIMARY KEY)")
-            self._conn.execute("DELETE FROM _spill_fenced")
-            self._conn.execute(
-                "INSERT INTO _spill_fenced (request_id) "
-                "SELECT request_id FROM crawl_spill_leases WHERE expires_at > ?",
-                (now,),
-            )
-            cursor = self._conn.execute(
-                "DELETE FROM crawl_spills WHERE created_at < ? "
-                "AND request_id NOT IN (SELECT request_id FROM _spill_fenced)",
-                (cutoff,),
-            )
-            self._conn.commit()
-        return cursor.rowcount
+            with txn_write(self._conn, owner="result_store.gc_stale_spills"):
+                self._conn.execute(
+                    "CREATE TEMP TABLE IF NOT EXISTS _spill_fenced (request_id TEXT PRIMARY KEY)"
+                )
+                self._conn.execute("DELETE FROM _spill_fenced")
+                self._conn.execute(
+                    "INSERT INTO _spill_fenced (request_id) "
+                    "SELECT request_id FROM crawl_spill_leases WHERE expires_at > ?",
+                    (now,),
+                )
+                rowcount = self._conn.execute(
+                    "DELETE FROM crawl_spills WHERE created_at < ? "
+                    "AND request_id NOT IN (SELECT request_id FROM _spill_fenced)",
+                    (cutoff,),
+                ).rowcount
+        return rowcount
 
     aput = atwin(put)
     aload_ordered = atwin(load_ordered)
     agc_stale_spills = atwin(gc_stale_spills)
+    arelease_spill = atwin(release_spill)

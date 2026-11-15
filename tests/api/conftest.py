@@ -5,6 +5,7 @@ import pytest
 from tests._job_harnesses import keyed_jobs_client
 from tests._job_store_doubles import LoopGuardJobStore, LoopGuardResultStore, LoopGuardWatchStore
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, deployment_tier
+from tests._result_store_fixture import loop_permitted_store
 from tests._watch_harnesses import keyed_watches_client
 
 
@@ -13,9 +14,7 @@ def loop_guard_store(tmp_path) -> LoopGuardJobStore:
     return LoopGuardJobStore(tmp_path / "jobs.db", policy=UNRESTRICTED_HOST_POLICY, tier=deployment_tier())
 
 
-@pytest.fixture
-def result_store(tmp_path) -> LoopGuardResultStore:
-    return LoopGuardResultStore(tmp_path / "results.db")
+result_store = loop_permitted_store(lambda path: LoopGuardResultStore(path / "results.db"))
 
 
 @pytest.fixture
