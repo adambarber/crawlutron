@@ -11,7 +11,7 @@ import time
 from crawlutron.storage.coordination_store import CoordinationStore, atwin
 from crawlutron.storage.ids import new_sync_slot_id
 from crawlutron.storage.migrations.manifest import StoreSchema
-from crawlutron.storage.safe_db import txn_write
+from crawlutron.storage.safe_db import txn_read, txn_write
 
 __all__ = ["CoordinationSyncSlotsStore"]
 
@@ -75,10 +75,11 @@ class CoordinationSyncSlotsStore(CoordinationStore):
         """Non-stale reserved slots for ``caller_id`` at ``now``."""
         stamp = time.time() if now is None else now
         with self._lock:
-            row = self._conn.execute(
-                "SELECT COUNT(*) FROM coordination_sync_slots WHERE caller_id = ? AND reserved_at > ?",
-                (caller_id, stamp - _STALENESS_SECONDS),
-            ).fetchone()
+            with txn_read(self._conn, owner="coordination_sync_slots.count_active"):
+                row = self._conn.execute(
+                    "SELECT COUNT(*) FROM coordination_sync_slots WHERE caller_id = ? AND reserved_at > ?",
+                    (caller_id, stamp - _STALENESS_SECONDS),
+                ).fetchone()
         return 0 if row is None else int(row[0])
 
     def stale(self, cutoff: float) -> int:
