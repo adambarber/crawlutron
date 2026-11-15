@@ -78,8 +78,8 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     # #314/wave-3: DNS + SSRF split out of pinned_transport (500-line ceiling);
     # the seam owns every resolve-and-pin door plus the reset pair. No test doors:
     "packages/core/src/crawlutron/transport/pinned_dns.py": (
-        11,
-        8,
+        10,
+        7,
     ),  # saturation via the real resolve door (ParkedResolver)
     # #998: safe-url package modules.
     "packages/safe-url/src/safe_url/address_class.py": (3, 2),

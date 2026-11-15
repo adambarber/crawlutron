@@ -24,7 +24,6 @@ __all__ = [
     "ResolverBudgetExceeded",
     "bounded_addrinfo",
     "bounded_thread_resolve",
-    "check_ssrf_protection",
     "check_ssrf_protection_stable",
     "dns_in_flight_resolves",
     "dns_wait_for",
@@ -162,21 +161,10 @@ def _resolve_or_refuse(hostname: str, *, use_cache: bool) -> list[str]:
 
 def _validated_fresh_answer(url: NormalizedUrl) -> set[str]:
     """One fresh (uncached) resolve, asserted all-public: the shared verdict body
-    of ``check_ssrf_protection`` (one resolve) and ``check_ssrf_protection_stable``
-    (two, compared)."""
+    (one resolve); the stable variant compares two."""
     ips = _resolve_or_refuse(url.host, use_cache=False)
     _public_verdict(url.host, ips)
     return set(ips)
-
-
-def check_ssrf_protection(url: NormalizedUrl, *, use_cache: bool = True) -> None:
-    """Resolve the URL's host and abort if any IP is private/loopback. The host
-    is read off the admitted value (nothing left to re-parse). Set
-    "CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1" (or "true"/"yes"/"on") to disable.
-    """
-    if allow_private_targets():
-        return
-    _public_verdict(url.host, _resolve_or_refuse(url.host, use_cache=use_cache))
 
 
 def check_ssrf_protection_stable(url: NormalizedUrl) -> None:

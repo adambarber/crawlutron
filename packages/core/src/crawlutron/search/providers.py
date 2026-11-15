@@ -19,10 +19,8 @@ from crawlutron.safety.bounded_io import BodyTooLarge, read_capped_async
 from crawlutron.transport.http_client_pool import get_async_http_client
 from crawlutron.transport.pinned_dns import ResolverBudgetExceeded, bounded_thread_resolve
 from crawlutron.transport.pinned_transport import (
-    PinnedBody,
     PinnedRequest,
     build_pinned_request,
-    open_pinned_request,
 )
 from crawlutron.transport.timeouts import Timeouts
 
@@ -120,12 +118,12 @@ async def provider_http(
         )
     pinned = await _pinned_provider_request(request_url, headers, timeout_seconds)
     try:
-        async with open_pinned_request(
-            client,
+        async with client.stream(
             method,
             pinned,
+            json=json_body,
+            data=data,
             timeout=timeout,
-            body=PinnedBody(json_value=json_body, form=data),
         ) as response:
             try:
                 raw = await read_capped_async(response.aiter_bytes(), _SEARCH_RESPONSE_MAX_BYTES)

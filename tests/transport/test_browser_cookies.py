@@ -200,21 +200,30 @@ async def test_cffi_session_does_not_replay_cookies_it_received(base_url):
     )
 
 
-async def test_shared_httpx_client_does_not_replay_cookies_it_received(base_url):
-    """The long-lived httpx client shares the defect class, so the same chokepoint.
-
-    ``get_async_http_client`` serves every declared-crawler fetch and outlives
-    them all, so its jar accumulates across tenants for the life of the process.
+async def test_shared_httpx_client_does_not_replay_cookies_it_received(base_url, monkeypatch):
+    """The long-lived httpx client shares the defect class: its jar accumulates
+    across tenants for the life of the process.
     """
+    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "1")
+    from safe_url.host_policy import HostPolicy
+    from safe_url.normalized_url import NormalizedUrl
+
     from crawlutron.transport.http_client_pool import get_async_http_client
+    from crawlutron.transport.pinned_transport import build_pinned_request
 
     client = get_async_http_client()
+    replayed_text = ""
     try:
-        await client.get(base_url + "/set-cookie")
-        replayed = await client.get(base_url + "/check-cookie")
+        set_cookie = NormalizedUrl(base_url + "/set-cookie", policy=HostPolicy.unrestricted())
+        check_cookie = NormalizedUrl(base_url + "/check-cookie", policy=HostPolicy.unrestricted())
+        async with client.get(build_pinned_request(set_cookie, {})) as _set:
+            await _set.aread()
+        async with client.get(build_pinned_request(check_cookie, {})) as response:
+            await response.aread()
+            replayed_text = response.text
     finally:
         await client.aclose()
 
-    assert "session_id" not in replayed.text, (
-        f"the shared httpx client replayed a cookie its own jar absorbed: {replayed.text!r}"
+    assert "session_id" not in replayed_text, (
+        f"the shared httpx client replayed a cookie its own jar absorbed: {replayed_text!r}"
     )

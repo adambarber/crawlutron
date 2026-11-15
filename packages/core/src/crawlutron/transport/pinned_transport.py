@@ -6,7 +6,6 @@ composition, redirect-chain rules); never retries, extracts, or constructs.
 
 from __future__ import annotations
 
-import typing
 from dataclasses import dataclass
 from typing import Protocol
 from urllib.parse import urlparse
@@ -14,7 +13,6 @@ from urllib.parse import urlparse
 import httpx
 from safe_url.normalized_url import NormalizedUrl
 
-from crawlutron.models.json_value import JsonValue
 from crawlutron.safety.header_authority import survives_cross_origin
 from crawlutron.transport import pinned_dns as _dns
 from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE, global_cookie_jar
@@ -49,12 +47,6 @@ class PinnedRequest:
         return self.url.tls_hostname
 
 
-def _sni_extensions(request: PinnedRequest) -> dict[str, str] | None:
-    """The SNI extension mapping for a pinned request: the logical hostname.
-    ``None`` when the hop has nothing to pin (plain HTTP or the local-dev posture)."""
-    return {"sni_hostname": sni} if (sni := request.tls_hostname) else None
-
-
 def build_pinned_request(url: NormalizedUrl, headers: dict[str, str]) -> PinnedRequest:
     """Build the pinned request for an admitted URL -- the sole owner of the
     composition (IP blocklist, fresh pin, exact-IP connect with Host preserved).
@@ -76,47 +68,6 @@ def build_pinned_request(url: NormalizedUrl, headers: dict[str, str]) -> PinnedR
         # hosts on one IP would share one TLS session; reuse is a perf nicety.
         out_headers["Connection"] = "close"
     return PinnedRequest(connect_url=connect_url, headers=out_headers, url=url)
-
-
-def open_pinned_request(
-    client: httpx.AsyncClient,
-    method: str,
-    request: PinnedRequest,
-    *,
-    timeout: httpx.Timeout | None = None,
-    headers: dict[str, str] | None = None,
-    body: PinnedBody | None = None,
-) -> typing.AsyncContextManager[httpx.Response]:
-    """Open one SSRF-pinned httpx stream by method: the connect URL is the
-    validated IP and TLS SNI stays on the logical hostname. The CALLER owns the
-    response drain, so each site keeps its own cap posture."""
-    return client.stream(
-        method,
-        request.connect_url,
-        headers=headers if headers is not None else request.headers,
-        timeout=timeout,
-        content=body.content if body else None,
-        json=body.json_value if body else None,
-        data=body.form if body else None,
-        extensions=_sni_extensions(request),
-    )
-
-
-@dataclass(frozen=True, slots=True)
-class PinnedBody:
-    """The request body a pinned call sends: exactly one arm is set.
-
-    One record instead of three parallel optional parameters, so no call site
-    mirrors a helper's argument list to send a body.
-    """
-
-    content: bytes | None = None
-    json_value: dict[str, JsonValue] | None = None
-    form: dict[str, str] | None = None
-
-    def __post_init__(self) -> None:
-        if sum(arm is not None for arm in (self.content, self.json_value, self.form)) > 1:
-            raise ValueError("PinnedBody carries at most one body arm")
 
 
 class PinRule(Protocol):

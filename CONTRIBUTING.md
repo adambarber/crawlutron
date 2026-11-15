@@ -88,7 +88,7 @@ These require explicit review from a maintainer before merge:
   raw URL text is parsed, and the public/SSRF egress verdict plus the
   private-target opt-in are decided here.
 - `packages/core/src/crawlutron/transport/pinned_transport.py` — transport SSRF guard
-  (`check_ssrf_protection`, `resolve_and_pin_host`), request pinning,
+  (`resolve_and_pin_host`), request pinning,
   redirect-target admission, `Host:` header construction.
 - `packages/core/src/crawlutron/transport/cookie_jar.py` — per-tenant cookie namespace
   (`COOKIE_NAMESPACE` ContextVar) and cookie isolation.

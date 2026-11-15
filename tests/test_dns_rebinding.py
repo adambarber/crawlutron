@@ -22,7 +22,7 @@ from tests._policy_factories import canonical
 class TestDNSRebindingProtection:
     def test_a_mixed_public_private_answer_is_refused(self, monkeypatch):
         """Re-ruled #525 SEC-07: #404's first-public-wins drifted from
-        check_ssrf_protection (fail-closed on any private) and from the browser
+        resolve_and_pin_host (fail-closed on any private) and from the browser
         path (#387, mixed refused). One verdict per hostname: refuse."""
         import socket
 

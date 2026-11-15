@@ -6,14 +6,15 @@ import asyncio
 import contextlib
 import threading
 from collections.abc import Callable, Generator
-from contextlib import contextmanager
+from contextlib import AbstractAsyncContextManager, contextmanager
 from http.cookiejar import CookieJar as _StdlibCookieJar
-from typing import TYPE_CHECKING, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 
 import httpx
 
 from crawlutron.runtime import process_state
 from crawlutron.runtime.resource_lifecycle import DeferredClose
+from crawlutron.transport.pinned_transport import PinnedRequest
 from crawlutron.transport.pooled_client_release import (
     PENDING_CLIENT_CLOSE,
     PENDING_CLIENT_CLOSE_LOCK,
@@ -55,8 +56,8 @@ _CLIENTS_BUILT: bool = False
 _HTTP_CLIENT_INIT_LOCK = threading.Lock()
 
 
-def _build_async_client(settings: CrawlerSettings | None = None) -> httpx.AsyncClient:
-    """Build an httpx.AsyncClient with configurable connection pool."""
+def _build_async_client(settings: CrawlerSettings | None = None) -> PooledClient:
+    """Build a pooled client with configurable connection pool."""
     if settings is None:
         settings = _default_settings()
     client = httpx.AsyncClient(
@@ -75,7 +76,7 @@ def _build_async_client(settings: CrawlerSettings | None = None) -> httpx.AsyncC
         # _GLOBAL_COOKIE_JAR chokepoint.
         cookies=_NoStoreCookieJar(),
     )
-    return bind_to_running_loop(client)
+    return bind_to_running_loop(_PooledHttpClient(client))
 
 
 # Superseded loop-bound pooled clients awaiting a loop to close on -- one bounded
@@ -251,6 +252,70 @@ class LoopBoundPooledClient:
             await safe_aclose(current)
 
 
+class _PooledHttpClient:
+    """Facade over the pooled httpx client exposing pinned dial verbs only.
+
+    Every verb dials a PinnedRequest; raw URL dials are inexpressible.
+    """
+
+    __slots__ = ("_bound_loop", "_client")
+
+    def __init__(self, client: httpx.AsyncClient) -> None:
+        self._client = client
+        self._bound_loop: asyncio.AbstractEventLoop | None = None
+
+    @property
+    def is_closed(self) -> bool:
+        """Whether the underlying pooled client reports itself closed."""
+        return bool(getattr(self._client, "is_closed", False))
+
+    async def aclose(self) -> None:
+        """Close the underlying pooled client; httpx has no sync ``close``."""
+        await self._client.aclose()
+
+    async def close(self) -> None:
+        """Close: httpx closes through ``aclose``, which this delegates to.
+
+        Deliberately async so the release path never closes the transport off-loop.
+        """
+        await self.aclose()
+
+    def stream(
+        self,
+        method: str,
+        request: PinnedRequest,
+        *,
+        timeout: httpx.Timeout | None = None,
+        headers: dict[str, str] | None = None,
+        content: bytes | None = None,
+        json: object | None = None,
+        data: dict[str, str] | None = None,
+        follow_redirects: bool | None = None,
+    ) -> AbstractAsyncContextManager[httpx.Response]:
+        """One pinned stream: the connect URL is the validated IP from the pin."""
+        extensions = {"sni_hostname": request.tls_hostname} if request.tls_hostname else None
+        kwargs: dict[str, Any] = {
+            "headers": headers if headers is not None else request.headers,
+            "content": content,
+            "json": json,
+            "data": data,
+            "extensions": extensions,
+        }
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        if follow_redirects is not None:
+            kwargs["follow_redirects"] = follow_redirects
+        return self._client.stream(method, request.connect_url, **kwargs)
+
+    def get(self, request: PinnedRequest) -> AbstractAsyncContextManager[httpx.Response]:
+        """Pinned GET: the connect URL is the validated IP from the pin."""
+        return self.stream("GET", request)
+
+    def post(self, request: PinnedRequest) -> AbstractAsyncContextManager[httpx.Response]:
+        """Pinned POST: the connect URL is the validated IP from the pin."""
+        return self.stream("POST", request)
+
+
 # The two pooled clients, described once and managed by the code above.
 _HTTP_CLIENT_SINGLETON = LoopBoundPooledClient(
     slot="_DEFAULT_HTTP_CLIENT",
@@ -261,15 +326,15 @@ _HTTP_CLIENT_SINGLETON = LoopBoundPooledClient(
 )
 
 
-def get_async_http_client(settings: CrawlerSettings | None = None) -> httpx.AsyncClient:
-    """Return the pooled ``httpx.AsyncClient`` bound to the current event loop.
+def get_async_http_client(settings: CrawlerSettings | None = None) -> _PooledHttpClient:
+    """Return the pooled client facade bound to the current event loop.
     The client is reused while the running loop is unchanged (HTTP/2 connection
     pooling) and rebuilt if the loop changes (e.g. test harness ``asyncio.run`` sequences).
     """
     pooled = _HTTP_CLIENT_SINGLETON.get(settings)
-    # Validated boundary: this descriptor's builder is _build_async_client, so the
-    # pooled object is always the httpx client the cast names.
-    return cast(httpx.AsyncClient, pooled)
+    # The builder always returns the facade wrapping an httpx client, so the cast
+    # names the real returned type.
+    return cast(_PooledHttpClient, pooled)
 
 
 async def close_async_http_client() -> None:

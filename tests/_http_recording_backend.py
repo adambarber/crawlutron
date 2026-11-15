@@ -11,6 +11,8 @@ import socket
 import httpcore
 import httpx
 
+from tests._fetcher_factories import _PinnedClient
+
 
 class RecordingBackend(httpcore.AsyncNetworkBackend):
     """A real httpcore backend that records each connection it is asked to dial.
@@ -74,12 +76,16 @@ class StubStream(httpcore.AsyncNetworkStream):
         return None
 
 
-def recording_httpx_client(backend: RecordingBackend) -> httpx.AsyncClient:
-    """A real httpx client whose transport's httpcore pool dials through ``backend``."""
+def recording_httpx_client(backend: RecordingBackend) -> _PinnedClient:
+    """A httpx client presented through the pinned facade's stream verb.
+
+    Wraps the real client whose httpcore pool dials through ``backend`` so the
+    pooled client's ``stream`` receives a ``PinnedRequest``, never a raw URL.
+    """
     pool = httpcore.AsyncConnectionPool(network_backend=backend)
     transport = httpx.AsyncHTTPTransport(verify=False)
     transport._pool = pool
-    return httpx.AsyncClient(transport=transport)
+    return _PinnedClient(httpx.AsyncClient(transport=transport))
 
 
 def is_ip_literal(host: str) -> bool:

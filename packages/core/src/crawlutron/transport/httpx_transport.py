@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from crawlutron.safety.bounded_io import read_capped_async
 from crawlutron.transport import http_client_pool, pinned_transport
+from crawlutron.transport.pinned_transport import PinnedRequest
 from crawlutron.transport.timeouts import Timeouts
 from crawlutron.transport.transport import (
     FetchRequest,
@@ -37,22 +38,15 @@ class HttpxTransport:
         the walker maps that to an http_413 ``FetchResult``.
         """
         client = http_client_pool.get_async_http_client()
+        pinned = PinnedRequest(
+            connect_url=request.connect_url,
+            headers=request.headers,
+            url=request.url,
+        )
         timeout = Timeouts.for_request(request.timeout_seconds).as_httpx()
         started = time.monotonic()
 
-        extensions = None
-        sni = request.url.tls_hostname
-        if sni is not None:
-            extensions = {"sni_hostname": sni}
-
-        async with client.stream(
-            "GET",
-            request.connect_url,
-            headers=request.headers,
-            timeout=timeout,
-            follow_redirects=False,
-            extensions=extensions,
-        ) as response:
+        async with client.stream("GET", pinned, timeout=timeout, follow_redirects=False) as response:
             content_length = response.headers.get("content-length")
             if pinned_transport.declared_length_exceeds(content_length, max_bytes):
                 return http_413(request.url, request.url, started)

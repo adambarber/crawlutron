@@ -6,6 +6,7 @@ import multiprocessing
 import socket
 import threading
 import time
+import typing
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from multiprocessing.process import BaseProcess
 from multiprocessing.queues import Queue
@@ -15,6 +16,7 @@ import pytest
 from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.models.http_fetch_result import HttpFetchResult
+from crawlutron.transport.pinned_transport import PinnedRequest
 from crawlutron.transport.transport import FetchRequest
 from crawlutron.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 from tests._fetch_outcome import FetchFailed, FetchOutcome
@@ -86,16 +88,46 @@ class ScriptedClient(httpx.AsyncClient):
         self.captured_headers = captured_headers
 
 
+class _PinnedClient:
+    """Adapts a real httpx client to the pooled facade's pinned stream verb.
+
+    ``stream`` dials ``request.connect_url``; everything else delegates inward.
+    """
+
+    __slots__ = ("_client", "captured_headers")
+
+    def __init__(self, client: httpx.AsyncClient) -> None:
+        self._client = client
+        # Only the scripted client carries a captured-headers record; a plain
+        # client (e.g. the dispatching transport double) yields an empty list.
+        self.captured_headers: list[httpx.Headers] = (
+            client.captured_headers if isinstance(client, ScriptedClient) else []
+        )
+
+    def stream(self, method: str, request: PinnedRequest, **kwargs: typing.Any):
+        if "headers" not in kwargs:
+            kwargs["headers"] = request.headers
+        kwargs.setdefault(
+            "extensions",
+            {"sni_hostname": request.tls_hostname} if request.tls_hostname else None,
+        )
+        return self._client.stream(method, request.connect_url, **kwargs)
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._client, name)
+
+
 def scripted_transport_client(
     responses: Sequence[httpx.Response],
     *,
     observed_requests: list[httpx.Request] | None = None,
     observed_responses: list[httpx.Response] | None = None,
-) -> ScriptedClient:
+) -> _PinnedClient:
     """A real ``httpx.AsyncClient`` that answers from `responses`, in call order.
 
     ``httpx.MockTransport`` is the seam httpx publishes; a call beyond the
-    script raises ``IndexError``; the event hooks record request and response."""
+    script raises ``IndexError``; the event hooks record request and response.
+    """
     captured: list[httpx.Headers] = []
 
     def _handle(request: httpx.Request) -> httpx.Response:
@@ -107,15 +139,15 @@ def scripted_transport_client(
         client.event_hooks["request"].append(_recording_hook(observed_requests))
     if observed_responses is not None:
         client.event_hooks["response"].append(_recording_hook(observed_responses))
-    return client
+    return _PinnedClient(client)
 
 
-def dispatching_transport_client(handler) -> httpx.AsyncClient:
+def dispatching_transport_client(handler) -> _PinnedClient:
     """A real ``httpx.AsyncClient`` whose transport asks ``handler`` per request.
 
     The right shape when the answer depends on where the request went (a
     redirect chain); only the answerer differs from :func:`scripted_transport_client`."""
-    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    return _PinnedClient(httpx.AsyncClient(transport=httpx.MockTransport(handler)))
 
 
 def allow_scripted_egress(monkeypatch, ip: str = "1.2.3.4") -> None:
@@ -125,8 +157,6 @@ def allow_scripted_egress(monkeypatch, ip: str = "1.2.3.4") -> None:
     everything downstream still runs. ``ip`` is public by construction."""
     from crawlutron.transport import pinned_dns as pinned_mod
 
-    monkeypatch.setattr(pinned_mod, "check_ssrf_protection", lambda url: None)
-    monkeypatch.setattr(pinned_mod, "check_ssrf_protection", lambda url: None)
     monkeypatch.setattr(pinned_mod, "resolve_and_pin_host", lambda url: (url.host, ip))
 
 
@@ -179,7 +209,7 @@ def patch_http_fetcher_transport(
     responses: Sequence[httpx.Response],
     *,
     allow_ssrf_bypass: bool,
-) -> ScriptedClient:
+) -> _PinnedClient:
     """Point the httpx fetcher at a scripted transport; return the client.
 
     ``allow_ssrf_bypass`` is required because installing this also installs

@@ -10,6 +10,7 @@ import crawlutron.transport.pinned_dns as pinned_mod
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.extraction.content import extract_post_fetch_discovery
 from crawlutron.orchestration.engine import crawl_request
+from crawlutron.transport.pinned_transport import PinnedRequest
 from tests._browser_doubles import _fake_browser
 from tests._fetch_doubles import FetcherDouble, make_fetch
 from tests._policy_factories import canonical, host_policy_for
@@ -120,7 +121,10 @@ class _Client:
         self.calls: list[tuple[str, bool, dict[str, object] | None]] = []
 
     def stream(self, method, url, headers=None, timeout=None, follow_redirects=False, extensions=None):
-        self.calls.append((url, follow_redirects, extensions))
+        connect_url = url.connect_url if isinstance(url, PinnedRequest) else url
+        if isinstance(url, PinnedRequest) and url.tls_hostname:
+            extensions = {"sni_hostname": url.tls_hostname}
+        self.calls.append((connect_url, follow_redirects, extensions))
         return _Stream(self.response)
 
 
@@ -133,7 +137,6 @@ async def test_redirect_to_policy_blocked_host_is_refused_before_fetch(monkeypat
         )
     )
     monkeypatch.setattr(pool_mod, "get_async_http_client", lambda: client)
-    monkeypatch.setattr(pinned_mod, "check_ssrf_protection", lambda url: None)
     # HTTPS is pinned like plain HTTP: the connect host is the validated IP.
     monkeypatch.setattr(pinned_mod, "resolve_and_pin_host", lambda url: (url.host, "93.184.216.34"))
 

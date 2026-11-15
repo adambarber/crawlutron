@@ -20,6 +20,7 @@ from crawlutron.search.providers import (
 )
 from crawlutron.search.providers_api import BraveProvider, SerperProvider, TavilyProvider, get_search_provider
 from crawlutron.search.providers_html import DuckDuckGoProvider
+from crawlutron.transport.pinned_transport import PinnedRequest
 from tests._assertions import one_search_result, provider_results
 
 
@@ -358,8 +359,12 @@ async def test_provider_http_pins_the_connect_to_the_resolved_ip(monkeypatch):
     seen: list[str] = []
 
     class _RecordingClient(_FakeStreamClient):
-        def stream(self, method, url, **kwargs):
-            seen.append(url)
+        def stream(self, method: str, url: str | PinnedRequest, **kwargs):
+            if isinstance(url, PinnedRequest):
+                seen.append(url.connect_url)
+                url = url.connect_url
+            else:
+                seen.append(url)
             return super().stream(method, url, **kwargs)
 
     client = _RecordingClient(_FakeStreamResponse(b"{}"))

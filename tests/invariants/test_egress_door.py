@@ -6,6 +6,8 @@ to (webhooks.py:136) and now routes delivery through get_async_http_client().
 
 from __future__ import annotations
 
+import ast
+
 from tests.chokepoint_walks import call_nodes, offender_at, relative_posix, resolved_call_name
 from tests.rules import Bites, Rule
 
@@ -86,6 +88,61 @@ INDEPENDENT_EGRESS_DOOR = Rule(
 )
 
 
+#: The pooled client's dial verbs never take a raw URL string: every verb takes a
+#: PinnedRequest whose connect_url is the validated IP.
+_RAW_DIAL_VERBS = frozenset({"get", "post", "stream"})
+
+
+def _raw_egress_dial_offenders(tree, path):
+    """Flag a pooled-client dial verb handed a raw URL string instead of a PinnedRequest.
+
+    A string URL there is the raw-dial shape the facade refuses; named file:line.
+    """
+    offenders = []
+    for call in call_nodes(tree):
+        if not isinstance(call.func, ast.Attribute) or call.func.attr not in _RAW_DIAL_VERBS:
+            continue
+        args = call.args
+        url_index = 1 if call.func.attr == "stream" else 0
+        if len(args) <= url_index:
+            continue
+        url = args[url_index]
+        if (
+            isinstance(url, ast.Constant)
+            and isinstance(url.value, str)
+            and url.value.startswith(("http://", "https://"))
+        ):
+            offenders.append(offender_at(path, call, "pooled-client dial of a raw URL string"))
+    return offenders
+
+
+RAW_EGRESS_DIAL = Rule(
+    name="raw-egress-dial-through-pooled-client",
+    find=_raw_egress_dial_offenders,
+    summary=(
+        "get_async_http_client() hands out a facade whose get/post/stream take a "
+        "PinnedRequest, never a raw URL string; dialling a caller-supplied host at "
+        "OS resolution time is inexpressible through this surface"
+    ),
+    bite=lambda: Bites(
+        'client.get("http://example.test/")',
+        marker="pooled-client dial of a raw URL string",
+        count=1,
+    ),
+    clean=lambda: (
+        # The sanctioned shape: a PinnedRequest, never a raw URL string.
+        "client.stream('GET', pinned, follow_redirects=False)\n",
+    ),
+)
+
+
 def test_independent_egress_door():
     """No module but fetchers.py's pool home constructs an outbound client."""
     INDEPENDENT_EGRESS_DOOR.scan()
+
+
+def test_raw_egress_dial_is_named_by_file_and_line():
+    """The pooled client's dial verbs refuse a raw URL string, and a planted
+    client.get("http://example.test/") is named by file:line."""
+    RAW_EGRESS_DIAL.scan()
+    RAW_EGRESS_DIAL.check_bites()

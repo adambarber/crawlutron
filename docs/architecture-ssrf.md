@@ -41,14 +41,14 @@ covers route-level interception and hostname pinning.
 
 ## Per-fetch resolve + pin (pinned_dns.py, pinned_transport.py)
 
-`check_ssrf_protection` (`pinned_dns.py:179`) resolves the host and aborts if
-any IP is private/loopback; it is skipped only when `allow_private_targets()`
-is true (`pinned_dns.py:184`, `host_policy.py:103`). The validation path
-reuses a short-TTL cache (`_DNS_TTL = 60.0`, `pinned_dns.py:69`); the
+`resolve_and_pin_host` (`pinned_dns.py:187`) resolves the host once and aborts
+if any IP is private/loopback; it is skipped only when `allow_private_targets()`
+is true (`pinned_dns.py:193`, `host_policy.py:153`). The validation path
+reuses a short-TTL cache (`_DNS_TTL = 60.0`, `pinned_dns.py:66`); the
 pinning path deliberately does **not** (`_resolve_ips` with `use_cache=False`,
-`pinned_dns.py:174`, `:218`) so a rebind inside the TTL cannot bypass SSRF —
+`pinned_dns.py:123`) so a rebind inside the TTL cannot bypass SSRF —
 a cached IP never bypasses the guard through a TOCTOU
-(`pinned_dns.py:134`).
+(`pinned_dns.py:126`).
 
 `resolve_and_pin_host` (`pinned_dns.py:206`) resolves the host **once**,
 pins the resulting IP, and connects to that exact IP to defeat DNS-rebinding

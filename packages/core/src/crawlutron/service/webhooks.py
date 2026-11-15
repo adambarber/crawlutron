@@ -116,9 +116,7 @@ async def deliver_pinned_webhook(
     # one place) rather than urlparse/check/pin inline -- manual composition is the
     # shape that produced the redirect findings, and this closes validation's window.
     from crawlutron.transport.pinned_transport import (
-        PinnedBody,
         build_pinned_request_async,
-        open_pinned_request,
     )
 
     normalized = NormalizedUrl(webhook_url, policy=host_policy)
@@ -135,11 +133,10 @@ async def deliver_pinned_webhook(
     # Deliberate one-per-delivery cost: pooling would re-resolve by hostname (defeating
     # the pin) or cache the IP across deliveries (reopening the rebinding window).
     client = get_async_http_client()
-    async with open_pinned_request(
-        client,
+    async with client.stream(
         "POST",
         pinned,
-        body=PinnedBody(content=payload_bytes),
+        content=payload_bytes,
         headers=request_headers,
     ) as response:
         try:

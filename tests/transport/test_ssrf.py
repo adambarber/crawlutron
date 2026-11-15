@@ -8,7 +8,7 @@ from safe_url.host_policy import HostPolicy
 from safe_url.normalized_url import NormalizedUrl
 
 import crawlutron.transport.pinned_dns as http_mod
-from crawlutron.transport.pinned_dns import check_ssrf_protection, resolve_and_pin_host
+from crawlutron.transport.pinned_dns import resolve_and_pin_host
 from crawlutron.transport.pinned_transport import build_pinned_request
 from crawlutron.transport.redirect_walker import RedirectWalker
 from tests._assertions import (
@@ -115,12 +115,6 @@ def _unresolvable_host(monkeypatch, *, allow_private: str = "0") -> None:
     monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", allow_private)
 
 
-def test_check_ssrf_protection_blocks_unresolvable_host(monkeypatch):
-    _unresolvable_host(monkeypatch)
-    with pytest.raises(ValueError):
-        http_mod.check_ssrf_protection(canonical("http://nonexistent.invalid/"))
-
-
 def test_resolve_and_pin_host_fails_closed_when_resolution_fails(monkeypatch):
     """An unresolvable host must be refused, not handed back for re-resolution.
 
@@ -163,8 +157,8 @@ def test_pinned_builder_surfaces_unresolvable_host_as_an_ssrf_refusal(monkeypatc
 
 class TestSSRFProtection:
     def test_resolve_and_pin_host_refuses_a_mixed_public_private_answer(self, monkeypatch):
-        """One verdict per hostname (#525 SEC-07): check_ssrf_protection fails
-        closed on any-private and the browser path refused mixed answers (#387);
+        """One verdict per hostname (#525 SEC-07): the pin fails closed on
+        any-private and the browser path refused mixed answers (#387);
         first-public-wins would dial a host whose other answers are internal."""
 
         def mixed(host, *args, **kwargs):
@@ -179,17 +173,6 @@ class TestSSRFProtection:
         ):
             resolve_and_pin_host(canonical("http://example.com/"))
 
-    @pytest.mark.parametrize("private_ip", ["127.0.0.1", "192.168.1.1"])
-    def test_check_ssrf_protection_blocks_private_targets(self, monkeypatch, private_ip):
-        # The live hazard shape: an admitted public NAME whose DNS answer is private
-        with host_resolves_to(monkeypatch, private_ip), pytest.raises(ValueError):
-            check_ssrf_protection(canonical("http://example.com/"))
-
-    def test_check_ssrf_protection_allows_public_ip(self, monkeypatch):
-        # Should not raise for a public IP.
-        with host_resolves_to(monkeypatch, "8.8.8.8"):
-            check_ssrf_protection(canonical("http://8.8.8.8:8080/"))
-
     def test_resolve_and_pin_host_pins_first_public_ip(self, monkeypatch):
         with host_resolves_to(monkeypatch, "1.2.3.4"):
             hostname, ip = resolve_and_pin_host(canonical("http://example.com:8080/"))
@@ -201,18 +184,6 @@ class TestSSRFProtection:
         for target in ["http://localhost:8080/", "http://127.0.0.1:8080/", "http://10.0.0.1:8080/"]:
             with pytest.raises(ValueError, match="private"):
                 NormalizedUrl(target, policy=HostPolicy.unrestricted())
-
-    def test_hostname_resolved_only_once(self, monkeypatch):
-        """The SSRF check must resolve the hostname exactly once.
-
-        The process-global DNS cache is cleared first, so a prior test cannot
-        serve this call from cache and report 0 getaddrinfo calls."""
-        from crawlutron.runtime import process_state
-
-        process_state.reset_all_process_state()
-        with host_resolves_to(monkeypatch, "8.8.8.8") as resolved:
-            check_ssrf_protection(canonical("http://example.com:8080/"))
-        assert resolved == ["example.com"]
 
 
 class TestFrontierIdentityRefusesRejectedTargets:
@@ -285,16 +256,12 @@ class TestDegradedResolverFailsClosed:
     SSRF gate must fail closed with the ValueError shape for every one of them."""
 
     @pytest.mark.parametrize(
-        ("exc", "where"),
-        [
-            (TimeoutError("degraded resolver"), "check"),
-            (OSError("resolver died"), "check"),
-            (TimeoutError("degraded resolver"), "pin"),
-            (OSError("resolver died"), "pin"),
-        ],
-        ids=["timeout-check", "oserror-check", "timeout-pin", "oserror-pin"],
+        "exc",
+        [TimeoutError("degraded resolver"), OSError("resolver died")],
+        ids=["timeout-pin", "oserror-pin"],
     )
-    def test_non_gaierror_resolution_faults_fail_closed(self, monkeypatch, exc, where):
+    def test_non_gaierror_resolution_faults_fail_closed(self, monkeypatch, exc):
+        """Non-gaierror resolver faults fail closed at the pin, not just gaierror."""
         block_private_targets(monkeypatch)
 
         def degraded(host, *args, **kwargs):
@@ -302,9 +269,8 @@ class TestDegradedResolverFailsClosed:
 
         monkeypatch.setattr(http_mod.socket, "getaddrinfo", degraded)
         url = canonical("http://example.com/")
-        gate = check_ssrf_protection if where == "check" else resolve_and_pin_host
         with pytest.raises(ValueError, match="cannot resolve hostname"):
-            gate(url)
+            resolve_and_pin_host(url)
 
     def test_unbounded_resolution_is_bounded_by_the_dns_budget(self, monkeypatch):
         # A hung resolver must surface as the fail-closed ValueError within the
@@ -324,7 +290,7 @@ class TestDegradedResolverFailsClosed:
         monkeypatch.setattr(http_mod.socket, "getaddrinfo", hung)
         started = time.monotonic()
         with pytest.raises(ValueError, match="cannot resolve hostname"):
-            check_ssrf_protection(canonical("http://bfg-bounded.example/"))
+            resolve_and_pin_host(canonical("http://bfg-bounded.example/"))
         # Unbounded would block >=1s on the hung resolver; the budget abandons at 0.1s.
         assert time.monotonic() - started < 0.9, "the resolve was not bounded by the DNS budget"
 
@@ -344,18 +310,13 @@ class TestSsrfDnsPinning:
         with host_resolves_to(monkeypatch, "127.0.0.1"), pytest.raises(ValueError):
             resolve_and_pin_host(canonical("http://example.com/"))
 
-    def test_loopback_resolution_blocked_by_default(self, monkeypatch):
-        block_private_targets(monkeypatch)
-        with host_resolves_to(monkeypatch, "127.0.0.1"), pytest.raises(ValueError):
-            check_ssrf_protection(canonical("http://example.com/"))
-
 
 @pytest.mark.usefixtures("ssrf_guard_required")
 def test_ssrf_fixture_passes_when_opted_out(monkeypatch):
     """The happy path: opt out, then exercise the helper. Should pass."""
     with host_resolves_to(monkeypatch, "93.184.216.34"):
         # Hermetic: the resolver is stubbed, so this never reaches real DNS.
-        http_mod.check_ssrf_protection(canonical("http://example.com/"))
+        http_mod.resolve_and_pin_host(canonical("http://example.com/"))
 
 
 @pytest.mark.usefixtures("ssrf_guard_required")
@@ -364,15 +325,12 @@ def test_ssrf_fixture_fails_when_opt_out_missing(monkeypatch):
     message naming the missing opt-out.
     """
     # Deliberately do NOT set CRAWLUTRON_ALLOW_PRIVATE_TARGETS=0. The fixture must catch this.
-    import os
-
     monkeypatch.delenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", raising=False)
-    os.environ["CRAWLUTRON_ALLOW_PRIVATE_TARGETS"] = "1"
     with pytest.raises(pytest.fail.Exception, match="SSRF guard"):
-        http_mod.check_ssrf_protection(canonical("http://example.invalid/"))
+        http_mod.resolve_and_pin_host(canonical("http://example.invalid/"))
 
 
-# Note: a test that requests ``ssrf_guard_required`` but never touches ``check_ssrf_protection`` or
+# Note: a test that requests ``ssrf_guard_required`` but never touches
 # ``resolve_and_pin_host`` simply passes without exercising the SSRF path.
 
 

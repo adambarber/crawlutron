@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import httpx
 
-from tests._fetcher_factories import MockResponse
+from tests._fetcher_factories import MockResponse, _PinnedClient
 
 __all__ = ["record_webhook_delivery", "recorded_webhook_posts"]
 
@@ -34,7 +34,7 @@ def record_webhook_delivery(
 
     def _scripted_client(*args, **kwargs):
         kwargs.setdefault("transport", transport)
-        return real_client(*args, **kwargs)
+        return _PinnedClient(real_client(*args, **kwargs))
 
     monkeypatch.setattr("crawlutron.service.webhooks.get_async_http_client", _scripted_client)
     return requests

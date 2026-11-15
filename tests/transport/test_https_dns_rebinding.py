@@ -99,7 +99,7 @@ class TestHttpsDnsRebindingFetchIsBlocked:
 
         monkeypatch.setattr(socket, "getaddrinfo", private_resolver)
 
-        # The pin and check_ssrf_protection now share one verdict, so the
+        # The pin and the SSRF verdict now share one refusal, so the
         # wording matches its sibling's "private/loopback" refusal (#525 SEC-07).
         with pytest.raises(ValueError, match="private/loopback"):
             await default_http_fetcher(
