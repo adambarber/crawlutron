@@ -141,7 +141,9 @@ DECLARED_SURFACE_RATCHET = {
     "packages/rest/src/crawlutron_rest/api/identity_router.py": (5, 3),
     "packages/core/src/crawlutron/service/job_runner.py": (15, 12),
     "packages/rest/src/crawlutron_rest/api/jobs_router.py": (6, 5),
-    "packages/core/src/crawlutron/service/main_helpers.py": (3, 3),
+    # #1083: crawl_tail is the shared crawl tail both doors call (completion
+    # metric + result-store put); MCP previously half-tailed.
+    "packages/core/src/crawlutron/service/main_helpers.py": (4, 4),
     # #871: readiness state re-homed framework-free; health keeps the FastAPI wire
     # door (router factory) while the state names re-export for patch-seam survival.
     "packages/core/src/crawlutron/health/readiness.py": (1, 1),

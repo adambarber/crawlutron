@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum, auto
@@ -29,10 +30,9 @@ from crawlutron.service.crawl_endpoint_cores import delta_context_for
 from crawlutron.service.crawl_executor import execute_crawl
 from crawlutron.service.errors import DomainError
 from crawlutron.service.job_cores import create_job_core
-from crawlutron.service.main_helpers import request_gate
+from crawlutron.service.main_helpers import crawl_tail, request_gate
 from crawlutron.service.map_endpoint import map_site
 from crawlutron.service.render_endpoint import render as render_endpoint_handler
-from crawlutron.service.response_shaping import aunified_response_from_result
 from crawlutron.storage.job_store import JobStore
 from crawlutron.storage.result_store import CrawlResultStore
 from crawlutron.storage.watch_store import WatchStore
@@ -209,12 +209,20 @@ async def _admit_tool(
 
 
 async def _crawled(payload: CrawlRequest, settings, shutdown_event, caller_id: str, result_store):
-    """Run the crawl endpoint and shape it, threading the delta knobs through the
-    REST endpoint's own delta_context_for loader (one semantics source)."""
+    """Run the crawl and answer through the shared tail: completion metric,
+    unified response, then a fail-open result-store put."""
+    _crawl_started = time.monotonic()
+    result = await execute_crawl(payload, settings=settings, shutdown_event=shutdown_event)
     delta_context = await delta_context_for(payload, caller_id, result_store)
-    return await aunified_response_from_result(
-        await execute_crawl(payload, settings=settings, shutdown_event=shutdown_event),
+    return await crawl_tail(
+        result,
+        _crawl_started,
+        event="crawl_request_completed",
+        logger=_logger,
+        caller_id=caller_id,
         delta_context=delta_context,
+        result_store=result_store,
+        owner=caller_id,
     )
 
 

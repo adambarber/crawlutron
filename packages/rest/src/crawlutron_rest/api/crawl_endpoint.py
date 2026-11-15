@@ -31,8 +31,7 @@ from crawlutron.service.crawl_endpoint_cores import (
 from crawlutron.service.crawl_executor import execute_crawl
 from crawlutron.service.errors import DomainError, ValidationRefusal
 from crawlutron.service.job_lifecycle import start_tracked_task
-from crawlutron.service.main_helpers import record_crawl_completion, request_gate
-from crawlutron.service.response_shaping import aunified_response_from_result
+from crawlutron.service.main_helpers import crawl_tail, request_gate
 from crawlutron.service.webhooks import ensure_https_webhook_url, validate_webhook_url_async
 from crawlutron.storage.ids import new_request_id
 from crawlutron.storage.job_store import FrontierEntry, JobStore
@@ -290,18 +289,16 @@ async def _run_sync_crawl(
         result = await crawl_awaitable
     else:
         result = await await_or_client_gone(crawl_awaitable, request)
-    await record_crawl_completion(
+    response_model = await crawl_tail(
         result,
         _crawl_started,
         event="crawl_request_completed",
         logger=_logger,
         caller_id=owner,
+        delta_context=delta_context,
+        result_store=result_store,
+        owner=owner,
     )
-    response_model = await aunified_response_from_result(result, delta_context=delta_context)
-    try:
-        await result_store.aput(result["request_id"], response_model.model_dump(), owner=owner)
-    except Exception:
-        _logger.warning("crawl_result_store_failed", extra={"request_id": result["request_id"]})
     output_format = payload.output_format
     if output_format and output_format.lower() != "json":
         body, media_type = _serialize_or_reject(
