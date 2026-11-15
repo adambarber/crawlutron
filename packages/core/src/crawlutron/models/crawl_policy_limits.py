@@ -55,6 +55,18 @@ class CrawlPolicyLimits(BaseModel):
             "rotate identities, or inject credentials.",
         ),
     ] = DEFAULT_CHALLENGE_WAIT_SECONDS
+
+    @classmethod
+    def challenge_wait_bounds(cls) -> tuple[int, int]:
+        """``(ge, le)`` for ``challenge_wait_seconds`` read from field
+        metadata: the single derivation point so settings and the browser
+        fallback cannot drift.
+        """
+        field = cls.model_fields["challenge_wait_seconds"]
+        ge = [meta.ge for meta in field.metadata if type(meta).__name__.lower() == "ge"][0]
+        le = [meta.le for meta in field.metadata if type(meta).__name__.lower() == "le"][0]
+        return ge, le
+
     max_discovered_links: Annotated[
         int,
         Field(

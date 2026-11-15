@@ -17,6 +17,7 @@ from safe_url.normalized_url import NormalizedUrl
 from crawlutron.config.env import get_env_float, get_env_int
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.extraction.classify import classify_page
+from crawlutron.models.crawl_policy_limits import CrawlPolicyLimits
 from crawlutron.models.crawl_result import CrawlResult
 from crawlutron.models.result_factory import terminal_crawl_result
 from crawlutron.models.taxonomy import Classification
@@ -121,15 +122,19 @@ class BrowserRenderer:
         status_for: Callable[[str], ResultStatus] | None = None,
     ) -> None:
         self._sleep = sleep
-        # Policy limit, then the settings field, then env, then the canonical
-        # default: the number itself lives only in crawlutron.vocabulary.limits.
+        # Policy limit, then settings, then env, then the canonical default;
+        # the bounds come from CrawlPolicyLimits' field metadata.
         if challenge_wait_seconds is not None:
             self._challenge_wait_seconds = challenge_wait_seconds
         elif settings is not None:
             self._challenge_wait_seconds = float(settings.challenge_wait_seconds)
         else:
+            _cw_lo, _cw_hi = CrawlPolicyLimits.challenge_wait_bounds()
             self._challenge_wait_seconds = get_env_float(
-                "CRAWLUTRON_CHALLENGE_WAIT_SECONDS", DEFAULT_CHALLENGE_WAIT_SECONDS, lo=0.0, hi=300.0
+                "CRAWLUTRON_CHALLENGE_WAIT_SECONDS",
+                DEFAULT_CHALLENGE_WAIT_SECONDS,
+                lo=_cw_lo,
+                hi=_cw_hi,
             )
         self._pdf_text_extractor = pdf_text_extractor or default_document_text_extractor
         # The two renderer-owned predicates a test steers (page yield, PDF);

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import logging
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TypedDict
 
 from crawlutron.config.env import get_mapping_float, get_mapping_int, in_range, parse_bool_value
+from crawlutron.models.crawl_policy_limits import CrawlPolicyLimits
 from crawlutron.runtime.pressure_memory import read_memory_stats
 from crawlutron.runtime.pressure_sizing import (
     derive_browser_pool_size,
@@ -347,24 +347,19 @@ def _transport_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> 
         validate=in_range(1, 512),
         validate_event="http_max_connections_out_of_range",
     )
-    # httpx documents keepalive <= connections but does not enforce it: an
-    # explicit keepalive above the ceiling is clamped loudly, naming both knobs.
+    # httpx documents keepalive <= connections; refusal logs above the ceiling.
+    # A negative floor clamps to 0 like cache_ttl; only ceilings refuse loudly.
     http_max_keepalive = get_mapping_int(
-        source, "CRAWLUTRON_HTTP_MAX_KEEPALIVE", default_http_keepalive(), lo=0
+        source,
+        "CRAWLUTRON_HTTP_MAX_KEEPALIVE",
+        default_http_keepalive(),
+        lo=0,
+        hi=http_max_connections,
+        validate=in_range(0, http_max_connections),
+        validate_event="http_max_keepalive_above_max_connections",
     )
-    raw_keepalive = source.get("CRAWLUTRON_HTTP_MAX_KEEPALIVE")
-    if raw_keepalive is not None and http_max_keepalive > http_max_connections:
-        logging.getLogger(__name__).warning(
-            "http_max_keepalive_above_max_connections: "
-            "CRAWLUTRON_HTTP_MAX_KEEPALIVE=%s exceeds CRAWLUTRON_HTTP_MAX_CONNECTIONS=%s; "
-            "keepalive clamped to %s",
-            raw_keepalive,
-            http_max_connections,
-            http_max_connections,
-        )
-        http_max_keepalive = http_max_connections
-    # An idle keep-alive time limit cannot be negative; no ceiling is
-    # documented, so none is invented here.
+    # A negative idle expiry is meaningless: the floor clamps to 0.0 like
+    # the sibling adaptive-timeout knobs; only ceilings refuse loudly.
     http_keepalive_expiry = get_mapping_float(
         source, "CRAWLUTRON_HTTP_KEEPALIVE_EXPIRY", cls.http_keepalive_expiry, lo=0.0
     )
@@ -377,6 +372,7 @@ def _transport_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> 
 
 def _browser_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> _BrowserFields:
     """Browser render caps, challenge wait, and the fixed-overhead render knobs."""
+    _cw_lo, _cw_hi = CrawlPolicyLimits.challenge_wait_bounds()
     return {
         "max_browser_renders": get_mapping_int(
             source, "CRAWLUTRON_MAX_BROWSER_RENDERS", cls.max_browser_renders
@@ -384,15 +380,15 @@ def _browser_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> _B
         "max_concurrent_pages": get_mapping_int(
             source, "CRAWLUTRON_MAX_CONCURRENT_PAGES", cls.max_concurrent_pages
         ),
-        # CrawlPolicyLimits bounds challenge_wait_seconds at [0, 120] (default
-        # 15); the settings read derives its bound from that model, not a second number.
+        # CrawlPolicyLimits bounds challenge_wait_seconds at [ge, le] (default
+        # 15); the settings read derives its bound from that model's metadata.
         "challenge_wait_seconds": get_mapping_int(
             source,
             "CRAWLUTRON_CHALLENGE_WAIT_SECONDS",
             cls.challenge_wait_seconds,
-            lo=0,
-            hi=120,
-            validate=in_range(0, 120),
+            lo=_cw_lo,
+            hi=_cw_hi,
+            validate=in_range(_cw_lo, _cw_hi),
             validate_event="challenge_wait_seconds_out_of_range",
         ),
         "browser_lazy_scroll_steps": get_mapping_int(
