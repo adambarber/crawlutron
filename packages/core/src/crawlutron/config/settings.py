@@ -134,6 +134,9 @@ class CrawlerSettings:
     # Per-caller watch cap: registration refuses past this many live watches for
     # one owner; the anonymous bucket shares one finite allowance.
     max_watches_per_caller: int = 100
+    # Retention sweep grace: tombstones reclaimed this many seconds after
+    # deletion. 86400s (24h) is our stated retention promise.
+    retention_sweep_grace_seconds: int = 86400
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, str] | None = None) -> CrawlerSettings:
@@ -151,6 +154,7 @@ class CrawlerSettings:
             **_browser_fields(cls, source),
             **_extraction_fields(cls, source),
             **_search_fields(cls, source),
+            **_retention_fields(cls, source),
         )
 
 
@@ -233,6 +237,12 @@ class _SearchFields(TypedDict):
     key_admin_token: str
     webhook_secret: str
     max_watches_per_caller: int
+
+
+class _RetentionFields(TypedDict):
+    """The keys `_retention_fields` reads: the retention sweep grace."""
+
+    retention_sweep_grace_seconds: int
 
 
 def _core_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> _CoreFields:
@@ -454,5 +464,24 @@ def _search_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> _Se
         "webhook_secret": source.get("CRAWLUTRON_WEBHOOK_SECRET", cls.webhook_secret),
         "max_watches_per_caller": get_mapping_int(
             source, "CRAWLUTRON_MAX_WATCHES_PER_CALLER", cls.max_watches_per_caller, lo=1
+        ),
+    }
+
+
+def _retention_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> _RetentionFields:
+    """Retention sweep grace: tombstones are reclaimed this many seconds after deletion.
+
+    Reads ``CRAWLUTRON_RETENTION_SWEEP_GRACE_SECONDS``; out-of-range is refused
+    with ``operator_retention_grace_out_of_range``, never silently clamped.
+    """
+    return {
+        "retention_sweep_grace_seconds": get_mapping_int(
+            source,
+            "CRAWLUTRON_RETENTION_SWEEP_GRACE_SECONDS",
+            cls.retention_sweep_grace_seconds,
+            lo=0,
+            hi=31_536_000,
+            validate=in_range(0, 31_536_000),
+            validate_event="operator_retention_grace_out_of_range",
         ),
     }

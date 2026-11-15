@@ -31,8 +31,7 @@ else:
         from fastapi import FastAPI
         from fastapi.exceptions import RequestValidationError
     except ImportError:
-        # FastAPI is optional at import time (MCP/CLI/tests import this module
-        # with no web server): FastAPI -> None, exceptions -> ``Exception``.
+        # FastAPI optional at import time: FastAPI -> None, exceptions -> Exception.
         FastAPI = None
         RequestValidationError = Exception
 
@@ -46,10 +45,7 @@ _TeardownStep = tuple[str, Callable[[], Awaitable[None]]]
 
 
 async def _run_shutdown_steps(steps: Sequence[_TeardownStep]) -> None:
-    """Run every teardown step, then report the ones that failed.
-
-    One failure must not decide what else is released; failures raise together.
-    """
+    """Run every teardown step; one failure must not decide what else is released."""
     failures: list[str] = []
     for name, step in steps:
         try:
@@ -61,11 +57,7 @@ async def _run_shutdown_steps(steps: Sequence[_TeardownStep]) -> None:
 
 
 def create_app(settings: CrawlerSettings | None = None) -> FastAPI:
-    """Build the wired service app: stores, logging, lifespan, routers.
-
-    The one factory for every entry point; importing this module stays
-    side-effect free so CLI/MCP paths construct nothing they do not use.
-    """
+    """Build the wired service app; importing stays side-effect free."""
     if FastAPI is None:
         raise RuntimeError("create_app requires FastAPI, which is not importable here")
     settings = settings or CrawlerSettings.from_mapping()
@@ -112,8 +104,7 @@ def _configure_logging(settings: CrawlerSettings) -> logging.Logger:
         log_file_max_bytes=settings.log_file_max_bytes,
         log_file_backup_count=settings.log_file_backup_count,
     )
-    # Third-party extraction libraries log expected per-element WARNINGs (parser
-    # noise that cannot be acted on). Keep ERROR+ visible, drop the chatter.
+    # Third-party extraction WARNINGs are parser noise; keep ERROR+ visible.
     logging.getLogger("trafilatura").setLevel(logging.ERROR)
     return logger
 
@@ -382,7 +373,12 @@ async def _recover_jobs_and_start_sweep(_app: FastAPI, settings: CrawlerSettings
         sweep_spills_forever(_app.state.spill_store, shutdown_event=shutdown_event, max_age_seconds=ttl)
     )
     _app.state.retention_sweep_task = asyncio.create_task(
-        sweep_retention_forever(_app.state.job_store, _app.state.result_store, shutdown_event)
+        sweep_retention_forever(
+            _app.state.job_store,
+            _app.state.result_store,
+            shutdown_event,
+            grace_seconds=settings.retention_sweep_grace_seconds,
+        )
     )
     _app.state.watch_sweep_task = asyncio.create_task(
         sweep_watches_forever(

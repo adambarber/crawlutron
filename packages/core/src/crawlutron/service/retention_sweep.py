@@ -1,5 +1,7 @@
-"""The retention sweep owns garbage rows: tombstones past grace, orphaned
+"""The retention sweep reclaims garbage rows: tombstones past grace, orphaned
 accumulators, expired results -- then truncates the WAL.
+
+Grace default is 86400s (24h); the operative value comes from CrawlerSettings.
 """
 
 from __future__ import annotations
@@ -13,15 +15,16 @@ from crawlutron.storage.result_store import CrawlResultStore
 from crawlutron.storage.safe_db import wal_checkpoint
 from crawlutron.transport.freshness import default_clock
 
-#: Tombstones are reclaimed 24 hours after deletion; younger ones survive.
-TOMBSTONE_GRACE_SECONDS = 86400.0
-
 #: One pass every five minutes, same cadence as the cache and spill sweeps.
 RETENTION_SWEEP_INTERVAL_SECONDS = 300.0
 
+#: Stated retention promise: tombstones are reclaimed 24 hours after deletion.
+#: Production overrides this via CrawlerSettings.retention_sweep_grace_seconds.
+DEFAULT_TOMBSTONE_GRACE_SECONDS = 86400.0
+
 __all__ = [
     "RETENTION_SWEEP_INTERVAL_SECONDS",
-    "TOMBSTONE_GRACE_SECONDS",
+    "DEFAULT_TOMBSTONE_GRACE_SECONDS",
     "retention_maintenance_once",
     "sweep_retention_forever",
 ]
@@ -31,12 +34,13 @@ def retention_maintenance_once(
     job_store: JobStore,
     result_store: CrawlResultStore,
     *,
-    grace_seconds: float = TOMBSTONE_GRACE_SECONDS,
+    grace_seconds: float = DEFAULT_TOMBSTONE_GRACE_SECONDS,
     now: float | None = None,
 ) -> int:
     """Reap every garbage row class in one pass; return rows reclaimed.
 
-    Garbage: tombstones past grace, orphaned accumulators, expired results.
+    Garbage: tombstones past grace (the operative value comes from settings,
+    not this default), orphaned accumulators, expired results.
     """
     now = default_clock() if now is None else float(now)
     reclaimed = job_store.reap_tombstones(grace_seconds=grace_seconds, now=now)
@@ -53,12 +57,13 @@ async def sweep_retention_forever(
     shutdown_event: asyncio.Event,
     *,
     interval_seconds: float = RETENTION_SWEEP_INTERVAL_SECONDS,
-    grace_seconds: float = TOMBSTONE_GRACE_SECONDS,
+    grace_seconds: float = DEFAULT_TOMBSTONE_GRACE_SECONDS,
     clock: Callable[[], float] = default_clock,
 ) -> None:
     """Run retention_maintenance_once on a bounded cadence until shutdown.
 
     A failing pass is logged; the loop continues. Store work runs off the loop.
+    The operative grace value comes from CrawlerSettings at the call site.
     """
 
     async def tick() -> None:

@@ -7,6 +7,8 @@ from __future__ import annotations
 import sqlite3
 from contextlib import closing
 
+from crawlutron.config.settings import CrawlerSettings
+from crawlutron.service.retention_sweep import retention_maintenance_once
 from crawlutron.storage.safe_db import allow_on_loop
 from tests._retention_sweep_support import (
     GRACE,
@@ -86,6 +88,40 @@ class TestRetentionSweepTick:
 
     def test_retention_maintenance_once_runs_all_families_and_checkpoints(self, tmp_path):
         sweep_reclaims_tombstone_and_expired_result(tmp_path)
+
+    def test_sweep_reads_settings_grace_not_the_module_constant(self, tmp_path):
+        """A tombstone 60s past deletion is reclaimed with grace=50 but not with
+        the default 86400s constant -- proving the sweep reads settings, not the constant.
+        """
+        job_store, result_store = stores(tmp_path)
+        try:
+            job = root_job(job_store)
+
+            # Tombstone written at NOW - 60s; deleted_at is 60s in the past.
+            with closing(sqlite3.connect(job_store.db_path)) as conn:
+                conn.execute(
+                    "UPDATE crawl_jobs SET deleted_at = ? WHERE job_id = ?",
+                    (NOW - 60.0, job.job_id),
+                )
+                conn.commit()
+
+            # With the default constant (86400s), this tombstone is NOT past grace.
+            reclaimed_with_constant = job_store.reap_tombstones(grace_seconds=86400.0, now=NOW)
+            assert reclaimed_with_constant == 0, "default 86400s grace must not reclaim a 60s-old tombstone"
+
+            # With settings grace (50s), it IS past grace.
+            settings = CrawlerSettings.from_mapping({"CRAWLUTRON_RETENTION_SWEEP_GRACE_SECONDS": "50"})
+            reclaimed_with_settings = retention_maintenance_once(
+                job_store,
+                result_store,
+                grace_seconds=float(settings.retention_sweep_grace_seconds),
+                now=NOW,
+            )
+            assert reclaimed_with_settings >= 1, "settings grace of 50s must reclaim a 60s-old tombstone"
+            assert job_store.load(job.job_id) is None
+        finally:
+            job_store.close()
+            result_store.close()
 
 
 def _row_exists(conn, table, job_id):
