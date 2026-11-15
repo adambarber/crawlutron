@@ -218,6 +218,20 @@ class CrawlResultStore(_PayloadStoreGuardrails):
                 ).rowcount
         return rowcount == 1
 
+    def prune_expired(self, *, now: float | None = None) -> int:
+        """Delete results rows past TTL, independent of any put.
+
+        A quiet deployment keeps expired rows; this pass reclaims them.
+        """
+        now = self._clock() if now is None else float(now)
+        if self._ttl_seconds <= 0:
+            return 0
+        cutoff = now - self._ttl_seconds
+        with self._lock:
+            with txn_write(self._conn, owner="result_store.prune_expired"):
+                cur = self._conn.execute("DELETE FROM results WHERE stored_at < ?", (cutoff,))
+        return cur.rowcount
+
     # One ``atwin`` twin per operation: the sync signature is declared once and
     # ``owner=`` rides through **kwargs, so the twins cannot drift from the base.
     aput = atwin(put)

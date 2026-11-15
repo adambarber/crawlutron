@@ -369,6 +369,7 @@ async def _recover_jobs_and_start_sweep(_app: FastAPI, settings: CrawlerSettings
     from crawlutron.service.cache_sweep import sweep_cache_forever
     from crawlutron.service.job_recovery import recover_and_start_pending_jobs
     from crawlutron.service.job_runner import start_job
+    from crawlutron.service.retention_sweep import sweep_retention_forever
     from crawlutron.service.spill_sweep import sweep_spills_forever
     from crawlutron.service.watch_sweep import sweep_watches_forever
 
@@ -379,6 +380,9 @@ async def _recover_jobs_and_start_sweep(_app: FastAPI, settings: CrawlerSettings
     ttl = _app.state.result_store.ttl_seconds
     _app.state.spill_maintenance_task = asyncio.create_task(
         sweep_spills_forever(_app.state.spill_store, shutdown_event=shutdown_event, max_age_seconds=ttl)
+    )
+    _app.state.retention_sweep_task = asyncio.create_task(
+        sweep_retention_forever(_app.state.job_store, _app.state.result_store, shutdown_event)
     )
     _app.state.watch_sweep_task = asyncio.create_task(
         sweep_watches_forever(
@@ -481,6 +485,7 @@ async def _drain_watch_sweep(_app: FastAPI) -> None:
     """Cancel sweeps while the key store is still open (no closed-handle race)."""
     await _drain_task(_app, "cache_maintenance_task")
     await _drain_task(_app, "spill_maintenance_task")
+    await _drain_task(_app, "retention_sweep_task")
     await _drain_task(_app, "watch_sweep_task")
 
 

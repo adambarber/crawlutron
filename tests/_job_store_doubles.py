@@ -300,6 +300,14 @@ class LoopGuardJobStore(JobStore):
         _refuse_on_loop("JobStore.close")
         return super().close()
 
+    def reap_tombstones(self, *, grace_seconds, now):
+        _refuse_on_loop("JobStore.reap_tombstones")
+        return super().reap_tombstones(grace_seconds=grace_seconds, now=now)
+
+    def reap_orphan_accumulators(self):
+        _refuse_on_loop("JobStore.reap_orphan_accumulators")
+        return super().reap_orphan_accumulators()
+
 
 class LoopGuardResultStore(CrawlResultStore):
     """The real result store, with its sync entry points refusing the loop."""
@@ -323,6 +331,10 @@ class LoopGuardResultStore(CrawlResultStore):
     def retained_count(self, *, owner=None):
         _refuse_on_loop("CrawlResultStore.retained_count")
         return super().retained_count(owner=owner)
+
+    def prune_expired(self, *, now=None):
+        _refuse_on_loop("CrawlResultStore.prune_expired")
+        return super().prune_expired(now=now)
 
     def delete(self, request_id):
         _refuse_on_loop("CrawlResultStore.delete")

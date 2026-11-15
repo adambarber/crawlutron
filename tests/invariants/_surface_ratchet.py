@@ -108,6 +108,9 @@ DECLARED_SURFACE_RATCHET = {
     # (operator_caller: the shared operator identity the keys door and resolver read).
     "packages/core/src/crawlutron/service/cache_sweep.py": (3, 2),
     "packages/core/src/crawlutron/service/sweep_loop.py": (2, 1),
+    # Retention sweep (#1076): one pass owns tombstone, orphan-accumulator, and
+    # expired-result reclamation plus the WAL checkpoint; hosted on sweep_loop.
+    "packages/core/src/crawlutron/service/retention_sweep.py": (4, 2),
     # Spill sweep (#753): one GC lane beside the cache sweep; max_age is wired
     # from the result store's ttl_seconds, not a second literal.
     "packages/core/src/crawlutron/service/spill_sweep.py": (4, 2),

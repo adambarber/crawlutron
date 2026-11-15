@@ -131,10 +131,7 @@ __all__ = [
 
 
 class JobStore:
-    """SQLite-backed store for crawl job states.
-    Every method is synchronous SQLite work, so each has an ``a``-prefixed twin
-    running off the loop; ``self._lock`` serializes every connection use.
-    """
+    """SQLite-backed store for crawl job states; every method has an ``a``-prefixed twin off the loop."""
 
     _conn: sqlite3.Connection
 
@@ -148,31 +145,24 @@ class JobStore:
     ):
         self.db_path = Path(db_path)
         self._host_policy = policy
-        # Operator tier: an omitted limit resolves to the API path's number, not the default.
+        # Omitted limits resolve to the API path's number, not the default.
         self.tier = tier
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn, memory_name = connect_store(self.db_path, schema=StoreSchema.CRAWL_JOBS)
-        # Serialize all connection use: sqlite3 connections are unsafe across
-        # threads, and every other store instance and migration touches this file.
+        # Serialize all connection use; every other store instance touches this file.
         self.lock_key = store_lock_key(self.db_path, memory_name)
         self._lock = process_lock(self.lock_key)
-        # Column-addressed rows: the schema grows by migration, so positional
-        # indexing would couple reads to ALTER ordering.
+        # Column-addressed rows: schema growth by migration must not couple reads to ALTER order.
         self._conn.row_factory = sqlite3.Row
-        # A store whose last reference dies closes its connection at that GC point (see bind_conn_lifecycle).
+        # A store whose last reference dies closes its connection at GC (see bind_conn_lifecycle).
         bind_conn_lifecycle(self)
-        # A caller-supplied row-to-model mapping replaces the default for
-        # observation or a custom projection; it runs under the same lock.
+        # A caller-supplied row-to-model mapping replaces the default; it runs under the same lock.
         self._row_to_job_factory: Callable[..., CrawlJobState] | None = row_to_job
-        # Live state is rewritten wholesale each batch, history only appended;
-        # the append-only side has its own owner so neither pays for the other.
+        # Live state is rewritten wholesale each batch; history only appended.
         self._accumulators = JobAccumulators(self._conn)
 
     def _read_collections(self, row: sqlite3.Row, *, with_accumulators: bool) -> CrawlJobState:
-        """Collections read under the (reentrant) lock; the caller owns the hold.
-
-        The single body both loaders share, so the atomic hold cannot drift.
-        """
+        """Collections read under the lock; both loaders share this atomic hold."""
         with self._lock:
             visited = self._accumulators.read_visited(row["job_id"]) if with_accumulators else []
             results = self._accumulators.read_results(row["job_id"]) if with_accumulators else []
@@ -187,11 +177,7 @@ class JobStore:
         )
 
     def _row_to_job(self, row: sqlite3.Row, *, with_accumulators: bool = True) -> CrawlJobState:
-        """One row, read through the declared record (the walk lives beside it).
-
-        Entered from ``_read_row`` the caller's hold spans reads and walk; a direct
-        entry re-acquires for the reads only. The frontier always loads.
-        """
+        """One row read through the declared record; the frontier always loads."""
         return self._read_collections(row, with_accumulators=with_accumulators)
 
     def create(self, root_url: str, policy: PolicyLike, *, owner: str = "") -> CrawlJobState:
@@ -220,16 +206,12 @@ class JobStore:
         )
 
     def save(self, job: CrawlJobState) -> None:
-        """Persist job DATA to SQLite (thread-safe). ``status`` and ``owner`` are
-        INSERT-only -- the UPDATE path never touches them -- so a stale whole-row
-        save cannot clobber a pause/cancel or transfer ownership."""
+        """Persist job DATA; status and owner are INSERT-only, never clobbered by a stale save."""
         with self._lock:
             self._persist(job)
 
     def _persist(self, job: CrawlJobState) -> None:
-        """Write job state to SQLite. Caller must hold ``self._lock``.
-        No normalization pass: identity is established at ingress. A tombstoned
-        (deleted) job is a no-op here, so a late ``save`` cannot resurrect it."""
+        """Write job state to SQLite; caller holds ``self._lock``. Tombstoned jobs no-op."""
         with txn_write(self._conn, owner="job_store.save"):
             if self._is_tombstoned(job.job_id):
                 return
@@ -314,6 +296,40 @@ class JobStore:
                     "SELECT 1 FROM crawl_jobs WHERE job_id = ? AND deleted_at IS NOT NULL", (job_id,)
                 ).fetchone()
         return row is not None
+
+    def reap_tombstones(self, *, grace_seconds: float, now: float) -> int:
+        """Reclaim tombstones past grace, cascading their accumulators.
+
+        Younger than grace: left untouched; idempotent deletes stay safe.
+        """
+        cutoff = now - max(0.0, float(grace_seconds))
+        reclaimed = 0
+        with self._lock:
+            with txn_write(self._conn, owner="job_store.reap_tombstones"):
+                rows = self._conn.execute(
+                    "SELECT job_id FROM crawl_jobs WHERE deleted_at IS NOT NULL AND deleted_at < ?",
+                    (cutoff,),
+                ).fetchall()
+                for row in rows:
+                    job_id = row["job_id"]
+                    self._conn.execute("DELETE FROM crawl_jobs WHERE job_id = ?", (job_id,))
+                    self._accumulators.delete(job_id)
+                    reclaimed += 1
+        return reclaimed
+
+    def reap_orphan_accumulators(self) -> int:
+        """Delete accumulator rows whose job_id is absent from crawl_jobs."""
+        total = 0
+        with self._lock:
+            with txn_write(self._conn, owner="job_store.reap_orphan_accumulators"):
+                for sql in (
+                    'DELETE FROM "crawl_job_results" WHERE job_id NOT IN (SELECT job_id FROM crawl_jobs)',
+                    'DELETE FROM "crawl_job_visited" WHERE job_id NOT IN (SELECT job_id FROM crawl_jobs)',
+                    'DELETE FROM "crawl_job_frontier" WHERE job_id NOT IN (SELECT job_id FROM crawl_jobs)',
+                ):
+                    cur = self._conn.execute(sql)
+                    total += cur.rowcount
+        return total
 
     def list_jobs(self, *, limit: int | None = None, offset: int = 0) -> list[JobStatusView]:
         return self._read_job_list(None, limit=limit, offset=offset)
