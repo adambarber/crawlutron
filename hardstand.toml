@@ -43,23 +43,23 @@ name = "regen-version"
 # dev-sufficient version file from git describe; a real build overwrites it.
 run = ".venv/bin/python scripts/regen_version.py"
 
-# Setup, part 2 (#488): bind the WORKSPACE tree into the shared venv's sys.path.
+# Setup, part 2 (#488, corrected #1058): bind the WORKSPACE tree into the shared
+# venv's sys.path.
 #
 # The shared venv carries hatchling editable installs whose .pth files point at
-# the MAIN checkout (/Users/.../crawlutron). From the workspace CWD that pointer
-# is shadowed (sys.path[0] = '' wins), so in-workspace mypy/pytest/ruff all see
-# the workspace tree. But any interpreter of the shared venv invoked from OUTSIDE
-# the workspace resolved `app` to MAIN's tree via the editable pointer — red:
-# `import app` from a foreign CWD printed main's path. Fix, zero downloads, no
-# main clobbering: site-packages processes .pth files alphabetically and appends
-# each path to sys.path in that order, so a pth whose name sorts BEFORE
-# `_editable_impl_crawlutron.pth` (ASCII '!' < '_') lands the workspace tree
-# earlier in sys.path — workspace-first from any CWD. Stale pths after teardown
-# are harmless: paths that no longer exist are skipped by site processing.
+# the MAIN checkout (/Users/.../crawlutron) and win over the workspace CWD, so an
+# interpreter started in a workspace imported MAIN's packages: ad-hoc pytest
+# verified the wrong tree. Fix, zero downloads, no main clobbering: site-packages
+# processes .pth files alphabetically and appends each path to sys.path in that
+# order, so a pth whose name sorts BEFORE `_editable_impl_crawlutron.pth`
+# (ASCII '!' < '_') lands the workspace roots earlier in sys.path. The roots are
+# the members' src/ dirs, derived from the uv manifest by the binder; binding the
+# workspace ROOT (the old printf) exposed nothing importable. Stale pths after
+# teardown are harmless: paths that no longer exist are skipped by site.
 
 [[setup]]
 name = "bind-workspace-tree"
-run = "printf %s $PWD > .venv/lib/$(.venv/bin/python -c 'import sys; print(f\"python{sys.version_info.major}.{sys.version_info.minor}\")')/site-packages/!hardstand-workspace.pth"
+run = ".venv/bin/python scripts/bind_workspace_tree.py"
 
 # #553 residual: a fresh workspace's git hooks do not exist until pre-commit
 # installs them -- without this step a workspace commit runs ZERO gates and
