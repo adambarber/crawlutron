@@ -322,7 +322,7 @@ class BrowserDriver:
             logger.warning(
                 "browser_action_chain_budget_exhausted",
                 extra={
-                    "url": url,
+                    "url": redact_url(url),
                     "budget_seconds": budget_seconds,
                     "actions": len(actions),
                 },

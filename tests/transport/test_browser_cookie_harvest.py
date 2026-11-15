@@ -183,6 +183,31 @@ class TestActionChainFailuresAreVisible:
         assert fields.get("wait_ms") == 2500, f"the requested wait budget is not named: {fields!r}"
         assert fields.get("url") == "http://example.com/page", f"the URL is not named: {fields!r}"
 
+    async def test_budget_exhausted_log_redacts_the_url(self, caplog):
+        """The budget-exhausted log must redact the URL like its :357 sibling."""
+        driver = BrowserDriver()
+
+        async def never_arrives(selector, timeout=None, **kwargs):
+            await asyncio.Event().wait()
+
+        page = BrowserFakePage(on_wait_for_selector=never_arrives)
+        actions = [cast("BrowserAction", {"type": "wait", "selector": "#hydration-done", "timeout": 2500})]
+        with caplog.at_level("WARNING"):
+            await asyncio.wait_for(
+                driver.run_action_chain(
+                    page,
+                    actions,
+                    url="http://example.com/page?token=secret123",
+                    budget_seconds=0.05,
+                ),
+                timeout=10.0,
+            )
+        exhausted = [r for r in caplog.records if r.__dict__.get("budget_seconds") is not None]
+        assert exhausted, "the chain exhausted its render budget without logging it"
+        url_field = exhausted[0].__dict__.get("url", "")
+        assert "secret123" not in url_field, f"the raw secret-bearing URL reached the log: {url_field!r}"
+        assert "[REDACTED]" in url_field, f"the budget log did not redact the URL: {url_field!r}"
+
 
 class TestActionChainIsOneBoundedHold:
     """A pool slot may be held for the render's budget, not for the chain's.
