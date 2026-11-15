@@ -16,11 +16,7 @@ from crawlutron.models.json_value import JsonValue
 from crawlutron.models.serialization import from_wire, to_dict
 from crawlutron.storage.coordination_store import CoordinationStore, atwin
 from crawlutron.storage.migrations import StoreSchema
-from crawlutron.storage.safe_db import (
-    allow_on_loop_read,
-    txn_read,
-    txn_write,
-)
+from crawlutron.storage.safe_db import txn_write
 from crawlutron.transport.freshness import default_clock
 
 # The write-edge byte cap: one retained row is a whole crawl response, so
@@ -128,20 +124,16 @@ class CrawlResultStore(_PayloadStoreGuardrails):
         now = self._clock()
         cutoff = now - self._ttl_seconds if self._ttl_seconds > 0 else 0.0
         with self._lock:
-            # #1059: read_owned is reached from async callers via atwin; narrows the loop ban.
-            with allow_on_loop_read():
-                with txn_read(self._conn, owner="result_store.read_owned"):
-                    if caller_id is None:
-                        row = self._conn.execute(
-                            "SELECT stored_at, payload, owner FROM results WHERE request_id = ?",
-                            (request_id,),
-                        ).fetchone()
-                    else:
-                        row = self._conn.execute(
-                            "SELECT stored_at, payload, owner FROM results WHERE request_id = ? AND "
-                            "owner = ?",
-                            (request_id, caller_id),
-                        ).fetchone()
+            if caller_id is None:
+                row = self._conn.execute(
+                    "SELECT stored_at, payload, owner FROM results WHERE request_id = ?",
+                    (request_id,),
+                ).fetchone()
+            else:
+                row = self._conn.execute(
+                    "SELECT stored_at, payload, owner FROM results WHERE request_id = ? AND owner = ?",
+                    (request_id, caller_id),
+                ).fetchone()
         if row is None:
             return None
         stored_at, payload, _owner = row
@@ -162,41 +154,38 @@ class CrawlResultStore(_PayloadStoreGuardrails):
         """
         cutoff = self._cutoff()
         with self._lock:
-            # #1059: payloads_page is reached from async callers via atwin; narrows the loop ban.
-            with allow_on_loop_read():
-                with txn_read(self._conn, owner="result_store.payloads_page"):
-                    if cursor is None:
-                        if owner is None:
-                            rows = self._conn.execute(
-                                "SELECT stored_at, request_id, payload FROM results"
-                                " WHERE stored_at >= ? ORDER BY stored_at DESC, request_id DESC LIMIT ?",
-                                (cutoff, limit),
-                            ).fetchall()
-                        else:
-                            rows = self._conn.execute(
-                                "SELECT stored_at, request_id, payload FROM results"
-                                " WHERE stored_at >= ? AND owner = ?"
-                                " ORDER BY stored_at DESC, request_id DESC LIMIT ?",
-                                (cutoff, owner, limit),
-                            ).fetchall()
-                    else:
-                        at, request_id = cursor
-                        if owner is None:
-                            rows = self._conn.execute(
-                                "SELECT stored_at, request_id, payload FROM results"
-                                " WHERE stored_at >= ? AND (stored_at < ? OR (stored_at = ? AND "
-                                "request_id < ?))"
-                                " ORDER BY stored_at DESC, request_id DESC LIMIT ?",
-                                (cutoff, at, at, request_id, limit),
-                            ).fetchall()
-                        else:
-                            rows = self._conn.execute(
-                                "SELECT stored_at, request_id, payload FROM results"
-                                " WHERE stored_at >= ? AND owner = ?"
-                                " AND (stored_at < ? OR (stored_at = ? AND request_id < ?))"
-                                " ORDER BY stored_at DESC, request_id DESC LIMIT ?",
-                                (cutoff, owner, at, at, request_id, limit),
-                            ).fetchall()
+            if cursor is None:
+                if owner is None:
+                    rows = self._conn.execute(
+                        "SELECT stored_at, request_id, payload FROM results"
+                        " WHERE stored_at >= ? ORDER BY stored_at DESC, request_id DESC LIMIT ?",
+                        (cutoff, limit),
+                    ).fetchall()
+                else:
+                    rows = self._conn.execute(
+                        "SELECT stored_at, request_id, payload FROM results"
+                        " WHERE stored_at >= ? AND owner = ?"
+                        " ORDER BY stored_at DESC, request_id DESC LIMIT ?",
+                        (cutoff, owner, limit),
+                    ).fetchall()
+            else:
+                at, request_id = cursor
+                if owner is None:
+                    rows = self._conn.execute(
+                        "SELECT stored_at, request_id, payload FROM results"
+                        " WHERE stored_at >= ? AND (stored_at < ? OR (stored_at = ? AND "
+                        "request_id < ?))"
+                        " ORDER BY stored_at DESC, request_id DESC LIMIT ?",
+                        (cutoff, at, at, request_id, limit),
+                    ).fetchall()
+                else:
+                    rows = self._conn.execute(
+                        "SELECT stored_at, request_id, payload FROM results"
+                        " WHERE stored_at >= ? AND owner = ?"
+                        " AND (stored_at < ? OR (stored_at = ? AND request_id < ?))"
+                        " ORDER BY stored_at DESC, request_id DESC LIMIT ?",
+                        (cutoff, owner, at, at, request_id, limit),
+                    ).fetchall()
         return [((stored_at, request_id), json.loads(payload)) for stored_at, request_id, payload in rows]
 
     def retained_count(self, *, owner: str | None = None) -> int:
@@ -205,18 +194,15 @@ class CrawlResultStore(_PayloadStoreGuardrails):
         """
         cutoff = self._cutoff()
         with self._lock:
-            # #1059: retained_count is reached from async callers via atwin; narrows the loop ban.
-            with allow_on_loop_read():
-                with txn_read(self._conn, owner="result_store.retained_count"):
-                    if owner is None:
-                        row = self._conn.execute(
-                            "SELECT COUNT(*) FROM results WHERE stored_at >= ?", (cutoff,)
-                        ).fetchone()
-                    else:
-                        row = self._conn.execute(
-                            "SELECT COUNT(*) FROM results WHERE stored_at >= ? AND owner = ?",
-                            (cutoff, owner),
-                        ).fetchone()
+            if owner is None:
+                row = self._conn.execute(
+                    "SELECT COUNT(*) FROM results WHERE stored_at >= ?", (cutoff,)
+                ).fetchone()
+            else:
+                row = self._conn.execute(
+                    "SELECT COUNT(*) FROM results WHERE stored_at >= ? AND owner = ?",
+                    (cutoff, owner),
+                ).fetchone()
         return int(row[0]) if row is not None else 0
 
     def delete(self, request_id: str) -> bool:
@@ -287,13 +273,10 @@ class CrawlSpillStore(_PayloadStoreGuardrails):
         Degradation ruling (supersedes the deleted file spill's corrupt-line
         skip, #C8): a corrupt PAYLOAD row RAISES, never silently N-1 of N."""
         with self._lock:
-            # #1059: load_ordered is reached from async callers via atwin; narrows the loop ban.
-            with allow_on_loop_read():
-                with txn_read(self._conn, owner="result_store.load_ordered"):
-                    rows = self._conn.execute(
-                        "SELECT payload FROM crawl_spills WHERE request_id = ? ORDER BY sequence",
-                        (request_id,),
-                    ).fetchall()
+            rows = self._conn.execute(
+                "SELECT payload FROM crawl_spills WHERE request_id = ? ORDER BY sequence",
+                (request_id,),
+            ).fetchall()
         return [from_wire(EngineCrawlResult, json.loads(blob)["r"], policy=policy) for (blob,) in rows]
 
     def release_spill(self, request_id: str) -> None:

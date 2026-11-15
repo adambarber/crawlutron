@@ -79,8 +79,7 @@ def _fetch_owner_row(
 ) -> sqlite3.Row | None:
     """One owner-filtered row fetch: execute and fetchone, None on miss.
     The idiom the read sites share; each site owns its own transaction posture."""
-    with txn_read(conn, owner="job_store.fetch_owner_row"):
-        return conn.execute(statement, params).fetchone()
+    return conn.execute(statement, params).fetchone()
 
 
 logger = logging.getLogger(__name__)
@@ -327,17 +326,12 @@ class JobStore:
 
     def _read_job_list(self, owner: str | None, *, limit: int | None, offset: int = 0) -> list[JobStatusView]:
         with self._lock:
-            # #1059: list jobs is reached from async callers via atwin; narrows the loop ban.
-            with allow_on_loop_read():
-                with txn_read(self._conn, owner="job_store.read_job_list"):
-                    counts = self._accumulators.counts_by_job()
-                    statement, params = _owner_statement(
-                        _JOB_STATUS_PROJECTION, False, _JOB_LIST_ORDER, owner
-                    )
-                    if limit is not None:
-                        statement += " LIMIT ? OFFSET ?"
-                        params = (*params, max(0, limit), max(0, offset))
-                    rows = self._conn.execute(statement, params).fetchall()
+            counts = self._accumulators.counts_by_job()
+            statement, params = _owner_statement(_JOB_STATUS_PROJECTION, False, _JOB_LIST_ORDER, owner)
+            if limit is not None:
+                statement += " LIMIT ? OFFSET ?"
+                params = (*params, max(0, limit), max(0, offset))
+            rows = self._conn.execute(statement, params).fetchall()
         return [_status_row(r, *counts.get(r["job_id"], (0, 0))) for r in rows]
 
     def count_jobs(self) -> int:
@@ -348,11 +342,8 @@ class JobStore:
 
     def _count_jobs(self, owner: str | None) -> int:
         with self._lock:
-            # #1059: count jobs is reached from async callers via atwin; narrows the loop ban.
-            with allow_on_loop_read():
-                with txn_read(self._conn, owner="job_store.count_jobs"):
-                    statement, params = _owner_statement("SELECT count(*) FROM crawl_jobs", False, "", owner)
-                    row = self._conn.execute(statement, params).fetchone()
+            statement, params = _owner_statement("SELECT count(*) FROM crawl_jobs", False, "", owner)
+            row = self._conn.execute(statement, params).fetchone()
         return int(row[0])
 
     def status_row(self, job_id: str) -> JobStatusView | None:
@@ -363,14 +354,11 @@ class JobStore:
 
     def _read_status_row(self, job_id: str, owner: str | None) -> JobStatusView | None:
         with self._lock:
-            # #1059: status row is reached from async callers via atwin; narrows the loop ban.
-            with allow_on_loop_read():
-                with txn_read(self._conn, owner="job_store.status_row"):
-                    statement, params = _owner_statement(_JOB_STATUS_PROJECTION, True, "", owner)
-                    row = _fetch_owner_row(self._conn, statement, (job_id, *params))
-                    if row is None:
-                        return None
-                    visited, results = self._accumulators.counts_for(job_id)
+            statement, params = _owner_statement(_JOB_STATUS_PROJECTION, True, "", owner)
+            row = _fetch_owner_row(self._conn, statement, (job_id, *params))
+            if row is None:
+                return None
+            visited, results = self._accumulators.counts_for(job_id)
         return _status_row(row, visited, results)
 
     def exists(self, job_id: str) -> bool:
@@ -381,23 +369,16 @@ class JobStore:
 
     def active_count_for_caller(self, caller_id: str) -> int:
         with self._lock:
-            # #1059: active count is reached from async callers via atwin; narrows the loop ban.
-            with allow_on_loop_read():
-                with txn_read(self._conn, owner="job_store.active_count_for_caller"):
-                    row = self._conn.execute(
-                        "SELECT count(*) FROM crawl_jobs WHERE owner = ? AND status IN (?, ?)"
-                        " AND deleted_at IS NULL",
-                        (caller_id, JobStatus.PENDING.value, JobStatus.RUNNING.value),
-                    ).fetchone()
+            row = self._conn.execute(
+                "SELECT count(*) FROM crawl_jobs WHERE owner = ? AND status IN (?, ?) AND deleted_at IS NULL",
+                (caller_id, JobStatus.PENDING.value, JobStatus.RUNNING.value),
+            ).fetchone()
         return int(row[0])
 
     def _has_job_row(self, job_id: str, owner: str | None) -> bool:
         with self._lock:
-            # #1059: exists check is reached from async callers via atwin; narrows the loop ban.
-            with allow_on_loop_read():
-                with txn_read(self._conn, owner="job_store.has_job_row"):
-                    statement, params = _owner_statement("SELECT 1 FROM crawl_jobs", True, "", owner)
-                    row = _fetch_owner_row(self._conn, statement, (job_id, *params))
+            statement, params = _owner_statement("SELECT 1 FROM crawl_jobs", True, "", owner)
+            row = _fetch_owner_row(self._conn, statement, (job_id, *params))
         return row is not None
 
     def claim_running(

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from crawlutron.models.json_value import JsonValue
 from crawlutron.safety.json_safe import json_default
-from crawlutron.storage.safe_db import in_txn, txn_read
+from crawlutron.storage.safe_db import in_txn
 from crawlutron.storage.sqlite_store import connection_data_version
 
 from .job_store_collections import FrontierEntryDict
@@ -165,10 +165,9 @@ class JobAccumulators:
 
     def read_results(self, job_id: str) -> list[dict[str, JsonValue]]:
         """The page history, in the order it was crawled."""
-        with txn_read(self._conn, owner="job_store_accumulators.read_results"):
-            rows = self._conn.execute(
-                'SELECT payload FROM "crawl_job_results" WHERE job_id = ? ORDER BY seq', (job_id,)
-            ).fetchall()
+        rows = self._conn.execute(
+            'SELECT payload FROM "crawl_job_results" WHERE job_id = ? ORDER BY seq', (job_id,)
+        ).fetchall()
         payloads = [json.loads(row["payload"]) for row in rows]
         # The loaded page history is already persisted: remember its identity so a
         # fresh process's first save is a no-op instead of a resync.
@@ -176,10 +175,9 @@ class JobAccumulators:
         return payloads
 
     def read_visited(self, job_id: str) -> list[str]:
-        with txn_read(self._conn, owner="job_store_accumulators.read_visited"):
-            rows = self._conn.execute(
-                'SELECT url FROM "crawl_job_visited" WHERE job_id = ?', (job_id,)
-            ).fetchall()
+        rows = self._conn.execute(
+            'SELECT url FROM "crawl_job_visited" WHERE job_id = ?', (job_id,)
+        ).fetchall()
         urls = [row["url"] for row in rows]
         # The loaded visited set is already persisted: remember its identity so a
         # fresh process's first save is a no-op instead of a resync.
@@ -188,10 +186,9 @@ class JobAccumulators:
 
     def read_frontier(self, job_id: str) -> list[FrontierEntryDict]:
         """The outstanding queue, in queue order."""
-        with txn_read(self._conn, owner="job_store_accumulators.read_frontier"):
-            rows = self._conn.execute(
-                'SELECT url, depth FROM "crawl_job_frontier" WHERE job_id = ? ORDER BY pos', (job_id,)
-            ).fetchall()
+        rows = self._conn.execute(
+            'SELECT url, depth FROM "crawl_job_frontier" WHERE job_id = ? ORDER BY pos', (job_id,)
+        ).fetchall()
         frontier: list[FrontierEntryDict] = [{"url": row["url"], "depth": row["depth"]} for row in rows]
         # The loaded queue is already persisted: remember its identity so a fresh
         # process's first save is a no-op instead of a resync.
@@ -214,25 +211,23 @@ class JobAccumulators:
 
     def counts_by_job(self) -> dict[str, tuple[int, int]]:
         """``{job_id: (visited, results)}`` in one grouped scan, not one query per job."""
-        with txn_read(self._conn, owner="job_store_accumulators.counts_by_job"):
-            rows = self._conn.execute(
-                """
-                SELECT job_id,
-                       (SELECT count(*) FROM crawl_job_visited v WHERE v.job_id = j.job_id) AS visited_count,
-                       (SELECT count(*) FROM crawl_job_results r WHERE r.job_id = j.job_id) AS results_count
-                  FROM crawl_jobs j
-                """
-            ).fetchall()
+        rows = self._conn.execute(
+            """
+            SELECT job_id,
+                   (SELECT count(*) FROM crawl_job_visited v WHERE v.job_id = j.job_id) AS visited_count,
+                   (SELECT count(*) FROM crawl_job_results r WHERE r.job_id = j.job_id) AS results_count
+              FROM crawl_jobs j
+            """
+        ).fetchall()
         return {row["job_id"]: (row["visited_count"], row["results_count"]) for row in rows}
 
     def counts_for(self, job_id: str) -> tuple[int, int]:
         """``(visited, results)`` for one job without reading either list."""
-        with txn_read(self._conn, owner="job_store_accumulators.counts_for"):
-            row = self._conn.execute(
-                "SELECT (SELECT count(*) FROM crawl_job_visited WHERE job_id = ?) AS visited,"
-                " (SELECT count(*) FROM crawl_job_results WHERE job_id = ?) AS results",
-                (job_id, job_id),
-            ).fetchone()
+        row = self._conn.execute(
+            "SELECT (SELECT count(*) FROM crawl_job_visited WHERE job_id = ?) AS visited,"
+            " (SELECT count(*) FROM crawl_job_results WHERE job_id = ?) AS results",
+            (job_id, job_id),
+        ).fetchone()
         return row["visited"], row["results"]
 
     def _max_seq_plus_one(self, job_id: str) -> int:
