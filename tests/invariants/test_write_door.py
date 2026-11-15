@@ -18,11 +18,7 @@ _STORAGE_DIR = REPO_ROOT / "packages" / "core" / "src" / "crawlutron" / "storage
 
 #: Storage modules not yet migrated to txn_write/in_txn; each names why it is still allowed bare writes.
 #: The set shrinks one store per arc until the gate seals at zero; the throttle store is the mutation target.
-_EXEMPT_MODULES = frozenset(
-    {
-        "packages/core/src/crawlutron/storage/job_store_accumulators.py": "awaiting the accumulators arc",
-    }
-)
+_EXEMPT_MODULES: frozenset[str] = frozenset()
 
 _WRITE_METHODS = frozenset({"execute", "executemany", "commit", "rollback", "executescript"})
 _WRITE_KEYWORDS = frozenset({"insert", "update", "delete", "begin"})

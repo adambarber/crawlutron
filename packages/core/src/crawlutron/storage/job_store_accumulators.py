@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from crawlutron.models.json_value import JsonValue
 from crawlutron.safety.json_safe import json_default
+from crawlutron.storage.safe_db import in_txn
 from crawlutron.storage.sqlite_store import connection_data_version
 
 from .job_store_collections import FrontierEntryDict
@@ -65,9 +66,7 @@ def _remember_shape(accumulators: JobAccumulators, job_id: str, collection: str,
 
 
 class JobAccumulators:
-    """The growing part of a job: its append-only page history, visited set and
-    frontier queue, in their own tables so a batch is one INSERT per new row
-    (row is batch-bounded: frontier pops per batch, in_flight by concurrency)."""
+    """The growing part of a job: page history, visited set and frontier queue."""
 
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
@@ -128,17 +127,12 @@ class JobAccumulators:
         return stored
 
     def _content_matches(self, job_id: str, collection: str, mark: int, tail_digest: str) -> bool:
-        """Content-identity seam: true iff the stored (mark, tail_digest) matches.
-        A legacy bare digest never matches, so the caller falls through to reconcile.
-        """
+        """Content-identity seam: true iff the stored (mark, tail_digest) matches."""
         stored = self._stored(job_id, collection)
         return stored is not None and stored[0] == mark and stored[1] == tail_digest
 
     def _content_full_matches(self, job_id: str, collection: str, full_digest: str) -> bool:
-        """Full-digest tie-break for the ambiguous tail-empty case (mark == length).
-        When the stored full digest is on file, compare directly; when it is None
-        (post-growth write, no prior load), read the table fresh and compare.
-        """
+        """Full-digest tie-break for the tail-empty ambiguity."""
         stored = self._stored(job_id, collection)
         if stored is None:
             return False
@@ -162,11 +156,7 @@ class JobAccumulators:
         self._record_content(job_id, collection, mark, self._digest([]), None)
 
     def read_results(self, job_id: str) -> list[dict[str, JsonValue]]:
-        """The page history, in the order it was crawled.
-
-        Each payload is the response model's own dump (the write edge), so the
-        declared read is the dump's shape, not ``Any``.
-        """
+        """The page history, in the order it was crawled."""
         rows = self._conn.execute(
             'SELECT payload FROM "crawl_job_results" WHERE job_id = ? ORDER BY seq', (job_id,)
         ).fetchall()
@@ -187,11 +177,7 @@ class JobAccumulators:
         return urls
 
     def read_frontier(self, job_id: str) -> list[FrontierEntryDict]:
-        """The outstanding queue, in queue order.
-
-        Rows are keyed by URL, so a read is every entry the job still holds;
-        the identity merge on read filters what admission no longer keeps.
-        """
+        """The outstanding queue, in queue order."""
         rows = self._conn.execute(
             'SELECT url, depth FROM "crawl_job_frontier" WHERE job_id = ? ORDER BY pos', (job_id,)
         ).fetchall()
@@ -207,23 +193,16 @@ class JobAccumulators:
         self._reconcile_frontier(job)
 
     def delete(self, job_id: str) -> None:
-        """Drop a job's history.
-        Without this, the tables would keep a deleted job's crawl with nothing
-        pointing at it -- the old column layout deleted the history by construction.
-        """
-        self._conn.execute('DELETE FROM "crawl_job_results" WHERE job_id = ?', (job_id,))
-        self._conn.execute('DELETE FROM "crawl_job_visited" WHERE job_id = ?', (job_id,))
-        self._conn.execute('DELETE FROM "crawl_job_frontier" WHERE job_id = ?', (job_id,))
-        # Drop the remembered content identity so a re-created job with the same
-        # job_id is persisted in full instead of matching a tombstoned digest.
+        """Drop a job's history."""
+        with in_txn(self._conn):
+            self._conn.execute('DELETE FROM "crawl_job_results" WHERE job_id = ?', (job_id,))
+            self._conn.execute('DELETE FROM "crawl_job_visited" WHERE job_id = ?', (job_id,))
+            self._conn.execute('DELETE FROM "crawl_job_frontier" WHERE job_id = ?', (job_id,))
         self._content_digest.pop(job_id, None)
         self._seeded_version.pop(job_id, None)
 
     def counts_by_job(self) -> dict[str, tuple[int, int]]:
-        """``{job_id: (visited, results)}`` for the job list, in one query, instead of a
-        correlated subquery round trip per job per counter -- the primary keys make
-        both counts a single grouped scan of the two tables.
-        """
+        """``{job_id: (visited, results)}`` in one grouped scan, not one query per job."""
         rows = self._conn.execute(
             """
             SELECT job_id,
@@ -235,10 +214,7 @@ class JobAccumulators:
         return {row["job_id"]: (row["visited_count"], row["results_count"]) for row in rows}
 
     def counts_for(self, job_id: str) -> tuple[int, int]:
-        """``(visited, results)`` for one job, without reading either list: ``count(*)``
-        over the primary key is an index probe, giving ``len()``'s answer for none
-        of the load, so a status read reports a size without materializing the history.
-        """
+        """``(visited, results)`` for one job without reading either list."""
         row = self._conn.execute(
             "SELECT (SELECT count(*) FROM crawl_job_visited WHERE job_id = ?) AS visited,"
             " (SELECT count(*) FROM crawl_job_results WHERE job_id = ?) AS results",
@@ -258,36 +234,35 @@ class JobAccumulators:
         return [{"url": entry.url.raw, "depth": entry.depth} for entry in islice(job.frontier, mark, None)]
 
     def _frontier_resync(self, job_id: str) -> None:
-        """Drop the whole frontier table; caller re-inserts from mark 0."""
-        self._conn.execute('DELETE FROM "crawl_job_frontier" WHERE job_id = ?', (job_id,))
+        """Drop the whole frontier; caller re-inserts from mark 0."""
+        with in_txn(self._conn):
+            self._conn.execute('DELETE FROM "crawl_job_frontier" WHERE job_id = ?', (job_id,))
 
     def _frontier_write_tail(self, job_id: str, mark: int, tail: list[dict[str, object]]) -> None:
-        """Append the frontier tail starting after the table's current high-water pos."""
+        """Append the frontier tail after the table's current high-water pos."""
         row = self._conn.execute(
             'SELECT max(pos) AS high FROM "crawl_job_frontier" WHERE job_id = ?', (job_id,)
         ).fetchone()
         high = row["high"]
         start = 0 if high is None else high + 1
-        self._conn.executemany(
-            # OR REPLACE, not OR IGNORE: a re-inserted identity carries its new
-            # depth and position -- the write edge's decision, not the table's.
-            'INSERT OR REPLACE INTO "crawl_job_frontier" (job_id, url, pos, depth) VALUES (?, ?, ?, ?)',
-            ((job_id, entry["url"], pos, entry["depth"]) for pos, entry in enumerate(tail, start=start)),
-        )
+        with in_txn(self._conn):
+            self._conn.executemany(
+                # OR REPLACE, not OR IGNORE: a re-inserted identity carries its new
+                # depth and position -- the write edge's decision, not the table's.
+                'INSERT OR REPLACE INTO "crawl_job_frontier" (job_id, url, pos, depth) VALUES (?, ?, ?, ?)',
+                ((job_id, entry["url"], pos, entry["depth"]) for pos, entry in enumerate(tail, start=start)),
+            )
 
     def _reconcile_frontier(self, job: CrawlJobState) -> None:
-        """Reconcile the live queue against its table rows.
-
-        ``frontier_removed`` names rows to delete; ``frontier_mark`` splits the
-        persisted prefix from the appended tail: a batch is O(removed+appended).
-        """
+        """Reconcile the live queue against its table rows."""
         job_id = job.job_id
         if not job.frontier_removed and _unchanged_since_save(self, job_id, "frontier", list(job.frontier)):
             return
-        for url in job.frontier_removed:
-            self._conn.execute(
-                'DELETE FROM "crawl_job_frontier" WHERE job_id = ? AND url = ?', (job_id, url.raw)
-            )
+        with in_txn(self._conn):
+            for url in job.frontier_removed:
+                self._conn.execute(
+                    'DELETE FROM "crawl_job_frontier" WHERE job_id = ? AND url = ?', (job_id, url.raw)
+                )
         job.frontier_removed.clear()
         mark = job.frontier_mark
 
@@ -322,9 +297,7 @@ class JobAccumulators:
         _remember_shape(self, job_id, "frontier", list(job.frontier))
 
     def _append_results(self, job: CrawlJobState) -> None:
-        """Insert only the pages this batch added, keyed off the table's high-water
-        mark (not a remembered count). Shrunken history or a same-length replacement
-        is detected by content identity and resynced."""
+        """Insert only pages this batch added, keyed off the table's high-water mark."""
         job_id = job.job_id
         results = job.results
         if _unchanged_since_save(self, job_id, "results", results):
@@ -352,24 +325,28 @@ class JobAccumulators:
             # Same-length replacement or shrink: fall through to resync below.
         if table and self._digest(results[: len(table)]) != self._digest(table):
             # Table head differs from live head (out-of-band change): resync whole.
-            self._conn.execute('DELETE FROM "crawl_job_results" WHERE job_id = ?', (job_id,))
+            with in_txn(self._conn):
+                self._conn.execute('DELETE FROM "crawl_job_results" WHERE job_id = ?', (job_id,))
             table = []
             persisted = 0
         if persisted >= len(results):
             # Shrank or same-length replacement: resync so the table matches exactly.
-            self._conn.execute('DELETE FROM "crawl_job_results" WHERE job_id = ?', (job_id,))
+            with in_txn(self._conn):
+                self._conn.execute('DELETE FROM "crawl_job_results" WHERE job_id = ?', (job_id,))
             persisted = 0
-        self._conn.executemany(
-            'INSERT OR IGNORE INTO "crawl_job_results" (job_id, seq, payload) VALUES (?, ?, ?)',
-            ((job_id, seq, _json(result)) for seq, result in enumerate(results[persisted:], start=persisted)),
-        )
+        with in_txn(self._conn):
+            self._conn.executemany(
+                'INSERT OR IGNORE INTO "crawl_job_results" (job_id, seq, payload) VALUES (?, ?, ?)',
+                (
+                    (job_id, seq, _json(result))
+                    for seq, result in enumerate(results[persisted:], start=persisted)
+                ),
+            )
         self._record_content(job_id, "results", len(results), self._digest([]), None)
         _remember_shape(self, job_id, "results", results)
 
     def _append_visited(self, job: CrawlJobState) -> None:
-        """Insert only the visited tail this state has not sent yet, keyed off
-        the live ``visited_mark`` (the ``_append_results`` pattern): the slice
-        after the mark is exactly what is new; replacements resync by identity."""
+        """Insert only the visited tail not yet sent, keyed off the visited_mark."""
         job_id = job.job_id
         if _unchanged_since_save(self, job_id, "visited", list(job.visited)):
             return
@@ -381,7 +358,8 @@ class JobAccumulators:
         if mark > len(job.visited):
             # The set shrank below the mark (retry-requeue discard) resyncs,
             # and INSERT OR IGNORE stays: the ignore is the cross-process guard.
-            self._conn.execute('DELETE FROM "crawl_job_visited" WHERE job_id = ?', (job_id,))
+            with in_txn(self._conn):
+                self._conn.execute('DELETE FROM "crawl_job_visited" WHERE job_id = ?', (job_id,))
             job.visited_mark = 0
             mark = 0
         elif mark == len(job.visited):
@@ -394,16 +372,18 @@ class JobAccumulators:
                 _remember_shape(self, job_id, "visited", list(job.visited))
                 return
             # Same-length replacement: resync.
-            self._conn.execute('DELETE FROM "crawl_job_visited" WHERE job_id = ?', (job_id,))
+            with in_txn(self._conn):
+                self._conn.execute('DELETE FROM "crawl_job_visited" WHERE job_id = ?', (job_id,))
             mark = 0
         elif self._content_matches(job_id, "visited", mark, tail_digest):
             # Growth tail already persisted: nothing to write.
             skip_write = True
         if not skip_write:
-            self._conn.executemany(
-                'INSERT OR IGNORE INTO "crawl_job_visited" (job_id, url) VALUES (?, ?)',
-                ((job_id, url.raw) for url in islice(job.visited, mark, None)),
-            )
+            with in_txn(self._conn):
+                self._conn.executemany(
+                    'INSERT OR IGNORE INTO "crawl_job_visited" (job_id, url) VALUES (?, ?)',
+                    ((job_id, url.raw) for url in islice(job.visited, mark, None)),
+                )
         job.visited_mark = len(job.visited)
         self._record_content(job_id, "visited", len(job.visited), self._digest([]), None)
         _remember_shape(self, job_id, "visited", list(job.visited))
