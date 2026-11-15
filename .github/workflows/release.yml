@@ -27,7 +27,7 @@ permissions:
 jobs:
   guard:
     name: "Guard: assert the tag version and inspect every artifact"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # A green CI run on a v* tag, and nothing else: the tag is what makes it a
     # release, the green run is what makes it publishable.
     if: ${{ github.event.workflow_run.conclusion == 'success' && startsWith(github.event.workflow_run.head_branch, 'v') }}
@@ -80,7 +80,7 @@ jobs:
 
   roster:
     name: Compute the publish roster from the manifest
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: ${{ github.event.workflow_run.conclusion == 'success' && startsWith(github.event.workflow_run.head_branch, 'v') }}
     permissions:
       contents: read
@@ -105,7 +105,7 @@ jobs:
 
   distributions:
     name: Publish ${{ matrix.selector }} to PyPI
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: ${{ github.event.workflow_run.conclusion == 'success' && startsWith(github.event.workflow_run.head_branch, 'v') }}
     needs: [guard, roster]
     permissions:
@@ -157,7 +157,7 @@ jobs:
 
   image:
     name: Publish the container image
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: ${{ github.event.workflow_run.conclusion == 'success' && startsWith(github.event.workflow_run.head_branch, 'v') }}
     permissions:
       contents: read
@@ -231,7 +231,7 @@ jobs:
   github-release:
     name: Publish the GitHub release
     needs: [distributions, image]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: ${{ github.event.workflow_run.conclusion == 'success' && startsWith(github.event.workflow_run.head_branch, 'v') }}
     permissions:
       contents: write

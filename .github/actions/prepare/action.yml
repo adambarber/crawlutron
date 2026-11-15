@@ -9,14 +9,14 @@ description: >
 runs:
   using: composite
   steps:
-    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+    - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
       with:
         python-version: "3.14"
     # The venv is the service's own: the hook entries resolve `.venv/bin/...`
     # relative to the service root, and every hook is `language: system`, so this
     # is the only place the tools come from. Installed from the frozen lock
     # (#622) -- an unpinned install would re-resolve the transitive graph.
-    - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+    - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         enable-cache: true
         cache-dependency-glob: uv.lock
@@ -37,7 +37,7 @@ runs:
     # read as "a hung child from an earlier run" and killed -- or raise, which is
     # what redded every gate when CI split into one job per gate.
     - name: Cache gate state
-      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
       with:
         path: |
           .mypy_cache
