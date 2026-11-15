@@ -15,7 +15,7 @@ from safe_url.url_redaction import is_secret_name
 from crawlutron.models.watch_deleted_response import WatchDeletedResponse
 from crawlutron.models.watch_list_response import WatchListResponse
 from crawlutron.models.watch_state import WatchState
-from crawlutron.service.errors import ValidationRefusal, WatchLimitExceeded, WatchNotFound
+from crawlutron.service.errors import AuthRefusal, ValidationRefusal, WatchLimitExceeded, WatchNotFound
 from crawlutron.transport.freshness import default_clock
 
 if TYPE_CHECKING:
@@ -101,6 +101,8 @@ async def list_watches_core(
     result_store: CrawlResultStore | None = None,
 ) -> WatchListResponse:
     """The owned listing GET /v1/watches answers."""
+    if not caller.authenticated:
+        raise AuthRefusal("invalid_api_key", "Unauthenticated: an API key is required")
     return WatchListResponse(watches=await watch_store.alist_for_caller(caller.caller_id))
 
 

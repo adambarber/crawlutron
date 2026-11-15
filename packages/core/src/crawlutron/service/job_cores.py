@@ -25,6 +25,7 @@ from crawlutron.service.caller_auth import (
     refuse_anonymous_cookie_namespace,
     resolve_page_limit,
 )
+from crawlutron.service.errors import AuthRefusal
 from crawlutron.service.job_control import control_job_core, raise_job_not_found
 from crawlutron.service.main_helpers import build_job_status
 from crawlutron.transport.request_profile import cookie_namespace_for
@@ -100,6 +101,8 @@ async def list_jobs_core(
     result_store: CrawlResultStore | None = None,
 ) -> JobListResponse:
     """The owned, newest-first page GET /v1/jobs answers."""
+    if not caller.authenticated:
+        raise AuthRefusal("invalid_api_key", "Unauthenticated: an API key is required")
     caller_id = caller.caller_id
     page_limit = payload.limit if payload.limit is not None else DEFAULT_JOB_LIST_LIMIT
     jobs = await job_store.alist_for_caller(caller_id, limit=page_limit, offset=payload.offset)

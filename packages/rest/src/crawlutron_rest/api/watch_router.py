@@ -25,7 +25,7 @@ from crawlutron.service.watch_sweep import WATCH_SWEEP_INTERVAL_SECONDS
 from crawlutron.service.webhooks import ensure_https_webhook_url, validate_webhook_url_async
 from crawlutron_rest.api.caller_auth import auth_denials
 from crawlutron_rest.api.dependencies import CallerDep, SettingsDep, WatchStoreDep
-from crawlutron_rest.api.exceptions import http_error, validation_http_error
+from crawlutron_rest.api.exceptions import validation_http_error
 from crawlutron_rest.api.route_layer import guarded_router
 
 router = guarded_router(prefix="/v1/watches", tags=["Crawler"])
@@ -89,9 +89,9 @@ async def create_watch(
     },
 )
 async def list_watches(watch_store: WatchStoreDep, caller: CallerDep) -> WatchListResponse:
-    if not caller.authenticated:
-        raise http_error(401, "invalid_api_key", "Unauthenticated: an API key is required")
-    return await list_watches_core(None, watch_store, None, caller)
+    from crawlutron.models.watch_list_request import WatchListRequest
+
+    return await list_watches_core(WatchListRequest(), watch_store, None, caller)
 
 
 @router.get(

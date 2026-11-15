@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from crawlutron.service import job_runner
+from crawlutron.storage.safe_db import allow_on_loop
 from crawlutron_rest.api.crawl_router import router as crawl_router
 from crawlutron_rest.api.jobs_router import router as jobs_router
 from crawlutron_rest.api.keys_router import router as keys_router
@@ -29,7 +30,7 @@ from tests._job_harnesses import ScriptedExecute, _execution_policy, post_api_jo
 from tests._policy_factories import canonical
 from tests._quota_harness import service_client
 from tests._result_builders import engine_result
-from tests.mcp._tool_calls import KeyedToolCaller, issue_key
+from tests.mcp._tool_calls import META, PROTOCOL, KeyedToolCaller, issue_key
 
 _DELETE_JOB_ROUTERS = {
     "crawl": crawl_router,
@@ -118,6 +119,33 @@ class TestListJobsTool:
         async with job_harness(tmp_path) as h:
             text = await h.error_text("list_jobs", {"limit": 0})
             assert "limit" in text
+
+
+class TestAnonymousMcpListing:
+    async def test_anonymous_list_jobs_is_refused(self, tmp_path):
+        """An anonymous MCP list_jobs is refused before the store query (core owns the gate)."""
+        async with _job_mcp_client(tmp_path) as (client, job_store, _keys):
+            with allow_on_loop():
+                job_store.create_single_shot("job-0", "http://example.com/", {}, owner="")
+            response = await client.post(
+                "/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {"name": "list_jobs", "arguments": {}, "_meta": META},
+                },
+                headers={
+                    "MCP-Protocol-Version": PROTOCOL,
+                    "Mcp-Method": "tools/call",
+                    "Mcp-Name": "list_jobs",
+                    "Accept": "application/json, text/event-stream",
+                },
+            )
+            assert response.status_code == 200, response.text
+            body = response.json()["result"]
+            assert body["isError"] is True, body
+            assert "an API key is required" in str(body["content"][0]["text"])
 
 
 class TestGetJobTool:

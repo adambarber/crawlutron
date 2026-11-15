@@ -1,4 +1,4 @@
-"""Anonymous listings are refused at both listing doors (#1028)."""
+"""Anonymous listings are refused at the cores, so both doors inherit it (#1070)."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ import pathlib
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from crawlutron_rest.api.jobs_router import list_jobs
-from crawlutron_rest.api.watch_router import list_watches
+from crawlutron.service.job_cores import list_jobs_core
+from crawlutron.service.watch_cores import list_watches_core
 from tests._job_harnesses import _make_app
 from tests._job_store_doubles import LoopGuardJobStore, LoopGuardWatchStore
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, deployment_tier
@@ -20,7 +20,7 @@ def _refusal_line(fn) -> int | None:
     """The source line of the anonymous refusal in ``fn``, or None when absent."""
     lines, start = inspect.getsourcelines(fn)
     source = "".join(lines)
-    if "caller.authenticated" not in source or "raise http_error" not in source:
+    if "caller.authenticated" not in source or "raise" not in source:
         return None
     for offset, line in enumerate(lines):
         if "caller.authenticated" in line:
@@ -29,9 +29,9 @@ def _refusal_line(fn) -> int | None:
 
 
 def _offenders() -> list[str]:
-    """Each listing door missing the anonymous refusal, named at file:line."""
+    """Each listing core missing the anonymous refusal, named at file:line."""
     out: list[str] = []
-    for fn in (list_jobs, list_watches):
+    for fn in (list_jobs_core, list_watches_core):
         if _refusal_line(fn) is None:
             file = pathlib.Path(inspect.getfile(fn)).name
             line = inspect.getsourcelines(fn)[1]
@@ -40,12 +40,12 @@ def _offenders() -> list[str]:
 
 
 def test_listing_doors_refuse_anonymous_callers():
-    """Each listing door refuses unauthenticated callers before the store query.
+    """Each listing core refuses unauthenticated callers before the store query.
 
-    Names each offender at file:line; goes red when the refusal is removed.
+    Names each offender at file:line; goes red when the core refusal is removed.
     """
     offenders = _offenders()
-    assert not offenders, "listing door missing the anonymous refusal: " + "; ".join(offenders)
+    assert not offenders, "listing core missing the anonymous refusal: " + "; ".join(offenders)
 
 
 @pytest.mark.asyncio

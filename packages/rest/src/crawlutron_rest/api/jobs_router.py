@@ -15,11 +15,12 @@ from crawlutron.models.job_control_request import JobControlRequest
 from crawlutron.models.job_create_request import JobCreateRequest
 from crawlutron.models.job_create_response import JobCreateResponse
 from crawlutron.models.job_deleted_response import JobDeletedResponse
+from crawlutron.models.job_list_request import JobListRequest
 from crawlutron.models.job_list_response import JobListResponse
 from crawlutron.models.job_status_response import JobStatusResponse
 from crawlutron.service import job_runner
 from crawlutron.service.job_control import control_job_core, raise_job_not_found
-from crawlutron.service.job_cores import create_job_core, delete_job_core
+from crawlutron.service.job_cores import create_job_core, delete_job_core, list_jobs_core
 from crawlutron.service.main_helpers import build_job_status
 from crawlutron.vocabulary.limits import DEFAULT_JOB_LIST_LIMIT, MAX_JOB_LIST_LIMIT
 from crawlutron_rest.api.caller_auth import (
@@ -34,7 +35,7 @@ from crawlutron_rest.api.dependencies import (
     ShutdownEventDep,
     TrackingDep,
 )
-from crawlutron_rest.api.exceptions import http_error, validation_http_error
+from crawlutron_rest.api.exceptions import validation_http_error
 from crawlutron_rest.api.route_layer import guarded_router
 
 router = guarded_router(prefix="/v1/jobs", tags=["Crawler"])
@@ -101,14 +102,15 @@ async def list_jobs(
     limit: Annotated[int | None, Query(ge=1, le=MAX_JOB_LIST_LIMIT)] = None,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> JobListResponse:
-    # FastAPI's Query le/ge bound the page; the store's SQL slice then
-    # spares a caller with thousands of rows from re-materializing all of them.
-    if not caller.authenticated:
-        raise http_error(401, "invalid_api_key", "Unauthenticated: an API key is required")
-    page_limit = limit if limit is not None else DEFAULT_JOB_LIST_LIMIT
-    jobs = await job_store.alist_for_caller(caller.caller_id, limit=page_limit, offset=offset)
-    total = await job_store.acount_for_caller(caller.caller_id)
-    return JobListResponse(jobs=[build_job_status(row) for row in jobs], total=total)
+    # list_jobs_core does not consume settings or the shutdown event (unlike
+    # create_job_core), so the door passes None for both, mirroring delete_job.
+    return await list_jobs_core(
+        JobListRequest(limit=limit, offset=offset),
+        job_store,
+        None,
+        None,
+        caller,
+    )
 
 
 @router.get(
