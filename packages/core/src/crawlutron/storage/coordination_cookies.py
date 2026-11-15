@@ -13,7 +13,7 @@ from pathlib import Path
 
 from crawlutron.storage.coordination_store import CoordinationStore
 from crawlutron.storage.migrations.manifest import StoreSchema
-from crawlutron.storage.safe_db import in_txn, txn_write
+from crawlutron.storage.safe_db import in_txn, txn_read, txn_write
 
 __all__ = ["DEFAULT_MAX_HOSTS_PER_NAMESPACE", "SharedCookieStore"]
 
@@ -40,10 +40,11 @@ class SharedCookieStore(CoordinationStore):
         writer cannot corrupt the transaction state.
         """
         with self._lock:
-            row = self._conn.execute(
-                "SELECT payload FROM coordination_cookies WHERE namespace = ? AND host = ?",
-                (namespace or "", host),
-            ).fetchone()
+            with txn_read(self._conn, owner="coordination_cookies.load"):
+                row = self._conn.execute(
+                    "SELECT payload FROM coordination_cookies WHERE namespace = ? AND host = ?",
+                    (namespace or "", host),
+                ).fetchone()
         if row is None:
             return {}
         return self._decode(row[0])
@@ -92,10 +93,11 @@ class SharedCookieStore(CoordinationStore):
         """One namespace's slots as {host: cookies}; every access under self._lock."""
 
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT host, payload FROM coordination_cookies WHERE namespace = ?",
-                (namespace or "",),
-            ).fetchall()
+            with txn_read(self._conn, owner="coordination_cookies.slots_for_namespace"):
+                rows = self._conn.execute(
+                    "SELECT host, payload FROM coordination_cookies WHERE namespace = ?",
+                    (namespace or "",),
+                ).fetchall()
         return {str(host): self._decode(payload) for host, payload in rows}
 
     def put(self, namespace: str, host: str, value: Mapping[str, str]) -> None:
