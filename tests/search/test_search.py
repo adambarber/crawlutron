@@ -213,8 +213,9 @@ class TestSearchEndpoint:
         fake_provider_http(200, provider_results({"title": "A", "url": "https://example.gov/a"}))
         await async_client.post("/v1/search", json={"query": "x"})
         metrics = get_metrics()
-        assert (metrics.snapshot().search_requests_total, metrics.snapshot().search_results_total) == (1, 1)
-        assert metrics.snapshot().search_provider_counts["tavily"] == 1
+        snap = await metrics.snapshot()
+        assert (snap.search_requests_total, snap.search_results_total) == (1, 1)
+        assert snap.search_provider_counts["tavily"] == 1
 
     async def test_search_endpoint_reports_active_provider_in_capabilities(
         self, async_client, override_settings

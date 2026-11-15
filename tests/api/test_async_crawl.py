@@ -450,9 +450,9 @@ class TestAsyncCrawlMetrics:
         records elapsed through the shared completion helper, so the async path
         does not leave the duration counter frozen at zero."""
         get_metrics().reset()
-        before = get_metrics().snapshot().total_elapsed_ms
+        before = (await get_metrics().snapshot()).total_elapsed_ms
         await submit_async_crawl(crawl_api.client, crawl_api.payload(async_mode=True))
-        after = get_metrics().snapshot().total_elapsed_ms
+        after = (await get_metrics().snapshot()).total_elapsed_ms
         assert after > before
 
 

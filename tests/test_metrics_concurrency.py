@@ -38,22 +38,22 @@ def _hammer(store, work) -> None:
     assert not failures, failures
 
 
-def _assert_throttle_total(store) -> None:
+async def _assert_throttle_total(store) -> None:
     _hammer(store, lambda: asyncio.run(store.record_throttle()))
-    total = store.snapshot().resource_throttle_batches_total
+    total = (await store.snapshot()).resource_throttle_batches_total
     assert total == THREADS * INCREMENT_EACH
 
 
 async def test_concurrent_local_increments_are_never_lost():
     """One thousand increments from ten threads must read one thousand."""
     store = MetricsStore()
-    _assert_throttle_total(store)
+    await _assert_throttle_total(store)
 
 
 async def test_concurrent_shared_store_increments_are_never_lost(tmp_path):
     """The SQL upsert path stays exact under the same hammer."""
     store = MetricsStore(counters=CoordinationCounters(tmp_path / "shared.db"))
-    _assert_throttle_total(store)
+    await _assert_throttle_total(store)
 
 
 async def test_concurrent_series_registration_never_crosses_the_cap(tmp_path):
@@ -72,7 +72,7 @@ async def test_concurrent_series_registration_never_crosses_the_cap(tmp_path):
 
     run_threads(register_new, count=THREADS)
 
-    arrivals.extend(store.snapshot().caller_counts)
+    arrivals.extend((await store.snapshot()).caller_counts)
     # 256 distinct caller series + one reserved overflow series -- the same
     # bound the sequential contract already holds (test_metrics_gating A8).
     assert len(arrivals) <= 257, f"cap crossed: {len(arrivals)} distinct caller series"
@@ -187,7 +187,7 @@ def test_series_cap_holds_under_forced_flush_window(tmp_path):
         thread.join(timeout=30)
     assert not any(thread.is_alive() for thread in threads), "a registration did not return"
 
-    arrivals = list(store.snapshot().caller_counts)
+    arrivals = list(asyncio.run(store.snapshot()).caller_counts)
     assert len(arrivals) <= 257, f"cap crossed: {len(arrivals)} distinct caller series"
     assert "__overflow__" in arrivals, "post-cap arrivals did not fold into the overflow series"
 

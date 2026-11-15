@@ -1,7 +1,4 @@
-"""Prometheus metrics; counters live in the shared store, gauges stay
-process-local (measuring a cgroup every worker shares). The store is optional:
-without one the counters are a plain process-local dict.
-"""
+"""Prometheus metrics: shared counters, process-local gauges, optional store."""
 
 from __future__ import annotations
 
@@ -34,11 +31,7 @@ _OVERFLOW_SERIES = "__overflow__"
 
 @dataclass(frozen=True)
 class CountersSnapshot:
-    """One read of every counter, as a typed record.
-
-    This record replaces the store's accessor pile: a new counter is one field
-    plus its write, not a property, an exposition line and a hope the spellings agree.
-    """
+    """One read of every counter, as one typed record."""
 
     crawl_requests_total: float = 0.0
     crawl_requests_accepted_total: float = 0.0
@@ -98,7 +91,17 @@ class MetricsStore:
 
     def _source(self) -> dict[str, float]:
         store = self._counters
-        return store.snapshot() if store is not None else self._local
+        if store is None:
+            return self._local
+        result = []
+
+        def _read() -> None:
+            result.append(store.snapshot())
+
+        worker = threading.Thread(target=_read)
+        worker.start()
+        worker.join()
+        return result[0]
 
     def _labelled(self, source: dict[str, float], prefix: str) -> dict[str, float]:
         return {key.removeprefix(prefix): value for key, value in source.items() if key.startswith(prefix)}
@@ -115,9 +118,10 @@ class MetricsStore:
         distinct = sum(1 for existing in source if existing.startswith(prefix))
         return _OVERFLOW_SERIES if distinct >= _MAX_CALLER_SERIES else caller_id
 
-    def snapshot(self) -> CountersSnapshot:
-        """Every counter as one typed record, from one read of the source."""
-        source = self._source()
+    async def snapshot(self) -> CountersSnapshot:
+        """Every counter as one typed record; the read runs off the loop via ``asnapshot``."""
+        store = self._counters
+        source = await store.asnapshot() if store is not None else self._local
         return CountersSnapshot(
             crawl_requests_total=source.get("crawl_requests_total", 0.0),
             crawl_requests_accepted_total=source.get("crawl_requests_accepted_total", 0.0),
@@ -275,13 +279,13 @@ class MetricsStore:
         self.resource_memory_utilization = 0.0
         self.resource_cpu_utilization = 0.0
 
-    def as_prometheus(self, *, caller_detail: bool = True) -> str:
+    async def as_prometheus(self, *, caller_detail: bool = True) -> str:
         """Render the exposition; ``caller_detail`` gates the per-caller families.
 
         The router passes the operator-auth result so the caller-labelled series
         (a key-identity oracle) only leave the door to an authenticated operator.
         """
-        return _exposition(self.snapshot(), self, caller_detail=caller_detail)
+        return _exposition(await self.snapshot(), self, caller_detail=caller_detail)
 
 
 @dataclass(frozen=True)

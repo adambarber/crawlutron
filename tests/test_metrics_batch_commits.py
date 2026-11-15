@@ -86,7 +86,7 @@ async def test_exposition_stays_byte_identical(tmp_path) -> None:
     await store.observe_crawl(results=_rendered(1), elapsed_ms=10.0)
     await store.record_throttle()
 
-    text = store.as_prometheus()
+    text = await store.as_prometheus()
 
     assert "crawler_crawl_requests_total 1.0" in text
     assert "crawler_crawl_results_total 1.0" in text
@@ -103,7 +103,7 @@ async def test_caller_series_cap_still_works(tmp_path) -> None:
     counters, store = _meter(tmp_path, "overflow.db")
     for i in range(300):
         await store.observe_crawl(caller_id=f"key-{i}")
-    assert store.snapshot().caller_counts.get("__overflow__", 0) >= 1.0
+    assert (await store.snapshot()).caller_counts.get("__overflow__", 0) >= 1.0
     counters.close()
 
 
@@ -114,7 +114,7 @@ async def test_non_finite_delta_is_refused(tmp_path) -> None:
         await store.observe_crawl(results=_rendered(1), elapsed_ms=float("nan"))
 
     await store.observe_crawl(results=_rendered(1), elapsed_ms=5.0)
-    assert counters.get("total_elapsed_ms") >= 5.0
+    assert await counters.aget("total_elapsed_ms") >= 5.0
     counters.close()
 
 
@@ -122,7 +122,7 @@ async def test_no_store_path_still_works() -> None:
     """An unbound store reports its own process-local counters."""
     store = runtime_metrics.MetricsStore()
     await store.observe_crawl(results=_rendered(1), elapsed_ms=5.0)
-    text = store.as_prometheus()
+    text = await store.as_prometheus()
     assert "crawler_crawl_results_total 1.0" in text
     assert "crawler_crawl_seconds_total 0.005" in text
 
@@ -135,6 +135,6 @@ async def test_multi_worker_summation_unchanged(tmp_path) -> None:
     await first.observe_crawl(results=_rendered(1), elapsed_ms=10.0)
     await second.observe_crawl(results=_rendered(1), elapsed_ms=20.0)
 
-    snap = first.snapshot()
+    snap = await first.snapshot()
     assert snap.crawl_results_total == 2.0
     assert snap.total_elapsed_ms == 30.0

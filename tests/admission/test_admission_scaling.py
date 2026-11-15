@@ -41,10 +41,10 @@ async def _crawl_under_pressure(*, cpu_ratio, memory_ratio):
     from crawlutron.runtime.pressure_gates import ResourceGate
 
     gate = ResourceGate(memory_ratio=lambda: memory_ratio, cpu_ratio=lambda: cpu_ratio)
-    before = get_metrics().snapshot().resource_throttle_batches_total
+    before = (await get_metrics().snapshot()).resource_throttle_batches_total
     pages = site_linking_to("/a")
     out = await crawled_results(pages, limits=LINKED_PAIR_LIMITS, resource_gate=gate)
-    throttled = get_metrics().snapshot().resource_throttle_batches_total - before
+    throttled = (await get_metrics().snapshot()).resource_throttle_batches_total - before
     return out, throttled
 
 

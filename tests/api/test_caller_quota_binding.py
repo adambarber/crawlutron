@@ -114,7 +114,7 @@ async def test_keyed_job_stores_the_key_bound_when_limits_omitted(tmp_path, monk
     store = make_store(tmp_path / "jobs.db")
     keys = CallerKeyStore(tmp_path / "keys.db")
     issued = await keys.aissue_key("agent-a", max_pages=1)
-    record = keys.verify_key(issued.secret)
+    record = await keys.averify_key(issued.secret)
     assert record is not None
     caller = identity_for_key(record)
     monkeypatch.setattr(jobs_router.job_runner, "start_job", lambda *args, **kwargs: None)

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-
 from fastapi import APIRouter, Depends, Request, Response
 
 from crawlutron.runtime.metrics import get_metrics
@@ -23,10 +21,10 @@ async def metrics_endpoint(request: Request) -> Response:
     require the operator token (CRAWLUTRON_KEY_ADMIN_TOKEN) because they name keys.
     """
     metrics = get_metrics()
-    # ``as_prometheus`` reads the shared coordination counters -- a dozen SQLite
-    # reads per scrape. Run it off the loop so a scrape cannot stall on the store.
+    # ``as_prometheus`` reads the counters via the store's ``asnapshot`` twin, so
+    # the SQLite read already runs off the loop; await it directly.
     return Response(
-        await asyncio.to_thread(metrics.as_prometheus, caller_detail=getattr(request.state, "caller", False)),
+        await metrics.as_prometheus(caller_detail=getattr(request.state, "caller", False)),
         media_type="text/plain; version=0.0.4",
     )
 

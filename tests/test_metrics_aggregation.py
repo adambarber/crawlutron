@@ -33,7 +33,7 @@ async def test_counters_are_summed_across_workers(tmp_path):
     await _observe_one_success(second)
 
     # Each worker alone saw one result; the endpoint must report two.
-    assert "crawler_crawl_results_total 2.0" in first.as_prometheus()
+    assert "crawler_crawl_results_total 2.0" in await first.as_prometheus()
 
 
 async def test_a_worker_reports_totals_it_did_not_produce(tmp_path):
@@ -44,7 +44,7 @@ async def test_a_worker_reports_totals_it_did_not_produce(tmp_path):
     first, second = _two_workers(tmp_path / "coordination.db")
     await second.observe_search(provider="tavily", results=7)
 
-    assert "crawler_search_results_total 7.0" in first.as_prometheus()
+    assert "crawler_search_results_total 7.0" in await first.as_prometheus()
 
 
 async def test_labelled_series_are_summed_not_overwritten(tmp_path):
@@ -59,11 +59,12 @@ async def test_labelled_series_are_summed_not_overwritten(tmp_path):
     await second.observe_crawl(results=[named])
 
     assert (
-        f'crawler_strategy_results_total{{strategy="{HTTP_DECLARED_CRAWLER}"}} 2.0' in first.as_prometheus()
+        f'crawler_strategy_results_total{{strategy="{HTTP_DECLARED_CRAWLER}"}} 2.0'
+        in await first.as_prometheus()
     )
 
 
-def test_gauges_are_reported_per_worker_and_never_summed(tmp_path):
+async def test_gauges_are_reported_per_worker_and_never_summed(tmp_path):
     """A shared cgroup reading is the same in every worker; summing would report 2.0
     when neither process is over budget -- an alert that fires on a healthy service
     and a signal that stops meaning anything once the worker count changes.
@@ -72,7 +73,7 @@ def test_gauges_are_reported_per_worker_and_never_summed(tmp_path):
     first.resource_memory_utilization = 0.25
     second.resource_memory_utilization = 0.25
 
-    text = first.as_prometheus()
+    text = await first.as_prometheus()
     assert "crawler_resource_memory_utilization 0.2500" in text
     assert "crawler_resource_memory_utilization 0.5000" not in text
 
@@ -86,7 +87,7 @@ async def test_a_worker_with_no_shared_store_still_reports_its_own_counters():
     metrics = MetricsStore()
     await metrics.observe_crawl(results=[engine_result("http://example.com/a", "rendered")])
 
-    assert "crawler_crawl_results_total 1.0" in metrics.as_prometheus()
+    assert "crawler_crawl_results_total 1.0" in await metrics.as_prometheus()
 
 
 async def test_reset_clears_the_shared_store_not_just_local_fields(tmp_path):
@@ -101,7 +102,7 @@ async def test_reset_clears_the_shared_store_not_just_local_fields(tmp_path):
 
     await asyncio.to_thread(first.reset)
 
-    assert "crawler_crawl_results_total 0.0" in second.as_prometheus()
+    assert "crawler_crawl_results_total 0.0" in await second.as_prometheus()
 
 
 async def test_the_counters_read_as_one_record(tmp_path):
@@ -116,7 +117,7 @@ async def test_the_counters_read_as_one_record(tmp_path):
     await store.observe_search(provider="tavily", results=2, elapsed_ms=3.5)
     await store.record_throttle()
 
-    record = store.snapshot()
+    record = await store.snapshot()
 
     assert record.crawl_requests_total == 1.0
     assert record.crawl_results_total == 1.0
@@ -129,7 +130,7 @@ async def test_the_counters_read_as_one_record(tmp_path):
     assert record.search_provider_counts == {"tavily": 2.0}
 
 
-def test_the_exposition_reads_the_backing_store_once(tmp_path, monkeypatch):
+async def test_the_exposition_reads_the_backing_store_once(tmp_path, monkeypatch):
     """One scrape is one snapshot: the exposition reads the shared store a
     single time, not once per labelled family (three SELECTs per scrape was
     the accessor pile paying per property)."""
@@ -143,7 +144,7 @@ def test_the_exposition_reads_the_backing_store_once(tmp_path, monkeypatch):
         return original(self)
 
     monkeypatch.setattr(CoordinationCounters, "snapshot", counted)
-    store.as_prometheus()
+    await store.as_prometheus()
 
     assert reads[0] == 1, f"the exposition read the backing store {reads[0]} times"
 
@@ -163,5 +164,5 @@ async def test_a_late_bind_carries_counters_recorded_before_it(tmp_path):
 
     await metrics.bind_counters(shared)
 
-    total = shared.snapshot()["crawl_results_total"]
+    total = (await shared.asnapshot())["crawl_results_total"]
     assert total == 2.0, f"the pre-bind counter was dropped: {total} instead of 2"

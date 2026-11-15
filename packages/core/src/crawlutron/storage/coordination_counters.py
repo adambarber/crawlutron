@@ -10,7 +10,7 @@ from collections.abc import Mapping
 
 from crawlutron.storage.coordination_store import CoordinationStore, atwin
 from crawlutron.storage.migrations.manifest import StoreSchema
-from crawlutron.storage.safe_db import txn_write
+from crawlutron.storage.safe_db import txn_read, txn_write
 
 __all__ = ["CoordinationCounters"]
 
@@ -83,15 +83,17 @@ class CoordinationCounters(CoordinationStore):
         for names only some workers have touched yet.
         """
         with self._lock:
-            row = self._conn.execute(
-                "SELECT value FROM coordination_counters WHERE name = ?", (name,)
-            ).fetchone()
+            with txn_read(self._conn, owner="coordination_counters.get"):
+                row = self._conn.execute(
+                    "SELECT value FROM coordination_counters WHERE name = ?", (name,)
+                ).fetchone()
         return 0.0 if row is None else float(row[0])
 
     def snapshot(self) -> dict[str, float]:
         """Every recorded name and total, including increments not yet flushed."""
         with self._lock:
-            rows = self._conn.execute("SELECT name, value FROM coordination_counters").fetchall()
+            with txn_read(self._conn, owner="coordination_counters.snapshot"):
+                rows = self._conn.execute("SELECT name, value FROM coordination_counters").fetchall()
             pending = dict(self._pending or {})
         merged = {str(name): float(value) for name, value in rows}
         for name, value in pending.items():
@@ -108,3 +110,5 @@ class CoordinationCounters(CoordinationStore):
     aflush = atwin(flush)
     a_add_many = atwin(add_many)
     a_reset = atwin(reset)
+    aget = atwin(get)
+    asnapshot = atwin(snapshot)

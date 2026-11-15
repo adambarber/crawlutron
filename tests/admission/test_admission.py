@@ -289,8 +289,8 @@ def test_resource_gate_scale_is_min_of_resources(monkeypatch):
     assert gate.batch_scale_factor() == 1.0
 
 
-def test_metrics_expose_resource_utilization_and_counters():
-    text = get_metrics().as_prometheus()
+async def test_metrics_expose_resource_utilization_and_counters():
+    text = await get_metrics().as_prometheus()
     assert "crawler_resource_memory_utilization" in text
     assert "crawler_resource_cpu_utilization" in text
     assert "crawler_resource_throttle_batches_total" in text

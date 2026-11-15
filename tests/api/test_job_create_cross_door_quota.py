@@ -31,7 +31,7 @@ async def test_rest_create_refuses_when_the_tracker_holds_the_callers_slot(tmp_p
         jobs_router_route_app.include_router(jobs_router)
         mount_tracker(client)
         issued = await keys.aissue_key("agent-a", max_concurrency=1)
-        record = keys.verify_key(issued.secret)
+        record = await keys.averify_key(issued.secret)
         assert record is not None
         caller = identity_for_key(record)
         jobs_router_route_app.dependency_overrides[get_caller_identity] = lambda: caller

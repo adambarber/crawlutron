@@ -152,13 +152,13 @@ async def test_a_valid_caller_key_cannot_revoke_another_callers_key(tmp_path):
     async with isolation_client(tmp_path) as (client, _store, _results, keys):
         victim_secret = await issue_key(client)
         attacker_secret = await issue_key(client)
-        victim_key = keys.verify_key(victim_secret)
+        victim_key = await keys.averify_key(victim_secret)
         assert victim_key is not None
 
         refused = await client.delete(f"/v1/keys/{victim_key.key_id}", headers={"X-API-Key": attacker_secret})
 
         _assert_401(refused)
-        assert keys.verify_key(victim_secret) is not None
+        assert await keys.averify_key(victim_secret) is not None
 
 
 async def test_a_valid_caller_key_cannot_list_keys(tmp_path):

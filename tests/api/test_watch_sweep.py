@@ -339,7 +339,7 @@ async def test_a_revoked_owner_watch_is_deactivated_by_the_sweep(watch_store, tm
     keys = CallerKeyStore(tmp_path / "keys.db")
     issued = await keys.aissue_key("alice")
     secret = issued.secret
-    record = keys.verify_key(secret)
+    record = await keys.averify_key(secret)
     assert record is not None
     owned = register(watch_store, canonical(DEAD_ORIGIN), owner=record.key_id)
     # The anonymous watch, by contrast, has no key to revoke and keeps checking.
@@ -369,7 +369,7 @@ async def _keyed_sweeper(watch_store, tmp_path, monkeypatch, *, capture: list[st
     a recording ``execute_crawl``; returns ``(tracker, record, sweeper)``.
     """
     keys = CallerKeyStore(tmp_path / "keys.db")
-    record = keys.verify_key((await keys.aissue_key("agent-a", max_concurrency=1)).secret)
+    record = await keys.averify_key((await keys.aissue_key("agent-a", max_concurrency=1)).secret)
     assert record is not None
     register(watch_store, canonical(DEAD_ORIGIN), owner=record.key_id)
     tracker = CallerConcurrencyTracker()

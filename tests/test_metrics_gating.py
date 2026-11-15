@@ -24,7 +24,7 @@ async def test_base_exposition_without_operator_token_omits_caller_detail(tmp_pa
     await store.observe_crawl(caller_id="key_a")
     await store.observe_search(provider="tavily", caller_id="key_a")
 
-    base = store.as_prometheus(caller_detail=False)
+    base = await store.as_prometheus(caller_detail=False)
     assert "crawler_crawl_requests_total 1.0" in base
     assert "crawler_search_requests_total 1.0" in base
     assert "by_caller_total" not in base
@@ -34,7 +34,7 @@ async def test_operator_token_path_exposes_caller_detail(tmp_path):
     store = _store(tmp_path)
     await store.observe_crawl(caller_id="key_a", elapsed_ms=1.0)
 
-    full = store.as_prometheus(caller_detail=True)
+    full = await store.as_prometheus(caller_detail=True)
     assert 'crawler_crawl_requests_by_caller_total{caller="key_a"} 1.0' in full
 
 
@@ -42,7 +42,7 @@ async def test_bare_and_caller_families_have_disjoint_names(tmp_path):
     """A9: one family must not carry two label sets -- bare and labelled differ by name."""
     store = _store(tmp_path)
     await store.observe_crawl(caller_id="key_a")
-    text = store.as_prometheus(caller_detail=True)
+    text = await store.as_prometheus(caller_detail=True)
     # Bare and per-caller are different families, so no family mixes unlabelled + labelled.
     assert "crawler_crawl_requests_total " in text
     assert "crawler_crawl_requests_by_caller_total{" in text
@@ -56,12 +56,12 @@ async def test_caller_label_dimension_is_capped_by_overflow_fold(tmp_path):
     # must stop growing (overflow fold) instead of minting a series per caller.
     for i in range(300):
         await store.observe_crawl(caller_id=f"key_{i}")
-    counts = store.snapshot().caller_counts
+    counts = (await store.snapshot()).caller_counts
     # cap distinct series + one reserved overflow series -- bounded, not 300.
     assert len(counts) <= 257
     assert "__overflow__" in counts
 
-    bare = store.snapshot().crawl_requests_total
+    bare = (await store.snapshot()).crawl_requests_total
     summed = sum(counts.values())
     assert bare == summed  # sum(labels) always equals bare
 
@@ -73,10 +73,10 @@ async def test_search_and_crawl_caller_families_stay_distinct(tmp_path):
     await store.observe_search(provider="tavily", caller_id="key_a")
 
     # A search by key_a must not inflate its crawl family, nor vice versa.
-    record = store.snapshot()
+    record = await store.snapshot()
     assert record.caller_counts == {"key_a": 1.0}
     assert record.search_caller_counts == {"key_a": 1.0}
-    text = store.as_prometheus(caller_detail=True)
+    text = await store.as_prometheus(caller_detail=True)
     assert 'crawler_crawl_requests_by_caller_total{caller="key_a"} 1.0' in text
     assert 'crawler_search_requests_by_caller_total{caller="key_a"} 1.0' in text
 

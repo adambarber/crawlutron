@@ -323,7 +323,7 @@ def test_extract_document_degrades_when_no_worker_can_be_acquired(fake_pool, mon
     assert result.text is None and result.markdown is None
 
 
-def test_a_starved_acquire_increments_the_doc_pool_unavailable_counter(fake_pool, monkeypatch):
+async def test_a_starved_acquire_increments_the_doc_pool_unavailable_counter(fake_pool, monkeypatch):
     """A degrade is counted, not just logged (#346): the wedge alert must exist.
 
     The pool's only slot is busy, so a second acquisition runs out of budget
@@ -335,11 +335,12 @@ def test_a_starved_acquire_increments_the_doc_pool_unavailable_counter(fake_pool
     monkeypatch.setattr("crawlutron.runtime.metrics.metrics", store)
 
     assert pool.acquire(0.05) is None, "the acquisition did not degrade on the busy pool"
-    assert store.snapshot().extraction_doc_pool_unavailable_total == 1.0
-    assert "crawler_extraction_doc_pool_unavailable_total 1.0" in store.as_prometheus(caller_detail=False)
+    assert (await store.snapshot()).extraction_doc_pool_unavailable_total == 1.0
+    exposition = await store.as_prometheus(caller_detail=False)
+    assert "crawler_extraction_doc_pool_unavailable_total 1.0" in exposition
 
 
-def test_a_failed_spawn_increments_the_doc_pool_unavailable_counter(monkeypatch):
+async def test_a_failed_spawn_increments_the_doc_pool_unavailable_counter(monkeypatch):
     """A spawn that never became ready ends the acquisition as a degrade (#346):
     the counter must count it with the timeout path, or the wedge undercount."""
 
@@ -351,7 +352,7 @@ def test_a_failed_spawn_increments_the_doc_pool_unavailable_counter(monkeypatch)
     monkeypatch.setattr("crawlutron.runtime.metrics.metrics", store)
 
     assert pool.acquire(0.05) is None, "the acquisition did not degrade on the failed spawn"
-    assert store.snapshot().extraction_doc_pool_unavailable_total == 1.0
+    assert (await store.snapshot()).extraction_doc_pool_unavailable_total == 1.0
 
 
 # --- 4/5/6: -----------------------------------------------------------------

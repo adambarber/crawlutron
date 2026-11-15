@@ -159,8 +159,8 @@ async def test_the_full_exposition_matches_the_golden():
     labelled families and the HELP/TYPE lines nothing substring-checked are held.
     """
     store = await _observed_store()
-    assert store.as_prometheus(caller_detail=True) == _GOLDEN_CALLER_DETAIL
-    assert store.as_prometheus(caller_detail=False) == _GOLDEN_WITHOUT_CALLER_DETAIL
+    assert await store.as_prometheus(caller_detail=True) == _GOLDEN_CALLER_DETAIL
+    assert await store.as_prometheus(caller_detail=False) == _GOLDEN_WITHOUT_CALLER_DETAIL
 
 
 # -- the declared line contract (#485): the golden pins the exact bytes;

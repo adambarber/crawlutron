@@ -83,7 +83,7 @@ async def _seeded_for_owner(
 ) -> SuggestionHarness:
     """The harness with one blocked row stored under the caller's key id."""
     h, keys = suggestion_harness
-    record = keys.verify_key(h.secret)
+    record = await keys.averify_key(h.secret)
     assert record is not None
     await _seed_blocked(h, "crawl_a", record.key_id)
     return h

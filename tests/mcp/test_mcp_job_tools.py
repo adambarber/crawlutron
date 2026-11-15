@@ -87,7 +87,7 @@ async def job_harness(tmp_path: Path, *, seeded: int = 0, running: bool = False)
 
     async with _job_mcp_client(tmp_path) as (client, job_store, keys):
         secret = await issue_key(client)
-        record = keys.verify_key(secret)
+        record = await keys.averify_key(secret)
         assert record is not None
         owner = record.key_id
         for index in range(seeded):
@@ -261,7 +261,7 @@ class TestDeleteJobPurgesResultStoreMCP:
             keys,
         ):
             secret = await issue_key(client)
-            record = keys.verify_key(secret)
+            record = await keys.averify_key(secret)
             assert record is not None
             owner = record.key_id
             headers = {"X-API-Key": secret}

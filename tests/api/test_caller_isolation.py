@@ -436,9 +436,9 @@ async def test_crawl_metrics_carry_a_caller_dimension(tmp_path):
     await metrics.observe_crawl(caller_id="key_b")
     await metrics.observe_crawl()
 
-    record = metrics.snapshot()
+    record = await metrics.snapshot()
     assert record.caller_counts == {"key_a": 2.0, "key_b": 1.0}
-    exposition = metrics.as_prometheus()
+    exposition = await metrics.as_prometheus()
     assert 'crawler_crawl_requests_by_caller_total{caller="key_a"} 2.0' in exposition
     assert 'crawler_crawl_requests_by_caller_total{caller="key_b"} 1.0' in exposition
 
@@ -452,10 +452,10 @@ async def test_search_metrics_have_their_own_caller_family(tmp_path):
     await metrics.observe_crawl(caller_id="key_a")
     await metrics.observe_search(provider="tavily", caller_id="key_a")
 
-    record = metrics.snapshot()
+    record = await metrics.snapshot()
     assert record.caller_counts == {"key_a": 1.0}
     assert record.search_caller_counts == {"key_a": 1.0}
-    exposition = metrics.as_prometheus()
+    exposition = await metrics.as_prometheus()
     assert 'crawler_crawl_requests_by_caller_total{caller="key_a"} 1.0' in exposition
     assert 'crawler_search_requests_by_caller_total{caller="key_a"} 1.0' in exposition
 

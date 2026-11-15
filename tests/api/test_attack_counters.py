@@ -6,6 +6,8 @@ One test per counter family; each counts through the public metrics surface
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from crawlutron.runtime.metrics import get_metrics
@@ -13,8 +15,8 @@ from crawlutron.service.errors import KeyVerifyThrottled
 from crawlutron_rest.api.throttle import Throttle, Throttled
 
 
-def _meter_snapshot() -> dict[str, float]:
-    snap = get_metrics().snapshot()
+async def _meter_snapshot() -> dict[str, float]:
+    snap = await get_metrics().snapshot()
     return {
         "auth_refusals": snap.auth_refusals_total,
         "key_verify_throttle_trips": snap.key_verify_throttle_trips_total,
@@ -42,10 +44,10 @@ async def _refused_keys_request(counter: str, tmp_path) -> None:
     from tests.factories.client import isolation_client
 
     async with isolation_client(tmp_path) as (client, _store, _results, _keys):
-        before = _meter_snapshot()[counter]
+        before = (await _meter_snapshot())[counter]
         response = await client.get("/v1/keys", headers={"X-API-Key": "not-the-token"})
         assert response.status_code == 401
-        assert _meter_snapshot()[counter] == before + 1.0
+        assert (await _meter_snapshot())[counter] == before + 1.0
 
 
 async def test_invalid_key_401_is_counted(tmp_path):
@@ -62,7 +64,7 @@ def test_key_verify_throttle_trip_is_counted():
     with pytest.raises(KeyVerifyThrottled) as raised:
         throttle.check(presented)
     assert raised.value.status == 429
-    assert _meter_snapshot()["key_verify_throttle_trips"] == 1.0
+    assert asyncio.run(_meter_snapshot())["key_verify_throttle_trips"] == 1.0
 
 
 def test_anonymous_429_is_counted():
@@ -72,7 +74,7 @@ def test_anonymous_429_is_counted():
         meter.check_anon("10.9.9.10")
     with pytest.raises(Throttled):
         meter.check_anon("10.9.9.10")
-    assert _meter_snapshot()["anonymous_throttle_refusals"] == 1.0
+    assert asyncio.run(_meter_snapshot())["anonymous_throttle_refusals"] == 1.0
 
 
 async def test_admin_guess_is_counted(tmp_path):
@@ -85,13 +87,13 @@ async def test_admin_failure_recording_is_counted():
 
     throttle = Throttle()
     await throttle.arecord_admin_failure()
-    assert _meter_snapshot()["admin_auth_failures"] == 1.0
+    assert (await _meter_snapshot())["admin_auth_failures"] == 1.0
 
 
 def test_throttled_check_does_not_count_a_trip():
     """An in-budget verify does not increment the trip counter."""
     Throttle().check("ck_0123456789abcdef.clean")
-    assert _meter_snapshot()["key_verify_throttle_trips"] == 0.0
+    assert asyncio.run(_meter_snapshot())["key_verify_throttle_trips"] == 0.0
 
 
 def test_under_budget_anonymous_check_does_not_count_a_refusal():

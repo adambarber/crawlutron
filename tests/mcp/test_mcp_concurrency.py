@@ -85,7 +85,7 @@ async def test_keyed_mcp_crawl_refused_when_holding_an_async_job(tmp_path):
     caller cannot run its MCP quota fresh while it holds jobs (the register-unification anchor)."""
     async with _mcp_client(tmp_path) as (client, job_store, keys):
         secret = await issue_key(client, max_concurrency=1)
-        record = keys.verify_key(secret)
+        record = await keys.averify_key(secret)
         assert record is not None
         with allow_on_loop():
             job_store.create_single_shot("busy", "http://example.com/", {}, owner=record.key_id)

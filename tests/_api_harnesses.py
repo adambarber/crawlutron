@@ -117,7 +117,7 @@ async def issue_agent_key(keys):
     """
     issued = await keys.aissue_key("agent-a")
     secret = issued.secret
-    owner = keys.verify_key(secret).key_id
+    owner = (await keys.averify_key(secret)).key_id
     return secret, owner, {"X-API-Key": secret}
 
 

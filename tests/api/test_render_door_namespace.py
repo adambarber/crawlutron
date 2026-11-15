@@ -89,7 +89,7 @@ async def test_keyed_render_harvest_lands_in_the_callers_namespace(tmp_path):
     try:
         async with _render_client(tmp_path) as (client, keys):
             secret = await issue_key(client)
-            key_id = keys.list_keys()[0].key_id
+            key_id = (await keys.alist_keys())[0].key_id
             response = await client.post(
                 "/v1/render",
                 headers={"X-API-Key": secret},
