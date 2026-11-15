@@ -58,21 +58,21 @@ async def test_keyed_crawl_keeps_an_explicit_under_ceiling_limit(tmp_path):
 async def test_tracker_reserves_and_releases_per_caller():
     """The sync-door in-flight register is per-caller and drops a caller at zero."""
     tracker = CallerConcurrencyTracker()
-    assert tracker.sync_in_flight("key_a") == 0
+    assert await tracker.sync_in_flight("key_a") == 0
 
     await tracker.reserve("key_a")
     await tracker.reserve("key_a")
     await tracker.reserve("key_b")
-    assert tracker.sync_in_flight("key_a") == 2
-    assert tracker.sync_in_flight("key_b") == 1
-    assert tracker.sync_in_flight("key_c") == 0
+    assert await tracker.sync_in_flight("key_a") == 2
+    assert await tracker.sync_in_flight("key_b") == 1
+    assert await tracker.sync_in_flight("key_c") == 0
 
     await tracker.release("key_a")
     await tracker.release("key_a")
     await tracker.release("key_b")
-    assert tracker.sync_in_flight("key_a") == 0
+    assert await tracker.sync_in_flight("key_a") == 0
     await tracker.release("key_a")
-    assert tracker.sync_in_flight("key_a") == 0
+    assert await tracker.sync_in_flight("key_a") == 0
 
 
 async def test_sync_crawl_counts_toward_concurrency(tmp_path, monkeypatch):
@@ -102,7 +102,7 @@ async def test_sync_crawl_releases_the_slot_when_the_engine_fails(tmp_path, monk
         headers = _keyed_headers(issued.secret)
         with pytest.raises(RuntimeError):
             await client.post("/v1/crawl", headers=headers, json={"url": "http://example.com/"})
-        assert tracker.sync_in_flight(issued.key_id) == 0
+        assert await tracker.sync_in_flight(issued.key_id) == 0
 
 
 async def test_keyed_job_stores_the_key_bound_when_limits_omitted(tmp_path, monkeypatch):

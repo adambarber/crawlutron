@@ -31,9 +31,9 @@ class TestCallerConcurrencyTrackerLocks:
         await tracker.reserve(caller)
         await tracker.reserve(caller)
         await tracker.release(caller)  # count drops to 1
-        assert tracker.sync_in_flight(caller) == 1
+        assert await tracker.sync_in_flight(caller) == 1
         await tracker.release(caller)  # count drops to 0: the eviction trigger
-        assert tracker.sync_in_flight(caller) == 0
+        assert await tracker.sync_in_flight(caller) == 0
         assert tracker.slot_lock(caller) is lock
 
 
@@ -65,3 +65,17 @@ class TestCallerConcurrencyTrackerRace:
                 return lock_c is lock_b
 
         assert asyncio.run(interleave())
+
+
+class TestCallerConcurrencyTrackerOffLoop:
+    """``sync_in_flight`` is awaited from the loop and reads the store's count."""
+
+    async def test_sync_in_flight_returns_store_count_awaited_from_loop(self, tmp_path):
+        """Awaited off the loop: red before the conversion (it was a sync int), green after."""
+        tracker = CallerConcurrencyTracker(coordination_db_path=str(tmp_path / "coord.db"))
+        await tracker.reserve("key-a", max_concurrency=10)
+        await tracker.reserve("key-a", max_concurrency=10)
+        assert await tracker.sync_in_flight("key-a") == 2
+        assert await tracker.sync_in_flight("key-b") == 0
+        await tracker.release("key-a")
+        assert await tracker.sync_in_flight("key-a") == 1

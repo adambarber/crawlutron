@@ -10,7 +10,7 @@ from tests._api_harnesses import keyed_quota_client as _keyedquota_client
 from tests._timing_harnesses import await_until
 
 
-def _assert_quota_outcome(responses, *, overlapped: bool, store, tracker, issued) -> None:
+async def _assert_quota_outcome(responses, *, overlapped: bool, store, tracker, issued) -> None:
     """One 202, one 429 quota_exceeded, no overlap, and no leaked slot."""
     accepted = [r for r in responses if r.status_code == 202]
     refused = [r for r in responses if r.status_code == 429]
@@ -25,8 +25,8 @@ def _assert_quota_outcome(responses, *, overlapped: bool, store, tracker, issued
     assert len(refused) == 1
     for response in refused:
         assert response.json()["code"] == "quota_exceeded"
-    assert tracker.sync_in_flight(issued.key_id) == 0, "a refused or handed-off slot was leaked"
-    assert store.active_count_for_caller(issued.key_id) == 1
+    assert await tracker.sync_in_flight(issued.key_id) == 0, "a refused or handed-off slot was leaked"
+    assert await store.aactive_count_for_caller(issued.key_id) == 1
 
 
 def _two_concurrent_posts(client, headers):
@@ -80,7 +80,7 @@ async def test_two_concurrent_async_posts_cannot_both_pass_a_quota_of_one(tmp_pa
         posts = _two_concurrent_posts(client, {"X-API-Key": issued.secret})
         responses = [await asyncio.wait_for(t, timeout=10) for t in posts]
         try:
-            _assert_quota_outcome(
+            await _assert_quota_outcome(
                 responses, overlapped=state["overlapped"], store=store, tracker=tracker, issued=issued
             )
         finally:

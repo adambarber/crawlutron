@@ -423,4 +423,4 @@ async def test_a_owner_watch_check_releases_the_slot_after_a_check(watch_store, 
     await sweeper.sweep_once(now=NOW)
 
     # A check that completed released its owner slot rather than leaking it.
-    assert tracker.sync_in_flight(record.key_id) == 0
+    assert await tracker.sync_in_flight(record.key_id) == 0

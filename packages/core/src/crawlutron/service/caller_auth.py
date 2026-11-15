@@ -192,7 +192,8 @@ async def admit(
         job_active = (
             await job_store.aactive_count_for_caller(active.caller_id) if job_store is not None else 0
         )
-        check_concurrency_quota(active, job_active + concurrency_tracker.sync_in_flight(active.caller_id))
+        active_count = job_active + await concurrency_tracker.sync_in_flight(active.caller_id)
+        check_concurrency_quota(active, active_count)
         if not reserve_slot:
             # The row insert runs inside the lock; once it lands, the durable
             # row is the reservation the next admit counts.

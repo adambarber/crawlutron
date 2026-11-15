@@ -68,10 +68,14 @@ class CallerConcurrencyTracker:
         else:
             self._in_flight[caller_id] = count
 
-    def sync_in_flight(self, caller_id: str) -> int:
-        """How many sync crawls ``caller_id`` currently has running (0 when none)."""
+    async def sync_in_flight(self, caller_id: str) -> int:
+        """How many sync crawls ``caller_id`` currently has running (0 when none).
+
+        The coordination read runs on the store executor, never on the event
+        loop; callers await it.
+        """
         if self._coord is not None:
-            return self._coord.count_active(caller_id)
+            return await self._coord.acount_active(caller_id)
         return self._in_flight.get(caller_id, 0)
 
     def slot_lock(self, caller_id: str) -> asyncio.Lock:
@@ -107,6 +111,10 @@ class CoordinationHandle:
     def count_active(self, caller_id: str) -> int:
         """Non-stale reserved slots for ``caller_id``."""
         return self._store.count_active(caller_id, time.time())
+
+    async def acount_active(self, caller_id: str) -> int:
+        """Non-stale reserved slots for ``caller_id``, awaited off the loop."""
+        return await self._store.acount_active(caller_id, time.time())
 
     def close(self) -> None:
         self._store.close()
