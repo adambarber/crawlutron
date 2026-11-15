@@ -466,8 +466,10 @@ def _reset() -> None:
 
 
 def _has() -> bool:
-    """Whether the metrics store holds any recorded counter right now."""
-    return bool(metrics._source())
+    """Whether this process holds counter state right now: local totals or
+    increments not yet flushed (the shared table is not process state)."""
+    store = metrics.counters
+    return bool(metrics._local) or (store is not None and store.has_pending())
 
 
 process_state.register(__name__, _reset, _has)

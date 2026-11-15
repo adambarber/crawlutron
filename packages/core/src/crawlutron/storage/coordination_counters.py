@@ -100,6 +100,11 @@ class CoordinationCounters(CoordinationStore):
             merged[name] = merged.get(name, 0.0) + value
         return merged
 
+    def has_pending(self) -> bool:
+        """Whether this process holds increments not yet flushed to the store."""
+        with self._lock:
+            return bool(self._pending)
+
     def reset(self) -> None:
         """Drop every counter. Test isolation and operator reset."""
         with self._lock:
