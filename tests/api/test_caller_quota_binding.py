@@ -187,7 +187,7 @@ async def test_sync_crawl_counts_cross_door_with_an_async_job(tmp_path):
         # background crawl that could stray past this test's teardown.
         with allow_on_loop():
             store.create_single_shot("async_busy", "http://example.com/", {}, owner=issued.key_id)
-        assert store.active_count_for_caller(issued.key_id) == 1
+        assert (await store.aactive_count_for_caller(issued.key_id)) == 1
         expect_quota_refused(
             await client.post(
                 "/v1/crawl", headers=_keyed_headers(issued.secret), json={"url": "http://example.com/"}

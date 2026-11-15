@@ -6,6 +6,7 @@ The count->insert window let two concurrent posts pass a quota of one.
 import asyncio
 import contextlib
 
+from crawlutron.storage.safe_db import allow_on_loop_read
 from tests._api_harnesses import keyed_quota_client as _keyedquota_client
 from tests._timing_harnesses import await_until
 
@@ -88,7 +89,12 @@ async def test_two_concurrent_async_posts_cannot_both_pass_a_quota_of_one(tmp_pa
             # parked on the event, holding the webhook semaphore at teardown.
             pinned.set()
             with contextlib.suppress(AssertionError):
+
+                def _count_is_zero() -> bool:
+                    with allow_on_loop_read():
+                        return store.active_count_for_caller(issued.key_id) == 0
+
                 await await_until(
-                    lambda: store.active_count_for_caller(issued.key_id) == 0,
+                    _count_is_zero,
                     "the pinned async crawl never reached terminal",
                 )

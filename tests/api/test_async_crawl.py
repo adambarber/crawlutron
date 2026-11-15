@@ -434,12 +434,12 @@ class TestAsyncCrawlTeardownIsolation:
         job_store = service_app().state.job_store
         with allow_on_loop():
             job_store.create_single_shot("stray_pending", "http://example.com/", {}, owner="")
-        assert job_store.active_count_for_caller("") >= 1
+        assert (await job_store.aactive_count_for_caller("")) >= 1
 
         # This is what the crawl_api fixture runs in its teardown.
         await _drain_running_crawls()
 
-        assert job_store.active_count_for_caller("") == 0
+        assert (await job_store.aactive_count_for_caller("")) == 0
 
 
 class TestAsyncCrawlMetrics:

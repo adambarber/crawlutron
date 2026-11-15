@@ -365,10 +365,12 @@ class JobStore:
 
     def active_count_for_caller(self, caller_id: str) -> int:
         with self._lock:
-            row = self._conn.execute(
-                "SELECT count(*) FROM crawl_jobs WHERE owner = ? AND status IN (?, ?) AND deleted_at IS NULL",
-                (caller_id, JobStatus.PENDING.value, JobStatus.RUNNING.value),
-            ).fetchone()
+            with txn_read(self._conn, owner="job_store.active_count_for_caller"):
+                row = self._conn.execute(
+                    "SELECT count(*) FROM crawl_jobs WHERE owner = ?"
+                    " AND status IN (?, ?) AND deleted_at IS NULL",
+                    (caller_id, JobStatus.PENDING.value, JobStatus.RUNNING.value),
+                ).fetchone()
         return int(row[0])
 
     def _has_job_row(self, job_id: str, owner: str | None) -> bool:

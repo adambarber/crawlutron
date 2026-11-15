@@ -24,7 +24,6 @@ _READ_KEYWORDS = frozenset({"select", "pragma", "with", "explain"})
 _READ_DOOR = frozenset({"txn_read", "txn_write", "in_txn"})
 
 _SCOPE_EXCLUDE = frozenset({"sqlite_store.py"})
-READ_DOOR_BUDGET = 1
 
 
 def _bare_read_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
@@ -93,17 +92,9 @@ def _count_offenders() -> list[str]:
 
 def test_storage_reads_funnel_through_the_read_door() -> None:
     offenders = _count_offenders()
-    assert len(offenders) <= READ_DOOR_BUDGET, (
-        f"{len(offenders)} bare read(s) outside the read door, budget is {READ_DOOR_BUDGET}:\n  "
+    assert len(offenders) == 0, (
+        f"{len(offenders)} bare read(s) outside the read door; gate is sealed at zero:\n  "
         + "\n  ".join(offenders)
-    )
-
-
-def test_read_door_budget_is_tight() -> None:
-    offenders = _count_offenders()
-    assert len(offenders) == READ_DOOR_BUDGET, (
-        f"read-door budget is stale: {len(offenders)} offender(s), budget is {READ_DOOR_BUDGET}; "
-        "lower it to the measured count:\n  " + "\n  ".join(offenders)
     )
 
 
