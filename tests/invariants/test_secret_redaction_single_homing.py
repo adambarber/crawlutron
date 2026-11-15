@@ -6,11 +6,11 @@ stays legal, so caller growth cannot red -- the only red is a second implementat
 import ast
 from pathlib import Path
 
-from tests._walk_primitives import string_constants
-from tests.chokepoint_walks import APP_ROOT, REPO_ROOT
+from tests._walk_primitives import APP_ROOTS, string_constants
+from tests.chokepoint_walks import REPO_ROOT
 
-#: The one sanctioned home for masking implementation.
-HOME = Path("packages/core/src/crawlutron/safety/url_redaction.py")
+#: The one sanctioned home for masking implementation (safe_url owns redaction).
+HOME = Path("packages/safe-url/src/safe_url/url_redaction.py")
 
 #: String-literal markers that betray a masking implementation.
 MASKING_MARKERS = ("[REDACTED]", "[unparseable-webhook-url]")
@@ -83,12 +83,23 @@ def _split_rebuild_mask(func: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
 
 
 def test_secret_redaction_is_single_homed_in_url_redaction():
-    for path in sorted(APP_ROOT.rglob("*.py")):
-        if path == REPO_ROOT / HOME:
-            continue
-        tree = ast.parse(path.read_text())
-        for finding in _masking_violations(path.relative_to(REPO_ROOT), tree):
-            raise AssertionError(f"{finding} -- secret redaction is single-homed in {HOME}")
+    for root in APP_ROOTS:
+        for path in sorted(root.rglob("*.py")):
+            if path == REPO_ROOT / HOME:
+                continue
+            tree = ast.parse(path.read_text())
+            for finding in _masking_violations(path.relative_to(REPO_ROOT), tree):
+                raise AssertionError(f"{finding} -- secret redaction is single-homed in {HOME}")
+
+
+def test_gate_names_a_masking_marker_planted_inside_safe_url():
+    """A planted masking marker inside safe_url names file:line (#1074)."""
+    src = 'def mask_url(url):\n    return "[REDACTED]"\n'
+    violations = _masking_violations(Path("packages/safe-url/src/safe_url/_mask_probe.py"), ast.parse(src))
+    assert any(
+        v == "packages/safe-url/src/safe_url/_mask_probe.py:2 masking marker literal '[REDACTED]'"
+        for v in violations
+    )
 
 
 def test_a_branchless_split_rebuild_mask_reds():
