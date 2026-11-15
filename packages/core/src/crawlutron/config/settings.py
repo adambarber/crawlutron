@@ -27,6 +27,7 @@ from crawlutron.vocabulary.limits import (
     DEFAULT_MAX_RETRIES,
     MAX_HTTP_TIMEOUT_SECONDS,
     MAX_RETRIES,
+    MAX_TOMBSTONE_GRACE_SECONDS,
 )
 
 # Connection-pool sizing bound to the SAME RAM-derived HTTP concurrency the
@@ -480,8 +481,8 @@ def _retention_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> 
             "CRAWLUTRON_RETENTION_SWEEP_GRACE_SECONDS",
             cls.retention_sweep_grace_seconds,
             lo=0,
-            hi=31_536_000,
-            validate=in_range(0, 31_536_000),
+            hi=MAX_TOMBSTONE_GRACE_SECONDS,
+            validate=in_range(0, MAX_TOMBSTONE_GRACE_SECONDS),
             validate_event="operator_retention_grace_out_of_range",
         ),
     }

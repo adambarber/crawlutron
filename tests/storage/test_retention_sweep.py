@@ -55,6 +55,34 @@ class TestRetentionSweepTick:
         finally:
             job_store.close()
 
+    def test_zero_grace_reclaims_tombstone_deleted_before_now_but_not_at_now(self, tmp_path):
+        """Zero grace reclaims tombstones strictly older than now.
+
+        now - 1 is reclaimed; exactly now survives (now < now is false). Checks
+        the DB directly because load() returns None for any tombstoned job.
+        """
+        job_store, _ = stores(tmp_path)
+        try:
+            old_job = job_store.create("http://example.com/old", {"strategies": ["HTTP_DECLARED_CRAWLER"]})
+            fresh_job = job_store.create(
+                "http://example.com/fresh", {"strategies": ["HTTP_DECLARED_CRAWLER"]}
+            )
+            tombstone_job(job_store, old_job.job_id, deleted_at=NOW - 1.0)
+            tombstone_job(job_store, fresh_job.job_id, deleted_at=NOW)
+
+            reclaimed = job_store.reap_tombstones(grace_seconds=0.0, now=NOW)
+
+            assert reclaimed == 1, "zero grace must reclaim tombstones strictly older than now"
+            with closing(sqlite3.connect(job_store.db_path)) as conn:
+                assert not _row_exists(conn, "crawl_jobs", old_job.job_id), (
+                    "now-1 tombstone must be reclaimed"
+                )
+                assert _row_exists(conn, "crawl_jobs", fresh_job.job_id), (
+                    "now tombstone must survive zero-grace sweep"
+                )
+        finally:
+            job_store.close()
+
     def test_expired_result_with_no_subsequent_put_is_reclaimed(self, tmp_path):
         _, result_store = stores(tmp_path)
         try:

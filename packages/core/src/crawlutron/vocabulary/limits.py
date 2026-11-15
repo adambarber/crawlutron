@@ -85,6 +85,10 @@ MAX_TOTAL_URL_BUDGET_SECONDS: float = 900.0
 # `le=` reads this constant -- one source of truth for the bound.
 MAX_RATE_LIMIT_RPS: float = 100.0
 
+# One year of seconds (365 * 24 * 3600): retention sweep grace ceiling.
+# Sourced, not picked; operators see the bound alongside other maxima.
+MAX_TOMBSTONE_GRACE_SECONDS: Final[int] = 365 * 24 * 3600
+
 # Cache TTLs (seconds).
 DEFAULT_CACHE_TTL_SECONDS: float = 3600.0
 
