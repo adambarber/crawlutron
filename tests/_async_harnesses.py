@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from crawlutron.models.json_value import JsonValue
+from crawlutron.storage.safe_db import allow_on_loop
 from tests._timing_harnesses import await_until
 
 
@@ -96,7 +97,8 @@ async def _drain_running_crawls(*, guard: float = 10.0) -> None:
     # bounded wait that cannot retire it force-cancels it so none leaks.
     for job_id in acting():
         pending = frozenset({JobStatus.PENDING, JobStatus.RUNNING})
-        job_store.set_status(job_id, JobStatus.CANCELLED, expected=pending)
+        with allow_on_loop():
+            job_store.set_status(job_id, JobStatus.CANCELLED, expected=pending)
 
 
 async def run_loop_rebind_scenario(get_client, *, guard: float | None = None):

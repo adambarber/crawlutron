@@ -10,6 +10,7 @@ from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.service import async_crawl_runner
 from crawlutron.storage.job_store import JobStatus
+from crawlutron.storage.safe_db import allow_on_loop
 from tests._job_harnesses import make_job_store
 from tests._policy_factories import canonical
 
@@ -38,9 +39,10 @@ def _lose_lease_once(store, original_renew):
     def renew_then_lose(job_id: str, token: str, *, now: float) -> bool:
         calls["n"] += 1
         if calls["n"] == 1:
-            original_renew(job_id, token, now=now)
-            assert store.release_job_claim(job_id, token) is True
-            assert store.claim_running(job_id, "foreign", now=now, claim_seconds=300.0) is True
+            with allow_on_loop():
+                original_renew(job_id, token, now=now)
+                assert store.release_job_claim(job_id, token) is True
+                assert store.claim_running(job_id, "foreign", now=now, claim_seconds=300.0) is True
             return False
         return original_renew(job_id, token, now=now)
 

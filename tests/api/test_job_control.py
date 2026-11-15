@@ -12,6 +12,7 @@ from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.service import job_lifecycle, job_runner
 from crawlutron.storage.job_store import FrontierEntry, JobStatus, JobStore
+from crawlutron.storage.safe_db import allow_on_loop
 from tests._job_harnesses import (
     ScriptedExecute,
     _create_api_job,
@@ -249,8 +250,9 @@ class TestJobControlTransitions:
         job_store = service_app().state.job_store
         job = job_store.create("http://example.com/", CrawlPolicy())
         if seed_terminal:
-            job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
-            job_store.set_status(job.job_id, JobStatus.COMPLETED, expected=JobStatus.RUNNING)
+            with allow_on_loop():
+                job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
+                job_store.set_status(job.job_id, JobStatus.COMPLETED, expected=JobStatus.RUNNING)
         await run_job_control_test(service_app(), job_store, job.job_id, action, expected)
         job_store.delete(job.job_id)
 
@@ -325,8 +327,9 @@ class TestTheRunnerClaim:
         The claim is the flip the two paths below exercise; the state setup
         does not differ between them."""
         job = TestTheRunnerClaim._seeded(job_store)
-        assert job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
-        assert job_store.set_status(job.job_id, JobStatus.PAUSED, expected=JobStatus.RUNNING)
+        with allow_on_loop():
+            assert job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
+            assert job_store.set_status(job.job_id, JobStatus.PAUSED, expected=JobStatus.RUNNING)
         engine = ScriptedExecute(results=[engine_result(GRAPH_ROOT, "rendered")])
         job_runner.install_execute_crawl(engine)
         return job, engine
@@ -335,7 +338,8 @@ class TestTheRunnerClaim:
         # The create/recovery entrance path: whoever loaded a RUNNING row is not the owner, and an owner it
         # did not become means no work.
         job = self._seeded(job_store)
-        assert job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
+        with allow_on_loop():
+            assert job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
         engine = ScriptedExecute(results=[engine_result(GRAPH_ROOT, "rendered")])
         job_runner.install_execute_crawl(engine)
 

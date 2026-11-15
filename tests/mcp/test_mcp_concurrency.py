@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 
 from crawlutron.storage.job_store import JobStatus
+from crawlutron.storage.safe_db import allow_on_loop
 from tests._async_harnesses import issue_key
 from tests._concurrency_probe import block_execute_crawl
 from tests._quota_harness import service_client
@@ -87,7 +88,8 @@ async def test_keyed_mcp_crawl_refused_when_holding_an_async_job(tmp_path):
         record = keys.verify_key(secret)
         assert record is not None
         job_store.create_single_shot("busy", "http://example.com/", {}, owner=record.key_id)
-        assert job_store.set_status("busy", JobStatus.RUNNING, expected=JobStatus.PENDING) is True
+        with allow_on_loop():
+            assert job_store.set_status("busy", JobStatus.RUNNING, expected=JobStatus.PENDING) is True
 
         _assert_quota_refused(*await _mcp_crawl(client, key=secret, url="http://example.com/admin"))
 

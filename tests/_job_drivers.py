@@ -9,6 +9,7 @@ from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.json_value import JsonValue
 from crawlutron.storage.job_store import CrawlJobState, FrontierEntry, JobStatus, JobStore
+from crawlutron.storage.safe_db import allow_on_loop
 from tests._job_store_doubles import seed_frontier
 from tests._policy_factories import canonical
 
@@ -45,7 +46,8 @@ def _seed_job(
         job.in_flight = [FrontierEntry(url=canonical(url), depth=0) for url in kw["in_flight"]]
     job_store.save(job)
     if kw.get("running"):
-        job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
+        with allow_on_loop():
+            job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
     if on_seeded is not None:
         on_seeded(job, job_store)
     return job

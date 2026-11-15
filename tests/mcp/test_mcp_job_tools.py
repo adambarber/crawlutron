@@ -83,6 +83,7 @@ class JobHarness(KeyedToolCaller):
 async def job_harness(tmp_path: Path, *, seeded: int = 0, running: bool = False):
     """A keyed harness with ``seeded`` single-shot jobs owned by the caller."""
     from crawlutron.storage.job_store import JobStatus
+    from crawlutron.storage.safe_db import allow_on_loop
 
     async with _job_mcp_client(tmp_path) as (client, job_store, keys):
         secret = await issue_key(client)
@@ -93,7 +94,8 @@ async def job_harness(tmp_path: Path, *, seeded: int = 0, running: bool = False)
             job_id = f"job-{index}"
             job_store.create_single_shot(job_id, "http://example.com/", {}, owner=owner)
             if running:
-                assert job_store.set_status(job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
+                with allow_on_loop():
+                    assert job_store.set_status(job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
         yield JobHarness(client=client, job_store=job_store, secret=secret)
 
 

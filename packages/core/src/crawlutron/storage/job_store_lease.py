@@ -11,6 +11,7 @@ import threading
 import time
 
 from crawlutron.storage.job_store_collections import JobStatus
+from crawlutron.storage.safe_db import txn_write
 
 DEFAULT_JOB_CLAIM_SECONDS = 300.0
 
@@ -22,8 +23,8 @@ def _execute(
     params: tuple[object, ...],
 ) -> sqlite3.Cursor:
     with lock:
-        cur = conn.execute(statement, params)
-        conn.commit()
+        with txn_write(conn, owner="job_store_lease"):
+            cur = conn.execute(statement, params)
     return cur
 
 

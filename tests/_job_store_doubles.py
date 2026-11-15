@@ -10,6 +10,7 @@ from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.storage.coordination_cookies import SharedCookieStore
 from crawlutron.storage.job_store import CrawlJobState, FrontierEntry, JobStatus, JobStore, OrderedUrlSet
 from crawlutron.storage.result_store import CrawlResultStore
+from crawlutron.storage.safe_db import allow_on_loop
 from crawlutron.storage.watch_store import WatchStore
 from tests._policy_factories import canonical, job_store
 
@@ -72,7 +73,8 @@ class _StoreListener:
 
 def _publishing_set_status(self, job_id, new, *, expected, error=None, **kwargs) -> bool:
     """The real CAS, then a bus publish when the write landed."""
-    changed = self._real_set_status(job_id, new, expected=expected, error=error, **kwargs)
+    with allow_on_loop():
+        changed = self._real_set_status(job_id, new, expected=expected, error=error, **kwargs)
     if changed:
         self.status_bus.publish(job_id)
     return changed

@@ -345,10 +345,12 @@ def base_policy():
 @pytest.fixture
 def job_store(tmp_path):
     """JobStore backed by a per-test SQLite db under ``tmp_path``."""
+    from crawlutron.storage.safe_db import allow_on_loop
     from tests._job_harnesses import make_job_store
 
     store = make_job_store(str(tmp_path))
-    yield store
+    with allow_on_loop():
+        yield store
     store.close()
 
 

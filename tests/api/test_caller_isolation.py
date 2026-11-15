@@ -15,6 +15,7 @@ from crawlutron.runtime.metrics import MetricsStore
 from crawlutron.storage.caller_key_store import CallerKeyStore
 from crawlutron.storage.job_store import CrawlJobState, JobStatus, JobStore
 from crawlutron.storage.result_store import CrawlResultStore
+from crawlutron.storage.safe_db import allow_on_loop
 from crawlutron_rest.api.caller_auth import (
     check_page_quota,
     effective_cookie_namespace,
@@ -132,9 +133,8 @@ def test_saving_a_job_never_transfers_ownership(tmp_path):
 def test_control_plane_moves_through_scoped_status(tmp_path):
     store = make_store(tmp_path / "jobs.db")
     seed_owned_job(store)
-
-    assert store.set_status("crawl_owned", JobStatus.RUNNING, expected=JobStatus.PENDING) is True
-
+    with allow_on_loop():
+        assert store.set_status("crawl_owned", JobStatus.RUNNING, expected=JobStatus.PENDING) is True
     assert store.status_for_caller("crawl_owned", "key_a") is not None
     assert store.status_for_caller("crawl_owned", "key_b") is None
 
@@ -290,7 +290,6 @@ def test_page_quota_rejects_over_budget_crawls():
 
 
 async def test_get_crawl_result_enforces_owner(tmp_path):
-    import pytest
     from fastapi import HTTPException
 
     store = make_store(tmp_path / "jobs.db")
@@ -301,10 +300,10 @@ async def test_get_crawl_result_enforces_owner(tmp_path):
     assert done is not None
     done.results = [cast("dict[str, JsonValue]", payload)]
     store.save(done)
-    store.set_status("crawl_owned", JobStatus.COMPLETED, expected=JobStatus.PENDING)
+    with allow_on_loop():
+        store.set_status("crawl_owned", JobStatus.COMPLETED, expected=JobStatus.PENDING)
     owner = CallerIdentity(caller_id="key_a", authenticated=True)
     stranger = CallerIdentity(caller_id="key_b", authenticated=True)
-
     with pytest.raises(HTTPException) as raised:
         await get_crawl_result("crawl_owned", store, results, caller=stranger)
     assert raised.value.status_code == 404
@@ -357,8 +356,9 @@ def test_active_count_for_caller_counts_only_live_owned_jobs(tmp_path):
     seed_owned_job(store, job_id="crawl_running", owner="key_a")
     seed_owned_job(store, job_id="crawl_other", owner="key_b")
     seed_owned_job(store, job_id="crawl_done", owner="key_a")
-    assert store.set_status("crawl_running", JobStatus.RUNNING, expected=JobStatus.PENDING) is True
-    assert store.set_status("crawl_done", JobStatus.COMPLETED, expected=JobStatus.PENDING) is True
+    with allow_on_loop():
+        assert store.set_status("crawl_running", JobStatus.RUNNING, expected=JobStatus.PENDING) is True
+        assert store.set_status("crawl_done", JobStatus.COMPLETED, expected=JobStatus.PENDING) is True
 
     assert store.active_count_for_caller("key_a") == 1
     assert store.active_count_for_caller("key_b") == 1
@@ -386,7 +386,8 @@ def test_concurrency_quota_rejects_a_full_caller():
 def _concurrency_setup(store: JobStore, issued) -> None:
     """Seed a running job for the issued key so its one slot is taken."""
     seed_owned_job(store, job_id="crawl_busy", owner=issued.key_id)
-    store.set_status("crawl_busy", JobStatus.RUNNING, expected=JobStatus.PENDING)
+    with allow_on_loop():
+        store.set_status("crawl_busy", JobStatus.RUNNING, expected=JobStatus.PENDING)
 
 
 @pytest.mark.parametrize(
@@ -489,8 +490,7 @@ async def test_keyed_crawl_keeps_an_explicit_zero_page_limit(tmp_path):
 
 
 async def test_keyed_crawl_zero_limit_enforced_as_stored(tmp_path):
-    """#593 execution-level: the bound the engine enforces equals the stored
-    bound, so validate_wire_policy is a no-op on max_pages==DEFAULT_MAX_PAGES."""
+    """The engine's enforced bound equals the stored bound for zero limits."""
     async with keyed_quota_crawl(tmp_path, key_max_pages=0, label="agent-b") as (store, _, _, response):
         assert response.status_code == 202, response.text
         stored = keyed_zero_bound(store, response)
