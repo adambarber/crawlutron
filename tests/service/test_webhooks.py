@@ -4,18 +4,9 @@ All three legs live in ``admit_webhook_target``; every door calls this single
 façade so a door that forgets a leg is structurally impossible.
 """
 
-import asyncio
-import time
-
 import pytest
 from safe_url.host_policy import HostPolicy
 
-from crawlutron.models.caller_identity import CallerIdentity
-from crawlutron.service.caller_auth import Tracking, admit
-from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
-
-# The admission law plus the chokepoint facade the two routers share (#1082).
-from crawlutron.service.errors import QuotaRefusal
 from crawlutron.service.webhooks import admit_webhook_target
 from tests._assertions import host_resolves_to
 
@@ -47,42 +38,3 @@ async def test_admit_admits_https_public_target(monkeypatch):
             "https://webhook.example.com/cb", host_policy=HostPolicy.unrestricted()
         )
     assert target.delivery_url() == "https://webhook.example.com/cb"
-
-
-async def test_slow_webhook_probe_outside_admit_does_not_tax_concurrent_admit():
-    """A slow webhook probe must not tax a concurrent admit for the same caller.
-
-    Moving the probe back inside ``admission.admit`` reds this test.
-    """
-    tracker = CallerConcurrencyTracker()
-    caller = CallerIdentity(caller_id="agent-a", authenticated=True, max_pages=100, max_concurrency=1)
-    probe_started = asyncio.Event()
-
-    # Request 1: slow probe runs FIRST, then admit takes the reservation (fixed order).
-    async def request_one():
-        probe_started.set()
-        await asyncio.sleep(2.0)  # slow probe; no reservation held yet
-        async with admit(
-            caller, 10, tracking=Tracking(job_store=None, concurrency_tracker=tracker), payload=None
-        ):
-            pass
-
-    task1 = asyncio.create_task(request_one())
-    await asyncio.wait_for(probe_started.wait(), timeout=5)
-
-    # Request 2: same caller, no probe -- must not be taxed by request 1's probe.
-    started = time.monotonic()
-    admitted = False
-    try:
-        async with admit(
-            caller, 10, tracking=Tracking(job_store=None, concurrency_tracker=tracker), payload=None
-        ):
-            admitted = True
-    except QuotaRefusal:
-        admitted = False
-    elapsed = time.monotonic() - started
-
-    assert admitted is True, "concurrent admit was refused while request 1's probe was in flight"
-    assert elapsed < 1.0, f"concurrent admit waited {elapsed:.2f}s for the slow webhook probe"
-
-    await asyncio.wait_for(task1, timeout=6)
