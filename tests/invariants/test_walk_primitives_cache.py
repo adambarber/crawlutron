@@ -1,14 +1,8 @@
-"""package_roots() and import_roots() are @cache-wrapped (#1096)."""
+"""The suite's memoized walk helpers are @cache-wrapped (#1096, #1108)."""
 
 from tests._walk_primitives import import_roots, package_roots
-
-
-def test_import_roots_returns_same_object_twice():
-    """Two calls to import_roots() must return the exact same object
-    (the @cache wrapper guarantees identity across invocations)."""
-    a = import_roots()
-    b = import_roots()
-    assert a is b, "import_roots() must be @cache-wrapped (different tuple objects returned)"
+from tests.invariants._cache_walk_probe import assert_repeat_call_skips_the_walk
+from tests.trees import test_tree_module_names as _test_tree_module_names
 
 
 def test_package_roots_returns_same_object_twice():
@@ -18,32 +12,16 @@ def test_package_roots_returns_same_object_twice():
     assert a is b, "package_roots() must be @cache-wrapped (different tuple objects returned)"
 
 
-def test_import_roots_rglob_called_once_across_two_calls():
-    """import_roots() must not re-run Path.rglob on repeated calls: first call
-    walks via rglob; with @cache the second returns the cached tuple and triggers
-    zero rglob calls."""
-    import pathlib
-    from unittest.mock import patch
-
+def test_import_roots_walks_the_tree_once():
+    """A repeat call costs zero rglob: the declared cache serves it."""
     import_roots.cache_clear()
     package_roots.cache_clear()
+    roots = assert_repeat_call_skips_the_walk(import_roots)
+    assert roots, "import_roots() resolved no import roots"
 
-    count = 0
-    original_rglob = pathlib.Path.rglob
 
-    def count_rglob(self, pattern):
-        nonlocal count
-        count += 1
-        return original_rglob(self, pattern)
-
-    with patch.object(pathlib.Path, "rglob", count_rglob):
-        import_roots()
-        first = count
-    assert first > 0, "rglob should fire on the first call"
-
-    count = 0
-    with patch.object(pathlib.Path, "rglob", count_rglob):
-        import_roots()
-        second = count
-
-    assert second == 0, f"rglob called {second} times on cached import_roots() (expected 0)"
+def test_tree_module_names_walks_the_test_tree_once():
+    """A repeat call costs zero rglob: the sweep asks once per imported module."""
+    _test_tree_module_names.cache_clear()
+    names = assert_repeat_call_skips_the_walk(_test_tree_module_names)
+    assert "trees" in names, "the name set does not name the test support module itself"

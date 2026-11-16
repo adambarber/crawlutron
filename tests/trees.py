@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+from functools import cache
 
 from tests.chokepoint_walks import APP_ROOT, TESTS_DIR, trees_under
 
@@ -37,6 +38,7 @@ def app_reads(monkeypatch) -> list[pathlib.Path]:
     return seen
 
 
+@cache
 def test_tree_module_names() -> frozenset[str]:
     """The bare module names that name a file in the test tree.
 
