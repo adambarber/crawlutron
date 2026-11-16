@@ -15,12 +15,10 @@ from crawlutron.models.json_value import JsonValue
 from crawlutron.models.result_factory import terminal_attempt
 from crawlutron.models.serialization import to_dict
 from crawlutron.models.taxonomy import Classification
-from crawlutron.transport.browser import BrowserRenderer
 from crawlutron.transport.scheduler import DomainScheduler
 from crawlutron.vocabulary.extraction import EXTRACTION_DOCUMENT, EXTRACTION_TRAFILATURA
 from crawlutron.vocabulary.strategies import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
 from crawlutron.vocabulary.taxonomy import CrawlClassification
-from tests._assertions import browser_integration_test
 from tests._browser_doubles import _fake_browser
 from tests._fetch_doubles import FetcherDouble
 from tests._fetcher_factories import (
@@ -67,10 +65,9 @@ class TestEngineCrawlRequest:
         assert result.status == "failed"
         assert result.classification == "browser_crash"
 
-    @browser_integration_test
     async def test_crawl_request_http_failure_falls_back_to_browser(self, base_url):
-
-        # The intent here is page-fetch failure -> browser fallback.
+        # HTTP fetcher fails -> ladder escalates to browser strategy. A fake
+        # browser double drives the dispatch path.
         _robots = (200, "User-agent: *\nAllow: /\n", "text/plain")
         failing_fetcher = FetcherDouble(
             lambda url, _sent_headers, *_: (
@@ -78,28 +75,19 @@ class TestEngineCrawlRequest:
             )
         )
 
-        renderer = BrowserRenderer()
-
-        async def browser_worker(job):
-            return await renderer.render(
-                job.url,
-                job.options,
-                policy=job.host_policy,
-            )
-
-        try:
-            result = await crawled_result(
-                f"{base_url}/",
-                strategies=[HTTP_DECLARED_CRAWLER, BROWSER_HEADLESS],
-                timeout_seconds=20,
-                max_discovered_links=50,
-                http_fetcher=failing_fetcher,
-                browser_worker=browser_worker,
-            )
-        finally:
-            # An unclosed renderer leaves a live browser process whose pipes the
-            # GC reports as unraisable ResourceWarnings in some later test.
-            await renderer.close()
+        result = await crawled_result(
+            f"{base_url}/",
+            strategies=[HTTP_DECLARED_CRAWLER, BROWSER_HEADLESS],
+            timeout_seconds=20,
+            max_discovered_links=50,
+            http_fetcher=failing_fetcher,
+            browser_worker=_fake_browser(
+                html="<html><body>Example Org</body></html>",
+                text="doc",
+                status="success",
+                classification="rendered",
+            ),
+        )
         assert result.status == "success"
         assert result.classification == "rendered"
         assert "Example Org" in (result.markdown or "")

@@ -215,8 +215,8 @@ class TestShadowDomApi(_AsgiEndpointTests):
 
     @browser_integration_test
     async def test_v1_crawl_shadow_dom_flattened(self):
-        # The ASGI harness runs no lifespan, so the pool is None; a real browser-strategy crawl needs a live
-        # pool. Initialize (real camoufox) and close it in a finally so no browsers leak into later tests.
+        # One real browser per test invocation, created and torn down on the
+        # test's own loop so no Camoufox process leaks into later tests.
         from crawlutron.transport.browser_pool import close_browser_pool, initialize_browser_pool
 
         await initialize_browser_pool()

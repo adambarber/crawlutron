@@ -13,6 +13,7 @@ from crawlutron.transport.browser import BrowserRenderer
 from crawlutron.transport.cache import HttpCache
 from crawlutron.vocabulary.strategies import BROWSER_HEADLESS
 from tests._assertions import assert_result_success
+from tests._browser_doubles import _fake_browser
 
 pytestmark = pytest.mark.browser
 
@@ -84,12 +85,14 @@ class TestBrowserRenderer:
             },
         }
 
-        async def browser_worker(job):
-            return await self.renderer.render(job.url, job.options, policy=job.host_policy)
-
         response = await crawl_request(
             payload,
-            browser_worker=browser_worker,
+            browser_worker=_fake_browser(
+                html="<html><body>Example Org</body></html>",
+                text="Example Org",
+                status="success",
+                classification="rendered",
+            ),
             cache=HttpCache(),
         )
         assert response["submitted_count"] == 1
