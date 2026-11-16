@@ -22,7 +22,7 @@ from crawlutron.service.watch_cores import (
     register_watch_core,
 )
 from crawlutron.service.watch_sweep import WATCH_SWEEP_INTERVAL_SECONDS
-from crawlutron.service.webhooks import ensure_https_webhook_url, validate_webhook_url_async
+from crawlutron.service.webhooks import admit_webhook_target
 from crawlutron_rest.api.caller_auth import auth_denials
 from crawlutron_rest.api.dependencies import CallerDep, SettingsDep, WatchStoreDep
 from crawlutron_rest.api.exceptions import validation_http_error
@@ -61,11 +61,9 @@ async def create_watch(
     if payload.webhook_url is not None:
         host_policy = HostPolicy.from_settings(settings)
         try:
-            # The target admits through the ONE chokepoint: NormalizedUrl refuses
-            # userinfo, and the pinned-request validation is the SSRF rule.
-            ensure_https_webhook_url(payload.webhook_url)
-            await validate_webhook_url_async(payload.webhook_url, host_policy=host_policy)
-            webhook_url = WebhookTarget.admit(payload.webhook_url, host_policy=host_policy)
+            # One chokepoint: validate (https, SSRF) then admit, before
+            # admission.admit holds the caller's slot_lock.
+            webhook_url = await admit_webhook_target(payload.webhook_url, host_policy=host_policy)
         except ValueError as error:
             raise validation_http_error(error) from error
     else:

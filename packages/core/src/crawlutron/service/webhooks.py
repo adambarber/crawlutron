@@ -348,6 +348,14 @@ def start_webhook_delivery(
     return _tracked_delivery(target, payload)
 
 
+async def admit_webhook_target(webhook_url: str, *, host_policy: HostPolicy) -> WebhookTarget:
+    """One chokepoint: validate (https, SSRF) then admit (no userinfo/secret
+    params). Returns the validated, admitted target."""
+    ensure_https_webhook_url(webhook_url)
+    await validate_webhook_url_async(webhook_url, host_policy=host_policy)
+    return WebhookTarget.admit(webhook_url, host_policy=host_policy)
+
+
 async def validate_webhook_url_async(webhook_url: str, *, host_policy: HostPolicy) -> None:
     """Validate a webhook URL against SSRF: resolves the hostname and rejects
     private/loopback targets (DNS-rebinding class) via the one pin rule; raises
@@ -360,6 +368,7 @@ async def validate_webhook_url_async(webhook_url: str, *, host_policy: HostPolic
 
 __all__ = [
     "DELIVERIES_CAP",
+    "admit_webhook_target",
     "deliver_pinned_webhook",
     "ensure_https_webhook_url",
     "max_webhook_size",

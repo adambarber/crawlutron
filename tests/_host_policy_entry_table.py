@@ -26,5 +26,6 @@ def host_policy_entry_table() -> set[str]:
         "packages/core/src/crawlutron/service/policy_suggestions.py:build_policy_suggestions",
         # post_webhook* left the table: they take an admitted WebhookTarget, whose
         # constructor IS the policy seam (probed via deliver_pinned_webhook).
+        "packages/core/src/crawlutron/service/webhooks.py:admit_webhook_target",
         "packages/core/src/crawlutron/service/webhooks.py:deliver_pinned_webhook",
     }

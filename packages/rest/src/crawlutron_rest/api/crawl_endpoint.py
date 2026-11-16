@@ -32,7 +32,7 @@ from crawlutron.service.crawl_executor import execute_crawl
 from crawlutron.service.errors import DomainError, ValidationRefusal
 from crawlutron.service.job_lifecycle import start_tracked_task
 from crawlutron.service.main_helpers import crawl_tail, request_gate
-from crawlutron.service.webhooks import ensure_https_webhook_url, validate_webhook_url_async
+from crawlutron.service.webhooks import admit_webhook_target
 from crawlutron.storage.ids import new_request_id
 from crawlutron.storage.job_store import FrontierEntry, JobStore
 from crawlutron.storage.result_store import CrawlResultStore, CrawlSpillStore
@@ -129,6 +129,11 @@ async def crawl(
         host_policy = HostPolicy.from_settings(settings)
         checked_pairs = checked_payload_urls(payload, settings.max_batch_size, host_policy=host_policy)
         delta_context = await delta_context_for(payload, active_caller.caller_id, result_store)
+        webhook_url: WebhookTarget | None = None
+        if payload.webhook_url is not None:
+            # One chokepoint: validate (https, SSRF) then admit before
+            # admission.admit holds the caller's slot_lock.
+            webhook_url = await admit_webhook_target(payload.webhook_url, host_policy=host_policy)
         return await _admitted_crawl(
             payload,
             active_caller=active_caller,
@@ -139,13 +144,10 @@ async def crawl(
             spill_store=spill_store,
             concurrency_tracker=concurrency_tracker,
             shutdown_event=shutdown_event,
-            host_policy=host_policy,
             checked_pairs=checked_pairs,
             delta_context=delta_context,
             request=request,
-            webhook_url=None
-            if payload.webhook_url is None
-            else WebhookTarget.admit(payload.webhook_url, host_policy=host_policy),
+            webhook_url=webhook_url,
         )
 
 
@@ -160,7 +162,6 @@ async def _admitted_crawl(
     spill_store: CrawlSpillStore | None,
     concurrency_tracker: CallerConcurrencyTracker | None,
     shutdown_event: asyncio.Event,
-    host_policy: HostPolicy,
     checked_pairs: list[tuple[str, NormalizedUrl]],
     delta_context: DeltaContext | None,
     request: Request | None,
@@ -193,7 +194,6 @@ async def _admitted_crawl(
                 result_store=result_store,
                 spill_store=spill_store,
                 shutdown_event=shutdown_event,
-                host_policy=host_policy,
                 checked=checked_pairs,
                 owner=owner,
                 webhook_url=webhook_url,
@@ -218,20 +218,12 @@ async def _accepted_async(
     result_store: CrawlResultStore,
     spill_store: CrawlSpillStore | None,
     shutdown_event: asyncio.Event,
-    host_policy: HostPolicy,
     checked: list[tuple[str, NormalizedUrl]],
     owner: str,
     webhook_url: WebhookTarget | None,
     delta_context: DeltaContext | None,
 ) -> JSONResponse:
-    """The 202 door: validate the webhook, persist the job row, start the runner."""
-    if webhook_url is not None:
-        delivery = webhook_url.delivery_url()
-        try:
-            ensure_https_webhook_url(delivery)
-        except ValueError as error:
-            raise http_error(422, "validation_error", str(error)) from error
-        await validate_webhook_url_async(delivery, host_policy=host_policy)
+    """The 202 door: persist the job row and start the runner (probe ran before admit)."""
     request_id = new_request_id()
     # The store's tier, not ``settings``: the row is read back with the
     # store's tier, and two tier sources drift apart the moment they differ.

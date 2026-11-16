@@ -262,6 +262,19 @@ async def _probe_webhook_delivery(monkeypatch, tmp_path):
     )
 
 
+async def _probe_admit_webhook_target(monkeypatch, tmp_path):
+    from crawlutron.service import webhooks
+
+    effects = _effects()
+    monkeypatch_wire_guard(monkeypatch, effects)
+    with pytest.raises(ValueError, match="host_denied"):
+        await webhooks.admit_webhook_target(
+            _BLOCKED_URL,
+            host_policy=_denied_policy(),
+        )
+    assert effects["wire"] == []
+
+
 async def _probe_suggestions(monkeypatch, tmp_path):
     """A host this deployment refuses must produce no suggestion at either level: the
     rollup admits every stored URL through the deployment's policy, so a candidate rule
@@ -350,6 +363,7 @@ _PROBES = {
     "packages/core/src/crawlutron/service/watch_cores.py:register_watch_core": _probe_watch_cores,
     "packages/core/src/crawlutron/service/policy_suggestions.py:policy_suggestions": _probe_suggestions,
     "packages/core/src/crawlutron/service/policy_suggestions.py:build_policy_suggestions": _probe_suggestions,
+    "packages/core/src/crawlutron/service/webhooks.py:admit_webhook_target": _probe_admit_webhook_target,
     "packages/core/src/crawlutron/service/webhooks.py:deliver_pinned_webhook": _probe_webhook_delivery,
 }
 

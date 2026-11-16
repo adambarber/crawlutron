@@ -173,7 +173,8 @@ DECLARED_SURFACE_RATCHET = {
     # #849: the typed domain refusals both doors map — one base + named subclasses
     # plus the single-homed quota predicate the sweep reads.
     "packages/core/src/crawlutron/service/errors.py": (17, 16),
-    "packages/core/src/crawlutron/service/webhooks.py": (15, 13),
+    # #1082: admit_webhook_target is the validate-then-admit chokepoint facade.
+    "packages/core/src/crawlutron/service/webhooks.py": (16, 14),
     "packages/core/src/crawlutron/extraction/content.py": (4, 4),
     "packages/core/src/crawlutron/extraction/llm_format.py": (4, 4),
     # #668 raised 18,0 -> 19,0: RATE_LIMITED is the JSON-RPC code the anonymous
