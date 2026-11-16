@@ -145,22 +145,21 @@ def _table_entries() -> set[str]:
     return host_policy_entry_table()
 
 
-def test_host_policy_entry_table_matches_ast_discovery():
-    assert discover_host_policy_entry_points(_app_modules()) == _table_entries()
+def test_host_policy_entry_table_and_undeclared_delta_match_ast_discovery():
+    """Table matches discovery on the real app tree; a synthetic undeclared
+    entry is flagged by discovery but absent from the table."""
+    base = _app_modules()
+    assert discover_host_policy_entry_points(base) == _table_entries()
 
-
-def test_host_policy_discovery_rejects_undeclared_entry_point():
-    modules = _app_modules() + (
-        (
-            REPO_ROOT / "packages/rest/src/crawlutron_rest/api/_undeclared_entry.py",
-            ast.parse(
-                "from safe_url.host_policy import HostPolicy\n"
-                "from safe_url.normalized_url import admit_or_none\n"
-                "def undeclared_entry(url, *, policy: HostPolicy):\n"
-                "    return admit_or_none(url, policy=policy)\n"
-            ),
+    synthetic = (
+        REPO_ROOT / "packages/rest/src/crawlutron_rest/api/_undeclared_entry.py",
+        ast.parse(
+            "from safe_url.host_policy import HostPolicy\n"
+            "from safe_url.normalized_url import admit_or_none\n"
+            "def undeclared_entry(url, *, policy: HostPolicy):\n"
+            "    return admit_or_none(url, policy=policy)\n"
         ),
     )
-    discovered = discover_host_policy_entry_points(modules)
+    discovered = discover_host_policy_entry_points(base + (synthetic,))
     assert "packages/rest/src/crawlutron_rest/api/_undeclared_entry.py:undeclared_entry" in discovered
     assert discovered - _table_entries()

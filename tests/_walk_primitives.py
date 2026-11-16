@@ -109,6 +109,7 @@ def _member_package_roots(base: pathlib.Path, members: tuple[str, ...]) -> tuple
     return tuple(sorted(set(roots)))
 
 
+@cache
 def package_roots(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
     """The importable package dirs (derived packaging truth), sorted.
 
@@ -146,11 +147,12 @@ def _member_import_packages(base: pathlib.Path, member: str) -> tuple[str, ...]:
     return tuple(str(p) for p in packages if isinstance(p, str))
 
 
+@cache
 def import_roots(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
     """The import-root package dirs (``packages/<member>/<import-name>``), derived.
 
     From each member's wheel ``packages`` truth; a new member lands here by its
-    own pyproject, never a hand-typed list (#906)."""
+    own pyproject, never a hand-typed list (#906). Memoized via @cache."""
     roots = [
         f"{member}/{pkg}" for member in package_roots(base) for pkg in _member_import_packages(base, member)
     ]
