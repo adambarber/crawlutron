@@ -10,6 +10,7 @@ import ast
 import pathlib
 from collections.abc import Iterator
 
+from tests._walk_primitives import parsed
 from tests.chokepoint_walks import REPO_ROOT
 
 __all__ = [
@@ -90,7 +91,7 @@ def suite_trees() -> Iterator[tuple[pathlib.Path, ast.Module]]:
     for path in sorted((REPO_ROOT / "tests").rglob("*.py")):
         if "__pycache__" in path.parts:
             continue
-        yield path, ast.parse(path.read_text())
+        yield path, parsed(path)
 
 
 def single_target_assigns(tree: ast.Module) -> Iterator[tuple[str, ast.Assign]]:
