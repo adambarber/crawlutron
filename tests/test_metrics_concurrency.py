@@ -162,17 +162,28 @@ def test_snapshot_never_observes_the_flush_neither_state(shared_db):
 
 
 def test_reset_during_flush_ends_in_one_clean_state(shared_db):
-    """reset() racing a flush must end in one clean state: the commit must not
-    resurrect data reset dropped, and reset must not drop a committed batch.
+    """reset() racing a flush must end in one clean state, never a resurrected
+    batch: the handoff holds the write lock, so reset blocks until the commit.
+    A reset that skips the lock finishes inside the window and resurrects it.
     """
     gate = threading.Event()
     counters = _ParkedFlush(shared_db, gate=gate)
     counters.add_pending("caller:bee", 1.0)
+    reset_finished = threading.Event()
+
+    def reset() -> None:
+        counters.reset()
+        reset_finished.set()
+
     flusher = _start_parked_flush(counters)
-    counters.reset()
+    resetter = threading.Thread(target=reset)
+    resetter.start()
+    assert not reset_finished.wait(timeout=0.05), "reset returned while the flush held the handoff"
     gate.set()
+    assert reset_finished.wait(timeout=5), "reset never finished after the handoff released"
     flusher.join(timeout=5)
-    assert not flusher.is_alive()
+    resetter.join(timeout=5)
+    assert not flusher.is_alive() and not resetter.is_alive()
     assert counters.snapshot() == {}, "reset during a flush left a trace of the batch"
 
 
