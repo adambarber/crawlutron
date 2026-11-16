@@ -7,10 +7,11 @@ from __future__ import annotations
 
 import ast
 import pathlib
+from unittest import mock
 
 import pytest
 
-from tests._walk_primitives import comment_lines, is_exempt, string_constants
+from tests._walk_primitives import comment_lines, is_exempt, parsed, string_constants
 from tests.chokepoint_walks import REPO_ROOT
 
 __all__ = ["MOVED_MODULES"]
@@ -106,7 +107,7 @@ def _drift_offenders(root: pathlib.Path = _TESTS_ROOT) -> list[str]:
             path.relative_to(REPO_ROOT).as_posix() if path.is_relative_to(REPO_ROOT) else path.as_posix()
         )
         source = path.read_text(encoding="utf-8")
-        tree = ast.parse(source)
+        tree = parsed(path)
         for lineno, value in string_constants(tree):
             for name in MOVED_MODULES:
                 dotted = f"crawlutron_rest.api.{name}"
@@ -177,3 +178,22 @@ def test_moved_module_shim_gate_green_when_shim_exists() -> None:
         test_moved_module_shim_still_resolves()
     finally:
         MOVED_MODULES.pop("crawl_endpoint", None)
+
+
+def test_drift_detector_routes_through_shared_parse_cache() -> None:
+    """The detector walks `parsed(path)` trees; a cached read costs zero
+    `ast.parse` calls — an inline parse fires once per file and this goes red."""
+    files = sorted(p for p in _TESTS_ROOT.rglob("*.py") if "__pycache__" not in p.parts)
+    for path in files:
+        parsed(path)  # warm the shared cache so the detector sees hits
+    calls: list[tuple[object, ...]] = []
+    real_parse = ast.parse
+
+    def counting(*args, **kwargs):
+        calls.append(args)
+        return real_parse(*args, **kwargs)
+
+    with mock.patch("ast.parse", counting):
+        offenders = _drift_offenders()
+    assert not offenders
+    assert calls == []

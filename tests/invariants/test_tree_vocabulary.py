@@ -5,6 +5,7 @@ import pathlib
 from collections.abc import Iterator
 from functools import lru_cache
 
+from tests._walk_primitives import _narrow
 from tests.chokepoint_walks import (
     APP_ROOT,
     REPO_ROOT,
@@ -14,6 +15,7 @@ from tests.chokepoint_walks import (
     resolved_expr_name,
     trees_under,
 )
+from tests.invariants._cache_walk_probe import assert_second_call_skips_the_walk
 from tests.rules import Bites, Registry, Rule, Silent
 from tests.trees import test_tree_module_names as _test_tree_module_names
 from tests.trees import tree_under_tests as _tests_tree
@@ -37,7 +39,7 @@ def _referenced_names(tree: ast.AST, path: pathlib.Path) -> frozenset[str]:
     and qualified forms resolved through imports -- ``attr`` alone lied."""
     local = _test_tree_module_names()
     names: set[str] = set()
-    for node in ast.walk(tree):
+    for node in _narrow(tree, "referenced_names", ast.Name, ast.alias, ast.Attribute):
         if isinstance(node, ast.Name):
             names.add(node.id)
         elif isinstance(node, ast.alias):
@@ -214,3 +216,12 @@ RULES = Registry((VOCABULARY_PRIMITIVES_ARE_REFERENCED, RETIRED_VOCABULARY_IS_NO
 def test_no_rule_violations():
     """Vocabulary primitives are referenced; retired buckets are not imported."""
     RULES.check_all_clean()
+
+
+def test_referenced_names_reuses_the_cached_node_walk() -> None:
+    """One tree is walked once: the second call is served by the node cache."""
+    tree = ast.parse("x = 1\nimport os as operating_system\n")
+    path = pathlib.Path("probe.py")
+    first = _referenced_names(tree, path)
+    second = assert_second_call_skips_the_walk(_referenced_names, tree, path, root=tree)
+    assert first == second

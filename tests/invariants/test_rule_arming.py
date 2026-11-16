@@ -10,8 +10,10 @@ import importlib
 import re
 from collections.abc import Iterator, Sequence
 
+from tests._walk_primitives import _narrow
 from tests.chokepoint_walks import REPO_ROOT, parsed
 from tests.invariants._armed_detectors import ArmedHandRolled, hand_rolled_detectors
+from tests.invariants._cache_walk_probe import assert_second_call_skips_the_walk
 from tests.invariants._shared import app_names
 from tests.rules import Registry, Rule
 
@@ -88,7 +90,7 @@ def _private_keys(body: ast.AST, constants: dict[str, str]) -> set[str]:
     Only strings, only constants: a local named ``_seen`` is not a spelling the
     detector compares anything to."""
     keys: set[str] = set()
-    for node in ast.walk(body):
+    for node in _narrow(body, "private_keys", ast.Constant, ast.Name):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             keys.add(node.value)
         elif isinstance(node, ast.Name) and node.id in constants:
@@ -263,3 +265,12 @@ def test_every_rule_is_still_armed_on_a_name_the_app_tree_has() -> None:
         "nothing and reports green while governing nothing. Update the detector to the new "
         "spelling, or drop the rule if the property moved out of scope: " + "; ".join(found)
     )
+
+
+def test_private_keys_reuses_the_cached_node_walk() -> None:
+    """One body is walked once: the second call is served by the node cache."""
+    body = ast.parse("x = '_gone'\n").body[0]
+    constants: dict[str, str] = {}
+    first = _private_keys(body, constants)
+    second = assert_second_call_skips_the_walk(_private_keys, body, constants, root=body)
+    assert first == second == {"_gone"}
