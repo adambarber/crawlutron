@@ -6,22 +6,44 @@ The local RMW needs one lock; the series check-then-insert must not cross the ca
 from __future__ import annotations
 
 import asyncio
-import sys
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping
+from pathlib import Path
+
+import pytest
 
 from crawlutron.runtime.metrics import MetricsStore
 from crawlutron.storage.coordination_counters import CoordinationCounters
+from crawlutron.storage.migrations import migrate_store
+from crawlutron.storage.migrations.manifest import StoreSchema
 from tests._thread_fanout import run_threads
 
 THREADS = 10
 INCREMENT_EACH = 100
 
 
+@pytest.fixture(scope="module")
+def shared_db(tmp_path_factory) -> Path:
+    """One database migrated once for the whole module; tests scrub rows between themselves."""
+    db_path = tmp_path_factory.mktemp("metrics_concurrency") / "shared.db"
+    migrate_store(db_path, StoreSchema.COORDINATION_COUNTERS)
+    return db_path
+
+
+@pytest.fixture(autouse=True)
+def _scrub_rows(shared_db: Path) -> Generator[None, None, None]:
+    """Drop every row the test wrote so the next test starts from a clean row set."""
+    yield
+    store = CoordinationCounters(shared_db)
+    try:
+        store.reset()
+    finally:
+        store.close()
+
+
 def _hammer(store, work) -> None:
     """Run ``work`` from ten threads released together, forcing preemption."""
-    sys.setswitchinterval(1e-6)
     start = threading.Barrier(THREADS)
     failures: list[Exception] = []
 
@@ -34,7 +56,6 @@ def _hammer(store, work) -> None:
             failures.append(exc)
 
     run_threads(run, count=THREADS)
-    sys.setswitchinterval(5e-3)
     assert not failures, failures
 
 
@@ -50,15 +71,15 @@ async def test_concurrent_local_increments_are_never_lost():
     await _assert_throttle_total(store)
 
 
-async def test_concurrent_shared_store_increments_are_never_lost(tmp_path):
+async def test_concurrent_shared_store_increments_are_never_lost(shared_db):
     """The SQL upsert path stays exact under the same hammer."""
-    store = MetricsStore(counters=CoordinationCounters(tmp_path / "shared.db"))
+    store = MetricsStore(counters=CoordinationCounters(shared_db))
     await _assert_throttle_total(store)
 
 
-async def test_concurrent_series_registration_never_crosses_the_cap(tmp_path):
+async def test_concurrent_series_registration_never_crosses_the_cap(shared_db):
     """Callers registering past the cap while others race must fold, not overflow."""
-    counters = CoordinationCounters(tmp_path / "series.db")
+    counters = CoordinationCounters(shared_db)
     store = MetricsStore(counters=counters)
     for existing in range(255):
         await store.observe_crawl(caller_id=f"seed-{existing}")
@@ -107,41 +128,45 @@ def _start_parked_flush(counters: _ParkedFlush) -> threading.Thread:
     return flusher
 
 
-def test_snapshot_never_observes_the_flush_neither_state(tmp_path):
+def test_snapshot_never_observes_the_flush_neither_state(shared_db):
     """Kills the two-step flush mutant: swap, release ``_lock``, then commit.
     While a batch is in flight a snapshot sees it exactly once -- pending
     before the handoff, rows after it -- never in neither place.
     """
     gate = threading.Event()
-    counters = _ParkedFlush(tmp_path / "handoff.db", gate=gate)
+    counters = _ParkedFlush(shared_db, gate=gate)
     counters.add_pending("caller:bee", 1.0)
     assert counters.snapshot() == {"caller:bee": 1.0}
 
     seen: dict[str, float] = {}
+    snapshot_taken = threading.Event()
 
     def read() -> None:
         seen.update(counters.snapshot())
+        snapshot_taken.set()
 
     flusher = _start_parked_flush(counters)
     reader = threading.Thread(target=read)
     reader.start()
-    reader.join(timeout=2)
-    assert not reader.is_alive() or "caller:bee" not in seen, (
+    # Mid-handoff probe: with the handoff parked, the fixed code holds the
+    # write lock, so a snapshot here is the neither-state gap the mutant exposes.
+    assert not snapshot_taken.wait(timeout=0.05), (
         "snapshot observed the batch in neither pending nor the rows"
     )
     gate.set()
+    assert snapshot_taken.wait(timeout=5), "reader never snapshotted the post-handoff state"
+    assert seen == {"caller:bee": 1.0}, "snapshot observed the batch in neither pending nor the rows"
     flusher.join(timeout=5)
     reader.join(timeout=5)
     assert not flusher.is_alive() and not reader.is_alive()
-    assert seen == {"caller:bee": 1.0}, f"batch seen {seen!r}, expected exactly once"
 
 
-def test_reset_during_flush_ends_in_one_clean_state(tmp_path):
+def test_reset_during_flush_ends_in_one_clean_state(shared_db):
     """reset() racing a flush must end in one clean state: the commit must not
     resurrect data reset dropped, and reset must not drop a committed batch.
     """
     gate = threading.Event()
-    counters = _ParkedFlush(tmp_path / "reset.db", gate=gate)
+    counters = _ParkedFlush(shared_db, gate=gate)
     counters.add_pending("caller:bee", 1.0)
     flusher = _start_parked_flush(counters)
     counters.reset()
@@ -151,22 +176,22 @@ def test_reset_during_flush_ends_in_one_clean_state(tmp_path):
     assert counters.snapshot() == {}, "reset during a flush left a trace of the batch"
 
 
-def test_second_flush_of_an_empty_batch_is_a_no_op(tmp_path):
+def test_second_flush_of_an_empty_batch_is_a_no_op(shared_db):
     """A second flush after the first commits nothing; pending is drained once."""
-    counters = _ParkedFlush(tmp_path / "double.db", gate=None)
+    counters = _ParkedFlush(shared_db, gate=None)
     counters.add_pending("bee", 2.0)
     counters.flush()
     counters.flush()
     assert counters.snapshot() == {"bee": 2.0}
 
 
-def test_series_cap_holds_under_forced_flush_window(tmp_path):
+def test_series_cap_holds_under_forced_flush_window(shared_db):
     """Ten registrations race while every flush is parked mid-handoff: a
     snapshot that sees a batch in neither pending nor the rows lets each
     registration mint its own series past 257; the atomic handoff keeps the cap."""
     gate = threading.Event()
     gate.set()  # open while seeding: flushes commit normally
-    counters = _ParkedFlush(tmp_path / "series.db", gate=gate)
+    counters = _ParkedFlush(shared_db, gate=gate)
     store = MetricsStore(counters=counters)
     for existing in range(255):
         asyncio.run(store.observe_crawl(caller_id=f"seed-{existing}"))
@@ -204,28 +229,28 @@ class _RecordingSnapshot(CoordinationCounters):
         return super().snapshot()
 
 
-async def test_caller_series_source_read_runs_off_the_loop(tmp_path):
+async def test_caller_series_source_read_runs_off_the_loop(shared_db):
     """The caller-series source read runs off the event loop.
 
     Red before step 2: snapshot() ran on the loop thread; green after it runs
     on a worker thread via asyncio.to_thread.
     """
     loop_ident = threading.get_ident()
-    counters = _RecordingSnapshot(tmp_path / "offloop.db")
+    counters = _RecordingSnapshot(shared_db)
     store = MetricsStore(counters=counters)
     await store.observe_crawl(caller_id="off-loop")
     assert counters.snapshot_idents, "store.snapshot was never called"
     assert all(ident != loop_ident for ident in counters.snapshot_idents)
 
 
-async def test_bind_holds_write_lock_across_carryover(tmp_path) -> None:
+async def test_bind_holds_write_lock_across_carryover(shared_db) -> None:
     """An increment parked mid-RMW while bind carries over ``_local`` is
     flushed with the carryover: bind holds the write lock, so nothing is
     stranded; unfixed, bind clears ``_local`` mid-RMW and reads 1.0 instead of 2.0."""
     KEY = "extraction_doc_pool_unavailable_total"
     store = MetricsStore()  # no store bound yet
     store.record_doc_pool_unavailable()  # _local[KEY] = 1.0
-    counters = CoordinationCounters(tmp_path / "bind.db")
+    counters = CoordinationCounters(shared_db)
 
     parked = threading.Event()
     released = threading.Event()
@@ -243,11 +268,11 @@ async def test_bind_holds_write_lock_across_carryover(tmp_path) -> None:
     )
 
 
-async def test_repeat_caller_reads_store_once(tmp_path) -> None:
+async def test_repeat_caller_reads_store_once(shared_db) -> None:
     """Repeat observations of one caller read the shared table once, not per
     call: the admitted-series cache answers for known callers. A new caller
     still consults the store and folds at the cap."""
-    counters = _RecordingSnapshot(tmp_path / "cache.db")
+    counters = _RecordingSnapshot(shared_db)
     store = MetricsStore(counters=counters)
     for _ in range(3):
         await store.observe_crawl(caller_id="repeat")
@@ -260,10 +285,10 @@ async def test_repeat_caller_reads_store_once(tmp_path) -> None:
     assert len(counters.snapshot_idents) > 1  # new callers still consult the store
 
 
-async def test_caller_cache_is_cleared_on_reset(tmp_path) -> None:
+async def test_caller_cache_is_cleared_on_reset(shared_db) -> None:
     """The admitted-series cache is cleared on reset, so a reset caller
     re-consults the shared table."""
-    counters = _RecordingSnapshot(tmp_path / "reset.db")
+    counters = _RecordingSnapshot(shared_db)
     store = MetricsStore(counters=counters)
     await store.observe_crawl(caller_id="repeat")
     assert len(counters.snapshot_idents) == 1
@@ -274,23 +299,23 @@ async def test_caller_cache_is_cleared_on_reset(tmp_path) -> None:
     assert len(counters.snapshot_idents) == 2
 
 
-async def test_caller_cache_is_cleared_on_bind(tmp_path) -> None:
+async def test_caller_cache_is_cleared_on_bind(shared_db) -> None:
     """The admitted-series cache is cleared on bind: carryover flushes into the
     rebound store and a repeat caller re-consults it."""
     store = MetricsStore()  # no store bound yet
     await store.observe_crawl(caller_id="repeat")  # _local holds caller:repeat = 1
-    bound = _RecordingSnapshot(tmp_path / "bound.db")
+    bound = _RecordingSnapshot(shared_db)
     await store.bind_counters(bound)  # carryover flushes _local into bound
     await store.observe_crawl(caller_id="repeat")  # cache cleared: re-consults bound
     assert len(bound.snapshot_idents) == 1  # exactly one re-consultation
     assert (await store.snapshot()).caller_counts == {"repeat": 2.0}  # carryover + new
 
 
-async def test_admitted_series_count_stays_at_cap(tmp_path) -> None:
+async def test_admitted_series_count_stays_at_cap(shared_db) -> None:
     """A caller-id flood cannot grow the admitted-series dict past the cap:
     folded callers are not cached, so the cache stops at the cap while the
     overflow series keeps bare == sum(labels) exact."""
-    counters = CoordinationCounters(tmp_path / "flood.db")
+    counters = CoordinationCounters(shared_db)
     store = MetricsStore(counters=counters)
     for i in range(400):
         await store.observe_crawl(caller_id=f"flood-{i}")
