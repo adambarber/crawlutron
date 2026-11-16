@@ -2,6 +2,7 @@
 curl_cffi fetcher in an isolated spawned interpreter (in-process curl_cffi
 busy-spins the GIL). Why and how: ``docs/testing.md`` -> Transport doubles."""
 
+import functools
 import multiprocessing
 import socket
 import threading
@@ -225,7 +226,7 @@ def patch_http_fetcher_transport(
     return client
 
 
-def _genuine_cffi_outcome(url: str, timeout_seconds: int, max_content_length: int) -> FetchOutcome:
+def _genuine_cffi_outcome(url: str, timeout_seconds: float, max_content_length: int) -> FetchOutcome:
     """Fetch `url` with the real fetcher, right here, and classify the result.
 
     Returns the production result or a :class:`FetchFailed` naming what ended it;
@@ -251,7 +252,7 @@ def _genuine_cffi_outcome(url: str, timeout_seconds: int, max_content_length: in
 
 
 def outcome_worker(
-    url: str, timeout_seconds: int, max_content_length: int, out_queue: Queue[FetchOutcome]
+    url: str, timeout_seconds: float, max_content_length: int, out_queue: Queue[FetchOutcome]
 ) -> None:
     """Subprocess body: hand the parent one outcome and exit.
 
@@ -272,17 +273,44 @@ def join_or_kill(worker: BaseProcess, join_timeout: float, what: str) -> None:
         pytest.fail(f"{what} was still running {join_timeout}s after the join")
 
 
+#: Inherited from the flat join_timeout=8.0 this work deleted: at the 0.25 s budget
+#: it buys ~2x headroom (child work ~1.79s against a 4.05s bound) under load.
+_GUARD_FACTOR = 8.0
+#: The closed port the floor probe dials: connection refused, no fetch work.
+_FLOOR_PROBE_URL = "http://127.0.0.1:1/"
+#: The measuring child's own bound: fixed and generous, never self-derived.
+_FLOOR_PROBE_JOIN_SECONDS = 30.0
+
+
+@functools.cache
+def _measured_child_floor_seconds() -> float:
+    """One warm spawned child's floor: interpreter boot plus the worker's imports.
+
+    Measured once per process against a closed port, so the join bound below
+    scales with the child cost this machine actually pays, not a flat number."""
+    out_queue = isolated_queue()
+    worker = isolated_process(
+        outcome_worker, (_FLOOR_PROBE_URL, 0.05, DEFAULT_MAX_CONTENT_LENGTH_BYTES, out_queue)
+    )
+    started = time.monotonic()
+    worker.start()
+    join_or_kill(worker, _FLOOR_PROBE_JOIN_SECONDS, "the child floor probe")
+    return time.monotonic() - started
+
+
 def real_cffi_fetch_outcome(
     url: str,
     *,
-    timeout_seconds: int = 10,
+    timeout_seconds: float = 10.0,
     max_content_length: int = DEFAULT_MAX_CONTENT_LENGTH_BYTES,
-    join_timeout: float = 10.0,
+    join_timeout: float | None = None,
 ) -> FetchOutcome:
     """Run the genuine curl_cffi fetcher against `url` in a spawned interpreter.
 
-    Loopback targets set ``CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1`` here;
-    ``join_timeout`` is a hang guard, not a budget."""
+    The default join bound derives from the measured child floor plus the timeout,
+    so the guard scales with the work it guards; loopback callers set the private env."""
+    if join_timeout is None:
+        join_timeout = (_measured_child_floor_seconds() + timeout_seconds) * _GUARD_FACTOR
     out_queue = isolated_queue()
     worker = isolated_process(outcome_worker, (url, timeout_seconds, max_content_length, out_queue))
     worker.start()

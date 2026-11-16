@@ -250,8 +250,7 @@ def test_cffi_stream_timeout_honored_on_stalled_body(monkeypatch) -> None:
     try:
         outcome = real_cffi_fetch_outcome(
             f"http://127.0.0.1:{server.server_port}/",
-            timeout_seconds=1,
-            join_timeout=8.0,
+            timeout_seconds=0.25,
         )
     finally:
         _STALL_RELEASE.set()

@@ -130,7 +130,7 @@ def test_http_fetcher_alias_carries_the_documented_argument_types():
     assert [param.annotation for param in _parameters_of_kind(alias, _POSITIONAL)] == [
         NormalizedUrl,
         dict[str, str],
-        int,
+        float,
         int,
     ]
     assert alias.return_annotation is HttpFetchResult

@@ -22,6 +22,6 @@ class HttpFetcher(Protocol):
         self,
         url: NormalizedUrl,
         headers: dict[str, str],
-        timeout_seconds: int,
+        timeout_seconds: float,
         max_content_length: int = ...,
     ) -> HttpFetchResult: ...

@@ -43,7 +43,7 @@ class RobotsRules:
 
 
 FetchAndDecode = Callable[
-    [HttpFetcher, NormalizedUrl, Mapping[str, str], int], Awaitable[tuple[str | None, int | None]]
+    [HttpFetcher, NormalizedUrl, Mapping[str, str], float], Awaitable[tuple[str | None, int | None]]
 ]
 
 robots_cache: BoundedTTLCache[tuple[str, HostPolicy], RobotsRules] = BoundedTTLCache(
@@ -56,7 +56,7 @@ _inflight: dict[tuple[str, HostPolicy], asyncio.Task[RobotsRules]] = {}
 async def _load_uncached(
     target: NormalizedUrl,
     fetcher: HttpFetcher,
-    timeout_seconds: int,
+    timeout_seconds: float,
     fetch_and_decode: FetchAndDecode,
     policy: HostPolicy,
 ) -> RobotsRules:
@@ -97,7 +97,7 @@ async def _load_uncached(
 async def load_robots_rules(
     target: NormalizedUrl,
     fetcher: HttpFetcher,
-    timeout_seconds: int,
+    timeout_seconds: float,
     *,
     fetch_and_decode: FetchAndDecode | None = None,
     policy: HostPolicy,

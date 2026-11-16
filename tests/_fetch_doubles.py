@@ -90,7 +90,7 @@ class FetcherDouble:
         self,
         url: NormalizedUrl,
         headers: dict[str, str],
-        timeout_seconds: int,
+        timeout_seconds: float,
         max_content_length: int = DEFAULT_MAX_CONTENT_LENGTH_BYTES,
     ) -> HttpFetchResult:
         """What the strategy reads, whichever way this factory was built: declared as

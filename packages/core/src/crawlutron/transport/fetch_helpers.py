@@ -77,7 +77,7 @@ class _SitemapWalk:
     in place, so a walk that hits its caps resolves in fewer passes."""
 
     fetcher: HttpFetcher
-    timeout_seconds: int
+    timeout_seconds: float
     host_policy: HostPolicy
     max_depth: int
     max_urls: int
@@ -89,7 +89,7 @@ async def _call_fetcher(
     fetcher: HttpFetcher,
     url: NormalizedUrl,
     headers: _RequestHeaders,
-    timeout_seconds: int,
+    timeout_seconds: float,
 ) -> HttpFetchResult:
     """Invoke the fetcher, tolerating the sync fetcher doubles the suite passes.
     The production protocol is async (a coroutine return); a sync double returns
@@ -110,7 +110,7 @@ async def fetch_decode_discovery(
     fetcher: HttpFetcher,
     url: NormalizedUrl,
     headers: _RequestHeaders,
-    timeout_seconds: int,
+    timeout_seconds: float,
 ) -> Discovery:
     """Fetch, decompress and decode a discovery body (robots.txt / sitemap.xml):
     the single place the policy lives -- capped decompress against a gzip bomb.
@@ -140,7 +140,7 @@ async def fetch_and_decode(
     fetcher: HttpFetcher,
     url: NormalizedUrl,
     headers: _RequestHeaders,
-    timeout_seconds: int,
+    timeout_seconds: float,
 ) -> tuple[str | None, int | None]:
     """Fetch a URL, returning ``(decoded body, HTTP status)``; the body is present
     only on 200, so the status lets callers tell a 404 from a 5xx (robots fails
@@ -176,7 +176,7 @@ async def fetch_text(
     fetcher: HttpFetcher,
     url: NormalizedUrl,
     cond_headers: Mapping[str, str] | None,
-    timeout_seconds: int,
+    timeout_seconds: float,
 ) -> tuple[str | None, str | None, str | None, bool]:
     """Fetch + decode a sitemap body: ``(text, etag, last_modified, not_modified)``.
     The sitemap layer's only addition is conditional semantics: a 304 means the
@@ -332,7 +332,7 @@ def _cache_walk_result(
 async def fetch_sitemap_urls(
     fetcher: HttpFetcher,
     sitemap_url: NormalizedUrl,
-    timeout_seconds: int,
+    timeout_seconds: float,
     *,
     max_depth: int = SITEMAP_MAX_DEPTH,
     max_urls: int = SITEMAP_MAX_URLS,

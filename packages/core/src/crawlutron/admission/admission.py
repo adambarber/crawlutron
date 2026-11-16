@@ -73,7 +73,7 @@ class JobAdmissionContext:
     want_document_bodies: bool
     respect_robots: bool
     seed_sitemaps: bool
-    timeout_seconds: int
+    timeout_seconds: float
     robots: RobotsGate
     scheduler: DomainScheduler
 

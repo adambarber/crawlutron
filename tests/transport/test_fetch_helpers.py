@@ -96,7 +96,7 @@ class TestFetchDecodeDiscovery:
         async def fetcher(
             url: NormalizedUrl,
             headers: dict[str, str],
-            timeout_seconds: int,
+            timeout_seconds: float,
             max_content_length: int = 1,
         ) -> HttpFetchResult:
             return make_fetch(status=200, headers={"content-type": "text/plain"}, body=b"async")

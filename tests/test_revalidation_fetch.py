@@ -32,7 +32,7 @@ class _CountingFetcher:
         self.header_sets: list[dict[str, str]] = []
 
     async def __call__(
-        self, url: NormalizedUrl, headers: dict[str, str], timeout_seconds: int, max_content_length: int = 0
+        self, url: NormalizedUrl, headers: dict[str, str], timeout_seconds: float, max_content_length: int = 0
     ) -> HttpFetchResult:
         self.calls += 1
         self.header_sets.append(dict(headers))

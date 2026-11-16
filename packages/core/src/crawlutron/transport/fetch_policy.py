@@ -87,7 +87,7 @@ async def fetch_with_retries(
     fetcher: HttpFetcher,
     url: NormalizedUrl,
     headers: dict[str, str],
-    timeout_seconds: int,
+    timeout_seconds: float,
     max_retries: int,
     max_content_length: int = DEFAULT_MAX_CONTENT_LENGTH_BYTES,
 ) -> tuple[_HttpFetchResult, RetryDiagnostics]:
@@ -165,7 +165,7 @@ def _robots_diagnostics(evaluation: str, **overrides: object) -> RobotsDiagnosti
 
 
 async def _fetch_robots_text(
-    http_fetcher: HttpFetcher, robots_url: NormalizedUrl, headers: dict[str, str], timeout_seconds: int
+    http_fetcher: HttpFetcher, robots_url: NormalizedUrl, headers: dict[str, str], timeout_seconds: float
 ) -> str:
     """Fetch + decode one robots.txt body, tolerating a sync test double.
 
@@ -191,7 +191,7 @@ async def _fetch_robot_directives(
     normalized_url: NormalizedUrl,
     http_fetcher: HttpFetcher,
     headers: dict[str, str],
-    timeout_seconds: int,
+    timeout_seconds: float,
 ) -> tuple[float | None, list[str], int]:
     """Fetch /robots.txt and fold its crawl-delay and Sitemap directives.
 
@@ -232,7 +232,7 @@ async def _diagnose_robots(
     normalized_url: NormalizedUrl,
     headers: dict[str, str],
     http_fetcher: HttpFetcher,
-    timeout_seconds: int,
+    timeout_seconds: float,
     flags: DiscoveryFlags,
     engine_robots_sitemaps: list[str] | None,
     robots_evaluated: bool,
@@ -291,7 +291,7 @@ async def _collect_sitemaps(
     normalized_url: NormalizedUrl,
     http_fetcher: HttpFetcher,
     host_policy: HostPolicy,
-    timeout_seconds: int,
+    timeout_seconds: float,
     candidate_urls: list[str],
 ) -> tuple[list[str], dict[str, str], int]:
     """Fetch one or more sitemaps down to ``(loc, lastmod)`` pairs.

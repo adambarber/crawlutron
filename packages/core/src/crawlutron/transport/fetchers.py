@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 async def default_http_fetcher(
     url: NormalizedUrl,
     headers: dict[str, str],
-    timeout_seconds: int,
+    timeout_seconds: float,
     max_content_length: int = DEFAULT_MAX_CONTENT_LENGTH_BYTES,
     *,
     impersonate: bool = False,
@@ -64,7 +64,7 @@ async def default_http_fetcher(
 async def cffi_fetch(
     url: NormalizedUrl,
     headers: dict[str, str],
-    timeout_seconds: int,
+    timeout_seconds: float,
     max_content_length: int,
     *,
     release_stream_noblock: Callable[[object], None] | None = None,

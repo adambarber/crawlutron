@@ -140,7 +140,7 @@ class TestSitemapCandidateBuilderUsesTheCanonicalOrigin:
         async def _capture(
             fetcher: HttpFetcher,
             sitemap_url: NormalizedUrl,
-            timeout_seconds: int,
+            timeout_seconds: float,
             *,
             max_depth: int = 2,
             max_urls: int = 100,

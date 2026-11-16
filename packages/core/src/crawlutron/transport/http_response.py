@@ -44,7 +44,7 @@ class HttpStrategyContext:
     started: float
     caller_conditional: dict[str, str] = field(default_factory=dict)
     profile: RequestProfileRecord = field(default_factory=lambda: cast(RequestProfileRecord, {}))
-    timeout_seconds: int = 10
+    timeout_seconds: float = 10.0
     max_retries: int = 0
     max_content_length: int = 0
     base_headers: dict[str, str] = field(default_factory=dict)
