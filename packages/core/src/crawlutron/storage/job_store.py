@@ -13,6 +13,7 @@ from safe_url.host_policy import HostPolicy
 from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.admission.policy import PolicyLike, PolicyTier, read_policy
+from crawlutron.service.effects import EffectContainer
 from crawlutron.storage.coordination_store import atwin
 from crawlutron.storage.ids import new_job_id
 from crawlutron.storage.migrations import StoreSchema
@@ -55,6 +56,9 @@ from .job_store_state import (
     _create_job,
     _job_row_params,
 )
+
+_DEFAULT_CONTAINER = EffectContainer()
+
 
 _ROW_COLUMNS = (
     "SELECT job_id, kind, owner, root_url, policy, status, created_at, updated_at, error, "
@@ -131,10 +135,6 @@ __all__ = [
 
 
 class JobStore:
-    """SQLite-backed store for crawl job states; every method has an ``a``-prefixed twin off the loop."""
-
-    _conn: sqlite3.Connection
-
     def __init__(
         self,
         db_path: str | Path,
@@ -142,23 +142,19 @@ class JobStore:
         policy: HostPolicy,
         tier: PolicyTier,
         row_to_job: Callable[..., CrawlJobState] | None = None,
+        container: EffectContainer | None = None,
     ):
         self.db_path = Path(db_path)
         self._host_policy = policy
-        # Omitted limits resolve to the API path's number, not the default.
         self.tier = tier
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn, memory_name = connect_store(self.db_path, schema=StoreSchema.CRAWL_JOBS)
-        # Serialize all connection use; every other store instance touches this file.
         self.lock_key = store_lock_key(self.db_path, memory_name)
         self._lock = process_lock(self.lock_key)
-        # Column-addressed rows: schema growth by migration must not couple reads to ALTER order.
         self._conn.row_factory = sqlite3.Row
-        # A store whose last reference dies closes its connection at GC (see bind_conn_lifecycle).
         bind_conn_lifecycle(self)
-        # A caller-supplied row-to-model mapping replaces the default; it runs under the same lock.
         self._row_to_job_factory: Callable[..., CrawlJobState] | None = row_to_job
-        # Live state is rewritten wholesale each batch; history only appended.
+        self._container = container or _DEFAULT_CONTAINER
         self._accumulators = JobAccumulators(self._conn)
 
     def _read_collections(self, row: sqlite3.Row, *, with_accumulators: bool) -> CrawlJobState:
@@ -206,12 +202,10 @@ class JobStore:
         )
 
     def save(self, job: CrawlJobState) -> None:
-        """Persist job DATA; status and owner are INSERT-only, never clobbered by a stale save."""
         with self._lock:
             self._persist(job)
 
     def _persist(self, job: CrawlJobState) -> None:
-        """Write job state to SQLite; caller holds ``self._lock``. Tombstoned jobs no-op."""
         with txn_write(self._conn, owner="job_store.save"):
             if self._is_tombstoned(job.job_id):
                 return
@@ -447,15 +441,18 @@ class JobStore:
         with self._lock:
             self._conn.close()
 
-    # Async twins for the event loop.
-    asave = atwin(save)
+    async def asave(self, job: CrawlJobState) -> None:
+        await self._container.db_write(lambda: self.save(job), owner="job_store.save")
+
+    async def adelete(self, job_id: str) -> bool:
+        return await self._container.db_write(lambda: self.delete(job_id), owner="job_store.delete")
+
     acreate = atwin(create)
     acreate_single_shot = atwin(create_single_shot)
     aset_status = atwin(set_status)
     aload = atwin(load)
     aload_for_caller = atwin(load_for_caller)
     areload_state = atwin(reload_state)
-    adelete = atwin(delete)
     adelete_for_caller = atwin(delete_for_caller)
     alist_jobs = atwin(list_jobs)
     alist_for_caller = atwin(list_for_caller)
@@ -473,3 +470,11 @@ class JobStore:
     arunning_claim = atwin(running_claim)
     ais_job_claim_fresh = atwin(is_job_claim_fresh)
     aretire_orphan_running = atwin(retire_orphan_running)
+
+    async def areap_tombstones(self, *, grace_seconds: float, now: float) -> int:
+        return await self._container.db_write(
+            lambda: self.reap_tombstones(grace_seconds=grace_seconds, now=now)
+        )
+
+    async def areap_orphan_accumulators(self) -> int:
+        return await self._container.db_write(lambda: self.reap_orphan_accumulators())

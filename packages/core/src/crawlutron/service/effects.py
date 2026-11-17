@@ -7,7 +7,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, TypeVar, cast
 
 if TYPE_CHECKING:
     from crawlutron.storage.job_store import JobStore
@@ -53,6 +53,8 @@ _DEFAULT_CONCURRENCY: dict[EffectKind, int] = {
     EffectKind.WEBHOOK_POST: 4,
     EffectKind.SUBPROCESS_SPAWN: 2,
 }
+
+_T = TypeVar("_T")
 
 
 async def _sleep_op(timeout_seconds: float) -> object:
@@ -156,17 +158,18 @@ class EffectContainer:
 
     async def db_write(
         self,
+        txn: Callable[[], _T],
         *,
-        txn: Callable[[], Awaitable[object]],
-        bounds: EffectBounds | None = None,
-        caller_timeout_seconds: float | None = None,
-    ) -> EffectResult:
-        return await self.run(
-            EffectKind.DB_WRITE,
-            txn,
-            caller_timeout_seconds=caller_timeout_seconds or 0.0,
-            bounds=bounds,
-        )
+        owner: str = "",
+        timeout_seconds: float = 30.0,
+    ) -> _T:
+        """Run sync ``txn`` off the loop under the DB_WRITE semaphore (width 1).
+
+        ``owner`` is for tracing; the container is claim-oblivious. ``txn`` runs via
+        ``asyncio.to_thread`` so the writer thread has no running loop.
+        """
+        async with self._semaphore(EffectKind.DB_WRITE):
+            return await asyncio.wait_for(asyncio.to_thread(txn), timeout=timeout_seconds)
 
     async def webhook_post(
         self,
