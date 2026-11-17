@@ -22,6 +22,10 @@ def harness_app(*routers, safety_stack: bool = True) -> FastAPI:
         install_error_surface(app)
     if getattr(app.state, "caller_quota_admission", None) is None:
         app.state.caller_quota_admission = CALLER_QUOTA_ADMISSION
+    if getattr(app.state, "effect_container", None) is None:
+        from crawlutron.service.effects import EffectContainer
+
+        app.state.effect_container = EffectContainer()
     return app
 
 

@@ -14,6 +14,7 @@ from safe_url.host_policy import HostPolicy
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.runtime.app_module_ref import set_module_app_provider
 from crawlutron.runtime.pressure_sizing import default_executor_workers
+from crawlutron.service.effects import EffectContainer
 from crawlutron.service.store_bootstrap import build_stores
 from crawlutron.transport.browser_pool import (
     close_browser_pool,
@@ -220,6 +221,7 @@ def _stash_state(
 
     app.state.caller_quota_admission = CALLER_QUOTA_ADMISSION
     app.state.concurrency_tracker = CallerConcurrencyTracker(coordination_db_path=str(job_store.db_path))
+    app.state.effect_container = EffectContainer()
 
 
 def install_error_surface(app) -> None:

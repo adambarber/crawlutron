@@ -68,6 +68,9 @@ class EffectContainer:
 
     def __init__(self, *, concurrency_per_kind: dict[EffectKind, int] | None = None) -> None:
         concurrency = dict(_DEFAULT_CONCURRENCY)
+        from crawlutron.runtime.pressure_sizing import derive_browser_pool_size
+
+        concurrency.setdefault(EffectKind.RENDER, derive_browser_pool_size())
         if concurrency_per_kind is not None:
             concurrency.update(concurrency_per_kind)
         self._semaphores: dict[EffectKind, asyncio.Semaphore] = {
@@ -207,6 +210,10 @@ class EffectContainer:
         )
 
 
+#: Shared effect container bounding all in-flight effects across callers.
+_DEFAULT_CONTAINER = EffectContainer()
+
+
 async def run_collect_batch(
     container: EffectContainer,
     op: Callable[[], Awaitable[object]],
@@ -246,3 +253,37 @@ async def run_crawl_with_claim(
     first = cast("dict[str, object]", outputs[0]) if outputs else {}
     items = cast("list[object]", first.get("results", [])) if isinstance(first, dict) else []
     return items, still_owned
+
+
+async def container_effect[EffectT](
+    container: EffectContainer | None,
+    kind: EffectKind,
+    op: Callable[[], Awaitable[EffectT]],
+    *,
+    timeout_seconds: float,
+) -> EffectT:
+    """Run ``op`` under ``container``'s per-kind bound and return its value.
+
+    The effect's return value is captured through a closure because
+    ``EffectContainer.run`` returns the ``EffectResult``, not the op's output.
+    """
+    container = container or _DEFAULT_CONTAINER
+    result_holder: list[EffectT] = []
+
+    async def _capture() -> None:
+        result_holder.append(await op())
+
+    if kind is EffectKind.RENDER:
+        await container.render(
+            page_op=_capture,
+            timeout_seconds=timeout_seconds,
+            caller_timeout_seconds=timeout_seconds,
+        )
+    else:
+        await container.fetch(
+            url="",
+            timeout_seconds=timeout_seconds,
+            op=_capture,
+            caller_timeout_seconds=timeout_seconds,
+        )
+    return result_holder[0]

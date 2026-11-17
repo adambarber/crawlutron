@@ -1,6 +1,5 @@
-"""The MCP tool dispatch: every ``tools/call`` door and the machinery that
-turns one endpoint call into a ``ToolResult``; each door delegates to the same
-pydantic models and endpoint functions the REST doors use.
+"""MCP tool dispatch: each ``tools/call`` door delegates to the same endpoints
+the REST doors use, returning a ``ToolResult``.
 """
 
 from __future__ import annotations
@@ -21,6 +20,7 @@ from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.crawl_pending import CrawlPendingError
 from crawlutron.models.json_value import JsonValue
 from crawlutron.models.policy_suggestions_response import PolicySuggestionsResponse
+from crawlutron.models.result_record import ProducerEnvelope
 from crawlutron.safety.json_safe import json_default
 from crawlutron.search.endpoint import search as search_endpoint_handler
 from crawlutron.service.admit_endpoint import admit_url
@@ -28,6 +28,7 @@ from crawlutron.service.caller_auth import CALLER_QUOTA_ADMISSION, CallerQuotaAd
 from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
 from crawlutron.service.crawl_endpoint_cores import delta_context_for
 from crawlutron.service.crawl_executor import execute_crawl
+from crawlutron.service.effects import EffectContainer, EffectKind, container_effect
 from crawlutron.service.errors import DomainError
 from crawlutron.service.job_cores import create_job_core
 from crawlutron.service.main_helpers import crawl_tail, request_gate
@@ -113,11 +114,7 @@ class DoorKind(StrEnum):
 
 @dataclass(frozen=True)
 class DoorBinding:
-    """The declared door data a ToolSpec carries instead of a handler.
-
-    Per-tool injectables live here as declared, checked values (core, store,
-    static refusal), never as **kwargs widened at call sites.
-    """
+    """Declared door data a ToolSpec carries instead of a handler."""
 
     kind: DoorKind
     core: Callable[..., Awaitable[Any]] | None = None
@@ -147,14 +144,12 @@ class DoorEnv(Protocol):
     def concurrency_tracker(self) -> CallerConcurrencyTracker | None: ...
     @property
     def caller_auth(self) -> CallerQuotaAdmission | None: ...
+    @property
+    def container(self) -> EffectContainer | None: ...
 
 
 class _DoorKwargs(TypedDict, total=False):
-    """The keyword set dispatch consumes to build one door: the seven DoorEnv slots.
-
-    Each defaults to None at runtime; doors built with a subset of keys still
-    construct; bodies guard None where a callee requires a value.
-    """
+    """Keyword set dispatch consumes to build one door: the DoorEnv slots."""
 
     settings: NotRequired[CrawlerSettings | None]
     shutdown_event: NotRequired[asyncio.Event | None]
@@ -164,14 +159,12 @@ class _DoorKwargs(TypedDict, total=False):
     concurrency_tracker: NotRequired[CallerConcurrencyTracker | None]
     caller: NotRequired[CallerIdentity | None]
     caller_auth: NotRequired[CallerQuotaAdmission | None]
+    container: NotRequired[EffectContainer | None]
 
 
 @dataclass(frozen=True)
 class _ToolDoor:
-    """The per-call door environment dispatch threads to every kind's body.
-
-    Same slots as before #701; every slot defaults to None.
-    """
+    """Per-call door environment dispatch threads to every kind's body."""
 
     settings: CrawlerSettings | None = None
     shutdown_event: asyncio.Event | None = None
@@ -181,6 +174,7 @@ class _ToolDoor:
     concurrency_tracker: CallerConcurrencyTracker | None = None
     caller: CallerIdentity | None = None
     caller_auth: CallerQuotaAdmission | None = None
+    container: EffectContainer | None = None
 
 
 async def _admit_tool(
@@ -192,27 +186,35 @@ async def _admit_tool(
     work: Callable[[], Awaitable[ToolResult]],
     caller_auth: CallerQuotaAdmission | None = None,
 ) -> ToolResult:
-    """Admit one fetch tool under the readiness gate: request_gate OUTER, admit INNER.
-
-    Every fetch tool funnels through here, so the MCP surface shares the HTTP
-    doors' single gate: /ready counts MCP work and the capacity cap refuses it.
-    """
+    """Admit one fetch tool under the readiness gate; the quota slot is decision-only."""
     port = CALLER_QUOTA_ADMISSION if caller_auth is None else caller_auth
-    # request_gate OUTER, admit INNER: the count takes the slot first, so a quota-
-    # rejected request holds it only for the brief admission (the HTTP door order).
+    # request_gate OUTER, admit INNER: the slot is released before the effect runs.
     try:
         async with request_gate("mcp_request_rejected", logger=_logger):
-            async with port.admit(caller, pages, tracking=tracking, payload=payload):
-                return await work()
+            async with port.admit(caller, pages, tracking=tracking, payload=payload) as owner:
+                # Admission decision only: page bound, quotas, reservation.
+                _ = owner
+            return await work()
     except DomainError as error:
         return _tool_error(error)
 
 
-async def _crawled(payload: CrawlRequest, settings, shutdown_event, caller_id: str, result_store):
-    """Run the crawl and answer through the shared tail: completion metric,
-    unified response, then a fail-open result-store put."""
+async def _crawled(
+    payload: CrawlRequest,
+    settings,
+    shutdown_event,
+    caller_id: str,
+    result_store,
+    container: EffectContainer | None = None,
+):
+    """Run the crawl under ``container.fetch``, then answer through the shared tail."""
     _crawl_started = time.monotonic()
-    result = await execute_crawl(payload, settings=settings, shutdown_event=shutdown_event)
+    timeout_seconds = float(settings.default_timeout_seconds) if settings is not None else 30.0
+
+    async def _crawl_op() -> ProducerEnvelope:
+        return await execute_crawl(payload, settings=settings, shutdown_event=shutdown_event)
+
+    result = await container_effect(container, EffectKind.FETCH, _crawl_op, timeout_seconds=timeout_seconds)
     delta_context = await delta_context_for(payload, caller_id, result_store)
     return await crawl_tail(
         result,
@@ -236,12 +238,9 @@ async def _guarded_crawl(
     job_store=None,
     result_store=None,
     caller_auth=None,
+    container: EffectContainer | None = None,
 ) -> ToolResult:
-    """The delivery refusal check, the caller admission, then the crawl, in one place.
-
-    Both doors refuse webhook/async over MCP for the same reason, and the two
-    refusals spelled out twice are two places a new door can forget the check.
-    """
+    """Delivery refusal, caller admission, then the crawl, in one place."""
     pages = payload.policy.limits.max_pages
     tracking = Tracking(job_store=job_store, concurrency_tracker=concurrency_tracker)
     return await _admit_tool(
@@ -252,7 +251,14 @@ async def _guarded_crawl(
         caller_auth=caller_auth,
         work=lambda: tool_result(
             projected(
-                _crawled(payload, settings, shutdown_event, caller_for(caller).caller_id, result_store),
+                _crawled(
+                    payload,
+                    settings,
+                    shutdown_event,
+                    caller_for(caller).caller_id,
+                    result_store,
+                    container=container,
+                ),
                 projection,
             )
         ),
@@ -323,6 +329,7 @@ async def _crawl_door(payload: BaseModel, door: DoorEnv, projection: CrawlProjec
         job_store=door.job_store,
         result_store=door.result_store,
         caller_auth=door.caller_auth,
+        container=door.container,
     )
 
 
@@ -337,15 +344,25 @@ async def _render_door(payload: BaseModel, door: DoorEnv) -> ToolResult:
     settings = door.settings
     if settings is None:
         raise ValueError("render requires initialized settings")
-    requested = len(render_payload.urls) if render_payload.urls is not None else 1
-    # The namespace binds around the whole admit, so the gate and the work
-    # both run under it; an MCP render's harvest keys by the caller's key id.
+    timeout_seconds = float(
+        render_payload.options.timeout_seconds
+        if render_payload.options and render_payload.options.timeout_seconds
+        else settings.default_timeout_seconds
+    )
+
+    async def _render_op():
+        return await render_endpoint_handler(render_payload, settings=settings)
+
     async with _port(door).bound_render_cookie_namespace(caller_for(door.caller)):
         return await _admit_tool(
             door.caller,
-            requested,
+            len(render_payload.urls) if render_payload.urls is not None else 1,
             tracking=_tracking(door),
-            work=lambda: tool_result(render_endpoint_handler(render_payload, settings=settings)),
+            work=lambda: tool_result(
+                container_effect(
+                    door.container, EffectKind.RENDER, _render_op, timeout_seconds=timeout_seconds
+                )
+            ),
             caller_auth=door.caller_auth,
         )
 
@@ -371,6 +388,11 @@ async def _search_door(payload: BaseModel, door: DoorEnv) -> ToolResult:
 async def _map_door(payload: BaseModel, door: DoorEnv) -> ToolResult:
     """The map door: admission over the policy's page limit, then the frontier walk."""
     map_payload = cast("MapRequest", payload)
+    timeout_seconds = float(door.settings.default_timeout_seconds) if door.settings is not None else 30.0
+
+    async def _map_op():
+        return await map_site(map_payload, settings=door.settings, shutdown_event=door.shutdown_event)
+
     return await _admit_tool(
         door.caller,
         map_payload.policy.limits.max_pages,
@@ -378,7 +400,7 @@ async def _map_door(payload: BaseModel, door: DoorEnv) -> ToolResult:
         tracking=_tracking(door),
         caller_auth=door.caller_auth,
         work=lambda: tool_result(
-            map_site(map_payload, settings=door.settings, shutdown_event=door.shutdown_event)
+            container_effect(door.container, EffectKind.FETCH, _map_op, timeout_seconds=timeout_seconds)
         ),
     )
 
@@ -446,10 +468,7 @@ async def dispatch(spec, payload: BaseModel, **door: Unpack[_DoorKwargs]) -> Too
 
 
 async def _create_job_tool(payload: BaseModel, door: DoorEnv) -> ToolResult:
-    """The admitted job-creation door: the REST create's request_gate-free twin.
-
-    create_job_core itself enters admit (quota + concurrency), so the door
-    must not wrap it in admit a second time -- one request is one slot (#576)."""
+    """Admitted job-creation door; create_job_core enters admit once (#576)."""
     if door.job_store is None:
         raise ValueError("create_job requires an initialized job store")
     if door.concurrency_tracker is None:

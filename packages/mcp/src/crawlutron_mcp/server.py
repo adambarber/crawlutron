@@ -183,6 +183,7 @@ async def call_tool(
     body: dict[str, JsonValue],
     settings,
     shutdown_event,
+    container=None,
     **door,
 ) -> JsonValue:
     """Invoke one declared tool; the door environment forwards to dispatch."""
@@ -213,7 +214,9 @@ async def call_tool(
                 "isError": True,
             },
         )
-    result = await dispatch(spec, payload, settings=settings, shutdown_event=shutdown_event, **door)
+    result = await dispatch(
+        spec, payload, settings=settings, shutdown_event=shutdown_event, container=container, **door
+    )
     success: dict[str, JsonValue] = {
         "resultType": "complete",
         "content": [{"type": "text", "text": result.text}],
@@ -244,6 +247,7 @@ async def _dispatch_method(
     params: dict[str, JsonValue],
     settings,
     shutdown_event,
+    container=None,
     **door,
 ) -> tuple[int, JsonValue | None]:
     """Route one validated method; an unknown method is a 404."""
@@ -252,7 +256,7 @@ async def _dispatch_method(
     if method == "tools/list":
         return 200, result_response(request_id, tools_list_result())
     if method == "tools/call":
-        return 200, await call_tool(request_id, params, settings, shutdown_event, **door)
+        return 200, await call_tool(request_id, params, settings, shutdown_event, container=container, **door)
     return 404, error_response(request_id, METHOD_NOT_FOUND, f"Method not found: {method}")
 
 
@@ -270,6 +274,7 @@ async def handle_mcp_request(
     result_store=None,
     caller=None,
     caller_auth=None,
+    container=None,
 ) -> tuple[int, JsonValue | None]:
     """Process one JSON-RPC message; returns ``(http_status, payload_or_None)``.
 
@@ -287,7 +292,6 @@ async def handle_mcp_request(
     params = body.get("params")
     if not isinstance(params, dict):
         params = {}
-
     try:
         _validate_transport(
             request_id,
@@ -303,6 +307,7 @@ async def handle_mcp_request(
             params,
             settings,
             shutdown_event,
+            container=container,
             concurrency_tracker=concurrency_tracker,
             job_store=job_store,
             watch_store=watch_store,

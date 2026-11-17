@@ -92,6 +92,7 @@ async def mcp_endpoint(
             "caller_quota_unwired",
             "the caller-quota admission port is not wired into app.state",
         )
+    container = getattr(request.app.state, "effect_container", None)
     status, payload = await handle_mcp_request(
         body,
         protocol_version_header=request.headers.get("mcp-protocol-version"),
@@ -99,6 +100,7 @@ async def mcp_endpoint(
         name_header=request.headers.get("mcp-name"),
         settings=settings,
         shutdown_event=shutdown_event,
+        container=container,
         concurrency_tracker=get_concurrency_tracker(request),
         job_store=getattr(request.app.state, "job_store", None),
         watch_store=getattr(request.app.state, "watch_store", None),
