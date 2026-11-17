@@ -29,6 +29,7 @@ from crawlutron.service.crawl_endpoint_cores import (
     stored_response_payload,
 )
 from crawlutron.service.crawl_executor import execute_crawl
+from crawlutron.service.effects import EffectBounds, EffectContainer
 from crawlutron.service.errors import DomainError, ValidationRefusal
 from crawlutron.service.job_lifecycle import start_tracked_task
 from crawlutron.service.main_helpers import crawl_tail, request_gate
@@ -134,6 +135,7 @@ async def crawl(
             # One chokepoint: validate (https, SSRF) then admit before
             # admission.admit holds the caller's slot_lock.
             webhook_url = await admit_webhook_target(payload.webhook_url, host_policy=host_policy)
+        container = EffectContainer()
         return await _admitted_crawl(
             payload,
             active_caller=active_caller,
@@ -148,6 +150,7 @@ async def crawl(
             delta_context=delta_context,
             request=request,
             webhook_url=webhook_url,
+            container=container,
         )
 
 
@@ -166,6 +169,7 @@ async def _admitted_crawl(
     delta_context: DeltaContext | None,
     request: Request | None,
     webhook_url: WebhookTarget | None,
+    container: EffectContainer,
 ) -> JSONResponse | Response | UnifiedCrawlResponse:
     """One admission for both doors: sync holds a slot; async persists a durable job row."""
     async_door = bool(payload.async_mode or webhook_url)
@@ -177,7 +181,7 @@ async def _admitted_crawl(
         payload=payload,
     ) as owner:
         if async_door:
-            crawl_awaitable = None
+            crawl_awaitable: Awaitable[ProducerEnvelope] | None = None
         else:
             crawl_awaitable = execute_crawl(
                 payload,
@@ -207,6 +211,8 @@ async def _admitted_crawl(
             request=request,
             crawl_awaitable=crawl_awaitable,
             delta_context=delta_context,
+            settings=settings,
+            container=container,
         )
 
 
@@ -269,18 +275,12 @@ async def _run_sync_crawl(
     request: Request | None,
     crawl_awaitable: Awaitable[ProducerEnvelope] | None,
     delta_context: DeltaContext | None,
+    settings: CrawlerSettings,
+    container: EffectContainer,
 ) -> Response | UnifiedCrawlResponse:
     """The sync door: disconnect-aware crawl, metrics, store, then the body."""
-    if crawl_awaitable is None:
-        # Unreachable from the dispatch: the sync door always receives a built awaitable.
-        raise AssertionError("the sync door always receives a built awaitable")
     _crawl_started = time.monotonic()
-    # Disconnect-aware sync crawl: if the caller has gone away, halt the
-    # engine call instead of crawling to completion for a dead client.
-    if request is None:
-        result = await crawl_awaitable
-    else:
-        result = await await_or_client_gone(crawl_awaitable, request)
+    result = await _fetch_sync_crawl(container, crawl_awaitable, request, checked, settings)
     response_model = await crawl_tail(
         result,
         _crawl_started,
@@ -298,6 +298,51 @@ async def _run_sync_crawl(
         )
         return Response(content=body, media_type=media_type)
     return response_model
+
+
+async def _fetch_sync_crawl(
+    container: EffectContainer,
+    crawl_awaitable: Awaitable[ProducerEnvelope] | None,
+    request: Request | None,
+    checked: list[tuple[str, NormalizedUrl]],
+    settings: CrawlerSettings,
+) -> ProducerEnvelope:
+    """Run the crawl under the container bound; return the producer envelope."""
+    if crawl_awaitable is None:
+        raise AssertionError("the sync door always receives a built awaitable")
+    timeout_seconds = settings.default_timeout_seconds
+    if not isinstance(timeout_seconds, (int, float)):
+        timeout_seconds = 30.0
+    crawl_output: list[ProducerEnvelope] = []
+
+    async def _crawl_op() -> None:
+        if request is None:
+            crawl_output.append(await crawl_awaitable)
+        else:
+            crawl_output.append(await await_or_client_gone(crawl_awaitable, request))
+
+    await container.fetch(
+        url=checked[0][1].raw,
+        op=_crawl_op,
+        timeout_seconds=timeout_seconds,
+        caller_timeout_seconds=timeout_seconds,
+        bounds=EffectBounds(
+            timeout_seconds=0.0,
+            caller_timeout_seconds=timeout_seconds,
+            floor_seconds=5.0,
+            min_seconds=10.0,
+        ),
+    )
+    return (
+        crawl_output[0]
+        if crawl_output
+        else {
+            "request_id": "",
+            "submitted_count": 0,
+            "policy_schema_version": "",
+            "results": [],
+        }
+    )
 
 
 # The stored-payload reader lives in service.crawl_endpoint_cores (#849); the

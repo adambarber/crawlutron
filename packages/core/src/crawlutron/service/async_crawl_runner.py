@@ -22,6 +22,7 @@ from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
 from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.runtime import process_state
 from crawlutron.service.crawl_executor import execute_crawl
+from crawlutron.service.effects import EffectBounds, EffectContainer
 from crawlutron.service.job_runner import arecord_terminal_failure
 from crawlutron.service.main_helpers import record_crawl_completion
 from crawlutron.service.response_shaping import (
@@ -29,12 +30,14 @@ from crawlutron.service.response_shaping import (
     abuild_unified_crawl_response,
 )
 from crawlutron.service.unified_shaping import build_unified_result
+from crawlutron.service.webhooks import webhook_drain_deadline_seconds
 from crawlutron.storage.job_store import (
     DEFAULT_JOB_CLAIM_SECONDS,
     CrawlJobState,
     JobStatus,
 )
 from crawlutron.storage.result_store import CrawlSpillStore
+from crawlutron.transport.timeouts import Timeouts
 
 logger = logging.getLogger(__name__)
 
@@ -112,35 +115,24 @@ async def run_async_crawl(
     is set. ``url_pairs`` carries the gate's admitted batch, never rebuilt."""
     claim_token = f"async:{request_id}:{time.monotonic_ns()}"
     claim_seconds = DEFAULT_JOB_CLAIM_SECONDS
+    container = EffectContainer()
     try:
-        async with async_crawl_semaphore():
-            job = await _claim_running(request_id, job_store, claim_token, claim_seconds)
-            if job is None:
-                return
-            stop = asyncio.Event()
-            abort = asyncio.Event()
-            forward = asyncio.create_task(_forward_shutdown(shutdown_event, abort))
-            heartbeat = asyncio.create_task(
-                _heartbeat_claim(request_id, job_store, claim_token, claim_seconds, stop, abort)
-            )
-            try:
-                response_payload = await _crawl_and_build_response(
-                    request_id,
-                    payload,
-                    crawl_settings,
-                    abort,
-                    url_pairs,
-                    job,
-                    job_store,
-                    spill_store=spill_store,
-                    delta_context=delta_context,
-                )
-            finally:
-                stop.set()
-                forward.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await forward
-                await heartbeat
+        crawled = await _crawl_under_semaphore(
+            request_id,
+            payload,
+            crawl_settings,
+            job_store,
+            result_store,
+            shutdown_event,
+            url_pairs,
+            spill_store,
+            delta_context,
+            claim_token,
+            claim_seconds,
+        )
+        if crawled is None:
+            return
+        job, response_payload = crawled
         await _publish_success(
             request_id,
             job_store=job_store,
@@ -149,12 +141,60 @@ async def run_async_crawl(
             owner=job.owner,
             webhook_url=webhook_url,
             claim_token=claim_token,
+            container=container,
         )
     except asyncio.CancelledError:
-        await _record_failure(request_id, job_store, "cancelled_shutdown", webhook_url, claim_token)
+        await _record_failure(
+            request_id, job_store, "cancelled_shutdown", webhook_url, claim_token, container
+        )
         raise
     except Exception as exc:
-        await _record_failure(request_id, job_store, str(exc), webhook_url, claim_token)
+        await _record_failure(request_id, job_store, str(exc), webhook_url, claim_token, container)
+
+
+async def _crawl_under_semaphore(
+    request_id: str,
+    payload: CrawlRequest,
+    crawl_settings: CrawlerSettings,
+    job_store,
+    result_store,
+    shutdown_event: asyncio.Event,
+    url_pairs: list[tuple[str, NormalizedUrl]] | None,
+    spill_store: CrawlSpillStore | None,
+    delta_context: DeltaContext | None,
+    claim_token: str,
+    claim_seconds: float,
+) -> tuple[CrawlJobState, dict[str, object]] | None:
+    """Claim and crawl under the bounded semaphore; return (job, payload) or None."""
+    async with async_crawl_semaphore():
+        job = await _claim_running(request_id, job_store, claim_token, claim_seconds)
+        if job is None:
+            return None
+        stop = asyncio.Event()
+        abort = asyncio.Event()
+        forward = asyncio.create_task(_forward_shutdown(shutdown_event, abort))
+        heartbeat = asyncio.create_task(
+            _heartbeat_claim(request_id, job_store, claim_token, claim_seconds, stop, abort)
+        )
+        try:
+            response_payload = await _crawl_and_build_response(
+                request_id,
+                payload,
+                crawl_settings,
+                abort,
+                url_pairs,
+                job,
+                job_store,
+                spill_store=spill_store,
+                delta_context=delta_context,
+            )
+        finally:
+            stop.set()
+            forward.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await forward
+            await heartbeat
+        return job, response_payload
 
 
 async def _claim_running(
@@ -284,12 +324,9 @@ async def _publish_success(
     owner,
     webhook_url: WebhookTarget | None,
     claim_token: str,
+    container: EffectContainer,
 ) -> None:
-    """CAS COMPLETED, store the payload, and POST the webhook.
-
-    Terminal writes are ownership-guarded so a runner that lost its lease
-    cannot clobber a foreign owner.
-    """
+    """CAS COMPLETED, store the payload, POST the webhook. Bounded by the container."""
     published = await job_store.aset_status(
         request_id,
         JobStatus.COMPLETED,
@@ -304,16 +341,35 @@ async def _publish_success(
         await result_store.aput(request_id, response_payload, owner=owner)
     except Exception:
         logger.warning("crawl_result_store_failed", extra={"request_id": request_id})
-    await _deliver_webhook(webhook_url, response_payload)
+    await _deliver_webhook(webhook_url, response_payload, container)
 
 
-async def _deliver_webhook(webhook_url: WebhookTarget | None, payload: dict[str, object]) -> None:
-    """One guarded delivery of the admitted target; admission lived at the door."""
+async def _deliver_webhook(
+    webhook_url: WebhookTarget | None, payload: dict[str, object], container: EffectContainer
+) -> None:
+    """One bounded delivery of the admitted target; admission lived at the door."""
     if webhook_url is None:
         return
     from crawlutron.service.webhooks import post_webhook_guarded
 
-    await post_webhook_guarded(webhook_url, payload)
+    read_timeout = Timeouts.defaults().read
+
+    async def _webhook_op() -> None:
+        await post_webhook_guarded(webhook_url, payload)
+
+    await container.webhook_post(
+        target=webhook_url,
+        payload=payload,
+        op=_webhook_op,
+        timeout_seconds=read_timeout,
+        caller_timeout_seconds=read_timeout,
+        bounds=EffectBounds(
+            timeout_seconds=0.0,
+            caller_timeout_seconds=read_timeout,
+            floor_seconds=read_timeout,
+            min_seconds=webhook_drain_deadline_seconds(),
+        ),
+    )
 
 
 async def _record_failure(
@@ -322,6 +378,7 @@ async def _record_failure(
     error: str,
     webhook_url: WebhookTarget | None,
     claim_token: str,
+    container: EffectContainer,
 ) -> None:
     """Record the terminal FAILED write and POST the error webhook when it won."""
     logger.error("async_crawl_failed", extra={"request_id": request_id, "error": error})
@@ -335,4 +392,4 @@ async def _record_failure(
                     adapt=build_unified_result,
                 )
             ).model_dump()
-            await _deliver_webhook(webhook_url, error_payload)
+            await _deliver_webhook(webhook_url, error_payload, container)

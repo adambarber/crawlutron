@@ -9,8 +9,9 @@ import re
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import replace
+from functools import partial
+from typing import cast
 
-from safe_url.host_policy import HostPolicy
 from safe_url.normalized_url import NormalizedUrl, admit_or_none
 from safe_url.url_redaction import redact_url
 
@@ -30,6 +31,7 @@ from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.result_record import ProducerEnvelope
 from crawlutron.service.crawl_executor import execute_crawl as _real_execute_crawl
+from crawlutron.service.effects import EffectContainer, run_crawl_with_claim
 from crawlutron.service.job_lifecycle import (
     cancel_all_tasks,
     cancel_job_task,
@@ -78,7 +80,6 @@ _execute_crawl: ExecuteCrawl = _real_execute_crawl
 
 
 def install_execute_crawl(fn: ExecuteCrawl) -> None:
-    """Swap the engine seam (tests only)."""
     global _execute_crawl
     _execute_crawl = fn
 
@@ -86,7 +87,6 @@ def install_execute_crawl(fn: ExecuteCrawl) -> None:
 async def arecord_terminal_failure(
     job_store: JobStore, job_id: str, error: str, *, claimed_by: str | None = None
 ) -> bool:
-    """Flip a RUNNING job to FAILED; ownership-guarded when ``claimed_by`` is set."""
     scrubbed = _scrubbed(error)
     if claimed_by is not None:
         return await job_store.aset_status(
@@ -108,10 +108,8 @@ def reset_execute_crawl() -> None:
 
 def pop_frontier(job: CrawlJobState) -> list[FrontierEntry]:
     normalize_job_state(job)
-    # Normalization's drops are already logged by the merge, only the pops here need logging.
     max_pages = job_max_pages(job.policy, job.tier)
     if job.in_flight:
-        # Cap arithmetic without the whole-set copy: the union's size is this sum.
         if max_pages > 0:
             fixed_count = len(job.visited) + sum(1 for entry in job.in_flight if entry.url not in job.visited)
             if fixed_count > max_pages:
@@ -139,7 +137,6 @@ def pop_frontier(job: CrawlJobState) -> list[FrontierEntry]:
 
 
 def job_engine_payload(job: CrawlJobState, batch: Sequence[FrontierEntry]) -> CrawlRequest:
-    """Build one non-recursive engine batch from a whole-site job."""
     urls = [entry.url.raw for entry in batch]
     policy = read_policy(job.policy, job.tier)
     policy = policy.model_copy(update={"limits": policy.limits.model_copy(update={"max_depth": 0})})
@@ -229,7 +226,6 @@ async def _should_stop(
 async def _mark_complete_if_empty(
     job: CrawlJobState, job_id: str, job_store: JobStore, batch: Sequence[FrontierEntry], *, claim_token: str
 ) -> bool:
-    """Mark COMPLETED when the frontier yielded nothing; else ``False``."""
     if batch:
         return False
     await job_store.asave(job)
@@ -255,8 +251,6 @@ async def absorb_batch(
     for entry in batch:
         identity = entry.url
         job.in_flight = [pending for pending in job.in_flight if pending.url != identity]
-        # The identity leaves in_flight here; the threaded set must forget it too,
-        # or the requeue below would dedupe against its own URL.
         known.discard(identity)
         item = resolved.get(identity)
         transient = item is None or is_transient_classification(item.classification)
@@ -300,6 +294,13 @@ def _resolved_items(
     return resolved
 
 
+async def _renew_claim_and_save(job_store: JobStore, job_id: str, token: str, job: CrawlJobState) -> bool:
+    if not await job_store.arenew_job_claim(job_id, token, now=time.time()):
+        return False
+    await job_store.asave(job)
+    return True
+
+
 async def _run_claimed_loop(
     job,
     job_id: str,
@@ -308,8 +309,17 @@ async def _run_claimed_loop(
     shutdown_event: asyncio.Event,
     context,
     token: str,
+    container: EffectContainer,
 ) -> None:
     known = admitted_page_identities(job, host_policy=context.host_policy)
+    _crawl_claim = partial(
+        run_crawl_with_claim,
+        container,
+        timeout=settings.default_timeout_seconds,
+        job_store=job_store,
+        job_id=job_id,
+        token=token,
+    )
     while True:
         if not await job_store.arenew_job_claim(job_id, token, now=time.time()):
             return
@@ -324,19 +334,20 @@ async def _run_claimed_loop(
             return
         if not job.in_flight:
             job.in_flight = list(batch)
-        if not await job_store.arenew_job_claim(job_id, token, now=time.time()):
+        if not await _renew_claim_and_save(job_store, job_id, token, job):
             return
-        await job_store.asave(job)
-        result = await _execute_crawl(
-            job_engine_payload(job, batch), settings=settings, shutdown_event=shutdown_event
-        )
-        still_owned = await job_store.arenew_job_claim(job_id, token, now=time.time())
-        items = result["results"]
+
+        async def _crawl_op(_job=job, _batch=batch) -> object:
+            return await _execute_crawl(
+                job_engine_payload(_job, _batch), settings=settings, shutdown_event=shutdown_event
+            )
+
+        items, still_owned = await _crawl_claim(_crawl_op, batch[0].url.raw)
         reloaded = await job_store.areload_state(job_id)
         if reloaded is None or reloaded.claimed_by != token:
             return
         job = replace(reloaded, results=job.results, visited=job.visited, visited_mark=job.visited_mark)
-        resolved = _resolved_items(items, job.host_policy)
+        resolved = _resolved_items(cast("Sequence[EngineCrawlResult]", items), job.host_policy)
         if job.status in {JobStatus.PAUSED, JobStatus.CANCELLED}:
             if job.in_flight:
                 await absorb_batch(job, batch, resolved, context, known)
@@ -345,9 +356,8 @@ async def _run_claimed_loop(
         if not still_owned or job.status is not JobStatus.RUNNING:
             return
         await absorb_batch(job, batch, resolved, context, known)
-        if not await job_store.arenew_job_claim(job_id, token, now=time.time()):
+        if not await _renew_claim_and_save(job_store, job_id, token, job):
             return
-        await job_store.asave(job)
 
 
 async def run_job(
@@ -361,7 +371,6 @@ async def run_job(
     claim_token: str | None = None,
     claim_seconds: float = DEFAULT_JOB_CLAIM_SECONDS,
 ) -> None:
-    """Whole-site engine loop for one job, stamped/renewed under a DB lease."""
     token = claim_token or new_claim_token(job_id)
     job = await _load_and_claim(
         job_id, job_store, preclaimed=preclaimed, claim_token=token, claim_seconds=claim_seconds
@@ -370,13 +379,11 @@ async def run_job(
         return
     try:
         context = JobAdmissionContext.create(job.policy, job.tier, settings, fetch_and_decode)
-        _ = HostPolicy
+        container = EffectContainer()
         if context.max_depth > 0 and context.seed_sitemaps:
             await _seed_job_sitemaps(job, context)
             await job_store.asave(job)
-        await _run_claimed_loop(job, job_id, job_store, settings, shutdown_event, context, token)
-    except asyncio.CancelledError:
-        raise
+        await _run_claimed_loop(job, job_id, job_store, settings, shutdown_event, context, token, container)
     except Exception as exc:
         logger.exception("job_runner_failed job_id=%s error=%r", job_id, exc)
         await arecord_terminal_failure(job_store, job_id, str(exc), claimed_by=token)
@@ -385,7 +392,6 @@ async def run_job(
 async def _transition(
     job_store: JobStore, job_id: str, to: JobStatus, *, expected: JobStatus | frozenset[JobStatus]
 ) -> str:
-    """Flip status: applied, missing, or conflict."""
     if await job_store.aset_status(job_id, to, expected=expected):
         return "ok"
     return "missing" if await job_store.aload(job_id) is None else "conflict"
@@ -406,10 +412,6 @@ def start_job(
     claim_token: str | None = None,
     claim_seconds: float = DEFAULT_JOB_CLAIM_SECONDS,
 ) -> asyncio.Task:
-    """Spawn (or return) the runner task; preclaimed rows were flipped by caller.
-
-    Lives here so the registry never imports back into this one.
-    """
     token = claim_token or new_claim_token(job_id)
     return start_tracked_task(
         job_id,
@@ -437,7 +439,6 @@ async def resume_job(
     wedge_grace_seconds: float = 5.0,
     claim_seconds: float = DEFAULT_JOB_CLAIM_SECONDS,
 ) -> str:
-    """Resume a paused job by respawning its runner task."""
     token = new_claim_token(job_id)
     outcome = "conflict"
     if await job_store.aset_status(

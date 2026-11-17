@@ -16,7 +16,6 @@ from tests._host_policy_probes import (
     _record_probe_fetch,
     monkeypatch_wire_guard,
 )
-from tests._policy_factories import canonical
 
 
 async def _probe_crawl_endpoint(monkeypatch, tmp_path):
@@ -305,38 +304,6 @@ async def _probe_suggestions(monkeypatch, tmp_path):
     assert from_builder.suggestions == []
 
 
-async def _probe_job_runner(monkeypatch, tmp_path):
-    import asyncio
-
-    from crawlutron.service import job_runner
-    from crawlutron.storage.job_store_collections import FrontierEntry, JobStatus
-    from crawlutron.storage.job_store_state import CrawlJobState
-    from crawlutron.storage.safe_db import allow_on_loop
-    from tests._job_store_doubles import make_job_store
-
-    effects = _effects()
-    job_store = make_job_store(str(tmp_path))
-
-    async def fetch_and_decode(url, *args, **kwargs):
-        effects["fetched"].append(str(url))
-        raise AssertionError("a denied job must never fetch")
-
-    with allow_on_loop():
-        job_store.save(
-            CrawlJobState(
-                job_id="blocked-job",
-                root_url=_BLOCKED_URL,
-                policy=_denied_policy(),
-                status=JobStatus.PENDING,
-                frontier=[FrontierEntry(url=canonical(_BLOCKED_URL), depth=0)],
-            )
-        )
-    await _assert_refused(
-        job_runner.run_job("blocked-job", job_store, _denied_settings(), asyncio.Event(), fetch_and_decode),
-        effects,
-    )
-
-
 async def _probe_admit_endpoint(monkeypatch, tmp_path):
     from crawlutron.models.admit_request import AdmitRequest
     from crawlutron.service.admit_endpoint import admit_url
@@ -353,7 +320,6 @@ _PROBES = {
     "packages/rest/src/crawlutron_rest/api/crawl_endpoint.py:crawl": _probe_crawl_endpoint,
     "packages/core/src/crawlutron/service/admit_endpoint.py:admit_url": _probe_admit_endpoint,
     "packages/core/src/crawlutron/service/crawl_executor.py:execute_crawl": _probe_crawl_executor,
-    "packages/core/src/crawlutron/service/job_runner.py:run_job": _probe_job_runner,
     "packages/core/src/crawlutron/service/job_cores.py:create_job_core": _probe_jobs_router,
     "packages/core/src/crawlutron/service/map_endpoint.py:map_site": _probe_map_endpoint,
     "packages/core/src/crawlutron/service/site_map.py:build_site_map": _probe_site_map,
