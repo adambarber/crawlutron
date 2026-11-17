@@ -258,7 +258,7 @@ class TestWholeSiteAdmissionContract:
         seed = "https://example.test/from-sitemap"
         policy = self._policy(1, 10, scope_regex="^https://example.test/", sitemaps=True)
 
-        async def sitemap_candidates(root_url, context):
+        async def sitemap_candidates(root_url, context, container):
             assert root_url == root
             return [seed]
 

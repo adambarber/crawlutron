@@ -62,7 +62,6 @@ from crawlutron.vocabulary.taxonomy import is_transient_classification
 
 logger = logging.getLogger(__name__)
 
-
 BATCH_SIZE = 8
 
 
@@ -143,8 +142,10 @@ def job_engine_payload(job: CrawlJobState, batch: Sequence[FrontierEntry]) -> Cr
     return CrawlRequest(urls=urls, policy=policy)
 
 
-async def _seed_job_sitemaps(job: CrawlJobState, context: JobAdmissionContext) -> None:
-    candidates = await fetch_job_sitemap_candidates(job.root_url, context)
+async def _seed_job_sitemaps(
+    job: CrawlJobState, context: JobAdmissionContext, container: EffectContainer
+) -> None:
+    candidates = await fetch_job_sitemap_candidates(job.root_url, context, container)
     outcome = await admit_job_links(job, candidates, source_depth=-1, context=context)
     job.stats["total_discovered"] = job.stats.get("total_discovered", 0) + outcome.accepted
 
@@ -152,7 +153,6 @@ async def _seed_job_sitemaps(job: CrawlJobState, context: JobAdmissionContext) -
 async def _load_and_claim(
     job_id: str, job_store: JobStore, *, preclaimed: bool, claim_token: str, claim_seconds: float
 ) -> CrawlJobState | None:
-    """Load and claim the job, or ``None`` when it cannot be owned."""
     job = await job_store.aload(job_id)
     if job is None:
         return None
@@ -381,7 +381,7 @@ async def run_job(
         context = JobAdmissionContext.create(job.policy, job.tier, settings, fetch_and_decode)
         container = EffectContainer()
         if context.max_depth > 0 and context.seed_sitemaps:
-            await _seed_job_sitemaps(job, context)
+            await _seed_job_sitemaps(job, context, container)
             await job_store.asave(job)
         await _run_claimed_loop(job, job_id, job_store, settings, shutdown_event, context, token, container)
     except Exception as exc:

@@ -21,6 +21,7 @@ from crawlutron.admission.admission_links import (
 from crawlutron.admission.policy import PolicyLike, PolicyTier, discovery_flags, read_policy
 from crawlutron.models.crawl_extraction_method import CrawlExtractionMethod
 from crawlutron.safety.safe_regex import BoundedPattern
+from crawlutron.service.effects import EffectContainer
 from crawlutron.storage.job_store import CrawlJobState, FrontierEntry, job_max_pages
 from crawlutron.transport.fetch_helpers import fetch_sitemap_urls
 from crawlutron.transport.fetchers import default_http_fetcher
@@ -263,10 +264,12 @@ def requeue_admitted_pages(
     return AdmissionOutcome(accepted=len(accepted_entries), cap_overcommitted=overcommitted)
 
 
-async def fetch_job_sitemap_candidates(root_url: str, context: JobAdmissionContext) -> list[str]:
+async def fetch_job_sitemap_candidates(
+    root_url: str, context: JobAdmissionContext, container: EffectContainer
+) -> list[str]:
     """Sitemap candidates for a job root, or none if not crawlable: the origin
-    comes from the admitted ``NormalizedUrl``, not a hand-rolled ``urlparse``
-    rebuild, so every spelling agrees with the rest of the service.
+    comes from the admitted ``NormalizedUrl`` and the fetch runs under the
+    container's FETCH bound, so admission itself does no origin I/O.
     """
     try:
         canonical_root = NormalizedUrl(root_url, policy=context.host_policy)
@@ -275,11 +278,23 @@ async def fetch_job_sitemap_candidates(root_url: str, context: JobAdmissionConte
     sitemap_url = admit_or_none(f"{canonical_root.origin}/sitemap.xml", policy=context.host_policy)
     if sitemap_url is None:
         return []
-    found = await fetch_sitemap_urls(
-        default_http_fetcher,
-        sitemap_url,
-        context.timeout_seconds,
-        host_policy=context.host_policy,
+    found: list[tuple[NormalizedUrl, str | None]] = []
+
+    async def _collect() -> None:
+        found.extend(
+            await fetch_sitemap_urls(
+                default_http_fetcher,
+                sitemap_url,
+                context.timeout_seconds,
+                host_policy=context.host_policy,
+            )
+        )
+
+    await container.fetch(
+        url=sitemap_url.raw,
+        timeout_seconds=context.timeout_seconds,
+        op=_collect,
+        caller_timeout_seconds=context.timeout_seconds,
     )
     return sorted({loc.raw for loc, _lastmod in found})
 

@@ -6,11 +6,18 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
 from crawlutron.models.result_record import ProducerEnvelope
+from crawlutron.service.effects import (
+    EffectContainer,
+    EffectKind,
+    EffectOutcome,
+    EffectResult,
+)
 from tests._crawl_runners import crawled_results
 
 if TYPE_CHECKING:
@@ -159,10 +166,20 @@ class TestSitemapCandidateBuilderUsesTheCanonicalOrigin:
         context = JobAdmissionContext.create(
             CrawlPolicy(), PolicyTier.model_defaults(), CrawlerSettings.from_mapping({})
         )
+
+        class _RunOpContainer(EffectContainer):
+            async def fetch(self, **kwargs) -> EffectResult:
+                op = kwargs.get("op")
+                if op is None:
+                    return EffectResult(kind=EffectKind.FETCH, outcome=EffectOutcome.SUCCESS)
+                await cast("Callable[[], Awaitable[object]]", op)()
+                return EffectResult(kind=EffectKind.FETCH, outcome=EffectOutcome.SUCCESS)
+
+        container = _RunOpContainer()
         original = admission.fetch_sitemap_urls
         admission.fetch_sitemap_urls = _capture
         try:
-            await admission.fetch_job_sitemap_candidates(root_url, context)
+            await admission.fetch_job_sitemap_candidates(root_url, context, container)
         finally:
             admission.fetch_sitemap_urls = original
         return seen[0] if seen else None
