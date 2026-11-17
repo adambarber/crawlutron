@@ -11,7 +11,9 @@ from crawlutron.service.effects import (
     EffectContainer,
     EffectKind,
     EffectOutcome,
+    container_effect,
 )
+from crawlutron.service.errors import DomainError
 
 
 def _bounds(caller: float) -> EffectBounds:
@@ -142,3 +144,31 @@ async def test_fetch_door_records_elapsed() -> None:
     assert result.kind is EffectKind.FETCH
     assert result.outcome is EffectOutcome.SUCCESS
     assert result.elapsed_seconds >= 0.0
+
+
+async def test_container_effect_raises_domain_error_on_timeout() -> None:
+    """A timed-out effect must surface a typed refusal, not an unhandled
+    IndexError from indexing an empty result holder (#1121)."""
+    container = EffectContainer(concurrency_per_kind={EffectKind.FETCH: 1})
+
+    async def _never() -> None:
+        await asyncio.Event().wait()
+
+    with pytest.raises(DomainError) as excinfo:
+        await container_effect(
+            container,
+            EffectKind.FETCH,
+            _never,
+            timeout_seconds=0.05,
+        )
+    assert excinfo.value.code == "effect_timeout"
+
+
+async def test_container_effect_returns_captured_value_on_success() -> None:
+    """The happy path still returns the op's value after the timeout guard."""
+    container = EffectContainer(concurrency_per_kind={EffectKind.FETCH: 1})
+
+    async def _work() -> int:
+        return 42
+
+    assert await container_effect(container, EffectKind.FETCH, _work, timeout_seconds=1.0) == 42

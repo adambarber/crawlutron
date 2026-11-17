@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, TypeVar, cast
 
+from crawlutron.service.errors import DomainError
+
 if TYPE_CHECKING:
     from crawlutron.storage.job_store import JobStore
 
@@ -274,16 +276,22 @@ async def container_effect[EffectT](
         result_holder.append(await op())
 
     if kind is EffectKind.RENDER:
-        await container.render(
+        result = await container.render(
             page_op=_capture,
             timeout_seconds=timeout_seconds,
             caller_timeout_seconds=timeout_seconds,
         )
     else:
-        await container.fetch(
+        result = await container.fetch(
             url="",
             timeout_seconds=timeout_seconds,
             op=_capture,
             caller_timeout_seconds=timeout_seconds,
+        )
+    if result.outcome is EffectOutcome.TIMED_OUT:
+        raise DomainError(
+            504,
+            "effect_timeout",
+            f"{kind.value} effect timed out",
         )
     return result_holder[0]
