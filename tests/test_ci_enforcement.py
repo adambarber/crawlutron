@@ -314,19 +314,13 @@ def _cache_step_paths(action: str) -> str:
     return "\n".join(body)
 
 
-def test_the_prepare_action_installs_the_frozen_lock_and_regenerates_the_version() -> None:
-    """One gate environment, defined once: every job starts from the same prepare
-    action, so the frozen install, the 3.14 interpreter and the gitignored version
-    artifact cannot drift between jobs.
-    """
+def test_the_prepare_action_installs_the_frozen_lock() -> None:
+    """One gate environment, defined once."""
     action = PREPARE_ACTION_PATH.read_text(encoding="utf-8")
     assert 'python-version: "3.14"' in action, "the prepare action must pin the 3.14 interpreter"
     assert "uv sync --frozen --extra dev" in action, (
         "the prepare action must install from the frozen lock: a bare install "
         "re-resolves the graph CI never froze"
-    )
-    assert "scripts/regen_version.py" in action, (
-        "the prepare action must regenerate the gitignored version artifact"
     )
     assert "pip install" not in action, "the prepare action installs with uv, not pip"
     assert "actions/cache@" in action, "the prepare action must cache gate state"
@@ -469,11 +463,9 @@ def test_ci_release_workflow_pins_version_consistency() -> None:
     )
 
 
-def test_ci_regenerates_the_version_artifact_before_the_suite() -> None:
-    """#949: the version artifact is gitignored, so a CI checkout has none until the
-    build backend writes it; the prepare action every gate uses must leave it in
-    place."""
-    action = PREPARE_ACTION_PATH.read_text(encoding="utf-8")
-    assert "scripts/regen_version.py" in action, (
-        "the prepare action must regenerate the version artifact before any gate runs"
+def test_ci_has_version_artifact_tracked_in_git() -> None:
+    """#949: the version artifact is tracked in git, so every CI checkout has it
+    before any gate runs; hatch-vcs overwrites it at build time."""
+    assert (SERVICE_ROOT / "packages/core/src/crawlutron/_version.py").exists(), (
+        "_version.py must be tracked in git so CI gates see it without a regen step"
     )

@@ -57,8 +57,8 @@ SANCTIONED_IGNORE_GLOBS = (
     "**/node_modules/**",  # vendored third-party tree, not source
     "**/.git/**",  # git metadata, not source
     "**/packages/core/src/crawlutron/storage/migrations/**",  # generated DDL snapshots
-    # The generated version artifact (hatch-vcs/regen_version), gitignored and
-    # absent in CI; scanning it pairs it against its own generator template.
+    # The tracked version artifact (hatch-vcs owns it at build time); scanned
+    # because hatch-vcs regenerates it from git describe on every build.
     "**/packages/core/src/crawlutron/_version.py",
 )
 

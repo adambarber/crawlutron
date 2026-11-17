@@ -1,9 +1,10 @@
 # Release runbook
 
 The version lives in a git tag, nowhere else. `[tool.hatch.version] source = "vcs"`
-in `pyproject.toml` resolves it from the newest tag at build time, and the
-generated `packages/core/src/crawlutron/_version.py` is a gitignored build
-artifact. There is no hand-edited version and no second place that records one.
+in `pyproject.toml` resolves it from the newest tag at build time, and
+`packages/core/src/crawlutron/_version.py` is **tracked in git** so every checkout
+has it before any gate runs; hatch-vcs overwrites it at build time. There is no
+hand-edited version and no second place that records one.
 
 SemVer, honest `0.MINOR.PATCH` until 1.0 (minor may break), matching the
 `Development Status :: 4 - Beta` classifier.
@@ -52,23 +53,35 @@ The same probe is runnable locally: `uv build --all-packages --out-dir dist` the
 
 ## One-time PyPI setup (owner)
 
-Publishing uses **trusted publishing** (OIDC): there is no stored token, and the
-workflow identity is the credential.
+Publishing uses **trusted publishing** (OIDC) only: there is no stored token,
+and the workflow identity is the credential. The `PYPI_API_TOKEN` bootstrap
+fallback was removed — there is no long-lived PyPI credential in this repository.
 
-PyPI dedupes *pending* publishers on the workflow identity, and each pending
-publisher is bound to one project name and consumed by that name's first upload. So
-the names cannot all be pre-registered: register one, release, register the next.
+Each project needs one trusted publisher configured on pypi.org. Pending
+publishers are deduplicated on the workflow identity and bound to one project
+name, consumed by that name's first upload. Register one, release, register the
+next: owner `adambarber`, repository `crawlutron`, workflow `release.yml`,
+environment `pypi`.
 
-To avoid six release cycles, bootstrap instead: create a scoped PyPI API token,
-add it as the repository secret `PYPI_API_TOKEN`, and push the tag. The release
-job publishes with the token while the secret is set and with trusted publishing
-when it is not. Once every name exists, add each project's trusted publisher (owner
-`adambarber`, repository `crawlutron`, workflow `release.yml`, environment `pypi`)
-and delete the secret.
+The `pypi` environment already exists in this repository with a tag-only
+deployment policy. **Required reviewers must be added to the `pypi` environment**
+so no release publishes without a human click.
 
-The environment `pypi` already exists in this repository with a tag-only
-deployment policy; add required reviewers there if a release should need a human
-click.
+## Release security requirements
+
+These are enforced outside the repository (GitHub repo settings) and must be in
+place before the first release:
+
+- **Branch protection on `main`**: requires a passing CI `required` check and a
+  pull request review from a release owner before any merge.
+- **Tag protection on `v*`**: only release owners may create or push `v*` tags.
+  A tag is the release act — unrestricted tag pushes bypass CI gating entirely.
+- **CODEOWNERS**: `.github/CODEOWNERS` lists release-owning paths
+  (`.github/workflows/release.yml`, `.github/actions/prepare/action.yml`,
+  `scripts/release_roster.py`, `docs/RELEASE.md`); changes to those files
+  require release-owner review.
+- **`pypi` environment required reviewers**: ≥1 release owner must approve every
+  publish.
 
 ## What was removed
 

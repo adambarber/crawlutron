@@ -12,3 +12,11 @@
 # `@dev-stack` for the same reason: it was a placeholder from the pre-extraction
 # layout rather than anyone who reviews anything.
 jscpd-expectations.json @adambarber
+
+# Release tooling: changes to the release workflow, prepare action, roster,
+# and runbook require release-owner review. These files sit on the trust
+# boundary between CI green and a published artifact.
+.github/workflows/release.yml @adambarber
+.github/actions/prepare/action.yml @adambarber
+scripts/release_roster.py @adambarber
+docs/RELEASE.md @adambarber

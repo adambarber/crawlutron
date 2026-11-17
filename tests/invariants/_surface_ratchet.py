@@ -99,7 +99,7 @@ DECLARED_SURFACE_RATCHET = {
     # #643: unregister joins the registry's public door set so test probes can
     # drop their fake owners (registered_owners exhaustiveness must stay true).
     "packages/core/src/crawlutron/runtime/process_state.py": (6, 6),
-    # Generated at build time by the hatch-vcs hook (#561); never hand-edited.
+    # Tracked in git; hatch-vcs overwrites it at build time (#561).
     "packages/core/src/crawlutron/_version.py": (3, 0),
     "packages/core/src/crawlutron/admission/policy.py": (10, 5),
     "packages/rest/src/crawlutron_rest/api/_depends_singletons.py": (2, 0),
