@@ -1,6 +1,5 @@
-"""The one read edge between a policy as it arrives and the model that reads it:
-read_policy is total (defaults, the safe direction), validate_wire_policy rejects,
-and the operator tier is shared so API- and job-path defaults agree.
+"""Pure gate edge: read_policy is total and side-effect free (no I/O, no
+network/DB); validate_wire_policy rejects with the wire error code.
 """
 
 from __future__ import annotations
