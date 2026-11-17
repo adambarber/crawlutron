@@ -1,0 +1,28 @@
+version: 2
+updates:
+  # Dependency updates for the crawlutron service itself (not vendored layouts).
+  # crawlutron is its own repository; this file lives at the service root.
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    # bump the uv lock in lockstep: Dependabot edits pyproject/requirements; uv
+    # re-resolves uv.lock on the next `uv sync --frozen` run.
+    groups:
+      crawlutron-deps:
+        patterns: ["*"]
+    ignore:
+      # Dependabot may not know hatch-vcs dynamic versions; ignore pre-release
+      # bumps that would change the version source.
+      - dependency-name: "hatch-vcs"
+        update-types: ["version-update:semver-pre"]
+
+  # GitHub Actions and Docker pins in workflows are updated manually per SHA;
+  # Dependabot does not manage action/Dockerfile pins here.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 0

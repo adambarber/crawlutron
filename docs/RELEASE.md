@@ -44,9 +44,9 @@ uploaded, so a mis-tag can never ship `0.0.0.dev0` under a semver name.
 `.github/workflows/packaging.yml` runs on push and pull request and publishes
 nothing. It builds every member, inspects every artifact with `twine check
 --strict`, installs each wheel into its own clean 3.14 environment, and imports
-its top level (the import name comes from the installed metadata, because
-`crawlutron-safe-url` imports as `safe_url`). It also builds the container image
-without pushing. A packaging break therefore reds before merge, not at release.
+its top level (the import name comes from the wheel's own `__init__.py`
+contents, not installed metadata, so `crawlutron-safe-url` imports as
+`safe_url`). It also builds the container image without pushing. A packaging break therefore reds before merge, not at release.
 
 The same probe is runnable locally: `uv build --all-packages --out-dir dist` then
 `.venv/bin/python scripts/check_packaging.py`.
@@ -118,3 +118,12 @@ notes are generated from the commit log (`gh release create --generate-notes`).
 
 Deploy, fleet concerns, and the Homebrew / npx channels are out of scope per the
 #561 owner ruling.
+
+Image signing (Cosign + SLSA provenance) and atomic publish / rollback
+(github-release as the commit point with rollback on partial failure) are
+deferred. They are documented escape hatches: when release automation reaches
+that maturity, add Cosign signing to the `image` job, SLSA provenance to both
+publish jobs, and make `github-release` the commit point so partial-publish
+states (PyPI published, image not, or vice versa) cannot persist. Until then,
+partial-publish recovery is manual: inspect `distributions` and `image` job
+results before trusting a release.
