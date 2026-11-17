@@ -26,7 +26,13 @@ from crawlutron.service.caller_auth import (
     resolve_page_limit,
 )
 from crawlutron.service.errors import AuthRefusal
-from crawlutron_rest.api.credentials import constant_time_eq, is_operator, key_admin_token, presented_key
+from crawlutron_rest.api.credentials import (
+    constant_time_eq,
+    is_operator,
+    key_admin_token,
+    presented_key,
+    remote_host,
+)
 from crawlutron_rest.api.throttle import shared_throttle
 
 
@@ -89,19 +95,20 @@ async def get_keys_caller(request: Request) -> CallerIdentity:
     """FastAPI dependency: the operator token is the only /v1/keys caller.
 
     A caller key never enters; an unconfigured token seals it (fail closed).
-    Failed guesses meter through the shared throttle's ``admin`` bucket (#659).
+    Failed guesses meter the admin ladder scoped to the remote IP (#1123).
     """
     secret = presented_key(request)
     admin_token = key_admin_token(request)
     if not secret or not admin_token:
         await _raise_invalid_api_key()
     throttle = shared_throttle()
-    await throttle.acheck_admin()
+    remote = remote_host(request)
+    await throttle.acheck_admin(remote)
     if not constant_time_eq(secret, admin_token):
-        await throttle.arecord_admin_failure()
+        await throttle.arecord_admin_failure(remote)
         await record_operator_auth_failure(_audit_store(request))
         await _raise_invalid_api_key()
-    await throttle.arecord_admin_success()
+    await throttle.arecord_admin_success(remote)
     return operator_caller()
 
 
@@ -118,9 +125,6 @@ async def _caller_from_secret(request: Request, secret: str) -> CallerIdentity:
     record = await store.averify_key(secret) if store is not None else None
     if record is None:
         await throttle.arecord_failure(secret, remote)
-        # A non-key secret also paces the shared admin bucket (#826): guesses arm
-        # the cooldown /v1/keys enforces. Valid keys never reach this refusal arm.
-        await throttle.arecord_admin_failure()
         await _raise_invalid_api_key()
     await throttle.arecord_success(secret, remote)
     return identity_for_key(record)
@@ -134,8 +138,9 @@ async def get_caller_identity(request: Request) -> CallerIdentity:
     secret = presented_key(request)
     if not secret:
         return anonymous_caller()
+    remote = remote_host(request)
     if verify_admin_secret(secret, request):
-        await shared_throttle().arecord_admin_success()
+        await shared_throttle().arecord_admin_success(remote)
         return operator_caller()
     return await _caller_from_secret(request, secret)
 

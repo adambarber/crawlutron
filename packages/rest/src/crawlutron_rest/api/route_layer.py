@@ -20,6 +20,7 @@ from crawlutron_rest.api.caller_auth import (
     record_operator_auth_failure,
     verify_admin_secret,
 )
+from crawlutron_rest.api.credentials import remote_host
 from crawlutron_rest.api.dependencies import CallerDep
 from crawlutron_rest.api.throttle import shared_throttle
 
@@ -56,7 +57,7 @@ async def guard_admin_request(request: Request) -> None:
 
 
 async def operator_guard(request: Request) -> bool:
-    """The soft operator gate: negatives pace through the admin bucket.
+    """The soft operator gate: negatives pace the remote-scoped admin ladder.
 
     A presented token is paced BEFORE the compare and its outcome recorded
     (#659), keeping the soft 200-on-miss contract (#209).
@@ -65,12 +66,13 @@ async def operator_guard(request: Request) -> bool:
     if not secret:
         return False
     throttle = shared_throttle()
-    await throttle.acheck_admin()
+    remote = remote_host(request)
+    await throttle.acheck_admin(remote)
     matched = verify_admin_secret(secret, request)
     if matched:
-        await throttle.arecord_admin_success()
+        await throttle.arecord_admin_success(remote)
     else:
-        await throttle.arecord_admin_failure()
+        await throttle.arecord_admin_failure(remote)
         await record_operator_auth_failure(getattr(getattr(request.app, "state", None), "audit_store", None))
     request.state.caller = matched
     return matched

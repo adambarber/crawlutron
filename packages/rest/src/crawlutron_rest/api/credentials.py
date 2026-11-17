@@ -10,7 +10,7 @@ import secrets
 
 from fastapi import Request
 
-__all__ = ["constant_time_eq", "is_operator", "key_admin_token", "presented_key"]
+__all__ = ["constant_time_eq", "is_operator", "key_admin_token", "presented_key", "remote_host"]
 
 
 def presented_key(request: Request) -> str | None:
@@ -47,3 +47,9 @@ def is_operator(request: Request) -> bool:
         return False
     admin_token = key_admin_token(request)
     return bool(admin_token) and constant_time_eq(secret, admin_token)
+
+
+def remote_host(request: Request) -> str | None:
+    """The request's remote address, or None when the transport provides none."""
+    client = request.client
+    return client.host if client else None

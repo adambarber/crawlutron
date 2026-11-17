@@ -17,7 +17,7 @@ from crawlutron.service.errors import DomainError, KeyVerifyThrottled
 from crawlutron.service.meter_ledger import MeterLedger, register_shared_meter
 from crawlutron.storage.coordination_store import atwin
 from crawlutron.storage.coordination_throttle_store import CoordinationThrottleStore
-from crawlutron_rest.api.credentials import is_operator, presented_key
+from crawlutron_rest.api.credentials import is_operator, presented_key, remote_host
 
 __all__ = [
     "ANON_MAX_REQUESTS",
@@ -37,6 +37,7 @@ _ANON_NO_CLIENT = "unknown"
 _KV_WINDOW = 300.0
 _KV_COOLDOWN = 60.0
 _KV_CAP = 1024
+_ADMIN_NO_CLIENT = "unknown"
 
 
 class Throttled(Exception):
@@ -88,6 +89,7 @@ class Throttle(MeterLedger):
 
     MAX_FAILURES = 5
     IP_MAX_FAILURES = 5
+    # The admin ladder's namespace; the per-remote scope rides the key (#1123).
     ADMIN_BUCKET = "admin"
 
     def __init__(
@@ -301,17 +303,17 @@ class Throttle(MeterLedger):
 
     # -- admin ---------------------------------------------------------------
 
-    def check_admin(self) -> None:
-        self._kv_check(self.ADMIN_BUCKET)
+    def check_admin(self, remote: str | None = None) -> None:
+        self._kv_check(self._admin_key_for(remote))
 
-    def record_admin_failure(self) -> None:
+    def record_admin_failure(self, remote: str | None = None) -> None:
         from crawlutron.runtime.metrics import get_metrics
 
         get_metrics().record_admin_auth_failure()
-        self._kv_record_fail(self.ADMIN_BUCKET, self.MAX_FAILURES)
+        self._kv_record_fail(self._admin_key_for(remote), self.MAX_FAILURES)
 
-    def record_admin_success(self) -> None:
-        self._kv_clear_sync(self.ADMIN_BUCKET)
+    def record_admin_success(self, remote: str | None = None) -> None:
+        self._kv_clear_sync(self._admin_key_for(remote))
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -347,6 +349,10 @@ class Throttle(MeterLedger):
 
     def _ip_key_for(self, remote: str) -> str:
         return f"ip:{remote}"
+
+    def _admin_key_for(self, remote: str | None) -> str:
+        """The admin ladder's per-remote scope; one fixed bucket when unknown."""
+        return f"{self.ADMIN_BUCKET}:{remote or _ADMIN_NO_CLIENT}"
 
     def _require_store(self) -> CoordinationThrottleStore:
         store = self._store
@@ -397,7 +403,7 @@ async def throttle_anonymous_surfaces(request, call_next):
     if path in _OPERATOR_METERED_EXACT and is_operator(request):
         return await call_next(request)
     try:
-        await shared_throttle().acheck_anon(_remote(request))
+        await shared_throttle().acheck_anon(remote_host(request))
     except Throttled as t:
         return _refuse(path, t)
     return await call_next(request)
@@ -424,11 +430,6 @@ async def _verified(request) -> bool:
     if store is None:
         return False
     return await store.akey_present(presented_key(request) or "")
-
-
-def _remote(request) -> str | None:
-    c = request.client
-    return c.host if c else None
 
 
 def _refuse(path: str, t: Throttled) -> JSONResponse:

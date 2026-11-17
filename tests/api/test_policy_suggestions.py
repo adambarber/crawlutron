@@ -424,31 +424,31 @@ async def _assert_suggestions_admin_pacing(tmp_path, *, make_guesses, keys_statu
     assert resp.json()["code"] == keys_code
 
 
-async def test_wrong_operator_guesses_on_suggestions_arm_the_shared_admin_bucket(tmp_path):
-    """#826: the suggestions door was the ONE unpaced channel for the operator
-    secret. A wrong token lands ``record is None`` and (post-fix) records a shared
-    admin failure, so line-speed guesses arm the cooldown /v1/keys enforces."""
+async def test_wrong_operator_guesses_on_suggestions_leave_the_admin_ladder_cold(tmp_path):
+    """#826, superseded by #1123: the suggestions door is a KEYED door, so a
+    wrong operator token paces the keyed ladders only -- /v1/keys answers 401 for
+    a still-wrong token with its admin ladder untouched."""
     from crawlutron_rest.api.throttle import Throttle
 
     def op_guesses(_client, _keys):
         return [(f"op-guess-{i}", 401) for i in range(Throttle.MAX_FAILURES)]
 
     await _assert_suggestions_admin_pacing(
-        tmp_path, make_guesses=op_guesses, keys_status=429, keys_code="key_verify_throttled"
+        tmp_path, make_guesses=op_guesses, keys_status=401, keys_code="invalid_api_key"
     )
 
 
-async def test_wrong_caller_key_guesses_on_suggestions_arm_the_admin_bucket(tmp_path):
-    """#826: a wrong CALLER key is also ``record is None``, so garbage key guesses
-    pace the shared admin bucket just like wrong operator tokens -- every non-key
-    secret on this door fails toward the cooldown, not just token-shaped guesses."""
+async def test_wrong_caller_key_guesses_on_suggestions_leave_the_admin_ladder_cold(tmp_path):
+    """#826, superseded by #1123: only admin-door attempts count toward the
+    admin ladder -- garbage caller-key guesses pace the keyed ladders, and
+    /v1/keys still refuses a wrong token with 401, not a cooldown."""
     from crawlutron_rest.api.throttle import Throttle
 
     def garbage_guesses(_client, _keys):
         return [(f"ck_0{i:016x}.garbage", 401) for i in range(Throttle.MAX_FAILURES)]
 
     await _assert_suggestions_admin_pacing(
-        tmp_path, make_guesses=garbage_guesses, keys_status=429, keys_code="key_verify_throttled"
+        tmp_path, make_guesses=garbage_guesses, keys_status=401, keys_code="invalid_api_key"
     )
 
 
