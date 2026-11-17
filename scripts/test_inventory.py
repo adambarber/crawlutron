@@ -51,24 +51,23 @@ def claimed_behavior(node: ast.FunctionDef | ast.AsyncFunctionDef, test_name: st
     return test_name[len("test_") :].replace("_", " ").strip()
 
 
-def _import_objects(tree: ast.Module) -> set[str]:
-    """Production dotted names bound by module-level imports of one tree."""
+def _import_bindings(tree: ast.Module) -> dict[str, str]:
+    """Local name -> production dotted object bound by module-level imports."""
     from tests.chokepoint_walks import from_imports, plain_imports
 
-    found: set[str] = set()
+    bindings: dict[str, str] = {}
     for from_imp in from_imports(tree):
         if from_imp.module and is_production(from_imp.module):
             for alias in from_imp.names:
-                found.add(f"{from_imp.module}.{alias.name}")
+                local = alias.asname or alias.name
+                bindings[local] = f"{from_imp.module}.{alias.name}"
     for import_stmt in plain_imports(tree):
         for alias in import_stmt.names:
-            if is_production(alias.name):
-                found.add(alias.name)
-            else:
-                top = alias.name.split(".", 1)[0]
-                if top in PRODUCTION:
-                    found.add(top)
-    return found
+            top = alias.name.split(".", 1)[0]
+            if top in PRODUCTION:
+                local = alias.asname or top
+                bindings[local] = alias.name
+    return bindings
 
 
 def _call_objects(tree: ast.Module, node: ast.AST) -> set[str]:
@@ -93,8 +92,9 @@ def collect_tests() -> list[dict]:
         directory = REPO_ROOT / root
         for path, tree in trees_under(directory):
             relative = path.relative_to(REPO_ROOT).as_posix()
-            import_objects = _import_objects(tree)
+            import_bindings = _import_bindings(tree)
             candidates: list[tuple[str | None, ast.FunctionDef | ast.AsyncFunctionDef]] = []
+            class_enclosed: set[int] = set()
             for cls in class_defs(tree):
                 if not cls.name.startswith("Test"):
                     continue
@@ -102,12 +102,13 @@ def collect_tests() -> list[dict]:
                     if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name.startswith(
                         "test_"
                     ):
+                        class_enclosed.add(id(item))
                         candidates.append((cls.name, item))
             for fn in functions(tree):
-                if fn.name.startswith("test_"):
+                if fn.name.startswith("test_") and id(fn) not in class_enclosed:
                     candidates.append((None, fn))
             for class_name, fn in candidates:
-                tests.append(_test_record(path, relative, tree, class_name, fn, import_objects))
+                tests.append(_test_record(path, relative, tree, class_name, fn, import_bindings))
     tests.sort(key=lambda t: (t["file"], t["line"], t["test"]))
     return tests
 
@@ -118,12 +119,24 @@ def _test_record(
     tree: ast.Module,
     class_name: str | None,
     fn: ast.FunctionDef | ast.AsyncFunctionDef,
-    import_objects: set[str],
+    import_bindings: dict[str, str],
 ) -> dict[str, object]:
-    """One test's inventory record."""
+    """One test's inventory record.
+
+    Precedence: called > imported > unresolved; ties break by (length, name).
+    """
+    from tests.chokepoint_walks import name_reads
+
     call_objects = _call_objects(tree, fn)
-    objects = import_objects | call_objects
-    primary = max(objects, key=len) if objects else "unresolved"
+    read_names = {node.id for node in name_reads(fn)}
+    test_imports = {import_bindings[name] for name in read_names if name in import_bindings}
+    if call_objects:
+        primary = sorted(call_objects, key=lambda o: (len(o), o))[-1]
+    elif test_imports:
+        primary = sorted(test_imports, key=lambda o: (len(o), o))[-1]
+    else:
+        primary = "unresolved"
+    objects = test_imports | call_objects
     return {
         "node_id": test_node_id(relative, class_name, fn.name),
         "file": relative,
