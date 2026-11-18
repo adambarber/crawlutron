@@ -1,14 +1,18 @@
 """The extract() entry point: bounded, deterministic, never-raise.
 
 Slice 3: HTML single-pass extraction with quality ladder.
+Slice 4: CSV/JSON/XML text format extraction.
 """
 
 from __future__ import annotations
+
+from typing import cast
 
 from crawlutron_extract.charset import decode_content
 from crawlutron_extract.html_pass import extract_html
 from crawlutron_extract.limits import RICH_TEXT_FLOOR, ExtractLimits
 from crawlutron_extract.models import Extraction, Quality
+from crawlutron_extract.text_format import extract_text_format
 
 __all__ = ["DEFAULT_LIMITS", "extract"]
 
@@ -57,6 +61,73 @@ def _resolve_quality(
     return Quality.MEDIUM
 
 
+def _resolve_text_format_quality(quality_str: str) -> Quality:
+    """Map text format quality string to Quality enum."""
+    mapping = {
+        "high": Quality.HIGH,
+        "medium": Quality.MEDIUM,
+        "low": Quality.LOW,
+        "failed": Quality.FAILED,
+    }
+    return mapping.get(quality_str, Quality.FAILED)
+
+
+def _apply_text_format(
+    fmt: dict[str, object],
+    metadata: dict[str, str],
+    flags: list[str],
+) -> tuple[
+    str,
+    str,
+    list[dict[str, str]],
+    list,
+    list,
+    list[list[list[str]]],
+    bool,
+    Quality,
+]:
+    """Apply a text-format result dict to local variables.
+
+    Shared by CSV/JSON/XML branches to avoid duplicating the same
+    dict-unpacking logic three times.
+    """
+    metadata.update(cast(dict[str, str], fmt["metadata"]))
+    text = cast(str, fmt["text"])
+    markdown = cast(str, fmt["markdown"])
+    links = cast(list[dict[str, str]], fmt["links"])
+    frames = cast(list[dict[str, str]], fmt["frames"])
+    forms = cast(list[dict[str, str]], fmt["forms"])
+    tables = cast(list[list[list[str]]], fmt["tables"])
+    truncated = cast(bool, fmt["truncated"])
+    flags.extend(cast(list[str], fmt.get("quality_flags", [])))
+    quality = _resolve_text_format_quality(cast(str, fmt.get("_quality", "failed")))
+    return text, markdown, links, frames, forms, tables, truncated, quality
+
+
+def _empty_extraction(
+    *,
+    quality: Quality,
+    flag: str,
+    flags: list[str],
+    metadata: dict[str, str],
+    charset: str | None,
+) -> Extraction:
+    """Build an empty Extraction with the given quality and flag."""
+    return Extraction(
+        quality=quality,
+        flags=flags + [flag],
+        metadata=metadata,
+        text="",
+        markdown="",
+        links=[],
+        frames=[],
+        forms=[],
+        tables=[],
+        truncated=False,
+        charset=charset,
+    )
+
+
 def extract(
     content: bytes,
     content_type: str,
@@ -66,9 +137,7 @@ def extract(
 ) -> Extraction:
     """Extract bounded, deterministic output. Refuses oversized input.
 
-    Never raises on hostile input; returns quality="failed" instead. Only
-    programmer error (a bad type) may raise.
-    """
+    Never raises on hostile input; returns quality="failed" instead."""
     if len(content) > limits.max_input_bytes:
         return Extraction(quality=Quality.FAILED, flags=["input_refused"])
     text, charset, flags = decode_content(content, content_type)
@@ -79,54 +148,107 @@ def extract(
         metadata["url"] = url
     if charset:
         metadata["charset"] = charset
+
+    markdown = ""
+    links: list[dict[str, str]] = []
+    frames: list = []
+    forms: list = []
+    tables: list[list[list[str]]] = []
+    truncated = False
     quality = Quality.FAILED
-    html_markdown = ""
-    html_links: list[dict[str, str]] = []
-    html_frames: list = []
-    html_forms: list = []
-    html_tables: list[list[list[str]]] = []
-    html_truncated = False
-    if "text/html" in content_type.lower():
+
+    ctype = content_type.lower()
+    is_html = ctype == "text/html" or ctype.startswith("text/html;")
+    is_csv = ctype == "text/csv" or ctype.startswith("text/csv;") or ctype == "application/csv"
+    is_json = (
+        ctype == "application/json"
+        or ctype.startswith("application/json;")
+        or ctype == "application/jsonl"
+        or ctype.startswith("application/jsonl;")
+        or ctype == "text/json"
+    )
+    is_xml = (
+        ctype == "application/xml"
+        or ctype.startswith("application/xml;")
+        or ctype == "text/xml"
+        or ctype.startswith("text/xml;")
+    )
+    if is_html:
         html = extract_html(text, limits)
         metadata.update(html["metadata"])
         text = html["text"]
-        html_markdown = html["markdown"]
-        html_links = html["links"]
-        html_frames = html["frames"]
-        html_forms = html["forms"]
-        html_tables = html["tables"]
-        html_truncated = html["truncated"]
+        markdown = html["markdown"]
+        links = html["links"]
+        frames = cast(list[dict[str, str]], html["frames"])
+        forms = cast(list[dict[str, str]], html["forms"])
+        tables = html["tables"]
+        truncated = html["truncated"]
         quality = _resolve_quality(
             content_type=content_type,
             text=text,
             flags=flags,
             found_main=html["found_main"],
-            html_links=html_links,
-            html_frames=html_frames,
-            html_forms=html_forms,
-            html_tables=html_tables,
+            html_links=links,
+            html_frames=frames,
+            html_forms=forms,
+            html_tables=tables,
         )
+    elif is_csv or is_json or is_xml:
+        fmt = extract_text_format(text, content_type, limits)
+        (
+            text,
+            markdown,
+            links,
+            frames,
+            forms,
+            tables,
+            truncated,
+            quality,
+        ) = _apply_text_format(fmt, metadata, flags)
+    elif ctype.startswith("text/"):
+        # Plain text: no format extractor ran. Empty → FAILED, else LOW.
+        quality = Quality.LOW if text.strip() else Quality.FAILED
     else:
-        quality = _resolve_quality(
-            content_type=content_type,
-            text=text,
-            flags=flags,
-            found_main=False,
-            html_links=[],
-            html_frames=[],
-            html_forms=[],
-            html_tables=[],
+        # Binary container (PDF, DOCX, EPUB, etc.) with no tier: empty payload,
+        # container flag, quality=low. Truly unsupported types are refused.
+        container_types = (
+            "application/pdf",
+            "application/msword",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.ms-excel",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.ms-powerpoint",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "application/epub+zip",
         )
+        if ctype in container_types:
+            container_flag = f"{ctype.split('/')[-1]}_unsupported"
+            return _empty_extraction(
+                quality=Quality.LOW,
+                flag=container_flag,
+                flags=flags,
+                metadata=metadata,
+                charset=charset,
+            )
+        # Truly unsupported type: refuse.
+        return _empty_extraction(
+            quality=Quality.FAILED,
+            flag="format_refused",
+            flags=flags,
+            metadata=metadata,
+            charset=charset,
+        )
+
     return Extraction(
         quality=quality,
         flags=flags,
         metadata=metadata,
         text=text,
-        markdown=html_markdown,
-        links=html_links,
-        frames=html_frames,
-        forms=html_forms,
-        tables=html_tables,
-        truncated=html_truncated,
+        markdown=markdown,
+        links=links,
+        frames=frames,
+        forms=forms,
+        tables=tables,
+        truncated=truncated,
         charset=charset,
     )

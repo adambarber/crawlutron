@@ -260,6 +260,30 @@ def test_high_is_reachable():
     assert result.quality == Quality.HIGH
 
 
+def test_links_collected_inside_boilerplate():
+    """Links in nav/footer are collected document-wide (frontier discovery)."""
+    html = (
+        b'<nav role="navigation"><a href="/nav-link">Nav link</a></nav>'
+        b'<footer><a href="/footer-link">Footer link</a></footer>'
+        b"<p>Main text</p>"
+    )
+    result = extract(html, "text/html")
+    assert len(result.links) == 2
+    urls = {link["url"] for link in result.links}
+    assert urls == {"/nav-link", "/footer-link"}
+
+
+def test_main_inside_boilerplate_extracts_text():
+    """Wikipedia nests <main> inside boilerplate wrappers; text must extract."""
+    html = (
+        b'<nav role="navigation"><a href="/nav">Nav</a></nav>'
+        b'<div role="banner"><main>' + b"x" * 300 + b"</main></div>"
+    )
+    result = extract(html, "text/html")
+    assert result.quality == Quality.HIGH
+    assert len(result.text) >= 200
+
+
 def test_determinism():
     html = b"<h1>Test</h1><p>Hello world</p><a href='/x'>link</a>"
     limits = ExtractLimits()

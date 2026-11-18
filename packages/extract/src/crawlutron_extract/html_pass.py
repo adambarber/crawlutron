@@ -84,7 +84,6 @@ class _HTMLExtractor(html_parser.HTMLParser):
         self._current_table: list[list[str]] | None = None
         self._current_row: list[str] | None = None
         self._current_cell: list[str] | None = None
-        self._in_boilerplate = 0
         self._in_main = 0
         self._found_main = False
         self._in_code = 0
@@ -97,17 +96,35 @@ class _HTMLExtractor(html_parser.HTMLParser):
         self._truncated = False
         self._list_stack: list[tuple[str, int]] = []
 
+    @property
+    def _in_boilerplate(self) -> bool:
+        """True if any ancestor frame is boilerplate. Stack-based so unclosed
+        boilerplate tags in real-world HTML cannot permanently silence text."""
+        return any(f["boilerplate"] for f in self._stack)
+
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attr_dict = {k: (v or "") for k, v in attrs}
         is_boilerplate = tag in _BOILERPLATE_TAGS or _role_is_boilerplate(attr_dict)
         is_main = _is_main(tag, attr_dict)
         self._stack.append({"tag": tag, "boilerplate": is_boilerplate, "main": is_main})
-        if is_boilerplate:
-            self._in_boilerplate += 1
         if is_main:
             self._in_main += 1
             self._found_main = True
-        if self._in_boilerplate > 0:
+
+        # Links/frames/forms are collected document-wide (used for frontier
+        # discovery), not gated behind main-content or boilerplate selection.
+        if tag == "a":
+            self._in_link = True
+            self._link_url = attr_dict.get("href", "")
+            self._link_text_parts = []
+        elif tag in ("iframe", "frame"):
+            self._add_frame(attr_dict)
+        elif tag == "form":
+            self._handle_form_start(attr_dict)
+        elif tag in ("input", "button", "select", "textarea"):
+            self._handle_form_field(tag, attr_dict)
+
+        if self._in_boilerplate:
             return
         if tag == "title":
             self._in_title = True
@@ -117,18 +134,23 @@ class _HTMLExtractor(html_parser.HTMLParser):
         if not self._stack:
             return
         frame = self._stack.pop()
-        if frame["boilerplate"]:
-            self._in_boilerplate -= 1
         if frame["main"]:
             self._in_main -= 1
-        if self._in_boilerplate > 0:
+
+        # Close links document-wide so link metadata is always recorded.
+        if tag == "a":
+            self._close_link()
+
+        if self._in_boilerplate:
             return
         if tag == "title":
             self._in_title = False
         self._handle_end_specific(tag)
 
     def handle_data(self, data: str) -> None:
-        if self._in_boilerplate > 0:
+        # Skip text inside boilerplate unless inside main-content (Wikipedia
+        # nests <main> inside boilerplate wrappers; the content must extract).
+        if self._in_boilerplate and self._in_main == 0:
             return
         data = data.replace("\x00", "")
         target = self._main_parts if self._in_main > 0 else self._text_parts
@@ -146,16 +168,6 @@ class _HTMLExtractor(html_parser.HTMLParser):
     def _handle_start_specific(self, tag: str, attrs: dict[str, str]) -> None:
         if tag == "meta":
             self._handle_meta(attrs)
-        elif tag == "a":
-            self._in_link = True
-            self._link_url = attrs.get("href", "")
-            self._link_text_parts = []
-        elif tag in ("iframe", "frame"):
-            self._add_frame(attrs)
-        elif tag == "form":
-            self._handle_form_start(attrs)
-        elif tag in ("input", "button", "select", "textarea"):
-            self._handle_form_field(tag, attrs)
         elif tag == "table":
             self._start_table()
         elif tag == "tr":
@@ -178,9 +190,7 @@ class _HTMLExtractor(html_parser.HTMLParser):
             self._append_text(marker)
 
     def _handle_end_specific(self, tag: str) -> None:
-        if tag == "a":
-            self._close_link()
-        elif tag == "table":
+        if tag == "table":
             self._close_table()
         elif tag == "tr":
             self._close_row()
