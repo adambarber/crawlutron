@@ -126,12 +126,13 @@ def test_json_empty():
 
 
 def test_pdf_binary_container_quality_low():
-    """Binary container (PDF) with no tier: empty text, container flag, quality=low."""
+    """Binary container (PDF) below the quality floor: empty text, partial
+    encoding flag, quality=low."""
     result = extract(b"%PDF-1.4 fake pdf content", "application/pdf")
     assert result.quality == Quality.LOW
     assert result.text == ""
     assert result.markdown == ""
-    assert "pdf_unsupported" in result.flags
+    assert "pdf_encoding_partial" in result.flags
 
 
 def test_docx_binary_container_quality_low():

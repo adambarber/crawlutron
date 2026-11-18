@@ -101,6 +101,7 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     "packages/extract/src/crawlutron_extract/charset.py": (1, 1),
     "packages/extract/src/crawlutron_extract/html_pass.py": (1, 1),
     "packages/extract/src/crawlutron_extract/text_format.py": (1, 1),
+    "packages/extract/src/crawlutron_extract/pdf_pass.py": (1, 1),
 }
 
 # Former #215 exemptions: their __all__ deliberately does not enumerate every public

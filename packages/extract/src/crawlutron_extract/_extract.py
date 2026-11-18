@@ -15,6 +15,7 @@ from crawlutron_extract.html_pass import extract_html
 from crawlutron_extract.limits import RICH_TEXT_FLOOR, ExtractLimits
 from crawlutron_extract.models import Extraction, Quality
 from crawlutron_extract.office import extract_office
+from crawlutron_extract.pdf_pass import extract_pdf
 from crawlutron_extract.text_format import extract_text_format
 
 __all__ = ["DEFAULT_LIMITS", "extract"]
@@ -151,7 +152,6 @@ def extract(
 
     ctype = content_type.lower()
     container_types = (
-        "application/pdf",
         "application/msword",  # .doc legacy binary — refused with flag
     )
     is_office = (
@@ -162,8 +162,35 @@ def extract(
     )
 
     # Binary containers (PDF, DOC) skip the charset ladder — decode_content
-    # would emit charset_lossy on non-text bytes. Return empty with quality=low.
+    # would emit charset_lossy on non-text bytes.
     flags: list[str] = []
+    if ctype == "application/pdf":
+        # PDF tier-1 text sweep; below the quality floor returns empty + low.
+        fmt = extract_pdf(content, limits)
+        (
+            pdf_text,
+            pdf_markdown,
+            pdf_links,
+            pdf_frames,
+            pdf_forms,
+            pdf_tables,
+            pdf_truncated,
+            pdf_quality,
+        ) = _apply_text_format(fmt, metadata, flags)
+        return Extraction(
+            quality=pdf_quality,
+            flags=flags,
+            metadata=metadata,
+            text=pdf_text,
+            markdown=pdf_markdown,
+            links=pdf_links,
+            frames=pdf_frames,
+            forms=pdf_forms,
+            tables=pdf_tables,
+            truncated=pdf_truncated,
+            charset=None,
+            links_refused=0,
+        )
     if ctype in container_types:
         charset: str | None = None
         return _empty_extraction(
