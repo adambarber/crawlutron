@@ -18,7 +18,7 @@ class _PublicSuffixDataset(Protocol):
 
 
 # ``_PSL_UNSET`` keeps "never attempted" distinct from "attempted and
-# unavailable": the accessor must keep trying in the first, never again in the second.
+# unavailable": keep trying in the first, never again in the second.
 _PSL_UNSET = None
 _PSL: _PublicSuffixDataset | None = _PSL_UNSET
 
@@ -38,6 +38,16 @@ def _public_suffix_list() -> _PublicSuffixDataset | None:
     except Exception:
         _PSL = None
     return _PSL
+
+
+def _psl_available() -> bool:
+    """Whether the publicsuffixlist dataset loaded this process.
+
+    When False, registrable_domain answers from the documented two-label
+    heuristic: the fallback is explicit, never silent.
+    """
+    _public_suffix_list()
+    return _PSL is not None
 
 
 def _heuristic_registrable_domain(host: str) -> str:

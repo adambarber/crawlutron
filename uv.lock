@@ -601,7 +601,7 @@ dependencies = [
     { name = "brotli" },
     { name = "camoufox" },
     { name = "charset-normalizer" },
-    { name = "crawlutron-safe-url" },
+    { name = "crawlutron-safe-url", extra = ["psl", "regex"] },
     { name = "curl-cffi" },
     { name = "fastapi" },
     { name = "h2" },
@@ -622,7 +622,7 @@ requires-dist = [
     { name = "brotli", specifier = "==1.2.1" },
     { name = "camoufox", specifier = "==0.5.9" },
     { name = "charset-normalizer", specifier = "==3.5.2" },
-    { name = "crawlutron-safe-url", editable = "packages/safe-url" },
+    { name = "crawlutron-safe-url", extras = ["psl", "regex"], editable = "packages/safe-url" },
     { name = "curl-cffi", specifier = "==0.17.0" },
     { name = "fastapi", specifier = "==0.162.0" },
     { name = "h2", specifier = "==4.4.1" },
@@ -670,21 +670,27 @@ requires-dist = [
 [[package]]
 name = "crawlutron-safe-url"
 source = { editable = "packages/safe-url" }
-dependencies = [
-    { name = "regex" },
-]
 
 [package.optional-dependencies]
+full = [
+    { name = "publicsuffixlist" },
+    { name = "regex" },
+]
 psl = [
     { name = "publicsuffixlist" },
+]
+regex = [
+    { name = "regex" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "publicsuffixlist", marker = "extra == 'full'", specifier = "==1.1.2.20261101" },
     { name = "publicsuffixlist", marker = "extra == 'psl'", specifier = "==1.1.2.20261101" },
-    { name = "regex", specifier = "==2026.9.29" },
+    { name = "regex", marker = "extra == 'full'", specifier = "==2026.9.29" },
+    { name = "regex", marker = "extra == 'regex'", specifier = "==2026.9.29" },
 ]
-provides-extras = ["psl"]
+provides-extras = ["full", "psl", "regex"]
 
 [[package]]
 name = "crawlutron-sdk"

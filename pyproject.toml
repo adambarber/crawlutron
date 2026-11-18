@@ -351,3 +351,6 @@ max-statements = 87
     "S603",  # intentional: argv is operator-supplied image/tag, never caller credentials
 ]
 "**/__pycache__/**" = ["ALL"]
+# PEP 562: safe_url/__init__.py exports regex-backed names via __getattr__,
+# so they are undefined at module level by design (lazy package root).
+"packages/safe-url/src/safe_url/__init__.py" = ["F822"]

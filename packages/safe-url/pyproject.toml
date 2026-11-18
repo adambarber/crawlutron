@@ -9,15 +9,16 @@ description = "SSRF-safe URL admission: NormalizedUrl, HostPolicy, IDNA canonica
 readme = "README.md"
 requires-python = ">=3.14"
 license = "MIT"
-dependencies = [
-    # Regex engine for the bounded matcher: the stdlib cannot be interrupted.
-    "regex==2026.9.29",
-]
+dependencies = []
 
 [project.optional-dependencies]
-# Public-suffix dataset for registrable_domain (safe_url/registrable_domain.py):
-# without it the suffix heuristic silently degrades.
+# The bounded matcher (safe_url/safe_regex.py) is the ``regex`` C extension:
+# only consumers that call scope_allows/compile_untrusted need it.
+regex = ["regex==2026.9.29"]
+# The public-suffix dataset (safe_url/registrable_domain.py): without it the
+# two-label heuristic answers site grouping, explicitly via psl_available().
 psl = ["publicsuffixlist==1.1.2.20261101"]
+full = ["regex==2026.9.29", "publicsuffixlist==1.1.2.20261101"]
 
 [tool.hatch.version]
 source = "vcs"
