@@ -407,10 +407,10 @@ def _close_bound_stores() -> None:
     teardown door: a caller that opened one and forgot cannot leak it (#1123)."""
     with _BOUND_LOCK:
         bound = list(_BOUND)
-        for throttle in bound:
-            throttle.unbind_shared_db()
-        # The reset door the reset family reads: clear, never per-element discard.
+        # Clear before unbinding: a Throttle admitted mid-sweep must stay owned.
         _BOUND.clear()
+    for throttle in bound:
+        throttle.unbind_shared_db()
 
 
 def _has_bound_stores() -> bool:
