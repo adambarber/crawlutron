@@ -135,14 +135,13 @@ def test_pdf_binary_container_quality_low():
 
 
 def test_docx_binary_container_quality_low():
-    """Binary container (DOCX) with no tier: empty text, container flag, quality=low."""
+    """Binary container (DOCX) with corrupt content: empty text, corrupt flag, quality=failed."""
     ct = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     result = extract(b"fake docx content", ct)
-    assert result.quality == Quality.LOW
+    assert result.quality == Quality.FAILED
     assert result.text == ""
     assert result.markdown == ""
-    flags_str = ",".join(result.flags)
-    assert "document_unsupported" in flags_str
+    assert "corrupt_container" in result.flags
 
 
 def test_image_png_refused():

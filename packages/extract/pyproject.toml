@@ -5,13 +5,16 @@ build-backend = "hatchling.build"
 [project]
 name = "crawlutron-extract"
 dynamic = ["version"]
-description = "Stdlib-only content extraction: HTML, office containers, text formats, PDF tier 1, bounded and deterministic"
+description = "Content extraction: HTML, office containers, text formats, PDF tier 1, bounded and deterministic"
 readme = "README.md"
 requires-python = ">=3.14"
 license = "MIT"
 
-# Stdlib only except crawlutron-safe-url for link admission (slice 5).
-# pdfminer.six is declared as an optional extra and imported lazily (slice 8).
+# crawlutron-safe-url is required for link admission (slice 5). Its own
+# dependency closure includes regex (bounded matcher) and publicsuffixlist
+# (public suffix list) as hard dependencies; the default install is not
+# stdlib-only. pdfminer.six is declared as an optional extra and imported
+# lazily behind a seam (slice 8).
 dependencies = ["crawlutron-safe-url"]
 
 [project.optional-dependencies]

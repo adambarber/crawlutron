@@ -12,6 +12,8 @@ import json
 import re
 from typing import cast
 
+from crawlutron_extract.limits import _empty_result
+
 __all__ = ["extract_text_format"]
 
 #: DOCTYPE must be refused: never expand external entities (XML bomb).
@@ -35,21 +37,6 @@ def extract_text_format(
     if "xml" in ctype:
         return _extract_xml(content, limits)
     return _empty_result("unsupported_content_type")
-
-
-def _empty_result(reason: str, flags: list[str] | None = None) -> dict[str, object]:
-    return {
-        "text": "",
-        "markdown": "",
-        "metadata": {"refusal": reason},
-        "links": [],
-        "frames": [],
-        "forms": [],
-        "tables": [],
-        "truncated": False,
-        "found_main": False,
-        "quality_flags": flags or ["format_refused"],
-    }
 
 
 def _extract_csv(content: str, limits) -> dict[str, object]:

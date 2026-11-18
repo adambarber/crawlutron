@@ -11,6 +11,7 @@ import pathlib
 
 from tests.chokepoint_walks import ADMISSION_ROOT, APP_ROOT, offender_at, trees_under
 from tests.invariants._clock_family import dotted_name
+from tests.invariants._shared import _module_imports_tree
 from tests.rules import Bites, Rule, Silent
 
 _SYNTHETIC = ADMISSION_ROOT / "_synthetic.py"
@@ -36,18 +37,17 @@ def _roots(tree: ast.Module) -> tuple[set[str], set[str]]:
     """Aliased roots for ``time`` and ``asyncio`` (``import time as t``, ``import asyncio as aio``)."""
     time_roots: set[str] = set()
     asyncio_roots: set[str] = set()
+    for top, asname in _module_imports_tree(tree):
+        bound = asname or top
+        if top == "time":
+            time_roots.add(bound)
+        elif top == "asyncio":
+            asyncio_roots.add(bound)
     for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
+        if isinstance(node, ast.ImportFrom) and node.module == "time":
             for alias in node.names:
-                if alias.name == "time":
-                    time_roots.add(alias.asname or "time")
-                elif alias.name == "asyncio":
-                    asyncio_roots.add(alias.asname or "asyncio")
-        elif isinstance(node, ast.ImportFrom):
-            if node.module == "time":
-                for alias in node.names:
-                    if alias.name in _TIME_CLOCK_MEMBERS:
-                        time_roots.add(alias.asname or alias.name)
+                if alias.name in _TIME_CLOCK_MEMBERS:
+                    time_roots.add(alias.asname or alias.name)
     return time_roots, asyncio_roots
 
 

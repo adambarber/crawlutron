@@ -96,6 +96,7 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     # #1137: crawlutron-extract leaf package, stdlib-only, __all__-declared.
     "packages/extract/src/crawlutron_extract/limits.py": (2, 0),
     "packages/extract/src/crawlutron_extract/models.py": (2, 0),
+    "packages/extract/src/crawlutron_extract/office.py": (1, 1),
     "packages/extract/src/crawlutron_extract/_extract.py": (2, 1),
     "packages/extract/src/crawlutron_extract/charset.py": (1, 1),
     "packages/extract/src/crawlutron_extract/html_pass.py": (1, 1),

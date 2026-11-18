@@ -11,6 +11,22 @@ __all__ = ["ExtractLimits", "RICH_TEXT_FLOOR"]
 RICH_TEXT_FLOOR: int = 200
 
 
+def _empty_result(reason: str, flags: list[str] | None = None) -> dict:
+    """Shared empty extraction result: every field present, quality=failed."""
+    return {
+        "text": "",
+        "markdown": "",
+        "metadata": {"refusal": reason},
+        "links": [],
+        "frames": [],
+        "forms": [],
+        "tables": [],
+        "truncated": False,
+        "found_main": False,
+        "quality_flags": flags or ["format_refused"],
+    }
+
+
 @dataclass(frozen=True)
 class ExtractLimits:
     """Caps applied to every extraction; input above max_input_bytes is refused."""

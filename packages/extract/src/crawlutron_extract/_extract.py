@@ -14,6 +14,7 @@ from crawlutron_extract.charset import decode_content
 from crawlutron_extract.html_pass import extract_html
 from crawlutron_extract.limits import RICH_TEXT_FLOOR, ExtractLimits
 from crawlutron_extract.models import Extraction, Quality
+from crawlutron_extract.office import extract_office
 from crawlutron_extract.text_format import extract_text_format
 
 __all__ = ["DEFAULT_LIMITS", "extract"]
@@ -151,26 +152,53 @@ def extract(
     ctype = content_type.lower()
     container_types = (
         "application/pdf",
-        "application/msword",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/vnd.ms-excel",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "application/vnd.ms-powerpoint",
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        "application/epub+zip",
+        "application/msword",  # .doc legacy binary — refused with flag
+    )
+    is_office = (
+        ctype == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        or ctype == "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        or ctype == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        or ctype == "application/epub+zip"
     )
 
-    # Binary containers skip the charset ladder — decode_content would emit
-    # charset_lossy on non-text bytes. Return empty with quality=low.
+    # Binary containers (PDF, DOC) skip the charset ladder — decode_content
+    # would emit charset_lossy on non-text bytes. Return empty with quality=low.
+    flags: list[str] = []
     if ctype in container_types:
         charset: str | None = None
-        flags: list[str] = []
         return _empty_extraction(
             quality=Quality.LOW,
             flag=f"{ctype.split('/')[-1]}_unsupported",
             flags=flags,
             metadata=metadata,
             charset=charset,
+        )
+    # Office containers (DOCX/PPTX/XLSX/EPUB) extracted via zip+XML.
+    if is_office:
+        fmt = extract_office(content, content_type, limits)
+        (
+            of_text,
+            of_markdown,
+            of_links,
+            of_frames,
+            of_forms,
+            of_tables,
+            of_truncated,
+            of_quality,
+        ) = _apply_text_format(fmt, metadata, flags)
+        return Extraction(
+            quality=of_quality,
+            flags=flags,
+            metadata=metadata,
+            text=of_text,
+            markdown=of_markdown,
+            links=of_links,
+            frames=of_frames,
+            forms=of_forms,
+            tables=of_tables,
+            truncated=of_truncated,
+            charset=None,
+            links_refused=0,
         )
     # Truly unsupported type: refuse without decode.
     if not (
