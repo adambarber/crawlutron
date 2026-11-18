@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-import sys
-from contextlib import suppress
 from importlib import import_module
 from typing import Protocol, cast
 
 from safe_url.address_class import AddressClass, classify
 from safe_url.host_canonical import idna_host
-
-TWO_PART_PUBLIC_SUFFIXES = {"co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au"}
 
 
 class _PublicSuffixDataset(Protocol):
@@ -23,42 +19,17 @@ _PSL_UNSET = None
 _PSL: _PublicSuffixDataset | None = _PSL_UNSET
 
 
-def _public_suffix_list() -> _PublicSuffixDataset | None:
-    """Lazily load the publicsuffixlist snapshot, None when absent.
+def _public_suffix_list() -> _PublicSuffixDataset:
+    """Load the publicsuffixlist snapshot: a hard dependency, failure propagates.
 
-    Failure falls back to the heuristic rather than failing an import or a gate.
+    There is no silent absent state -- if the dataset cannot load, that error
+    reaches the caller instead of degrading site grouping.
     """
     global _PSL
-    # Read through the module object so a caller that deletes the attribute --
-    # the test seam for "never loaded" -- is read as uninitialised, not a NameError.
-    if getattr(sys.modules[__name__], "_PSL", _PSL_UNSET) is not _PSL_UNSET:
+    if _PSL is not None:
         return _PSL
-    try:
-        _PSL = cast(_PublicSuffixDataset, import_module("publicsuffixlist").PublicSuffixList())
-    except Exception:
-        _PSL = None
+    _PSL = cast(_PublicSuffixDataset, import_module("publicsuffixlist").PublicSuffixList())
     return _PSL
-
-
-def _psl_available() -> bool:
-    """Whether the publicsuffixlist dataset loaded this process.
-
-    When False, registrable_domain answers from the documented two-label
-    heuristic: the fallback is explicit, never silent.
-    """
-    _public_suffix_list()
-    return _PSL is not None
-
-
-def _heuristic_registrable_domain(host: str) -> str:
-    """Fallback used only when the PSL dataset is unavailable."""
-    labels = host.split(".")
-    if len(labels) <= 2:
-        return host
-    suffix = ".".join(labels[-2:])
-    if suffix in TWO_PART_PUBLIC_SUFFIXES and len(labels) >= 3:
-        return ".".join(labels[-3:])
-    return ".".join(labels[-2:])
 
 
 def registrable_domain(host: str, *, psl: _PublicSuffixDataset | None = None) -> str:
@@ -71,18 +42,14 @@ def registrable_domain(host: str, *, psl: _PublicSuffixDataset | None = None) ->
         ascii_host = idna_host(host)
     except ValueError:
         ascii_host = host
-    if psl is None:
-        psl = _public_suffix_list()
     # An IP literal has no registrable site: the PSL '*' default would map it to
     # its last two octets, colliding unrelated hosts on one site key.
     if classify(ascii_host) is not AddressClass.NOT_AN_ADDRESS:
         return host
-    if psl is not None:
-        with suppress(Exception):
-            registrable = psl.privatesuffix(ascii_host)
-            if registrable:
-                return registrable
-    return _heuristic_registrable_domain(host)
+    if psl is None:
+        psl = _public_suffix_list()
+    registrable = psl.privatesuffix(ascii_host)
+    return registrable if registrable else host
 
 
 def is_public_suffix(host: str, *, psl: _PublicSuffixDataset | None = None) -> bool:
@@ -99,10 +66,7 @@ def is_public_suffix(host: str, *, psl: _PublicSuffixDataset | None = None) -> b
         return True
     if psl is None:
         psl = _public_suffix_list()
-    if psl is not None:
-        with suppress(Exception):
-            return psl.privatesuffix(host) is None
-    return host in TWO_PART_PUBLIC_SUFFIXES
+    return psl.privatesuffix(host) is None
 
 
-__all__ = ["TWO_PART_PUBLIC_SUFFIXES", "is_public_suffix", "registrable_domain"]
+__all__ = ["is_public_suffix", "registrable_domain"]

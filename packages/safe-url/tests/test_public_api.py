@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import tomllib
+from pathlib import Path
 
 import pytest
 from safe_url import (
@@ -109,8 +111,13 @@ def test_registrable_domain_and_public_suffix():
     assert registrable_domain("a.b.c.example.com") == "example.com"
     assert registrable_domain("1.2.3.4") == "1.2.3.4"
     assert registrable_domain("a.b.example.co.uk") == "example.co.uk"
-    assert registrable_domain("a.b.c.example.com", psl=None) == "example.com"
+    # github.io is a public suffix, so hosts directly under it are their own
+    # registrable domain -- the PSL answers site grouping, no heuristic.
+    assert registrable_domain("a.github.io") == "a.github.io"
+    assert registrable_domain("a.b.github.io") == "b.github.io"
+    assert registrable_domain("foo.co.uk") == "foo.co.uk"
     assert is_public_suffix("com") is True
+    assert is_public_suffix("github.io") is True
     assert is_public_suffix("example.com") is False
 
 
@@ -151,3 +158,13 @@ def test_scope_allows_matches_against_url_without_query():
     compiled = compile_untrusted(r"example\.com/keep/")
     assert scope_allows(compiled, "https://example.com/keep/page?x=1") is True
     assert scope_allows(compiled, "https://example.com/drop/page") is False
+
+
+def test_manifest_declares_regex_and_psl_as_hard_dependencies():
+    """regex and publicsuffixlist are hard dependencies, not optional extras."""
+    manifest = tomllib.loads(
+        (Path(__file__).resolve().parent.parent / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    deps = manifest["project"]["dependencies"]
+    assert "regex==2026.9.29" in deps
+    assert "publicsuffixlist==1.1.2.20261101" in deps

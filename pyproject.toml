@@ -53,9 +53,9 @@ dependencies = [
     "crawlutron-mcp>=0.4.0.dev0",
     "crawlutron-rest>=0.4.0.dev0",
     "crawlutron-sdk>=0.4.0.dev0",
-    # The public-suffix dataset is safe-url's optional extra; the crawler wants
-    # the real registrable-domain lookups, so the app opts in.
-    "crawlutron-safe-url[psl]>=0.4.0.dev0",
+    # crawlutron-safe-url ships complete: regex and publicsuffixlist are hard
+    # dependencies, so admission and site grouping never silently degrade.
+    "crawlutron-safe-url>=0.4.0.dev0",
 ]
 
 [project.optional-dependencies]

@@ -87,7 +87,9 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     "packages/safe-url/src/safe_url/host_policy.py": (5, 5),
     "packages/safe-url/src/safe_url/normalized_url.py": (6, 4),
     "packages/safe-url/src/safe_url/process_state.py": (6, 6),
-    "packages/safe-url/src/safe_url/registrable_domain.py": (3, 2),
+    # LOWERED to (2, 2): the PSL heuristic, TWO_PART_PUBLIC_SUFFIXES and
+    # _psl_available were deleted -- hard deps now, no absent state (#1140).
+    "packages/safe-url/src/safe_url/registrable_domain.py": (2, 2),
     "packages/safe-url/src/safe_url/safe_regex.py": (7, 2),
     "packages/safe-url/src/safe_url/scope_match.py": (1, 1),
     "packages/safe-url/src/safe_url/url_redaction.py": (4, 4),
