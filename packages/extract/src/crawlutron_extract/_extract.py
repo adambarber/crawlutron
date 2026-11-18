@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import cast
 
+from safe_url import HostPolicy, NormalizedUrl
+
 from crawlutron_extract.charset import decode_content
 from crawlutron_extract.html_pass import extract_html
 from crawlutron_extract.limits import RICH_TEXT_FLOOR, ExtractLimits
@@ -79,7 +81,7 @@ def _apply_text_format(
 ) -> tuple[
     str,
     str,
-    list[dict[str, str]],
+    list[NormalizedUrl],
     list,
     list,
     list[list[list[str]]],
@@ -94,7 +96,7 @@ def _apply_text_format(
     metadata.update(cast(dict[str, str], fmt["metadata"]))
     text = cast(str, fmt["text"])
     markdown = cast(str, fmt["markdown"])
-    links = cast(list[dict[str, str]], fmt["links"])
+    links = cast(list[NormalizedUrl], fmt["links"])
     frames = cast(list[dict[str, str]], fmt["frames"])
     forms = cast(list[dict[str, str]], fmt["forms"])
     tables = cast(list[list[list[str]]], fmt["tables"])
@@ -140,24 +142,75 @@ def extract(
     Never raises on hostile input; returns quality="failed" instead."""
     if len(content) > limits.max_input_bytes:
         return Extraction(quality=Quality.FAILED, flags=["input_refused"])
-    text, charset, flags = decode_content(content, content_type)
     metadata: dict[str, str] = {}
     if content_type:
         metadata["content_type"] = content_type
     if url is not None:
         metadata["url"] = url
+
+    ctype = content_type.lower()
+    container_types = (
+        "application/pdf",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-powerpoint",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "application/epub+zip",
+    )
+
+    # Binary containers skip the charset ladder — decode_content would emit
+    # charset_lossy on non-text bytes. Return empty with quality=low.
+    if ctype in container_types:
+        charset: str | None = None
+        flags: list[str] = []
+        return _empty_extraction(
+            quality=Quality.LOW,
+            flag=f"{ctype.split('/')[-1]}_unsupported",
+            flags=flags,
+            metadata=metadata,
+            charset=charset,
+        )
+    # Truly unsupported type: refuse without decode.
+    if not (
+        ctype == "text/html"
+        or ctype.startswith("text/html;")
+        or ctype == "text/csv"
+        or ctype.startswith("text/csv;")
+        or ctype == "application/csv"
+        or ctype == "application/json"
+        or ctype.startswith("application/json;")
+        or ctype == "application/jsonl"
+        or ctype.startswith("application/jsonl;")
+        or ctype == "text/json"
+        or ctype == "application/xml"
+        or ctype.startswith("application/xml;")
+        or ctype == "text/xml"
+        or ctype.startswith("text/xml;")
+        or ctype.startswith("text/")
+    ):
+        return _empty_extraction(
+            quality=Quality.FAILED,
+            flag="format_refused",
+            flags=[],
+            metadata=metadata,
+            charset=None,
+        )
+
+    text, charset, flags = decode_content(content, content_type)
     if charset:
         metadata["charset"] = charset
 
     markdown = ""
-    links: list[dict[str, str]] = []
+    links: list = []
     frames: list = []
     forms: list = []
     tables: list[list[list[str]]] = []
     truncated = False
     quality = Quality.FAILED
+    links_refused = 0
 
-    ctype = content_type.lower()
     is_html = ctype == "text/html" or ctype.startswith("text/html;")
     is_csv = ctype == "text/csv" or ctype.startswith("text/csv;") or ctype == "application/csv"
     is_json = (
@@ -174,7 +227,8 @@ def extract(
         or ctype.startswith("text/xml;")
     )
     if is_html:
-        html = extract_html(text, limits)
+        policy = HostPolicy.unrestricted()
+        html = extract_html(text, limits, base_url=url, policy=policy)
         metadata.update(html["metadata"])
         text = html["text"]
         markdown = html["markdown"]
@@ -183,6 +237,9 @@ def extract(
         forms = cast(list[dict[str, str]], html["forms"])
         tables = html["tables"]
         truncated = html["truncated"]
+        if html["links_refused"] > 0:
+            flags.append("links_refused")
+        links_refused = html["links_refused"]
         quality = _resolve_quality(
             content_type=content_type,
             text=text,
@@ -208,36 +265,6 @@ def extract(
     elif ctype.startswith("text/"):
         # Plain text: no format extractor ran. Empty → FAILED, else LOW.
         quality = Quality.LOW if text.strip() else Quality.FAILED
-    else:
-        # Binary container (PDF, DOCX, EPUB, etc.) with no tier: empty payload,
-        # container flag, quality=low. Truly unsupported types are refused.
-        container_types = (
-            "application/pdf",
-            "application/msword",
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            "application/vnd.ms-excel",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "application/vnd.ms-powerpoint",
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            "application/epub+zip",
-        )
-        if ctype in container_types:
-            container_flag = f"{ctype.split('/')[-1]}_unsupported"
-            return _empty_extraction(
-                quality=Quality.LOW,
-                flag=container_flag,
-                flags=flags,
-                metadata=metadata,
-                charset=charset,
-            )
-        # Truly unsupported type: refuse.
-        return _empty_extraction(
-            quality=Quality.FAILED,
-            flag="format_refused",
-            flags=flags,
-            metadata=metadata,
-            charset=charset,
-        )
 
     return Extraction(
         quality=quality,
@@ -251,4 +278,5 @@ def extract(
         tables=tables,
         truncated=truncated,
         charset=charset,
+        links_refused=links_refused,
     )

@@ -6,7 +6,15 @@ entities, duplicate attributes, null bytes, 5 MB single line, 100k-row table.
 
 from __future__ import annotations
 
+import pytest
 from crawlutron_extract import ExtractLimits, Quality, extract
+from safe_url.host_policy import reset_private_target_memo
+
+
+@pytest.fixture(autouse=True)
+def _reset_private_target_state(monkeypatch):
+    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
+    reset_private_target_memo()
 
 
 def test_basic_html_text_and_markdown():
@@ -37,8 +45,8 @@ def test_links_extracted():
     html = b'<a href="https://example.com">Example</a>'
     result = extract(html, "text/html")
     assert len(result.links) == 1
-    assert result.links[0]["url"] == "https://example.com"
-    assert result.links[0]["text"] == "Example"
+    assert str(result.links[0]) == "https://example.com"
+    assert result.links[0].host == "example.com"
 
 
 def test_frames_extracted():
@@ -163,7 +171,7 @@ def test_100k_row_table_capped():
 
 
 def test_links_capped():
-    links = b"".join(b'<a href="u%d">t</a>' % i for i in range(2000))
+    links = b"".join(b'<a href="https://example.com/u%d">t</a>' % i for i in range(2000))
     html = b"<div>" + links + b"</div>"
     limits = ExtractLimits(max_links=5)
     result = extract(html, "text/html", limits=limits)
@@ -267,10 +275,10 @@ def test_links_collected_inside_boilerplate():
         b'<footer><a href="/footer-link">Footer link</a></footer>'
         b"<p>Main text</p>"
     )
-    result = extract(html, "text/html")
+    result = extract(html, "text/html", url="https://example.com/")
     assert len(result.links) == 2
-    urls = {link["url"] for link in result.links}
-    assert urls == {"/nav-link", "/footer-link"}
+    urls = {str(link) for link in result.links}
+    assert urls == {"https://example.com/nav-link", "https://example.com/footer-link"}
 
 
 def test_main_inside_boilerplate_extracts_text():
@@ -290,3 +298,68 @@ def test_determinism():
     a = extract(html, "text/html", limits=limits)
     b = extract(html, "text/html", limits=limits)
     assert a == b
+
+
+@pytest.mark.parametrize(
+    "html,expected_url,expected_refused",
+    [
+        # javascript link refused, https link kept
+        (
+            b'<a href="javascript:alert(1)">JS</a><a href="https://example.com/ok">OK</a>',
+            "https://example.com/ok",
+            1,
+        ),
+        # protocol-relative URL resolved against base
+        (
+            b'<a href="//example.com/abs">Protocol-relative</a>',
+            "https://example.com/abs",
+            0,
+        ),
+        # relative ../x resolved against base URL
+        (
+            b'<a href="../sibling">Sibling</a>',
+            "https://example.com/sibling",
+            0,
+        ),
+        # <base href> changes resolution base
+        (
+            b'<base href="https://base.example.com/root/"><a href="page">Relative</a>',
+            "https://base.example.com/root/page",
+            0,
+        ),
+        # duplicate links differing only by fragment dedupe to one
+        (
+            b'<a href="https://example.com/page#a">A</a><a href="https://example.com/page#b">B</a>',
+            "https://example.com/page",
+            0,
+        ),
+    ],
+)
+def test_links_resolve(html, expected_url, expected_refused):
+    result = extract(html, "text/html", url="https://example.com/")
+    assert len(result.links) == 1
+    assert str(result.links[0]) == expected_url
+    assert result.links_refused == expected_refused
+
+
+def test_links_dedup_by_trailing_slash():
+    html = b'<a href="https://example.com/page">A</a><a href="https://example.com/page/">B</a>'
+    result = extract(html, "text/html", url="https://example.com/")
+    assert len(result.links) == 2  # /page and /page/ are different URLs
+
+
+def test_links_10k_capped_and_steady_memory():
+    links = b"".join(b'<a href="https://example.com/u%d">t</a>' % i for i in range(10_000))
+    html = b"<div>" + links + b"</div>"
+    limits = ExtractLimits(max_links=50)
+    result = extract(html, "text/html", url="https://example.com/", limits=limits)
+    assert len(result.links) == 50
+    assert result.truncated
+
+
+def test_links_all_refused():
+    html = b'<a href="javascript:1">J</a><a href="mailto:a@b.c">M</a><a href="data:x">D</a>'
+    result = extract(html, "text/html", url="https://example.com/")
+    assert len(result.links) == 0
+    assert result.links_refused == 3
+    assert "links_refused" in result.flags

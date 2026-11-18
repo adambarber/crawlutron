@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from safe_url import NormalizedUrl
+
 __all__ = ["Extraction", "Quality"]
 
 
@@ -25,10 +27,11 @@ class Extraction:
     markdown: str = ""
     charset: str | None = None
     metadata: dict[str, str] = field(default_factory=dict)
-    links: list[dict[str, str]] = field(default_factory=list)
+    links: list[NormalizedUrl] = field(default_factory=list)
     frames: list[dict[str, str]] = field(default_factory=list)
     forms: list[dict[str, str]] = field(default_factory=list)
     tables: list[list[list[str]]] = field(default_factory=list)
     quality: Quality = Quality.FAILED
     flags: list[str] = field(default_factory=list)
     truncated: bool = False
+    links_refused: int = 0

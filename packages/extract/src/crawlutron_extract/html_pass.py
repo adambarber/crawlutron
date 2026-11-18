@@ -1,13 +1,15 @@
 """HTML single-pass extraction: text, markdown, metadata, links, frames, forms.
 
 html.parser streaming: memory O(output), not O(document). Boilerplate skipped;
-article/main/[role=main] preferred; entities decode once.
+article/main/[role=main] preferred. Links admitted through safe_url (never raw strings).
 """
 
 from __future__ import annotations
 
 from html import parser as html_parser
 from typing import TypedDict
+
+from safe_url import HostPolicy, NormalizedUrl, admit_or_none
 
 __all__ = ["extract_html"]
 
@@ -23,12 +25,13 @@ class _HtmlResult(TypedDict):
     text: str
     markdown: str
     metadata: dict[str, str]
-    links: list[dict[str, str]]
+    links: list[NormalizedUrl]
     frames: list[_FrameEntry]
     forms: list[_FormEntry]
     tables: list[list[list[str]]]
     truncated: bool
     found_main: bool
+    links_refused: int
 
 
 class _FrameEntry(TypedDict):
@@ -60,9 +63,14 @@ def _collapse_whitespace(text: str) -> str:
     return "\n".join(" ".join(line.split()) for line in lines)
 
 
-def extract_html(content: str, limits) -> _HtmlResult:
+def extract_html(
+    content: str,
+    limits,
+    base_url: str | None = None,
+    policy: HostPolicy | None = None,
+) -> _HtmlResult:
     """Extract from HTML in one pass; never raises."""
-    extractor = _HTMLExtractor(limits)
+    extractor = _HTMLExtractor(limits, base_url=base_url, policy=policy)
     extractor.feed(content)
     extractor.close()
     return extractor.result()
@@ -71,13 +79,15 @@ def extract_html(content: str, limits) -> _HtmlResult:
 class _HTMLExtractor(html_parser.HTMLParser):
     """Event-based parser producing bounded markdown and metadata."""
 
-    def __init__(self, limits) -> None:
+    def __init__(self, limits, base_url: str | None = None, policy: HostPolicy | None = None) -> None:
         super().__init__(convert_charrefs=True)
         self._limits = limits
         self._stack: list[dict[str, object]] = []
         self._text_parts: list[str] = []
         self._main_parts: list[str] = []
-        self._links: list[dict[str, str]] = []
+        self._links: list[NormalizedUrl] = []
+        self._seen_links: set[str] = set()
+        self._links_refused = 0
         self._frames: list[_FrameEntry] = []
         self._forms: list[_FormEntry] = []
         self._tables: list[list[list[str]]] = []
@@ -95,6 +105,13 @@ class _HTMLExtractor(html_parser.HTMLParser):
         self._metadata: dict[str, str] = {}
         self._truncated = False
         self._list_stack: list[tuple[str, int]] = []
+        self._policy = policy
+        self._base_url = None
+        if base_url is not None and policy is not None:
+            try:
+                self._base_url = NormalizedUrl(base_url, policy=policy)
+            except ValueError:
+                pass
 
     @property
     def _in_boilerplate(self) -> bool:
@@ -110,6 +127,19 @@ class _HTMLExtractor(html_parser.HTMLParser):
         if is_main:
             self._in_main += 1
             self._found_main = True
+
+        # <base href> changes the resolution base for relative URLs.
+        if tag == "base" and attr_dict.get("href") and self._policy is not None:
+            href = attr_dict["href"]
+            if self._base_url is not None:
+                resolved = self._base_url.resolve(href)
+            else:
+                try:
+                    resolved = NormalizedUrl(href, policy=self._policy)
+                except ValueError:
+                    resolved = None
+            if resolved is not None:
+                self._base_url = resolved
 
         # Links/frames/forms are collected document-wide (used for frontier
         # discovery), not gated behind main-content or boilerplate selection.
@@ -287,10 +317,21 @@ class _HTMLExtractor(html_parser.HTMLParser):
             self._link_url = ""
             self._link_text_parts = []
             return
-        if len(self._links) >= self._limits.max_links:
-            self._truncated = True
-        else:
-            self._links.append({"url": self._link_url, "text": text})
+        # Resolve against base URL, admit through safe_url, dedupe, cap after admission.
+        resolved_url = self._link_url
+        if self._base_url is not None:
+            resolved = self._base_url.resolve(self._link_url)
+            if resolved is not None:
+                resolved_url = resolved._raw
+        admitted = admit_or_none(resolved_url, policy=self._policy) if self._policy is not None else None
+        if admitted is None:
+            self._links_refused += 1
+        elif admitted.raw not in self._seen_links:
+            self._seen_links.add(admitted.raw)
+            if len(self._links) >= self._limits.max_links:
+                self._truncated = True
+            else:
+                self._links.append(admitted)
         self._link_url = ""
         self._link_text_parts = []
 
@@ -327,6 +368,7 @@ class _HTMLExtractor(html_parser.HTMLParser):
             "tables": self._tables,
             "truncated": self._truncated,
             "found_main": self._found_main,
+            "links_refused": self._links_refused,
         }
 
     def _build_markdown(self) -> str:
