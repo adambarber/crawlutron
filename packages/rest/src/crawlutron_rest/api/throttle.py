@@ -7,12 +7,14 @@ externally-reachable surface and every pre-auth key-verify path.
 from __future__ import annotations
 
 import hashlib
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from fastapi.responses import JSONResponse
 
+from crawlutron.runtime import process_state
 from crawlutron.service.errors import DomainError, KeyVerifyThrottled
 from crawlutron.service.meter_ledger import MeterLedger, register_shared_meter
 from crawlutron.storage.coordination_store import atwin
@@ -122,6 +124,7 @@ class Throttle(MeterLedger):
             self._reservations.clear()
         if prior is not None:
             prior.close()
+        _admit_bound(self)
 
     def unbind_shared_db(self) -> None:
         with self._lock:
@@ -132,6 +135,7 @@ class Throttle(MeterLedger):
             self._reservations.clear()
         if prior is not None:
             prior.close()
+        _drop_bound(self)
 
     # -- anonymous -----------------------------------------------------------
 
@@ -379,6 +383,42 @@ class Throttle(MeterLedger):
     aresidence = atwin(residence)
 
 
+# Live shared-store ownership (#1123): every Throttle holding a bound store is
+# admitted here, so the registry reset closes what a caller opened and forgot.
+_BOUND: set[Throttle] = set()
+_BOUND_LOCK = threading.RLock()
+_BOUND_SHARED_DB_OWNER = "crawlutron_rest.api.throttle-shared-db"
+
+
+def _admit_bound(throttle: Throttle) -> None:
+    """Track one Throttle as holding a live shared store."""
+    with _BOUND_LOCK:
+        _BOUND.add(throttle)
+
+
+def _drop_bound(throttle: Throttle) -> None:
+    """Stop tracking one Throttle: its store is closed or replaced."""
+    with _BOUND_LOCK:
+        _BOUND.discard(throttle)
+
+
+def _close_bound_stores() -> None:
+    """Close every shared store still held, through the owning Throttle's own
+    teardown door: a caller that opened one and forgot cannot leak it (#1123)."""
+    with _BOUND_LOCK:
+        bound = list(_BOUND)
+        for throttle in bound:
+            throttle.unbind_shared_db()
+        # The reset door the reset family reads: clear, never per-element discard.
+        _BOUND.clear()
+
+
+def _has_bound_stores() -> bool:
+    """Whether any Throttle still holds a shared store right now."""
+    with _BOUND_LOCK:
+        return bool(_BOUND)
+
+
 _SHARED = Throttle()
 
 
@@ -388,6 +428,9 @@ def shared_throttle() -> Throttle:
 
 
 register_shared_meter(__name__, _SHARED)
+# #1123: the shared-store connections are production-owned state: the reset
+# closes every store left bound, including the app lifespan's own.
+process_state.register(_BOUND_SHARED_DB_OWNER, _close_bound_stores, _has_bound_stores)
 
 # -- anonymous middleware ----------------------------------------------------
 

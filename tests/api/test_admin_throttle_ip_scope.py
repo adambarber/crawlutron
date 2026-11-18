@@ -127,6 +127,23 @@ def test_the_shared_store_keys_the_admin_ladder_per_address(tmp_path):
     second.check_admin(_OPERATOR)
 
 
+def test_a_forgotten_shared_store_is_closed_by_the_registry_reset(tmp_path):
+    """Production owns the shared-store connection: a Throttle that binds one
+    and never unbinds it leaks nothing, because the registry reset closes it."""
+    from crawlutron.runtime import process_state
+    from tests.invariants.test_no_leaked_store_connections import live_ledgered_sites
+
+    db = tmp_path / "crawler.db"
+    before = len(live_ledgered_sites())
+    forgotten = Throttle(shared_db_path=db)
+    forgotten.record_admin_failure(_ATTACKER)
+    assert forgotten.shared is True
+    assert len(live_ledgered_sites()) > before
+    process_state.reset_all_process_state()
+    assert forgotten.shared is False
+    assert len(live_ledgered_sites()) == before
+
+
 async def test_the_async_twins_carry_the_scope():
     """The doors await the async twins; the scope rides the twin's arguments."""
     _state, throttle = _arranged()
