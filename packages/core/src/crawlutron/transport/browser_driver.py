@@ -182,6 +182,7 @@ class BrowserDriver:
         self._browser: BrowserHandle | None = None
         self._browser_reused = False
         self._render_count = 0
+        self._launch_key: tuple | None = None
 
     async def open_page(self, browser_profile: BrowserProfileRecord | None) -> RenderPage:
         """Return a page on a (possibly reused) browser, with profile kwargs applied.
@@ -245,14 +246,16 @@ class BrowserDriver:
         Recycles the browser once it has served ``_max_browser_renders`` to
         bound memory growth of a long-lived Camoufox process.
         """
+        launch_kwargs = self.browser_kwargs(browser_profile)
+        launch_key = _launch_key(launch_kwargs)
         if (
             self._browser is None
             or _browser_closed(self._browser)
             or self._render_count >= self._max_browser_renders
+            or launch_key != self._launch_key
         ):
             if self._browser is not None:
                 await self._release_browser()
-            launch_kwargs = self.browser_kwargs(browser_profile)
             cm = self._browser_factory(**launch_kwargs)
             # The yielded handle is object-typed in the wild (Browser|BrowserContext);
             # the driver only calls new_page on it, so narrow to the handle here.
@@ -261,6 +264,7 @@ class BrowserDriver:
             self._browser_cm = cm
             self._browser_reused = False
             self._render_count = 0
+            self._launch_key = launch_key
         else:
             self._browser_reused = True
         browser = self._browser
@@ -424,6 +428,21 @@ class BrowserDriver:
     async def _async_sleep(self, seconds: float) -> None:
         """Wait between page steps, off the event loop. See :func:`async_sleep`."""
         await async_sleep(self._sleep, seconds)
+
+
+def _launch_key(kwargs: dict[str, object]) -> tuple:
+    """Hashable key of launch kwargs so reuse detects a profile mismatch.
+
+    Lists (e.g. ``args`` from ``resource_mode``) become tuples; sorted for
+    order-independent equality.
+    """
+    frozen: list[tuple[str, object]] = []
+    for key in sorted(kwargs):
+        value = kwargs[key]
+        if isinstance(value, list):
+            value = tuple(value)
+        frozen.append((key, value))
+    return tuple(frozen)
 
 
 def _browser_closed(browser: object) -> bool:
