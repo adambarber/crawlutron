@@ -93,6 +93,10 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     "packages/safe-url/src/safe_url/safe_regex.py": (7, 2),
     "packages/safe-url/src/safe_url/scope_match.py": (1, 1),
     "packages/safe-url/src/safe_url/url_redaction.py": (4, 4),
+    # #1137: crawlutron-extract leaf package, stdlib-only, __all__-declared.
+    "packages/extract/src/crawlutron_extract/limits.py": (1, 0),
+    "packages/extract/src/crawlutron_extract/models.py": (2, 0),
+    "packages/extract/src/crawlutron_extract/_extract.py": (2, 1),
 }
 
 # Former #215 exemptions: their __all__ deliberately does not enumerate every public
@@ -103,6 +107,19 @@ DECLARED_SURFACE_RATCHET = {
     "packages/core/src/crawlutron/runtime/process_state.py": (6, 6),
     # Tracked in git; hatch-vcs overwrites it at build time (#561).
     "packages/core/src/crawlutron/_version.py": (3, 0),
+    # #1137: crawlutron-extract _version.py (dunder names in __all__; counts-only).
+    "packages/extract/src/crawlutron_extract/_version.py": (3, 0),
+    # #1137: pre-existing __all__ modules now covered by the derived scan roots
+    # (workspace members instead of core-only APP_ROOT).
+    "packages/core/src/admission/errors.py": (3, 3),
+    "packages/core/src/admission/gate.py": (4, 2),
+    "packages/core/src/admission/gauge.py": (2, 1),
+    "packages/core/src/admission/policy.py": (2, 0),
+    "packages/core/src/admission/seams.py": (2, 2),
+    "packages/core/src/admission/values.py": (24, 17),
+    "packages/sdk/src/crawlutron_sdk/client.py": (2, 2),
+    "packages/sdk/src/crawlutron_sdk/errors.py": (18, 2),
+    "packages/sdk/src/crawlutron_sdk/models.py": (27, 0),
     "packages/core/src/crawlutron/admission/policy.py": (10, 5),
     "packages/rest/src/crawlutron_rest/api/_depends_singletons.py": (2, 0),
     "packages/core/src/crawlutron/service/async_crawl_runner.py": (3, 2),

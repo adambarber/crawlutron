@@ -11,7 +11,7 @@
     // owner of project-specific safety predicates; this file is the single owner
     // of "the type annotation is a lie". Gated by a pre-commit hook running
     // basedpyright directly, whose finding count is zero-or-fail.
-    "include": ["packages/core/src/crawlutron", "packages/mcp/src/crawlutron_mcp"],
+    "include": ["packages/core/src/crawlutron", "packages/mcp/src/crawlutron_mcp", "packages/extract/src/crawlutron_extract"],
     "exclude": [
         "tests",
         "scripts",

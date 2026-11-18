@@ -296,6 +296,8 @@ max-statements = 87
                # bind this code performs
     "S105",    # fake credentials in fixtures
     "S106",    # fake credentials in fixtures
+    "S310",    # test fixtures build XML with ElementTree; not parsing untrusted input
+    "S405",    # test fixtures build XML with ElementTree; not parsing untrusted input
     "S311",    # seeded pseudo-random generators, for reproducible test data.
                # Not satisfiable by any change: the rule fires on the
                # random.Random(seed) CONSTRUCTION, not just on its methods, so
@@ -325,6 +327,8 @@ max-statements = 87
     "S104",
     "S105",
     "S106",
+    "S310",    # test fixtures build XML with ElementTree; not parsing untrusted input
+    "S405",    # test fixtures build XML with ElementTree; not parsing untrusted input
     "S311",
     "S404",
     "S603",

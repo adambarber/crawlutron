@@ -9,6 +9,7 @@ import ast
 import pathlib
 import re
 
+from tests._walk_primitives import import_roots
 from tests.chokepoint_walks import APP_ROOT, REPO_ROOT, assignment_targets, parsed, relative_posix
 from tests.invariants._shared import _declared_public_symbols
 from tests.invariants._surface_ratchet import (
@@ -92,18 +93,23 @@ def test_property_owner_public_surfaces_equal_all():
     assert not offenders, "property owner public surface drifted: " + ", ".join(offenders)
 
 
-def _all_surface_modules(root: pathlib.Path = APP_ROOT) -> set[str]:
-    """Every module (outside ``crawlutron/models``) that declares a literal ``__all__``.
-    crawlutron/models is governed by the models section below, not this gate.
+def _all_surface_modules() -> set[str]:
+    """Every module declaring a literal __all__, derived from every uv workspace
+    import root (not the core-only APP_ROOT). A new member is picked up
+    automatically via its own pyproject packages list (#906).
     """
     found: set[str] = set()
-    for path in sorted(root.rglob("*.py")):
-        rel = relative_posix(path)
-        if path.name == "__init__.py" or rel.startswith("packages/core/src/crawlutron/models/"):
-            continue
-        if _declared_public_symbols(parsed(path)) is None:
-            continue
-        found.add(rel)
+    for root in import_roots():
+        base = REPO_ROOT / root
+        for path in sorted(base.rglob("*.py")):
+            if path.name == "__init__.py":
+                continue
+            rel = relative_posix(path)
+            if rel.startswith("packages/core/src/crawlutron/models/"):
+                continue
+            if _declared_public_symbols(parsed(path)) is None:
+                continue
+            found.add(rel)
     return found
 
 
