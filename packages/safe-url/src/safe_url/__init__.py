@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from importlib import import_module
+from typing import TYPE_CHECKING
 
 from safe_url.address_class import AddressClass, classify, is_loopback_bind
 from safe_url.host_canonical import idna_host, punycode_host
@@ -16,6 +17,20 @@ from safe_url.host_policy import (
 from safe_url.normalized_url import NormalizedUrl, admit_or_none, admit_with_reason, refusal_literals
 from safe_url.registrable_domain import is_public_suffix, registrable_domain
 from safe_url.url_redaction import is_secret_name, redact_url, redact_urls_in_text, redacted_marker
+
+if TYPE_CHECKING:
+    # Bound for the type checker and __all__; resolved lazily at runtime via
+    # __getattr__, so the base import never pulls the regex C extension.
+    from safe_url.safe_regex import (
+        DEFAULT_MATCH_TIMEOUT_SECONDS,
+        MAX_PATTERN_LENGTH,
+        BoundedPattern,
+        RegexTimeout,
+        UnsafePattern,
+        compile_untrusted,
+        match_bounded,
+    )
+    from safe_url.scope_match import scope_allows
 
 __all__ = [
     "DEFAULT_MATCH_TIMEOUT_SECONDS",
@@ -74,7 +89,7 @@ class RegexUnavailable(ImportError):
         super().__init__(f"safe_url.{name} requires the regex extension: install crawlutron-safe-url[regex]")
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> object:
     """PEP 562 lazy loader for the regex-backed names.
 
     A name that needs the ``regex`` extension raises :class:`RegexUnavailable`
