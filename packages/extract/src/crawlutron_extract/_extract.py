@@ -261,12 +261,13 @@ def extract(
         text = html["text"]
         markdown = html["markdown"]
         links = html["links"]
-        frames = cast(list[dict[str, str]], html["frames"])
-        forms = cast(list[dict[str, str]], html["forms"])
+        frames = html["frames"]
+        forms = html["forms"]
         tables = html["tables"]
         truncated = html["truncated"]
         if html["links_refused"] > 0:
             flags.append("links_refused")
+        flags.extend(html.get("flags", []))
         links_refused = html["links_refused"]
         quality = _resolve_quality(
             content_type=content_type,

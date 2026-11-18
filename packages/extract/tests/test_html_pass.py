@@ -363,3 +363,108 @@ def test_links_all_refused():
     assert len(result.links) == 0
     assert result.links_refused == 3
     assert "links_refused" in result.flags
+
+
+def test_strong_emphasis_markdown():
+    """<strong> renders as **bold** in markdown."""
+    result = extract(b"<p><strong>bold</strong></p>", "text/html")
+    assert "**bold**" in result.markdown
+
+
+def test_em_emphasis_markdown():
+    """<em> renders as *italic* in markdown."""
+    result = extract(b"<p><em>italic</em></p>", "text/html")
+    assert "*italic*" in result.markdown
+
+
+def test_inline_code_markdown():
+    """<code> renders as `code` in markdown."""
+    result = extract(b"<p><code>fmt</code></p>", "text/html")
+    assert "`fmt`" in result.markdown
+
+
+def test_nested_emphasis_markdown():
+    """Nested <strong>/<em> nest their markers."""
+    result = extract(b"<p><strong>a <em>b</em> c</strong></p>", "text/html")
+    assert "**a *b* c**" in result.markdown
+
+
+def test_blockquote_markdown():
+    """<blockquote> renders with a > prefix in markdown."""
+    result = extract(b"<blockquote>quoted</blockquote>", "text/html")
+    assert "> quoted" in result.markdown
+
+
+def test_image_markdown():
+    """<img> renders as ![alt](src) in markdown."""
+    result = extract(b'<img alt="An image" src="https://example.com/img.png">', "text/html")
+    assert "![An image](https://example.com/img.png)" in result.markdown
+
+
+def test_horizontal_rule_markdown():
+    """<hr> renders as --- in markdown."""
+    result = extract(b"<p>a</p><hr><p>b</p>", "text/html")
+    assert "---\n" in result.markdown
+
+
+def test_nested_list_indentation():
+    """Nested list items are indented by two spaces per level."""
+    html = b"<ul><li>outer<ul><li>inner</li></ul></li></ul>"
+    result = extract(html, "text/html")
+    assert "- outer" in result.markdown
+    assert "  - inner" in result.markdown
+
+
+def test_ordered_list_start():
+    """<ol start> begins numbering at the declared value."""
+    result = extract(b'<ol start="4"><li>a</li><li>b</li></ol>', "text/html")
+    assert "4. a" in result.markdown
+    assert "5. b" in result.markdown
+
+
+def test_table_header_row():
+    """<th> cells form a header row with a markdown separator."""
+    html = b"<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>"
+    result = extract(html, "text/html")
+    md = result.markdown
+    assert "| A | B |" in md
+    assert "|---|---|" in md
+    assert "| 1 | 2 |" in md
+
+
+def test_table_caption():
+    """<caption> text appears in the table markdown."""
+    html = b"<table><caption>Summary</caption><tr><td>1</td></tr></table>"
+    result = extract(html, "text/html")
+    assert "Summary" in result.markdown
+
+
+def test_table_colspan_degraded():
+    """colspan is degraded honestly (repeated cell), never crashes."""
+    html = b'<table><tr><td colspan="2">merged</td></tr></table>'
+    result = extract(html, "text/html")
+    assert isinstance(result.markdown, str)
+    assert "merged" in result.markdown
+
+
+def test_table_rowspan_degraded():
+    """rowspan is degraded honestly, never crashes."""
+    html = b'<table><tr><td rowspan="2">spanning</td><td>b</td></tr><tr><td>c</td></tr></table>'
+    result = extract(html, "text/html")
+    assert isinstance(result.markdown, str)
+
+
+def test_nested_table_refused():
+    """A table inside a cell is refused with a flag, never crashes."""
+    html = b"<table><tr><td><table><tr><td>nested</td></tr></table></td></tr></table>"
+    result = extract(html, "text/html")
+    assert "nested_table_refused" in result.flags
+
+
+def test_quality_medium_paths_distinguishable():
+    """The two MEDIUM paths (no-main vs below-floor) are both MEDIUM and
+    reachable through distinct conditions."""
+    no_main = extract(b"<p>Some body text without a main content marker.</p>", "text/html")
+    assert no_main.quality == Quality.MEDIUM
+    below_floor = extract(b"<main>" + b"x" * 199 + b"</main>", "text/html")
+    assert below_floor.quality == Quality.MEDIUM
