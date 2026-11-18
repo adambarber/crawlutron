@@ -10,6 +10,16 @@ import zipfile
 from io import BytesIO
 from xml.etree import ElementTree as ET
 
+import pytest
+from safe_url.host_policy import reset_private_target_memo
+
+
+@pytest.fixture(autouse=True)
+def _reset_private_target_state(monkeypatch):
+    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
+    reset_private_target_memo()
+
+
 OPC_CONTENT_TYPES = (
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
     '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>'

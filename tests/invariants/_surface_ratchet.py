@@ -100,6 +100,7 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     "packages/extract/src/crawlutron_extract/_extract.py": (2, 1),
     "packages/extract/src/crawlutron_extract/charset.py": (1, 1),
     "packages/extract/src/crawlutron_extract/html_pass.py": (1, 1),
+    "packages/extract/src/crawlutron_extract/html_meta.py": (1, 1),
     "packages/extract/src/crawlutron_extract/text_format.py": (1, 1),
     "packages/extract/src/crawlutron_extract/pdf_pass.py": (1, 1),
 }

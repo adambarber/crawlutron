@@ -8,13 +8,6 @@ from __future__ import annotations
 
 import pytest
 from crawlutron_extract import ExtractLimits, Quality, extract
-from safe_url.host_policy import reset_private_target_memo
-
-
-@pytest.fixture(autouse=True)
-def _reset_private_target_state(monkeypatch):
-    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
-    reset_private_target_memo()
 
 
 def test_basic_html_text_and_markdown():
@@ -52,8 +45,10 @@ def test_links_extracted():
 def test_frames_extracted():
     html = b'<iframe src="https://example.com/frame" name="f1"></iframe>'
     result = extract(html, "text/html")
+    frame = result.frames[0]
     assert len(result.frames) == 1
-    assert result.frames[0]["src"] == "https://example.com/frame"
+    assert frame["src"] == "https://example.com/frame"
+    assert frame["name"] == "f1"
 
 
 def test_forms_extracted():
