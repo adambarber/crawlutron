@@ -433,8 +433,8 @@ class BrowserDriver:
 def _launch_key(kwargs: dict[str, object]) -> tuple:
     """Hashable key of launch kwargs so reuse detects a profile mismatch.
 
-    Lists (e.g. ``args`` from ``resource_mode``) become tuples; sorted for
-    order-independent equality.
+    Keys are sorted for order-independent equality; list values (``args`` from
+    ``resource_mode``) become tuples and keep their order, which is semantic.
     """
     frozen: list[tuple[str, object]] = []
     for key in sorted(kwargs):
