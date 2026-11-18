@@ -98,6 +98,7 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     "packages/extract/src/crawlutron_extract/models.py": (2, 0),
     "packages/extract/src/crawlutron_extract/_extract.py": (2, 1),
     "packages/extract/src/crawlutron_extract/charset.py": (1, 1),
+    "packages/extract/src/crawlutron_extract/html_pass.py": (1, 1),
 }
 
 # Former #215 exemptions: their __all__ deliberately does not enumerate every public
