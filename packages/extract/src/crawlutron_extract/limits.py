@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-__all__ = ["ExtractLimits"]
+__all__ = ["ExtractLimits", "RICH_TEXT_FLOOR"]
+
+#: Minimum extracted body text length for quality="high" (main-content
+#: element found, no lossy decode). Below this floor, quality caps at "medium".
+RICH_TEXT_FLOOR: int = 200
 
 
 @dataclass(frozen=True)

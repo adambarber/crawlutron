@@ -28,6 +28,7 @@ class _HtmlResult(TypedDict):
     forms: list[_FormEntry]
     tables: list[list[list[str]]]
     truncated: bool
+    found_main: bool
 
 
 class _FrameEntry(TypedDict):
@@ -85,6 +86,7 @@ class _HTMLExtractor(html_parser.HTMLParser):
         self._current_cell: list[str] | None = None
         self._in_boilerplate = 0
         self._in_main = 0
+        self._found_main = False
         self._in_code = 0
         self._in_link = False
         self._in_title = False
@@ -104,6 +106,7 @@ class _HTMLExtractor(html_parser.HTMLParser):
             self._in_boilerplate += 1
         if is_main:
             self._in_main += 1
+            self._found_main = True
         if self._in_boilerplate > 0:
             return
         if tag == "title":
@@ -313,6 +316,7 @@ class _HTMLExtractor(html_parser.HTMLParser):
             "forms": self._forms,
             "tables": self._tables,
             "truncated": self._truncated,
+            "found_main": self._found_main,
         }
 
     def _build_markdown(self) -> str:

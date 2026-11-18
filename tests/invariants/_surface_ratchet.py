@@ -94,7 +94,7 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     "packages/safe-url/src/safe_url/scope_match.py": (1, 1),
     "packages/safe-url/src/safe_url/url_redaction.py": (4, 4),
     # #1137: crawlutron-extract leaf package, stdlib-only, __all__-declared.
-    "packages/extract/src/crawlutron_extract/limits.py": (1, 0),
+    "packages/extract/src/crawlutron_extract/limits.py": (2, 0),
     "packages/extract/src/crawlutron_extract/models.py": (2, 0),
     "packages/extract/src/crawlutron_extract/_extract.py": (2, 1),
     "packages/extract/src/crawlutron_extract/charset.py": (1, 1),

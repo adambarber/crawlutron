@@ -186,8 +186,78 @@ def test_non_html_returns_low_quality():
 
 def test_empty_html():
     result = extract(b"", "text/html")
-    assert result.quality == Quality.LOW
+    assert result.quality == Quality.FAILED
     assert result.text == ""
+
+
+def test_non_html_clean_decode_is_low():
+    result = extract(b"hello", "text/plain")
+    assert result.quality == Quality.LOW
+
+
+def test_non_html_empty_is_failed():
+    result = extract(b"", "text/plain")
+    assert result.quality == Quality.FAILED
+
+
+def test_html_lossy_decode_is_low():
+    content = b"\xff\xfeinvalid"
+    result = extract(content, "text/html")
+    assert result.quality == Quality.LOW
+    assert "charset_lossy" in result.flags
+
+
+def test_html_only_links_is_low():
+    html = b'<a href="https://example.com">Link</a>'
+    result = extract(html, "text/html")
+    assert result.quality == Quality.LOW
+    assert len(result.links) == 1
+
+
+def test_html_body_text_no_main_is_medium():
+    html = b"<p>Some body text without a main content marker.</p>"
+    result = extract(html, "text/html")
+    assert result.quality == Quality.MEDIUM
+
+
+def test_html_main_below_floor_is_medium():
+    # RICH_TEXT_FLOOR is 200; body text at floor-1 with main-content → MEDIUM
+    body = "x" * (200 - 1)
+    html = f"<main>{body}</main>".encode()
+    result = extract(html, "text/html")
+    assert result.quality == Quality.MEDIUM
+
+
+def test_html_main_at_floor_is_high():
+    # RICH_TEXT_FLOOR is 200; body text at floor with main-content → HIGH
+    body = "x" * 200
+    html = f"<main>{body}</main>".encode()
+    result = extract(html, "text/html")
+    assert result.quality == Quality.HIGH
+
+
+def test_html_main_above_floor_is_high():
+    # RICH_TEXT_FLOOR is 200; body text at floor+1 with main-content → HIGH
+    body = "x" * 201
+    html = f"<main>{body}</main>".encode()
+    result = extract(html, "text/html")
+    assert result.quality == Quality.HIGH
+
+
+def test_html_main_with_lossy_decode_is_low():
+    # Lossy decode overrides main-content → LOW
+    content = b"\xff\xfe" + b"<main>" + b"x" * 300 + b"</main>"
+    result = extract(content, "text/html")
+    assert result.quality == Quality.LOW
+    assert "charset_lossy" in result.flags
+
+
+def test_high_is_reachable():
+    """HIGH must be reachable — an unreachable enum value is dead surface."""
+    body = "x" * 250
+    html = f"<article>{body}</article>".encode()
+    result = extract(html, "text/html")
+    assert result.quality == Quality.HIGH
 
 
 def test_determinism():

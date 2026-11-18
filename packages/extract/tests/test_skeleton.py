@@ -97,8 +97,8 @@ def test_quality_closed_vocabulary():
     assert {q.value for q in Quality} == {"high", "medium", "low", "failed"}
 
 
-def test_default_extraction_has_empty_payload_and_low_quality():
-    """No extractor has run yet, so empty content is quality=LOW."""
+def test_default_extraction_has_empty_payload_and_failed_quality():
+    """Nothing extracted, so empty content is quality=FAILED."""
     e = extract(b"", "text/plain")
     assert e.text == ""
     assert e.markdown == ""
@@ -108,7 +108,7 @@ def test_default_extraction_has_empty_payload_and_low_quality():
     assert e.frames == []
     assert e.forms == []
     assert e.tables == []
-    assert e.quality == Quality.LOW
+    assert e.quality == Quality.FAILED
     assert e.flags == []
     assert e.truncated is False
 
