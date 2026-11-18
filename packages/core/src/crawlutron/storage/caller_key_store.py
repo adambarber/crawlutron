@@ -14,6 +14,7 @@ from pathlib import Path
 
 from crawlutron.models.caller_key import CallerKey
 from crawlutron.models.issued_key import IssuedKey
+from crawlutron.safety.bounded_ttl import BoundedTTLCache
 from crawlutron.storage.coordination_store import CoordinationStore, atwin
 from crawlutron.storage.migrations.manifest import StoreSchema
 
@@ -36,8 +37,14 @@ PBKDF2_ITERATIONS = 210_000
 #: previous slot while now - previous_rotated_at <= GRACE_WINDOW_SECONDS.
 GRACE_WINDOW_SECONDS = 300.0
 
-#: PBKDF2 derivations per verify_key call, hit or miss: one for current, plus
-#: one more for previous inside the grace window (at most two total, locked).
+#: Cap on proven-body entries per store instance (bounded-structure law).
+_PROVEN_BODY_CACHE_MAX = 256
+#: TTL for a cached body proof, equal to the grace window so a cached proof
+#: cannot outlive the rotation grace period.
+_PROVEN_BODY_TTL_SECONDS = GRACE_WINDOW_SECONDS
+
+# PBKDF2 derivations per verify_key call, hit or miss: one for current, plus
+# one more for previous inside the grace window (at most two total, locked).
 pbkdf2_calls = 0
 _pbkdf2_calls_lock = threading.Lock()
 
@@ -121,6 +128,11 @@ def _secret_id_and_body(secret: str) -> tuple[str, str] | None:
     return f"key_{id_hex}", body
 
 
+def _body_proof(body: str) -> str:
+    """The cheap per-request proof of a presented body: one SHA-256 hex digest."""
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
 class CallerKeyStore(CoordinationStore):
     """SQLite-backed store of inbound caller key records keyed by key id.
 
@@ -133,6 +145,9 @@ class CallerKeyStore(CoordinationStore):
     def __init__(self, db_path: str | Path) -> None:
         super().__init__(db_path)
         self._audit = None
+        self._proven_bodies: BoundedTTLCache[str, str] = BoundedTTLCache(
+            max_entries=_PROVEN_BODY_CACHE_MAX, ttl=_PROVEN_BODY_TTL_SECONDS
+        )
 
     def attach_audit(self, audit) -> None:
         """Wire the audit sink; a store without one stays unrecorded (tests).
@@ -210,6 +225,9 @@ class CallerKeyStore(CoordinationStore):
             # while the derivation ran; the post-derive row decides.
             row = self._reread_row(key_id)
         if row is not None and secrets.compare_digest(computed, digest_hex):
+            # Current-hash match only: cache the cheap body proof so a verified
+            # body skips the bucket; rotate/revoke discard it, grace never records.
+            self._record_body_proof(key_id, body, stored)
             return _record_from_row(row)
         if row is not None and row[6] and row[7] is not None and time.time() - row[7] <= GRACE_WINDOW_SECONDS:
             parsed_previous = _stored_salt_and_digest(row[6])
@@ -219,6 +237,20 @@ class CallerKeyStore(CoordinationStore):
             if secrets.compare_digest(computed, previous_digest):
                 return _record_from_row(row)
         return None
+
+    def _record_body_proof(self, key_id: str | None, body: str, verified_hash: str) -> None:
+        """Cache a body proof only if the row still carries the verified hash.
+
+        Closes the verify-vs-rotate race: a rotation between derivation and the
+        cache write makes the re-read mismatch, so no stale proof is cached.
+        """
+        if key_id is None:
+            return
+        with self._lock:
+            row = self._reread_row(key_id)
+            if row is None or row[2] != verified_hash:
+                return
+            self._proven_bodies.put(key_id, _body_proof(body))
 
     def list_keys(self) -> list[CallerKey]:
         """Every live key record, oldest first."""
@@ -238,6 +270,7 @@ class CallerKeyStore(CoordinationStore):
         with self._lock:
             with txn_write(self._conn, owner="caller_key_store.revoke_key"):
                 cur = self._conn.execute("DELETE FROM caller_keys WHERE key_id = ?", (key_id,))
+                self._proven_bodies.discard(key_id)
         self._commit_and_audit("key_revoke", key_id, outcome="granted" if cur.rowcount > 0 else "refused")
         return cur.rowcount > 0
 
@@ -263,6 +296,7 @@ class CallerKeyStore(CoordinationStore):
                     " previous_rotated_at = ? WHERE key_id = ?",
                     (_store_hash(parsed[1]), row[0], now, key_id),
                 )
+                self._proven_bodies.discard(key_id)
         self._commit_and_audit("key_rotate", key_id)
         return True
 
@@ -280,15 +314,22 @@ class CallerKeyStore(CoordinationStore):
                 ).fetchone()
         return None if row is None else _record_from_row(row)
 
-    def key_present(self, presented: str) -> bool:
-        """Whether the presented secret names a live key, without derivation.
+    def key_body_proven(self, presented: str) -> bool:
+        """Whether ``presented`` names a live key whose body matches its proof.
 
-        One indexed PK lookup via the store's existing grammar; no PBKDF2.
+        Presence alone never proves: revocation is immediate via ``exists_key``,
+        and a stale proof is cleared on rotate/revoke. Returns False on any miss.
         """
         parsed = _secret_id_and_body(presented)
         if parsed is None:
             return False
-        return self.exists_key(parsed[0])
+        key_id, body = parsed
+        if not self.exists_key(key_id):
+            return False
+        proof = self._proven_bodies.get(key_id)
+        if proof is None:
+            return False
+        return secrets.compare_digest(proof.encode("ascii"), _body_proof(body).encode("ascii"))
 
     def exists_key(self, key_id: str) -> bool:
         """Whether a live key row for ``key_id`` exists, without materializing it.
@@ -302,7 +343,7 @@ class CallerKeyStore(CoordinationStore):
         return row is not None
 
     aissue_key = atwin(issue_key)
-    akey_present = atwin(key_present)
+    akey_body_proven = atwin(key_body_proven)
     averify_key = atwin(verify_key)
     alist_keys = atwin(list_keys)
     arevoke_key = atwin(revoke_key)

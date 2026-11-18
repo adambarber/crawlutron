@@ -461,10 +461,8 @@ def _request_state(request) -> object | None:
 
 
 async def _verified(request) -> bool:
-    """Whether the request presents a verified key, cheaply.
-
-    One indexed presence lookup off the loop (the store's atwin twin): no
-    PBKDF2, no second parser. A verified key skips the bucket.
+    """Whether the request presents a verified key body, cheaply.
+    A verified body skips the bucket; a live id with a wrong body still consumes it.
     """
     state = _request_state(request)
     if state is None:
@@ -472,7 +470,7 @@ async def _verified(request) -> bool:
     store = getattr(state, "caller_key_store", None)
     if store is None:
         return False
-    return await store.akey_present(presented_key(request) or "")
+    return await store.akey_body_proven(presented_key(request) or "")
 
 
 def _refuse(path: str, t: Throttled) -> JSONResponse:
