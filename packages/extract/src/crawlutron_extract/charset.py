@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 
-__all__ = ["detect_charset", "decode_content"]
+__all__ = ["decode_content"]
 
 # BOM -> charset, longest BOM first so UTF-8 (3 bytes) wins over UTF-16 (2 bytes).
 _BOM_CHARS = (
@@ -57,7 +57,7 @@ def _scan_meta_charset(content: bytes) -> str | None:
     return None
 
 
-def detect_charset(content: bytes, content_type: str) -> str:
+def _detect_charset(content: bytes, content_type: str) -> str:
     """Resolve charset by priority: BOM -> Content-Type -> meta -> UTF-8."""
     _, bom_charset = _strip_bom(content)
     if bom_charset:
@@ -76,19 +76,19 @@ def detect_charset(content: bytes, content_type: str) -> str:
 
 
 def decode_content(content: bytes, content_type: str) -> tuple[str, str, list[str]]:
-    """Decode content, never raising: returns (text, charset, flags)."""
+    """Decode content, never raising: returns (text, charset, flags).
+
+    Decode failure is reported only through the charset_lossy flag.
+    """
     flags: list[str] = []
     body, _bom_charset = _strip_bom(content)
 
-    charset = detect_charset(content, content_type)
+    charset = _detect_charset(content, content_type)
 
     try:
         text = body.decode(charset)
     except (UnicodeDecodeError, LookupError):
         flags.append("charset_lossy")
-        try:
-            text = body.decode("utf-8", errors="replace")
-        except (UnicodeDecodeError, LookupError):
-            text = body.decode("latin-1", errors="replace")
+        text = body.decode("utf-8", errors="replace")
 
     return text, charset, flags

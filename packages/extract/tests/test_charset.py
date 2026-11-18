@@ -6,7 +6,7 @@ Never raises on hostile input; reports resolved charset and quality.
 from __future__ import annotations
 
 from crawlutron_extract import ExtractLimits, Quality, extract
-from crawlutron_extract.charset import decode_content, detect_charset
+from crawlutron_extract.charset import _detect_charset, decode_content
 
 
 def test_utf8_bom_is_detected_and_stripped():
@@ -120,17 +120,30 @@ def test_extract_charset_field_matches_resolved():
     assert result.charset == "utf-8"
 
 
-def test_lossy_decode_sets_quality_low():
+def test_clean_decode_sets_quality_low():
+    """No extractor has run yet, so a clean non-refused decode is LOW."""
+    result = extract(b"hello", "text/plain")
+    assert result.quality == Quality.LOW
+    assert result.flags == []
+
+
+def test_lossy_decode_still_quality_low():
+    """Lossy decode is also LOW; decode facts live in flags, not quality."""
     content = b"\xff\xfeinvalid"
     result = extract(content, "text/plain")
     assert result.quality == Quality.LOW
     assert "charset_lossy" in result.flags
 
 
-def test_clean_decode_sets_quality_medium():
-    result = extract(b"hello", "text/plain")
-    assert result.quality == Quality.MEDIUM
-    assert result.flags == []
+def test_every_byte_value_decodes_without_raising():
+    """Totality proof: every single byte value 0x00-0xFF decodes without
+    exception. Non-UTF-8 bytes carry the charset_lossy flag."""
+    body = bytes(range(256))
+    text, charset, flags = decode_content(body, "text/plain")
+    assert isinstance(text, str)
+    assert charset == "utf-8"
+    # Bytes above 0x7F are not valid standalone UTF-8, so they are lossy.
+    assert "charset_lossy" in flags
 
 
 def test_input_above_cap_refused_before_decode():
@@ -150,5 +163,5 @@ def test_input_at_exact_cap_not_refused():
 def test_detect_charset_priority_bom_over_content_type():
     # UTF-8 BOM present; Content-Type declares iso-8859-1. BOM wins.
     content = b"\xef\xbb\xbf" + "ol\u00e1".encode("utf-8")
-    charset = detect_charset(content, "text/plain; charset=iso-8859-1")
+    charset = _detect_charset(content, "text/plain; charset=iso-8859-1")
     assert charset == "utf-8"

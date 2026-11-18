@@ -36,9 +36,10 @@ def extract(
         metadata["url"] = url
     if charset:
         metadata["charset"] = charset
-    quality = Quality.LOW if "charset_lossy" in flags else Quality.MEDIUM
+    # No extractor has run yet: quality reports confidence in the extracted
+    # payload, not the decode step. Decode facts live in flags (charset_lossy).
     return Extraction(
-        quality=quality,
+        quality=Quality.LOW,
         flags=flags,
         metadata=metadata,
         text=text,
