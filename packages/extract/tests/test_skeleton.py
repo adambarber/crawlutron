@@ -97,17 +97,18 @@ def test_quality_closed_vocabulary():
     assert {q.value for q in Quality} == {"high", "medium", "low", "failed"}
 
 
-def test_default_extraction_has_empty_payload_and_failed_quality():
-    """Empty Extraction has empty text/markdown and quality=failed."""
-    e = extract(b"hello", "text/plain")
+def test_default_extraction_has_empty_payload_and_medium_quality():
+    """Empty content decodes to empty text with quality=medium (clean UTF-8)."""
+    e = extract(b"", "text/plain")
     assert e.text == ""
     assert e.markdown == ""
-    assert e.metadata == {"content_type": "text/plain"}
+    assert e.charset == "utf-8"
+    assert e.metadata == {"content_type": "text/plain", "charset": "utf-8"}
     assert e.links == []
     assert e.frames == []
     assert e.forms == []
     assert e.tables == []
-    assert e.quality == Quality.FAILED
+    assert e.quality == Quality.MEDIUM
     assert e.flags == []
     assert e.truncated is False
 

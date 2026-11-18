@@ -23,6 +23,7 @@ class Extraction:
 
     text: str = ""
     markdown: str = ""
+    charset: str | None = None
     metadata: dict[str, str] = field(default_factory=dict)
     links: list[dict[str, str]] = field(default_factory=list)
     frames: list[dict[str, str]] = field(default_factory=list)

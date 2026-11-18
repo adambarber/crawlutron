@@ -16,7 +16,7 @@ base_branch = "main"
 PATH = ".venv/bin:/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"
 # Workspace source packages first so hardstand exec/run resolves the workspace
 # tree, not the shared venv's editable install pointing at the main checkout.
-PYTHONPATH = "packages/core/src:packages/mcp/src:packages/rest/src:packages/safe-url/src:packages/sdk/src"
+PYTHONPATH = "packages/extract/src:packages/core/src:packages/mcp/src:packages/rest/src:packages/safe-url/src:packages/sdk/src"
 
 [[resource]]
 kind          = "worktree"
