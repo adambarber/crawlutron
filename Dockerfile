@@ -28,25 +28,17 @@ WORKDIR /app
 # project's own tooling (uv 0.13.6), so the builder and the Astral image agree.
 COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /uvx /bin/
 
-# Install build dependencies required for compiling Python wheels
-# (e.g., lxml, charset-normalizer, brotli, pydantic-core)
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends \
-    build-essential=12.9 python3-dev=3.11.2-1+b1 \
-    libxml2-dev=2.9.14+dfsg-1.3~deb12u6 libxslt1-dev=1.1.35-1+deb12u4 \
-    && rm -rf /var/lib/apt/lists/*
-
 # pyproject.toml + uv.lock are the single source of truth for the dependency
-# graph (requirements*.txt were deleted in dc6f2bbe). ``uv sync --frozen``
-# installs exactly the locked pins, with no hash-check drift. The workspace
-# members come along first: the root project resolves every member through
-# ``[tool.uv.sources]`` into ``packages/<name>``, so a stage holding only the
-# lockfile dies at "Distribution not found at: file:///app/packages/core".
+# graph. ``--locked`` refuses a lock the manifests no longer satisfy instead of
+# freezing a stale graph; ``--no-editable`` installs the six members as wheels,
+# so the venv IS the runtime source tree and the runtime stage copies none. The
+# workspace members come along first: the root project resolves every member
+# through ``[tool.uv.sources]`` into ``packages/<name>``, so a stage holding only
+# the lockfile dies at "Distribution not found at: file:///app/packages/core".
 COPY pyproject.toml uv.lock ./
 COPY packages/ ./packages/
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project --python /usr/local/bin/python
+    uv sync --locked --no-install-project --no-editable --python /usr/local/bin/python
 
 # ==========================================
 # 2b. Isolated Camoufox browser-binary stage
@@ -87,13 +79,9 @@ RUN uv pip install --no-cache-dir --python /usr/local/bin/python \
 # breaks: camoufox's own cleanup runs on the mount while buildkit holds it open
 # -> errno 16 "Device or resource busy". Point XDG_CACHE_HOME at a path INSIDE
 # the mount (distinct from the raw fetch cache) so camoufox owns a real dir and
-# the mount only persists the finished install across rebuilds.
-#
-# OFFLINE SEED (option B): a named `seed` build context (a real camoufox cache,
-# e.g. ~/Library/Caches/camoufox) may be bound with --build-context seed=<dir>
-# and is copied into the mount so the fetch short-circuits without the network.
-# Without a seed context the RUN fetches the browser binary over the wire
-# exactly as before -- bare `docker build .` works with no extra flags.
+# the mount only persists the finished install across rebuilds. The mount is the
+# only offline short-circuit: no build context is read, so bare `docker build .`
+# takes the same path with no extra flags.
 RUN --mount=type=cache,target=/root/.cache/camoufox-mount,sharing=locked \
     sh -c 'PYTHONPATH=/camoufox-deps XDG_CACHE_HOME=/root/.cache/camoufox-mount python -m camoufox fetch; test -d /root/.cache/camoufox-mount/camoufox && mkdir -p /camoufox-bundle && cp -a /root/.cache/camoufox-mount/camoufox/. /camoufox-bundle/'
 
@@ -105,7 +93,6 @@ FROM ${CRAWLUTRON_BASE_IMAGE} AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONHASHSEED=random \
-    PYTHONPATH=/app \
     TZ=UTC \
     PATH=/app/.venv/bin:$PATH \
     CRAWLUTRON_LOG_LEVEL=info \
@@ -120,23 +107,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     CRAWLUTRON_CONTENT_CACHE_ENABLED=true \
     CRAWLUTRON_CACHE_DIR=/app/cache \
     CRAWLUTRON_CACHE_TTL_SECONDS=3600 \
-    # Zero telemetry is a hard posture for this service. ONNX Runtime (pulled in
-    # transitively by magika, used for ML content-type inference) is the one
-    # component here that has a native opt-out flag, so we set it at the source.
-    # Playwright ships no telemetry in this version and camoufox only phone-homes
-    # on demand; the compose extra_hosts sinkhole is the un-bypassable chokepoint
-    # for any of those that lack a flag. See
+    # Zero telemetry is a hard posture for this service. No runtime dependency
+    # carries a native opt-out flag now that onnxruntime left with the magika-era
+    # extractors; compose's extra_hosts sinkhole is the chokepoint. See
     # docs/references/crawlutron-telemetry.md.
-    ORT_DISABLE_TELEMETRY=1 \
-    # Bound glibc malloc arenas: concurrent lxml/trafilatura parsing otherwise
-    # inflates resident memory via arena fragmentation.
+    # Bound glibc malloc arenas: concurrent lxml parsing otherwise inflates
+    # resident memory via arena fragmentation.
     MALLOC_ARENA_MAX=2
 
 WORKDIR /app
 
-# Install runtime system dependencies.
-# ADDED: libxml2, libxslt1.1 (required by lxml/trafilatura at runtime)
-# ADDED: fonts-noto-core (improves rendering accuracy for non-Latin municipal sites)
+# Install runtime system dependencies: the browser shared libraries Camoufox
+# needs, curl for the healthcheck, and fonts-noto-core for non-Latin sites.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
@@ -145,7 +127,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libxrandr2=2:1.5.2-2+b1 libgbm1=22.3.6-1+deb12u2 \
     ca-certificates=20250419~deb12u2 curl=7.88.1-10+deb12u15 \
     fonts-liberation=1:1.07.4-11 fonts-noto-core=20201225-1 \
-    poppler-utils=22.12.0-2+deb12u3 libx11-xcb1=2:1.8.4-2+deb12u2 \
+    libx11-xcb1=2:1.8.4-2+deb12u2 \
     libxcomposite1=1:0.4.5-1 libxdamage1=1:1.1.6-1 libxfixes3=1:6.0.0-2 \
     libxcb1=1.15-1 libxcb-shm0=1.15-1 libxcb-render0=1.15-1 \
     libxext6=2:1.3.4-1+b1 libx11-6=2:1.8.4-2+deb12u2 libglib2.0-0=2.74.6-2+deb12u9 \
@@ -153,7 +135,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libcups2=2.4.2-3+deb12u9 libpango-1.0-0=1.50.12+ds-1 libcairo2=1.16.0-7 \
     libnss3=2:3.87.1-1+deb12u4 libnspr4=2:4.35-1 libdbus-1-3=1.14.10-1~deb12u1 \
     libxkbcommon0=1.5.0-1 libxshmfence1=1.3-1 libfontconfig1=2.14.1-4 \
-    libxml2=2.9.14+dfsg-1.3~deb12u6 libxslt1.1=1.1.35-1+deb12u4 \
     && rm -rf /var/lib/apt/lists/*
 
 
@@ -185,19 +166,10 @@ COPY --from=camoufox-binary /camoufox-bundle /home/appuser/.cache/camoufox
 # mount is never persisted into the image), which is the whole requirement.
 RUN /app/.venv/bin/python -m fpgen fetch --decompress
 
-# Copy application code. Post-Wave-A the importable trees all live under packages/:
-# four must be present at /app to resolve the CMD's `uvicorn crawlutron_rest.main:app`
-# with PYTHONPATH=/app. The packages/core wheel ships both the `crawlutron` and
-# `admission` import names, so both trees land at /app (pressure_sizing imports
-# ``admission`` directly).
-COPY --chown=appuser:appuser packages/core/src/crawlutron /app/crawlutron
-COPY --chown=appuser:appuser packages/core/src/admission /app/admission
-COPY --chown=appuser:appuser packages/rest/src/crawlutron_rest /app/crawlutron_rest
-COPY --chown=appuser:appuser packages/sdk/src/crawlutron_sdk /app/crawlutron_sdk
-# Priority: the REST app imports crawlutron_mcp at import time
-# (crawlutron_rest.discovery.agent_hints -> registry.TOOL_SPECS), so its tree
-# must land at /app too or uvicorn dies before serving a single request.
-COPY --chown=appuser:appuser packages/mcp/src/crawlutron_mcp /app/crawlutron_mcp
+# No application source is copied: the builder's venv carries all six members as
+# installed wheels (crawlutron, admission, crawlutron_extract, crawlutron_mcp,
+# crawlutron_rest, crawlutron_sdk, safe_url), so the wheel set cannot drift from
+# the source tree the way a partial COPY list did.
 
 # uvicorn applies its logging config in ``Config.__init__`` -- BEFORE the app
 # is imported -- so the service's JSON sink must exist by then or uvicorn's own
@@ -236,7 +208,7 @@ COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /uvx /bin/
 COPY pyproject.toml uv.lock ./
 COPY packages/ ./packages/
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --extra dev --no-install-project --python /app/.venv/bin/python
+    uv sync --locked --extra dev --no-install-project --python /app/.venv/bin/python
 
 # Switch back to appuser
 USER appuser

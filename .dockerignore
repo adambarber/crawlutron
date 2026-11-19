@@ -16,7 +16,8 @@
 # The sources, from the Dockerfile's own COPY lines:
 #   pyproject.toml            builder, camoufox-binary, development
 #   uv.lock                   builder, camoufox-binary, development
-#   packages/                 runtime (crawlutron + admission + crawlutron_rest + crawlutron_sdk)
+#   packages/                 builder, development (wheel builds; the runtime
+#                             stage copies no source, its venv carries all six)
 #   uvicorn-log-config.json   runtime
 #   Dockerfile                the build itself
 *

@@ -15,18 +15,16 @@ services:
       # build would run the service in hot-reload dev mode under a supervisor
       # process. The runtime stage is the production command.
       target: runtime
-      # Compose supplies a committed empty seed dir (``${SEED_CACHE_DIR:-.dockerseed}``)
-      # so the camoufox-binary stage can short-circuit the browser fetch offline
-      # (point SEED_CACHE_DIR at ~/Library/Caches/camoufox). Bare ``docker build .``
-      # declares no seed context and fetches over the wire instead, so no seed
-      # context is mandatory for a clean-checkout build.
-      additional_contexts:
-        - "seed=${SEED_CACHE_DIR:-.dockerseed}"
+      # The build context carries no .git, so hatch-vcs cannot derive a version:
+      # the caller supplies one. Release CI passes the tag; a local build gets
+      # the line floor, which satisfies every member's `>=0.4.0.dev0` requirement.
+      args:
+        SETUPTOOLS_SCM_PRETEND_VERSION: ${SETUPTOOLS_SCM_PRETEND_VERSION:-0.4.0.dev0}
     image: crawlutron:local
     container_name: crawlutron
     restart: unless-stopped
     # PID 1 must reap children. The service spawns long-lived subprocesses
-    # (persistent markitdown doc workers, Playwright browser drivers) whose
+    # (persistent document-extraction workers, Playwright browser drivers) whose
     # parents can exit before them; without an init those orphans reparent to
     # PID 1 and, when uvicorn is the PID 1, are never waited on -- they become
     # zombies that docker cannot kill, and the container wedges irrecoverably
@@ -72,15 +70,13 @@ services:
       # Belt over the image's baked value: guarantee ORT telemetry is off even if
       # this service is ever pointed at an image built before that ENV landed.
       # Zero-telemetry posture; see docs/references/crawlutron-telemetry.md.
-      ORT_DISABLE_TELEMETRY: "1"
     volumes:
       - ./logs:/app/logs
       - ./cache:/app/cache
-    # Telemetry egress blackhole. ORT_DISABLE_TELEMETRY handles onnxruntime; this
-    # is the un-bypassable chokepoint for the sinks that have NO opt-out flag
-    # (Playwright 1DS, a future ORT, camoufox's App-Insights path). These hosts
-    # are never crawl targets, so sinkholing to 0.0.0.0 cannot affect the crawler
-    # itself. See docs/references/crawlutron-telemetry.md.
+    # Telemetry egress blackhole for the sinks that have NO opt-out flag
+    # (Playwright 1DS, camoufox's App-Insights path). These hosts are never crawl
+    # targets, so sinkholing to 0.0.0.0 cannot affect the crawler itself. See
+    # docs/references/crawlutron-telemetry.md.
     extra_hosts:
       - "mobile.events.data.microsoft.com:0.0.0.0"
       - "browser.events.data.microsoft.com:0.0.0.0"
