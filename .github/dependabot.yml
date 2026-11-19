@@ -7,6 +7,10 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
+    # A supply-chain cooldown: a release has to survive a week in the open before
+    # Dependabot proposes it, so a compromised publish window is not adopted on day 0.
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     # bump the uv lock in lockstep: Dependabot edits pyproject/requirements; uv
     # re-resolves uv.lock on the next `uv sync --frozen` run.
@@ -25,4 +29,6 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 0

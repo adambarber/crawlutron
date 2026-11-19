@@ -1,0 +1,18 @@
+# zizmor policy for this repository's workflows. Each accepted class is a
+# deliberate design decision, written down here so the audit is honest rather
+# than silencing whatever it finds; anything not listed must be fixed.
+rules:
+  dangerous-triggers:
+    ignore:
+      # Publishing is CI-gated by design: both workflows run on a workflow_run of
+      # "CI", and every job now also requires the triggering run to be a push
+      # event, so a pull-request branch named like a tag cannot reach a publish
+      # job. The trigger is the gate, not an oversight.
+      - release.yml
+      - packaging.yml
+  cache-poisoning:
+    ignore:
+      # ci.yml publishes no artifact, package, or image: its caches (Camoufox
+      # binary, uv) feed read-only gate jobs, so a poisoned entry has no publish
+      # path to reach. Publishing jobs in release.yml run with enable-cache: false.
+      - ci.yml
