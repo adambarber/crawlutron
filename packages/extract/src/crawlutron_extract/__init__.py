@@ -5,6 +5,7 @@ from __future__ import annotations
 from crawlutron_extract._extract import DEFAULT_LIMITS, extract
 from crawlutron_extract.css_select import SelectorError, validate_css
 from crawlutron_extract.html_diagnostics import html_diagnostics
+from crawlutron_extract.js_endpoints import extract_js_endpoints
 from crawlutron_extract.limits import ExtractLimits
 from crawlutron_extract.links import LinkRecord, extract_discovered_links
 from crawlutron_extract.models import Extraction, Quality
@@ -22,6 +23,7 @@ __all__ = [
     "Schema",
     "extract",
     "extract_discovered_links",
+    "extract_js_endpoints",
     "extract_records",
     "html_diagnostics",
     "LinkRecord",

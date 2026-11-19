@@ -6,6 +6,8 @@ from html import parser as html_parser
 
 from safe_url import HostPolicy, NormalizedUrl, admit_or_none
 
+from crawlutron_extract.limits import ExtractLimits
+
 __all__ = ["resolve_or_admit", "tag_attrs"]
 
 
@@ -21,6 +23,25 @@ def resolve_or_admit(href: str, target: NormalizedUrl | None) -> NormalizedUrl |
     if target is not None:
         return target.resolve(href)
     return admit_or_none(href, policy=HostPolicy.unrestricted())
+
+
+def _prepare(
+    html: bytes | str,
+    source_url: str | NormalizedUrl | None,
+    limits: ExtractLimits | None = None,
+) -> tuple[str, NormalizedUrl | None, ExtractLimits]:
+    """Decode html, admit the source URL, and apply the default limits."""
+    if limits is None:
+        limits = ExtractLimits()
+    text = html.decode("utf-8", "replace") if isinstance(html, bytes) else html
+    base: NormalizedUrl | None = None
+    if isinstance(source_url, NormalizedUrl):
+        base = source_url
+    elif source_url is not None:
+        admitted = admit_or_none(source_url, policy=HostPolicy.unrestricted())
+        if admitted is not None:
+            base = admitted
+    return text, base, limits
 
 
 def tag_attrs(attrs: list[tuple[str, str | None]]) -> dict[str, str]:

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from safe_url import HostPolicy, NormalizedUrl, admit_or_none
+from safe_url import NormalizedUrl
 
-from crawlutron_extract._html_common import _HtmlParser, resolve_or_admit, tag_attrs
+from crawlutron_extract._html_common import _HtmlParser, _prepare, resolve_or_admit, tag_attrs
 from crawlutron_extract.limits import ExtractLimits
 
 __all__ = ["LinkRecord", "extract_discovered_links"]
@@ -32,19 +32,8 @@ def extract_discovered_links(
     limits: ExtractLimits | None = None,
 ) -> tuple[list[LinkRecord], int]:
     """Admitted links and the refusal count, capped after admission."""
-    if limits is None:
-        limits = ExtractLimits()
-    text = html.decode("utf-8", "replace") if isinstance(html, bytes) else html
-    base: NormalizedUrl | None = None
-    source_host = ""
-    if isinstance(source_url, NormalizedUrl):
-        base = source_url
-        source_host = source_url.host
-    elif source_url is not None:
-        admitted = admit_or_none(source_url, policy=HostPolicy.unrestricted())
-        if admitted is not None:
-            base = admitted
-            source_host = admitted.host
+    text, base, limits = _prepare(html, source_url, limits)
+    source_host = base.host if base is not None else ""
     links: list[LinkRecord] = []
     seen: set[str] = set()
     refused = 0

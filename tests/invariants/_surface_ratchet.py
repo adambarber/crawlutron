@@ -107,6 +107,8 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     "packages/extract/src/crawlutron_extract/_html_common.py": (2, 2),
     # #1137: LinkRecord + extract_discovered_links, the bounded link door.
     "packages/extract/src/crawlutron_extract/links.py": (2, 1),
+    # #1137: extract_js_endpoints, the bounded JS-endpoint door.
+    "packages/extract/src/crawlutron_extract/js_endpoints.py": (1, 1),
     # #1137: detect_pagination is the bounded next-page door.
     "packages/extract/src/crawlutron_extract/pagination.py": (1, 1),
     "packages/extract/src/crawlutron_extract/text_format.py": (1, 1),
