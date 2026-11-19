@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 
@@ -35,3 +36,4 @@ class Extraction:
     flags: list[str] = field(default_factory=list)
     truncated: bool = False
     links_refused: int = 0
+    records: tuple[Mapping[str, object], ...] = field(default_factory=tuple)

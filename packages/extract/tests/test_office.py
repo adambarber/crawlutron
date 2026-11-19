@@ -67,7 +67,7 @@ def _make_docx() -> bytes:
         b"<w:p><w:r><w:t>Hello World</w:t></w:r></w:p>"
         b'<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Heading One</w:t></w:r></w:p>'
         b"<w:p><w:r><w:t>Bullet item</w:t></w:r></w:p>"
-        b"<w:tbl><w:tr><w:tc><w:t>Cell A1</w:t></w:tc><w:tc><w:t>Cell B1</w:t></w:tr></w:tbl>"
+        b"<w:tbl><w:tr><w:tc><w:t>Cell A1</w:t></w:tc><w:tc><w:t>Cell B1</w:t></w:tc></w:tr></w:tbl>"
         b"</w:body>"
         b"</w:document>",
     )
@@ -193,6 +193,14 @@ def _make_epub() -> bytes:
     return buf.getvalue()
 
 
+def _bomb_zip(compress_type: int = zipfile.ZIP_STORED) -> bytes:
+    """Build a zip whose single 1 MB entry is highly compressible."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("word/document.xml", b"A" * 1_000_000, compress_type=compress_type)
+    return buf.getvalue()
+
+
 def test_docx_extract():
     """DOCX extraction should return text from document.xml."""
     result = extract(_make_docx(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
@@ -287,10 +295,7 @@ def test_xml_entity_refused():
 
 def test_zip_bomb_refused():
     """Zip ratio bomb should be refused or yield empty result."""
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as zf:
-        zf.writestr("word/document.xml", b"A" * 1_000_000)
-    bomb = buf.getvalue()
+    bomb = _bomb_zip()
     original_size = len(bomb)
     import zlib
 
@@ -349,3 +354,146 @@ def test_determinism():
         docx, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", limits=limits
     )
     assert a == b
+
+
+def test_pptx_slide_boundaries_and_speaker_notes():
+    """PPTX emits slide separators and includes notesSlide text (defect 4)."""
+    notes_xml = (
+        b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        b'<p:notes xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">'
+        b"<a:t>Speaker note here</a:t>"
+        b"</p:notes>"
+    )
+    content_types = _content_types_xml(
+        [
+            (
+                b"/ppt/slides/slide1.xml",
+                b"application/vnd.openxmlformats-officedocument.presentationml.slide+xml",
+            )
+        ]
+    )
+    rels = (
+        b'<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.'
+        b'openxmlformats.org/package/2006/relationships">'
+        b'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/'
+        b'officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/></Relationships>'
+    )
+    slide = (
+        b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:sld xmlns:p="http://schemas.'
+        b'openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.'
+        b'openxmlformats.org/drawingml/2006/main"><p:cSld><p:sp><p:txBody><a:t>Slide Title'
+        b"</a:t></p:txBody></p:sp></p:cSld></p:sld>"
+    )
+    pptx = _make_zip(
+        content_types,
+        rels,
+        slide,
+        extra=[("ppt/slides/notesSlide1-notes.xml", notes_xml)],
+        main_path="ppt/slides/slide1.xml",
+    )
+    result = extract(pptx, "application/vnd.openxmlformats-officedocument.presentationml.presentation")
+    assert result.quality == Quality.MEDIUM
+    assert "[Slide 1]" in result.text
+    assert "Slide Title" in result.text
+    assert "[Notes]" in result.text
+    assert "Speaker note here" in result.text
+
+
+def test_xlsx_cached_values_preferred_over_formulas():
+    """XLSX reads cached <v> values and prefers them over formula strings (defect 5)."""
+    sheet = (
+        b'<?xml version="1.0" encoding="UTF-8"?>'
+        b'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        b"<sheetData>"
+        b'<row r="1"><c r="A1" t="n"><v>99</v><f>A1+B1</f></c>'
+        b'<c r="B1"><v>7</v></c></row>'
+        b"</sheetData>"
+        b"</worksheet>"
+    )
+    xlsx = _make_zip(
+        _content_types_xml(
+            [
+                (
+                    b"/xl/worksheets/sheet1.xml",
+                    b"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml",
+                )
+            ]
+        ),
+        b"",
+        b'<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.'
+        b'openxmlformats.org/spreadsheetml/2006/main"><sheets><sheet name="Sheet1"'
+        b' sheetId="1" state="visible"/></sheets></workbook>',
+        extra=[("xl/worksheets/sheet1.xml", sheet)],
+        main_path="xl/workbook.xml",
+    )
+    result = extract(xlsx, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    assert result.quality == Quality.MEDIUM
+    assert "99" in result.text
+    assert "7" in result.text
+
+
+def test_epub_spine_order_skips_nav():
+    """EPUB follows spine order and skips properties=nav documents (defect 6)."""
+    nav_xml = b'<?xml version="1.0"?><html><body><nav>NAV SHOULD BE SKIPPED</nav></body></html>'
+    opf = (
+        b'<?xml version="1.0" encoding="UTF-8"?>'
+        b'<package xmlns="http://www.idpf.org/2007/opf" version="2.0">'
+        b"<manifest>"
+        b'<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'
+        b'<item id="chap1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>'
+        b"</manifest>"
+        b"<spine><itemref idref=" + b'"nav"' + b"/><itemref idref=" + b'"chap1"' + b"/></spine>"
+        b"</package>"
+    )
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("mimetype", b"application/epub+zip")
+        zf.writestr(
+            "META-INF/container.xml",
+            b'<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:'
+            b'container">'
+            b"<rootfiles>"
+            b'<rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>'
+            b"</rootfiles></container>",
+        )
+        zf.writestr("OEBPS/content.opf", opf)
+        chapter1_xhtml = b'<?xml version="1.0"?><html><body><p>Chapter 1 text</p></body></html>'
+        zf.writestr("OEBPS/chapter1.xhtml", chapter1_xhtml)
+        zf.writestr("OEBPS/nav.xhtml", nav_xml)
+    result = extract(buf.getvalue(), "application/epub+zip")
+    assert result.quality == Quality.MEDIUM
+    assert "Chapter 1 text" in result.text
+    assert "NAV SHOULD BE SKIPPED" not in result.text
+
+
+def test_zip_bomb_is_refused_not_expanded():
+    """Zip ratio bomb is refused with FAILED quality (defect 7)."""
+    bomb = _bomb_zip(zipfile.ZIP_DEFLATED)
+    docx_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    result = extract(bomb, docx_type)
+    assert result.quality == Quality.FAILED
+    assert result.text == ""
+    assert "zip_bomb_refused" in result.flags
+
+
+def test_zip_traversal_is_refused():
+    """A .. zip entry is refused (defect 7)."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("../evil.xml", b"<w:t>x</w:t>")
+    docx_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    result = extract(buf.getvalue(), docx_type)
+    assert result.quality == Quality.FAILED and result.text == ""
+    assert "zip_traversal_refused" in result.flags
+
+
+def test_zip_entry_count_cap():
+    """Too many zip entries is refused (defect 7)."""
+    limits = ExtractLimits(max_zip_entries=5)
+    docx_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for i in range(8):
+            zf.writestr(f"file{i}.txt", b"x")
+    result = extract(buf.getvalue(), docx_type, limits=limits)
+    assert result.quality == Quality.FAILED and result.text == ""

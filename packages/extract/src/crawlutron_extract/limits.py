@@ -51,3 +51,9 @@ class ExtractLimits:
     max_table_rows: int = 1_000
     max_table_cols: int = 100
     max_input_bytes: int = 50_000_000
+    max_dom_nodes: int = 50_000
+    max_dom_depth: int = 50
+    max_records: int = 10_000
+    max_fields_per_record: int = 100
+    max_zip_entries: int = 10_000
+    max_zip_ratio: int = 1000

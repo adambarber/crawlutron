@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 import zlib
 
-from crawlutron_extract.limits import _base_result
+from crawlutron_extract.limits import RICH_TEXT_FLOOR, _base_result
 
 __all__ = ["extract_pdf"]
 
@@ -58,11 +58,11 @@ def extract_pdf(content: bytes, limits) -> dict:
 
 
 def _inflate(body: bytes) -> str | None:
-    """zlib-decompress a stream body; None on failure."""
+    """zlib-decompress a stream body; fall back to raw text; None on total failure."""
     try:
         return zlib.decompress(body).decode("utf-8", errors="replace")
     except Exception:
-        return None
+        return body.decode("utf-8", errors="replace")
 
 
 def _strip_controls(text: str) -> str:
@@ -85,7 +85,8 @@ def _assemble(pages: list[str], limits, flags: list[str]) -> tuple[str, str]:
         return "", "low"
     text = _strip_controls("\n".join(good))
     text, _ = _apply_caps(text, limits)
-    return text, "low"
+    quality = "high" if len(text) >= RICH_TEXT_FLOOR else "medium"
+    return text, quality
 
 
 def _apply_caps(text: str, limits) -> tuple[str, bool]:

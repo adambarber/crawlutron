@@ -450,10 +450,10 @@ def test_table_rowspan_degraded():
 
 
 def test_nested_table_refused():
-    """A table inside a cell is refused with a flag, never crashes."""
+    """A table inside a cell is flattened with a flag, never crashes."""
     html = b"<table><tr><td><table><tr><td>nested</td></tr></table></td></tr></table>"
     result = extract(html, "text/html")
-    assert "nested_table_refused" in result.flags
+    assert "nested_table_flattened" in result.flags
 
 
 def test_quality_medium_paths_distinguishable():
@@ -463,3 +463,24 @@ def test_quality_medium_paths_distinguishable():
     assert no_main.quality == Quality.MEDIUM
     below_floor = extract(b"<main>" + b"x" * 199 + b"</main>", "text/html")
     assert below_floor.quality == Quality.MEDIUM
+
+
+def test_nested_table_preserves_outer_and_inner_content():
+    """A nested table is flattened into the enclosing cell; the outer table
+    is kept and no cell text is dropped (defect 8)."""
+    nested_html = (
+        b"<table><tr><td>Outer before <table><tr><td>nested</td></tr></table> Outer after</td></tr></table>"
+    )
+    result = extract(nested_html, "text/html")
+    assert "nested_table_flattened" in result.flags
+    assert len(result.tables) == 1
+    assert result.tables[0][0] == ["Outer before nested Outer after"]
+
+
+def test_rowspan_carries_down_keeps_grid_rectangular():
+    """Rowspan carries content down the spanned rows and the grid stays
+    rectangular with table_grid_degraded set (defect 9)."""
+    html = b'<table><tr><td rowspan="2">spanning</td><td>b</td></tr><tr><td>c</td></tr></table>'
+    result = extract(html, "text/html")
+    assert "table_grid_degraded" in result.flags
+    assert result.tables == [[["spanning", "b"], ["spanning", "c"]]]

@@ -171,9 +171,8 @@ class _HTMLExtractor(html_parser.HTMLParser):
         data = data.replace("\x00", "")
         if self._in_boilerplate and self._in_main == 0:
             return
-        if self._tables.in_table > 1:
-            return
-        self._text.handle_data(data)
+        if self._tables.in_table <= 1:
+            self._text.handle_data(data)
         self._tables.handle_data(data)
         self._forms_frames.handle_data(data)
 
@@ -192,7 +191,9 @@ class _HTMLExtractor(html_parser.HTMLParser):
         if self._srcdoc_refused:
             flags.append("srcdoc_depth_refused")
         if table_flags & 1:
-            flags.append("nested_table_refused")
+            flags.append("nested_table_flattened")
+        if table_flags & 2:
+            flags.append("table_grid_degraded")
         if len(text) > self._limits.max_text_chars:
             text = text[: self._limits.max_text_chars]
             truncated = True
