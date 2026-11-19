@@ -15,6 +15,11 @@ license = "MIT"
 # crawlutron-core` produce a working engine instead of an import error; the app
 # wheel depends on the members and adds nothing.
 dependencies = [
+    # crawlutron-extract is the extraction leaf: its bounded DOM parsers and the
+    # selector validators crawl_policy's field validators call. Declared here so a
+    # plain `pip install crawlutron-core` cannot lose the import the manifest does
+    # not grant (workspace resolution masks the defect locally).
+    "crawlutron-extract>=0.4.0.dev0",
     # crawlutron-safe-url ships complete: regex and publicsuffixlist are hard
     # dependencies, so admission and site grouping never silently degrade.
     "crawlutron-safe-url>=0.4.0.dev0",
