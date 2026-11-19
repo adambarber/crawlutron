@@ -31,7 +31,7 @@ help:
 	@echo "  make clean     - remove caches and build artifacts"
 
 install:
-	$(PYTHON) -m pip install -e ".[dev]"
+	uv sync --extra dev
 
 test test-fast:
 	cd "$(SUITE_DIR)" && $(PYTHON) -m pytest
