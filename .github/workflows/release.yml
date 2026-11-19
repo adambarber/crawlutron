@@ -205,38 +205,47 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push the runtime image
+      - name: Build the runtime image locally
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           target: runtime
           file: Dockerfile
-          push: true
+          # Loaded, never pushed yet: a tag that failed its smoke must not exist.
+          push: false
+          load: true
           build-args: |
             SETUPTOOLS_SCM_PRETEND_VERSION=${{ steps.version.outputs.native }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/crawlutron:${{ steps.version.outputs.tag }}
 
-      - name: Smoke the pushed image
+      - name: Smoke the built image
         env:
           VERSION_TAG: ${{ steps.version.outputs.tag }}
           EXPECTED_VERSION: ${{ steps.version.outputs.native }}
         run: |
           set -euo pipefail
-          IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER}/crawlutron"
-          TAG="$VERSION_TAG"
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER}/crawlutron:$VERSION_TAG"
           NAME="crawlutron-smoke"
           docker rm -f "$NAME" >/dev/null 2>&1 || true
-          docker run -d --name "$NAME" -e CRAWLUTRON_HOST=0.0.0.0 -p 8765:8765 "$IMAGE:$TAG"
+          docker run -d --name "$NAME" -e CRAWLUTRON_HOST=0.0.0.0 -p 8765:8765 "$IMAGE"
           trap 'docker rm -f "$NAME" >/dev/null 2>&1 || true' EXIT
           for _ in $(seq 1 15); do
             curl -fsS http://127.0.0.1:8765/health >/dev/null && break
             sleep 1
           done
-          curl -fsS http://127.0.0.1:8765/health >/dev/null
+          if ! curl -fsS http://127.0.0.1:8765/health >/dev/null; then
+            docker logs "$NAME" || true
+            exit 1
+          fi
           curl -fsS http://127.0.0.1:8765/ready >/dev/null
           BAKED="$(docker exec "$NAME" /app/.venv/bin/python -c 'import crawlutron; print(crawlutron.__version__)')"
           test "$BAKED" = "$EXPECTED_VERSION"
+
+      - name: Push the smoked image
+        env:
+          VERSION_TAG: ${{ steps.version.outputs.tag }}
+        run: docker push "ghcr.io/${GITHUB_REPOSITORY_OWNER}/crawlutron:$VERSION_TAG"
 
   github-release:
     name: Publish the GitHub release

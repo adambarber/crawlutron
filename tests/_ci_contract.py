@@ -21,6 +21,11 @@ MAKEFILE_PATH = SERVICE_ROOT / "Makefile"
 
 WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "ci.yml"
 
+# The version-triggered publish workflow and the packaging probe, contracted
+# alongside ci.yml.
+RELEASE_WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "release.yml"
+PACKAGING_WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "packaging.yml"
+
 # The one gate environment every job starts from.
 PREPARE_ACTION_PATH = SERVICE_ROOT / ".github" / "actions" / "prepare" / "action.yml"
 
