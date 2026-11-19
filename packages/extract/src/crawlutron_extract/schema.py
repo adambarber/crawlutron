@@ -106,7 +106,7 @@ def _extract_field_value(
     node,
     field: FieldSpec,
     base_url: str | None,
-    policy: HostPolicy | None,
+    policy: HostPolicy,
 ) -> object | None:
     """Extract a single field value from a matched node."""
     if field.kind == FieldKind.TEXT:
@@ -122,7 +122,7 @@ def _extract_field_value(
         resolved = _resolve_url(base_url, href)
         if resolved is None:
             return None
-        admitted = admit_or_none(resolved, policy=policy) if policy else None
+        admitted = admit_or_none(resolved, policy=policy)
         return str(admitted) if admitted is not None else None
     elif field.kind == FieldKind.NUMBER:
         return _coerce_number(node.get_text())
@@ -184,10 +184,9 @@ def extract_records(
     fields_truncated = False
     schema_required_missing = False
 
-    policy = HostPolicy.unrestricted() if url else None
-
-    # A document <base href> rebases relative URLs, consistently with
-    # extract_discovered_links.
+    # A document <base href> rebases relative URLs, as extract_discovered_links
+    # does; LINK values always admit through safe_url (it refuses unsafe schemes).
+    policy = HostPolicy.unrestricted()
     base_href = _find_base_href(dom)
     document_base = _resolve_url(url, base_href) if base_href else url
 

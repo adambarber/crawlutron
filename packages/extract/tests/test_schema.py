@@ -250,6 +250,36 @@ def test_schema_link_honours_base_href():
     assert result.records == ({"l": "https://example.com/base/page"},)
 
 
+def test_schema_link_resolves_against_document_base_without_url():
+    """LINK resolves against a document <base href> even with no url argument."""
+    html = (
+        '<html><head><base href="https://cdn.example.com/dir/">'
+        '</head><body><div class="r"><a class="lnk" href="p.html">L</a></div></body></html>'
+    )
+    result = _extract_schema(html, "div.r", _f("u", "a.lnk", kind=FieldKind.LINK))
+    assert result.records == ({"u": "https://cdn.example.com/dir/p.html"},)
+
+
+def test_schema_link_document_base_wins_over_url():
+    """When a document <base href> and url disagree, the document base wins."""
+    html = (
+        '<html><head><base href="https://cdn.example.com/dir/">'
+        '</head><body><div class="r"><a class="lnk" href="p.html">L</a></div></body></html>'
+    )
+    result = _extract_schema(
+        html, "div.r", _f("u", "a.lnk", kind=FieldKind.LINK), url="https://other.example.com/"
+    )
+    assert result.records == ({"u": "https://cdn.example.com/dir/p.html"},)
+
+
+def test_schema_record_selector_one_record_per_matching_element():
+    """Every record selector over a document yields one record per matching element."""
+    h = "<html><body><p>x</p></body></html>"
+    for sel in ("html", "body", "p"):
+        result = _extract_schema(h, sel, _f("t", "p", kind=FieldKind.TEXT))
+        assert result.records == ({"t": "x"},), sel
+
+
 def test_schema_duplicate_field_names_refused():
     """Duplicate field names are refused at Schema construction, naming the field."""
     try:

@@ -89,16 +89,26 @@ class DOMBuilder(html_parser.HTMLParser):
 
 
 def build_dom(content: str, max_nodes: int, max_depth: int) -> tuple[DOMNode | None, bool]:
-    """Build a DOM tree from HTML.
+    """Build a bounded DOM tree from HTML.
 
-    Returns (root_node, truncated). If truncated is True, the tree was
-    truncated due to caps.
+    Full documents parse as-is; fragments wrap so <html>/<body> never duplicate.
     """
     builder = DOMBuilder(max_nodes, max_depth)
-    builder.feed("<html><body>" + content + "</body></html>")
+    full = _is_full_document(content)
+    if full:
+        builder.feed(content)
+    else:
+        builder.feed("<html><body>" + content + "</body></html>")
     builder.close()
-    root = builder.result()[0]
-    # The synthetic <html><body> wrapper: return its body child as root
-    if root is not None and root.tag == "html" and root.children:
+    root, truncated = builder.result()
+    # Wrapped fragments expose their <body> root; full documents keep their real
+    # <html> root so html/body selectors match exactly once.
+    if not full and root is not None and root.tag == "html" and root.children:
         root = root.children[0]
-    return root, builder.result()[1]
+    return root, truncated
+
+
+def _is_full_document(content: str) -> bool:
+    """True when ``content`` already carries its own <html> document root."""
+    stripped = content.lstrip()
+    return stripped.lower().startswith(("<html", "<!doctype"))
