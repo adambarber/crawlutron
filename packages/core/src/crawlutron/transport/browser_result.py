@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from crawlutron.admission.render_options import resolve_render_options
+from crawlutron.admission.render_options import policy_wants_markdown, resolve_render_options
 from crawlutron.models.crawl_diagnostics import CrawlDiagnostics
 from crawlutron.models.crawl_job import CrawlJob
 from crawlutron.models.crawl_policy import CrawlPolicy
@@ -89,6 +89,7 @@ async def _extract_browser_content(
         policy=policy,
         default_method=_render_extraction_method(result),
         html=True,
+        markdown=policy_wants_markdown(policy),
         settings=settings,
     )
 

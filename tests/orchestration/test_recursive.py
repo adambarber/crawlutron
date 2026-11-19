@@ -119,7 +119,7 @@ class TestRecursiveCrawl:
         out = await crawled_results(
             pages,
             limits=LINKED_PAIR_LIMITS,
-            policy={"browser_profile": {"include_html": False}},
+            policy={"browser_profile": {"include_html": False, "include_markdown": True}},
         )
         _assert_memory_stripped(out)
 
@@ -152,7 +152,7 @@ class TestRecursiveCrawlServer:
             return await crawled_results(
                 pages,
                 limits={"max_depth": max_depth, "max_pages": 10},
-                policy={"browser_profile": {"include_html": False}},
+                policy={"browser_profile": {"include_html": False, "include_markdown": True}},
             )
 
         for max_depth in (0, 1):

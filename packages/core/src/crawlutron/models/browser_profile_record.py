@@ -16,6 +16,7 @@ class BrowserProfileRecord(TypedDict, total=False):
     storage_state: str
     actions: JsonValue
     include_html: bool
+    include_markdown: bool
     include_screenshot: bool
     screenshot_selectors: list[str]
     auto_accept_cookie_consent: bool

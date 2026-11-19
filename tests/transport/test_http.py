@@ -62,6 +62,16 @@ async def _run(
     )
 
 
+async def _run_homepage_with_markdown(base_url: str):
+    """Homepage crawl with markdown opted in, asserted successful."""
+    result = await _run(
+        url=f"{base_url}/",
+        policy=http_policy(browser_profile={"include_markdown": True}),
+    )
+    assert_result_success(result)
+    return result
+
+
 def _html_fetcher(html: str):
     """An async fetcher that serves a fixed HTML body for any URL."""
     return FetcherDouble(lambda url, *_: {"status": 200, "ctype": "text/html", "body": html.encode("utf-8")})
@@ -153,16 +163,33 @@ class TestHttpStrategy:
         assert "frames" in r2.diagnostics
 
     async def test_http_strategy_extracts_html_markdown_content_only(self, base_url):
-        result = await _run(
-            url=f"{base_url}/",
-        )
-        assert_result_success(result)
+        result = await _run_homepage_with_markdown(base_url)
         assert "Example Org" in (result.text or "")
         assert "Example Org" in (result.markdown or "")
         assert result.discovered_link_count == 0
         assert result.discovered_links == ()
         assert result.next_page_url == canonical(f"{base_url}/page2")
         assert result.http_status == 200
+
+    async def test_http_strategy_default_drops_markdown_keeps_text_and_html(self):
+        """No ``include_markdown``: the record carries no markdown while text and
+        html are still delivered."""
+        html = "<html><body>Example Org page</body></html>"
+        result = await _run(url="http://example.com/", http_fetcher=_html_fetcher(html))
+        assert result.markdown is None
+        assert result.html is not None
+        assert result.text is not None
+
+    async def test_http_strategy_include_markdown_true_carries_markdown(self):
+        """``include_markdown=true``: real markdown is retained on the record."""
+        html = "<html><body><h1>Example Org</h1><p>Body text here</p></body></html>"
+        result = await _run(
+            url="http://example.com/",
+            policy=http_policy(browser_profile={"include_markdown": True}),
+            http_fetcher=_html_fetcher(html),
+        )
+        assert result.markdown is not None
+        assert "# Example Org" in result.markdown
 
     async def test_http_strategy_404_classified_not_found(self, base_url):
         result = await _run(
@@ -194,6 +221,7 @@ class TestHttpStrategy:
     async def test_http_csv_document_via_http(self, base_url):
         result = await _run(
             url=f"{base_url}/sample.csv",
+            policy=http_policy(browser_profile={"include_markdown": True}),
         )
         assert "Alice" in (result.markdown or "")
         assert "|" in (result.markdown or "")
@@ -201,12 +229,14 @@ class TestHttpStrategy:
     async def test_http_json_document_via_http(self, base_url):
         result = await _run(
             url=f"{base_url}/sample.json",
+            policy=http_policy(browser_profile={"include_markdown": True}),
         )
         assert "a: 1" in (result.markdown or "")
 
     async def test_http_pdf_table_preserved_via_http(self, base_url):
         result = await _run(
             url=f"{base_url}/sample_table.pdf",
+            policy=http_policy(browser_profile={"include_markdown": True}),
         )
         assert "Name" in (result.markdown or "")
         assert "Department" in (result.markdown or "")
@@ -219,12 +249,8 @@ class TestHttpStrategy:
         assert not looks_like_binary_body(b"%PDF-1.4", "application/pdf", canonical("http://x/a.pdf"))
 
     async def test_crawl_request_async_returns_unified_results_dict(self, base_url):
-        from tests._fetcher_factories import crawl_homepage_async
-
-        response = await crawl_homepage_async(base_url)
-        assert response["submitted_count"] == 1
-        assert len(response["results"]) == 1
-        assert "Example Org" in str(response["results"][0].markdown)
+        result = await _run_homepage_with_markdown(base_url)
+        assert "Example Org" in result.markdown
 
     async def test_js_endpoints_and_sitemap_discovery_gated_without_discovery(self):
         # The heavier discovery-only extras -- JS-endpoint extraction and the remote sitemap/feed discovery

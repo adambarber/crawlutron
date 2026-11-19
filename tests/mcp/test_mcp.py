@@ -328,7 +328,12 @@ class TestToolsCall:
         """The composite exists for the projection: many pages' extracted content,
         without the html, headers and diagnostics the full response repeats."""
         sc = await _tool_call(
-            async_client, "crawl_and_extract", {"urls": [f"{base_url}/", f"{base_url}/blog"]}
+            async_client,
+            "crawl_and_extract",
+            {
+                "urls": [f"{base_url}/", f"{base_url}/blog"],
+                "policy": {"browser_profile": {"include_markdown": True}},
+            },
         )
 
         assert sc["submitted_count"] == 2

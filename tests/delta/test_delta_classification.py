@@ -200,6 +200,17 @@ def test_content_fingerprint_empty_is_none():
         assert (value is None) == (not markdown)
 
 
+def test_content_fingerprint_skips_none_markdown():
+    """markdown None is skipped: the fingerprint hashes only the renderings the
+    record carries (html + text), and never crashes on an absent markdown."""
+    item = engine_result(URL, "rendered", markdown=None, html="<html>body</html>", text="body")
+    value = content_fingerprint(item)
+    assert value is not None
+    assert value == content_fingerprint(
+        engine_result(URL, "rendered", markdown="", html="<html>body</html>", text="body")
+    )
+
+
 def test_baseline_fingerprint_fields_record_what_was_hashed():
     """extract_baseline records which content fields fed the fingerprint, so a
     re-crawl at a different output shape compares over the same field set."""

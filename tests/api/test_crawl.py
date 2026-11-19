@@ -40,7 +40,16 @@ class TestCrawlApi(_AsgiEndpointTests):
     """Tests using pytest fixtures and ASGI transport."""
 
     async def test_v1_crawl_returns_unified_response_with_markdown_and_diagnostics(self):
-        body = await completed_crawl(self.client, make_crawl_payload(f"{self.base}/"))
+        body = await completed_crawl(
+            self.client,
+            make_crawl_payload(
+                f"{self.base}/",
+                policy={
+                    "strategies": [HTTP_DECLARED_CRAWLER],
+                    "browser_profile": {"include_markdown": True},
+                },
+            ),
+        )
         assert "request_id" in body
         assert body["submitted_count"] == 1
         assert "policy_schema_version" in body
@@ -58,7 +67,14 @@ class TestCrawlApi(_AsgiEndpointTests):
         assert result["next_page_url"] == f"{self.base}/page2"
 
     async def test_v1_crawl_batch_returns_one_result_per_url(self):
-        payload = make_crawl_payload(f"{self.base}/", urls=[f"{self.base}/", f"{self.base}/page2"])
+        payload = make_crawl_payload(
+            f"{self.base}/",
+            urls=[f"{self.base}/", f"{self.base}/page2"],
+            policy={
+                "strategies": [HTTP_DECLARED_CRAWLER],
+                "browser_profile": {"include_markdown": True},
+            },
+        )
         payload.pop("url")
         body = await completed_crawl(self.client, payload)
         assert body["submitted_count"] == 2
@@ -154,7 +170,15 @@ class TestCrawlApi(_AsgiEndpointTests):
 
     async def test_v1_crawl_markdown_output_format(self):
         resp = await self.client.post(
-            "/v1/crawl", json=make_crawl_payload(f"{self.base}/", output_format="markdown")
+            "/v1/crawl",
+            json=make_crawl_payload(
+                f"{self.base}/",
+                output_format="markdown",
+                policy={
+                    "strategies": [HTTP_DECLARED_CRAWLER],
+                    "browser_profile": {"include_markdown": True},
+                },
+            ),
         )
         assert resp.status_code == 200, resp.text
         assert "text/markdown" in resp.headers.get("content-type", "")

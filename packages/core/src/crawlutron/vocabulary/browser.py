@@ -55,6 +55,7 @@ BROWSER_PROFILE_KEYS: Final[frozenset[str]] = frozenset(
         "storage_state",
         "actions",
         "include_html",
+        "include_markdown",
         "include_screenshot",
         "screenshot_selectors",
         "auto_accept_cookie_consent",

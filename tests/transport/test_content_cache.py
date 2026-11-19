@@ -31,7 +31,12 @@ def etag_case(tmp_path, etag_server):
     port = etag_server.server_address[1]
     return (
         f"http://127.0.0.1:{port}/",
-        {"strategies": [HTTP_DECLARED_CRAWLER], "extraction": "full", "headers": {}},
+        {
+            "strategies": [HTTP_DECLARED_CRAWLER],
+            "extraction": "full",
+            "headers": {},
+            "browser_profile": {"include_markdown": True},
+        },
         FetcherDouble(
             lambda url, sent_headers, timeout, cap: default_http_fetcher(url, sent_headers, timeout, cap)
         ),

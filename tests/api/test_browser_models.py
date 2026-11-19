@@ -143,6 +143,7 @@ class TestBrowserProfileVocabularyIsClosed:
             "auto_accept_cookie_consent": True,
             "cookie_harvest_timeout_seconds": 5,
             "include_html": True,
+            "include_markdown": False,
             "include_screenshot": True,
             "lazy_scroll_delay_seconds": 1,
             "lazy_scroll_steps": 3,

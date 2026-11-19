@@ -65,9 +65,14 @@ def _full_discovery_policy() -> "CrawlPolicy":
     return http_strategy_policy(extraction="full", discovery=True)
 
 
-async def _render(monkeypatch, html: str, *, text: str = BROWSER_TEXT):
+async def _render(monkeypatch, html: str, *, text: str = BROWSER_TEXT, markdown: bool = False):
     """The browser strategy's result for `html`, built by the production builder."""
-    return await invoke_browser_strategy(monkeypatch, policy=_full_discovery_policy(), html=html, text=text)
+    policy = _full_discovery_policy()
+    if markdown:
+        profile = dict(policy.browser_profile or {})
+        profile["include_markdown"] = True
+        policy = policy.model_copy(update={"browser_profile": profile})
+    return await invoke_browser_strategy(monkeypatch, policy=policy, html=html, text=text)
 
 
 def assert_extracted_discovery(result) -> None:
@@ -199,7 +204,7 @@ async def test_browser_result_carries_the_shared_builder_shape(monkeypatch):
     It hand-built EngineCrawlResult, silently relying on the ``validators``
     default; pinning the fields proves the shared-builder route preserves them.
     """
-    result = await _render(monkeypatch, HTML)
+    result = await _render(monkeypatch, HTML, markdown=True)
     assert result.status == "success"
     assert result.classification == "rendered"
     assert result.selected_strategy == "BROWSER_HEADLESS"

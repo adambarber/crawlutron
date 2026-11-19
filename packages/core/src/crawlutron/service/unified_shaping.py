@@ -101,24 +101,22 @@ def extract_llm_metadata(html: str, url: NormalizedUrl | None) -> PageMetadata:
 
 
 def format_crawl_item(item: EngineCrawlResult) -> tuple[str | None, PageMetadata]:
-    """Unified output formatter: ``(markdown, metadata)`` for any result, through one
-    path. Metadata comes from the carried ``llm_metadata`` when present, else from
-    ``extract_llm_metadata`` over the HTML; the carried field adds no new wire keys.
+    """Unified output formatter: ``(markdown, metadata)`` for any result.
+    Markdown is emitted only when the record carries it; text never masquerades as
+    markdown. Metadata comes from carried ``llm_metadata`` or parsed HTML.
     """
     carried = item.llm_metadata
     url = item.final_url or item.normalized_url
     html = item.html
     markdown = item.markdown
-    if markdown:
-        if isinstance(carried, dict) and carried:
-            return markdown, extract_carried_metadata(carried)
-        if html and url is not None:
-            return markdown, extract_llm_metadata(html, url)
-        return markdown, {}
-    text = item.text
-    if not text:
-        return None, {}
-    return text, {}
+    metadata: PageMetadata = {}
+    if isinstance(carried, dict) and carried:
+        metadata = extract_carried_metadata(carried)
+    elif html and url is not None:
+        metadata = extract_llm_metadata(html, url)
+    if not markdown:
+        return None, metadata
+    return markdown, metadata
 
 
 async def aformat_crawl_item(item: EngineCrawlResult) -> tuple[str | None, PageMetadata]:

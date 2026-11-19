@@ -64,12 +64,12 @@ async def run_extraction(
     policy: CrawlPolicy,
     default_method: str,
     html: bool,
+    markdown: bool,
     settings: CrawlerSettings | None = None,
 ) -> ExtractedContent:
     """Run extraction once off the loop through crawlutron_extract.extract.
-
-    Modes decode the same bytes; ``default_method`` stamps the result and
-    ``settings`` maps onto ``ExtractLimits`` (quality=failed on hostile input).
+    ``default_method`` stamps the result and ``settings`` maps onto
+    ``ExtractLimits``; ``markdown`` gates retention of the package's markdown.
     """
     payload = content if isinstance(content, (bytes, bytearray)) else content.encode("utf-8", "replace")
     result = await asyncio.to_thread(
@@ -79,15 +79,18 @@ async def run_extraction(
         url=final_url.raw if final_url is not None else None,
         limits=_extract_limits(settings),
     )
-    text, markdown = normalized_extraction(result)
+    text, extracted_markdown = normalized_extraction(result)
     if not text:
         # Unparseable input degrades to the already-decoded body so nothing is
         # silently lost; the package's quality floor still marks it low/failed.
         text = decoded.strip() or ""
-        markdown = text
+        extracted_markdown = text
     if not markdown:
-        markdown = text
-    return ExtractedContent(text=text, markdown=markdown, extraction_method=default_method)
+        # Not requested: carry nothing (no retention, no wire).
+        extracted_markdown = None
+    elif not extracted_markdown:
+        extracted_markdown = text
+    return ExtractedContent(text=text, markdown=extracted_markdown, extraction_method=default_method)
 
 
 async def discover_after_fetch(

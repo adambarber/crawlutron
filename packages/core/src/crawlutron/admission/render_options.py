@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
     from crawlutron.models.browser_profile_record import BrowserProfileRecord
 
-__all__ = ["RenderOptionsWire", "policy_wants_html", "resolve_render_options"]
+__all__ = ["RenderOptionsWire", "policy_wants_html", "policy_wants_markdown", "resolve_render_options"]
 
 
 class RenderOptionsWire(TypedDict, total=False):
@@ -106,3 +106,11 @@ def policy_wants_html(policy: CrawlPolicy) -> bool:
     drift — the sole reading of that field allowed outside this module.
     """
     return bool(policy.browser_profile.get("include_html", True))
+
+
+def policy_wants_markdown(policy: CrawlPolicy) -> bool:
+    """The caller's payload knob: keep extracted markdown or drop it, read once via
+    ``policy.browser_profile["include_markdown"]``. Opt-in: absent is None on the
+    record and the wire; sole reader of that field outside this module.
+    """
+    return bool(policy.browser_profile.get("include_markdown", False))

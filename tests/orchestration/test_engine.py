@@ -48,11 +48,15 @@ def http_policy(*strategies: str, extraction: str = "full", **extra) -> CrawlPol
 
 class TestEngineCrawlRequest:
     async def test_crawl_request_http_success(self, base_url):
-        from tests._fetcher_factories import crawl_homepage_async
-
-        response = await crawl_homepage_async(base_url)
-        first_markdown = response["results"][0].markdown or ""
-        assert "Example Org" in first_markdown
+        result = await crawled_result(
+            base_url,
+            policy={
+                "strategies": [HTTP_DECLARED_CRAWLER],
+                "limits": {"timeout_seconds": 10, "max_discovered_links": 50},
+                "browser_profile": {"include_markdown": True},
+            },
+        )
+        assert "Example Org" in (result.markdown or "")
 
     async def test_crawl_request_conditional_cache_304(self, base_url):
         url = f"{base_url}/with_etag"
@@ -77,9 +81,11 @@ class TestEngineCrawlRequest:
 
         result = await crawled_result(
             f"{base_url}/",
-            strategies=[HTTP_DECLARED_CRAWLER, BROWSER_HEADLESS],
-            timeout_seconds=20,
-            max_discovered_links=50,
+            policy={
+                "strategies": [HTTP_DECLARED_CRAWLER, BROWSER_HEADLESS],
+                "limits": {"timeout_seconds": 20, "max_discovered_links": 50},
+                "browser_profile": {"include_markdown": True},
+            },
             http_fetcher=failing_fetcher,
             browser_worker=_fake_browser(
                 html="<html><body>Example Org</body></html>",
@@ -193,7 +199,11 @@ class TestEngineChainEdges:
         # here needs a server that 404s robots.
         result = await crawled_result(
             f"{base_url}/doc",
-            policy={"strategies": [BROWSER_HEADLESS], "extraction": EXTRACTION_DOCUMENT},
+            policy={
+                "strategies": [BROWSER_HEADLESS],
+                "extraction": EXTRACTION_DOCUMENT,
+                "browser_profile": {"include_markdown": True},
+            },
             browser_worker=_fake_browser(html="<html><body>doc table</body></html>"),
         )
         assert result.status == "success"
@@ -202,7 +212,11 @@ class TestEngineChainEdges:
     async def test_browser_strategy_trafilatura_extraction(self, base_url):
         result = await crawled_result(
             f"{base_url}/doc2",
-            policy={"strategies": [BROWSER_HEADLESS], "extraction": EXTRACTION_TRAFILATURA},
+            policy={
+                "strategies": [BROWSER_HEADLESS],
+                "extraction": EXTRACTION_TRAFILATURA,
+                "browser_profile": {"include_markdown": True},
+            },
             browser_worker=_fake_browser(html="<html><body>trafilatura body</body></html>"),
         )
         assert "trafilatura body" in (result.markdown or "")
@@ -334,7 +348,9 @@ class TestEngineChainEdges:
         """When include_html is False the raw HTML is not retained in the result."""
         result = await crawled_result(
             "http://example.com/",
-            policy=http_policy(extraction="dom", browser_profile={"include_html": False}),
+            policy=http_policy(
+                extraction="dom", browser_profile={"include_html": False, "include_markdown": True}
+            ),
             http_fetcher=FetcherDouble(
                 lambda url, *_: {
                     "status": 200,

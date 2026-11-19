@@ -38,7 +38,9 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     "packages/core/src/crawlutron/safety/bounded_io.py": (4, 2),
     "packages/core/src/crawlutron/transport/decompression.py": (5, 2),
     "packages/core/src/crawlutron/admission/credentials.py": (3, 3),
-    "packages/core/src/crawlutron/admission/render_options.py": (3, 2),
+    # #1136: policy_wants_markdown is the markdown opt-in reader, mirroring
+    # policy_wants_html; it raises the declared surface by one symbol.
+    "packages/core/src/crawlutron/admission/render_options.py": (4, 3),
     # RAISED to (2, 2): `payload_policy` was `_payload_policy` until the layout put its only production caller
     # (the engine) in another package.
     "packages/core/src/crawlutron/admission/payload_helpers.py": (2, 2),

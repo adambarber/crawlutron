@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from crawlutron.admission.render_options import policy_wants_markdown
 from crawlutron.extraction.classify import classify_page_with_evidence
 from crawlutron.models.classification_evidence import ClassificationEvidenceRecord
 from crawlutron.models.request_profile_diagnostics import RequestProfileDiagnostics
@@ -61,6 +62,7 @@ async def extract_http_phase(ctx: HttpStrategyContext, resp: FetchedResponse) ->
         policy=ctx.policy,
         default_method=EXTRACTION_METHOD_HTTP_HTML if html_body else EXTRACTION_METHOD_HTTP_BODY,
         html=html_body,
+        markdown=policy_wants_markdown(ctx.policy),
         settings=ctx.settings,
     )
     text, markdown = extracted.text, extracted.markdown
