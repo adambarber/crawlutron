@@ -7,16 +7,15 @@ from __future__ import annotations
 
 from typing import cast
 
+from crawlutron_extract._select_common import (
+    SelectorError,
+    _consume,
+    _emit_char,
+    _peek,
+    _scan_ident,
+    _skip_ws,
+)
 from crawlutron_extract.html_dom import DOMNode
-
-
-class SelectorError(Exception):
-    """Raised when a selector uses syntax outside the supported subset."""
-
-    def __init__(self, message: str, selector: str = ""):
-        super().__init__(f"{message} (selector: {selector!r})" if selector else message)
-        self.selector = selector
-
 
 # Tokenizer
 
@@ -28,44 +27,44 @@ def _tokenize(selector: str) -> list[tuple[str, str]]:
     while i < n:
         c = selector[i]
         if c.isspace():
-            tokens.append(("WS", " "))
+            _emit_char(tokens, "WS", " ")
             i += 1
         elif c == ".":
-            tokens.append(("DOT", "."))
+            _emit_char(tokens, "DOT", ".")
             i += 1
         elif c == "#":
-            tokens.append(("HASH", "#"))
+            _emit_char(tokens, "HASH", "#")
             i += 1
         elif c == "[":
-            tokens.append(("LBRACKET", "["))
+            _emit_char(tokens, "LBRACKET", "[")
             i += 1
         elif c == "]":
-            tokens.append(("RBRACKET", "]"))
+            _emit_char(tokens, "RBRACKET", "]")
             i += 1
         elif c == "(":
-            tokens.append(("LPAREN", "("))
+            _emit_char(tokens, "LPAREN", "(")
             i += 1
         elif c == ")":
-            tokens.append(("RPAREN", ")"))
+            _emit_char(tokens, "RPAREN", ")")
             i += 1
         elif c == ",":
-            tokens.append(("COMMA", ","))
+            _emit_char(tokens, "COMMA", ",")
             i += 1
         elif c == ">":
-            tokens.append(("GREATER", ">"))
+            _emit_char(tokens, "GREATER", ">")
             i += 1
         elif c == "+":
-            tokens.append(("PLUS", "+"))
+            _emit_char(tokens, "PLUS", "+")
             i += 1
         elif c == "*":
-            tokens.append(("STAR", "*"))
+            _emit_char(tokens, "STAR", "*")
             i += 1
         elif c == "=":
             if i + 1 < n and selector[i + 1] in "^$*":
                 tokens.append(("ATTR_OP", selector[i : i + 2]))
                 i += 2
             else:
-                tokens.append(("ATTR_OP", "="))
+                _emit_char(tokens, "ATTR_OP", "=")
                 i += 1
         elif c == ":":
             j = i + 1
@@ -83,31 +82,10 @@ def _tokenize(selector: str) -> list[tuple[str, str]]:
             tokens.append(("PSEUDO", selector[i:j]))
             i = j
         else:
-            j = i
-            while j < n and (selector[j].isalnum() or selector[j] in "-_"):
-                j += 1
+            j = _scan_ident(selector, i, n)
             tokens.append(("IDENT", selector[i:j]))
             i = j
     return tokens
-
-
-def _peek(tokens: list[tuple[str, str]], pos: int) -> tuple[str, str] | None:
-    if 0 <= pos < len(tokens):
-        return tokens[pos]
-    return None
-
-
-def _consume(
-    tokens: list[tuple[str, str]],
-    pos: int,
-    expected: str | None = None,
-) -> tuple[tuple[str, str], int]:
-    if pos >= len(tokens):
-        raise SelectorError("Unexpected end of selector")
-    tok = tokens[pos]
-    if expected and tok[0] != expected:
-        raise SelectorError(f"Expected {expected}, got {tok[0]}")
-    return tok, pos + 1
 
 
 # Parser
@@ -185,16 +163,6 @@ def _parse_simple_selector(tokens: list[tuple[str, str]], pos: int) -> tuple[lis
     return parts, pos
 
 
-def _skip_ws(tokens: list[tuple[str, str]], pos: int) -> int:
-    """Skip whitespace tokens, returning the new position."""
-    tok = _peek(tokens, pos)
-    while tok and tok[0] == "WS":
-        _consume(tokens, pos, "WS")
-        pos += 1
-        tok = _peek(tokens, pos)
-    return pos
-
-
 def _parse_selector(
     tokens: list[tuple[str, str]], pos: int
 ) -> tuple[list[tuple[list[tuple[str, ...]], str | None]], int]:
@@ -240,7 +208,18 @@ def parse_selector_list(selector: str) -> list[list[tuple[list[tuple[str, ...]],
             pos += 1
         else:
             break
+    # Reject dangling combinators and any trailing junk.
+    for chain in selectors:
+        if chain and chain[-1][1] is not None:
+            raise SelectorError("Dangling combinator", selector)
+    if pos < len(tokens):
+        raise SelectorError("Trailing tokens", selector, tokens[pos][1])
     return selectors
+
+
+def validate_css(selector: str) -> None:
+    """Validate a CSS selector; raise SelectorError if outside the supported subset."""
+    parse_selector_list(selector)
 
 
 # Matcher

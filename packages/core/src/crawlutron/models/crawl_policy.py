@@ -162,17 +162,16 @@ class CrawlPolicy(BaseModel):
     def _validate_selector_syntax(cls, value: str | None, info: ValidationInfo) -> str | None:
         # A malformed selector is a caller error surfaced here (invalid_policy at
         # the wire edge), not parked until extraction as a flaky network_error.
-        from lxml import etree
-        from soupsieve import compile as compile_css
+        from crawlutron_extract import SelectorError, validate_css, validate_xpath
 
         if value is None:
             return None
         try:
             if info.field_name == "css_selector":
-                compile_css(value)
+                validate_css(value)
             else:
-                etree.XPath(value)
-        except Exception as exc:
+                validate_xpath(value)
+        except SelectorError as exc:
             raise ValueError(f"{info.field_name} rejected: {exc}") from exc
         return value
 

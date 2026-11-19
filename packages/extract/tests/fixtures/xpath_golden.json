@@ -1,0 +1,148 @@
+[
+  [
+    "<div class=\"a b\"><p id=\"x\">hello</p><p class=\"x\">world</p><section><div><span>deep</span></div></section></div>",
+    "//p",
+    [
+      "p",
+      "p"
+    ]
+  ],
+  [
+    "<div class=\"a b\"><p id=\"x\">hello</p><p class=\"x\">world</p><section><div><span>deep</span></div></section></div>",
+    "//div",
+    [
+      "div",
+      "div"
+    ]
+  ],
+  [
+    "<div class=\"a b\"><p id=\"x\">hello</p><p class=\"x\">world</p><section><div><span>deep</span></div></section></div>",
+    "//span",
+    [
+      "span"
+    ]
+  ],
+  [
+    "<div class=\"a b\"><p id=\"x\">hello</p><p class=\"x\">world</p><section><div><span>deep</span></div></section></div>",
+    "//p[1]",
+    [
+      "p"
+    ]
+  ],
+  [
+    "<div class=\"a b\"><p id=\"x\">hello</p><p class=\"x\">world</p><section><div><span>deep</span></div></section></div>",
+    "//p[last()]",
+    [
+      "p"
+    ]
+  ],
+  [
+    "<div class=\"a b\"><p id=\"x\">hello</p><p class=\"x\">world</p><section><div><span>deep</span></div></section></div>",
+    "//p[@id]",
+    [
+      "p"
+    ]
+  ],
+  [
+    "<div class=\"a b\"><p id=\"x\">hello</p><p class=\"x\">world</p><section><div><span>deep</span></div></section></div>",
+    "//p[@id='x']",
+    [
+      "p"
+    ]
+  ],
+  [
+    "<div class=\"a b\"><p id=\"x\">hello</p><p class=\"x\">world</p><section><div><span>deep</span></div></section></div>",
+    "//p[@class='x']",
+    [
+      "p"
+    ]
+  ],
+  [
+    "<div class=\"a b\"><p id=\"x\">hello</p><p class=\"x\">world</p><section><div><span>deep</span></div></section></div>",
+    "//p[contains(@class, 'x')]",
+    [
+      "p"
+    ]
+  ],
+  [
+    "<div class=\"a b\"><p id=\"x\">hello</p><p class=\"x\">world</p><section><div><span>deep</span></div></section></div>",
+    "//p[starts-with(@id, 'x')]",
+    [
+      "p"
+    ]
+  ],
+  [
+    "<div class=\"a b\"><p id=\"x\">hello</p><p class=\"x\">world</p><section><div><span>deep</span></div></section></div>",
+    "//*[contains(concat(' ', normalize-space(@class), ' '), ' b ')]",
+    [
+      "div"
+    ]
+  ],
+  [
+    "<div class=\"a b\"><p id=\"x\">hello</p><p class=\"x\">world</p><section><div><span>deep</span></div></section></div>",
+    "//p/text()",
+    [
+      "hello",
+      "world"
+    ]
+  ],
+  [
+    "<div class=\"a b\"><p id=\"x\">hello</p><p class=\"x\">world</p><section><div><span>deep</span></div></section></div>",
+    "//p[1]/text()",
+    [
+      "hello"
+    ]
+  ],
+  [
+    "<div class=\"a b\"><p id=\"x\">hello</p><p class=\"x\">world</p><section><div><span>deep</span></div></section></div>",
+    "//div/@class",
+    [
+      "a b"
+    ]
+  ],
+  [
+    "<div class=\"a b\"><p id=\"x\">hello</p><p class=\"x\">world</p><section><div><span>deep</span></div></section></div>",
+    "//p/@id",
+    [
+      "x"
+    ]
+  ],
+  [
+    "<div class=\"a b\"><p id=\"x\">hello</p><p class=\"x\">world</p><section><div><span>deep</span></div></section></div>",
+    "//div/p",
+    [
+      "p",
+      "p"
+    ]
+  ],
+  [
+    "<div class=\"a b\"><p id=\"x\">hello</p><p class=\"x\">world</p><section><div><span>deep</span></div></section></div>",
+    "//div//p",
+    [
+      "p",
+      "p"
+    ]
+  ],
+  [
+    "<div class=\"a b\"><p id=\"x\">hello</p><p class=\"x\">world</p><section><div><span>deep</span></div></section></div>",
+    ".//p",
+    [
+      "p",
+      "p"
+    ]
+  ],
+  [
+    "<article><section><div><p><span id=\"t\">target</span></p></div></section></article>",
+    "//article/section/div/p/span",
+    [
+      "span"
+    ]
+  ],
+  [
+    "<article><section><div><p><span id=\"t\">target</span></p></div></section></article>",
+    "//article//span",
+    [
+      "span"
+    ]
+  ]
+]
