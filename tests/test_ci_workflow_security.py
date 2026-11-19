@@ -80,6 +80,18 @@ def _publishes(step: dict[str, object]) -> bool:
     )
 
 
+def test_the_published_graph_is_probed_before_the_release_lands() -> None:
+    """#1170: a partial publish left every pip install of the root failing."""
+    document = yaml.safe_load(RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8"))
+    assert isinstance(document, dict)
+    jobs = document["jobs"]
+    assert isinstance(jobs, dict)
+    assert "install-graph" in jobs, "the release must probe the published install graph"
+    assert "install-graph" in jobs["github-release"]["needs"], (
+        "the GitHub release must wait for the install-graph probe"
+    )
+
+
 def test_the_image_is_pushed_only_after_it_smokes() -> None:
     """A tag that failed its smoke must never exist: :0.4.0rc1 was pushed dead."""
     steps = job_steps(RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8"), "image")
