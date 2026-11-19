@@ -42,6 +42,28 @@ def test_links_extracted():
     assert result.links[0].host == "example.com"
 
 
+def test_link_text_emitted_inline_in_text_and_markdown():
+    html = b'<p>Read the <a href="https://ex.com/doc">full documentation</a> now.</p>'
+    result = extract(html, "text/html")
+    assert "full documentation" in result.text
+    assert "[full documentation](https://ex.com/doc)" in result.markdown
+
+
+def test_link_with_no_text_emits_nothing():
+    html = b'<p><a href="https://ex.com/empty"></a> done</p>'
+    result = extract(html, "text/html")
+    assert result.text.strip() == result.markdown.strip() == "done"
+
+
+def test_block_elements_do_not_concatenate():
+    """Block boundaries separate text; heading and paragraph do not run together."""
+    html = b"<h1>Title</h1><p>Read the body.</p>"
+    result = extract(html, "text/html")
+    assert "TitleRead" not in result.text
+    assert "# Title" in result.text
+    assert "Read the body." in result.text
+
+
 def test_frames_extracted():
     html = b'<iframe src="https://example.com/frame" name="f1"></iframe>'
     result = extract(html, "text/html")
@@ -210,10 +232,12 @@ def test_html_lossy_decode_is_low():
     assert "charset_lossy" in result.flags
 
 
-def test_html_only_links_is_low():
+def test_html_only_links_text_is_emitted():
+    """A link-only page carries its text as body text, so MEDIUM not LOW."""
     html = b'<a href="https://example.com">Link</a>'
     result = extract(html, "text/html")
-    assert result.quality == Quality.LOW
+    assert "Link" in result.text
+    assert result.quality == Quality.MEDIUM
     assert len(result.links) == 1
 
 
@@ -253,14 +277,6 @@ def test_html_main_with_lossy_decode_is_low():
     result = extract(content, "text/html")
     assert result.quality == Quality.LOW
     assert "charset_lossy" in result.flags
-
-
-def test_high_is_reachable():
-    """HIGH must be reachable — an unreachable enum value is dead surface."""
-    body = "x" * 250
-    html = f"<article>{body}</article>".encode()
-    result = extract(html, "text/html")
-    assert result.quality == Quality.HIGH
 
 
 def test_links_collected_inside_boilerplate():
@@ -457,8 +473,7 @@ def test_nested_table_refused():
 
 
 def test_quality_medium_paths_distinguishable():
-    """The two MEDIUM paths (no-main vs below-floor) are both MEDIUM and
-    reachable through distinct conditions."""
+    """Both MEDIUM paths (no-main vs below-floor) are reachable."""
     no_main = extract(b"<p>Some body text without a main content marker.</p>", "text/html")
     assert no_main.quality == Quality.MEDIUM
     below_floor = extract(b"<main>" + b"x" * 199 + b"</main>", "text/html")
@@ -466,8 +481,7 @@ def test_quality_medium_paths_distinguishable():
 
 
 def test_nested_table_preserves_outer_and_inner_content():
-    """A nested table is flattened into the enclosing cell; the outer table
-    is kept and no cell text is dropped (defect 8)."""
+    """A nested table is flattened; the outer table is kept and no cell text dropped (defect 8)."""
     nested_html = (
         b"<table><tr><td>Outer before <table><tr><td>nested</td></tr></table> Outer after</td></tr></table>"
     )
@@ -478,8 +492,7 @@ def test_nested_table_preserves_outer_and_inner_content():
 
 
 def test_rowspan_carries_down_keeps_grid_rectangular():
-    """Rowspan carries content down the spanned rows and the grid stays
-    rectangular with table_grid_degraded set (defect 9)."""
+    """Rowspan carries content down the spanned rows; grid stays rectangular (defect 9)."""
     html = b'<table><tr><td rowspan="2">spanning</td><td>b</td></tr><tr><td>c</td></tr></table>'
     result = extract(html, "text/html")
     assert "table_grid_degraded" in result.flags

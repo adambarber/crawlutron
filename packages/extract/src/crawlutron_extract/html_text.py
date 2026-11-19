@@ -23,6 +23,9 @@ class TextSink:
         self._in_strong = 0
         self._in_blockquote = 0
         self._in_title = False
+        self._in_link = False
+        self._link_href = ""
+        self._link_text_parts: list[str] = []
         self._list_stack: list[tuple[str, int]] = []
         self._link_collector = link_collector
 
@@ -35,10 +38,16 @@ class TextSink:
             self._open_code()
         elif tag == "blockquote":
             self._open_blockquote()
+            self._block_break()
+        elif tag == "a":
+            self._in_link = True
+            self._link_href = attrs.get("href", "") or ""
+            self._link_text_parts = []
         elif tag == "img":
             self.append_md(f"![{attrs.get('alt', '')}]({attrs.get('src', '')})")
         elif tag == "hr":
             self.append_md("\n---\n")
+            self._block_break()
         elif tag == "br":
             self.append_text("\n")
             self.append_md("\n")
@@ -64,15 +73,25 @@ class TextSink:
             self._close_code()
         elif tag == "blockquote":
             self._close_blockquote()
+            self._block_break()
+        elif tag == "a":
+            self._emit_link()
         elif tag in _HEADING_TAGS:
             self.append_md("\n")
+            self._block_break()
         elif tag == "p":
             self.append_md("\n")
+            self._block_break()
+        elif tag == "li":
+            self._block_break()
         elif tag in _LIST_TAGS and self._list_stack:
             self._list_stack.pop()
 
     def handle_data(self, data: str) -> None:
         data = data.replace("\x00", "")
+        if self._link_collector is not None and self._in_link:
+            self._link_text_parts.append(data)
+            return
         if self._link_collector is not None and self._link_collector.is_in_link():
             return
         if self._in_title:
@@ -128,6 +147,30 @@ class TextSink:
             self._list_stack[-1] = (kind, count + 1)
             return f"{indent}{count}. "
         return f"{indent}- "
+
+    def _block_break(self) -> None:
+        """Separate adjacent block elements so text parts never concatenate."""
+        self.append_text("\n")
+
+    def _emit_link(self) -> None:
+        """Emit a captured ``<a>`` as inline text and ``[text](href)`` markdown.
+
+        A link with no text emits nothing.
+        """
+        if not self._in_link:
+            return
+        link_text = " ".join("".join(self._link_text_parts).split())
+        href = self._link_href
+        self._in_link = False
+        self._link_href = ""
+        self._link_text_parts = []
+        if not link_text:
+            return
+        self.append_text(link_text)
+        if href:
+            self.append_md(f"[{link_text}]({href})")
+        else:
+            self.append_md(link_text)
 
     def append_text(self, text: str) -> None:
         self._text_parts.append(text)
