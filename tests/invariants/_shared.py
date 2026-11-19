@@ -293,27 +293,6 @@ type DefinitionNode = ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
 type ModuleSet = tuple[tuple[pathlib.Path, ast.Module], ...] | list[tuple[pathlib.Path, ast.Module]] | None
 
 
-def _module_imports_tree(tree: ast.Module) -> set[tuple[str, str | None]]:
-    """``(module, asname-or-None)`` for every top-level import in ``tree``."""
-    imports: set[tuple[str, str | None]] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                imports.add((alias.name, alias.asname))
-        elif isinstance(node, ast.ImportFrom):
-            if node.module:
-                imports.add((node.module, None))
-    return imports
-
-
-def _module_imports(path: pathlib.Path) -> set[str]:
-    """Return the set of top-level modules imported by a single source file."""
-    return {
-        name.split(".")[0]
-        for name, _ in _module_imports_tree(ast.parse(path.read_text(encoding="utf-8"), filename=str(path)))
-    }
-
-
 def _private_from_import_names(
     tree: ast.Module,
     targets: Callable[[str], bool],
