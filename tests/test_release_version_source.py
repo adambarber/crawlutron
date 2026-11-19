@@ -18,12 +18,15 @@ def test_the_release_reads_its_tag_from_the_ci_run() -> None:
     """
     steps = _job_steps(RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8"), "distributions")
     script = "\n".join(str(step.get("run", "")) for step in steps)
+    bindings = "\n".join(str(step.get("env", "")) for step in steps)
     assert "GITHUB_REF_NAME" not in script, (
         "a workflow_run's GITHUB_REF_NAME is the default branch, not the release tag"
     )
-    assert "github.event.workflow_run.head_branch" in script, (
+    # Bound through env, never spliced into the script (zizmor template-injection).
+    assert "github.event.workflow_run.head_branch" in bindings, (
         "the release must name its version from the CI run's head branch, which is the tag"
     )
+    assert 'TAG="$TAG_REF"' in script, "the script must read the tag from the bound variable"
 
 
 def test_the_release_workflow_is_this_parseable_document() -> None:

@@ -16,7 +16,9 @@ on:
     types: [completed]
   workflow_dispatch:
 
-permissions: read-all
+permissions:
+  contents: read
+  pull-requests: read
 
 jobs:
   distributions:
@@ -28,6 +30,7 @@ jobs:
         github.event_name == 'workflow_dispatch'
         || (
           github.event.workflow_run.conclusion == 'success'
+          && github.event.workflow_run.event == 'push'
           && (
             github.event.workflow_run.head_branch == 'main'
             || startsWith(github.event.workflow_run.head_branch, 'v')
@@ -41,6 +44,7 @@ jobs:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: false
       # hatch-vcs derives the version from the newest tag. A checkout is not
       # guaranteed to carry them, and a tagless tree builds 0.1.devN, which fails
       # the members' `>=0.4.0.dev0` floor when the probe resolves them.
@@ -69,13 +73,14 @@ jobs:
   image:
     name: Build the container image
     runs-on: ubuntu-24.04
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && (github.event.workflow_run.head_branch == 'main' || startsWith(github.event.workflow_run.head_branch, 'v'))) }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && (github.event.workflow_run.head_branch == 'main' || startsWith(github.event.workflow_run.head_branch, 'v'))) }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: false
       - name: Fetch the tags the version comes from
         run: git fetch --tags --force
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
