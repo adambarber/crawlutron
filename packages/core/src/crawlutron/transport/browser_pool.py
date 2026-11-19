@@ -129,14 +129,20 @@ class BrowserPool:
                     f"(available={self._available.qsize()}, pool_size={self._pool_size}). "
                     "The pool is exhausted or a renderer leaked; try again later."
                 ) from None
-        async with self._lock:
-            if self._closing.is_set() or not self._initialized or renderer not in self._renderers:
-                # close() swept this renderer out from under the suspended wait;
-                # the pool no longer owns it, so the acquire is refused (#590).
-                raise BrowserPoolExhaustedError(
-                    "The pool closed while this acquire was waiting; no renderer was handed out."
-                )
-            self._checked_out.add(renderer)
+        try:
+            async with self._lock:
+                if self._closing.is_set() or not self._initialized or renderer not in self._renderers:
+                    # close() swept this renderer out from under the suspended wait;
+                    # the pool no longer owns it, so the acquire is refused (#590).
+                    raise BrowserPoolExhaustedError(
+                        "The pool closed while this acquire was waiting; no renderer was handed out."
+                    )
+                self._checked_out.add(renderer)
+        except BaseException:
+            # Popped by _wait_available but never checked out: return it so a
+            # cancelled acquire (or a closing-pool refusal) cannot shrink the pool.
+            self._available.put_nowait(renderer)
+            raise
         logger.debug("browser_pool_acquired", extra={"available": self._available.qsize()})
         return renderer
 
