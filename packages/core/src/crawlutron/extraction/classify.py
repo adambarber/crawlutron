@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from typing import Final, NamedTuple
+from typing import NamedTuple
 
 from crawlutron.models.classification_evidence import ClassificationEvidenceRecord
 from crawlutron.models.taxonomy import Classification
-from crawlutron.safety.bounded_io import truncate_html_input
 
 # Named Classification members, not bare literals: a literal in return position
 # widens to ``str`` and hands the caller a plain string that merely spells a member.
@@ -149,9 +148,8 @@ SOFT_SINGLE_SIGNAL_CLASSIFICATIONS = frozenset(
 def classify_page_with_evidence(
     html: str | None, text: str | None, *, title: str | None = None
 ) -> tuple[Classification, list[ClassificationEvidenceRecord]]:
-    stripped_html = strip_html_noise(html).lower()
     visible_haystack = f"{title or ''}\n{text or ''}".lower()
-    html_haystack = stripped_html
+    html_haystack = (text or "").lower()
     if not (text or "").strip() and not (title or "").strip() and _html_has_no_user_visible_content(html):
         return _BINARY_NO_TEXT, [
             ClassificationEvidenceRecord(
@@ -273,106 +271,6 @@ def _evidence(
         source=source,
         context=context,
     )
-
-
-# Cap the scan input: linear, so the bound covers resources, not correctness.
-
-
-def _strip_remaining_tags(text: str) -> str:
-    """Replace every ``<[^>]+>`` match with a space, linearly: the regex
-    form backtracked to end-of-string at each ``<`` when no ``>`` existed
-    anywhere, and a page of bare ``<`` tokens made that O(k*n).
-    """
-    out: list[str] = []
-    pos = 0
-    while True:
-        lt = text.find("<", pos)
-        if lt == -1:
-            out.append(text[pos:])
-            return "".join(out)
-        gt = text.find(">", lt + 1)
-        if gt == -1:
-            # Unterminated tag: the regex found no match, so the tail stays verbatim.
-            out.append(text[pos:])
-            return "".join(out)
-        if gt == lt + 1:
-            # ``<>``: the pattern needs one+ chars between; keep the '<' verbatim.
-            out.append(text[pos : lt + 1])
-            pos = lt + 1
-            continue
-        out.append(text[pos:lt])
-        out.append(" ")
-        pos = gt + 1
-
-
-#: Openers whose closers are stripped before classification: a declaration.
-_NOISE_OPENERS: Final = ("<script", "<style", "<!--")
-
-
-def _refresh_opener_positions(lower: str, next_at: dict[str, int], pos: int) -> dict[str, int]:
-    """Carry each opener's next occurrence past ``pos``: an absent (-1) opener
-    stays absent forever, and a stale position is found again from ``pos`` --
-    forward-only finds, so the whole scan stays linear.
-    """
-    for opener, at in next_at.items():
-        if at != -1 and at < pos:
-            next_at[opener] = lower.find(opener, pos)
-    return next_at
-
-
-def strip_html_noise(html: str | None) -> str:
-    """Remove script/style/comment regions via linear string scanning (str.find), not a
-    backtracking regex -- and browser-consistent: an *unclosed* ``<script>``/``<style>``/``<!--``
-    swallows the rest of the document, so code is never counted as page text.
-    """
-    body = truncate_html_input(html)
-
-    out: list[str] = []
-    pos = 0
-    lower = body.lower()
-    # Each opener's next occurrence rides the loop: re-finding from pos every
-    # iteration made a page of many closed regions rescan the remainder per region.
-    next_at: dict[str, int] = {opener: lower.find(opener) for opener in _NOISE_OPENERS}
-    while pos < len(body):
-        # The openers are a set, not a branch per tag; carried positions are its memory.
-        candidates = [idx for idx in next_at.values() if idx != -1]
-
-        if not candidates:
-            out.append(body[pos:])
-            break
-
-        start = min(candidates)
-        out.append(body[pos:start])
-
-        if body.startswith("<!--", start):
-            closer = "-->"
-        else:
-            # Match against ``lower``: the opener scan is case-insensitive, and
-            # body may appear as ``<SCRIPT>``.
-            tag = "script" if lower.startswith("<script", start) else "style"
-            # Word-boundary guard (regex ``\b`` parity): ``<scriptable`` is a
-            # run of text, not an opening tag.
-            after = start + 1 + len(tag)
-            if after < len(body) and (body[after].isalnum() or body[after] == "_"):
-                # Not a real opener (``<scriptable``): keep the token verbatim.
-                out.append(body[start : start + 2])
-                pos = start + 2
-                next_at = _refresh_opener_positions(lower, next_at, pos)
-                continue
-            closer = f"</{tag}"
-
-        end = lower.find(closer, start)
-        if end == -1:
-            # Unclosed block: swallow the remainder and stop.
-            pos = len(body)
-            break
-        # Consume through the closing tag's ``>`` (handles attributes/space).
-        gt = body.find(">", end)
-        pos = len(body) if gt == -1 else gt + 1
-        next_at = _refresh_opener_positions(lower, next_at, pos)
-
-    without_noise = "".join(out)
-    return _strip_remaining_tags(without_noise)
 
 
 def _html_has_no_user_visible_content(html: str | None) -> bool:

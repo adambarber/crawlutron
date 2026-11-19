@@ -105,7 +105,6 @@ class TestExtractionEdges:
             "<html><body><p>test content</p></body></html>",
             "<html><body><p>plain text fallback</p></body></html>",
         ],
-        ids=["trafilatura", "markdownify_fallback"],
     )
     def test_extract_html_always_yields_text(self, html):
         assert extract_html(html, canonical("http://e.com/")).text is not None
@@ -167,37 +166,6 @@ class TestExtractionGaps:
         html = '<script>fetch("/api/x");</script>'
         endpoints = extract_js_endpoints(html)
         assert {"url": "/api/x"} in endpoints
-
-
-class TestTrafilaturaChatterIsSuppressed:
-    """The extractor must not emit ERROR-level records for benign inputs.
-
-    trafilatura logs ERROR for empty/fragment/no-main HTML -- normal crawler
-    conditions it already falls through on -- crowding out real failures.
-    """
-
-    @pytest.mark.parametrize("html", ["", "<html><body></body></html>", "<div></div>"])
-    def test_empty_and_fragment_html_emits_no_trafilatura_error(self, html, caplog):
-        extraction.extract_html(html, url=canonical("http://example.com/"))
-
-        trafilatura_records = [r for r in caplog.records if r.name.startswith("trafilatura")]
-        errors = [r for r in trafilatura_records if r.levelno >= logging.ERROR]
-        assert not errors, (
-            "trafilatura emitted ERROR records for a benign input; these are the "
-            "2239 spurious per-run records. Extract already falls back to "
-            "markdownify/plain text, so the record carries no signal."
-        )
-
-    def test_real_html_still_extracts_and_logs_no_error(self, caplog):
-        out = extraction.extract_html(
-            "<html><body><article><h1>Title</h1><p>Real body text here.</p></article></body></html>",
-            url=canonical("http://example.com/"),
-        )
-        assert out.text and "Real body text" in out.text
-        errors = [
-            r for r in caplog.records if r.name.startswith("trafilatura") and r.levelno >= logging.ERROR
-        ]
-        assert not errors
 
 
 def test_selector_on_non_html_is_reported_not_silently_dropped(caplog):

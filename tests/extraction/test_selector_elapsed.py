@@ -3,9 +3,9 @@
 import threading
 import time
 
-import bs4
 import pytest
 
+from crawlutron.extraction import documents as docex
 from crawlutron.extraction.content import ExtractedContent, Selectors, extract_selected
 from tests._extraction_helpers import settings_with
 from tests._policy_factories import canonical
@@ -16,17 +16,16 @@ pytestmark = pytest.mark.usefixtures("four_worker_selector_pool")
 @pytest.mark.real_sleeps
 @pytest.mark.wall_assertion
 def test_timed_out_selector_returns_within_one_deadline(monkeypatch):
-    """A RUNNING timed-out selector must not double the caller's latency: the defect
-    waits a second full deadline on the still-running future (~2x); the fix returns
-    the sentinel after the first (~1x). The parked selector always gets released."""
+    """A timed-out selector must return after one deadline, not two."""
     entered = threading.Event()
     release = threading.Event()
 
-    def parked_select(self, selector):
+    def parked_find_all(root, chain):
         entered.set()
         release.wait(timeout=60)
+        return []
 
-    monkeypatch.setattr(bs4.BeautifulSoup, "select", parked_select)
+    monkeypatch.setattr(docex, "find_all", parked_find_all)
     html = "<html><body><p class='x'>hi</p></body></html>"
     timeout = 0.5
     settings = settings_with(extraction_selector_timeout=timeout)

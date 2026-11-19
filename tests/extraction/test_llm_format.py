@@ -9,7 +9,6 @@ from crawlutron.models.page_metadata import PageMetadata
 from crawlutron.models.page_metadata_response import PageMetadataResponse
 from tests._extraction_helpers import extract_content
 from tests._fetcher_factories import LLM_FORMAT_TEST_HTML
-from tests._parse_budget import ParseBudget
 from tests._policy_factories import canonical
 
 
@@ -74,25 +73,6 @@ class TestJsonLdExtraction:
             "the owner must name the system type"
         )
         assert PageMetadataResponse.model_fields["json_ld"].annotation == JsonValue | None
-
-    def test_single_parse_per_html(self):
-        budget = ParseBudget()
-        html = (
-            '<html lang="en"><head><title>Test Page</title>'
-            '<meta name="description" content="A test page">'
-            '<meta property="og:title" content="OG Title">'
-            '<link rel="canonical" href="https://example.com/c">'
-            '<link rel="icon" href="https://example.com/f.ico">'
-            '<script type="application/ld+json">{"@type":"WebSite"}</script>'
-            "</head><body><p>x</p></body></html>"
-        )
-        meta = extract_llm_metadata(html, canonical("https://example.com"))
-        # Title, meta, JSON-LD, canonical, favicon, language all read from ONE lxml parse instead of 8+
-        # independent regex scans.
-        assert budget.parses == 1
-        assert meta["title"] == "Test Page"
-        assert meta["canonical_url"] == "https://example.com/c"
-        assert meta["favicon"] == "https://example.com/f.ico"
 
 
 class TestLlmFormat:
@@ -174,4 +154,4 @@ class TestLlmFormatEdges:
         html = '<link rel="canonical" href="https://canon.example/"><link rel="icon" href="/fav.ico">'
         md = extract_llm_metadata(html, canonical("http://x/"))
         assert md["canonical_url"] == "https://canon.example/"
-        assert md["favicon"] == "/fav.ico"
+        assert md["favicon"] == "http://x/fav.ico"

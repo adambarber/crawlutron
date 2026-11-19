@@ -28,9 +28,9 @@ def test_prose_only_security_check_phrase_stays_rendered():
 def test_corroborated_not_found_still_classifies():
     """Two independent not-found signals still classify."""
     html = "<html><title>404 Not Found</title><body>page not found</body></html>"
-    assert classify_page(html, None) == "not_found"
+    assert classify_page(html, "page not found") == "not_found"
 
 
 def test_corroborated_forbidden_still_classifies():
     html = "<html><body>Access denied. 403 forbidden</body></html>"
-    assert classify_page(html, None) == "access_denied"
+    assert classify_page(html, "Access denied. 403 forbidden") == "access_denied"

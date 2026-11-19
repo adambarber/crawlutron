@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from crawlutron_extract import extract as _package_extract
+from crawlutron_extract.charset import decode_content as _package_decode_content
 from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.extraction.discovery import (
@@ -68,11 +70,15 @@ __all__ = [
 ]
 
 
-def decode_body(body: bytes | bytearray | str) -> str:
-    """Lossy-UTF-8 text of a body; the extraction path's one decode point."""
-    if isinstance(body, (bytes, bytearray)):
-        return bytes(body).decode("utf-8", "replace")
-    return body
+def decode_body(body: bytes | bytearray | str, content_type: str | None = None) -> str:
+    """Decode a body through the package charset ladder: BOM -> Content-Type -> meta -> UTF-8.
+
+    A ``str`` body is already text and is returned unchanged; no decode runs.
+    """
+    if isinstance(body, str):
+        return body
+    text, _charset, _flags = _package_decode_content(bytes(body), content_type or "")
+    return text
 
 
 def _is_html_text(text: str) -> bool:
@@ -109,10 +115,8 @@ def extract_content(
     url: NormalizedUrl | None,
     selectors: Selectors | None = None,
 ) -> ExtractedContent:
-    """Extract ``(text, markdown)`` via the unified pipeline.
-
-    The HTML branch hands the selector pair to ``extract_html`` (which routes it); a selector
-    means nothing to a non-DOM body, so the full content is extracted and the fallback logged.
+    """Extract ``(text, markdown)``; HTML→extract_html, documents→extract_document,
+    else a thin adapter over ``crawlutron_extract.extract``.
     """
     # ONE decision, read twice (drop report + dispatch): the predicate decodes the whole
     # body, so one decode per request shares its text with the HTML branch.
@@ -137,5 +141,11 @@ def extract_content(
             else content.encode("utf-8", "replace")
         )
         return extract_document(body, url)
-    text = decoded.strip()
-    return ExtractedContent(text or None, text or None)
+    raw = content if isinstance(content, (bytes, bytearray)) else content.encode("utf-8", "replace")
+    extraction = _package_extract(raw, content_type or "", url=url.raw if url is not None else None)
+    text = extraction.text or None
+    markdown = extraction.markdown or text
+    if text is None:
+        text = decoded.strip() or None
+        markdown = text
+    return ExtractedContent(text, markdown)

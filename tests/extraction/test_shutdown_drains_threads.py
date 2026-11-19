@@ -4,7 +4,6 @@ import asyncio
 import threading
 import time
 
-import bs4
 import pytest
 
 from crawlutron.extraction import content as ext_content
@@ -61,16 +60,17 @@ def test_shutdown_refuses_queued_work_instead_of_orphaning_it(monkeypatch):
     release = threading.Event()
     saturated = threading.Barrier(5)  # 4 parked workers + this thread
 
-    def parked_select(self, selector):
+    def parked_find_all(root, chain):
         saturated.wait(timeout=5)
         release.wait()
+        return []
 
     def counted_select(self, selector):
         with lock:
             executed.append(1)
         return []
 
-    monkeypatch.setattr(bs4.BeautifulSoup, "select", parked_select)
+    monkeypatch.setattr(docex, "find_all", parked_find_all)
     settings = settings_with(extraction_selector_timeout=30.0)
     threads = _spawn(4, "parked", settings)  # saturate the 4 workers
     for t in threads:

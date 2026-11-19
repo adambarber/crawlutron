@@ -4,7 +4,6 @@ import concurrent.futures
 import threading
 import time
 
-import bs4
 import pytest
 
 from crawlutron.extraction import documents as docex
@@ -20,23 +19,21 @@ pytestmark = pytest.mark.usefixtures("four_worker_selector_pool")
 
 
 def test_timed_out_selectors_are_cancelled_not_orphaned(monkeypatch):
-    """Queued selectors behind a saturated pool must be cancelled on timeout,
-    not started later as orphans that hog workers. Eight pages, four workers,
-    a parked select, a 0.05s deadline: the last four never run unless orphaned.
-    """
+    """Timed-out selectors must be cancelled, not orphaned past the pool."""
     calls: list[int] = []
     lock = threading.Lock()
     all_running = threading.Event()
     saturated = threading.Barrier(4, action=all_running.set)  # the 4 workers only
     release = threading.Event()
 
-    def parked_select(self, selector):
+    def parked_find_all(root, chain):
         with lock:
             calls.append(1)
         saturated.wait(timeout=5)
         release.wait()
+        return []
 
-    monkeypatch.setattr(bs4.BeautifulSoup, "select", parked_select)
+    monkeypatch.setattr(docex, "find_all", parked_find_all)
     html = "<html><body><p class='x'>hi</p></body></html>"
     settings = settings_with(extraction_selector_timeout=0.05)
     executor = docex.extraction_executor()

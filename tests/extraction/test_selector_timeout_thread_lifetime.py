@@ -5,7 +5,6 @@ runaway on the shared extraction executor.
 import asyncio
 import threading
 
-import bs4
 import pytest
 
 from crawlutron.extraction import documents
@@ -22,14 +21,14 @@ def _live_extraction_threads() -> list[threading.Thread]:
 
 @pytest.mark.real_sleeps
 def test_timed_out_selector_thread_does_not_outlive_teardown(monkeypatch):
-    """Shutdown must await (drain) the in-flight timed-out evaluation: no
-    ``extraction`` worker thread may be alive once the shutdown returns."""
+    """A timed-out selector's worker must not outlive extraction teardown."""
     release = threading.Event()
 
-    def parked_select(self, selector):
+    def parked_find_all(root, chain):
         release.wait(timeout=15)
+        return []
 
-    monkeypatch.setattr(bs4.BeautifulSoup, "select", parked_select)
+    monkeypatch.setattr(documents, "find_all", parked_find_all)
     settings = settings_with(extraction_selector_timeout=0.05)
 
     result = extract_selected(

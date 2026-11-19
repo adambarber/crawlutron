@@ -7,20 +7,25 @@ import concurrent.futures
 import functools
 import logging
 import os
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal, NamedTuple, TypeVar
+from typing import NamedTuple, TypeVar
 
-import trafilatura
-from lxml import etree
+from crawlutron_extract.css_select import SelectorError, find_all, parse_selector_list
+from crawlutron_extract.html_dom import DOMNode, build_dom
+from crawlutron_extract.html_pass import extract_html as _package_extract_html
+from crawlutron_extract.html_text import render_markdown
+from crawlutron_extract.limits import ExtractLimits
+from crawlutron_extract.xpath_eval import select
+from crawlutron_extract.xpath_select import SelectorError as XPathSelectorError
+from crawlutron_extract.xpath_select import parse_xpath
 from markdownify import markdownify as html_to_md
-from safe_url.normalized_url import NormalizedUrl
+from safe_url import HostPolicy, NormalizedUrl
 
 from crawlutron.config.env import get_env_int, parse_bool_env
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.extraction.doc_pool import DocExtractionPool, doc_task_hooks
 from crawlutron.extraction.llm_format import text_from_html
-from crawlutron.extraction.trees import parse_html_tree
 from crawlutron.runtime.pressure_sizing import doc_worker_count
 
 logger = logging.getLogger(__name__)
@@ -213,7 +218,7 @@ def extract_selected(
     *,
     selectors: Selectors | None = None,
     settings: CrawlerSettings | None = None,
-    tree: etree._Element | None = None,
+    tree: object = None,
 ) -> ExtractedContent:
     """Mechanical DOM targeting: extract only matched nodes as Markdown, via a
     Selectors value (never loose css/xpath params), CSS by BeautifulSoup and
@@ -236,65 +241,88 @@ def extract_selected(
     return ExtractedContent(md or text, md or text)
 
 
-def _css_selected_fragment(html: str, selectors: Selectors, selector_timeout: float) -> str | None:
-    """The CSS form: BeautifulSoup select under the shared deadline."""
-    css_selector = selectors.css or ""
-    if not css_selector:
-        return None
-    if len(html) > EXTRACTION_DOC_MAX_INPUT_BYTES:
-        # The parse itself is untimed on the caller thread: refuse a hostile-size
-        # payload instead of parsing it.
-        logger.warning(
-            "extraction_css_payload_too_large",
-            extra={"size_bytes": len(html), "max_bytes": EXTRACTION_DOC_MAX_INPUT_BYTES},
-        )
-        return None
-    try:
-        from bs4 import BeautifulSoup
-    except ImportError:
-        return None
-    soup = BeautifulSoup(html, "html.parser")
-    selected = _eval_selector(lambda: soup.select(css_selector), selector_timeout)
+def _limits() -> ExtractLimits:
+    return ExtractLimits()
+
+
+def _refuse_oversized(html: str) -> bool:
+    """Log and refuse a hostile-size payload; true when refused."""
+    if len(html) <= EXTRACTION_DOC_MAX_INPUT_BYTES:
+        return False
+    logger.warning(
+        "extraction_css_payload_too_large",
+        extra={"size_bytes": len(html), "max_bytes": EXTRACTION_DOC_MAX_INPUT_BYTES},
+    )
+    return True
+
+
+def _selector_fragment(
+    html: str,
+    collect: Callable[[DOMNode], list],
+    selector_timeout: float,
+    selector_type: str,
+    selector: str,
+) -> str | None:
+    """Run a DOM-rendering selector evaluation under the shared deadline.
+    ``collect`` turns the parsed DOM into nodes; their markdown is joined.
+    """
+
+    def evaluate() -> str | None:
+        dom, _truncated = build_dom(html, _limits().max_dom_nodes, _limits().max_dom_depth)
+        if dom is None:
+            return None
+        parts = [render_markdown(node) for node in collect(dom)]
+        return "\n".join(parts) if parts else None
+
+    selected = _eval_selector(evaluate, selector_timeout)
     if isinstance(selected, _SelectorTimedOut):
         logger.warning(
             "extraction_selector_timeout",
-            extra={"selector_type": "css", "selector": css_selector},
+            extra={"selector_type": selector_type, "selector": selector},
         )
         return None
-    if not selected:
+    return selected
+
+
+def _css_selected_fragment(html: str, selectors: Selectors, selector_timeout: float) -> str | None:
+    """The CSS form: the package's CSS selector evaluator under the shared deadline."""
+    css_selector = selectors.css or ""
+    if not css_selector:
         return None
-    return "\n".join(str(tag) for tag in selected)
+    if _refuse_oversized(html):
+        return None
+    try:
+        chains = parse_selector_list(css_selector)
+    except SelectorError:
+        return None
+    return _selector_fragment(
+        html,
+        lambda dom: [node for chain in chains for node in find_all(dom, chain)],
+        selector_timeout,
+        "css",
+        css_selector,
+    )
 
 
 def _xpath_selected_fragment(
-    html: str, selectors: Selectors, selector_timeout: float, *, tree: etree._Element | None
+    html: str, selectors: Selectors, selector_timeout: float, *, tree: object = None
 ) -> str | None:
-    """The XPath form: lxml under the shared deadline; invalid XPath is caller error."""
+    """The XPath form: the package's XPath evaluator under the shared deadline.
+
+    ``tree`` is accepted for signature compatibility; the package builds its own
+    bounded DOM from ``html``.
+    """
+    del tree  # the package parses its own DOM; a pre-parsed tree is not needed here
     xpath = selectors.xpath or ""
     if not xpath:
         return None
-    tree = tree if tree is not None else parse_html_tree(html)
-    if tree is None:
+    if _refuse_oversized(html):
         return None
     try:
-        nodes = _eval_selector(lambda: tree.xpath(xpath), selector_timeout)
-    except Exception:  # invalid XPath is caller error, not extraction
+        parse_xpath(xpath)
+    except XPathSelectorError:
         return None
-    if isinstance(nodes, _SelectorTimedOut):
-        logger.warning(
-            "extraction_selector_timeout",
-            extra={"selector_type": "xpath", "selector": xpath},
-        )
-        return None
-    if not nodes:
-        return None
-    parts: list[str] = []
-    for node in nodes:
-        if isinstance(node, str):
-            parts.append(node)
-        else:
-            parts.append(etree.tostring(node, encoding="unicode"))
-    return "\n".join(parts)
+    return _selector_fragment(html, lambda dom: select(dom, xpath), selector_timeout, "xpath", xpath)
 
 
 PDF_MAGIC = b"%PDF"
@@ -315,46 +343,6 @@ DOC_EXTENSIONS = (
 )
 
 
-class _LogRestorer:
-    """Detach the filters a :func:`suppress_trafilatura_chatter` call installed.
-    Module-level so the suppressor can declare it as its return type -- an inner
-    class would leave the ``with`` block typing against a bare ``object``.
-    """
-
-    def __init__(self, filters: Sequence[tuple[logging.Logger, logging.Filter]]) -> None:
-        self._filters = filters
-
-    def __enter__(self) -> _LogRestorer:
-        return self
-
-    def __exit__(self, *exc: object) -> Literal[False]:
-        for log, log_filter in self._filters:
-            log.removeFilter(log_filter)
-        return False
-
-
-class _DropBelowCritical(logging.Filter):
-    """Drop every record while installed: suppression by filter, not by level,
-    so concurrent suppressions cannot snapshot and pin each other's levels.
-    """
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        return False
-
-
-def suppress_trafilatura_chatter() -> _LogRestorer:
-    """Silence trafilatura's ERROR chatter for benign inputs (empty/fragment/no-main
-    HTML), which carries no diagnostic signal and otherwise drowns real failures
-    at scale; a context manager so suppression is scoped to the extraction call.
-    """
-    loggers = [logging.getLogger(n) for n in ("trafilatura.core", "trafilatura.utils", "trafilatura.xml")]
-    dropper = _DropBelowCritical()
-    installed = [(log, dropper) for log in loggers]
-    for log, log_filter in installed:
-        log.addFilter(log_filter)
-    return _LogRestorer(installed)
-
-
 def extract_html(
     html: str,
     url: NormalizedUrl | None,
@@ -362,8 +350,8 @@ def extract_html(
     settings: CrawlerSettings | None = None,
 ) -> ExtractedContent:
     """Single owner of the HTML dispatch: selector-targeted and full-page both route
-    here; the full-page path is bounded by the input byte cap and the selector
-    deadline so a pathological page cannot burn CPU unbounded.
+    here. The full-page pass delegates to ``crawlutron_extract.html_pass``; a selector
+    narrows through the package's CSS/XPath evaluators under the selector deadline.
     """
     active = settings or CrawlerSettings.from_mapping()
     if selectors:
@@ -375,37 +363,13 @@ def extract_html(
             extra={"size_bytes": len(html), "max_bytes": EXTRACTION_DOC_MAX_INPUT_BYTES},
         )
         return ExtractedContent(None, None)
-    try:
-        with suppress_trafilatura_chatter():
-            md = _eval_selector(
-                lambda: trafilatura.extract(
-                    html,
-                    url=url.raw if url is not None else None,
-                    output_format="markdown",
-                    favor_recall=True,
-                    include_comments=False,
-                    include_tables=True,
-                    include_formatting=True,
-                    include_links=True,
-                    deduplicate=True,
-                ),
-                active.extraction_selector_timeout,
-            )
-    except Exception:
-        md = None
-    if isinstance(md, _SelectorTimedOut):
-        logger.warning("extraction_selector_timeout", extra={"selector_type": "trafilatura"})
-        md = None
-    if not md or not md.strip():
-        # Fallback to markdownify before the plain-text extractor so that
-        # pages Trafilatura refuses still become usable Markdown.
-        try:
-            md = html_to_md(html) or None
-        except Exception:
-            md = None
-    if not md or not md.strip():
-        md = text_from_html(html) or None
-    return ExtractedContent(md, md)
+    result = _package_extract_html(
+        html,
+        ExtractLimits(),
+        base_url=url.raw if url is not None else None,
+        policy=HostPolicy.unrestricted(),
+    )
+    return ExtractedContent(result["text"] or None, result["markdown"] or None)
 
 
 def extract_document(

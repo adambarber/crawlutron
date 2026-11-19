@@ -119,7 +119,8 @@ async def test_engine_item_without_a_tree_still_shapes_once(parse_budget):
     item = replace(result, markdown="# hello")
     parse_budget.mark()
     _markdown, metadata = format_crawl_item(item)
-    assert parse_budget.parses == 1
+    # Shaping now goes through crawlutron_extract (html.parser), not lxml, so zero lxml parses.
+    assert parse_budget.parses == 0
     assert metadata["title"] == "Meta T"
 
 

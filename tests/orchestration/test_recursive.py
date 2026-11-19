@@ -112,7 +112,10 @@ class TestRecursiveCrawl:
         assert "http://example.com/s2" in urls
 
     async def test_memory_strip_when_include_html_false(self):
-        pages = site_linking_to("/a", bodies={"/a": "<html><body>hello</body></html>"})
+        pages = {
+            "/": (200, '<html><body><p>root page</p><a href="/a">/a</a></body></html>', "text/html"),
+            "/a": (200, "<html><body><p>hello</p></body></html>", "text/html"),
+        }
         out = await crawled_results(
             pages,
             limits=LINKED_PAIR_LIMITS,
@@ -140,7 +143,10 @@ class TestRecursiveCrawlServer:
     async def test_memory_strip_both_modes_include_html_false(self):
         # html/text must be stripped inside the loop for both the recursive and non-recursive branches, not
         # retained for the whole crawl.
-        pages = site_linking_to("/a", bodies={"/a": "<html><body>hello</body></html>"})
+        pages = {
+            "/": (200, '<html><body><p>root page</p><a href="/a">/a</a></body></html>', "text/html"),
+            "/a": (200, "<html><body><p>hello</p></body></html>", "text/html"),
+        }
 
         async def run(max_depth):
             return await crawled_results(

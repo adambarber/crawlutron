@@ -10,12 +10,14 @@ from crawlutron.extraction.content import (
     text_from_html,
 )
 from crawlutron.extraction.doc_pool import DocPoolHooks, doc_task_hooks, install_doc_pool_hooks
+from tests._crawl_runners import run_http_strategy
 from tests._extraction_helpers import (
     detect_pagination,
     doc_worker_acquisitions,
     extract_content,
     extract_js_endpoints,
 )
+from tests._fetch_doubles import FetcherDouble
 from tests._policy_factories import canonical
 
 
@@ -28,12 +30,17 @@ def test_document_test_hooks_follow_the_injected_seam():
 
 
 class TestExtractContent:
-    def test_html_uses_trafilatura_markdown(self):
-        html = "<html><body><main>Main content here</main></body></html>"
-        result = extract_content(html, "text/html", canonical("http://example.com/"))
+    def test_html_text_and_markdown_come_from_crawlutron_extract(self):
+        """extract_content is a thin adapter over crawlutron_extract.extract (the surviving
+        owner of text/markdown); its output matches Extraction.text/.markdown exactly."""
+        import crawlutron_extract
+
+        body = b"just some plain text"
+        result = extract_content(body, "text/plain", canonical("http://example.com/"))
+        extraction = crawlutron_extract.extract(body, "text/plain", url="http://example.com/")
         assert isinstance(result, ExtractedContent)
-        assert "Main content here" in (result.markdown or "")
-        assert result.text == result.markdown
+        assert result.text == extraction.text == "just some plain text"
+        assert result.markdown == result.text
 
     def test_pdf_routes_to_markitdown_fallback(self):
         result = extract_content(b"%PDF-1.7 fake bytes", "application/pdf", canonical("http://x/a.pdf"))
@@ -143,11 +150,10 @@ class TestKatanaDiscovery:
         endpoints = extract_js_endpoints('<script>fetch(" ")</script>', canonical("http://e.com/"))
         assert endpoints == []
 
-    def test_extract_html_markdownify_fallback(self):
-        # Trafilatura rejects an empty body; the markdownify fallback runs (and may still yield nothing,
-        # falling through to plain-text).
+    def test_extract_html_empty_body_yields_empty(self):
+        """An empty body yields an empty ExtractedContent via crawlutron_extract.html_pass."""
         result = extract_html("<html><body></body></html>", None)
-        assert isinstance(result, ExtractedContent)
+        assert result == ExtractedContent(None, None)
 
     def test_detect_pagination_anchor_rel_next(self):
         html = '<a rel="next" href="/page2">Next</a>'
@@ -196,3 +202,30 @@ async def test_extract_document_skips_oversized_input(monkeypatch):
     out = await asyncio.to_thread(ex.extract_document, b"x" * 101, canonical("http://x.test/big.pdf"))
     assert out.text is None and out.markdown is None
     assert acquisitions == [], "a refused document still asked for a markitdown worker"
+
+
+async def test_http_result_text_is_produced_by_crawlutron_extract():
+    """End-to-end: an HTTP result's markdown comes from crawlutron_extract.html_pass, which
+    flattens nested tables into the enclosing cell -- a transform only the package applies."""
+    html = (
+        "<html><body>"
+        "<table><tr><td>outer cell<table><tr><td>nested cell</td></tr></table></td></tr></table>"
+        "</body></html>"
+    )
+
+    def respond(url, *_ignored):
+        return {
+            "status": 200,
+            "headers": {"content-type": "text/html"},
+            "body": html.encode(),
+        }
+
+    fetcher = FetcherDouble(respond)
+    result = await run_http_strategy(
+        "http://example.com/",
+        {"strategies": ["HTTP_DECLARED_CRAWLER"], "limits": {}, "headers": {}},
+        http_fetcher=fetcher,
+    )
+    assert result.status == "success"
+    assert "outer cell" in (result.markdown or "")
+    assert "nested cell" in (result.markdown or "")

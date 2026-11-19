@@ -4,10 +4,8 @@ import logging
 import threading
 from contextlib import contextmanager
 
-import bs4
-from lxml import etree
-
 import crawlutron.extraction.content as extraction
+from crawlutron.extraction import documents as docex
 from crawlutron.extraction.content import ExtractedContent, Selectors, extract_selected
 from tests._extraction_helpers import settings_with
 from tests._parse_budget import ParseBudget
@@ -41,27 +39,28 @@ def _parked_stub_worker():
         event.set()
 
 
+def _timed_out_selector(monkeypatch, caplog, attr, selectors, flavour: str) -> None:
+    """Parked ``docex.<attr>`` evaluation must time out under the selector deadline."""
+    html = "<html><body><p class='x'>hi</p></body></html>"
+    with _parked_stub_worker() as never_released:
+        monkeypatch.setattr(docex, attr, lambda root, arg: never_released.wait(timeout=30) or [])
+        with caplog.at_level(logging.WARNING, logger="crawlutron.extraction.content"):
+            result = extract_selected(
+                html,
+                canonical("http://example.com/"),
+                selectors=selectors,
+                settings=settings_with(extraction_selector_timeout=0.2),
+            )
+    assert_selector_timed_out(result, caplog, flavour)
+
+
 def test_css_selector_slow_must_not_hang(monkeypatch, caplog):
     """A selector that never returns must be bounded, not awaited.
 
     The stub blocks on an Event nothing ever sets, so the only thing that can
     end the wait is the selector deadline firing inside ``_eval_selector``.
     """
-    html = "<html><body><p class='x'>hi</p></body></html>"
-    with _parked_stub_worker() as never_released:
-        monkeypatch.setattr(
-            bs4.BeautifulSoup,
-            "select",
-            lambda self, selector: never_released.wait(timeout=30) or [],
-        )
-        with caplog.at_level(logging.WARNING, logger="crawlutron.extraction.content"):
-            result = extract_selected(
-                html,
-                canonical("http://example.com/"),
-                selectors=Selectors(css=".x"),
-                settings=settings_with(extraction_selector_timeout=0.2),
-            )
-    assert_selector_timed_out(result, caplog, "CSS")
+    _timed_out_selector(monkeypatch, caplog, "find_all", Selectors(css=".x"), "CSS")
 
 
 def test_css_selector_fast_still_works():
@@ -71,35 +70,13 @@ def test_css_selector_fast_still_works():
     assert "hi" in (result.text or "")
 
 
-class _SlowFakeTree(etree.ElementBase):
-    """An XPath tree whose evaluation blocks past the selector deadline."""
-
-    never_released = threading.Event()
-
-    def xpath(self, *args: object, **kwargs: object) -> list[object] | bool:
-        # The double's whole point: it overrides _Element's xpath and blocks past
-        # the deadline; the narrowed signature is honest at its own call boundary.
-        return self.never_released.wait(timeout=30) or []
-
-
-def test_xpath_selector_slow_must_not_hang(caplog):
+def test_xpath_selector_slow_must_not_hang(monkeypatch, caplog):
     """The XPath twin of the CSS test: same instrument, same warning assertion.
 
-    The tree is handed in rather than reached for, so the thing that blocks is
-    the evaluation this function actually performs.
+    The parked evaluation is crawlutron_extract.xpath_eval.select, bounded by
+    documents._eval_selector (the surviving owner of bounded selector evaluation).
     """
-    html = "<html><body><p>x</p></body></html>"
-    with _parked_stub_worker() as never_released:
-        _SlowFakeTree.never_released = never_released
-        with caplog.at_level(logging.WARNING, logger="crawlutron.extraction.content"):
-            result = extract_selected(
-                html,
-                canonical("http://example.com/"),
-                selectors=Selectors(xpath="//p"),
-                settings=settings_with(extraction_selector_timeout=0.2),
-                tree=_SlowFakeTree(),
-            )
-    assert_selector_timed_out(result, caplog, "XPath")
+    _timed_out_selector(monkeypatch, caplog, "select", Selectors(xpath="//p"), "XPath")
 
 
 def test_xpath_selector_fast_still_works():

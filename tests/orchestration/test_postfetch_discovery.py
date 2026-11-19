@@ -213,7 +213,7 @@ async def test_browser_result_carries_the_shared_builder_shape(monkeypatch):
     assert result.error is None
     assert result.html == HTML
     assert isinstance(result.text, str)
-    assert "page one with enough words" in result.text
+    assert "Body copy" in result.text
     assert isinstance(result.markdown, str)
     assert isinstance(result.extraction_method, str)
     assert result.classification_evidence == ()
