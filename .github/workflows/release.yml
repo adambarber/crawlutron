@@ -159,6 +159,43 @@ jobs:
         with:
           packages-dir: dist/
 
+  install-graph:
+    name: Verify the published install graph resolves
+    runs-on: ubuntu-24.04
+    # A partial publish once left the index unsatisfiable for every consumer
+    # (#1170). This probe installs the released root into a clean venv and
+    # imports every member, retrying while the index propagates.
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && startsWith(github.event.workflow_run.head_branch, 'v') }}
+    needs: [distributions]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.14"
+      - name: Install the released root and import every member
+        env:
+          TAG_REF: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG_REF#v}"
+          python -m venv /tmp/probe
+          for attempt in $(seq 1 30); do
+            if /tmp/probe/bin/pip install --quiet --no-cache-dir "crawlutron==$VERSION"; then
+              break
+            fi
+            if [ "$attempt" = 30 ]; then
+              echo "::error::crawlutron==$VERSION never resolved from the published index"
+              exit 1
+            fi
+            sleep 10
+          done
+          /tmp/probe/bin/python -c 'import crawlutron, crawlutron_extract, crawlutron_mcp, crawlutron_rest.main, crawlutron_sdk, safe_url'
+
   image:
     name: Publish the container image
     runs-on: ubuntu-24.04
@@ -249,7 +286,7 @@ jobs:
 
   github-release:
     name: Publish the GitHub release
-    needs: [distributions, image]
+    needs: [distributions, image, install-graph]
     runs-on: ubuntu-24.04
     if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && startsWith(github.event.workflow_run.head_branch, 'v') }}
     permissions:
