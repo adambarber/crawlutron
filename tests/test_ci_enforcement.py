@@ -316,8 +316,9 @@ def test_every_gate_job_starts_from_the_prepare_action() -> None:
         if name in {"audit", "secret-scan"}:
             continue
         steps = job_steps(workflow, name)
-        assert any(str(step.get("uses", "")).startswith("./.github/actions/prepare") for step in steps), (
-            f"job {name} must start from ./.github/actions/prepare"
+        assert any(str(step.get("uses", "")).startswith("$/.github/actions/prepare") for step in steps), (
+            f"job {name} must start from $/.github/actions/prepare: the self-repository "
+            "form cannot resolve to another commit (zizmor self-repository)"
         )
         assert any(str(step.get("uses", "")).split("@")[0] == "actions/checkout" for step in steps), (
             f"job {name} must check out before using the local prepare action"

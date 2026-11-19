@@ -48,7 +48,7 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
-      - uses: ./.github/actions/prepare
+      - uses: $/.github/actions/prepare
       - name: ruff
         run: .venv/bin/pre-commit run ruff --all-files
 
@@ -61,7 +61,7 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
-      - uses: ./.github/actions/prepare
+      - uses: $/.github/actions/prepare
       - name: ruff format
         run: .venv/bin/pre-commit run ruff-format --all-files
 
@@ -74,7 +74,7 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
-      - uses: ./.github/actions/prepare
+      - uses: $/.github/actions/prepare
       - name: basedpyright
         run: .venv/bin/pre-commit run basedpyright --all-files
 
@@ -87,7 +87,7 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
-      - uses: ./.github/actions/prepare
+      - uses: $/.github/actions/prepare
       - name: jscpd
         run: .venv/bin/pre-commit run jscpd --all-files
 
@@ -100,7 +100,7 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
-      - uses: ./.github/actions/prepare
+      - uses: $/.github/actions/prepare
       - name: mypy
         run: .venv/bin/pre-commit run mypy --all-files
 
@@ -113,7 +113,7 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
-      - uses: ./.github/actions/prepare
+      - uses: $/.github/actions/prepare
       - name: lock
         run: .venv/bin/pre-commit run lock --all-files
 
@@ -126,7 +126,7 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
-      - uses: ./.github/actions/prepare
+      - uses: $/.github/actions/prepare
       - name: vulture
         run: .venv/bin/pre-commit run vulture --all-files
 
@@ -139,7 +139,7 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
-      - uses: ./.github/actions/prepare
+      - uses: $/.github/actions/prepare
       # #949: on a cold-cache runner the battery's first imports are compile
       # misses. Precompiling bytecode over the derived member src roots turns
       # them into .pyc hits (the S4 pattern) so the run starts warm.
@@ -167,7 +167,7 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
-      - uses: ./.github/actions/prepare
+      - uses: $/.github/actions/prepare
       - name: Run pytest (real PBKDF2)
         run: .venv/bin/python -m pytest -m "real_pbkdf2"
 
@@ -188,7 +188,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: ./.github/actions/prepare
+      - uses: $/.github/actions/prepare
       # Camoufox downloads ~200 MB of Firefox on first use (#490). The binary
       # lands in the platform cache dir (camoufox.utils.INSTALL_DIR --
       # ~/.cache/camoufox on Linux) and is version-locked by the pin in
