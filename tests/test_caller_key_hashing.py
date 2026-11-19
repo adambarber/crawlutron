@@ -25,7 +25,12 @@ def test_pbkdf2_is_clamped_to_the_test_floor() -> None:
 @pytest.mark.real_pbkdf2
 def test_real_pbkdf2_path_verifies_issued_secret(tmp_path):
     """The unclamped 210k work factor still round-trips: issue, then verify."""
+    from crawlutron.storage import caller_key_store
     from crawlutron.storage.caller_key_store import CallerKeyStore
+
+    # The clamp skips marked tests, so the live attribute is the source default:
+    # a drift to 1_000 reds here before any round-trip assertion.
+    assert caller_key_store.PBKDF2_ITERATIONS == 210_000
 
     store = CallerKeyStore(tmp_path / "keys.db")
     issued = store.issue_key("real-path")

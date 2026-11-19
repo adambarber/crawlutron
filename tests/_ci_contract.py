@@ -70,6 +70,7 @@ REPORTING_JOBS = {
     "mypy",
     "vulture",
     "battery",
+    "real-pbkdf2",
     "test-browser",
     "audit",
     "secret-scan",

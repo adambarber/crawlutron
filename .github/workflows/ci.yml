@@ -132,6 +132,22 @@ jobs:
           # than a budget. Commit admission keeps the 60s default.
           GATE_FANOUT_WALL_SECONDS: "300"
 
+  # The battery deselects `real_pbkdf2`, so the real 210k-iteration PBKDF2 path
+  # in storage/caller_key_store.py is never exercised by commit admission. This
+  # job runs that surface alone; the 1_000-iteration autouse clamp stays in
+  # place for the fast battery and is not weakened.
+  real-pbkdf2:
+    name: Test suite (real PBKDF2)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: ./.github/actions/prepare
+      - name: Run pytest (real PBKDF2)
+        run: .venv/bin/python -m pytest -m "real_pbkdf2"
+
   test-browser:
     name: Test suite (browser)
     runs-on: ubuntu-24.04
@@ -228,6 +244,7 @@ jobs:
       - mypy
       - vulture
       - battery
+      - real-pbkdf2
       - test-browser
       - audit
       - secret-scan
@@ -249,6 +266,7 @@ jobs:
           test "${{ needs.mypy.result }}" = "success"
           test "${{ needs.vulture.result }}" = "success"
           test "${{ needs.battery.result }}" = "success"
+          test "${{ needs.real-pbkdf2.result }}" = "success"
           test "${{ needs.test-browser.result }}" = "success"
           test "${{ needs.audit.result }}" = "success"
           test "${{ needs.secret-scan.result }}" = "success"
