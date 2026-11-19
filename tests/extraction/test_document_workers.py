@@ -103,7 +103,9 @@ class TestExtractionMethods:
 
 class TestHtmlTreeParsing:
     def test_extraction_parse_html_tree_error(self):
-        assert parse_html_tree("{{invalid html").tag == "html"
+        tree = parse_html_tree("{{invalid html")
+        assert tree is not None
+        assert tree.tag == "html"
 
 
 class TestSelectedExtraction:

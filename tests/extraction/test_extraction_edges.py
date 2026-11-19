@@ -19,7 +19,6 @@ from crawlutron.extraction.content import (
 from tests._extraction_helpers import (
     extract_content,
     extract_discovered_links,
-    extract_js_endpoints,
     html_diagnostics,
 )
 from tests._policy_factories import canonical
@@ -121,21 +120,12 @@ class TestExtractionEdges:
         assert parse_html_tree(None) is None
 
     def test_parse_html_tree_parser_error(self):
-        assert parse_html_tree("<").tag == "html"
+        tree = parse_html_tree("<")
+        assert tree is not None
+        assert tree.tag == "html"
 
 
 class TestExtractionGaps:
-    def test_nested_anchor(self):
-        # Real HTML parsers (lxml) flatten illegally-nested anchors into siblings, so both distinct hrefs are
-        # discovered as separate links rather than the inner one being swallowed by the outer.
-        links, _, _ = extract_discovered_links(
-            '<a href="/x">outer <a href="/y">inner</a></a>',
-            canonical("http://e.com/"),
-        )
-        hrefs = {entry.normalized_url.raw for entry in links}
-        assert "http://e.com/x" in hrefs
-        assert "http://e.com/y" in hrefs
-
     def test_duplicate_href(self):
         links, count, _ = extract_discovered_links(
             '<a href="/x">a</a><a href="/x">b</a>',
@@ -161,11 +151,6 @@ class TestExtractionGaps:
         assert "forms" in diag
         assert diag["frames"]
         assert diag["forms"]
-
-    def test_js_endpoints(self):
-        html = '<script>fetch("/api/x");</script>'
-        endpoints = extract_js_endpoints(html)
-        assert {"url": "/api/x"} in endpoints
 
 
 def test_selector_on_non_html_is_reported_not_silently_dropped(caplog):

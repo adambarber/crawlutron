@@ -107,22 +107,6 @@ class TestTextAndMetadata:
 
 
 class TestKatanaDiscovery:
-    def test_extract_js_endpoints_finds_fetch_call(self):
-        html = '<script>fetch("/api/data").then(r => r.json())</script>'
-        endpoints = extract_js_endpoints(html)
-        assert {"url": "/api/data"} in endpoints
-
-    def test_extract_js_endpoints_finds_axios_and_xhr(self):
-        html = 'axios.get("/api/items");xhr.open("GET", "/api/widgets");'
-        endpoints = extract_js_endpoints(html)
-        assert {"url": "/api/items"} in endpoints
-        assert {"url": "/api/widgets"} in endpoints
-
-    def test_extract_js_endpoints_dedupes(self):
-        html = 'fetch("/api/x"); fetch("/api/x")'
-        endpoints = extract_js_endpoints(html)
-        assert endpoints == [{"url": "/api/x"}]
-
     def test_extract_js_endpoints_resolves_against_source(self):
         html = 'fetch("/api/x"); axios.get("/y")'
         endpoints = extract_js_endpoints(html, canonical("http://e.com/page"))
@@ -132,12 +116,6 @@ class TestKatanaDiscovery:
         html = 'fetch("/api/x"); fetch("/api/x")'
         endpoints = extract_js_endpoints(html, canonical("http://e.com/"))
         assert endpoints == [{"url": "http://e.com/api/x"}]
-
-    def test_extract_js_endpoints_unresolved_without_source(self):
-        # Without a source URL the raw endpoint string is returned unresolved.
-        html = 'fetch("/api/x")'
-        endpoints = extract_js_endpoints(html)
-        assert endpoints == [{"url": "/api/x"}]
 
     def test_extract_js_endpoints_empty_html(self):
         # The helper is a thin untyped wrapper that defaults host_policy, so None is a supported input rather

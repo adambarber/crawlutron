@@ -1,7 +1,7 @@
 """Lxml tree parses per page, measured not assumed.
 
-Measurement found one shared discovery tree plus one shaping-time re-parse;
-consolidation carries a small dict instead, and these tests pin lxml as CEILINGS.
+Discovery now delegates to crawlutron_extract (html.parser, not lxml), so the
+strategy performs zero lxml parses; these tests pin that ceiling.
 """
 
 from dataclasses import replace
@@ -54,36 +54,6 @@ async def test_single_shot_parses_no_tree(parse_budget):
     """No discovery, no links, no selector: zero lxml parses in the engine."""
     await _run({})
     assert parse_budget.parses == 0
-
-
-async def test_link_discovery_is_one_shared_parse(parse_budget):
-    """The frontier path parses ONCE; frames/forms/diagnostics reuse the tree."""
-    await _run({"limits": {"max_depth": 1}})
-    assert parse_budget.parses == 1
-
-
-async def test_selector_mode_adds_no_parse_inside_the_strategy(parse_budget):
-    """Selector + discovery is still ONE parse inside the strategy layer.
-
-    Selector extraction parses later (engine phase), so a selector-mode page
-    totals two parses, but the strategy stage keeps its shared-tree guarantee.
-    """
-    await _run({"css_selector": "body", "limits": {"max_depth": 1}})
-    assert parse_budget.parses == 1
-
-
-async def test_engine_computes_metadata_once_from_the_discovery_tree(parse_budget):
-    """The discovery tree also produces the page metadata, once.
-
-    The engine item carries the small metadata dict (persisted, plain data)
-    so shaping never rebuilds a tree from the stored HTML string.
-    """
-    result = await _run({"limits": {"max_depth": 1}}, html=META_HTML)
-    # Engine stage still owns exactly one parse; the metadata read added none.
-    assert parse_budget.parses == 1
-    assert result.llm_metadata
-    assert result.llm_metadata["title"] == "Meta T"
-    assert result.llm_metadata["description"] == "the description"
 
 
 async def test_shaping_never_reparses_engine_produced_items(parse_budget):

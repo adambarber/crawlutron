@@ -116,7 +116,6 @@ async def discover_after_fetch(
         include_diagnostics=discovery_block,
         include_links=status == "success" and want_links,
         include_js_endpoints=discovery_block,
-        include_metadata=True,
         host_policy=host_policy,
     )
 

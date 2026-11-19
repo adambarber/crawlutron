@@ -1,4 +1,4 @@
-"""Shared HTML tree parsing, frame/form collection and diagnostics."""
+"""HTML tree parsing, frame/form collection and diagnostics over crawlutron_extract."""
 
 from __future__ import annotations
 
@@ -7,11 +7,11 @@ from dataclasses import dataclass
 from html import unescape
 from typing import TypedDict
 
-from lxml import etree
-from lxml.etree import ParserError
+from crawlutron_extract.html_dom import DOMNode, build_dom
+from crawlutron_extract.limits import ExtractLimits
 from safe_url.normalized_url import NormalizedUrl
 
-# --- Structured discovery diagnostics: links, frames, forms ---
+Tree = DOMNode
 
 
 class FrameDiagnostic(TypedDict):
@@ -45,111 +45,116 @@ class HtmlDiagnostics(TypedDict, total=False):
     forms: list[FormDiagnostic]
 
 
-# Tally over the real parser, not a patched one; locked because worker threads parse.
 _parse_tally_lock = threading.Lock()
-
 
 _parse_tally = 0
 
 
 def parse_count() -> int:
-    """How many lxml trees this process has parsed -- cumulative and monotonic,
-    so a caller brackets one stage and takes the difference, freeing production
-    code from knowing where the phase boundaries are.
-    """
+    """How many DOM trees this process has built -- cumulative and monotonic."""
     with _parse_tally_lock:
         return _parse_tally
 
 
-def parse_html_tree(html: str | None):
-    """Parse HTML once with lxml and return the root element -- reused by every
-    discovery pass and the XPath path so the tree is walked once. ``etree.HTML``
-    preserves legacy frameset markup; returns ``None`` for empty or invalid input.
+def parse_html_tree(html: str | None) -> Tree | None:
+    """Build one bounded DOM tree from HTML; None for empty or invalid input.
+
+    Fragments are re-wrapped to an ``html`` root to match the prior lxml shape.
     """
     global _parse_tally
     with _parse_tally_lock:
         _parse_tally += 1
     if not html:
         return None
-    try:
-        return etree.HTML(html)
-    except (ParserError, ValueError, TypeError):
-        return None
+    root, _truncated = build_dom(html, ExtractLimits().max_dom_nodes, ExtractLimits().max_dom_depth)
+    if root is not None and root.tag != "html":
+        html_root = DOMNode("html", {}, None)
+        html_root.add_child(root)
+        root.parent = html_root
+        root = html_root
+    return root
 
 
-def _diagnostic_tree(html: str | None, tree: etree._Element | None) -> etree._Element | None:
-    return tree if tree is not None else (parse_html_tree(html) if html else None)
+def _walk(tree: Tree):
+    """Yield every DOM node in document order, root first."""
+    yield tree
+    for child in tree.children:
+        yield from _walk(child)
 
 
-def _diagnostic_inputs(html: str | None, tree: etree._Element | None) -> etree._Element | None:
-    return _diagnostic_tree(html, tree) if html else None
+def _frame_elements(tree: Tree):
+    for node in _walk(tree):
+        if node.tag in ("frame", "iframe"):
+            yield node
+
+
+def _form_elements(tree: Tree):
+    for node in _walk(tree):
+        if node.tag == "form":
+            yield node
 
 
 @dataclass(frozen=True)
 class _Walkable:
-    """A source URL and the tree to walk, both known good."""
+    """A source URL and the DOM tree to walk, both known good."""
 
     source_url: NormalizedUrl
-    tree: etree._Element
+    tree: Tree
 
 
 def walkable(
-    html: str | None, source_url: NormalizedUrl | None, tree: etree._Element | None
+    html: str | None, source_url: NormalizedUrl | None, tree: Tree | None = None
 ) -> _Walkable | None:
-    """What a diagnostic extractor needs before it can look at anything, or None --
-    the shared preconditions, so the ``tree is None`` guard is never dropped. A
-    record, not a bare tree, so the caller gets the narrowed URL back.
-    """
+    """Preconditions for a diagnostic extractor: a source URL and a usable tree."""
     if not source_url:
         return None
-    parsed = _diagnostic_inputs(html, tree)
-    return None if parsed is None else _Walkable(source_url=source_url, tree=parsed)
+    if tree is None:
+        tree = parse_html_tree(html)
+    if tree is None:
+        return None
+    return _Walkable(source_url=source_url, tree=tree)
 
 
 class FrameCollector:
-    """Back-compat collector: parse once with lxml and collect frame/iframe srcs."""
+    """Back-compat collector: build one DOM tree and collect frame/iframe srcs."""
 
     def __init__(self, source_url: NormalizedUrl) -> None:
         self.source_url = source_url
         self.frames: list[dict[str, str]] = []
 
     def feed(self, html: str) -> None:
-        tree = _diagnostic_tree(html, None)
+        tree = parse_html_tree(html)
         if tree is None:
             return
-        for el in tree.iter("frame", "iframe"):
-            src = (el.get("src") or "").strip()
-            normalized = self.source_url.resolve(src)
-            if normalized is None:
+        seen: set[str] = set()
+        for el in _frame_elements(tree):
+            src = (el.get_attribute("src") or "").strip()
+            if not src:
                 continue
+            normalized = self.source_url.resolve(src)
+            if normalized is None or normalized.raw in seen:
+                continue
+            seen.add(normalized.raw)
             self.frames.append(
                 {
                     "url": normalized.raw,
-                    "name": el.get("name") or "",
-                    "title": el.get("title") or "",
+                    "name": el.get_attribute("name") or "",
+                    "title": "",
                 }
             )
 
 
-def frames_from(
-    walkable: _Walkable,
-    source_url: NormalizedUrl | None,
-) -> list[FrameDiagnostic]:
-    """Frame/iframe diagnostics, admitted through the source URL's own policy --
-    ``resolve`` on the source is the filter, so a refused frame is dropped here
-    with no second policy parameter to pass a different answer.
-    """
+def frames_from(walkable: _Walkable, source_url: NormalizedUrl | None = None) -> list[FrameDiagnostic]:
+    """Frame/iframe diagnostics admitted through the source URL's policy."""
     source_host = walkable.source_url.host
     frames: list[FrameDiagnostic] = []
     seen: set[NormalizedUrl] = set()
-    for el in walkable.tree.iter("frame", "iframe"):
-        src = (el.get("src") or "").strip()
+    for el in _frame_elements(walkable.tree):
+        src = (el.get_attribute("src") or "").strip()
         if not src:
             continue
         normalized_url = walkable.source_url.resolve(src)
-        if normalized_url is None:
-            continue
-        if normalized_url in seen:
+        if normalized_url is None or normalized_url in seen:
             continue
         seen.add(normalized_url)
         frame_host = normalized_url.host
@@ -157,8 +162,8 @@ def frames_from(
             {
                 "url": normalized_url.raw,
                 "normalized_url": normalized_url.raw,
-                "name": el.get("name") or "",
-                "title": el.get("title") or "",
+                "name": el.get_attribute("name") or "",
+                "title": el.get_attribute("title") or "",
                 "source_url": source_url.raw if source_url is not None else None,
                 "host": frame_host,
                 "is_same_host": bool(frame_host) and frame_host == source_host,
@@ -170,20 +175,20 @@ def frames_from(
 _CONTROL_TAGS = ("input", "select", "textarea", "button")
 
 
-def forms_from(
-    walkable: _Walkable,
-) -> list[FormDiagnostic]:
+def forms_from(walkable: _Walkable) -> list[FormDiagnostic]:
     forms: list[FormDiagnostic] = []
-    for form_el in walkable.tree.iter("form"):
-        attrs = {key.lower(): value for key, value in form_el.attrib.items()}
+    for form_el in _form_elements(walkable.tree):
+        attrs = {key.lower(): value for key, value in form_el.attrs.items()}
         action = unescape(str(attrs.get("action", "")).strip())
         normalized_action = walkable.source_url.resolve(action or walkable.source_url.raw)
         if normalized_action is None:
             continue
         controls: list[dict[str, str]] = []
-        for control in form_el.iter(*_CONTROL_TAGS):
-            cattrs = {key.lower(): value for key, value in control.attrib.items()}
-            tag = str(control.tag)
+        for node in _walk(form_el):
+            if node.tag not in _CONTROL_TAGS:
+                continue
+            cattrs = {key.lower(): value for key, value in node.attrs.items()}
+            tag = node.tag
             control_type = (
                 (cattrs.get("type") or "text").lower() if tag == "input" else cattrs.get("type", "")
             )
@@ -211,14 +216,10 @@ def forms_from(
 
 
 def html_diagnostics(
-    html: str | None,
-    source_url: NormalizedUrl | None,
-    *,
-    tree: etree._Element | None = None,
+    html: str | None, source_url: NormalizedUrl | None, *, tree: Tree | None = None
 ) -> HtmlDiagnostics:
+    """Frame and form diagnostics for one page: one parse, one guard."""
     diagnostics: HtmlDiagnostics = {}
-    # One parse, one guard: the walkable-tree precondition (empty diagnostic,
-    # not an error) is stated once, not spelled in front of both extractors.
     walked = walkable(html, source_url, tree)
     if walked is None:
         return diagnostics
