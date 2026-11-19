@@ -15,11 +15,6 @@ services:
       # build would run the service in hot-reload dev mode under a supervisor
       # process. The runtime stage is the production command.
       target: runtime
-      # The build context carries no .git, so hatch-vcs cannot derive a version:
-      # the caller supplies one. Release CI passes the tag; a local build gets
-      # the line floor, which satisfies every member's `>=0.4.0.dev0` requirement.
-      args:
-        SETUPTOOLS_SCM_PRETEND_VERSION: ${SETUPTOOLS_SCM_PRETEND_VERSION:-0.4.0.dev0}
     image: crawlutron:local
     container_name: crawlutron
     restart: unless-stopped

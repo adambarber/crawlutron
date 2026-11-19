@@ -87,9 +87,6 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
-      - name: Resolve the build version
-        id: version
-        run: echo "version=$(uvx --from hatch-vcs python -c 'from setuptools_scm import get_version; print(get_version())')" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
       - name: Build the runtime image
         # Loaded into the local daemon rather than pushed: this asserts the image
@@ -102,5 +99,3 @@ jobs:
           push: false
           load: true
           tags: crawlutron:ci
-          build-args: |
-            SETUPTOOLS_SCM_PRETEND_VERSION=${{ steps.version.outputs.version }}

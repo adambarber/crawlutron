@@ -66,7 +66,8 @@ def test_no_run_step_splices_event_input_into_shell() -> None:
 def test_a_run_step_that_splices_an_event_field_is_caught() -> None:
     """Bites: the old inline branch interpolation fails the check."""
     workflow = RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8")
-    broken = workflow.replace('TAG="$TAG_REF"', 'TAG="${{ github.event.workflow_run.head_branch }}"', 1)
+    marker = "python3 scripts/release_roster.py --released > released.json"
+    broken = workflow.replace(marker, f'{marker} "${{{{ github.event.workflow_run.head_branch }}}}"', 1)
     assert broken != workflow, "the injection did not apply; the probe proves nothing"
     with pytest.raises(AssertionError):
         _assert_no_event_splicing(broken, "mutated release")
@@ -87,8 +88,8 @@ def test_the_published_graph_is_probed_before_the_release_lands() -> None:
     jobs = document["jobs"]
     assert isinstance(jobs, dict)
     assert "install-graph" in jobs, "the release must probe the published install graph"
-    assert "install-graph" in jobs["github-release"]["needs"], (
-        "the GitHub release must wait for the install-graph probe"
+    assert "publish" in jobs["install-graph"]["needs"], (
+        "the install probe must wait for the package to be published"
     )
 
 

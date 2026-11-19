@@ -76,21 +76,3 @@ def test_every_stage_that_syncs_the_workspace_first_copies_the_members() -> None
             "a stage runs `uv sync --locked` without copying packages/: the workspace "
             f"members it resolves live there, and the first COPY is {copy!r}"
         )
-
-
-def test_every_syncing_stage_accepts_the_vcs_pretend_version() -> None:
-    """The build context ships no `.git`, so a syncing stage must take the version.
-
-    hatch-vcs cannot resolve from a gitless context, so the caller passes
-    SETUPTOOLS_SCM_PRETEND_VERSION as a build arg for `uv sync`.
-    """
-    for stage in _syncing_stages():
-        assert "ARG SETUPTOOLS_SCM_PRETEND_VERSION" in stage
-        assert "SETUPTOOLS_SCM_PRETEND_VERSION" in stage
-
-
-def test_image_builds_pass_the_vcs_pretend_version() -> None:
-    """Every workflow docker build must forward the pretend version into the image."""
-    for name in (".github/workflows/packaging.yml", ".github/workflows/release.yml"):
-        text = SERVICE_ROOT.joinpath(name).read_text(encoding="utf-8")
-        assert "SETUPTOOLS_SCM_PRETEND_VERSION=" in text, f"{name} must pass the pretend version"

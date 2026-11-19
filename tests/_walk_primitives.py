@@ -94,6 +94,22 @@ def _expanded_members(base: pathlib.Path, pattern: str) -> tuple[str, ...]:
     return tuple(sorted(p.relative_to(base).as_posix() for p in base.glob(pattern) if p.is_dir()))
 
 
+def workspace_package_dirs(base: pathlib.Path = REPO_ROOT) -> dict[str, pathlib.Path]:
+    """The root project plus every workspace member, keyed by base-relative path."""
+    dirs: dict[str, pathlib.Path] = {".": base}
+    for pattern in uv_workspace_members(base) or ():
+        dirs.update({member: base / member for member in _expanded_members(base, pattern)})
+    return dirs
+
+
+def workspace_project(directory: pathlib.Path) -> dict[str, object]:
+    """A package's ``[project]`` table, keyed by string."""
+    with (directory / "pyproject.toml").open("rb") as handle:
+        project = tomllib.load(handle)["project"]
+    assert isinstance(project, dict)
+    return {str(key): value for key, value in project.items()}
+
+
 def _member_package_roots(base: pathlib.Path, members: tuple[str, ...]) -> tuple[str, ...]:
     """The python-bearing member dirs of a UV workspace, named repo-relatively.
 

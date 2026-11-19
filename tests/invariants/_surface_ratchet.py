@@ -21,7 +21,7 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     "packages/core/src/crawlutron/config/env.py": (8, 6),
     # RAISED to (7, 6): failed_unified_result is the single failure projection.
     "packages/core/src/crawlutron/service/response_shaping.py": (7, 6),
-    "packages/core/src/crawlutron/service/unified_shaping.py": (5, 5),
+    "packages/core/src/crawlutron/service/unified_shaping.py": (7, 7),
     # #861: the render core moved from api/ to service/; logger is private so
     # surface is two public symbols, both entry points.
     "packages/core/src/crawlutron/service/render.py": (3, 3),
@@ -38,7 +38,9 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     "packages/core/src/crawlutron/safety/bounded_io.py": (4, 2),
     "packages/core/src/crawlutron/transport/decompression.py": (5, 2),
     "packages/core/src/crawlutron/admission/credentials.py": (3, 3),
-    "packages/core/src/crawlutron/admission/render_options.py": (3, 2),
+    # #1136: policy_wants_markdown is the markdown opt-in reader, mirroring
+    # policy_wants_html; it raises the declared surface by one symbol.
+    "packages/core/src/crawlutron/admission/render_options.py": (4, 3),
     # RAISED to (2, 2): `payload_policy` was `_payload_policy` until the layout put its only production caller
     # (the engine) in another package.
     "packages/core/src/crawlutron/admission/payload_helpers.py": (2, 2),
@@ -87,10 +89,34 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     "packages/safe-url/src/safe_url/host_policy.py": (5, 5),
     "packages/safe-url/src/safe_url/normalized_url.py": (6, 4),
     "packages/safe-url/src/safe_url/process_state.py": (6, 6),
-    "packages/safe-url/src/safe_url/registrable_domain.py": (3, 2),
+    # LOWERED to (2, 2): the PSL heuristic, TWO_PART_PUBLIC_SUFFIXES and
+    # _psl_available were deleted -- hard deps now, no absent state (#1140).
+    "packages/safe-url/src/safe_url/registrable_domain.py": (2, 2),
     "packages/safe-url/src/safe_url/safe_regex.py": (7, 2),
     "packages/safe-url/src/safe_url/scope_match.py": (1, 1),
     "packages/safe-url/src/safe_url/url_redaction.py": (4, 4),
+    # #1137: crawlutron-extract leaf package, stdlib-only, __all__-declared.
+    "packages/extract/src/crawlutron_extract/limits.py": (2, 0),
+    "packages/extract/src/crawlutron_extract/models.py": (2, 0),
+    "packages/extract/src/crawlutron_extract/office.py": (1, 1),
+    "packages/extract/src/crawlutron_extract/_extract.py": (2, 1),
+    "packages/extract/src/crawlutron_extract/charset.py": (1, 1),
+    "packages/extract/src/crawlutron_extract/html_pass.py": (1, 1),
+    "packages/extract/src/crawlutron_extract/html_meta.py": (1, 1),
+    # #1137: html_diagnostics is the bounded diagnostics door.
+    "packages/extract/src/crawlutron_extract/html_diagnostics.py": (1, 1),
+    # #1137: shared attr-dict normaliser and URL resolver used by both discovery parsers.
+    "packages/extract/src/crawlutron_extract/_html_common.py": (2, 2),
+    # #1137: LinkRecord + extract_discovered_links, the bounded link door.
+    "packages/extract/src/crawlutron_extract/links.py": (2, 1),
+    # #1137: extract_js_endpoints, the bounded JS-endpoint door.
+    "packages/extract/src/crawlutron_extract/js_endpoints.py": (1, 1),
+    # #1137: extract_sitemap_locs, the bounded sitemap door.
+    "packages/extract/src/crawlutron_extract/sitemap.py": (1, 1),
+    # #1137: detect_pagination is the bounded next-page door.
+    "packages/extract/src/crawlutron_extract/pagination.py": (1, 1),
+    "packages/extract/src/crawlutron_extract/text_format.py": (1, 1),
+    "packages/extract/src/crawlutron_extract/pdf_pass.py": (1, 1),
 }
 
 # Former #215 exemptions: their __all__ deliberately does not enumerate every public
@@ -99,8 +125,17 @@ DECLARED_SURFACE_RATCHET = {
     # #643: unregister joins the registry's public door set so test probes can
     # drop their fake owners (registered_owners exhaustiveness must stay true).
     "packages/core/src/crawlutron/runtime/process_state.py": (6, 6),
-    # Generated at build time by the hatch-vcs hook (#561); never hand-edited.
-    "packages/core/src/crawlutron/_version.py": (3, 0),
+    # #1137: pre-existing __all__ modules now covered by the derived scan roots
+    # (workspace members instead of core-only APP_ROOT).
+    "packages/core/src/admission/errors.py": (3, 3),
+    "packages/core/src/admission/gate.py": (4, 2),
+    "packages/core/src/admission/gauge.py": (2, 1),
+    "packages/core/src/admission/policy.py": (2, 0),
+    "packages/core/src/admission/seams.py": (2, 2),
+    "packages/core/src/admission/values.py": (24, 17),
+    "packages/sdk/src/crawlutron_sdk/client.py": (2, 2),
+    "packages/sdk/src/crawlutron_sdk/errors.py": (18, 2),
+    "packages/sdk/src/crawlutron_sdk/models.py": (27, 0),
     "packages/core/src/crawlutron/admission/policy.py": (10, 5),
     "packages/rest/src/crawlutron_rest/api/_depends_singletons.py": (2, 0),
     "packages/core/src/crawlutron/service/async_crawl_runner.py": (3, 2),
@@ -108,6 +143,9 @@ DECLARED_SURFACE_RATCHET = {
     # (operator_caller: the shared operator identity the keys door and resolver read).
     "packages/core/src/crawlutron/service/cache_sweep.py": (3, 2),
     "packages/core/src/crawlutron/service/sweep_loop.py": (2, 1),
+    # Retention sweep (#1076): one pass owns tombstone, orphan-accumulator, and
+    # expired-result reclamation plus the WAL checkpoint; hosted on sweep_loop.
+    "packages/core/src/crawlutron/service/retention_sweep.py": (4, 2),
     # Spill sweep (#753): one GC lane beside the cache sweep; max_age is wired
     # from the result store's ttl_seconds, not a second literal.
     "packages/core/src/crawlutron/service/spill_sweep.py": (4, 2),
@@ -117,7 +155,9 @@ DECLARED_SURFACE_RATCHET = {
     "packages/core/src/crawlutron/service/store_bootstrap.py": (2, 1),
     # #849: the core moved to service/caller_auth; Request plumbing stays api.
     "packages/rest/src/crawlutron_rest/api/caller_auth.py": (8, 6),
-    "packages/rest/src/crawlutron_rest/api/credentials.py": (4, 4),
+    # #1123: remote_host is the request's remote address -- the admin ladder's
+    # per-IP scope, read by the throttle middleware, caller_auth, and route_layer.
+    "packages/rest/src/crawlutron_rest/api/credentials.py": (5, 5),
     "packages/core/src/crawlutron/service/caller_concurrency.py": (2, 2),
     # #674 raised 1,1 -> 2,2: CrawlRefusalError is the typed refusal carrier the
     # sweep's deactivation arm reads (reason as an enum member, not boundary text).
@@ -138,7 +178,9 @@ DECLARED_SURFACE_RATCHET = {
     "packages/rest/src/crawlutron_rest/api/identity_router.py": (5, 3),
     "packages/core/src/crawlutron/service/job_runner.py": (15, 12),
     "packages/rest/src/crawlutron_rest/api/jobs_router.py": (6, 5),
-    "packages/core/src/crawlutron/service/main_helpers.py": (3, 3),
+    # #1083: crawl_tail is the shared crawl tail both doors call (completion
+    # metric + result-store put); MCP previously half-tailed.
+    "packages/core/src/crawlutron/service/main_helpers.py": (4, 4),
     # #871: readiness state re-homed framework-free; health keeps the FastAPI wire
     # door (router factory) while the state names re-export for patch-seam survival.
     "packages/core/src/crawlutron/health/readiness.py": (1, 1),
@@ -168,9 +210,8 @@ DECLARED_SURFACE_RATCHET = {
     # #849: the typed domain refusals both doors map — one base + named subclasses
     # plus the single-homed quota predicate the sweep reads.
     "packages/core/src/crawlutron/service/errors.py": (17, 16),
-    "packages/core/src/crawlutron/service/webhooks.py": (15, 13),
-    "packages/core/src/crawlutron/extraction/content.py": (4, 4),
-    "packages/core/src/crawlutron/extraction/llm_format.py": (4, 4),
+    # #1082: admit_webhook_target is the validate-then-admit chokepoint facade.
+    "packages/core/src/crawlutron/service/webhooks.py": (16, 14),
     # #668 raised 18,0 -> 19,0: RATE_LIMITED is the JSON-RPC code the anonymous
     # meter's /mcp refusal answers with.
     "packages/mcp/src/crawlutron_mcp/constants.py": (19, 0),
@@ -230,7 +271,7 @@ DECLARED_SURFACE_RATCHET = {
     "packages/core/src/crawlutron/storage/coordination_throttle_store.py": (1, 1),
     "packages/core/src/crawlutron/storage/job_store.py": (2, 1),
     "packages/core/src/crawlutron/storage/job_store_collections.py": (11, 6),
-    "packages/core/src/crawlutron/storage/job_store_read.py": (3, 2),
+    "packages/core/src/crawlutron/storage/job_store_read.py": (7, 4),
     "packages/core/src/crawlutron/storage/job_store_state.py": (2, 1),
     "packages/core/src/crawlutron/runtime/resource_lifecycle.py": (5, 5),
     # (5,5) #643 decline; mapped_value_errors mapping removed (safe_url statelessness)

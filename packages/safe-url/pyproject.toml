@@ -1,27 +1,18 @@
 [build-system]
-requires = ["hatchling", "hatch-vcs>=0.4"]
+requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
 name = "crawlutron-safe-url"
-dynamic = ["version"]
+version = "0.4.0rc1"
 description = "SSRF-safe URL admission: NormalizedUrl, HostPolicy, IDNA canonicalization, registrable domain, private-target guard, credential-safe redaction"
 readme = "README.md"
 requires-python = ">=3.14"
 license = "MIT"
 dependencies = [
-    # Regex engine for the bounded matcher: the stdlib cannot be interrupted.
     "regex==2026.9.29",
+    "publicsuffixlist==1.1.2.20261101",
 ]
-
-[project.optional-dependencies]
-# Public-suffix dataset for registrable_domain (safe_url/registrable_domain.py):
-# without it the suffix heuristic silently degrades.
-psl = ["publicsuffixlist==1.1.2.20261101"]
-
-[tool.hatch.version]
-source = "vcs"
-raw-options = { search_parent_directories = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/safe_url"]

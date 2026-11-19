@@ -1,7 +1,7 @@
 name: Prepare a gate environment
 description: >
-  Everything a gate needs after the checkout: the 3.14 interpreter, the frozen
-  install, and the regenerated version artifact. One definition, so a new gate job
+  Everything a gate needs after the checkout: the 3.14 interpreter and the frozen
+  install. One definition, so a new gate job
   cannot drift from the environment the others use. The checkout itself stays in
   the job: GitHub resolves a local action before any step runs, so an action that
   checked out would run before the repository existed on disk.
@@ -24,12 +24,6 @@ runs:
       run: uv sync --frozen --extra dev
       shell: bash
     # The version artifact is gitignored, so a fresh checkout has none until the
-    # build backend writes it. hatch-vcs does that during the sync above; this
-    # step only covers a checkout whose artifact the sync did not touch, so the
-    # version-derivation gate always sees the real ref.
-    - name: Regenerate the version artifact
-      run: .venv/bin/python scripts/regen_version.py
-      shell: bash
     # Gate state the hooks persist across runs (mypy's incremental cache, ruff's
     # cache), keyed on the lock + pyproject so a dependency or config bump
     # invalidates it. `.gate_fanout` is NOT cached: it holds per-run pidfiles, and
