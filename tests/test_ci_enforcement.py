@@ -12,7 +12,9 @@ from scripts import jscpd_gate as gate
 from tests._ci_contract import (
     CONFIG_PATH,
     ENFORCEMENT_TRIGGER_PATTERN,
+    PACKAGING_WORKFLOW_PATH,
     PREPARE_ACTION_PATH,
+    RELEASE_WORKFLOW_PATH,
     REPORTING_JOBS,
     SERVICE_ROOT,
     WORKFLOW_PATH,
@@ -30,10 +32,6 @@ from tests._ci_contract import (
     job_steps,
     precommit_hook_ids,
 )
-
-# The version-triggered GHCR publish workflow (#949), contracted alongside ci.yml.
-RELEASE_WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "release.yml"
-PACKAGING_WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "packaging.yml"
 
 
 def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
@@ -112,61 +110,6 @@ def test_ci_runs_a_dependency_audit_and_secret_scan() -> None:
     assert "pip-audit" in audit_runs, "audit must run pip-audit"
 
     assert "gitleaks.io" not in workflow, "workflow must not use a mutable gitleaks.io ref"
-
-
-def test_every_action_is_sha_pinned_and_permissions_are_declared() -> None:
-    """#624: mutable tags (`@v4`) are repointable; every `uses:` must pin a
-    full-length commit SHA, and the workflow must declare its permissions so
-    the default write-all token scope cannot leak into a compromised step.
-    """
-    for workflow_path in (WORKFLOW_PATH, RELEASE_WORKFLOW_PATH, PACKAGING_WORKFLOW_PATH):
-        document = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
-        assert isinstance(document, dict)
-
-        def walk(value: object, file_name: str = workflow_path.name) -> None:
-            if isinstance(value, dict):
-                uses = value.get("uses")
-                if isinstance(uses, str) and "@" in uses:
-                    ref = uses.rsplit("@", 1)[1]
-                    assert re.fullmatch(r"[0-9a-f]{40}", ref), (
-                        f"action ref {uses!r} in {file_name} is not a full-length commit SHA"
-                    )
-                for child in value.values():
-                    walk(child)
-            elif isinstance(value, list):
-                for child in value:
-                    walk(child)
-
-        walk(document.get("jobs"))
-    ci = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
-    assert isinstance(ci, dict)
-    permissions = ci.get("permissions")
-    assert permissions == {"contents": "read", "pull-requests": "read"}, (
-        f"CI must declare exactly its two read scopes, found {permissions!r}"
-    )
-
-
-def _assert_no_event_splicing(workflow: str, label: str) -> None:
-    """An event field is attacker-shaped text: it reaches a shell through `env:`."""
-    for name, run in _job_run_steps(workflow):
-        assert "${{ github.event" not in run, (
-            f"{label} job {name} splices event input into its script; bind it through env"
-        )
-
-
-def test_no_run_step_splices_event_input_into_shell() -> None:
-    """zizmor template-injection: a branch named like a tag must never become code."""
-    for path in (WORKFLOW_PATH, RELEASE_WORKFLOW_PATH, PACKAGING_WORKFLOW_PATH):
-        _assert_no_event_splicing(path.read_text(encoding="utf-8"), path.name)
-
-
-def test_a_run_step_that_splices_an_event_field_is_caught() -> None:
-    """Bites: the old inline branch interpolation fails the check."""
-    workflow = RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8")
-    broken = workflow.replace('TAG="$TAG_REF"', 'TAG="${{ github.event.workflow_run.head_branch }}"', 1)
-    assert broken != workflow, "the injection did not apply; the probe proves nothing"
-    with pytest.raises(AssertionError):
-        _assert_no_event_splicing(broken, "mutated release")
 
 
 def test_release_workflow_publishes_nothing_without_a_tag() -> None:
