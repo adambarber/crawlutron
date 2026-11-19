@@ -1,0 +1,56 @@
+name: Release Please
+
+# Versions and tags are release-please's: each workspace package carries its own
+# number, bumped only when commits touch that package. Publishing lives in
+# release.yml and waits for CI on the commit this produces.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  release-please:
+    name: Propose and tag the next releases
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: googleapis/release-please-action@8b8fd2cc23b2e18957157a9d923d75aa0c6f6ad5 # v4
+        id: release
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+      # A bumped version makes uv.lock stale, and the lock gate runs on every
+      # commit after this PR lands. Re-lock inside the PR instead of reddening main.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        if: ${{ steps.release.outputs.pr }}
+        with:
+          ref: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        if: ${{ steps.release.outputs.pr }}
+        with:
+          enable-cache: false
+      - name: Refresh the lock for the bumped versions
+        if: ${{ steps.release.outputs.pr }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_BRANCH: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+        run: |
+          set -euo pipefail
+          uv lock
+          git add uv.lock
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git config user.name "release-please[bot]"
+          git config user.email "release-please[bot]@users.noreply.github.com"
+          git commit -m "chore: refresh uv.lock for the release versions"
+          gh auth setup-git
+          git push origin "HEAD:${HEAD_BRANCH}"

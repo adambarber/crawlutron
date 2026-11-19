@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling", "hatch-vcs>=0.4.0.dev0"]
+requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv.workspace]
@@ -17,7 +17,7 @@ crawlutron-sdk = { workspace = true }
 
 [project]
 name = "crawlutron"
-dynamic = ["version"]
+version = "0.4.0rc1"
 description = "Policy-driven, self-hosted web crawler and content-extraction service built around FastAPI"
 readme = "README.md"
 requires-python = ">=3.14"
@@ -122,11 +122,6 @@ Homepage = "https://github.com/adambarber/crawlutron"
 Issues = "https://github.com/adambarber/crawlutron/issues"
 Changelog = "https://github.com/adambarber/crawlutron/blob/main/CHANGELOG.md"
 Security = "https://github.com/adambarber/crawlutron/blob/main/SECURITY.md"
-
-[tool.hatch.version]
-# The single source of the version: the most recent git tag (SemVer, 0.x per
-# #561). Untagged or dirty checkouts get a dev suffix; no hand-edited number.
-source = "vcs"
 
 [tool.hatch.build.targets.wheel]
 # The root project ships no wheel: it is only the uv workspace container. Every

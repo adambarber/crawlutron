@@ -73,17 +73,9 @@ async def invoke_http_strategy(
     *,
     policy: CrawlPolicy | dict[str, JsonValue],
     resp: Callable[[object], HttpFetchResult],
-    dedupe_patch: bool = False,
     global_concurrency: int | None = None,
     cap_capture: list[int] | None = None,
 ) -> EngineCrawlResult:
-    if dedupe_patch:
-        # Lazy on purpose, and the reason is measured: `import trafilatura` costs roughly 400ms because it
-        # transitively pulls dateparser, ua_parser, browserforge, onnxruntime, mammoth, lxml and PIL.
-        import trafilatura.core
-
-        monkeypatch.setattr(trafilatura.core, "duplicate_test", lambda *a, **k: False)
-
     def answer(url, _sent_headers, *_):
         return resp(url)
 

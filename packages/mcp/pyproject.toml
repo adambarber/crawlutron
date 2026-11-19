@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling", "hatch-vcs>=0.4.0.dev0"]
+requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
 name = "crawlutron-mcp"
-dynamic = ["version"]
+version = "0.4.0rc1"
 description = "Transport-agnostic Model Context Protocol (2026-07-28) surface for the Crawlutron crawler"
 readme = "README.md"
 requires-python = ">=3.14"
@@ -16,10 +16,6 @@ dependencies = [
     "crawlutron-core>=0.4.0.dev0",
     "pydantic",
 ]
-
-[tool.hatch.version]
-source = "vcs"
-raw-options = { search_parent_directories = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/crawlutron_mcp"]

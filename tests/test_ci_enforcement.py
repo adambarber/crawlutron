@@ -16,7 +16,6 @@ from tests._ci_contract import (
     PREPARE_ACTION_PATH,
     RELEASE_WORKFLOW_PATH,
     REPORTING_JOBS,
-    SERVICE_ROOT,
     WORKFLOW_PATH,
     _assert_failure_propagation,
     _assert_no_config_exclude,
@@ -129,16 +128,31 @@ def test_release_workflow_publishes_nothing_without_a_tag() -> None:
     assert gated.get("workflows") == ["CI"], "the release must follow the CI workflow"
     assert "completed" in str(gated.get("types")), "the release must run on CI completion"
 
-    _assert_ci_gated(document, require_tag=True)
+    _assert_ci_gated(document)
     jobs = _mapping(document.get("jobs"), "jobs")
     image = _mapping(jobs.get("image"), "an image job")
     assert _mapping(image.get("permissions"), "image permissions").get("packages") == "write", (
         "the image job needs packages:write, scoped to itself"
     )
-    publish = _mapping(jobs.get("distributions"), "a distributions job")
+    publish = _mapping(jobs.get("publish"), "a publish job")
     assert _mapping(publish.get("permissions"), "publish permissions").get("id-token") == "write", (
         "the publish job needs id-token:write for trusted publishing"
     )
+    # The tag is what makes it a release: publication is derived from the tags at
+    # the commit CI passed, never from the merge itself.
+    released_runs = " ".join(str(step.get("run", "")) for step in _steps(jobs.get("released")))
+    assert "release_roster.py --released" in released_runs, (
+        "the released set must come from the tags pointing at the green commit"
+    )
+    publish_steps = [str(step.get("name", "")) for step in _steps(jobs.get("publish"))]
+    assert "Assert the artifacts carry the release version" in publish_steps, (
+        "a build whose version disagrees with its tag must never reach the index"
+    )
+    for name, job in jobs.items():
+        if "workflow_run.conclusion == 'success'" in str(_mapping(job, name).get("if", "")):
+            assert "head_branch == 'main'" in str(_mapping(job, name).get("if", "")), (
+                f"gated job {name} must also pin the branch it serves"
+            )
 
 
 def _workflow_document(path: Path) -> dict[object, object]:
@@ -154,30 +168,48 @@ def _mapping(value: object, what: str) -> dict[str, object]:
     return {str(key): item for key, item in value.items()}
 
 
+def _steps(job: object) -> list[dict[str, object]]:
+    """One job's step records, each narrowed to a string-keyed mapping."""
+    steps = _mapping(job, "a job").get("steps")
+    assert isinstance(steps, list)
+    return [_mapping(step, "a step") for step in steps]
+
+
 def _triggers(document: dict[object, object]) -> dict[str, object]:
     """The ``on`` block, whichever spelling the YAML parser used for the key."""
     raw = document.get("on")
     return _mapping(raw if isinstance(raw, dict) else document.get(True), "an 'on' trigger")
 
 
-def _assert_ci_gated(document: dict[object, object], *, require_tag: bool) -> None:
-    """Every job runs only after a green CI run, on the branches this workflow serves.
-
-    ``require_tag`` adds the release's own condition: the tag makes it a release,
-    the green run makes it publishable, and neither alone is sufficient.
-    """
+def _assert_ci_gated(document: dict[object, object]) -> None:
+    """Every job runs only after a green CI run, directly or through its needs."""
     gate = _mapping(_triggers(document).get("workflow_run"), "a workflow_run gate")
     assert gate.get("workflows") == ["CI"], "must follow CI"
     assert "completed" in str(gate.get("types")), "on completion"
-    for name, job in _mapping(document.get("jobs"), "jobs").items():
-        condition = str(_mapping(job, f"job {name}").get("if", ""))
-        assert "workflow_run.conclusion == 'success'" in condition, (
-            f"job {name} does not require a green CI run"
-        )
-        if require_tag:
-            assert "startsWith(github.event.workflow_run.head_branch, 'v')" in condition, (
-                f"job {name} does not require a v* tag"
-            )
+    jobs = _mapping(document.get("jobs"), "jobs")
+    gated = {
+        name
+        for name, job in jobs.items()
+        if "workflow_run.conclusion == 'success'" in str(_mapping(job, name).get("if", ""))
+    }
+    assert gated, "no job requires a green CI run"
+    reached = set(gated)
+    changed = True
+    while changed:
+        changed = False
+        for name, job in jobs.items():
+            if name in reached:
+                continue
+            needed = _mapping(job, name).get("needs") or []
+            if isinstance(needed, str):
+                upstream = {needed}
+            else:
+                assert isinstance(needed, list)
+                upstream = {str(item) for item in needed}
+            if upstream & reached:
+                reached.add(name)
+                changed = True
+    assert reached == set(jobs), f"jobs outside the CI gate: {sorted(set(jobs) - reached)}"
 
 
 def test_packaging_runs_only_after_a_green_ci_run() -> None:
@@ -190,7 +222,7 @@ def test_packaging_runs_only_after_a_green_ci_run() -> None:
     document = _workflow_document(PACKAGING_WORKFLOW_PATH)
     assert "workflow_run" in _triggers(document), "packaging runs on a CI run's completion"
     assert "push" not in _triggers(document), "packaging must not run on the push itself"
-    _assert_ci_gated(document, require_tag=False)
+    _assert_ci_gated(document)
 
 
 def test_packaging_workflow_publishes_nothing() -> None:
@@ -210,22 +242,6 @@ def test_packaging_workflow_publishes_nothing() -> None:
         assert banned not in workflow, f"the packaging workflow must not publish ({banned!r})"
     assert "twine check --strict" in workflow, "the packaging workflow must inspect every artifact"
     assert "scripts/check_packaging.py" in workflow, "every wheel must install and import"
-
-
-def test_release_please_is_gone() -> None:
-    """#1014: two sources of truth for one version is the defect being removed.
-
-    release-please edits a static version field, while this project's version is
-    derived from the git tag, so it could never have worked.
-    """
-    for path in (
-        ".github/release-please.yml",
-        "release-please-config.json",
-        ".release-please-manifest.json",
-    ):
-        assert not (SERVICE_ROOT / path).exists(), f"{path} is dead configuration: the tag is the version"
-    workflow = SERVICE_ROOT.joinpath(".github/workflows/ci.yml").read_text(encoding="utf-8")
-    assert "release-please" not in workflow
 
 
 def test_every_precommit_hook_has_a_ci_job_that_runs_the_hook() -> None:
@@ -433,12 +449,4 @@ def test_ci_release_workflow_pins_version_consistency() -> None:
     # loopback-bound process, so the smoke must bind 0.0.0.0 (compose precedent).
     assert "-e CRAWLUTRON_HOST=0.0.0.0" in joined, (
         "the smoke must set CRAWLUTRON_HOST=0.0.0.0 for -p to reach the service"
-    )
-
-
-def test_ci_has_version_artifact_tracked_in_git() -> None:
-    """#949: the version artifact is tracked in git, so every CI checkout has it
-    before any gate runs; hatch-vcs overwrites it at build time."""
-    assert (SERVICE_ROOT / "packages/core/src/crawlutron/_version.py").exists(), (
-        "_version.py must be tracked in git so CI gates see it without a regen step"
     )

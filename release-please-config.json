@@ -1,0 +1,35 @@
+{
+  "release-type": "python",
+  "bump-minor-pre-major": true,
+  "packages": {
+    ".": {
+      "package-name": "crawlutron",
+      "component": "crawlutron",
+      "exclude-paths": ["packages/**"]
+    },
+    "packages/core": {
+      "package-name": "crawlutron-core",
+      "component": "crawlutron-core"
+    },
+    "packages/extract": {
+      "package-name": "crawlutron-extract",
+      "component": "crawlutron-extract"
+    },
+    "packages/mcp": {
+      "package-name": "crawlutron-mcp",
+      "component": "crawlutron-mcp"
+    },
+    "packages/rest": {
+      "package-name": "crawlutron-rest",
+      "component": "crawlutron-rest"
+    },
+    "packages/safe-url": {
+      "package-name": "crawlutron-safe-url",
+      "component": "crawlutron-safe-url"
+    },
+    "packages/sdk": {
+      "package-name": "crawlutron-sdk",
+      "component": "crawlutron-sdk"
+    }
+  }
+}

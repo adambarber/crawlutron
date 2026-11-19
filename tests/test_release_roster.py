@@ -1,49 +1,86 @@
-"""The release roster derives from the manifest, never a hand-typed list."""
+"""The roster derives from the manifests, and "released" from the tags at HEAD."""
 
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
 import tomllib
+from pathlib import Path
 
 import yaml
 
-from scripts.release_roster import roster
-from tests._ci_contract import SERVICE_ROOT
+from scripts.release_roster import released, roster
 
-RELEASE_WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "release.yml"
-ROOT_MANIFEST = SERVICE_ROOT / "pyproject.toml"
-
-
-def _manifest_roster() -> list[dict[str, str]]:
-    """The roster the manifest dictates: root project plus every member by project.name."""
-    table = tomllib.loads(ROOT_MANIFEST.read_text(encoding="utf-8"))
-    entries: list[dict[str, str]] = [
-        {"name": str(table["project"]["name"]), "selector": str(table["project"]["name"])}
-    ]
-    workspace = table.get("tool", {}).get("uv", {}).get("workspace", {})
-    for pattern in workspace.get("members", ()):
-        for member in sorted(SERVICE_ROOT.glob(pattern)):
-            if member.is_dir():
-                project = tomllib.loads((member / "pyproject.toml").read_text(encoding="utf-8"))["project"]
-                entries.append({"name": str(project["name"]), "selector": str(project["name"])})
-    return entries
+RELEASE_WORKFLOW_PATH = Path(__file__).resolve().parents[1] / ".github/workflows/release.yml"
+GIT = shutil.which("git") or "git"
 
 
-def test_roster_matches_the_manifest() -> None:
-    assert roster() == _manifest_roster()
+def _git(root: Path, *arguments: str) -> None:
+    """Run git pinned to ``root`` by environment, so a hook's git vars cannot redirect it."""
+    environment = {
+        **os.environ,
+        "GIT_DIR": str(root / ".git"),
+        "GIT_WORK_TREE": str(root),
+        "GIT_INDEX_FILE": str(root / ".git/index"),
+    }
+    subprocess.run([GIT, *arguments], cwd=root, env=environment, check=True, capture_output=True)
 
 
-def test_release_matrix_comes_from_the_roster_script() -> None:
+def _write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _stand_up(tmp_path: Path, member_version: str = "2.0.0") -> Path:
+    _write(
+        tmp_path / "pyproject.toml",
+        '[tool.uv.workspace]\nmembers = ["packages/*"]\n\n[project]\nname = "app"\nversion = "1.0.0"\n',
+    )
+    _write(
+        tmp_path / "packages/one/pyproject.toml",
+        f'[project]\nname = "one"\nversion = "{member_version}"\n',
+    )
+    for command in (("init", "-q"), ("add", "-A"), ("commit", "-qm", "init")):
+        _git(tmp_path, *command)
+    return tmp_path
+
+
+def _tag(root: Path, name: str) -> None:
+    _git(root, "tag", name)
+
+
+def test_the_roster_derives_name_version_and_path_from_each_manifest(tmp_path: Path) -> None:
+    root = _stand_up(tmp_path)
+    entries = {entry["name"]: entry for entry in roster(root)}
+    assert set(entries) == {"app", "one"}
+    assert entries["one"]["version"] == "2.0.0"
+    assert entries["one"]["path"] == "packages/one"
+    assert entries["app"]["path"] == "."
+
+
+def test_only_packages_whose_version_tag_points_at_head_are_released(tmp_path: Path) -> None:
+    """A release-please tag names the exact version, so a stale tag releases nothing."""
+    root = _stand_up(tmp_path)
+    _tag(root, "one-v2.0.0")
+    _tag(root, "app-v9.9.9")
+    assert [entry["name"] for entry in released(root)] == ["one"]
+
+
+def test_a_bumped_version_without_its_tag_releases_nothing(tmp_path: Path) -> None:
+    """The tag and the declared version must agree; a bump alone is not a release."""
+    root = _stand_up(tmp_path)
+    _tag(root, "one-v2.0.0")
+    text = (root / "packages/one/pyproject.toml").read_text(encoding="utf-8")
+    _write(root / "packages/one/pyproject.toml", text.replace("2.0.0", "2.1.0"))
+    assert tomllib.loads(text)["project"]["version"] == "2.0.0"
+    assert released(root) == []
+
+
+def test_the_publish_matrix_is_the_released_set_never_a_hand_typed_list() -> None:
+    """A literal name in the matrix is a package the roster does not govern."""
     document = yaml.safe_load(RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8"))
-    assert isinstance(document, dict)
-    jobs = document.get("jobs")
-    assert isinstance(jobs, dict)
-    distributions = jobs.get("distributions")
-    assert isinstance(distributions, dict)
-    strategy = distributions.get("strategy")
-    assert isinstance(strategy, dict)
-    matrix = strategy.get("matrix")
-    assert isinstance(matrix, str), "the publish matrix must be a dynamic expression, not an inline list"
-    assert matrix.startswith("${{") and matrix.endswith("}}")
-    assert "fromJson(needs.roster.outputs.matrix)" in matrix
-    for entry in _manifest_roster():
-        assert f'"{entry["name"]}"' not in matrix, f"{entry['name']!r} is hand-typed into the publish matrix"
+    matrix = document["jobs"]["publish"]["strategy"]["matrix"]
+    rendered = " ".join(str(value) for value in matrix.values())
+    assert "fromJSON(needs.released.outputs.packages)" in rendered
+    assert "fromJSON(needs.roster" not in rendered, "the roster job is the writer; never re-parse it"

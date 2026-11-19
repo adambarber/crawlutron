@@ -159,21 +159,20 @@ def test_checked_in_scan_config_is_owned_by_the_gate() -> None:
 
 
 @pytest.mark.parametrize(
-    "glob", ["**/*.py", "packages/core/crawlutron/*.py", "**/zz_probe_clone.py", "*", "**"]
+    "glob",
+    [
+        "**/*.py",
+        "packages/core/crawlutron/*.py",
+        "**/zz_probe_clone.py",
+        "**/packages/core/src/crawlutron/_version.py",
+        "*",
+        "**",
+    ],
 )
 def test_python_source_globs_are_never_a_sanctioned_exception(glob) -> None:
     """The ignore list exists to skip caches and vendored trees, never source."""
     with pytest.raises(ValueError, match="Python source|whole tree"):
         res._reject_source_masking([glob])
-
-
-def test_only_the_named_generated_version_file_may_be_ignored_as_py_source() -> None:
-    """The one sanctioned generated .py exception never becomes a wildcard: a
-    sibling-suffixed named file (or the old flat path) still reds as a mask."""
-    res._reject_source_masking(["**/packages/core/src/crawlutron/_version.py"])
-    for glob in ("**/packages/core/src/crawlutron/_version2.py", "packages/core/crawlutron/_version.py"):
-        with pytest.raises(ValueError, match="Python source"):
-            res._reject_source_masking([glob])
 
 
 @pytest.mark.parametrize(

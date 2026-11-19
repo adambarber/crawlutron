@@ -125,10 +125,6 @@ DECLARED_SURFACE_RATCHET = {
     # #643: unregister joins the registry's public door set so test probes can
     # drop their fake owners (registered_owners exhaustiveness must stay true).
     "packages/core/src/crawlutron/runtime/process_state.py": (6, 6),
-    # Tracked in git; hatch-vcs overwrites it at build time (#561).
-    "packages/core/src/crawlutron/_version.py": (3, 0),
-    # #1137: crawlutron-extract _version.py (dunder names in __all__; counts-only).
-    "packages/extract/src/crawlutron_extract/_version.py": (3, 0),
     # #1137: pre-existing __all__ modules now covered by the derived scan roots
     # (workspace members instead of core-only APP_ROOT).
     "packages/core/src/admission/errors.py": (3, 3),

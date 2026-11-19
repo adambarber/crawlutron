@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling", "hatch-vcs>=0.4.0.dev0"]
+requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
 name = "crawlutron-extract"
-dynamic = ["version"]
+version = "0.4.0rc1"
 description = "Content extraction: HTML, office containers, text formats, PDF tier 1, bounded and deterministic"
 readme = "README.md"
 requires-python = ">=3.14"
@@ -15,13 +15,6 @@ license = "MIT"
 # (public suffix list) as hard dependencies; the default install is not
 # stdlib-only. pdfminer.six is a hard dependency for PDF tier-1 fallback.
 dependencies = ["crawlutron-safe-url", "pdfminer.six==20260107"]
-
-[tool.hatch.version]
-source = "vcs"
-raw-options = { search_parent_directories = true }
-
-[tool.hatch.build.hooks.vcs]
-version-file = "src/crawlutron_extract/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/crawlutron_extract"]
