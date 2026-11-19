@@ -32,9 +32,11 @@ on:
   workflow_dispatch:
 
 # #624: CI needs no write scope -- it reports results, it never pushes.
-# Declaring read-all removes the default write-all token scope a compromised
-# step could otherwise use.
-permissions: read-all
+# Declared as the two scopes the jobs actually read (zizmor: read-all is overly
+# broad); a step that gains a new scope must name it here.
+permissions:
+  contents: read
+  pull-requests: read
 
 jobs:
   ruff:
@@ -45,6 +47,7 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: false
       - uses: ./.github/actions/prepare
       - name: ruff
         run: .venv/bin/pre-commit run ruff --all-files
@@ -57,6 +60,7 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: false
       - uses: ./.github/actions/prepare
       - name: ruff format
         run: .venv/bin/pre-commit run ruff-format --all-files
@@ -69,6 +73,7 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: false
       - uses: ./.github/actions/prepare
       - name: basedpyright
         run: .venv/bin/pre-commit run basedpyright --all-files
@@ -81,6 +86,7 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: false
       - uses: ./.github/actions/prepare
       - name: jscpd
         run: .venv/bin/pre-commit run jscpd --all-files
@@ -93,6 +99,7 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: false
       - uses: ./.github/actions/prepare
       - name: mypy
         run: .venv/bin/pre-commit run mypy --all-files
@@ -105,6 +112,7 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: false
       - uses: ./.github/actions/prepare
       - name: lock
         run: .venv/bin/pre-commit run lock --all-files
@@ -117,6 +125,7 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: false
       - uses: ./.github/actions/prepare
       - name: vulture
         run: .venv/bin/pre-commit run vulture --all-files
@@ -129,6 +138,7 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: false
       - uses: ./.github/actions/prepare
       # #949: on a cold-cache runner the battery's first imports are compile
       # misses. Precompiling bytecode over the derived member src roots turns
@@ -143,6 +153,23 @@ jobs:
           # gate hanging the job forever, so it gets hang-guard room here rather
           # than a budget. Commit admission keeps the 60s default.
           GATE_FANOUT_WALL_SECONDS: "300"
+
+  # The battery deselects `real_pbkdf2`, so the real 210k-iteration PBKDF2 path
+  # in storage/caller_key_store.py is never exercised by commit admission. This
+  # job runs that surface alone; the 1_000-iteration autouse clamp stays in
+  # place for the fast battery and is not weakened.
+  real-pbkdf2:
+    name: Test suite (real PBKDF2)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - uses: ./.github/actions/prepare
+      - name: Run pytest (real PBKDF2)
+        run: .venv/bin/python -m pytest -m "real_pbkdf2"
 
   test-browser:
     name: Test suite (browser)
@@ -160,6 +187,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: ./.github/actions/prepare
       # Camoufox downloads ~200 MB of Firefox on first use (#490). The binary
       # lands in the platform cache dir (camoufox.utils.INSTALL_DIR --
@@ -196,6 +224,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.14"
@@ -222,6 +251,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -241,6 +271,7 @@ jobs:
       - mypy
       - vulture
       - battery
+      - real-pbkdf2
       - test-browser
       - audit
       - secret-scan
@@ -263,6 +294,7 @@ jobs:
           test "${{ needs.mypy.result }}" = "success"
           test "${{ needs.vulture.result }}" = "success"
           test "${{ needs.battery.result }}" = "success"
+          test "${{ needs.real-pbkdf2.result }}" = "success"
           test "${{ needs.test-browser.result }}" = "success"
           test "${{ needs.audit.result }}" = "success"
           test "${{ needs.secret-scan.result }}" = "success"

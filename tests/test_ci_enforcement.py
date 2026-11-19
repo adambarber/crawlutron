@@ -141,9 +141,32 @@ def test_every_action_is_sha_pinned_and_permissions_are_declared() -> None:
     ci = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
     assert isinstance(ci, dict)
     permissions = ci.get("permissions")
-    assert permissions == "read-all", (
-        f"CI must declare top-level permissions: read-all, found {permissions!r}"
+    assert permissions == {"contents": "read", "pull-requests": "read"}, (
+        f"CI must declare exactly its two read scopes, found {permissions!r}"
     )
+
+
+def _assert_no_event_splicing(workflow: str, label: str) -> None:
+    """An event field is attacker-shaped text: it reaches a shell through `env:`."""
+    for name, run in _job_run_steps(workflow):
+        assert "${{ github.event" not in run, (
+            f"{label} job {name} splices event input into its script; bind it through env"
+        )
+
+
+def test_no_run_step_splices_event_input_into_shell() -> None:
+    """zizmor template-injection: a branch named like a tag must never become code."""
+    for path in (WORKFLOW_PATH, RELEASE_WORKFLOW_PATH, PACKAGING_WORKFLOW_PATH):
+        _assert_no_event_splicing(path.read_text(encoding="utf-8"), path.name)
+
+
+def test_a_run_step_that_splices_an_event_field_is_caught() -> None:
+    """Bites: the old inline branch interpolation fails the check."""
+    workflow = RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8")
+    broken = workflow.replace('TAG="$TAG_REF"', 'TAG="${{ github.event.workflow_run.head_branch }}"', 1)
+    assert broken != workflow, "the injection did not apply; the probe proves nothing"
+    with pytest.raises(AssertionError):
+        _assert_no_event_splicing(broken, "mutated release")
 
 
 def test_release_workflow_publishes_nothing_without_a_tag() -> None:
@@ -237,7 +260,9 @@ def test_packaging_workflow_publishes_nothing() -> None:
     workflow = PACKAGING_WORKFLOW_PATH.read_text(encoding="utf-8")
     document = yaml.safe_load(workflow)
     assert isinstance(document, dict)
-    assert document.get("permissions") == "read-all", "the packaging workflow needs no write scope"
+    assert document.get("permissions") == {"contents": "read", "pull-requests": "read"}, (
+        "the packaging workflow needs only its two read scopes"
+    )
     for banned in ("pypa/gh-action-pypi-publish", "twine upload", "docker push", "push: true"):
         assert banned not in workflow, f"the packaging workflow must not publish ({banned!r})"
     assert "twine check --strict" in workflow, "the packaging workflow must inspect every artifact"
@@ -455,13 +480,17 @@ def test_ci_precompiles_bytecode_before_the_battery() -> None:
 def test_ci_release_workflow_pins_version_consistency() -> None:
     """#949: the smoke asserts the BAKED version equals the tag it was pushed as,
     so the image cannot carry a version that disagrees with its :{version} tag."""
-    runs = [str(run) for _, run in _job_run_steps(RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8"))]
+    text = RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8")
+    runs = [str(run) for _, run in _job_run_steps(text)]
     joined = "\n".join(runs)
     assert "ghcr.io/" in joined, "the release workflow must push to GHCR"
     assert "tr '[:upper:]' '[:lower:]'" in joined, "GHCR tag must be lowercased"
-    assert "steps.version.outputs.native" in joined, (
+    # The derived version reaches the smoke through env (zizmor template-injection),
+    # so the binding is asserted on the workflow text and its use on the script.
+    assert "EXPECTED_VERSION: ${{ steps.version.outputs.native }}" in text, (
         "the smoke must compare the baked version against the git-describe version"
     )
+    assert 'test "$BAKED" = "$EXPECTED_VERSION"' in joined
     # The image's CMD binds loopback by default; Docker -p cannot reach a
     # loopback-bound process, so the smoke must bind 0.0.0.0 (compose precedent).
     assert "-e CRAWLUTRON_HOST=0.0.0.0" in joined, (
