@@ -1,0 +1,90 @@
+"""The workflow security surface: pinned actions, narrow tokens, no event text
+spliced into a shell, and no publish before a smoke."""
+
+from __future__ import annotations
+
+import re
+
+import pytest
+import yaml
+
+from tests._ci_contract import (
+    PACKAGING_WORKFLOW_PATH,
+    RELEASE_WORKFLOW_PATH,
+    WORKFLOW_PATH,
+    _job_run_steps,
+    job_steps,
+)
+
+
+def test_every_action_is_sha_pinned_and_permissions_are_declared() -> None:
+    """#624: mutable tags (`@v4`) are repointable; every `uses:` must pin a
+    full-length commit SHA, and the workflow must declare its permissions so
+    the default write-all token scope cannot leak into a compromised step.
+    """
+    for workflow_path in (WORKFLOW_PATH, RELEASE_WORKFLOW_PATH, PACKAGING_WORKFLOW_PATH):
+        document = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+        assert isinstance(document, dict)
+
+        def walk(value: object, file_name: str = workflow_path.name) -> None:
+            if isinstance(value, dict):
+                uses = value.get("uses")
+                if isinstance(uses, str) and "@" in uses:
+                    ref = uses.rsplit("@", 1)[1]
+                    assert re.fullmatch(r"[0-9a-f]{40}", ref), (
+                        f"action ref {uses!r} in {file_name} is not a full-length commit SHA"
+                    )
+                for child in value.values():
+                    walk(child)
+            elif isinstance(value, list):
+                for child in value:
+                    walk(child)
+
+        walk(document.get("jobs"))
+    ci = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+    assert isinstance(ci, dict)
+    permissions = ci.get("permissions")
+    assert permissions == {"contents": "read", "pull-requests": "read"}, (
+        f"CI must declare exactly its two read scopes, found {permissions!r}"
+    )
+
+
+def _assert_no_event_splicing(workflow: str, label: str) -> None:
+    """An event field is attacker-shaped text: it reaches a shell through `env:`."""
+    for name, run in _job_run_steps(workflow):
+        assert "${{ github.event" not in run, (
+            f"{label} job {name} splices event input into its script; bind it through env"
+        )
+
+
+def test_no_run_step_splices_event_input_into_shell() -> None:
+    """zizmor template-injection: a branch named like a tag must never become code."""
+    for path in (WORKFLOW_PATH, RELEASE_WORKFLOW_PATH, PACKAGING_WORKFLOW_PATH):
+        _assert_no_event_splicing(path.read_text(encoding="utf-8"), path.name)
+
+
+def test_a_run_step_that_splices_an_event_field_is_caught() -> None:
+    """Bites: the old inline branch interpolation fails the check."""
+    workflow = RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8")
+    broken = workflow.replace('TAG="$TAG_REF"', 'TAG="${{ github.event.workflow_run.head_branch }}"', 1)
+    assert broken != workflow, "the injection did not apply; the probe proves nothing"
+    with pytest.raises(AssertionError):
+        _assert_no_event_splicing(broken, "mutated release")
+
+
+def _publishes(step: dict[str, object]) -> bool:
+    """True when this step hands the image to the registry."""
+    with_block = step.get("with")
+    return str(step.get("run", "")).startswith("docker push") or (
+        isinstance(with_block, dict) and with_block.get("push") is True
+    )
+
+
+def test_the_image_is_pushed_only_after_it_smokes() -> None:
+    """A tag that failed its smoke must never exist: :0.4.0rc1 was pushed dead."""
+    steps = job_steps(RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8"), "image")
+    names = [str(step.get("name", "")) for step in steps]
+    smoke = next(i for i, name in enumerate(names) if name.startswith("Smoke"))
+    publishes = [i for i, step in enumerate(steps) if _publishes(step)]
+    assert publishes, "the image job must publish the image"
+    assert min(publishes) > smoke, f"the image publishes before it smokes: {names}"
