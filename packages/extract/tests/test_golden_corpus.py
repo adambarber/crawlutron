@@ -33,14 +33,21 @@ FAMILIES: dict[str, tuple[tuple[str, str], ...]] = {
         ("test_pattern_colors.pdf", "application/pdf"),
         ("sampleOneByteIdentityEncode.pdf", "application/pdf"),
     ),
-    "docx": (("55733.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),),
-    "xlsx": (("1_NoIden.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),),
+    "docx": (
+        ("55733.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+        ("52288.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+    ),
+    "xlsx": (
+        ("1_NoIden.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        ("123233_charts.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+    ),
     "pptx": (
         (
             "49386-null_dates.pptx",
             "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         ),
     ),
+    "md": (("LICENSES.md", "text/markdown"),),
 }
 
 
@@ -139,5 +146,33 @@ def test_golden_pptx_pins_slide_title() -> None:
 def test_golden_empty_pdf_is_low_not_higher() -> None:
     """PDF with no extractable text ranks low, never medium/high."""
     result = _extract("test_pattern_colors.pdf", "application/pdf")
+    assert result.text == ""
+    assert result.quality == Quality.LOW
+
+
+def test_golden_md_pins_licenses_header() -> None:
+    """LICENSES.md yields its heading as non-empty text."""
+    result = _extract("LICENSES.md", "text/markdown")
+    assert result.text.strip()
+    assert "Golden corpus provenance" in result.text
+
+
+def test_golden_docx_52288_pins_chapter_one() -> None:
+    """52288.docx yields its chapter body as non-empty text."""
+    result = _extract(
+        "52288.docx",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+    assert result.text.strip()
+    assert result.text.startswith("CHAPTER 1")
+    assert result.quality == Quality.MEDIUM
+
+
+def test_golden_xlsx_charts_is_empty_low() -> None:
+    """Charts-only xlsx yields no text and ranks low, never medium/high."""
+    result = _extract(
+        "123233_charts.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
     assert result.text == ""
     assert result.quality == Quality.LOW

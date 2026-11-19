@@ -20,11 +20,23 @@ from crawlutron_extract.html_dom import DOMNode
 # Tokenizer
 
 
+def _scan_string(selector: str, i: int, n: int) -> int:
+    """Scan a quoted string literal; raise on an unterminated (unmatched) quote."""
+    quote = selector[i]
+    j = i + 1
+    while j < n and selector[j] != quote:
+        j += 1
+    if j >= n:
+        raise SelectorError("Unterminated string literal", selector, quote)
+    return j + 1
+
+
 def _tokenize(selector: str) -> list[tuple[str, str]]:
     tokens: list[tuple[str, str]] = []
     i = 0
     n = len(selector)
     while i < n:
+        start = i
         c = selector[i]
         if c.isspace():
             _emit_char(tokens, "WS", " ")
@@ -56,9 +68,15 @@ def _tokenize(selector: str) -> list[tuple[str, str]]:
         elif c == "+":
             _emit_char(tokens, "PLUS", "+")
             i += 1
-        elif c == "*":
-            _emit_char(tokens, "STAR", "*")
-            i += 1
+        elif c in "^$*":
+            if i + 1 < n and selector[i + 1] == "=":
+                tokens.append(("ATTR_OP", c + "="))
+                i += 2
+            elif c == "*":
+                tokens.append(("STAR", "*"))
+                i += 1
+            else:
+                raise SelectorError("Untokenizable selector syntax", selector, selector[i])
         elif c == "=":
             if i + 1 < n and selector[i + 1] in "^$*":
                 tokens.append(("ATTR_OP", selector[i : i + 2]))
@@ -66,6 +84,13 @@ def _tokenize(selector: str) -> list[tuple[str, str]]:
             else:
                 _emit_char(tokens, "ATTR_OP", "=")
                 i += 1
+        elif c in "'\"":
+            j = _scan_string(selector, i, n)
+            tokens.append(("STRING", selector[i:j]))
+            i = j
+        elif c == "/":
+            tokens.append(("SLASH", "/"))
+            i += 1
         elif c == ":":
             j = i + 1
             while j < n and (selector[j].isalnum() or selector[j] in "-_"):
@@ -82,9 +107,15 @@ def _tokenize(selector: str) -> list[tuple[str, str]]:
             tokens.append(("PSEUDO", selector[i:j]))
             i = j
         else:
-            j = _scan_ident(selector, i, n)
+            j = _scan_ident(selector, i, n, extra="-_")
+            if j == i:
+                raise SelectorError("Untokenizable selector syntax", selector, selector[i])
             tokens.append(("IDENT", selector[i:j]))
             i = j
+        # Structural guard: every iteration must consume at least one character,
+        # or the tokenizer spins forever on the character at the cursor.
+        if i == start:
+            raise SelectorError("Tokenizer stalled on token", selector, selector[start])
     return tokens
 
 

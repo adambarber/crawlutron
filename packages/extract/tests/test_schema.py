@@ -80,7 +80,7 @@ def test_schema_number_unparseable_required():
     """NUMBER field with unparseable text and required=True → schema_required_missing."""
     html = b"<div class='record'><span class='price'>not a number</span></div>"
     result = _extract_schema(html, ".record", _f("price", ".price", kind=FieldKind.NUMBER, required=True))
-    assert result.records == ({},)
+    assert result.records == ()
     assert "schema_required_missing" in result.flags
 
 
@@ -100,7 +100,7 @@ def test_schema_link_refused():
     """LINK kind refuses unsafe URLs."""
     html = b'<div class="record"><a class="link" href="javascript:alert(1)">Link</a></div>'
     result = _extract_schema(html, ".record", _f("link", ".link", kind=FieldKind.LINK, attribute="href"))
-    assert result.records == ({},)
+    assert result.records == ()
 
 
 def test_schema_attr_extraction():
@@ -200,6 +200,7 @@ def test_schema_records_truncated():
     result = _extract_schema(html, ".record", _f("title", ".title"), limits=limits)
     assert len(result.records) == 2
     assert "records_truncated" in result.flags
+    assert result.truncated is True
 
 
 def test_schema_fields_truncated():
@@ -219,10 +220,49 @@ def test_schema_fields_truncated():
     )
     assert len(result.records[0]) == 2
     assert "fields_truncated" in result.flags
+    assert result.truncated is True
 
 
 def test_schema_quality_failed_no_records():
     """No records → quality=LOW."""
     html = b"<div class='record'><span class='title'>Hello</span></div>"
     result = _extract_schema(html, ".nonexistent", _f("title", ".title"))
+    assert result.quality == Quality.LOW
+
+
+def test_schema_markdown_renders():
+    """MARKDOWN routes through the markdown emitter (emphasis, list, link content)."""
+    html = b"<p><em>x</em> <ul><li>a</li><li>b</li></ul> <a href=/u>link</a></p>"
+    result = _extract_schema(html, None, _f("m", "p", kind=FieldKind.MARKDOWN))
+    assert len(result.records) == 1
+    md = result.records[0]["m"]
+    assert isinstance(md, str)
+    assert "*x*" in md
+    assert "- a" in md
+    assert "- b" in md
+    assert "link" in md
+
+
+def test_schema_link_honours_base_href():
+    """LINK resolves against a document <base href>, not just the url argument."""
+    html = b'<base href="https://example.com/base/"><a href="page">L</a>'
+    result = _extract_schema(html, None, _f("l", "a", kind=FieldKind.LINK), url="https://example.com/")
+    assert result.records == ({"l": "https://example.com/base/page"},)
+
+
+def test_schema_duplicate_field_names_refused():
+    """Duplicate field names are refused at Schema construction, naming the field."""
+    try:
+        Schema(record=None, fields=(_f("x", ".a"), _f("x", ".b")))
+    except ValueError as exc:
+        assert "x" in str(exc)
+    else:
+        raise AssertionError("duplicate field names were not refused")
+
+
+def test_schema_empty_document_no_records():
+    """record=None with no matching field yields no records and never raises quality."""
+    html = b"<div>nothing here</div>"
+    result = _extract_schema(html, None, _f("t", ".missing"))
+    assert result.records == ()
     assert result.quality == Quality.LOW

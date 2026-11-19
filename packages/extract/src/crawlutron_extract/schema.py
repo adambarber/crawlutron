@@ -16,7 +16,8 @@ from crawlutron_extract.css_select import (
     find_all_any,
     parse_selector_list,
 )
-from crawlutron_extract.html_dom import build_dom
+from crawlutron_extract.html_dom import DOMNode, build_dom
+from crawlutron_extract.html_text import render_markdown
 from crawlutron_extract.limits import ExtractLimits
 from crawlutron_extract.models import Extraction, Quality
 
@@ -54,6 +55,14 @@ class Schema:
     record: str | None
     fields: tuple[FieldSpec, ...]
 
+    def __post_init__(self) -> None:
+        """Refuse duplicate field names at construction, naming both fields."""
+        seen: set[str] = set()
+        for field in self.fields:
+            if field.name in seen:
+                raise ValueError(f"Duplicate field name {field.name!r} in schema")
+            seen.add(field.name)
+
 
 def _resolve_url(base_url: str | None, href: str) -> str | None:
     """Resolve a possibly-relative href against the document base URL."""
@@ -66,6 +75,17 @@ def _resolve_url(base_url: str | None, href: str) -> str | None:
     from urllib.parse import urljoin
 
     return urljoin(base_url, href)
+
+
+def _find_base_href(node: DOMNode) -> str | None:
+    """Return the first document ``<base href>`` value, if any."""
+    if node.tag == "base":
+        return node.get_attribute("href")
+    for child in node.children:
+        href = _find_base_href(child)
+        if href is not None:
+            return href
+    return None
 
 
 def _coerce_number(value: str) -> float | None:
@@ -92,7 +112,7 @@ def _extract_field_value(
     if field.kind == FieldKind.TEXT:
         return node.get_text()
     elif field.kind == FieldKind.MARKDOWN:
-        return node.get_text()
+        return render_markdown(node)
     elif field.kind == FieldKind.ATTR:
         return node.get_attribute(field.attribute)
     elif field.kind == FieldKind.LINK:
@@ -166,6 +186,11 @@ def extract_records(
 
     policy = HostPolicy.unrestricted() if url else None
 
+    # A document <base href> rebases relative URLs, consistently with
+    # extract_discovered_links.
+    base_href = _find_base_href(dom)
+    document_base = _resolve_url(url, base_href) if base_href else url
+
     for record_node in record_nodes:
         if len(records) >= limits.max_records:
             records_truncated = True
@@ -189,7 +214,7 @@ def extract_records(
             if len(target_nodes) > limits.max_fields_per_record:
                 fields_truncated = True
             for node in target_nodes[: limits.max_fields_per_record]:
-                value = _extract_field_value(node, field, url, policy)
+                value = _extract_field_value(node, field, document_base, policy)
                 if value is not None:
                     values.append(value)
 
@@ -202,7 +227,8 @@ def extract_records(
             elif field.required:
                 schema_required_missing = True
 
-        records.append(record)
+        if fields_added > 0:
+            records.append(record)
 
     quality = Quality.MEDIUM if records else Quality.LOW
 
@@ -217,6 +243,7 @@ def extract_records(
     return Extraction(
         quality=quality,
         flags=flags,
+        truncated=records_truncated or fields_truncated,
         records=tuple(records),
         metadata={"content_type": "text/html", "url": url} if url else {"content_type": "text/html"},
     )

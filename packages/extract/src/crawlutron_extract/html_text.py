@@ -4,6 +4,8 @@ code, lists, blockquotes, images, <hr>.
 
 from __future__ import annotations
 
+from crawlutron_extract.html_dom import DOMNode
+
 _HEADING_TAGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
 _LIST_TAGS = frozenset({"ul", "ol"})
 _CODE_TAGS = frozenset({"pre", "code"})
@@ -144,3 +146,23 @@ class TextSink:
         markdown = "".join(self._md_parts)
         title = " ".join("".join(self._title_parts).split())
         return text, markdown, title
+
+
+def render_markdown(node: DOMNode) -> str:
+    """Render a DOM subtree as markdown through the shared TextSink emitter.
+
+    Emphasis, lists, headings, code and images render as markdown instead of
+    being flattened to plain text.
+    """
+
+    def walk(n: DOMNode) -> None:
+        sink.handle_starttag(n.tag, n.attrs)
+        if n._text:
+            sink.handle_data(n._text)
+        for child in n.children:
+            walk(child)
+        sink.handle_endtag(n.tag)
+
+    sink = TextSink()
+    walk(node)
+    return sink.result()[1]

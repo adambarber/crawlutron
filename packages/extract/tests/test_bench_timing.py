@@ -14,12 +14,12 @@ def _big_html(size_bytes: int) -> bytes:
     return html.encode("utf-8")[:size_bytes]
 
 
-def test_1mib_html_extract_under_two_seconds() -> None:
-    """1 MiB HTML extracts under 2 s (coarse regression floor)."""
+def test_1mib_html_extract_under_one_second() -> None:
+    """1 MiB HTML extracts under 1 s (coarse regression floor)."""
     html = _big_html(1024 * 1024)
     total = 0.0
     for _ in range(5):
         start = time.perf_counter()
         extract(html, "text/html")
         total += time.perf_counter() - start
-    assert total / 5 < 2.0
+    assert total / 5 < 1.0
