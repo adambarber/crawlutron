@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import threading
 import time
 from collections.abc import Awaitable, Callable
 
@@ -165,7 +166,7 @@ async def await_until(
 
 
 class SleepRecorder:
-    """Records every duration handed to ``asyncio.sleep`` while installed, still
+    """Records every duration handed to ``asyncio.sleep`` by the thread that installed it, still
     yielding exactly once so the interleaving is unchanged; asserting the *request*
     (0.3s whether granted in 0.3s or 3s) is what makes the claim reproducible.
     """
@@ -173,16 +174,21 @@ class SleepRecorder:
     def __init__(self) -> None:
         self.delays: list[float] = []
         self._previous_sleep: Callable[..., Awaitable[None]] | None = None
+        self._owner: int | None = None
 
     async def sleep(self, delay: float, *args: object, **kwargs: object) -> None:
-        self.delays.append(delay)
         previous = self._previous_sleep
         assert previous is not None, "SleepRecorder.sleep used before install()"
+        # A leaked thread from another test calls the same patched module function:
+        # its sleeps are not this test's requests and must not be counted (#1179).
+        if threading.get_ident() == self._owner:
+            self.delays.append(delay)
         await previous(0)  # zero seconds, real yield
 
     def install(self, monkeypatch) -> SleepRecorder:
         """Patch ``asyncio.sleep`` for the duration of a test."""
         self._previous_sleep = asyncio.sleep
+        self._owner = threading.get_ident()
         monkeypatch.setattr(asyncio, "sleep", self.sleep)
         return self
 
