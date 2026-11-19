@@ -156,14 +156,20 @@ async def test_discard_raises_timeout_when_the_close_thread_stalls(monkeypatch):
     """A stalled close raises TimeoutError after done.wait(30) returns false."""
     client = _client()
     namespace = _slot_of(client)
+    stopped = threading.Event()
 
-    async def _never() -> object:
-        while True:
+    async def _never() -> None:
+        # Stops on the way out: a coroutine that outlives its test keeps calling
+        # the patched asyncio.sleep and pollutes a later test's recorder (#1179).
+        while not stopped.is_set():
             await asyncio.sleep(0.1)
 
     monkeypatch.setattr(threading.Event, "wait", lambda self, timeout=None: False)
-    with pytest.raises(TimeoutError, match="within 30s"):
-        discard_if_unowned_loop(_never, "_slot", namespace)
+    try:
+        with pytest.raises(TimeoutError, match="within 30s"):
+            discard_if_unowned_loop(_never, "_slot", namespace)
+    finally:
+        stopped.set()
 
 
 async def test_discard_close_thread_is_a_daemon(monkeypatch):
