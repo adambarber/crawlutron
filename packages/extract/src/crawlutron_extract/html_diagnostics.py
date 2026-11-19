@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import re
-from html import parser as html_parser
 
 from safe_url import HostPolicy
 
-from crawlutron_extract._html_common import tag_attrs
+from crawlutron_extract._html_common import _HtmlParser, tag_attrs
 from crawlutron_extract.html_forms_frames import FormFrameCollector
 from crawlutron_extract.html_links import LinkCollector
 from crawlutron_extract.limits import ExtractLimits
@@ -32,10 +31,7 @@ def html_diagnostics(html: bytes | str) -> dict:
     collector = FormFrameCollector(limits)
     has_frameset = False
 
-    class _P(html_parser.HTMLParser):
-        def __init__(self) -> None:
-            super().__init__(convert_charrefs=True)
-
+    class _P(_HtmlParser):
         def handle_starttag(self, tag, attrs):
             nonlocal has_frameset
             attr_dict = tag_attrs(attrs)
