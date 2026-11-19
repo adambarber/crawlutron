@@ -7,6 +7,7 @@ from crawlutron_extract.css_select import SelectorError, validate_css
 from crawlutron_extract.html_diagnostics import html_diagnostics
 from crawlutron_extract.limits import ExtractLimits
 from crawlutron_extract.models import Extraction, Quality
+from crawlutron_extract.pagination import detect_pagination
 from crawlutron_extract.schema import FieldKind, FieldSpec, Schema, extract_records
 from crawlutron_extract.xpath_select import validate_xpath
 
@@ -21,6 +22,7 @@ __all__ = [
     "extract",
     "extract_records",
     "html_diagnostics",
+    "detect_pagination",
     "SelectorError",
     "validate_css",
     "validate_xpath",

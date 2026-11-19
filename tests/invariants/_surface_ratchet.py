@@ -103,6 +103,10 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     "packages/extract/src/crawlutron_extract/html_meta.py": (1, 1),
     # #1137: html_diagnostics is the bounded diagnostics door.
     "packages/extract/src/crawlutron_extract/html_diagnostics.py": (1, 1),
+    # #1137: shared attr-dict normaliser used by both discovery parsers.
+    "packages/extract/src/crawlutron_extract/_html_common.py": (1, 1),
+    # #1137: detect_pagination is the bounded next-page door.
+    "packages/extract/src/crawlutron_extract/pagination.py": (1, 1),
     "packages/extract/src/crawlutron_extract/text_format.py": (1, 1),
     "packages/extract/src/crawlutron_extract/pdf_pass.py": (1, 1),
 }

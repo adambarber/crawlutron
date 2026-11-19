@@ -7,6 +7,7 @@ from html import parser as html_parser
 
 from safe_url import HostPolicy
 
+from crawlutron_extract._html_common import tag_attrs
 from crawlutron_extract.html_forms_frames import FormFrameCollector
 from crawlutron_extract.html_links import LinkCollector
 from crawlutron_extract.limits import ExtractLimits
@@ -37,7 +38,7 @@ def html_diagnostics(html: bytes | str) -> dict:
 
         def handle_starttag(self, tag, attrs):
             nonlocal has_frameset
-            attr_dict = {k: (v or "") for k, v in attrs}
+            attr_dict = tag_attrs(attrs)
             if tag == "frameset":
                 has_frameset = True
             elif tag == "a":
