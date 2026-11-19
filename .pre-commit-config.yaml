@@ -200,6 +200,18 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
+      # The lockfile is a build input every image and CI install trusts; a stale one
+      # installs a graph the manifests no longer declare.
+      - id: lock
+        name: uv lock freshness (the manifest and the lock agree)
+        entry: >-
+          bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
+          .venv/bin/python -m scripts.gate_fanout lock -- uv lock --check
+        language: system
+        files: *service_trigger
+        pass_filenames: false
+        stages: [pre-commit]
+
       # The repo rule "every commit cites an issue" was convention-only (#492): none of
       # the pre-commit-stage hooks reads the message. This one does, at commit-msg stage.
       - id: commit-citation

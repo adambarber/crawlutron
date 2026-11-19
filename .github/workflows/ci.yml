@@ -97,6 +97,18 @@ jobs:
       - name: mypy
         run: .venv/bin/pre-commit run mypy --all-files
 
+  lock:
+    name: Lock freshness
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: ./.github/actions/prepare
+      - name: lock
+        run: .venv/bin/pre-commit run lock --all-files
+
   vulture:
     name: vulture
     runs-on: ubuntu-24.04
@@ -241,6 +253,7 @@ jobs:
       - ruff-format
       - basedpyright
       - jscpd
+      - lock
       - mypy
       - vulture
       - battery
@@ -263,6 +276,7 @@ jobs:
           test "${{ needs.ruff-format.result }}" = "success"
           test "${{ needs.basedpyright.result }}" = "success"
           test "${{ needs.jscpd.result }}" = "success"
+          test "${{ needs.lock.result }}" = "success"
           test "${{ needs.mypy.result }}" = "success"
           test "${{ needs.vulture.result }}" = "success"
           test "${{ needs.battery.result }}" = "success"

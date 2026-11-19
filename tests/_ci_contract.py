@@ -67,6 +67,7 @@ REPORTING_JOBS = {
     "ruff-format",
     "basedpyright",
     "jscpd",
+    "lock",
     "mypy",
     "vulture",
     "battery",
