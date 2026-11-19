@@ -11,6 +11,7 @@ from crawlutron_extract.links import LinkRecord, extract_discovered_links
 from crawlutron_extract.models import Extraction, Quality
 from crawlutron_extract.pagination import detect_pagination
 from crawlutron_extract.schema import FieldKind, FieldSpec, Schema, extract_records
+from crawlutron_extract.sitemap import extract_sitemap_locs
 from crawlutron_extract.xpath_select import validate_xpath
 
 __all__ = [
@@ -25,6 +26,7 @@ __all__ = [
     "extract_discovered_links",
     "extract_js_endpoints",
     "extract_records",
+    "extract_sitemap_locs",
     "html_diagnostics",
     "LinkRecord",
     "SelectorError",
