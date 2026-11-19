@@ -6,6 +6,7 @@ The local RMW needs one lock; the series check-then-insert must not cross the ca
 from __future__ import annotations
 
 import asyncio
+import sys
 import threading
 import time
 from collections.abc import Generator, Mapping
@@ -17,10 +18,11 @@ from crawlutron.runtime.metrics import MetricsStore
 from crawlutron.storage.coordination_counters import CoordinationCounters
 from crawlutron.storage.migrations import migrate_store
 from crawlutron.storage.migrations.manifest import StoreSchema
-from tests._thread_fanout import run_threads
+from tests._thread_fanout import run_thread_fanout, run_threads
 
 THREADS = 10
 INCREMENT_EACH = 100
+_SWITCH_INTERVAL = 1e-6  # force frequent GIL yields so the dict-iteration race lands
 
 
 @pytest.fixture(scope="module")
@@ -336,3 +338,40 @@ async def test_admitted_series_count_stays_at_cap(shared_db) -> None:
     assert counts["__overflow__"] >= 1.0
     await store.observe_crawl(caller_id="flood-7")  # repeat caller: cache hit
     assert store.admitted_series_count() == 256
+
+
+async def test_concurrent_exposition_never_sees_a_changing_dict() -> None:
+    """Concurrent increments racing /metrics snapshots must not raise
+    RuntimeError: dictionary changed size during iteration, and every snapshot
+    is one consistent point-in-time (bare total equals the sum of its labels)."""
+    store = MetricsStore()
+    errors: list[BaseException] = []
+    barrier = threading.Barrier(12)
+    previous = sys.getswitchinterval()
+    sys.setswitchinterval(_SWITCH_INTERVAL)
+    try:
+
+        def worker(index: int) -> None:
+            barrier.wait()
+            ident = threading.get_ident()
+            try:
+
+                async def spin() -> None:
+                    for step in range(60):
+                        if index < 6:
+                            await store.observe_crawl(caller_id=f"caller-{index}-{ident}-{step}")
+                        else:
+                            text = await store.as_prometheus(caller_detail=True)
+                            assert "crawler_crawl_requests_total " in text
+
+                asyncio.run(spin())
+            except BaseException as exc:  # the failure IS the result
+                errors.append(exc)
+
+        run_thread_fanout(worker, count=12)
+        assert not errors, errors
+
+        record = await store.snapshot()
+        assert record.crawl_requests_total == sum(record.caller_counts.values()), record
+    finally:
+        sys.setswitchinterval(previous)

@@ -22,8 +22,8 @@ _PROVIDER_PREFIX = "search_provider:"
 _CALLER_PREFIX = "caller:"
 _SEARCH_CALLER_PREFIX = "search_caller:"
 
-# Fail-closed bound: 256 caller-labelled series per family; a NEW caller past
-# it folds into one reserved overflow series so bare and sum stay exact.
+# Fail-closed bound: 256 caller-labelled series per family; new callers past
+# it fold into one reserved overflow series so bare and sum stay exact.
 _MAX_CALLER_SERIES = 256
 _OVERFLOW_SERIES = "__overflow__"
 
@@ -61,8 +61,7 @@ class MetricsStore:
 
     def __init__(self, counters: CoordinationCounters | None = None) -> None:
         self._counters = counters
-        #: One dict for every counter and label; a counter is added in one place
-        #: whether or not a store is attached.
+        #: One dict for every counter and label; a counter is added in one place, store-attached or not.
         self._local: dict[str, float] = {}
         #: One write lock serializes the local RMW and caller check-then-insert across threads.
         self._write_lock = threading.RLock()
@@ -113,7 +112,12 @@ class MetricsStore:
     async def snapshot(self) -> CountersSnapshot:
         """Every counter as one typed record."""
         store = self._counters
-        source = await store.asnapshot() if store is not None else self._local
+        if store is not None:
+            source = await store.asnapshot()
+        else:
+            # Copy under the write lock so exposition never iterates a resizing dict.
+            with self._write_lock:
+                source = dict(self._local)
         return CountersSnapshot(
             crawl_requests_total=source.get("crawl_requests_total", 0.0),
             crawl_requests_accepted_total=source.get("crawl_requests_accepted_total", 0.0),
@@ -138,8 +142,6 @@ class MetricsStore:
             caller_counts=self._labelled(source, _CALLER_PREFIX),
             search_caller_counts=self._labelled(source, _SEARCH_CALLER_PREFIX),
         )
-
-    # -- the only counter write paths --------------------------------------
 
     def _record_caller_series(self, prefix: str, caller_id: str) -> None:
         """Caller series under the cap: hit is a fast path with no store read;
@@ -422,8 +424,6 @@ _FAMILIES: tuple[_Family, ...] = (
         field="resource_throttle_batches_total",
     ),
 )
-
-# The bare counter families, in exposition order; public so the golden test pins the declaration.
 COUNTER_FAMILIES = tuple(f for f in _FAMILIES if f.kind == "counter" and f.label is None and f.header)
 
 
@@ -432,7 +432,6 @@ def _escape_label_value(value: str) -> str:
 
 
 def _family_value(family: _Family, record: CountersSnapshot, store: MetricsStore) -> str:
-    """One family's rendered value."""
     source: MetricsStore | CountersSnapshot = store if family.store else record
     value = getattr(source, family.field)
     if family.elapsed_ms:
