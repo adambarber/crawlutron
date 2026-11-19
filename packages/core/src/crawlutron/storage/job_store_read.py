@@ -143,7 +143,7 @@ def _merge_live_collections(
 
 # Every field the job response exposes, shared by single and list reads so the
 # two cannot drift into describing different jobs.
-_JOB_STATUS_PROJECTION = """
+JOB_STATUS_PROJECTION = """
     SELECT job_id, root_url, status, created_at, updated_at, stats, error, owner,
            COALESCE(kind, 'whole_site') AS kind,
            (SELECT count(*) FROM crawl_job_frontier f WHERE f.job_id = crawl_jobs.job_id) AS frontier_size,
@@ -153,7 +153,18 @@ _JOB_STATUS_PROJECTION = """
 
 # The list order: newest first, with the job id breaking a tie, so a page of
 # two rows created in the same instant has one order and not two.
-_JOB_LIST_ORDER = " ORDER BY created_at DESC, job_id DESC"
+JOB_LIST_ORDER = " ORDER BY created_at DESC, job_id DESC"
+
+
+def owner_statement(
+    projection: str, where_job_id: bool, tail: str, owner: str | None
+) -> tuple[str, tuple[object, ...]]:
+    """The owner-filtered read statement and its bindings, every fragment a
+    module literal (empty string is a real owner, so the split is on None alone)."""
+    anchor = " WHERE job_id = ?" if where_job_id else " WHERE 1=1"
+    owner_clause = "" if owner is None else " AND owner = ?"
+    statement = projection + anchor + owner_clause + " AND deleted_at IS NULL" + tail
+    return statement, () if owner is None else (owner,)
 
 
 class JobStatusView(TypedDict):
@@ -177,7 +188,7 @@ class JobStatusView(TypedDict):
     error: str | None
 
 
-def _status_row(row: sqlite3.Row, visited: int, results: int) -> JobStatusView:
+def status_row(row: sqlite3.Row, visited: int, results: int) -> JobStatusView:
     """Shape one projected row into the status view the API returns: frontier_size
     and cap_truncated are NULL on a fresh job, and ``kind`` is selected because
     recovery reads it from this view (it was missing, so every job read as whole-site).
@@ -203,7 +214,11 @@ def _status_row(row: sqlite3.Row, visited: int, results: int) -> JobStatusView:
 
 __all__ = [
     "CrawlJobRow",
+    "JOB_STATUS_PROJECTION",
+    "JOB_LIST_ORDER",
     "JobStatusView",
     "normalize_job_state",
+    "owner_statement",
     "row_to_state",
+    "status_row",
 ]

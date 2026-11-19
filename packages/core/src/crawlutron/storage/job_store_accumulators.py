@@ -206,19 +206,6 @@ class JobAccumulators:
         self._content_digest.pop(job_id, None)
         self._seeded_version.pop(job_id, None)
 
-    def counts_by_job(self) -> dict[str, tuple[int, int]]:
-        """``{job_id: (visited, results)}`` in one grouped scan, not one query per job."""
-        with txn_read(self._conn, owner="job_store_accumulators.counts_by_job"):
-            rows = self._conn.execute(
-                """
-                SELECT job_id,
-                       (SELECT count(*) FROM crawl_job_visited v WHERE v.job_id = j.job_id) AS visited_count,
-                       (SELECT count(*) FROM crawl_job_results r WHERE r.job_id = j.job_id) AS results_count
-                  FROM crawl_jobs j
-                """
-            ).fetchall()
-        return {row["job_id"]: (row["visited_count"], row["results_count"]) for row in rows}
-
     def counts_for(self, job_id: str) -> tuple[int, int]:
         """``(visited, results)`` for one job without reading either list."""
         with txn_read(self._conn, owner="job_store_accumulators.counts_for"):

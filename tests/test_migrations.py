@@ -408,7 +408,7 @@ def test_migration_bookkeeping_never_leaks_into_store_payloads(tmp_path):
     result = result_store.get("request-1")
     wire_payload = json.dumps({"jobs": jobs, "result": result}, sort_keys=True)
 
-    assert jobs[0]["results_count"] == 1
+    assert jobs[0]["results_count"] == 0  # listing reads no per-job counts by default (#1131)
     for table_name in _BOOKKEEPING_TABLES:
         assert table_name not in wire_payload
     store.close()

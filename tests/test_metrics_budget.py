@@ -41,8 +41,8 @@ BLOCK_LENGTH = 40
 # and "block length" are sealed (#419): the zero tests are the whole gates.
 _BUDGETS = {
     "abc size": 0,
-    # LOWERED 358 -> 357 (#383); 355 -> 348 (#419); 348 -> 345 (#314): the job
-    # store's owner-filter branches collapsed into one clause helper.
+    # LOWERED 358 -> 357 (#383); 355 -> 348 (#419); 348 -> 345 (#314); 345 -> 346 (#1131);
+    # 346 -> 345 (#1131 fix: removed _read_job_list, JobStore shrunk by one method).
     "largest class": 345,
 }
 

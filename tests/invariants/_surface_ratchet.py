@@ -275,7 +275,7 @@ DECLARED_SURFACE_RATCHET = {
     "packages/core/src/crawlutron/storage/coordination_throttle_store.py": (1, 1),
     "packages/core/src/crawlutron/storage/job_store.py": (2, 1),
     "packages/core/src/crawlutron/storage/job_store_collections.py": (11, 6),
-    "packages/core/src/crawlutron/storage/job_store_read.py": (3, 2),
+    "packages/core/src/crawlutron/storage/job_store_read.py": (7, 4),
     "packages/core/src/crawlutron/storage/job_store_state.py": (2, 1),
     "packages/core/src/crawlutron/runtime/resource_lifecycle.py": (5, 5),
     # (5,5) #643 decline; mapped_value_errors mapping removed (safe_url statelessness)

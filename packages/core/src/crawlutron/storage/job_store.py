@@ -42,13 +42,14 @@ from .job_store_collections import (
     job_max_pages,
 )
 from .job_store_lease import DEFAULT_JOB_CLAIM_SECONDS
+from .job_store_list import read_job_list
 from .job_store_read import (
-    _JOB_LIST_ORDER,
-    _JOB_STATUS_PROJECTION,
+    JOB_STATUS_PROJECTION,
     JobStatusView,
-    _status_row,
     normalize_job_state,
+    owner_statement,
     row_to_state,
+    status_row,
 )
 from .job_store_state import (
     _UPSERT_JOB_ROW_SQL,
@@ -64,17 +65,6 @@ _ROW_COLUMNS = (
     "SELECT job_id, kind, owner, root_url, policy, status, created_at, updated_at, error, "
     "stats, in_flight, transient_retries, claimed_by, claimed_at FROM crawl_jobs"
 )
-
-
-def _owner_statement(
-    projection: str, where_job_id: bool, tail: str, owner: str | None
-) -> tuple[str, tuple[object, ...]]:
-    """The owner-filtered read statement and its bindings, every fragment a
-    module literal (``""`` is a real owner, so the split is on None alone)."""
-    anchor = " WHERE job_id = ?" if where_job_id else " WHERE 1=1"
-    owner_clause = "" if owner is None else " AND owner = ?"
-    statement = projection + anchor + owner_clause + " AND deleted_at IS NULL" + tail
-    return statement, () if owner is None else (owner,)
 
 
 def _fetch_owner_row(
@@ -100,7 +90,7 @@ type _Batch = list[FrontierEntry] | None
 def _read_job_row(
     store: JobStore, job_id: str, *, with_accumulators: bool, owner: str | None = None
 ) -> CrawlJobState | None:
-    statement, params = _owner_statement(_ROW_COLUMNS, True, "", owner)
+    statement, params = owner_statement(_ROW_COLUMNS, True, "", owner)
     try:
         with store._lock:
             with txn_read(store._conn, owner="job_store.read_job_row"):
@@ -325,24 +315,23 @@ class JobStore:
                     total += cur.rowcount
         return total
 
+    def _list_jobs(
+        self,
+        owner: str | None,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[JobStatusView]:
+        with self._lock:
+            return read_job_list(self._conn, owner, limit=limit, offset=offset)
+
     def list_jobs(self, *, limit: int | None = None, offset: int = 0) -> list[JobStatusView]:
-        return self._read_job_list(None, limit=limit, offset=offset)
+        return self._list_jobs(None, limit=limit, offset=offset)
 
     def list_for_caller(
         self, caller_id: str, *, limit: int | None = None, offset: int = 0
     ) -> list[JobStatusView]:
-        return self._read_job_list(caller_id, limit=limit, offset=offset)
-
-    def _read_job_list(self, owner: str | None, *, limit: int | None, offset: int = 0) -> list[JobStatusView]:
-        with self._lock:
-            counts = self._accumulators.counts_by_job()
-            statement, params = _owner_statement(_JOB_STATUS_PROJECTION, False, _JOB_LIST_ORDER, owner)
-            if limit is not None:
-                statement += " LIMIT ? OFFSET ?"
-                params = (*params, max(0, limit), max(0, offset))
-            with txn_read(self._conn, owner="job_store._read_job_list"):
-                rows = self._conn.execute(statement, params).fetchall()
-        return [_status_row(r, *counts.get(r["job_id"], (0, 0))) for r in rows]
+        return self._list_jobs(caller_id, limit=limit, offset=offset)
 
     def count_jobs(self) -> int:
         return self._count_jobs(None)
@@ -352,7 +341,7 @@ class JobStore:
 
     def _count_jobs(self, owner: str | None) -> int:
         with self._lock:
-            statement, params = _owner_statement("SELECT count(*) FROM crawl_jobs", False, "", owner)
+            statement, params = owner_statement("SELECT count(*) FROM crawl_jobs", False, "", owner)
             with txn_read(self._conn, owner="job_store._count_jobs"):
                 row = self._conn.execute(statement, params).fetchone()
         return int(row[0])
@@ -365,12 +354,12 @@ class JobStore:
 
     def _read_status_row(self, job_id: str, owner: str | None) -> JobStatusView | None:
         with self._lock:
-            statement, params = _owner_statement(_JOB_STATUS_PROJECTION, True, "", owner)
+            statement, params = owner_statement(JOB_STATUS_PROJECTION, True, "", owner)
             row = _fetch_owner_row(self._conn, statement, (job_id, *params))
             if row is None:
                 return None
             visited, results = self._accumulators.counts_for(job_id)
-        return _status_row(row, visited, results)
+        return status_row(row, visited, results)
 
     def exists(self, job_id: str) -> bool:
         return self._has_job_row(job_id, None)
@@ -390,7 +379,7 @@ class JobStore:
 
     def _has_job_row(self, job_id: str, owner: str | None) -> bool:
         with self._lock:
-            statement, params = _owner_statement("SELECT 1 FROM crawl_jobs", True, "", owner)
+            statement, params = owner_statement("SELECT 1 FROM crawl_jobs", True, "", owner)
             row = _fetch_owner_row(self._conn, statement, (job_id, *params))
         return row is not None
 
