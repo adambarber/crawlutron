@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import TYPE_CHECKING
 
@@ -46,18 +47,22 @@ class HttpxTransport:
         timeout = Timeouts.for_request(request.timeout_seconds).as_httpx()
         started = time.monotonic()
 
-        async with client.stream("GET", pinned, timeout=timeout, follow_redirects=False) as response:
-            content_length = response.headers.get("content-length")
-            if pinned_transport.declared_length_exceeds(content_length, max_bytes):
-                return http_413(request.url, request.url, started)
+        # Hard end-to-end deadline for the whole hop: httpx's timeout is per-read
+        # inactivity, so a drip feeder resets it forever without this wrapper.
+        deadline_remaining = request.timeout_seconds - (time.monotonic() - started)
+        async with asyncio.timeout(deadline_remaining):
+            async with client.stream("GET", pinned, timeout=timeout, follow_redirects=False) as response:
+                content_length = response.headers.get("content-length")
+                if pinned_transport.declared_length_exceeds(content_length, max_bytes):
+                    return http_413(request.url, request.url, started)
 
-            status_code = response.status_code
-            location = response.headers.get("location")
-            if 300 <= status_code < 400 and location is not None:
-                # Redirect: do not read the body; the walker advances the hop.
-                return redirect_from_headers(request, status_code, started, response.headers)
+                status_code = response.status_code
+                location = response.headers.get("location")
+                if 300 <= status_code < 400 and location is not None:
+                    # Redirect: do not read the body; the walker advances the hop.
+                    return redirect_from_headers(request, status_code, started, response.headers)
 
-            raw = await read_capped_async(response.aiter_raw(), max_bytes)
-            return await terminal_from_response(
-                response, request, started, max_bytes, response.headers, raw, status_code
-            )
+                raw = await read_capped_async(response.aiter_raw(), max_bytes)
+                return await terminal_from_response(
+                    response, request, started, max_bytes, response.headers, raw, status_code
+                )
