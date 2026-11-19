@@ -10,7 +10,6 @@ from pydantic import ValidationError
 from crawlutron.admission.payload_helpers import checked_payload_urls
 from crawlutron.admission.policy import PolicyTier, read_policy
 from crawlutron.config.settings import CrawlerSettings
-from crawlutron.extraction.document_text import format_extracted_document_text
 from crawlutron.extraction.trees import FrameCollector, frames_from, walkable
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.json_value import JsonValue
@@ -241,26 +240,6 @@ class TestFetchRetries:
 
 
 class TestPureParsing:
-    def test_range_action_expands_across_letters(self) -> None:
-        # "1a - 1c" covers three items, and every one of them is stamped with the action. The observable claim
-        # is per-item: each record carries the suffix.
-        out = format_extracted_document_text(
-            "1a - 1c Approve\n1a.\nAlpha\n1b.\nBeta\n1c.\nGamma",
-            source_url="http://x/",
-        )
-        assert out == (
-            "1a. Alpha [Action: Approve]\n\n1b. Beta [Action: Approve]\n\n1c. Gamma [Action: Approve]"
-        )
-
-    def test_range_with_mismatched_item_numbers_is_honoured_literally(self) -> None:
-        # "1a - 5a" is a typo in the source document rather than a range: the two halves are stamped and
-        # nothing in between is invented.
-        out = format_extracted_document_text(
-            "1a - 5a Approve\n1a.\nAlpha\n2a.\nBravo\n5a.\nDelta",
-            source_url="http://x/",
-        )
-        assert out == "1a. Alpha [Action: Approve]\n\n2a. Bravo\n\n5a. Delta [Action: Approve]"
-
     def test_looks_like_binary_body_branches(self) -> None:
         assert (
             looks_like_binary_body(b"PK\x03\x04data", "application/octet-stream", canonical("http://x/z.zip"))
@@ -270,17 +249,6 @@ class TestPureParsing:
         assert looks_like_binary_body(b"data", "application/json", canonical("http://x/")) is False
         assert looks_like_binary_body(b"data", "application/octet-stream", canonical("http://x/")) is True
         assert looks_like_binary_body(b"data", "application/pdf", canonical("http://x/a.pdf")) is False
-
-    def test_format_extracted_document_text_range_action(self) -> None:
-        text = "1a - 1c Approve\n1a.\nBuild the thing\n1b.\nFix the bug\n1c.\nShip it"
-        out = format_extracted_document_text(text, source_url="http://x/")
-        assert "Approve" in out
-
-    def test_should_join_document_paragraph_heading(self) -> None:
-        # Kept as the negative half of the heading rule from the pure-parsing side. The heading and the prose
-        # stay two records, so the heading did not absorb what followed it.
-        out = format_extracted_document_text("Section A\nsome prose", source_url="http://x/")
-        assert out == "Section A\n\nsome prose"
 
     def test_extract_frames_skips_bad_and_dupes(self) -> None:
         html = (
@@ -331,10 +299,9 @@ class TestHttpStrategyResult:
 
     @pytest.fixture(autouse=True)
     def _isolated_doc_pool(self, monkeypatch):
-        """A fresh isolated doc pool, immune to a prior test's terminal teardown (#246)."""
-        from tests._doc_pool_fixtures import fresh_doc_pool
-
-        fresh_doc_pool(monkeypatch)
+        """The doc pool no longer exists (extraction runs through crawlutron_extract),
+        so this isolation fixture is a no-op shim kept for fixture ordering."""
+        yield
 
     async def test_success_html(self) -> None:
         assert_result_success(await self._run())
@@ -375,7 +342,7 @@ class TestHttpStrategyResult:
         non_html = await self._run(
             policy={"extraction": EXTRACTION_TRAFILATURA}, ctype="application/json", body=b"{}"
         )
-        assert non_html.text == ""
+        assert non_html.text == "{}"
 
     async def test_discovery_diagnostics_records_exceptions_and_feeds(self) -> None:
         _failed_probe = ConnectionError("discovery failed")

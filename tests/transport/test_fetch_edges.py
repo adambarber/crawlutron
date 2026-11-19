@@ -8,9 +8,7 @@ import pytest
 from crawlutron.admission.payload_helpers import checked_payload_urls
 from crawlutron.admission.policy import read_policy
 from crawlutron.config.settings import CrawlerSettings
-from crawlutron.extraction.content import forms_from
-from crawlutron.extraction.document_text import format_extracted_document_text
-from crawlutron.extraction.trees import walkable
+from crawlutron.extraction.trees import forms_from, walkable
 from crawlutron.models.crawl_request import CrawlRequest as _CrawlRequestModel
 from crawlutron.models.json_value import JsonValue
 from crawlutron.models.request_profile_record import RequestProfileRecord
@@ -164,14 +162,6 @@ class TestFetchHelperUtilities:
         )
         assert all("ftp://" not in getattr(link, "url", str(link)) for link in links)
         assert any("https://ok/x" in getattr(link, "url", str(link)) for link in links)
-
-    def test_public_participation_breaks_item_title_collection(self) -> None:
-        # A boilerplate section marker ends the title run rather than joining it, so the marker is dropped and
-        # the text after it is not mistaken for more title.
-        out = format_extracted_document_text(
-            "1a.\nBuild\nPublic Participation\nNext item", source_url="http://x/"
-        )
-        assert out == "1a. Build\n\nNext item"
 
     def test_looks_like_binary_body_magic_without_zip_extension(self) -> None:
         # PK magic with a non-.zip URL still classifies as binary.

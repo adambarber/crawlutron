@@ -11,8 +11,7 @@ from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
-from crawlutron_extract.limits import ExtractLimits
-from crawlutron_extract.pdf_pass import extract_pdf as _package_extract_pdf
+from crawlutron_extract import extract as _package_extract
 from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.transport.httpx_transport import HttpxTransport
@@ -57,11 +56,16 @@ async def _afetch_document_bytes(
     return result.body
 
 
-async def _capped_extract_pdf(pdf_bytes: bytes) -> str:
-    """Extract Markdown text from PDF bytes via the package, under the cap."""
+async def _capped_extract_pdf(pdf_bytes: bytes, content_type: str | None, url: NormalizedUrl | None) -> str:
+    """Extract Markdown text from document bytes via the package, under the cap."""
     async with _DOC_EXTRACTION_SEMAPHORE:
-        result = await asyncio.to_thread(_package_extract_pdf, pdf_bytes, ExtractLimits())
-    return result.get("text") or ""
+        result = await asyncio.to_thread(
+            _package_extract,
+            pdf_bytes,
+            content_type or "application/pdf",
+            url=url.raw if url is not None else None,
+        )
+    return result.markdown or result.text or ""
 
 
 def default_document_text_extractor(url: NormalizedUrl, timeout_seconds: float | None = None) -> str:
@@ -75,7 +79,8 @@ def default_document_text_extractor(url: NormalizedUrl, timeout_seconds: float |
         pdf_bytes = await _afetch_document_bytes(url, timeout_seconds=timeout_seconds)
         if not pdf_bytes:
             return ""
-        return await _capped_extract_pdf(pdf_bytes)
+        content_type = "application/pdf" if pdf_bytes.startswith(b"%PDF") else ""
+        return await _capped_extract_pdf(pdf_bytes, content_type, url)
 
     try:
         with ThreadPoolExecutor(max_workers=1, thread_name_prefix="document-extract") as pool:

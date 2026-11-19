@@ -474,7 +474,7 @@ def test_host_policy_detector_accepts_fixed_extraction_boundaries():
     An extraction boundary takes a bound, not a policy; if the detector
     ever flags these, the sanction needs a second look.
     """
-    path = APP_ROOT / "extraction" / "content.py"
+    path = APP_ROOT / "extraction" / "trees.py"
     tree = parsed(path)
     assert not [
         offender

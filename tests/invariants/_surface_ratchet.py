@@ -21,7 +21,7 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     "packages/core/src/crawlutron/config/env.py": (8, 6),
     # RAISED to (7, 6): failed_unified_result is the single failure projection.
     "packages/core/src/crawlutron/service/response_shaping.py": (7, 6),
-    "packages/core/src/crawlutron/service/unified_shaping.py": (5, 5),
+    "packages/core/src/crawlutron/service/unified_shaping.py": (7, 7),
     # #861: the render core moved from api/ to service/; logger is private so
     # surface is two public symbols, both entry points.
     "packages/core/src/crawlutron/service/render.py": (3, 3),
@@ -214,8 +214,6 @@ DECLARED_SURFACE_RATCHET = {
     "packages/core/src/crawlutron/service/errors.py": (17, 16),
     # #1082: admit_webhook_target is the validate-then-admit chokepoint facade.
     "packages/core/src/crawlutron/service/webhooks.py": (16, 14),
-    "packages/core/src/crawlutron/extraction/content.py": (4, 4),
-    "packages/core/src/crawlutron/extraction/llm_format.py": (4, 4),
     # #668 raised 18,0 -> 19,0: RATE_LIMITED is the JSON-RPC code the anonymous
     # meter's /mcp refusal answers with.
     "packages/mcp/src/crawlutron_mcp/constants.py": (19, 0),

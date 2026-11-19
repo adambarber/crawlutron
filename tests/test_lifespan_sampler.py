@@ -12,7 +12,6 @@ def _spy_on_every_teardown(monkeypatch, http_closer) -> list[str]:
     is the real object with its real ``close`` replaced, not a stand-in, so a
     hand-rolled gate that knows one method fails on whatever the next one is.
     """
-    from crawlutron.extraction import content as extraction_mod
     from crawlutron.orchestration import engine as engine_mod
     from crawlutron.transport import http_client_pool as http_mod
     from crawlutron_rest import main as main_mod
@@ -25,13 +24,12 @@ def _spy_on_every_teardown(monkeypatch, http_closer) -> list[str]:
 
         return _close
 
-    # Start from the neutraliser: the set of closers the lifespan reaches is production's list, and this test
-    # only over-runs the four it is counting.
+    # Start from the neutraliser: production's closer set, minus the deleted "doc"
+    # step (extraction now runs through crawlutron_extract).
     stub_heavy_teardown(monkeypatch)
     monkeypatch.setattr(http_mod, "close_async_http_client", http_closer)
     monkeypatch.setattr(http_mod, "close_cffi_session", _record("cffi"))
     monkeypatch.setattr(main_mod, "close_browser_pool", _record("browser"))
-    monkeypatch.setattr(extraction_mod, "shutdown_doc_extraction_executor", _record("doc"))
     monkeypatch.setattr(engine_mod.resource_gate(), "close", lambda: ran.append("gate"))
     return ran
 
@@ -67,7 +65,7 @@ class TestShutdownRunsEveryStep:
             async with app.router.lifespan_context(app):
                 pass
 
-        skipped = [n for n in ("cffi", "browser", "doc", "gate") if n not in ran]
+        skipped = [n for n in ("cffi", "browser", "gate") if n not in ran]
         assert not skipped, f"every teardown step must be attempted; skipped: {skipped}"
 
     async def test_a_clean_shutdown_runs_every_step_and_raises_nothing(self, monkeypatch):
@@ -81,4 +79,4 @@ class TestShutdownRunsEveryStep:
         async with app.router.lifespan_context(app):
             pass
 
-        assert ran == ["cffi", "browser", "doc", "gate"]
+        assert ran == ["cffi", "browser", "gate"]

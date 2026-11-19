@@ -1,122 +1,30 @@
-"""Test helpers for the extraction pipeline."""
+"""Test helpers for the extraction pipeline (post-cutover).
+
+Only the helpers still needed by surviving tests are kept; they source from
+``crawlutron.extraction.discovery`` and ``crawlutron.transport.fetchers``.
+"""
 
 from __future__ import annotations
 
-__all__ = ["format_extracted_document_text"]
+__all__ = ["default_http_fetcher", "extract_discovered_links", "pin_selector_pool"]
 
-from dataclasses import replace
-from typing import TypedDict, Unpack
-
-import crawlutron.extraction.content as _extraction_module
-from crawlutron.config.settings import CrawlerSettings
-from crawlutron.extraction.content import (
-    detect_pagination as _production_detect_pagination,
-)
-from crawlutron.extraction.content import (
-    extract_content as _production_extract_content,
-)
-from crawlutron.extraction.content import (
+from crawlutron.extraction.discovery import (
     extract_discovered_links as _production_extract_discovered_links,
 )
-from crawlutron.extraction.content import (
-    extract_js_endpoints as _extract_js_endpoints_with_policy,
-)
-from crawlutron.extraction.content import (
-    html_diagnostics as _production_html_diagnostics,
-)
-from crawlutron.extraction.document_text import format_extracted_document_text
 from crawlutron.transport.fetchers import default_http_fetcher as _production_default_http_fetcher
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 
 def pin_selector_pool(monkeypatch):
-    """Set the documented knob to 4 and shut the live pool so the next
-    ``_extraction_executor`` call rebuilds at the pinned size.
+    """No-op shim for the unused ``four_worker_selector_pool`` fixture.
+
+    The doc pool no longer exists, so there is nothing to shut down or rebuild.
     """
-    import asyncio
-
-    from crawlutron.extraction.content import shutdown_doc_extraction_executor
-
     monkeypatch.setenv("CRAWLUTRON_EXTRACTION_THREADS", "4")
-    asyncio.run(shutdown_doc_extraction_executor())
 
 
-class _SettingsOverrides(TypedDict, total=False):
-    """The subset of CrawlerSettings fields tests may override."""
-
-    extraction_doc_timeout: float
-    extraction_selector_timeout: float
-    extraction_doc_acquire_timeout: float
-    extraction_max_markdown: int
-
-
-def html_diagnostics(html, source_url):
-    return _production_html_diagnostics(html, source_url)
-
-
-def extract_content(content, content_type, url, selectors=None):
-    return _production_extract_content(content, content_type, url, selectors)
-
-
-def extract_js_endpoints(endpoints, source_url=None, *, policy=UNRESTRICTED_HOST_POLICY):
-    return _extract_js_endpoints_with_policy(endpoints, source_url, host_policy=policy)
-
-
-def detect_pagination(html, final_url):
-    return _production_detect_pagination(html, final_url)
-
-
-def extract_discovered_links(
-    html,
-    source_url,
-    *,
-    max_links=250,
-    tree=None,
-):
-    return _production_extract_discovered_links(
-        html,
-        source_url,
-        max_links=max_links,
-        tree=tree,
-    )
-
-
-def doc_worker_acquisitions(monkeypatch):
-    """Record calls to the production worker-acquisition chokepoint, watching the one
-    decision that can fork a markitdown worker; patching Process hid more than it
-    showed, and the spy answers ``None`` so a slip degrades instead of raising.
-    """
-    acquisitions: list[bool] = []
-
-    def spy(timeout) -> None:
-        acquisitions.append(True)
-        return None
-
-    monkeypatch.setattr(_extraction_module.DOC_POOL, "acquire", spy)
-    return acquisitions
+def extract_discovered_links(html, source_url, *, max_links=250, tree=None):
+    return _production_extract_discovered_links(html, source_url, max_links=max_links, tree=tree)
 
 
 async def default_http_fetcher(*args, **kwargs):
     return await _production_default_http_fetcher(*args, **kwargs)
-
-
-def settings_with(**overrides: Unpack[_SettingsOverrides]) -> CrawlerSettings:
-    """Settings carrying the extraction deadlines a test wants, built from mapping
-    and overridden, so a test that only cares about one deadline still runs against
-    whatever the environment says about every other knob -- as production does.
-    """
-    return replace(CrawlerSettings.from_mapping(), **overrides)
-
-
-# The surface test modules import; a name dropped here fails their collection.
-__all__ = [
-    "default_http_fetcher",
-    "detect_pagination",
-    "doc_worker_acquisitions",
-    "extract_content",
-    "extract_discovered_links",
-    "extract_js_endpoints",
-    "format_extracted_document_text",
-    "html_diagnostics",
-    "settings_with",
-]

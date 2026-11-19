@@ -5,8 +5,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from crawlutron.extraction.classify import classify_page_with_evidence
-from crawlutron.extraction.content import is_html
-from crawlutron.extraction.document_text import format_extracted_document_text
 from crawlutron.models.classification_evidence import ClassificationEvidenceRecord
 from crawlutron.models.request_profile_diagnostics import RequestProfileDiagnostics
 from crawlutron.models.taxonomy import Classification
@@ -15,7 +13,6 @@ from crawlutron.transport.content_pipeline import run_extraction
 from crawlutron.transport.decompression import decompress_body as _decompress_body
 from crawlutron.transport.http_response import ExtractedHttpContent, FetchedResponse, HttpStrategyContext
 from crawlutron.vocabulary.extraction import (
-    EXTRACTION_DOCUMENT,
     EXTRACTION_METHOD_HTTP_BODY,
     EXTRACTION_METHOD_HTTP_HTML,
     EXTRACTION_TRAFILATURA,
@@ -28,11 +25,21 @@ __all__ = [
 ]
 
 
+def _is_html_body(content_type: str | None, body: str) -> bool:
+    """Decide whether an already-decoded body is HTML: content-type says so, or
+    the text itself opens like an HTML document. Mirrors the legacy content
+    pipeline's sniff for a ``str`` body."""
+    ct = (content_type or "").lower()
+    if "html" in ct:
+        return True
+    return body.lstrip().lower().startswith(("<html", "<!doctype html>"))
+
+
 async def extract_http_phase(ctx: HttpStrategyContext, resp: FetchedResponse) -> ExtractedHttpContent:
     """Decode the body, run the selected extractor, measure content.
 
-    ``is_html`` is :func:`crawlutron.extraction.content.is_html`, the one predicate the funnel
-    dispatches on -- not a second reading of the same question two functions apart.
+    ``_is_html_body`` is the one predicate the funnel dispatches on -- not a
+    second reading of the same question two functions apart.
     """
     content_encoding = resp.headers.get("content-encoding", "")
     if content_encoding:
@@ -43,7 +50,7 @@ async def extract_http_phase(ctx: HttpStrategyContext, resp: FetchedResponse) ->
         strategy_decompression_failed = resp.decompression_failed
 
     body_text = body_decode.decode_body(decompressed, resp.content_type)
-    html_body = is_html(resp.content_type, body_text)
+    html_body = _is_html_body(resp.content_type, body_text)
     html = body_text if html_body else None
     extracted = await run_extraction(
         extraction=ctx.extraction,
@@ -57,9 +64,6 @@ async def extract_http_phase(ctx: HttpStrategyContext, resp: FetchedResponse) ->
         settings=ctx.settings,
     )
     text, markdown = extracted.text, extracted.markdown
-    if ctx.extraction == EXTRACTION_DOCUMENT and (resp.content_type or "").lower().startswith("text/"):
-        text = format_extracted_document_text(text, source_url=resp.final_url.raw)
-        markdown = text
 
     return ExtractedHttpContent(
         decompressed=decompressed,

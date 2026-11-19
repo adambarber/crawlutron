@@ -434,9 +434,6 @@ async def _shutdown_services(_app: FastAPI) -> None:
 
     await shutdown_job_runner()
 
-    # Imported here, not at module scope: this pulls in the markitdown stack,
-    # which CLI/MCP callers that never render a PDF must not pay for.
-    from crawlutron.extraction.content import shutdown_doc_extraction_executor
     from crawlutron.transport.http_client_pool import close_async_http_client, close_cffi_session
 
     async def _close_gate() -> None:
@@ -464,9 +461,6 @@ async def _shutdown_services(_app: FastAPI) -> None:
             ("close_async_http_client", close_async_http_client),
             ("close_cffi_session", close_cffi_session),
             ("close_browser_pool", close_browser_pool),
-            # The lazy document-extraction workers are the one pool nothing
-            # above touches; without this their subprocesses outlive shutdown.
-            ("shutdown_doc_extraction_executor", shutdown_doc_extraction_executor),
             ("resource_gate.close", _close_gate),
             # The stores create_app built hold long-lived connections; shutdown
             # closes them so nothing relies on GC finalization (#838).

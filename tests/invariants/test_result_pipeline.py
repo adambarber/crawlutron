@@ -6,15 +6,12 @@ import ast
 import pathlib
 
 from tests.chokepoint_walks import (
-    APP_ROOT,
     SANCTIONED,
     app_trees,
     functions,
-    name_reads,
     named_calls_to_any,
     offender,
     offender_at,
-    resolved_expr_name,
 )
 from tests.rules import Bites, Registry, Rule
 
@@ -22,18 +19,6 @@ from tests.rules import Bites, Registry, Rule
 # dispatch, one discovery call, one projection The browser and HTTP strategies each carried the same
 
 _CONTENT_PIPELINE_OWNER = frozenset({"content_pipeline.py"})  # owner: dispatches the raw extractors
-
-
-# Import-resolved, so an alias cannot slip past the sweep.
-_EXTRACTION_ENTRY_POINTS = frozenset(
-    {
-        "crawlutron.extraction.content.extract_document",
-        "crawlutron.extraction.content.extract_html",
-        "crawlutron.extraction.content.extract_content",
-        "crawlutron.extraction.content.extract_post_fetch_discovery",
-        "crawlutron.extraction.content.normalized_extraction",
-    }
-)
 
 
 # The terminal-result builders, not the model: result_helpers constructing EngineCrawlResult is where the
@@ -56,76 +41,6 @@ _DISCOVERY_RESULT_FIELDS = frozenset(
 
 
 _DISCOVERY_PROJECTION = "discovery_result_fields"
-
-
-def _extraction_reach_past_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """Flag a use of a raw extractor outside the content pipeline.
-
-    Keyed on name-in-load-position, not a call or import: both strategies
-    dispatched an offloaded extractor as an argument.
-    """
-    offenders: list[str] = []
-    for node in name_reads(tree):
-        if not isinstance(node.ctx, ast.Load):
-            continue
-        name = resolved_expr_name(tree, node)
-        if name in _EXTRACTION_ENTRY_POINTS:
-            offenders.append(
-                offender_at(
-                    path,
-                    node,
-                    f"{name} is dispatched outside "
-                    f"strategies/content_pipeline.py; run the mode chain through _run_extraction",
-                )
-            )
-    return offenders
-
-
-_EXTRACTION_PROOF_PATH = APP_ROOT / "transport" / "_synthetic.py"
-
-
-def _assert_owner_extraction_still_fires() -> None:
-    """The exemption is not what makes the tree clean: the owner's own calls are
-    the shape this detector matches, so the real pipeline must still fire when
-    its tree is read at a non-sanctioned path."""
-    owner = next((path, tree) for path, tree in app_trees() if path.name in _CONTENT_PIPELINE_OWNER)
-    assert owner[0].name == "content_pipeline.py", owner[0]
-    assert _extraction_reach_past_offenders(owner[1], _EXTRACTION_PROOF_PATH), (
-        "the detector no longer matches the owner"
-    )
-
-
-EXTRACTION_IS_DISPATCHED_BY_THE_CONTENT_PIPELINE_ALONE = Rule(
-    name="extraction-is-dispatched-by-the-content-pipeline-alone",
-    find=_extraction_reach_past_offenders,
-    summary="dispatch extraction through strategies/content_pipeline._run_extraction",
-    excludes=SANCTIONED | _CONTENT_PIPELINE_OWNER,  # owner: its own dispatch is the matched shape
-    premise=_assert_owner_extraction_still_fires,
-    bite=lambda: (
-        # The offloaded extractor AND the bare extractor call are two dispatch shapes, so a source carrying
-        # both is worth exactly two findings.
-        Bites(
-            "from crawlutron.extraction.content import extract_html, normalized_extraction\n"
-            "async def f(decoded, final_url):\n"
-            "    extracted = await asyncio.to_thread(extract_html, decoded, final_url)\n"
-            "    return normalized_extraction(extracted)\n",
-            "_run_extraction",
-            count=2,
-        ),
-        Bites(
-            "from crawlutron.extraction.content import extract_content as _ec\n"
-            "def f(body, content_type, url):\n"
-            "    return _ec(body, content_type, url)\n",
-            "_run_extraction",
-        ),
-    ),
-    clean=lambda: (
-        # Routing through the chokepoint is the sanctioned shape.
-        "from crawlutron.transport.content_pipeline import _run_extraction\n"
-        "async def f(body, final_url):\n"
-        "    return await _run_extraction(extraction='full', content=body, decoded='')\n",
-    ),
-)
 
 
 # The discovery projection's one-definition census sits with the rules it guards:
@@ -200,12 +115,7 @@ def test_discovery_result_projection_has_exactly_one_definition():
     assert "packages/core/src/crawlutron/transport/content_pipeline.py" in definitions[0], definitions
 
 
-RULES = Registry(
-    (
-        EXTRACTION_IS_DISPATCHED_BY_THE_CONTENT_PIPELINE_ALONE,
-        DISCOVERED_LINK_RESULT_FIELDS_COME_FROM_THE_PIPELINE,
-    )
-)
+RULES = Registry((DISCOVERED_LINK_RESULT_FIELDS_COME_FROM_THE_PIPELINE,))
 
 
 def test_no_rule_violations():

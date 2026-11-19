@@ -42,15 +42,15 @@ def _html_item(i: int = 0) -> EngineCrawlResult:
 async def test_aformat_crawl_item_offloads_metadata_parse(monkeypatch):
     """The lxml metadata parse runs in a worker thread, not on the loop."""
     calls: list[tuple[str, str]] = []
-    from crawlutron.extraction import llm_format as llm_mod
+    from crawlutron.service import unified_shaping as shaping_mod
 
-    real_fn = llm_mod.extract_llm_metadata
+    real_fn = shaping_mod.extract_llm_metadata
 
     def spy(html, url):
         calls.append((html, url))
         return real_fn(html, url)
 
-    monkeypatch.setattr(llm_mod, "extract_llm_metadata", spy)
+    monkeypatch.setattr(shaping_mod, "extract_llm_metadata", spy)
     seen_threads: set[int] = set()
     loop_thread = asyncio.get_running_loop()
 

@@ -1,16 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Mapping, Sequence
-from typing import cast
+from typing import cast, get_type_hints
+
+from crawlutron_extract import extract as _package_extract
+from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.delta import DeltaContext, classify_result
-from crawlutron.extraction.llm_format import (
-    PageMetadata as ExtractedPageMetadata,
-)
-from crawlutron.extraction.llm_format import (
-    extract_carried_metadata,
-)
 from crawlutron.models.classification_evidence import ClassificationEvidence, ClassificationEvidenceRecord
 from crawlutron.models.content_validators import ContentValidators
 from crawlutron.models.crawl_result import CrawlResult, EngineCrawlResult
@@ -20,6 +18,7 @@ from crawlutron.models.crawl_strategy_attempt import CrawlStrategyAttempt
 from crawlutron.models.discovered_link import DiscoveredLink
 from crawlutron.models.discovered_link_response import DiscoveredLinkResponse as WireDiscoveredLink
 from crawlutron.models.json_value import JsonValue
+from crawlutron.models.page_metadata import PageMetadata
 from crawlutron.models.page_metadata_response import PageMetadataResponse
 from crawlutron.models.serialization import to_dict as _result_to_dict
 from crawlutron.models.strategy_attempt import StrategyAttempt
@@ -28,10 +27,80 @@ from crawlutron.models.unified_crawl_result import UnifiedCrawlResult
 from crawlutron.vocabulary.taxonomy import CrawlClassification
 
 #: The batch shaper is generic over its result shape so ``adapt`` and ``results``
-#: agree: browser results with an engine adapter are no longer expressible.
+#: agree; browser results with an engine adapter are no longer expressible.
+_JSON_MEMBERSHIP = (type(None), bool, int, float, str, list, dict)
 
 
-def format_crawl_item(item: EngineCrawlResult) -> tuple[str | None, ExtractedPageMetadata]:
+def _build_field_types() -> dict[str, type | tuple[type, ...]]:
+    """Derive each ``PageMetadata`` field's admitted type once, at import time."""
+    field_types: dict[str, type | tuple[type, ...]] = {}
+    for _field, _hint in get_type_hints(PageMetadata).items():
+        if _hint is JsonValue:
+            field_types[_field] = _JSON_MEMBERSHIP
+            continue
+        _members = getattr(_hint, "__args__", ()) or ()
+        if not _members:
+            field_types[_field] = _hint
+            continue
+        _live = tuple(arg for arg in _members if arg is not type(None))
+        field_types[_field] = _live[0] if len(_live) == 1 else _live
+    return field_types
+
+
+_FIELD_TYPES = _build_field_types()
+
+
+def extract_carried_metadata(value: object) -> PageMetadata:
+    """The one place unproven page metadata becomes :class:`PageMetadata`: the JSON
+    from the engine spill is admitted field by field (a junk field drops, the rest
+    survives).
+    """
+    if not isinstance(value, dict):
+        return {}
+    admitted = {
+        key: item
+        for key, item in value.items()
+        if (expected := _FIELD_TYPES.get(key)) is not None and isinstance(item, expected)
+    }
+    return cast(PageMetadata, admitted)
+
+
+def extract_llm_metadata(html: str, url: NormalizedUrl | None) -> PageMetadata:
+    """Extract Page metadata from HTML via one crawlutron_extract pass. The package's
+    metadata collector mirrors PageMetadata's key set (title, description, og/twitter
+    fields, canonical, favicon, language, json_ld).
+    """
+    metadata: dict[str, object] = {"source_url": url.raw if url is not None else ""}
+    extraction = _package_extract(
+        html.encode("utf-8", "replace"), "text/html", url=url.raw if url is not None else None
+    )
+    metadata.update(extraction.metadata)
+    raw_json_ld = metadata.get("json_ld")
+    if isinstance(raw_json_ld, str):
+        try:
+            metadata["json_ld"] = json.loads(raw_json_ld)
+        except (ValueError, TypeError):
+            # The package joins multiple blocks with "\n"; parse each as a separate document.
+            blocks = [block for block in raw_json_ld.split("\n") if block.strip()]
+            parsed: list[object] = []
+            ok = True
+            for block in blocks:
+                try:
+                    parsed.append(json.loads(block))
+                except (ValueError, TypeError):
+                    ok = False
+                    break
+            if ok and len(blocks) > 1:
+                metadata["json_ld"] = parsed
+            elif ok and len(blocks) == 1:
+                metadata["json_ld"] = parsed[0]
+            else:
+                # Malformed JSON-LD is skipped, matching the original extractor.
+                metadata.pop("json_ld", None)
+    return extract_carried_metadata(metadata)
+
+
+def format_crawl_item(item: EngineCrawlResult) -> tuple[str | None, PageMetadata]:
     """Unified output formatter: ``(markdown, metadata)`` for any result, through one
     path. Metadata comes from the carried ``llm_metadata`` when present, else from
     ``extract_llm_metadata`` over the HTML; the carried field adds no new wire keys.
@@ -44,8 +113,6 @@ def format_crawl_item(item: EngineCrawlResult) -> tuple[str | None, ExtractedPag
         if isinstance(carried, dict) and carried:
             return markdown, extract_carried_metadata(carried)
         if html and url is not None:
-            from crawlutron.extraction.llm_format import extract_llm_metadata
-
             return markdown, extract_llm_metadata(html, url)
         return markdown, {}
     text = item.text
@@ -54,7 +121,7 @@ def format_crawl_item(item: EngineCrawlResult) -> tuple[str | None, ExtractedPag
     return text, {}
 
 
-async def aformat_crawl_item(item: EngineCrawlResult) -> tuple[str | None, ExtractedPageMetadata]:
+async def aformat_crawl_item(item: EngineCrawlResult) -> tuple[str | None, PageMetadata]:
     """Async :func:`format_crawl_item`: the whole formatter leaves the loop.
     The fallback tree-reparse would otherwise park the event loop once per item;
     runs the identical sync formatter on a worker thread.
@@ -105,7 +172,7 @@ def _validator_model(validators: Mapping[str, str]) -> ContentValidators | None:
     return ContentValidators.model_validate(validators) if validators else None
 
 
-def _metadata_response(extracted: ExtractedPageMetadata) -> PageMetadataResponse:
+def _metadata_response(extracted: PageMetadata) -> PageMetadataResponse:
     """Project an extractor metadata key-set to the wire model, loudly.
 
     A key the wire model does not declare is an error, never the silent drop the
@@ -239,6 +306,8 @@ __all__ = [
     "abuild_unified_result",
     "aformat_crawl_item",
     "build_unified_result",
+    "extract_carried_metadata",
+    "extract_llm_metadata",
     "format_crawl_item",
     "render_result_to_unified",
 ]

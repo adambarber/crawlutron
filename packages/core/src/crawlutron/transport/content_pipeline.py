@@ -10,27 +10,20 @@ import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypedDict
 
+from crawlutron_extract import extract as _package_extract
+from crawlutron_extract.limits import ExtractLimits
+
 from crawlutron.admission.policy import discovery_flags
 from crawlutron.config.settings import CrawlerSettings
-from crawlutron.extraction.content import (
+from crawlutron.extraction.discovery import (
     PostFetchDiscovery,
-    Selectors,
-    extract_content,
-    extract_html,
     extract_post_fetch_discovery,
     normalized_extraction,
 )
-from crawlutron.extraction.documents import adocument_extract
 from crawlutron.models.classification_evidence import ClassificationEvidenceRecord
 from crawlutron.models.discovered_link import DiscoveredLink
 from crawlutron.models.page_metadata import PageMetadata
 from crawlutron.safety.validation import filter_js_endpoints
-from crawlutron.vocabulary.extraction import (
-    EXTRACTION_DOCUMENT,
-    EXTRACTION_METHOD_DOCUMENT,
-    EXTRACTION_METHOD_TRAFILATURA,
-    EXTRACTION_TRAFILATURA,
-)
 
 if TYPE_CHECKING:
     from safe_url.host_policy import HostPolicy
@@ -54,6 +47,13 @@ class ExtractedContent:
     extraction_method: str
 
 
+def _extract_limits(settings: CrawlerSettings | None) -> ExtractLimits:
+    """Map the crawl's resolved settings onto the package's extraction caps."""
+    if settings is None:
+        return ExtractLimits()
+    return ExtractLimits(max_markdown_chars=settings.extraction_max_markdown)
+
+
 async def run_extraction(
     *,
     extraction: CrawlExtractionMethod,
@@ -66,26 +66,28 @@ async def run_extraction(
     html: bool,
     settings: CrawlerSettings | None = None,
 ) -> ExtractedContent:
-    """Run the configured extractor once, off the loop: a fourth mode is one
-    change here, not a branch per caller. ``settings`` is the crawl's resolved
-    settings, so extraction never re-reads the env."""
-    selectors = Selectors(css=policy.css_selector, xpath=policy.xpath)
-    if extraction == EXTRACTION_DOCUMENT:
-        # The document extractor is typed for bytes; a browser render has text.
-        payload = content.encode("utf-8", "replace") if isinstance(content, str) else content
-        extracted = await adocument_extract(payload, final_url, settings)
-        method = EXTRACTION_METHOD_DOCUMENT
-    elif extraction == EXTRACTION_TRAFILATURA:
-        if not html:
-            # No HTML, nothing for trafilatura to read: no text, no markdown.
-            return ExtractedContent("", None, EXTRACTION_METHOD_TRAFILATURA)
-        extracted = await asyncio.to_thread(extract_html, decoded, final_url, selectors)
-        method = EXTRACTION_METHOD_TRAFILATURA
-    else:
-        extracted = await asyncio.to_thread(extract_content, content, content_type, final_url, selectors)
-        method = default_method
-    text, markdown = normalized_extraction(extracted)
-    return ExtractedContent(text=text, markdown=markdown, extraction_method=method)
+    """Run extraction once off the loop through crawlutron_extract.extract.
+
+    Modes decode the same bytes; ``default_method`` stamps the result and
+    ``settings`` maps onto ``ExtractLimits`` (quality=failed on hostile input).
+    """
+    payload = content if isinstance(content, (bytes, bytearray)) else content.encode("utf-8", "replace")
+    result = await asyncio.to_thread(
+        _package_extract,
+        payload,
+        content_type or "",
+        url=final_url.raw if final_url is not None else None,
+        limits=_extract_limits(settings),
+    )
+    text, markdown = normalized_extraction(result)
+    if not text:
+        # Unparseable input degrades to the already-decoded body so nothing is
+        # silently lost; the package's quality floor still marks it low/failed.
+        text = decoded.strip() or ""
+        markdown = text
+    if not markdown:
+        markdown = text
+    return ExtractedContent(text=text, markdown=markdown, extraction_method=default_method)
 
 
 async def discover_after_fetch(

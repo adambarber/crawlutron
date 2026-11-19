@@ -100,16 +100,3 @@ def test_uvicorn_loggers_route_through_the_service_sink():
     assert record["logger"] == "uvicorn.error"
     assert record["message"] == "uvicorn_started"
     assert record["service"] == "crawlutron"
-
-
-def test_doc_worker_suppresses_pdfminer_chatter():
-    """The doc worker drops pdfminer's expected per-font WARNINGs at the source."""
-    from crawlutron.extraction.doc_pool import configure_doc_worker_logging
-
-    pdfminer = logging.getLogger("pdfminer")
-    saved_level = pdfminer.level
-    try:
-        configure_doc_worker_logging()
-        assert pdfminer.level == logging.ERROR
-    finally:
-        pdfminer.setLevel(saved_level)

@@ -10,7 +10,6 @@ import shutil
 import sqlite3
 import sys
 import tempfile
-import threading
 import time
 from pathlib import Path
 from typing import TextIO
@@ -301,42 +300,22 @@ def stub_cffi_fetcher(request, monkeypatch):
 
 @pytest.fixture(autouse=True, scope="session")
 def _cleanup_extraction_executors():
-    """Shutdown the document extraction process pool at end of test session."""
+    """Shutdown the document extraction process pool at end of test session.
+
+    The doc pool no longer exists (extraction now runs through
+    ``crawlutron_extract``), so there is nothing to tear down.
+    """
     yield
-    import asyncio
-
-    from crawlutron.extraction.content import shutdown_doc_extraction_executor
-
-    asyncio.run(shutdown_doc_extraction_executor())
 
 
 @pytest.fixture(autouse=True)
 def _document_pool_per_test(monkeypatch):
-    """Each test that touches the document pool gets a fresh one, built lazily: a test that ran the lifespan
-    closed the process-global pool for every later test in the worker, and an eager build cost a
-    spawn+teardown per test.
+    """Each test that touched the document pool used to get a fresh one.
+
+    The doc pool no longer exists, so this is a no-op shim kept for any
+    fixture ordering that still references it.
     """
-    import crawlutron.extraction.content as ext_mod
-    import crawlutron.extraction.documents as docex
-    from crawlutron.extraction.doc_pool import DocExtractionPool
-
-    built: list[DocExtractionPool] = []
-    build_lock = threading.Lock()
-
-    class _LazyDocPool:
-        def __getattr__(self, name):
-            with build_lock:
-                if not built:
-                    built.append(docex.build_doc_pool())
-            return getattr(built[0], name)
-
-    proxy = _LazyDocPool()
-    monkeypatch.setattr(docex, "DOC_POOL", proxy, raising=False)
-    monkeypatch.setattr(ext_mod, "DOC_POOL", proxy, raising=False)
     yield
-    if built:
-        # The pool this test used, and any worker it spawned, dies with the test.
-        built[0].teardown()
 
 
 @pytest.fixture

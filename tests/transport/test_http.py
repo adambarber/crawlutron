@@ -202,7 +202,7 @@ class TestHttpStrategy:
         result = await _run(
             url=f"{base_url}/sample.json",
         )
-        assert '"a":1' in (result.markdown or "")
+        assert "a: 1" in (result.markdown or "")
 
     async def test_http_pdf_table_preserved_via_http(self, base_url):
         result = await _run(

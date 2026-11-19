@@ -162,6 +162,7 @@ def test_a_foreign_pid_group_is_never_signalled(tmp_path, monkeypatch) -> None:
 
     def refuse(pid: int, sig: int) -> None:
         signalled.append(pid)
+        del sig  # sig is the signal number; refuse is a killpg stand-in that never inspects it
         raise PermissionError
 
     monkeypatch.setattr(gate_fanout.os, "killpg", refuse)
@@ -178,6 +179,8 @@ def test_a_fresh_live_child_is_left_alone(tmp_path, monkeypatch) -> None:
     pidfile.write_text("4242", encoding="utf-8")
 
     monkeypatch.setattr(gate_fanout, "_alive", lambda pid: True)
-    monkeypatch.setattr(gate_fanout.os, "killpg", lambda pid, sig: pytest.fail("killed a live child"))
+    monkeypatch.setattr(
+        gate_fanout.os, "killpg", lambda pid, sig: pytest.fail(f"killed a live child (sig={sig})")
+    )
 
     assert gate_fanout._child_is_running(pidfile) is True

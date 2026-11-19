@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, get_type_hints
 from lxml import etree
 
 from crawlutron.admission.policy import read_policy
-from crawlutron.extraction.content import extract_post_fetch_discovery
+from crawlutron.extraction.discovery import extract_post_fetch_discovery
 from tests._assertions import install_to_thread_spy
 from tests._fetch_doubles import FetcherDouble, make_fetch
 from tests._fetcher_factories import invoke_browser_strategy, invoke_http_strategy
@@ -111,7 +111,7 @@ async def test_browser_post_fetch_block_runs_off_loop(monkeypatch):
 
 async def test_no_lxml_tree_escapes_to_loop(monkeypatch):
     """The offloaded block returns plain data: no lxml element crosses back."""
-    import crawlutron.extraction.content as ext_mod
+    import crawlutron.extraction.discovery as ext_mod
 
     out = await asyncio.to_thread(
         ext_mod.extract_post_fetch_discovery,
