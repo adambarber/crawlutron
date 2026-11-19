@@ -1,20 +1,8 @@
 name: Release
 
-# The tag is the release act. hatch-vcs derives the version from the newest git
-# tag, so cutting a release is `git tag vX.Y.Z && git push --tags`; this workflow
-# turns that tag into artifacts and publishes nothing else, ever.
-#
-# Nothing publishes until CI is green on that commit. This runs on the CI run's
-# completion, not on the tag push, so a red commit can never reach a publish: the
+# Versions and tags belong to release-please (release-please.yml). This workflow
+# publishes the packages whose tags point at a commit CI has already passed: the
 # tag is necessary but not sufficient.
-#
-# Publishing to PyPI uses trusted publishing (OIDC): there is no stored token to
-# leak, and the workflow identity is the credential. Each project needs one
-# trusted publisher configured on pypi.org (see docs/RELEASE.md); a name that is
-# not yet claimed needs a pending publisher.
-#
-# ci.yml stays `permissions: read-all` and cannot publish (#624). Only this
-# workflow carries write scope, and each job carries the narrowest set it needs.
 
 on:
   workflow_run:
@@ -25,72 +13,13 @@ permissions:
   contents: read
 
 jobs:
-  guard:
-    name: "Guard: assert the tag version and inspect every artifact"
+  released:
+    name: Resolve the packages this commit released
     runs-on: ubuntu-24.04
-    # A green CI run on a v* tag, and nothing else: the tag is what makes it a
-    # release, the green run is what makes it publishable.
-    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && startsWith(github.event.workflow_run.head_branch, 'v') }}
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          ref: ${{ github.event.workflow_run.head_sha }}
-          fetch-depth: 0
-          fetch-tags: true
-          persist-credentials: false
-      - name: Fetch the tags the version comes from
-        run: git fetch --tags --force
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        with:
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: "3.14"
-      - name: Assert the tag carries the version the build will derive
-        env:
-          # The branch name is attacker-shaped input: through env, never spliced
-          # into the script text (zizmor template-injection).
-          TAG_REF: ${{ github.event.workflow_run.head_branch }}
-        run: |
-          set -euo pipefail
-          TAG="$TAG_REF"
-          TAG="${TAG#v}"
-          uv build --all-packages --out-dir dist >/dev/null
-          uv run --no-project --python 3.14 python - "$TAG" <<'PY'
-          import pathlib
-          import sys
-          import tarfile
-
-          tag = sys.argv[1]
-          sdists = sorted(pathlib.Path("dist").glob("*.tar.gz"))
-          if not sdists:
-              sys.exit("no sdist built")
-          bad = []
-          for sdist in sdists:
-              with tarfile.open(sdist) as tf:
-                  name = tf.getnames()[0].split("/")[0]
-              version = name.split("-", 1)[1]
-              print(f"{sdist.name}: {version}")
-              if version != tag:
-                  bad.append(f"{sdist.name} carries {version}, tag is {tag}")
-          for line in bad:
-              print(f"::error::{line}")
-          sys.exit(1 if bad else 0)
-          PY
-      - name: Inspect every artifact
-        run: uvx twine check --strict dist/*
-
-  roster:
-    name: Compute the publish roster from the manifest
-    runs-on: ubuntu-24.04
-    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && startsWith(github.event.workflow_run.head_branch, 'v') }}
-    permissions:
-      contents: read
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' }}
     outputs:
-      matrix: ${{ steps.emit.outputs.matrix }}
+      packages: ${{ steps.roster.outputs.packages }}
+      root_version: ${{ steps.roster.outputs.root_version }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -98,109 +27,130 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: "3.14"
-      - name: Emit the manifest-derived roster
-        id: emit
+      - name: Emit the released packages
+        id: roster
         run: |
           set -euo pipefail
-          python scripts/release_roster.py > /tmp/roster.json
-          MATRIX="$(python -c 'import json; print(json.dumps({"selector": [entry["selector"] for entry in json.load(open("/tmp/roster.json"))]}))')"
-          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+          python3 scripts/release_roster.py --released > released.json
+          python3 - <<'PY'
+          import json
+          import os
 
-  distributions:
-    name: Publish ${{ matrix.selector }} to PyPI
+          entries = json.load(open("released.json"))
+          root = next((entry["version"] for entry in entries if entry["name"] == "crawlutron"), "")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"packages={json.dumps(entries)}\n")
+              out.write(f"root_version={root}\n")
+          print(f"{len(entries)} package(s) tagged at this commit; root={root or 'not released'}")
+          PY
+
+  publish:
+    name: Publish ${{ matrix.package.name }} to PyPI
+    needs: [released]
+    if: ${{ needs.released.outputs.packages != '[]' }}
     runs-on: ubuntu-24.04
-    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && startsWith(github.event.workflow_run.head_branch, 'v') }}
-    needs: [guard, roster]
+    environment: pypi
     permissions:
       contents: read
       id-token: write
-    environment: pypi
     strategy:
       fail-fast: true
       max-parallel: 1
-      matrix: ${{ fromJson(needs.roster.outputs.matrix) }}
+      matrix:
+        package: ${{ fromJSON(needs.released.outputs.packages) }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
-          fetch-depth: 0
-          fetch-tags: true
           persist-credentials: false
-      - name: Fetch the tags the version comes from
-        run: git fetch --tags --force
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.14"
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           # No cache in a job that publishes: a poisoned cache entry must not
           # reach a distribution (zizmor cache-poisoning).
           enable-cache: false
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: "3.14"
-      - name: Resolve the release version from the CI run's tag
-        env:
-          TAG_REF: ${{ github.event.workflow_run.head_branch }}
-          SELECTOR: ${{ matrix.selector }}
-        run: |
-          set -euo pipefail
-          TAG="$TAG_REF"
-          TAG="${TAG#v}"
-          echo "releasing $TAG for $SELECTOR"
       - name: Build only this distribution
         env:
-          SELECTOR: ${{ matrix.selector }}
+          SELECTOR: ${{ matrix.package.selector }}
         run: uv build --package "$SELECTOR" --out-dir dist
+      - name: Assert the artifacts carry the release version
+        env:
+          EXPECTED_VERSION: ${{ matrix.package.version }}
+        run: |
+          set -euo pipefail
+          python3 - "$EXPECTED_VERSION" <<'PY'
+          import email
+          import pathlib
+          import sys
+          import zipfile
+
+          expected = sys.argv[1]
+          wheels = sorted(pathlib.Path("dist").glob("*.whl"))
+          if not wheels:
+              sys.exit("no wheel built")
+          for wheel in wheels:
+              with zipfile.ZipFile(wheel) as archive:
+                  metadata = next(n for n in archive.namelist() if n.endswith(".dist-info/METADATA"))
+                  version = email.message_from_bytes(archive.read(metadata))["Version"]
+              print(f"{wheel.name}: {version}")
+              if version != expected:
+                  sys.exit(f"{wheel.name} carries {version}, the release is {expected}")
+          PY
       - name: Inspect this distribution's artifacts
         run: uvx twine check --strict dist/*
       - name: Publish to PyPI (trusted publishing, OIDC only)
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1
         with:
           packages-dir: dist/
+          # A partial upload is resumed, never repeated: file hashes are immutable,
+          # so an existing file is the same file.
+          skip-existing: true
 
   install-graph:
-    name: Verify the published install graph resolves
+    name: Verify ${{ matrix.package.name }} resolves from the published index
+    needs: [released, publish]
+    if: ${{ needs.released.outputs.packages != '[]' }}
     runs-on: ubuntu-24.04
-    # A partial publish once left the index unsatisfiable for every consumer
-    # (#1170). This probe installs the released root into a clean venv and
-    # imports every member, retrying while the index propagates.
-    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && startsWith(github.event.workflow_run.head_branch, 'v') }}
-    needs: [distributions]
     permissions:
       contents: read
+    strategy:
+      fail-fast: true
+      max-parallel: 1
+      matrix:
+        package: ${{ fromJSON(needs.released.outputs.packages) }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          fetch-depth: 0
-          persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.14"
-      - name: Install the released root and import every member
+      - name: Install the released package and check its graph
         env:
-          TAG_REF: ${{ github.event.workflow_run.head_branch }}
+          NAME: ${{ matrix.package.name }}
+          VERSION: ${{ matrix.package.version }}
         run: |
           set -euo pipefail
-          VERSION="${TAG_REF#v}"
           python -m venv /tmp/probe
           for attempt in $(seq 1 30); do
-            if /tmp/probe/bin/pip install --quiet --no-cache-dir "crawlutron==$VERSION"; then
+            if /tmp/probe/bin/pip install --quiet --no-cache-dir "${NAME}==${VERSION}"; then
               break
             fi
             if [ "$attempt" = 30 ]; then
-              echo "::error::crawlutron==$VERSION never resolved from the published index"
+              echo "::error::${NAME}==${VERSION} never resolved from the published index"
               exit 1
             fi
             sleep 10
           done
-          /tmp/probe/bin/python -c 'import crawlutron, crawlutron_extract, crawlutron_mcp, crawlutron_rest.main, crawlutron_sdk, safe_url'
+          /tmp/probe/bin/pip check
+          if [ "$NAME" = "crawlutron" ]; then
+            /tmp/probe/bin/python -c 'import crawlutron, crawlutron_extract, crawlutron_mcp, crawlutron_rest.main, crawlutron_sdk, safe_url'
+          fi
 
   image:
     name: Publish the container image
+    needs: [released, publish]
+    if: ${{ needs.released.outputs.root_version != '' }}
     runs-on: ubuntu-24.04
-    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && startsWith(github.event.workflow_run.head_branch, 'v') }}
-    needs: [guard]
     permissions:
       contents: read
       packages: write
@@ -208,40 +158,20 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
-          fetch-depth: 0
-          fetch-tags: true
           persist-credentials: false
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        with:
-          # No cache in a job that publishes an image (zizmor cache-poisoning).
-          enable-cache: false
-      - name: Install the frozen environment
-        run: uv sync --frozen --extra dev
-
-      - name: Resolve the release version
+      - name: Resolve the image tag
         id: version
         env:
-          BRANCH_REF: ${{ github.event.workflow_run.head_branch }}
+          NATIVE_VERSION: ${{ needs.released.outputs.root_version }}
         run: |
           set -euo pipefail
-          BRANCH="$BRANCH_REF"
-          case "$BRANCH" in
-            v*) ;;
-            *) echo "::error::not a release: CI ran on '$BRANCH', not a v* tag"; exit 1 ;;
-          esac
-          VERSION="${BRANCH#v}"
-          echo "native=${VERSION}"
-          TAG="$(printf %s "$VERSION" | tr '[:upper:]' '[:lower:]' | tr '+' '-')"
-          echo "tag=${TAG}"
-          echo "native=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-
+          echo "native=${NATIVE_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=$(printf %s "$NATIVE_VERSION" | tr '[:upper:]' '[:lower:]' | tr '+' '-')" >> "$GITHUB_OUTPUT"
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Build the runtime image locally
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
@@ -251,11 +181,8 @@ jobs:
           # Loaded, never pushed yet: a tag that failed its smoke must not exist.
           push: false
           load: true
-          build-args: |
-            SETUPTOOLS_SCM_PRETEND_VERSION=${{ steps.version.outputs.native }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/crawlutron:${{ steps.version.outputs.tag }}
-
       - name: Smoke the built image
         env:
           VERSION_TAG: ${{ steps.version.outputs.tag }}
@@ -278,42 +205,37 @@ jobs:
           curl -fsS http://127.0.0.1:8765/ready >/dev/null
           BAKED="$(docker exec "$NAME" /app/.venv/bin/python -c 'import crawlutron; print(crawlutron.__version__)')"
           test "$BAKED" = "$EXPECTED_VERSION"
-
       - name: Push the smoked image
         env:
           VERSION_TAG: ${{ steps.version.outputs.tag }}
         run: docker push "ghcr.io/${GITHUB_REPOSITORY_OWNER}/crawlutron:$VERSION_TAG"
 
-  github-release:
-    name: Publish the GitHub release
-    needs: [distributions, image, install-graph]
+  sbom:
+    name: Attach the dependency SBOM to the ${{ matrix.package.name }} release
+    needs: [released, publish]
+    if: ${{ needs.released.outputs.packages != '[]' }}
     runs-on: ubuntu-24.04
-    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && startsWith(github.event.workflow_run.head_branch, 'v') }}
     permissions:
       contents: write
+    strategy:
+      fail-fast: true
+      max-parallel: 1
+      matrix:
+        package: ${{ fromJSON(needs.released.outputs.packages) }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
-          fetch-depth: 0
-          fetch-tags: true
           persist-credentials: false
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-      - name: Build the SBOM from the frozen lock
-        run: |
-          uv export --frozen --no-dev --no-emit-workspace --format requirements-txt -o /tmp/crawlutron-lock.txt
-          uv tool run --from cyclonedx-bom==8.0.1 cyclonedx-py requirements /tmp/crawlutron-lock.txt -o sbom.cdx.json --of json
-      - name: Create the release with its notes and SBOM
+          enable-cache: false
+      - name: Build and attach the SBOM from the frozen lock
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG_REF: ${{ github.event.workflow_run.head_branch }}
+          TAG: ${{ matrix.package.tag }}
         run: |
           set -euo pipefail
-          TAG="$TAG_REF"
-          gh release create "$TAG" \
-            --title "$TAG" \
-            --generate-notes \
-            sbom.cdx.json
+          uv export --frozen --no-dev --no-emit-workspace --format requirements-txt -o /tmp/crawlutron-lock.txt
+          uv tool run --from cyclonedx-bom==8.0.1 cyclonedx-py requirements /tmp/crawlutron-lock.txt -o sbom.cdx.json --of json
+          gh release upload "$TAG" sbom.cdx.json --clobber
