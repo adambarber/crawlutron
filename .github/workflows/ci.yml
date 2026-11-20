@@ -210,6 +210,15 @@ jobs:
         run: .venv/bin/python -m fpgen fetch --decompress
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Loopback connectivity diagnostics
+        run: |
+          echo "=== /etc/hosts ==="
+          cat /etc/hosts
+          echo "=== IPv6 addresses ==="
+          ip -6 addr show dev eth0 2>/dev/null || true
+          ip -6 addr show dev lo 2>/dev/null || true
+          echo "=== Browser loopback probe ==="
+          .venv/bin/python tests/_loopback_diag.py
       - name: Run pytest (browser)
         env:
           # Firefox on GitHub Actions ubuntu-24.04 cannot connect to the

@@ -242,7 +242,15 @@ class BrowserRenderer:
         """Goto the pinned URL and wait for the page's network to settle.
         ``networkidle`` waits for in-flight XHR/fetch to drain before extraction,
         so async-fetched content is not read mid-flight (#918)."""
-        await page.goto(pinned_url, wait_until="networkidle")
+        try:
+            await page.goto(pinned_url, wait_until="networkidle")
+        except Exception as exc:
+            logging.getLogger("crawlutron.transport.browser").error(
+                "BROWSER_GOTO_DIAG: pinned_url=%s error=%r",
+                pinned_url,
+                exc,
+            )
+            raise
         await self._driver.wait_for_ready_state(page)
 
     async def _render_with_page_unlocked(
