@@ -28,10 +28,11 @@ Scope: docs and evidence only. No workflow or code behavior changes. This ticket
 - CodeQL / rehearsal PR checks: informational only, never block unrelated PRs.
 - Battery: never split per package.
 - TestPyPI guard: unchanged.
+- No automated or public release workflow dispatch from this branch.
+- `workflow_dispatch` is declared in `release.yml:28-34` for manual owner retry only — a separate, explicit owner authorization, not part of W0.
 - No tag pushes from this branch.
-- No real release workflow dispatch.
-- No edits to `release-please.yml` or `scorecard.yml` (out of scope).
 - `release.yml` stays top-level.
+- No edits to `release-please.yml` or `scorecard.yml` (out of scope).
 - Rehearsal carries ZERO id-token / write credentials: credentials are absent, not boolean-guarded.
 
 ## Interface freeze
@@ -41,7 +42,7 @@ The contract appendix lives in `docs/REHEARSAL-SPEC.md`. It covers every `script
 ## Baselines (measured, not invented)
 
 - coverage: 7.17.3 with C extension. `coverage report --format=markdown` EXISTS on this venv (`text` default, `markdown`, or `total`) — the reviewer's claim that no such flag exists is false here.
-- Warm battery: `6263 passed in 32.83s` (full randomized `pytest -q`, actual run on this workspace, 8 deselected).
+- Warm battery: `6263 passed in 32.83s` (full randomized `pytest -q`, my warm run on this workspace, 8 deselected). The reviewer's solo re-run read `6263 passed in 38.43s`. Count confirmed identical (6263); wall-time varies by runner and cache state, so neither figure is presented as a universal baseline.
 - ci.yml coverage job: `.venv/bin/python -m pytest -q -m "not (browser or slow or real_pbkdf2)" --cov=crawlutron --cov-report=xml --cov-report=term-missing`, then codecov/codecov-action v7.1.1 (`files: coverage.xml`, `flags: battery`, `use_oidc: true`, `fail_ci_if_error: false`; `id-token: write`).
 - Pre-push coverage hook: `.venv/bin/python -m pytest -q --cov=crawlutron --cov-report=`.
 - Battery hook: `.venv/bin/python -m scripts.gate_fanout battery -- .venv/bin/python -m pytest -q`.

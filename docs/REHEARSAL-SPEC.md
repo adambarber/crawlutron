@@ -30,13 +30,72 @@ argv: python3 scripts/release/emit_roster.py (no positional args)
 Env contract:
 - `RELEASE_TAG`: empty on tag push ⇒ emit entries tagged at HEAD; non-empty ⇒ entries for that tag.
 - `GITHUB_EVENT_NAME`, `GITHUB_REF_NAME`: feed the `--primary` resolution.
-- `GITHUB_OUTPUT`: written by the caller per the contract below.
+- `GITHUB_OUTPUT`: emit_roster.py itself appends the three contract lines — it is the caller; no separate caller is implied.
+Stdout: one-line summary (`N package(s) tagged; root=...; primary=...`), never the contract lines.
 Semantic validation: `RELEASE_TAG` empty is valid (not an error); an unknown tag yields an empty released set (not an error).
 Exit codes: 0 success; 2 usage or env error; 3 roster or git failure.
-GITHUB_OUTPUT contract (appended by the caller):
-  - `packages=<JSON array>` — released roster entries
+GITHUB_OUTPUT contract (emitted by emit_roster.py itself):
+  - `packages=<JSON array>` — released roster entries (same entries `release_roster.py --released` prints)
   - `root_version=<string>` — version of the `crawlutron` entry, or `""`
   - `primary=<true|false>` — result of `release_roster.py --primary`
+Coherence: `release_roster.py` prints its stdout JSON array pretty (`indent=2`, scripts/release_roster.py:114); emit_roster.py reads that array and re-serializes it compactly into `GITHUB_OUTPUT packages=<JSON array>`, matching the compact form `release.yml:92-94` uses. `primary` is always re-resolved via `release_roster.py --primary`, never copied from a stale value.
+
+### Container image build, smoke, push, attest (release.yml:233-316)
+
+Name: scripts/release/image.py [to be created]
+argv: python3 scripts/release/image.py (no positional args)
+Env contract:
+- `NATIVE_VERSION`: root package version (release root_version); drives the image tag (lowercased, `+` → `-`).
+- Permissions required: `packages: write`, `attestations: write`, `id-token: write`.
+- Builds from the workflow's fixed Dockerfile (`target: runtime`, `push: false`, `load: true`); the release version comes from the resolver, not the checkout.
+Smoke contract:
+- Runs the image, polls `/health` up to 60s, then curls `/ready`.
+- Bakes `version("crawlutron")` from `/app/.venv/bin/python` inside the container and asserts it equals `NATIVE_VERSION`.
+- Only after the smoke passes: `docker push`, then `actions/attest-build-provenance` with push-to-registry: true.
+Exit codes: 0 success (smoke passed, pushed, attested); 2 env/version error; 3 build or smoke failure; 4 push or attestation failure.
+Semantic validation: `NATIVE_VERSION` empty (root not released) ⇒ the entrypoint is a no-op, not an error (guarded by `root_version != ''` in release.yml:236).
+RELEASE_TAG rule: empty on tag push ⇒ tag images at HEAD's root version; non-empty names a specific tag.
+
+### Dependency SBOM attach (release.yml:318-349)
+
+Name: scripts/release/sbom.py [to be created]
+argv: python3 scripts/release/sbom.py (no positional args)
+Env contract:
+- `TAG`: the package tag (`<name>-v<version>`).
+- `GH_TOKEN`: GitHub token for `gh release upload`.
+- Permissions required: `contents: write`.
+- Builds `sbom.cdx.json` from the frozen lock (`uv export --frozen --no-dev --no-emit-workspace --format requirements-txt`) via `cyclonedx-bom==8.0.1` (`cyclonedx-py requirements ... -o sbom.cdx.json --of json`).
+- Uploads `sbom.cdx.json` to the release `$TAG` with `--clobber`.
+Exit codes: 0 success; 2 env error; 3 export or SBOM generation failure; 4 upload failure.
+Semantic validation: the lock is frozen (`--frozen`); a stale manifest fails immediately rather than producing a mismatched SBOM.
+RELEASE_TAG rule: `TAG` is derived from the released entry's tag; empty is not valid here (SBOM always attaches to a concrete tag).
+
+### Distribution artifacts + checksums attach (release.yml:351-384)
+
+Name: scripts/release/release_artifacts.py [to be created]
+argv: python3 scripts/release/release_artifacts.py (no positional args)
+Env contract:
+- `TAG`: the package tag (`<name>-v<version>`).
+- `GH_TOKEN`: GitHub token for `gh release upload`.
+- Permissions required: `contents: write`.
+- Downloads the verified `dist-${selector}` artifact, then in `dist/`: `shopt -s nullglob`, `files=(*.whl *.tar.gz)`, `sha256sum -- "${files[@]}" > SHA256SUMS`.
+- Uploads the distributions plus `SHA256SUMS` to `$TAG` with `--clobber`.
+Exit codes: 0 success; 2 env error; 3 checksum failure; 4 upload failure.
+Semantic validation: when no wheel/tar.gz exists, the upload step fails (no silent empty release).
+RELEASE_TAG rule: `TAG` is derived from the released entry's tag; empty is not valid here.
+
+### Install-graph probe + retry (release.yml:194-231)
+
+Name: scripts/release/install_graph.py [to be created]
+argv: python3 scripts/release/install_graph.py (no positional args)
+Env contract:
+- `NAME`: package name from the released entry.
+- `VERSION`: package version from the released entry.
+- Creates a clean venv (`python -m venv /tmp/probe`), then retries `pip install --quiet --no-cache-dir "${NAME}==${VERSION}"` up to 30 attempts, sleeping 10s between attempts (index propagation delay tolerance).
+- Runs `pip check`; if `NAME == "crawlutron"`, additionally imports `crawlutron`, `crawlutron_extract`, `crawlutron_mcp`, `crawlutron_rest.main`, `crawlutron_sdk`, `safe_url`.
+Exit codes: 0 success (installs, pip check passes, optional import probe passes); 2 env error; 3 resolution failure after 30 attempts; 4 import or pip-check failure.
+Semantic validation: 30 attempts × 10s bounds the wait; never hangs indefinitely waiting for index propagation.
+RELEASE_TAG rule: `NAME`/`VERSION` come from the released entry; empty tag is not valid here (the probe targets a concrete published version).
 
 ## scripts/coverage_reports.py [to be created by B1]
 
