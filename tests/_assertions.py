@@ -1,9 +1,7 @@
 import asyncio
-import contextlib
 import functools
 import inspect
 import json
-import os
 from contextlib import contextmanager
 
 import pytest
@@ -231,41 +229,11 @@ def awaitable_search(provider, query: str, limit: int):
     return asyncio.run(provider.search(query, limit, timeout_seconds=1.0))
 
 
-@functools.lru_cache(maxsize=1)
-def browser_available() -> bool:
-    # Both probes import inside the function, matching the idiom the playwright probe below already used.
-    with contextlib.suppress(Exception):
-        # A local predicate, never a network action: `launch_path()` auto-installs
-        # (GitHub API) when the paired build is absent; the offline probe just raises.
-        from camoufox.pkgman import LAUNCH_FILE, OS_NAME, camoufox_path
-
-        directory = camoufox_path(download_if_missing=False)
-        executable = (
-            directory / "Camoufox.app" / "Contents" / "MacOS" / "camoufox"
-            if OS_NAME == "mac"
-            else directory / LAUNCH_FILE[OS_NAME]
-        )
-        return executable.exists()
-    try:
-        from playwright.sync_api import sync_playwright
-    except Exception:
-        return False
-    try:
-        with sync_playwright() as p:
-            path = p.chromium.executable_path
-            return bool(path) and os.path.exists(path)
-    except Exception:
-        return False
-
-
 def browser_integration_test(func):
     """Mark a test as a real-browser engine-integration that also joins the
-    default battery; it runs when a browser is present and skips when not."""
+    default battery; a browser is mandatory for this code base."""
     func = pytest.mark.browser(func)
     func = pytest.mark.browser_battery(func)
-    func = pytest.mark.skipif(
-        not browser_available(), reason="no usable browser binary (camoufox/playwright)"
-    )(func)
     return func
 
 

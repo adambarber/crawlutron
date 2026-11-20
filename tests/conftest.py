@@ -165,18 +165,6 @@ os.environ["CRAWLUTRON_CACHE_TTL_SECONDS"] = os.environ.get("CRAWLUTRON_CACHE_TT
 os.environ["CRAWLUTRON_CONTENT_CACHE_ENABLED"] = os.environ.get("CRAWLUTRON_CONTENT_CACHE_ENABLED", "false")
 
 
-def pytest_collection_modifyitems(config, items):
-    """Auto-skip browser-marked tests when no real browser is installed."""
-    from tests._assertions import browser_available
-
-    if browser_available():
-        return
-    skip_no_browser = pytest.mark.skip(reason="browser not available in this environment")
-    for item in items:
-        if "browser" in item.keywords:
-            item.add_marker(skip_no_browser)
-
-
 # 435: zero-run xdist workers abort natively when teardown races the camoufox
 # import graph's shutdown; unbuffered streams shrink that race.
 try:
@@ -242,6 +230,7 @@ def clamp_pbkdf2_iterations(request, monkeypatch):
     The real 210k derivation is the dominant cost of every keyed-key test;
     the real path is covered by the ``real_pbkdf2``-marked test."""
     if request.node.get_closest_marker("real_pbkdf2"):
+        yield
         return
     from crawlutron.storage import caller_key_store
 
