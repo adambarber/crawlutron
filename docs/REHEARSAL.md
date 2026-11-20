@@ -16,7 +16,7 @@ make rehearsal-bites  # Run fast-path rehearsal without id-token (lint/ruff only
 ## Safety posture (zizmor.yml)
 
 - `cache-poisoning` rule ignores `ci.yml` and `packaging.yml` (read-only gate jobs, no publish path)
-- `posture.workflows.contents: read` declares the read-only posture for all workflows
+- No posture override exists: the default excessive-permissions audit and the contract tests enforce read-only
 
 ## Code owners
 
@@ -28,9 +28,9 @@ make rehearsal-bites  # Run fast-path rehearsal without id-token (lint/ruff only
 ## Contract tests
 
 The file `tests/test_release_contract.py` verifies:
-1. Attach-parity: rehearsal and production attach share same code path/mode
+1. Attach-parity: rehearsal entrypoints are pinned to the frozen spec; B1 adopts them in release.yml
 2. Image job twin: release.yml:233-317 has documented unrehearsed-surface entry
-3. PR-path list: tag globs are pinned against REHEARSAL-SPEC.md
+3. PR-path list: tag globs match release.yml and the spec's tag vocabulary
 4. Every non-publish release job has a rehearsal twin with same entrypoint, env contract, needs edges
 5. No shell control flow in rehearsal run blocks
 6. CODEOWNERS lists both rehearsal.yml and release.yml
