@@ -1,0 +1,27 @@
+name: Prepare browser runtime
+description: >
+  Install the X server and Firefox runtime libraries crawlutron's real-browser
+  tests need on a bare ubuntu-24.04 runner. The browser binary itself is
+  fetched by the test job (camoufox fetch); this action only covers the system
+  libraries Firefox cannot launch without.
+inputs: {}
+runs:
+  using: composite
+  steps:
+    - name: Install browser runtime libraries
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends \
+          xvfb \
+          libgtk-3-0 libasound2 libdbus-glib-1-2 libxt6 libxtst6 \
+          libxrandr2 libgbm1 ca-certificates \
+          fonts-liberation fonts-noto-core \
+          libx11-xcb1 libxcomposite1 libxdamage1 libxfixes3 \
+          libxcb1 libxcb-shm0 libxcb-render0 \
+          libxext6 libx11-6 libglib2.0-0 \
+          libstdc++6 libatk1.0-0 libatk-bridge2.0-0 \
+          libcups2 libpango-1.0-0 libcairo2 \
+          libnss3 libnspr4 libdbus-1-3 \
+          libxkbcommon0 libxshmfence1 libfontconfig1 \
+        && rm -rf /var/lib/apt/lists/*

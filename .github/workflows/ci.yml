@@ -203,10 +203,13 @@ jobs:
           # an unauthenticated runner at 60 req/h: the fetch 403s on a busy
           # day. The job's own token lifts it to the repository's rate limit.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: $/.github/actions/prepare-browser
+      # Firefox on a bare ubuntu-24.04 runner needs an X server and its runtime
+      # libraries; xvfb-run provides both (camoufox CI does the same).
       - name: Pre-fetch fpgen fingerprint model
         run: .venv/bin/python -m fpgen fetch --decompress
       - name: Run pytest (browser)
-        run: .venv/bin/python -m pytest -m "browser"
+        run: xvfb-run -a .venv/bin/python -m pytest -m "browser"
   # #623: dependency audit against the frozen lock. The export/pip-audit tools
   # install inside CI's runner (owner-bandwidth is irrelevant there); the DB
   # fetch is GitHub's advisory DB on their side.

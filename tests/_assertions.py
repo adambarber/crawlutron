@@ -230,10 +230,10 @@ def awaitable_search(provider, query: str, limit: int):
 
 
 def browser_integration_test(func):
-    """Mark a test as a real-browser engine-integration that also joins the
-    default battery; a browser is mandatory for this code base."""
+    """Mark a test as a real-browser engine-integration; a browser is
+    mandatory for this code base. Browser tests run in the test-browser CI
+    job, not in the default battery."""
     func = pytest.mark.browser(func)
-    func = pytest.mark.browser_battery(func)
     return func
 
 

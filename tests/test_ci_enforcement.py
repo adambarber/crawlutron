@@ -393,7 +393,7 @@ def test_browser_job_selects_only_browser_marked_tests() -> None:
             if isinstance(step, dict) and "Run pytest (browser)" == str(step.get("name"))
         )
     )
-    assert browser_step.strip() == '.venv/bin/python -m pytest -m "browser"', browser_step
+    assert browser_step.strip() == 'xvfb-run -a .venv/bin/python -m pytest -m "browser"', browser_step
 
 
 def test_conftest_leaves_bytecode_writing_enabled() -> None:
