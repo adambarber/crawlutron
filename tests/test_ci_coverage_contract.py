@@ -26,13 +26,18 @@ def _codecov_upload_steps(workflow: str, job_name: str) -> list[StepMapping]:
     ]
 
 
-def _assert_codecov_upload_flags(with_: StepMapping, job_name: str, require_flags: bool = True) -> None:
-    """Assert codecov upload has correct flags."""
+def _assert_codecov_upload_flags(
+    with_: StepMapping,
+    job_name: str,
+    require_flags: bool = True,
+    report_type: str = "test_results",
+) -> None:
+    """Assert a Codecov upload carries the expected flags and report type."""
     if require_flags:
         assert "flags" in with_, f"{job_name} codecov upload must specify flags"
     assert with_.get("use_oidc") is True or with_.get("use_oidc") == "true"
     assert with_.get("fail_ci_if_error") is False or with_.get("fail_ci_if_error") == "false"
-    assert with_.get("report_type") == "test_results" or with_.get("report-type") == "test_results"
+    assert with_.get("report_type", with_.get("report-type", "coverage")) == report_type
 
 
 def test_battery_is_only_fast_suite_execution() -> None:
@@ -106,7 +111,8 @@ def test_codecov_uploads_use_informational_status_and_correct_flags() -> None:
         # SHA-pinned codecov-action
         assert "@" in uses and len(uses.split("@")[1]) == 40, f"codecov action must be SHA-pinned: {uses}"
         with_ = cast(StepMapping, step_dict.get("with", {}))
-        _assert_codecov_upload_flags(with_, "coverage", require_flags=False)
+        kind = "coverage" if "coverage.xml" in str(with_.get("files", "")) else "test_results"
+        _assert_codecov_upload_flags(with_, "coverage", require_flags=False, report_type=kind)
 
 
 def test_codecov_yml_has_six_components_and_informational_status() -> None:
@@ -201,13 +207,22 @@ def test_no_blocking_threshold_anywhere() -> None:
     )
 
 
-def test_scripts_coverage_reports_py_untouched() -> None:
-    """scripts/coverage_reports.py is not created or edited by this ticket (owned by B1)."""
-    # The file should not exist in this workspace's changes
-    # It will be created by B1 separately
-    WORKFLOW_PATH.parent.parent.parent / "scripts" / "coverage_reports.py"
-    # We don't assert it doesn't exist - it might be created by B1 in parallel
-    # But we assert WE don't create/edit it - this test documents the contract
+def test_coverage_job_uploads_generated_coverage_xml() -> None:
+    """The report job sends the generated coverage XML to Codecov."""
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    steps = job_steps(workflow, "coverage")
+    uploads = [
+        step
+        for step in steps
+        if isinstance(step, dict)
+        and "codecov" in str(step.get("uses", ""))
+        and "coverage.xml" in str(cast(StepMapping, step.get("with", {})).get("files", ""))
+    ]
+    assert uploads, "coverage job must upload coverage_reports/coverage.xml to Codecov"
+    for step in uploads:
+        with_ = cast(StepMapping, step.get("with", {}))
+        assert "coverage_reports/coverage.xml" in str(with_.get("files", ""))
+        assert with_.get("report_type", with_.get("report-type", "coverage")) == "coverage"
 
 
 def test_battery_job_env_includes_pytest_addopts_with_coverage() -> None:
@@ -232,9 +247,7 @@ def test_coverage_job_emits_single_artifact() -> None:
         for step in coverage_steps
         if isinstance(step, dict) and "uses" in step and "upload-artifact" in str(step.get("uses", ""))
     ]
-    assert artifact_steps, "coverage job must upload artifact"
-    # Should be one main artifact (the combined report)
-    # The exact count may vary but there should be at least one
+    assert len(artifact_steps) == 1, f"coverage job must emit one artifact, got {len(artifact_steps)}"
 
 
 def test_browser_and_real_pbkdf2_add_data_test_results_pattern() -> None:
