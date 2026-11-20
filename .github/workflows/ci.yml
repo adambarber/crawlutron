@@ -206,10 +206,6 @@ jobs:
       - uses: $/.github/actions/prepare-browser
       # Firefox on a bare ubuntu-24.04 runner needs an X server and its runtime
       # libraries; xvfb-run provides both (camoufox CI does the same).
-      - name: Pre-fetch fpgen fingerprint model
-        run: .venv/bin/python -m fpgen fetch --decompress
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Loopback connectivity diagnostics
         run: |
           echo "=== /etc/hosts ==="
