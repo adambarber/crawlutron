@@ -166,5 +166,5 @@ def test_manifest_declares_regex_and_psl_as_hard_dependencies():
         (Path(__file__).resolve().parent.parent / "pyproject.toml").read_text(encoding="utf-8")
     )
     deps = manifest["project"]["dependencies"]
-    assert "regex==2026.9.29" in deps
+    assert "regex==2026.11.19" in deps
     assert "publicsuffixlist==1.1.2.20261101" in deps
