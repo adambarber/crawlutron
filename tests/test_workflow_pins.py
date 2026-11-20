@@ -15,8 +15,8 @@ PACKAGING_WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "packaging.ym
 # A legitimate upgrade edits this table; a SHA slipped past review reds here.
 CONVERGED_PINS = {
     "actions/setup-python": (
-        "ece7cb06caefa5fff74198d8649806c4678c61a1",
-        "v6",
+        "6d4fd22b20465ccc0f7354476588e8df7c9ca0e0",
+        "v7.1.0",
     ),
     "astral-sh/setup-uv": (
         "68559e99cc807c1eb7e9238fd43a15bba460eec2",
