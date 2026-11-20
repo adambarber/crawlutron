@@ -1,5 +1,5 @@
 {
-  ".": "0.5.0",
+  ".": "0.5.1",
   "packages/core": "0.5.0",
   "packages/extract": "0.5.0",
   "packages/mcp": "0.5.0",
