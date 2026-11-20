@@ -1,61 +1,67 @@
 """Async-door quota across workers: max_concurrency binds over shared SQLite.
 
-Two admits at max_concurrency=1: BEGIN IMMEDIATE refuses the second.
+A second worker is refused while the first admission is held open; no race.
 """
 
 from __future__ import annotations
 
-import asyncio
+from collections.abc import Iterator
+from pathlib import Path
+from typing import NamedTuple
+
+import pytest
 
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.service.caller_auth import Tracking, admit
 from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
 from crawlutron.service.errors import QuotaRefusal
+from crawlutron.storage.job_store import JobStore
 from tests._policy_factories import job_store as make_store
 
 _CALLER = CallerIdentity(caller_id="test-caller", authenticated=True, max_concurrency=1)
 
 
-async def _admit_once(tracker: CallerConcurrencyTracker, store) -> None:
-    """One async-door admit; raises QuotaRefusal when the quota is full."""
-    tracking = Tracking(job_store=store, concurrency_tracker=tracker)
-    async with admit(_CALLER, 1, tracking=tracking):
-        # The async door inserts its job row inside the admission; the slot
-        # stands for that row until it lands.
-        await asyncio.sleep(0)
+class _Workers(NamedTuple):
+    trackers: tuple[CallerConcurrencyTracker, CallerConcurrencyTracker]
+    stores: tuple[JobStore, JobStore]
 
 
-async def test_async_admit_refuses_second_at_max_concurrency_one(tmp_path):
-    """Two concurrent async admits at max_concurrency=1: one succeeds, one refused.
-
-    The durable reservation under BEGIN IMMEDIATE is the cross-worker mutex.
-    Bounded by asyncio.wait_for -- never an unbounded wait.
-    """
-    db = tmp_path / "crawler.db"
+def _workers(tmp_path: Path) -> _Workers:
+    """Two independent workers over one coordination DB and one job DB."""
     coord = tmp_path / "coord.db"
-
+    db = tmp_path / "crawler.db"
     tracker_a = CallerConcurrencyTracker(coordination_db_path=coord)
     tracker_b = CallerConcurrencyTracker(coordination_db_path=coord)
-    store_a = make_store(db)
-    store_b = make_store(db)
+    return _Workers((tracker_a, tracker_b), (make_store(db), make_store(db)))
 
+
+def _doorways(workers: _Workers) -> tuple[Tracking, Tracking]:
+    """Tracking pairs for the two workers, in worker order."""
+    (tracker_a, tracker_b), (store_a, store_b) = workers
+    return Tracking(job_store=store_a, concurrency_tracker=tracker_a), Tracking(
+        job_store=store_b, concurrency_tracker=tracker_b
+    )
+
+
+@pytest.fixture
+def workers(tmp_path: Path) -> Iterator[_Workers]:
+    """Two workers over shared DBs, closed after the test even on failure."""
+    pair = _workers(tmp_path)
     try:
-        results = await asyncio.wait_for(
-            asyncio.gather(
-                _admit_once(tracker_a, store_a),
-                _admit_once(tracker_b, store_b),
-                return_exceptions=True,
-            ),
-            timeout=10.0,
-        )
+        yield pair
     finally:
-        tracker_a.close()
-        tracker_b.close()
-        store_a.close()
-        store_b.close()
+        for tracker in pair.trackers:
+            tracker.close()
+        for store in pair.stores:
+            store.close()
 
-    refusals = [r for r in results if isinstance(r, QuotaRefusal)]
-    successes = [r for r in results if not isinstance(r, BaseException)]
-    assert len(successes) == 1, f"expected exactly one successful admit, got {len(successes)}"
-    assert len(refusals) == 1, f"expected exactly one QuotaRefusal, got {len(refusals)}"
-    assert "quota" in str(refusals[0]).lower(), refusals[0]
+
+async def test_cross_worker_quota_holds_until_release(workers: _Workers) -> None:
+    """A held admission blocks another worker; release restores its capacity."""
+    first, second = _doorways(workers)
+    async with admit(_CALLER, 1, tracking=first):
+        with pytest.raises(QuotaRefusal, match="quota"):
+            async with admit(_CALLER, 1, tracking=second):
+                pass
+    async with admit(_CALLER, 1, tracking=second) as caller_id:
+        assert caller_id == _CALLER.caller_id

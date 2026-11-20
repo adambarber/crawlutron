@@ -6,10 +6,15 @@ A first ``PRAGMA journal_mode=WAL`` conversion is a write SQLite refuses with
 
 import sqlite3
 import threading
-import time
 from contextlib import contextmanager
+from types import SimpleNamespace
+from typing import cast
 
+import pytest
+
+from crawlutron.storage import sqlite_store
 from crawlutron.storage.sqlite_store import configure_store_connection
+from tests._clocks import Timeline
 
 
 def _delete_mode_database(path: str) -> None:
@@ -92,21 +97,37 @@ def test_setup_outlasts_a_peer_beyond_the_busy_timeout(tmp_path):
         assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
 
 
-def test_setup_refuses_a_peer_that_never_releases(tmp_path):
-    """Bounded, not forever: a hard lock must not become an unkillable hang.
+def test_setup_refuses_a_peer_that_never_releases(monkeypatch) -> None:
+    """A spent deadline re-raises at once: no backoff sleep, no second try."""
+    timeline = Timeline(1000.0)
+    sleeps: list[float] = []
 
-    The bound is the caller's, asserted tightly; a loose "under ten seconds"
-    once let a budget checked only between attempts pass.
-    """
-    with _peer_locked_store(tmp_path, "stuck") as conn:
-        started = time.monotonic()
-        try:
-            configure_store_connection(conn, wal_retry_seconds=0.5)
-        except sqlite3.OperationalError:
-            waited = time.monotonic() - started
-            assert waited < 0.75, f"waited {waited:.2f}s against a 0.5s budget"
-        else:
-            raise AssertionError("expected a refusal while a peer held the database")
+    class _LockedConnection:
+        isolation_level = None
+
+        def __init__(self) -> None:
+            self.timeouts: list[int] = []
+            self.attempts = 0
+
+        def execute(self, statement: str):
+            if statement.startswith("PRAGMA busy_timeout="):
+                self.timeouts.append(int(statement.rsplit("=", 1)[1]))
+                return self
+            self.attempts += 1
+            assert self.attempts == 1, "the retry loop kept going past its deadline"
+            timeline.advance(0.5)
+            raise sqlite3.OperationalError("database is locked")
+
+    # The chokepoint only runs PRAGMAs here; this stand-in refuses the WAL one without a real lock.
+    stub = _LockedConnection()
+    conn = cast(sqlite3.Connection, stub)
+    monkeypatch.setattr(sqlite_store, "time", SimpleNamespace(monotonic=timeline, sleep=sleeps.append))
+
+    with pytest.raises(sqlite3.OperationalError, match="locked"):
+        configure_store_connection(conn, busy_timeout_ms=5000, wal_retry_seconds=0.5)
+
+    assert sleeps == [], "a spent deadline must not buy another backoff sleep"
+    assert stub.timeouts == [5000, 500, 5000], stub.timeouts
 
 
 def test_already_wal_database_is_never_written(tmp_path):

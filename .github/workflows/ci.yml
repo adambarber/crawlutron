@@ -184,6 +184,11 @@ jobs:
           fetch-tags: true
           persist-credentials: false
       - uses: $/.github/actions/prepare
+      # camoufox fetch installs this model, but the browser-binary cache skips
+      # fetch on warm runs while the venv is rebuilt every run. Install it here
+      # so no hermetic test ever triggers a GitHub download itself.
+      - name: Install pinned fpgen fingerprint model
+        run: .venv/bin/python -c "from camoufox.fpgen_model import ensure_fpgen_model; ensure_fpgen_model()"
       # Camoufox downloads ~200 MB of Firefox on first use (#490). The binary
       # lands in ~/.cache/camoufox and is version-locked by the pin in
       # pyproject.toml, so a cache keyed on that pin skips the fetch on warm
