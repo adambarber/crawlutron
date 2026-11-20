@@ -76,3 +76,34 @@ def test_every_stage_that_syncs_the_workspace_first_copies_the_members() -> None
             "a stage runs `uv sync --locked` without copying packages/: the workspace "
             f"members it resolves live there, and the first COPY is {copy!r}"
         )
+
+
+def test_both_api_fetches_can_receive_a_github_token_secret() -> None:
+    """Unauthenticated GitHub API calls rate-limit the image build."""
+    text = DOCKERFILE_PATH.read_text(encoding="utf-8")
+    assert text.count("--mount=type=secret,id=github_token") == 2
+    assert text.count('export GITHUB_TOKEN="$(cat /run/secrets/github_token)"') == 2
+
+
+def test_image_builds_pass_the_token_into_the_secret_mount() -> None:
+    """A Dockerfile secret is only usable when the workflow supplies it."""
+    import yaml
+
+    for name in ("packaging.yml", "release.yml"):
+        path = SERVICE_ROOT / ".github/workflows" / name
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert isinstance(document, dict)
+        jobs = document.get("jobs")
+        assert isinstance(jobs, dict)
+        builds = [
+            step
+            for job in jobs.values()
+            if isinstance(job, dict) and isinstance(job.get("steps"), list)
+            for step in job["steps"]
+            if isinstance(step, dict) and "docker/build-push-action" in str(step.get("uses", ""))
+        ]
+        assert builds, f"{name} has no image build step"
+        for step in builds:
+            secrets = step.get("secrets")
+            assert isinstance(secrets, dict), f"{name} supplies no build secrets"
+            assert secrets.get("github_token") == "${{ secrets.GITHUB_TOKEN }}", name

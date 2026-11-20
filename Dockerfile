@@ -81,7 +81,8 @@ RUN uv pip install --no-cache-dir --python /usr/local/bin/python \
 # only offline short-circuit: no build context is read, so bare `docker build .`
 # takes the same path with no extra flags.
 RUN --mount=type=cache,target=/root/.cache/camoufox-mount,sharing=locked \
-    sh -c 'PYTHONPATH=/camoufox-deps XDG_CACHE_HOME=/root/.cache/camoufox-mount python -m camoufox fetch; test -d /root/.cache/camoufox-mount/camoufox && mkdir -p /camoufox-bundle && cp -a /root/.cache/camoufox-mount/camoufox/. /camoufox-bundle/'
+    --mount=type=secret,id=github_token \
+    sh -c 'if [ -f /run/secrets/github_token ]; then export GITHUB_TOKEN="$(cat /run/secrets/github_token)"; fi; PYTHONPATH=/camoufox-deps XDG_CACHE_HOME=/root/.cache/camoufox-mount python -m camoufox fetch; test -d /root/.cache/camoufox-mount/camoufox && mkdir -p /camoufox-bundle && cp -a /root/.cache/camoufox-mount/camoufox/. /camoufox-bundle/'
 
 # ==========================================
 # 2. Runtime Stage: Lean production image
@@ -162,7 +163,8 @@ COPY --from=camoufox-binary /camoufox-bundle /home/appuser/.cache/camoufox
 # fetch --decompress populates it at build time. A --mount=type=cache is NOT
 # used on purpose: the data must be baked into this image layer (a buildx cache
 # mount is never persisted into the image), which is the whole requirement.
-RUN /app/.venv/bin/python -m fpgen fetch --decompress
+RUN --mount=type=secret,id=github_token \
+    sh -c 'if [ -f /run/secrets/github_token ]; then export GITHUB_TOKEN="$(cat /run/secrets/github_token)"; fi; /app/.venv/bin/python -m fpgen fetch --decompress'
 
 # No application source is copied: the builder's venv carries all six members as
 # installed wheels (crawlutron, admission, crawlutron_extract, crawlutron_mcp,
