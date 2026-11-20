@@ -208,6 +208,8 @@ jobs:
       # libraries; xvfb-run provides both (camoufox CI does the same).
       - name: Pre-fetch fpgen fingerprint model
         run: .venv/bin/python -m fpgen fetch --decompress
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Run pytest (browser)
         run: xvfb-run -a .venv/bin/python -m pytest -m "browser"
   # #623: dependency audit against the frozen lock. The export/pip-audit tools
