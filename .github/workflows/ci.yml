@@ -211,6 +211,17 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Run pytest (browser)
+        env:
+          # Firefox on GitHub Actions ubuntu-24.04 cannot connect to the
+          # in-process test server at 127.0.0.1 -- network_error on every
+          # navigation. Two causes, both fixed here:
+          #   NO_PROXY:  Firefox honors system proxy env vars; without this
+          #            it may try to proxy localhost through a nonexistent proxy.
+          #   CRAWLUTRON_HEADLESS=false: boolean headless Firefox on Linux has
+          #            limited networking; headed mode under xvfb-run matches
+          #            camoufox's own CI and works reliably.
+          NO_PROXY: 127.0.0.1,localhost
+          CRAWLUTRON_HEADLESS: "false"
         run: xvfb-run -a .venv/bin/python -m pytest -m "browser"
   # #623: dependency audit against the frozen lock. The export/pip-audit tools
   # install inside CI's runner (owner-bandwidth is irrelevant there); the DB
