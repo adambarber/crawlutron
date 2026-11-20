@@ -15,3 +15,5 @@ rules:
       # release rebuilds without its caches for the same reason.
       - ci.yml
       - packaging.yml
+# Read-only posture is enforced by the default excessive-permissions audit
+# and tests/test_release_contract.py; no posture override exists in zizmor.

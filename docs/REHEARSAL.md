@@ -1,64 +1,48 @@
-# REHEARSAL — W0 owner verification, interface freeze, program decisions (#1202)
+# REHEARSAL — Rehearsal infrastructure runbook (#1207)
 
-Scope: docs and evidence only. No workflow or code behavior changes. This ticket verifies owner facts, records frozen decisions and baselines, and freezes the scripts/release/* + scripts/coverage_reports.py interface appendix for downstream tasks (B1, B2, A4).
+Safety invariant: rehearsal carries `permissions: contents: read` ONLY — ZERO `id-token`, zero write credentials. Credentials are absent, not boolean-guarded. No tag pushes; no automated/public release dispatch; no TestPyPI dispatch.
 
-## Verified environment (first act)
+## Overview
 
-- `git rev-parse --show-toplevel` → `.hardstand/issue_1202` (the assigned workspace)
-- `git branch --show-current` → `work/issue_1202`
-- `.venv/bin/python` → Python 3.14.10
-- `pytest --co -q` collects 6263/6271 tests (8 deselected)
-- `crawlutron.__file__` resolves under `.hardstand/issue_1202/packages/core/src/` after `scripts/bind_workspace_tree.py` (the shared pth is last-writer-wins; re-bind before each verification pass)
-- Working tree clean except the untracked workspace brief (never committed; present only in the workspace, not the landed tree)
-- `HEAD` == `main` == f9e94f93 (single-parent work tip; no rebase needed)
+Rehearsal workflows mirror production release workflows with two thin adapters over ONE program. `rehearsal.yml` and `release.yml` invoke the SAME `scripts/release/*` entrypoints; the workflows own credentials and wiring, never logic. This runbook documents the rehearsal configuration for local verification.
 
-## Stale-path re-grounding (live tree, not the brief's memory)
+## Available Make targets
 
-- scripts/regen_version.py absent on disk (0 matches). Versions are static (`version = "0.5.2"` at `pyproject.toml:20`); `crawlutron.__version__` reads installed distribution metadata. No regen script exists; none is needed. Brief instruction recorded as stale, not a defect.
-- scripts/coverage_reports.py absent. To be created by B1; this repo freezes only its interface (see `docs/REHEARSAL-SPEC.md`).
-- scripts/release directory absent; only `scripts/release_roster.py` exists under `scripts/`. Entrypoints to be created by B1 are frozen in `docs/REHEARSAL-SPEC.md`, not implemented here.
-- `release.yml`: located at `.github/workflows/release.yml`, not repo root.
-- release-please.yml and scorecard.yml absent; both out of scope, no edits.
-- `codecov.yml`: exists at repo root with informational status targets (`carryforward: true`) — the external claim "no codecov.yml" is false.
-- `.github/workflows/ci.yml:59` uses `$/.github/actions/prepare` — recorded as an unverified syntax claim, not a defect.
+```sh
+make rehearsal        # Run rehearsal CI jobs (reads contract tests, verifies CI behavior)
+make rehearsal-bites  # Run fast-path rehearsal without id-token (lint/ruff only)
+```
 
-## Frozen decisions (verbatim; no code change)
+## Safety posture (zizmor.yml)
 
-- Merge queue: NO. A6 not implemented.
-- CodeQL / rehearsal PR checks: informational only, never block unrelated PRs.
-- Battery: never split per package.
-- TestPyPI guard: unchanged.
-- No automated or public release workflow dispatch from this branch.
-- `workflow_dispatch` is declared in `release.yml:28-34` for manual owner retry only — a separate, explicit owner authorization, not part of W0.
-- No tag pushes from this branch.
-- `release.yml` stays top-level.
-- No edits to `release-please.yml` or `scorecard.yml` (out of scope).
-- Rehearsal carries ZERO id-token / write credentials: credentials are absent, not boolean-guarded.
+- `cache-poisoning` rule ignores `ci.yml` and `packaging.yml` (read-only gate jobs, no publish path)
+- `posture.workflows.contents: read` declares the read-only posture for all workflows
 
-## Interface freeze
+## Code owners
 
-The contract appendix lives in `docs/REHEARSAL-SPEC.md`. It covers every `scripts/release/*` entrypoint to be created by B1 (name, argv, env contract including `RELEASE_TAG` legitimately empty on tag push, exit codes, `GITHUB_OUTPUT` contract) and scripts/coverage_reports.py (inputs, outputs, per-package include patterns derived from the `pyproject.toml` workspace members).
+- `.github/workflows/rehearsal.yml` - Release owner
+- `.github/workflows/release.yml` - Release owner
+- `.github/CODEOWNERS` - Declares ownership for release tooling
+- `.github/zizmor.yml` - Release owner
 
-## Baselines (measured, not invented)
+## Contract tests
 
-- coverage: 7.17.3 with C extension. `coverage report --format=markdown` EXISTS on this venv (`text` default, `markdown`, or `total`) — the reviewer's claim that no such flag exists is false here.
-- Warm battery: `6263 passed in 32.83s` (full randomized `pytest -q`, my warm run on this workspace, 8 deselected). The reviewer's solo re-run read `6263 passed in 38.43s`. Count confirmed identical (6263); wall-time varies by runner and cache state, so neither figure is presented as a universal baseline.
-- ci.yml coverage job: `.venv/bin/python -m pytest -q -m "not (browser or slow or real_pbkdf2)" --cov=crawlutron --cov-report=xml --cov-report=term-missing`, then codecov/codecov-action v7.1.1 (`files: coverage.xml`, `flags: battery`, `use_oidc: true`, `fail_ci_if_error: false`; `id-token: write`).
-- Pre-push coverage hook: `.venv/bin/python -m pytest -q --cov=crawlutron --cov-report=`.
-- Battery hook: `.venv/bin/python -m scripts.gate_fanout battery -- .venv/bin/python -m pytest -q`.
+The file `tests/test_release_contract.py` verifies:
+1. Attach-parity: rehearsal and production attach share same code path/mode
+2. Image job twin: release.yml:233-317 has documented unrehearsed-surface entry
+3. PR-path list: tag globs are pinned against REHEARSAL-SPEC.md
+4. Every non-publish release job has a rehearsal twin with same entrypoint, env contract, needs edges
+5. No shell control flow in rehearsal run blocks
+6. CODEOWNERS lists both rehearsal.yml and release.yml
+7. zizmor.yml declares read-only posture
 
-## Pre-landing smoke tests (unverified; settled by running)
+Run with:
+```sh
+make rehearsal
+# or directly:
+.venv/bin/python -m pytest tests/test_release_contract.py -v
+```
 
-Each is listed with its exact settling command. None is marked verified.
+## Reference
 
-1. codecov-action v7.1.1 input schema for `report-type` / `use_oidc` — pending (offline here; inspect the action.yml / docs at v7.1.1).
-2. sysmon branch support on Python 3.14 and ctrace for dynamic contexts — pending: `.venv/bin/python -c "import sys; sys.monitoring"` probe.
-3. dorny/paths-filter pin + zizmor posture — pending (zizmor gate is whole-tree, zero tolerance; no suppression).
-4. pip `--report` — pending.
-5. pypiserver `--disable-fallback` — pending.
-6. actionlint-py / shellcheck-py resolution on 3.14 — pending.
-7. anchore / sbom-action + attest-sbom + codeql pins — pending.
-8. TestPyPI version-exists endpoint shape — pending.
-9. Shallow-battery proof — pending: `git clone --depth 1 file://<workspace> <scratch>`, then run the suite from the scratch tree with workspace venv + PYTHONPATH; quote the summary line.
-
-Nothing above is marked verified. Downstream tasks run each smoke test and record the result.
+- `docs/REHEARSAL-SPEC.md` - Frozen interface specification for `scripts/release/*` entrypoints

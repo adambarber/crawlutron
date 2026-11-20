@@ -1,0 +1,101 @@
+name: Rehearsal
+
+on:
+  push:
+    tags:
+      - "v*"
+      - "crawlutron-v*"
+      - "crawlutron-core-v*"
+      - "crawlutron-extract-v*"
+      - "crawlutron-mcp-v*"
+      - "crawlutron-rest-v*"
+      - "crawlutron-safe-url-v*"
+      - "crawlutron-sdk-v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Released tag to rehearse (leave empty for this commit)
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  released:
+    name: Resolve the packages this commit released
+    if: ${{ github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      packages: ${{ steps.roster.outputs.packages }}
+      root_version: ${{ steps.roster.outputs.root_version }}
+      primary: ${{ steps.roster.outputs.primary }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - name: Emit the released packages
+        id: roster
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: python3 scripts/release/emit_roster.py
+
+  ci:
+    name: Run CI suite (read-only)
+    needs: [released]
+    if: ${{ needs.released.outputs.primary == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - uses: $/.github/actions/prepare
+      - name: Run the fast hermetic test suite
+        run: .venv/bin/python -m pytest -q -m "not (browser or slow or real_pbkdf2)"
+
+  install-graph:
+    name: Verify package resolves from the published index
+    needs: [released]
+    if: ${{ needs.released.outputs.primary == 'true' && needs.released.outputs.packages != '[]' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      max-parallel: 1
+      matrix:
+        package: ${{ fromJSON(needs.released.outputs.packages) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - name: Install the released package and check its graph
+        env:
+          NAME: ${{ matrix.package.name }}
+          VERSION: ${{ matrix.package.version }}
+        run: python3 scripts/release/install_graph.py

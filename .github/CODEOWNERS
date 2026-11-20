@@ -16,6 +16,7 @@ jscpd-expectations.json @adambarber
 # Release tooling: changes to the release workflow, prepare action, roster,
 # and runbook require release-owner review. These files sit on the trust
 # boundary between CI green and a published artifact.
+.github/workflows/rehearsal.yml @adambarber
 .github/workflows/release.yml @adambarber
 .github/workflows/release-please.yml @adambarber
 .github/workflows/ci.yml @adambarber
