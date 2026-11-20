@@ -65,6 +65,17 @@ run = ".venv/bin/pre-commit install --hook-type commit-msg --hook-type pre-commi
 
 # Actions that agents can run inside the workspace
 
+# #1213: `hardstand exec` inherits the executor's 30s default, shorter than the
+# battery's warm ~34s, so a gated commit is killed before the admission test finishes.
+# This declared action carries its own 120s bound and still runs EVERY hook; the
+# message is read from .git/ so no tracking artifact or .gitignore surface is added.
+[[actions]]
+name = "commit"
+kind = "exec"
+env = ["PATH", "PYTHONPATH"]
+timeout = "120s"
+run = 'git commit -F "$(git rev-parse --git-dir)/commit-message"'
+
 [[actions]]
 name = "pytest"
 kind = "exec"
