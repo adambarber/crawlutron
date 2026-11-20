@@ -144,9 +144,22 @@ bypass-selection = true
 # the tracer (measured below, see the hook's comment). `branch` stays off for
 # the default surface -- statement coverage is the measured number; branch is
 # the deeper weekly surface (see the pre-push hook's config comment).
+# `source_pkgs` lists all seven import names from the uv workspace members.
+# `relative_files=true` and `parallel=true` enable distributed collection.
 [tool.coverage.run]
 core = "sysmon"
 branch = false
+source_pkgs = [
+    "admission",
+    "crawlutron",
+    "crawlutron_extract",
+    "crawlutron_mcp",
+    "crawlutron_rest",
+    "crawlutron_sdk",
+    "safe_url",
+]
+relative_files = true
+parallel = true
 # The deeper, non-default surface (weekly / pre-release, paired with the
 # mutation-proof evidence story): run it by hand with
 #   python -m coverage run --branch --dynamic-context=test_function -m pytest -q --cov=crawlutron

@@ -7,7 +7,8 @@ from tests._ci_contract import WORKFLOW_PATH, job_steps
 
 def test_browser_job_selects_only_browser_marked_tests() -> None:
     """The browser job exists to run the browser suite: a filter that admits
-    anything else re-runs the fast suite (~3,400 tests) on every push."""
+    anything else re-runs the fast suite (~3,400 tests) on every push.
+    Now runs with coverage flags for per-surface Codecov upload."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
     steps = job_steps(workflow, "test-browser")
     browser_step = str(
@@ -17,7 +18,12 @@ def test_browser_job_selects_only_browser_marked_tests() -> None:
             if isinstance(step, dict) and "Run pytest (browser)" == str(step.get("name"))
         )
     )
-    assert browser_step.strip() == 'xvfb-run -a .venv/bin/python -m pytest -m "browser"', browser_step
+    # Must select only browser marker and include coverage flags
+    assert '-m "browser"' in browser_step, browser_step
+    assert "--cov=crawlutron" in browser_step, browser_step
+    assert "--cov-report=" in browser_step, browser_step
+    assert "--cov-append" in browser_step, browser_step
+    assert "xvfb-run -a .venv/bin/python -m pytest" in browser_step, browser_step
 
 
 def test_browser_job_installs_pinned_fpgen_model_before_tests() -> None:

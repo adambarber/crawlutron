@@ -10,8 +10,31 @@ coverage:
         target: 90%
         informational: true
 
-# Later flag uploads (browser, real-pbkdf2) must not crater the total when
-# only the battery flag is present on a given run.
+# Six Codecov components (flags) for per-surface measurement:
+# - battery: the fast suite (commit admission)
+# - real-pbkdf2: real PBKDF2 stress surface
+# - test-browser: browser integration surface
+# - admission: admission package coverage
+# - crawl: crawl package coverage
+# - sdk: SDK package coverage
+# All components use carryforward so a surface absent on a given run does not
+# crater the total. Status targets remain informational; no blocking threshold.
 flag_management:
   default_rules:
     carryforward: true
+  flags:
+    battery:
+      carryforward: true
+    real-pbkdf2:
+      carryforward: true
+    test-browser:
+      carryforward: true
+    admission:
+      carryforward: true
+    crawl:
+      carryforward: true
+    sdk:
+      carryforward: true
+
+# Informational status per component; no gate fails on coverage.
+# Each component's project/patch status inherits the global informational setting.

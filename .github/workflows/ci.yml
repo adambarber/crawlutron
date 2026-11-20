@@ -162,6 +162,9 @@ jobs:
     name: Test suite (battery)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    # The battery is the ONLY fast-suite execution. It runs with coverage
+    # via PYTEST_ADDOPTS and uploads .coverage* + junit artifacts for the
+    # report-only coverage job to consume.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -182,13 +185,31 @@ jobs:
           # a hung gate hanging the job forever, so it gets hang-guard room
           # here rather than a budget. Commit admission keeps the 60s default.
           GATE_FANOUT_WALL_SECONDS: "300"
+          # Coverage flags for the battery run -- the ONLY fast-suite execution.
+          # Per-invocation junit avoids filename collisions across xdist workers.
+          PYTEST_ADDOPTS: "--cov=crawlutron --cov-report= --cov-append -p pytest_cov --junitxml=junit-%p.xml"
+      - name: Upload coverage data artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-data
+          path: .coverage*
+          if-no-files-found: warn
+      - name: Upload junit artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: junit-results
+          path: junit-*.xml
+          if-no-files-found: warn
 
-  # CI-only measurement. The pre-commit set is deliberately untouched: this
-  # job runs the battery's selection under coverage and uploads to Codecov.
+  # Report-only coverage job: consumes artifacts from battery, real-pbkdf2, and
+  # test-browser; never re-runs tests. Combines coverage data, invokes the
+  # frozen scripts/coverage_reports.py CLI, emits one artifact, and does
+  # per-surface Codecov uploads with informational status.
   coverage:
     name: Coverage
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    needs: [battery, real-pbkdf2, test-browser]
     permissions:
       contents: read
       pull-requests: read
@@ -201,25 +222,78 @@ jobs:
           fetch-tags: true
           persist-credentials: false
       - uses: $/.github/actions/prepare
-      - name: Measure the battery's coverage
-        run: .venv/bin/python -m pytest -q -m "not (browser or slow or real_pbkdf2)" --cov=crawlutron --cov-report=xml --cov-report=term-missing
-      - name: Upload coverage
+      - name: Download battery coverage data
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: coverage-data
+          path: .
+      - name: Download battery junit results
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: junit-results
+          path: .
+      - name: Download real-pbkdf2 coverage data
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: always()
+        with:
+          name: coverage-data-real-pbkdf2
+          path: .
+      - name: Download test-browser coverage data
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: always()
+        with:
+          name: coverage-data-test-browser
+          path: .
+      - name: Combine coverage data
+        run: .venv/bin/python -m coverage combine
+      - name: Generate coverage reports
+        run: .venv/bin/python scripts/coverage_reports.py
+      - name: Upload combined coverage report artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-report
+          path: coverage_report/
+          if-no-files-found: error
+      # Per-surface Codecov uploads with informational status.
+      # Uses !cancelled() so uploads run even when a prior job failed.
+      - name: Upload battery coverage to Codecov
+        if: ${{ !cancelled() }}
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
-          files: coverage.xml
           flags: battery
+          report-type: test_results
           use_oidc: true
-          # An upload hiccup must never redden a contributor's PR.
+          fail_ci_if_error: false
+      - name: Upload real-pbkdf2 coverage to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          flags: real-pbkdf2
+          report-type: test_results
+          use_oidc: true
+          fail_ci_if_error: false
+      - name: Upload test-browser coverage to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          flags: test-browser
+          report-type: test_results
+          use_oidc: true
           fail_ci_if_error: false
 
   # The battery deselects `real_pbkdf2`, so the real 210k-iteration PBKDF2 path
   # in storage/caller_key_store.py is never exercised by commit admission. This
   # job runs that surface alone; the 1_000-iteration autouse clamp stays in
   # place for the fast battery and is not weakened.
+  # Runs with coverage and uploads data artifact for the report-only coverage job.
   real-pbkdf2:
     name: Test suite (real PBKDF2)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -227,8 +301,22 @@ jobs:
           fetch-tags: true
           persist-credentials: false
       - uses: $/.github/actions/prepare
-      - name: Run pytest (real PBKDF2)
-        run: .venv/bin/python -m pytest -m "real_pbkdf2"
+      - name: Run pytest (real PBKDF2) with coverage
+        run: .venv/bin/python -m pytest -m "real_pbkdf2" --cov=crawlutron --cov-report= --cov-append -p pytest_cov
+      - name: Upload coverage data artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-data-real-pbkdf2
+          path: .coverage*
+          if-no-files-found: warn
+      - name: Upload real-pbkdf2 coverage to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          flags: real-pbkdf2
+          report-type: test_results
+          use_oidc: true
+          fail_ci_if_error: false
 
   test-browser:
     name: Test suite (browser)
@@ -238,6 +326,10 @@ jobs:
     # BrowserRenderer.render is short-circuited, so the green reflects a real
     # browser rather than a double. It selects ONLY the `browser` marker: any
     # wider filter re-runs the fast suite (~5,700 tests) on every push.
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -262,7 +354,7 @@ jobs:
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.cache/camoufox
-          key: camoufox-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          key: camoufox-${{ runner.os }}-{{ hashFiles('pyproject.toml') }}
       - name: Install Camoufox browser binary
         if: ${{ steps.camoufox.outputs.cache-hit != 'true' }}
         run: .venv/bin/python -m camoufox fetch
@@ -286,7 +378,21 @@ jobs:
           #            camoufox's own CI and works reliably.
           NO_PROXY: 127.0.0.1,localhost
           CRAWLUTRON_HEADLESS: "false"
-        run: xvfb-run -a .venv/bin/python -m pytest -m "browser"
+        run: xvfb-run -a .venv/bin/python -m pytest -m "browser" --cov=crawlutron --cov-report= --cov-append -p pytest_cov
+      - name: Upload coverage data artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-data-test-browser
+          path: .coverage*
+          if-no-files-found: warn
+      - name: Upload test-browser coverage to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          flags: test-browser
+          report-type: test_results
+          use_oidc: true
+          fail_ci_if_error: false
   # #623: dependency audit against the frozen lock. The export/pip-audit tools
   # install inside CI's runner (owner-bandwidth is irrelevant there); the DB
   # fetch is GitHub's advisory DB on their side.
