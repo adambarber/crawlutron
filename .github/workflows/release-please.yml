@@ -5,8 +5,12 @@ name: Release Please
 # release.yml and waits for CI on the commit this produces.
 
 on:
-  push:
-    branches: [main]
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+# release-please must never create version bumps or tags on a commit that has
+# not passed CI. A red commit must never reach the index.
 
 permissions:
   contents: read
@@ -15,6 +19,7 @@ jobs:
   release-please:
     name: Propose and tag the next releases
     runs-on: ubuntu-24.04
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' }}
     permissions:
       contents: write
       pull-requests: write

@@ -86,11 +86,21 @@ def test_the_published_version_is_the_manifest_version() -> None:
 
 
 def test_release_please_runs_only_on_main_and_is_pinned() -> None:
-    """Releases are driven by merges to main, from a commit-pinned action."""
+    """Releases are driven by CI-green merges to main, from a commit-pinned action."""
     document = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
     trigger = document[True] if True in document else document["on"]
-    assert trigger["push"]["branches"] == ["main"]
+    assert trigger["workflow_run"]["workflows"] == ["CI"], (
+        "release-please must be gated on CI, never run on raw push"
+    )
+    assert trigger["workflow_run"]["types"] == ["completed"]
     jobs = _mapping(document["jobs"])
+    release_please = _mapping(jobs.get("release-please"))
+    assert "github.event.workflow_run.conclusion == 'success'" in str(release_please.get("if", "")), (
+        "the release-please job must require a green CI run"
+    )
+    assert "github.event.workflow_run.head_branch == 'main'" in str(release_please.get("if", "")), (
+        "the release-please job must pin the branch it serves"
+    )
     action = [str(step["uses"]) for job in jobs.values() for step in _steps(job) if "uses" in step]
     assert any(uses.startswith("googleapis/release-please-action@") for uses in action)
     for uses in action:
