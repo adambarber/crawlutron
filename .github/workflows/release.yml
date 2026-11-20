@@ -64,7 +64,7 @@ jobs:
       root_version: ${{ steps.roster.outputs.root_version }}
       primary: ${{ steps.roster.outputs.primary }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
@@ -114,7 +114,7 @@ jobs:
     steps:
       # Versions are static in pyproject.toml; tags still bind this build to
       # the exact release commit the artifact assertion checks.
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.tag || github.sha }}
           fetch-depth: 0
@@ -245,7 +245,7 @@ jobs:
     steps:
       # Build the image from this workflow's fixed Dockerfile; the release
       # version comes from the resolver, not from the checkout.
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
@@ -329,7 +329,7 @@ jobs:
       matrix:
         package: ${{ fromJSON(needs.released.outputs.packages) }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.tag || github.sha }}
           fetch-depth: 0
@@ -362,7 +362,7 @@ jobs:
       matrix:
         package: ${{ fromJSON(needs.released.outputs.packages) }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.tag || github.sha }}
           persist-credentials: false
