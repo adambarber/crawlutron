@@ -67,9 +67,9 @@ def _tags_at_head(root: Path) -> frozenset[str]:
     return frozenset(done.stdout.split())
 
 
-def released(root: Path = ROOT) -> list[dict[str, str]]:
-    """Roster entries whose ``<name>-v<version>`` tag points at HEAD."""
-    tags = _tags_at_head(root)
+def released(root: Path = ROOT, tag: str | None = None) -> list[dict[str, str]]:
+    """Roster entries whose ``<name>-v<version>`` tag is released."""
+    tags = frozenset({tag}) if tag else _tags_at_head(root)
     return [entry for entry in roster(root) if f"{entry['name']}-v{entry['version']}" in tags]
 
 
@@ -102,7 +102,7 @@ def main() -> None:
             else "false"
         )
         return
-    entries = released() if arguments.released else roster()
+    entries = released(tag=os.environ.get("RELEASE_TAG") or None) if arguments.released else roster()
     print(json.dumps(entries, indent=2))
 
 

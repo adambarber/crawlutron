@@ -134,7 +134,9 @@ def test_a_manual_retry_can_publish_an_existing_tag_from_the_fixed_workflow() ->
         for i, step in enumerate(job.get("steps", []))
         if "with" in step and "ref" in step["with"]
     ]
-    assert refs and set(refs) == {"${{ inputs.tag || github.sha }}"}
+    assert refs and set(refs) == {"${{ inputs.tag || github.sha }}", "${{ github.sha }}"}
+    released_job = workflow_doc["jobs"]["released"]
+    assert released_job["steps"][0]["with"]["ref"] == "${{ github.sha }}"
 
 
 def test_the_release_trigger_names_component_tags_not_any_dash_vee() -> None:
@@ -151,6 +153,12 @@ def test_the_release_trigger_names_component_tags_not_any_dash_vee() -> None:
         "crawlutron-safe-url-v*",
         "crawlutron-sdk-v*",
     }
+
+
+def test_an_explicit_tag_resolves_the_roster_without_moving_the_checkout(tmp_path: Path) -> None:
+    """A dispatch at main can publish a tag that points at an older commit."""
+    root = _stand_up(tmp_path)
+    assert [entry["name"] for entry in released(root, tag="one-v2.0.0")] == ["one"]
 
 
 def test_the_publish_matrix_is_the_released_set_never_a_hand_typed_list() -> None:
