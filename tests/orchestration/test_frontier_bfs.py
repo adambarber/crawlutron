@@ -5,6 +5,7 @@ O(1) popleft. Behavior (BFS completeness/ordering) must be unchanged.
 """
 
 from tests._fetcher_factories import crawled_urls
+from tests._host_assert import host_in
 
 
 def _build_hub(n_leaves: int):
@@ -24,7 +25,7 @@ async def test_bfs_crawls_all_discovered_leaves():
         await crawled_urls(pages, limits={"max_depth": 2, "max_pages": 1000, "max_discovered_links": 2000})
     )
     # root, hub, and all 300 leaves must be present.
-    assert "http://example.com/" in urls
+    assert host_in(urls, "example.com")
     assert "http://example.com/hub" in urls
     for i in range(300):
         assert f"http://example.com/l{i}" in urls

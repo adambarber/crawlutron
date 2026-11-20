@@ -27,6 +27,8 @@ from safe_url import (
 from safe_url.host_policy import allow_private_targets, reset_private_target_memo
 from safe_url.safe_regex import compile_untrusted
 
+from tests._host_assert import host_in, host_of
+
 UNRESTRICTED = HostPolicy.unrestricted()
 STRICT = HostPolicy.from_strings("example.com", "")
 
@@ -63,7 +65,7 @@ def test_admit_with_reason_surfaces_refusal():
 
 def test_host_policy_from_strings_parses():
     policy = HostPolicy.from_strings("example.com,*.trusted.example", "*.ads.example")
-    assert "example.com" in policy.allowed_hosts
+    assert host_in(policy.allowed_hosts, "example.com")
     assert "trusted.example" in policy.allowed_hosts
     assert "ads.example" in policy.denied_hosts
 
@@ -131,7 +133,7 @@ def test_idna_host_punycode():
 def test_redact_url_masks_credentials():
     assert "pass" not in redact_url("https://user:pass@example.com/hook")
     assert "secret" not in redact_url("https://example.com/hook?key=secret")
-    assert "example.com" in redact_url("https://example.com/hook")
+    assert host_of(redact_url("https://example.com/hook")) == "example.com"
 
 
 def test_normalized_url_repr_redacts_the_secret():

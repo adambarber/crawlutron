@@ -8,6 +8,7 @@ from __future__ import annotations
 import httpx
 
 from tests._fetcher_factories import MockResponse, _PinnedClient
+from tests._host_assert import host_of
 
 __all__ = ["record_webhook_delivery", "recorded_webhook_posts"]
 
@@ -50,7 +51,7 @@ def recorded_webhook_posts(monkeypatch):
 
         @staticmethod
         def _posts():
-            return [r for r in recorded if "webhook.example.com" in str(r.url) and r.method == "POST"]
+            return [r for r in recorded if host_of(r.url) == "webhook.example.com" and r.method == "POST"]
 
         def __iter__(self):
             return iter(self._posts())

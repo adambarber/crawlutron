@@ -20,6 +20,7 @@ from tests._browser_doubles import (
     render_pinned,
     stub_pinned_request,
 )
+from tests._host_assert import host_of
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
 # -------------------------------------------------------------------------- document.py: SSRF gate on urlopen
@@ -374,7 +375,7 @@ async def test_a_cert_identity_mismatch_is_a_classified_refusal_not_silence(monk
         canonical("https://example.com/path"),
         pin=stub_pinned_request(("https://example.com/path", {})),
     )
-    assert pinned_url.startswith("https://example.com"), pinned_url
+    assert host_of(pinned_url) == "example.com", pinned_url
 
     page = _CertMismatchPage()
     renderer = build_pinned_renderer(page, pin=stub_pinned_request(("https://example.com/path", {})))

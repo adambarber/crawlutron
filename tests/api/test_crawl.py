@@ -21,6 +21,7 @@ from tests._assertions import (
     wire_results,
 )
 from tests._fetcher_factories import make_crawl_payload
+from tests._host_assert import host_of
 from tests._policy_factories import crawl_policy
 from tests.api._asgi_base import _AsgiEndpointTests
 
@@ -121,7 +122,7 @@ class TestCrawlApi(_AsgiEndpointTests):
         assert isinstance(links, list)
         for link in links:
             normalized = link["normalized_url"] if isinstance(link, dict) else link
-            assert not str(normalized).startswith("https://example.com"), (
+            assert host_of(normalized) != "example.com", (
                 f"discovered link {normalized!r} matches the scope; fixture is on loopback"
             )
 

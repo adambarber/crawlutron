@@ -19,6 +19,7 @@ from crawlutron.service.effects import (
     EffectResult,
 )
 from tests._crawl_runners import crawled_results
+from tests._host_assert import host_in
 
 if TYPE_CHECKING:
     from safe_url.host_policy import HostPolicy
@@ -86,7 +87,7 @@ async def test_scope_records_out_of_scope_links_but_never_fetches_them():
     # expansion stayed in scope...
     assert crawled == {"http://example.com/", "http://example.com/keep/x"}
     # ...and instagram was never fetched
-    assert not any("instagram.com" in u for u in fetched)
+    assert not host_in(fetched, "instagram.com")
     # ...but the advertised profile is still recorded on the seed result
     assert "https://instagram.com/cityofexample" in _recorded_discovered(out)
 
@@ -105,7 +106,7 @@ async def test_skip_list_hosts_recorded_but_never_enqueued():
     out, fetched = await _crawl_example_site(pages)
     crawled = _crawled_urls(out)
     assert crawled == {"http://example.com/", "http://example.com/local"}
-    assert not any("pinterest.com" in u or "x.com/" in u for u in fetched), fetched
+    assert not (host_in(fetched, "pinterest.com") or host_in(fetched, "x.com")), fetched
     recorded = _recorded_discovered(out)
     assert "https://www.pinterest.com/pin/1" in recorded
     assert "https://x.com/mayor" in recorded

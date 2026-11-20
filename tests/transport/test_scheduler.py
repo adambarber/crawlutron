@@ -7,6 +7,7 @@ from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.crawl_task import CrawlTask
 from crawlutron.models.taxonomy import Classification
 from crawlutron.transport.scheduler import DomainScheduler, jittered_delay
+from tests._host_assert import host_in
 from tests._policy_factories import canonical
 from tests._result_builders import engine_result, make_job
 from tests._scheduler_doubles import engine_envelope, make_scheduler, ok_worker, trip_circuit
@@ -53,12 +54,12 @@ class TestScheduler:
         )
         scheduler.set_domain_cooldown("example.com", 5.0)
         scheduler.purge_expired()
-        assert "example.com" in scheduler.domain_cooldowns
+        assert host_in(scheduler.domain_cooldowns, "example.com")
         # Still standing at window-1; gone at window+1 (the purge is the
         # public door for "is the debt still owed").
         now[0] += 4.0
         scheduler.purge_expired()
-        assert "example.com" in scheduler.domain_cooldowns
+        assert host_in(scheduler.domain_cooldowns, "example.com")
         now[0] += 2.0
         scheduler.purge_expired()
         assert "example.com" not in scheduler.domain_cooldowns
@@ -303,4 +304,4 @@ class TestSchedulerDomainState:
         scheduler.set_domain_cooldown("example.com", 10)
         cooldowns = scheduler.domain_cooldowns
         assert isinstance(cooldowns, dict)
-        assert "example.com" in cooldowns
+        assert host_in(cooldowns, "example.com")
