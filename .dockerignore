@@ -25,6 +25,7 @@
 !packages/**
 !pyproject.toml
 !uv.lock
+!scripts/camoufox_offline_fetch.py
 !README.md
 !LICENSE
 !uvicorn-log-config.json

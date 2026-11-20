@@ -59,6 +59,7 @@ WORKDIR /app
 
 COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /uvx /bin/
 COPY pyproject.toml uv.lock ./
+COPY scripts/camoufox_offline_fetch.py scripts/
 
 # Install ONLY the camoufox pin into a dedicated dir so the fetch RUN below has
 # the module on PYTHONPATH. The pin is extracted from the frozen lock (single
@@ -79,7 +80,7 @@ RUN uv pip install --no-cache-dir --python /usr/local/bin/python \
 # only offline short-circuit: no build context is read, so bare `docker build .`
 # takes the same path with no extra flags.
 RUN --mount=type=cache,target=/root/.cache/camoufox-mount,sharing=locked \
-    PYTHONPATH=/camoufox-deps XDG_CACHE_HOME=/root/.cache/camoufox-mount python -m camoufox fetch && \
+    PYTHONPATH=/camoufox-deps:/app/scripts XDG_CACHE_HOME=/root/.cache/camoufox-mount python -m camoufox_offline_fetch && \
     test -d /root/.cache/camoufox-mount/camoufox && mkdir -p /camoufox-bundle && \
     cp -a /root/.cache/camoufox-mount/camoufox/. /camoufox-bundle/
 

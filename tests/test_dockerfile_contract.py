@@ -55,13 +55,12 @@ def test_the_runtime_stage_takes_its_source_from_the_venv() -> None:
     )
 
 
-def test_dockerfile_fetches_the_browser_without_a_build_context() -> None:
-    """Bare ``docker build .`` must succeed from a clean checkout: camoufox
-    fetches over the wire at build time and the image needs no extra context.
-    """
+def test_dockerfile_fetches_the_browser_without_a_seed_mount() -> None:
+    """A bare checkout builds: the pinned installer ships in the context, no seed mount."""
     text = DOCKERFILE_PATH.read_text(encoding="utf-8")
-    assert "python -m camoufox fetch" in text, "camoufox fetch must run at build time"
-    assert "from=seed" not in text, "no seed bind mount: bare docker build . must need no build context"
+    assert "python -m camoufox_offline_fetch" in text, "the pinned installer must run at build time"
+    assert "COPY scripts/camoufox_offline_fetch.py" in text
+    assert "from=seed" not in text, "no seed bind mount: bare docker build . must need no seed"
 
 
 def test_every_stage_that_syncs_the_workspace_first_copies_the_members() -> None:
@@ -100,7 +99,11 @@ def test_no_image_build_receives_a_credential() -> None:
     assert "--mount=type=secret" not in text
     assert "GITHUB_TOKEN" not in text
     assert "python -m fpgen fetch" not in text
+    assert "python -m camoufox fetch" not in text
+    assert "python -m camoufox_offline_fetch" in text
     assert "ensure_fpgen_model()" in text
+    ignore = (DOCKERFILE_PATH.parent / ".dockerignore").read_text(encoding="utf-8")
+    assert "!scripts/camoufox_offline_fetch.py" in ignore
 
 
 def test_image_builds_supply_no_secret() -> None:
