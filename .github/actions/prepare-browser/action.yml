@@ -14,7 +14,7 @@ runs:
         sudo apt-get update -qq
         sudo apt-get install -y --no-install-recommends \
           xvfb \
-          libgtk-3-0 libasound2 libdbus-glib-1-2 libxt6 libxtst6 \
+          libgtk-3-0 libasound2t64 libdbus-glib-1-2 libxt6 libxtst6 \
           libxrandr2 libgbm1 ca-certificates \
           fonts-liberation fonts-noto-core \
           libx11-xcb1 libxcomposite1 libxdamage1 libxfixes3 \
