@@ -61,9 +61,16 @@ def roster(root: Path = ROOT) -> list[dict[str, str]]:
 
 
 def _tags_at_head(root: Path) -> frozenset[str]:
+    # A commit hook exports GIT_DIR; without clearing it cwd cannot pin the repo.
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     git = shutil.which("git") or "git"
     done = subprocess.run(
-        [git, "tag", "--points-at", "HEAD"], cwd=root, capture_output=True, text=True, check=True
+        [git, "tag", "--points-at", "HEAD"],
+        cwd=root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return frozenset(done.stdout.split())
 
