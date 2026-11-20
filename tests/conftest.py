@@ -245,7 +245,10 @@ def clamp_pbkdf2_iterations(request, monkeypatch):
         return
     from crawlutron.storage import caller_key_store
 
-    monkeypatch.setattr(caller_key_store, "PBKDF2_ITERATIONS", 1_000)
+    original = caller_key_store.PBKDF2_ITERATIONS
+    caller_key_store.PBKDF2_ITERATIONS = 1_000
+    yield
+    caller_key_store.PBKDF2_ITERATIONS = original
 
 
 def real_pbkdf2_iterations() -> int:

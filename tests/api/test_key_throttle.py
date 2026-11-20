@@ -215,7 +215,7 @@ def test_cooldown_expiry_rearms_the_bucket():
     the next MAX_FAILURES guesses are needed before cooling again."""
     state, clock = arrange_clock(start=100.0)
     throttle = Throttle(clock=clock)
-    presented = "ck_0123456789abcdef.cooldown"
+    presented = "test-cooldown-key-abc"
 
     for _ in range(Throttle.MAX_FAILURES):
         throttle.record_failure(presented)
@@ -281,7 +281,7 @@ def test_concurrent_record_failure_loses_increments_without_lock():
     failures == 0 and stores 1, so the counter ends at 1, never reaching
     MAX_FAILURES or cooling; no deadlock, no sleeps, no GIL timing."""
     count = Throttle.MAX_FAILURES
-    key = "ck_0123456789abcdef.racy"
+    key = "test-key-throttle-abc"
     state, clock = arrange_clock(start=100.0)
     gate = threading.Barrier(count)
     throttle = _RacyThrottle(clock=clock, gate=gate)
