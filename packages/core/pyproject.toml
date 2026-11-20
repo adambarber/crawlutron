@@ -23,7 +23,7 @@ dependencies = [
     # crawlutron-safe-url ships complete: regex and publicsuffixlist are hard
     # dependencies, so admission and site grouping never silently degrade.
     "crawlutron-safe-url>=0.4.0.dev0",
-    "fastapi==0.162.0",
+    "fastapi==0.162.6",
     "camoufox==0.5.9",
     "curl_cffi==0.17.0",
     "charset-normalizer==3.5.2",

@@ -69,9 +69,9 @@ dev = [
     # Test and toolchain packages, exhaustively pinned for reproducible CI and
     # dev installs; uv.lock freezes the transitive graph on top.
     "pytest==9.2.0",
-    "pytest-asyncio==1.4.1.post1",
+    "pytest-asyncio==1.5.0",
     "pytest-xdist==3.8.0",
-    "pytest-randomly==5.0.0",
+    "pytest-randomly==5.1.0",
     # The hook-chain timeout: the safety-invariants gate runs pytest with
     # --timeout=30 (9x the slowest measured legit invariant), so a hang fails
     # the gate instead of wedging the commit chain. A gate tool, hence pinned
@@ -82,9 +82,9 @@ dev = [
     "pytest-cov==7.1.0",
     # Coverage engine itself, pinned so the gate surface doesn't float. The
     # dev extra installs it; CI's enforcement job builds from -e .[dev].
-    "coverage==7.17.0",
-    "ruff==0.17.3",
-    "jscpd==5.3.2",
+    "coverage==7.17.3",
+    "ruff==0.17.5",
+    "jscpd==5.4.3",
     "pre-commit==4.7.0",
     # Direct consumer: scripts/jscpd_gate.py and scripts/gate_fanout.py parse
     # pre-commit config/JSONC as YAML, and tests/_ci_contract.py parses the CI
@@ -100,7 +100,7 @@ dev = [
     # real gate, not an advisory one -- the old comment claiming otherwise was
     # stale and would have told the next reader to ignore type errors.
     "brotli-stubs==1.2.1",
-    "types-regex==2026.9.29.20261030",
+    "types-regex==2026.11.9.20261110",
     "types-lxml==2026.2.16",
     "mypy==2.4.1",
     # The third type checker, and the only one that sees annotation lies mypy
