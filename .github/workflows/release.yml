@@ -16,7 +16,7 @@ name: Release
 # nothing.
 on:
   push:
-    tags: ["v*"]
+    tags: ["v*", "*-v*"]   # root tags and <component>-v<version> tags
   workflow_dispatch:
 
 permissions:

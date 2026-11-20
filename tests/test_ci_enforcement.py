@@ -125,7 +125,11 @@ def test_release_workflow_publishes_nothing_without_a_tag() -> None:
         f"the release workflow must be triggered by tag push or dispatch, found triggers {sorted(triggers)}"
     )
     push = _mapping(triggers.get("push"), "a push gate")
-    assert push.get("tags") == ["v*"], "the release workflow must trigger on v* tags"
+    tags = push.get("tags")
+    assert isinstance(tags, list), "the release push gate must declare tag patterns"
+    assert {str(tag) for tag in tags} == {"v*", "*-v*"}, (
+        "the release workflow must trigger on both root v* tags and component *-v* tags"
+    )
 
     # The `ci` job calls ci.yml as a reusable workflow; `needs` is the gate --
     # no `workflow_run` trigger.
