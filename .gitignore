@@ -35,4 +35,8 @@ tmp/
 .opencode
 .hardstand/
 
+# Local CodeQL analysis artifacts.
+codeql-db/
+results.sarif
+
 
