@@ -25,6 +25,8 @@
 !packages/**
 !pyproject.toml
 !uv.lock
+!README.md
+!LICENSE
 !uvicorn-log-config.json
 !Dockerfile
 

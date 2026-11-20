@@ -27,16 +27,14 @@ WORKDIR /app
 COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /uvx /bin/
 
 # pyproject.toml + uv.lock are the single source of truth for the dependency
-# graph. ``--locked`` refuses a lock the manifests no longer satisfy instead of
-# freezing a stale graph; ``--no-editable`` installs the six members as wheels,
-# so the venv IS the runtime source tree and the runtime stage copies none. The
-# workspace members come along first: the root project resolves every member
-# through ``[tool.uv.sources]`` into ``packages/<name>``, so a stage holding only
-# the lockfile dies at "Distribution not found at: file:///app/packages/core".
-COPY pyproject.toml uv.lock ./
+# graph. ``--locked`` refuses a stale lock; ``--no-editable`` installs members
+# as wheels and the root dist with the release version the smoke test asserts.
+# Members are copied before the sync because [tool.uv.sources] resolves them
+# from packages/<name>; a lockfile-only stage dies at file:///app/packages/core.
+COPY pyproject.toml uv.lock README.md LICENSE ./
 COPY packages/ ./packages/
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-install-project --no-editable --python /usr/local/bin/python
+    uv sync --locked --no-editable --python /usr/local/bin/python
 
 # ==========================================
 # 2b. Isolated Camoufox browser-binary stage

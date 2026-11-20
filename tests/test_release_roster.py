@@ -143,6 +143,7 @@ def test_a_manual_retry_can_publish_an_existing_tag_from_the_fixed_workflow() ->
     )
     assert "seq 1 60" in smoke
     assert "curl --noproxy '*'" in smoke, "loopback probes must bypass any HTTP proxy"
+    assert 'version("crawlutron")' in smoke, "assert the root release version, not the core member"
     assert "docker inspect -f" in smoke
     released_job = workflow_doc["jobs"]["released"]
     assert released_job["steps"][0]["with"]["ref"] == "${{ github.sha }}"

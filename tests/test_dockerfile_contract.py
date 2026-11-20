@@ -78,6 +78,15 @@ def test_every_stage_that_syncs_the_workspace_first_copies_the_members() -> None
         )
 
 
+def test_builder_installs_root_so_the_image_reports_the_release_version() -> None:
+    """Without the root dist, crawlutron.__version__ reads the core member's version."""
+    text = DOCKERFILE_PATH.read_text(encoding="utf-8")
+    assert "COPY pyproject.toml uv.lock README.md LICENSE ./" in text
+    assert "uv sync --locked --no-editable --python /usr/local/bin/python" in text
+    ignore = (DOCKERFILE_PATH.parent / ".dockerignore").read_text(encoding="utf-8")
+    assert "!README.md" in ignore and "!LICENSE" in ignore
+
+
 def test_runtime_command_supplies_uvicorn_defaults() -> None:
     """Empty env expansions make uvicorn exit before the health probe."""
     text = DOCKERFILE_PATH.read_text(encoding="utf-8")

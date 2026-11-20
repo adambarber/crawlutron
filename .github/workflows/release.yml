@@ -298,7 +298,7 @@ jobs:
             exit 1
           fi
           curl --noproxy '*' -fsS http://127.0.0.1:8765/ready >/dev/null
-          BAKED="$(docker exec "$NAME" /app/.venv/bin/python -c 'import crawlutron; print(crawlutron.__version__)')"
+          BAKED="$(docker exec "$NAME" /app/.venv/bin/python -c 'from importlib.metadata import version; print(version("crawlutron"))')"
           test "$BAKED" = "$EXPECTED_VERSION"
       - name: Push the smoked image
         id: push
