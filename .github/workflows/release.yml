@@ -251,8 +251,8 @@ jobs:
           load: true
           tags: |
             ghcr.io/${{ github.repository_owner }}/crawlutron:${{ steps.version.outputs.tag }}
-        secrets:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          secrets: |
+            github_token=${{ secrets.GITHUB_TOKEN }}
       - name: Smoke the built image
         env:
           VERSION_TAG: ${{ steps.version.outputs.tag }}

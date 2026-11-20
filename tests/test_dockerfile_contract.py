@@ -104,6 +104,6 @@ def test_image_builds_pass_the_token_into_the_secret_mount() -> None:
         ]
         assert builds, f"{name} has no image build step"
         for step in builds:
-            secrets = step.get("secrets")
-            assert isinstance(secrets, dict), f"{name} supplies no build secrets"
-            assert secrets.get("github_token") == "${{ secrets.GITHUB_TOKEN }}", name
+            with_block = step.get("with")
+            assert isinstance(with_block, dict), f"{name} has no build inputs"
+            assert "github_token=${{ secrets.GITHUB_TOKEN }}" in str(with_block.get("secrets", "")), name
