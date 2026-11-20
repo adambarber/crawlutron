@@ -64,6 +64,7 @@ def test_the_roster_derives_name_version_and_path_from_each_manifest(tmp_path: P
     assert set(entries) == {"app", "one"}
     assert entries["one"]["version"] == "2.0.0"
     assert entries["one"]["path"] == "packages/one"
+    assert entries["one"]["tag"] == "one-v2.0.0"
     assert entries["app"]["path"] == "."
 
 
@@ -159,6 +160,19 @@ def test_an_explicit_tag_resolves_the_roster_without_moving_the_checkout(tmp_pat
     """A dispatch at main can publish a tag that points at an older commit."""
     root = _stand_up(tmp_path)
     assert [entry["name"] for entry in released(root, tag="one-v2.0.0")] == ["one"]
+
+
+def test_the_root_declares_every_workspace_member_as_a_runtime_dependency() -> None:
+    """An omitted member makes the published app unimportable."""
+    manifest_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
+    declared = {
+        str(dependency).split("[")[0].split(">=")[0].split("==")[0]
+        for dependency in manifest["project"]["dependencies"]
+        if str(dependency).startswith("crawlutron")
+    }
+    members = {entry["name"] for entry in roster() if entry["name"] != "crawlutron"}
+    assert declared == members
 
 
 def test_the_publish_matrix_is_the_released_set_never_a_hand_typed_list() -> None:

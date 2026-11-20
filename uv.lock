@@ -507,6 +507,7 @@ version = "0.5.1"
 source = { editable = "." }
 dependencies = [
     { name = "crawlutron-core" },
+    { name = "crawlutron-extract" },
     { name = "crawlutron-mcp" },
     { name = "crawlutron-rest" },
     { name = "crawlutron-safe-url" },
@@ -541,6 +542,7 @@ requires-dist = [
     { name = "brotli-stubs", marker = "extra == 'dev'", specifier = "==1.2.1" },
     { name = "coverage", marker = "extra == 'dev'", specifier = "==7.17.0" },
     { name = "crawlutron-core", editable = "packages/core" },
+    { name = "crawlutron-extract", editable = "packages/extract" },
     { name = "crawlutron-mcp", editable = "packages/mcp" },
     { name = "crawlutron-rest", editable = "packages/rest" },
     { name = "crawlutron-safe-url", editable = "packages/safe-url" },

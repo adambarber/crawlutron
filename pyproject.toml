@@ -51,6 +51,7 @@ dependencies = [
     # plain `pytest` with no PYTHONPATH). Each member declares its own runtime
     # set, so this list is members only and never a second copy of theirs.
     "crawlutron-core>=0.4.0.dev0",
+    "crawlutron-extract>=0.4.0.dev0",
     "crawlutron-mcp>=0.4.0.dev0",
     "crawlutron-rest>=0.4.0.dev0",
     "crawlutron-sdk>=0.4.0.dev0",

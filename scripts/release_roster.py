@@ -46,6 +46,7 @@ def _entry(root: Path, directory: Path) -> dict[str, str]:
         "name": name,
         "selector": name,
         "version": str(project["version"]),
+        "tag": f"{name}-v{project['version']}",
         "path": "." if directory == root else directory.relative_to(root).as_posix(),
     }
 
