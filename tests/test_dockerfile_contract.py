@@ -94,17 +94,17 @@ def test_runtime_command_supplies_uvicorn_defaults() -> None:
     assert "--log-level ${CRAWLUTRON_LOG_LEVEL:-info}" in text
 
 
-def test_the_fpgen_model_is_installed_without_the_github_api() -> None:
-    """The REST fetch rate-limits repeated builds; the pinned URL does not."""
+def test_no_image_build_receives_a_credential() -> None:
+    """Neither camoufox nor fpgen needs a token; unreadable mounts broke builds."""
     text = DOCKERFILE_PATH.read_text(encoding="utf-8")
-    assert text.count("--mount=type=secret,id=github_token") == 1
-    assert text.count('export GITHUB_TOKEN="$(cat /run/secrets/github_token)"') == 1
+    assert "--mount=type=secret" not in text
+    assert "GITHUB_TOKEN" not in text
     assert "python -m fpgen fetch" not in text
     assert "ensure_fpgen_model()" in text
 
 
-def test_image_builds_pass_the_token_into_the_secret_mount() -> None:
-    """A Dockerfile secret is only usable when the workflow supplies it."""
+def test_image_builds_supply_no_secret() -> None:
+    """A build-time token is unreadable under BuildKit and unnecessary here."""
     import yaml
 
     for name in ("packaging.yml", "release.yml"):
@@ -122,6 +122,4 @@ def test_image_builds_pass_the_token_into_the_secret_mount() -> None:
         ]
         assert builds, f"{name} has no image build step"
         for step in builds:
-            with_block = step.get("with")
-            assert isinstance(with_block, dict), f"{name} has no build inputs"
-            assert "github_token=${{ secrets.GITHUB_TOKEN }}" in str(with_block.get("secrets", "")), name
+            assert "secrets" not in step.get("with", {}), f"{name} passes a secret into a build"

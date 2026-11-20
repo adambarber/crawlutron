@@ -64,5 +64,3 @@ jobs:
           push: false
           load: true
           tags: crawlutron:ci
-          secrets: |
-            github_token=${{ secrets.GITHUB_TOKEN }}

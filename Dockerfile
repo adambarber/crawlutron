@@ -79,8 +79,9 @@ RUN uv pip install --no-cache-dir --python /usr/local/bin/python \
 # only offline short-circuit: no build context is read, so bare `docker build .`
 # takes the same path with no extra flags.
 RUN --mount=type=cache,target=/root/.cache/camoufox-mount,sharing=locked \
-    --mount=type=secret,id=github_token \
-    sh -c 'if [ -f /run/secrets/github_token ]; then export GITHUB_TOKEN="$(cat /run/secrets/github_token)"; fi; PYTHONPATH=/camoufox-deps XDG_CACHE_HOME=/root/.cache/camoufox-mount python -m camoufox fetch; test -d /root/.cache/camoufox-mount/camoufox && mkdir -p /camoufox-bundle && cp -a /root/.cache/camoufox-mount/camoufox/. /camoufox-bundle/'
+    PYTHONPATH=/camoufox-deps XDG_CACHE_HOME=/root/.cache/camoufox-mount python -m camoufox fetch && \
+    test -d /root/.cache/camoufox-mount/camoufox && mkdir -p /camoufox-bundle && \
+    cp -a /root/.cache/camoufox-mount/camoufox/. /camoufox-bundle/
 
 # ==========================================
 # 2. Runtime Stage: Lean production image
