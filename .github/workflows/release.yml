@@ -243,11 +243,11 @@ jobs:
       attestations: write
       id-token: write
     steps:
-      # Tags pin the exact release commit; the smoke test checks the static
-      # version baked into the image against this release.
+      # Build the image from this workflow's fixed Dockerfile; the release
+      # version comes from the resolver, not from the checkout.
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: ${{ inputs.tag || github.sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false

@@ -138,6 +138,8 @@ def test_a_manual_retry_can_publish_an_existing_tag_from_the_fixed_workflow() ->
     assert refs and set(refs) == {"${{ inputs.tag || github.sha }}", "${{ github.sha }}"}
     released_job = workflow_doc["jobs"]["released"]
     assert released_job["steps"][0]["with"]["ref"] == "${{ github.sha }}"
+    image_job = workflow_doc["jobs"]["image"]
+    assert image_job["steps"][0]["with"]["ref"] == "${{ github.sha }}"
 
 
 def test_the_release_trigger_names_component_tags_not_any_dash_vee() -> None:

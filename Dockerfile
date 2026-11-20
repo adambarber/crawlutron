@@ -182,7 +182,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
 # Production command. The bind interface defaults to loopback (callers
 # authenticate with an API key; see SECURITY.md); CRAWLUTRON_HOST must be set explicitly to
 # expose the port (the compose file sets 0.0.0.0, gated by its loopback mapping).
-CMD ["sh", "-c", "exec uvicorn crawlutron_rest.main:app --host ${CRAWLUTRON_HOST:-127.0.0.1} --port 8765 --workers ${CRAWLUTRON_WORKERS} --log-config /app/uvicorn-log-config.json --log-level ${CRAWLUTRON_LOG_LEVEL}"]
+CMD ["sh", "-c", "exec uvicorn crawlutron_rest.main:app --host ${CRAWLUTRON_HOST:-127.0.0.1} --port 8765 --workers ${CRAWLUTRON_WORKERS:-1} --log-config /app/uvicorn-log-config.json --log-level ${CRAWLUTRON_LOG_LEVEL:-info}"]
 
 # ==========================================
 # 3. Development Stage: Hot-reloading and dev tools

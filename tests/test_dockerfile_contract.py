@@ -78,6 +78,13 @@ def test_every_stage_that_syncs_the_workspace_first_copies_the_members() -> None
         )
 
 
+def test_runtime_command_supplies_uvicorn_defaults() -> None:
+    """Empty env expansions make uvicorn exit before the health probe."""
+    text = DOCKERFILE_PATH.read_text(encoding="utf-8")
+    assert "--workers ${CRAWLUTRON_WORKERS:-1}" in text
+    assert "--log-level ${CRAWLUTRON_LOG_LEVEL:-info}" in text
+
+
 def test_the_fpgen_model_is_installed_without_the_github_api() -> None:
     """The REST fetch rate-limits repeated builds; the pinned URL does not."""
     text = DOCKERFILE_PATH.read_text(encoding="utf-8")
