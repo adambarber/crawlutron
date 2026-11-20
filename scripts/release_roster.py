@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import tomllib
@@ -72,10 +73,35 @@ def released(root: Path = ROOT) -> list[dict[str, str]]:
     return [entry for entry in roster(root) if f"{entry['name']}-v{entry['version']}" in tags]
 
 
+def primary_tag(root: Path = ROOT, event_name: str = "", ref_name: str = "") -> bool:
+    """Whether this event owns the publish side effects for the tags at HEAD."""
+    if event_name == "workflow_dispatch":
+        return True
+    entries = roster(root)
+    expected = {f"{entry['name']}-v{entry['version']}" for entry in entries}
+    tags = _tags_at_head(root) & expected
+    if not tags:
+        return False
+    root_tag = f"{entries[0]['name']}-v{entries[0]['version']}"
+    chosen = root_tag if root_tag in tags else sorted(tags)[0]
+    return ref_name == chosen
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--released", action="store_true", help="only packages tagged at HEAD")
+    parser.add_argument("--primary", action="store_true", help="is this event the publishing one")
     arguments = parser.parse_args()
+    if arguments.primary:
+        print(
+            "true"
+            if primary_tag(
+                event_name=os.environ.get("GITHUB_EVENT_NAME", ""),
+                ref_name=os.environ.get("GITHUB_REF_NAME", ""),
+            )
+            else "false"
+        )
+        return
     entries = released() if arguments.released else roster()
     print(json.dumps(entries, indent=2))
 

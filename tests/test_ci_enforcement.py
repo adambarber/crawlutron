@@ -127,8 +127,11 @@ def test_release_workflow_publishes_nothing_without_a_tag() -> None:
     push = _mapping(triggers.get("push"), "a push gate")
     tags = push.get("tags")
     assert isinstance(tags, list), "the release push gate must declare tag patterns"
-    assert {str(tag) for tag in tags} == {"v*", "*-v*"}, (
-        "the release workflow must trigger on both root v* tags and component *-v* tags"
+    patterns = {str(tag) for tag in tags}
+    assert "v*" in patterns, "root tags must trigger a release"
+    assert "*-v*" not in patterns, "a wildcard around -v matches unrelated tags"
+    assert all(pattern == "v*" or pattern.startswith("crawlutron") for pattern in patterns), (
+        "component tag patterns must be named explicitly"
     )
 
     # The `ci` job calls ci.yml as a reusable workflow; `needs` is the gate --
@@ -144,12 +147,17 @@ def test_release_workflow_publishes_nothing_without_a_tag() -> None:
 def _assert_every_publish_job_gated_on_ci(jobs: dict[str, object]) -> None:
     """Every publishing/admission job transitively depends on `ci`, so a red
     commit never reaches them: `needs` replaces `workflow_run`."""
+    # `released` is a read-only roster resolver that runs ahead of CI to elect
+    # one publishing tag; every other job must still be downstream of CI.
+    released_job = _mapping(jobs.get("released"), "the released job")
+    assert released_job.get("needs") in (None, [])
+    assert _mapping(released_job.get("permissions"), "released permissions") == {"contents": "read"}
     gated = {"ci"}
     changed = True
     while changed:
         changed = False
         for name, job in jobs.items():
-            if name in gated:
+            if name in gated or name == "released":
                 continue
             needed = _mapping(job, name).get("needs") or []
             if isinstance(needed, str):
@@ -160,7 +168,8 @@ def _assert_every_publish_job_gated_on_ci(jobs: dict[str, object]) -> None:
             if upstream & gated:
                 gated.add(name)
                 changed = True
-    assert gated == set(jobs), f"jobs outside the CI gate: {sorted(set(jobs) - gated)}"
+    outside = set(jobs) - {"released"} - gated
+    assert not outside, f"jobs outside the CI gate: {sorted(outside)}"
 
     image = _mapping(jobs.get("image"), "an image job")
     assert _mapping(image.get("permissions"), "image permissions").get("packages") == "write", (
@@ -177,7 +186,11 @@ def _assert_every_publish_job_gated_on_ci(jobs: dict[str, object]) -> None:
         "the released set must come from the tags pointing at the green commit"
     )
     build = _mapping(jobs.get("publish-build"), "a publish-build job")
-    assert build.get("needs") == ["released"], "the build must be gated on the resolved roster"
+    needs = build.get("needs")
+    assert isinstance(needs, list), "the build must declare its upstream jobs"
+    assert {str(item) for item in needs} == {"released", "ci"}, (
+        "the build must be gated on both the resolved roster and green CI"
+    )
     assert "id-token" not in _mapping(build.get("permissions"), "build permissions"), (
         "a build backend must run without OIDC in scope"
     )

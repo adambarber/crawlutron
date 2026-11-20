@@ -10,7 +10,7 @@ from pathlib import Path
 
 import yaml
 
-from scripts.release_roster import released, roster
+from scripts.release_roster import primary_tag, released, roster
 
 RELEASE_WORKFLOW_PATH = Path(__file__).resolve().parents[1] / ".github/workflows/release.yml"
 GIT = shutil.which("git") or "git"
@@ -83,6 +83,59 @@ def test_a_bumped_version_without_its_tag_releases_nothing(tmp_path: Path) -> No
     _write(root / "packages/one/pyproject.toml", text.replace("2.0.0", "2.1.0"))
     assert tomllib.loads(text)["project"]["version"] == "2.0.0"
     assert released(root) == []
+
+
+def test_the_primary_tag_is_deterministic_and_a_dispatch_owns_the_release(tmp_path: Path) -> None:
+    """One of N tags at a commit publishes; a manual retry always publishes."""
+    root = _stand_up(tmp_path)
+    _tag(root, "one-v2.0.0")
+    _tag(root, "app-v1.0.0")
+    assert primary_tag(root, "push", "app-v1.0.0") is True
+    assert primary_tag(root, "push", "one-v2.0.0") is False
+    assert primary_tag(root, "workflow_dispatch", "main") is True
+    assert primary_tag(root, "push", "not-a-release") is False
+
+
+def test_tag_runs_for_one_commit_share_a_concurrency_group() -> None:
+    """Two component tags at one commit must not race each other's releases."""
+    document = yaml.safe_load(RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8"))
+    concurrency = document["concurrency"]
+    assert concurrency["group"] == "release-${{ github.sha }}"
+    assert concurrency["cancel-in-progress"] is False
+
+
+def test_only_the_primary_tag_runs_the_gates_and_publishes() -> None:
+    """Non-primary tag runs resolve the roster but touch no gate or index."""
+    document = yaml.safe_load(RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8"))
+    jobs = document["jobs"]
+    assert jobs["released"].get("needs") in (None, [])
+    assert "primary" in jobs["released"]["outputs"]
+    assert "needs.released.outputs.primary == 'true'" in jobs["ci"]["if"]
+    for name in (
+        "publish-build",
+        "publish",
+        "install-graph",
+        "image",
+        "sbom",
+        "release-artifacts",
+    ):
+        assert "needs.released.outputs.primary == 'true'" in jobs[name]["if"], name
+
+
+def test_the_release_trigger_names_component_tags_not_any_dash_vee() -> None:
+    """A wildcard around `-v` would fire on unrelated tags."""
+    document = yaml.safe_load(RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8"))
+    triggers = document.get("on", document.get(True))
+    assert set(triggers["push"]["tags"]) == {
+        "v*",
+        "crawlutron-v*",
+        "crawlutron-core-v*",
+        "crawlutron-extract-v*",
+        "crawlutron-mcp-v*",
+        "crawlutron-rest-v*",
+        "crawlutron-safe-url-v*",
+        "crawlutron-sdk-v*",
+    }
 
 
 def test_the_publish_matrix_is_the_released_set_never_a_hand_typed_list() -> None:

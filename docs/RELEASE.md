@@ -86,9 +86,8 @@ The same probe is runnable locally: `uv build --all-packages --out-dir dist` the
 
 ## One-time PyPI setup (owner)
 
-Publishing uses **trusted publishing** (OIDC) only: there is no stored token,
-and the workflow identity is the credential. The `PYPI_API_TOKEN` bootstrap
-fallback was removed — there is no long-lived PyPI credential in this repository.
+Publishing uses **trusted publishing** (OIDC) only: the workflow identity is
+the credential. There is no long-lived PyPI credential in this repository.
 
 Each project needs one trusted publisher configured on pypi.org. Pending
 publishers are deduplicated on the workflow identity and bound to one project
@@ -110,7 +109,7 @@ place before the first release:
 
 - **Branch protection on `main`**: requires a passing CI `required` check and a
   pull request review from a release owner before any merge. A merge queue
-  serializes main so hatch-vcs/repeat runs stay unique.
+  serializes main so repeated builds of the same version stay deterministic.
 - **Tag ruleset on `v*` and `*-v*`**: only the release App or repository admins
   may create or push release tags. A tag is the release act — unrestricted tag
   pushes bypass CI gating.

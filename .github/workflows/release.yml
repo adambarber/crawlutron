@@ -16,18 +16,29 @@ name: Release
 # nothing.
 on:
   push:
-    tags: ["v*", "*-v*"]   # root tags and <component>-v<version> tags
+    tags:
+      - "v*"
+      - "crawlutron-v*"
+      - "crawlutron-core-v*"
+      - "crawlutron-extract-v*"
+      - "crawlutron-mcp-v*"
+      - "crawlutron-rest-v*"
+      - "crawlutron-safe-url-v*"
+      - "crawlutron-sdk-v*"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  # Component tags at one commit are separate events; one release per commit.
+  group: release-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
   ci:
+    needs: [released]
+    if: ${{ needs.released.outputs.primary == 'true' }}
     uses: $/.github/workflows/ci.yml
     permissions:
       contents: read
@@ -37,7 +48,6 @@ jobs:
 
   released:
     name: Resolve the packages this commit released
-    needs: [ci]
     if: ${{ github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -46,6 +56,7 @@ jobs:
     outputs:
       packages: ${{ steps.roster.outputs.packages }}
       root_version: ${{ steps.roster.outputs.root_version }}
+      primary: ${{ steps.roster.outputs.primary }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -61,13 +72,19 @@ jobs:
           python3 - <<'PY'
           import json
           import os
+          import subprocess
 
           entries = json.load(open("released.json"))
           root = next((entry["version"] for entry in entries if entry["name"] == "crawlutron"), "")
+          primary = subprocess.run(
+              ["python3", "scripts/release_roster.py", "--primary"],
+              cwd=".", capture_output=True, text=True, check=True,
+          ).stdout.strip()
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
               out.write(f"packages={json.dumps(entries)}\n")
               out.write(f"root_version={root}\n")
-          print(f"{len(entries)} package(s) tagged at this commit; root={root or 'not released'}")
+              out.write(f"primary={primary}\n")
+          print(f"{len(entries)} package(s) tagged; root={root or 'not released'}; primary={primary}")
           PY
 
   # Build with no OIDC in scope: a build backend executes arbitrary code, and
@@ -75,8 +92,8 @@ jobs:
   # publish job below does nothing but download and upload verified artifacts.
   publish-build:
     name: Build ${{ matrix.package.name }} for PyPI
-    needs: [released]
-    if: ${{ needs.released.outputs.packages != '[]' }}
+    needs: [released, ci]
+    if: ${{ needs.released.outputs.primary == 'true' && needs.released.outputs.packages != '[]' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -87,9 +104,8 @@ jobs:
       matrix:
         package: ${{ fromJSON(needs.released.outputs.packages) }}
     steps:
-      # fetch-tags is load-bearing: hatch-vcs derives the version from tags,
-      # and a shallow tagless checkout builds 0.1.devN -- the assertion below
-      # would fail on every release.
+      # Versions are static in pyproject.toml; tags still bind this build to
+      # the exact release commit the artifact assertion checks.
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ github.sha }}
@@ -141,7 +157,7 @@ jobs:
   publish:
     name: Publish ${{ matrix.package.name }} to PyPI
     needs: [released, publish-build]
-    if: ${{ needs.released.outputs.packages != '[]' }}
+    if: ${{ needs.released.outputs.primary == 'true' && needs.released.outputs.packages != '[]' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: pypi
@@ -170,7 +186,7 @@ jobs:
   install-graph:
     name: Verify ${{ matrix.package.name }} resolves from the published index
     needs: [released, publish]
-    if: ${{ needs.released.outputs.packages != '[]' }}
+    if: ${{ needs.released.outputs.primary == 'true' && needs.released.outputs.packages != '[]' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -209,7 +225,7 @@ jobs:
   image:
     name: Publish the container image
     needs: [released, publish]
-    if: ${{ needs.released.outputs.root_version != '' }}
+    if: ${{ needs.released.outputs.primary == 'true' && needs.released.outputs.root_version != '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -219,8 +235,8 @@ jobs:
       attestations: write
       id-token: write
     steps:
-      # Tags again: the smoke test asserts the baked version equals the
-      # release, and a tagless build bakes 0.1.devN.
+      # Tags pin the exact release commit; the smoke test checks the static
+      # version baked into the image against this release.
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ github.sha }}
@@ -295,7 +311,7 @@ jobs:
   sbom:
     name: Attach the dependency SBOM to the ${{ matrix.package.name }} release
     needs: [released, publish]
-    if: ${{ needs.released.outputs.packages != '[]' }}
+    if: ${{ needs.released.outputs.primary == 'true' && needs.released.outputs.packages != '[]' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -325,8 +341,8 @@ jobs:
 
   release-artifacts:
     name: Attach ${{ matrix.package.name }} distributions and checksums
-    needs: [released, publish-build]
-    if: ${{ needs.released.outputs.packages != '[]' }}
+    needs: [released, publish]
+    if: ${{ needs.released.outputs.primary == 'true' && needs.released.outputs.packages != '[]' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

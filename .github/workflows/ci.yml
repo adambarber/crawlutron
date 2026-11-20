@@ -228,8 +228,8 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
-          # prepare's `uv sync` builds the editable install, and hatch-vcs
-          # derives its version from tags -- a tagless tree builds 0.1.devN.
+          # prepare's `uv sync` reads the static version; tags keep release
+          # assertions aligned with the exact commit under test.
           fetch-tags: true
           persist-credentials: false
       - uses: $/.github/actions/prepare
