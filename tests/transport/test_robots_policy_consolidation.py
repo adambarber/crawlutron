@@ -11,13 +11,12 @@ from crawlutron.orchestration.engine import crawl_request
 from crawlutron.transport.robots import (
     ROBOTS_FAILURE_TTL_SECONDS,
     FetchAndDecode,
-    load_robots_rules,
     robots_cache,
 )
 from crawlutron.vocabulary.robots import RobotsSource
-from safe_url.host_policy import HostPolicy
 from tests._fetch_doubles import FetcherDouble
 from tests._policy_factories import canonical, crawl_policy
+from tests._robots_test_helpers import robots_load, unrestricted_policy
 
 _HTML_BODY = b"<html><body>page content</body></html>"
 
@@ -36,7 +35,7 @@ def _gate(fetch_and_decode: FetchAndDecode | None = None) -> RobotsGate:
     The consolidation tests read one policy through two very different paths,
     so the gate is built once; the arguments were restated at every call site.
     """
-    return RobotsGate(CrawlPolicy(), HostPolicy.unrestricted(), fetch_and_decode)
+    return RobotsGate(CrawlPolicy(), unrestricted_policy(), fetch_and_decode)
 
 
 async def test_job_fetch_populates_cache_seen_by_engine():
@@ -59,7 +58,7 @@ async def test_job_fetch_populates_cache_seen_by_engine():
     )
     assert result["results"][0].status == "success"
     assert fetch_calls == 1
-    cached = robots_cache.get(("https://shared.test", HostPolicy.unrestricted()))
+    cached = robots_cache.get(("https://shared.test", unrestricted_policy()))
     assert cached is not None
     assert cached.rules == [(False, "/private")]
     assert cached.sitemaps == ["https://shared.test/sitemap.xml"]
@@ -130,12 +129,10 @@ async def test_owner_preserves_4xx_and_5xx_ttl_semantics():
         calls += 1
         return None, next(statuses)
 
-    policy = HostPolicy.unrestricted()
+    policy = unrestricted_policy()
 
     def _load(url: str):
-        return load_robots_rules(
-            canonical(url), FetcherDouble(lambda *_: (None, None)), 5, fetch_and_decode=decode, policy=policy
-        )
+        return robots_load(url, decode, policy)
 
     missing = await _load("https://missing.test")
     missing_again = await _load("https://missing.test")

@@ -10,15 +10,10 @@ import pytest
 from crawlutron.transport.robots import (
     ROBOTS_FAILURE_TTL_SECONDS,
     RobotsRules,
-    load_robots_rules,
     robots_cache,
 )
 from crawlutron.vocabulary.robots import RobotsSource
-
-# RobotsSource is the admission policy source used by crawl gate tests.
-from safe_url.host_policy import HostPolicy
-from tests._fetch_doubles import FetcherDouble
-from tests._policy_factories import canonical
+from tests._robots_test_helpers import robots_load, unrestricted_policy
 
 _ROBOTS_URL = "https://waf.test/robots.txt"
 
@@ -38,15 +33,8 @@ def _decode_queue(*answers: tuple[str | None, int | None]):
 
 async def _load(origin: str, *answers):
     decode, calls = _decode_queue(*answers)
-    # The decode double never touches the fetcher; the double satisfies the
-    # HttpFetcher contract without a live transport.
-    rules = await load_robots_rules(
-        canonical(origin),
-        FetcherDouble(lambda *_: (None, None)),
-        5,
-        fetch_and_decode=decode,
-        policy=HostPolicy.unrestricted(),
-    )
+    # The decode double satisfies the HttpFetcher contract without a live transport.
+    rules = await robots_load(origin, decode, unrestricted_policy())
     return rules, calls
 
 
@@ -54,13 +42,7 @@ def _loads_against(decode, policy):
     """A load bound to one decode double and policy, for tests re-using them."""
 
     def _load():
-        return load_robots_rules(
-            canonical("https://waf.test"),
-            FetcherDouble(lambda *_: (None, None)),
-            5,
-            fetch_and_decode=decode,
-            policy=policy,
-        )
+        return robots_load("https://waf.test", decode, policy)
 
     return _load
 
@@ -89,7 +71,7 @@ async def test_application_layer_refusal_denies(status):
 async def test_robots_403_refusal_is_fail_closed_on_the_short_clock():
     """The rework ruling: 403 is an application-layer refusal -- deny, but the
     entry still expires on the short clock so a later 200 is honored."""
-    policy = HostPolicy.unrestricted()
+    policy = unrestricted_policy()
     robots_cache.clear()
     try:
         rules, _ = await _load("https://waf.test", (None, 403))
@@ -103,7 +85,7 @@ async def test_robots_403_refusal_is_fail_closed_on_the_short_clock():
 async def test_refusal_status_is_not_cached_as_a_denial():
     """One transient refusal (403 here) must not outlive the failure TTL: the
     entry expires on the short clock, so a later 200 is honored on the next load."""
-    policy = HostPolicy.unrestricted()
+    policy = unrestricted_policy()
     robots_cache.clear()
     try:
         decode, calls = _decode_queue((None, 403))
@@ -120,7 +102,7 @@ async def test_refusal_status_is_not_cached_as_a_denial():
 async def test_later_robots_200_wins_after_unavailable_status():
     """After the short TTL lapses, a successful robots fetch is parsed and its
     rules enforced -- a 403 never becomes a standing decision."""
-    policy = HostPolicy.unrestricted()
+    policy = unrestricted_policy()
     robots_cache.clear()
     try:
         await _load("https://waf.test", (None, 403))
@@ -149,17 +131,11 @@ async def test_robots_5xx_still_fails_closed():
 
 
 async def test_robots_5xx_refusal_ttl_is_the_short_failure_ttl():
-    policy = HostPolicy.unrestricted()
+    policy = unrestricted_policy()
     robots_cache.clear()
     try:
         decode, _ = _decode_queue((None, 500))
-        await load_robots_rules(
-            canonical("https://down.test"),
-            FetcherDouble(lambda *_: (None, None)),
-            5,
-            fetch_and_decode=decode,
-            policy=policy,
-        )
+        await robots_load("https://down.test", decode, policy)
         delta = robots_cache.time_until_expiry(("https://down.test", policy))
         assert delta is not None and delta <= ROBOTS_FAILURE_TTL_SECONDS
     finally:
@@ -169,7 +145,7 @@ async def test_robots_5xx_refusal_ttl_is_the_short_failure_ttl():
 async def test_robots_404_is_unavailable_too_on_the_short_clock():
     """404 was already allow-all, but on the long TTL -- a site whose robots
     appears later must not wait 600s for the empty verdict to lapse."""
-    policy = HostPolicy.unrestricted()
+    policy = unrestricted_policy()
     robots_cache.clear()
     try:
         await _load("https://gone.test", (None, 404))
@@ -181,7 +157,7 @@ async def test_robots_404_is_unavailable_too_on_the_short_clock():
 
 async def test_robots_200_keeps_the_long_ttl():
     """RFC 9309 2.3.1.1: a successful fetch is a real decision -- long TTL."""
-    policy = HostPolicy.unrestricted()
+    policy = unrestricted_policy()
     robots_cache.clear()
     try:
         await _load("https://gone.test", ("User-agent: *\nDisallow: /x\n", 200))
