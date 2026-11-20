@@ -9,7 +9,7 @@ Scope: docs and evidence only. No workflow or code behavior changes. This ticket
 - `.venv/bin/python` → Python 3.14.10
 - `pytest --co -q` collects 6263/6271 tests (8 deselected)
 - `crawlutron.__file__` resolves under `.hardstand/issue_1202/packages/core/src/` after `scripts/bind_workspace_tree.py` (the shared pth is last-writer-wins; re-bind before each verification pass)
-- Working tree clean except the untracked `BRIEF-1202.md` (never committed)
+- Working tree clean except the untracked workspace brief (never committed; present only in the workspace, not the landed tree)
 - `HEAD` == `main` == f9e94f93 (single-parent work tip; no rebase needed)
 
 ## Stale-path re-grounding (live tree, not the brief's memory)
