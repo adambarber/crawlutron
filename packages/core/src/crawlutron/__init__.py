@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _distribution_version
 
-try:
-    __version__ = _distribution_version("crawlutron-core")
-except PackageNotFoundError:  # a source tree that was never installed
-    __version__ = "0.0.0"
+# The version is owned by release-please in pyproject.toml and read from the
+# installed distribution -- never supplied by code or a fallback literal.
+__version__ = _distribution_version("crawlutron-core")
 
 __all__ = ["__version__"]

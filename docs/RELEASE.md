@@ -41,12 +41,13 @@ Called workflows need `id-token: write` in the caller's grant, so both
 `release-please.yml` and `release.yml` declare it on their `ci` job. The
 pre-commit set is unchanged; coverage is CI-only measurement.
 
-On a green push to `main` only, `testpypi-build` rewrites the declared version
-to a unique PEP 440 `.devN` suffix, builds every member, and stages the
-distributions; `testpypi` then publishes them with trusted publishing from a
-minimal OIDC job. The build job has no `id-token`, because a build backend
-executes arbitrary code. TestPyPI is a rehearsal stage, not a distribution
-channel -- its dependency graph is stale and it has no SLA.
+On a green push to `main` only, `testpypi-build` builds the declared versions
+and stages the distributions; `testpypi` then publishes them with trusted
+publishing from a minimal OIDC job. The build job has no `id-token`, because a
+build backend executes arbitrary code. Repeated pushes reuse the same declared
+version and `skip-existing` makes the upload a no-op until release-please bumps
+it. TestPyPI is a rehearsal stage, not a distribution channel -- its dependency
+graph is stale and it has no SLA.
 
 ## What CI does with the tags
 

@@ -29,6 +29,13 @@ def test_the_running_version_is_the_core_declaration() -> None:
     assert crawlutron.__version__ == workspace_project(SERVICE_ROOT / "packages/core")["version"]
 
 
+def test_runtime_has_no_version_literal() -> None:
+    """The runtime reads installed metadata; it never supplies a number."""
+    source = (SERVICE_ROOT / "packages/core/src/crawlutron/__init__.py").read_text(encoding="utf-8")
+    assert "0.0.0" not in source
+    assert '_distribution_version("crawlutron-core")' in source
+
+
 def test_every_python_version_pin_is_314() -> None:
     """One interpreter family: every checker, workflow and floor agree."""
     assert workspace_project(SERVICE_ROOT)["requires-python"] == ">=3.14"

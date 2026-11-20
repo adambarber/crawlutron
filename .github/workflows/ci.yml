@@ -400,26 +400,9 @@ jobs:
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: false
-      # Release-please owns the declared version; dev builds get a monotonic
-      # PEP 440 .devN suffix so each push is a distinct upload. Both indexes
-      # reject local segments, so none is used here.
-      - name: Give dev builds a unique version
-        run: |
-          set -euo pipefail
-          BASE=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)
-          DISTANCE=$(git rev-list --count "$(git describe --tags --abbrev=0 --match 'v*')"..HEAD)
-          VERSION="${BASE}.dev${DISTANCE}"
-          python3 - "$VERSION" <<'PY'
-          import pathlib
-          import re
-          import sys
-
-          version = sys.argv[1]
-          paths = [pathlib.Path("pyproject.toml"), *sorted(pathlib.Path("packages").glob("*/pyproject.toml"))]
-          for path in paths:
-              path.write_text(re.sub(r'(?m)^version = ".*"$', f'version = "{version}"', path.read_text(), count=1))
-          print(f"dev build version: {version}")
-          PY
+      # Release-please owns the declared version in every pyproject; no CI step
+      # rewrites it. A repeat push reuses the declared version and `skip-existing`
+      # makes the TestPyPI upload a no-op until release-please bumps it.
       - name: Build and inspect every distribution
         run: |
           set -euo pipefail

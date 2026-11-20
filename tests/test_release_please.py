@@ -121,3 +121,24 @@ def test_release_uses_an_app_token_and_no_sha_dispatch() -> None:
     )
     assert "steps.app-token.outputs.token" in text
     assert "steps.release.outputs.pr || '{}'" in text, "an empty release output must not break fromJSON"
+
+
+def test_config_lets_commit_types_choose_the_bump() -> None:
+    """No manual release-as override may replace the commit-derived bump."""
+    config = _config()
+    assert config["release-type"] == "python"
+    assert config.get("bump-minor-pre-major") is True
+    assert "release-as" not in config
+    for path, entry in _mapping(config["packages"]).items():
+        assert "release-as" not in _mapping(entry), path
+
+
+def test_no_workflow_rewrites_a_declared_version() -> None:
+    """Release-please is the only writer of a package version number."""
+    for path in sorted((SERVICE_ROOT / ".github/workflows").glob("*.yml")):
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for job in _mapping(document["jobs"]).values():
+            for step in _steps(job):
+                run = str(step.get("run", ""))
+                assert "write_text" not in run, f"{path.name} writes a file from a step"
+                assert ".dev" not in run, f"{path.name} invents a dev version"
