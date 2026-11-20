@@ -1,0 +1,14 @@
+# Historical false positives: deliberate short test-fixture values that gitleaks
+# flags in older commits. Each fingerprint names one commit, file, rule and line,
+# so a real secret anywhere else still reds the gate.
+
+# tests/test_runtime_policy.py used long "dummy_*" fixture strings; current tree
+# uses short "dummy"/"dummy2" values instead.
+c223bf9b9bd1f948b3634ea88aff0954a6fbf42b:tests/test_runtime_policy.py:generic-api-key:19
+c223bf9b9bd1f948b3634ea88aff0954a6fbf42b:tests/test_runtime_policy.py:generic-api-key:33
+c223bf9b9bd1f948b3634ea88aff0954a6fbf42b:tests/test_runtime_policy.py:generic-api-key:40
+c223bf9b9bd1f948b3634ea88aff0954a6fbf42b:tests/test_runtime_policy.py:generic-api-key:58
+
+# Older fixtures in these two files; neither string exists in the current tree.
+ae19f84bbd2b55efc523aad4f94c7e95ecde4793:tests/conftest.py:generic-api-key:193
+f9da6c32bb9db5e311f69f47a81ea2027fafb9b2:tests/api/test_key_throttle.py:generic-api-key:226

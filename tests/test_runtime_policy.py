@@ -16,13 +16,13 @@ def test_settings_repr_does_not_leak_secrets():
     """repr(settings) must not contain any secret value."""
     settings = CrawlerSettings.from_mapping(
         {
-            "CRAWLUTRON_TAVILY_API_KEY": "dummy_api_key_dummy_api_key_dummy",
-            "CRAWLUTRON_KEY_ADMIN_TOKEN": "dummy_admin_token_dummy_admin_token",
+            "CRAWLUTRON_TAVILY_API_KEY": "dummy",
+            "CRAWLUTRON_KEY_ADMIN_TOKEN": "dummy2",
         }
     )
     rendered = repr(settings)
-    assert "dummy_api_key_dummy_api_key_dummy" not in rendered
-    assert "dummy_admin_token_dummy_admin_token" not in rendered
+    assert "dummy" not in rendered
+    assert "dummy2" not in rendered
 
 
 def test_build_runtime_policy_maps_settings_fields():
@@ -30,14 +30,14 @@ def test_build_runtime_policy_maps_settings_fields():
     settings = CrawlerSettings.from_mapping(
         {
             "CRAWLUTRON_SEARCH_PROVIDER": "tavily",
-            "CRAWLUTRON_TAVILY_API_KEY": "dummy_api_key_dummy_api_key_dummy",
+            "CRAWLUTRON_TAVILY_API_KEY": "dummy",
             "CRAWLUTRON_SEARCH_LIMIT_DEFAULT": "10",
             "CRAWLUTRON_DEFAULT_TIMEOUT_SECONDS": "20",
         }
     )
     policy = build_runtime_policy(settings)
     assert policy.search_provider == "tavily"
-    assert policy.tavily_api_key == "dummy_api_key_dummy_api_key_dummy"
+    assert policy.tavily_api_key == "dummy"
     assert policy.search_limit_default == 10
     assert policy.default_timeout_seconds == 20
 
@@ -55,10 +55,10 @@ def test_runtime_policy_repr_does_not_leak_secrets():
     """repr(snapshot) must not echo secret values."""
     settings = CrawlerSettings.from_mapping(
         {
-            "CRAWLUTRON_TAVILY_API_KEY": "dummy_api_key_dummy_api_key_dummy",
-            "CRAWLUTRON_KEY_ADMIN_TOKEN": "dummy_admin_token_dummy_admin_token",
+            "CRAWLUTRON_TAVILY_API_KEY": "dummy",
+            "CRAWLUTRON_KEY_ADMIN_TOKEN": "dummy2",
         }
     )
     rendered = repr(build_runtime_policy(settings))
-    assert "dummy_api_key_dummy_api_key_dummy" not in rendered
-    assert "dummy_admin_token_dummy_admin_token" not in rendered
+    assert "dummy" not in rendered
+    assert "dummy2" not in rendered
