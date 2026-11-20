@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import zipfile
 from io import BytesIO
-from xml.etree import ElementTree as ET
 
 import pytest
 from safe_url.host_policy import reset_private_target_memo
@@ -45,14 +44,8 @@ def build_docx(paragraphs: list[str]) -> bytes:
 
 def _docx_document(paragraphs: list[str]) -> str:
     ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-    root = ET.Element("w:document", {"xmlns:w": ns})
-    body = ET.SubElement(root, "w:body")
-    for text in paragraphs:
-        p = ET.SubElement(body, "w:p")
-        r = ET.SubElement(p, "w:r")
-        t = ET.SubElement(r, "w:t")
-        t.text = text
-    return ET.tostring(root, encoding="unicode")
+    items = "".join(f"<w:p><w:r><w:t>{text}</w:t></w:r></w:p>" for text in paragraphs)
+    return f'<w:document xmlns:w="{ns}"><w:body>{items}</w:body></w:document>'
 
 
 def build_pptx(slides: list[list[str]]) -> bytes:
@@ -65,14 +58,8 @@ def build_pptx(slides: list[list[str]]) -> bytes:
 
 def _pptx_slide(shape_texts: list[str]) -> str:
     ns = "http://schemas.openxmlformats.org/presentationml/2006/main"
-    root = ET.Element("p:sld", {"xmlns:p": ns})
-    for text in shape_texts:
-        sp = ET.SubElement(root, "p:sp")
-        tx = ET.SubElement(sp, "p:tx")
-        body = ET.SubElement(tx, "a:bodyPr")
-        t = ET.SubElement(body, "a:t")
-        t.text = text
-    return ET.tostring(root, encoding="unicode")
+    items = "".join(f"<p:sp><p:tx><a:bodyPr/><a:t>{text}</a:t></p:tx></p:sp>" for text in shape_texts)
+    return f'<p:sld xmlns:p="{ns}">{items}</p:sld>'
 
 
 def build_xlsx(sheets: dict[str, list[list[str]]]) -> bytes:
@@ -85,15 +72,13 @@ def build_xlsx(sheets: dict[str, list[list[str]]]) -> bytes:
 
 def _xlsx_sheet(rows: list[list[str]]) -> str:
     ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
-    root = ET.Element("worksheet", {"xmlns": ns})
-    sheet_data = ET.SubElement(root, "sheetData")
+    rows_xml = ""
     for r_idx, row in enumerate(rows, 1):
-        row_el = ET.SubElement(sheet_data, "row", {"r": str(r_idx)})
-        for c_idx, value in enumerate(row, 1):
-            cell = ET.SubElement(row_el, "c", {"r": f"{_col_letter(c_idx)}{r_idx}"})
-            v = ET.SubElement(cell, "v")
-            v.text = value
-    return ET.tostring(root, encoding="unicode")
+        cells = "".join(
+            f'<c r="{_col_letter(c_idx)}{r_idx}"><v>{value}</v></c>' for c_idx, value in enumerate(row, 1)
+        )
+        rows_xml += f'<row r="{r_idx}">{cells}</row>'
+    return f'<worksheet xmlns="{ns}"><sheetData>{rows_xml}</sheetData></worksheet>'
 
 
 def _col_letter(n: int) -> str:

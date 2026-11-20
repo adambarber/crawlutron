@@ -9,6 +9,7 @@ members = ["packages/*"]
 # Resolve the member wheels from the workspace, never PyPI: their versions are
 # git-derived at build time and each lives in this repository.
 crawlutron-core = { workspace = true }
+crawlutron-extract = { workspace = true }
 crawlutron-mcp = { workspace = true }
 crawlutron-rest = { workspace = true }
 crawlutron-safe-url = { workspace = true }
