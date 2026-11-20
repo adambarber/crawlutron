@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from tests._ci_contract import SERVICE_ROOT
-from tests.test_ci_enforcement import _mapping, _workflow_document
+from tests._ci_contract import SERVICE_ROOT, mapping, workflow_document
 
 
 def test_every_job_condition_is_one_well_formed_expression() -> None:
@@ -15,9 +14,9 @@ def test_every_job_condition_is_one_well_formed_expression() -> None:
     workflows = sorted(SERVICE_ROOT.joinpath(".github/workflows").glob("*.yml"))
     assert workflows, "no workflows to check: the gate would pass vacuously"
     for path in workflows:
-        document = _workflow_document(path)
-        for name, job in _mapping(document.get("jobs"), "jobs").items():
-            condition = _mapping(job, f"job {name}").get("if")
+        document = workflow_document(path)
+        for name, job in mapping(document.get("jobs"), "jobs").items():
+            condition = mapping(job, f"job {name}").get("if")
             if not isinstance(condition, str):
                 continue
             text = " ".join(condition.split())

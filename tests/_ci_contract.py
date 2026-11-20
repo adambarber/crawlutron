@@ -419,3 +419,30 @@ QUOTED_SECOND_JSCPD_HOOK = (
 
 #: Compile-time, runtime and test docstrings may run no longer than three lines.
 _HOOK_MODULE = re.compile(r"\.venv/bin/python -m ([\w.]+)")
+
+
+# Shared workflow-document parsing helpers used by CI enforcement test modules.
+def workflow_document(path: Path) -> dict[object, object]:
+    """One workflow file, parsed. The single reader, so every check sees one shape."""
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert isinstance(document, dict), f"{path.name} is not a workflow"
+    return document
+
+
+def mapping(value: object, what: str) -> dict[str, object]:
+    """A workflow block narrowed to a string-keyed mapping, or a named refusal."""
+    assert isinstance(value, dict), f"the workflow must declare {what}"
+    return {str(key): item for key, item in value.items()}
+
+
+def steps(job: object) -> list[dict[str, object]]:
+    """One job's step records, each narrowed to a string-keyed mapping."""
+    steps = mapping(job, "a job").get("steps")
+    assert isinstance(steps, list)
+    return [mapping(step, "a step") for step in steps]
+
+
+def triggers(document: dict[object, object]) -> dict[str, object]:
+    """The ``on`` block, whichever spelling the YAML parser used for the key."""
+    raw = document.get("on")
+    return mapping(raw if isinstance(raw, dict) else document.get(True), "an 'on' trigger")
