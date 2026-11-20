@@ -136,6 +136,14 @@ def test_a_manual_retry_can_publish_an_existing_tag_from_the_fixed_workflow() ->
         if "with" in step and "ref" in step["with"]
     ]
     assert refs and set(refs) == {"${{ inputs.tag || github.sha }}", "${{ github.sha }}"}
+    smoke = "\n".join(
+        str(step.get("run", ""))
+        for step in workflow_doc["jobs"]["image"]["steps"]
+        if "Smoke the built image" == step.get("name")
+    )
+    assert "seq 1 60" in smoke
+    assert "curl --noproxy '*'" in smoke, "loopback probes must bypass any HTTP proxy"
+    assert "docker inspect -f" in smoke
     released_job = workflow_doc["jobs"]["released"]
     assert released_job["steps"][0]["with"]["ref"] == "${{ github.sha }}"
     image_job = workflow_doc["jobs"]["image"]
