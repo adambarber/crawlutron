@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 from collections.abc import (
     Awaitable,
     Callable,
@@ -57,12 +56,6 @@ async def resolve_browser_target(
         return url.raw, {}
     pinned = await pin(url, {}, timeout_seconds=timeout_seconds)
     host = pinned.headers.get("Host")
-    logging.getLogger("crawlutron.transport.browser_targets").warning(
-        "BROWSER_TARGET_DIAG: raw=%s connect_url=%s host=%s",
-        url.raw,
-        pinned.connect_url,
-        host,
-    )
     return pinned.connect_url, ({"Host": host} if host else {})
 
 
