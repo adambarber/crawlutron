@@ -107,6 +107,16 @@ else:
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _configure_git_identity_for_tests():
+    """Set GIT_AUTHOR_*/GIT_COMMITTER_* for the whole suite so any test that runs git commit works in CI."""
+    os.environ.setdefault("GIT_AUTHOR_NAME", "Crawlutron Test Suite")
+    os.environ.setdefault("GIT_AUTHOR_EMAIL", "test@crawlutron.local")
+    os.environ.setdefault("GIT_COMMITTER_NAME", "Crawlutron Test Suite")
+    os.environ.setdefault("GIT_COMMITTER_EMAIL", "test@crawlutron.local")
+    yield
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _remove_test_cache_dir():
     """Delete this worker's scratch cache directory once the session is over.
 

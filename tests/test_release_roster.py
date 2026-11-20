@@ -17,12 +17,20 @@ GIT = shutil.which("git") or "git"
 
 
 def _git(root: Path, *arguments: str) -> None:
-    """Run git pinned to ``root`` by environment, so a hook's git vars cannot redirect it."""
+    """Run git pinned to ``root`` by environment, so a hook's git vars cannot redirect it.
+
+    A test identity is set so ``git commit`` works in any environment, including CI,
+    where no ``user.name``/``user.email`` is configured.
+    """
     environment = {
         **os.environ,
         "GIT_DIR": str(root / ".git"),
         "GIT_WORK_TREE": str(root),
         "GIT_INDEX_FILE": str(root / ".git/index"),
+        "GIT_AUTHOR_NAME": "Crawlutron Test Suite",
+        "GIT_AUTHOR_EMAIL": "test@crawlutron.local",
+        "GIT_COMMITTER_NAME": "Crawlutron Test Suite",
+        "GIT_COMMITTER_EMAIL": "test@crawlutron.local",
     }
     subprocess.run([GIT, *arguments], cwd=root, env=environment, check=True, capture_output=True)
 
