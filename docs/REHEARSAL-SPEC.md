@@ -40,6 +40,21 @@ GITHUB_OUTPUT contract (emitted by emit_roster.py itself):
   - `primary=<true|false>` — result of `release_roster.py --primary`
 Coherence: `release_roster.py` prints its stdout JSON array pretty (`indent=2`, scripts/release_roster.py:114); emit_roster.py reads that array and re-serializes it compactly into `GITHUB_OUTPUT packages=<JSON array>`, matching the compact form `release.yml:92-94` uses. `primary` is always re-resolved via `release_roster.py --primary`, never copied from a stale value.
 
+### Distribution build + version assert (release.yml:101-163, `publish-build`)
+
+Name: scripts/release/build_assert.py [to be created]
+argv: python3 scripts/release/build_assert.py (no positional args)
+Env contract:
+- `SELECTOR`: package selector (`name` field) from the released entry, e.g. `crawlutron-core`.
+- `VERSION`: package version from the released entry (`EXPECTED_VERSION`).
+- Permissions required: none (no OIDC/id-token — a build backend executes arbitrary code, so a job holding id-token must not also build).
+- Builds only this distribution: `uv build --package "$SELECTOR" --out-dir dist`.
+- Asserts the built artifacts carry the release version: each wheel's `.dist-info/METADATA` `Version` header equals `EXPECTED_VERSION` (mismatch fails, naming the wheel and its carried version).
+- Runs `uvx twine check --strict dist/*` on the verified artifacts.
+Exit codes: 0 success (built, version asserted, twine check strict passes); 2 env/arg error; 3 build failure; 4 version mismatch; 5 twine check failure.
+Semantic validation: no wheel built ⇒ failure; a wheel carrying a version other than the released entry's version ⇒ failure naming file+line. Static versions in `pyproject.toml` bind the build to the exact release commit; a repeat push reuses the declared version (`skip-existing` makes TestPyPI upload a no-op until release-please bumps it).
+RELEASE_TAG rule: `SELECTOR`/`VERSION` come from the released entry resolved at HEAD (or at `RELEASE_TAG` when non-empty); empty `RELEASE_TAG` on tag push resolves tags at HEAD.
+
 ### Container image build, smoke, push, attest (release.yml:233-316)
 
 Name: scripts/release/image.py [to be created]
