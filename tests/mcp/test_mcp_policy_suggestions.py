@@ -51,7 +51,7 @@ async def other_caller(h: SuggestionHarness) -> SuggestionHarness:
 @contextlib.asynccontextmanager
 async def _suggestion_app_client(
     tmp_path: Path,
-) -> AsyncGenerator[tuple[AsyncClient, CrawlResultStore, CallerKeyStore], None]:
+) -> AsyncGenerator[tuple[AsyncClient, CrawlResultStore, CallerKeyStore]]:
     """An app over /mcp + /v1/policy-suggestions + keys, one isolated triple of stores."""
     from crawlutron_rest.api.keys_router import router as keys_router
     from crawlutron_rest.api.policy_router import router as policy_router
@@ -67,7 +67,7 @@ async def _suggestion_app_client(
 @pytest.fixture
 async def suggestion_harness(
     tmp_path: Path,
-) -> AsyncGenerator[tuple[SuggestionHarness, CallerKeyStore], None]:
+) -> AsyncGenerator[tuple[SuggestionHarness, CallerKeyStore]]:
     """A keyed client over /mcp + /v1/policy-suggestions sharing one result store."""
     async with _suggestion_app_client(tmp_path) as (client, results, keys):
         secret = await issue_key(client)

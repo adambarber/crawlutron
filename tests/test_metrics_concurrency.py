@@ -34,7 +34,7 @@ def shared_db(tmp_path_factory) -> Path:
 
 
 @pytest.fixture(autouse=True)
-def _scrub_rows(shared_db: Path) -> Generator[None, None, None]:
+def _scrub_rows(shared_db: Path) -> Generator[None]:
     """Drop every row the test wrote so the next test starts from a clean row set."""
     yield
     store = CoordinationCounters(shared_db)

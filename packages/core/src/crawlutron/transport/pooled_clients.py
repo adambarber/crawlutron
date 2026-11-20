@@ -443,7 +443,7 @@ process_state.register(__name__, _reset, _has)
 @contextmanager
 def swap_pooled_builders(
     swaps: list[tuple[LoopBoundPooledClient, PooledClientBuilder]],
-) -> Generator[None, None, None]:
+) -> Generator[None]:
     """Rebind the given pooled singletons' builders, restored on the way out.
 
     The builders are the one part of the pools a caller can legitimately

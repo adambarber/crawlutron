@@ -55,7 +55,7 @@ def _effective_argv(pytestconfig: pytest.Config) -> list[str]:
     sources.extend(shlex.split(os.environ.get("PYTEST_ADDOPTS", "")))
     try:
         addopts = pytestconfig.getini("addopts")
-    except (KeyError, ValueError):
+    except KeyError, ValueError:
         addopts = ""
     sources.extend(addopts if isinstance(addopts, list) else shlex.split(str(addopts)))
     return sources

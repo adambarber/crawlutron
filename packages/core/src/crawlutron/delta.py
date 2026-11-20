@@ -113,7 +113,7 @@ def _http_date_epoch(value: str | None) -> float | None:
         return None
     try:
         return parsedate_to_datetime(value).timestamp()
-    except (TypeError, ValueError, OverflowError):
+    except TypeError, ValueError, OverflowError:
         return None
 
 

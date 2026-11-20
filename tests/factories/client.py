@@ -51,7 +51,7 @@ def close_all(*stores_: object) -> None:
 @contextlib.asynccontextmanager
 async def isolation_client(
     tmp_path: Path,
-) -> AsyncGenerator[_Isolated, None]:
+) -> AsyncGenerator[_Isolated]:
     """An HTTP client over isolated stores, yielding the client and the stores."""
     store, results, keys = stores(tmp_path)
     app = isolation_app(store, results, keys)
@@ -65,7 +65,7 @@ async def isolation_client(
 @contextlib.asynccontextmanager
 async def quota_client(
     tmp_path: Path,
-) -> AsyncGenerator[_Isolated, None]:
+) -> AsyncGenerator[_Isolated]:
     """An HTTP client whose app can run the crawl POST: settings and shutdown wired."""
     store, results, keys = stores(tmp_path)
     app = isolation_app(store, results, keys)

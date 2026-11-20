@@ -76,7 +76,7 @@ async def keyed_client(
     *,
     keys: CallerKeyStore,
     overrides: Mapping[Callable[[Request], object], Callable[[], object]] | None = None,
-) -> AsyncGenerator[AsyncClient, None]:
+) -> AsyncGenerator[AsyncClient]:
     """Configure ``app`` as a keyed service and serve it with an in-process client."""
     for dependency, factory in (
         keyed_overrides(app, keys) if overrides is None else {**keyed_overrides(app, keys), **overrides}
@@ -93,7 +93,7 @@ async def service_client(
     routers: Mapping[str, APIRouter],
     with_results: bool = False,
     wire: Callable[[FastAPI], None] | None = None,
-) -> AsyncGenerator[tuple[AsyncClient, JobStore, CallerKeyStore], None]:
+) -> AsyncGenerator[tuple[AsyncClient, JobStore, CallerKeyStore]]:
     """Serve a keyed HTTP client over one register, one key admin and ``routers``; ``with_results`` also
     wires a result store and propagates the job store to ``app.state`` for the MCP door. ``wire`` runs
     once mounted, so a test substitutes wiring at production's injection point.
@@ -129,7 +129,7 @@ def mcp_crawl_keys_routers() -> dict[str, APIRouter]:
 async def keyed_result_client(
     tmp_path: Path,
     routers: tuple[APIRouter, ...],
-) -> AsyncGenerator[tuple[AsyncClient, CrawlResultStore, CallerKeyStore], None]:
+) -> AsyncGenerator[tuple[AsyncClient, CrawlResultStore, CallerKeyStore]]:
     """A keyed client over ``routers`` with a result store the rollup reads. Owns settings/shutdown/result
     overrides so the door reads the store handed to it, and stashes the store on app.state for the MCP
     door; yields the client, result store, and key store.

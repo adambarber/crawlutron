@@ -76,7 +76,7 @@ def test_a_run_step_that_splices_an_event_field_is_caught() -> None:
 def _publishes(step: dict[str, object]) -> bool:
     """True when this step hands the image to the registry."""
     with_block = step.get("with")
-    return str(step.get("run", "")).startswith("docker push") or (
+    return "docker push" in str(step.get("run", "")) or (
         isinstance(with_block, dict) and with_block.get("push") is True
     )
 

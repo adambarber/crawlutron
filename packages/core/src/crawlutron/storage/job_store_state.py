@@ -56,7 +56,7 @@ def _normalized_stats(value: object) -> dict[str, int]:
                 continue
             try:
                 stats[key] = int(raw)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
     return stats
 

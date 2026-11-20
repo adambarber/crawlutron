@@ -114,7 +114,7 @@ class _PooledFake:
         if hasattr(self, "is_closed"):
             self.is_closed = True
 
-    def stream(self, *args: object, **kwargs: object) -> "_BrokenStream":
+    def stream(self, *args: object, **kwargs: object) -> _BrokenStream:
         """Fail the fetch loop instantly with no network access."""
         return _BrokenStream()
 
@@ -128,7 +128,7 @@ class _BrokenStream:
     status_code = 502
     headers: dict[str, str] = {}
 
-    async def __aenter__(self) -> "_BrokenStream":
+    async def __aenter__(self) -> _BrokenStream:
         return self
 
     async def __aexit__(self, *exc: object) -> None:
@@ -357,7 +357,7 @@ def _discard_probe(install: asyncio.AbstractEventLoop | None) -> list[bool]:
     close was called. The condition is installed for real via set_event_loop instead of monkeypatching
     asyncio.get_event_loop, so the probe pins behavior.
     """
-    from crawlutron.transport.pooled_clients import PooledClient, discard_if_unowned_loop
+    from crawlutron.transport.pooled_clients import discard_if_unowned_loop
 
     closed: list[bool] = []
 

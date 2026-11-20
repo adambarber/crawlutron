@@ -76,6 +76,7 @@ REPORTING_JOBS = {
     "mypy",
     "vulture",
     "battery",
+    "coverage",
     "real-pbkdf2",
     "test-browser",
     "audit",

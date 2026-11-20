@@ -176,7 +176,7 @@ try:
         stdout.reconfigure(line_buffering=False, write_through=True)
         stderr.reconfigure(line_buffering=False, write_through=True)
     os.environ["PYTHONUNBUFFERED"] = "1"
-except (AttributeError, ValueError):
+except AttributeError, ValueError:
     logging.getLogger(__name__).debug("stream reconfigure unavailable")
 
 
@@ -192,7 +192,7 @@ def pytest_sessionfinish(session, exitstatus):  # args unused; hook signature
         del session, exitstatus
         sys.stdout.flush()
         sys.stderr.flush()
-    except (ValueError, OSError):
+    except ValueError, OSError:
         logging.getLogger(__name__).debug("final flush unavailable")
     # The module-level app's stores hold long-lived connections (#838); close
     # them HERE, before interpreter exit relies on GC finalization.
@@ -200,7 +200,7 @@ def pytest_sessionfinish(session, exitstatus):  # args unused; hook signature
 
     try:
         app = service_app()
-    except (AssertionError, ImportError):
+    except AssertionError, ImportError:
         return
     for attr in (
         "job_store",

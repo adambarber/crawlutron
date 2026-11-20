@@ -55,7 +55,7 @@ if TYPE_CHECKING:
 @contextlib.asynccontextmanager
 async def _job_mcp_client(
     tmp_path: Path,
-) -> AsyncGenerator[tuple[AsyncClient, JobStore, CallerKeyStore], None]:
+) -> AsyncGenerator[tuple[AsyncClient, JobStore, CallerKeyStore]]:
     """Isolated app serving /mcp + /v1/jobs over one job store and key admin."""
     async with service_client(
         tmp_path,

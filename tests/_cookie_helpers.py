@@ -16,7 +16,7 @@ from crawlutron.transport.cookie_jar import CookieJar
 
 
 @contextmanager
-def cookie_file(jar: CookieJar, name: str) -> Generator[str, None, None]:
+def cookie_file(jar: CookieJar, name: str) -> Generator[str]:
     """Export ``jar`` to ``name``; yield the path, removed on exit, and removed
     *first* if a previous run left one behind so an atomicity test never reads a
     file it did not write.

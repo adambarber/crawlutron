@@ -78,7 +78,7 @@ def expires_seconds(headers: Mapping[str, str], *, now: float) -> float | None:
         return None
     try:
         instant = parsedate_to_datetime(raw).timestamp()
-    except (TypeError, ValueError, OverflowError):
+    except TypeError, ValueError, OverflowError:
         return None
     return instant - now
 

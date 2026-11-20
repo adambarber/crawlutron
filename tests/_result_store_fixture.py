@@ -13,11 +13,11 @@ from crawlutron.storage.safe_db import allow_on_loop
 
 def loop_permitted_store[S: CoordinationStore](
     build: Callable[[pathlib.Path], S],
-) -> Callable[[pathlib.Path], Generator[S, None, None]]:
+) -> Callable[[pathlib.Path], Generator[S]]:
     """Fixture factory: a store from ``build`` whose sync seeds may run on the loop."""
 
     @pytest.fixture
-    def store_fixture(tmp_path: pathlib.Path) -> Generator[S, None, None]:
+    def store_fixture(tmp_path: pathlib.Path) -> Generator[S]:
         store = build(tmp_path)
         with allow_on_loop():
             yield store

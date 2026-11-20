@@ -55,7 +55,7 @@ def _sync_client(handler) -> CrawlutronClientSync:
 
 
 @asynccontextmanager
-async def _served(handler) -> AsyncGenerator[CrawlutronClient, None]:
+async def _served(handler) -> AsyncGenerator[CrawlutronClient]:
     client = _client(handler)
     try:
         yield client
@@ -64,7 +64,7 @@ async def _served(handler) -> AsyncGenerator[CrawlutronClient, None]:
 
 
 @asynccontextmanager
-async def _hanging_server() -> AsyncGenerator[str, None]:
+async def _hanging_server() -> AsyncGenerator[str]:
     """Accept a connection and never answer, so only a client timeout ends the wait."""
     writers: list[asyncio.StreamWriter] = []
 
@@ -84,7 +84,7 @@ async def _hanging_server() -> AsyncGenerator[str, None]:
 
 
 @asynccontextmanager
-async def _served_sync(handler) -> AsyncGenerator[CrawlutronClientSync, None]:
+async def _served_sync(handler) -> AsyncGenerator[CrawlutronClientSync]:
     client = _sync_client(handler)
     try:
         yield client

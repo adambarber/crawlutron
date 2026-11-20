@@ -84,7 +84,7 @@ def normalize_job_state(job: CrawlJobState) -> CrawlJobState:
     for url, attempts in job.transient_retries.items():
         try:
             value = max(0, int(attempts))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         transient_retries[url] = max(transient_retries.get(url, 0), value)
     job.root_url = root_url

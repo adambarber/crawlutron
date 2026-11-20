@@ -25,7 +25,7 @@ from tests._fetch_outcome import FetchFailed, FetchOutcome
 _ISOLATED = multiprocessing.get_context("spawn")
 
 
-def isolated_queue() -> "Queue[FetchOutcome]":
+def isolated_queue() -> Queue[FetchOutcome]:
     """A queue from the same context as :func:`isolated_process`.
 
     Its element type is the report both spawned reporters put on it: the one

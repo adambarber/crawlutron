@@ -8,7 +8,7 @@ from crawlutron.storage.safe_db import allow_on_loop
 
 
 @pytest.fixture
-def watch_store(tmp_path) -> Generator[object, None, None]:
+def watch_store(tmp_path) -> Generator[object]:
     """WatchStore backed by a per-test SQLite db under ``tmp_path``.
 
     Async tests drive sync writes on the loop; ``allow_on_loop`` is the

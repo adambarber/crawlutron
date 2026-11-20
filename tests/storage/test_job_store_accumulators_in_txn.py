@@ -35,7 +35,7 @@ def _make_conn() -> sqlite3.Connection:
 
 
 @contextmanager
-def _accumulators() -> Generator[tuple[JobAccumulators, sqlite3.Connection], None, None]:
+def _accumulators() -> Generator[tuple[JobAccumulators, sqlite3.Connection]]:
     """A JobAccumulators over a fresh in-memory schema, closed on exit."""
     conn = _make_conn()
     try:

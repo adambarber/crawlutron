@@ -157,7 +157,7 @@ async def test_the_async_twins_carry_the_scope():
 @asynccontextmanager
 async def _two_address_clients(
     tmp_path,
-) -> AsyncGenerator[tuple[httpx.AsyncClient, httpx.AsyncClient], None]:
+) -> AsyncGenerator[tuple[httpx.AsyncClient, httpx.AsyncClient]]:
     """One isolated keys-door app served to two clients, each presenting a
     different remote address: the attacker's and the operator's."""
     store, results, keys = stores(tmp_path)

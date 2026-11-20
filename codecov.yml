@@ -1,0 +1,17 @@
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 0.5%
+        informational: true
+    patch:
+      default:
+        target: 90%
+        informational: true
+
+# Later flag uploads (browser, real-pbkdf2) must not crater the total when
+# only the battery flag is present on a given run.
+flag_management:
+  default_rules:
+    carryforward: true

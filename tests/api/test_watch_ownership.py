@@ -31,7 +31,7 @@ async def _issue(keys: CallerKeyStore, label: str, *, max_pages: int = 0) -> str
 @asynccontextmanager
 async def _keyed_watch_client(
     watch_store, key_store: CallerKeyStore, *, max_watches: int = 100
-) -> AsyncGenerator[AsyncClient, None]:
+) -> AsyncGenerator[AsyncClient]:
     """A client over ``/v1/watches`` whose app holds ``key_store`` for identity."""
     app = harness_app(watch_router)
     app.state.caller_key_store = key_store

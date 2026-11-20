@@ -179,7 +179,7 @@ def mount_tracker(client: AsyncClient):
 
 
 @contextlib.asynccontextmanager
-async def keyed_quota_client(tmp_path, *, max_concurrency: int = 1) -> AsyncGenerator[_QuotaClient, None]:
+async def keyed_quota_client(tmp_path, *, max_concurrency: int = 1) -> AsyncGenerator[_QuotaClient]:
     """A quota client with a mounted tracker and one keyed caller."""
     from tests.factories.client import quota_client
 
@@ -191,15 +191,11 @@ async def keyed_quota_client(tmp_path, *, max_concurrency: int = 1) -> AsyncGene
 
 @contextlib.asynccontextmanager
 async def isolated_client(
-    tmp_path, *, routers
+    tmp_path,
+    *,
+    routers,
 ) -> AsyncGenerator[
-    tuple[
-        AsyncClient,
-        JobStore,
-        result_store.CrawlResultStore,
-        caller_key_store.CallerKeyStore,
-    ],
-    None,
+    tuple[AsyncClient, JobStore, result_store.CrawlResultStore, caller_key_store.CallerKeyStore]
 ]:
     """An HTTP client over ``routers`` backed by isolated job/result/key stores.
 

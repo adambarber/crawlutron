@@ -59,7 +59,7 @@ NEXT_PAGE_URL = "http://example.com/next"
 BROWSER_TEXT = "page one page two next page body copy"
 
 
-def _full_discovery_policy() -> "CrawlPolicy":
+def _full_discovery_policy() -> CrawlPolicy:
     """Full extraction with discovery on: the policy that makes the post-fetch
     block have something to find, for whichever strategy is under test."""
     return http_strategy_policy(extraction="full", discovery=True)

@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
 
 @contextmanager
-def _swap_cffi_builder(builder: PooledClientBuilder) -> Generator[None, None, None]:
+def _swap_cffi_builder(builder: PooledClientBuilder) -> Generator[None]:
     """Swap the cffi leaf's builder; restore it on the way out."""
     singleton = _leaf.session_singleton()
     original = singleton.build
@@ -47,7 +47,7 @@ def pooled_client_builders(
     *,
     http: PooledClientBuilder | None = None,
     cffi: PooledClientBuilder | None = None,
-) -> Generator[None, None, None]:
+) -> Generator[None]:
     """Swap a pooled client's builder for the duration of a block."""
     swaps: list[tuple[LoopBoundPooledClient, PooledClientBuilder]] = []
     if http is not None:

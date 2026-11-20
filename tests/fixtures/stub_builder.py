@@ -17,7 +17,7 @@ __all__ = ["stub_builder"]
 
 
 @pytest.fixture
-def stub_builder() -> Generator[Callable[[str, Callable[..., Any]], None], None, None]:
+def stub_builder() -> Generator[Callable[[str, Callable[..., Any]], None]]:
     """Install a pooled-client builder for this test's body, undone at teardown.
 
     ``seam`` is ``"http"`` or ``"cffi"`` -- the keyword the public seam accepts, not

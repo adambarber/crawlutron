@@ -33,7 +33,7 @@ def _app(job_store: JobStore, caller: CallerIdentity) -> FastAPI:
 
 
 @contextlib.asynccontextmanager
-async def _client(job_store: JobStore, caller: CallerIdentity) -> AsyncGenerator[AsyncClient, None]:
+async def _client(job_store: JobStore, caller: CallerIdentity) -> AsyncGenerator[AsyncClient]:
     transport = ASGITransport(app=_app(job_store, caller))
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client

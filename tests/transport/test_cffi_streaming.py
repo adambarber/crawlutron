@@ -312,7 +312,7 @@ class _FakeCffiResponse:
 
 class _FakeCffiClient:
     #: The most recent client built, or ``None`` when none has been.
-    last_instance: "_FakeCffiClient | None" = None
+    last_instance: _FakeCffiClient | None = None
 
     def __init__(self, body: bytes, **kwargs):
         self._body = body

@@ -18,7 +18,7 @@ def write_body(body: bytes, output: str = "json", pretty: bool = False) -> None:
     if output == "json" and pretty:
         try:
             text = json.dumps(json.loads(text), ensure_ascii=False, indent=2)
-        except (json.JSONDecodeError, ValueError):
+        except json.JSONDecodeError, ValueError:
             pass
     if not text.endswith("\n"):
         text += "\n"

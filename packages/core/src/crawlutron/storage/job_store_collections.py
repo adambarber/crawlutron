@@ -123,7 +123,7 @@ def read_transient_retries(retries: dict[str, int], *, host_policy: HostPolicy) 
             key = _admit_cached(url, host_policy)
             if key is not None:
                 admitted_retries[key] = max(0, int(attempts))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
     return admitted_retries
 
@@ -135,7 +135,7 @@ def _entry_depth(value: object, fallback: int) -> int:
         return fallback
     try:
         return max(0, int(value))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return fallback
 
 

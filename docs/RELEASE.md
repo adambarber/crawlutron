@@ -13,14 +13,40 @@ breaking change a minor bump while the version is still `0.x`.
 
 ## Cutting a release
 
-Nothing is hand-tagged. A merge to `main` runs `.github/workflows/release-please.yml`,
-which opens or updates one release PR that bumps only the packages whose files
-changed. Merging that PR is the release act: release-please writes the versions,
-creates the tags (`<component>-v<version>`), and creates one GitHub release per
-package.
+A merge to `main` runs `.github/workflows/ci.yml` directly: the gates, coverage,
+and a dev-build upload to TestPyPI. The bot is not involved.
 
-The release PR also carries a refreshed `uv.lock`: a version bump makes the lock
+Release Please is **dispatch-only**. To cut a release, run Actions → Release
+Please → Run workflow → `main` (or `gh workflow run release-please.yml --ref
+main`). That run calls CI again on the same HEAD before the bot may act. Without
+this dispatch nothing is tagged, and the release PR only refreshes when
+dispatched. A release therefore costs two extra gate runs (dispatch, then the
+tag's `release.yml` run) -- the price of in-run gating.
+
+The bot authenticates with a GitHub App (`vars.RELEASE_APP_ID` and
+`secrets.RELEASE_APP_PRIVATE_KEY`), not `GITHUB_TOKEN`. App-created PRs receive
+CI checks, and App-created tags fire `release.yml` directly. The old handoff
+that dispatched by commit SHA is gone: the dispatch API accepts a ref name,
+never a SHA. Provision the App id/key as a one-time owner step before using the
+dispatch.
+
+The release PR carries a refreshed `uv.lock`: a version bump makes the lock
 stale, and the lock gate runs on every commit after the PR lands.
+
+## What CI does with coverage and dev builds
+
+Every CI path -- pull request, push, dispatch, tag -- runs a `coverage` job that
+measures the battery's selection and uploads to Codecov with tokenless OIDC.
+Called workflows need `id-token: write` in the caller's grant, so both
+`release-please.yml` and `release.yml` declare it on their `ci` job. The
+pre-commit set is unchanged; coverage is CI-only measurement.
+
+On a green push to `main` only, `testpypi-build` rewrites the declared version
+to a unique PEP 440 `.devN` suffix, builds every member, and stages the
+distributions; `testpypi` then publishes them with trusted publishing from a
+minimal OIDC job. The build job has no `id-token`, because a build backend
+executes arbitrary code. TestPyPI is a rehearsal stage, not a distribution
+channel -- its dependency graph is stale and it has no SLA.
 
 ## What CI does with the tags
 
@@ -69,6 +95,10 @@ name, consumed by that name's first upload. Register one, release, register the
 next: owner `adambarber`, repository `crawlutron`, workflow `release.yml`,
 environment `pypi`.
 
+The dev-build path needs a second registration on **test.pypi.org** for every
+project: same owner and repository, workflow `ci.yml`, environment `testpypi`.
+That environment has no required reviewers; `pypi` keeps its reviewer gate.
+
 The `pypi` environment requires a reviewer, so no release publishes without a
 human click.
 
@@ -78,9 +108,14 @@ These are enforced outside the repository (GitHub repo settings) and must be in
 place before the first release:
 
 - **Branch protection on `main`**: requires a passing CI `required` check and a
-  pull request review from a release owner before any merge.
-- **Tag ruleset on `*-v*`**: only repository admins may create or push release
-  tags. A tag is the release act — unrestricted tag pushes bypass CI gating.
+  pull request review from a release owner before any merge. A merge queue
+  serializes main so hatch-vcs/repeat runs stay unique.
+- **Tag ruleset on `v*` and `*-v*`**: only the release App or repository admins
+  may create or push release tags. A tag is the release act — unrestricted tag
+  pushes bypass CI gating.
+- **Environments**: `pypi` has required reviewers and is bound to release tags;
+  `testpypi` has none, since dev builds are a rehearsal. Both are declared in
+  the workflows and enforced in repository settings.
 - **CODEOWNERS**: `.github/CODEOWNERS` lists release-owning paths
   (`.github/workflows/release.yml`, `.github/actions/prepare/action.yml`,
   `scripts/release_roster.py`, `docs/RELEASE.md`); changes to those files

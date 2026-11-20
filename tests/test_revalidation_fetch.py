@@ -127,7 +127,7 @@ class TestRevalidationFetchesOnce:
 
 async def _cached_content_crawler(
     tmp_path, url, body_text
-) -> tuple[ContentCache, Callable[[], Awaitable["EngineCrawlResult"]]]:
+) -> tuple[ContentCache, Callable[[], Awaitable[EngineCrawlResult]]]:
     """A content-cache harness: the first crawl stores body_text against a validator,
     later crawls revalidate and earn an empty 304. Returns the cache and a crawl."""
     from tests._fetch_doubles import FetcherDouble
@@ -143,7 +143,7 @@ async def _cached_content_crawler(
     cache = HttpCache()
     content_cache = ContentCache(cache_dir=str(tmp_path / "cc"), default_ttl=3600)
 
-    async def crawl() -> "EngineCrawlResult":
+    async def crawl() -> EngineCrawlResult:
         return await run_http_strategy(
             url=url,
             policy={},

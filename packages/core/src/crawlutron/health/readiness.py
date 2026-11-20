@@ -17,7 +17,7 @@ from crawlutron.runtime.readiness_state import (
 __all__ = ["READINESS_STATE", "ReadinessSnapshot", "ReadinessState", "create_health_router"]
 
 
-def create_health_router() -> "tuple[APIRouter, ReadinessState]":
+def create_health_router() -> tuple[APIRouter, ReadinessState]:
     """Create health and readiness router (self-managed; no external config)."""
     router = APIRouter(tags=["Health"])
     readiness_state = READINESS_STATE

@@ -71,7 +71,7 @@ def _stub_effects(monkeypatch, probe, render_stub) -> None:
 
 
 @asynccontextmanager
-async def _mcp_client(tmp_path, *, fetch_width: int, render_width: int) -> AsyncGenerator[AsyncClient, None]:
+async def _mcp_client(tmp_path, *, fetch_width: int, render_width: int) -> AsyncGenerator[AsyncClient]:
     """An MCP client whose app carries an EffectContainer of the given widths."""
     async with service_client(tmp_path, routers=mcp_crawl_keys_routers(), with_results=True) as (
         client,

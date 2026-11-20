@@ -79,7 +79,7 @@ def extract_llm_metadata(html: str, url: NormalizedUrl | None) -> PageMetadata:
     if isinstance(raw_json_ld, str):
         try:
             metadata["json_ld"] = json.loads(raw_json_ld)
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             # The package joins multiple blocks with "\n"; parse each as a separate document.
             blocks = [block for block in raw_json_ld.split("\n") if block.strip()]
             parsed: list[object] = []
@@ -87,7 +87,7 @@ def extract_llm_metadata(html: str, url: NormalizedUrl | None) -> PageMetadata:
             for block in blocks:
                 try:
                     parsed.append(json.loads(block))
-                except (ValueError, TypeError):
+                except ValueError, TypeError:
                     ok = False
                     break
             if ok and len(blocks) > 1:

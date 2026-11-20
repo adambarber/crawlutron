@@ -25,7 +25,7 @@ from tests._quota_harness import grant_test_admin_token
 @contextlib.asynccontextmanager
 async def _search_client(
     tmp_path: Path,
-) -> AsyncGenerator[tuple[AsyncClient, FastAPI], None]:
+) -> AsyncGenerator[tuple[AsyncClient, FastAPI]]:
     """An app serving /v1/search + /v1/keys over isolated stores, Tavily configured."""
     from crawlutron_rest.api.identity_router import router as identity_router
     from crawlutron_rest.api.keys_router import router as keys_router

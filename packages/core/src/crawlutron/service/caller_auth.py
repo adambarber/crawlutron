@@ -161,7 +161,7 @@ async def admit(
     *,
     tracking: Tracking,
     payload: PolicyCarrier | None = None,
-) -> AsyncGenerator[str, None]:
+) -> AsyncGenerator[str]:
     """Admit one request: resolve the page bound, the quotas, the cookie namespace.
 
     One durable reservation under BEGIN IMMEDIATE (store write lock = cross-worker

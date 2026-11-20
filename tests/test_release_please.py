@@ -86,17 +86,20 @@ def test_the_published_version_is_the_manifest_version() -> None:
     )
 
 
-def test_release_please_runs_only_on_main_and_is_pinned() -> None:
-    """Releases are driven by CI-green merges to main, from a commit-pinned action."""
+def test_release_please_is_dispatch_only_and_pinned() -> None:
+    """The bot runs on owner dispatch; ci.yml owns the push-to-main path."""
     document = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
     trigger = document[True] if True in document else document["on"]
-    assert trigger["push"]["branches"] == ["main"], (
-        "release-please must run on push to main, never on raw workflow_run"
+    assert set(trigger) == {"workflow_dispatch"}, (
+        "release-please must be dispatch-only; ci.yml runs on every push to main"
     )
     jobs = _mapping(document["jobs"])
     ci = _mapping(jobs.get("ci"))
     assert ci.get("uses") == "$/.github/workflows/ci.yml", (
         "release-please must call ci.yml first, so no tag is created on an unproven commit"
+    )
+    assert "id-token: write" in (WORKFLOW_PATH.read_text(encoding="utf-8")), (
+        "the called coverage job needs id-token in the caller's grant"
     )
     release_please = _mapping(jobs.get("release-please"))
     assert release_please.get("needs") == ["ci"], "the release-please job must depend on ci passing"
@@ -107,3 +110,14 @@ def test_release_please_runs_only_on_main_and_is_pinned() -> None:
         assert len(reference) == 40 and all(c in "0123456789abcdef" for c in reference), (
             f"{uses} must pin a full commit SHA"
         )
+
+
+def test_release_uses_an_app_token_and_no_sha_dispatch() -> None:
+    """App tags fire release.yml; the old SHA-ref dispatch never could."""
+    text = WORKFLOW_PATH.read_text(encoding="utf-8")
+    assert "GITHUB_SHA" not in text, "workflow_dispatch accepts a ref name, never a commit SHA"
+    assert "actions/create-github-app-token@" in text, (
+        "only an App token gives bot PRs CI checks and bot tags a push event"
+    )
+    assert "steps.app-token.outputs.token" in text
+    assert "steps.release.outputs.pr || '{}'" in text, "an empty release output must not break fromJSON"

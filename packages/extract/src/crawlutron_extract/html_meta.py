@@ -85,7 +85,7 @@ class MetadataCollector:
             if block:
                 try:
                     json.loads(block)  # validate only; malformed JSON-LD is skipped
-                except (ValueError, json.JSONDecodeError):
+                except ValueError, json.JSONDecodeError:
                     pass
                 else:
                     self._json_ld.append(block)

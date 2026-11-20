@@ -91,14 +91,14 @@ def _find_base_href(node: DOMNode) -> str | None:
 def _coerce_number(value: str) -> float | None:
     try:
         return float(value)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return None
 
 
 def _coerce_integer(value: str) -> int | None:
     try:
         return int(value)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return None
 
 

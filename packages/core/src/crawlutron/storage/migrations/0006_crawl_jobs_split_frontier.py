@@ -33,7 +33,7 @@ def _json_list(raw: object) -> list[JsonValue]:
         return []
     try:
         value = json.loads(raw)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return []
     return value if isinstance(value, list) else []
 
@@ -49,12 +49,12 @@ def _entries(raw: object):
             continue
         try:
             depth = max(0, int(str(depth)))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             depth = 0
         yield url, depth
 
 
-def _carry_across(conn: "sqlite3.Connection") -> None:
+def _carry_across(conn: sqlite3.Connection) -> None:
     """Move whatever the column already holds into the new table, then drop it:
     a fresh database no-ops both copies, while an upgraded one keeps its queue
     so a crawl in flight resumes with the entries it had outstanding."""
@@ -69,7 +69,7 @@ def _carry_across(conn: "sqlite3.Connection") -> None:
     conn.execute('ALTER TABLE "crawl_jobs" DROP COLUMN "frontier"')
 
 
-def apply_step(conn: "sqlite3.Connection") -> None:
+def apply_step(conn: sqlite3.Connection) -> None:
     existing = {
         str(row[0]) for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
     }
@@ -80,7 +80,7 @@ def apply_step(conn: "sqlite3.Connection") -> None:
     _carry_across(conn)
 
 
-def rollback_step(conn: "sqlite3.Connection") -> None:
+def rollback_step(conn: sqlite3.Connection) -> None:
     """Restore the column and carry the live queue back into it.
 
     The table is the queue's only home after the cutover, so the rollback can

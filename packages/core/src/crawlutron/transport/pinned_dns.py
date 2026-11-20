@@ -153,7 +153,7 @@ def _resolve_or_refuse(hostname: str, *, use_cache: bool) -> list[str]:
     """One resolve (cached or fresh) with the shared fail-closed fault law."""
     try:
         return _resolve_ips(hostname, use_cache=use_cache)
-    except (socket.gaierror, socket.herror, OSError, TimeoutError):
+    except socket.gaierror, socket.herror, OSError, TimeoutError:
         # Any OS resolver fault (gaierror, herror, a degraded resolver's timeout/OSError)
         # is not a valid public target: fail closed, never reach loopback via the pin.
         raise ValueError(f"SSRF protection: cannot resolve hostname {hostname}") from None
@@ -197,7 +197,7 @@ def resolve_and_pin_host(url: NormalizedUrl) -> tuple[str, str]:
         # Resolve FRESH (no cache): the pin governs the connection, so it is
         # re-validated every call and a rebind inside the TTL cannot bypass it.
         ips = _resolve_ips(hostname, use_cache=False)
-    except (socket.gaierror, socket.herror, OSError, TimeoutError):
+    except socket.gaierror, socket.herror, OSError, TimeoutError:
         # Fail closed against every OS resolver fault: returning the hostname would
         # let the client re-resolve at connect time with no validation applied.
         raise ValueError(f"SSRF protection: cannot resolve hostname {hostname}") from None

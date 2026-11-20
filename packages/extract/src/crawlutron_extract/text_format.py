@@ -128,7 +128,7 @@ def _extract_json(content: str, limits) -> dict[str, object]:
 
     try:
         data = json.loads(content)
-    except (json.JSONDecodeError, ValueError):
+    except json.JSONDecodeError, ValueError:
         # Try JSONL line-by-line.
         lines = content.splitlines()
         parsed: list[object] = []
@@ -138,7 +138,7 @@ def _extract_json(content: str, limits) -> dict[str, object]:
                 continue
             try:
                 parsed.append(json.loads(line))
-            except (json.JSONDecodeError, ValueError):
+            except json.JSONDecodeError, ValueError:
                 flags.append("jsonl_parse_error")
                 break
         if not parsed:

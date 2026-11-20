@@ -39,7 +39,7 @@ def _race_peak(gate) -> int:
             cm = gate.admit(_GENERAL_ONE)
             try:
                 granted = await asyncio.wait_for(cm.__aenter__(), timeout=0.5)
-            except (TimeoutError, asyncio.CancelledError, RuntimeError):
+            except TimeoutError, asyncio.CancelledError, RuntimeError:
                 continue  # the admit parked; an earlier holder released the slot
             granted.lease.release(work_completed=True)
             await cm.__aexit__(None, None, None)

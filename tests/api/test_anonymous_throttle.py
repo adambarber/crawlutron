@@ -112,7 +112,7 @@ def _app_client() -> httpx.AsyncClient:
 
 
 @asynccontextmanager
-async def _admin_app_client() -> AsyncGenerator[tuple[httpx.AsyncClient, CallerKeyStore], None]:
+async def _admin_app_client() -> AsyncGenerator[tuple[httpx.AsyncClient, CallerKeyStore]]:
     """Test app with admin token, stores closed on teardown.
 
     Yields ``(client, key_store)``; callers that do not need the store

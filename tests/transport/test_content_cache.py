@@ -59,7 +59,7 @@ def cached_strategy_runner(url, policy, fetcher, cache=None, content_cache=None)
 
 
 @contextlib.contextmanager
-def etag_serving(etag: str, body: bytes) -> Generator[None, None, None]:
+def etag_serving(etag: str, body: bytes) -> Generator[None]:
     """Make the etag server answer with a new validator and body, then restore.
 
     The restore values are read off the handler, not re-spelled -- a copied

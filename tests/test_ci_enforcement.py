@@ -172,9 +172,17 @@ def _assert_every_publish_job_gated_on_ci(jobs: dict[str, object]) -> None:
     assert "release_roster.py --released" in released_runs, (
         "the released set must come from the tags pointing at the green commit"
     )
-    publish_steps = [str(step.get("name", "")) for step in _steps(jobs.get("publish"))]
-    assert "Assert the artifacts carry the release version" in publish_steps, (
+    build = _mapping(jobs.get("publish-build"), "a publish-build job")
+    assert build.get("needs") == ["released"], "the build must be gated on the resolved roster"
+    assert "id-token" not in _mapping(build.get("permissions"), "build permissions"), (
+        "a build backend must run without OIDC in scope"
+    )
+    build_steps = [str(step.get("name", "")) for step in _steps(jobs.get("publish-build"))]
+    assert "Assert the artifacts carry the release version" in build_steps, (
         "a build whose version disagrees with its tag must never reach the index"
+    )
+    assert "needs.released.outputs.packages" in str(publish.get("if")), (
+        "the publish job must only upload the resolved packages"
     )
 
 

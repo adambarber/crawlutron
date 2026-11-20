@@ -1,5 +1,10 @@
 # crawlutron
 
+[![CI](https://github.com/adambarber/crawlutron/actions/workflows/ci.yml/badge.svg)](https://github.com/adambarber/crawlutron/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/adambarber/crawlutron/graph/badge.svg)](https://codecov.io/gh/adambarber/crawlutron)
+[![PyPI](https://img.shields.io/pypi/v/crawlutron.svg)](https://pypi.org/project/crawlutron/)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/adambarber/crawlutron/badge)](https://securityscorecards.dev/viewer/?uri=github.com/adambarber/crawlutron)
+
 A policy-driven, self-hosted web crawler and content-extraction service built around
 FastAPI. It exposes a single, machine-readable crawl contract that supports:
 

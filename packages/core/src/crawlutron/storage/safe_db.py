@@ -56,7 +56,7 @@ def _transaction(
     begin_sql: str,
     *,
     state: _TxnState | None,
-) -> Generator[None, None, None]:
+) -> Generator[None]:
     """BEGIN ``begin_sql``, yield, roll back on failure, commit on success.
 
     ``state`` is marked poisoned when commit or rollback itself fails.
@@ -104,7 +104,7 @@ def assert_off_main_thread() -> None:
 
 
 @contextmanager
-def allow_on_loop() -> Generator[None, None, None]:
+def allow_on_loop() -> Generator[None]:
     """Temporarily permit loop-thread writes (lifespan bootstrap, shutdown sweeps)."""
     _WRITE_TXN.allow_depth = getattr(_WRITE_TXN, "allow_depth", 0) + 1
     try:
@@ -114,7 +114,7 @@ def allow_on_loop() -> Generator[None, None, None]:
 
 
 @contextmanager
-def allow_on_loop_read() -> Generator[None, None, None]:
+def allow_on_loop_read() -> Generator[None]:
     """Temporarily permit loop-thread reads (bootstrap, shutdown sweeps)."""
     _READ_TXN.allow_depth = getattr(_READ_TXN, "allow_depth", 0) + 1
     try:
@@ -151,7 +151,7 @@ def _drop_state(conn: sqlite3.Connection) -> None:
 
 
 @contextmanager
-def txn_write(conn: sqlite3.Connection, *, owner: str = "") -> Generator[None, None, None]:
+def txn_write(conn: sqlite3.Connection, *, owner: str = "") -> Generator[None]:
     """BEGIN IMMEDIATE, commit, roll back on failure; one write txn per thread."""
     _off_loop()
     state = _state_for(conn)
@@ -178,7 +178,7 @@ def txn_write(conn: sqlite3.Connection, *, owner: str = "") -> Generator[None, N
 
 
 @contextmanager
-def in_txn(conn: sqlite3.Connection) -> Generator[None, None, None]:
+def in_txn(conn: sqlite3.Connection) -> Generator[None]:
     """Assert an active transaction; run statements without opening one."""
     state = _state_for(conn)
     if not conn.in_transaction:
@@ -228,7 +228,7 @@ def txn_read(
     max_bytes: int | None = None,
     deadline: float | None = None,
     owner: str = "",
-) -> Generator[None, None, None]:
+) -> Generator[None]:
     """BEGIN DEFERRED for consistent reads.
     Reentrant: a nested call joins the outer snapshot; depth restored on every path.
     Bounds stack: the tightest active cap/deadline wins."""

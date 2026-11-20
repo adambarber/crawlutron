@@ -33,9 +33,7 @@ class _RecordingAdmission:
 
 
 @contextlib.asynccontextmanager
-async def _ported_client(
-    tmp_path, admission
-) -> AsyncGenerator[tuple[AsyncClient, object, object, object], None]:
+async def _ported_client(tmp_path, admission) -> AsyncGenerator[tuple[AsyncClient, object, object, object]]:
     """The MCP+crawl+keys harness with ``admission`` substituted for the port."""
     from tests._quota_harness import mcp_crawl_keys_routers, service_client
 

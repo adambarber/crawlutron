@@ -47,7 +47,7 @@ class CrawlApi:
 
 
 @pytest.fixture
-async def crawl_api(async_client, base_url) -> AsyncGenerator[CrawlApi, None]:
+async def crawl_api(async_client, base_url) -> AsyncGenerator[CrawlApi]:
     """An ASGI client, the helper server's origin, and a cleared webhook sink.
 
     Teardown drains the crawls this test started -- a straggler losing its
@@ -89,7 +89,7 @@ async def _drain_running_crawls(*, guard: float = 10.0) -> None:
         # A 5ms poll keeps the DB question off the hot path (a sleep(0) spin ran
         # ``list_jobs`` ~2000x/s); the bound and the swallow are unchanged.
         await asyncio.wait_for(drained(), timeout=guard)
-    except (AssertionError, TimeoutError):
+    except AssertionError, TimeoutError:
         # A stuck crawl is reported, not raised: raising here would mask the assertion of the test that
         # actually caused it.
         pass
@@ -123,7 +123,7 @@ async def run_loop_rebind_scenario(get_client, *, guard: float | None = None):
 
 
 @contextlib.asynccontextmanager
-async def serve(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
+async def serve(app: FastAPI) -> AsyncGenerator[AsyncClient]:
     """The one ASGI test-client bootstrap: mount the app and speak HTTP to it."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client

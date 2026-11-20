@@ -45,7 +45,7 @@ async def other_caller(h: WatchHarness) -> WatchHarness:
 
 
 @pytest.fixture
-async def watch_harness(tmp_path: Path) -> AsyncGenerator[WatchHarness, None]:
+async def watch_harness(tmp_path: Path) -> AsyncGenerator[WatchHarness]:
     """A keyed client over /mcp + /v1/watches sharing one watch store and key admin."""
     from crawlutron.storage.watch_store import WatchStore
     from crawlutron_rest.api.keys_router import router as keys_router

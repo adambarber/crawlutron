@@ -322,7 +322,7 @@ class AdmissionGate:
     # -- the door ---------------------------------------------------------
 
     @asynccontextmanager
-    async def admit(self, want: Want) -> AsyncGenerator[Granted, None]:
+    async def admit(self, want: Want) -> AsyncGenerator[Granted]:
         """Admit-and-lease: yield a live Granted or raise AdmissionRefused."""
         if self._lease_ctx.get():
             raise NestedAdmitError()

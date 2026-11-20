@@ -73,7 +73,7 @@ async def mcp_endpoint(
         )
     try:
         body = await request.json()
-    except (json.JSONDecodeError, UnicodeDecodeError):
+    except json.JSONDecodeError, UnicodeDecodeError:
         return JSONResponse(
             status_code=400,
             content=error_response(None, PARSE_ERROR, "Parse error"),

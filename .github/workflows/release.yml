@@ -9,10 +9,8 @@ name: Release
 # no polling, no dangerous trigger.
 #
 # Two entry points:
-#   - push of a v* tag (a human, or release-please with an App token/PAT);
-#   - workflow_dispatch, which is how release-please.yml hands over the
-#     commit it just tagged with GITHUB_TOKEN (token-created tags fire no
-#     push events; workflow_dispatch is the documented exception).
+#   - push of a v* tag, created by the release App token;
+#   - workflow_dispatch, for an owner to retry a release by hand.
 # The tag is necessary but not sufficient: the roster only emits packages
 # actually tagged at this commit, so a dispatch at an untagged ref publishes
 # nothing.
@@ -24,18 +22,25 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   ci:
     uses: $/.github/workflows/ci.yml
     permissions:
       contents: read
       pull-requests: read
+      # Codecov's tokenless upload in the called coverage job needs this grant.
+      id-token: write
 
   released:
     name: Resolve the packages this commit released
     needs: [ci]
     if: ${{ github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: read
     outputs:
@@ -65,15 +70,17 @@ jobs:
           print(f"{len(entries)} package(s) tagged at this commit; root={root or 'not released'}")
           PY
 
-  publish:
-    name: Publish ${{ matrix.package.name }} to PyPI
+  # Build with no OIDC in scope: a build backend executes arbitrary code, and
+  # any step in a job holding id-token can mint the publish credential. The
+  # publish job below does nothing but download and upload verified artifacts.
+  publish-build:
+    name: Build ${{ matrix.package.name }} for PyPI
     needs: [released]
     if: ${{ needs.released.outputs.packages != '[]' }}
     runs-on: ubuntu-24.04
-    environment: pypi
+    timeout-minutes: 15
     permissions:
       contents: read
-      id-token: write
     strategy:
       fail-fast: true
       max-parallel: 1
@@ -94,8 +101,6 @@ jobs:
           python-version: "3.14"
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          # No cache in a job that publishes: a poisoned cache entry must not
-          # reach a distribution (zizmor cache-poisoning).
           enable-cache: false
       - name: Build only this distribution
         env:
@@ -126,6 +131,34 @@ jobs:
           PY
       - name: Inspect this distribution's artifacts
         run: uvx twine check --strict dist/*
+      - name: Stage the verified distribution
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dist-${{ matrix.package.selector }}
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: Publish ${{ matrix.package.name }} to PyPI
+    needs: [released, publish-build]
+    if: ${{ needs.released.outputs.packages != '[]' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: true
+      max-parallel: 1
+      matrix:
+        package: ${{ fromJSON(needs.released.outputs.packages) }}
+    steps:
+      - name: Download the verified distribution
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: dist-${{ matrix.package.selector }}
+          path: dist/
       - name: Publish to PyPI (trusted publishing, OIDC only)
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1
         with:
@@ -139,6 +172,7 @@ jobs:
     needs: [released, publish]
     if: ${{ needs.released.outputs.packages != '[]' }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: read
     strategy:
@@ -177,9 +211,13 @@ jobs:
     needs: [released, publish]
     if: ${{ needs.released.outputs.root_version != '' }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: read
       packages: write
+      # Provenance attestation signs the pushed image with OIDC.
+      attestations: write
+      id-token: write
     steps:
       # Tags again: the smoke test asserts the baked version equals the
       # release, and a tagless build bakes 0.1.devN.
@@ -236,15 +274,28 @@ jobs:
           BAKED="$(docker exec "$NAME" /app/.venv/bin/python -c 'import crawlutron; print(crawlutron.__version__)')"
           test "$BAKED" = "$EXPECTED_VERSION"
       - name: Push the smoked image
+        id: push
         env:
           VERSION_TAG: ${{ steps.version.outputs.tag }}
-        run: docker push "ghcr.io/${GITHUB_REPOSITORY_OWNER}/crawlutron:$VERSION_TAG"
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER}/crawlutron:$VERSION_TAG"
+          docker push "$IMAGE"
+          DIGEST=$(docker buildx imagetools inspect "$IMAGE" --format '{{.Manifest.Digest}}')
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+      - name: Attest the pushed image
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-name: ghcr.io/${{ github.repository_owner }}/crawlutron
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
 
   sbom:
     name: Attach the dependency SBOM to the ${{ matrix.package.name }} release
     needs: [released, publish]
     if: ${{ needs.released.outputs.packages != '[]' }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: write
     strategy:
@@ -269,3 +320,32 @@ jobs:
           uv export --frozen --no-dev --no-emit-workspace --format requirements-txt -o /tmp/crawlutron-lock.txt
           uv tool run --from cyclonedx-bom==8.0.1 cyclonedx-py requirements /tmp/crawlutron-lock.txt -o sbom.cdx.json --of json
           gh release upload "$TAG" sbom.cdx.json --clobber
+
+  release-artifacts:
+    name: Attach ${{ matrix.package.name }} distributions and checksums
+    needs: [released, publish-build]
+    if: ${{ needs.released.outputs.packages != '[]' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: true
+      max-parallel: 1
+      matrix:
+        package: ${{ fromJSON(needs.released.outputs.packages) }}
+    steps:
+      - name: Download the verified distribution
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: dist-${{ matrix.package.selector }}
+          path: dist/
+      - name: Attach artifacts and their checksums to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ matrix.package.tag }}
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum *.whl *.tar.gz > SHA256SUMS
+          gh release upload "$TAG" *.whl *.tar.gz SHA256SUMS --clobber

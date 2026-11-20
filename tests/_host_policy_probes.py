@@ -69,7 +69,7 @@ def _record_probe_fetch(effects: MutableMapping[str, list[str]], payload: Mappin
 async def _assert_refused(awaitable, effects: Mapping[str, list[str]]) -> None:
     try:
         result = await awaitable
-    except (ValueError, RuntimeError):
+    except ValueError, RuntimeError:
         result = None
     except Exception as error:
         # Any refusal carrier refuses: the api HTTPException or a service DomainError subclass.

@@ -154,7 +154,7 @@ async def _pinned_provider_request(
 
     try:
         return await bounded_thread_resolve(pin, timeout_seconds=timeout_seconds)
-    except (ValueError, ResolverBudgetExceeded):
+    except ValueError, ResolverBudgetExceeded:
         raise SearchProviderError("provider endpoint could not be resolved to a public address") from None
 
 

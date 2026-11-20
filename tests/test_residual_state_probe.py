@@ -57,7 +57,7 @@ def _watch_store_teardown_check(tmp_path) -> bool:
         pass
     try:
         store.list_watches()
-    except (sqlite3.ProgrammingError, StoreClosed):
+    except sqlite3.ProgrammingError, StoreClosed:
         return True
     return False
 

@@ -88,7 +88,7 @@ def _backend(db_path: str | Path, memory_name: str | None) -> DatabaseBackend:
 def _locked_backend(
     db_path: str | Path,
     memory_name: str | None = None,
-) -> Generator[DatabaseBackend, None, None]:
+) -> Generator[DatabaseBackend]:
     """Open a migration backend under the same lock the store's writers take.
 
     A DDL write needs exactly the lock an in-flight write holds, so taking the

@@ -29,7 +29,7 @@ from crawlutron_sdk.models import (
 
 
 @contextmanager
-def _served_sync_client(handler) -> Generator[CrawlutronClientSync, None, None]:
+def _served_sync_client(handler) -> Generator[CrawlutronClientSync]:
     """Yield a sync client over a MockTransport, closing it on exit."""
     client = CrawlutronClientSync(transport=httpx.MockTransport(handler), base_url="http://test")
     try:

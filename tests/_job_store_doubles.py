@@ -32,13 +32,13 @@ class _StatusBus:
             if listener.job_id == job_id:
                 listener.notify()
 
-    def subscribe(self, job_id: str) -> "_StoreListener":
+    def subscribe(self, job_id: str) -> _StoreListener:
         listener = _StoreListener(self, job_id, asyncio.get_running_loop())
         with self._lock:
             self._listeners.append(listener)
         return listener
 
-    def discard(self, listener: "_StoreListener") -> None:
+    def discard(self, listener: _StoreListener) -> None:
         with self._lock:
             if listener in self._listeners:
                 self._listeners.remove(listener)

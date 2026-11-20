@@ -31,7 +31,7 @@ type _Harness = tuple[
 
 
 @pytest.fixture
-async def trackerless_app(tmp_path: Path) -> AsyncGenerator[_Harness, None]:
+async def trackerless_app(tmp_path: Path) -> AsyncGenerator[_Harness]:
     """The crawl router served WITHOUT a concurrency tracker on app.state."""
     from crawlutron_rest.api.crawl_router import router as crawl_router
     from crawlutron_rest.api.keys_router import router as keys_router

@@ -18,7 +18,7 @@ from crawlutron.vocabulary.browser import BrowserAction
 
 
 @contextmanager
-def owned_browser_pool(pool: BrowserPool | None) -> Generator[None, None, None]:
+def owned_browser_pool(pool: BrowserPool | None) -> Generator[None]:
     """Install ``pool`` as the process-wide browser pool, then restore the previous
     one, so no later test's 503-versus-200 answer depends on ordering; ``None``
     installs the no-pool state that asserts the pool-down guard answers 503.

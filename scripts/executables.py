@@ -64,7 +64,7 @@ def _probe(candidate: Path) -> bool:
             timeout=30,
             check=False,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except OSError, subprocess.TimeoutExpired:
         return False
     if probe.returncode != 0:
         return False

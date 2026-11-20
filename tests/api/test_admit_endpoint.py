@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 
 @asynccontextmanager
-async def serve_admit(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
+async def serve_admit(app: FastAPI) -> AsyncGenerator[AsyncClient]:
     from tests._async_harnesses import serve
 
     async with serve(app) as client:

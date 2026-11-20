@@ -3,16 +3,18 @@ name: CI
 # The gates, and nothing else. This file is the single definition of "green".
 #
 # Pull requests run it top-level, so the required check keeps its name.
-# Pushes do NOT trigger it directly: a push to main enters through
-# release-please.yml and a tag push through release.yml, and both call this
-# workflow as their first job. That is what replaces `workflow_run`: the gates
-# run on the exact commit inside the caller's run, and `needs` -- not a
-# cross-run conclusion lookup -- is the gate. A `push` trigger here would run
-# the whole battery a second time per commit.
+# Pushes to main run it top-level too: release-please is dispatch-only now, so
+# this is the single push entry point. Tag pushes still enter through
+# release.yml, which calls this workflow as its first job. Both callers run
+# the gates on the exact commit inside their own run, and `needs` -- not a
+# cross-run conclusion lookup -- is the gate. A `push` trigger here would
+# otherwise run the whole battery a second time per commit; it no longer does.
 #
 # One job per gate, and every gate job runs ITS HOOK: `pre-commit run <id>
 # --all-files`. The gate's definition lives exactly once, in
 # .pre-commit-config.yaml, so CI cannot drift from what a local commit runs.
+# Coverage is the one measurement job that runs pytest directly (no new hook)
+# and uploads to Codecov.
 # There is no wrapper job: a single `pre-commit run --all-files` fans every
 # gate out inside one runner, so the battery's xdist workers fought the other
 # gates for the same cores and hit the wall clock. The contract test
@@ -23,6 +25,8 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: [main]   # tag pushes enter through release.yml, never here
   workflow_call:
   # Kept so the suite can be re-run on demand against a given ref without
   # opening a PR.
@@ -35,10 +39,17 @@ permissions:
   contents: read
   pull-requests: read
 
+# PR runs cancel superseded pushes; caller runs (dispatch/tag) keep their own
+# group so a release never cancels or queues behind a top-level push run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   ruff:
     name: ruff
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -52,6 +63,7 @@ jobs:
   ruff-format:
     name: ruff format
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -65,6 +77,7 @@ jobs:
   basedpyright:
     name: basedpyright
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -78,6 +91,7 @@ jobs:
   jscpd:
     name: jscpd
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -91,6 +105,7 @@ jobs:
   mypy:
     name: mypy
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -104,6 +119,7 @@ jobs:
   lock:
     name: Lock freshness
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -117,6 +133,7 @@ jobs:
   vulture:
     name: vulture
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -130,6 +147,7 @@ jobs:
   battery:
     name: Test suite (battery)
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -151,6 +169,35 @@ jobs:
           # here rather than a budget. Commit admission keeps the 60s default.
           GATE_FANOUT_WALL_SECONDS: "300"
 
+  # CI-only measurement. The pre-commit set is deliberately untouched: this
+  # job runs the battery's selection under coverage and uploads to Codecov.
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read
+      # Codecov tokenless OIDC upload; ignored by every other job.
+      id-token: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - uses: $/.github/actions/prepare
+      - name: Measure the battery's coverage
+        run: .venv/bin/python -m pytest -q -m "not (browser or slow or real_pbkdf2)" --cov=crawlutron --cov-report=xml --cov-report=term-missing
+      - name: Upload coverage
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          files: coverage.xml
+          flags: battery
+          use_oidc: true
+          # An upload hiccup must never redden a contributor's PR.
+          fail_ci_if_error: false
+
   # The battery deselects `real_pbkdf2`, so the real 210k-iteration PBKDF2 path
   # in storage/caller_key_store.py is never exercised by commit admission. This
   # job runs that surface alone; the 1_000-iteration autouse clamp stays in
@@ -158,6 +205,7 @@ jobs:
   real-pbkdf2:
     name: Test suite (real PBKDF2)
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -171,6 +219,7 @@ jobs:
   test-browser:
     name: Test suite (browser)
     runs-on: ubuntu-24.04
+    timeout-minutes: 25
     # Required. 8 passed against a known-good commit, and all 8 fail when
     # BrowserRenderer.render is short-circuited, so the green reflects a real
     # browser rather than a double. It selects ONLY the `browser` marker: any
@@ -230,6 +279,7 @@ jobs:
   audit:
     name: Dependency audit
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -255,6 +305,7 @@ jobs:
   secret-scan:
     name: Secret scan
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -269,6 +320,7 @@ jobs:
   zizmor:
     name: zizmor
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -295,12 +347,14 @@ jobs:
       - mypy
       - vulture
       - battery
+      - coverage
       - real-pbkdf2
       - test-browser
       - audit
       - secret-scan
       - zizmor
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - name: Require every gate to have succeeded
         # Declared, not inherited: without errexit the step returns the exit
@@ -316,11 +370,90 @@ jobs:
           test "${{ needs.mypy.result }}" = "success"
           test "${{ needs.vulture.result }}" = "success"
           test "${{ needs.battery.result }}" = "success"
+          test "${{ needs.coverage.result }}" = "success"
           test "${{ needs.real-pbkdf2.result }}" = "success"
           test "${{ needs.test-browser.result }}" = "success"
           test "${{ needs.audit.result }}" = "success"
           test "${{ needs.secret-scan.result }}" = "success"
           test "${{ needs.zizmor.result }}" = "success"
+
+  # Dev builds go to TestPyPI on green main pushes only. Trusted publishing
+  # rejects OIDC from a called workflow, so both jobs live here at top level;
+  # the guard is load-bearing and must not be widened to dispatch or tags.
+  testpypi-build:
+    name: Build dev distributions for TestPyPI
+    needs: [required]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.14"
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
+      # Release-please owns the declared version; dev builds get a monotonic
+      # PEP 440 .devN suffix so each push is a distinct upload. Both indexes
+      # reject local segments, so none is used here.
+      - name: Give dev builds a unique version
+        run: |
+          set -euo pipefail
+          BASE=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)
+          DISTANCE=$(git rev-list --count "$(git describe --tags --abbrev=0 --match 'v*')"..HEAD)
+          VERSION="${BASE}.dev${DISTANCE}"
+          python3 - "$VERSION" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          version = sys.argv[1]
+          paths = [pathlib.Path("pyproject.toml"), *sorted(pathlib.Path("packages").glob("*/pyproject.toml"))]
+          for path in paths:
+              path.write_text(re.sub(r'(?m)^version = ".*"$', f'version = "{version}"', path.read_text(), count=1))
+          print(f"dev build version: {version}")
+          PY
+      - name: Build and inspect every distribution
+        run: |
+          set -euo pipefail
+          uv build --all-packages --out-dir dist
+          uvx twine check --strict dist/*
+      - name: Stage the dev distributions
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dev-dist
+          path: dist/
+          if-no-files-found: error
+
+  testpypi:
+    name: Publish dev builds to TestPyPI
+    needs: [testpypi-build]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: testpypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download the dev distributions
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: dev-dist
+          path: dist/
+      - name: Publish to TestPyPI (trusted publishing)
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: dist/
+          skip-existing: true
 
   # Packaging is downstream of every gate on every path (PR, main, tag), and
   # publishes nothing. Calling it from here means the release workflows get

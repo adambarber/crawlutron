@@ -239,7 +239,7 @@ def _exit_code_from_body(body: bytes, exit_on: str) -> int:
         return EXIT_SUCCESS
     try:
         data = json.loads(body)
-    except (json.JSONDecodeError, ValueError):
+    except json.JSONDecodeError, ValueError:
         return EXIT_SUCCESS
     if exit_on == "partial":
         return EXIT_SUCCESS if bool(data.get("success", True)) else EXIT_PARTIAL
@@ -281,7 +281,7 @@ def _handle_sync(client: CrawlClient, response: httpx.Response, args: argparse.N
         try:
             data = json.loads(body)
             request_id = str(data.get("request_id", ""))
-        except (json.JSONDecodeError, ValueError):
+        except json.JSONDecodeError, ValueError:
             request_id = ""
         if request_id:
             trace_response = client.trace(request_id)
@@ -325,7 +325,7 @@ def run_crawl(
                 return EXIT_SUCCESS
             try:
                 envelope = json.loads(body)
-            except (json.JSONDecodeError, ValueError):
+            except json.JSONDecodeError, ValueError:
                 return EXIT_SUCCESS
             request_id = str(envelope.get("request_id", ""))
             if not request_id:
