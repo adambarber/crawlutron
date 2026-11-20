@@ -1,4 +1,4 @@
-"""Body decompression and decoding: codec selection, caps, bombs, bytearray input and charset fallback."""
+"""Body decompression and decoding, codec selection, caps, bombs, bytearray input and charset fallback."""
 
 import gzip
 import zlib
