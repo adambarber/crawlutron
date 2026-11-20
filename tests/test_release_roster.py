@@ -8,6 +8,7 @@ import subprocess
 import tomllib
 from pathlib import Path
 
+import pytest
 import yaml
 
 from scripts.release_roster import primary_tag, released, roster
@@ -22,16 +23,20 @@ def _git(root: Path, *arguments: str) -> None:
     A test identity is set so ``git commit`` works in any environment, including CI,
     where no ``user.name``/``user.email`` is configured.
     """
-    environment = {
-        **os.environ,
-        "GIT_DIR": str(root / ".git"),
-        "GIT_WORK_TREE": str(root),
-        "GIT_INDEX_FILE": str(root / ".git/index"),
-        "GIT_AUTHOR_NAME": "Crawlutron Test Suite",
-        "GIT_AUTHOR_EMAIL": "test@crawlutron.local",
-        "GIT_COMMITTER_NAME": "Crawlutron Test Suite",
-        "GIT_COMMITTER_EMAIL": "test@crawlutron.local",
-    }
+    # Drop hook-exported GIT_* vars: cmd.Dir alone cannot escape a GIT_DIR or
+    # GIT_COMMON_DIR pointing at the host repo, so git init would target it.
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    environment.update(
+        {
+            "GIT_DIR": str(root / ".git"),
+            "GIT_WORK_TREE": str(root),
+            "GIT_INDEX_FILE": str(root / ".git/index"),
+            "GIT_AUTHOR_NAME": "Crawlutron Test Suite",
+            "GIT_AUTHOR_EMAIL": "test@crawlutron.local",
+            "GIT_COMMITTER_NAME": "Crawlutron Test Suite",
+            "GIT_COMMITTER_EMAIL": "test@crawlutron.local",
+        }
+    )
     subprocess.run([GIT, *arguments], cwd=root, env=environment, check=True, capture_output=True)
 
 
@@ -84,6 +89,14 @@ def test_a_bumped_version_without_its_tag_releases_nothing(tmp_path: Path) -> No
     _write(root / "packages/one/pyproject.toml", text.replace("2.0.0", "2.1.0"))
     assert tomllib.loads(text)["project"]["version"] == "2.0.0"
     assert released(root) == []
+
+
+def test_tag_queries_ignore_inherited_git_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A hook's GIT_DIR must not redirect a fixture's tag query to the host repo."""
+    root = _stand_up(tmp_path)
+    _tag(root, "one-v2.0.0")
+    monkeypatch.setenv("GIT_DIR", str(tmp_path / "absent.git"))
+    assert [entry["name"] for entry in released(root)] == ["one"]
 
 
 def test_the_primary_tag_is_deterministic_and_a_dispatch_owns_the_release(tmp_path: Path) -> None:
