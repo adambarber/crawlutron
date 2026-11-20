@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "crawlutron-safe-url"
-version = "0.4.0rc1"
+version = "0.5.0"
 description = "SSRF-safe URL admission: NormalizedUrl, HostPolicy, IDNA canonicalization, registrable domain, private-target guard, credential-safe redaction"
 readme = "README.md"
 requires-python = ">=3.14"

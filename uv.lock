@@ -503,7 +503,7 @@ wheels = [
 
 [[package]]
 name = "crawlutron"
-version = "0.4.0rc1"
+version = "0.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "crawlutron-core" },
@@ -565,7 +565,7 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "crawlutron-core"
-version = "0.4.0rc1"
+version = "0.5.0"
 source = { editable = "packages/core" }
 dependencies = [
     { name = "brotli" },
@@ -600,7 +600,7 @@ requires-dist = [
 
 [[package]]
 name = "crawlutron-extract"
-version = "0.4.0rc1"
+version = "0.5.0"
 source = { editable = "packages/extract" }
 dependencies = [
     { name = "crawlutron-safe-url" },
@@ -615,7 +615,7 @@ requires-dist = [
 
 [[package]]
 name = "crawlutron-mcp"
-version = "0.4.0rc1"
+version = "0.5.0"
 source = { editable = "packages/mcp" }
 dependencies = [
     { name = "crawlutron-core" },
@@ -630,7 +630,7 @@ requires-dist = [
 
 [[package]]
 name = "crawlutron-rest"
-version = "0.4.0rc1"
+version = "0.5.0"
 source = { editable = "packages/rest" }
 dependencies = [
     { name = "crawlutron-core" },
@@ -647,7 +647,7 @@ requires-dist = [
 
 [[package]]
 name = "crawlutron-safe-url"
-version = "0.4.0rc1"
+version = "0.5.0"
 source = { editable = "packages/safe-url" }
 dependencies = [
     { name = "publicsuffixlist" },
@@ -662,7 +662,7 @@ requires-dist = [
 
 [[package]]
 name = "crawlutron-sdk"
-version = "0.4.0rc1"
+version = "0.5.0"
 source = { editable = "packages/sdk" }
 dependencies = [
     { name = "httpx" },

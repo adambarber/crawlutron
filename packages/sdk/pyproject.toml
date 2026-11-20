@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "crawlutron-sdk"
-version = "0.4.0rc1"
+version = "0.5.0"
 description = "Python client for the Crawlutron execution service"
 readme = "README.md"
 requires-python = ">=3.14"

@@ -1,9 +1,9 @@
 {
-  ".": "0.4.0rc1",
-  "packages/core": "0.4.0rc1",
-  "packages/extract": "0.4.0rc1",
-  "packages/mcp": "0.4.0rc1",
-  "packages/rest": "0.4.0rc1",
-  "packages/safe-url": "0.4.0rc1",
-  "packages/sdk": "0.4.0rc1"
+  ".": "0.5.0",
+  "packages/core": "0.5.0",
+  "packages/extract": "0.5.0",
+  "packages/mcp": "0.5.0",
+  "packages/rest": "0.5.0",
+  "packages/safe-url": "0.5.0",
+  "packages/sdk": "0.5.0"
 }

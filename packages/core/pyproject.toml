@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "crawlutron-core"
-version = "0.4.0rc1"
+version = "0.5.0"
 description = "Policy-driven, self-hosted web crawler and content-extraction service built around FastAPI"
 readme = "README.md"
 requires-python = ">=3.14"

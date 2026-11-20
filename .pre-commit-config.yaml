@@ -220,7 +220,7 @@ repos:
         name: zizmor whole-tree workflow audit (zero tolerance)
         entry: >-
           bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
-          .venv/bin/python -m scripts.gate_fanout zizmor -- zizmor . --collect all
+          .venv/bin/python -m scripts.gate_fanout zizmor -- uvx "zizmor@1.32.0" . --collect all
         language: system
         files: *service_trigger
         pass_filenames: false

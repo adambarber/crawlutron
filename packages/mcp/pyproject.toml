@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "crawlutron-mcp"
-version = "0.4.0rc1"
+version = "0.5.0"
 description = "Transport-agnostic Model Context Protocol (2026-07-28) surface for the Crawlutron crawler"
 readme = "README.md"
 requires-python = ">=3.14"
