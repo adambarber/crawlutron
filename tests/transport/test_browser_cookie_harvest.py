@@ -9,13 +9,12 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from typing import cast
 
-from safe_url.normalized_url import NormalizedUrl
-
 from crawlutron.runtime import process_state
 from crawlutron.transport.browser_cookies import get_browser_cookies_for, harvest_session_cookies
 from crawlutron.transport.browser_driver import BrowserDriver
 from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE
 from crawlutron.vocabulary.browser import BrowserAction
+from safe_url.normalized_url import NormalizedUrl
 from tests._browser_doubles import BrowserFakePage, FakeBrowserDriver, ScriptedPage, build_pinned_renderer
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 

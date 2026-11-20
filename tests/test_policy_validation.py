@@ -3,9 +3,9 @@
 from urllib.parse import urlparse
 
 import pytest
+
 from safe_url.host_policy import HostPolicy
 from safe_url.normalized_url import NormalizedUrl
-
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 from tests._validation_helpers import admit_or_none, assert_url_refused, registrable_domain
 

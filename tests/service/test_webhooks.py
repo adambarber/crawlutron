@@ -5,9 +5,9 @@ façade so a door that forgets a leg is structurally impossible.
 """
 
 import pytest
-from safe_url.host_policy import HostPolicy
 
 from crawlutron.service.webhooks import admit_webhook_target
+from safe_url.host_policy import HostPolicy
 from tests._assertions import host_resolves_to
 
 

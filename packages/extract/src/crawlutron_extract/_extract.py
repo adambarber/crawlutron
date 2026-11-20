@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from typing import cast
 
-from safe_url import HostPolicy, NormalizedUrl
-
 from crawlutron_extract.charset import decode_content
 from crawlutron_extract.html_pass import extract_html
 from crawlutron_extract.limits import RICH_TEXT_FLOOR, ExtractLimits
@@ -17,6 +15,7 @@ from crawlutron_extract.models import Extraction, Quality
 from crawlutron_extract.office import extract_office
 from crawlutron_extract.pdf_pass import extract_pdf
 from crawlutron_extract.text_format import extract_text_format
+from safe_url import HostPolicy, NormalizedUrl
 
 __all__ = ["DEFAULT_LIMITS", "extract"]
 

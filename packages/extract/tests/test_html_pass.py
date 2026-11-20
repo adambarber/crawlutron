@@ -7,6 +7,7 @@ entities, duplicate attributes, null bytes, 5 MB single line, 100k-row table.
 from __future__ import annotations
 
 import pytest
+
 from crawlutron_extract import ExtractLimits, Quality, extract
 
 

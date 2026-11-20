@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import logging
 
-from safe_url.normalized_url import NormalizedUrl
-from safe_url.url_redaction import redact_urls_in_text
-
 from crawlutron.runtime import process_state
 from crawlutron.runtime.resource_lifecycle import record_declined_close
 from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE
 from crawlutron.transport.cookie_store import InMemoryCookieStore
 from crawlutron.transport.render_page import RenderPage
+from safe_url.normalized_url import NormalizedUrl
+from safe_url.url_redaction import redact_urls_in_text
 
 logger = logging.getLogger(__name__)
 

@@ -11,13 +11,12 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, TypedDict
 
-from safe_url.host_policy import HostPolicy
-from safe_url.normalized_url import NormalizedUrl, admit_or_none
-
 from crawlutron.admission.policy import PolicyTier, read_policy
 from crawlutron.admission.policy import stored_policy as _stored_policy
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.safety.json_safe import json_default
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl, admit_or_none
 
 from .job_store_collections import (
     FrontierEntry,

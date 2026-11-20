@@ -305,20 +305,18 @@ class TestNormalizedUrlIsAValueNotAString:
     def test_the_admission_boundary_is_typed_as_the_value(self):
         from typing import get_type_hints
 
-        from safe_url.normalized_url import NormalizedUrl
-
         from crawlutron.admission.admission_links import AdmittedLink
+        from safe_url.normalized_url import NormalizedUrl
 
         assert get_type_hints(AdmittedLink)["normalized_url"] is NormalizedUrl
 
     def test_records_carry_the_value_and_the_wire_carries_text(self):
         from typing import get_type_hints
 
-        from safe_url.normalized_url import NormalizedUrl
-
         from crawlutron.models.crawl_task import CrawlTask
         from crawlutron.models.discovered_link import DiscoveredLink
         from crawlutron.models.serialization import to_dict
+        from safe_url.normalized_url import NormalizedUrl
 
         # Both cross a boundary: ``DiscoveredLink`` is rebuilt from the spill file, and ``CrawlTask`` is
         # persisted.

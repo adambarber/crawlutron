@@ -134,11 +134,10 @@ class TestCrawlRequestWebhook:
     async def test_engine_crawl_request_with_webhook(self):
         import asyncio
 
-        from safe_url.host_policy import HostPolicy
-
         from crawlutron.config.settings import CrawlerSettings
         from crawlutron.models.webhook_target import WebhookTarget
         from crawlutron.orchestration.engine import crawl_request
+        from safe_url.host_policy import HostPolicy
 
         async def browser_worker(job):
             return None

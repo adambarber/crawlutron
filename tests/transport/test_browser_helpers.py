@@ -1,10 +1,9 @@
 """Real tests for the browser strategy's logic (no browser; inject failing factories)."""
 
-from safe_url.normalized_url import NormalizedUrl
-
 from crawlutron.models.render_options import RenderOptions
 from crawlutron.transport.browser import BrowserRenderer
 from crawlutron.transport.browser_driver import BrowserDriver
+from safe_url.normalized_url import NormalizedUrl
 from tests._browser_doubles import BrowserFakeContextManager, BrowserFakePage
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 

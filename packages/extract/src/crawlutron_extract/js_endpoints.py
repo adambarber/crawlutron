@@ -8,10 +8,9 @@ from __future__ import annotations
 
 import re
 
-from safe_url import NormalizedUrl
-
 from crawlutron_extract._html_common import _prepare, resolve_or_admit
 from crawlutron_extract.limits import ExtractLimits
+from safe_url import NormalizedUrl
 
 __all__ = ["extract_js_endpoints"]
 

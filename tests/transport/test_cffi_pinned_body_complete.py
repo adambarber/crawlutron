@@ -10,13 +10,13 @@ import asyncio
 import pytest
 from curl_cffi.requests.exceptions import RequestException, SSLError
 from curl_cffi.requests.models import STREAM_END
-from safe_url.host_policy import HostPolicy
-from safe_url.normalized_url import NormalizedUrl
 
 import crawlutron.transport.http_client_pool as http_client_pool
 from crawlutron.runtime import process_state
 from crawlutron.transport.cffi_transport import CffiTransport
 from crawlutron.transport.transport import FetchRequest
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
 
 EXPECTED_BODY = b"the-entire-terminal-body-must-arrive-complete"
 

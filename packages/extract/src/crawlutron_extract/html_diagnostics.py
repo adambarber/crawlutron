@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import re
 
-from safe_url import HostPolicy
-
 from crawlutron_extract._html_common import _HtmlParser, tag_attrs
 from crawlutron_extract.html_forms_frames import FormFrameCollector
 from crawlutron_extract.html_links import LinkCollector
 from crawlutron_extract.limits import ExtractLimits
+from safe_url import HostPolicy
 
 __all__ = ["html_diagnostics"]
 

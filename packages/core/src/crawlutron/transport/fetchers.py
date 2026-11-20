@@ -10,8 +10,6 @@ import logging
 from collections.abc import Callable, Mapping
 
 from curl_cffi.requests.exceptions import SSLError
-from safe_url.normalized_url import NormalizedUrl
-from safe_url.url_redaction import redact_url
 
 from crawlutron.models.http_fetch_result import HttpFetchResult
 from crawlutron.models.http_fetcher import HttpFetcher
@@ -21,6 +19,8 @@ from crawlutron.transport.httpx_transport import HttpxTransport
 from crawlutron.transport.redirect_walker import RedirectWalker
 from crawlutron.transport.request_profile import store_set_cookies
 from crawlutron.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
+from safe_url.normalized_url import NormalizedUrl
+from safe_url.url_redaction import redact_url
 
 logger = logging.getLogger(__name__)
 

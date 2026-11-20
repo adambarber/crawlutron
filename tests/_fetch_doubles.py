@@ -7,10 +7,9 @@ import inspect
 from collections.abc import Callable
 from typing import Any
 
-from safe_url.normalized_url import NormalizedUrl
-
 from crawlutron.models.http_fetch_result import HttpFetchResult
 from crawlutron.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
+from safe_url.normalized_url import NormalizedUrl
 from tests._policy_factories import canonical
 
 #: One scripted page: (status, raw body, content type). The fetcher estimates

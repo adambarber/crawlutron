@@ -9,7 +9,6 @@ from __future__ import annotations
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from lxml import html as lxml_html
-from safe_url.host_policy import HostPolicy
 
 from crawlutron.search import providers as _providers
 from crawlutron.search.providers import (
@@ -21,6 +20,7 @@ from crawlutron.search.providers import (
     clip_text,
     normalize_result_url,
 )
+from safe_url.host_policy import HostPolicy
 
 _DUCKDUCKGO_UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"

@@ -8,8 +8,6 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from safe_url.normalized_url import NormalizedUrl
-
 from crawlutron.models.content_validators import ContentValidators
 from crawlutron.models.watch_state import WatchState
 from crawlutron.models.watch_status import WatchStatus
@@ -22,6 +20,7 @@ from crawlutron.vocabulary.taxonomy import (
     CrawlClassification,
     status_for_classification,
 )
+from safe_url.normalized_url import NormalizedUrl
 
 __all__ = ["WatchStore"]
 

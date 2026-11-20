@@ -476,7 +476,6 @@ async def _verified(request) -> bool:
 def _refuse(path: str, t: Throttled) -> JSONResponse:
     from crawlutron_mcp.constants import RATE_LIMITED
     from crawlutron_mcp.protocol import error_response
-
     from crawlutron_rest.api.exceptions import error_envelope
 
     if path in METERED_EXACT:

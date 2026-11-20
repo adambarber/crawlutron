@@ -9,7 +9,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 import pytest
-from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.models.content_metrics import ContentMetrics
 from crawlutron.models.crawl_policy import CrawlPolicy
@@ -19,6 +18,7 @@ from crawlutron.transport.http_response import (
     FetchedResponse,
     HttpStrategyContext,
 )
+from safe_url.normalized_url import NormalizedUrl
 from tests._fetch_doubles import FetcherDouble
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 

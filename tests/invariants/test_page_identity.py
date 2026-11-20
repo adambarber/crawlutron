@@ -78,7 +78,6 @@ def test_admitted_raw_is_the_durable_identity():
     a refactor that changed identity could pass the gate and re-key everything.
     """
     from safe_url.normalized_url import NormalizedUrl
-
     from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
     # The canonical public form, with the noise the normalizer strips (default port,

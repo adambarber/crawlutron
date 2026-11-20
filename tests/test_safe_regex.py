@@ -4,6 +4,7 @@ import threading
 import time
 
 import pytest
+
 from safe_url.safe_regex import (
     RegexTimeout,
     UnsafePattern,

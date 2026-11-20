@@ -14,9 +14,6 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Final, cast
 
-from safe_url.host_policy import HostPolicy
-from safe_url.normalized_url import NormalizedUrl
-
 from crawlutron.admission.policy import DiscoveryFlags, discovery_flags
 from crawlutron.models.crawl_diagnostics import CrawlDiagnostics
 from crawlutron.models.crawl_policy import CrawlPolicy
@@ -31,6 +28,8 @@ from crawlutron.transport.decompression import decompress_body as _decompress_bo
 from crawlutron.transport.robots_parse import parse_robots_crawl_delay, parse_robots_sitemaps
 from crawlutron.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES, DISCOVERY_BODY_MAX_BYTES
 from crawlutron.vocabulary.taxonomy import is_transient_classification
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
 
 #: Maximum ``Sitemap:`` directives honoured per robots.txt. Beyond it excess
 #: lines are silently dropped so a hostile file cannot spawn a fan-out.

@@ -7,8 +7,6 @@ from __future__ import annotations
 
 import abc
 
-from safe_url.host_policy import HostPolicy
-
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.json_value import JsonValue
 from crawlutron.search import providers as _providers
@@ -26,6 +24,7 @@ from crawlutron.search.providers import (
     provider_message,
 )
 from crawlutron.search.providers_html import DuckDuckGoProvider
+from safe_url.host_policy import HostPolicy
 
 
 class ApiKeyProvider(BaseProvider):

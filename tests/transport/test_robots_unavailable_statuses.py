@@ -6,7 +6,6 @@ explicit denial); other 4xx are "unavailable" (RFC 9309). The value says which."
 from __future__ import annotations
 
 import pytest
-from safe_url.host_policy import HostPolicy
 
 from crawlutron.transport.robots import (
     ROBOTS_FAILURE_TTL_SECONDS,
@@ -15,6 +14,9 @@ from crawlutron.transport.robots import (
     robots_cache,
 )
 from crawlutron.vocabulary.robots import RobotsSource
+
+# RobotsSource is the admission policy source used by crawl gate tests.
+from safe_url.host_policy import HostPolicy
 from tests._fetch_doubles import FetcherDouble
 from tests._policy_factories import canonical
 

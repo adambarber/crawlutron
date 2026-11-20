@@ -7,8 +7,6 @@ from __future__ import annotations
 
 from types import MappingProxyType
 
-from safe_url.normalized_url import NormalizedUrl
-
 from crawlutron.models.classification_evidence import ClassificationEvidenceRecord
 from crawlutron.models.crawl_diagnostics import CrawlDiagnostics
 from crawlutron.models.crawl_result import CrawlResult, EngineCrawlResult
@@ -20,6 +18,7 @@ from crawlutron.models.json_value import JsonValue
 from crawlutron.models.page_metadata import PageMetadata
 from crawlutron.models.taxonomy import Classification, CrawlError, CrawlStrategyName
 from crawlutron.vocabulary.taxonomy import ResultStatus
+from safe_url.normalized_url import NormalizedUrl
 
 __all__ = [
     "build_engine_result",

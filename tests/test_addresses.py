@@ -6,6 +6,7 @@ share the parse/unwrap/range work, which lives once so a range added is seen by 
 import ipaddress
 
 import pytest
+
 from safe_url.address_class import AddressClass, classify, is_loopback_bind
 
 # One representative per class. Order matters: the classifier returns the first match, so this table doubles

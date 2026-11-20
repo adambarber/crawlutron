@@ -11,8 +11,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
-from safe_url.normalized_url import NormalizedUrl
-
 from crawlutron.models.http_fetch_result import HttpFetchResult
 from crawlutron.transport.decompression import (
     DecompressionTooLargeError,
@@ -20,6 +18,7 @@ from crawlutron.transport.decompression import (
 from crawlutron.transport.decompression import (
     decompress_body as _decompress_body,
 )
+from safe_url.normalized_url import NormalizedUrl
 
 #: The result of one transport hop -- read by the walk layer as
 #: url/final_url/status_code/headers/body/elapsed_ms.

@@ -9,11 +9,10 @@ import itertools
 import threading
 from collections.abc import Callable
 
-from safe_url.normalized_url import NormalizedUrl
-
 from crawlutron.runtime import process_state
 from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE
 from crawlutron.transport.freshness import default_clock, expiry_for, is_expired, stores_for_ttl
+from safe_url.normalized_url import NormalizedUrl
 
 _DEFAULT_TTL_SECONDS = 3600.0
 _MAX_ENTRIES = 100_000

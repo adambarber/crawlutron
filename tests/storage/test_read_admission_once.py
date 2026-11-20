@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from safe_url.host_policy import HostPolicy
-
 import crawlutron.storage.job_store_collections as collections
 from crawlutron.storage.job_store import JobStore
 from crawlutron.storage.job_store_collections import FrontierEntry
 from crawlutron.storage.job_store_state import CrawlJobState
+from safe_url.host_policy import HostPolicy
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 from tests._policy_factories import job_store as store_on
 

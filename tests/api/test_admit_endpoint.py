@@ -204,10 +204,9 @@ class TestMcpParity:
         assert "admit" in names
 
     async def _tool_verdict(self, admit_settings, url: str) -> object:
+        from crawlutron.models.admit_request import AdmitRequest
         from crawlutron_mcp.handlers import dispatch as tool_dispatch
         from crawlutron_mcp.registry import TOOLS_BY_NAME
-
-        from crawlutron.models.admit_request import AdmitRequest
 
         result = await tool_dispatch(
             TOOLS_BY_NAME["admit"],
@@ -389,9 +388,8 @@ class TestProducerVocabularyLoop:
         -- else it is remapped to invalid_url and its table row is dead -- and every set entry is
         table-mapped, else the boundary passes a value the wire cannot name.
         """
-        from safe_url.normalized_url import refusal_literals
-
         import crawlutron.service.admit_endpoint as endpoint_module
+        from safe_url.normalized_url import refusal_literals
         from tests.chokepoint_walks import REPO_ROOT
 
         models_dir = REPO_ROOT / "packages" / "safe-url" / "src" / "safe_url"

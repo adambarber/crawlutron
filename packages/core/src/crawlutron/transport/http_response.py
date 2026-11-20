@@ -7,9 +7,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Protocol, TypedDict, cast
 
-from safe_url.host_policy import HostPolicy
-from safe_url.normalized_url import NormalizedUrl
-
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.content_metrics import ContentMetrics
 from crawlutron.models.crawl_extraction_method import CrawlExtractionMethod
@@ -23,6 +20,8 @@ from crawlutron.models.request_profile_record import RequestProfileRecord
 from crawlutron.models.taxonomy import CrawlStrategyName
 from crawlutron.transport.cache import HttpCache
 from crawlutron.transport.content_cache import ContentCache
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
 
 #: The pre-fetch retry tally every strategy context starts from.
 _DEFAULT_RETRY: RetryDiagnostics = {"attempts": 0, "transient_errors": [], "content_cache": "miss"}

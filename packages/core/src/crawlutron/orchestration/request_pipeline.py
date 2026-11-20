@@ -7,10 +7,6 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, cast
 
-from safe_url.host_policy import HostPolicy
-from safe_url.normalized_url import admit_or_none
-from safe_url.safe_regex import BoundedPattern
-
 from admission import AdmissionGate
 from crawlutron.admission.admission import normalize_sitemap_candidates
 from crawlutron.admission.admission_links import gather_robots_decisions
@@ -51,14 +47,16 @@ from crawlutron.transport.results import (
 from crawlutron.transport.robots import FetchAndDecode, RobotsRules
 from crawlutron.transport.scheduler import DomainScheduler
 from crawlutron.vocabulary.strategies import BROWSER_STRATEGIES
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import admit_or_none
+from safe_url.safe_regex import BoundedPattern
 
 if TYPE_CHECKING:
-    from safe_url.normalized_url import NormalizedUrl
-
     from crawlutron.models.http_fetcher import HttpFetcher
     from crawlutron.models.result_record import ProducerEnvelope
     from crawlutron.models.webhook_target import WebhookTarget
     from crawlutron.orchestration.engine import SeedCache
+    from safe_url.normalized_url import NormalizedUrl
 
 
 @dataclass(frozen=True)

@@ -4,10 +4,10 @@ import logging
 from functools import partial
 
 import pytest
-from safe_url.host_policy import HostPolicy, allow_private_targets, reset_private_target_memo
-from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.safety.validation import filter_js_endpoints as _filter_js_endpoints
+from safe_url.host_policy import HostPolicy, allow_private_targets, reset_private_target_memo
+from safe_url.normalized_url import NormalizedUrl
 
 _HOST_POLICY = HostPolicy.unrestricted()
 admit = partial(NormalizedUrl, policy=_HOST_POLICY)

@@ -9,6 +9,10 @@ from __future__ import annotations
 from dataclasses import replace as _replace
 from typing import TypedDict, cast
 
+from crawlutron.extraction.trees import html_diagnostics
+from crawlutron.models.discovered_link import DiscoveredLink
+from crawlutron.models.json_value import JsonValue
+from crawlutron.models.page_metadata import PageMetadata
 from crawlutron_extract import (
     detect_pagination as _package_detect_pagination,
 )
@@ -22,11 +26,6 @@ from crawlutron_extract.limits import ExtractLimits
 from crawlutron_extract.links import LinkRecord
 from safe_url.host_policy import HostPolicy
 from safe_url.normalized_url import NormalizedUrl, admit_or_none
-
-from crawlutron.extraction.trees import html_diagnostics
-from crawlutron.models.discovered_link import DiscoveredLink
-from crawlutron.models.json_value import JsonValue
-from crawlutron.models.page_metadata import PageMetadata
 
 
 class PostFetchDiscovery(TypedDict):

@@ -68,6 +68,7 @@ def precommit_hook_ids(config: str) -> tuple[str, ...]:
 # Every job that reports a result the aggregate must depend on: one per gate,
 # plus the two supply-chain gates added by #623.
 REPORTING_JOBS = {
+    "actionlint",
     "ruff",
     "ruff-format",
     "basedpyright",

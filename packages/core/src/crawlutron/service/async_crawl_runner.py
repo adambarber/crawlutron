@@ -12,8 +12,6 @@ import logging
 import time
 from dataclasses import dataclass
 
-from safe_url.normalized_url import NormalizedUrl
-
 from crawlutron.config.env import get_env_int
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.delta import DeltaContext
@@ -38,6 +36,7 @@ from crawlutron.storage.job_store import (
 )
 from crawlutron.storage.result_store import CrawlSpillStore
 from crawlutron.transport.timeouts import Timeouts
+from safe_url.normalized_url import NormalizedUrl
 
 logger = logging.getLogger(__name__)
 

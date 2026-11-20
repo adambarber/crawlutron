@@ -71,9 +71,8 @@ async def test_an_unwired_mcp_port_refuses_loudly():
 async def test_auth_denial_projects_fixed_message_not_the_exception(async_client, monkeypatch):
     """A 401 denial carries the fixed allowlisted message, never text derived
     from the caught exception object (stack-trace-exposure)."""
-    from crawlutron_mcp.constants import INVALID_API_KEY
-
     from crawlutron.service.errors import DomainError
+    from crawlutron_mcp.constants import INVALID_API_KEY
 
     async def _bad_identity(request):
         raise DomainError(401, "invalid_api_key", "exception-derived leakage message")

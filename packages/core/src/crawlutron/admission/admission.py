@@ -7,10 +7,6 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from safe_url.host_policy import HostPolicy
-from safe_url.normalized_url import NormalizedUrl, admit_or_none
-from safe_url.scope_match import scope_allows
-
 from crawlutron.admission.admission_links import (
     AdmissionOutcome,
     LinkCandidate,
@@ -27,6 +23,9 @@ from crawlutron.transport.fetch_helpers import fetch_sitemap_urls
 from crawlutron.transport.fetchers import default_http_fetcher
 from crawlutron.transport.robots import FetchAndDecode, RobotsRules, load_robots_rules, robots_allows
 from crawlutron.transport.scheduler import DomainScheduler
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl, admit_or_none
+from safe_url.scope_match import scope_allows
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard
     from crawlutron.config.settings import CrawlerSettings

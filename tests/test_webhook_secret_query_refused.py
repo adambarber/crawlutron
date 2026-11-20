@@ -4,9 +4,9 @@ at delivery time; webhook auth is policy.credentials, never URL params.
 """
 
 import pytest
-from safe_url.host_policy import HostPolicy
 
 from crawlutron.models.webhook_target import WebhookTarget
+from safe_url.host_policy import HostPolicy
 
 
 def test_admit_refuses_secret_named_query_parameter():

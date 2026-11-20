@@ -1,7 +1,5 @@
 """HTTP fetch strategy behavior against a real local server (no mocks)."""
 
-from safe_url.normalized_url import NormalizedUrl
-
 from crawlutron.admission.policy import read_policy
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.crawl_strategy_attempt import CrawlStrategyAttempt
@@ -13,6 +11,7 @@ from crawlutron.transport.http import http_strategy_result
 from crawlutron.transport.results import crawl_result_from_engine_result
 from crawlutron.vocabulary.extraction import EXTRACTION_FULL
 from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
+from safe_url.normalized_url import NormalizedUrl
 from tests._assertions import assert_result_success
 from tests._fetch_doubles import FetcherDouble
 from tests._fetcher_factories import (

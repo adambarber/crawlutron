@@ -10,8 +10,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 
-from safe_url import NormalizedUrl
-
 from crawlutron.models.classification_evidence import ClassificationEvidenceRecord
 from crawlutron.models.crawl_diagnostics import CrawlDiagnostics
 from crawlutron.models.crawl_strategy_attempt import CrawlStrategyAttempt
@@ -25,6 +23,7 @@ from crawlutron.models.taxonomy import (
     CrawlStrategyName,
 )
 from crawlutron.vocabulary.taxonomy import ResultStatus
+from safe_url import NormalizedUrl
 
 
 @dataclass(frozen=True)

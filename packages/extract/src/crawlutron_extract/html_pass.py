@@ -8,14 +8,13 @@ from __future__ import annotations
 from html import parser as html_parser
 from typing import TypedDict
 
-from safe_url import HostPolicy, NormalizedUrl
-
 from crawlutron_extract.html_forms_frames import FormFrameCollector
 from crawlutron_extract.html_links import LinkCollector
 from crawlutron_extract.html_meta import MetadataCollector
 from crawlutron_extract.html_tables import TableCollector
 from crawlutron_extract.html_text import TextSink
 from crawlutron_extract.limits import ExtractLimits
+from safe_url import HostPolicy, NormalizedUrl
 
 __all__ = ["extract_html"]
 

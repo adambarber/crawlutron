@@ -13,8 +13,6 @@ from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple, Protocol, cast
 
-from safe_url.url_redaction import redact_url, redact_urls_in_text
-
 from crawlutron.config.env import get_env_int
 from crawlutron.models.browser_profile_record import BrowserProfileRecord
 from crawlutron.models.screenshot_diagnostics import ScreenshotDiagnostics
@@ -45,6 +43,7 @@ from crawlutron.vocabulary.limits import (
     DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS,
     DEFAULT_MAX_BROWSER_RENDERS,
 )
+from safe_url.url_redaction import redact_url, redact_urls_in_text
 
 if TYPE_CHECKING:
     from crawlutron.config.settings import CrawlerSettings

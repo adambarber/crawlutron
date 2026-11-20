@@ -9,8 +9,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from safe_url import HostPolicy, admit_or_none
-
 from crawlutron_extract.css_select import (
     SelectorError,
     find_all_any,
@@ -20,6 +18,7 @@ from crawlutron_extract.html_dom import DOMNode, build_dom
 from crawlutron_extract.html_text import render_markdown
 from crawlutron_extract.limits import ExtractLimits
 from crawlutron_extract.models import Extraction, Quality
+from safe_url import HostPolicy, admit_or_none
 
 
 class FieldKind(StrEnum):

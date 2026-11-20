@@ -4,8 +4,6 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from safe_url.host_policy import HostPolicy as _HostPolicy
-from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.admission.admission import requeue_admitted_pages
 from crawlutron.admission.payload_helpers import payload_policy
@@ -19,6 +17,8 @@ from crawlutron.runtime.pressure_sizing import (
 from crawlutron.storage.job_store import FrontierEntry
 from crawlutron.storage.job_store_collections import OrderedUrlSet
 from crawlutron.storage.job_store_state import CrawlJobState
+from safe_url.host_policy import HostPolicy as _HostPolicy
+from safe_url.normalized_url import NormalizedUrl
 from tests._admission_doubles import no_crawl_delay as _no_crawl_delay
 from tests._fetcher_factories import crawled_results
 from tests._policy_factories import admit, canonical, crawl_policy

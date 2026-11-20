@@ -8,9 +8,8 @@ import asyncio
 import contextlib
 from functools import partial
 
-from safe_url.normalized_url import NormalizedUrl
-
 from crawlutron.models.render_options import RenderOptions
+from safe_url.normalized_url import NormalizedUrl
 from tests._browser_doubles import DEFAULT_PAGE_HTML, ScriptedPage, scripted_renderer
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 

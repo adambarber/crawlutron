@@ -7,9 +7,6 @@ still-running job is a STRUCTURED NON-ERROR result (status: running), not an is_
 from __future__ import annotations
 
 import pytest
-from crawlutron_mcp.handlers import ToolResult
-from crawlutron_mcp.handlers import dispatch as tool_dispatch
-from crawlutron_mcp.registry import TOOLS_BY_NAME
 from typing_extensions import TypedDict
 
 from crawlutron.models.crawl_result_request import CrawlResultRequest
@@ -18,6 +15,9 @@ from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
 from crawlutron.models.unified_crawl_result import UnifiedCrawlResult
 from crawlutron.service.crawl_endpoint_cores import read_crawl_result_record, read_crawl_trace_record
 from crawlutron.storage.job_store import JobStatus
+from crawlutron_mcp.handlers import ToolResult
+from crawlutron_mcp.handlers import dispatch as tool_dispatch
+from crawlutron_mcp.registry import TOOLS_BY_NAME
 from tests._assertions import completed_crawl
 from tests._fetcher_factories import make_crawl_payload
 from tests._policy_factories import canonical
@@ -231,9 +231,8 @@ class TestNoRevalidationOnTheReplayPath:
 
 class TestDiscoveryAndParity:
     def test_capabilities_name_the_full_mcp_tool_set(self):
-        from crawlutron_mcp.registry import TOOL_SPECS
-
         from crawlutron.config.settings import CrawlerSettings
+        from crawlutron_mcp.registry import TOOL_SPECS
         from crawlutron_rest.discovery.capabilities import capabilities_payload
 
         mcp = capabilities_payload(CrawlerSettings.from_mapping({}))["mcp"]

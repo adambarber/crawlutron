@@ -9,8 +9,6 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
-from safe_url.host_policy import HostPolicy
-
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.json_value import JsonValue
 from crawlutron.models.serialization import from_wire, to_dict
@@ -18,6 +16,7 @@ from crawlutron.storage.coordination_store import CoordinationStore, atwin
 from crawlutron.storage.migrations import StoreSchema
 from crawlutron.storage.safe_db import txn_read, txn_write
 from crawlutron.transport.freshness import default_clock
+from safe_url.host_policy import HostPolicy
 
 # The write-edge byte cap: one retained row is a whole crawl response, so
 # without a byte bound the entry cap bounds rows, never retained bytes.

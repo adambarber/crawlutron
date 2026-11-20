@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from safe_url.host_policy import HostPolicy
-
 from crawlutron.admission.payload_helpers import checked_payload_urls
 from crawlutron.admission.policy import read_policy
 from crawlutron.models.crawl_request import CrawlRequest
@@ -30,6 +28,7 @@ from crawlutron.service.job_control import control_job_core, raise_job_not_found
 from crawlutron.service.main_helpers import build_job_status
 from crawlutron.transport.request_profile import cookie_namespace_for
 from crawlutron.vocabulary.limits import DEFAULT_JOB_LIST_LIMIT
+from safe_url.host_policy import HostPolicy
 
 if TYPE_CHECKING:
     from crawlutron.config.settings import CrawlerSettings

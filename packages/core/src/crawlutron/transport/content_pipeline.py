@@ -10,9 +10,6 @@ import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypedDict
 
-from crawlutron_extract import extract as _package_extract
-from crawlutron_extract.limits import ExtractLimits
-
 from crawlutron.admission.policy import discovery_flags
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.extraction.discovery import (
@@ -24,14 +21,15 @@ from crawlutron.models.classification_evidence import ClassificationEvidenceReco
 from crawlutron.models.discovered_link import DiscoveredLink
 from crawlutron.models.page_metadata import PageMetadata
 from crawlutron.safety.validation import filter_js_endpoints
+from crawlutron_extract import extract as _package_extract
+from crawlutron_extract.limits import ExtractLimits
 
 if TYPE_CHECKING:
-    from safe_url.host_policy import HostPolicy
-    from safe_url.normalized_url import NormalizedUrl
-
     from crawlutron.models.crawl_diagnostics import CrawlDiagnostics
     from crawlutron.models.crawl_extraction_method import CrawlExtractionMethod
     from crawlutron.models.crawl_policy import CrawlPolicy
+    from safe_url.host_policy import HostPolicy
+    from safe_url.normalized_url import NormalizedUrl
 
 
 @dataclass(frozen=True)

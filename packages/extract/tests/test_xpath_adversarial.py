@@ -7,6 +7,7 @@ the DOM node cap, unicode and entity-decoded attribute values, empty results.
 from __future__ import annotations
 
 import pytest
+
 from crawlutron_extract.html_dom import build_dom
 from crawlutron_extract.xpath_eval import select, select_values
 from crawlutron_extract.xpath_select import SelectorError

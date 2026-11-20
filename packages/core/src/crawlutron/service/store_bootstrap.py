@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import dataclasses
 
-from safe_url.host_policy import HostPolicy
-
 from crawlutron.admission.policy import PolicyTier
 from crawlutron.config.env import get_env_float, get_env_int
 from crawlutron.config.settings import CrawlerSettings
@@ -28,6 +26,7 @@ from crawlutron.storage import (
 from crawlutron.storage import (
     watch_store as watch_store_mod,
 )
+from safe_url.host_policy import HostPolicy
 
 
 @dataclasses.dataclass(frozen=True)

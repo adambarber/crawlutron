@@ -10,8 +10,6 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import cast
 
-from safe_url.normalized_url import NormalizedUrl
-
 from crawlutron.models.http_fetch_result import HttpFetchResult
 from crawlutron.safety.bounded_io import BodyTooLarge
 from crawlutron.safety.header_values import reject_injectable_header_values
@@ -25,6 +23,7 @@ from crawlutron.transport.pinned_transport import (
 )
 from crawlutron.transport.transport import FetchRequest, Transport, http_413
 from crawlutron.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
+from safe_url.normalized_url import NormalizedUrl
 
 StoreHopCookies = Callable[[NormalizedUrl, Mapping[str, str]], Awaitable[None]]
 

@@ -8,13 +8,12 @@ from __future__ import annotations
 
 import logging
 
-from safe_url.host_policy import HostPolicy, host_egress_reason, host_policy_reason
-from safe_url.normalized_url import NormalizedUrl, admit_with_reason
-
 from crawlutron.models.admit_request import AdmitRequest
 from crawlutron.models.admit_response import AdmitChecks, AdmitReason, AdmitResponse
 from crawlutron.transport.fetchers import default_http_fetcher
 from crawlutron.transport.robots import load_robots_rules, robots_allows
+from safe_url.host_policy import HostPolicy, host_egress_reason, host_policy_reason
+from safe_url.normalized_url import NormalizedUrl, admit_with_reason
 
 logger = logging.getLogger(__name__)
 

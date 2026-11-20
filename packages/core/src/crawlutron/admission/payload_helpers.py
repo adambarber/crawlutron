@@ -8,16 +8,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from safe_url.normalized_url import NormalizedUrl
-
 from crawlutron.admission.policy import PolicyTier, validate_wire_policy
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.single_url_source_request import SingleUrlSourceRequest
+from safe_url.normalized_url import NormalizedUrl
 
 if TYPE_CHECKING:
-    from safe_url.host_policy import HostPolicy
-
     from crawlutron.models.crawl_policy import CrawlPolicy
+    from safe_url.host_policy import HostPolicy
 
 
 def _validated_url(url: str, *, host_policy: HostPolicy) -> NormalizedUrl:

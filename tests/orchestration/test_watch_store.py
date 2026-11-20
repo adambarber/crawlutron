@@ -5,11 +5,11 @@ call, so no test (and no production path) depends on wall time.
 """
 
 import pytest
-from safe_url.host_policy import HostPolicy
 
 from crawlutron.models.watch_status import WatchStatus
 from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.vocabulary.taxonomy import CrawlClassification
+from safe_url.host_policy import HostPolicy
 from tests._policy_factories import canonical
 
 NOW = 1_000_000.0

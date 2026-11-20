@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 
 from httpx import ASGITransport, AsyncClient
-from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models import watch_state
@@ -18,6 +17,7 @@ from crawlutron.service.watch_sweep import WatchSweeper
 from crawlutron.vocabulary.taxonomy import CrawlClassification
 from crawlutron_rest.api.dependencies import get_settings, get_watch_store
 from crawlutron_rest.api.watch_router import router as watch_router
+from safe_url.normalized_url import NormalizedUrl
 from tests._app_harnesses import harness_app
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 

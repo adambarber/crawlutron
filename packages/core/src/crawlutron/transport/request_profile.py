@@ -11,8 +11,6 @@ import os
 from collections.abc import Iterable, Mapping
 from typing import Protocol, runtime_checkable
 
-from safe_url.normalized_url import NormalizedUrl
-
 from crawlutron.admission.credentials import apply_credentials as apply_credentials
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.request_profile_record import RequestProfileRecord
@@ -20,6 +18,7 @@ from crawlutron.safety.header_authority import service_identity_headers
 from crawlutron.transport import cookie_jar
 from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE
 from crawlutron.vocabulary.strategies import HTTP_CFFI_IMPERSONATE
+from safe_url.normalized_url import NormalizedUrl
 
 
 def cookie_namespace_for(profile: RequestProfileRecord) -> str:

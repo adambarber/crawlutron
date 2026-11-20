@@ -11,11 +11,11 @@ from typing import Protocol
 from urllib.parse import urlparse
 
 import httpx
-from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.safety.header_authority import survives_cross_origin
 from crawlutron.transport import pinned_dns as _dns
 from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE, global_cookie_jar
+from safe_url.normalized_url import NormalizedUrl
 
 
 def declared_length_exceeds(header_value: str | None, limit: int) -> bool:

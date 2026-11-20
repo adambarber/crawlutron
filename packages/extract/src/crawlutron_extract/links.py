@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from safe_url import NormalizedUrl
-
 from crawlutron_extract._html_common import _HtmlParser, _prepare, resolve_or_admit, tag_attrs
 from crawlutron_extract.limits import ExtractLimits
+from safe_url import NormalizedUrl
 
 __all__ = ["LinkRecord", "extract_discovered_links"]
 

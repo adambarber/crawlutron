@@ -18,9 +18,6 @@ from collections.abc import Mapping
 from urllib.parse import urlparse
 
 from httpx import HTTPError
-from safe_url.host_policy import HostPolicy
-from safe_url.normalized_url import NormalizedUrl
-from safe_url.url_redaction import redact_urls_in_text
 
 from crawlutron.config.env import get_env_int, get_mapping_int
 from crawlutron.config.settings import CrawlerSettings
@@ -29,6 +26,9 @@ from crawlutron.runtime import process_state
 from crawlutron.safety.bounded_io import BodyTooLarge, read_capped_async
 from crawlutron.transport.http_client_pool import get_async_http_client
 from crawlutron.transport.timeouts import Timeouts
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
+from safe_url.url_redaction import redact_urls_in_text
 
 logger = logging.getLogger(__name__)
 

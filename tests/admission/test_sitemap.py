@@ -3,8 +3,6 @@
 import asyncio
 from functools import partial
 
-from safe_url.normalized_url import NormalizedUrl
-
 from crawlutron.admission.policy import read_policy
 from crawlutron.orchestration.engine import fresh_seeds, parse_lastmod, seed_is_fresh
 from crawlutron.transport.content_cache import ContentCache
@@ -12,6 +10,7 @@ from crawlutron.transport.content_cache_key import build_content_cache_key
 from crawlutron.transport.fetch_helpers import SITEMAP_CACHE, fetch_sitemap_urls
 from crawlutron.transport.request_profile import cookie_namespace_for, headers_for_strategy
 from crawlutron.vocabulary.limits import SITEMAP_CACHE_TTL_SECONDS, SITEMAP_FAILURE_TTL_SECONDS
+from safe_url.normalized_url import NormalizedUrl
 from tests._assertions import install_to_thread_spy
 from tests._fetch_doubles import FetcherDouble, make_fetch
 from tests._overlap_probe import OverlapProbe

@@ -5,10 +5,10 @@ reports was written by the sweep, so tests write via the store, read via the API
 
 import pytest
 from httpx import Response
-from safe_url.host_policy import HostPolicy
 
 from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.vocabulary.taxonomy import CrawlClassification
+from safe_url.host_policy import HostPolicy
 from tests._assertions import block_private_targets
 from tests._policy_factories import canonical
 from tests._watch_harnesses import keyed_watches_client, watch_client

@@ -16,14 +16,13 @@ from http.cookiejar import Cookie, DefaultCookiePolicy
 from http.cookiejar import CookieJar as StdCookieJar
 from typing import TYPE_CHECKING, TypedDict, cast
 
-from safe_url.normalized_url import NormalizedUrl
-from safe_url.registrable_domain import is_public_suffix
-
 from crawlutron.runtime import process_state
 from crawlutron.storage.coordination_cookies import DEFAULT_MAX_HOSTS_PER_NAMESPACE
 from crawlutron.storage.coordination_store import atwin
 from crawlutron.transport.cookie_store import InMemoryCookieStore
 from crawlutron.transport.header_carrier import cookie_header_request
+from safe_url.normalized_url import NormalizedUrl
+from safe_url.registrable_domain import is_public_suffix
 
 if TYPE_CHECKING:
     from urllib.request import Request

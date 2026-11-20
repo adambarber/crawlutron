@@ -16,9 +16,6 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import NamedTuple, cast
 
-from safe_url.host_policy import HostPolicy
-from safe_url.normalized_url import NormalizedUrl
-
 from crawlutron.models.http_fetch_result import HttpFetchResult as HttpFetchResult
 from crawlutron.models.http_fetcher import HttpFetcher as HttpFetcher
 from crawlutron.runtime import process_state
@@ -35,6 +32,8 @@ from crawlutron.vocabulary.limits import (
     SITEMAP_MAX_DEPTH,
     SITEMAP_MAX_URLS,
 )
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
 
 # Request headers as the discovery fetch takes them: a mapping it only
 # reads, or None for "send none" -- one declaration, owned by the core.

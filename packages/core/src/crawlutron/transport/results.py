@@ -9,8 +9,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypeVar, cast
 
-from safe_url.normalized_url import NormalizedUrl
-
 from crawlutron.models.crawl_diagnostics import CrawlDiagnostics
 from crawlutron.models.crawl_result import CrawlResult, EngineCrawlResult
 from crawlutron.models.crawl_strategy_attempt import CrawlStrategyAttempt
@@ -22,6 +20,7 @@ from crawlutron.models.result_factory import (
 from crawlutron.models.taxonomy import Classification, CrawlError, CrawlStrategyName
 from crawlutron.transport.classification import classify_and_log
 from crawlutron.vocabulary.taxonomy import ResultStatus
+from safe_url.normalized_url import NormalizedUrl
 
 if TYPE_CHECKING:
     from crawlutron.models.json_value import JsonValue

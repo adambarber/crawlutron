@@ -9,9 +9,6 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from safe_url.host_policy import HostPolicy
-from safe_url.normalized_url import NormalizedUrl
-
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.taxonomy import as_classification
 from crawlutron.orchestration.engine import crawl_request
@@ -20,6 +17,8 @@ from crawlutron.storage.result_store import CrawlSpillStore
 from crawlutron.transport.browser_pool import PooledBrowserWorker, get_browser_pool
 from crawlutron.vocabulary.strategies import BROWSER_STRATEGIES
 from crawlutron.vocabulary.taxonomy import CrawlClassification
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
 
 if TYPE_CHECKING:
     from crawlutron.models.crawl_policy import CrawlPolicy

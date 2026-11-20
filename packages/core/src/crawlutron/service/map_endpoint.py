@@ -4,8 +4,6 @@ import asyncio
 import logging
 import time
 
-from safe_url.host_policy import HostPolicy
-
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.discovery_config import DiscoveryConfig
@@ -15,6 +13,7 @@ from crawlutron.service.crawl_executor import execute_crawl
 from crawlutron.service.main_helpers import record_crawl_completion
 from crawlutron.service.site_map import build_site_map
 from crawlutron.vocabulary.limits import MAX_DISCOVERED_LINKS
+from safe_url.host_policy import HostPolicy
 
 logger = logging.getLogger(__name__)
 

@@ -12,8 +12,6 @@ from collections.abc import (
 )
 from typing import TYPE_CHECKING
 
-from safe_url.normalized_url import NormalizedUrl
-
 from crawlutron.config.env import get_env_float, get_env_int
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.extraction.classify import classify_page
@@ -41,12 +39,12 @@ from crawlutron.transport.driver_config import async_sleep
 from crawlutron.transport.pinned_dns import ResolverBudgetExceeded
 from crawlutron.transport.render_page import RenderPage
 from crawlutron.transport.timeouts import bounded_content, bounded_evaluate
+from safe_url.normalized_url import NormalizedUrl
 
 if TYPE_CHECKING:
-    from safe_url.host_policy import HostPolicy
-
     from crawlutron.models.render_options import RenderOptions
     from crawlutron.models.taxonomy import CrawlError
+    from safe_url.host_policy import HostPolicy
 
 __all__ = [
     "BrowserRenderer",

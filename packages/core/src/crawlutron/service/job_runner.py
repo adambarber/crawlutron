@@ -12,9 +12,6 @@ from dataclasses import replace
 from functools import partial
 from typing import cast
 
-from safe_url.normalized_url import NormalizedUrl, admit_or_none
-from safe_url.url_redaction import redact_url
-
 from crawlutron.admission.admission import (
     JobAdmissionContext,
     admit_job_links,
@@ -59,6 +56,8 @@ from crawlutron.storage.job_store import (
 from crawlutron.transport.robots import FetchAndDecode
 from crawlutron.vocabulary.limits import MAX_URL_TRANSIENT_ATTEMPTS
 from crawlutron.vocabulary.taxonomy import is_transient_classification
+from safe_url.normalized_url import NormalizedUrl, admit_or_none
+from safe_url.url_redaction import redact_url
 
 logger = logging.getLogger(__name__)
 

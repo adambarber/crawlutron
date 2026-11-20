@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from safe_url.host_policy import HostPolicy
 
 from crawlutron.admission.admission import RobotsGate
 from crawlutron.models.crawl_policy import CrawlPolicy
@@ -16,6 +15,7 @@ from crawlutron.transport.robots import (
     robots_cache,
 )
 from crawlutron.vocabulary.robots import RobotsSource
+from safe_url.host_policy import HostPolicy
 from tests._fetch_doubles import FetcherDouble
 from tests._policy_factories import canonical, crawl_policy
 

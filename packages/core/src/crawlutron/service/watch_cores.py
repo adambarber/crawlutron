@@ -8,15 +8,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, NoReturn
 from urllib.parse import parse_qsl, urlsplit
 
-from safe_url.host_policy import HostPolicy
-from safe_url.normalized_url import NormalizedUrl
-from safe_url.url_redaction import is_secret_name
-
 from crawlutron.models.watch_deleted_response import WatchDeletedResponse
 from crawlutron.models.watch_list_response import WatchListResponse
 from crawlutron.models.watch_state import WatchState
 from crawlutron.service.errors import AuthRefusal, ValidationRefusal, WatchLimitExceeded, WatchNotFound
 from crawlutron.transport.freshness import default_clock
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
+from safe_url.url_redaction import is_secret_name
 
 if TYPE_CHECKING:
     from crawlutron.config.settings import CrawlerSettings

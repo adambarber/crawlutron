@@ -10,9 +10,6 @@ from collections import deque
 from contextlib import asynccontextmanager
 from typing import NamedTuple, cast
 
-from safe_url.host_policy import HostPolicy
-from safe_url.normalized_url import NormalizedUrl
-
 from admission import AdmissionGate, Allocation, AllocationEntry, Count, LaneId, Want
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.crawl_task import CrawlTask
@@ -21,6 +18,8 @@ from crawlutron.orchestration.recursive import CrawlRun
 from crawlutron.runtime.pressure_gates import ResourceGate
 from crawlutron.transport.scheduler import DomainScheduler
 from crawlutron.vocabulary.strategies import BROWSER_HEADLESS
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
 from tests._policy_factories import canonical
 from tests._recursive_harnesses import ContentionFreeGate
 

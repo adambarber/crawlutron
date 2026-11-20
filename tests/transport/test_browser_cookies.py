@@ -205,11 +205,10 @@ async def test_shared_httpx_client_does_not_replay_cookies_it_received(base_url,
     across tenants for the life of the process.
     """
     monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "1")
-    from safe_url.host_policy import HostPolicy
-    from safe_url.normalized_url import NormalizedUrl
-
     from crawlutron.transport.http_client_pool import get_async_http_client
     from crawlutron.transport.pinned_transport import build_pinned_request
+    from safe_url.host_policy import HostPolicy
+    from safe_url.normalized_url import NormalizedUrl
 
     client = get_async_http_client()
     replayed_text = ""

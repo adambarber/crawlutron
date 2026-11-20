@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from html import parser as html_parser
 
-from safe_url import HostPolicy, NormalizedUrl, admit_or_none
-
 from crawlutron_extract._html_common import tag_attrs
+from safe_url import HostPolicy, NormalizedUrl, admit_or_none
 
 __all__ = ["detect_pagination"]
 

@@ -10,11 +10,6 @@ from dataclasses import dataclass, field, replace
 from itertools import islice
 from typing import Protocol, cast
 
-from safe_url.host_policy import HostPolicy
-from safe_url.normalized_url import NormalizedUrl
-from safe_url.safe_regex import BoundedPattern
-from safe_url.url_redaction import redact_url
-
 from admission import AdmissionGate
 from crawlutron.admission.admission_links import (
     AdmittedLink,
@@ -39,6 +34,10 @@ from crawlutron.transport.scheduler import DomainScheduler
 from crawlutron.vocabulary.limits import ENGINE_BATCH_CONCURRENCY_MULTIPLIER
 from crawlutron.vocabulary.strategies import BROWSER_STRATEGIES, HTTP_STRATEGIES
 from crawlutron.vocabulary.taxonomy import is_transient_classification
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
+from safe_url.safe_regex import BoundedPattern
+from safe_url.url_redaction import redact_url
 
 logger = logging.getLogger(__name__)
 

@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import pytest
-from crawlutron_mcp.handlers import dispatch as tool_dispatch
-from crawlutron_mcp.registry import TOOLS_BY_NAME
 
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.runtime.metrics import get_metrics
 from crawlutron.storage.result_store import CrawlResultStore
+from crawlutron_mcp.handlers import dispatch as tool_dispatch
+from crawlutron_mcp.registry import TOOLS_BY_NAME
 
 
 @pytest.fixture

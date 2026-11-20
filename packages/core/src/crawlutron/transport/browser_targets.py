@@ -10,9 +10,6 @@ from collections.abc import (
 )
 from typing import TYPE_CHECKING, Protocol, cast
 
-from safe_url.host_policy import HostPolicy
-from safe_url.normalized_url import NormalizedUrl
-
 from crawlutron.models.intercepted_xhr_record import InterceptedXhrRecord
 from crawlutron.safety.json_safe import json_default
 from crawlutron.transport.pinned_dns import (
@@ -20,6 +17,8 @@ from crawlutron.transport.pinned_dns import (
     check_ssrf_protection_stable,
 )
 from crawlutron.transport.pinned_transport import PinnedRequest
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
 
 if TYPE_CHECKING:
     from crawlutron.models.json_value import JsonValue

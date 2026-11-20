@@ -1,10 +1,10 @@
 import pytest
 from pydantic import ValidationError
+
+from crawlutron.config.env import get_env_int
 from safe_url.normalized_url import NormalizedUrl
 from safe_url.normalized_url import admit_or_none as _admit_or_none
 from safe_url.registrable_domain import registrable_domain
-
-from crawlutron.config.env import get_env_int
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 

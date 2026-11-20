@@ -11,8 +11,6 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, NamedTuple, cast
 
-from safe_url.normalized_url import NormalizedUrl
-
 from crawlutron.extraction.classify import classify_page
 from crawlutron.models.browser_profile_record import BrowserProfileRecord
 from crawlutron.models.crawl_result import CrawlResult
@@ -37,13 +35,13 @@ from crawlutron.transport.timeouts import (
     render_phase_seconds,
 )
 from crawlutron.vocabulary.browser import BrowserAction
+from safe_url.normalized_url import NormalizedUrl
 
 if TYPE_CHECKING:
-    from safe_url.host_policy import HostPolicy
-
     from crawlutron.models.render_options import RenderOptions
     from crawlutron.models.taxonomy import Classification
     from crawlutron.vocabulary.taxonomy import ResultStatus
+    from safe_url.host_policy import HostPolicy
 
 
 class WireGuard(NamedTuple):

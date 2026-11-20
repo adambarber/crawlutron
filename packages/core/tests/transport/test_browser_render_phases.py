@@ -10,8 +10,6 @@ from collections.abc import Callable
 from typing import cast
 
 import pytest
-from safe_url.host_policy import HostPolicy
-from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.models.crawl_result import CrawlResult
 from crawlutron.models.intercepted_xhr_record import InterceptedXhrRecord
@@ -25,6 +23,8 @@ from crawlutron.transport.browser_render_phases import (
 )
 from crawlutron.transport.pinned_transport import PinnedRequest
 from crawlutron.transport.render_page import GuardContext
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
 from tests._browser_page_doubles import BrowserFakePage, FakePageContext
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, admitted
 

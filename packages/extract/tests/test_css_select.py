@@ -8,6 +8,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+
 from crawlutron_extract.css_select import SelectorError, parse_selector_list, validate_css
 
 REFUSED = ["//a[", "'unmatched", '"unmatched']

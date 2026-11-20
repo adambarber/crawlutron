@@ -10,7 +10,6 @@ def recording_worker():
     Several dispatch and robots tests assert *which* jobs reached the worker;
     a copy that drops the ``seen.append`` turns that into a vacuous truth."""
     from safe_url.normalized_url import NormalizedUrl
-
     from tests._result_builders import engine_result
 
     seen: list[NormalizedUrl] = []

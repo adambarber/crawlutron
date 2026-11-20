@@ -8,9 +8,6 @@ from collections.abc import Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager, suppress
 from typing import TYPE_CHECKING
 
-from safe_url.address_class import is_loopback_bind
-from safe_url.host_policy import HostPolicy
-
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.runtime.app_module_ref import set_module_app_provider
 from crawlutron.runtime.pressure_sizing import default_executor_workers
@@ -22,6 +19,8 @@ from crawlutron.transport.browser_pool import (
 )
 from crawlutron.vocabulary.identity import SERVICE_ID, SERVICE_VERSION
 from crawlutron_rest.policy import build_runtime_policy
+from safe_url.address_class import is_loopback_bind
+from safe_url.host_policy import HostPolicy
 
 if TYPE_CHECKING:
     # Imported for annotations under type checking; the runtime import carries the real classes.

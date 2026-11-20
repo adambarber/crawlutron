@@ -11,12 +11,11 @@ from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
-from crawlutron_extract import extract as _package_extract
-from safe_url.normalized_url import NormalizedUrl
-
 from crawlutron.transport.httpx_transport import HttpxTransport
 from crawlutron.transport.redirect_walker import RedirectWalker
 from crawlutron.transport.timeouts import Timeouts
+from crawlutron_extract import extract as _package_extract
+from safe_url.normalized_url import NormalizedUrl
 
 if TYPE_CHECKING:
     from crawlutron.transport import pinned_transport

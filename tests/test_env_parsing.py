@@ -60,9 +60,8 @@ class TestEnvDecisionMemo:
     def test_both_twins_delegate_to_the_shared_memo(self, monkeypatch):
         """safe_url parses the private-target env var inline; patching crawlutron's
         parse_bool_value does not reach it — the twins diverge by design (#998)."""
-        from safe_url.host_policy import allow_private_targets, reset_private_target_memo
-
         import crawlutron.config.env as config_env
+        from safe_url.host_policy import allow_private_targets, reset_private_target_memo
 
         def exploded(raw, default, *, env_name):
             raise AssertionError("twin parsed outside the shared memo")

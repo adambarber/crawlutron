@@ -12,8 +12,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import httpx
-from safe_url.host_policy import HostPolicy
-from safe_url.normalized_url import NormalizedUrl, admit_or_none
 
 from crawlutron.safety.bounded_io import BodyTooLarge, read_capped_async
 from crawlutron.transport.http_client_pool import get_async_http_client
@@ -23,6 +21,8 @@ from crawlutron.transport.pinned_transport import (
     build_pinned_request,
 )
 from crawlutron.transport.timeouts import Timeouts
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl, admit_or_none
 
 if TYPE_CHECKING:
     from crawlutron.config.settings import CrawlerSettings

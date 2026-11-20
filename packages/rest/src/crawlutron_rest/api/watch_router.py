@@ -7,7 +7,6 @@ belongs to the sweep (:mod:`crawlutron.service.watch_sweep`). This router owns r
 from __future__ import annotations
 
 from fastapi import Response
-from safe_url.host_policy import HostPolicy
 
 from crawlutron.models.error_response import ErrorResponse
 from crawlutron.models.watch_create_request import WatchCreateRequest
@@ -27,6 +26,7 @@ from crawlutron_rest.api.caller_auth import auth_denials
 from crawlutron_rest.api.dependencies import CallerDep, SettingsDep, WatchStoreDep
 from crawlutron_rest.api.exceptions import validation_http_error
 from crawlutron_rest.api.route_layer import guarded_router
+from safe_url.host_policy import HostPolicy
 
 router = guarded_router(prefix="/v1/watches", tags=["Crawler"])
 

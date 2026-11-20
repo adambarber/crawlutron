@@ -8,8 +8,6 @@ from dataclasses import replace
 
 import httpx
 import pytest
-from safe_url.host_policy import HostPolicy
-from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.models.classification_evidence import ClassificationEvidenceRecord
 from crawlutron.models.crawl_result import EngineCrawlResult
@@ -19,6 +17,8 @@ from crawlutron.transport.browser_pool import BrowserPoolExhaustedError
 from crawlutron.transport.classification import classify_error_code
 from crawlutron.transport.results import engine_result_from_exception
 from crawlutron.vocabulary.strategies import BROWSER_HEADED_WARMED, BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
 from tests._browser_doubles import _fake_browser
 from tests._chain_policies import chain_policy
 from tests._fetch_doubles import FetcherDouble

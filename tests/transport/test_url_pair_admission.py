@@ -4,8 +4,6 @@ import asyncio
 from collections.abc import Callable
 
 import pytest
-from safe_url.host_policy import HostPolicy
-from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.admission.payload_helpers import checked_payload_urls
 from crawlutron.config.settings import CrawlerSettings
@@ -16,6 +14,8 @@ from crawlutron.runtime.pressure_gates import ResourceGate
 from crawlutron.storage.result_store import CrawlSpillStore
 from crawlutron.transport.cache import HttpCache
 from crawlutron.transport.content_cache import ContentCache
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
 from tests._fetch_doubles import FetcherDouble
 
 

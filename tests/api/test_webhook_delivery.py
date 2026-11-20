@@ -15,13 +15,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import Request
-from safe_url.host_policy import HostPolicy
 
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.service.async_crawl_runner import run_async_crawl
 from crawlutron.storage.job_store import JobStatus, JobStore
 from crawlutron.storage.result_store import CrawlResultStore
+from safe_url.host_policy import HostPolicy
 from tests._api_harnesses import run_with_webhook as _run_with_webhook
 from tests._assertions import block_private_targets, host_resolves_to
 from tests._webhook_doubles import record_webhook_delivery

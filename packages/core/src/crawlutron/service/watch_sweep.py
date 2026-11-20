@@ -12,8 +12,6 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from safe_url.host_policy import HostPolicy
-
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.crawl_policy import CrawlPolicy
@@ -31,6 +29,7 @@ from crawlutron.storage.watch_store import WatchStore
 from crawlutron.transport.freshness import default_clock
 from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from crawlutron.vocabulary.taxonomy import CrawlClassification, status_for_classification
+from safe_url.host_policy import HostPolicy
 
 if TYPE_CHECKING:
     from crawlutron.service.caller_concurrency import CallerConcurrencyTracker

@@ -6,9 +6,6 @@ from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, TypedDict, Unpack
 from urllib.parse import urlparse
 
-from safe_url.host_policy import HostPolicy
-from safe_url.normalized_url import NormalizedUrl
-
 from crawlutron.admission.policy import read_policy
 from crawlutron.models.http_fetch_result import HttpFetchResult
 from crawlutron.models.json_value import JsonValue
@@ -19,6 +16,8 @@ from crawlutron.transport.content_cache import ContentCache
 from crawlutron.transport.fetchers import default_http_fetcher
 from crawlutron.transport.strategy_request import StrategyRequest
 from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
 from tests._fetch_doubles import FetcherDouble, PageData, PageMap
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 

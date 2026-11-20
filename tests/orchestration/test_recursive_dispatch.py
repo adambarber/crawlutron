@@ -6,7 +6,6 @@ batch-sizing and admission-gate logic are covered without the full engine."""
 import asyncio
 
 import pytest
-from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.crawl_task import CrawlTask
@@ -17,6 +16,7 @@ from crawlutron.runtime.metrics import get_metrics
 from crawlutron.runtime.pressure_gates import ResourceGate
 from crawlutron.transport.scheduler import DomainScheduler
 from crawlutron.vocabulary.strategies import BROWSER_HEADLESS
+from safe_url.normalized_url import NormalizedUrl
 from tests._admission_runs import link as _link
 from tests._admission_runs import minimum_admission_run as _minimum_admission_run
 from tests._admission_runs import run as _run

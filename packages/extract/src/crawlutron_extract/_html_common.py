@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from html import parser as html_parser
 
-from safe_url import HostPolicy, NormalizedUrl, admit_or_none
-
 from crawlutron_extract.limits import ExtractLimits
+from safe_url import HostPolicy, NormalizedUrl, admit_or_none
 
 __all__ = ["resolve_or_admit", "tag_attrs"]
 

@@ -10,9 +10,6 @@ import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 
-from safe_url.host_policy import HostPolicy
-from safe_url.normalized_url import NormalizedUrl, admit_or_none
-
 from crawlutron.admission.admission_links import LinkCandidate
 from crawlutron.delta import DeltaContext, delta_summary_for, removed_entry_keys
 from crawlutron.models.crawl_result import EngineCrawlResult
@@ -25,6 +22,8 @@ from crawlutron.service.unified_shaping import (
     render_result_to_unified,
 )
 from crawlutron.vocabulary.taxonomy import CrawlClassification
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl, admit_or_none
 
 _logger = logging.getLogger(__name__)
 

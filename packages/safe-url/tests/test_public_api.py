@@ -7,6 +7,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
+
 from safe_url import (
     AddressClass,
     HostPolicy,
@@ -26,7 +27,6 @@ from safe_url import (
 )
 from safe_url.host_policy import allow_private_targets, reset_private_target_memo
 from safe_url.safe_regex import compile_untrusted
-
 from tests._host_assert import host_in, host_of
 
 UNRESTRICTED = HostPolicy.unrestricted()

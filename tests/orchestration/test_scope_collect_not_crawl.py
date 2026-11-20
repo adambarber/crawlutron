@@ -22,10 +22,9 @@ from tests._crawl_runners import crawled_results
 from tests._host_assert import host_in
 
 if TYPE_CHECKING:
+    from crawlutron.models.http_fetcher import HttpFetcher
     from safe_url.host_policy import HostPolicy
     from safe_url.normalized_url import NormalizedUrl
-
-    from crawlutron.models.http_fetcher import HttpFetcher
 
 
 def _doc_pages():

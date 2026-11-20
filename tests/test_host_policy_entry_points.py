@@ -174,10 +174,9 @@ async def _probe_site_map(monkeypatch, tmp_path):
     entry point filters instead of raising, so the claim is the output, and the shape
     with no normalized root is where aggregation consults policy.
     """
-    from safe_url.host_policy import HostPolicy
-
     from crawlutron.models.result_record import ProducerEnvelope
     from crawlutron.service.site_map import build_site_map
+    from safe_url.host_policy import HostPolicy
     from tests._result_builders import engine_result
 
     allowed, denied = "https://allowed.test/feed", "https://denied.test/sitemap"

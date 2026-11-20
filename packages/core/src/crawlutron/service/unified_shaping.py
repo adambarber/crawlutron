@@ -5,9 +5,6 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import cast, get_type_hints
 
-from crawlutron_extract import extract as _package_extract
-from safe_url.normalized_url import NormalizedUrl
-
 from crawlutron.delta import DeltaContext, classify_result
 from crawlutron.models.classification_evidence import ClassificationEvidence, ClassificationEvidenceRecord
 from crawlutron.models.content_validators import ContentValidators
@@ -25,6 +22,8 @@ from crawlutron.models.strategy_attempt import StrategyAttempt
 from crawlutron.models.taxonomy import CrawlStrategyName
 from crawlutron.models.unified_crawl_result import UnifiedCrawlResult
 from crawlutron.vocabulary.taxonomy import CrawlClassification
+from crawlutron_extract import extract as _package_extract
+from safe_url.normalized_url import NormalizedUrl
 
 #: The batch shaper is generic over its result shape so ``adapt`` and ``results``
 #: agree; browser results with an engine adapter are no longer expressible.

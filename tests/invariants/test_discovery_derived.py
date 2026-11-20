@@ -5,9 +5,8 @@ updating discovery REDS here.
 
 from __future__ import annotations
 
-from crawlutron_mcp.registry import TOOL_SPECS
-
 from crawlutron.config.settings import CrawlerSettings
+from crawlutron_mcp.registry import TOOL_SPECS
 from crawlutron_rest.discovery.recommended_surface import OPERATOR_EXCLUSIONS
 from crawlutron_rest.discovery.well_known import discovery_payload
 

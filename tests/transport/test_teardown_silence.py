@@ -7,8 +7,6 @@ import asyncio
 import logging
 from typing import cast
 
-from safe_url.normalized_url import NormalizedUrl
-
 from crawlutron.runtime.resource_lifecycle import (
     clear_declined_closes,
     declined_closes,
@@ -19,6 +17,7 @@ from crawlutron.transport.cffi_transport import release_stream_noblock
 from crawlutron.transport.pooled_clients import safe_aclose
 from crawlutron.transport.render_page import RenderPage
 from crawlutron.transport.transport import Closeable
+from safe_url.normalized_url import NormalizedUrl
 from tests._policy_factories import canonical
 
 

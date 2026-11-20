@@ -2,9 +2,8 @@
 
 import asyncio
 
-from safe_url.normalized_url import NormalizedUrl
-
 from crawlutron.admission.admission_links import gather_robots_decisions
+from safe_url.normalized_url import NormalizedUrl
 from tests._policy_factories import canonical
 
 

@@ -77,6 +77,10 @@ dev = [
     # the gate instead of wedging the commit chain. A gate tool, hence pinned
     # exact like the other gates despite living among the test packages.
     "pytest-timeout==2.4.0",
+    # actionlint lints GitHub workflow files; shellcheck-py validates shell in
+    # workflow `run:` blocks. Both are pinned gate tools for the actionlint hook.
+    "actionlint-py==1.7.12.25",
+    "shellcheck-py==0.11.0.1",
     # Coverage measurement, opt-in only (`make coverage`). No threshold, no
     # fail-under: measurement exists so the number is real; policy is separate.
     "pytest-cov==7.1.0",
@@ -180,16 +184,13 @@ select = [
     "RUF100",  # a noqa that no longer suppresses anything
     "PGH004",  # a noqa must name a specific rule, not blanket the file
 ]
-ignore = [
-    "D209",  # multiline docstring closing """ stays on the body line (house style)
-]
 
 [tool.ruff.lint.isort]
 # The crawler moved under packages/core (a uv workspace member), so ``crawlutron``
 # is no longer at the repo root and ruff no longer auto-detects it as first-party.
 # Naming it keeps isort grouping the package and test trees where it always has,
 # rather than re-folded into the third-party block.
-known-first-party = ["admission", "crawlutron", "crawlutron_rest", "crawlutron_sdk", "tests", "scripts"]
+known-first-party = ["admission", "crawlutron", "crawlutron_extract", "crawlutron_mcp", "crawlutron_rest", "crawlutron_sdk", "safe_url", "tests", "scripts"]
 # PLR0911 (too-many-returns) and PLR0913 (too-many-arguments) are deliberately
 # NOT selected, having been measured rather than assumed:
 #
@@ -210,9 +211,8 @@ known-first-party = ["admission", "crawlutron", "crawlutron_rest", "crawlutron_s
 # ran in any gate, so 154 over-length lines went unenforced; S101 was exempted
 # while `tests/**` already carried the `S` family, masking 8 asserts as collateral.
 #
-# The single exception now: D209 (ignore, above). Every other rule the D-family
-# would raise is deliberately unselected rather than ignored, because the D209
-# rewrite alone was measured at 1,153 docstring churn lines across 294 files.
+# No rule is ignored: every D-family rule is selected or unselected.
+# An inline suppression that suppresses nothing is a lint error (RUF100).
 #
 # The principle this replaces: a suppression that suppresses nothing is a claim
 # about the code that nothing re-checks. The type-suppression half of that is

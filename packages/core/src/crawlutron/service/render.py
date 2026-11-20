@@ -10,8 +10,6 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from safe_url.host_policy import HostPolicy
-
 from crawlutron.admission.admission_links import gather_deadline_bounded
 from crawlutron.admission.payload_helpers import checked_payload_urls
 from crawlutron.admission.render_options import resolve_render_options
@@ -34,19 +32,19 @@ from crawlutron.transport.results import (
 from crawlutron.transport.robots import RobotsRules
 from crawlutron.transport.scheduler import DomainScheduler
 from crawlutron.vocabulary.robots import RobotsSource
+from safe_url.host_policy import HostPolicy
 
 #: The policy a render batch that does not honor robots is judged against: one
 #: that forbids nothing, so a denial can never be reported from it.
 _ALLOWED_POLICY = RobotsRules([], [], None, RobotsSource.policy)
 
 if TYPE_CHECKING:
-    from safe_url.normalized_url import NormalizedUrl
-
     from crawlutron.models.crawl_result import EngineCrawlResult
     from crawlutron.models.crawl_worker import CrawlWorker
     from crawlutron.models.json_value import JsonValue
     from crawlutron.models.render_options import RenderOptions
     from crawlutron.models.result_record import RenderEnvelope
+    from safe_url.normalized_url import NormalizedUrl
 
 
 def render_options_for(payload: RenderRequest, settings: CrawlerSettings) -> RenderOptions:

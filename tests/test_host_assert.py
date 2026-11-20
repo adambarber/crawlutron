@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import httpx
 import pytest
-from safe_url.normalized_url import NormalizedUrl
 
+from safe_url.normalized_url import NormalizedUrl
 from tests._host_assert import host_in, host_of
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 

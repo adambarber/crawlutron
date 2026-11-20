@@ -16,6 +16,7 @@ from tests._ci_contract import (
     PREPARE_ACTION_PATH,
     RELEASE_WORKFLOW_PATH,
     REPORTING_JOBS,
+    SERVICE_ROOT,
     WORKFLOW_PATH,
     _assert_failure_propagation,
     _assert_no_config_exclude,
@@ -46,8 +47,7 @@ def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
     assert "jscpd-tests" not in config
     assert not [hook_id for hook_id, _ in hooks if hook_id in {"jscpd-app", "jscpd-tests"}]
 
-    # #557: coverage runs at pre-push (per-commit measurement trains
-    # --no-verify) and stays out of CI's enforcement surface.
+    # #557: coverage runs at pre-push and stays out of CI's enforcement surface.
     assert all(block.get("stages") in (["pre-commit"], ["commit-msg"], ["pre-push"]) for _, block in hooks)
     coverage_hooks = [(hook_id, block) for hook_id, block in hooks if hook_id == "coverage"]
     assert len(coverage_hooks) == 1, "exactly one coverage surface hook"
@@ -78,8 +78,7 @@ def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
     assert "scripts/jscpd_gate.py" not in workflow
     required = _required_needs(workflow)
     assert required == REPORTING_JOBS
-    # The enforcement job builds its venv from the frozen lock's dev extra;
-    # re-installing a specific tool on top reintroduces a drifting declaration.
+    # The enforcement job uses the frozen lock's dev extra; reinstalling a tool reintroduces drift.
     _assert_failure_propagation(workflow)
 
 
@@ -147,8 +146,7 @@ def test_release_workflow_publishes_nothing_without_a_tag() -> None:
 def _assert_every_publish_job_gated_on_ci(jobs: dict[str, object]) -> None:
     """Every publishing/admission job transitively depends on `ci`, so a red
     commit never reaches them: `needs` replaces `workflow_run`."""
-    # `released` is a read-only roster resolver that runs ahead of CI to elect
-    # one publishing tag; every other job must still be downstream of CI.
+    # `released` is a read-only roster resolver; every other job is downstream of CI.
     released_job = _mapping(jobs.get("released"), "the released job")
     assert released_job.get("needs") in (None, [])
     assert _mapping(released_job.get("permissions"), "released permissions") == {"contents": "read"}
@@ -179,8 +177,7 @@ def _assert_every_publish_job_gated_on_ci(jobs: dict[str, object]) -> None:
     assert _mapping(publish.get("permissions"), "publish permissions").get("id-token") == "write", (
         "the publish job needs id-token:write for trusted publishing"
     )
-    # The tag is what makes it a release: publication is derived from the tags at
-    # the commit CI passed, never from the merge itself.
+    # The tag makes it a release; publication comes from tags at the green commit, never the merge.
     released_runs = " ".join(str(step.get("run", "")) for step in _steps(jobs.get("released")))
     assert "release_roster.py --released" in released_runs, (
         "the released set must come from the tags pointing at the green commit"
@@ -319,23 +316,14 @@ def test_the_prepare_action_installs_the_frozen_lock() -> None:
     """One gate environment, defined once."""
     action = PREPARE_ACTION_PATH.read_text(encoding="utf-8")
     assert 'python-version: "3.14"' in action, "the prepare action must pin the 3.14 interpreter"
-    assert "uv sync --frozen --extra dev" in action, (
-        "the prepare action must install from the frozen lock: a bare install "
-        "re-resolves the graph CI never froze"
-    )
+    assert "uv sync --frozen --extra dev" in action, "the prepare action must install from the frozen lock"
     assert "pip install" not in action, "the prepare action installs with uv, not pip"
     assert "actions/cache@" in action, "the prepare action must cache gate state"
-    assert "actions/checkout" not in action, (
-        "checkout belongs in the job: GitHub resolves a local action before any step "
-        "runs, so an action that checks out runs before the repo is on disk"
-    )
-    # Per-run pidfiles must never ride a shared cache: every gate job uses this
-    # cache key, so a pid from one runner read on another is a stranger's process.
+    assert "actions/checkout" not in action, "checkout belongs in the job, before any step runs"
+    # Per-run pidfiles must never ride a shared cache; every gate job uses this key.
     cached = _cache_step_paths(action)
     assert cached, "the prepare action must declare a cache step with path inputs"
-    assert ".gate_fanout" not in cached, (
-        "the gate-fanout status dir holds per-run pidfiles and must not be cached"
-    )
+    assert ".gate_fanout" not in cached, "the gate-fanout status dir holds per-run pidfiles"
     for cache_dir in (".mypy_cache", ".ruff_cache"):
         assert cache_dir in cached, f"the prepare action must cache {cache_dir}"
 
@@ -350,11 +338,10 @@ def test_every_gate_job_starts_from_the_prepare_action() -> None:
             continue
         steps = job_steps(workflow, name)
         assert any(str(step.get("uses", "")).startswith("$/.github/actions/prepare") for step in steps), (
-            f"job {name} must start from $/.github/actions/prepare: the self-repository "
-            "form cannot resolve to another commit (zizmor self-repository)"
+            f"job {name} must start from $/.github/actions/prepare"
         )
         assert any(str(step.get("uses", "")).split("@")[0] == "actions/checkout" for step in steps), (
-            f"job {name} must check out before using the local prepare action"
+            f"job {name} must check out before using the prepare action"
         )
     for name, run in _job_run_steps(workflow):
         assert "pip install" not in run, (
@@ -445,9 +432,7 @@ def test_conftest_leaves_bytecode_writing_enabled() -> None:
     import tests.conftest as conftest_module
 
     _ = conftest_module  # conftest's import side effect applies its env at startup
-    assert os.environ.get("PYTHONDONTWRITEBYTECODE") != "1", (
-        "conftest disables bytecode writes; remove the PYTHONDONTWRITEBYTECODE=1 line"
-    )
+    assert os.environ.get("PYTHONDONTWRITEBYTECODE") != "1", "conftest disables bytecode writes"
 
 
 def test_ci_precompiles_bytecode_before_the_battery() -> None:
@@ -461,7 +446,7 @@ def test_ci_precompiles_bytecode_before_the_battery() -> None:
     # #949: the compile scope derives from the uv member src roots (glob, never a
     # hand-listed pre-src-layout package dir); this pins that derived glob.
     assert "packages/*/src" in runs, "compileall must derive its scope from the member src roots"
-    assert "tests" in runs and "scripts" in runs, "compileall must cover the test and script trees"
+    assert "tests" in runs and "scripts" in runs, "compileall must cover test and script trees"
 
 
 def test_ci_release_workflow_pins_version_consistency() -> None:
@@ -481,14 +466,34 @@ def test_ci_release_workflow_pins_version_consistency() -> None:
     assert registries == ["ghcr.io"], registries
     assert 'docker push "$IMAGE"' in joined, "the release workflow must push the pinned image"
     assert "tr '[:upper:]' '[:lower:]'" in joined, "GHCR tag must be lowercased"
-    # The derived version reaches the smoke through env (zizmor template-injection),
-    # so the binding is asserted on the workflow text and its use on the script.
-    assert "EXPECTED_VERSION: ${{ steps.version.outputs.native }}" in text, (
-        "the smoke must compare the baked version against the git-describe version"
-    )
+    assert "EXPECTED_VERSION: ${{ steps.version.outputs.native }}" in text, "baked = git-describe version"
     assert 'test "$BAKED" = "$EXPECTED_VERSION"' in joined
-    # The image's CMD binds loopback by default; Docker -p cannot reach a
-    # loopback-bound process, so the smoke must bind 0.0.0.0 (compose precedent).
-    assert "-e CRAWLUTRON_HOST=0.0.0.0" in joined, (
-        "the smoke must set CRAWLUTRON_HOST=0.0.0.0 for -p to reach the service"
-    )
+    assert "-e CRAWLUTRON_HOST=0.0.0.0" in joined, "CRAWLUTRON_HOST=0.0.0.0 lets -p reach the service"
+
+
+def test_actionlint_hook_has_a_ci_job() -> None:
+    """The actionlint hook must be enforced by a CI job running the hook itself."""
+    runs = [run.strip() for _, run in _job_run_steps(WORKFLOW_PATH.read_text(encoding="utf-8"))]
+    assert hook_run("actionlint") in runs, "hook actionlint has no CI job running it"
+
+
+def test_actionlint_in_reporting_jobs() -> None:
+    """actionlint must be in REPORTING_JOBS so the required aggregate depends on it."""
+    assert "actionlint" in REPORTING_JOBS
+
+
+def test_d209_ignore_is_removed_from_ruff_config() -> None:
+    """The dead D209 ignore must not appear in pyproject.toml's ruff lint config."""
+    text = (SERVICE_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    start = text.index("[tool.ruff.lint]")
+    end = text.index("\n[", start + 1)
+    assert "D209" not in text[start:end], "pyproject.toml ruff lint config still lists D209"
+
+
+def test_known_first_party_includes_member_packages() -> None:
+    """known-first-party must include the three member packages named by the ticket."""
+    text = (SERVICE_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    start = text.index("known-first-party")
+    end = text.index("]", start)
+    for name in ("crawlutron_extract", "crawlutron_mcp", "safe_url"):
+        assert name in text[start:end], f"pyproject.toml known-first-party must list {name}"

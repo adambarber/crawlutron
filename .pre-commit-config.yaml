@@ -200,6 +200,19 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
+      # Lints GitHub workflow files for insecure tokens, shell injection, and
+      # other supply-chain risks. actionlint-py pins the binary; shellcheck-py
+      # validates shell in workflow `run:` blocks. Both are dev-extra pins.
+      - id: actionlint
+        name: actionlint whole-workflow lint (zero tolerance)
+        entry: >-
+          bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
+          .venv/bin/python -m scripts.gate_fanout actionlint -- .venv/bin/actionlint -shellcheck .venv/bin/shellcheck -ignore '\$/\.github'
+        language: system
+        files: *service_trigger
+        pass_filenames: false
+        stages: [pre-commit]
+
       # The lockfile is a build input every image and CI install trusts; a stale one
       # installs a graph the manifests no longer declare.
       - id: lock

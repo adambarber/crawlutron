@@ -9,10 +9,10 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.runtime import process_state
 from crawlutron.transport import cookie_jar
+from safe_url.normalized_url import NormalizedUrl
 from tests._job_store_doubles import LoopGuardSharedCookieStore
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 

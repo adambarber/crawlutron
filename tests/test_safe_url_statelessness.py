@@ -3,9 +3,9 @@
 import importlib
 
 import pytest
+
 import safe_url.normalized_url as nu
 from safe_url.normalized_url import NormalizedUrl
-
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 mve = importlib.import_module("safe_url.mapped_value_errors")

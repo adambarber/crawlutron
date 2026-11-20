@@ -6,14 +6,13 @@ feeds, gathered in a normal crawl); ``build_site_map`` yields a de-duplicated, s
 
 from __future__ import annotations
 
-from safe_url.host_policy import HostPolicy
-from safe_url.normalized_url import NormalizedUrl, admit_or_none
-
 from crawlutron.models.crawl_diagnostics import CrawlDiagnostics
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.result_record import ProducerEnvelope
 from crawlutron.models.site_map_response import SiteMapPayload
 from crawlutron.service.response_shaping import frontier_link_url
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl, admit_or_none
 
 
 def build_site_map(crawl_response: ProducerEnvelope, *, host_policy: HostPolicy) -> SiteMapPayload:

@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import re
 
-from safe_url import NormalizedUrl
-
 from crawlutron_extract._html_common import resolve_or_admit
 from crawlutron_extract.limits import ExtractLimits
 from crawlutron_extract.text_format import _DOCTYPE_RE
+from safe_url import NormalizedUrl
 
 __all__ = ["extract_sitemap_locs"]
 

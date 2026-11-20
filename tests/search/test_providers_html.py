@@ -8,10 +8,10 @@ from __future__ import annotations
 from urllib.parse import quote
 
 import pytest
-from safe_url.host_policy import HostPolicy
 
 from crawlutron.search.providers import SearchProviderError
 from crawlutron.search.providers_html import DuckDuckGoProvider
+from safe_url.host_policy import HostPolicy
 from tests._assertions import awaitable_search
 
 

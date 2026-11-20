@@ -5,16 +5,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Annotated
 
 from pydantic import BaseModel, Field, field_serializer
-from safe_url.url_redaction import redact_url
 
 from crawlutron.models.content_validators import ContentValidators
 from crawlutron.models.watch_status import WatchStatus
 from crawlutron.vocabulary.taxonomy import CrawlClassification
+from safe_url.url_redaction import redact_url
 
 if TYPE_CHECKING:
-    from safe_url.host_policy import HostPolicy
-
     from crawlutron.models.webhook_target import WebhookTarget
+    from safe_url.host_policy import HostPolicy
 
 IntervalSeconds = Annotated[
     int,

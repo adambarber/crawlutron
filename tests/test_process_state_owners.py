@@ -9,9 +9,9 @@ import ast
 import importlib
 
 import pytest
-from safe_url import process_state as safe_url_process_state
 
 from crawlutron.runtime import process_state
+from safe_url import process_state as safe_url_process_state
 
 # Registered owners the registry tests reach into directly (these pin the names).
 # safe_url owns a separate seam (no crawlutron import); its owners use safe_url's registry, not core's.

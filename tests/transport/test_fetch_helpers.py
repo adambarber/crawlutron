@@ -7,11 +7,10 @@ this core now lives in one place, and both call sites are pinned.
 import gzip
 from dataclasses import dataclass, field
 
-from safe_url.normalized_url import NormalizedUrl
-
 from crawlutron.models.http_fetch_result import HttpFetchResult
 from crawlutron.transport.fetch_helpers import fetch_and_decode, fetch_decode_discovery, fetch_text
 from crawlutron.vocabulary.limits import DISCOVERY_BODY_MAX_BYTES
+from safe_url.normalized_url import NormalizedUrl
 from tests._fetch_doubles import make_fetch
 from tests._policy_factories import canonical
 

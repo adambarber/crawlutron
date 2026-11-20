@@ -10,6 +10,7 @@ import zipfile
 from io import BytesIO
 
 import pytest
+
 from safe_url.host_policy import reset_private_target_memo
 
 

@@ -4,7 +4,6 @@ from collections.abc import Mapping
 from typing import Annotated
 
 from pydantic import BaseModel, Field
-from safe_url.normalized_url import NormalizedUrl
 
 from crawlutron.models.classification_evidence import ClassificationEvidence
 from crawlutron.models.content_validators import ContentValidators
@@ -15,6 +14,7 @@ from crawlutron.models.json_value import JsonValue
 from crawlutron.models.page_metadata_response import PageMetadataResponse
 from crawlutron.models.strategy_attempt import StrategyAttempt
 from crawlutron.vocabulary.taxonomy import CrawlClassification
+from safe_url.normalized_url import NormalizedUrl
 
 
 class UnifiedCrawlResult(BaseModel):

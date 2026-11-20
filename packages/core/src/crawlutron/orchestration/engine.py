@@ -13,9 +13,6 @@ from contextvars import Token
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
 
-from safe_url.host_policy import HostPolicy
-from safe_url.normalized_url import NormalizedUrl
-
 from crawlutron.admission.admission_links import compile_scope_pattern
 from crawlutron.admission.payload_helpers import checked_payload_urls, payload_policy
 from crawlutron.admission.policy import PolicyTier
@@ -39,6 +36,8 @@ from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE
 from crawlutron.transport.fetchers import default_http_fetcher, impersonating_fetcher
 from crawlutron.transport.request_profile import cookie_namespace_for, headers_for_strategy
 from crawlutron.transport.robots import FetchAndDecode
+from safe_url.host_policy import HostPolicy
+from safe_url.normalized_url import NormalizedUrl
 
 if TYPE_CHECKING:
     from crawlutron.models.crawl_policy import CrawlPolicy

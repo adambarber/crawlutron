@@ -218,9 +218,8 @@ def test_domain_error_handler_details_none_becomes_empty_object():
 
 
 def test_mcp_tool_result_catches_domain_error():
-    from crawlutron_mcp.handlers import tool_result
-
     from crawlutron.service.errors import DomainError
+    from crawlutron_mcp.handlers import tool_result
 
     async def _raises():
         raise DomainError(404, "not_found", "Unknown job_id: x")

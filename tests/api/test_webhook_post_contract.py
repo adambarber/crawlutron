@@ -4,8 +4,8 @@ and swallows serialization failures per its best-effort contract (#S3)."""
 import logging
 
 import httpx
-from safe_url.host_policy import HostPolicy
 
+from safe_url.host_policy import HostPolicy
 from tests._host_assert import host_of
 from tests._webhook_doubles import record_webhook_delivery
 
@@ -15,10 +15,9 @@ _OK: dict[str, list[object]] = {"results": []}
 
 async def _post_through_chokepoint(monkeypatch, *, url: str, payload) -> list[httpx.Request]:
     """One post_webhook drive for the contract tests; returns delivered requests."""
-    from safe_url.normalized_url import NormalizedUrl
-
     from crawlutron.models.webhook_target import WebhookTarget
     from crawlutron.service import webhooks
+    from safe_url.normalized_url import NormalizedUrl
 
     delivered = record_webhook_delivery(monkeypatch)
     # Built past admission: a credential-shaped query param is refused at the

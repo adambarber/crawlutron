@@ -9,11 +9,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, NamedTuple, TypedDict
 
 from pydantic import ValidationError
-from safe_url import url_redaction
 
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.crawl_policy_limits import CrawlPolicyLimits
 from crawlutron.models.json_value import JsonValue
+from safe_url import url_redaction
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard
     from crawlutron.config.settings import CrawlerSettings
