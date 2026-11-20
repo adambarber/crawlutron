@@ -23,15 +23,12 @@ from crawlutron_rest.api.dependencies import get_concurrency_tracker, get_settin
 router = APIRouter(tags=["MCP"])
 
 
-def _auth_denial_message(error: HTTPException | DomainError) -> str:
-    """Render a caller-auth refusal: a DomainError carries ``message``; an
-    HTTPException's conforming detail (``dict`` with ``message``) unwraps to it."""
-    if isinstance(error, DomainError):
-        return str(error.message)
-    detail = error.detail
-    if isinstance(detail, dict):
-        return str(detail.get("message") or detail)
-    return str(detail) if detail else str(error)
+def _invalid_api_key_response() -> JSONResponse:
+    """Fixed 401 denial body: no exception-derived text (stack-trace-exposure)."""
+    return JSONResponse(
+        status_code=401,
+        content=error_response(None, INVALID_API_KEY, "Unknown or revoked API key"),
+    )
 
 
 @router.post(
@@ -66,11 +63,10 @@ async def mcp_endpoint(
             status_code=429,
             content=error_response(None, RATE_LIMITED, str(throttled.message)),
         )
-    except (HTTPException, DomainError) as error:
-        return JSONResponse(
-            status_code=401,
-            content=error_response(None, INVALID_API_KEY, _auth_denial_message(error)),
-        )
+    except HTTPException:
+        return _invalid_api_key_response()
+    except DomainError:
+        return _invalid_api_key_response()
     try:
         body = await request.json()
     except json.JSONDecodeError, UnicodeDecodeError:

@@ -470,7 +470,16 @@ def test_ci_release_workflow_pins_version_consistency() -> None:
     text = RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8")
     runs = [str(run) for _, run in _job_run_steps(text)]
     joined = "\n".join(runs)
-    assert "ghcr.io/" in joined, "the release workflow must push to GHCR"
+    document = yaml.safe_load(text)
+    registries = [
+        str(step["with"]["registry"])
+        for job in document.get("jobs", {}).values()
+        if isinstance(job, dict)
+        for step in job.get("steps", [])
+        if isinstance(step, dict) and isinstance(step.get("with"), dict) and "registry" in step["with"]
+    ]
+    assert registries == ["ghcr.io"], registries
+    assert 'docker push "$IMAGE"' in joined, "the release workflow must push the pinned image"
     assert "tr '[:upper:]' '[:lower:]'" in joined, "GHCR tag must be lowercased"
     # The derived version reaches the smoke through env (zizmor template-injection),
     # so the binding is asserted on the workflow text and its use on the script.

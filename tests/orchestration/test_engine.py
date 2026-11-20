@@ -26,6 +26,7 @@ from tests._fetcher_factories import (
     crawled_result,
     run_chain,
 )
+from tests._host_assert import host_in
 from tests._policy_factories import (
     canonical,
     http_strategy_policy,
@@ -294,12 +295,12 @@ class TestEngineChainEdges:
         )
         assert result.classification == "rate_limited"
         cooldowns = scheduler.domain_cooldowns
-        assert "example.com" in cooldowns
+        assert host_in(cooldowns, "example.com")
         # The park is the Retry-After duration on the ONE clock, not a wall
         # stamp (#580): still standing at 30-5, gone past 30.
         now[0] += 25.0
         scheduler.purge_expired()
-        assert "example.com" in cooldowns
+        assert host_in(cooldowns, "example.com")
         now[0] += 10.0
         scheduler.purge_expired()
         assert "example.com" not in scheduler.domain_cooldowns

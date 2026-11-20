@@ -8,7 +8,7 @@ import sqlite3
 from contextlib import closing
 
 import pytest
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 
 from crawlutron.admission.credentials import origin_of
 from crawlutron.admission.policy import PolicyTier, read_policy, validate_wire_policy
@@ -171,7 +171,7 @@ class TestPayloadPolicy:
         canonicalizer keeps the last, so the caller lists two and has one -- the
         same collapse its sibling validator rejects by refusing a path-scoped key.
         """
-        with pytest.raises(ValueError) as exc:
+        with pytest.raises(ValidationError) as exc:
             CrawlPolicy(
                 credentials={
                     "HTTPS://a.example": {"kind": "bearer", "token": "first"},
@@ -179,8 +179,10 @@ class TestPayloadPolicy:
                 }
             )
         message = str(exc.value)
-        assert "HTTPS://a.example" in message, message
-        assert "https://a.example:443" in message, message
+        assert exc.value.errors()[0]["msg"] == (
+            "Value error, credentials keys 'HTTPS://a.example' and 'https://a.example:443' "
+            "are both origin 'https://a.example'; one would silently replace the other"
+        ), message
 
     def test_a_colliding_credential_map_is_rejected_on_the_wire_path(self):
         """The wire path must reject too, not repair the collision away:

@@ -11,6 +11,7 @@ import pytest
 from crawlutron.models.crawl_task import CrawlTask
 from crawlutron.transport.scheduler import DomainScheduler
 from tests._clocks import Timeline, parking_clock
+from tests._host_assert import host_in
 from tests._policy_factories import canonical
 from tests._recursive_harnesses import drive_recursive_crawl, make_crawl_task
 from tests._result_builders import engine_result
@@ -47,7 +48,7 @@ async def test_open_breaker_parks_the_batch_and_records_a_cooldown(monkeypatch):
         "the batch facing an open breaker did not park: no sleep of the breaker "
         f"window was requested (sleeps: {requested})"
     )
-    assert "example.com" in scheduler.domain_cooldowns, (
+    assert host_in(scheduler.domain_cooldowns, "example.com"), (
         "the open breaker did not record a domain cooldown: later batches will "
         "re-dispatch straight into the breaker instead of parking"
     )

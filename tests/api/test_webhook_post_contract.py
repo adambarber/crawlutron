@@ -6,6 +6,7 @@ import logging
 import httpx
 from safe_url.host_policy import HostPolicy
 
+from tests._host_assert import host_of
 from tests._webhook_doubles import record_webhook_delivery
 
 _HTTPS = "https://webhook.example.com/cb"
@@ -50,7 +51,7 @@ class TestPostWebhookSchemeLaw:
         await self._refused(monkeypatch, caplog, "http://webhook.example.com/cb?api_key=hunter2")
         record = next(r for r in caplog.records if r.getMessage() == "webhook_http_refused")
         assert "hunter2" not in record.url, record.url
-        assert record.url.startswith("http://webhook.example.com"), record.url
+        assert host_of(record.url) == "webhook.example.com", record.url
         assert "hunter2" not in caplog.text, "the raw webhook URL reached the log"
 
     async def test_https_url_is_unaffected(self, monkeypatch):

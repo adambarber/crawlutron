@@ -13,6 +13,7 @@ from tests._fetcher_factories import (
     site_linking_to,
     xml_page,
 )
+from tests._host_assert import host_in
 
 
 def _assert_memory_stripped(out) -> None:
@@ -34,7 +35,7 @@ class TestRecursiveCrawl:
         out = await crawled_results(pages, limits=LINKED_PAIR_LIMITS)
         assert out["submitted_count"] == 1
         urls = {r.normalized_url.raw for r in out["results"] if r.normalized_url is not None}
-        assert "http://example.com/" in urls
+        assert host_in(urls, "example.com")
         assert "http://example.com/a" in urls
         assert "http://example.com/b" in urls
 

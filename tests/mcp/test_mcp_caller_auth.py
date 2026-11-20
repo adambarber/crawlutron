@@ -66,3 +66,24 @@ async def test_an_unwired_mcp_port_refuses_loudly():
         resp = await mcp_post(client, body)
         assert resp.status_code == 500, resp.text
         assert resp.json()["code"] == "caller_quota_unwired", resp.text
+
+
+async def test_auth_denial_projects_fixed_message_not_the_exception(async_client, monkeypatch):
+    """A 401 denial carries the fixed allowlisted message, never text derived
+    from the caught exception object (stack-trace-exposure)."""
+    from crawlutron_mcp.constants import INVALID_API_KEY
+
+    from crawlutron.service.errors import DomainError
+
+    async def _bad_identity(request):
+        raise DomainError(401, "invalid_api_key", "exception-derived leakage message")
+
+    monkeypatch.setattr("crawlutron_rest.api.mcp_router.get_caller_identity", _bad_identity)
+
+    body = _body("server/discover")
+    resp = await mcp_post(async_client, body, {"X-API-Key": "x"})
+    assert resp.status_code == 401, resp.text
+    error = resp.json()["error"]
+    assert error["code"] == INVALID_API_KEY, resp.text
+    assert error["message"] == "Unknown or revoked API key", resp.text
+    assert "exception-derived leakage message" not in str(error), resp.text

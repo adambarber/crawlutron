@@ -13,6 +13,7 @@ from safe_url.normalized_url import NormalizedUrl
 from safe_url.url_redaction import is_secret_name, redact_url
 
 from crawlutron.models.webhook_target import WebhookTarget
+from tests._host_assert import host_of
 
 
 def _secret_target(url: str) -> WebhookTarget:
@@ -49,7 +50,7 @@ def test_redact_url_masks_the_aged_vocabulary(url):
 def test_redact_url_masks_secret_query_values(url):
     redacted = redact_url(url)
     assert "secret" not in redacted and "abc" not in redacted and "z&ok" not in redacted
-    assert "example.com" in redacted
+    assert host_of(redacted) == "example.com"
 
 
 def test_redact_url_masks_userinfo():

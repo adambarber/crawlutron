@@ -19,6 +19,7 @@ from tests._assertions import (
 )
 from tests._async_harnesses import crawl_api as _crawl_api
 from tests._fetcher_factories import make_crawl_payload
+from tests._host_assert import host_of
 from tests._job_harnesses import single_shot_job
 from tests.helpers.server import spawn_threaded_server
 
@@ -115,7 +116,7 @@ class TestAsyncCrawlApi:
         assert response.json()["code"] == "validation_error"
         assert response.json()["details"]["errors"][0]["msg"] == "host_denied"
         assert not [
-            job for job in await job_store.alist_jobs() if job["root_url"].startswith("https://blocked.test")
+            job for job in await job_store.alist_jobs() if host_of(job["root_url"]) == "blocked.test"
         ], "a policy-blocked target created a job"
 
     async def test_v1_crawl_async_mode_status_url_returns_202_then_200(self, crawl_api):
