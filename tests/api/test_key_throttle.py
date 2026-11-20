@@ -215,7 +215,7 @@ def test_cooldown_expiry_rearms_the_bucket():
     the next MAX_FAILURES guesses are needed before cooling again."""
     state, clock = arrange_clock(start=100.0)
     throttle = Throttle(clock=clock)
-    presented = "test-cooldown-key-abc"
+    presented = "dummy_key_throttle_dummy_key_throttle_dummy"
 
     for _ in range(Throttle.MAX_FAILURES):
         throttle.record_failure(presented)
