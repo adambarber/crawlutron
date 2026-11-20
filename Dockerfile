@@ -157,14 +157,9 @@ COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
 # invalidate the browser download cache.
 COPY --from=camoufox-binary /camoufox-bundle /home/appuser/.cache/camoufox
 
-# Pre-fetch the fpgen fingerprint model into the venv so first launch is fully
-# offline. fpgen (a transitive dep of camoufox in uv.lock) downloads the model
-# DATA into <site-packages>/fpgen/data/ at first `import fpgen`; python -m fpgen
-# fetch --decompress populates it at build time. A --mount=type=cache is NOT
-# used on purpose: the data must be baked into this image layer (a buildx cache
-# mount is never persisted into the image), which is the whole requirement.
-RUN --mount=type=secret,id=github_token \
-    sh -c 'if [ -f /run/secrets/github_token ]; then export GITHUB_TOKEN="$(cat /run/secrets/github_token)"; fi; /app/.venv/bin/python -m fpgen fetch --decompress'
+# Bake the pinned, SHA256-checked fpgen model into the venv so first launch is
+# offline. The installer uses a direct URL, never GitHub's rate-limited REST API.
+RUN /app/.venv/bin/python -c "from camoufox.fpgen_model import ensure_fpgen_model; ensure_fpgen_model()"
 
 # No application source is copied: the builder's venv carries all six members as
 # installed wheels (crawlutron, admission, crawlutron_extract, crawlutron_mcp,

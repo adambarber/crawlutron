@@ -78,11 +78,13 @@ def test_every_stage_that_syncs_the_workspace_first_copies_the_members() -> None
         )
 
 
-def test_both_api_fetches_can_receive_a_github_token_secret() -> None:
-    """Unauthenticated GitHub API calls rate-limit the image build."""
+def test_the_fpgen_model_is_installed_without_the_github_api() -> None:
+    """The REST fetch rate-limits repeated builds; the pinned URL does not."""
     text = DOCKERFILE_PATH.read_text(encoding="utf-8")
-    assert text.count("--mount=type=secret,id=github_token") == 2
-    assert text.count('export GITHUB_TOKEN="$(cat /run/secrets/github_token)"') == 2
+    assert text.count("--mount=type=secret,id=github_token") == 1
+    assert text.count('export GITHUB_TOKEN="$(cat /run/secrets/github_token)"') == 1
+    assert "python -m fpgen fetch" not in text
+    assert "ensure_fpgen_model()" in text
 
 
 def test_image_builds_pass_the_token_into_the_secret_mount() -> None:
