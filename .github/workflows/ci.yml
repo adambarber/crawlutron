@@ -199,6 +199,7 @@ jobs:
         with:
           path: ~/.cache/camoufox
           key: camoufox-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          lookup-only: true
       - name: Install Camoufox browser binary
         run: .venv/bin/python -m camoufox fetch
         env:
@@ -230,7 +231,7 @@ jobs:
           python-version: "3.14"
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          enable-cache: true
+          enable-cache: false
           cache-dependency-glob: uv.lock
       - name: Audit the frozen lock
         env:

@@ -8,6 +8,7 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 5
+    default-days: 7
     # bump the uv lock in lockstep: Dependabot edits pyproject/requirements; uv
     # re-resolves uv.lock on the next `uv sync --frozen` run.
     groups:
@@ -26,3 +27,4 @@ updates:
     schedule:
       interval: "monthly"
     open-pull-requests-limit: 0
+    default-days: 7
