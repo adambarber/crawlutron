@@ -93,6 +93,10 @@ def test_every_job_pins_ubuntu_24_04() -> None:
         assert isinstance(jobs, dict), f"{path.name} declares no jobs"
         for name, job in jobs.items():
             assert isinstance(job, dict), f"job {name} in {path.name} is not a mapping"
+            # Jobs that call reusable workflows (`uses:`) run in the called
+            # workflow's runner; they carry no `runs-on` of their own.
+            if job.get("uses"):
+                continue
             assert job.get("runs-on") == "ubuntu-24.04", (
                 f"job {name} in {path.name} does not pin ubuntu-24.04"
             )

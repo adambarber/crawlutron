@@ -17,6 +17,10 @@ jscpd-expectations.json @adambarber
 # and runbook require release-owner review. These files sit on the trust
 # boundary between CI green and a published artifact.
 .github/workflows/release.yml @adambarber
+.github/workflows/release-please.yml @adambarber
+.github/workflows/ci.yml @adambarber
+.github/workflows/packaging.yml @adambarber
 .github/actions/prepare/action.yml @adambarber
+.github/zizmor.yml @adambarber
 scripts/release_roster.py @adambarber
 docs/RELEASE.md @adambarber

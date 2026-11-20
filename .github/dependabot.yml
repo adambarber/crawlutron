@@ -7,18 +7,17 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
-    default-days: 7
     # bump the uv lock in lockstep: Dependabot edits pyproject/requirements; uv
     # re-resolves uv.lock on the next `uv sync --frozen` run.
     groups:
       crawlutron-deps:
         patterns: ["*"]
     ignore:
-      # Dependabot may not know hatch-vcs dynamic versions; ignore pre-release
-      # bumps that would change the version source.
-      - dependency-name: "hatch-vcs"
-        update-types: ["version-update:semver-pre"]
+      # Dependabot does not track hatch-vcs dynamic versions; release-please
+      # owns versioning instead.
 
   # GitHub Actions and Docker pins in workflows are updated manually per SHA;
   # Dependabot does not manage action/Dockerfile pins here.
@@ -26,5 +25,6 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 0
-    default-days: 7

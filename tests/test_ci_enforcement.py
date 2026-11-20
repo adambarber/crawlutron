@@ -121,15 +121,43 @@ def test_release_workflow_publishes_nothing_without_a_tag() -> None:
     triggers = _triggers(document)
     # Publishing is downstream of CI, never of the tag push itself: the tag makes
     # it a release, a green CI run is what makes it publishable.
-    assert set(triggers) == {"workflow_run"}, (
-        f"the release workflow must be gated on CI, found triggers {sorted(triggers)}"
+    assert set(triggers) == {"push", "workflow_dispatch"}, (
+        f"the release workflow must be triggered by tag push or dispatch, found triggers {sorted(triggers)}"
     )
-    gated = _mapping(triggers["workflow_run"], "a workflow_run gate")
-    assert gated.get("workflows") == ["CI"], "the release must follow the CI workflow"
-    assert "completed" in str(gated.get("types")), "the release must run on CI completion"
+    push = _mapping(triggers.get("push"), "a push gate")
+    assert push.get("tags") == ["v*"], "the release workflow must trigger on v* tags"
 
-    _assert_ci_gated(document)
+    # The `ci` job calls ci.yml as a reusable workflow; `needs` is the gate --
+    # no `workflow_run` trigger.
     jobs = _mapping(document.get("jobs"), "jobs")
+    ci = _mapping(jobs.get("ci"), "the ci job")
+    assert ci.get("uses") == "$/.github/workflows/ci.yml", (
+        "the ci job must call ci.yml as a reusable workflow"
+    )
+    _assert_every_publish_job_gated_on_ci(jobs)
+
+
+def _assert_every_publish_job_gated_on_ci(jobs: dict[str, object]) -> None:
+    """Every publishing/admission job transitively depends on `ci`, so a red
+    commit never reaches them: `needs` replaces `workflow_run`."""
+    gated = {"ci"}
+    changed = True
+    while changed:
+        changed = False
+        for name, job in jobs.items():
+            if name in gated:
+                continue
+            needed = _mapping(job, name).get("needs") or []
+            if isinstance(needed, str):
+                upstream = {needed}
+            else:
+                assert isinstance(needed, list)
+                upstream = {str(item) for item in needed}
+            if upstream & gated:
+                gated.add(name)
+                changed = True
+    assert gated == set(jobs), f"jobs outside the CI gate: {sorted(set(jobs) - gated)}"
+
     image = _mapping(jobs.get("image"), "an image job")
     assert _mapping(image.get("permissions"), "image permissions").get("packages") == "write", (
         "the image job needs packages:write, scoped to itself"
@@ -148,11 +176,6 @@ def test_release_workflow_publishes_nothing_without_a_tag() -> None:
     assert "Assert the artifacts carry the release version" in publish_steps, (
         "a build whose version disagrees with its tag must never reach the index"
     )
-    for name, job in jobs.items():
-        if "workflow_run.conclusion == 'success'" in str(_mapping(job, name).get("if", "")):
-            assert "head_branch == 'main'" in str(_mapping(job, name).get("if", "")), (
-                f"gated job {name} must also pin the branch it serves"
-            )
 
 
 def _workflow_document(path: Path) -> dict[object, object]:
@@ -181,37 +204,6 @@ def _triggers(document: dict[object, object]) -> dict[str, object]:
     return _mapping(raw if isinstance(raw, dict) else document.get(True), "an 'on' trigger")
 
 
-def _assert_ci_gated(document: dict[object, object]) -> None:
-    """Every job runs only after a green CI run, directly or through its needs."""
-    gate = _mapping(_triggers(document).get("workflow_run"), "a workflow_run gate")
-    assert gate.get("workflows") == ["CI"], "must follow CI"
-    assert "completed" in str(gate.get("types")), "on completion"
-    jobs = _mapping(document.get("jobs"), "jobs")
-    gated = {
-        name
-        for name, job in jobs.items()
-        if "workflow_run.conclusion == 'success'" in str(_mapping(job, name).get("if", ""))
-    }
-    assert gated, "no job requires a green CI run"
-    reached = set(gated)
-    changed = True
-    while changed:
-        changed = False
-        for name, job in jobs.items():
-            if name in reached:
-                continue
-            needed = _mapping(job, name).get("needs") or []
-            if isinstance(needed, str):
-                upstream = {needed}
-            else:
-                assert isinstance(needed, list)
-                upstream = {str(item) for item in needed}
-            if upstream & reached:
-                reached.add(name)
-                changed = True
-    assert reached == set(jobs), f"jobs outside the CI gate: {sorted(set(jobs) - reached)}"
-
-
 def test_packaging_runs_only_after_a_green_ci_run() -> None:
     """Packaging is downstream of the gates, so a red commit never reaches it.
 
@@ -220,9 +212,9 @@ def test_packaging_runs_only_after_a_green_ci_run() -> None:
     """
     assert PACKAGING_WORKFLOW_PATH.is_file(), "a packaging workflow must exist"
     document = _workflow_document(PACKAGING_WORKFLOW_PATH)
-    assert "workflow_run" in _triggers(document), "packaging runs on a CI run's completion"
+    assert "workflow_call" in _triggers(document), "packaging is a reusable workflow"
     assert "push" not in _triggers(document), "packaging must not run on the push itself"
-    _assert_ci_gated(document)
+    assert "workflow_run" not in _triggers(document), "packaging must not use workflow_run"
 
 
 def test_packaging_workflow_publishes_nothing() -> None:
@@ -235,8 +227,8 @@ def test_packaging_workflow_publishes_nothing() -> None:
     workflow = PACKAGING_WORKFLOW_PATH.read_text(encoding="utf-8")
     document = yaml.safe_load(workflow)
     assert isinstance(document, dict)
-    assert document.get("permissions") == {"contents": "read", "pull-requests": "read"}, (
-        "the packaging workflow needs only its two read scopes"
+    assert document.get("permissions") == {"contents": "read"}, (
+        "the packaging workflow needs only its read scope"
     )
     for banned in ("pypa/gh-action-pypi-publish", "twine upload", "docker push", "push: true"):
         assert banned not in workflow, f"the packaging workflow must not publish ({banned!r})"

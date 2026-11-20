@@ -25,9 +25,10 @@ def _config() -> dict[str, object]:
 
 
 def _steps(job: object) -> list[dict[str, object]]:
-    """One job's step records, each narrowed to a string-keyed mapping."""
+    """One job's step records; `uses:` jobs carry no steps."""
     steps = _mapping(job).get("steps")
-    assert isinstance(steps, list)
+    if not isinstance(steps, list):
+        return []
     return [_mapping(step) for step in steps]
 
 
@@ -89,18 +90,16 @@ def test_release_please_runs_only_on_main_and_is_pinned() -> None:
     """Releases are driven by CI-green merges to main, from a commit-pinned action."""
     document = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
     trigger = document[True] if True in document else document["on"]
-    assert trigger["workflow_run"]["workflows"] == ["CI"], (
-        "release-please must be gated on CI, never run on raw push"
+    assert trigger["push"]["branches"] == ["main"], (
+        "release-please must run on push to main, never on raw workflow_run"
     )
-    assert trigger["workflow_run"]["types"] == ["completed"]
     jobs = _mapping(document["jobs"])
+    ci = _mapping(jobs.get("ci"))
+    assert ci.get("uses") == "$/.github/workflows/ci.yml", (
+        "release-please must call ci.yml first, so no tag is created on an unproven commit"
+    )
     release_please = _mapping(jobs.get("release-please"))
-    assert "github.event.workflow_run.conclusion == 'success'" in str(release_please.get("if", "")), (
-        "the release-please job must require a green CI run"
-    )
-    assert "github.event.workflow_run.head_branch == 'main'" in str(release_please.get("if", "")), (
-        "the release-please job must pin the branch it serves"
-    )
+    assert release_please.get("needs") == ["ci"], "the release-please job must depend on ci passing"
     action = [str(step["uses"]) for job in jobs.values() for step in _steps(job) if "uses" in step]
     assert any(uses.startswith("googleapis/release-please-action@") for uses in action)
     for uses in action:

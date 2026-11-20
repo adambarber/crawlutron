@@ -80,6 +80,7 @@ REPORTING_JOBS = {
     "test-browser",
     "audit",
     "secret-scan",
+    "zizmor",
 }
 
 # GitHub's template form for an errexit shell. The required aggregate is a chain of `test` lines, so its exit
@@ -278,7 +279,8 @@ def _assert_failure_propagation(workflow: str) -> None:
     for name, job in jobs.items():
         _assert_no_continue_on_error(job, name)
         steps = job.get("steps")
-        assert isinstance(steps, list)
+        if not isinstance(steps, list):
+            continue
         for step in steps:
             _assert_no_continue_on_error(step, f"a step in {name}")
 
@@ -305,14 +307,12 @@ def _assert_failure_propagation(workflow: str) -> None:
 
 
 def _job_run_steps(workflow: str) -> list[tuple[str, str]]:
-    """Every `run:` step in the workflow as `(job, script)` pairs, skipping steps
-    that carry no run string -- the shared sweep both run-based contract checks
-    iterate, extracted so the loops cannot become jscpd clone-pairs.
-    """
+    """Every `run:` step as `(job, script)` pairs; `uses:` jobs carry no steps."""
     found: list[tuple[str, str]] = []
     for name, job in _jobs(workflow).items():
         steps = job.get("steps")
-        assert isinstance(steps, list)
+        if not isinstance(steps, list):
+            continue
         for step in steps:
             if not isinstance(step, dict):
                 continue

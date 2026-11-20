@@ -1,29 +1,50 @@
 name: Release
 
-# Versions and tags belong to release-please (release-please.yml). This workflow
-# publishes the packages whose tags point at a commit CI has already passed: the
-# tag is necessary but not sufficient.
-
+# TOP-LEVEL, not reusable: PyPI trusted publishing rejects OIDC from inside a
+# called workflow, so the job invoking pypi-publish must live here, and the
+# trusted publisher on PyPI stays registered against release.yml. Everything
+# gate-shaped is reused instead: the first job calls ci.yml, so the gates run
+# on the exact tagged commit inside THIS run and `needs` is the gate. That is
+# the whole replacement for workflow_run -- no cross-run conclusion lookup,
+# no polling, no dangerous trigger.
+#
+# Two entry points:
+#   - push of a v* tag (a human, or release-please with an App token/PAT);
+#   - workflow_dispatch, which is how release-please.yml hands over the
+#     commit it just tagged with GITHUB_TOKEN (token-created tags fire no
+#     push events; workflow_dispatch is the documented exception).
+# The tag is necessary but not sufficient: the roster only emits packages
+# actually tagged at this commit, so a dispatch at an untagged ref publishes
+# nothing.
 on:
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  ci:
+    uses: $/.github/workflows/ci.yml
+    permissions:
+      contents: read
+      pull-requests: read
+
   released:
     name: Resolve the packages this commit released
+    needs: [ci]
+    if: ${{ github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-24.04
-    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' }}
+    permissions:
+      contents: read
     outputs:
       packages: ${{ steps.roster.outputs.packages }}
       root_version: ${{ steps.roster.outputs.root_version }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
@@ -59,9 +80,14 @@ jobs:
       matrix:
         package: ${{ fromJSON(needs.released.outputs.packages) }}
     steps:
+      # fetch-tags is load-bearing: hatch-vcs derives the version from tags,
+      # and a shallow tagless checkout builds 0.1.devN -- the assertion below
+      # would fail on every release.
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          fetch-tags: true
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
@@ -104,8 +130,8 @@ jobs:
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1
         with:
           packages-dir: dist/
-          # A partial upload is resumed, never repeated: file hashes are immutable,
-          # so an existing file is the same file.
+          # A partial upload is resumed, never repeated: file hashes are
+          # immutable, so an existing file is the same file.
           skip-existing: true
 
   install-graph:
@@ -155,9 +181,13 @@ jobs:
       contents: read
       packages: write
     steps:
+      # Tags again: the smoke test asserts the baked version equals the
+      # release, and a tagless build bakes 0.1.devN.
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          fetch-tags: true
           persist-credentials: false
       - name: Resolve the image tag
         id: version
@@ -225,7 +255,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:

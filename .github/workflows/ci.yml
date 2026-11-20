@@ -1,34 +1,31 @@
 name: CI
 
-# GitHub only loads workflows from a repository root's .github/workflows/. This
-# file lives inside the service because the service carries its own tooling, and
-# it is written for the layout where the service IS that repository: every path
-# below is relative to the root and carries no parent-directory prefix, because
-# the extraction is a file copy and a prefix naming a directory that will not
-# exist there is the one thing a copy cannot carry. The jobs need no
-# `working-directory` for the same reason -- the root is already the service.
-# tests/test_ci_enforcement.py (via tests/_ci_contract.py) asserts both.
-
+# The gates, and nothing else. This file is the single definition of "green".
+#
+# Pull requests run it top-level, so the required check keeps its name.
+# Pushes do NOT trigger it directly: a push to main enters through
+# release-please.yml and a tag push through release.yml, and both call this
+# workflow as their first job. That is what replaces `workflow_run`: the gates
+# run on the exact commit inside the caller's run, and `needs` -- not a
+# cross-run conclusion lookup -- is the gate. A `push` trigger here would run
+# the whole battery a second time per commit.
+#
 # One job per gate, and every gate job runs ITS HOOK: `pre-commit run <id>
-# --all-files`. The gate's definition therefore lives exactly once, in
-# .pre-commit-config.yaml, and CI cannot drift from what a local commit runs.
-# There is no wrapper job: a single `pre-commit run --all-files` fans every gate
-# out inside one runner, so the battery's xdist workers fought the other gates
-# for the same cores and hit the wall clock. The contract test fails if a
-# pre-commit hook has no job, or if a job re-runs a command the hook owns.
-
+# --all-files`. The gate's definition lives exactly once, in
+# .pre-commit-config.yaml, so CI cannot drift from what a local commit runs.
+# There is no wrapper job: a single `pre-commit run --all-files` fans every
+# gate out inside one runner, so the battery's xdist workers fought the other
+# gates for the same cores and hit the wall clock. The contract test
+# (tests/test_ci_enforcement.py via tests/_ci_contract.py) fails if a hook has
+# no job, or if a job re-runs a command the hook owns. Every path is
+# root-relative and no job sets working-directory: the service IS the
+# repository, and the contract test asserts both.
 on:
-  push:
-    branches: [main]
-    # Tags too: a release is only allowed to publish after this workflow is
-    # green on the tagged commit, so CI has to run on the tag at all.
-    tags: ["v*"]
   pull_request:
     branches: [main]
+  workflow_call:
   # Kept so the suite can be re-run on demand against a given ref without
-  # opening a PR. It is no longer what makes test-browser reachable: that job
-  # used to be `if: github.event_name == 'workflow_dispatch'`, so every push and
-  # pull request silently skipped it -- declared, never run, green.
+  # opening a PR.
   workflow_dispatch:
 
 # #624: CI needs no write scope -- it reports results, it never pushes.
@@ -148,10 +145,10 @@ jobs:
       - name: battery
         run: .venv/bin/pre-commit run battery --all-files
         env:
-          # The battery is the one gate that legitimately runs for a minute: ~50s
-          # warm, longer on a cold runner. The fan-out wall exists to stop a hung
-          # gate hanging the job forever, so it gets hang-guard room here rather
-          # than a budget. Commit admission keeps the 60s default.
+          # The battery is the one gate that legitimately runs for a minute:
+          # ~50s warm, longer on a cold runner. The fan-out wall exists to stop
+          # a hung gate hanging the job forever, so it gets hang-guard room
+          # here rather than a budget. Commit admission keeps the 60s default.
           GATE_FANOUT_WALL_SECONDS: "300"
 
   # The battery deselects `real_pbkdf2`, so the real 210k-iteration PBKDF2 path
@@ -174,45 +171,39 @@ jobs:
   test-browser:
     name: Test suite (browser)
     runs-on: ubuntu-24.04
-    # Required. It was held back pending evidence that it can actually go green,
-    # and that evidence now exists: 8 passed against a known-good commit, and
-    # all 8 fail when BrowserRenderer.render is short-circuited, so the green
-    # reflects a real browser rather than a double. The suite costs ~20s here
-    # and a Camoufox fetch, which is cheap enough to pay on every push.
-    #
-    # It selects ONLY the `browser` marker: the job exists to run the browser
-    # suite, and any wider filter re-runs the fast suite (~5,700 tests) on every
-    # push.
+    # Required. 8 passed against a known-good commit, and all 8 fail when
+    # BrowserRenderer.render is short-circuited, so the green reflects a real
+    # browser rather than a double. It selects ONLY the `browser` marker: any
+    # wider filter re-runs the fast suite (~5,700 tests) on every push.
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
+          # prepare's `uv sync` builds the editable install, and hatch-vcs
+          # derives its version from tags -- a tagless tree builds 0.1.devN.
+          fetch-tags: true
           persist-credentials: false
       - uses: $/.github/actions/prepare
       # Camoufox downloads ~200 MB of Firefox on first use (#490). The binary
-      # lands in the platform cache dir (camoufox.utils.INSTALL_DIR --
-      # ~/.cache/camoufox on Linux) and is version-locked by the pin in
+      # lands in ~/.cache/camoufox and is version-locked by the pin in
       # pyproject.toml, so a cache keyed on that pin skips the fetch on warm
-      # runs and the fetch itself re-validates the files on a miss.
+      # runs. NOT lookup-only: that skips the download (the cache would be
+      # saved but never read) and the fetch would run on every push.
       - name: Cache Camoufox browser binary
+        id: camoufox
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.cache/camoufox
           key: camoufox-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
-          lookup-only: true
       - name: Install Camoufox browser binary
+        if: ${{ steps.camoufox.outputs.cache-hit != 'true' }}
         run: .venv/bin/python -m camoufox fetch
         env:
-          # camoufox resolves its release through the GitHub API, which answers an
-          # unauthenticated runner at 60 req/h: the fetch 403s on a busy day. The
-          # job's own token lifts it to the repository's rate limit.
+          # camoufox resolves its release through the GitHub API, which answers
+          # an unauthenticated runner at 60 req/h: the fetch 403s on a busy
+          # day. The job's own token lifts it to the repository's rate limit.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Run pytest (browser)
-        # Selects the `browser` marker, and only that. The previous `-m "not
-        # slow"` admitted the whole fast suite (the battery job already runs it),
-        # re-running ~5,700 tests per push in a job that exists to add one
-        # marker. This still keeps `--strict-markers` and the rest of the
-        # addopts configuration intact.
         run: .venv/bin/python -m pytest -m "browser"
 
   # #623: dependency audit against the frozen lock. The export/pip-audit tools
@@ -235,10 +226,8 @@ jobs:
           cache-dependency-glob: uv.lock
       - name: Audit the frozen lock
         env:
-          # Refuse source builds outright: a missing wheel fails immediately and
-          # legibly instead of twenty seconds into a compiler subprocess. The
-          # lock is exported for 3.14 (below), so wheels are chosen for the
-          # interpreter the project actually targets.
+          # Refuse source builds outright: a missing wheel fails immediately
+          # and legibly instead of twenty seconds into a compiler subprocess.
           PIP_ONLY_BINARY: ":all:"
         run: |
           uv export --frozen --no-dev --no-emit-workspace --format requirements-txt --python 3.14 -o /tmp/lock.txt
@@ -257,9 +246,25 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # One required check. A repository ruleset should require exactly
-  # this job: GitHub treats a skipped job as success, so the individual jobs
-  # stay unconditional and this aggregate fails if any of them did not succeed.
+  # A gate like any other: no `needs`. It must not need `required`, because
+  # `required` needs zizmor -- that would be a cycle GitHub refuses to start.
+  zizmor:
+    name: zizmor
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: $/.github/actions/prepare
+      - name: zizmor
+        run: .venv/bin/pre-commit run zizmor --all-files
+
+  # One required check, and only on the PR path (this workflow runs top-level
+  # there, so the check name is unchanged). GitHub treats a skipped job as
+  # success, so the gates stay unconditional and this aggregate fails if any
+  # of them did not succeed. When this workflow is *called*, the aggregate is
+  # redundant -- any failed job fails the call -- but harmless.
   required:
     name: Required quality gate
     if: ${{ always() }}
@@ -276,15 +281,13 @@ jobs:
       - test-browser
       - audit
       - secret-scan
+      - zizmor
     runs-on: ubuntu-24.04
     steps:
       - name: Require every gate to have succeeded
-        # Declared, not inherited. The script below is a chain of `test` lines,
-        # and a shell without errexit hands the step the exit code of its LAST
-        # line -- so a failed need in the middle would be reported as a passing
-        # required check. GitHub's implicit Linux default happens to be
-        # `bash -e {0}`, which is why this worked unnoticed; a `defaults.run.shell`,
-        # a step-level `shell:`, or a different runner takes it away silently.
+        # Declared, not inherited: without errexit the step returns the exit
+        # code of its LAST test line, so a failed need in the middle would be
+        # reported as a passing required check.
         shell: bash -e {0}
         run: |
           test "${{ needs.ruff.result }}" = "success"
@@ -299,3 +302,13 @@ jobs:
           test "${{ needs.test-browser.result }}" = "success"
           test "${{ needs.audit.result }}" = "success"
           test "${{ needs.secret-scan.result }}" = "success"
+          test "${{ needs.zizmor.result }}" = "success"
+
+  # Packaging is downstream of every gate on every path (PR, main, tag), and
+  # publishes nothing. Calling it from here means the release workflows get
+  # it too, without re-declaring the ordering.
+  packaging:
+    needs: [required]
+    uses: $/.github/workflows/packaging.yml
+    permissions:
+      contents: read

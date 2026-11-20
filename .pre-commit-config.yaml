@@ -212,6 +212,20 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
+      # Zizmor audits every workflow file for insecure triggers, cache poisoning,
+      # dependabot cooldowns, and other supply-chain risks. Runs whole-tree so a
+      # new workflow is caught the first time it is committed. No suppressions:
+      # every finding is fixed in the workflow or it does not land.
+      - id: zizmor
+        name: zizmor whole-tree workflow audit (zero tolerance)
+        entry: >-
+          bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
+          .venv/bin/python -m scripts.gate_fanout zizmor -- zizmor . --collect all
+        language: system
+        files: *service_trigger
+        pass_filenames: false
+        stages: [pre-commit]
+
       # The repo rule "every commit cites an issue" was convention-only (#492): none of
       # the pre-commit-stage hooks reads the message. This one does, at commit-msg stage.
       - id: commit-citation

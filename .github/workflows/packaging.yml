@@ -1,88 +1,53 @@
 name: Packaging
 
-# Every member of the uv workspace must be publishable, and that is checked
-# after CI is green rather than at release time. Building, inspecting, installing
-# and importing each wheel is what a consumer does; a packaging break that only a
-# release discovers is a break that reaches a user.
-#
-# The ordering is the point: packaging runs on the CI run's result, so a red
-# commit never reaches it and a packaging break cannot be confused with a gate
-# break. It publishes nothing: no write scope, no upload anywhere. `release.yml`
-# is the only publishing path.
-
+# Reusable only: ci.yml calls this after the required aggregate, so a red
+# commit never reaches it, on any path. It publishes nothing -- no write
+# scope, no upload anywhere. release.yml is the only publishing path.
 on:
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
-  workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
-  pull-requests: read
 
 jobs:
-  distributions:
+  packaging-distributions:
     name: Build and check every distribution
     runs-on: ubuntu-24.04
-    # Only a green CI run, and only on the branches that publish.
-    if: >-
-      ${{
-        github.event_name == 'workflow_dispatch'
-        || (
-          github.event.workflow_run.conclusion == 'success'
-          && github.event.workflow_run.event == 'push'
-          && (
-            github.event.workflow_run.head_branch == 'main'
-            || startsWith(github.event.workflow_run.head_branch, 'v')
-          )
-        )
-      }}
     steps:
+      # hatch-vcs derives the version from the newest tag. A tagless tree
+      # builds 0.1.devN, which fails the members' >=0.4.0.dev0 floor when the
+      # probe resolves them -- so the checkout carries tags, no extra fetch.
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          # The commit CI actually ran, not whatever the default branch points at.
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
-      # hatch-vcs derives the version from the newest tag. A checkout is not
-      # guaranteed to carry them, and a tagless tree builds 0.1.devN, which fails
-      # the members' `>=0.4.0.dev0` floor when the probe resolves them.
-      - name: Fetch the tags the version comes from
-        run: git fetch --tags --force
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.14"
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: "3.14"
-
       - name: Build every member
         run: uv build --all-packages --out-dir dist
-
       - name: Inspect every artifact
         # twine reads the metadata a package index reads: a bad README path, a
         # missing license, an invalid version, or a description that will not
         # render fails here rather than on upload.
         run: uvx twine check --strict dist/*
-
       - name: Install and import every wheel in a clean environment
         run: uv run --no-project --python 3.14 python scripts/check_packaging.py
 
-  image:
+  packaging-image:
     name: Build the container image
     runs-on: ubuntu-24.04
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && (github.event.workflow_run.head_branch == 'main' || startsWith(github.event.workflow_run.head_branch, 'v'))) }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
-      - name: Fetch the tags the version comes from
-        run: git fetch --tags --force
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
