@@ -122,6 +122,21 @@ def test_only_the_primary_tag_runs_the_gates_and_publishes() -> None:
         assert "needs.released.outputs.primary == 'true'" in jobs[name]["if"], name
 
 
+def test_a_manual_retry_can_publish_an_existing_tag_from_the_fixed_workflow() -> None:
+    """Dispatch takes a tag; the checkout follows it, so old tags need no moving."""
+    workflow_doc = yaml.safe_load(RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8"))
+    dispatch_triggers = workflow_doc.get("on", workflow_doc.get(True))
+    tag_input = dispatch_triggers["workflow_dispatch"]["inputs"]["tag"]
+    assert tag_input["type"] == "string"
+    refs = [
+        job["steps"][i]["with"]["ref"]
+        for job in workflow_doc["jobs"].values()
+        for i, step in enumerate(job.get("steps", []))
+        if "with" in step and "ref" in step["with"]
+    ]
+    assert refs and set(refs) == {"${{ inputs.tag || github.sha }}"}
+
+
 def test_the_release_trigger_names_component_tags_not_any_dash_vee() -> None:
     """A wildcard around `-v` would fire on unrelated tags."""
     document = yaml.safe_load(RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8"))
