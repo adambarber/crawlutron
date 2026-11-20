@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 license = "MIT"
 dependencies = [
-    "regex==2026.11.9",
+    "regex==2026.11.19",
     "publicsuffixlist==1.1.2.20261101",
 ]
 

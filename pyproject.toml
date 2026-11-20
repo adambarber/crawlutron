@@ -83,7 +83,7 @@ dev = [
     # Coverage engine itself, pinned so the gate surface doesn't float. The
     # dev extra installs it; CI's enforcement job builds from -e .[dev].
     "coverage==7.17.3",
-    "ruff==0.17.5",
+    "ruff==0.17.6",
     "jscpd==5.4.3",
     "pre-commit==4.7.0",
     # Direct consumer: scripts/jscpd_gate.py and scripts/gate_fanout.py parse
@@ -100,7 +100,7 @@ dev = [
     # real gate, not an advisory one -- the old comment claiming otherwise was
     # stale and would have told the next reader to ignore type errors.
     "brotli-stubs==1.2.1",
-    "types-regex==2026.11.9.20261110",
+    "types-regex==2026.11.19.20261119",
     "types-lxml==2026.2.16",
     "mypy==2.4.1",
     # The third type checker, and the only one that sees annotation lies mypy
