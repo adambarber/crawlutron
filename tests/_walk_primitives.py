@@ -187,6 +187,36 @@ def import_roots(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
     return tuple(sorted(set(roots)))
 
 
+@cache
+def member_src_roots(base: pathlib.Path = REPO_ROOT) -> tuple[pathlib.Path, ...]:
+    """Every uv member's src dir, derived from the manifest, not hand-listed."""
+    roots = [
+        base / member / "src"
+        for pattern in uv_workspace_members(base) or ()
+        for member in _expanded_members(base, pattern)
+        if (base / member / "src").is_dir()
+    ]
+    assert roots, f"uv members declare no src dirs under {base}"
+    return tuple(sorted(roots))
+
+
+@cache
+def member_import_names(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
+    """The import names the members ship, from each wheel's packages list."""
+    names = [
+        pathlib.PurePosixPath(pkg).name
+        for member in package_roots(base)
+        for pkg in _member_import_packages(base, member)
+    ]
+    assert names, f"uv members declare no import names under {base}"
+    return tuple(sorted(set(names)))
+
+
+def prepend_member_roots(base: pathlib.Path, search_path: list[str]) -> None:
+    """Put this tree's member roots ahead of any editable install from another tree."""
+    search_path[:0] = [str(root) for root in reversed(member_src_roots(base))]
+
+
 def _holds_python(directory: pathlib.Path) -> bool:
     """True if a directory holds any code, ``__pycache__`` aside."""
     return directory.is_dir() and any("__pycache__" not in q.parts for q in directory.rglob("*.py"))

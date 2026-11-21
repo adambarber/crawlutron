@@ -29,30 +29,13 @@ branch_prefix = "work"
 kind     = "env"
 provider = "env.namespace"
 
-# Setup: reuse the main checkout's existing venv via symlink — no downloads.
-# The main checkout already has a working .venv with all dev deps installed.
+# Each workspace owns its interpreter. A shared venv's editable installs point
+# at MAIN; a per-worktree venv makes that leak structurally impossible.
+# uv clones from the local cache, so repeat setup stays download-free.
 
 [[setup]]
-name = "link-venv"
-run = "ln -sfn ../../.venv .venv"
-
-# Setup, part 2 (#488, corrected #1058): bind the WORKSPACE tree into the shared
-# venv's sys.path.
-#
-# The shared venv carries hatchling editable installs whose .pth files point at
-# the MAIN checkout (/Users/.../crawlutron) and win over the workspace CWD, so an
-# interpreter started in a workspace imported MAIN's packages: ad-hoc pytest
-# verified the wrong tree. Fix, zero downloads, no main clobbering: site-packages
-# processes .pth files alphabetically and appends each path to sys.path in that
-# order, so a pth whose name sorts BEFORE `_editable_impl_crawlutron.pth`
-# (ASCII '!' < '_') lands the workspace roots earlier in sys.path. The roots are
-# the members' src/ dirs, derived from the uv manifest by the binder; binding the
-# workspace ROOT (the old printf) exposed nothing importable. Stale pths after
-# teardown are harmless: paths that no longer exist are skipped by site.
-
-[[setup]]
-name = "bind-workspace-tree"
-run = ".venv/bin/python scripts/bind_workspace_tree.py"
+name = "sync-venv"
+run = "if [ -L .venv ]; then rm .venv; fi && uv sync --frozen --extra dev"
 
 # #553 residual: a fresh workspace's git hooks do not exist until pre-commit
 # installs them -- without this step a workspace commit runs ZERO gates and
@@ -143,4 +126,5 @@ run = ".venv/bin/basedpyright --pythonpath .venv/bin/python"
 [[actions]]
 name = "shell"
 kind = "exec"
+env = ["PATH", "PYTHONPATH"]
 run = "bash"
