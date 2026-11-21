@@ -72,8 +72,8 @@ def test_codeql_permissions_security_events_write() -> None:
 CORRECT_CODEQL_SHA = "48ab28a6f5dbc2a99bf1e0131198dd8f1df78169"
 
 
-def test_codeql_init_analyze_upload_sarif_sha_pinned() -> None:
-    """init, analyze, upload-sarif actions must be SHA-pinned."""
+def test_codeql_init_analyze_sha_pinned() -> None:
+    """init and analyze actions must be SHA-pinned."""
     doc = workflow_document()
     jobs = doc.get("jobs")
     assert isinstance(jobs, dict), "jobs must be a mapping"
@@ -84,10 +84,8 @@ def test_codeql_init_analyze_upload_sarif_sha_pinned() -> None:
     steps = analyze_job.get("steps")
     assert isinstance(steps, list), "analyze job must have steps"
 
-    # Find init, analyze, upload-sarif steps
     init_step = None
     analyze_step = None
-    upload_step = None
 
     for step in steps:
         if not isinstance(step, dict):
@@ -97,15 +95,11 @@ def test_codeql_init_analyze_upload_sarif_sha_pinned() -> None:
             init_step = step
         elif "codeql-action/analyze" in uses:
             analyze_step = step
-        elif "codeql-action/upload-sarif" in uses:
-            upload_step = step
 
     assert init_step is not None, "codeql-action/init step required"
     assert analyze_step is not None, "codeql-action/analyze step required"
-    assert upload_step is not None, "codeql-action/upload-sarif step required"
 
-    # Check SHA pins (must contain @sha256: or full commit hash)
-    for step, name in [(init_step, "init"), (analyze_step, "analyze"), (upload_step, "upload-sarif")]:
+    for step, name in [(init_step, "init"), (analyze_step, "analyze")]:
         uses = step.get("uses", "")
         assert "@" in uses and uses.count("@") == 1, f"{name} action must be pinned with @"
         # Verify it's a SHA pin (40 char hex or sha256:)
@@ -143,10 +137,8 @@ def test_codeql_sha_is_peeled_commit() -> None:
     steps = analyze_job.get("steps")
     assert isinstance(steps, list), "analyze job must have steps"
 
-    # Find init, analyze, upload-sarif steps
     init_step = None
     analyze_step = None
-    upload_step = None
 
     for step in steps:
         if not isinstance(step, dict):
@@ -156,15 +148,11 @@ def test_codeql_sha_is_peeled_commit() -> None:
             init_step = step
         elif "codeql-action/analyze" in uses:
             analyze_step = step
-        elif "codeql-action/upload-sarif" in uses:
-            upload_step = step
 
     assert init_step is not None, "codeql-action/init step required"
     assert analyze_step is not None, "codeql-action/analyze step required"
-    assert upload_step is not None, "codeql-action/upload-sarif step required"
 
-    # Check SHA pins
-    for step, name in [(init_step, "init"), (analyze_step, "analyze"), (upload_step, "upload-sarif")]:
+    for step, name in [(init_step, "init"), (analyze_step, "analyze")]:
         uses = step.get("uses", "")
         assert "@" in uses and uses.count("@") == 1, f"{name} action must be pinned with @"
         pin = uses.split("@")[1]
@@ -257,6 +245,27 @@ def test_codeql_no_build_step() -> None:
         assert "build" not in run.lower() or "codeql-action/autobuild" not in uses, (
             "Python does not need a build step"
         )
+
+
+def test_codeql_analyze_is_single_sarif_upload_door() -> None:
+    """analyze uploads SARIF; no separate upload-sarif step may exist."""
+    doc = workflow_document()
+    jobs = doc.get("jobs")
+    assert isinstance(jobs, dict), "jobs must be a mapping"
+    analyze_job = jobs.get("analyze")
+    assert isinstance(analyze_job, dict), "analyze job required"
+    steps = analyze_job.get("steps")
+    assert isinstance(steps, list), "analyze job must have steps"
+
+    upload_steps = [
+        step
+        for step in steps
+        if isinstance(step, dict) and "codeql-action/upload-sarif" in str(step.get("uses", ""))
+    ]
+    assert not upload_steps, f"analyze already uploads SARIF; remove redundant step(s): {upload_steps}"
+    assert any(
+        isinstance(step, dict) and "codeql-action/analyze" in str(step.get("uses", "")) for step in steps
+    ), "codeql-action/analyze step required"
 
 
 if __name__ == "__main__":
