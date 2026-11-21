@@ -34,8 +34,6 @@ jobs:
         run: |
           git fetch --no-tags origin "refs/pull/${PR_NUMBER}/head"
           test "$(git rev-parse FETCH_HEAD)" = "${PR_HEAD_SHA}"
-          git worktree add --detach pr-head "${PR_HEAD_SHA}"
-          chmod -R a-w pr-head
       - name: Run registered probes
         env:
           BASE_SHA: ${{ github.event.workflow_run.pull_requests[0].base.sha }}
