@@ -69,7 +69,7 @@ def test_codeql_permissions_security_events_write() -> None:
     assert security_events == "write", f"analyze job must have security-events:write, got {security_events}"
 
 
-CORRECT_CODEQL_SHA = "8c78abb9b62512e3c45dea6559ffd924ed8549c8"
+CORRECT_CODEQL_SHA = "48ab28a6f5dbc2a99bf1e0131198dd8f1df78169"
 
 
 def test_codeql_init_analyze_upload_sarif_sha_pinned() -> None:
@@ -125,6 +125,58 @@ def test_codeql_no_workflow_level_security_events() -> None:
         security_events = permissions.get("security-events")
         assert security_events is None or security_events != "write", (
             "workflow-level security-events:write is redundant with job-level grant; remove it"
+        )
+
+
+def test_codeql_sha_is_peeled_commit() -> None:
+    """The pinned SHA must be the peeled v3.28.0 commit, not its tag object.
+
+    The tag object 8c78abb9 peels to commit 48ab28a6; only the latter resolves as a `uses:` ref.
+    """
+    doc = workflow_document()
+    jobs = doc.get("jobs")
+    assert isinstance(jobs, dict), "jobs must be a mapping"
+
+    analyze_job = jobs.get("analyze")
+    assert isinstance(analyze_job, dict), "analyze job required"
+
+    steps = analyze_job.get("steps")
+    assert isinstance(steps, list), "analyze job must have steps"
+
+    # Find init, analyze, upload-sarif steps
+    init_step = None
+    analyze_step = None
+    upload_step = None
+
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        uses = step.get("uses", "")
+        if "codeql-action/init" in uses:
+            init_step = step
+        elif "codeql-action/analyze" in uses:
+            analyze_step = step
+        elif "codeql-action/upload-sarif" in uses:
+            upload_step = step
+
+    assert init_step is not None, "codeql-action/init step required"
+    assert analyze_step is not None, "codeql-action/analyze step required"
+    assert upload_step is not None, "codeql-action/upload-sarif step required"
+
+    # Check SHA pins
+    for step, name in [(init_step, "init"), (analyze_step, "analyze"), (upload_step, "upload-sarif")]:
+        uses = step.get("uses", "")
+        assert "@" in uses and uses.count("@") == 1, f"{name} action must be pinned with @"
+        pin = uses.split("@")[1]
+        assert len(pin) == 40 or pin.startswith("sha256:"), f"{name} must be SHA-pinned, got {pin}"
+        # Verify it's the CORRECT peeled commit for v3.28.0 (not the tag object)
+        assert pin == CORRECT_CODEQL_SHA, (
+            f"{name} must use v3.28.0 peeled commit {CORRECT_CODEQL_SHA}, got {pin}"
+        )
+        # Explicitly assert it's NOT the annotated tag object SHA
+        TAG_OBJECT_SHA = "8c78abb9b62512e3c45dea6559ffd924ed8549c8"
+        assert pin != TAG_OBJECT_SHA, (
+            f"{name} pinned SHA {pin} is the v3.28.0 annotated tag object, not the peeled commit"
         )
 
 
