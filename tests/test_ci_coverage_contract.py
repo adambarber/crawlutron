@@ -132,11 +132,12 @@ def test_coverage_job_downloads_artifacts_tolerantly() -> None:
     assert "coverage-data-test-browser" in names
     for step in download_steps:
         name = cast(StepMapping, step.get("with", {})).get("name")
-        expected = (
-            "${{ always() && needs.changes.outputs.browser == 'true' }}"
-            if "test-browser" in str(name)
-            else "${{ always() }}"
-        )
+        if "test-browser" in str(name):
+            expected = "${{ always() && needs.changes.outputs.browser == 'true' }}"
+        elif "real-pbkdf2" in str(name):
+            expected = "${{ always() && needs.real-pbkdf2.result != 'skipped' }}"
+        else:
+            expected = "${{ always() }}"
         assert step.get("if") == expected, f"download step {step.get('name')} must use {expected}"
 
 
@@ -267,7 +268,12 @@ def test_coverage_job_uploads_per_surface_codecov_with_explicit_files() -> None:
         assert flag in expected_files, f"unknown flag {flag}"
         assert files == expected_files[flag], f"flag {flag} expects files={expected_files[flag]}, got {files}"
         assert with_.get("report_type") == "test_results" or with_.get("report-type") == "test_results"
-        assert step.get("if") == "${{ !cancelled() }}"
+        expected_if = (
+            "${{ !cancelled() && needs.real-pbkdf2.result != 'skipped' }}"
+            if flag == "real-pbkdf2"
+            else "${{ !cancelled() }}"
+        )
+        assert step.get("if") == expected_if
 
 
 def test_no_direct_codecov_upload_in_real_pbkdf2_and_test_browser() -> None:

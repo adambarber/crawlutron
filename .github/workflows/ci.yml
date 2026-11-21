@@ -268,13 +268,13 @@ jobs:
           path: junit/battery
       - name: Download real-pbkdf2 coverage data
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        if: ${{ always() }}
+        if: ${{ always() && needs.real-pbkdf2.result != 'skipped' }}
         with:
           name: coverage-data-real-pbkdf2
           path: .
       - name: Download real-pbkdf2 junit results
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        if: ${{ always() }}
+        if: ${{ always() && needs.real-pbkdf2.result != 'skipped' }}
         with:
           name: junit-real-pbkdf2
           path: junit/real-pbkdf2
@@ -321,7 +321,7 @@ jobs:
           use_oidc: true
           fail_ci_if_error: false
       - name: Upload real-pbkdf2 coverage to Codecov
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.real-pbkdf2.result != 'skipped' }}
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           files: junit/real-pbkdf2/junit-real-pbkdf2.xml

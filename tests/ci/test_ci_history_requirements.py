@@ -54,3 +54,18 @@ def test_dependency_review_supplies_refs_on_push_events() -> None:
 
 def test_dependency_review_config_is_tracked() -> None:
     assert CONFIG_PATH.is_file()
+
+
+def test_coverage_consumes_real_pbkdf2_artifacts_only_when_produced() -> None:
+    """Filtered-off producers must not poison the coverage job's downstream steps."""
+    consumers = [
+        step
+        for step in _steps(_workflow_jobs()["coverage"])
+        if str(step.get("name", "")).startswith(("Download real-pbkdf2", "Upload real-pbkdf2"))
+    ]
+    assert len(consumers) == 3
+    for step in consumers:
+        condition = str(step.get("if", ""))
+        assert "needs.real-pbkdf2.result != 'skipped'" in condition, (
+            f"{step['name']} must skip when the producer is filtered off, got {condition!r}"
+        )
