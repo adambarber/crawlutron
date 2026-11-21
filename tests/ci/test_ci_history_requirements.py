@@ -56,16 +56,18 @@ def test_dependency_review_config_is_tracked() -> None:
     assert CONFIG_PATH.is_file()
 
 
-def test_coverage_consumes_real_pbkdf2_artifacts_only_when_produced() -> None:
-    """Filtered-off producers must not poison the coverage job's downstream steps."""
-    consumers = [
-        step
-        for step in _steps(_workflow_jobs()["coverage"])
-        if str(step.get("name", "")).startswith(("Download real-pbkdf2", "Upload real-pbkdf2"))
-    ]
-    assert len(consumers) == 3
-    for step in consumers:
-        condition = str(step.get("if", ""))
-        assert "needs.real-pbkdf2.result != 'skipped'" in condition, (
-            f"{step['name']} must skip when the producer is filtered off, got {condition!r}"
-        )
+def test_real_pbkdf2_job_is_never_skipped_by_a_path_filter() -> None:
+    """The required gate must see success, never skipped, when the surface is unfiltered."""
+    job = _workflow_jobs()["real-pbkdf2"]
+    assert isinstance(job, dict)
+    assert "if" not in job, "a skipped job reddens the required aggregate"
+    runs = [step for step in _steps(job) if 'pytest -m "real_pbkdf2"' in str(step.get("run", ""))]
+    assert len(runs) == 1
+    condition = str(runs[0].get("if", ""))
+    for token in (
+        "github.event_name != 'pull_request'",
+        "needs.changes.outputs.core-storage",
+        "needs.changes.outputs.tests",
+        "needs.changes.outputs.lockfile",
+    ):
+        assert token in condition, f"the real-pbkdf2 step filter lost {token!r}"
