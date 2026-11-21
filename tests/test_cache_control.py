@@ -97,9 +97,9 @@ def test_expires_seconds_parses_the_origin_instant(header_case):
 # Regression tests for #1197: Expires UTC-normalization under non-UTC TZ.
 
 
-def test_expires_seconds_minus_zero_zero_zero_zero_under_non_utc_tz(non_utc_tz):
+@pytest.mark.usefixtures("non_utc_tz")
+def test_expires_seconds_minus_zero_zero_zero_zero_under_non_utc_tz():
     """Expires with -0000 offset must normalize to UTC (same as +0000)."""
-    _ = non_utc_tz
     from crawlutron.transport.cache_control import expires_seconds
 
     # UTC epoch for "Wed, 21 Oct 2015 07:28:00 +0000" = 1445412480.0
@@ -113,9 +113,9 @@ def test_expires_seconds_minus_zero_zero_zero_zero_under_non_utc_tz(non_utc_tz):
     assert seconds is not None and seconds < 0, f"Expected negative (stale), got {seconds}"
 
 
-def test_expires_seconds_plus_zero_zero_zero_zero_under_non_utc_tz(non_utc_tz):
+@pytest.mark.usefixtures("non_utc_tz")
+def test_expires_seconds_plus_zero_zero_zero_zero_under_non_utc_tz():
     """Expires with +0000 offset must normalize to UTC."""
-    _ = non_utc_tz
     from crawlutron.transport.cache_control import expires_seconds
 
     now = 1_445_420_000.0
@@ -125,9 +125,9 @@ def test_expires_seconds_plus_zero_zero_zero_zero_under_non_utc_tz(non_utc_tz):
     assert seconds is not None and seconds < 0
 
 
-def test_expires_seconds_naive_utc_under_non_utc_tz(non_utc_tz):
+@pytest.mark.usefixtures("non_utc_tz")
+def test_expires_seconds_naive_utc_under_non_utc_tz():
     """Naive-looking UTC (no offset) must be treated as UTC."""
-    _ = non_utc_tz
     from crawlutron.transport.cache_control import expires_seconds
 
     # RFC-822 date without timezone offset - parsed as naive, must be UTC
@@ -138,9 +138,9 @@ def test_expires_seconds_naive_utc_under_non_utc_tz(non_utc_tz):
     assert seconds is not None and seconds < 0
 
 
-def test_expires_seconds_gmt_under_non_utc_tz(non_utc_tz):
+@pytest.mark.usefixtures("non_utc_tz")
+def test_expires_seconds_gmt_under_non_utc_tz():
     """Expires with GMT suffix must normalize to UTC."""
-    _ = non_utc_tz
     from crawlutron.transport.cache_control import expires_seconds
 
     now = 1_445_420_000.0
@@ -150,9 +150,9 @@ def test_expires_seconds_gmt_under_non_utc_tz(non_utc_tz):
     assert seconds is not None and seconds < 0
 
 
-def test_expires_seconds_garbage_returns_none(non_utc_tz):
+@pytest.mark.usefixtures("non_utc_tz")
+def test_expires_seconds_garbage_returns_none():
     """Garbage date strings must return None."""
-    _ = non_utc_tz
     from crawlutron.transport.cache_control import expires_seconds
 
     assert expires_seconds({"expires": "not a date"}, now=1_445_420_000.0) is None
