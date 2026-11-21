@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pathlib
 
-from scripts.bind_workspace_tree import PTH_NAME, bind, member_src_roots
+from scripts.bind_workspace_tree import PTH_NAME, bind, member_src_roots, prepend_member_roots
 from tests._walk_primitives import REPO_ROOT, package_roots
 
 
@@ -26,3 +26,15 @@ def test_bind_writes_one_absolute_root_per_line(tmp_path: pathlib.Path) -> None:
     roots = written.read_text().splitlines()
     assert roots == [str(root) for root in member_src_roots(REPO_ROOT)]
     assert all(pathlib.Path(root).is_absolute() for root in roots)
+
+
+def test_invoked_tree_is_prepended_ahead_of_a_stale_binding(tmp_path: pathlib.Path) -> None:
+    """A stale shared-venv pth must never outrank the tree pytest was invoked from."""
+    (tmp_path / "pyproject.toml").write_text('[tool.uv.workspace]\nmembers = ["packages/*"]\n')
+    own = tmp_path / "packages" / "core" / "src"
+    own.mkdir(parents=True)
+    foreign = tmp_path / "foreign"
+    search_path = [str(foreign), str(own)]
+    prepend_member_roots(tmp_path, search_path)
+    assert search_path[0] == str(own)
+    assert search_path[1:] == [str(foreign)]
