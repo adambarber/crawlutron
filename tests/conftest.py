@@ -44,6 +44,7 @@ pytest_plugins = (
     "tests.fixtures.client",
     "tests.fixtures.real_http_servers",
     "tests.network_guard",
+    "tests.fixtures.time_test_helpers",
 )
 
 # The real asyncio.sleep, kept so the fast dispatcher can still yield through it.

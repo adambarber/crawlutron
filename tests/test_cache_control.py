@@ -92,3 +92,69 @@ def test_expires_seconds_parses_the_origin_instant(header_case):
     assert past is not None and past <= 0.0  # already stale
     assert expires_seconds({header_case: "not a date"}, now=_NOW) is None
     assert expires_seconds({}, now=_NOW) is None
+
+
+# Regression tests for #1197: Expires UTC-normalization under non-UTC TZ.
+
+
+def test_expires_seconds_minus_zero_zero_zero_zero_under_non_utc_tz(non_utc_tz):
+    """Expires with -0000 offset must normalize to UTC (same as +0000)."""
+    _ = non_utc_tz
+    from crawlutron.transport.cache_control import expires_seconds
+
+    # UTC epoch for "Wed, 21 Oct 2015 07:28:00 +0000" = 1445412480.0
+    # Choose now between naive EDT (1445426880) and UTC (1445412480) epochs
+    now = 1_445_420_000.0
+    expires_header = "Wed, 21 Oct 2015 07:28:00 -0000"
+
+    # Correct UTC-normalized behavior: instant = 1445412480.0, so seconds = instant - now < 0 (stale)
+    # Buggy naive-local-time behavior: instant = 1445426880.0, so seconds > 0 (fresh)
+    seconds = expires_seconds({"expires": expires_header}, now=now)
+    assert seconds is not None and seconds < 0, f"Expected negative (stale), got {seconds}"
+
+
+def test_expires_seconds_plus_zero_zero_zero_zero_under_non_utc_tz(non_utc_tz):
+    """Expires with +0000 offset must normalize to UTC."""
+    _ = non_utc_tz
+    from crawlutron.transport.cache_control import expires_seconds
+
+    now = 1_445_420_000.0
+    expires_header = "Wed, 21 Oct 2015 07:28:00 +0000"
+
+    seconds = expires_seconds({"expires": expires_header}, now=now)
+    assert seconds is not None and seconds < 0
+
+
+def test_expires_seconds_naive_utc_under_non_utc_tz(non_utc_tz):
+    """Naive-looking UTC (no offset) must be treated as UTC."""
+    _ = non_utc_tz
+    from crawlutron.transport.cache_control import expires_seconds
+
+    # RFC-822 date without timezone offset - parsed as naive, must be UTC
+    now = 1_445_420_000.0
+    expires_header = "Wed, 21 Oct 2015 07:28:00"
+
+    seconds = expires_seconds({"expires": expires_header}, now=now)
+    assert seconds is not None and seconds < 0
+
+
+def test_expires_seconds_gmt_under_non_utc_tz(non_utc_tz):
+    """Expires with GMT suffix must normalize to UTC."""
+    _ = non_utc_tz
+    from crawlutron.transport.cache_control import expires_seconds
+
+    now = 1_445_420_000.0
+    expires_header = "Wed, 21 Oct 2015 07:28:00 GMT"
+
+    seconds = expires_seconds({"expires": expires_header}, now=now)
+    assert seconds is not None and seconds < 0
+
+
+def test_expires_seconds_garbage_returns_none(non_utc_tz):
+    """Garbage date strings must return None."""
+    _ = non_utc_tz
+    from crawlutron.transport.cache_control import expires_seconds
+
+    assert expires_seconds({"expires": "not a date"}, now=1_445_420_000.0) is None
+    assert expires_seconds({"expires": ""}, now=1_445_420_000.0) is None
+    assert expires_seconds({}, now=1_445_420_000.0) is None

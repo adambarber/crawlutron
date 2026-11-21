@@ -174,8 +174,9 @@ def test_no_baseline_freshness_paths():
         assert (classification, evidence["why"]) == (expected, why)
 
 
-def test_http_date_epoch_minus_zero_zero_zero_zero_under_non_utc_tz():
+def test_http_date_epoch_minus_zero_zero_zero_zero_under_non_utc_tz(non_utc_tz):
     """Regression for #1197: HTTP date with -0000 offset must normalize to UTC."""
+    _ = non_utc_tz
     # changed_since between naive EDT (1445426880) and UTC (1445412480) epochs
     changed_since = 1_445_420_000.0
     last_modified_header = "Wed, 21 Oct 2015 07:28:00 -0000"
@@ -189,8 +190,9 @@ def test_http_date_epoch_minus_zero_zero_zero_zero_under_non_utc_tz():
     assert evidence["why"] == "last_modified_not_newer"
 
 
-def test_http_date_epoch_plus_zero_zero_zero_zero_under_non_utc_tz():
+def test_http_date_epoch_plus_zero_zero_zero_zero_under_non_utc_tz(non_utc_tz):
     """HTTP date with +0000 offset must also normalize to UTC."""
+    _ = non_utc_tz
     changed_since = 1_445_420_000.0
     last_modified_header = "Wed, 21 Oct 2015 07:28:00 +0000"
 
@@ -201,8 +203,9 @@ def test_http_date_epoch_plus_zero_zero_zero_zero_under_non_utc_tz():
     assert evidence["why"] == "last_modified_not_newer"
 
 
-def test_http_date_epoch_naive_utc_under_non_utc_tz():
+def test_http_date_epoch_naive_utc_under_non_utc_tz(non_utc_tz):
     """Naive-looking UTC (no offset) must be treated as UTC."""
+    _ = non_utc_tz
     # RFC-822 date without timezone offset - parsed as naive, must be UTC
     changed_since = 1_445_420_000.0
     last_modified_header = "Wed, 21 Oct 2015 07:28:00"
@@ -214,8 +217,9 @@ def test_http_date_epoch_naive_utc_under_non_utc_tz():
     assert evidence["why"] == "last_modified_not_newer"
 
 
-def test_http_date_epoch_non_utc_offset_under_non_utc_tz():
+def test_http_date_epoch_non_utc_offset_under_non_utc_tz(non_utc_tz):
     """Non-UTC offsets must be correctly converted to UTC."""
+    _ = non_utc_tz
     # -0500 offset = 12:28 UTC = 1445430480; changed_since between UTC and naive
     changed_since = 1_445_425_000.0
     last_modified_header = "Wed, 21 Oct 2015 07:28:00 -0500"
