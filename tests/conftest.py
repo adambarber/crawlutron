@@ -16,7 +16,11 @@ from typing import TextIO
 
 import pytest
 
-from tests._app_factory import service_app
+from tests._walk_primitives import member_import_names, prepend_member_roots
+
+_TREE_ROOT = Path(__file__).resolve().parent.parent
+prepend_member_roots(_TREE_ROOT, sys.path)
+
 
 # The real PBKDF2 work factor, captured at import before the autouse clamp
 # fixture can patch it: the floor pin reads this, not the live attribute.
@@ -105,6 +109,24 @@ if _INHERITED_IS_SUITE_SCRATCH:
     os.environ["CRAWLUTRON_CACHE_DIR"] = str(_SCRATCH_CACHE_DIR)
 else:
     os.environ.setdefault("CRAWLUTRON_CACHE_DIR", str(_SCRATCH_CACHE_DIR))
+
+
+def _foreign_module_origins(root: Path) -> list[tuple[str, Path]]:
+    """Loaded member modules whose file lives outside the tree under test."""
+    foreign = []
+    for name in member_import_names(root):
+        module = sys.modules.get(name)
+        origin = getattr(module, "__file__", None)
+        if origin and not Path(origin).resolve().is_relative_to(root):
+            foreign.append((name, Path(origin).resolve()))
+    return foreign
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _the_suite_imports_its_own_tree():
+    """Fail before any test body if a stale pth smuggled a sibling tree in (#1230)."""
+    foreign = _foreign_module_origins(_TREE_ROOT)
+    assert not foreign, "battery imported a tree other than the one under test: " + repr(foreign)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -350,6 +372,7 @@ def _clear_global_http_state() -> None:
 
     from crawlutron.runtime import process_state
     from safe_url import process_state as safe_url_process_state
+    from tests._app_factory import service_app
 
     process_state.reset_all_process_state()
     safe_url_process_state.reset_all_process_state()

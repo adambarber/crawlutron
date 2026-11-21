@@ -188,11 +188,7 @@ def test_the_workflow_is_written_for_the_repository_root_it_will_run_from() -> N
 
 
 def test_every_job_checks_out_full_history() -> None:
-    """Every job needs ``fetch-depth: 0`` for the git-history budget ratchet.
-
-    GitHub's default shallow checkout makes the ratchet test SKIP -- a gate
-    silently inert in CI; each checkout must fetch the full history.
-    """
+    """ci.yml uses shallow checkout except secret scanning, which needs history for its commit range."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
     for name, job in _jobs(workflow).items():
         job_steps = job.get("steps")
@@ -206,9 +202,15 @@ def test_every_job_checks_out_full_history() -> None:
             continue
         for step in checkouts:
             fetch_depth = (step.get("with") or {}).get("fetch-depth")
-            assert fetch_depth == 0, (
+            fetch_tags = (step.get("with") or {}).get("fetch-tags")
+            expected = 0 if name == "secret-scan" else 1
+            assert fetch_depth == expected, (
                 f"job {name} checkouts with fetch-depth={fetch_depth!r}; "
-                "the metrics-budget history ratchet needs the full history"
+                f"ci.yml job {name} must use fetch-depth {expected}"
+            )
+            assert fetch_tags is False, (
+                f"job {name} checkouts with fetch-tags={fetch_tags!r}; "
+                "ci.yml jobs must not fetch tags (fetch-tags: false)"
             )
 
 

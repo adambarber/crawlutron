@@ -24,7 +24,6 @@ ENGINE_MODULE = "scripts.gate_fanout"
 #: A hook never names a path literal -- a move/landing scans by construction.
 SCAN_ROOTS_MARKER = "{{SCAN_ROOTS}}"
 
-
 #: Seconds a gate child may hold the run before its session is killed.
 #: CI overrides via GATE_FANOUT_WALL_SECONDS; default 60s guards commit-admission.
 WALL_SECONDS = float(os.environ.get("GATE_FANOUT_WALL_SECONDS", "60"))
@@ -151,13 +150,17 @@ def _wait_own(hook_id: str, status_dir: Path) -> int:
             text = rc.read_text()
             if text.strip():
                 return int(text)
-        if pidfile.is_file() and not _alive(int(pidfile.read_text())):
-            break
+        if pidfile.is_file():
+            pid_text = pidfile.read_text().strip()
+            if pid_text and not _alive(int(pid_text)):
+                break
         time.sleep(0.05)
     if pidfile.is_file():
-        pid = int(pidfile.read_text())
-        if _alive(pid):
-            os.killpg(pid, 9)
+        pid_text = pidfile.read_text().strip()
+        if pid_text:
+            pid = int(pid_text)
+            if _alive(pid):
+                os.killpg(pid, 9)
         pidfile.unlink(missing_ok=True)
     print(f"gate fanout: {hook_id} died or hit the wall clock; session killed", file=sys.stderr)
     return 1

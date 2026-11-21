@@ -14,7 +14,7 @@ from tests._walk_primitives import (
     scan_roots,
     uv_workspace_members,
 )
-from tests._walk_primitives import test_roots as derived_test_roots
+from tests._walk_primitives import get_test_roots as derived_test_roots
 
 
 def test_scan_roots_equal_every_python_bearing_tree() -> None:

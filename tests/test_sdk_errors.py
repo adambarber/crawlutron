@@ -115,3 +115,55 @@ def test_transport_error_has_no_status():
     error = crawlutron_sdk.CrawlutronTransportError("network down")
     assert error.status_code is None
     assert error.code == "transport_error"
+
+
+import httpx
+import pytest
+
+from crawlutron_sdk import CrawlutronClientSync
+from crawlutron_sdk.errors import (
+    CrawlutronInternalServerError,
+    CrawlutronNotFoundError,
+    CrawlutronTooManyRequestsError,
+)
+from crawlutron_sdk.models import AdmitRequest
+
+
+def _sync_client(handler) -> CrawlutronClientSync:
+    return CrawlutronClientSync(transport=httpx.MockTransport(handler), base_url="http://test")
+
+
+def test_malformed_error_body_keeps_the_http_status():
+    """An HTML error body still raises the typed error for its status."""
+    with _sync_client(lambda request: httpx.Response(500, text="<html>boom</html>")) as client:
+        with pytest.raises(CrawlutronInternalServerError) as caught:
+            client.admit(AdmitRequest(url="https://example.com/"))
+    assert caught.value.status_code == 500
+
+
+def test_retry_wait_is_clamped(monkeypatch: pytest.MonkeyPatch):
+    """429 Retry-After is clamped to 30 seconds without a wall-clock sleep."""
+    waits: list[float] = []
+
+    def capture(seconds: float) -> None:
+        waits.append(seconds)
+
+    monkeypatch.setattr("time.sleep", capture)
+    with _sync_client(lambda request: httpx.Response(429, headers={"Retry-After": "9999"})) as client:
+        with pytest.raises(CrawlutronTooManyRequestsError):
+            client.admit(AdmitRequest(url="https://example.com/"))
+    assert waits == [30.0, 30.0, 30.0]
+
+
+def test_path_ids_are_percent_encoded():
+    """Reserved delimiters in an id cannot redefine the request path."""
+    paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(str(request.url))
+        return httpx.Response(404, json={"code": "not_found", "message": "gone", "details": {}})
+
+    with _sync_client(handler) as client:
+        with pytest.raises(CrawlutronNotFoundError):
+            client.get_job("a/b?c#d")
+    assert paths == ["http://test/v1/jobs/a%2Fb%3Fc%23d"]

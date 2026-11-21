@@ -20,8 +20,11 @@ runs:
       with:
         enable-cache: true
         cache-dependency-glob: uv.lock
+        python-preference: only-system
     - name: Install the frozen environment
       run: uv sync --frozen --extra dev
+      env:
+        UV_PYTHON_PREFERENCE: only-system
       shell: bash
     # The version artifact is gitignored, so a fresh checkout has none until
     # the editable install writes it during `uv sync`. Gate state the hooks

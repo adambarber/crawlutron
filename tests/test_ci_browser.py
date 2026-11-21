@@ -6,37 +6,49 @@ from tests._ci_contract import WORKFLOW_PATH, job_steps
 
 
 def test_browser_job_selects_only_browser_marked_tests() -> None:
-    """The browser job exists to run the browser suite: a filter that admits
-    anything else re-runs the fast suite (~6,300 tests) on every push.
-    Now runs with coverage flags for per-surface Codecov upload."""
+    """Browser job runs browser suite only on PRs; all markers on main push."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
     steps = job_steps(workflow, "test-browser")
-    browser_step = str(
+    # PR step: only browser marker
+    pr_step = str(
         next(
             step.get("run")
             for step in steps
-            if isinstance(step, dict) and "Run pytest (browser)" == str(step.get("name"))
+            if isinstance(step, dict) and "Run pytest (browser, PRs only)" == str(step.get("name"))
         )
     )
-    # Must select only browser marker and include coverage flags
-    assert '-m "browser"' in browser_step, browser_step
-    assert "--cov=crawlutron" in browser_step, browser_step
-    assert "--cov-report=" in browser_step, browser_step
-    assert "--cov-append" in browser_step, browser_step
-    assert "xvfb-run -a .venv/bin/python -m pytest" in browser_step, browser_step
+    assert '-m "browser"' in pr_step, pr_step
+    assert "--cov=crawlutron" in pr_step, pr_step
+    assert "--cov-report=" in pr_step, pr_step
+    assert "--cov-append" in pr_step, pr_step
+    assert "xvfb-run -a .venv/bin/python -m pytest" in pr_step, pr_step
+    # Main push/release step: all markers (unconditional)
+    main_name = "Run pytest (all markers, main push and release calls)"
+    matching_steps = [step for step in steps if isinstance(step, dict) and main_name == str(step.get("name"))]
+    main_step = str(matching_steps[0].get("run"))
+    assert '-m "browser"' not in main_step, main_step
+    assert "--cov=crawlutron" in main_step, main_step
+    assert "--cov-report=" in main_step, main_step
+    assert "--cov-append" in main_step, main_step
+    assert "xvfb-run -a .venv/bin/python -m pytest" in main_step, main_step
 
 
 def test_browser_job_installs_pinned_fpgen_model_before_tests() -> None:
-    """A warm camoufox cache skips its fetch, the only fpgen model installer."""
+    """Warm camoufox cache skips fetch; model installer must run first."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
     steps = job_steps(workflow, "test-browser")
-    pytest_index = next(i for i, step in enumerate(steps) if str(step.get("name")) == "Run pytest (browser)")
+    # Both pytest steps must come after the model installer
+    pytest_indices = [
+        i
+        for i, step in enumerate(steps)
+        if isinstance(step, dict) and str(step.get("name", "")).startswith("Run pytest")
+    ]
     installers = [
         (i, step) for i, step in enumerate(steps) if "ensure_fpgen_model" in str(step.get("run", ""))
     ]
     assert len(installers) == 1, installers
     index, installer = installers[0]
-    assert index < pytest_index, "the model must be installed before pytest starts"
+    assert all(index < pi for pi in pytest_indices), "the model must be installed before all pytest steps"
     assert "if" not in installer, "a warm browser cache must not skip the model install"
     assert "camoufox.fpgen_model" in str(installer["run"])
     assert "python -m fpgen fetch" not in str(installer["run"])

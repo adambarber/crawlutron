@@ -1,15 +1,26 @@
 """Walk primitives: scopes, parents, line numbers and offenders."""
 
 import ast
+import copy
 import hashlib
 import io
 import pathlib
 import tokenize
 import tomllib
 import weakref
+from dataclasses import dataclass
 from functools import cache
 
 TESTS_DIR = pathlib.Path(__file__).resolve().parent
+
+
+@dataclass(frozen=True)
+class CacheMetadata:
+    """Metadata attached to each cached AST copy."""
+
+    source_sha256: str
+    ast_schema_version: str
+    validation_result: str
 
 
 def string_constants(tree: ast.AST) -> list[tuple[int, str]]:
@@ -176,12 +187,42 @@ def import_roots(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
     return tuple(sorted(set(roots)))
 
 
+@cache
+def member_src_roots(base: pathlib.Path = REPO_ROOT) -> tuple[pathlib.Path, ...]:
+    """Every uv member's src dir, derived from the manifest, not hand-listed."""
+    roots = [
+        base / member / "src"
+        for pattern in uv_workspace_members(base) or ()
+        for member in _expanded_members(base, pattern)
+        if (base / member / "src").is_dir()
+    ]
+    assert roots, f"uv members declare no src dirs under {base}"
+    return tuple(sorted(roots))
+
+
+@cache
+def member_import_names(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
+    """The import names the members ship, from each wheel's packages list."""
+    names = [
+        pathlib.PurePosixPath(pkg).name
+        for member in package_roots(base)
+        for pkg in _member_import_packages(base, member)
+    ]
+    assert names, f"uv members declare no import names under {base}"
+    return tuple(sorted(set(names)))
+
+
+def prepend_member_roots(base: pathlib.Path, search_path: list[str]) -> None:
+    """Put this tree's member roots ahead of any editable install from another tree."""
+    search_path[:0] = [str(root) for root in reversed(member_src_roots(base))]
+
+
 def _holds_python(directory: pathlib.Path) -> bool:
     """True if a directory holds any code, ``__pycache__`` aside."""
     return directory.is_dir() and any("__pycache__" not in q.parts for q in directory.rglob("*.py"))
 
 
-def test_roots(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
+def get_test_roots(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
     """The python-bearing test homes: the flat ``tests`` dir plus each
     ``packages/<member>/tests`` home, named repo-relatively and sorted. Each
     home is first-class: named, never merely covered by a member root."""
@@ -195,7 +236,7 @@ def test_roots(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
 def scan_roots(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
     """Every python-bearing dir under ``base``: package and top-level roots,
     minus the member containers a member root already covers. Per-package
-    test homes go to :func:`test_roots` (a member root covers them, #908)."""
+    test homes go to :func:`get_test_roots` (a member root covers them, #908)."""
     packages = set(PACKAGE_ROOTS) if base == REPO_ROOT else set(package_roots(base))
     package_paths = {pathlib.PurePosixPath(p) for p in packages}
     containers = {
@@ -250,25 +291,59 @@ _NODES_BY_KIND: weakref.WeakKeyDictionary[ast.AST, dict[str, tuple[ast.AST, ...]
 )
 
 
-# One AST per (path, source digest) per session; keyed on content, never (mtime, size), so a rewrite
-# that preserves size and mtime is re-parsed from fresh bytes, never stale.
-_PARSE_CACHE: dict[tuple[str, str], ast.Module] = {}
+# One canonical AST per (path, source digest); keyed on content, never (mtime, size).
+# Rewrite preserving size/mtime re-parses from fresh bytes.
+_PARSE_CACHE: dict[tuple[str, str], tuple[ast.Module, CacheMetadata]] = {}
+
+# AST schema version - increment when AST structure expectations change
+_AST_SCHEMA_VERSION = "3.14"
+
+
+def _validate_ast(tree: ast.Module) -> str:
+    """Validate the parsed AST. Returns 'valid' or an error description."""
+    try:
+        # Basic validation: ensure it's a well-formed module
+        ast.fix_missing_locations(tree)
+        compile(tree, filename=tree.__dict__.get("filename", "<unknown>"), mode="exec")
+        return "valid"
+    except Exception as e:
+        return f"invalid: {e}"
 
 
 def parsed(path: pathlib.Path) -> ast.Module:
-    """The AST of `path`, parsed once per session and shared. Keyed on the source's SHA-256 so a rewritten
-    file -- even one unchanged in size and mtime -- is re-parsed from fresh bytes, never stale. A
-    nonexistent path raises here -- the ONE CACHED seam every cached reader uses.
+    """The AST of `path`, parsed once per session and cached canonically.
+    Each caller receives an isolated copy with metadata (SHA-256, schema version, validation).
+    Callers must not share a mutable ast.Module.
     """
     if not path.is_file():
         raise FileNotFoundError(f"ast requested for a nonexistent source file: {path}")
     source = path.read_text(encoding="utf-8")
-    key = (str(path), hashlib.sha256(source.encode()).hexdigest())
-    tree = _PARSE_CACHE.get(key)
-    if tree is None:
-        tree = ast.parse(source, filename=str(path))
-        _PARSE_CACHE[key] = tree
-    return tree
+    source_sha256 = hashlib.sha256(source.encode()).hexdigest()
+    key = (str(path), source_sha256)
+    cached = _PARSE_CACHE.get(key)
+    if cached is None:
+        canonical_tree = ast.parse(source, filename=str(path))
+        metadata = CacheMetadata(
+            source_sha256=source_sha256,
+            ast_schema_version=_AST_SCHEMA_VERSION,
+            validation_result=_validate_ast(canonical_tree),
+        )
+        _PARSE_CACHE[key] = (canonical_tree, metadata)
+        cached = _PARSE_CACHE[key]
+    canonical_tree, metadata = cached
+    # Return a deep copy with metadata attached
+    tree_copy = copy.deepcopy(canonical_tree)
+    # Attach metadata as an attribute (not part of the AST proper)
+    object.__setattr__(
+        tree_copy,
+        "_cache_metadata",
+        {
+            "source_sha256": metadata.source_sha256,
+            "ast_schema_version": metadata.ast_schema_version,
+            "validation_result": metadata.validation_result,
+        },
+    )
+    return tree_copy
 
 
 def nodes_of(root: ast.AST) -> tuple[ast.AST, ...]:

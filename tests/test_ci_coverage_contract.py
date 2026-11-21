@@ -107,14 +107,11 @@ def test_battery_is_only_fast_suite_execution() -> None:
 
 
 def test_coverage_job_depends_on_battery_real_pbkdf2_test_browser() -> None:
-    """Coverage job needs [battery, real-pbkdf2, test-browser]."""
+    """Coverage needs the change filter plus the three test jobs."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-    coverage_job = _get_coverage_job(workflow)
-    needs = coverage_job.get("needs")
+    needs = _get_coverage_job(workflow).get("needs")
     assert isinstance(needs, list)
-    assert set(needs) == {"battery", "real-pbkdf2", "test-browser"}, (
-        f"coverage needs {needs}, expected [battery, real-pbkdf2, test-browser]"
-    )
+    assert set(needs) == {"changes", "battery", "real-pbkdf2", "test-browser"}
 
 
 def test_coverage_job_runs_if_always() -> None:
@@ -125,19 +122,22 @@ def test_coverage_job_runs_if_always() -> None:
 
 
 def test_coverage_job_downloads_artifacts_tolerantly() -> None:
-    """Coverage job downloads artifacts with if: always() so partial failure still reports."""
+    """Browser artifacts are downloaded only when the browser suite actually ran."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
     download_steps = _download_artifact_steps(workflow, "coverage")
-    # Should download: coverage-data (battery), junit-results (battery),
-    # coverage-data-real-pbkdf2, coverage-data-test-browser
     names = [cast(StepMapping, step.get("with", {})).get("name") for step in download_steps]
     assert "coverage-data" in names
     assert "junit-results" in names
     assert "coverage-data-real-pbkdf2" in names
     assert "coverage-data-test-browser" in names
-    # Each download should have if: always()
     for step in download_steps:
-        assert step.get("if") == "${{ always() }}", f"download step {step.get('name')} must have if: always()"
+        name = cast(StepMapping, step.get("with", {})).get("name")
+        expected = (
+            "${{ always() && needs.changes.outputs.browser == 'true' }}"
+            if "test-browser" in str(name)
+            else "${{ always() }}"
+        )
+        assert step.get("if") == expected, f"download step {step.get('name')} must use {expected}"
 
 
 def _assert_coverage_data_upload(workflow: str, job_name: str, artifact_name: str) -> None:
@@ -231,6 +231,14 @@ def test_coverage_job_downloads_junit_artifacts_to_distinct_paths() -> None:
     assert paths["junit-results"] == "junit/battery"
     assert paths["junit-real-pbkdf2"] == "junit/real-pbkdf2"
     assert paths["junit-test-browser"] == "junit/test-browser"
+
+
+def test_coverage_job_reads_the_browser_change_filter() -> None:
+    """Coverage must see the change-filter output gating the browser suite."""
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    needs = _get_coverage_job(workflow)["needs"]
+    assert isinstance(needs, list)
+    assert "changes" in needs
 
 
 def test_coverage_job_uploads_per_surface_codecov_with_explicit_files() -> None:
@@ -446,7 +454,7 @@ def test_coverage_producers_use_distinct_coverage_files() -> None:
     expected = (
         ("battery", "battery", ".coverage.battery"),
         ("real-pbkdf2", "Run pytest (real PBKDF2) with coverage", ".coverage.real-pbkdf2"),
-        ("test-browser", "Run pytest (browser)", ".coverage.test-browser"),
+        ("test-browser", "Run pytest (browser, PRs only)", ".coverage.test-browser"),
     )
     for job_name, step_name, file_name in expected:
         producers = [step for step in job_steps(workflow, job_name) if step.get("name") == step_name]
