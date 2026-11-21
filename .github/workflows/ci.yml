@@ -46,6 +46,7 @@ jobs:
       lockfile: ${{ steps.filter.outputs.lockfile }}
       browser: ${{ steps.filter.outputs.browser }}
       packaging: ${{ steps.filter.outputs.packaging }}
+      real-pbkdf2: ${{ github.event_name != 'pull_request' || steps.filter.outputs.core-storage == 'true' || steps.filter.outputs.tests == 'true' || steps.filter.outputs.lockfile == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -268,13 +269,13 @@ jobs:
           path: junit/battery
       - name: Download real-pbkdf2 coverage data
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        if: ${{ always() }}
+        if: ${{ always() && needs.changes.outputs.real-pbkdf2 == 'true' }}
         with:
           name: coverage-data-real-pbkdf2
           path: .
       - name: Download real-pbkdf2 junit results
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        if: ${{ always() }}
+        if: ${{ always() && needs.changes.outputs.real-pbkdf2 == 'true' }}
         with:
           name: junit-real-pbkdf2
           path: junit/real-pbkdf2
@@ -321,7 +322,7 @@ jobs:
           use_oidc: true
           fail_ci_if_error: false
       - name: Upload real-pbkdf2 coverage to Codecov
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.changes.outputs.real-pbkdf2 == 'true' }}
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           files: junit/real-pbkdf2/junit-real-pbkdf2.xml
@@ -344,7 +345,8 @@ jobs:
   # job runs that surface alone; the 1_000-iteration autouse clamp stays in
   # place for the fast battery and is not weakened.
   # Runs with coverage and uploads data artifact for the report-only coverage job.
-  # Filtered to core storage paths + tests + lockfile on PRs; always runs on main push and release calls.
+  # The job always reports a result so the required gate never sees "skipped";
+  # its test step is filtered to core storage paths + tests + lockfile on PRs.
   real-pbkdf2:
     name: Test suite (real PBKDF2)
     runs-on: ubuntu-24.04
@@ -354,7 +356,6 @@ jobs:
       contents: read
       pull-requests: read
       id-token: write
-    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.core-storage == 'true' || needs.changes.outputs.tests == 'true' || needs.changes.outputs.lockfile == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -363,6 +364,7 @@ jobs:
           persist-credentials: false
       - uses: $/.github/actions/prepare
       - name: Run pytest (real PBKDF2) with coverage
+        if: ${{ needs.changes.outputs.real-pbkdf2 == 'true' }}
         env:
           COVERAGE_FILE: .coverage.real-pbkdf2
         run: .venv/bin/python -m pytest -m "real_pbkdf2" --cov=crawlutron --cov-report= --cov-append -p pytest_cov --junitxml=junit-real-pbkdf2.xml
@@ -626,8 +628,8 @@ jobs:
           test "${{ needs.zizmor.result }}" = "success"
           test "${{ needs.pin-verify.result }}" = "success"
           test "${{ needs.dependency-review.result }}" = "success"
-          # Skipped passes by design: filtered jobs (real-pbkdf2, test-browser on PRs)
-          # return "skipped" which is not "failure" or "cancelled".
+          # Filtered surfaces are no-op steps inside jobs that still report
+          # success; a skipped job would fail this aggregate by design.
 
   # Dev builds go to TestPyPI on green main pushes only. Trusted publishing
   # rejects OIDC from a called workflow, so both jobs live here at top level;

@@ -54,3 +54,29 @@ def test_dependency_review_supplies_refs_on_push_events() -> None:
 
 def test_dependency_review_config_is_tracked() -> None:
     assert CONFIG_PATH.is_file()
+
+
+def test_real_pbkdf2_execution_is_one_shared_decision() -> None:
+    """A filtered-off PBKDF2 step must neither skip the job nor break report consumers."""
+    jobs = _workflow_jobs()
+    changes = jobs["changes"]
+    assert isinstance(changes, dict)
+    outputs = changes.get("outputs")
+    assert isinstance(outputs, dict)
+    decision = str(outputs.get("real-pbkdf2", ""))
+    assert "github.event_name != 'pull_request'" in decision
+    for token in ("core-storage", "tests", "lockfile"):
+        assert f"steps.filter.outputs.{token}" in decision, f"PBKDF2 decision lost {token!r}"
+
+    producer = jobs["real-pbkdf2"]
+    assert isinstance(producer, dict)
+    assert "if" not in producer, "a skipped job reddens the required aggregate"
+    guard = "needs.changes.outputs.real-pbkdf2 == 'true'"
+    guarded = [step for step in _steps(producer) if 'pytest -m "real_pbkdf2"' in str(step.get("run", ""))]
+    for step in _steps(jobs["coverage"]):
+        name = str(step.get("name", ""))
+        if name.startswith("Download real-pbkdf2") or name.startswith("Upload real-pbkdf2"):
+            guarded.append(step)
+    assert len(guarded) == 4
+    for step in guarded:
+        assert guard in str(step.get("if", "")), f"{step.get('name')} lost the shared PBKDF2 decision"
