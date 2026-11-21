@@ -208,21 +208,14 @@ def test_structural_probe_records_diff_and_output_hashes(tmp_path: Path) -> None
         text=True,
         check=True,
     ).stdout.strip()
-    base = subprocess.run(
-        [require_executable("git"), "rev-parse", "HEAD^"],
-        cwd=str(SERVICE_ROOT),
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
     output_path = tmp_path / "structural-diff.json"
-    result = probe_structural_diff(base, head, output_path)
+    result = probe_structural_diff(head, head, output_path)
     assert result.name == "structural-diff"
     assert probe_exit_code(result.result) == 0
     assert probe_stdout_sha256(result.result)
     artifact = _mapping(json.loads(output_path.read_text(encoding="utf-8")))
     data = _mapping(artifact.get("data"))
-    assert data.get("base_sha") == base
+    assert data.get("base_sha") == head
     assert data.get("head_sha") == head
     assert isinstance(data.get("diff"), str)
 

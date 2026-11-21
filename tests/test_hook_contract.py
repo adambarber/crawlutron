@@ -188,10 +188,7 @@ def test_the_workflow_is_written_for_the_repository_root_it_will_run_from() -> N
 
 
 def test_every_job_checks_out_full_history() -> None:
-    """Shallow checkout (fetch-depth: 1) for most jobs; full checkout only for
-    W0-justified jobs (packaging, release, rehearsal). The battery proved
-    locally that fetch-depth: 1 is sufficient for the test suite.
-    """
+    """ci.yml uses shallow checkout except secret scanning, which needs history for its commit range."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
     for name, job in _jobs(workflow).items():
         job_steps = job.get("steps")
@@ -206,10 +203,10 @@ def test_every_job_checks_out_full_history() -> None:
         for step in checkouts:
             fetch_depth = (step.get("with") or {}).get("fetch-depth")
             fetch_tags = (step.get("with") or {}).get("fetch-tags")
-            # W0-justified jobs (packaging, release) in separate workflows; ci.yml uses shallow checkout.
-            assert fetch_depth == 1, (
+            expected = 0 if name == "secret-scan" else 1
+            assert fetch_depth == expected, (
                 f"job {name} checkouts with fetch-depth={fetch_depth!r}; "
-                "ci.yml jobs must use shallow checkout (fetch-depth: 1)"
+                f"ci.yml job {name} must use fetch-depth {expected}"
             )
             assert fetch_tags is False, (
                 f"job {name} checkouts with fetch-tags={fetch_tags!r}; "

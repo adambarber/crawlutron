@@ -241,7 +241,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     if: ${{ always() }}
-    needs: [battery, real-pbkdf2, test-browser]
+    needs: [changes, battery, real-pbkdf2, test-browser]
     permissions:
       contents: read
       pull-requests: read
@@ -280,13 +280,13 @@ jobs:
           path: junit/real-pbkdf2
       - name: Download test-browser coverage data
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        if: ${{ always() }}
+        if: ${{ always() && needs.changes.outputs.browser == 'true' }}
         with:
           name: coverage-data-test-browser
           path: .
       - name: Download test-browser junit results
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        if: ${{ always() }}
+        if: ${{ always() && needs.changes.outputs.browser == 'true' }}
         with:
           name: junit-test-browser
           path: junit/test-browser
@@ -515,7 +515,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 1
+          fetch-depth: 0
           fetch-tags: false
           persist-credentials: false
       - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
@@ -561,6 +561,12 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Checkout trusted tree
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: false
       - name: Dependency review
         uses: actions/dependency-review-action@4081bf99e2866ebe428fc0477b69eb4fcda7220a # v4.4.0
         with:
