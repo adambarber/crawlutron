@@ -1,12 +1,15 @@
-"""Build, smoke-test, push, and attest a container image for the release version.
+"""Build, smoke-test, and push a container image for the release version.
 
-This replaces the `image` job from release.yml.
+This replaces the `image` job from release.yml. The SBOM is generated here
+(pre-push, rehearsable) and published by the workflow's attest-sbom step.
 """
 
 from __future__ import annotations
 
 import os
 import pathlib
+import shutil
+import subprocess
 import sys
 
 
@@ -21,6 +24,8 @@ _setup_paths()
 
 from _common import _require_env, _run
 from _support._image_types import _HasCookies
+
+SBOM_PATH = pathlib.Path("crawlutron-sbom.cdx.json")
 
 
 async def _get_cookie_names(context: _HasCookies, target: str) -> list[str]:
@@ -169,7 +174,25 @@ def _smoke_image(name: str, image: str, native_version: str) -> None:
     _check_baked_version(name, native_version)
 
 
-def _push_and_attest(image: str, repository_owner: str) -> None:
+def _generate_sbom(image: str) -> None:
+    """Scan the loaded image with syft; the workflow attests the file post-push."""
+    syft = shutil.which("syft")
+    if syft is None:
+        print("syft is not installed; the workflow installs it before this script runs", file=sys.stderr)
+        sys.exit(3)
+    result = subprocess.run(
+        [syft, image, "-o", f"cyclonedx-json={SBOM_PATH}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        print(f"SBOM generation failed: {result.stderr}", file=sys.stderr)
+        sys.exit(3)
+
+
+def _push_image(image: str) -> str:
+    """Push the smoke-passed image and return its registry digest."""
     push_result = _run(["docker", "push", image], capture=True)
     if push_result.returncode != 0:
         print(f"Docker push failed: {push_result.stderr}", file=sys.stderr)
@@ -190,24 +213,18 @@ def _push_and_attest(image: str, repository_owner: str) -> None:
     if digest_result.returncode != 0:
         print(f"Attestation digest lookup failed: {digest_result.stderr}", file=sys.stderr)
         sys.exit(4)
+    return digest_result.stdout.strip()
 
-    digest = digest_result.stdout.strip()
 
-    attest_result = _run(
-        [
-            "actions",
-            "attest-build-provenance",
-            "--subject-name",
-            f"ghcr.io/{repository_owner}/crawlutron",
-            "--subject-digest",
-            digest,
-            "--push-to-registry",
-        ],
-        capture=True,
-    )
-    if attest_result.returncode != 0:
-        print(f"Attestation failed: {attest_result.stderr}", file=sys.stderr)
-        sys.exit(4)
+def _export_outputs(digest: str) -> None:
+    """Hand the digest and SBOM path to the workflow's attest step."""
+    github_output = os.environ.get("GITHUB_OUTPUT")
+    if not github_output:
+        print("GITHUB_OUTPUT is required so the SBOM attestation can address the push")
+        sys.exit(2)
+    with open(github_output, "a", encoding="utf-8") as out:
+        out.write(f"digest={digest}\n")
+        out.write(f"sbom-path={SBOM_PATH}\n")
 
 
 def _image_tag(native_version: str, repository_owner: str) -> str:
@@ -229,8 +246,10 @@ def main() -> int:
     finally:
         _run(["docker", "rm", "-f", name], capture=True)
 
-    _push_and_attest(image, repository_owner)
-    print(f"image built, pushed, and attested: {image}")
+    _generate_sbom(image)
+    digest = _push_image(image)
+    _export_outputs(digest)
+    print(f"image built, smoked, SBOMed, and pushed: {image}")
     return 0
 
 
