@@ -133,16 +133,42 @@ def test_probe_plane_checks_out_base_and_executes_base_scripts() -> None:
     assert "scripts/review_probes.py structural-diff" not in run_text
 
 
-def test_probe_plane_fetches_head_as_detached_read_only_worktree() -> None:
-    """The PR head must be fetched without becoming executable probe code."""
+def test_probe_plane_has_no_pull_request_head_worktree() -> None:
+    """No probe step may fetch the PR head or create a pr-head worktree."""
     steps = _steps(_jobs()["probes"])
     run_text = _run_text(steps)
-    assert "refs/pull/" in run_text
-    assert "git worktree add --detach" in run_text
-    assert "chmod -R a-w" in run_text
+    assert "git worktree add" not in run_text
+    assert "pr-head" not in run_text
+    assert "refs/pull/" not in run_text
     for step in steps:
         run = str(step.get("run", ""))
         assert "${{" not in run
+
+
+def test_probe_plane_passes_base_head_run_id() -> None:
+    """The probes job must pass BASE_SHA, HEAD_SHA, and RUN_ID to the probe runner."""
+    env_names = _env_names(_jobs()["probes"])
+    assert "BASE_SHA" in env_names
+    assert "HEAD_SHA" in env_names
+    assert "RUN_ID" in env_names
+
+
+def test_agent_review_workflow_is_sha_pinned() -> None:
+    """Every registry actions/ uses reference must pin a commit SHA."""
+    hex_digits = set("0123456789abcdef")
+    for job in _jobs().values():
+        for step in _steps(job):
+            uses = str(step.get("uses", ""))
+            if not uses:
+                continue
+            name, separator, ref = uses.partition("@")
+            if name.startswith(("./", "$/")):
+                continue  # local composite action, no registry pin required
+            assert separator, f"{uses!r} has no pin in {WORKFLOW_PATH}"
+            assert name, f"{uses!r} has no action name in {WORKFLOW_PATH}"
+            assert len(ref) == 40 and all(char in hex_digits for char in ref), (
+                f"{uses!r} does not pin a commit SHA"
+            )
 
 
 def test_probe_plane_uploads_the_structured_artifact() -> None:
