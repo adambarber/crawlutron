@@ -4,6 +4,7 @@ domain there is data poisoning -- tracking stays skipped, content never enters.
 """
 
 from safe_url.normalized_url import ANALYTICS_HOST_SUFFIXES
+from tests._host_assert import host_in
 from tests._policy_factories import canonical
 
 
@@ -19,7 +20,7 @@ class TestAnalyticsSkipListBoundaries:
 
     def test_government_content_host_is_never_skipped(self):
         # Cdc.gov was in the skip list, silently dropping an entire government domain from every crawl.
-        assert "cdc.gov" not in ANALYTICS_HOST_SUFFIXES
+        assert not host_in(ANALYTICS_HOST_SUFFIXES, "cdc.gov")
         assert not canonical("https://www.cdc.gov/flu/weekly/index.htm").is_analytics_host
         assert not canonical("https://cdc.gov/data.csv").is_analytics_host
 

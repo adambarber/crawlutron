@@ -302,7 +302,7 @@ class TestEngineChainEdges:
         assert host_in(cooldowns, "example.com")
         now[0] += 10.0
         scheduler.purge_expired()
-        assert "example.com" not in scheduler.domain_cooldowns
+        assert not host_in(scheduler.domain_cooldowns, "example.com")
 
     async def test_robots_crawl_delay_sets_domain_min_delay(self, monkeypatch):
         """A host's robots Crawl-delay is honored as a

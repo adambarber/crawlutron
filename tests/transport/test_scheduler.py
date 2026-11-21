@@ -62,7 +62,7 @@ class TestScheduler:
         assert host_in(scheduler.domain_cooldowns, "example.com")
         now[0] += 2.0
         scheduler.purge_expired()
-        assert "example.com" not in scheduler.domain_cooldowns
+        assert not host_in(scheduler.domain_cooldowns, "example.com")
 
     async def test_cooldown_naps_only_the_remaining_window(self, monkeypatch):
         """A cooldown's park is the REMAINING duration on the one clock, and a

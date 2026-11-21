@@ -30,6 +30,7 @@ from tests._ci_contract import (
     triggers,
     workflow_document,
 )
+from tests._host_assert import host_in_text
 
 
 def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
@@ -107,7 +108,7 @@ def test_ci_runs_a_dependency_audit_and_secret_scan() -> None:
     assert "uv export --frozen" in audit_runs, "audit must export the frozen lock, not live deps"
     assert "pip-audit" in audit_runs, "audit must run pip-audit"
 
-    assert "gitleaks.io" not in workflow, "workflow must not use a mutable gitleaks.io ref"
+    assert not host_in_text(workflow, "gitleaks.io"), "workflow must not use a mutable gitleaks.io ref"
 
 
 def test_release_workflow_publishes_nothing_without_a_tag() -> None:

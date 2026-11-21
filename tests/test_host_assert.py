@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from safe_url.normalized_url import NormalizedUrl
-from tests._host_assert import host_in, host_of
+from tests._host_assert import host_in, host_in_source, host_in_text, host_of, is_host_literal, looks_like_url
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 
@@ -99,3 +99,46 @@ def test_host_in_resists_unicode_confusable():
     confusable = "https://еxample.com/"  # Cyrillic 'е' (U+0435)
     assert host_of(confusable) != "example.com"
     assert host_in({confusable}, "example.com") is False
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("https://example.com/x", True),
+        ("ghcr.io", True),
+        ("shutil.rmtree", False),
+        ("coverage_reports.py", False),
+        ("docker", False),
+    ],
+)
+def test_looks_like_url_distinguishes_hosts_from_dotted_identifiers(value, expected):
+    """Only URLs and known public suffixes count as URL literals."""
+    assert looks_like_url(value) is expected
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("ghcr.io", True),
+        ("https://example.com/x", False),
+        ("example.com/x", False),
+        ("shutil.rmtree", False),
+    ],
+)
+def test_is_host_literal_marks_only_bare_hosts(value, expected):
+    """Only a bare host is the substring-sanitization shape CodeQL flags."""
+    assert is_host_literal(value) is expected
+
+
+def test_host_in_text_matches_exact_host_not_substring():
+    """Arbitrary text uses the same exact host door as Python source."""
+    text = "FROM ghcr.io/acme/app@sha256:abc\n"
+    assert host_in_text(text, "ghcr.io") is True
+    assert host_in_text(text, "notghcr.io") is False
+
+
+def test_host_in_source_matches_exact_literal_host():
+    """Source-text assertions use the same host door; substring confusion is refused."""
+    source = 'HOST = "ghcr.io/acme/crawlutron"\n'
+    assert host_in_source(source, "ghcr.io") is True
+    assert host_in_source(source, "notghcr.io") is False

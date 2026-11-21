@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 
 from tests._ci_contract import RELEASE_WORKFLOW_PATH, SERVICE_ROOT, WORKFLOW_PATH, _job_run_steps, job_steps
+from tests._host_assert import host_in_text
 
 
 def test_conftest_leaves_bytecode_writing_enabled() -> None:
@@ -43,7 +44,7 @@ def test_ci_release_workflow_pins_version_consistency() -> None:
     yaml.safe_load(text)
     # The registry login is now in the script; verify the script uses ghcr.io
     image_script = (SERVICE_ROOT / "scripts" / "release" / "image.py").read_text()
-    assert "ghcr.io" in image_script
+    assert host_in_text(image_script, "ghcr.io")
     assert '"docker"' in image_script
     assert '"push"' in image_script
     assert "lower()" in image_script or "lowercase" in image_script
