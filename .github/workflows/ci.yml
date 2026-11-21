@@ -430,7 +430,7 @@ jobs:
       - uses: $/.github/actions/prepare-browser
       # Firefox on a bare ubuntu-24.04 runner needs an X server and its runtime
       # libraries; xvfb-run provides both (camoufox CI does the same).
-      - name: Run pytest (browser)
+      - name: Run pytest (browser, PRs only)
         if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.browser == 'true' }}
         env:
           # Firefox on GitHub Actions ubuntu-24.04 cannot connect to the
