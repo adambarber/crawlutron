@@ -110,3 +110,6 @@ async def absorb_batch(
     if failed:
         job.stats["total_failed"] = job.stats.get("total_failed", 0) + failed
     return failed
+
+
+__all__ = ["absorb_batch"]

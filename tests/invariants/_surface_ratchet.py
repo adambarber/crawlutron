@@ -178,6 +178,8 @@ DECLARED_SURFACE_RATCHET = {
     "packages/rest/src/crawlutron_rest/api/router_identity.py": (1, 1),
     "packages/rest/src/crawlutron_rest/api/identity_router.py": (5, 3),
     "packages/core/src/crawlutron/service/job_runner.py": (15, 12),
+    # #1224 extraction: absorb_batch is the one public symbol + entry point.
+    "packages/core/src/crawlutron/service/job_batch.py": (1, 1),
     "packages/rest/src/crawlutron_rest/api/jobs_router.py": (6, 5),
     # #1083: crawl_tail is the shared crawl tail both doors call (completion
     # metric + result-store put); MCP previously half-tailed.
