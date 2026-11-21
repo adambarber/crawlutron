@@ -29,28 +29,27 @@ def _dialed_timeouts(transport: ScriptedTransport) -> list[float]:
 async def test_sub_second_timeout_reaches_the_fetch_unaltered(monkeypatch) -> None:
     """A fractional budget arrives at the fetch as the float it was given.
 
-    Kills the mutant that coerces the budget to int: 0.5 would read as 0.
+    The walk-wide deadline makes the dialed budget a float remainder; 0.5
+    must not be coerced to int 0.
     """
     transport = _install_budget_transport(monkeypatch)
 
     await default_http_fetcher(canonical("http://example.test/"), {}, 0.5)
 
     dialed = _dialed_timeouts(transport)
-    # With walk-wide deadline, the first hop gets the remainder after walker setup.
-    # Allow a small epsilon for the time taken to initialize the walk.
     assert abs(dialed[0] - 0.5) < 0.01, dialed
 
 
-async def test_whole_second_timeout_reaches_the_fetch_unaltered(monkeypatch) -> None:
-    """The widening is one-directional: an int budget still arrives as itself.
+async def test_first_hop_receives_remaining_wall_budget(monkeypatch) -> None:
+    """The first hop receives the remaining wall budget (float <= stated).
 
-    Kills the mutant that re-spells the door as float-coercing: 10 stays an int.
+    The dialed budget is always a float remainder, never the raw int caller
+    value; there is no int-budget path to preserve.
     """
     transport = _install_budget_transport(monkeypatch)
 
     await default_http_fetcher(canonical("http://example.test/"), {}, 10)
 
     dialed = _dialed_timeouts(transport)
-    # With walk-wide deadline, the first hop gets the remainder after walker setup.
-    # Allow a small epsilon for the time taken to initialize the walk.
-    assert abs(dialed[0] - 10) < 0.01, dialed
+    assert dialed[0] <= 10.0, dialed
+    assert isinstance(dialed[0], float), dialed

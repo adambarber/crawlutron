@@ -5,10 +5,13 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TypeGuard
 
+import crawlutron.transport.redirect_walker as _walker_mod
 from crawlutron.models.http_fetch_result import HttpFetchResult
+from crawlutron.transport import pinned_dns
 from crawlutron.transport.pinned_transport import PinnedRequest
 from crawlutron.transport.redirect_walker import RedirectWalker
 from safe_url.normalized_url import NormalizedUrl
+from tests._clocks import Timeline
 from tests._fetch_doubles import make_fetch
 from tests._fetcher_factories import ScriptedTransport
 from tests._policy_factories import canonical
@@ -50,6 +53,20 @@ def _terminal(
     headers: dict[str, str] | None = None,
 ) -> HttpFetchResult:
     return _result(200, url=url, final_url=url, body=body, headers=headers)
+
+
+class _AdvancingTransport(ScriptedTransport):
+    """Scripted transport that advances the walker's timeline after each hop."""
+
+    def __init__(self, script, timeline: Timeline, advance: float) -> None:
+        super().__init__(script)
+        self._timeline = timeline
+        self._advance = advance
+
+    async def fetch(self, request, *, max_bytes: int) -> HttpFetchResult:
+        result = await super().fetch(request, max_bytes=max_bytes)
+        self._timeline.advance(self._advance)
+        return result
 
 
 async def _run_walk(
@@ -132,41 +149,125 @@ async def test_walk_deadline_exhausted_returns_408_not_hang():
     assert len(transport.calls) == 0
 
 
-async def test_walk_deadline_pin_gets_remaining_budget():
-    """Pin rule receives remaining walk budget."""
+async def test_walk_deadline_hop2_gets_reduced_remainder(monkeypatch):
+    """P0-1(a): hop 2's timeout is the reduced remainder (deadline pinned once).
 
-    class _CapturingPin(_RecordingPin):
-        def __call__(self, url: NormalizedUrl, headers: dict[str, str]) -> PinnedRequest:
-            return super().__call__(url, headers)
-
-    pin = _CapturingPin([_pinned(ORIGINAL)])
-    transport = ScriptedTransport([_terminal()])
-    store = _CookieStore()
-    walker = RedirectWalker(transport, store_cookies=store)
-    await walker.walk(ORIGINAL, {}, 10.0, max_bytes=1024, pin=pin)
-    assert len(pin.calls) == 1
-
-
-async def test_walk_deadline_transport_gets_remaining_budget():
-    """Transport receives remaining walk budget in FetchRequest."""
+    A per-hop deadline reset mutant is killed by simulating elapsed time.
+    """
     captured_timeouts: list[float] = []
 
     class _CapturingTransport(ScriptedTransport):
+        def __init__(self, script, timeline: Timeline, advance: float = 0.0) -> None:
+            super().__init__(script)
+            self._timeline = timeline
+            self._advance = advance
+
         async def fetch(self, request, *, max_bytes: int):
             captured_timeouts.append(request.timeout_seconds)
-            return await super().fetch(request, max_bytes=max_bytes)
+            result = await super().fetch(request, max_bytes=max_bytes)
+            self._timeline.advance(self._advance)
+            return result
 
-    transport = _CapturingTransport([_terminal()])
+    timeline = Timeline(0.0)
+    monkeypatch.setattr(_walker_mod.time, "monotonic", timeline)
+    transport = _CapturingTransport([_redirect("/y"), _terminal(url=TARGET)], timeline, advance=3.0)
+    pin = _RecordingPin([_pinned(ORIGINAL), _pinned(TARGET)])
+    store = _CookieStore()
+    walker = RedirectWalker(transport, store_cookies=store)
+    result = await walker.walk(ORIGINAL, {}, 10.0, max_bytes=1024, pin=pin)
+    assert result is not None and result.status_code == 200, result
+    assert len(captured_timeouts) == 2, captured_timeouts
+    assert captured_timeouts[0] == 10.0, captured_timeouts
+    assert captured_timeouts[1] == 7.0, captured_timeouts
+    assert captured_timeouts[1] < 10.0, captured_timeouts
+
+
+async def test_walk_deadline_chain_overrun_returns_408(monkeypatch):
+    """P0-1(b): redirect chain overrun returns 408, final_url = last fetched URL.
+
+    final_url names ORIGINAL (fetched), never TARGET (undialed).
+    """
+    timeline = Timeline(0.0)
+    monkeypatch.setattr(_walker_mod.time, "monotonic", timeline)
+    transport = _AdvancingTransport([_redirect("/y"), _terminal(url=TARGET)], timeline, advance=15.0)
+    pin = _RecordingPin([_pinned(ORIGINAL), _pinned(TARGET)])
+    store = _CookieStore()
+    walker = RedirectWalker(transport, store_cookies=store)
+    result = await walker.walk(ORIGINAL, {}, 10.0, max_bytes=1024, pin=pin)
+    assert _assert_http_408(result)
+    assert result.final_url == ORIGINAL, result.final_url
+    assert len(transport.calls) == 1, transport.calls
+
+
+async def test_walk_deadline_cookie_not_stored_on_408(monkeypatch):
+    """P0-1(c): Set-Cookie not stored when 408 pre-empts next admit.
+
+    Hop 2's admit never runs, so the deferred cookie is never flushed.
+    """
+    timeline = Timeline(0.0)
+    monkeypatch.setattr(_walker_mod.time, "monotonic", timeline)
+    transport = _AdvancingTransport([_redirect("/y"), _terminal(url=TARGET)], timeline, advance=15.0)
+    pin = _RecordingPin([_pinned(ORIGINAL), _pinned(TARGET)])
+    store = _CookieStore()
+    walker = RedirectWalker(transport, store_cookies=store)
+    result = await walker.walk(ORIGINAL, {}, 10.0, max_bytes=1024, pin=pin)
+    assert _assert_http_408(result)
+    assert len(store.calls) == 0, store.calls
+    assert len(transport.calls) == 1, transport.calls
+
+
+async def test_walk_deadline_transport_gets_remaining_budget(monkeypatch):
+    """P1-2: first hop gets remaining wall budget (float <= stated).
+
+    Frozen clock leaving ~3s; assertion is strict (< 10.0).
+    """
+    captured_timeouts: list[float] = []
+
+    class _CapturingTransport(ScriptedTransport):
+        def __init__(self, script, timeline: Timeline, advance: float = 0.0) -> None:
+            super().__init__(script)
+            self._timeline = timeline
+            self._advance = advance
+
+        async def fetch(self, request, *, max_bytes: int):
+            captured_timeouts.append(request.timeout_seconds)
+            result = await super().fetch(request, max_bytes=max_bytes)
+            self._timeline.advance(self._advance)
+            return result
+
+    timeline = Timeline(7.0)
+    monkeypatch.setattr(_walker_mod.time, "monotonic", timeline)
+    transport = _CapturingTransport([_terminal()], timeline, advance=0.0)
     pin = _RecordingPin([_pinned(ORIGINAL)])
     store = _CookieStore()
     walker = RedirectWalker(transport, store_cookies=store)
-    await walker.walk(ORIGINAL, {}, 10.0, max_bytes=1024, pin=pin)
-    assert len(captured_timeouts) == 1
-    assert 9.9 < captured_timeouts[0] <= 10.0, captured_timeouts
+    await walker.walk(ORIGINAL, {}, 10.0, max_bytes=1024, started=0.0, pin=pin)
+    assert len(captured_timeouts) == 1, captured_timeouts
+    assert captured_timeouts[0] == 3.0, captured_timeouts
+    assert captured_timeouts[0] < 10.0, captured_timeouts
 
 
-def test_walk_deadline_mutation_guard():
-    """Removing deadline check must cause test failure."""
-    # Mutant removing `if remaining <= 0:` would pass negative timeout
-    # to _admit_hop and _build_request, caught by test above.
-    pass
+async def test_walk_deadline_pin_gets_remaining_budget(monkeypatch):
+    """P1-3: pin resolve bounded by remaining walk budget, not full stated.
+
+    Asserts the timeout_seconds _admit_hop passes to bounded_thread_resolve.
+    """
+    captured_pin_timeouts: list[float] = []
+    original_resolve = pinned_dns.bounded_thread_resolve
+
+    async def capturing_resolve(work, *, timeout_seconds: float):
+        captured_pin_timeouts.append(timeout_seconds)
+        return await original_resolve(work, timeout_seconds=timeout_seconds)
+
+    monkeypatch.setattr(pinned_dns, "bounded_thread_resolve", capturing_resolve)
+
+    timeline = Timeline(7.0)
+    monkeypatch.setattr(_walker_mod.time, "monotonic", timeline)
+    transport = ScriptedTransport([_terminal()])
+    pin = _RecordingPin([_pinned(ORIGINAL)])
+    store = _CookieStore()
+    walker = RedirectWalker(transport, store_cookies=store)
+    await walker.walk(ORIGINAL, {}, 10.0, max_bytes=1024, started=0.0, pin=pin)
+    assert len(captured_pin_timeouts) == 1, captured_pin_timeouts
+    assert captured_pin_timeouts[0] == 3.0, captured_pin_timeouts
+    assert captured_pin_timeouts[0] < 10.0, captured_pin_timeouts
