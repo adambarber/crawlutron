@@ -19,6 +19,11 @@ _MANIFEST = (
 _STALE_REFUSAL = "The lockfile at `uv.lock` needs to be updated, but `--check` was provided."
 
 
+def _collapsed(text: str) -> str:
+    """Collapse whitespace runs so a line-wrapped uv diagnostic still matches."""
+    return " ".join(text.split())
+
+
 def _declared_lock_gate() -> list[str]:
     """The argv every commit's `lock` hook runs, read from the live config."""
     document = yaml.safe_load(_CONFIG.read_text(encoding="utf-8"))
@@ -28,6 +33,14 @@ def _declared_lock_gate() -> list[str]:
             if hook["id"] == "lock" and "-m scripts.gate_fanout lock" in entry:
                 return shlex.split(entry.split(" -- ", 1)[1])
     raise AssertionError(f"no `lock` gate declared in {_CONFIG.name}")
+
+
+def test_a_line_wrapped_refusal_still_matches_the_pin():
+    """CI's uv wraps the refusal at ~80 cols; the raw substring pin must not be used."""
+    wrapped = _STALE_REFUSAL.replace("was provided", "was\nprovided")
+    assert wrapped != _STALE_REFUSAL
+    assert _collapsed(_STALE_REFUSAL) in _collapsed(wrapped)
+    assert _STALE_REFUSAL not in wrapped, "the wrap must defeat the raw pre-fix pin"
 
 
 def test_the_declared_lock_gate_refuses_a_stale_project(tmp_path: Path):
@@ -45,6 +58,7 @@ def test_the_declared_lock_gate_refuses_a_stale_project(tmp_path: Path):
     result = subprocess.run([uv, "lock", "--check"], cwd=str(project), capture_output=True, text=True)
 
     assert result.returncode == 1, f"stale lock accepted: {result.stdout}{result.stderr}"
-    assert _STALE_REFUSAL in result.stderr + result.stdout, (
+    diagnostic = _collapsed(result.stdout + result.stderr)
+    assert _collapsed(_STALE_REFUSAL) in diagnostic, (
         f"Expected the lockfile staleness refusal, got: {result.stdout}{result.stderr}"
     )
