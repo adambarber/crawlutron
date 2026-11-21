@@ -13,6 +13,8 @@ from pathlib import Path
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "scripts"))
 from release._common import REPO_ROOT, _run, roster
 
+_COVERAGE = [sys.executable, "-m", "coverage"]
+
 
 def _include_patterns() -> dict[str, str]:
     """Map package name -> include pattern for coverage filtering."""
@@ -37,15 +39,15 @@ def _run_coverage(cmd: list[str]) -> None:
 
 def _repo_wide_reports(reports_dir: Path) -> None:
     xml_path = reports_dir / "coverage.xml"
-    _run(["coverage", "xml", "-o", str(xml_path), "-i"])
+    _run([*_COVERAGE, "xml", "-o", str(xml_path), "-i"])
 
     html_dir = reports_dir / "html"
-    _run(["coverage", "html", "-d", str(html_dir), "-i"])
+    _run([*_COVERAGE, "html", "-d", str(html_dir), "-i"])
 
     md_path = reports_dir / "coverage.md"
     _run(
         [
-            "coverage",
+            *_COVERAGE,
             "report",
             "--format=markdown",
             "-o",
@@ -61,15 +63,15 @@ def _per_package_reports(reports_dir: Path, include_patterns: dict[str, str]) ->
         pkg_dir.mkdir(parents=True, exist_ok=True)
 
         pkg_xml = pkg_dir / "coverage.xml"
-        _run(["coverage", "xml", "-o", str(pkg_xml), "--include", f"{include_pattern}/*", "-i"])
+        _run([*_COVERAGE, "xml", "-o", str(pkg_xml), "--include", f"{include_pattern}/*", "-i"])
 
         pkg_html = pkg_dir / "html"
-        _run(["coverage", "html", "-d", str(pkg_html), "--include", f"{include_pattern}/*", "-i"])
+        _run([*_COVERAGE, "html", "-d", str(pkg_html), "--include", f"{include_pattern}/*", "-i"])
 
         pkg_md = pkg_dir / "coverage.md"
         _run(
             [
-                "coverage",
+                *_COVERAGE,
                 "report",
                 "--format=markdown",
                 "--include",
