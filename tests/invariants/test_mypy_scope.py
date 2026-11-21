@@ -5,8 +5,8 @@ from __future__ import annotations
 import configparser
 import json
 
+from tests._walk_primitives import get_test_roots as derived_test_roots
 from tests._walk_primitives import import_roots
-from tests._walk_primitives import test_roots as derived_test_roots
 from tests.chokepoint_walks import REPO_ROOT
 
 _MYPY_INI = REPO_ROOT / "mypy.ini"

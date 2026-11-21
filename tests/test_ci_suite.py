@@ -10,13 +10,26 @@ from tests._ci_contract import WORKFLOW_PATH, _job_run_steps
 
 
 def _assert_no_default_suite_rerun(workflow: str) -> None:
-    """The check above, callable on a mutated workflow so the probe can bite.
+    """Check no job reruns default suite; test-browser main push is excepted."""
+    import yaml
 
-    Only pytest's own args count: the interpreter's ``-m`` is not a marker
-    filter, so a bare ``pytest`` and a ``-m browser`` run are told apart.
-    """
+    workflow_doc = yaml.safe_load(workflow)
+    jobs = workflow_doc.get("jobs", {})
+    test_browser_job = jobs.get("test-browser", {})
+    test_browser_steps = test_browser_job.get("steps", [])
+    # Find the main push step's run command
+    main_push_name = "Run pytest (all markers, main push and release calls)"
+    main_push_run = None
+    for step in test_browser_steps:
+        if isinstance(step, dict) and step.get("name") == main_push_name:
+            main_push_run = step.get("run")
+            break
+
     for name, run in _job_run_steps(workflow):
         if "pytest" not in run:
+            continue
+        # Allow test-browser main push step to run full suite
+        if name == "test-browser" and run == main_push_run:
             continue
         pytest_args = run.split("pytest", 1)[1]
         assert re.search(r"(?:^|\s)-m(?:\s|=)", pytest_args), (

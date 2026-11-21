@@ -62,7 +62,7 @@ def test_every_gate_job_starts_from_the_prepare_action() -> None:
     """
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
     for name in REPORTING_JOBS:
-        if name in {"audit", "secret-scan"}:
+        if name in {"audit", "secret-scan", "dependency-review"}:
             continue
         steps = job_steps(workflow, name)
         assert any(str(step.get("uses", "")).startswith("$/.github/actions/prepare") for step in steps), (

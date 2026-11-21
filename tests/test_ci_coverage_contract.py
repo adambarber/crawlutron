@@ -446,7 +446,7 @@ def test_coverage_producers_use_distinct_coverage_files() -> None:
     expected = (
         ("battery", "battery", ".coverage.battery"),
         ("real-pbkdf2", "Run pytest (real PBKDF2) with coverage", ".coverage.real-pbkdf2"),
-        ("test-browser", "Run pytest (browser)", ".coverage.test-browser"),
+        ("test-browser", "Run pytest (browser, PRs only)", ".coverage.test-browser"),
     )
     for job_name, step_name, file_name in expected:
         producers = [step for step in job_steps(workflow, job_name) if step.get("name") == step_name]

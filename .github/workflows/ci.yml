@@ -33,6 +33,46 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      core-storage: ${{ steps.filter.outputs.core-storage }}
+      tests: ${{ steps.filter.outputs.tests }}
+      lockfile: ${{ steps.filter.outputs.lockfile }}
+      browser: ${{ steps.filter.outputs.browser }}
+      packaging: ${{ steps.filter.outputs.packaging }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: false
+      - uses: dorny/paths-filter@0bc4621a3135347011ad047f9ecf449bf72ce2bd # v3.0.0
+        id: filter
+        with:
+          filters: |
+            core-storage:
+              - 'packages/core/src/crawlutron/storage/**'
+            tests:
+              - 'tests/**'
+            lockfile:
+              - 'uv.lock'
+            browser:
+              - 'packages/core/src/crawlutron/transport/browser*.py'
+              - 'packages/core/src/crawlutron/transport/browser_*.py'
+              - 'tests/transport/test_browser*.py'
+              - 'tests/transport/test_browser_*.py'
+            packaging:
+              - 'pyproject.toml'
+              - 'packages/**/pyproject.toml'
+              - 'Dockerfile'
+              - '.dockerignore'
+
   actionlint:
     name: actionlint
     runs-on: ubuntu-24.04
@@ -40,8 +80,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
-          fetch-tags: true
+          fetch-depth: 1
+          fetch-tags: false
           persist-credentials: false
       - uses: $/.github/actions/prepare
       - name: actionlint
@@ -54,8 +94,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
-          fetch-tags: true
+          fetch-depth: 1
+          fetch-tags: false
           persist-credentials: false
       - uses: $/.github/actions/prepare
       - name: ruff
@@ -68,8 +108,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
-          fetch-tags: true
+          fetch-depth: 1
+          fetch-tags: false
           persist-credentials: false
       - uses: $/.github/actions/prepare
       - name: ruff format
@@ -82,8 +122,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
-          fetch-tags: true
+          fetch-depth: 1
+          fetch-tags: false
           persist-credentials: false
       - uses: $/.github/actions/prepare
       - name: basedpyright
@@ -96,8 +136,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
-          fetch-tags: true
+          fetch-depth: 1
+          fetch-tags: false
           persist-credentials: false
       - uses: $/.github/actions/prepare
       - name: jscpd
@@ -110,8 +150,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
-          fetch-tags: true
+          fetch-depth: 1
+          fetch-tags: false
           persist-credentials: false
       - uses: $/.github/actions/prepare
       - name: mypy
@@ -124,8 +164,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
-          fetch-tags: true
+          fetch-depth: 1
+          fetch-tags: false
           persist-credentials: false
       - uses: $/.github/actions/prepare
       - name: lock
@@ -138,8 +178,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
-          fetch-tags: true
+          fetch-depth: 1
+          fetch-tags: false
           persist-credentials: false
       - uses: $/.github/actions/prepare
       - name: vulture
@@ -155,8 +195,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
-          fetch-tags: true
+          fetch-depth: 1
+          fetch-tags: false
           persist-credentials: false
       - uses: $/.github/actions/prepare
       # #949: on a cold-cache runner the battery's first imports are compile
@@ -210,8 +250,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
-          fetch-tags: true
+          fetch-depth: 1
+          fetch-tags: false
           persist-credentials: false
       - uses: $/.github/actions/prepare
       - name: Download battery coverage data
@@ -304,19 +344,22 @@ jobs:
   # job runs that surface alone; the 1_000-iteration autouse clamp stays in
   # place for the fast battery and is not weakened.
   # Runs with coverage and uploads data artifact for the report-only coverage job.
+  # Filtered to core storage paths + tests + lockfile on PRs; always runs on main push and release calls.
   real-pbkdf2:
     name: Test suite (real PBKDF2)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    needs: [changes]
     permissions:
       contents: read
       pull-requests: read
       id-token: write
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.core-storage == 'true' || needs.changes.outputs.tests == 'true' || needs.changes.outputs.lockfile == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
-          fetch-tags: true
+          fetch-depth: 1
+          fetch-tags: false
           persist-credentials: false
       - uses: $/.github/actions/prepare
       - name: Run pytest (real PBKDF2) with coverage
@@ -347,6 +390,8 @@ jobs:
     # BrowserRenderer.render is short-circuited, so the green reflects a real
     # browser rather than a double. It selects ONLY the `browser` marker: any
     # wider filter re-runs the fast suite (~6,300 tests) on every push.
+    # Gated on PRs via changes job (browser paths); UNCONDITIONAL on main push and release calls.
+    needs: [changes]
     permissions:
       contents: read
       pull-requests: read
@@ -354,8 +399,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
-          fetch-tags: true
+          fetch-depth: 1
+          fetch-tags: false
           persist-credentials: false
       - uses: $/.github/actions/prepare
       # camoufox fetch installs this model, but the browser-binary cache skips
@@ -385,7 +430,8 @@ jobs:
       - uses: $/.github/actions/prepare-browser
       # Firefox on a bare ubuntu-24.04 runner needs an X server and its runtime
       # libraries; xvfb-run provides both (camoufox CI does the same).
-      - name: Run pytest (browser)
+      - name: Run pytest (browser, PRs only)
+        if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.browser == 'true' }}
         env:
           # Firefox on GitHub Actions ubuntu-24.04 cannot connect to the
           # in-process test server at 127.0.0.1 -- network_error on every
@@ -399,6 +445,20 @@ jobs:
           CRAWLUTRON_HEADLESS: "false"
           COVERAGE_FILE: .coverage.test-browser
         run: xvfb-run -a .venv/bin/python -m pytest -m "browser" --cov=crawlutron --cov-report= --cov-append -p pytest_cov --junitxml=junit-browser.xml
+      - name: Run pytest (all markers, main push and release calls)
+        if: ${{ github.event_name != 'pull_request' }}
+        env:
+          # Firefox on GitHub Actions ubuntu-24.04 cannot connect to the
+          # in-process test server at 127.0.0.1 -- network_error on every
+          # navigation. Two causes, both fixed here:
+          #   NO_PROXY:  Firefox honors system proxy env vars; without this
+          #            it may try to proxy localhost through a nonexistent proxy.
+          #   CRAWLUTRON_HEADLESS=false: boolean headless Firefox on Linux has
+          #            limited networking; headed mode under xvfb-run matches
+          #            camoufox's own CI and works reliably.
+          NO_PROXY: 127.0.0.1,localhost
+          CRAWLUTRON_HEADLESS: "false"
+        run: xvfb-run -a .venv/bin/python -m pytest --cov=crawlutron --cov-report= --cov-append -p pytest_cov --junitxml=junit-browser.xml
       - name: Upload coverage data artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ always() }}
@@ -418,6 +478,9 @@ jobs:
   # #623: dependency audit against the frozen lock. The export/pip-audit tools
   # install inside CI's runner (owner-bandwidth is irrelevant there); the DB
   # fetch is GitHub's advisory DB on their side.
+  # enable-cache: true for uv cache -- zizmor exception: this cache is read-only
+  # and scoped to the audit job; it does not affect gate integrity. Owner applies
+  # the exception via zizmor config; do not self-exempt.
   audit:
     name: Dependency audit
     runs-on: ubuntu-24.04
@@ -425,14 +488,15 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
+          fetch-depth: 1
+          fetch-tags: false
           persist-credentials: false
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14"
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          enable-cache: false
+          enable-cache: true
           cache-dependency-glob: uv.lock
       - name: Audit the frozen lock
         env:
@@ -451,7 +515,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
+          fetch-depth: 1
+          fetch-tags: false
           persist-credentials: false
       - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
@@ -466,7 +531,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
+          fetch-depth: 1
+          fetch-tags: false
           persist-credentials: false
       - uses: $/.github/actions/prepare
       - name: zizmor
@@ -479,11 +545,26 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
+          fetch-depth: 1
+          fetch-tags: false
           persist-credentials: false
       - uses: $/.github/actions/prepare
       - name: pin-verify check
         run: .venv/bin/pre-commit run pin-verify --all-files
+
+  # Dependency review -- checks for vulnerable/malicious dependencies in PRs.
+  # SHA-pinned, contents:read only. Runs on all PRs and main pushes.
+  dependency-review:
+    name: Dependency review
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Dependency review
+        uses: actions/dependency-review-action@4081bf99e2866ebe428fc0477b69eb4fcda7220a # v4.4.0
+        with:
+          config-file: '.github/dependency-review-config.yml'
 
   # One required check, and only on the PR path (this workflow runs top-level
   # there, so the check name is unchanged). GitHub treats a skipped job as
@@ -510,6 +591,7 @@ jobs:
       - secret-scan
       - zizmor
       - pin-verify
+      - dependency-review
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -535,10 +617,14 @@ jobs:
           test "${{ needs.secret-scan.result }}" = "success"
           test "${{ needs.zizmor.result }}" = "success"
           test "${{ needs.pin-verify.result }}" = "success"
+          test "${{ needs.dependency-review.result }}" = "success"
+          # Skipped passes by design: filtered jobs (real-pbkdf2, test-browser on PRs)
+          # return "skipped" which is not "failure" or "cancelled".
 
   # Dev builds go to TestPyPI on green main pushes only. Trusted publishing
   # rejects OIDC from a called workflow, so both jobs live here at top level;
   # the guard is load-bearing and must not be widened to dispatch or tags.
+  # Skip redundant build when declared root version already exists on TestPyPI.
   testpypi-build:
     name: Build dev distributions for TestPyPI
     needs: [required]
@@ -547,11 +633,13 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+    outputs:
+      skip-build: ${{ steps.check-version.outputs.skip }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
-          fetch-tags: true
+          fetch-depth: 1
+          fetch-tags: false
           persist-credentials: false
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
@@ -559,15 +647,44 @@ jobs:
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: false
+      # Check if root version already exists on TestPyPI to skip redundant build.
       # Release-please owns the declared version in every pyproject; no CI step
       # rewrites it. A repeat push reuses the declared version and `skip-existing`
       # makes the TestPyPI upload a no-op until release-please bumps it.
+      - name: Get root version from pyproject.toml
+        id: get-version
+        run: |
+          set -euo pipefail
+          uv run --no-project --python 3.14 python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])" > /tmp/root_version.txt
+          ROOT_VERSION="$(cat /tmp/root_version.txt)"
+          echo "ROOT_VERSION=${ROOT_VERSION}" >> "${GITHUB_OUTPUT}"
+      - name: Check if version exists on TestPyPI
+        id: check-version
+        env:
+          ROOT_VERSION: ${{ steps.get-version.outputs.ROOT_VERSION }}
+        run: |
+          set -euo pipefail
+          echo "Root version: ${ROOT_VERSION}"
+          # Use twine to check if version exists on TestPyPI
+          if uvx twine check --strict --repository-url https://test.pypi.org/legacy/ dist/ 2>/dev/null; then
+            # Actually check via PyPI API
+            URL="https://test.pypi.org/pypi/crawlutron/${ROOT_VERSION}/json"
+            RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "${URL}")
+            if [ "${RESPONSE}" = "200" ]; then
+              echo "skip=true" >> "${GITHUB_OUTPUT}"
+              echo "Version ${ROOT_VERSION} already exists on TestPyPI, skipping build."
+              exit 0
+            fi
+          fi
+          echo "skip=false" >> "${GITHUB_OUTPUT}"
       - name: Build and inspect every distribution
+        if: ${{ steps.check-version.outputs.skip != 'true' }}
         run: |
           set -euo pipefail
           uv build --all-packages --out-dir dist
           uvx twine check --strict dist/*
       - name: Stage the dev distributions
+        if: ${{ steps.check-version.outputs.skip != 'true' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dev-dist
@@ -577,7 +694,7 @@ jobs:
   testpypi:
     name: Publish dev builds to TestPyPI
     needs: [testpypi-build]
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.testpypi-build.outputs.skip-build != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: testpypi

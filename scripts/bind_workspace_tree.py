@@ -33,6 +33,12 @@ def member_src_roots(root: pathlib.Path) -> tuple[pathlib.Path, ...]:
     return tuple(sorted(src for src in src_roots if src.is_dir()))
 
 
+def prepend_member_roots(root: pathlib.Path, search_path: list[str]) -> None:
+    """Put the invoked tree ahead of any stale shared-venv binding (#1230)."""
+    roots = [str(src) for src in member_src_roots(root)]
+    search_path[:] = roots + [entry for entry in search_path if entry not in roots]
+
+
 def bind(root: pathlib.Path, site_packages: pathlib.Path) -> pathlib.Path:
     """Write the workspace's roots into the pth the interpreter loads first."""
     target = site_packages / PTH_NAME

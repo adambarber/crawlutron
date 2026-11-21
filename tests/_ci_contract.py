@@ -66,7 +66,7 @@ def precommit_hook_ids(config: str) -> tuple[str, ...]:
 
 
 # Every job that reports a result the aggregate must depend on: one per gate,
-# plus the two supply-chain gates added by #623.
+# plus the two supply-chain gates added by #623, plus dependency-review from #1204.
 REPORTING_JOBS = {
     "actionlint",
     "ruff",
@@ -84,6 +84,7 @@ REPORTING_JOBS = {
     "secret-scan",
     "zizmor",
     "pin-verify",
+    "dependency-review",
 }
 
 # GitHub's template form for an errexit shell. The required aggregate is a chain of `test` lines, so its exit
