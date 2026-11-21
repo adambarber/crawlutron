@@ -25,6 +25,22 @@ make rehearsal-bites  # Run fast-path rehearsal without id-token (lint/ruff only
 - `.github/CODEOWNERS` - Declares ownership for release tooling
 - `.github/zizmor.yml` - Release owner
 
+## Unrehearsed surfaces
+
+Rehearsal carries zero write credentials; these surfaces are observed, never rehearsed.
+Each row names its deferred check.
+
+| Surface | Where | Deferred check |
+|---|---|---|
+| `publish-build` | `release.yml:83-119` | `contents: read` build verification; no credentials, no attestation |
+| `publish` | `release.yml:121-158` | PyPI upload + PEP 740 attestation structurally verified; real check on next tagged release |
+| `image` | `release.yml:182-218` | GHCR push + SBOM attestation structurally verified; real check on next tagged release |
+| `sbom`, `release-artifacts` | `release.yml:220-end` | Structurally verified; real check on next tagged release |
+| TestPyPI publish | `ci.yml:702-723` | One owner-approved observation on green main `34666cb4`: all seven distributions propagated (sdist + wheel); guard unchanged, a repeat push no-ops on version-exists |
+
+The TestPyPI observation was a push-path event, not a rehearsal capability: no dispatch
+input was added and rehearsal's `contents: read` posture is unchanged.
+
 ## Contract tests
 
 The file `tests/test_release_contract.py` verifies:
