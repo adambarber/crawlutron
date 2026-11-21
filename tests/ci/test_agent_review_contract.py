@@ -122,7 +122,10 @@ def test_probe_plane_checks_out_base_and_executes_base_scripts() -> None:
     checkout = _uses(steps, "actions/checkout")
     assert len(checkout) == 1
     checkout_with = _mapping(checkout[0].get("with"))
-    assert checkout_with.get("ref") == "${{ github.event.workflow_run.pull_requests[0].base.sha }}"
+    assert "ref" not in checkout_with, (
+        "Probe checkout must not use a context expression in with.ref; "
+        "it checks out the trusted default branch"
+    )
     assert checkout_with.get("persist-credentials") is False
     run_text = _run_text(steps)
     assert "scripts/review_probes.py run" in run_text
@@ -158,7 +161,10 @@ def test_review_plane_never_checks_out_pull_request_code() -> None:
     checkout = _uses(steps, "actions/checkout")
     assert len(checkout) == 1
     checkout_with = _mapping(checkout[0].get("with"))
-    assert checkout_with.get("ref") == "${{ github.sha }}"
+    assert "ref" not in checkout_with, (
+        "Review checkout must not use a context expression in with.ref; "
+        "it checks out the trusted default branch"
+    )
     assert checkout_with.get("persist-credentials") is False
 
 
@@ -258,3 +264,19 @@ def test_agent_review_workflow_has_owner_and_zizmor_coverage() -> None:
 def test_probe_steps_never_receive_trusted_plane_secrets(secret_name: str) -> None:
     """No probe step may inherit a trusted-plane secret."""
     assert secret_name not in _env_names(_jobs()["probes"])
+
+
+def test_workflow_run_checkout_no_context_ref() -> None:
+    """No workflow_run job's actions/checkout step uses a context expression in with.ref."""
+    triggers = _triggers()
+    assert "workflow_run" in triggers, "workflow_run trigger not found"
+
+    jobs = _jobs()
+    for job_name, job in jobs.items():
+        steps = _steps(job)
+        checkouts = _uses(steps, "actions/checkout")
+        for checkout in checkouts:
+            checkout_with = _mapping(checkout.get("with", {}))
+            ref = checkout_with.get("ref", "")
+            assert isinstance(ref, str), f"Expected ref to be a string, got {type(ref)}"
+            assert "${{" not in ref, f"Job '{job_name}' has context expression in ref: {ref}"
