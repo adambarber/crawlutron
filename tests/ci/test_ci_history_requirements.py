@@ -56,18 +56,27 @@ def test_dependency_review_config_is_tracked() -> None:
     assert CONFIG_PATH.is_file()
 
 
-def test_real_pbkdf2_job_is_never_skipped_by_a_path_filter() -> None:
-    """The required gate must see success, never skipped, when the surface is unfiltered."""
-    job = _workflow_jobs()["real-pbkdf2"]
-    assert isinstance(job, dict)
-    assert "if" not in job, "a skipped job reddens the required aggregate"
-    runs = [step for step in _steps(job) if 'pytest -m "real_pbkdf2"' in str(step.get("run", ""))]
-    assert len(runs) == 1
-    condition = str(runs[0].get("if", ""))
-    for token in (
-        "github.event_name != 'pull_request'",
-        "needs.changes.outputs.core-storage",
-        "needs.changes.outputs.tests",
-        "needs.changes.outputs.lockfile",
-    ):
-        assert token in condition, f"the real-pbkdf2 step filter lost {token!r}"
+def test_real_pbkdf2_execution_is_one_shared_decision() -> None:
+    """A filtered-off PBKDF2 step must neither skip the job nor break report consumers."""
+    jobs = _workflow_jobs()
+    changes = jobs["changes"]
+    assert isinstance(changes, dict)
+    outputs = changes.get("outputs")
+    assert isinstance(outputs, dict)
+    decision = str(outputs.get("real-pbkdf2", ""))
+    assert "github.event_name != 'pull_request'" in decision
+    for token in ("core-storage", "tests", "lockfile"):
+        assert f"steps.filter.outputs.{token}" in decision, f"PBKDF2 decision lost {token!r}"
+
+    producer = jobs["real-pbkdf2"]
+    assert isinstance(producer, dict)
+    assert "if" not in producer, "a skipped job reddens the required aggregate"
+    guard = "needs.changes.outputs.real-pbkdf2 == 'true'"
+    guarded = [step for step in _steps(producer) if 'pytest -m "real_pbkdf2"' in str(step.get("run", ""))]
+    for step in _steps(jobs["coverage"]):
+        name = str(step.get("name", ""))
+        if name.startswith("Download real-pbkdf2") or name.startswith("Upload real-pbkdf2"):
+            guarded.append(step)
+    assert len(guarded) == 4
+    for step in guarded:
+        assert guard in str(step.get("if", "")), f"{step.get('name')} lost the shared PBKDF2 decision"
