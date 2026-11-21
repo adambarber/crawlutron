@@ -122,6 +122,9 @@ dev = [
     "mutmut==3.2.0",
 ]
 
+[project.scripts]
+pin-verify = "scripts.pin_verify:main"
+
 [project.urls]
 # The canonical remote, and the same value as crawlutron.vocabulary.identity.REPOSITORY_URL --
 # which is the copy that goes out on the wire in the user-agent. pyproject

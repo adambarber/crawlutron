@@ -465,6 +465,19 @@ jobs:
       - name: zizmor
         run: .venv/bin/pre-commit run zizmor --all-files
 
+  pin-verify:
+    name: pin-verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: $/.github/actions/prepare
+      - name: pin-verify check
+        run: .venv/bin/pre-commit run pin-verify --all-files
+
   # One required check, and only on the PR path (this workflow runs top-level
   # there, so the check name is unchanged). GitHub treats a skipped job as
   # success, so the gates stay unconditional and this aggregate fails if any
@@ -489,6 +502,7 @@ jobs:
       - audit
       - secret-scan
       - zizmor
+      - pin-verify
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -513,6 +527,7 @@ jobs:
           test "${{ needs.audit.result }}" = "success"
           test "${{ needs.secret-scan.result }}" = "success"
           test "${{ needs.zizmor.result }}" = "success"
+          test "${{ needs.pin-verify.result }}" = "success"
 
   # Dev builds go to TestPyPI on green main pushes only. Trusted publishing
   # rejects OIDC from a called workflow, so both jobs live here at top level;

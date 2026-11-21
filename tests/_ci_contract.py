@@ -83,6 +83,7 @@ REPORTING_JOBS = {
     "audit",
     "secret-scan",
     "zizmor",
+    "pin-verify",
 }
 
 # GitHub's template form for an errexit shell. The required aggregate is a chain of `test` lines, so its exit
@@ -97,6 +98,7 @@ _ENFORCEMENT_BASE_INPUTS = (
     # The duplication gate's own implementation.
     "scripts/jscpd_gate.py",
     "scripts/module_graph.py",
+    "scripts/pin_verify.py",
     # The Makefile is a gate entry point: `make lint` and `make typecheck` run hooks out of the config.
     "Makefile",
     # The gate entry point itself.
@@ -108,6 +110,7 @@ _ENFORCEMENT_BASE_INPUTS = (
     "pytest.ini",
     "pyproject.toml",
     ".github/workflows/ci.yml",
+    ".github/versions.toml",
 )
 
 # Images the service can live under: the fixed canonical image plus live docker/*/ siblings. The

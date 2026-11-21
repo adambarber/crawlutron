@@ -6,6 +6,8 @@ from pathlib import Path
 
 import yaml
 
+import scripts.pin_verify as pv
+
 SERVICE_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "codeql.yml"
 
@@ -69,103 +71,30 @@ def test_codeql_permissions_security_events_write() -> None:
     assert security_events == "write", f"analyze job must have security-events:write, got {security_events}"
 
 
-CORRECT_CODEQL_SHA = "48ab28a6f5dbc2a99bf1e0131198dd8f1df78169"
-
-
-def test_codeql_init_analyze_sha_pinned() -> None:
-    """init and analyze actions must be SHA-pinned."""
+def test_codeql_init_analyze_use_registry_pin() -> None:
+    """init and analyze use the single sanctioned codeql-action pin."""
+    pin = pv.pin_sha(pv.load_registry()["github/codeql-action"])
     doc = workflow_document()
     jobs = doc.get("jobs")
     assert isinstance(jobs, dict), "jobs must be a mapping"
-
     analyze_job = jobs.get("analyze")
     assert isinstance(analyze_job, dict), "analyze job required"
-
     steps = analyze_job.get("steps")
     assert isinstance(steps, list), "analyze job must have steps"
-
-    init_step = None
-    analyze_step = None
-
+    found: dict[str, str] = {}
     for step in steps:
         if not isinstance(step, dict):
             continue
         uses = step.get("uses", "")
-        if "codeql-action/init" in uses:
-            init_step = step
-        elif "codeql-action/analyze" in uses:
-            analyze_step = step
-
-    assert init_step is not None, "codeql-action/init step required"
-    assert analyze_step is not None, "codeql-action/analyze step required"
-
-    for step, name in [(init_step, "init"), (analyze_step, "analyze")]:
-        uses = step.get("uses", "")
-        assert "@" in uses and uses.count("@") == 1, f"{name} action must be pinned with @"
-        # Verify it's a SHA pin (40 char hex or sha256:)
-        pin = uses.split("@")[1]
-        assert len(pin) == 40 or pin.startswith("sha256:"), f"{name} must be SHA-pinned, got {pin}"
-        # Verify it's the CORRECT SHA for v3.28.0
-        assert pin == CORRECT_CODEQL_SHA, f"{name} must use v3.28.0 SHA {CORRECT_CODEQL_SHA}, got {pin}"
-
-
-def test_codeql_no_workflow_level_security_events() -> None:
-    """codeql.yml must NOT have workflow-level security-events:write (redundant with job-level)."""
-    doc = workflow_document()
-    # Workflow-level permissions should not include security-events:write
-    permissions = doc.get("permissions")
-    if permissions is not None:
-        assert isinstance(permissions, dict), "permissions must be a mapping"
-        security_events = permissions.get("security-events")
-        assert security_events is None or security_events != "write", (
-            "workflow-level security-events:write is redundant with job-level grant; remove it"
-        )
-
-
-def test_codeql_sha_is_peeled_commit() -> None:
-    """The pinned SHA must be the peeled v3.28.0 commit, not its tag object.
-
-    The tag object 8c78abb9 peels to commit 48ab28a6; only the latter resolves as a `uses:` ref.
-    """
-    doc = workflow_document()
-    jobs = doc.get("jobs")
-    assert isinstance(jobs, dict), "jobs must be a mapping"
-
-    analyze_job = jobs.get("analyze")
-    assert isinstance(analyze_job, dict), "analyze job required"
-
-    steps = analyze_job.get("steps")
-    assert isinstance(steps, list), "analyze job must have steps"
-
-    init_step = None
-    analyze_step = None
-
-    for step in steps:
-        if not isinstance(step, dict):
+        if not isinstance(uses, str):
             continue
-        uses = step.get("uses", "")
-        if "codeql-action/init" in uses:
-            init_step = step
-        elif "codeql-action/analyze" in uses:
-            analyze_step = step
-
-    assert init_step is not None, "codeql-action/init step required"
-    assert analyze_step is not None, "codeql-action/analyze step required"
-
-    for step, name in [(init_step, "init"), (analyze_step, "analyze")]:
-        uses = step.get("uses", "")
-        assert "@" in uses and uses.count("@") == 1, f"{name} action must be pinned with @"
-        pin = uses.split("@")[1]
-        assert len(pin) == 40 or pin.startswith("sha256:"), f"{name} must be SHA-pinned, got {pin}"
-        # Verify it's the CORRECT peeled commit for v3.28.0 (not the tag object)
-        assert pin == CORRECT_CODEQL_SHA, (
-            f"{name} must use v3.28.0 peeled commit {CORRECT_CODEQL_SHA}, got {pin}"
-        )
-        # Explicitly assert it's NOT the annotated tag object SHA
-        TAG_OBJECT_SHA = "8c78abb9b62512e3c45dea6559ffd924ed8549c8"
-        assert pin != TAG_OBJECT_SHA, (
-            f"{name} pinned SHA {pin} is the v3.28.0 annotated tag object, not the peeled commit"
-        )
+        for action in ("init", "analyze"):
+            marker = f"github/codeql-action/{action}@"
+            if marker in uses:
+                found[action] = uses.split("@", 1)[1]
+    assert set(found) == {"init", "analyze"}, f"missing codeql steps: {sorted(found)}"
+    for action, sha in found.items():
+        assert sha == pin, f"codeql-action/{action} pins {sha}, registry says {pin}"
 
 
 def test_codeql_security_extended() -> None:

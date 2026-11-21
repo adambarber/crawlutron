@@ -239,6 +239,18 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
+      # pin-verify reads the one version registry and refuses any workflow pin that
+      # drifted from it. Offline by design; `pin-verify refresh` peels tags upstream.
+      - id: pin-verify
+        name: pin-verify registry check (offline)
+        entry: >-
+          bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
+          .venv/bin/python -m scripts.pin_verify check
+        language: system
+        files: *service_trigger
+        pass_filenames: false
+        stages: [pre-commit]
+
       # The repo rule "every commit cites an issue" was convention-only (#492): none of
       # the pre-commit-stage hooks reads the message. This one does, at commit-msg stage.
       - id: commit-citation
