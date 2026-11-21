@@ -10,7 +10,7 @@ coverage:
         target: 90%
         informational: true
 
-# Six Codecov components (flags) for per-surface measurement:
+# Six Codecov components for per-surface measurement:
 # - battery: the fast suite (commit admission)
 # - real-pbkdf2: real PBKDF2 stress surface
 # - test-browser: browser integration surface
@@ -19,21 +19,33 @@ coverage:
 # - sdk: SDK package coverage
 # All components use carryforward so a surface absent on a given run does not
 # crater the total. Status targets remain informational; no blocking threshold.
-flag_management:
+component_management:
   default_rules:
     carryforward: true
-  flags:
+  individual_components:
     battery:
+      flag_regexes:
+        - battery
       carryforward: true
     real-pbkdf2:
+      flag_regexes:
+        - real-pbkdf2
       carryforward: true
     test-browser:
+      flag_regexes:
+        - test-browser
       carryforward: true
     admission:
+      paths:
+        - packages/core/src/admission/
       carryforward: true
     crawl:
+      paths:
+        - packages/core/src/crawlutron/
       carryforward: true
     sdk:
+      paths:
+        - packages/sdk/src/crawlutron_sdk/
       carryforward: true
 
 # Informational status per component; no gate fails on coverage.

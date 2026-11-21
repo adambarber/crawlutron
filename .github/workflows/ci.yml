@@ -9,19 +9,6 @@ name: CI
 # the gates on the exact commit inside their own run, and `needs` -- not a
 # cross-run conclusion lookup -- is the gate. A `push` trigger here would
 # otherwise run the whole battery a second time per commit; it no longer does.
-#
-# One job per gate, and every gate job runs ITS HOOK: `pre-commit run <id>
-# --all-files`. The gate's definition lives exactly once, in
-# .pre-commit-config.yaml, so CI cannot drift from what a local commit runs.
-# Coverage is the one measurement job that runs pytest directly (no new hook)
-# and uploads to Codecov.
-# There is no wrapper job: a single `pre-commit run --all-files` fans every
-# gate out inside one runner, so the battery's xdist workers fought the other
-# gates for the same cores and hit the wall clock. The contract test
-# (tests/test_ci_enforcement.py via tests/_ci_contract.py) fails if a hook has
-# no job, or if a job re-runs a command the hook owns. Every path is
-# root-relative and no job sets working-directory: the service IS the
-# repository, and the contract test asserts both.
 on:
   pull_request:
     branches: [main]
@@ -190,12 +177,14 @@ jobs:
           PYTEST_ADDOPTS: "--cov=crawlutron --cov-report= --cov-append -p pytest_cov --junitxml=junit-%p.xml"
       - name: Upload coverage data artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ always() }}
         with:
           name: coverage-data
           path: .coverage*
           if-no-files-found: warn
       - name: Upload junit artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ always() }}
         with:
           name: junit-results
           path: junit-*.xml
@@ -209,6 +198,7 @@ jobs:
     name: Coverage
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    if: ${{ always() }}
     needs: [battery, real-pbkdf2, test-browser]
     permissions:
       contents: read
@@ -224,26 +214,40 @@ jobs:
       - uses: $/.github/actions/prepare
       - name: Download battery coverage data
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: ${{ always() }}
         with:
           name: coverage-data
           path: .
       - name: Download battery junit results
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: ${{ always() }}
         with:
           name: junit-results
-          path: .
+          path: junit/battery
       - name: Download real-pbkdf2 coverage data
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        if: always()
+        if: ${{ always() }}
         with:
           name: coverage-data-real-pbkdf2
           path: .
+      - name: Download real-pbkdf2 junit results
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: ${{ always() }}
+        with:
+          name: junit-real-pbkdf2
+          path: junit/real-pbkdf2
       - name: Download test-browser coverage data
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        if: always()
+        if: ${{ always() }}
         with:
           name: coverage-data-test-browser
           path: .
+      - name: Download test-browser junit results
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: ${{ always() }}
+        with:
+          name: junit-test-browser
+          path: junit/test-browser
       - name: Combine coverage data
         run: .venv/bin/python -m coverage combine
       - name: Generate coverage reports
@@ -258,9 +262,10 @@ jobs:
           fail_ci_if_error: false
       - name: Upload combined coverage report artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ always() }}
         with:
           name: coverage-report
-          path: coverage_report/
+          path: coverage_reports/
           if-no-files-found: error
       # Per-surface Codecov uploads with informational status.
       # Uses !cancelled() so uploads run even when a prior job failed.
@@ -268,7 +273,7 @@ jobs:
         if: ${{ !cancelled() }}
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
-          files: junit-*.xml
+          files: junit/battery/junit-*.xml
           flags: battery
           report-type: test_results
           use_oidc: true
@@ -277,7 +282,7 @@ jobs:
         if: ${{ !cancelled() }}
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
-          files: junit-*.xml
+          files: junit/real-pbkdf2/junit-real-pbkdf2.xml
           flags: real-pbkdf2
           report-type: test_results
           use_oidc: true
@@ -286,7 +291,7 @@ jobs:
         if: ${{ !cancelled() }}
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
-          files: junit-*.xml
+          files: junit/test-browser/junit-browser.xml
           flags: test-browser
           report-type: test_results
           use_oidc: true
@@ -316,19 +321,18 @@ jobs:
         run: .venv/bin/python -m pytest -m "real_pbkdf2" --cov=crawlutron --cov-report= --cov-append -p pytest_cov --junitxml=junit-real-pbkdf2.xml
       - name: Upload coverage data artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ always() }}
         with:
           name: coverage-data-real-pbkdf2
           path: .coverage*
           if-no-files-found: warn
-      - name: Upload real-pbkdf2 coverage to Codecov
-        if: ${{ !cancelled() }}
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+      - name: Upload junit artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ always() }}
         with:
-          files: junit-real-pbkdf2.xml
-          flags: real-pbkdf2
-          report-type: test_results
-          use_oidc: true
-          fail_ci_if_error: false
+          name: junit-real-pbkdf2
+          path: junit-real-pbkdf2.xml
+          if-no-files-found: warn
 
   test-browser:
     name: Test suite (browser)
@@ -337,7 +341,7 @@ jobs:
     # Required. 8 passed against a known-good commit, and all 8 fail when
     # BrowserRenderer.render is short-circuited, so the green reflects a real
     # browser rather than a double. It selects ONLY the `browser` marker: any
-    # wider filter re-runs the fast suite (~5,700 tests) on every push.
+    # wider filter re-runs the fast suite (~6,300 tests) on every push.
     permissions:
       contents: read
       pull-requests: read
@@ -346,8 +350,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-          # prepare's `uv sync` reads the static version; tags keep release
-          # assertions aligned with the exact commit under test.
           fetch-tags: true
           persist-credentials: false
       - uses: $/.github/actions/prepare
@@ -393,19 +395,19 @@ jobs:
         run: xvfb-run -a .venv/bin/python -m pytest -m "browser" --cov=crawlutron --cov-report= --cov-append -p pytest_cov --junitxml=junit-browser.xml
       - name: Upload coverage data artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ always() }}
         with:
           name: coverage-data-test-browser
           path: .coverage*
           if-no-files-found: warn
-      - name: Upload test-browser coverage to Codecov
-        if: ${{ !cancelled() }}
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+      - name: Upload junit artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ always() }}
         with:
-          files: junit-browser.xml
-          flags: test-browser
-          report-type: test_results
-          use_oidc: true
-          fail_ci_if_error: false
+          name: junit-test-browser
+          path: junit-browser.xml
+          if-no-files-found: warn
+
   # #623: dependency audit against the frozen lock. The export/pip-audit tools
   # install inside CI's runner (owner-bandwidth is irrelevant there); the DB
   # fetch is GitHub's advisory DB on their side.

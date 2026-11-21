@@ -16,6 +16,14 @@ from tests._ci_contract import (
 StepMapping = Mapping[str, object]
 
 
+def _get_coverage_job(workflow: str) -> StepMapping:
+    """Return the coverage job dict, asserting it exists."""
+    jobs = _jobs(workflow)
+    coverage_job = jobs.get("coverage")
+    assert coverage_job is not None
+    return cast(StepMapping, coverage_job)
+
+
 def _codecov_upload_steps(workflow: str, job_name: str) -> list[StepMapping]:
     """Return codecov upload steps for a job."""
     steps = job_steps(workflow, job_name)
@@ -23,6 +31,26 @@ def _codecov_upload_steps(workflow: str, job_name: str) -> list[StepMapping]:
         step
         for step in steps
         if isinstance(step, dict) and "uses" in step and "codecov" in str(step.get("uses", ""))
+    ]
+
+
+def _artifact_upload_steps(workflow: str, job_name: str) -> list[StepMapping]:
+    """Return artifact upload steps for a job."""
+    steps = job_steps(workflow, job_name)
+    return [
+        step
+        for step in steps
+        if isinstance(step, dict) and "uses" in step and "upload-artifact" in str(step.get("uses", ""))
+    ]
+
+
+def _download_artifact_steps(workflow: str, job_name: str) -> list[StepMapping]:
+    """Return artifact download steps for a job."""
+    steps = job_steps(workflow, job_name)
+    return [
+        step
+        for step in steps
+        if isinstance(step, dict) and "uses" in step and "download-artifact" in str(step.get("uses", ""))
     ]
 
 
@@ -56,6 +84,7 @@ def test_battery_is_only_fast_suite_execution() -> None:
     assert "--cov-report=" in pytest_addopts, "battery must have --cov-report in PYTEST_ADDOPTS"
     assert "--cov-append" in pytest_addopts, "battery must have --cov-append in PYTEST_ADDOPTS"
     assert "junit" in pytest_addopts.lower(), "battery must have junit in PYTEST_ADDOPTS"
+    assert "-p pytest_cov" in pytest_addopts, "battery must have -p pytest_cov in PYTEST_ADDOPTS"
 
     # Coverage job must NOT run pytest (report-only)
     assert "coverage" in jobs
@@ -80,9 +109,7 @@ def test_battery_is_only_fast_suite_execution() -> None:
 def test_coverage_job_depends_on_battery_real_pbkdf2_test_browser() -> None:
     """Coverage job needs [battery, real-pbkdf2, test-browser]."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-    jobs = _jobs(workflow)
-    coverage_job = jobs.get("coverage")
-    assert coverage_job is not None
+    coverage_job = _get_coverage_job(workflow)
     needs = coverage_job.get("needs")
     assert isinstance(needs, list)
     assert set(needs) == {"battery", "real-pbkdf2", "test-browser"}, (
@@ -90,33 +117,129 @@ def test_coverage_job_depends_on_battery_real_pbkdf2_test_browser() -> None:
     )
 
 
-def test_codecov_uploads_use_informational_status_and_correct_flags() -> None:
-    """Codecov uploads use !cancelled(), report-type: test_results, SHA-pinned action,
-    use_oidc: true, fail_ci_if_error: false."""
+def test_coverage_job_runs_if_always() -> None:
+    """Coverage job must have if: always() so partial failure still reports."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-    _jobs(workflow)
+    coverage_job = _get_coverage_job(workflow)
+    assert coverage_job.get("if") == "${{ always() }}", "coverage job must run if: always()"
 
-    # Check coverage job uploads
-    coverage_steps = job_steps(workflow, "coverage")
-    upload_steps = [
+
+def test_coverage_job_downloads_artifacts_tolerantly() -> None:
+    """Coverage job downloads artifacts with if: always() so partial failure still reports."""
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    download_steps = _download_artifact_steps(workflow, "coverage")
+    # Should download: coverage-data (battery), junit-results (battery),
+    # coverage-data-real-pbkdf2, coverage-data-test-browser
+    names = [cast(StepMapping, step.get("with", {})).get("name") for step in download_steps]
+    assert "coverage-data" in names
+    assert "junit-results" in names
+    assert "coverage-data-real-pbkdf2" in names
+    assert "coverage-data-test-browser" in names
+    # Each download should have if: always()
+    for step in download_steps:
+        assert step.get("if") == "${{ always() }}", f"download step {step.get('name')} must have if: always()"
+
+
+def _assert_junit_upload(workflow: str, job_name: str, artifact_name: str, artifact_path: str) -> None:
+    """Assert a job uploads a junit artifact with correct name and path."""
+    upload_steps = _artifact_upload_steps(workflow, job_name)
+    junit_uploads = [
         step
-        for step in coverage_steps
-        if isinstance(step, dict) and "uses" in step and "codecov" in str(step.get("uses", ""))
+        for step in upload_steps
+        if "junit" in str(cast(StepMapping, step.get("with", {})).get("name", ""))
     ]
-    assert upload_steps, "coverage job must have codecov upload steps"
+    assert len(junit_uploads) == 1, f"{job_name} must upload exactly one junit artifact"
+    with_ = cast(StepMapping, junit_uploads[0].get("with", {}))
+    assert with_.get("name") == artifact_name, f"{job_name} junit artifact must be named {artifact_name}"
+    assert with_.get("path") == artifact_path, f"{job_name} must upload {artifact_path}"
+    assert with_.get("if-no-files-found") == "warn"
+    assert junit_uploads[0].get("if") == "${{ always() }}", f"{job_name} junit upload must have if: always()"
 
-    for step in upload_steps:
-        step_dict = cast(StepMapping, step)
-        uses = str(step_dict.get("uses", ""))
-        # SHA-pinned codecov-action
-        assert "@" in uses and len(uses.split("@")[1]) == 40, f"codecov action must be SHA-pinned: {uses}"
-        with_ = cast(StepMapping, step_dict.get("with", {}))
-        kind = "coverage" if "coverage.xml" in str(with_.get("files", "")) else "test_results"
-        _assert_codecov_upload_flags(with_, "coverage", require_flags=False, report_type=kind)
+
+def test_battery_uploads_junit_artifact() -> None:
+    """Battery job uploads junit-*.xml artifact named junit-results."""
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    _assert_junit_upload(workflow, "battery", "junit-results", "junit-*.xml")
+
+
+def test_real_pbkdf2_uploads_junit_artifact() -> None:
+    """real-pbkdf2 job uploads junit-real-pbkdf2.xml artifact named junit-real-pbkdf2."""
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    _assert_junit_upload(workflow, "real-pbkdf2", "junit-real-pbkdf2", "junit-real-pbkdf2.xml")
+
+
+def test_test_browser_uploads_junit_artifact() -> None:
+    """test-browser job uploads junit-browser.xml artifact named junit-test-browser."""
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    _assert_junit_upload(workflow, "test-browser", "junit-test-browser", "junit-browser.xml")
+
+
+def test_coverage_job_downloads_junit_artifacts_to_distinct_paths() -> None:
+    """Coverage job downloads junit artifacts into distinct paths."""
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    download_steps = _download_artifact_steps(workflow, "coverage")
+    junit_downloads = [
+        step
+        for step in download_steps
+        if "junit" in str(cast(StepMapping, step.get("with", {})).get("name", ""))
+    ]
+    # Should download junit-results (battery), junit-real-pbkdf2, junit-test-browser
+    names = [cast(StepMapping, step.get("with", {})).get("name") for step in junit_downloads]
+    assert "junit-results" in names
+    assert "junit-real-pbkdf2" in names
+    assert "junit-test-browser" in names
+    # Check distinct paths
+    paths = {}
+    for step in junit_downloads:
+        with_ = cast(StepMapping, step.get("with", {}))
+        name = with_.get("name")
+        path = with_.get("path", ".")
+        paths[name] = path
+    assert paths["junit-results"] == "junit/battery"
+    assert paths["junit-real-pbkdf2"] == "junit/real-pbkdf2"
+    assert paths["junit-test-browser"] == "junit/test-browser"
+
+
+def test_coverage_job_uploads_per_surface_codecov_with_explicit_files() -> None:
+    """Coverage job uploads per-surface Codecov with explicit per-surface files."""
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    upload_steps = _codecov_upload_steps(workflow, "coverage")
+    test_results_uploads = [
+        step
+        for step in upload_steps
+        if "junit" in str(cast(StepMapping, step.get("with", {})).get("files", ""))
+    ]
+    assert len(test_results_uploads) == 3, (
+        "coverage job must have 3 test_results uploads (battery, real-pbkdf2, test-browser)"
+    )
+
+    expected_files = {
+        "battery": "junit/battery/junit-*.xml",
+        "real-pbkdf2": "junit/real-pbkdf2/junit-real-pbkdf2.xml",
+        "test-browser": "junit/test-browser/junit-browser.xml",
+    }
+
+    for step in test_results_uploads:
+        with_ = cast(StepMapping, step.get("with", {}))
+        files = str(with_.get("files", ""))
+        flag = with_.get("flags")
+        assert flag in expected_files, f"unknown flag {flag}"
+        assert files == expected_files[flag], f"flag {flag} expects files={expected_files[flag]}, got {files}"
+        assert with_.get("report_type") == "test_results" or with_.get("report-type") == "test_results"
+        assert step.get("if") == "${{ !cancelled() }}"
+
+
+def test_no_direct_codecov_upload_in_real_pbkdf2_and_test_browser() -> None:
+    """real-pbkdf2 and test-browser must not have direct Codecov uploads (coverage job owns it)."""
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    for job_name in ("real-pbkdf2", "test-browser"):
+        upload_steps = _codecov_upload_steps(workflow, job_name)
+        assert len(upload_steps) == 0, f"{job_name} must not have direct Codecov uploads"
 
 
 def test_codecov_yml_has_six_components_and_informational_status() -> None:
-    """codecov.yml has six components and informational status; no blocking threshold."""
+    """codecov.yml has six components via component_management and
+    informational status; no blocking threshold."""
     codecov_path = WORKFLOW_PATH.parent.parent.parent / "codecov.yml"
     assert codecov_path.exists(), "codecov.yml must exist at repo root"
     config = yaml.safe_load(codecov_path.read_text(encoding="utf-8"))
@@ -134,25 +257,57 @@ def test_codecov_yml_has_six_components_and_informational_status() -> None:
     )
     assert cast(bool, patch_status.get("informational")) is True, "patch status must be informational"
 
-    # Check flag_management carryforward
-    flag_mgmt = cast(StepMapping, config.get("flag_management", {}))
+    # Check component_management (not flag_management)
+    component_mgmt = cast(StepMapping, config.get("component_management", {}))
     assert (
         cast(
             bool,
-            cast(StepMapping, flag_mgmt.get("default_rules", {})).get("carryforward"),
+            cast(StepMapping, component_mgmt.get("default_rules", {})).get("carryforward"),
         )
         is True
+    ), "component_management.default_rules.carryforward must be true"
+
+    # Check six components via individual_components
+    individual_components = cast(StepMapping, component_mgmt.get("individual_components", {}))
+    expected_components = {"battery", "real-pbkdf2", "test-browser", "admission", "crawl", "sdk"}
+    assert set(individual_components.keys()) == expected_components, (
+        f"individual_components = {set(individual_components.keys())}, expected {expected_components}"
     )
 
-    # Check six components (flags) are defined
-    flags = cast(StepMapping, flag_mgmt.get("flags", {}))
-    expected_flags = {"battery", "real-pbkdf2", "test-browser", "admission", "crawl", "sdk"}
-    assert set(flags.keys()) == expected_flags, f"flags = {set(flags.keys())}, expected {expected_flags}"
-    for flag_name, flag_config in flags.items():
-        flag_config_dict = cast(StepMapping, flag_config)
-        assert cast(bool, flag_config_dict.get("carryforward")) is True, (
-            f"flag {flag_name} must have carryforward: true"
+    # Surface components (battery, real-pbkdf2, test-browser) use flag_regexes
+    for surface in ("battery", "real-pbkdf2", "test-browser"):
+        comp = cast(StepMapping, individual_components[surface])
+        assert "flag_regexes" in comp, f"component {surface} must have flag_regexes"
+        assert comp["flag_regexes"] == [surface], f"component {surface} flag_regexes must be [{surface!r}]"
+        assert comp.get("carryforward") is True, f"component {surface} must have carryforward: true"
+
+    # Package components (admission, crawl, sdk) use paths
+    for package in ("admission", "crawl", "sdk"):
+        comp = cast(StepMapping, individual_components[package])
+        assert "paths" in comp, f"component {package} must have paths"
+        assert isinstance(comp["paths"], list) and len(comp["paths"]) > 0, (
+            f"component {package} paths must be non-empty list"
         )
+        assert comp.get("carryforward") is True, f"component {package} must have carryforward: true"
+
+    # Ensure flag_management is NOT present (deprecated in favor of component_management)
+    assert "flag_management" not in config, "codecov.yml must use component_management, not flag_management"
+
+
+def test_coverage_job_artifact_path_is_coverage_reports() -> None:
+    """Coverage job uploads artifact from coverage_reports/ (not coverage_report/)."""
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    upload_steps = _artifact_upload_steps(workflow, "coverage")
+    coverage_report_uploads = [
+        step
+        for step in upload_steps
+        if "coverage" in str(cast(StepMapping, step.get("with", {})).get("name", ""))
+    ]
+    assert len(coverage_report_uploads) == 1, "coverage job must upload exactly one coverage report artifact"
+    with_ = cast(StepMapping, coverage_report_uploads[0].get("with", {}))
+    assert with_.get("path") == "coverage_reports/", (
+        f"coverage artifact path must be coverage_reports/, got {with_.get('path')}"
+    )
 
 
 def test_coverage_config_has_source_pkgs_relative_files_parallel() -> None:
@@ -223,6 +378,7 @@ def test_coverage_job_uploads_generated_coverage_xml() -> None:
         with_ = cast(StepMapping, step.get("with", {}))
         assert "coverage_reports/coverage.xml" in str(with_.get("files", ""))
         assert with_.get("report_type", with_.get("report-type", "coverage")) == "coverage"
+        assert step.get("if") == "${{ !cancelled() }}"
 
 
 def test_battery_job_env_includes_pytest_addopts_with_coverage() -> None:
@@ -234,6 +390,7 @@ def test_battery_job_env_includes_pytest_addopts_with_coverage() -> None:
     assert "--cov-report=" in workflow
     assert "--cov-append" in workflow
     assert "junit" in workflow.lower()
+    assert "-p pytest_cov" in workflow
 
 
 def test_coverage_job_emits_single_artifact() -> None:
@@ -248,14 +405,3 @@ def test_coverage_job_emits_single_artifact() -> None:
         if isinstance(step, dict) and "uses" in step and "upload-artifact" in str(step.get("uses", ""))
     ]
     assert len(artifact_steps) == 1, f"coverage job must emit one artifact, got {len(artifact_steps)}"
-
-
-def test_browser_and_real_pbkdf2_add_data_test_results_pattern() -> None:
-    """Browser and real-pbkdf2 jobs upload to Codecov with same data/test-results pattern."""
-    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-    for job_name in ("real-pbkdf2", "test-browser"):
-        upload_steps = _codecov_upload_steps(workflow, job_name)
-        assert upload_steps, f"{job_name} must upload to Codecov"
-        for step in upload_steps:
-            with_ = cast(StepMapping, step.get("with", {}))
-            _assert_codecov_upload_flags(with_, job_name)

@@ -156,7 +156,12 @@ def _evasive_workflow(evasion: str) -> str:
         )
         mutated = mutated.replace("          " + _result_assertion("typecheck") + "\n", "", 1)
     elif evasion == "no-always":
-        mutated = workflow.replace("    if: ${{ always() }}\n", "", 1)
+        # Target the required job's if: always() (job-level)
+        mutated = workflow.replace(
+            "  required:\n    name: Required quality gate\n    if: ${{ always() }}",
+            "  required:\n    name: Required quality gate",
+            1,
+        )
     elif evasion == "no-errexit":
         mutated = workflow.replace("        shell: " + ERREXIT_SHELL + "\n", "", 1)
     elif evasion == "sh-shell":
