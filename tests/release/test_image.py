@@ -21,7 +21,10 @@ class TestImage:
 
     def test_missing_repository_owner_is_error(self) -> None:
         """Missing GITHUB_REPOSITORY_OWNER → exit 2."""
-        result = _run_script({"NATIVE_VERSION": "0.5.2"})
+        result = _run_script(
+            {"NATIVE_VERSION": "0.5.2"},
+            unset=("GITHUB_REPOSITORY_OWNER",),
+        )
         assert result.returncode == 2
         assert "GITHUB_REPOSITORY_OWNER environment variable is required" in result.stderr
 
@@ -31,7 +34,8 @@ class TestImage:
             {
                 "NATIVE_VERSION": "0.5.2",
                 "GITHUB_REPOSITORY_OWNER": "test-owner",
-            }
+            },
+            unset=("GITHUB_ACTOR", "GITHUB_TOKEN"),
         )
         assert result.returncode == 2
         assert "GITHUB_ACTOR environment variable is required" in result.stderr
