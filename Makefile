@@ -116,3 +116,4 @@ rehearsal:
 rehearsal-bites:
 	@echo "Running rehearsal-bites (contract tests without id-token)..."
 	$(PRE_COMMIT) run ruff --all-files --config "$(HOOK_CONFIG)"
+	$(PYTHON) -m pytest tests/release_bites/ -q
