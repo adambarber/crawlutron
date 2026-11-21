@@ -181,7 +181,7 @@ def _assert_every_publish_job_gated_on_ci(jobs: dict[str, object]) -> None:
     # The tag is what makes it a release: publication is derived from the tags at
     # the commit CI passed, never from the merge itself.
     released_runs = " ".join(str(step.get("run", "")) for step in steps(jobs.get("released")))
-    assert "release_roster.py --released" in released_runs, (
+    assert "emit_roster.py" in released_runs, (
         "the released set must come from the tags pointing at the green commit"
     )
     build = mapping(jobs.get("publish-build"), "a publish-build job")
@@ -194,7 +194,7 @@ def _assert_every_publish_job_gated_on_ci(jobs: dict[str, object]) -> None:
         "a build backend must run without OIDC in scope"
     )
     build_steps = [str(step.get("name", "")) for step in steps(jobs.get("publish-build"))]
-    assert "Assert the artifacts carry the release version" in build_steps, (
+    assert "Build and verify distribution" in build_steps, (
         "a build whose version disagrees with its tag must never reach the index"
     )
     assert "needs.released.outputs.packages" in str(publish.get("if")), (

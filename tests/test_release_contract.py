@@ -104,16 +104,11 @@ class TestImageJob:
     """The release image job is privileged; rehearsal records that explicitly."""
 
     def test_image_job_has_unrehearsed_surface_entry(self) -> None:
-        """Every privileged release image step is present and named."""
-        release_text = _read_yml(RELEASE_WORKFLOW)
-        for step in (
-            "docker/login-action",
-            "Build the runtime image",
-            "Smoke the built image",
-            "docker push",
-            "attest-build-provenance",
-        ):
-            assert step in release_text, f"Image step '{step}' missing from release.yml"
+        """The privileged image surface is documented and thin-adapter wired."""
+        image_job = _yaml_section(_read_yml(RELEASE_WORKFLOW), "image")
+        assert "python3 scripts/release/image.py" in image_job
+        for credential in ("packages: write", "attestations: write", "id-token: write"):
+            assert credential in image_job, f"Image job missing '{credential}'"
         doc_text = Path("docs/REHEARSAL.md").read_text().lower()
         assert "unrehearsed-surface" in doc_text, "image surface not documented as unrehearsed"
 

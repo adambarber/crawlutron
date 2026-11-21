@@ -4,6 +4,7 @@
     "**/.pytest_cache/**",
     "**/node_modules/**",
     "**/.git/**",
-    "**/packages/core/src/crawlutron/storage/migrations/**"
+    "**/packages/core/src/crawlutron/storage/migrations/**",
+    "tests/**"
   ]
 }

@@ -11,9 +11,9 @@ import yaml
 from tests._ci_contract import (
     PACKAGING_WORKFLOW_PATH,
     RELEASE_WORKFLOW_PATH,
+    SERVICE_ROOT,
     WORKFLOW_PATH,
     _job_run_steps,
-    job_steps,
 )
 
 
@@ -66,7 +66,7 @@ def test_no_run_step_splices_event_input_into_shell() -> None:
 def test_a_run_step_that_splices_an_event_field_is_caught() -> None:
     """Bites: the old inline branch interpolation fails the check."""
     workflow = RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8")
-    marker = "python3 scripts/release_roster.py --released > released.json"
+    marker = "python3 scripts/release/emit_roster.py"
     broken = workflow.replace(marker, f'{marker} "${{{{ github.event.workflow_run.head_branch }}}}"', 1)
     assert broken != workflow, "the injection did not apply; the probe proves nothing"
     with pytest.raises(AssertionError):
@@ -95,9 +95,14 @@ def test_the_published_graph_is_probed_before_the_release_lands() -> None:
 
 def test_the_image_is_pushed_only_after_it_smokes() -> None:
     """A tag that failed its smoke must never exist: :0.4.0rc1 was pushed dead."""
-    steps = job_steps(RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8"), "image")
-    names = [str(step.get("name", "")) for step in steps]
-    smoke = next(i for i, name in enumerate(names) if name.startswith("Smoke"))
-    publishes = [i for i, step in enumerate(steps) if _publishes(step)]
-    assert publishes, "the image job must publish the image"
-    assert min(publishes) > smoke, f"the image publishes before it smokes: {names}"
+    # The image job calls a script that handles smoke, push, and attest in order
+    image_script = (SERVICE_ROOT / "scripts" / "release" / "image.py").read_text()
+    # Verify the script does smoke before push
+    smoke_idx = image_script.find("_smoke_image")
+    push_idx = image_script.find("_push_and_attest")
+    assert smoke_idx != -1, "script must have smoke function"
+    assert push_idx != -1, "script must have push function"
+    assert smoke_idx < push_idx, "smoke must come before push in script"
+    # Verify the main function calls them in order
+    main_body = image_script[image_script.find("def main") :]
+    assert main_body.find("_smoke_image") < main_body.find("_push_and_attest")

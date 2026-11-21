@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from scripts import jscpd_gate as gate
-from scripts._jscpd_report_types import JscpdDuplicate
 from scripts.executables import require_repo_tool
 from tests._jscpd_gate_helpers import (
     _args,
@@ -13,6 +12,7 @@ from tests._jscpd_gate_helpers import (
     _run_against_empty_tree,
     _stub_report,
 )
+from tests._support._jscpd_report_types import JscpdDuplicate
 
 
 def test_uniform_profile_shape() -> None:

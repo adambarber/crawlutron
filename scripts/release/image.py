@@ -5,185 +5,231 @@ This replaces the `image` job from release.yml.
 
 from __future__ import annotations
 
-import json
 import os
-import subprocess
+import pathlib
 import sys
-from pathlib import Path
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def main() -> int:
+def _setup_paths() -> pathlib.Path:
+    """Expose the test support package and return repo root."""
+    _repo_root = pathlib.Path(__file__).resolve().parents[2]
+    sys.path.insert(0, str(_repo_root / "tests"))
+    return _repo_root
+
+
+_setup_paths()
+
+from _common import _require_env, _run
+from _support._image_types import _HasCookies
+
+
+async def _get_cookie_names(context: _HasCookies, target: str) -> list[str]:
+    """Get cookie names with proper type hints."""
+    cookies = await context.cookies(target)
+    return [c["name"] for c in cookies]
+
+
+async def _get_cookie_jar(context: _HasCookies, target: str) -> dict[str, str]:
+    """Get cookie jar with proper type hints."""
+    cookies = await context.cookies(target)
+    return {c["name"]: c["value"] for c in cookies}
+
+
+def _validate_env() -> tuple[str, str]:
     native_version = os.environ.get("NATIVE_VERSION", "")
-    repo_owner = os.environ.get("GITHUB_REPOSITORY_OWNER", "")
-    repository_owner = os.environ.get("GITHUB_REPOSITORY_OWNER", "")
-
-    # If NATIVE_VERSION is empty (root not released), the entrypoint is a no-op
     if not native_version:
         print("root not released; image entrypoint no-op")
-        return 0
+        sys.exit(0)
+    repository_owner = _require_env("GITHUB_REPOSITORY_OWNER")
+    return native_version, repository_owner
 
-    # Compute the image tag: lowercase, '+' -> '-'
-    tag = native_version.lower().replace("+", "-")
 
-    image = f"ghcr.io/{repository_owner}/crawlutron:{tag}"
-
-    # Login to GHCR
-    subprocess.run(
+def _docker_login() -> None:
+    github_actor = _require_env("GITHUB_ACTOR")
+    github_token = _require_env("GITHUB_TOKEN")
+    login_result = _run(
         [
             "docker",
             "login",
             "ghcr.io",
             "-u",
-            os.environ.get("GITHUB_ACTOR", ""),
+            github_actor,
             "-p",
-            os.environ.get("GITHUB_TOKEN", ""),
+            github_token,
         ],
-        check=True,
-        capture_output=True,
-        text=True,
+        capture=True,
     )
+    if login_result.returncode != 0:
+        print(f"Docker login failed: {login_result.stderr}", file=sys.stderr)
+        sys.exit(3)
 
-    # Build the runtime image locally
-    build_result = subprocess.run(
+
+def _build_image(image: str) -> None:
+    build_result = _run(
         [
-            "docker", "build-push-action",
-            "--context", ".",
-            "--target", "runtime",
-            "--file", "Dockerfile",
-            "--no-push",
-            f"--tag={image}",
+            "docker",
+            "build",
+            "--target",
+            "runtime",
+            "--load",
+            "--tag",
+            image,
+            ".",
         ],
-        capture_output=True,
-        text=True,
+        capture=True,
     )
     if build_result.returncode != 0:
-        print(f"Docker build failed: {build_result.stderr}")
-        return 3
+        print(f"Docker build failed: {build_result.stderr}", file=sys.stderr)
+        sys.exit(3)
 
-    # Smoke the built image
-    name = "crawlutron-smoke"
-    rm_result = subprocess.run(
-        ["docker", "rm", "-f", name],
-        capture_output=True,
-        text=True,
-    )
-    # Ignore errors from rm -f
 
-    docker_run = subprocess.run(
-        ["docker", "run", "-d", "--name", name,
-         "-e", "CRAWLUTRON_HOST=0.0.0.0",
-         "-p", "8765:8765", image],
-        capture_output=True,
-        text=True,
+def _run_container(name: str, image: str) -> None:
+    _run(["docker", "rm", "-f", name], capture=True)
+    docker_run = _run(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            name,
+            "-e",
+            "CRAWLUTRON_HOST=0.0.0.0",
+            "-p",
+            "8765:8765",
+            image,
+        ],
+        capture=True,
     )
     if docker_run.returncode != 0:
-        print(f"Docker run failed: {docker_run.stderr}")
-        return 3
+        print(f"Docker run failed: {docker_run.stderr}", file=sys.stderr)
+        sys.exit(3)
 
-    # Poll /health up to 60s
+
+def _wait_for_health(name: str) -> None:
     health_passed = False
     for _ in range(60):
-        result = subprocess.run(
+        result = _run(
             ["curl", "--noproxy", "*", "-fsS", "http://127.0.0.1:8765/health"],
-            capture_output=True,
-            text=True,
+            capture=True,
         )
         if result.returncode == 0:
             health_passed = True
             break
-        subprocess.run(["sleep", "1"], capture_output=True, text=True)
+        _run(["sleep", "1"], capture=True)
 
     if not health_passed:
-        # Inspect and log for debugging
-        inspect = subprocess.run(
-            ["docker", "inspect", "-f",
-             "{{.State.Status}} {{.State.ExitCode}}", name],
-            capture_output=True,
-            text=True,
+        inspect = _run(
+            ["docker", "inspect", "-f", "{{.State.Status}} {{.State.ExitCode}}", name],
+            capture=True,
         )
-        logs = subprocess.run(
-            ["docker", "logs", name],
-            capture_output=True,
-            text=True,
-        )
-        print(f"Smoke failed: health check timed out")
-        print(f"inspect: {inspect.stdout}")
-        print(f"logs: {logs.stdout}")
-        return 3
+        logs = _run(["docker", "logs", name], capture=True)
+        print("Smoke failed: health check timed out", file=sys.stderr)
+        print(f"inspect: {inspect.stdout}", file=sys.stderr)
+        print(f"logs: {logs.stdout}", file=sys.stderr)
+        sys.exit(3)
 
-    # Check /ready
-    ready_result = subprocess.run(
+
+def _check_ready() -> None:
+    ready_result = _run(
         ["curl", "--noproxy", "*", "-fsS", "http://127.0.0.1:8765/ready"],
-        capture_output=True,
-        text=True,
+        capture=True,
     )
     if ready_result.returncode != 0:
-        print(f"Smoke failed: /ready not accessible")
-        return 3
+        print("Smoke failed: /ready not accessible", file=sys.stderr)
+        sys.exit(3)
 
-    # Bake version from inside the container
-    baked_result = subprocess.run(
-        ["docker", "exec", name,
-         "/app/.venv/bin/python", "-c",
-         "from importlib.metadata import version; print(version('crawlutron'))"],
-        capture_output=True,
-        text=True,
+
+def _check_baked_version(name: str, native_version: str) -> None:
+    baked_result = _run(
+        [
+            "docker",
+            "exec",
+            name,
+            "/app/.venv/bin/python",
+            "-c",
+            "from importlib.metadata import version; print(version('crawlutron'))",
+        ],
+        capture=True,
     )
     if baked_result.returncode != 0:
-        print(f"Smoke failed: could not bake version: {baked_result.stderr}")
-        return 3
+        print(f"Smoke failed: could not bake version: {baked_result.stderr}", file=sys.stderr)
+        sys.exit(3)
 
     baked_version = baked_result.stdout.strip()
-    expected_version = native_version
-    if baked_version != expected_version:
-        print(f"Smoke failed: version mismatch: baked={baked_version}, expected={expected_version}")
-        return 3
+    if baked_version != native_version:
+        msg = f"Smoke failed: version mismatch: baked={baked_version}, expected={native_version}"
+        print(msg, file=sys.stderr)
+        sys.exit(3)
 
-    # Push the smoked image
-    push_result = subprocess.run(
-        ["docker", "push", image],
-        capture_output=True,
-        text=True,
-    )
+
+def _smoke_image(name: str, image: str, native_version: str) -> None:
+    _run_container(name, image)
+    _wait_for_health(name)
+    _check_ready()
+    _check_baked_version(name, native_version)
+
+
+def _push_and_attest(image: str, repository_owner: str) -> None:
+    push_result = _run(["docker", "push", image], capture=True)
     if push_result.returncode != 0:
-        print(f"Docker push failed: {push_result.stderr}")
-        return 4
+        print(f"Docker push failed: {push_result.stderr}", file=sys.stderr)
+        sys.exit(4)
 
-    # Attest the pushed image
-    digest_result = subprocess.run(
+    digest_result = _run(
         [
-            "docker", "buildx", "imagetools",
-            "inspect", image,
+            "docker",
+            "buildx",
+            "imagetools",
+            "inspect",
+            image,
             "--format",
             "{{.Manifest.Digest}}",
         ],
-        capture_output=True,
-        text=True,
+        capture=True,
     )
     if digest_result.returncode != 0:
-        print(f"Attestation digest lookup failed: {digest_result.stderr}")
-        return 4
+        print(f"Attestation digest lookup failed: {digest_result.stderr}", file=sys.stderr)
+        sys.exit(4)
 
     digest = digest_result.stdout.strip()
 
-    attest_result = subprocess.run(
+    attest_result = _run(
         [
-            "actions", "attest-build-provenance",
+            "actions",
+            "attest-build-provenance",
             "--subject-name",
             f"ghcr.io/{repository_owner}/crawlutron",
             "--subject-digest",
             digest,
             "--push-to-registry",
         ],
-        capture_output=True,
-        text=True,
+        capture=True,
     )
     if attest_result.returncode != 0:
-        print(f"Attestation failed: {attest_result.stderr}")
-        return 4
+        print(f"Attestation failed: {attest_result.stderr}", file=sys.stderr)
+        sys.exit(4)
 
+
+def _image_tag(native_version: str, repository_owner: str) -> str:
+    """The OCI image reference for a released version."""
+    tag = native_version.lower().replace("+", "-")
+    return f"ghcr.io/{repository_owner}/crawlutron:{tag}"
+
+
+def main() -> int:
+    native_version, repository_owner = _validate_env()
+    image = _image_tag(native_version, repository_owner)
+    name = "crawlutron-smoke"
+
+    _docker_login()
+    _build_image(image)
+
+    try:
+        _smoke_image(name, image, native_version)
+    finally:
+        _run(["docker", "rm", "-f", name], capture=True)
+
+    _push_and_attest(image, repository_owner)
     print(f"image built, pushed, and attested: {image}")
     return 0
 

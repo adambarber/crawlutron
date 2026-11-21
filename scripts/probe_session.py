@@ -10,6 +10,13 @@ import asyncio
 import os
 import sys
 from pathlib import Path
+from typing import cast
+
+# Add tests directory to path for absolute imports
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests"))
+from _support._probe_types import _get_cookie_jar, _get_cookie_names
+
+from crawlutron.transport.browser_driver import BrowserDriver
 
 # Resolve the repo root from this script location; works from container,
 # workstation, or CI checkout.
@@ -25,7 +32,6 @@ _PROBE_OUTPUT = os.environ.get("CRAWLUTRON_PROBE_OUTPUT", str(_REPO_ROOT / "tmp"
 
 async def _run() -> None:
     out = []
-    from crawlutron.transport.browser_driver import BrowserDriver
 
     driver = BrowserDriver()
     try:
@@ -33,15 +39,17 @@ async def _run() -> None:
         # reason to know the browser is recycled underneath it.
         page = await driver.open_page({})
         await page.goto(_PROBE_TARGET, wait_until="domcontentloaded", timeout=45000)
-        ua = await page.evaluate("navigator.userAgent")
-        cookies = await page.context.cookies(_PROBE_TARGET)
+        ua = cast(str, await page.evaluate("navigator.userAgent"))
+        context = page.context
+        cookie_names = await _get_cookie_names(context, _PROBE_TARGET)
         out.append(f"UA: {ua[:60]}...")
-        out.append(f"cookies: {[c['name'] for c in cookies]}")
+        out.append(f"cookies: {cookie_names}")
 
         import curl_cffi.requests as cr
 
         async with cr.AsyncSession(impersonate="firefox135") as client:
-            jar = {c["name"]: c["value"] for c in cookies}
+            # Get cookies again for the jar
+            jar = await _get_cookie_jar(context, _PROBE_TARGET)
             # Each probe adds exactly one thing to the request the one before it
             # made, so the three status codes differ only by the header under test.
             for label, extra in (

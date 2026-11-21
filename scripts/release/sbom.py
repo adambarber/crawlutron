@@ -5,51 +5,38 @@ This replaces the `sbom` job from release.yml.
 
 from __future__ import annotations
 
-import json
-import os
-import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+from _common import UV, _gh_release_upload, _release_credentials, _run
 
 
-def main() -> int:
-    tag = os.environ.get("TAG", "")
-    gh_token = os.environ.get("GH_TOKEN", "")
-
-    if not tag:
-        print("ERROR: TAG environment variable is required")
-        return 2
-
-    # Build sbom.cdx.json from the frozen lock
-    lock_path = REPO_ROOT / "uv.lock"
-    if not lock_path.exists():
-        # Try to export the lock
-        subprocess.run(
-            [UV, "lock", "--frozen"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        lock_path = REPO_ROOT / "uv.lock"
-
-    # Export locked requirements to a temp file
-    lock_txt = Path("/tmp/crawlutron-lock.txt")
-    export_result = subprocess.run(
-        [UV, "export", "--frozen", "--no-dev", "--no-emit-workspace", "--format", "requirements-txt", "-o", str(lock_txt)],
-        capture_output=True,
-        text=True,
+def _export_lock(lock_txt: Path) -> None:
+    export_result = _run(
+        [
+            UV,
+            "export",
+            "--frozen",
+            "--no-dev",
+            "--no-emit-workspace",
+            "--format",
+            "requirements-txt",
+            "-o",
+            str(lock_txt),
+        ],
+        capture=True,
     )
     if export_result.returncode != 0:
-        print(f"Lock export failed: {export_result.stderr}")
-        return 3
+        print(f"Lock export failed: {export_result.stderr}", file=sys.stderr)
+        sys.exit(3)
 
-    # Generate SBOM using cyclonedx-bom
-    sbom_path = Path("sbom.cdx.json")
-    sbom_result = subprocess.run(
+
+def _generate_sbom(lock_txt: Path, sbom_path: Path) -> None:
+    sbom_result = _run(
         [
-            "uv", "tool",
+            UV,
+            "tool",
             "run",
             "--from",
             "cyclonedx-bom==8.0.1",
@@ -61,28 +48,23 @@ def main() -> int:
             "--of",
             "json",
         ],
-        capture_output=True,
-        text=True,
+        capture=True,
     )
     if sbom_result.returncode != 0:
-        print(f"SBOM generation failed: {sbom_result.stderr}")
-        return 3
+        print(f"SBOM generation failed: {sbom_result.stderr}", file=sys.stderr)
+        sys.exit(3)
 
-    # Upload SBOM to the release
-    upload_result = subprocess.run(
-        [
-            "gh", "release",
-            "upload",
-            tag,
-            str(sbom_path),
-            "--clobber",
-        ],
-        capture_output=True,
-        text=True,
-    )
-    if upload_result.returncode != 0:
-        print(f"SBOM upload failed: {upload_result.stderr}")
-        return 4
+
+def main() -> int:
+    tag, gh_token = _release_credentials()
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix="-lock.txt", delete=False) as f:
+        lock_txt = Path(f.name)
+    sbom_path = Path("sbom.cdx.json")
+
+    _export_lock(lock_txt)
+    _generate_sbom(lock_txt, sbom_path)
+    _gh_release_upload(tag, gh_token, [str(sbom_path)], "SBOM upload failed")
 
     print(f"SBOM attached to release tag: {tag}")
     return 0

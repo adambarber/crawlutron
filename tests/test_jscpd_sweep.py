@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from scripts import jscpd_gate as gate
 from scripts import jscpd_sweep as sweep
-from scripts._jscpd_report_types import JscpdDuplicate
+from tests._support._jscpd_report_types import JscpdDuplicate
 
 
 def _clone() -> JscpdDuplicate:

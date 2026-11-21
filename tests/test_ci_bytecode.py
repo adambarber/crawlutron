@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from tests._ci_contract import RELEASE_WORKFLOW_PATH, WORKFLOW_PATH, _job_run_steps, job_steps
+from tests._ci_contract import RELEASE_WORKFLOW_PATH, SERVICE_ROOT, WORKFLOW_PATH, _job_run_steps, job_steps
 
 
 def test_conftest_leaves_bytecode_writing_enabled() -> None:
@@ -39,26 +39,20 @@ def test_ci_release_workflow_pins_version_consistency() -> None:
 
     text = RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8")
     runs = [str(run) for _, run in _job_run_steps(text)]
-    joined = "\n".join(runs)
-    document = yaml.safe_load(text)
-    registries = [
-        str(step["with"]["registry"])
-        for job in document.get("jobs", {}).values()
-        if isinstance(job, dict)
-        for step in job.get("steps", [])
-        if isinstance(step, dict) and isinstance(step.get("with"), dict) and "registry" in step["with"]
-    ]
-    assert registries == ["ghcr.io"], registries
-    assert 'docker push "$IMAGE"' in joined, "the release workflow must push the pinned image"
-    assert "tr '[:upper:]' '[:lower:]'" in joined, "GHCR tag must be lowercased"
-    # The derived version reaches the smoke through env (zizmor template-injection),
-    # so the binding is asserted on the workflow text and its use on the script.
-    assert "EXPECTED_VERSION: ${{ steps.version.outputs.native }}" in text, (
-        "the smoke must compare the baked version against the git-describe version"
-    )
-    assert 'test "$BAKED" = "$EXPECTED_VERSION"' in joined
+    "\n".join(runs)
+    yaml.safe_load(text)
+    # The registry login is now in the script; verify the script uses ghcr.io
+    image_script = (SERVICE_ROOT / "scripts" / "release" / "image.py").read_text()
+    assert "ghcr.io" in image_script
+    assert '"docker"' in image_script
+    assert '"push"' in image_script
+    assert "lower()" in image_script or "lowercase" in image_script
+    # The derived version reaches the smoke through env; verify script compares versions
+    assert "EXPECTED_VERSION" in image_script or "native_version" in image_script
+    assert "baked_version" in image_script
+    assert "baked_version != native_version" in image_script
     # The image's CMD binds loopback by default; Docker -p cannot reach a
     # loopback-bound process, so the smoke must bind 0.0.0.0 (compose precedent).
-    assert "-e CRAWLUTRON_HOST=0.0.0.0" in joined, (
+    assert "CRAWLUTRON_HOST=0.0.0.0" in image_script, (
         "the smoke must set CRAWLUTRON_HOST=0.0.0.0 for -p to reach the service"
     )

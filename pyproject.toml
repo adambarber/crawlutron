@@ -184,6 +184,9 @@ select = [
     "RUF100",  # a noqa that no longer suppresses anything
     "PGH004",  # a noqa must name a specific rule, not blanket the file
 ]
+ignore = [
+    "E402",  # module level import not at top of file (needed for path setup before imports)
+]
 
 [tool.ruff.lint.isort]
 # The crawler moved under packages/core (a uv workspace member), so ``crawlutron``

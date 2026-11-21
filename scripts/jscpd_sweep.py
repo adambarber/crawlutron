@@ -14,8 +14,8 @@ import textwrap
 from pathlib import Path
 
 from scripts import jscpd_gate as gate
-from scripts._jscpd_report_types import JscpdDuplicate
 from scripts.ast_scopes import SCOPE_OPENING_NODES
+from tests._support._jscpd_report_types import JscpdDuplicate
 
 
 def _scan(root: str, min_lines: int, min_tokens: int) -> tuple[str, list[JscpdDuplicate]]:

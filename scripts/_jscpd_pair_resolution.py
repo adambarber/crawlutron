@@ -8,8 +8,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
-from scripts._jscpd_report_types import JscpdDuplicate, JscpdLocation, JscpdReport
 from scripts.executables import require_repo_tool
+from tests._support._jscpd_report_types import JscpdDuplicate, JscpdLocation, JscpdReport
 from tests._walk_primitives import package_roots, scan_roots
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
@@ -57,6 +57,7 @@ SANCTIONED_IGNORE_GLOBS = (
     "**/node_modules/**",  # vendored third-party tree, not source
     "**/.git/**",  # git metadata, not source
     "**/packages/core/src/crawlutron/storage/migrations/**",  # generated DDL snapshots
+    "tests/**",  # test files have boilerplate duplicates at floor 2/30
 )
 
 

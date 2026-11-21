@@ -12,6 +12,7 @@ import pytest
 import yaml
 
 from scripts.release_roster import primary_tag, released, roster
+from tests._ci_contract import SERVICE_ROOT
 
 RELEASE_WORKFLOW_PATH = Path(__file__).resolve().parents[1] / ".github/workflows/release.yml"
 GIT = shutil.which("git") or "git"
@@ -149,15 +150,13 @@ def test_a_manual_retry_can_publish_an_existing_tag_from_the_fixed_workflow() ->
         if "with" in step and "ref" in step["with"]
     ]
     assert refs and set(refs) == {"${{ inputs.tag || github.sha }}", "${{ github.sha }}"}
-    smoke = "\n".join(
-        str(step.get("run", ""))
-        for step in workflow_doc["jobs"]["image"]["steps"]
-        if "Smoke the built image" == step.get("name")
-    )
-    assert "seq 1 60" in smoke
-    assert "curl --noproxy '*'" in smoke, "loopback probes must bypass any HTTP proxy"
-    assert 'version("crawlutron")' in smoke, "assert the root release version, not the core member"
-    assert "docker inspect -f" in smoke
+    # The image job now calls the script; verify the script contains the smoke logic
+    image_script = (SERVICE_ROOT / "scripts" / "release" / "image.py").read_text()
+    assert "range(60)" in image_script
+    assert '"curl"' in image_script
+    assert '"--noproxy"' in image_script
+    assert "version('crawlutron')" in image_script
+    assert '"docker"' in image_script and '"inspect"' in image_script
     released_job = workflow_doc["jobs"]["released"]
     assert released_job["steps"][0]["with"]["ref"] == "${{ github.sha }}"
     image_job = workflow_doc["jobs"]["image"]

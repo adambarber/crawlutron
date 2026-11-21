@@ -14,7 +14,7 @@ import sys
 import yaml
 
 from scripts import _jscpd_pair_resolution as resolver
-from scripts._jscpd_report_types import JscpdDuplicate
+from tests._support._jscpd_report_types import JscpdDuplicate
 
 # Re-exports: the contract surface the gate's own suite reads off this module.
 CONFIG_PATH = resolver.CONFIG_PATH
