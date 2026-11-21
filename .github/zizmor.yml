@@ -2,9 +2,9 @@
 # deliberate design decision, written down here so the audit is honest rather
 # than silencing whatever it finds; anything not listed must be fixed.
 #
-# The dangerous-triggers section is gone with workflow_run: no workflow here
-# uses it (or pull_request_target). Publishing is gated by `needs` on a
-# workflow_call of CI inside the same run, which is not a dangerous trigger.
+# agent-review.yml uses workflow_run deliberately with a two-plane trust split:
+# - Plane A (probes): no secrets, runs only pinned base-tree scripts
+# - Plane B (review): consumes probe artifacts as data only, never executes PR code
 rules:
   cache-poisoning:
     ignore:
@@ -15,5 +15,11 @@ rules:
       # release rebuilds without its caches for the same reason.
       - ci.yml
       - packaging.yml
+  dangerous-triggers:
+    ignore:
+      # agent-review.yml uses workflow_run with a two-plane trust split.
+      # Plane A (probes) has no secrets and runs only pinned base-tree scripts.
+      # Plane B (review) consumes probe artifacts as data only, never executes PR code.
+      - agent-review.yml
 # Read-only posture is enforced by the default excessive-permissions audit
 # and tests/test_release_contract.py; no posture override exists in zizmor.

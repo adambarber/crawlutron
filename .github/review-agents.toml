@@ -1,0 +1,27 @@
+# Single policy registry for automated pull-request reviews.
+# Model IDs, prompt paths, probe allowlists, thresholds, and routing live here.
+
+[defaults]
+agent = "code-review"
+
+[agents.code-review]
+model = "nvidia/nemotron-3-ultra-550b-a55b"
+prompt = ".github/agents/code-review.md"
+probes = ["structural-diff", "ci-gates", "invariants"]
+severity_threshold = "P1"
+
+[probes.structural-diff]
+command = "structural-diff"
+description = "Collects the complete patch and changed-file list"
+
+[probes.ci-gates]
+command = "ci-gates"
+description = "Collects job conclusions from the triggering workflow run"
+
+[probes.invariants]
+command = "invariants"
+description = "Runs bounded invariant and contract test subsets"
+
+[routing]
+path_rules = []
+label_rules = []

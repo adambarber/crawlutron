@@ -124,6 +124,8 @@ dev = [
 
 [project.scripts]
 pin-verify = "scripts.pin_verify:main"
+agent-review = "scripts.agent_review:main"
+review-probes = "scripts.review_probes:main"
 
 [project.urls]
 # The canonical remote, and the same value as crawlutron.vocabulary.identity.REPOSITORY_URL --
