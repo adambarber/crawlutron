@@ -12,8 +12,6 @@ from pathlib import Path
 import httpx
 import pytest
 
-from scripts.executables import require_executable
-
 SERVICE_ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_PATH = SERVICE_ROOT / ".github" / "review-agents.toml"
 AGENT_REVIEW_SCRIPT = SERVICE_ROOT / "scripts" / "agent_review.py"
@@ -79,19 +77,30 @@ def _probe_artifacts(probe_dir: Path) -> None:
 
 
 def _write_verdict(path: Path, verdict: str) -> None:
-    path.write_text(json.dumps({"verdict": verdict, "findings": [], "summary": "review summary"}), encoding="utf-8")
+    path.write_text(
+        json.dumps({"verdict": verdict, "findings": [], "summary": "review summary"}), encoding="utf-8"
+    )
 
 
-def _current_head_get(url: str, *, headers: dict[str, str], timeout: float, follow_redirects: bool) -> httpx.Response:
-    return httpx.Response(200, json={"state": "open", "head": {"sha": "abc123"}}, request=httpx.Request("GET", url))
+def _current_head_get(
+    url: str, *, headers: dict[str, str], timeout: float, follow_redirects: bool
+) -> httpx.Response:
+    return httpx.Response(
+        200, json={"state": "open", "head": {"sha": "abc123"}}, request=httpx.Request("GET", url)
+    )
 
 
-def _stale_head_get(url: str, *, headers: dict[str, str], timeout: float, follow_redirects: bool) -> httpx.Response:
-    return httpx.Response(200, json={"state": "open", "head": {"sha": "new-head"}}, request=httpx.Request("GET", url))
+def _stale_head_get(
+    url: str, *, headers: dict[str, str], timeout: float, follow_redirects: bool
+) -> httpx.Response:
+    return httpx.Response(
+        200, json={"state": "open", "head": {"sha": "new-head"}}, request=httpx.Request("GET", url)
+    )
 
 
 def test_registry_parser_selects_the_configured_default_agent() -> None:
     from scripts.review_registry import load_registry
+
     registry = load_registry(REGISTRY_PATH)
     assert registry.default_agent == "code-review"
     assert registry.agents[registry.default_agent].probes
@@ -99,8 +108,10 @@ def test_registry_parser_selects_the_configured_default_agent() -> None:
 
 def test_registry_parser_rejects_an_unregistered_probe(tmp_path: Path) -> None:
     from scripts.review_registry import load_registry
+
     registry_path = tmp_path / "review-agents.toml"
-    registry_path.write_text("""[defaults]
+    registry_path.write_text(
+        """[defaults]
 agent = "code-review"
 [agents.code-review]
 model = "example-model"
@@ -110,15 +121,19 @@ severity_threshold = "P1"
 [probes.diff]
 command = "structural-diff"
 description = "diff"
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
     with pytest.raises(ValueError, match="unregistered probes"):
         load_registry(registry_path)
 
 
 def test_registry_parser_rejects_an_unknown_agent_field(tmp_path: Path) -> None:
     from scripts.review_registry import load_registry
+
     registry_path = tmp_path / "review-agents.toml"
-    registry_path.write_text("""[defaults]
+    registry_path.write_text(
+        """[defaults]
 agent = "code-review"
 [agents.code-review]
 model = "example-model"
@@ -129,15 +144,19 @@ path = ["**/*.py"]
 [probes.diff]
 command = "structural-diff"
 description = "diff"
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
     with pytest.raises(ValueError, match="unknown fields"):
         load_registry(registry_path)
 
 
 def test_registry_parser_rejects_an_unknown_root_field(tmp_path: Path) -> None:
     from scripts.review_registry import load_registry
+
     registry_path = tmp_path / "review-agents.toml"
-    registry_path.write_text("""defualts = "typo"
+    registry_path.write_text(
+        """defualts = "typo"
 [defaults]
 agent = "code-review"
 [agents.code-review]
@@ -148,15 +167,19 @@ severity_threshold = "P1"
 [probes.diff]
 command = "structural-diff"
 description = "diff"
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
     with pytest.raises(ValueError, match="unknown fields"):
         load_registry(registry_path)
 
 
 def test_registry_parser_rejects_an_unregistered_default_agent(tmp_path: Path) -> None:
     from scripts.review_registry import load_registry
+
     registry_path = tmp_path / "review-agents.toml"
-    registry_path.write_text("""[defaults]
+    registry_path.write_text(
+        """[defaults]
 agent = "missing"
 [agents.code-review]
 model = "example-model"
@@ -166,15 +189,19 @@ severity_threshold = "P1"
 [probes.diff]
 command = "structural-diff"
 description = "diff"
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
     with pytest.raises(ValueError, match="default agent"):
         load_registry(registry_path)
 
 
 def test_registry_parser_honors_path_routing(tmp_path: Path) -> None:
     from scripts.review_registry import load_registry, select_agent
+
     registry_path = tmp_path / "review-agents.toml"
-    registry_path.write_text("""[defaults]
+    registry_path.write_text(
+        """[defaults]
 agent = "general"
 [agents.general]
 model = "general-model"
@@ -192,7 +219,9 @@ description = "diff"
 [routing]
 path_rules = [{ pattern = "packages/mcp/**", agent = "special" }]
 label_rules = []
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
     registry = load_registry(registry_path)
     selected = select_agent(registry, changed_files=("packages/mcp/server.py",), labels=())
     assert selected.model == "special-model"
@@ -257,7 +286,10 @@ def test_agent_review_fails_closed_on_a_failed_probe(tmp_path: Path) -> None:
 
 def test_validate_verdict_rejects_unknown_and_malformed_fields() -> None:
     from scripts.agent_review import validate_verdict
-    valid = validate_verdict('{"verdict":"REQUEST_CHANGES","findings":[],"summary":"A source-grounded failure"}')
+
+    valid = validate_verdict(
+        '{"verdict":"REQUEST_CHANGES","findings":[],"summary":"A source-grounded failure"}'
+    )
     assert valid.verdict == "REQUEST_CHANGES"
     with pytest.raises(ValueError, match="Missing required field: verdict"):
         validate_verdict('{"findings":[],"summary":"missing"}')
@@ -268,15 +300,26 @@ def test_validate_verdict_rejects_unknown_and_malformed_fields() -> None:
     with pytest.raises(ValueError, match="unknown fields"):
         validate_verdict('{"verdict":"APPROVE","findings":[],"summary":"bad","extra":true}')
     with pytest.raises(ValueError, match="repository-relative"):
-        validate_verdict('{"verdict":"REQUEST_CHANGES","findings":[{"file":"../../etc/passwd","line":1,"severity":"P1","rule":"r","rationale":"x","confidence":"High"}],"summary":"bad"}')
+        validate_verdict(
+            '{"verdict":"REQUEST_CHANGES","findings":[{"file":"../../etc/passwd","line":1,"severity":"P1","rule":"r","rationale":"x","confidence":"High"}],"summary":"bad"}'
+        )
 
 
 def test_nvidia_call_uses_the_configured_model_and_fixed_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.agent_review import call_nvidia_api
+
     calls: list[dict[str, object]] = []
-    def fake_post(url: str, *, json: object, headers: dict[str, str], timeout: float, follow_redirects: bool) -> httpx.Response:
+
+    def fake_post(
+        url: str, *, json: object, headers: dict[str, str], timeout: float, follow_redirects: bool
+    ) -> httpx.Response:
         calls.append({"url": url, "json": json, "headers": headers})
-        return httpx.Response(200, json={"choices": [{"message": {"content": "verdict text"}}]}, request=httpx.Request("POST", url))
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "verdict text"}}]},
+            request=httpx.Request("POST", url),
+        )
+
     monkeypatch.setattr(httpx, "post", fake_post)
     assert call_nvidia_api("secret", "prompt", "configured-model") == "verdict text"
     assert calls[0]["url"] == "https://integrate.api.nvidia.com/v1/chat/completions"
@@ -288,6 +331,7 @@ def test_nvidia_call_uses_the_configured_model_and_fixed_endpoint(monkeypatch: p
 
 def test_stale_pull_request_head_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.agent_review import ensure_current_head
+
     monkeypatch.setattr(httpx, "get", _stale_head_get)
     monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repository")
     with pytest.raises(ValueError, match="stale"):
@@ -296,10 +340,15 @@ def test_stale_pull_request_head_is_refused(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_stale_head_blocks_check_publication(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.agent_review import publish_check
+
     calls: list[dict[str, object]] = []
-    def fake_post(url: str, *, json: object, headers: dict[str, str], timeout: float, follow_redirects: bool) -> httpx.Response:
+
+    def fake_post(
+        url: str, *, json: object, headers: dict[str, str], timeout: float, follow_redirects: bool
+    ) -> httpx.Response:
         calls.append({"url": url, "json": json, "headers": headers})
         return httpx.Response(201, json={}, request=httpx.Request("POST", url))
+
     monkeypatch.setattr(httpx, "post", fake_post)
     monkeypatch.setattr(httpx, "get", _stale_head_get)
     monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repository")
@@ -309,13 +358,24 @@ def test_stale_head_blocks_check_publication(tmp_path: Path, monkeypatch: pytest
     assert calls == []
 
 
-@pytest.mark.parametrize(("verdict", "expected_conclusion"), [("APPROVE", "success"), ("REQUEST_CHANGES", "failure")])
-def test_check_run_is_published_for_both_verdicts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, verdict: str, expected_conclusion: str) -> None:
+@pytest.mark.parametrize(
+    ("verdict", "expected_conclusion"), [("APPROVE", "success"), ("REQUEST_CHANGES", "failure")]
+)
+def test_check_run_is_published_for_both_verdicts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, verdict: str, expected_conclusion: str
+) -> None:
     from scripts.agent_review import publish_check
+
     calls: list[dict[str, object]] = []
-    def fake_post(url: str, *, json: object, headers: dict[str, str], timeout: float, follow_redirects: bool) -> httpx.Response:
+
+    def fake_post(
+        url: str, *, json: object, headers: dict[str, str], timeout: float, follow_redirects: bool
+    ) -> httpx.Response:
         calls.append({"url": url, "json": json, "headers": headers})
-        return httpx.Response(201, json={"html_url": "https://example.test/check"}, request=httpx.Request("POST", url))
+        return httpx.Response(
+            201, json={"html_url": "https://example.test/check"}, request=httpx.Request("POST", url)
+        )
+
     monkeypatch.setattr(httpx, "post", fake_post)
     monkeypatch.setattr(httpx, "get", _current_head_get)
     monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repository")
@@ -328,12 +388,21 @@ def test_check_run_is_published_for_both_verdicts(tmp_path: Path, monkeypatch: p
 
 
 @pytest.mark.parametrize("verdict", ["APPROVE", "REQUEST_CHANGES"])
-def test_pr_publication_is_always_an_advisory_comment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, verdict: str) -> None:
+def test_pr_publication_is_always_an_advisory_comment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, verdict: str
+) -> None:
     from scripts.agent_review import post_review
+
     calls: list[dict[str, object]] = []
-    def fake_post(url: str, *, json: object, headers: dict[str, str], timeout: float, follow_redirects: bool) -> httpx.Response:
+
+    def fake_post(
+        url: str, *, json: object, headers: dict[str, str], timeout: float, follow_redirects: bool
+    ) -> httpx.Response:
         calls.append({"url": url, "json": json, "headers": headers})
-        return httpx.Response(200, json={"html_url": "https://example.test/review"}, request=httpx.Request("POST", url))
+        return httpx.Response(
+            200, json={"html_url": "https://example.test/review"}, request=httpx.Request("POST", url)
+        )
+
     monkeypatch.setattr(httpx, "post", fake_post)
     monkeypatch.setattr(httpx, "get", _current_head_get)
     monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repository")

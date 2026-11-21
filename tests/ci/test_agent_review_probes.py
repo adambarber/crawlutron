@@ -50,9 +50,29 @@ def _probe_artifacts(probe_dir: Path) -> None:
         (probe_dir / f"{name}.json").write_text(json.dumps(payload), encoding="utf-8")
 
 
+def test_probe_records_are_read_only_through_shared_accessors() -> None:
+    import ast
+
+    tree = ast.parse(REVIEW_PROBES_SCRIPT.read_text(encoding="utf-8"))
+    direct: list[int] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Subscript):
+            continue
+        key = node.slice
+        if not isinstance(key, ast.Constant) or not isinstance(key.value, str):
+            continue
+        base = node.value
+        if isinstance(base, ast.Name) and base.id == "result":
+            direct.append(node.lineno)
+        elif isinstance(base, ast.Attribute) and base.attr == "result":
+            direct.append(node.lineno)
+    assert direct == [], f"direct probe record reads at lines {direct}"
+
+
 def test_probe_result_record_has_exactly_eight_keys() -> None:
-    from scripts.review_support import ProbeResultRecord
     import typing
+
+    from scripts.review_support import ProbeResultRecord
 
     hints = typing.get_type_hints(ProbeResultRecord)
     assert set(hints.keys()) == {
@@ -123,7 +143,7 @@ def test_probe_result_record_accessors_validate_input() -> None:
     }
     try:
         as_probe_result_record(bad_type, "test")
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         pass
     else:
         raise AssertionError("Expected TypeError or ValueError for wrong type")
@@ -166,7 +186,7 @@ def test_validate_probe_artifact_enforces_exact_eight_keys() -> None:
         raise AssertionError("Expected ValueError for missing key")
 
     extra_key = dict(valid_artifact)
-    extra_result: dict[str, object] = dict(valid_artifact["result"])
+    extra_result: dict[str, object] = _mapping(valid_artifact["result"])
     extra_result["extra_field"] = "not-allowed"
     extra_key["result"] = extra_result
     try:

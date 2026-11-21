@@ -28,7 +28,7 @@ else:
         import review_support as _support
 
 from crawlutron.review.probes import ProbeArtifact
-from crawlutron.review.support import ProbeResultRecord
+from crawlutron.review.support import ProbeResultRecord, probe_exit_code
 
 SHA_PATTERN: Final[re.Pattern[str]] = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
 REPOSITORY_PATTERN: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
@@ -134,8 +134,9 @@ def probe_structural_diff(base_sha: str, head_sha: str, output_path: Path) -> Pr
     stdout_path, stderr_path = _artifact_paths(output_path)
     argv = (_GIT, "diff", "--no-ext-diff", "--no-color", base_sha, head_sha, "--")
     result = _run_command("structural-diff", argv, stdout_path, stderr_path)
-    changed = _changed_files(base_sha, head_sha) if result["exit_code"] == 0 else []
-    diff = stdout_path.read_text(encoding="utf-8") if result["exit_code"] == 0 else ""
+    succeeded = probe_exit_code(result) == 0
+    changed = _changed_files(base_sha, head_sha) if succeeded else []
+    diff = stdout_path.read_text(encoding="utf-8") if succeeded else ""
     data: dict[str, object] = {
         "base_sha": base_sha,
         "head_sha": head_sha,
@@ -201,7 +202,7 @@ def probe_invariants(output_path: Path) -> ProbeArtifact:
     argv = (sys.executable, "-m", "pytest", *INVARIANT_TESTS, "-q", "--tb=line", "-x")
     result = _run_command("invariants", argv, stdout_path, stderr_path)
     data: dict[str, object] = {
-        "passed": result["exit_code"] == 0,
+        "passed": probe_exit_code(result) == 0,
         "tests": list(INVARIANT_TESTS),
     }
     artifact = ProbeArtifact(name="invariants", result=result, data=data)
@@ -312,7 +313,7 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1
-    failed = [artifact.name for artifact in artifacts if artifact.result["exit_code"] != 0]
+    failed = [artifact.name for artifact in artifacts if probe_exit_code(artifact.result) != 0]
     if failed:
         print(f"ERROR: probes failed: {', '.join(failed)}", file=sys.stderr)
         return 1
