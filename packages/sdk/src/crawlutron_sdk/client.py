@@ -6,6 +6,7 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from typing import Literal, Never, TypedDict, TypeVar
+from urllib.parse import quote
 
 import httpx
 from pydantic import BaseModel
@@ -76,7 +77,11 @@ def _str_key_dict(data: object) -> dict[str, object]:
 def _json_body(response: httpx.Response) -> dict[str, object]:
     if not response.content:
         return {}
-    return _str_key_dict(response.json())
+    try:
+        data = response.json()
+    except Exception:  # non-JSON response (e.g. HTML 502); map to typed error
+        return {"code": "bad_gateway", "message": "Malformed response", "details": {}}
+    return _str_key_dict(data)
 
 
 def _payload_dict(payload: object) -> dict[str, object]:
@@ -209,10 +214,21 @@ class CrawlutronClient(_ClientBase):
         json: dict[str, object] | None = None,
     ) -> httpx.Response:
         client = await self._get_client()
-        try:
-            return await client.request(method, path, json=json)
-        except httpx.HTTPError as error:
-            raise self._transport_error(error) from error
+        max_retries = 3
+        for attempt in range(max_retries + 1):
+            try:
+                response = await client.request(method, path, json=json)
+            except httpx.HTTPError as error:
+                raise self._transport_error(error) from error
+            if response.status_code in (429, 503):
+                if attempt < max_retries:
+                    retry_after = response.headers.get("Retry-After")
+                    wait_seconds = float(retry_after) if retry_after else 2.0
+                    await asyncio.sleep(wait_seconds)
+                    continue
+                break
+            break
+        return response
 
     async def crawl(self, payload: CrawlRequest) -> CrawlResponse:
         """Synchronous crawl door: returns the unified crawl response."""
@@ -227,11 +243,11 @@ class CrawlutronClient(_ClientBase):
 
     async def get_crawl_result(self, request_id: str) -> CrawlResponse:
         """Retrieve a completed crawl; raises if still accepted (202) or gone (404)."""
-        response = await self._request("GET", f"/v1/crawl/{request_id}")
+        response = await self._request("GET", f"/v1/crawl/{quote(request_id, safe='')}")
         return self._finish(response, CrawlResponse, accepted_if_pending=True)
 
     async def wait_for(
-        self, request_id: str, *, poll_interval: float = 1.0, max_wait: float | None = None
+        self, request_id: str, *, poll_interval: float = 1.0, max_wait: float | None = 60.0
     ) -> CrawlResponse:
         """Poll ``get_crawl_result`` until the crawl reaches a terminal state."""
         return await _poll_result(
@@ -383,10 +399,21 @@ class CrawlutronClientSync(_ClientBase):
 
     def _request(self, method: str, path: str, *, json: dict[str, object] | None = None) -> httpx.Response:
         client = self._get_client()
-        try:
-            return client.request(method, path, json=json)
-        except httpx.HTTPError as error:
-            self._transport_failure(error)
+        max_retries = 3
+        for attempt in range(max_retries + 1):
+            try:
+                response = client.request(method, path, json=json)
+            except httpx.HTTPError as error:
+                self._transport_failure(error)
+            if response.status_code in (429, 503):
+                if attempt < max_retries:
+                    retry_after = response.headers.get("Retry-After")
+                    wait_seconds = float(retry_after) if retry_after else 2.0
+                    time.sleep(wait_seconds)
+                    continue
+                break
+            break
+        return response
 
     def crawl(self, payload: CrawlRequest) -> CrawlResponse:
         response = self._request("POST", "/v1/crawl", json=_payload_dict(payload))
@@ -399,11 +426,11 @@ class CrawlutronClientSync(_ClientBase):
 
     def get_crawl_result(self, request_id: str) -> CrawlResponse:
         """Retrieve a completed crawl; raises if still accepted (202) or gone (404)."""
-        response = self._request("GET", f"/v1/crawl/{request_id}")
+        response = self._request("GET", f"/v1/crawl/{quote(request_id, safe='')}")
         return self._finish(response, CrawlResponse, accepted_if_pending=True)
 
     def wait_for(
-        self, request_id: str, *, max_wait: float | None = None, poll_interval: float = 1.0
+        self, request_id: str, *, max_wait: float | None = 60.0, poll_interval: float = 1.0
     ) -> CrawlResponse:
         """Poll ``get_crawl_result`` until the crawl reaches a terminal state."""
         deadline = self._make_wait_deadline(max_wait)
@@ -441,16 +468,16 @@ class CrawlutronClientSync(_ClientBase):
         return self._finish(response, JobListResponse)
 
     def get_job(self, job_id: str) -> JobStatusResponse:
-        response = self._request("GET", f"/v1/jobs/{job_id}")
+        response = self._request("GET", f"/v1/jobs/{quote(job_id, safe='')}")
         return self._finish(response, JobStatusResponse)
 
     def control_job(self, job_id: str, action: Literal["pause", "resume", "cancel"]) -> JobStatusResponse:
         payload = JobControlRequest(action=action)
-        response = self._request("POST", f"/v1/jobs/{job_id}/control", json=_payload_dict(payload))
+        response = self._request("POST", f"/v1/jobs/{quote(job_id, safe='')}/control", json=_payload_dict(payload))
         return self._finish(response, JobStatusResponse)
 
     def delete_job(self, job_id: str) -> None:
-        response = self._request("DELETE", f"/v1/jobs/{job_id}")
+        response = self._request("DELETE", f"/v1/jobs/{quote(job_id, safe='')}")
         self._check(response)
 
     def search(self, payload: SearchRequest) -> SearchResponse:
@@ -466,11 +493,11 @@ class CrawlutronClientSync(_ClientBase):
         return self._finish(response, WatchListResponse)
 
     def get_watch(self, watch_id: str) -> WatchState:
-        response = self._request("GET", f"/v1/watches/{watch_id}")
+        response = self._request("GET", f"/v1/watches/{quote(watch_id, safe='')}")
         return self._finish(response, WatchState)
 
     def delete_watch(self, watch_id: str) -> None:
-        response = self._request("DELETE", f"/v1/watches/{watch_id}")
+        response = self._request("DELETE", f"/v1/watches/{quote(watch_id, safe='')}")
         self._check(response)
 
     def agent_hints(self) -> AgentHintsResponse:
