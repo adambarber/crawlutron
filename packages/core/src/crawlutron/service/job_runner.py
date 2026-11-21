@@ -9,7 +9,6 @@ import re
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import replace
-from functools import partial
 from typing import cast
 
 from crawlutron.admission.admission import (
@@ -19,16 +18,16 @@ from crawlutron.admission.admission import (
     fetch_job_sitemap_candidates,
     record_cap_overcommitted,
     record_cap_truncated,
-    requeue_admitted_pages,
 )
-from crawlutron.admission.admission_links import AdmissionOutcome, remaining_page_capacity
+from crawlutron.admission.admission_links import remaining_page_capacity
 from crawlutron.admission.policy import read_policy
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.result_record import ProducerEnvelope
 from crawlutron.service.crawl_executor import execute_crawl as _real_execute_crawl
-from crawlutron.service.effects import EffectContainer, run_crawl_with_claim
+from crawlutron.service.effects import EffectContainer, EffectOutcome, run_crawl_with_claim
+from crawlutron.service.job_batch import absorb_batch
 from crawlutron.service.job_lifecycle import (
     cancel_all_tasks,
     cancel_job_task,
@@ -42,8 +41,6 @@ from crawlutron.service.job_recovery import (
     recover_orphaned_running_jobs,
 )
 from crawlutron.service.job_runner_lease import new_claim_token
-from crawlutron.service.response_shaping import failed_unified_result
-from crawlutron.service.unified_shaping import abuild_unified_result
 from crawlutron.storage.job_store import (
     DEFAULT_JOB_CLAIM_SECONDS,
     CrawlJobState,
@@ -54,8 +51,6 @@ from crawlutron.storage.job_store import (
     normalize_job_state,
 )
 from crawlutron.transport.robots import FetchAndDecode
-from crawlutron.vocabulary.limits import MAX_URL_TRANSIENT_ATTEMPTS
-from crawlutron.vocabulary.taxonomy import is_transient_classification
 from safe_url.normalized_url import NormalizedUrl, admit_or_none
 from safe_url.url_redaction import redact_url
 
@@ -141,6 +136,12 @@ def job_engine_payload(job: CrawlJobState, batch: Sequence[FrontierEntry]) -> Cr
     return CrawlRequest(urls=urls, policy=policy)
 
 
+def job_batch_timeout_seconds(payload: CrawlRequest) -> float:
+    """The batch wall bound: the policy's per-URL budget across its URLs."""
+    url_count = len(payload.urls) if payload.urls is not None else 1
+    return payload.policy.limits.total_url_budget_seconds * url_count
+
+
 async def _seed_job_sitemaps(
     job: CrawlJobState, context: JobAdmissionContext, container: EffectContainer
 ) -> None:
@@ -169,38 +170,6 @@ async def _load_and_claim(
     ):
         return None
     return replace(job, status=JobStatus.RUNNING, claimed_by=claim_token, claimed_at=now)
-
-
-async def _entry_result(
-    job: CrawlJobState,
-    identity: NormalizedUrl,
-    item: EngineCrawlResult | None,
-    depth: int,
-    context: JobAdmissionContext,
-    known: set[NormalizedUrl],
-) -> int:
-    if item is None:
-        job.results.append(failed_unified_result(identity).model_dump())
-        return 1
-    if is_transient_classification(item.classification):
-        item = replace(item, status="failed", error="retries_exhausted")
-    try:
-        unified = await abuild_unified_result(item)
-    except Exception:
-        unified = failed_unified_result(item)
-    job.results.append(unified.model_dump())
-    failed = 1 if item.status == "failed" else 0
-    try:
-        admitted = await admit_job_links(
-            job, item.discovered_links, source_depth=depth, context=context, known=known
-        )
-    except Exception:
-        url_attr = item.normalized_url.raw if item.normalized_url else "<unknown>"
-        logger.warning("link_admission_failed", extra={"url": redact_url(url_attr)})
-        admitted = AdmissionOutcome()
-    known |= admitted.known_delta  # unioning the delta copies nothing whole
-    job.stats["total_discovered"] = job.stats.get("total_discovered", 0) + admitted.accepted
-    return failed
 
 
 async def _should_stop(
@@ -239,39 +208,6 @@ async def _mark_complete_if_empty(
     return True
 
 
-async def absorb_batch(
-    job: CrawlJobState,
-    batch: Sequence[FrontierEntry],
-    resolved: dict[NormalizedUrl, EngineCrawlResult],
-    context: JobAdmissionContext,
-    known: set[NormalizedUrl],
-) -> int:
-    failed = 0
-    for entry in batch:
-        identity = entry.url
-        job.in_flight = [pending for pending in job.in_flight if pending.url != identity]
-        known.discard(identity)
-        item = resolved.get(identity)
-        transient = item is None or is_transient_classification(item.classification)
-        if transient and job.transient_retries.get(identity, 0) + 1 < MAX_URL_TRANSIENT_ATTEMPTS:
-            job.transient_retries[identity] = job.transient_retries.get(identity, 0) + 1
-            requeue_admitted_pages(
-                job,
-                (FrontierEntry(url=identity, depth=entry.depth),),
-                context,
-                known=known,
-            )
-            continue
-        job.transient_retries.pop(identity, None)
-        job.visited.add(identity)
-        known.add(identity)
-        failed += await _entry_result(job, identity, item, entry.depth, context, known)
-    job.stats["total_crawled"] = len(job.visited)
-    if failed:
-        job.stats["total_failed"] = job.stats.get("total_failed", 0) + failed
-    return failed
-
-
 def _resolve_redirects(
     items: Sequence[EngineCrawlResult], resolved: dict[NormalizedUrl, EngineCrawlResult]
 ) -> None:
@@ -300,6 +236,54 @@ async def _renew_claim_and_save(job_store: JobStore, job_id: str, token: str, jo
     return True
 
 
+async def _run_batch(
+    job: CrawlJobState,
+    batch: Sequence[FrontierEntry],
+    context: JobAdmissionContext,
+    known: set[NormalizedUrl],
+    *,
+    settings: CrawlerSettings,
+    shutdown_event: asyncio.Event,
+    container: EffectContainer,
+    job_store: JobStore,
+    job_id: str,
+    token: str,
+) -> CrawlJobState | None:
+    """Run one batch under its policy-derived bound and absorb what it resolved.
+
+    None means the job stops here: the claim was lost, the job was paused or
+    cancelled, or the state could not be reloaded.
+    """
+    payload = job_engine_payload(job, batch)
+    timeout = job_batch_timeout_seconds(payload)
+
+    # The default binds this batch's payload: the closure must not read the
+    # loop variable, and the payload chokepoint checks the builder's name.
+    async def _crawl_op(payload: CrawlRequest = payload) -> object:
+        return await _execute_crawl(payload, settings=settings, shutdown_event=shutdown_event)
+
+    claim = await run_crawl_with_claim(
+        container, _crawl_op, batch[0].url.raw, timeout, job_store, job_id, token
+    )
+    reloaded = await job_store.areload_state(job_id)
+    if reloaded is None or reloaded.claimed_by != token:
+        return None
+    job = replace(reloaded, results=job.results, visited=job.visited, visited_mark=job.visited_mark)
+    resolved = _resolved_items(cast("Sequence[EngineCrawlResult]", claim.items), job.host_policy)
+    timed_out = claim.outcome is EffectOutcome.TIMED_OUT
+    if job.status in {JobStatus.PAUSED, JobStatus.CANCELLED}:
+        if job.in_flight:
+            await absorb_batch(job, batch, resolved, context, known, timed_out=timed_out)
+            await job_store.asave(job)
+        return None
+    if not claim.still_owned or job.status is not JobStatus.RUNNING:
+        return None
+    await absorb_batch(job, batch, resolved, context, known, timed_out=timed_out)
+    if not await _renew_claim_and_save(job_store, job_id, token, job):
+        return None
+    return job
+
+
 async def _run_claimed_loop(
     job,
     job_id: str,
@@ -311,14 +295,6 @@ async def _run_claimed_loop(
     container: EffectContainer,
 ) -> None:
     known = admitted_page_identities(job, host_policy=context.host_policy)
-    _crawl_claim = partial(
-        run_crawl_with_claim,
-        container,
-        timeout=settings.default_timeout_seconds,
-        job_store=job_store,
-        job_id=job_id,
-        token=token,
-    )
     while True:
         if not await job_store.arenew_job_claim(job_id, token, now=time.time()):
             return
@@ -335,28 +311,21 @@ async def _run_claimed_loop(
             job.in_flight = list(batch)
         if not await _renew_claim_and_save(job_store, job_id, token, job):
             return
-
-        async def _crawl_op(_job=job, _batch=batch) -> object:
-            return await _execute_crawl(
-                job_engine_payload(_job, _batch), settings=settings, shutdown_event=shutdown_event
-            )
-
-        items, still_owned = await _crawl_claim(_crawl_op, batch[0].url.raw)
-        reloaded = await job_store.areload_state(job_id)
-        if reloaded is None or reloaded.claimed_by != token:
+        updated = await _run_batch(
+            job,
+            batch,
+            context,
+            known,
+            settings=settings,
+            shutdown_event=shutdown_event,
+            container=container,
+            job_store=job_store,
+            job_id=job_id,
+            token=token,
+        )
+        if updated is None:
             return
-        job = replace(reloaded, results=job.results, visited=job.visited, visited_mark=job.visited_mark)
-        resolved = _resolved_items(cast("Sequence[EngineCrawlResult]", items), job.host_policy)
-        if job.status in {JobStatus.PAUSED, JobStatus.CANCELLED}:
-            if job.in_flight:
-                await absorb_batch(job, batch, resolved, context, known)
-                await job_store.asave(job)
-            return
-        if not still_owned or job.status is not JobStatus.RUNNING:
-            return
-        await absorb_batch(job, batch, resolved, context, known)
-        if not await _renew_claim_and_save(job_store, job_id, token, job):
-            return
+        job = updated
 
 
 async def run_job(

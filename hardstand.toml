@@ -80,6 +80,7 @@ run = 'git commit -F "$(git rev-parse --git-dir)/commit-message"'
 name = "pytest"
 kind = "exec"
 env = ["PATH", "PYTHONPATH"]
+timeout = "120s"
 
 run = ".venv/bin/python -m pytest"
 
@@ -110,6 +111,13 @@ kind = "exec"
 env = ["PATH", "PYTHONPATH"]
 timeout = "90s"
 run = ".venv/bin/pre-commit run --all-files"
+
+[[actions]]
+name = "pre-push"
+kind = "exec"
+env = ["PATH", "PYTHONPATH"]
+timeout = "120s"
+run = ".venv/bin/pre-commit run --all-files --hook-stage pre-push"
 
 [[actions]]
 name = "lint"

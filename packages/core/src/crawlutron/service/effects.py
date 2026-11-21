@@ -41,6 +41,19 @@ class EffectResult:
 
 
 @dataclass(frozen=True)
+class CollectedBatch:
+    outcome: EffectOutcome
+    items: tuple[object, ...]
+
+
+@dataclass(frozen=True)
+class CrawlClaimResult:
+    outcome: EffectOutcome
+    items: tuple[object, ...]
+    still_owned: bool
+
+
+@dataclass(frozen=True)
 class EffectBounds:
     timeout_seconds: float
     caller_timeout_seconds: float
@@ -222,20 +235,20 @@ async def run_collect_batch(
     url: str,
     timeout_seconds: float,
     caller_timeout_seconds: float,
-) -> list[object]:
+) -> CollectedBatch:
     """Run ``op`` under the container's fetch bound, collecting outputs."""
     outputs: list[object] = []
 
     async def _collect() -> None:
         outputs.append(await op())
 
-    await container.fetch(
+    result = await container.fetch(
         url=url,
         op=_collect,
         timeout_seconds=timeout_seconds,
         caller_timeout_seconds=caller_timeout_seconds,
     )
-    return outputs
+    return CollectedBatch(outcome=result.outcome, items=tuple(outputs))
 
 
 async def run_crawl_with_claim(
@@ -246,15 +259,13 @@ async def run_crawl_with_claim(
     job_store: JobStore,
     job_id: str,
     token: str,
-) -> tuple[list[object], bool]:
+) -> CrawlClaimResult:
     """Run a crawl under the container bound and renew the claim."""
-    if not isinstance(timeout, (int, float)):
-        timeout = 30.0
-    outputs = await run_collect_batch(container, op, url, timeout, timeout)
+    collected = await run_collect_batch(container, op, url, timeout, timeout)
     still_owned = await job_store.arenew_job_claim(job_id, token, now=time.time())
-    first = cast("dict[str, object]", outputs[0]) if outputs else {}
+    first = cast("dict[str, object]", collected.items[0]) if collected.items else {}
     items = cast("list[object]", first.get("results", [])) if isinstance(first, dict) else []
-    return items, still_owned
+    return CrawlClaimResult(outcome=collected.outcome, items=tuple(items), still_owned=still_owned)
 
 
 async def container_effect[EffectT](
