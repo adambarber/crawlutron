@@ -438,3 +438,20 @@ def test_coverage_job_emits_single_artifact() -> None:
         if isinstance(step, dict) and "uses" in step and "upload-artifact" in str(step.get("uses", ""))
     ]
     assert len(artifact_steps) == 1, f"coverage job must emit one artifact, got {len(artifact_steps)}"
+
+
+def test_coverage_producers_use_distinct_coverage_files() -> None:
+    """Each producer names its data file so coverage combine can merge all three."""
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    expected = (
+        ("battery", "battery", ".coverage.battery"),
+        ("real-pbkdf2", "Run pytest (real PBKDF2) with coverage", ".coverage.real-pbkdf2"),
+        ("test-browser", "Run pytest (browser)", ".coverage.test-browser"),
+    )
+    for job_name, step_name, file_name in expected:
+        producers = [step for step in job_steps(workflow, job_name) if step.get("name") == step_name]
+        assert producers, f"{job_name} must have a step named {step_name!r}"
+        env = cast(StepMapping, producers[0].get("env", {}))
+        assert env.get("COVERAGE_FILE") == file_name, (
+            f"{job_name} must set COVERAGE_FILE={file_name}; got {env.get('COVERAGE_FILE')!r}"
+        )
