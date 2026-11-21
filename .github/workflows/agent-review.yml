@@ -27,6 +27,13 @@ jobs:
           fetch-tags: true
           persist-credentials: false
       - uses: $/.github/actions/prepare
+      - name: Fetch pull-request head
+        env:
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          PR_HEAD_SHA: ${{ github.event.workflow_run.pull_requests[0].head.sha }}
+        run: |
+          git fetch --no-tags origin "refs/pull/${PR_NUMBER}/head"
+          test "$(git rev-parse FETCH_HEAD)" = "${PR_HEAD_SHA}"
       - name: Run registered probes
         env:
           BASE_SHA: ${{ github.event.workflow_run.pull_requests[0].base.sha }}

@@ -220,6 +220,22 @@ def test_structural_probe_records_diff_and_output_hashes(tmp_path: Path) -> None
     assert isinstance(data.get("diff"), str)
 
 
+def test_changed_files_raises_when_fork_head_is_absent_locally() -> None:
+    """An unknown fork head must make `git diff` fail instead of reporting no changes."""
+    from scripts.review_probes import _changed_files
+
+    head = subprocess.run(
+        [require_executable("git"), "rev-parse", "HEAD"],
+        cwd=str(SERVICE_ROOT),
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    unknown = "0" * 40
+    with pytest.raises(RuntimeError, match="could not list changed files"):
+        _changed_files(unknown, head)
+
+
 def test_probe_output_path_traversal_is_refused(tmp_path: Path) -> None:
     from scripts.agent_review import _load_probe_artifacts
 
