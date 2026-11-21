@@ -49,7 +49,7 @@ class TestEmitRoster:
 
     def test_missing_github_output_is_error(self) -> None:
         """Missing GITHUB_OUTPUT → exit 2."""
-        result = _run_script({"RELEASE_TAG": ""})
+        result = _run_script({"RELEASE_TAG": ""}, unset=("GITHUB_OUTPUT",))
         assert result.returncode == 2
         assert "GITHUB_OUTPUT environment variable is required" in result.stderr
 
