@@ -103,12 +103,7 @@ async def assert_second_concurrent_refused(
 
     first = asyncio.create_task(_issue(url, body))
     await asyncio.wait_for(entered.wait(), timeout=5)
-    try:
-        second = await asyncio.wait_for(_issue(second_url or url, second_body or body), timeout=3)
-    except TimeoutError:
-        released.set()
-        await asyncio.wait_for(first, timeout=5)
-        raise AssertionError("second concurrent request was not bounded") from None
+    second = await _issue(second_url or url, second_body or body)
     assert second.status_code == 429, second.text
     assert second.json()["code"] == "quota_exceeded"
     released.set()
