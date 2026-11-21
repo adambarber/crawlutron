@@ -1,52 +1,38 @@
 """Bite: image version 0.0.0.
 
-Verifies version 0.0.0 detection fails with specific message.
+Invokes scripts/pin_verify.py against a pin declaring a wrong version and
+asserts the specific version-mismatch refusal message.
 """
 
 from __future__ import annotations
 
 import subprocess
-import tempfile
 from pathlib import Path
 
+WORKFLOW = (
+    "name: pv\non: push\njobs:\n  j:\n    runs-on: ubuntu-latest\n"
+    "    steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b0  # v99.99.99\n"
+)
+WORKFLOW_NAME = "pvtest_version.yml"
 
-def test_image_version_0_0_0_specific_assert():
-    """Verify version 0.0.0 detection fails with specific message."""
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        scratch = Path(tmp_dir)
-        pyproject_content = """[project]
-name = "crawlutron-test"
-version = "0.0.0"
-requires-python = ">=3.14"
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[dependencies]
-crawlutron-core = "0.5.0"
-"""
-        pyproject_path = scratch / "pyproject.toml"
-        pyproject_path.write_text(pyproject_content)
-
-        venv_python = Path(__file__).resolve().parents[2] / ".venv" / "bin" / "python"
+def test_image_version_0_0_0_refusal_message(tmp_path):
+    """pin_verify check refuses a version mismatch against the registry."""
+    repo_root = Path(__file__).resolve().parents[2]
+    workflow_path = repo_root / ".github" / "workflows" / WORKFLOW_NAME
+    workflow_path.write_text(WORKFLOW)
+    try:
+        venv_python = repo_root / ".venv" / "bin" / "python"
         result = subprocess.run(
-            [
-                str(venv_python),
-                "-c",
-                "import tomllib\n"
-                "with open('pyproject.toml', 'rb') as f:\n"
-                "    p = tomllib.load(f)\n"
-                "v = p['project']['version']\n"
-                "print('version=' + v)\n"
-                "import sys\n"
-                "sys.exit(1) if v == '0.0.0' else sys.exit(0)",
-            ],
-            cwd=str(scratch),
+            [str(venv_python), "scripts/pin_verify.py", "check"],
             capture_output=True,
             text=True,
+            cwd=str(repo_root),
         )
-
         combined = result.stdout + result.stderr
-        assert "version=0.0.0" in combined, f"Expected version 0.0.0 in output, {combined!r}"
-        assert result.returncode != 0, f"Expected non-zero exit for version 0.0.0, {combined!r}"
+        assert result.returncode != 0, f"Expected refusal, got: {combined!r}"
+        assert "registry says" in combined, (
+            f"Expected 'registry says' version-mismatch refusal, got: {combined!r}"
+        )
+    finally:
+        workflow_path.unlink(missing_ok=True)

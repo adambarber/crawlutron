@@ -1,42 +1,40 @@
 """Bite: stale lock.
 
-Verifies lock file has specific stale structure.
+Invokes real production config resolution (uv lock --check) against a
+deliberately stale lock and asserts the specific refusal message.
 """
 
 from __future__ import annotations
 
+import shutil
+import subprocess
+from pathlib import Path
 
-def test_stale_lock_specific_assert(tmp_path):
-    """Verify lock file has specific stale structure."""
-    pyproject_content = """[project]
-name = "crawlutron-test"
-version = "0.1.0"
-requires-python = ">=3.14"
+_UV = shutil.which("uv")
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
 
-[dependencies]
-requests = ">=2.0.0"
-"""
-    pyproject_path = tmp_path / "pyproject.toml"
-    pyproject_path.write_text(pyproject_content)
-
-    lock_content = """# This is a stale lock file
-name = "crawlutron-test"
-version = "1.0.0"
-
-[[package]]
-name = "requests"
-version = "1.0.0"
-"""
-    lock_path = tmp_path / "uv.lock"
-    lock_path.write_text(lock_content)
-
-    lock_text = lock_path.read_text(encoding="utf-8")
-    assert "stale" in lock_text.lower() or "version" in lock_text.lower(), (
-        f"Expected stale/version reference in lock file, got: {lock_text!r}"
+def test_stale_lock_refusal_message(tmp_path):
+    """uv lock --check on a stale lock refuses with an unsatisfiable diagnostic."""
+    assert _UV is not None, "uv must be on PATH to check a stale lock"
+    scratch = Path(tmp_path)
+    (scratch / "pyproject.toml").write_text(
+        '[project]\nname = "stale-probe"\nversion = "0.1.0"\n'
+        'requires-python = ">=3.14"\ndependencies = ["requests>=2.0.0"]\n'
+    )
+    # Generate a real lock, then stale the project constraint.
+    subprocess.run([_UV, "lock"], capture_output=True, text=True, cwd=str(scratch), check=True)
+    (scratch / "pyproject.toml").write_text(
+        '[project]\nname = "stale-probe"\nversion = "0.1.0"\n'
+        'requires-python = ">=3.14"\ndependencies = ["requests>=99.0.0"]\n'
     )
 
-    assert "requests" in lock_text.lower(), "Lock should mention 'requests'"
+    result = subprocess.run(
+        [_UV, "lock", "--check"],
+        capture_output=True,
+        text=True,
+        cwd=str(scratch),
+    )
+
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0, f"Expected refusal, got: {combined!r}"
+    assert "unsatisfiable" in combined.lower(), f"Expected 'unsatisfiable' refusal, got: {combined!r}"
