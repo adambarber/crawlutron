@@ -1,0 +1,46 @@
+name: CodeQL
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 2 * * 1"  # Weekly on Monday 2am UTC
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@1b549b9259bda1b5cc3c78b0a9d0f2c3f6d0e0a1  # v3.28.0
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@1b549b9259bda1b5cc3c78b0a9d0f2c3f6d0e0a1  # v3.28.0
+
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@1b549b9259bda1b5cc3c78b0a9d0f2c3f6d0e0a1  # v3.28.0
+        with:
+          sarif_file: codeql-results.sarif
