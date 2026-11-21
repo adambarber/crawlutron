@@ -7,7 +7,7 @@ validation metadata (source SHA-256, AST schema version, validation result).
 import ast
 
 from tests._walk_primitives import _PARSE_CACHE, parsed
-from tests.chokepoint_walks import REPO_ROOT
+from tests.chokepoint_paths import REPO_ROOT
 
 
 def test_ast_cache_returns_isolated_copies_with_metadata():

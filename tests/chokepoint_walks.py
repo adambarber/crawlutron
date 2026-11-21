@@ -17,11 +17,6 @@ from tests._walk_membership import (
     real_members,
 )
 from tests._walk_primitives import (
-    ADMISSION_ROOT,
-    APP_ROOT,
-    REPO_ROOT,
-    TESTS_DIR,
-    TRANSPORT_DIR,
     attribute_call_on,
     enclosing_function,
     file_tree,
@@ -31,6 +26,7 @@ from tests._walk_primitives import (
     offender_at,
     parent_map,
     parsed,
+    parsed_source,
     trees_under,
 )
 from tests._walk_readers import (
@@ -82,17 +78,11 @@ from tests._walk_trees import (
     app_trees,
     functions,
     offenders_over_functions,
-    relative_posix,
     trees_excluding,
 )
 
 __all__ = [
-    "ADMISSION_ROOT",
-    "APP_ROOT",
-    "REPO_ROOT",
     "SANCTIONED",
-    "TESTS_DIR",
-    "TRANSPORT_DIR",
     "app_offenders",
     "app_python_files",
     "app_trees",
@@ -138,9 +128,9 @@ __all__ = [
     "or_nodes",
     "parent_map",
     "parsed",
+    "parsed_source",
     "plain_imports",
     "real_members",
-    "relative_posix",
     "resolved_call_name",
     "resolved_expr_name",
     "returns",

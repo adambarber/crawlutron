@@ -6,7 +6,8 @@ import email
 import sys
 import zipfile
 
-from _common import REPO_ROOT, UV, _require_env, _run
+from scripts.release._common import UV, _require_env, _run
+from utils.paths import REPO_ROOT
 
 
 def main() -> int:

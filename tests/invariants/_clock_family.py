@@ -11,7 +11,7 @@ import pathlib
 from collections.abc import Iterator
 
 from tests._walk_primitives import parsed
-from tests.chokepoint_walks import REPO_ROOT
+from tests.chokepoint_paths import REPO_ROOT
 
 __all__ = [
     "CLOCK_HOME",

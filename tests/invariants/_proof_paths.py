@@ -6,7 +6,7 @@ here, not from another test module's internals.
 
 from __future__ import annotations
 
-from tests.chokepoint_walks import APP_ROOT
+from tests.chokepoint_paths import APP_ROOT
 
 __all__ = ["ELSEWHERE"]
 

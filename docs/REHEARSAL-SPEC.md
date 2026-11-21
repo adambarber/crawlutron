@@ -101,8 +101,8 @@ RELEASE_TAG rule: `TAG` is derived from the released entry's tag; empty is not v
 
 ### Install-graph probe + retry (release.yml:194-231)
 
-Name: scripts/release/install_graph.py [to be created]
-argv: python3 scripts/release/install_graph.py (no positional args)
+Name: scripts.release.install_graph [to be created]
+argv: python3 -m scripts.release.install_graph (no positional args)
 Env contract:
 - `NAME`: package name from the released entry.
 - `VERSION`: package version from the released entry.

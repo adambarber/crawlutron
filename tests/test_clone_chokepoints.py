@@ -4,7 +4,8 @@ import pytest
 
 from tests._clone_funnel_detectors import DETECTORS, FUNCTION_TYPES
 from tests._clone_funnel_table import FUNNEL_HOME_MODULES, FUNNELS
-from tests.chokepoint_walks import TESTS_DIR, trees_under
+from tests.chokepoint_paths import TESTS_DIR
+from tests.chokepoint_walks import trees_under
 
 NESTABLE_TYPES = (*FUNCTION_TYPES, ast.ClassDef)
 

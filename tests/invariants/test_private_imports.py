@@ -11,14 +11,12 @@ from collections.abc import Iterator
 
 import pytest
 
+from tests.chokepoint_paths import APP_ROOT, REPO_ROOT, relative_posix
 from tests.chokepoint_walks import (
-    APP_ROOT,
-    REPO_ROOT,
     assignment_targets,
     from_imports,
     nodes_of,
     parsed,
-    relative_posix,
     resolved_expr_name,
     trees_under,
 )

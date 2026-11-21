@@ -17,7 +17,7 @@ import sys
 import tokenize
 from collections.abc import Iterator
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+from utils.paths import REPO_ROOT
 
 # Extensions whose comments are whole-line '#' prefixed. Extensions rather
 # than a filename list, so a new .sh script is covered without editing this.

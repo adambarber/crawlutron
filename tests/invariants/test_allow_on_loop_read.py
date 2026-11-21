@@ -9,7 +9,6 @@ import ast
 import pathlib
 
 from tests._walk_primitives import (
-    REPO_ROOT,
     SCAN_ROOTS,
     enclosing_function,
     offender_at,
@@ -17,6 +16,7 @@ from tests._walk_primitives import (
     parsed,
     trees_under,
 )
+from tests.chokepoint_paths import REPO_ROOT
 from tests.rules import Rule
 
 #: The one sanctioned caller: (file, enclosing function name) — never a line number.

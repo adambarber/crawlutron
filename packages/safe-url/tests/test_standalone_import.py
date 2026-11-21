@@ -8,7 +8,7 @@ import os
 import subprocess
 import sys
 
-from tests._walk_primitives import REPO_ROOT
+from tests.chokepoint_paths import REPO_ROOT
 
 _SAFE_URL_SRC = REPO_ROOT / "packages" / "safe-url" / "src"
 

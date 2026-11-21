@@ -27,7 +27,8 @@ from tests._ratchet import (
 from tests._ratchet import (
     report as ratchet_report,
 )
-from tests.chokepoint_walks import REPO_ROOT, app_trees, nodes_of, trees_under
+from tests.chokepoint_paths import REPO_ROOT
+from tests.chokepoint_walks import app_trees, nodes_of, trees_under
 
 # Every collector in this file reads the same app tree, and they are called once per metric per test that
 # reads a number: the budget test reads both `offenders()` and `measurement()`, the tight test reads

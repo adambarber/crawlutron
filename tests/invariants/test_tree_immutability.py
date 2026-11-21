@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import pathlib
 
+from tests.chokepoint_paths import path_components
 from tests.chokepoint_walks import call_nodes, nodes_of, offender_at, resolved_expr_name
 from tests.rules import Bites, Rule, Trips
 from tests.trees import tree_under_tests as tests_tree
@@ -106,27 +107,6 @@ def _names_app_tree(component: ast.expr) -> bool:
     return parts[0] == "crawlutron" or (component.value.startswith("/") and "crawlutron" in parts)
 
 
-def _path_components(expr: ast.expr) -> list[ast.expr] | None:
-    """Flatten ``a / b / c``, ``os.path.join(a, b)``, and ``Path(a)`` into components.
-
-    The elements are expressions, which is what every consumer classifies them
-    as; only the wider node type was stopping them from saying so.
-    """
-    if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Div):
-        head = _path_components(expr.left)
-        return None if head is None else [*head, expr.right]
-    if isinstance(expr, ast.Call):
-        name = getattr(expr.func, "attr", None) or getattr(expr.func, "id", None)
-        if name in {"Path", "PurePath"} and expr.args:
-            # `Path(APP_ROOT / "x")` is the same path as `APP_ROOT / "x"`, so the wrapped expression is
-            # flattened rather than boxed.
-            return _path_components(expr.args[0])
-        if name == "join" and expr.args:
-            head = _path_components(expr.args[0])
-            return None if head is None else [*head, *expr.args[1:]]
-    return [expr]
-
-
 def _tree_role(
     components: list[ast.expr],
     anchors: set[str],
@@ -160,7 +140,7 @@ def _absorb_path_aliases(tree: ast.AST, anchors: set[str], rooted: set[str]) -> 
     for node in nodes_of(tree):
         if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
             continue
-        components = _path_components(node.value)
+        components = path_components(node.value)
         if components is None:
             continue
         role = _tree_role(components, anchors, rooted)
@@ -221,7 +201,7 @@ def _app_tree_mutation_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
             targets = node.args
         else:
             continue
-        if not targets or _tree_role(_path_components(targets[0]) or [], anchors, rooted) != "app":
+        if not targets or _tree_role(path_components(targets[0]) or [], anchors, rooted) != "app":
             continue
         offenders.append(offender_at(path, node, f"mutates the production tree: {ast.unparse(callee)}()"))
     return offenders

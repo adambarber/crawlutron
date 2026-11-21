@@ -12,16 +12,9 @@ from collections.abc import Callable, Iterable
 from functools import cache
 from pathlib import Path
 
-from tests._walk_primitives import APP_ROOTS, import_roots
-from tests.chokepoint_walks import (
-    APP_ROOT,
-    REPO_ROOT,
-    app_trees,
-    nodes_of,
-    parsed,
-    relative_posix,
-    resolved_call_name,
-)
+from tests._walk_primitives import import_roots
+from tests.chokepoint_paths import APP_ROOT, APP_ROOTS, REPO_ROOT, relative_posix
+from tests.chokepoint_walks import app_trees, nodes_of, parsed, resolved_call_name
 from tests.property_registry import Property
 
 __all__ = [

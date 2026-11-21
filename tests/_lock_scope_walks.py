@@ -7,7 +7,8 @@ outside the lock block -- so one detector serves both instead of two copies.
 import ast
 import pathlib
 
-from tests._walk_primitives import REPO_ROOT, parsed
+from tests._walk_primitives import parsed
+from tests.chokepoint_paths import REPO_ROOT
 
 
 def calls_inside_self_lock(

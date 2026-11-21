@@ -7,14 +7,8 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from tests.chokepoint_walks import (
-    APP_ROOT,
-    call_nodes,
-    nodes_of,
-    offender_at,
-    subscript_reads,
-    with_blocks,
-)
+from tests.chokepoint_paths import APP_ROOT
+from tests.chokepoint_walks import call_nodes, nodes_of, offender_at, subscript_reads, with_blocks
 from tests.invariants._shared import function_defs
 from tests.rules import Bites, Registry, Rule
 

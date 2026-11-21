@@ -7,7 +7,6 @@ import pathlib
 
 from tests._walk_primitives import (
     PACKAGE_ROOTS,
-    REPO_ROOT,
     SCAN_ROOTS,
     package_roots,
     python_bearing_roots,
@@ -15,6 +14,7 @@ from tests._walk_primitives import (
     uv_workspace_members,
 )
 from tests._walk_primitives import get_test_roots as derived_test_roots
+from tests.chokepoint_paths import REPO_ROOT
 
 
 def test_scan_roots_equal_every_python_bearing_tree() -> None:
@@ -32,6 +32,7 @@ def test_scan_roots_equal_every_python_bearing_tree() -> None:
         "packages/sdk",
         "scripts",
         "tests",
+        "utils",
     )
 
 

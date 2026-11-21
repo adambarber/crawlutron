@@ -182,7 +182,7 @@ def _assert_every_publish_job_gated_on_ci(jobs: dict[str, object]) -> None:
     # The tag is what makes it a release: publication is derived from the tags at
     # the commit CI passed, never from the merge itself.
     released_runs = " ".join(str(step.get("run", "")) for step in steps(jobs.get("released")))
-    assert "emit_roster.py" in released_runs, (
+    assert "scripts.release.emit_roster" in released_runs, (
         "the released set must come from the tags pointing at the green commit"
     )
     build = mapping(jobs.get("publish-build"), "a publish-build job")

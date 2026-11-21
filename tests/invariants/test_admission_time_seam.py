@@ -9,7 +9,8 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from tests.chokepoint_walks import ADMISSION_ROOT, APP_ROOT, offender_at, trees_under
+from tests.chokepoint_paths import ADMISSION_ROOT, APP_ROOT
+from tests.chokepoint_walks import offender_at, trees_under
 from tests.invariants._clock_family import dotted_name
 from tests.rules import Bites, Rule, Silent
 

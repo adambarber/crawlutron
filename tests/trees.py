@@ -10,7 +10,8 @@ import ast
 import pathlib
 from functools import cache
 
-from tests.chokepoint_walks import APP_ROOT, TESTS_DIR, trees_under
+from tests.chokepoint_paths import APP_ROOT, TESTS_DIR
+from tests.chokepoint_walks import trees_under
 
 __all__ = ["tree_under_tests", "app_reads", "test_tree_module_names"]
 

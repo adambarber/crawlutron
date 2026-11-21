@@ -6,7 +6,8 @@ under the store lock.
 import ast
 import pathlib
 
-from tests.chokepoint_walks import APP_ROOT, parsed
+from tests.chokepoint_paths import APP_ROOT
+from tests.chokepoint_walks import parsed
 
 _STORE = APP_ROOT / "storage" / "coordination_cookies.py"
 

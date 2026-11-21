@@ -11,8 +11,9 @@ from pathlib import Path
 import pytest
 
 from scripts.executables import require_executable
+from tests.chokepoint_paths import REPO_ROOT
 
-SERVICE_ROOT = Path(__file__).resolve().parents[2]
+SERVICE_ROOT = REPO_ROOT
 AGENT_REVIEW_SCRIPT = SERVICE_ROOT / "scripts" / "agent_review.py"
 REVIEW_PROBES_SCRIPT = SERVICE_ROOT / "scripts" / "review_probes.py"
 

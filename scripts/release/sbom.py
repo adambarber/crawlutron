@@ -9,7 +9,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from _common import UV, _gh_release_upload, _release_credentials, _run
+from scripts.release._common import UV, _gh_release_upload, _release_credentials, _run
 
 
 def _export_lock(lock_txt: Path) -> None:

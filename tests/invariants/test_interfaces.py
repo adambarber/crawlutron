@@ -10,7 +10,8 @@ import ast
 from functools import lru_cache
 from pathlib import Path
 
-from tests.chokepoint_walks import APP_ROOT, app_trees, offender_at
+from tests.chokepoint_paths import APP_ROOT
+from tests.chokepoint_walks import app_trees, offender_at
 from tests.rules import Bites, Rule
 
 # --------------------------------------------------------------------------- Container protocols on app

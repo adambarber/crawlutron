@@ -7,7 +7,8 @@ import re
 from functools import lru_cache
 
 from tests._walk_primitives import SCAN_ROOTS
-from tests.chokepoint_walks import REPO_ROOT, parsed
+from tests.chokepoint_paths import REPO_ROOT
+from tests.chokepoint_walks import parsed
 from tests.invariants._env_knobs import _consumed_knobs
 
 

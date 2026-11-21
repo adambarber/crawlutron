@@ -13,7 +13,8 @@ import sys
 import tempfile
 import zipfile
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+from utils.paths import REPO_ROOT
+
 PROBE_ROOT = pathlib.Path(tempfile.gettempdir()) / "crawlutron-probes"
 UV = shutil.which("uv") or "uv"
 

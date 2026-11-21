@@ -10,7 +10,7 @@ import json
 import os
 import sys
 
-from _common import _require_env, _run
+from scripts.release._common import _require_env, _run
 
 
 def main() -> int:
@@ -19,9 +19,9 @@ def main() -> int:
 
     # Get released entries (or all roster if RELEASE_TAG not set)
     if release_tag is not None:
-        result = _run([sys.executable, "scripts/release_roster.py", "--released"])
+        result = _run([sys.executable, "-m", "scripts.release_roster", "--released"])
     else:
-        result = _run([sys.executable, "scripts/release_roster.py"])
+        result = _run([sys.executable, "-m", "scripts.release_roster"])
 
     if result.returncode != 0:
         print(f"Roster resolution failed: {result.stderr}", file=sys.stderr)
@@ -34,7 +34,7 @@ def main() -> int:
         return 3
 
     # Resolve primary via release_roster.py --primary (never hardcoded)
-    primary_result = _run([sys.executable, "scripts/release_roster.py", "--primary"])
+    primary_result = _run([sys.executable, "-m", "scripts.release_roster", "--primary"])
     if primary_result.returncode != 0:
         print(f"Primary resolution failed: {primary_result.stderr}", file=sys.stderr)
         return 3

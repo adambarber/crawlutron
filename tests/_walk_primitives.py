@@ -6,12 +6,65 @@ import hashlib
 import io
 import pathlib
 import tokenize
-import tomllib
 import weakref
 from dataclasses import dataclass
 from functools import cache
 
-TESTS_DIR = pathlib.Path(__file__).resolve().parent
+from utils.paths import (
+    ADMISSION_ROOT,
+    APP_ROOT,
+    APP_ROOTS,
+    MCP_ROOT,
+    PACKAGE_ROOTS,
+    REPO_ROOT,
+    REST_ROOT,
+    SAFE_URL_ROOT,
+    SCAN_ROOTS,
+    TESTS_DIR,
+    TRANSPORT_DIR,
+    get_test_roots,
+    import_roots,
+    is_exempt,
+    member_import_names,
+    member_src_roots,
+    package_roots,
+    path_components,
+    prepend_member_roots,
+    python_bearing_roots,
+    relative_posix,
+    scan_roots,
+    uv_workspace_members,
+    workspace_package_dirs,
+    workspace_project,
+)
+
+__all__ = [
+    "ADMISSION_ROOT",
+    "APP_ROOT",
+    "APP_ROOTS",
+    "MCP_ROOT",
+    "PACKAGE_ROOTS",
+    "REST_ROOT",
+    "REPO_ROOT",
+    "SAFE_URL_ROOT",
+    "SCAN_ROOTS",
+    "TESTS_DIR",
+    "TRANSPORT_DIR",
+    "get_test_roots",
+    "import_roots",
+    "is_exempt",
+    "member_import_names",
+    "member_src_roots",
+    "package_roots",
+    "path_components",
+    "prepend_member_roots",
+    "python_bearing_roots",
+    "relative_posix",
+    "scan_roots",
+    "uv_workspace_members",
+    "workspace_package_dirs",
+    "workspace_project",
+]
 
 
 @dataclass(frozen=True)
@@ -45,242 +98,6 @@ def comment_lines(source: str) -> list[tuple[int, str]]:
     ]
 
 
-REPO_ROOT = TESTS_DIR.parent
-
-
-@cache
-def python_bearing_roots(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
-    """Every top-level dir under ``base`` holding any ``*.py``, sorted. Hidden dirs and symlinked trees
-    (venvs) are skipped -- caches and environments, not shipped code. Derived by walking, never
-    hand-listed: the app/ rename and crawlutron_sdk's late arrival were hand-list blindness.
-    """
-    roots = [
-        d.name
-        for d in base.iterdir()
-        if d.is_dir()
-        and not d.is_symlink()
-        and not d.name.startswith(".")
-        and any("__pycache__" not in q.parts for q in d.rglob("*.py"))
-    ]
-    assert roots, f"no python-bearing roots under {base}: repo surface is empty"
-    return tuple(sorted(roots))
-
-
-SCAN_ROOTS = python_bearing_roots()
-
-
-def uv_workspace_members(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...] | None:
-    """``[tool.uv.workspace].members`` from the root pyproject, or None when absent.
-
-    The packaging truth's key: when a UV workspace declares members, PACKAGE_ROOTS
-    derives from them; until then the current-layout fallback stands."""
-    pyproject = base / "pyproject.toml"
-    if not pyproject.is_file():
-        return None
-    try:
-        with pyproject.open("rb") as handle:
-            table = tomllib.load(handle)
-    except tomllib.TOMLDecodeError:
-        return None
-    tool = table.get("tool")
-    if not isinstance(tool, dict):
-        return None
-    workspace = tool.get("uv", {}).get("workspace") if isinstance(tool.get("uv"), dict) else None
-    if not isinstance(workspace, dict):
-        return None
-    members = workspace.get("members")
-    if not isinstance(members, list):
-        return None
-    return tuple(str(m) for m in members if isinstance(m, str))
-
-
-def _expanded_members(base: pathlib.Path, pattern: str) -> tuple[str, ...]:
-    """A member pattern as concrete existing dirs, named repo-relatively.
-
-    UV workspace members are gitignore-style globs (``packages/*``); a literal
-    member path is its own match, while a glob resolves to every matching dir."""
-    literal = base / pattern
-    if literal.is_dir():
-        return (pattern,)
-    return tuple(sorted(p.relative_to(base).as_posix() for p in base.glob(pattern) if p.is_dir()))
-
-
-def workspace_package_dirs(base: pathlib.Path = REPO_ROOT) -> dict[str, pathlib.Path]:
-    """The root project plus every workspace member, keyed by base-relative path."""
-    dirs: dict[str, pathlib.Path] = {".": base}
-    for pattern in uv_workspace_members(base) or ():
-        dirs.update({member: base / member for member in _expanded_members(base, pattern)})
-    return dirs
-
-
-def workspace_project(directory: pathlib.Path) -> dict[str, object]:
-    """A package's ``[project]`` table, keyed by string."""
-    with (directory / "pyproject.toml").open("rb") as handle:
-        project = tomllib.load(handle)["project"]
-    assert isinstance(project, dict)
-    return {str(key): value for key, value in project.items()}
-
-
-def _member_package_roots(base: pathlib.Path, members: tuple[str, ...]) -> tuple[str, ...]:
-    """The python-bearing member dirs of a UV workspace, named repo-relatively.
-
-    A member that holds any ``*.py`` is its own package root; a member with none
-    is a stub (docs-only), not part of the packaging surface."""
-    roots = [
-        member
-        for pattern in members
-        for member in _expanded_members(base, pattern)
-        if any("__pycache__" not in q.parts for q in (base / member).rglob("*.py"))
-    ]
-    assert roots, f"uv workspace members declare no python-bearing dirs under {base}: {members}"
-    return tuple(sorted(set(roots)))
-
-
-@cache
-def package_roots(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
-    """The importable package dirs (derived packaging truth), sorted.
-
-    A UV workspace declaration keys it; without one, the current-layout fallback
-    (every top-level python-bearing dir) stands until the Wave A manifest arrives."""
-    members = uv_workspace_members(base)
-    if members is not None:
-        return _member_package_roots(base, members)
-    return python_bearing_roots(base)
-
-
-#: The importable package dirs. SCAN_ROOTS consumes this, so a Wave A manifest
-#: swap-in re-derives both here, once.
-PACKAGE_ROOTS = package_roots()
-
-
-def _member_import_packages(base: pathlib.Path, member: str) -> tuple[str, ...]:
-    """The import names a member's wheel ships, from its own ``packages`` list.
-
-    ``crawlutron, admission`` for core, ``crawlutron_rest`` for rest; a member
-    without a wheel target is a stub container and ships nothing.
-    """
-    pyproject = base / member / "pyproject.toml"
-    if not pyproject.is_file():
-        return ()
-    try:
-        with pyproject.open("rb") as handle:
-            table = tomllib.load(handle)
-    except tomllib.TOMLDecodeError:
-        return ()
-    wheel = table.get("tool", {}).get("hatch", {}).get("build", {}).get("targets", {}).get("wheel", {})
-    packages = wheel.get("packages")
-    if not isinstance(packages, list):
-        return ()
-    return tuple(str(p) for p in packages if isinstance(p, str))
-
-
-@cache
-def import_roots(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
-    """The import-root package dirs (``packages/<member>/<import-name>``), derived.
-
-    From each member's wheel ``packages`` truth; a new member lands here by its
-    own pyproject, never a hand-typed list (#906). Memoized via @cache."""
-    roots = [
-        f"{member}/{pkg}" for member in package_roots(base) for pkg in _member_import_packages(base, member)
-    ]
-    assert roots, f"uv members declare no import roots under {base}"
-    return tuple(sorted(set(roots)))
-
-
-@cache
-def member_src_roots(base: pathlib.Path = REPO_ROOT) -> tuple[pathlib.Path, ...]:
-    """Every uv member's src dir, derived from the manifest, not hand-listed."""
-    roots = [
-        base / member / "src"
-        for pattern in uv_workspace_members(base) or ()
-        for member in _expanded_members(base, pattern)
-        if (base / member / "src").is_dir()
-    ]
-    assert roots, f"uv members declare no src dirs under {base}"
-    return tuple(sorted(roots))
-
-
-@cache
-def member_import_names(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
-    """The import names the members ship, from each wheel's packages list."""
-    names = [
-        pathlib.PurePosixPath(pkg).name
-        for member in package_roots(base)
-        for pkg in _member_import_packages(base, member)
-    ]
-    assert names, f"uv members declare no import names under {base}"
-    return tuple(sorted(set(names)))
-
-
-def prepend_member_roots(base: pathlib.Path, search_path: list[str]) -> None:
-    """Put this tree's member roots ahead of any editable install from another tree."""
-    search_path[:0] = [str(root) for root in reversed(member_src_roots(base))]
-
-
-def _holds_python(directory: pathlib.Path) -> bool:
-    """True if a directory holds any code, ``__pycache__`` aside."""
-    return directory.is_dir() and any("__pycache__" not in q.parts for q in directory.rglob("*.py"))
-
-
-def get_test_roots(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
-    """The python-bearing test homes: the flat ``tests`` dir plus each
-    ``packages/<member>/tests`` home, named repo-relatively and sorted. Each
-    home is first-class: named, never merely covered by a member root."""
-    flat = ("tests",) if _holds_python(base / "tests") else ()
-    member_homes = sorted(
-        f"{member}/tests" for member in package_roots(base) if _holds_python(base / member / "tests")
-    )
-    return tuple(sorted(set(flat) | set(member_homes)))
-
-
-def scan_roots(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
-    """Every python-bearing dir under ``base``: package and top-level roots,
-    minus the member containers a member root already covers. Per-package
-    test homes go to :func:`get_test_roots` (a member root covers them, #908)."""
-    packages = set(PACKAGE_ROOTS) if base == REPO_ROOT else set(package_roots(base))
-    package_paths = {pathlib.PurePosixPath(p) for p in packages}
-    containers = {
-        root
-        for root in python_bearing_roots(base)
-        if any(pathlib.PurePosixPath(root) in pkg.parents for pkg in package_paths)
-    }
-    return tuple(sorted(packages | (set(python_bearing_roots(base)) - containers)))
-
-
-SCAN_ROOTS = scan_roots()
-
-
-def is_exempt(relative: str, value: str, exemptions: tuple[tuple[str, str, str], ...]) -> bool:
-    """True if a (path-pattern, allowed-substring) exemption row covers ``value``.
-    Shared by the string-drift invariant gates so their ``_exempt`` is one home."""
-    for pattern, allowed, _justification in exemptions:
-        path = pathlib.PurePosixPath(relative)
-        if path == pathlib.PurePosixPath(pattern) or path.match(pattern):
-            if allowed in value:
-                return True
-    return False
-
-
-APP_ROOT = REPO_ROOT / "packages" / "core" / "src" / "crawlutron"
-
-
-#: The standalone admission kernel's importable root.
-ADMISSION_ROOT = REPO_ROOT / "packages" / "core" / "src" / "admission"
-
-
-#: Every production app/package surface the sweep laws cover (core + rest + mcp,
-#: Wave A #900/#902/#917); sweeps must span all three or a law vacates one of them.
-APP_ROOTS = (
-    APP_ROOT,
-    REPO_ROOT / "packages" / "rest" / "src" / "crawlutron_rest",
-    REPO_ROOT / "packages" / "mcp" / "src" / "crawlutron_mcp",
-    REPO_ROOT / "packages" / "safe-url" / "src" / "safe_url",
-)
-
-
-TRANSPORT_DIR = APP_ROOT / "transport"
-
-
 # The node sequence of every root any detector has walked, keyed by the root's identity.
 _NODES_BY_ROOT: weakref.WeakKeyDictionary[ast.AST, tuple[ast.AST, ...]] = weakref.WeakKeyDictionary()
 
@@ -310,6 +127,11 @@ def _validate_ast(tree: ast.Module) -> str:
         return f"invalid: {e}"
 
 
+def parsed_source(source: str, filename: str = "<module>") -> ast.Module:
+    """The single parse entry for source strings, including synthetic gate probes."""
+    return ast.parse(source, filename=filename)
+
+
 def parsed(path: pathlib.Path) -> ast.Module:
     """The AST of `path`, parsed once per session and cached canonically.
     Each caller receives an isolated copy with metadata (SHA-256, schema version, validation).
@@ -322,7 +144,7 @@ def parsed(path: pathlib.Path) -> ast.Module:
     key = (str(path), source_sha256)
     cached = _PARSE_CACHE.get(key)
     if cached is None:
-        canonical_tree = ast.parse(source, filename=str(path))
+        canonical_tree = parsed_source(source, str(path))
         metadata = CacheMetadata(
             source_sha256=source_sha256,
             ast_schema_version=_AST_SCHEMA_VERSION,

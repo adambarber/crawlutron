@@ -6,7 +6,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-SERVICE_ROOT = Path(__file__).resolve().parents[1]
+from tests.chokepoint_paths import REPO_ROOT
+
+SERVICE_ROOT = REPO_ROOT
 
 UNCITED = "Fix the transport bug\n"
 CITED = "Fix the transport bug\n\nCloses #492\n"

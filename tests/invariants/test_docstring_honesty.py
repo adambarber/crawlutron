@@ -5,7 +5,8 @@ from __future__ import annotations
 import ast
 import re
 
-from tests._walk_primitives import APP_ROOT, REPO_ROOT, SCAN_ROOTS
+from tests._walk_primitives import SCAN_ROOTS
+from tests.chokepoint_paths import APP_ROOT, REPO_ROOT
 
 #: The scan-surface root that the derived app-root door (``APP_ROOT``) stands for:
 #: walking APP_ROOT IS walking this member, so a docstring claiming it is honest.

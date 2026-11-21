@@ -24,6 +24,7 @@ _BUDGETS = {
     "packages/sdk": 0,
     "tests": 0,
     "scripts": 0,
+    "utils": 0,
 }
 
 

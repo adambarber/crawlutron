@@ -6,13 +6,13 @@ service, so checks are positive -- a rename that missed a site fails the pin.
 from __future__ import annotations
 
 import tomllib
-from pathlib import Path
 
 import pytest
 
 from crawlutron.vocabulary.identity import DEFAULT_USER_AGENT, REPOSITORY_URL, SERVICE_ID, SERVICE_VERSION
+from tests.chokepoint_paths import REPO_ROOT
 
-SERVICE_ROOT = Path(__file__).resolve().parent.parent
+SERVICE_ROOT = REPO_ROOT
 PYPROJECT = SERVICE_ROOT / "pyproject.toml"
 CANONICAL_REMOTE = "https://github.com/adambarber/crawlutron"
 DERIVED_URL_KEYS = ("Issues", "Changelog", "Security")

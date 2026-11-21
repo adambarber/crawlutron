@@ -13,6 +13,7 @@ from crawlutron.vocabulary.browser import (
     BROWSER_ACTION_TYPES,
     BROWSER_PROFILE_KEYS,
 )
+from tests.chokepoint_paths import APP_ROOT, REPO_ROOT
 
 
 class TestOutputFormatIsTheDocumentedSet:
@@ -163,9 +164,8 @@ class TestBrowserProfileVocabularyIsClosed:
         ``state`` was allowed and read nowhere; each key must appear as a
         literal read somewhere in the crawlutron package, asserted directly."""
         import ast
-        import pathlib
 
-        app_root = pathlib.Path(__file__).resolve().parents[2] / "packages" / "core" / "src" / "crawlutron"
+        app_root = REPO_ROOT / "packages" / "core" / "src" / "crawlutron"
         reads: set[str] = set()
         for path in app_root.rglob("*.py"):
             tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -286,8 +286,6 @@ class TestTheRendererAgreesWithTheVocabulary:
         ``dict[str, Any]``: the closed vocabulary must be the type, so a caller
         that hands the chain an undeclared action key is a type error."""
         import ast
-
-        from tests.chokepoint_walks import APP_ROOT
 
         tree = ast.parse((APP_ROOT / "transport" / "browser_driver.py").read_text(encoding="utf-8"))
         action_class = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "_ActionStep")

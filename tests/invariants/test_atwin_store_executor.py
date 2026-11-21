@@ -6,7 +6,8 @@ the default executor, which crawl saturation can exhaust.
 import ast
 
 from tests._walk_assertions import assert_detectors_clean
-from tests.chokepoint_walks import APP_ROOT, attribute_call_on, call_offenders, parsed
+from tests.chokepoint_paths import APP_ROOT
+from tests.chokepoint_walks import attribute_call_on, call_offenders, parsed
 
 _STORE = APP_ROOT / "storage" / "coordination_store.py"
 

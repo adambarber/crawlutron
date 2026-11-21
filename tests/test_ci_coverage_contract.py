@@ -92,7 +92,7 @@ def test_battery_is_only_fast_suite_execution() -> None:
     coverage_runs = " ".join(str(cast(StepMapping, step).get("run", "")) for step in coverage_steps)
     assert "pytest" not in coverage_runs, "coverage job must not re-run pytest (report-only)"
     assert "coverage combine" in coverage_runs, "coverage job must run coverage combine"
-    assert "coverage_reports.py" in coverage_runs, "coverage job must call frozen report script"
+    assert "scripts.coverage_reports" in coverage_runs, "coverage job must call frozen report script"
 
     # real-pbkdf2 and test-browser must not run the fast suite
     for job_name in ("real-pbkdf2", "test-browser"):

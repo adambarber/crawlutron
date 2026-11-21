@@ -7,24 +7,21 @@ from __future__ import annotations
 import ast
 import pathlib
 
+from tests.chokepoint_paths import APP_ROOT, REPO_ROOT, relative_posix
 from tests.chokepoint_walks import (
-    APP_ROOT,
     app_trees,
     enclosing_function,
     functions,
     nodes_of,
     offender_at,
     parent_map,
-    relative_posix,
     resolved_expr_name,
 )
 from tests.rules import Bites, Registry, Rule, Silent
 
 #: The rest package's api dir, for the path-keyed bite proofs that must prove
 #: a silenced site in the moved surface (relative_posix renders it rest-form).
-_REST_API = (
-    pathlib.Path(__file__).resolve().parents[2] / "packages" / "rest" / "src" / "crawlutron_rest" / "api"
-)
+_REST_API = REPO_ROOT / "packages" / "rest" / "src" / "crawlutron_rest" / "api"
 
 # The two admission edges (watch + async crawl) and the delivery POST site:
 # the only modules a raw ``webhook_url: str`` may appear in a signature of.

@@ -9,7 +9,7 @@ import ast
 
 import pytest
 
-from tests.chokepoint_walks import APP_ROOT
+from tests.chokepoint_paths import APP_ROOT
 from tests.invariants.test_harness_doubles import node_names
 
 _ENGINE = APP_ROOT / "orchestration" / "engine.py"

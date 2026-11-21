@@ -65,7 +65,7 @@ jobs:
         run: xvfb-run -a .venv/bin/python -m pytest
 
       - name: Generate coverage reports
-        run: .venv/bin/python scripts/coverage_reports.py
+        run: .venv/bin/python -m scripts.coverage_reports
 
       - name: Upload coverage data artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
@@ -130,7 +130,7 @@ jobs:
         run: .venv/bin/python -m coverage combine
 
       - name: Generate coverage reports
-        run: .venv/bin/python scripts/coverage_reports.py
+        run: .venv/bin/python -m scripts.coverage_reports
 
       - name: Upload coverage XML to Codecov
         if: ${{ !cancelled() }}

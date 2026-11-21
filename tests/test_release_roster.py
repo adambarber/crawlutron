@@ -13,8 +13,9 @@ import yaml
 
 from scripts.release_roster import primary_tag, released, roster
 from tests._ci_contract import SERVICE_ROOT
+from tests.chokepoint_paths import REPO_ROOT
 
-RELEASE_WORKFLOW_PATH = Path(__file__).resolve().parents[1] / ".github/workflows/release.yml"
+RELEASE_WORKFLOW_PATH = REPO_ROOT / ".github/workflows/release.yml"
 GIT = shutil.which("git") or "git"
 
 
@@ -187,7 +188,7 @@ def test_an_explicit_tag_resolves_the_roster_without_moving_the_checkout(tmp_pat
 
 def test_the_root_declares_every_workspace_member_as_a_runtime_dependency() -> None:
     """An omitted member makes the published app unimportable."""
-    manifest_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    manifest_path = REPO_ROOT / "pyproject.toml"
     manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
     declared = {
         str(dependency).split("[")[0].split(">=")[0].split("==")[0]

@@ -5,7 +5,8 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from tests.chokepoint_walks import REPO_ROOT, from_imports, relative_posix, trees_under
+from tests.chokepoint_paths import REPO_ROOT, relative_posix
+from tests.chokepoint_walks import from_imports, trees_under
 from tests.rules import Rule
 
 _STORE_DOUBLES_DOOR = "tests._job_store_doubles"

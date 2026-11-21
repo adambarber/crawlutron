@@ -5,14 +5,8 @@ Providers and selectors: one contract, one flow."""
 import ast
 import pathlib
 
-from tests.chokepoint_walks import (
-    APP_ROOT,
-    class_defs,
-    functions,
-    nodes_of,
-    offender_at,
-    resolved_expr_name,
-)
+from tests.chokepoint_paths import APP_ROOT
+from tests.chokepoint_walks import class_defs, functions, nodes_of, offender_at, resolved_expr_name
 from tests.rules import Bites, Registry, Rule
 
 # --------------------------------------------------------------------------- Search-provider result

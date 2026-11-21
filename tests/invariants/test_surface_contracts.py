@@ -7,16 +7,8 @@ import pathlib
 import re
 import typing
 
-from tests.chokepoint_walks import (
-    APP_ROOT,
-    REPO_ROOT,
-    app_trees,
-    call_nodes,
-    calls_to_any,
-    functions,
-    nodes_of,
-    offender_at,
-)
+from tests.chokepoint_paths import APP_ROOT, REPO_ROOT
+from tests.chokepoint_walks import app_trees, call_nodes, calls_to_any, functions, nodes_of, offender_at
 from tests.invariants._shared import _relative_app_path
 from tests.property_registry import Property
 from tests.rules import Bites, Registry, Rule, Silent

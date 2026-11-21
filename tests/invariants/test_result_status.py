@@ -5,14 +5,8 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from tests.chokepoint_walks import (
-    APP_ROOT,
-    SANCTIONED,
-    call_nodes,
-    offender_at,
-    relative_posix,
-    resolved_call_name,
-)
+from tests.chokepoint_paths import APP_ROOT, relative_posix
+from tests.chokepoint_walks import SANCTIONED, call_nodes, offender_at, resolved_call_name
 from tests.rules import Bites, Rule, Silent
 
 # --- A result may not spell its own (status, classification) pair -------------

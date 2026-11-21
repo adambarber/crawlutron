@@ -12,18 +12,20 @@ import shutil
 import subprocess
 import sys
 
+from utils.paths import REPO_ROOT
+
 
 def _setup_paths() -> pathlib.Path:
     """Expose the test support package and return repo root."""
-    _repo_root = pathlib.Path(__file__).resolve().parents[2]
+    _repo_root = REPO_ROOT
     sys.path.insert(0, str(_repo_root / "tests"))
     return _repo_root
 
 
 _setup_paths()
 
-from _common import _require_env, _run
-from _support._image_types import _HasCookies
+from scripts.release._common import _require_env, _run
+from tests._support._image_types import _HasCookies
 
 SBOM_PATH = pathlib.Path("crawlutron-sbom.cdx.json")
 

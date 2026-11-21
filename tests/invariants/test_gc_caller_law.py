@@ -7,8 +7,7 @@ from __future__ import annotations
 
 import ast
 
-from tests.chokepoint_walks import APP_ROOT
-from tests.invariants._shared import REPO_ROOT
+from tests.chokepoint_paths import APP_ROOT, REPO_ROOT
 
 _SEAMS = ("prune", "purge_robots_cache")
 _MAINTENANCE_MODULE = "packages/core/src/crawlutron/service/cache_sweep.py"

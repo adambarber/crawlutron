@@ -11,8 +11,9 @@ from typing import cast
 from scripts.executables import require_repo_tool
 from tests._support._jscpd_report_types import JscpdDuplicate, JscpdLocation, JscpdReport
 from tests._walk_primitives import package_roots, scan_roots
+from utils.paths import REPO_ROOT
 
-SERVICE_ROOT = Path(__file__).resolve().parents[1]
+SERVICE_ROOT = REPO_ROOT
 CONFIG_PATH = SERVICE_ROOT / ".jscpd.json"
 PRECOMMIT_CONFIG_PATH = SERVICE_ROOT / ".pre-commit-config.yaml"
 

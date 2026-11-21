@@ -11,8 +11,8 @@ from typing import Protocol
 
 import pytest
 
-from tests._walk_primitives import APP_ROOTS
-from tests.chokepoint_walks import app_trees, nodes_of, relative_posix
+from tests.chokepoint_paths import APP_ROOTS, relative_posix
+from tests.chokepoint_walks import app_trees, nodes_of
 
 ALL_APP: frozenset[str] = frozenset()
 """Every app module.

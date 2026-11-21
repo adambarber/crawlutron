@@ -6,11 +6,12 @@ stand alone. Scoped to crawlutron/ and tests/ plus ``.env.example`` -- not histo
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parent.parent
+from tests.chokepoint_paths import REPO_ROOT
+
+ROOT = REPO_ROOT
 
 #: (label, pattern). The first two are not dead patterns. Each pattern is kept because it is the shape that
 #: actually occurs, and the composite forms below cover the other shapes rather than leaving them ungated.

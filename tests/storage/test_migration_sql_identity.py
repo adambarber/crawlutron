@@ -7,7 +7,6 @@ every step's column spelling, not just the first (#530).
 from __future__ import annotations
 
 import importlib.util
-import pathlib
 import sqlite3
 from collections.abc import Callable
 
@@ -29,10 +28,9 @@ from crawlutron.storage.migrations.manifest import (
     create_index_sql,
     create_table_sql,
 )
+from tests.chokepoint_paths import REPO_ROOT
 
-MIGRATIONS_ROOT = (
-    pathlib.Path(__file__).parents[2] / "packages" / "core" / "src" / "crawlutron" / "storage" / "migrations"
-)
+MIGRATIONS_ROOT = REPO_ROOT / "packages" / "core" / "src" / "crawlutron" / "storage" / "migrations"
 
 #: A step's apply and rollback: a statement string, or a callable that runs it.
 Step = str | Callable[[sqlite3.Connection], None]

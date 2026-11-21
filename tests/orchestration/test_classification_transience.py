@@ -17,6 +17,7 @@ from crawlutron.vocabulary.taxonomy import (
     CrawlClassification,
     is_transient_classification,
 )
+from tests.chokepoint_paths import REPO_ROOT
 
 
 class TestTransienceIsATaxonomyOwnedVerdict:
@@ -111,7 +112,7 @@ class TestClassifiedFailuresGetTheVerdictThatMatchesThem:
         is ever reverted, this fails."""
         import ast
 
-        from tests.chokepoint_walks import REPO_ROOT, app_python_files
+        from tests.chokepoint_walks import app_python_files
 
         hits: list[str] = []
         for path in app_python_files():

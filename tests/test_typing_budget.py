@@ -24,7 +24,8 @@ from tests._ratchet import (
 from tests._ratchet import (
     report as ratchet_report,
 )
-from tests.chokepoint_walks import APP_ROOT, REPO_ROOT, nodes_of, trees_under
+from tests.chokepoint_paths import APP_ROOT, REPO_ROOT
+from tests.chokepoint_walks import nodes_of, trees_under
 
 _METRIC = "undeclared record"
 _ANY = "bare Any"

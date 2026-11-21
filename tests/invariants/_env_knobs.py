@@ -11,14 +11,8 @@ import re
 
 from crawlutron.config.settings import ENVIRONMENT_FIELD_ALIASES
 from scripts.ast_scopes import is_body_owner
-from tests.chokepoint_walks import (
-    REPO_ROOT,
-    app_trees,
-    parent_map,
-    resolved_call_name,
-    string_literals,
-    trees_under,
-)
+from tests.chokepoint_paths import REPO_ROOT
+from tests.chokepoint_walks import app_trees, parent_map, resolved_call_name, string_literals, trees_under
 from tests.invariants._shared import _relative_app_path
 
 __all__ = ["_KNOB_PATTERN", "_consumed_knobs"]

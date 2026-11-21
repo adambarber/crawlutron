@@ -6,7 +6,7 @@ import ast
 from pathlib import Path
 
 from scripts.ast_scopes import SCOPE_OPENING_NODES
-from tests.chokepoint_walks import REPO_ROOT
+from tests.chokepoint_paths import REPO_ROOT
 
 # Consumers of the vocabulary; the declaration file is exempt (the tuple there
 # IS the declaration).

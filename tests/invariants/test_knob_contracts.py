@@ -6,13 +6,8 @@ import ast
 import pathlib
 
 from crawlutron.config.settings import ENVIRONMENT_FIELD_ALIASES
-from tests.chokepoint_walks import (
-    REPO_ROOT,
-    app_trees,
-    class_defs,
-    file_tree,
-    string_literals,
-)
+from tests.chokepoint_paths import REPO_ROOT
+from tests.chokepoint_walks import app_trees, class_defs, file_tree, string_literals
 from tests.invariants._env_knobs import (
     _KNOB_PATTERN,
     _consumed_knobs,

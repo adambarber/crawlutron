@@ -38,7 +38,7 @@ jobs:
         # render fails here rather than on upload.
         run: uvx twine check --strict dist/*
       - name: Install and import every wheel in a clean environment
-        run: uv run --no-project --python 3.14 python scripts/check_packaging.py
+        run: uv run --no-project --python 3.14 python -m scripts.check_packaging
 
   packaging-image:
     name: Build the container image

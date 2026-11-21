@@ -11,11 +11,12 @@ import json
 import os
 
 # Add scripts directory to path for absolute imports
-import pathlib
 import sys
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "scripts"))
-from release._common import (
+from utils.paths import REPO_ROOT
+
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+from scripts.release._common import (
     primary_tag,
     released,
     roster,

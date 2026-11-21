@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import ast
-import pathlib
 
 import crawlutron_sdk
 from crawlutron.service.errors import DomainError, JobStateConflict
-
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+from tests.chokepoint_paths import REPO_ROOT
 
 #: Live raise-site sources the wire triplets are re-derived from each run.
 _RAISE_SITE_SOURCES = (

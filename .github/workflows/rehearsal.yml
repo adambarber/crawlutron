@@ -49,7 +49,7 @@ jobs:
         id: roster
         env:
           RELEASE_TAG: ${{ inputs.tag }}
-        run: python3 scripts/release/emit_roster.py
+        run: python3 -m scripts.release.emit_roster
 
   ci:
     name: Run CI suite (read-only)
@@ -98,4 +98,4 @@ jobs:
         env:
           NAME: ${{ matrix.package.name }}
           VERSION: ${{ matrix.package.version }}
-        run: python3 scripts/release/install_graph.py
+        run: python3 -m scripts.release.install_graph

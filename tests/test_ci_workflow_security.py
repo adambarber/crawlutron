@@ -66,7 +66,7 @@ def test_no_run_step_splices_event_input_into_shell() -> None:
 def test_a_run_step_that_splices_an_event_field_is_caught() -> None:
     """Bites: the old inline branch interpolation fails the check."""
     workflow = RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8")
-    marker = "python3 scripts/release/emit_roster.py"
+    marker = "python3 -m scripts.release.emit_roster"
     broken = workflow.replace(marker, f'{marker} "${{{{ github.event.workflow_run.head_branch }}}}"', 1)
     assert broken != workflow, "the injection did not apply; the probe proves nothing"
     with pytest.raises(AssertionError):

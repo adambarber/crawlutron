@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import ast
 
-from tests.chokepoint_walks import call_nodes, offender_at, relative_posix, resolved_call_name
+from tests.chokepoint_paths import relative_posix
+from tests.chokepoint_walks import call_nodes, offender_at, resolved_call_name
 from tests.rules import Bites, Rule
 
 #: The sanctioned egress home: fetchers.py owns the pooled client; nothing else builds one.

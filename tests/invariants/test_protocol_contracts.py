@@ -6,17 +6,8 @@ import ast
 from collections.abc import Iterable
 from pathlib import Path
 
-from tests.chokepoint_walks import (
-    APP_ROOT,
-    REPO_ROOT,
-    app_trees,
-    attribute_reads,
-    file_tree,
-    lineno,
-    name_reads,
-    offender,
-    relative_posix,
-)
+from tests.chokepoint_paths import APP_ROOT, REPO_ROOT, relative_posix
+from tests.chokepoint_walks import app_trees, attribute_reads, file_tree, lineno, name_reads, offender
 from tests.invariants._shared import _declared_public_symbols, _enclosing_calls, _enclosing_nodes
 from tests.rules import Bites, Rule
 

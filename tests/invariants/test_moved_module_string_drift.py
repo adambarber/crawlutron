@@ -12,7 +12,7 @@ from unittest import mock
 import pytest
 
 from tests._walk_primitives import comment_lines, is_exempt, parsed, string_constants
-from tests.chokepoint_walks import REPO_ROOT
+from tests.chokepoint_paths import REPO_ROOT
 
 __all__ = ["MOVED_MODULES"]
 

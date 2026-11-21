@@ -1,11 +1,12 @@
 """Memory guardrails: conservative default response size cap."""
 
 import sys
-from pathlib import Path
+
+from tests.chokepoint_paths import REPO_ROOT
 
 # Resolve the app root from this file's location so the tests are independent of the CWD they are launched
 # from (repo root or any subdirectory both work): the app root is three levels up.
-_APP_ROOT = Path(__file__).resolve().parents[2]
+_APP_ROOT = REPO_ROOT
 
 
 def test_default_max_content_length_is_none_so_ram_scaling_stays_live():

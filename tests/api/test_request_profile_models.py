@@ -6,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from crawlutron.models.request_profile_record import RequestProfileRecord
-from tests.chokepoint_walks import APP_ROOT
+from tests.chokepoint_paths import APP_ROOT
 
 
 class TestRequestProfileVocabularyIsClosed:

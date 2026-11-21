@@ -11,7 +11,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from release._common import primary_tag
+from scripts.release._common import primary_tag
 
 ROOT_MANIFEST = (
     '[project]\nname = "crawlutron"\nversion = "1.2.3"\n\n[tool.uv.workspace]\nmembers = ["packages/*"]\n'

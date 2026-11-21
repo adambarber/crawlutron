@@ -5,7 +5,8 @@ dispatch function, so the handler factories and their module-level handle_* alia
 
 from __future__ import annotations
 
-from tests.chokepoint_walks import REPO_ROOT, parsed
+from tests.chokepoint_paths import REPO_ROOT
+from tests.chokepoint_walks import parsed
 from tests.invariants.test_public_surface import _owned_public_symbols
 
 _HANDLERS = REPO_ROOT / "packages/mcp/src/crawlutron_mcp/handlers.py"

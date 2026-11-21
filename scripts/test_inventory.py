@@ -13,7 +13,9 @@ import pathlib
 import sys
 from collections import defaultdict
 
-_REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+from utils.paths import REPO_ROOT
+
+_REPO_ROOT = REPO_ROOT
 _root_on_path = str(_REPO_ROOT) in sys.path
 if not _root_on_path:
     sys.path.insert(0, str(_REPO_ROOT))
@@ -84,8 +86,8 @@ def _call_objects(tree: ast.Module, node: ast.AST) -> set[str]:
 
 def collect_tests() -> list[dict]:
     """Every test function: module-level and inside Test* classes."""
-    from tests._walk_primitives import REPO_ROOT, trees_under
     from tests._walk_primitives import get_test_roots as test_roots
+    from tests._walk_primitives import trees_under
     from tests.chokepoint_walks import class_defs, functions
 
     tests: list[dict] = []

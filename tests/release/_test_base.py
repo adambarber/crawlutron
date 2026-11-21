@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from tests.chokepoint_paths import REPO_ROOT, relative_posix
+
 
 def _run_script(
     script_path: Path,
@@ -15,11 +17,12 @@ def _run_script(
     unset: tuple[str, ...] = (),
 ) -> subprocess.CompletedProcess[str]:
     """Run a release script with an explicit environment."""
-    repo_root = script_path.resolve().parents[2]
+    repo_root = REPO_ROOT
+    module = relative_posix(script_path.resolve()).removesuffix(".py").replace("/", ".")
     full_env = {key: value for key, value in os.environ.items() if key not in unset}
     full_env.update(env)
     return subprocess.run(
-        [sys.executable, str(script_path)],
+        [sys.executable, "-m", module],
         cwd=str(cwd or repo_root),
         capture_output=True,
         text=True,
@@ -29,7 +32,7 @@ def _run_script(
 
 def _make_script_runner(script_name: str, subdir: str = "release"):
     """Create a _run_script function for a specific release script."""
-    script_path = Path(__file__).resolve().parents[2] / "scripts" / subdir / script_name
+    script_path = REPO_ROOT / "scripts" / subdir / script_name
 
     def _runner(
         env: dict[str, str],

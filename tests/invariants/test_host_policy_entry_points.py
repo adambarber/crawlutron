@@ -3,7 +3,8 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from tests.chokepoint_walks import REPO_ROOT, app_trees, local_nodes, nodes_of, resolved_call_name
+from tests.chokepoint_paths import REPO_ROOT
+from tests.chokepoint_walks import app_trees, local_nodes, nodes_of, resolved_call_name
 from tests.invariants._shared import DefinitionNode, _module_definition_index, _module_name
 
 _DECISION_NAMES = frozenset(

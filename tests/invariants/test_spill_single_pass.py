@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import ast
 
-from tests.chokepoint_walks import app_trees, offender_at, relative_posix
+from tests.chokepoint_paths import relative_posix
+from tests.chokepoint_walks import app_trees, offender_at
 
 
 def test_spill_load_ordered_reassembles_without_a_client_side_sort():

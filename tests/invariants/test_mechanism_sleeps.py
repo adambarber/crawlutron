@@ -6,7 +6,8 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from tests.chokepoint_walks import TESTS_DIR, attribute_call_on, offender_at, trees_under
+from tests.chokepoint_paths import TESTS_DIR
+from tests.chokepoint_walks import attribute_call_on, offender_at, trees_under
 from tests.rules import Bites, Rule
 
 _TIME_LIMIT_NOTE = (

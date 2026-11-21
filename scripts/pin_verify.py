@@ -10,7 +10,9 @@ import subprocess
 import tomllib
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+from utils.paths import REPO_ROOT
+
+ROOT = REPO_ROOT
 REGISTRY_PATH = ROOT / ".github" / "versions.toml"
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 USES = re.compile(r"uses:\s*(\S+?)(?:\s+#\s*(\S+))?\s*$")

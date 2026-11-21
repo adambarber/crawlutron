@@ -15,7 +15,7 @@ import pytest
 
 from scripts.extract_comments import over_line_docstrings
 from tests._walk_primitives import SCAN_ROOTS, declared_root_files, parsed
-from tests.chokepoint_walks import REPO_ROOT
+from tests.chokepoint_paths import REPO_ROOT
 
 #: The most consecutive full-line ``#`` comments a block may run.
 LIMIT = 2

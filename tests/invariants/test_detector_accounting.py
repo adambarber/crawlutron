@@ -8,7 +8,8 @@ import ast
 import pathlib
 from dataclasses import dataclass
 
-from tests.chokepoint_walks import REPO_ROOT, calls_to_any, from_imports, functions, parsed
+from tests.chokepoint_paths import REPO_ROOT
+from tests.chokepoint_walks import calls_to_any, from_imports, functions, parsed
 from tests.invariants._armed_detectors import hand_rolled_detectors
 
 INVARIANTS_ROOT = REPO_ROOT / "tests" / "invariants"

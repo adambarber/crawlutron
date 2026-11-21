@@ -5,8 +5,9 @@ import pathlib
 from collections.abc import Callable
 
 from scripts.module_graph import IMPORT_ROOTS, _runtime_imports, build_graph
-from tests._walk_primitives import REPO_ROOT, offender_at
+from tests._walk_primitives import offender_at
 from tests._walk_readers import call_nodes
+from tests.chokepoint_paths import APP_ROOT, REPO_ROOT
 from tests.chokepoint_walks import trees_under
 from tests.rules import Bites, Rule
 
@@ -19,8 +20,8 @@ _WALKED: tuple[tuple[pathlib.Path, ast.Module], ...] = tuple(
 )
 
 #: models/vocabulary subtrees for the upward-import rule.
-_MODELS_DIR = REPO_ROOT / "packages" / "core" / "src" / "crawlutron" / "models"
-_VOCAB_DIR = REPO_ROOT / "packages" / "core" / "src" / "crawlutron" / "vocabulary"
+_MODELS_DIR = APP_ROOT / "models"
+_VOCAB_DIR = APP_ROOT / "vocabulary"
 _MODELS_VOCAB_TREES: tuple[tuple[pathlib.Path, ast.Module], ...] = tuple(
     (path, tree) for directory in (_MODELS_DIR, _VOCAB_DIR) for path, tree in trees_under(directory)
 )

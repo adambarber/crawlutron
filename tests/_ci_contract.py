@@ -11,8 +11,9 @@ from pathlib import Path
 import yaml
 
 from tests._walk_primitives import package_roots
+from tests.chokepoint_paths import REPO_ROOT
 
-SERVICE_ROOT = Path(__file__).resolve().parents[1]
+SERVICE_ROOT = REPO_ROOT
 
 CONFIG_PATH = SERVICE_ROOT / ".pre-commit-config.yaml"
 

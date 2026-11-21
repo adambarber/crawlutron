@@ -9,7 +9,9 @@ from pathlib import Path
 
 import yaml
 
-_CONFIG = Path(__file__).resolve().parents[2] / ".pre-commit-config.yaml"
+from tests.chokepoint_paths import REPO_ROOT
+
+_CONFIG = REPO_ROOT / ".pre-commit-config.yaml"
 _GATE = ["uv", "lock", "--check"]
 _MANIFEST = (
     '[project]\nname = "stale-probe"\nversion = "0.1.0"\nrequires-python = "{python}"\n'

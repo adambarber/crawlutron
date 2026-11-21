@@ -17,8 +17,9 @@ from typing import TextIO
 import pytest
 
 from tests._walk_primitives import member_import_names, prepend_member_roots
+from tests.chokepoint_paths import REPO_ROOT
 
-_TREE_ROOT = Path(__file__).resolve().parent.parent
+_TREE_ROOT = REPO_ROOT
 prepend_member_roots(_TREE_ROOT, sys.path)
 
 

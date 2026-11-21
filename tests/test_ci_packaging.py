@@ -36,4 +36,4 @@ def test_packaging_workflow_publishes_nothing() -> None:
     for banned in ("pypa/gh-action-pypi-publish", "twine upload", "docker push", "push: true"):
         assert banned not in workflow, f"the packaging workflow must not publish ({banned!r})"
     assert "twine check --strict" in workflow, "the packaging workflow must inspect every artifact"
-    assert "scripts/check_packaging.py" in workflow, "every wheel must install and import"
+    assert "scripts.check_packaging" in workflow, "every wheel must install and import"

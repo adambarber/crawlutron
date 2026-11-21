@@ -9,7 +9,8 @@ import ast
 import pathlib
 from functools import cache
 
-from tests.chokepoint_walks import REPO_ROOT, app_trees, nodes_of, offender_at, relative_posix
+from tests.chokepoint_paths import REPO_ROOT, relative_posix
+from tests.chokepoint_walks import app_trees, nodes_of, offender_at
 from tests.invariants._proof_paths import ELSEWHERE as _ELSEWHERE
 from tests.invariants._shared import _enclosing_defs, module_level_bindings
 from tests.rules import Bites, Registry, Rule, Silent

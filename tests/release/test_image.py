@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
+from tests.chokepoint_paths import REPO_ROOT
 from tests.release._test_base import _make_script_runner
 
-SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "release" / "image.py"
+SCRIPT = REPO_ROOT / "scripts" / "release" / "image.py"
 _run_script = _make_script_runner("image.py")
 
 

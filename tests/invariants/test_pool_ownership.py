@@ -5,7 +5,8 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from tests.chokepoint_walks import REPO_ROOT, offender_at, relative_posix
+from tests.chokepoint_paths import REPO_ROOT, relative_posix
+from tests.chokepoint_walks import offender_at
 from tests.invariants._proof_paths import ELSEWHERE as _ELSEWHERE
 from tests.invariants._shared import _enclosing_calls
 from tests.rules import Bites, Registry, Rule, Silent

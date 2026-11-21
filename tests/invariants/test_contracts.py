@@ -3,14 +3,13 @@ from __future__ import annotations
 import ast
 import pathlib
 
+from tests.chokepoint_paths import APP_ROOT, relative_posix
 from tests.chokepoint_walks import (
-    APP_ROOT,
     assignment_targets,
     call_nodes,
     calls_to_any,
     nodes_of,
     offender_at,
-    relative_posix,
     try_blocks,
     writes,
 )

@@ -11,7 +11,8 @@ import re
 from collections.abc import Iterator, Sequence
 
 from tests._walk_primitives import _narrow
-from tests.chokepoint_walks import REPO_ROOT, parsed
+from tests.chokepoint_paths import REPO_ROOT
+from tests.chokepoint_walks import parsed
 from tests.invariants._armed_detectors import ArmedHandRolled, hand_rolled_detectors
 from tests.invariants._cache_walk_probe import assert_second_call_skips_the_walk
 from tests.invariants._shared import app_names
