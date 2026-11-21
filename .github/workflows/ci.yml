@@ -172,6 +172,7 @@ jobs:
           # a hung gate hanging the job forever, so it gets hang-guard room
           # here rather than a budget. Commit admission keeps the 60s default.
           GATE_FANOUT_WALL_SECONDS: "300"
+          COVERAGE_FILE: .coverage.battery
           # Coverage flags for the battery run -- the ONLY fast-suite execution.
           # Per-invocation junit avoids filename collisions across xdist workers.
           PYTEST_ADDOPTS: "--cov=crawlutron --cov-report= --cov-append -p pytest_cov --junitxml=junit-%p.xml"
@@ -319,6 +320,8 @@ jobs:
           persist-credentials: false
       - uses: $/.github/actions/prepare
       - name: Run pytest (real PBKDF2) with coverage
+        env:
+          COVERAGE_FILE: .coverage.real-pbkdf2
         run: .venv/bin/python -m pytest -m "real_pbkdf2" --cov=crawlutron --cov-report= --cov-append -p pytest_cov --junitxml=junit-real-pbkdf2.xml
       - name: Upload coverage data artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -394,6 +397,7 @@ jobs:
           #            camoufox's own CI and works reliably.
           NO_PROXY: 127.0.0.1,localhost
           CRAWLUTRON_HEADLESS: "false"
+          COVERAGE_FILE: .coverage.test-browser
         run: xvfb-run -a .venv/bin/python -m pytest -m "browser" --cov=crawlutron --cov-report= --cov-append -p pytest_cov --junitxml=junit-browser.xml
       - name: Upload coverage data artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
