@@ -95,14 +95,18 @@ def test_the_published_graph_is_probed_before_the_release_lands() -> None:
 
 def test_the_image_is_pushed_only_after_it_smokes() -> None:
     """A tag that failed its smoke must never exist: :0.4.0rc1 was pushed dead."""
-    # The image job calls a script that handles smoke, push, and attest in order
+    # The image script smokes, SBOMs, and pushes in order; the workflow's
+    # attest-sbom step attests the pushed digest afterwards.
     image_script = (SERVICE_ROOT / "scripts" / "release" / "image.py").read_text()
     # Verify the script does smoke before push
     smoke_idx = image_script.find("_smoke_image")
-    push_idx = image_script.find("_push_and_attest")
+    sbom_idx = image_script.find("_generate_sbom")
+    push_idx = image_script.find("_push_image")
     assert smoke_idx != -1, "script must have smoke function"
+    assert sbom_idx != -1, "script must have SBOM function"
     assert push_idx != -1, "script must have push function"
-    assert smoke_idx < push_idx, "smoke must come before push in script"
+    assert smoke_idx < sbom_idx < push_idx, "smoke, SBOM, push must run in that order"
     # Verify the main function calls them in order
     main_body = image_script[image_script.find("def main") :]
-    assert main_body.find("_smoke_image") < main_body.find("_push_and_attest")
+    assert main_body.find("_smoke_image") < main_body.find("_generate_sbom")
+    assert main_body.find("_generate_sbom") < main_body.find("_push_image")

@@ -23,5 +23,7 @@ jscpd-expectations.json @adambarber
 .github/workflows/packaging.yml @adambarber
 .github/actions/prepare/action.yml @adambarber
 .github/zizmor.yml @adambarber
+.github/versions.toml @adambarber
 scripts/release_roster.py @adambarber
+scripts/release/image.py @adambarber
 docs/RELEASE.md @adambarber
