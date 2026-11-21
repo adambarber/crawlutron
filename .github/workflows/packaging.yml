@@ -13,8 +13,9 @@ jobs:
   packaging-distributions:
     name: Build and check every distribution
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
-      # hatch-vcs derives the version from the newest tag. A tagless tree
+      # Ensure tags are available for version derivation; a tagless tree
       # builds 0.1.devN, which fails the members' >=0.4.0.dev0 floor when the
       # probe resolves them -- so the checkout carries tags, no extra fetch.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -42,6 +43,7 @@ jobs:
   packaging-image:
     name: Build the container image
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

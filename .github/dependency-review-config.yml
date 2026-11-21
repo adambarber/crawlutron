@@ -1,0 +1,19 @@
+# Dependency review configuration for crawlutron
+# This file configures the actions/dependency-review-action behavior.
+
+# Fail on any vulnerability with severity high or critical
+fail-on-severity: high
+
+# Allow specific vulnerabilities that are false positives or accepted risks
+# Format: "CVE-YYYY-NNNNN" or "GHSA-xxxx-xxxx-xxxx"
+allow-ghsas: []
+
+# Skip checking development dependencies (we only audit production deps via uv export --no-dev)
+# The audit job already handles production dependency auditing with pip-audit.
+# This review action catches supply-chain issues in the dependency graph itself.
+
+# Configuration for private packages / registries (not needed for crawlutron)
+# private-registries: []
+
+# Severity levels: low, moderate, high, critical
+# We fail on high and critical to catch supply-chain attacks early.
