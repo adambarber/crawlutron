@@ -42,5 +42,15 @@ def test_dependency_review_checks_out_config_source() -> None:
     assert len(_checkouts(_workflow_jobs()["dependency-review"])) == 1
 
 
+def test_dependency_review_supplies_refs_on_push_events() -> None:
+    steps = _steps(_workflow_jobs()["dependency-review"])
+    review = [step for step in steps if "dependency-review-action@" in str(step.get("uses", ""))]
+    assert len(review) == 1
+    options = review[0].get("with")
+    assert isinstance(options, dict)
+    assert "github.event.before" in str(options.get("base-ref", ""))
+    assert "github.sha" in str(options.get("head-ref", ""))
+
+
 def test_dependency_review_config_is_tracked() -> None:
     assert CONFIG_PATH.is_file()

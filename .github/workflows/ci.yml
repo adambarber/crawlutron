@@ -571,6 +571,8 @@ jobs:
         uses: actions/dependency-review-action@4081bf99e2866ebe428fc0477b69eb4fcda7220a # v4.4.0
         with:
           config-file: '.github/dependency-review-config.yml'
+          base-ref: ${{ github.event.before || github.event.pull_request.base.sha }}
+          head-ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
   # One required check, and only on the PR path (this workflow runs top-level
   # there, so the check name is unchanged). GitHub treats a skipped job as
