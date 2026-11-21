@@ -55,19 +55,37 @@ class Transport(Protocol):
     async def fetch(self, request: FetchRequest, *, max_bytes: int) -> FetchResult: ...
 
 
+def _http_error_result(
+    url: NormalizedUrl,
+    final_url: NormalizedUrl,
+    started: float,
+    status_code: int,
+) -> HttpFetchResult:
+    """Shared error result builder for 4xx/5xx with empty body."""
+    return HttpFetchResult(
+        url=url,
+        final_url=final_url,
+        status_code=status_code,
+        headers={"content-type": "application/octet-stream"},
+        body=b"",
+        elapsed_ms=int((time.monotonic() - started) * 1000),
+    )
+
+
 def http_413(url: NormalizedUrl, final_url: NormalizedUrl, started: float) -> HttpFetchResult:
     """Standard 413 (payload too large) result.
 
     Takes the logical ``final_url``, never ``current_url``: a pinned plain-HTTP
     response url is the resolved-IP literal, which leaks topology."""
-    return HttpFetchResult(
-        url=url,
-        final_url=final_url,
-        status_code=413,
-        headers={"content-type": "application/octet-stream"},
-        body=b"",
-        elapsed_ms=int((time.monotonic() - started) * 1000),
-    )
+    return _http_error_result(url, final_url, started, 413)
+
+
+def http_408_deadline(url: NormalizedUrl, final_url: NormalizedUrl, started: float) -> HttpFetchResult:
+    """Walk deadline exhausted (408 Request Timeout).
+
+    Uses the same shape as http_413 but with 408 status. The walk-wide
+    monotonic deadline was exceeded before any hop could complete."""
+    return _http_error_result(url, final_url, started, 408)
 
 
 def _lowercased(headers: Mapping[str, str]) -> dict[str, str]:
