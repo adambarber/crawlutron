@@ -84,7 +84,8 @@ def _call_objects(tree: ast.Module, node: ast.AST) -> set[str]:
 
 def collect_tests() -> list[dict]:
     """Every test function: module-level and inside Test* classes."""
-    from tests._walk_primitives import REPO_ROOT, test_roots, trees_under
+    from tests._walk_primitives import REPO_ROOT, trees_under
+    from tests._walk_primitives import get_test_roots as test_roots
     from tests.chokepoint_walks import class_defs, functions
 
     tests: list[dict] = []
