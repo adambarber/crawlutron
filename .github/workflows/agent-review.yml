@@ -1,0 +1,148 @@
+name: Agent Review
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+concurrency:
+  group: agent-review-${{ github.event.workflow_run.pull_requests[0].head.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  probes:
+    name: Probes
+    if: ${{ github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+          ref: ${{ github.event.workflow_run.pull_requests[0].base.sha }}
+      - uses: $/.github/actions/prepare
+      - name: Fetch pull-request head
+        env:
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          PR_HEAD_SHA: ${{ github.event.workflow_run.pull_requests[0].head.sha }}
+        run: |
+          git fetch --no-tags origin "refs/pull/${PR_NUMBER}/head"
+          test "$(git rev-parse FETCH_HEAD)" = "${PR_HEAD_SHA}"
+          git worktree add --detach pr-head "${PR_HEAD_SHA}"
+          chmod -R a-w pr-head
+      - name: Run registered probes
+        env:
+          BASE_SHA: ${{ github.event.workflow_run.pull_requests[0].base.sha }}
+          HEAD_SHA: ${{ github.event.workflow_run.pull_requests[0].head.sha }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          .venv/bin/python scripts/review_probes.py run \
+            --registry .github/review-agents.toml \
+            --output-dir probes \
+            --base "${BASE_SHA}" \
+            --head "${HEAD_SHA}" \
+            --run-id "${RUN_ID}"
+      - name: Upload probe artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: agent-review-probes
+          path: probes/
+          if-no-files-found: error
+
+  review:
+    name: Review
+    if: ${{ always() && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success' }}
+    needs: [probes]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - uses: $/.github/actions/prepare
+      - name: Download probe artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: agent-review-probes
+          path: probes
+      - name: Create GitHub App token
+        id: app-token
+        continue-on-error: true
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.REVIEW_APP_ID }}
+          private-key: ${{ secrets.REVIEW_APP_PRIVATE_KEY }}
+          permission-contents: read
+          permission-checks: write
+          permission-pull-requests: write
+      - name: Require GitHub App credentials
+        id: app-credentials
+        if: always()
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          REVIEW_APP_ID: ${{ vars.REVIEW_APP_ID }}
+          REVIEW_APP_PRIVATE_KEY: ${{ secrets.REVIEW_APP_PRIVATE_KEY }}
+        run: |
+          if [ -z "${APP_TOKEN}" ] || [ -z "${REVIEW_APP_ID}" ] || [ -z "${REVIEW_APP_PRIVATE_KEY}" ]; then
+            echo "GitHub App credentials are unavailable; review fails closed" >&2
+            exit 1
+          fi
+          echo "available=true" >> "${GITHUB_OUTPUT}"
+      - name: Run agent review
+        if: ${{ always() && steps.app-credentials.outputs.available == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          PR_HEAD_SHA: ${{ github.event.workflow_run.pull_requests[0].head.sha }}
+        run: |
+          .venv/bin/python scripts/agent_review.py review \
+            --pr-number "${PR_NUMBER}" \
+            --head-sha "${PR_HEAD_SHA}" \
+            --probe-dir probes \
+            --registry .github/review-agents.toml \
+            --output verdict.json
+      - name: Upload verdict artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ always() && steps.app-credentials.outputs.available == 'true' }}
+        with:
+          name: agent-review-verdict
+          path: verdict.json
+          if-no-files-found: error
+      - name: Publish code-review check
+        if: ${{ always() && steps.app-credentials.outputs.available == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          PR_HEAD_SHA: ${{ github.event.workflow_run.pull_requests[0].head.sha }}
+        run: |
+          .venv/bin/python scripts/agent_review.py publish-check \
+            --verdict verdict.json \
+            --pr-number "${PR_NUMBER}" \
+            --head-sha "${PR_HEAD_SHA}"
+      - name: Post advisory PR review
+        if: ${{ always() && steps.app-credentials.outputs.available == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          PR_HEAD_SHA: ${{ github.event.workflow_run.pull_requests[0].head.sha }}
+        run: |
+          .venv/bin/python scripts/agent_review.py post-review \
+            --verdict verdict.json \
+            --pr-number "${PR_NUMBER}" \
+            --head-sha "${PR_HEAD_SHA}"
