@@ -1,31 +1,24 @@
-"""Bite: coverage report validation on a disposable scratch tree."""
+"""Bite: coverage source regression.
+
+`coverage_reports.py` refuses to build reports when the combined coverage data is
+absent, with the exact diagnostic naming the file it looked for.
+"""
 
 from __future__ import annotations
 
 import subprocess
-import tempfile
+import sys
 from pathlib import Path
 
 
-def test_coverage_report_generation():
-    """Verify coverage_reports.py generates proper structure.
-
-    Invokes scripts/coverage_reports.py when no coverage data exists
-    and verifies it fails with the specific error message.
-    """
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        Path(tmp_dir)
-
-        venv_python = Path(__file__).resolve().parents[2] / ".venv" / "bin" / "python"
-        result = subprocess.run(
-            [str(venv_python), "scripts/coverage_reports.py"],
-            capture_output=True,
-            text=True,
-            cwd=Path(__file__).resolve().parents[2],
-        )
-
-        combined = result.stdout + result.stderr
-        assert result.returncode != 0, "Expected coverage_reports.py to fail without .coverage file"
-        assert "ERROR" in combined or "not found" in combined.lower(), (
-            f"Expected specific error message, got: {combined!r}"
-        )
+def test_missing_coverage_data_refusal_message(scripts_tree: Path):
+    """The report step fails naming the missing `.coverage` file and its location."""
+    result = subprocess.run(
+        [sys.executable, "scripts/coverage_reports.py"],
+        capture_output=True,
+        text=True,
+        cwd=str(scripts_tree),
+        check=False,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.stderr.strip() == f"ERROR: Coverage data file not found at {scripts_tree / '.coverage'}"

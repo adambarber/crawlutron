@@ -1,29 +1,57 @@
 """Bite: multi-tag election.
 
-Invokes scripts/release_roster.py and asserts every roster entry carries a
-tag, so multi-tag election input is present.
+Two tags point at one commit; the elected publishing tag is the root project's,
+so the sibling tag's event does not own publish side effects.
 """
 
 from __future__ import annotations
 
-import json
+import os
+import shutil
 import subprocess
 from pathlib import Path
 
+from release._common import primary_tag
 
-def test_multi_tag_election_roster_tags():
-    """release_roster.py emits entries each carrying a tag."""
-    repo_root = Path(__file__).resolve().parents[2]
-    venv_python = repo_root / ".venv" / "bin" / "python"
-    result = subprocess.run(
-        [str(venv_python), "scripts/release_roster.py"],
+ROOT_MANIFEST = (
+    '[project]\nname = "crawlutron"\nversion = "1.2.3"\n\n[tool.uv.workspace]\nmembers = ["packages/*"]\n'
+)
+MEMBER_MANIFEST = '[project]\nname = "alpha"\nversion = "1.2.3"\n'
+ROOT_TAG = "crawlutron-v1.2.3"
+MEMBER_TAG = "alpha-v1.2.3"
+
+
+def _git(root: Path, *argv: str) -> None:
+    git = shutil.which("git")
+    assert git is not None, "git must be on PATH to build the election fixture"
+    # GIT_* from an enclosing hook redirect git at the workspace; strip it.
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    subprocess.run(
+        [git, "-c", "user.name=bite", "-c", "user.email=bite@example.invalid", *argv],
+        cwd=str(root),
+        env=environment,
         capture_output=True,
         text=True,
-        cwd=str(repo_root),
+        check=True,
     )
-    combined = result.stdout + result.stderr
-    assert result.returncode == 0, f"Roster resolution failed: {combined!r}"
-    entries = json.loads(result.stdout)
-    assert isinstance(entries, list) and entries, f"Expected non-empty roster, got: {combined!r}"
-    for entry in entries:
-        assert entry.get("tag"), f"Expected a tag on roster entry {entry!r}"
+
+
+def _tagged_at_one_commit(tmp_path: Path) -> Path:
+    """A disposable repo where the root and a member tag point at one commit."""
+    root = tmp_path / "election"
+    (root / "packages" / "alpha").mkdir(parents=True)
+    (root / "pyproject.toml").write_text(ROOT_MANIFEST, encoding="utf-8")
+    (root / "packages" / "alpha" / "pyproject.toml").write_text(MEMBER_MANIFEST, encoding="utf-8")
+    _git(root, "init", "-q")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "release")
+    _git(root, "tag", MEMBER_TAG)
+    _git(root, "tag", ROOT_TAG)
+    return root
+
+
+def test_multi_tag_election_prefers_the_root_project_tag(tmp_path: Path):
+    """The root tag is elected though the member tag sorts first; only it publishes."""
+    root = _tagged_at_one_commit(tmp_path)
+    assert primary_tag(root=root, event_name="push", ref_name=ROOT_TAG) is True
+    assert primary_tag(root=root, event_name="push", ref_name=MEMBER_TAG) is False

@@ -1,37 +1,33 @@
-"""Bite: rehearsal mode must name the missing id-token in its refusal."""
+"""Bite: id-token rehearsal — exact summary and GITHUB_OUTPUT payloads."""
 
 from __future__ import annotations
 
 import os
 import subprocess
-import tempfile
+import sys
 from pathlib import Path
 
+from tests.release_bites.conftest import REPO_ROOT
 
-def test_id_token_in_rehearsal_specific_pattern():
-    """RED: id-token in rehearsal → specific id-token assertion pattern.
+ABSENT_TAG = "v0.0.0-no-package-carries-this"
 
-    Runs scripts/release/emit_roster.py in rehearsal mode without id-token
-    and verifies it succeeds (no id-token required for roster emission).
-    """
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        github_output = Path(tmp_dir) / "github_output"
-        venv_python = Path(__file__).resolve().parents[2] / ".venv" / "bin" / "python"
-        result = subprocess.run(
-            [str(venv_python), "scripts/release/emit_roster.py"],
-            capture_output=True,
-            text=True,
-            env={
-                **os.environ,
-                "RELEASE_TAG": "",
-                "GITHUB_OUTPUT": str(github_output),
-                "RUNNER_ENV": "rehearsal",
-            },
-            cwd=str(Path(__file__).resolve().parents[2]),
-        )
 
-        combined = result.stdout + result.stderr
-        assert result.returncode == 0, f"Expected success, got: {combined!r}"
-        assert "0 package(s)" in combined or "package(s)" in combined, (
-            f"Expected package count in output, got: {combined!r}"
-        )
+def test_emit_roster_writes_the_release_outputs(tmp_path: Path):
+    """A rehearsal run needs no id-token and writes its exact summary and outputs."""
+    github_output = tmp_path / "github_output"
+    result = subprocess.run(
+        [sys.executable, "scripts/release/emit_roster.py"],
+        capture_output=True,
+        text=True,
+        cwd=str(REPO_ROOT),
+        env={
+            **os.environ,
+            "RELEASE_TAG": ABSENT_TAG,
+            "GITHUB_EVENT_NAME": "workflow_dispatch",
+            "GITHUB_OUTPUT": str(github_output),
+        },
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == "0 package(s) tagged; root=not released; primary=true\n"
+    assert github_output.read_text(encoding="utf-8") == "packages=[]\nroot_version=\nprimary=true\n"
