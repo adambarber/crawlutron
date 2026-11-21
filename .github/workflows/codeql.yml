@@ -10,7 +10,6 @@ on:
 
 permissions:
   contents: read
-  security-events: write
 
 jobs:
   analyze:
@@ -32,15 +31,15 @@ jobs:
           persist-credentials: false
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@1b549b9259bda1b5cc3c78b0a9d0f2c3f6d0e0a1  # v3.28.0
+        uses: github/codeql-action/init@8c78abb9b62512e3c45dea6559ffd924ed8549c8  # v3.28.0
         with:
           languages: ${{ matrix.language }}
           queries: security-extended
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@1b549b9259bda1b5cc3c78b0a9d0f2c3f6d0e0a1  # v3.28.0
+        uses: github/codeql-action/analyze@8c78abb9b62512e3c45dea6559ffd924ed8549c8  # v3.28.0
 
       - name: Upload SARIF
-        uses: github/codeql-action/upload-sarif@1b549b9259bda1b5cc3c78b0a9d0f2c3f6d0e0a1  # v3.28.0
+        uses: github/codeql-action/upload-sarif@8c78abb9b62512e3c45dea6559ffd924ed8549c8  # v3.28.0
         with:
           sarif_file: codeql-results.sarif

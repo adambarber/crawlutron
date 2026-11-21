@@ -29,9 +29,6 @@ jobs:
       - name: Prepare gate environment
         uses: $/.github/actions/prepare
 
-      - name: Install mutmut
-        run: .venv/bin/pip install mutmut==3.2.0
-
       - name: Run mutation testing on invariant-critical modules
         run: |
           .venv/bin/mutmut run \
@@ -96,14 +93,13 @@ jobs:
           /tmp/lowest-venv/bin/python -c "
           import sys
           packages = [
+              'admission',
               'crawlutron',
-              'crawlutron_core',
               'crawlutron_extract',
               'crawlutron_mcp',
               'crawlutron_rest',
               'crawlutron_sdk',
               'safe_url',
-              'admission',
           ]
           for pkg in packages:
               try:

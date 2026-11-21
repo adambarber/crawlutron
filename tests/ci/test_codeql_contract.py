@@ -69,6 +69,9 @@ def test_codeql_permissions_security_events_write() -> None:
     assert security_events == "write", f"analyze job must have security-events:write, got {security_events}"
 
 
+CORRECT_CODEQL_SHA = "8c78abb9b62512e3c45dea6559ffd924ed8549c8"
+
+
 def test_codeql_init_analyze_upload_sarif_sha_pinned() -> None:
     """init, analyze, upload-sarif actions must be SHA-pinned."""
     doc = workflow_document()
@@ -108,6 +111,21 @@ def test_codeql_init_analyze_upload_sarif_sha_pinned() -> None:
         # Verify it's a SHA pin (40 char hex or sha256:)
         pin = uses.split("@")[1]
         assert len(pin) == 40 or pin.startswith("sha256:"), f"{name} must be SHA-pinned, got {pin}"
+        # Verify it's the CORRECT SHA for v3.28.0
+        assert pin == CORRECT_CODEQL_SHA, f"{name} must use v3.28.0 SHA {CORRECT_CODEQL_SHA}, got {pin}"
+
+
+def test_codeql_no_workflow_level_security_events() -> None:
+    """codeql.yml must NOT have workflow-level security-events:write (redundant with job-level)."""
+    doc = workflow_document()
+    # Workflow-level permissions should not include security-events:write
+    permissions = doc.get("permissions")
+    if permissions is not None:
+        assert isinstance(permissions, dict), "permissions must be a mapping"
+        security_events = permissions.get("security-events")
+        assert security_events is None or security_events != "write", (
+            "workflow-level security-events:write is redundant with job-level grant; remove it"
+        )
 
 
 def test_codeql_security_extended() -> None:

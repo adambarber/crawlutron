@@ -117,6 +117,9 @@ dev = [
     # Dead-code gate, run by the vulture hook through scripts/gate. Pinned for
     # the same reason as the other gate tools in the extra.
     "vulture==2.16",
+    # Mutation testing for weekly.yml invariant-critical probe; pinned so the
+    # weekly workflow doesn't need a runtime pip install.
+    "mutmut==3.2.0",
 ]
 
 [project.urls]

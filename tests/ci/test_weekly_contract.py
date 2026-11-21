@@ -8,6 +8,7 @@ import yaml
 
 SERVICE_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "weekly.yml"
+PYPROJECT_PATH = SERVICE_ROOT / "pyproject.toml"
 
 
 def workflow_document() -> dict[object, object]:
@@ -22,6 +23,17 @@ def _get_on_block(document: dict[object, object]) -> dict[str, object]:
     on_block = document.get("on") or document.get(True)
     assert isinstance(on_block, dict), "on block must be a mapping"
     return on_block
+
+
+def _get_source_pkgs_from_pyproject() -> list[str]:
+    """Derive the expected source_pkgs from pyproject.toml."""
+    import tomllib
+
+    with PYPROJECT_PATH.open("rb") as f:
+        data = tomllib.load(f)
+    source_pkgs = data.get("tool", {}).get("coverage", {}).get("run", {}).get("source_pkgs", [])
+    assert isinstance(source_pkgs, list), "source_pkgs must be a list"
+    return [str(pkg) for pkg in source_pkgs]
 
 
 def test_weekly_workflow_exists() -> None:
@@ -150,6 +162,55 @@ def test_weekly_lowest_direct_resolution_probe() -> None:
     assert has_import_check, "import every member verification step required"
 
 
+def test_weekly_import_check_matches_source_pkgs() -> None:
+    """weekly.yml lowest-direct probe must import exactly the source_pkgs from pyproject.toml."""
+    doc = workflow_document()
+    jobs = doc.get("jobs")
+    assert isinstance(jobs, dict), "jobs must be a mapping"
+
+    resolution_job = jobs.get("lowest-direct-resolution")
+    assert isinstance(resolution_job, dict), "lowest-direct-resolution job required"
+
+    steps = resolution_job.get("steps")
+    assert isinstance(steps, list), "lowest-direct-resolution job must have steps"
+
+    # Find the import verification step
+    import_step = None
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        run = step.get("run", "")
+        if "import" in run and ("crawlutron" in run or "admission" in run or "safe_url" in run):
+            import_step = step
+            break
+
+    assert import_step is not None, "import verification step required"
+
+    # Derive expected packages from pyproject.toml
+    expected_packages = _get_source_pkgs_from_pyproject()
+
+    # Extract the packages list from the run command
+    run_cmd = import_step.get("run", "")
+    # The packages list is in a Python list literal in the run command
+    import re
+
+    match = re.search(r"packages\s*=\s*\[(.*?)\]", run_cmd, re.DOTALL)
+    assert match, f"could not find packages list in import step: {run_cmd}"
+
+    # Parse the package names from the list literal
+    packages_str = match.group(1)
+    # Extract quoted strings
+    found_packages = re.findall(r"['\"]([^'\"]+)['\"]", packages_str)
+    # Normalize: replace hyphens with underscores for import
+    found_packages = [pkg.replace("-", "_") for pkg in found_packages]
+
+    # The workflow uses a hand-maintained list; it must match the derived source_pkgs
+    assert set(found_packages) == set(expected_packages), (
+        f"workflow import list {sorted(found_packages)} does not match "
+        f"pyproject.toml source_pkgs {sorted(expected_packages)}"
+    )
+
+
 def test_weekly_artifact_upload() -> None:
     """weekly.yml must upload mutation testing HTML artifact and resolution probe results."""
     doc = workflow_document()
@@ -178,6 +239,21 @@ def test_weekly_artifact_upload() -> None:
 
     assert has_mutation_artifact, "mutation testing HTML artifact upload required"
     assert has_resolution_artifact, "resolution probe results artifact upload required"
+
+
+def test_mutmut_in_dev_dependencies() -> None:
+    """pyproject.toml must include mutmut==3.2.0 in [project.optional-dependencies] dev."""
+    import tomllib
+
+    with PYPROJECT_PATH.open("rb") as f:
+        data = tomllib.load(f)
+
+    dev_deps = data.get("project", {}).get("optional-dependencies", {}).get("dev", [])
+    assert isinstance(dev_deps, list), "dev dependencies must be a list"
+
+    # Check for mutmut==3.2.0
+    mutmut_found = any(dep.startswith("mutmut==3.2.0") for dep in dev_deps)
+    assert mutmut_found, f"mutmut==3.2.0 not found in dev dependencies: {dev_deps}"
 
 
 if __name__ == "__main__":

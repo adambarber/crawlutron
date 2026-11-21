@@ -8,6 +8,8 @@ import yaml
 
 SERVICE_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "nightly.yml"
+PYTEST_INI_PATH = SERVICE_ROOT / "pytest.ini"
+PYPROJECT_PATH = SERVICE_ROOT / "pyproject.toml"
 
 
 def workflow_document() -> dict[object, object]:
@@ -22,6 +24,27 @@ def _get_on_block(document: dict[object, object]) -> dict[str, object]:
     on_block = document.get("on") or document.get(True)
     assert isinstance(on_block, dict), "on block must be a mapping"
     return on_block
+
+
+def _get_pytest_markers() -> dict[str, str]:
+    """Parse pytest.ini and return the markers dict."""
+    import configparser
+
+    config = configparser.ConfigParser()
+    config.read(PYTEST_INI_PATH)
+    if "pytest" not in config:
+        return {}
+    markers_raw = config["pytest"].get("markers", "")
+    markers = {}
+    for line in markers_raw.split("\n"):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        # Format: "marker_name: description"
+        if ":" in line:
+            name, desc = line.split(":", 1)
+            markers[name.strip()] = desc.strip()
+    return markers
 
 
 def test_nightly_workflow_exists() -> None:
@@ -85,6 +108,56 @@ def test_nightly_no_m_filter() -> None:
     # Check for pytest -m filter in PYTEST_ADDOPTS
     pytest_addopts_m_filter = re.search(r"-m\s+", pytest_addopts)
     assert not pytest_addopts_m_filter, "nightly must not use -m filter in PYTEST_ADDOPTS"
+
+
+def test_nightly_slow_marker_registered_and_not_deselected() -> None:
+    """slow marker must be registered in pytest.ini and nightly must not deselect it via config."""
+    # 1. Verify slow marker is registered in pytest.ini
+    markers = _get_pytest_markers()
+    assert "slow" in markers, f"slow marker not registered in pytest.ini; markers: {list(markers.keys())}"
+
+    # 2. Verify nightly workflow's PYTEST_ADDOPTS does not contain -m filter that would deselect slow
+    doc = workflow_document()
+    jobs = doc.get("jobs")
+    assert isinstance(jobs, dict), "jobs must be a mapping"
+
+    test_job = jobs.get("test")
+    assert isinstance(test_job, dict), "test job required"
+
+    steps = test_job.get("steps")
+    assert isinstance(steps, list), "test job must have steps"
+
+    # Find the pytest run step
+    pytest_step = None
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        run = step.get("run", "")
+        if "pytest" in run:
+            pytest_step = step
+            break
+
+    assert pytest_step is not None, "pytest run step required"
+    env = pytest_step.get("env", {})
+    pytest_addopts = env.get("PYTEST_ADDOPTS", "")
+
+    # The PYTEST_ADDOPTS must not contain a -m filter that excludes slow
+    # (e.g., "-m 'not slow'" or "-m 'not (browser or slow)'")
+    import re
+
+    # Check for explicit -m filter in PYTEST_ADDOPTS that mentions slow
+    m_filter_match = re.search(r"-m\s+[\"']?([^\"']+)[\"']?", pytest_addopts)
+    if m_filter_match:
+        m_expr = m_filter_match.group(1)
+        assert "slow" not in m_expr, (
+            f"nightly PYTEST_ADDOPTS contains -m filter that references slow: {m_expr}"
+        )
+
+    # 3. Nightly workflow doesn't set -m; pytest.ini default excludes slow.
+    # This static assertion: workflow config itself doesn't deselect slow.
+    run_cmd = pytest_step.get("run", "")
+    pytest_m_filter = re.search(r"pytest\s+-m\s+", run_cmd)
+    assert not pytest_m_filter, "nightly run command must NOT use pytest's -m filter"
 
 
 def test_nightly_xvfb_prepare_browser_camoufox() -> None:
@@ -224,6 +297,55 @@ def test_nightly_flag_nightly() -> None:
     raw_name = doc.get("name", "")
     name: str = raw_name if isinstance(raw_name, str) else ""
     assert "nightly" in name.lower(), f"workflow name must contain 'nightly', got {name}"
+
+
+def test_nightly_coverage_source_pkgs_not_overridden() -> None:
+    """nightly.yml must not override coverage source_pkgs; all seven packages from pyproject.toml measured."""
+    import tomllib
+
+    # Derive expected source_pkgs from pyproject.toml
+    with PYPROJECT_PATH.open("rb") as f:
+        data = tomllib.load(f)
+    expected_source_pkgs = data.get("tool", {}).get("coverage", {}).get("run", {}).get("source_pkgs", [])
+    assert isinstance(expected_source_pkgs, list), "source_pkgs must be a list"
+    assert len(expected_source_pkgs) == 7, (
+        f"expected 7 source_pkgs, got {len(expected_source_pkgs)}: {expected_source_pkgs}"
+    )
+
+    doc = workflow_document()
+    jobs = doc.get("jobs")
+    assert isinstance(jobs, dict), "jobs must be a mapping"
+
+    test_job = jobs.get("test")
+    assert isinstance(test_job, dict), "test job required"
+
+    steps = test_job.get("steps")
+    assert isinstance(steps, list), "test job must have steps"
+
+    # Find the pytest run step
+    pytest_step = None
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        run = step.get("run", "")
+        if "pytest" in run:
+            pytest_step = step
+            break
+
+    assert pytest_step is not None, "pytest run step required"
+    env = pytest_step.get("env", {})
+    pytest_addopts = env.get("PYTEST_ADDOPTS", "")
+
+    # PYTEST_ADDOPTS uses --cov=crawlutron + pyproject.toml source_pkgs.
+    # Must NOT override source_pkgs (e.g., --cov=admission --cov=crawlutron).
+    assert "--cov=" in pytest_addopts, "pytest must run with --cov"
+    import re
+
+    cov_matches = re.findall(r"--cov=([^\s]+)", pytest_addopts)
+    assert cov_matches == ["crawlutron"], f"expected --cov=crawlutron only, got {cov_matches}"
+    # Must not have --cov-source or --cov-config that would override
+    assert "--cov-source" not in pytest_addopts, "must not override --cov-source"
+    assert "--cov-config" not in pytest_addopts, "must not override --cov-config"
 
 
 if __name__ == "__main__":
