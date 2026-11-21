@@ -430,7 +430,7 @@ jobs:
       - uses: $/.github/actions/prepare-browser
       # Firefox on a bare ubuntu-24.04 runner needs an X server and its runtime
       # libraries; xvfb-run provides both (camoufox CI does the same).
-      - name: Run pytest (browser, PRs only)
+      - name: Run pytest (browser)
         if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.browser == 'true' }}
         env:
           # Firefox on GitHub Actions ubuntu-24.04 cannot connect to the
@@ -545,7 +545,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
+          fetch-depth: 1
+          fetch-tags: false
           persist-credentials: false
       - uses: $/.github/actions/prepare
       - name: pin-verify check
