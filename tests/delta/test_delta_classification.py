@@ -174,6 +174,68 @@ def test_no_baseline_freshness_paths():
         assert (classification, evidence["why"]) == (expected, why)
 
 
+def test_http_date_epoch_minus_zero_zero_zero_zero_under_non_utc_tz():
+    """Regression for #1197: HTTP date with -0000 offset must normalize to UTC."""
+    # changed_since between naive EDT (1445426880) and UTC (1445412480) epochs
+    changed_since = 1_445_420_000.0
+    last_modified_header = "Wed, 21 Oct 2015 07:28:00 -0000"
+
+    result = engine_result(URL, "rendered", headers={"last-modified": last_modified_header})
+    classification, evidence = _classified(result, changed_since=changed_since)
+
+    # The correct UTC-normalized behavior is UNCHANGED (last_modified <= changed_since)
+    # The buggy naive-local-time behavior would be CHANGED
+    assert classification == UNCHANGED, f"Expected UNCHANGED, got {classification}: {evidence}"
+    assert evidence["why"] == "last_modified_not_newer"
+
+
+def test_http_date_epoch_plus_zero_zero_zero_zero_under_non_utc_tz():
+    """HTTP date with +0000 offset must also normalize to UTC."""
+    changed_since = 1_445_420_000.0
+    last_modified_header = "Wed, 21 Oct 2015 07:28:00 +0000"
+
+    result = engine_result(URL, "rendered", headers={"last-modified": last_modified_header})
+    classification, evidence = _classified(result, changed_since=changed_since)
+
+    assert classification == UNCHANGED
+    assert evidence["why"] == "last_modified_not_newer"
+
+
+def test_http_date_epoch_naive_utc_under_non_utc_tz():
+    """Naive-looking UTC (no offset) must be treated as UTC."""
+    # RFC-822 date without timezone offset - parsed as naive, must be UTC
+    changed_since = 1_445_420_000.0
+    last_modified_header = "Wed, 21 Oct 2015 07:28:00"
+
+    result = engine_result(URL, "rendered", headers={"last-modified": last_modified_header})
+    classification, evidence = _classified(result, changed_since=changed_since)
+
+    assert classification == UNCHANGED
+    assert evidence["why"] == "last_modified_not_newer"
+
+
+def test_http_date_epoch_non_utc_offset_under_non_utc_tz():
+    """Non-UTC offsets must be correctly converted to UTC."""
+    # -0500 offset = 12:28 UTC = 1445430480; changed_since between UTC and naive
+    changed_since = 1_445_425_000.0
+    last_modified_header = "Wed, 21 Oct 2015 07:28:00 -0500"
+
+    result = engine_result(URL, "rendered", headers={"last-modified": last_modified_header})
+    classification, evidence = _classified(result, changed_since=changed_since)
+
+    assert classification == CHANGED
+    assert evidence["why"] == "last_modified_newer"
+
+
+def test_http_date_epoch_garbage_returns_none():
+    """Garbage date strings must return None (unchanged via freshness path)."""
+    from crawlutron._time import http_date_epoch
+
+    assert http_date_epoch("not a date") is None
+    assert http_date_epoch("") is None
+    assert http_date_epoch(None) is None
+
+
 def test_changed_since_nothing_cached_is_new():
     result = engine_result(
         URL,
