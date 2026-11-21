@@ -127,6 +127,7 @@ DECLARED_SURFACE_RATCHET = {
     "packages/core/src/crawlutron/runtime/process_state.py": (6, 6),
     # #1137: pre-existing __all__ modules now covered by the derived scan roots
     # (workspace members instead of core-only APP_ROOT).
+    "packages/core/src/crawlutron/_time.py": (2, 2),
     "packages/core/src/admission/errors.py": (3, 3),
     "packages/core/src/admission/gate.py": (4, 2),
     "packages/core/src/admission/gauge.py": (2, 1),

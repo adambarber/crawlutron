@@ -10,9 +10,10 @@ import logging
 import time
 from collections.abc import Iterable, Mapping
 from contextvars import Token
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING, Protocol
 
+from crawlutron._time import utc_timestamp
 from crawlutron.admission.admission_links import compile_scope_pattern
 from crawlutron.admission.payload_helpers import checked_payload_urls, payload_policy
 from crawlutron.admission.policy import PolicyTier
@@ -64,18 +65,6 @@ def purge_robots_cache(now: float | None = None) -> int:
     return robots_cache.purge_expired(now=now)
 
 
-def _utc_timestamp(dt: datetime | None) -> float | None:
-    """Seconds since the epoch, reading a naive datetime as UTC.
-    A sitemap lastmod arrives via RFC-822 or ISO-8601 parsers, both returning a
-    naive value for a stamp without an offset, so one place says "UTC is meant". None in, None out.
-    """
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
-    return dt.timestamp()
-
-
 def parse_lastmod(lastmod: str | None) -> float | None:
     """Parse a sitemap <lastmod> (ISO-8601 or RFC-822) into epoch seconds.
     A stamp beyond CRAWLUTRON_SITEMAP_LASTMOD_FUTURE_SKEW_SECONDS ahead is an
@@ -88,13 +77,13 @@ def parse_lastmod(lastmod: str | None) -> float | None:
     try:
         from email.utils import parsedate_to_datetime
 
-        ts = _utc_timestamp(parsedate_to_datetime(s))
+        ts = utc_timestamp(parsedate_to_datetime(s))
     except TypeError, ValueError:
         pass
     if ts is None:
         iso = s.replace("Z", "+00:00")
         try:
-            ts = _utc_timestamp(datetime.fromisoformat(iso))
+            ts = utc_timestamp(datetime.fromisoformat(iso))
         except ValueError:
             return None
     if ts is None:

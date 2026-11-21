@@ -70,15 +70,14 @@ def max_age_seconds(headers: Mapping[str, str]) -> float | None:
 def expires_seconds(headers: Mapping[str, str], *, now: float) -> float | None:
     """The freshness lifetime implied by the ``Expires`` instant (RFC 9111 5.3):
     the header date minus ``now``; None when absent or unparsable."""
-    from email.utils import parsedate_to_datetime
+    from crawlutron._time import http_date_epoch
 
     lowered = {str(k).lower(): str(v) for k, v in headers.items()}
     raw = lowered.get("expires")
     if not raw:
         return None
-    try:
-        instant = parsedate_to_datetime(raw).timestamp()
-    except TypeError, ValueError, OverflowError:
+    instant = http_date_epoch(raw)
+    if instant is None:
         return None
     return instant - now
 

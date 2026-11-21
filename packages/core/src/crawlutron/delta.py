@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from email.utils import parsedate_to_datetime
 from hashlib import sha256
 
+from crawlutron._time import http_date_epoch
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.unified_crawl_result import UnifiedCrawlResult
 
@@ -108,13 +108,11 @@ def _fingerprint_matching_baseline(item: EngineCrawlResult, baseline: BaselineEv
 
 
 def _http_date_epoch(value: str | None) -> float | None:
-    """Epoch seconds for an HTTP date header, or None when it cannot be parsed."""
-    if not value:
-        return None
-    try:
-        return parsedate_to_datetime(value).timestamp()
-    except TypeError, ValueError, OverflowError:
-        return None
+    """Epoch seconds for an HTTP date header, or None when it cannot be parsed.
+
+    Delegates to the shared UTC-normalization chokepoint in ``crawlutron._time``.
+    """
+    return http_date_epoch(value)
 
 
 def _content_cache_miss(item: EngineCrawlResult) -> bool:
