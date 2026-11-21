@@ -5,6 +5,7 @@ cookie capture, credential stripping, and pin validation in one place."""
 
 from __future__ import annotations
 
+import math
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -21,7 +22,7 @@ from crawlutron.transport.pinned_transport import (
     cffi_resolve_entry,
     redirect_target,
 )
-from crawlutron.transport.transport import FetchRequest, Transport, http_413
+from crawlutron.transport.transport import FetchRequest, Transport, http_408_deadline, http_413
 from crawlutron.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 from safe_url.normalized_url import NormalizedUrl
 
@@ -30,11 +31,9 @@ StoreHopCookies = Callable[[NormalizedUrl, Mapping[str, str]], Awaitable[None]]
 
 @dataclass(frozen=True, slots=True)
 class _HopFrame:
-    """One hop's shared frame: parameters every arm forwards."""
+    """One hop's shared frame: the original admitted URL and the walk start."""
 
     url: NormalizedUrl
-    timeout_seconds: float
-    max_bytes: int
     started: float
 
 
@@ -66,43 +65,54 @@ class RedirectWalker:
         """
         if started is None:
             started = time.monotonic()
-        # One walk object: hop state lives in locals; one verdict per chain.
+        if not math.isfinite(timeout_seconds) or timeout_seconds < 0:
+            raise ValueError(
+                f"walk timeout_seconds must be a finite non-negative number, got {timeout_seconds!r}"
+            )
+        hop = _HopFrame(url=url, started=started)
+        rule = pin or build_pinned_request
+        reject_injectable_header_values(headers)
+        deadline = started + timeout_seconds
+        return await self._walk_loop(url, headers, hop, rule, max_bytes, deadline)
+
+    async def _walk_loop(
+        self,
+        url: NormalizedUrl,
+        headers: dict[str, str],
+        hop: _HopFrame,
+        rule: PinRule,
+        max_bytes: int,
+        deadline: float,
+    ) -> HttpFetchResult | None:
         current_url = url
         current_headers: Mapping[str, str] | dict[str, str] = dict(headers)
         hops = 0
-        rule = pin or build_pinned_request
-        hop = _HopFrame(url=url, timeout_seconds=timeout_seconds, max_bytes=max_bytes, started=started)
         pending: tuple[NormalizedUrl, Mapping[str, str]] | None = None
-        # The shared wire edge: a header value that could end one header and
-        # start another is refused before the first hop.
-        reject_injectable_header_values(headers)
+        last_fetched_url = url
 
         while True:
-            pinned = await self._admit_hop(current_url, current_headers, rule, timeout_seconds)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return http_408_deadline(hop.url, last_fetched_url, hop.started)
 
-            # The previous hop's Set-Cookie flushes here: reaching this point
-            # means this hop's pin admitted the walk.
+            pinned = await self._admit_hop(current_url, current_headers, rule, remaining)
             await _flush_deferred_hop_cookies(pending, self._store_cookies)
             pending = None
-            request = self._build_request(pinned, timeout_seconds)
+            request = self._build_request(pinned, remaining)
 
             try:
                 result = await self._transport.fetch(request, max_bytes=max_bytes)
             except BodyTooLarge:
-                # Multi-hop cap breach: url is the original admitted URL, final_url
-                # the terminal-hop logical URL (current_url advanced per hop).
                 return http_413(hop.url, current_url, hop.started)
+            last_fetched_url = current_url
 
             next_hop, cookie_headers = await self._handle_hop_result(
                 result, current_url, current_headers, hops
             )
             if next_hop is None:
-                # Terminal: persist this hop's cookies and return the result.
                 await self._store_cookies(current_url, cookie_headers)
                 return result
 
-            # Redirect: defer this hop's cookies until the next pin admits;
-            # RFC 6265 5.3: the Set-Cookie belongs to the sending origin.
             pending = (current_url, cookie_headers)
             current_url, current_headers = next_hop
             hops += 1
