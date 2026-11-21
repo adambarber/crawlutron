@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TypeGuard
 
+import pytest
+
 import crawlutron.transport.redirect_walker as _walker_mod
 from crawlutron.models.http_fetch_result import HttpFetchResult
 from crawlutron.transport import pinned_dns
@@ -64,6 +66,22 @@ class _AdvancingTransport(ScriptedTransport):
         self._advance = advance
 
     async def fetch(self, request, *, max_bytes: int) -> HttpFetchResult:
+        result = await super().fetch(request, max_bytes=max_bytes)
+        self._timeline.advance(self._advance)
+        return result
+
+
+class _CapturingTransport(ScriptedTransport):
+    """Captures each hop's timeout_seconds into captured_timeouts."""
+
+    def __init__(self, script, timeline: Timeline, advance: float = 0.0) -> None:
+        super().__init__(script)
+        self._timeline = timeline
+        self._advance = advance
+        self.captured_timeouts: list[float] = []
+
+    async def fetch(self, request, *, max_bytes: int):
+        self.captured_timeouts.append(request.timeout_seconds)
         result = await super().fetch(request, max_bytes=max_bytes)
         self._timeline.advance(self._advance)
         return result
@@ -149,37 +167,38 @@ async def test_walk_deadline_exhausted_returns_408_not_hang():
     assert len(transport.calls) == 0
 
 
+@pytest.mark.parametrize("bad_timeout", [-1.0, float("nan"), float("inf")])
+async def test_walk_deadline_refuses_bad_timeout(bad_timeout):
+    """Non-finite or negative timeout_seconds is refused at the walk door."""
+    with pytest.raises(ValueError, match="timeout_seconds"):
+        await _run_walk([_terminal()], [_pinned(ORIGINAL)], timeout_seconds=bad_timeout)
+
+
+async def test_walk_deadline_walks_with_positive_timeout():
+    """Positive finite timeout_seconds walks normally."""
+    result, transport, pin, store = await _run_walk(
+        [_terminal(url=ORIGINAL)], [_pinned(ORIGINAL)], timeout_seconds=5.0
+    )
+    assert result is not None and result.status_code == 200
+    assert result.url == ORIGINAL
+
+
 async def test_walk_deadline_hop2_gets_reduced_remainder(monkeypatch):
     """P0-1(a): hop 2's timeout is the reduced remainder (deadline pinned once).
 
     A per-hop deadline reset mutant is killed by simulating elapsed time.
     """
-    captured_timeouts: list[float] = []
-
-    class _CapturingTransport(ScriptedTransport):
-        def __init__(self, script, timeline: Timeline, advance: float = 0.0) -> None:
-            super().__init__(script)
-            self._timeline = timeline
-            self._advance = advance
-
-        async def fetch(self, request, *, max_bytes: int):
-            captured_timeouts.append(request.timeout_seconds)
-            result = await super().fetch(request, max_bytes=max_bytes)
-            self._timeline.advance(self._advance)
-            return result
-
-    timeline = Timeline(0.0)
-    monkeypatch.setattr(_walker_mod.time, "monotonic", timeline)
-    transport = _CapturingTransport([_redirect("/y"), _terminal(url=TARGET)], timeline, advance=3.0)
+    transport = _CapturingTransport([_redirect("/y"), _terminal(url=TARGET)], Timeline(0.0), advance=3.0)
+    monkeypatch.setattr(_walker_mod.time, "monotonic", transport._timeline)
     pin = _RecordingPin([_pinned(ORIGINAL), _pinned(TARGET)])
     store = _CookieStore()
     walker = RedirectWalker(transport, store_cookies=store)
     result = await walker.walk(ORIGINAL, {}, 10.0, max_bytes=1024, pin=pin)
     assert result is not None and result.status_code == 200, result
-    assert len(captured_timeouts) == 2, captured_timeouts
-    assert captured_timeouts[0] == 10.0, captured_timeouts
-    assert captured_timeouts[1] == 7.0, captured_timeouts
-    assert captured_timeouts[1] < 10.0, captured_timeouts
+    assert len(transport.captured_timeouts) == 2, transport.captured_timeouts
+    assert transport.captured_timeouts[0] == 10.0, transport.captured_timeouts
+    assert transport.captured_timeouts[1] == 7.0, transport.captured_timeouts
+    assert transport.captured_timeouts[1] < 10.0, transport.captured_timeouts
 
 
 async def test_walk_deadline_chain_overrun_returns_408(monkeypatch):
@@ -221,30 +240,15 @@ async def test_walk_deadline_transport_gets_remaining_budget(monkeypatch):
 
     Frozen clock leaving ~3s; assertion is strict (< 10.0).
     """
-    captured_timeouts: list[float] = []
-
-    class _CapturingTransport(ScriptedTransport):
-        def __init__(self, script, timeline: Timeline, advance: float = 0.0) -> None:
-            super().__init__(script)
-            self._timeline = timeline
-            self._advance = advance
-
-        async def fetch(self, request, *, max_bytes: int):
-            captured_timeouts.append(request.timeout_seconds)
-            result = await super().fetch(request, max_bytes=max_bytes)
-            self._timeline.advance(self._advance)
-            return result
-
-    timeline = Timeline(7.0)
-    monkeypatch.setattr(_walker_mod.time, "monotonic", timeline)
-    transport = _CapturingTransport([_terminal()], timeline, advance=0.0)
+    transport = _CapturingTransport([_terminal()], Timeline(7.0), advance=0.0)
+    monkeypatch.setattr(_walker_mod.time, "monotonic", transport._timeline)
     pin = _RecordingPin([_pinned(ORIGINAL)])
     store = _CookieStore()
     walker = RedirectWalker(transport, store_cookies=store)
     await walker.walk(ORIGINAL, {}, 10.0, max_bytes=1024, started=0.0, pin=pin)
-    assert len(captured_timeouts) == 1, captured_timeouts
-    assert captured_timeouts[0] == 3.0, captured_timeouts
-    assert captured_timeouts[0] < 10.0, captured_timeouts
+    assert len(transport.captured_timeouts) == 1, transport.captured_timeouts
+    assert transport.captured_timeouts[0] == 3.0, transport.captured_timeouts
+    assert transport.captured_timeouts[0] < 10.0, transport.captured_timeouts
 
 
 async def test_walk_deadline_pin_gets_remaining_budget(monkeypatch):
