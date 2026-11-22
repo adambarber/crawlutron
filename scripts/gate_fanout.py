@@ -6,6 +6,7 @@ import contextlib
 import hashlib
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -69,11 +70,67 @@ def _gate_argv() -> dict[str, list[str]]:
     return gates
 
 
-def _run_key() -> str:
-    pair = f"{os.environ.get('PRE_COMMIT_FROM_REF', '')} {os.environ.get('PRE_COMMIT_TO_REF', '')}"
-    if not pair.strip():
-        return "adhoc"
-    return hashlib.sha256(pair.encode()).hexdigest()[:16]
+def _config_digest() -> str:
+    """Digest of the gate config so a config change can't reuse an old verdict."""
+    return hashlib.sha256(CONFIG_PATH.read_bytes()).hexdigest()[:16]
+
+
+def _git_capture(args: list[str], env: dict[str, str] | None = None) -> str:
+    """Run a read-only git query and return its stdout."""
+    git_bin = shutil.which("git")
+    if git_bin is None:
+        raise RuntimeError("git not found on PATH: cannot read the gate input tree")
+    result = subprocess.run(
+        [git_bin, *args],
+        env=env,
+        cwd=SERVICE_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout
+
+
+def _staged_tree_digest(index_file: str) -> str:
+    """Digest of the staged tree: blob SHAs, modes, paths."""
+    out = _git_capture(["ls-files", "--stage"], env={**os.environ, "GIT_INDEX_FILE": index_file})
+    return hashlib.sha256(out.encode()).hexdigest()
+
+
+def _untracked_digest() -> str:
+    """Hash untracked bodies so a content edit cannot reuse a cached verdict."""
+    listing = _git_capture(["ls-files", "--others", "--exclude-standard", "-z"])
+    digest = hashlib.sha256()
+    for name in listing.split("\0"):
+        if not name:
+            continue
+        try:
+            body = (SERVICE_ROOT / name).read_bytes()[:1_048_576]
+        except OSError:
+            continue
+        digest.update(name.encode() + b"\0" + body)
+    return digest.hexdigest()
+
+
+def _worktree_digest() -> str:
+    """Digest of the worktree in the pure no-staged-index path."""
+    parts = (
+        _git_capture(["ls-files", "--stage"]),
+        _git_capture(["diff", "--no-ext-diff", "--binary", "HEAD"]),
+        _git_capture(["status", "--porcelain"]),
+        _untracked_digest(),
+    )
+    return hashlib.sha256("".join(parts).encode()).hexdigest()
+
+
+def _run_key(index_file: str | None = None) -> str:
+    """Bind verdict identity to gated content, not ref env vars."""
+    config_digest = _config_digest()
+    index_file = index_file or os.environ.get("PRE_COMMIT_INDEX_FILE")
+    if index_file and Path(index_file).is_file():
+        staged = _staged_tree_digest(index_file)
+        return hashlib.sha256(f"{staged}:{config_digest}".encode()).hexdigest()[:16]
+    return hashlib.sha256(f"adhoc:{_worktree_digest()}:{config_digest}".encode()).hexdigest()[:16]
 
 
 def _status_dir() -> Path:
@@ -175,14 +232,19 @@ def _cleanup(status_dir: Path) -> None:
             (status_dir / f"{hook_id}.pid").unlink(missing_ok=True)
 
 
+def _run_gate(argv: list[str]) -> subprocess.CompletedProcess[str]:
+    """Run one gate command; the only subprocess door in the child path."""
+    return subprocess.run(argv, cwd=SERVICE_ROOT, capture_output=True, text=True, check=False)
+
+
 def _child(rc_path: str, argv: list[str]) -> int:
-    completed = subprocess.run(argv, cwd=SERVICE_ROOT, capture_output=True, text=True, check=False)
+    completed = _run_gate(argv)
     attempts = [completed]
     if completed.returncode in (-6, 134) and "failed" not in completed.stdout:
         # A gate child can SIGABRT on teardown after a passing report under
         # saturation; retry once after the burst drains, fail-loud on repeat.
         time.sleep(3)
-        attempts.append(subprocess.run(argv, cwd=SERVICE_ROOT, capture_output=True, text=True, check=False))
+        attempts.append(_run_gate(argv))
     final = attempts[-1]
     tmp = Path(f"{rc_path}.tmp")
     tmp.write_text(str(final.returncode))
