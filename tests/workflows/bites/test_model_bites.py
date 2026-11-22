@@ -109,9 +109,9 @@ def test_facts_are_computed_once_per_step(monkeypatch) -> None:
     seen: list[str] = []
     original = CommandFacts.parse
 
-    def counted(run: str) -> CommandFacts:
+    def counted(run: str, env=None) -> CommandFacts:
         seen.append(run)
-        return original(run)
+        return original(run, env)
 
     monkeypatch.setattr(CommandFacts, "parse", counted)
     step = Step.model_validate({"name": "Once", "run": "echo hi", "line": 1})

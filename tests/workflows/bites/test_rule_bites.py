@@ -87,6 +87,44 @@ def test_a_workflow_rule_names_the_injected_violation(rule, broken: Workflow) ->
     assert findings and findings[0].rule == rule.name
 
 
+def test_an_export_only_filters_subsequent_invocations() -> None:
+    ordered = _mutate(steps=(_step(name="Bite", run='pytest; export PYTEST_ADDOPTS="-m slow"; pytest'),))
+    assert len(list(no_bare_pytest(parent_workflow(ordered), ordered))) == 1
+    revoked = _mutate(
+        steps=(
+            _step(
+                name="Bite",
+                run='export PYTEST_ADDOPTS="-m slow"; pytest; unset PYTEST_ADDOPTS; pytest',
+            ),
+        )
+    )
+    assert len(list(no_bare_pytest(parent_workflow(revoked), revoked))) == 1
+
+
+def test_a_nested_quote_export_value_is_honoured() -> None:
+    filtered = _mutate(
+        steps=(
+            _step(
+                name="Bite",
+                run="export PYTEST_ADDOPTS=\"-m 'not (browser or slow)'\"; pytest",
+            ),
+        )
+    )
+    assert not list(no_bare_pytest(parent_workflow(filtered), filtered))
+
+
+def test_a_pipeline_mentioning_pip_is_not_an_install() -> None:
+    clean = _mutate(steps=(_step(name="Bite", run='echo "pip install x" | tee log'),))
+    assert not list(no_pip_install(parent_workflow(clean), clean))
+
+
+def test_copied_facts_follow_a_copied_run() -> None:
+    original = _step(name="Bite", run="echo hi")
+    changed = original.model_copy(update={"run": "pip install x"})
+    assert changed.run == "pip install x"
+    assert changed.command_facts.pip_install
+
+
 def test_two_pytest_invocations_yield_two_findings() -> None:
     mixed = _mutate(steps=(_step(name="Bite", run="pytest -m slow; pytest"),))
     assert len(list(no_bare_pytest(parent_workflow(mixed), mixed))) == 1

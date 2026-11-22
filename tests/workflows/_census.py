@@ -5,13 +5,14 @@ from __future__ import annotations
 from collections.abc import Iterable
 from importlib import import_module
 
-from tests.workflows._model import CONTINUE_ON_ERROR_WAIVERS, WORKFLOWS
+from tests.workflows._model import JOBS, WORKFLOWS
+from tests.workflows._policy import POLICY, RuleId
 from tests.workflows._registry import CATALOG
-from tests.workflows._rules import BARE_PYTEST_WAIVERS, PIP_INSTALL_WAIVERS
 
 import_module("tests.workflows._decision_catalog")  # registration, not collection
 
-WAIVER_CEILINGS = {"continue-on-error": 1, "bare-pytest": 3, "pip-install": 1}
+POLICY.validate_targets(WORKFLOWS, JOBS)
+WAIVER_CEILINGS = {rule.value: ceiling for rule, ceiling in POLICY.ceilings.items()}
 
 
 def missing_decisions(*, stems: Iterable[str] | None = None) -> set[str]:
@@ -20,8 +21,4 @@ def missing_decisions(*, stems: Iterable[str] | None = None) -> set[str]:
 
 
 def waiver_counts() -> dict[str, int]:
-    return {
-        "continue-on-error": len(CONTINUE_ON_ERROR_WAIVERS),
-        "bare-pytest": len(BARE_PYTEST_WAIVERS),
-        "pip-install": len(PIP_INSTALL_WAIVERS),
-    }
+    return {rule.value: POLICY.count(rule) for rule in RuleId if rule in POLICY.ceilings}

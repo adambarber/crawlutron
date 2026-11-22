@@ -7,17 +7,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 
 from tests.workflows._model import WORKFLOWS, Job, Workflow
-
-BARE_PYTEST_WAIVERS = frozenset(
-    {
-        ("ci", "test-browser", "Run pytest (all markers, main push and release calls)"),
-        ("nightly", "test", "Run full test suite (no -m filter) with coverage"),
-        ("weekly", "mutation-testing", "Run mutation testing on invariant-critical modules"),
-    }
-)
-PIP_INSTALL_WAIVERS = frozenset(
-    {("weekly", "lowest-direct-resolution", "Install lowest-direct dependencies")}
-)
+from tests.workflows._policy import POLICY, RuleId
 
 
 @dataclass(frozen=True)
@@ -78,24 +68,26 @@ def no_event_splicing_in_run(workflow: Workflow, job: Job) -> Iterator[Finding]:
 
 def no_bare_pytest(workflow: Workflow, job: Job) -> Iterator[Finding]:
     for step in job.steps:
-        if (workflow.stem, job.key, step.name) in BARE_PYTEST_WAIVERS:
+        if POLICY.is_waived(workflow.stem, job.key, step.name, RuleId.NO_BARE_PYTEST):
             continue
-        if step.pytest_env_marker or step.command_facts.exported_markers:
-            continue
-        for segment in step.command_facts.unfiltered_pytest_segments:
+        for invocation in step.command_facts.pytest_invocations:
+            if invocation.filtered:
+                continue
             yield Finding(
                 "no-bare-pytest",
                 workflow.stem,
                 job.key,
                 step.line,
                 f"{workflow.path}:{step.line}: a second default-suite run can drift from the battery: "
-                f"{segment.strip()}",
+                f"{invocation.text}",
             )
 
 
 def no_pip_install(workflow: Workflow, job: Job) -> Iterator[Finding]:
     for step in job.steps:
-        if step.command_facts.pip_install and (workflow.stem, job.key, step.name) not in PIP_INSTALL_WAIVERS:
+        if step.command_facts.pip_install and not POLICY.is_waived(
+            workflow.stem, job.key, step.name, RuleId.NO_PIP_INSTALL
+        ):
             yield Finding(
                 "no-pip-install",
                 workflow.stem,

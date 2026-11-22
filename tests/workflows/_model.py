@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
@@ -19,7 +18,7 @@ from pydantic import (
 )
 
 from tests.chokepoint_paths import REPO_ROOT
-from tests.workflows._facts import PYTEST_ENV_KEYS, CommandFacts, ExpressionFacts, has_marker_filter
+from tests.workflows._facts import CommandFacts, ExpressionFacts
 from tests.workflows._names import (
     ActionRef,
     Cron,
@@ -32,9 +31,12 @@ from tests.workflows._names import (
     TimeoutMinutes,
     WorkflowStem,
 )
+from tests.workflows._policy import POLICY, RuleId
 
 STRICT = ConfigDict(extra="forbid", frozen=True)
-_FACT_FIELDS = frozenset({"event_spliced", "command_facts", "pytest_env_marker"})
+_FACT_FIELDS = frozenset({"event_spliced", "command_facts"})
+_VERBATIM = frozenset({"run", "env", "uses", "with_", "if_", "continue_on_error"})
+_ALIASES = {"with_": "with", "if_": "if", "continue_on_error": "continue-on-error"}
 
 
 class Runner(StrEnum):
@@ -58,24 +60,6 @@ class PermissionLevel(StrEnum):
     NONE = "none"
 
 
-@dataclass(frozen=True)
-class Waiver:
-    workflow: str
-    job: str
-    step: str
-    reason: str
-
-
-CONTINUE_ON_ERROR_WAIVERS = (
-    Waiver(
-        "agent-review",
-        "review",
-        "Create GitHub App token",
-        "A fail-closed guard step follows; the token is advisory, not the gate",
-    ),
-)
-
-
 class Step(BaseModel):
     model_config = STRICT
     name: StepName | None = None
@@ -90,7 +74,6 @@ class Step(BaseModel):
     line: int
     event_spliced: bool = False
     command_facts: CommandFacts = Field(default_factory=CommandFacts)
-    pytest_env_marker: bool = False
 
     @model_validator(mode="before")
     def strip_facts(cls, data: object) -> object:
@@ -102,12 +85,7 @@ class Step(BaseModel):
     def derive_facts(self) -> Step:
         run = self.run or ""
         object.__setattr__(self, "event_spliced", ExpressionFacts.parse(run).references_event)
-        object.__setattr__(self, "command_facts", CommandFacts.parse(run))
-        object.__setattr__(
-            self,
-            "pytest_env_marker",
-            any(has_marker_filter(str(v)) for k, v in self.env.items() if k in PYTEST_ENV_KEYS),
-        )
+        object.__setattr__(self, "command_facts", CommandFacts.parse(run, dict(self.env)))
         return self
 
     @model_validator(mode="after")
@@ -118,6 +96,14 @@ class Step(BaseModel):
         if self.uses and self.run:
             raise ValueError("a step either uses an action or runs a script")
         return self
+
+    def model_copy(self, *, update=None, deep=False) -> Step:
+        if update and _VERBATIM & set(update):
+            raw = self.model_dump(by_alias=True)
+            for key, value in update.items():
+                raw[_ALIASES.get(key, key)] = value
+            return Step.model_validate(raw)
+        return super().model_copy(update=update, deep=deep)
 
 
 class Strategy(BaseModel):
@@ -251,10 +237,7 @@ def parse_workflow(path: Path) -> Workflow:
             step["line"] = index.get(("jobs", str(job_key), "steps", str(number)), 0)
             if "waived_continue_on_error" in step:
                 raise ValueError(f"{path.name}:{step['line']}: waiver field is author-controlled")
-            waived = any(
-                w.workflow == stem and w.job == job_key and w.step == step.get("name")
-                for w in CONTINUE_ON_ERROR_WAIVERS
-            )
+            waived = POLICY.is_waived(stem, job_key, step.get("name"), RuleId.CONTINUE_ON_ERROR)
             if waived:
                 if not step.get("continue-on-error"):
                     raise ValueError(f"{path.name}:{step['line']}: waiver without the violation")
