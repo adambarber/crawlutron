@@ -458,11 +458,3 @@ class JobStore:
     arunning_claim = atwin(running_claim)
     ais_job_claim_fresh = atwin(is_job_claim_fresh)
     aretire_orphan_running = atwin(retire_orphan_running)
-
-    async def areap_tombstones(self, *, grace_seconds: float, now: float) -> int:
-        return await self._container.db_write(
-            lambda: self.reap_tombstones(grace_seconds=grace_seconds, now=now)
-        )
-
-    async def areap_orphan_accumulators(self) -> int:
-        return await self._container.db_write(lambda: self.reap_orphan_accumulators())

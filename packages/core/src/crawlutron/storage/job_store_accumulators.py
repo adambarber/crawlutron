@@ -84,10 +84,6 @@ class JobAccumulators:
     def _data_version(self) -> int:
         return connection_data_version(self._conn)
 
-    def _note_table_truth(self, job_id: str, version: int) -> None:
-        """Stamp ``job_id``'s digests as truth as of ``version`` (reads just ran)."""
-        self._seeded_version[job_id] = version
-
     def _seed_version(self, job_id: str, version: int) -> None:
         """Record the version observed before our write (the no-op proof)."""
         self._own_version[job_id] = version
@@ -152,10 +148,6 @@ class JobAccumulators:
         full_digest: str | None = None,
     ) -> None:
         self._content_digest.setdefault(job_id, {})[collection] = (mark, tail_digest, full_digest)
-
-    def _tail_nop(self, job_id: str, collection: str, mark: int) -> None:
-        """Record that the persisted tail already matches: no rows written."""
-        self._record_content(job_id, collection, mark, self._digest([]), None)
 
     def read_results(self, job_id: str) -> list[dict[str, JsonValue]]:
         """The page history, in the order it was crawled."""
