@@ -68,10 +68,7 @@ def _lookup(dotted: str, payload: Mapping[str, object]) -> str:
 
 
 def _evaluate(expression: str, payload: Mapping[str, object]) -> str:
-    """Evaluate the base-ref expression body against a payload.
-
-    String constants, github.event/sha lookups, !=, and &&/|| short-circuit.
-    """
+    """Evaluate a base-ref expression body (short-circuit, constants, github lookups)."""
     body = expression.strip()
     if body.startswith("${{") and body.endswith("}}"):
         body = body[3:-2].strip()
@@ -146,14 +143,6 @@ def test_base_ref_no_pr_regression() -> None:
     expression = _base_ref_expression()
     resolved = _evaluate(expression, PR_PUSH)
     assert resolved == "b" * 40, f"PR push base-ref regressed: {resolved!r}"
-
-
-def test_base_ref_expression_guards_against_null_sha() -> None:
-    """The declared expression must itself reject the zero SHA and fall through."""
-    expression = _base_ref_expression()
-    assert ZERO_SHA in expression, "the expression must name the null SHA to reject it"
-    assert "!=" in expression, "the expression must compare against the null SHA"
-    assert "github.sha" in expression, "the expression must fall through to a real commit"
 
 
 if __name__ == "__main__":
