@@ -10,10 +10,10 @@ from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.orchestration.request_pipeline import PipelineDependencies, PipelineState, build_jobs
-from crawlutron.runtime.pressure_gates import ResourceGate
 from crawlutron.storage.result_store import CrawlSpillStore
 from crawlutron.transport.cache import HttpCache
 from crawlutron.transport.content_cache import ContentCache
+from crawlutron_admit.sensing.pressure_gates import ResourceGate
 from safe_url.host_policy import HostPolicy
 from safe_url.normalized_url import NormalizedUrl
 from tests._fetch_doubles import FetcherDouble

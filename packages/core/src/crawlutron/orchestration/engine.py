@@ -27,7 +27,6 @@ from crawlutron.orchestration.request_pipeline import (
     run_crawl_request,
 )
 from crawlutron.runtime import process_state
-from crawlutron.runtime.pressure_gates import ResourceGate
 from crawlutron.storage.result_store import CrawlSpillStore
 from crawlutron.transport import robots as _robots_policy
 from crawlutron.transport.cache import HttpCache, shared_http_cache
@@ -37,6 +36,7 @@ from crawlutron.transport.cookie_jar import COOKIE_NAMESPACE
 from crawlutron.transport.fetchers import default_http_fetcher, impersonating_fetcher
 from crawlutron.transport.request_profile import cookie_namespace_for, headers_for_strategy
 from crawlutron.transport.robots import FetchAndDecode
+from crawlutron_admit.sensing.pressure_gates import ResourceGate
 from safe_url.host_policy import HostPolicy
 from safe_url.normalized_url import NormalizedUrl
 

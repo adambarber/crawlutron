@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import pytest
 
-from admission import LaneId
-from admission.values import Lease
+from crawlutron_admit import LaneId
+from crawlutron_admit.values import Lease
 from tests._support._doors import _finish, _hold_one
 from tests._support._gate_factory import build_gate
 

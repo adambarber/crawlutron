@@ -162,7 +162,7 @@ COPY --from=camoufox-binary /camoufox-bundle /home/appuser/.cache/camoufox
 RUN /app/.venv/bin/python -c "from camoufox.fpgen_model import ensure_fpgen_model; ensure_fpgen_model()"
 
 # No application source is copied: the builder's venv carries all six members as
-# installed wheels (crawlutron, admission, crawlutron_extract, crawlutron_mcp,
+# installed wheels (crawlutron, crawlutron_admit, crawlutron_extract, crawlutron_mcp,
 # crawlutron_rest, crawlutron_sdk, safe_url), so the wheel set cannot drift from
 # the source tree the way a partial COPY list did.
 

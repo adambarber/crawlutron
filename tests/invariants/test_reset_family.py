@@ -202,6 +202,9 @@ RESET_SHAPED_STATE_IS_REGISTERED = Rule(
         "a module with a reset door for module-level state must register that state with "
         "crawlutron.runtime.process_state -- an unregistered reset is invisible to the seam"
     ),
+    # Core's admit_sensing adapter registers this cache's reset/probe pair: the
+    # package cannot import core's registry, so registration lives at the edge.
+    skip=frozenset(["packages/crawlutron-admit/src/crawlutron_admit/sensing/cgroup_sense.py"]),
     bite=lambda: (
         Bites(
             "STATE = {}\n\n\ndef fill():\n    STATE['k'] = 1\n\n\ndef _reset():\n    STATE.clear()\n",

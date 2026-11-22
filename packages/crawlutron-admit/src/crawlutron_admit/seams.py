@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Awaitable
 from typing import Protocol, runtime_checkable
 
-from admission.values import Instant
+from crawlutron_admit.values import Instant
 
 __all__ = ["Clock", "Signal"]
 

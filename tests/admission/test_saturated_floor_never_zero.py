@@ -6,14 +6,14 @@ never yield a silent zero that makes the recursive loop spin.
 
 from __future__ import annotations
 
-from admission import Count, Want
-from admission.errors import AdmissionRefused
-from crawlutron.runtime.pressure_gates import ResourceGate
 from crawlutron.runtime.pressure_sizing import (
     TaskRamBudget,
     build_admission_gate,
     build_admission_policy,
 )
+from crawlutron_admit import Count, Want
+from crawlutron_admit.errors import AdmissionRefused
+from crawlutron_admit.sensing.pressure_gates import ResourceGate
 
 
 def _saturated_policy():

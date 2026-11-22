@@ -35,8 +35,8 @@ Linux and macOS are supported; Windows is not. The service is built on POSIX
 primitives the Windows runtime does not provide: `fcntl` advisory file locking
 (`packages/core/src/crawlutron/safety/atomic_write.py`, `packages/core/src/crawlutron/orchestration/engine.py`,
 `packages/core/src/crawlutron/transport/content_cache.py`), `resource`/sysconf-based memory
-sizing (`packages/core/src/crawlutron/runtime/pressure_memory.py`), and cgroup filesystem
-readings for the resource gauges (`packages/core/src/crawlutron/runtime/cgroup_sense.py`).
+sizing (`packages/crawlutron-admit/src/crawlutron_admit/sensing/pressure_memory.py`), and cgroup filesystem
+readings for the resource gauges (`packages/crawlutron-admit/src/crawlutron_admit/sensing/cgroup_sense.py`).
 Deploy it as a Linux container or run it directly on Linux/macOS.
 
 ## Security residuals and environment escape hatches

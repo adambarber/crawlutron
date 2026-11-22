@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from admission import Ratio
+from crawlutron_admit import Ratio
 from tests._support._doors import _finish, _hold_one
 from tests._support._gate_factory import FakeGauge, GateSpec, build_gate
 

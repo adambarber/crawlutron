@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from admission.values import (
+from crawlutron_admit.values import (
     Cost,
     Count,
     Duration,

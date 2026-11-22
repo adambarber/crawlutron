@@ -5,11 +5,10 @@ import time
 
 import pytest
 
-from crawlutron.orchestration.recursive import batch_is_http_heavy
 from crawlutron.runtime.metrics import get_metrics
-from crawlutron.runtime.pressure_memory import batch_scale
 from crawlutron.runtime.pressure_sizing import ResourceGate
 from crawlutron.vocabulary.strategies import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
+from crawlutron_admit.sensing.pressure_memory import batch_scale
 from tests._admission_doubles import FakeResourceGauge
 from tests._fetcher_factories import LINKED_PAIR_LIMITS, crawled_results, site_linking_to
 from tests._recursive_harnesses import drive_recursive_crawl, make_crawl_task
@@ -38,7 +37,7 @@ async def _crawl_under_pressure(*, cpu_ratio, memory_ratio):
     """Run the two-page fixture crawl against a gate with pinned sampler ratios.
     Returns the ``(envelope, throttle_count)`` pair; the pinned resource drives
     the throttle, and the gate is handed to the engine as its collaborator."""
-    from crawlutron.runtime.pressure_gates import ResourceGate
+    from crawlutron_admit.sensing.pressure_gates import ResourceGate
 
     gate = ResourceGate(memory_ratio=lambda: memory_ratio, cpu_ratio=lambda: cpu_ratio)
     before = (await get_metrics().snapshot()).resource_throttle_batches_total
@@ -70,7 +69,7 @@ def test_direct_reads_do_not_perturb_slope(monkeypatch):
     """The usage sensor is read by readiness/metrics/waits between dispatch
     scale computations. Those reads must not mutate the slope series, or a
     single stray sample invents a climb that is not there."""
-    import crawlutron.runtime.pressure_memory as mp
+    import crawlutron_admit.sensing.pressure_memory as mp
 
     # The clock and the sensor keep going: the event loop and the framework's
     # teardown read the global clock too, and a finite sequence ran out.
@@ -103,59 +102,6 @@ def test_direct_reads_do_not_perturb_slope(monkeypatch):
     )
 
 
-# --------------------------------------------------------------------------- Pure helper: does the upcoming
-# batch look HTTP-heavy? ---------------------------------------------------------------------------
-
-
-def _http_heavy(pins: dict[str, str], domains: list[str], *, sample: int = 8) -> bool:
-    """Build the batch the way the admission gate sees it and ask if it is HTTP-heavy.
-
-    The scheduler double, frontier construction and sample size used to be
-    re-spelled at every site; a test now states its pins and verdict only.
-    """
-    frontier = [(0, make_crawl_task(0, d)) for d in domains]
-    return batch_is_http_heavy(_Scheduler(pins), frontier, sample=sample)
-
-
-class TestBatchIsHttpHeavy:
-    def test_all_http_pinned(self):
-        sched = _Scheduler({f"site{i}.gov": HTTP_DECLARED_CRAWLER for i in range(4)})
-        frontier = [(0, make_crawl_task(0, f"site{i}.gov")) for i in range(4)]
-        assert batch_is_http_heavy(sched, frontier, sample=8) is True
-
-    def test_majority_http_pinned(self):
-        # 2 of 3 pinned HTTP; the 3rd unpinned (not yet proven cheap)
-        pins = {"a.gov": HTTP_DECLARED_CRAWLER, "b.gov": HTTP_DECLARED_CRAWLER}
-        assert _http_heavy(pins, ["a.gov", "b.gov", "c.gov"]) is True
-
-    def test_half_or_less_not_http_heavy(self):
-        # 1 of 3 pinned HTTP -> not HTTP-heavy (conservative)
-        assert _http_heavy({"a.gov": HTTP_DECLARED_CRAWLER}, ["a.gov", "b.gov", "c.gov"]) is False
-
-    def test_browser_pinned_counts_against(self):
-        # 2 browser-pinned, 1 HTTP-pinned -> not HTTP-heavy
-        pins = {
-            "a.gov": BROWSER_HEADLESS,
-            "b.gov": BROWSER_HEADLESS,
-            "c.gov": HTTP_DECLARED_CRAWLER,
-        }
-        assert _http_heavy(pins, ["a.gov", "b.gov", "c.gov"]) is False
-
-    def test_no_pins_is_false(self):
-        # Cold start, nothing proven cheap
-        assert _http_heavy({}, [f"site{i}.gov" for i in range(4)]) is False
-
-    def test_empty_frontier_is_false(self):
-        assert _http_heavy({}, []) is False
-
-    def test_sample_window_limits_lookahead(self):
-        # Beyond the sample window the composition is not considered.
-        sched = _Scheduler({"a.gov": HTTP_DECLARED_CRAWLER})
-        # First task unpinned, second pinned HTTP; sample=1 looks only at first
-        frontier = [(0, make_crawl_task(0, "z.gov")), (0, make_crawl_task(0, "a.gov"))]
-        assert batch_is_http_heavy(sched, frontier, sample=1) is False
-
-
 async def _ok_worker(job):
     from tests._result_builders import engine_result
 
@@ -184,8 +130,8 @@ async def _run_with_gate(sched, gate, jobs):
 
 
 class TestDispatcherStrategyAwareScaling:
-    async def test_http_heavy_batch_uses_http_scale(self):
-        # Two domains already proven HTTP (pinned) -> dispatcher consults http_scale_factor
+    async def test_http_heavy_batch_uses_gate_ratios(self):
+        # Two HTTP-pinned domains: the one gate still decides from both resource ratios.
         sched = _Scheduler(
             {
                 "a.gov": HTTP_DECLARED_CRAWLER,
@@ -196,10 +142,9 @@ class TestDispatcherStrategyAwareScaling:
         gate = FakeResourceGauge(batch=0.0, http=1.0)
         await _run_with_gate(sched, gate, jobs)
 
-        # The dispatcher consults http_scale_factor for an HTTP-heavy batch and uses its value (http=1.0) so
-        # both pages fit in one batch.
-        assert "http" in gate.calls
-        assert sched.runs == 1  # http scale 1.0 => both admitted at once
+        # The kernel gate consults both ratios and admits the whole batch at capacity.
+        assert "mem" in gate.calls and "cpu" in gate.calls
+        assert sched.runs == 1
 
     @pytest.mark.parametrize(
         ("_case", "pins"),
@@ -214,13 +159,13 @@ class TestDispatcherStrategyAwareScaling:
             ("cold_unpinned", {}),
         ],
     )
-    async def test_batch_uses_the_combined_scale(self, _case, pins):
+    async def test_batch_uses_gate_ratios(self, _case, pins):
         jobs = [make_crawl_task(0, "a.gov"), make_crawl_task(0, "b.gov")]
         gate = FakeResourceGauge(batch=1.0, http=1.0)
         await _run_with_gate(_Scheduler(pins), gate, jobs)
 
-        assert "batch" in gate.calls
-        assert "http" not in gate.calls
+        assert "mem" in gate.calls and "cpu" in gate.calls
+        assert "batch" not in gate.calls and "http" not in gate.calls
 
 
 # --------------------------------------------------------------------------- Gate semantics: HTTP scale

@@ -25,6 +25,7 @@ def test_scan_roots_equal_every_python_bearing_tree() -> None:
     """
     assert SCAN_ROOTS == (
         "packages/core",
+        "packages/crawlutron-admit",
         "packages/extract",
         "packages/mcp",
         "packages/rest",
@@ -71,6 +72,8 @@ def test_scan_roots_never_names_the_member_container(tmp_path: pathlib.Path) -> 
     for member in (
         "packages/core",
         "packages/core/crawlutron",
+        "packages/crawlutron-admit",
+        "packages/crawlutron-admit/src/crawlutron_admit",
         "packages/extract",
         "packages/extract/src/crawlutron_extract",
         "packages/mcp",
@@ -83,6 +86,7 @@ def test_scan_roots_never_names_the_member_container(tmp_path: pathlib.Path) -> 
         "packages/safe-url/src/safe_url",
     ):
         (tmp_path / member).mkdir(parents=True)
+    (tmp_path / "packages/crawlutron-admit/src/crawlutron_admit/mod.py").write_text("x = 1\n")
     (tmp_path / "packages/core/crawlutron/mod.py").write_text("x = 1\n")
     (tmp_path / "packages/extract/src/crawlutron_extract/mod.py").write_text("x = 1\n")
     (tmp_path / "packages/mcp/crawlutron_mcp/mod.py").write_text("x = 1\n")

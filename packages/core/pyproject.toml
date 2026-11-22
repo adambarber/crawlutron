@@ -10,8 +10,8 @@ readme = "README.md"
 requires-python = ">=3.14"
 license = "MIT"
 
-# The engine's own runtime set: every third-party library the `crawlutron` and
-# `admission` packages import. Declaring it here is what makes `pip install
+# The engine's own runtime set: every third-party library the `crawlutron`
+# package imports. Declaring it here is what makes `pip install
 # crawlutron-core` produce a working engine instead of an import error; the app
 # wheel depends on the members and adds nothing.
 dependencies = [
@@ -37,6 +37,5 @@ dependencies = [
 ]
 
 [tool.hatch.build.targets.wheel]
-# Dist name (crawlutron-core) and import names (crawlutron, admission) are
-# independent: importing either resolves into this one wheel.
-packages = ["src/crawlutron", "src/admission"]
+# The admission stack ships as its own wheel (crawlutron-admit).
+packages = ["src/crawlutron"]

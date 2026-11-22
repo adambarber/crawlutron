@@ -7,6 +7,10 @@
       "component": "crawlutron",
       "exclude-paths": ["packages/**"]
     },
+    "packages/crawlutron-admit": {
+      "package-name": "crawlutron-admit",
+      "component": "crawlutron-admit"
+    },
     "packages/core": {
       "package-name": "crawlutron-core",
       "component": "crawlutron-core"

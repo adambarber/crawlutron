@@ -10,7 +10,7 @@ import dataclasses
 
 import pytest
 
-from admission import Count, Want
+from crawlutron_admit import Count, Want
 from tests._support._doors import _finish, _live
 from tests._support._gate_factory import GateSpec, build_gate
 

@@ -13,9 +13,9 @@ from crawlutron.models.taxonomy import Classification
 from crawlutron.orchestration.admission_stall import AdmissionStallGuard
 from crawlutron.orchestration.recursive import admit_recursive_batch
 from crawlutron.runtime.metrics import get_metrics
-from crawlutron.runtime.pressure_gates import ResourceGate
 from crawlutron.transport.scheduler import DomainScheduler
 from crawlutron.vocabulary.strategies import BROWSER_HEADLESS
+from crawlutron_admit.sensing.pressure_gates import ResourceGate
 from safe_url.normalized_url import NormalizedUrl
 from tests._admission_runs import link as _link
 from tests._admission_runs import minimum_admission_run as _minimum_admission_run

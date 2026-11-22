@@ -28,8 +28,8 @@ if TYPE_CHECKING:
     from crawlutron.models.http_fetcher import HttpFetcher
     from crawlutron.models.result_record import ProducerEnvelope
     from crawlutron.models.taxonomy import CrawlStrategyName
-    from crawlutron.runtime.pressure_gates import ResourceGate
     from crawlutron.transport.scheduler import DomainScheduler
+    from crawlutron_admit.sensing.pressure_gates import ResourceGate
     from tests.helpers.server import TestServer
 
 #: The policy limits a scripted crawl is run under, in wire shape.

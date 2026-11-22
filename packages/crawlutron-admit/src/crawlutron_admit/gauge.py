@@ -9,7 +9,7 @@ from __future__ import annotations
 import enum
 from typing import Protocol, runtime_checkable
 
-from admission.values import Ratio
+from crawlutron_admit.values import Ratio
 
 __all__ = ["GaugeState", "ResourceGauge"]
 

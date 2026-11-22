@@ -6,8 +6,8 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable
 
-from crawlutron.runtime.pressure_memory import MemoryGate, ResourceGauge
-from crawlutron.runtime.pressure_probes import (
+from crawlutron_admit.sensing.pressure_memory import MemoryGate, ResourceGauge
+from crawlutron_admit.sensing.pressure_probes import (
     DEFAULT_CPU_BUDGET,
     DEFAULT_CPU_HARD,
     DEFAULT_CPU_TARGET,

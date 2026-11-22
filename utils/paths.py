@@ -257,7 +257,7 @@ def _import_root(name: str) -> pathlib.Path:
 def _app_roots() -> tuple[pathlib.Path, pathlib.Path, pathlib.Path, pathlib.Path, pathlib.Path]:
     return (
         _import_root("crawlutron"),
-        _import_root("admission"),
+        _import_root("crawlutron_admit"),
         _import_root("crawlutron_rest"),
         _import_root("crawlutron_mcp"),
         _import_root("safe_url"),
@@ -273,7 +273,7 @@ _DERIVATIONS: Mapping[str, Callable[[], object]] = MappingProxyType(
         "REST_ROOT": lambda: _app_roots()[2],
         "MCP_ROOT": lambda: _app_roots()[3],
         "SAFE_URL_ROOT": lambda: _app_roots()[4],
-        "APP_ROOTS": lambda: tuple(_app_roots()[i] for i in (0, 2, 3, 4)),
+        "APP_ROOTS": lambda: tuple(_app_roots()[i] for i in (0, 1, 2, 3, 4)),
         "TRANSPORT_DIR": lambda: _app_roots()[0] / "transport",
     }
 )

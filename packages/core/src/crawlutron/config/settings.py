@@ -7,7 +7,6 @@ from typing import TypedDict
 
 from crawlutron.config.env import get_mapping_float, get_mapping_int, in_range, parse_bool_value
 from crawlutron.models.crawl_policy_limits import CrawlPolicyLimits
-from crawlutron.runtime.pressure_memory import read_memory_stats
 from crawlutron.runtime.pressure_sizing import (
     derive_browser_pool_size,
     doc_worker_count,
@@ -29,6 +28,7 @@ from crawlutron.vocabulary.limits import (
     MAX_RETRIES,
     MAX_TOMBSTONE_GRACE_SECONDS,
 )
+from crawlutron_admit.sensing.pressure_memory import read_memory_stats
 
 # Connection-pool sizing bound to the SAME RAM-derived HTTP concurrency the
 # weighted admission allows (max_http_concurrency_for), so the two cannot diverge.

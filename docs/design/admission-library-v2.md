@@ -13,7 +13,7 @@ lane_spread))`; OVERSIZE evaluates wanted lanes only), admission and
 lease-taking made inseparable by construction (`async with gate.admit(want) as
 granted:`), `Cost.weight` dropped, the wait seam reframed as an injected
 `Signal` event-with-optional-timeout (source-scan gate keyed on top-level
-`packages/core/src/admission/**` only), seam-parity scoped to the unsaturated band with the
+`packages/crawlutron-admit/src/crawlutron_admit/**` only), seam-parity scoped to the unsaturated band with the
 saturated deltas declared intended, `Progress.last_decision` pinned as
 granting-only, `PinnedGate` inventory corrected to 13, cold_probe pinned as a
 global concurrent in-flight cap. Full rulings table: the v2.1 fix round.
@@ -183,7 +183,7 @@ Full rulings table: `docs/reviews/admission-library-review-round11.md`.
 
 The kernel is a **generic, typed package independent of the crawler, API
 server, and crawlutron specifics** — zero `crawlutron.*` imports, enforced by
-an import-contract gate (not a comment). Lives at a **top-level `packages/core/src/admission/`
+an import-contract gate (not a comment). Lives at a **top-level `packages/crawlutron-admit/src/crawlutron_admit/`
 package**, sibling to `packages/core/src/crawlutron/` under the UV workspace root.
 
 **Non-negotiables (wire contracts — nothing below can be relaxed):**
@@ -205,8 +205,8 @@ package**, sibling to `packages/core/src/crawlutron/` under the UV workspace roo
 **Naming hazard (correction to the review, see §10):** there is already a
 `packages/core/src/crawlutron/admission/` package (URL/link admission — `admission.py`,
 `admission_links.py`, `credentials.py`, `policy.py`). The new kernel is
-`packages/core/src/admission/` at the **repo root**, a different tree. v2 mandates a one-line
-notice in each package's module docstring (`packages/core/src/admission/…` =
+`packages/crawlutron-admit/src/crawlutron_admit/` at the **repo root**, a different tree. v2 mandates a one-line
+notice in each package's module docstring (`packages/crawlutron-admit/src/crawlutron_admit/…` =
 "resource-adaptive paced-admission kernel"; `packages/core/src/crawlutron/admission/…` =
 "URL admission") so the two "admission" names never collapse conceptually.
 
@@ -590,10 +590,10 @@ set) are unaffected (MINOR-2).
   **single event-with-optional-timeout primitive**: `gate._wait_for_progress()`
   awaits the injected `Signal` (an `asyncio.Event`-equivalent) with an optional
   `Duration` timeout, then re-checks the version. The **concrete event/sleep
-  primitive lives OUTSIDE `packages/core/src/admission/`** — injected from the seam; the kernel
+  primitive lives OUTSIDE `packages/crawlutron-admit/src/crawlutron_admit/`** — injected from the seam; the kernel
   declares only a `Signal` Protocol (`.wait(timeout)`, `.set()`). The
   source-scan gate (§9.6) is satisfiable under exactly this reading: it scans
-  the **top-level `packages/core/src/admission/**`** for direct
+  the **top-level `packages/crawlutron-admit/src/crawlutron_admit/**`** for direct
   `time.monotonic`/`asyncio.sleep` (and aliases); because the concrete
   blocking/awaiting primitive is never implemented in-package, the seam's
   event class (which may legitimately use `asyncio.sleep`) is out of scope.
@@ -967,7 +967,7 @@ none — the v1 plan declared it; v2 makes it a real Protocol member).
 - `Clock` / `Signal` — the only time/seam surfaces; **both declared as
   Protocols in the kernel, their concrete implementations injected from the
   seam** (M4). No `time.monotonic`, no `asyncio.sleep`, no concrete
-  `asyncio.Event` construction inside `packages/core/src/admission/**` (source-scan gate, §9.6).
+  `asyncio.Event` construction inside `packages/crawlutron-admit/src/crawlutron_admit/**` (source-scan gate, §9.6).
 
 ## 9. Migration plan (every gap closed — M1..M7)
 
@@ -1031,12 +1031,12 @@ none — the v1 plan declared it; v2 makes it a real Protocol member).
    - **Zero-crawlutron-import gate**: a new invariant (modeled on
      `test_engine_import_seam.py` / `test_one_clock.py`'s path-keyed
      `Registry`/`Rule` from `tests/rules.py`) AST-scans every
-     `packages/core/src/admission/**/*.py` and fails on any `import crawlutron` /
+     `packages/crawlutron-admit/src/crawlutron_admit/**/*.py` and fails on any `import crawlutron` /
      `from crawlutron import …`, naming file:line. It is a gate, not a
      comment.
    - **Source-scan gate**: a second `Rule` (same `Bites`/`Registry` shape)
      fails on any `time.monotonic`/`asyncio.sleep` (and aliases) appearing in
-     `packages/core/src/admission/**`, forcing the `Clock`/`Signal` seams.
+     `packages/crawlutron-admit/src/crawlutron_admit/**`, forcing the `Clock`/`Signal` seams.
    - **Mutation gate on the floor law**: a scratch-tree mutation proof (per
      the canon) that a mutant removing `max(1, …)` from `floor_global`, or
      dropping a lane's `min(want, capacity)` clamp, reds a named test. `-n0`
@@ -1056,7 +1056,7 @@ none — the v1 plan declared it; v2 makes it a real Protocol member).
      exactly at saturation.
    - **Source-scan gate scope (M4 + MINOR-4 descriptor)**: the
      `time.monotonic`/`asyncio.sleep`-and-aliases `Rule` scans **top-level
-     `packages/core/src/admission/**` only** with the exact descriptor
+     `packages/crawlutron-admit/src/crawlutron_admit/**` only** with the exact descriptor
      **`scope = lambda *, exclude: trees_under(REPO_ROOT / "admission")`**
      (`trees_under` from `tests/chokepoint_walks.py`; `REPO_ROOT`
      `tests/_walk_primitives.py`). The default `Rule` scope is `app_trees`
@@ -1204,7 +1204,7 @@ and must stay green through the seam migration.
 5. **The review's M6 ratchet framing is incomplete**: the deeper gate is the
    **derived scan surface** — `test_scan_roots.py:16` pins `SCAN_ROOTS` as a
    4-tuple and `test_file_size.py:88-91` requires
-   `set(_BUDGETS) == set(python_bearing_roots())`. A new `packages/core/src/admission/` root
+   `set(_BUDGETS) == set(python_bearing_roots())`. A new `packages/crawlutron-admit/src/crawlutron_admit/` root
    auto-claims both and **both must change in the same commit**; just adding
    a `_BUDGETS` row without updating the `SCAN_ROOTS` tuple-reds incorrectly.
    v2 states both (plus the jscpd root cross-check, `test_file_size.py:77-85`).

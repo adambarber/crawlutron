@@ -107,6 +107,12 @@ ADMISSION_USES_NO_CONCRETE_TIME_OR_SLEEP = Rule(
         "the injected Clock/Signal are the package's only time surfaces (\u00a78)"
     ),
     scope=lambda *, exclude: trees_under(ADMISSION_ROOT),
+    # The cgroup sensing stack uses monotonic time for its own cache TTL, not for
+    # admission decisions; the decision core is the semantic home of this rule.
+    skip=frozenset(
+        f"packages/crawlutron-admit/src/crawlutron_admit/sensing/{name}.py"
+        for name in ("cgroup_sense", "pressure_memory", "pressure_probes", "pressure_gates")
+    ),
     proof_path=_SYNTHETIC,
     bite=lambda: (
         Bites(

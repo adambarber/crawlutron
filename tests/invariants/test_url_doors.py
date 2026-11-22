@@ -58,6 +58,13 @@ def _raw_batch_dedup_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 BATCH_DEDUP_KEYS_ON_ADMITTED_IDENTITY = Rule(
     name="batch-dedup-keys-on-admitted-identity",
     find=_raw_batch_dedup_offenders,
+    # The gate's dict.fromkeys(LaneId, 0) allocates per-lane counters; it never dedups URLs.
+    skip=frozenset(
+        [
+            "packages/crawlutron-admit/src/crawlutron_admit/gate.py",
+            "packages/crawlutron-admit/src/crawlutron_admit/gate_decisions.py",
+        ]
+    ),
     summary=(
         "The url-batch dedup must collapse duplicates by admitted page identity "
         "(NormalizedUrl admission), not the raw string, or a request carrying "

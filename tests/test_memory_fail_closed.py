@@ -5,7 +5,7 @@ no answer (containers without /proc); read_memory_stats fell through to total_by
 
 import pytest
 
-from crawlutron.runtime.pressure_memory import MemoryGate, batch_scale, read_memory_stats
+from crawlutron_admit.sensing.pressure_memory import MemoryGate, batch_scale, read_memory_stats
 
 
 def test_an_unknowable_ceiling_is_conservative_not_zero():

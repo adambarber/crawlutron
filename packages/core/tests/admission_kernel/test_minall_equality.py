@@ -5,7 +5,7 @@ does and be usable as a stable hashable token."""
 
 from __future__ import annotations
 
-from admission import MinAll
+from crawlutron_admit import MinAll
 
 
 def test_minall_value_equality() -> None:

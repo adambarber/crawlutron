@@ -9,7 +9,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from admission import (
+from crawlutron.config.env import get_env_float, get_env_int
+from crawlutron.runtime.admit_sensing import register as register_admission_sensing
+from crawlutron_admit import (
     AdmissionGate,
     AdmissionRefused,
     Bytes,
@@ -30,11 +32,12 @@ from admission import (
     Signal,
     Want,
 )
-from admission.gauge import ResourceGauge as KernelResourceGauge
-from crawlutron.config.env import get_env_float, get_env_int
-from crawlutron.runtime.pressure_gates import CpuGate, ResourceGate
-from crawlutron.runtime.pressure_memory import read_memory_stats
-from crawlutron.runtime.pressure_probes import LoopLagProbe, read_cpu_quota, read_cpu_usage_seconds
+from crawlutron_admit.gauge import ResourceGauge as KernelResourceGauge
+from crawlutron_admit.sensing.pressure_gates import CpuGate, ResourceGate
+from crawlutron_admit.sensing.pressure_memory import read_memory_stats
+from crawlutron_admit.sensing.pressure_probes import LoopLagProbe, read_cpu_quota, read_cpu_usage_seconds
+
+register_admission_sensing()
 
 __all__ = [
     "CpuGate",
@@ -281,7 +284,7 @@ class _MonotonicClock:
     """The kernel's monotonic Clock bound to the real monotonic timeline."""
 
     def now(self) -> Instant:
-        return Instant._of(time.monotonic())
+        return Instant.of(time.monotonic())
 
 
 def _seam_signal() -> Signal:

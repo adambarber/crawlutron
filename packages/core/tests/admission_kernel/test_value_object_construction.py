@@ -10,7 +10,7 @@ import math
 
 import pytest
 
-from admission import (
+from crawlutron_admit import (
     Allocation,
     AllocationEntry,
     Bytes,
@@ -99,7 +99,7 @@ def test_limits_refuses_swapped_target_hard_pair() -> None:
 
 def test_sensing_must_be_complete_over_memory_and_cpu() -> None:
     """Sensing completes over {MEMORY, CPU}: a missing lane is an under-sensed box."""
-    from admission import SensorBinding
+    from crawlutron_admit import SensorBinding
 
     mem_binding = SensorBinding(Limits(target=Ratio(0.2), hard=Ratio(0.8)), object())
     cpu_binding = SensorBinding(Limits(target=Ratio(0.1), hard=Ratio(0.9)), object())
@@ -151,8 +151,8 @@ def test_granted_requires_positive_total_and_a_live_lease() -> None:
 def test_progress_enforces_advance_after_decision() -> None:
     """Progress keeps last_advance >= last_decision: a granting decision is progress."""
     with pytest.raises(ValueError):
-        Progress(last_advance=Instant._of(1.0), last_decision=Instant._of(2.0))
-    record = Progress(last_advance=Instant._of(5.0), last_decision=Instant._of(3.0))
+        Progress(last_advance=Instant.of(1.0), last_decision=Instant.of(2.0))
+    record = Progress(last_advance=Instant.of(5.0), last_decision=Instant.of(3.0))
     assert record.last_advance.value >= record.last_decision.value
 
 
@@ -160,5 +160,5 @@ def test_instant_is_hidden_constructor_only() -> None:
     """Instant is built only by Clock.now(); the raw form is a private _of door."""
     with pytest.raises(TypeError):
         Instant(3.0)
-    inst = Instant._of(3.0)
+    inst = Instant.of(3.0)
     assert inst.value == 3.0

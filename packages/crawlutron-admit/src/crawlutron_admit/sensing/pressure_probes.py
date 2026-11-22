@@ -8,7 +8,7 @@ import os
 import time
 from collections.abc import Awaitable, Callable
 
-from crawlutron.runtime.cgroup_sense import read_int, read_text
+from crawlutron_admit.sensing.cgroup_sense import read_int, read_text
 
 _logger = logging.getLogger(__name__)
 

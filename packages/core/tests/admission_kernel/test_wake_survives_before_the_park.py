@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import asyncio
 
-from admission import Count, LaneId, Want
-from crawlutron.runtime.pressure_gates import ResourceGate
 from crawlutron.runtime.pressure_sizing import (
     TaskRamBudget,
     build_admission_gate,
     build_admission_policy,
 )
+from crawlutron_admit import Count, LaneId, Want
+from crawlutron_admit.sensing.pressure_gates import ResourceGate
 from tests._support._doors import _live
 
 
