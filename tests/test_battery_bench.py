@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import configparser
 import sys
 
 import pytest
 
 import scripts.battery_bench as bench
+from tests.chokepoint_paths import REPO_ROOT
 
 _ADDOPTS = '--strict-markers -m "not (browser or slow or real_pbkdf2)" -n 8 --dist worksteal'
 
@@ -42,3 +44,10 @@ def test_serial_and_workers_are_mutually_exclusive(configured: None) -> None:
 def test_default_workers_come_from_pytest_ini(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(bench, "addopts", lambda: _ADDOPTS)
     assert bench.options([]) == (8, 30)
+
+
+def test_harness_reads_the_live_pytest_ini() -> None:
+    config = configparser.ConfigParser()
+    config.read(REPO_ROOT / "pytest.ini")
+    assert bench.addopts() == " ".join(config["pytest"]["addopts"].split())
+    assert bench.configured_workers() == 8
