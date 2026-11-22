@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import yaml
 
+from tests._ci_contract import workflow_files
 from tests.chokepoint_paths import REPO_ROOT
 
 
 def test_no_workflow_uses_hyphenated_codecov_inputs() -> None:
     offenders: list[str] = []
-    for path in sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml")):
+    for path in workflow_files(REPO_ROOT / ".github" / "workflows"):
         document = yaml.safe_load(path.read_text(encoding="utf-8"))
         for key, job in document.get("jobs", {}).items():
             for step in job.get("steps", []):

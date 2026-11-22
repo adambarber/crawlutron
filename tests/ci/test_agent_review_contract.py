@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tomllib
+from functools import cache
 
 import pytest
 import yaml
@@ -14,6 +15,28 @@ REGISTRY_PATH = SERVICE_ROOT / ".github" / "review-agents.toml"
 CODEOWNERS_PATH = SERVICE_ROOT / ".github" / "CODEOWNERS"
 ZIZMOR_PATH = SERVICE_ROOT / ".github" / "zizmor.yml"
 REVIEW_SCRIPT_PATH = SERVICE_ROOT / "scripts" / "agent_review.py"
+
+_TEXT_SUFFIXES = frozenset(
+    {".py", ".yml", ".yaml", ".toml", ".md", ".json", ".jsonc", ".sh", ".txt", ".cfg", ".ini"}
+)
+TEXT_READS = [0]
+
+
+@cache
+def registry_texts() -> tuple[tuple[object, str], ...]:
+    """One text read per candidate file, memoized for the whole process."""
+    found: list[tuple[object, str]] = []
+    for root in (SERVICE_ROOT / ".github", SERVICE_ROOT / "scripts", SERVICE_ROOT / "tests"):
+        for path in root.rglob("*"):
+            if not path.is_file() or path.suffix not in _TEXT_SUFFIXES or path == REGISTRY_PATH:
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                continue
+            TEXT_READS[0] += 1
+            found.append((path, text))
+    return tuple(found)
 
 
 def _mapping(value: object) -> dict[str, object]:
@@ -261,6 +284,17 @@ def test_pr_publication_is_advisory_and_never_approves_or_merges() -> None:
     assert "pulls/{pr_number}/reviews" in source
 
 
+def test_registry_text_scan_is_memoized() -> None:
+    """A repeat sweep must reuse the first read, proved by a read counter."""
+    registry_texts.cache_clear()
+    before = TEXT_READS[0]
+    first = registry_texts()
+    after = TEXT_READS[0]
+    assert registry_texts() is first
+    assert TEXT_READS[0] == after
+    assert after > before
+
+
 def test_model_and_prompt_policy_exist_only_in_registry() -> None:
     """Model IDs and prompt paths must have one registry home."""
     data = tomllib.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
@@ -268,17 +302,9 @@ def test_model_and_prompt_policy_exist_only_in_registry() -> None:
     default_agent = str(_mapping(data.get("defaults")).get("agent"))
     agent = _mapping(agents[default_agent])
     policy_values = (str(agent.get("model")), str(agent.get("prompt")))
-    search_roots = (SERVICE_ROOT / ".github", SERVICE_ROOT / "scripts", SERVICE_ROOT / "tests")
-    for root in search_roots:
-        for path in root.rglob("*"):
-            if not path.is_file() or path == REGISTRY_PATH:
-                continue
-            try:
-                text = path.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                continue
-            for value in policy_values:
-                assert value not in text, f"{value!r} escaped the registry in {path}"
+    for path, text in registry_texts():
+        for value in policy_values:
+            assert value not in text, f"{value!r} escaped the registry in {path}"
 
 
 def test_agent_review_workflow_has_owner_and_zizmor_coverage() -> None:

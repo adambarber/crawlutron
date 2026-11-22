@@ -12,6 +12,7 @@ import json
 import pathlib
 import sys
 from collections import defaultdict
+from functools import cache
 
 from utils.paths import REPO_ROOT
 
@@ -82,6 +83,17 @@ def _call_objects(tree: ast.Module, node: ast.AST) -> set[str]:
         if resolved and is_production(resolved):
             found.add(resolved)
     return found
+
+
+COLLECTION_COUNT = 0
+
+
+@cache
+def collect_once() -> list[dict]:
+    """The one tree collection per process; callers share its result."""
+    global COLLECTION_COUNT
+    COLLECTION_COUNT += 1
+    return collect_tests()
 
 
 def collect_tests() -> list[dict]:
@@ -271,7 +283,7 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        tests = collect_tests()
+        tests = collect_once()
         groups = build_groups(tests)
         duplication = duplication_flags(groups)
         fragmentation = fragmentation_flags(groups)

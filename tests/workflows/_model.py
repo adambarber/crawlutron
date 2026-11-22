@@ -17,6 +17,7 @@ from pydantic import (
     model_validator,
 )
 
+from tests._ci_contract import workflow_files
 from tests.chokepoint_paths import REPO_ROOT
 from tests.workflows._admission import admit_or_none as _admit_or_none
 from tests.workflows._facts import CommandFacts, ExpressionFacts
@@ -284,7 +285,7 @@ def parse_workflow(path: Path) -> Workflow:
     return Workflow.create(raw, context={"waived_lines": waived_lines})
 
 
-WORKFLOWS: tuple[Workflow, ...] = tuple(parse_workflow(path) for path in sorted(WORKFLOW_DIR.glob("*.yml")))
+WORKFLOWS: tuple[Workflow, ...] = tuple(parse_workflow(path) for path in workflow_files(WORKFLOW_DIR))
 JOBS: tuple[Job, ...] = tuple(job for item in WORKFLOWS for job in item.jobs.values())
 POLICY = Policy.create(WAIVERS, context={"jobs": JOBS, "workflows": WORKFLOWS, "ceilings": CEILINGS})
 

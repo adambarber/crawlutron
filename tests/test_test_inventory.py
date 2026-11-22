@@ -5,6 +5,7 @@ import io
 import json
 import sys
 
+from scripts import test_inventory
 from scripts.test_inventory import main
 
 
@@ -19,6 +20,15 @@ def _run(fmt: str) -> tuple[int, str]:
     finally:
         sys.argv = old_argv
     return code, buffer.getvalue()
+
+
+def test_inventory_collects_the_tree_once_per_process() -> None:
+    test_inventory.collect_once.cache_clear()
+    before = test_inventory.COLLECTION_COUNT
+    _run("text")
+    _run("json")
+    _run("text")
+    assert test_inventory.COLLECTION_COUNT == before + 1
 
 
 def test_inventory_text_reports_a_total():
