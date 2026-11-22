@@ -94,10 +94,6 @@ _PRIVATE_HOSTS = frozenset({"localhost", "host.docker.internal"})
 _ON_SPELLINGS = frozenset({"1", "true", "yes", "on"})
 
 
-def _private_target_default() -> bool:
-    return False
-
-
 def _parse_private_target_env(raw: str | None) -> bool:
     """Parse the raw env value into a private-target decision.
 

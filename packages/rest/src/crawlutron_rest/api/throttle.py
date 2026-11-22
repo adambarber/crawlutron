@@ -217,13 +217,6 @@ class Throttle(MeterLedger):
     def record_success(self, presented: str, remote: str | None = None) -> None:
         self._kv_clear_sync(self._key_for(presented))
 
-    def _kv_pop_local(self, key: str) -> bool:
-        if self._store is not None:
-            return False
-        with self._lock:
-            self._buckets.pop(key, None)
-        return True
-
     def _kv_clear_sync(self, key: str) -> None:
         if self._store is None:
             with self._lock:

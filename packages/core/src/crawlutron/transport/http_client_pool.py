@@ -31,18 +31,6 @@ if TYPE_CHECKING:
 
 
 @contextmanager
-def _swap_cffi_builder(builder: PooledClientBuilder) -> Generator[None]:
-    """Swap the cffi leaf's builder; restore it on the way out."""
-    singleton = _leaf.session_singleton()
-    original = singleton.build
-    singleton.build = builder
-    try:
-        yield
-    finally:
-        singleton.build = original
-
-
-@contextmanager
 def pooled_client_builders(
     *,
     http: PooledClientBuilder | None = None,
