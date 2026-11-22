@@ -23,12 +23,14 @@ def _run(fmt: str) -> tuple[int, str]:
 
 
 def test_inventory_collects_the_tree_once_per_process() -> None:
-    test_inventory.collect_once.cache_clear()
-    before = test_inventory.COLLECTION_COUNT
+    first = test_inventory.collect_once()
+    count = test_inventory.COLLECTION_COUNT
     _run("text")
     _run("json")
     _run("text")
-    assert test_inventory.COLLECTION_COUNT == before + 1
+    assert test_inventory.collect_once() is first
+    assert test_inventory.COLLECTION_COUNT == count
+    assert count > 0
 
 
 def test_inventory_text_reports_a_total():

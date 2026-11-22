@@ -5,6 +5,7 @@ validation metadata (source SHA-256, AST schema version, validation result).
 """
 
 import ast
+from pathlib import Path
 
 from tests._walk_primitives import _PARSE_CACHE, parsed
 from tests.chokepoint_paths import REPO_ROOT
@@ -72,33 +73,29 @@ def test_ast_cache_mutation_isolation():
     assert ast.dump(tree1) != initial_dump1, "tree1 mutation not reflected"
 
 
-def test_ast_cache_canonical_tree_stored_once():
-    """The canonical tree is stored once per (path, source_digest) in _PARSE_CACHE."""
-    test_file = REPO_ROOT / "tests" / "_walk_primitives.py"
+def test_ast_cache_canonical_tree_stored_once(tmp_path: Path) -> None:
+    """A fresh source is stored once; the shared cache is never evicted."""
+    test_file = tmp_path / "unique_module.py"
+    test_file.write_text("value = 1\n", encoding="utf-8")
+    before = len(_PARSE_CACHE)
 
-    # Clear cache to start fresh
-    _PARSE_CACHE.clear()
-
-    # First parse populates cache
     parsed(test_file)
-    cache_size_after_first = len(_PARSE_CACHE)
-
-    # Second parse should NOT add to cache (same source digest)
+    after_first = len(_PARSE_CACHE)
     parsed(test_file)
-    cache_size_after_second = len(_PARSE_CACHE)
 
-    assert cache_size_after_first == 1, "cache should have 1 entry after first parse"
-    assert cache_size_after_second == 1, "cache should still have 1 entry after second parse (same source)"
+    assert after_first == before + 1
+    assert len(_PARSE_CACHE) == after_first
 
 
-def test_ast_cache_different_sources_different_entries():
-    """Different source files (or same file with different content) get different cache entries."""
-    test_file1 = REPO_ROOT / "tests" / "_walk_primitives.py"
-    test_file2 = REPO_ROOT / "tests" / "chokepoint_walks.py"
+def test_ast_cache_different_sources_different_entries(tmp_path: Path) -> None:
+    """Two fresh sources add two entries without clearing the shared cache."""
+    first = tmp_path / "one.py"
+    second = tmp_path / "two.py"
+    first.write_text("a = 1\n", encoding="utf-8")
+    second.write_text("b = 2\n", encoding="utf-8")
+    before = len(_PARSE_CACHE)
 
-    _PARSE_CACHE.clear()
+    parsed(first)
+    parsed(second)
 
-    parsed(test_file1)
-    parsed(test_file2)
-
-    assert len(_PARSE_CACHE) == 2, "different files should have separate cache entries"
+    assert len(_PARSE_CACHE) == before + 2

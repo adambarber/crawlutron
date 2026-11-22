@@ -285,14 +285,12 @@ def test_pr_publication_is_advisory_and_never_approves_or_merges() -> None:
 
 
 def test_registry_text_scan_is_memoized() -> None:
-    """A repeat sweep must reuse the first read, proved by a read counter."""
-    registry_texts.cache_clear()
-    before = TEXT_READS[0]
+    """A repeat sweep reuses the first read; no test evicts the cache."""
     first = registry_texts()
-    after = TEXT_READS[0]
+    reads = TEXT_READS[0]
     assert registry_texts() is first
-    assert TEXT_READS[0] == after
-    assert after > before
+    assert TEXT_READS[0] == reads
+    assert reads > 0
 
 
 def test_model_and_prompt_policy_exist_only_in_registry() -> None:
