@@ -94,11 +94,6 @@ async def close_cffi_session() -> None:
     await _CFFI_SESSION_SINGLETON.shutdown()
 
 
-def own_session() -> CffiSession | None:
-    """The pooled session, for the shared pool's process-state decisions."""
-    return _DEFAULT_CFFI_SESSION
-
-
 def owns_process_state() -> bool:
     """Whether a cffi session is currently held process-wide."""
     return _DEFAULT_CFFI_SESSION is not None
