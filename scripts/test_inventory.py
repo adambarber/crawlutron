@@ -37,7 +37,7 @@ def is_production(name: str) -> bool:
     return name.split(".", 1)[0] in PRODUCTION
 
 
-def test_node_id(relative: str, class_name: str | None, test_name: str) -> str:
+def node_id(relative: str, class_name: str | None, test_name: str) -> str:
     """Build a pytest-style node id from relative path, optional class, test name."""
     parts = [relative]
     if class_name is not None:
@@ -153,7 +153,7 @@ def _test_record(
         primary = "unresolved"
     objects = test_imports | call_objects
     return {
-        "node_id": test_node_id(relative, class_name, fn.name),
+        "node_id": node_id(relative, class_name, fn.name),
         "file": relative,
         "line": fn.lineno,
         "class": class_name,
