@@ -240,6 +240,7 @@ class TestShadowDomApi(_AsgiEndpointTests):
     """Shadow-DOM flattening via browser renderer (real camoufox)."""
 
     @browser_integration_test
+    @pytest.mark.real_sleeps
     async def test_v1_crawl_shadow_dom_flattened(self):
         # One real browser per test invocation, created and torn down on the
         # test's own loop so no Camoufox process leaks into later tests.
