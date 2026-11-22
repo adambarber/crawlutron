@@ -6,7 +6,7 @@ from tests._ci_contract import WORKFLOW_PATH, job_steps
 
 
 def test_browser_job_selects_only_browser_marked_tests() -> None:
-    """Browser job runs browser suite only on PRs; all markers on main push."""
+    """Browser job selects the browser marker on both PR and main-push steps."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
     steps = job_steps(workflow, "test-browser")
     # PR step: only browser marker
@@ -22,11 +22,13 @@ def test_browser_job_selects_only_browser_marked_tests() -> None:
     assert "--cov-report=" in pr_step, pr_step
     assert "--cov-append" in pr_step, pr_step
     assert "xvfb-run -a .venv/bin/python -m pytest" in pr_step, pr_step
-    # Main push/release step: all markers (unconditional)
+    # Main push/release step: drops ini addopts (-o addopts=) so pytest.ini's
+    # `-m "not (browser...)"` cannot re-filter, then explicitly selects browser.
     main_name = "Run pytest (all markers, main push and release calls)"
     matching_steps = [step for step in steps if isinstance(step, dict) and main_name == str(step.get("name"))]
     main_step = str(matching_steps[0].get("run"))
-    assert '-m "browser"' not in main_step, main_step
+    assert "-o addopts=" in main_step, main_step
+    assert '-m "browser"' in main_step, main_step
     assert "--cov=crawlutron" in main_step, main_step
     assert "--cov-report=" in main_step, main_step
     assert "--cov-append" in main_step, main_step
