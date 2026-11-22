@@ -100,6 +100,7 @@ class PipelineState:
     discovery: DiscoveryFlags = DiscoveryFlags(False, False, False)
     request_id: str = ""
     spill: CrawlSpillStore | None = None
+    delivery_failures: list[int] = field(default_factory=list)
 
 
 def build_jobs(state: PipelineState) -> list[CrawlTask]:
@@ -337,6 +338,16 @@ async def _dispatch_paced(
     """
     admission = _build_admission(state)
     remaining = list(jobs)
+    delivery_failures: list[int] = []
+
+    async def _spill_tracked(index: int, result: EngineCrawlResult) -> None:
+        """Spill one result, recording the index if the sink write fails."""
+        try:
+            await _spill_one(state, index, result)
+        except Exception:
+            delivery_failures.append(index)
+            raise
+
     while remaining:
         http_jobs, browser_jobs = _bucket_tasks_by_tier(scheduler, remaining, state.policy)
         admit_http, admit_browser = await kernel_admit(admission, len(http_jobs), len(browser_jobs))
@@ -354,7 +365,7 @@ async def _dispatch_paced(
         await scheduler.run(
             chunk,
             lambda job: _worker(state, job),
-            on_result=lambda index, result: _spill_one(state, index, result),
+            on_result=_spill_tracked,
             failed_result=lambda job, exc: engine_result_from_exception(
                 error=exc,
                 original_url=job.original_url,
@@ -362,6 +373,7 @@ async def _dispatch_paced(
                 strategy=None,
             ),
         )
+    state.delivery_failures = delivery_failures
 
 
 async def _run_nonrecursive(state: PipelineState) -> None:
@@ -426,6 +438,8 @@ async def _response(state: PipelineState) -> ProducerEnvelope:
         "policy_schema_version": POLICY_SCHEMA_VERSION,
         "results": await state.spill.aload_ordered(state.request_id, policy=state.host_policy),
     }
+    if state.delivery_failures:
+        response["delivery_failures"] = state.delivery_failures
     if state.webhook_url is not None:
         # The wire form is the redacted one: the raw URL is a delivery secret.
         response["webhook_url"] = state.webhook_url.redacted()

@@ -31,6 +31,7 @@ class ProducerEnvelope(TypedDict):
     policy_schema_version: str
     results: Sequence[EngineCrawlResult]
     webhook_url: NotRequired[str]
+    delivery_failures: NotRequired[list[int]]
 
 
 class RenderEnvelope(TypedDict):
