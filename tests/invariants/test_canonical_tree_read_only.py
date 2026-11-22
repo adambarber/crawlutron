@@ -11,6 +11,7 @@ from tests.chokepoint_paths import REPO_ROOT
 _MUTATORS = frozenset({"append", "extend", "insert", "remove", "pop", "clear", "update", "add", "setattr"})
 
 # The only modules that deliberately mutate a parsed tree: copy-isolation proofs.
+# This gate's own literal names the door, so it lists itself.
 _COPY_BOUNDARIES = frozenset(
     {
         "tests/test_ast_parse_cache.py",

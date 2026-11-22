@@ -91,7 +91,7 @@ def _root_findings[T](
 ) -> dict[str, list[T]]:
     """Every ``collect`` hit under one root, as ``{file: [findings]}``. ``include_gate_bash`` adds the
     entry-point scripts (scripts/gate and scripts/run-tests.sh) to the sweep; the docstring scan never
-    asks for them. ``collect`` gets the file's source; tree-taking readers parse via ``parsed``.
+    asks for them. ``collect`` gets the file's source; tree readers use ``canonical_tree``.
     """
     files = list(declared_root_files(root))
     if include_gate_bash and root == "scripts":
@@ -287,6 +287,6 @@ def test_declared_scan_roots_fail_loud_when_vacuous(
         walk.declared_root_files("hollow")
     assert [p.name for p in walk.declared_root_files("exists")] == ["real.py"]
 
-    # AST-ask seam: parsed() blows up at the ask for a nonexistent file.
+    # AST-ask seam: canonical_tree() blows up at the ask for a nonexistent file.
     with pytest.raises(FileNotFoundError, match="nonexistent source file"):
         walk.canonical_tree(tmp_path / "absent" / "ghost.py")

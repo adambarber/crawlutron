@@ -1,4 +1,4 @@
-"""suite_trees() yields AST copies with identical metadata and structure via parsed() (#1098)."""
+"""suite_trees() yields isolated AST copies with matching metadata and structure (#1098)."""
 
 import ast
 
