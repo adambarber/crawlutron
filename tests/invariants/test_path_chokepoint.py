@@ -5,7 +5,8 @@ import os
 import pathlib
 import subprocess
 import sys
-from types import MappingProxyType
+from types import MappingProxyType, ModuleType
+from typing import cast
 
 import pytest
 
@@ -32,6 +33,11 @@ _OWNED = frozenset(
 _PATH_OWNER = "utils/paths.py"
 _PATH_DOORS = frozenset({"tests/chokepoint_paths.py", "tests/_walk_primitives.py", _PATH_OWNER})
 _ALLOWED_DOORS = frozenset({"tests.chokepoint_paths", "utils.paths"})
+
+
+class _ProbeModule(ModuleType):
+    VALUE: object
+
 
 # Production modules locating their own sibling data are not restating the repo layout.
 _PRODUCTION_SRC = tuple(r.relative_to(REPO_ROOT).as_posix() for r in member_src_roots())
@@ -175,6 +181,33 @@ def test_detectors_stay_clean_on_a_conforming_module() -> None:
 def test_the_door_freezes_its_names() -> None:
     with pytest.raises(AttributeError, match="immutable"):
         path_door.REPO_ROOT = pathlib.Path("elsewhere")
+
+
+def test_a_frozen_module_survives_namespace_writes() -> None:
+    module = _ProbeModule("sealed_probe")
+    module.VALUE = object()
+    original = module.VALUE
+    path_door.freeze_module(module)
+    namespace = cast(dict[str, object], module.__dict__)
+    namespace["VALUE"] = "dict-hit"
+    assert module.VALUE is original
+    del namespace["VALUE"]
+    assert module.VALUE is original
+    class_name, frozen_name = "__class__", "_frozen"
+    with pytest.raises(AttributeError, match="immutable"):
+        setattr(module, class_name, ModuleType)
+    with pytest.raises(AttributeError, match="immutable"):
+        delattr(module, frozen_name)
+
+
+def test_a_dict_write_cannot_redirect_the_door() -> None:
+    original = path_door.REPO_ROOT
+    namespace = cast(dict[str, object], path_door.__dict__)
+    namespace["REPO_ROOT"] = pathlib.Path("redirected")
+    try:
+        assert path_door.REPO_ROOT is original
+    finally:
+        namespace["REPO_ROOT"] = original
 
 
 def test_derived_names_are_cached_once_and_immutable() -> None:

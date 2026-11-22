@@ -46,6 +46,23 @@ def test_a_mixed_worker_file_splits_by_classname(tmp_path: Path) -> None:
     assert _cases(dest / "invariants" / "junit-1.xml") == ["inv"]
 
 
+def test_member_test_home_invariants_are_classified(tmp_path: Path) -> None:
+    source = tmp_path / "junit"
+    source.mkdir()
+    _write_suite(
+        source,
+        "junit-member.xml",
+        [
+            ("packages.core.tests.invariants.test_y", "member_inv", "passed"),
+            ("tests.orchestration.test_a", "beh", "passed"),
+        ],
+    )
+    dest = tmp_path / "split"
+    split(source, dest)
+    assert _cases(dest / "invariants" / "junit-member.xml") == ["member_inv"]
+    assert _cases(dest / "behavioral" / "junit-member.xml") == ["beh"]
+
+
 def test_failure_and_skip_counts_follow_their_case(tmp_path: Path) -> None:
     source = tmp_path / "junit"
     source.mkdir()

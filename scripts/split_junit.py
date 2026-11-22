@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import sys
+from functools import cache
 from pathlib import Path
 
 from lxml import etree
 
-from utils.paths import REPO_ROOT, TESTS_DIR
+from utils.paths import REPO_ROOT, get_test_roots
 
 _INVARIANT_SEGMENT = "invariants"
 _BUCKETS = ("behavioral", "invariants")
@@ -19,10 +20,15 @@ def _resolve(path: Path) -> Path:
     return path if path.is_absolute() else REPO_ROOT / path
 
 
+@cache
+def _invariant_prefixes() -> tuple[str, ...]:
+    """Every first-class test home contributes an invariant prefix."""
+    return tuple(f"{home.replace('/', '.')}.{_INVARIANT_SEGMENT}." for home in get_test_roots())
+
+
 def _is_invariant(classname: str) -> bool:
-    """Classify a JUnit classname by the invariant test home."""
-    prefix = TESTS_DIR.relative_to(REPO_ROOT).as_posix().replace("/", ".")
-    return classname.startswith(f"{prefix}.{_INVARIANT_SEGMENT}.")
+    """Classify a JUnit classname by every derived invariant test home."""
+    return any(classname.startswith(prefix) for prefix in _invariant_prefixes())
 
 
 def _suite_attributes(suite: etree._Element, cases: list[etree._Element]) -> dict[str, str]:

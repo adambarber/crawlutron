@@ -292,17 +292,35 @@ def __getattr__(name: str) -> object:
     return _surface(name)
 
 
+_SEALED: dict[int, Mapping[str, object]] = {}
+
+
 class _FrozenModule(ModuleType):
-    """A module whose name bindings are fixed once its surface is built."""
+    """A module whose names are served from an immutable snapshot, not its dict."""
+
+    def __getattribute__(self, name: str) -> object:
+        sealed = _SEALED.get(id(self))
+        if sealed is not None and name in sealed:
+            return sealed[name]
+        return super().__getattribute__(name)
 
     def __setattr__(self, name: str, value: object) -> None:
-        if getattr(self, "_frozen", False):
+        if id(self) in _SEALED:
             raise AttributeError(f"{self.__name__}.{name} is immutable")
         super().__setattr__(name, value)
 
+    def __delattr__(self, name: str) -> None:
+        if id(self) in _SEALED:
+            raise AttributeError(f"{self.__name__}.{name} is immutable")
+        super().__delattr__(name)
+
 
 def freeze_module(module: ModuleType) -> None:
-    """Lock a module's names; every imported name is already derived and immutable."""
+    """Seal a module's public names against dict writes, deletion, and class swaps."""
+    sealed = MappingProxyType(
+        {key: value for key, value in module.__dict__.items() if not key.startswith("__")}
+    )
+    _SEALED[id(module)] = sealed
     module.__dict__["_frozen"] = True
     module.__class__ = _FrozenModule
 
