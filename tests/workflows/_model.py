@@ -109,11 +109,12 @@ class Step(BaseModel):
             raise ValueError("a step either uses an action or runs a script")
         return self
 
-    def model_copy(self, *, update=None, deep=False) -> Step:
+    def model_copy(self, *, update: Mapping[str, object] | None = None, deep: bool = False) -> Step:
         raw = self.model_dump(by_alias=True)
         for key, value in (update or {}).items():
             raw[_ALIASES.get(key, key)] = value
-        return Step.create(raw)
+        context = {"waived_lines": {self.line}} if self.continue_on_error else None
+        return Step.create(raw, context=context)
 
 
 _CONSTRUCTION_DOOR = "model_construct"

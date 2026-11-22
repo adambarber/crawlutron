@@ -87,6 +87,11 @@ def test_a_workflow_rule_names_the_injected_violation(rule, broken: Workflow) ->
     assert findings and findings[0].rule == rule.name
 
 
+def test_an_export_inside_the_same_subshell_filters_its_pytest() -> None:
+    scoped = _mutate(steps=(_step(name="Bite", run='(export PYTEST_ADDOPTS="-m slow"; pytest)'),))
+    assert not list(no_bare_pytest(parent_workflow(scoped), scoped))
+
+
 def test_a_subshell_export_does_not_filter_the_outer_run() -> None:
     scoped = _mutate(steps=(_step(name="Bite", run='(export PYTEST_ADDOPTS="-m slow"); pytest'),))
     assert len(list(no_bare_pytest(parent_workflow(scoped), scoped))) == 1

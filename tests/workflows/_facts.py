@@ -101,24 +101,32 @@ class CommandFacts(BaseModel):
     def parse(cls, run: str, env: Mapping[str, object] | None = None) -> CommandFacts:
         flat = re.sub(r"\\\s*\n\s*", " ", run)
         segments = tuple(part for part in _SEGMENT.split(flat) if part.strip())
-        state = {key: str(value) for key, value in (env or {}).items()}
+        scopes: list[dict[str, str]] = [{key: str(value) for key, value in (env or {}).items()}]
         invocations: list[Invocation] = []
-        depth = 0
         for segment in segments:
-            depth += segment.count("(") - segment.count(")")
             command = segment.strip()
-            if depth <= 0 and command.startswith(("export ", "unset ")):
-                export = _EXPORT.search(command)
-                unset = _UNSET.search(command)
+            opens, closes = command.count("("), command.count(")")
+            if opens and command.startswith("("):
+                scopes.extend(dict(scopes[-1]) for _ in range(opens))
+            body = command.lstrip("(").strip()
+            if body.startswith(("export ", "unset ")):
+                export = _EXPORT.search(body)
+                unset = _UNSET.search(body)
                 if export:
-                    state[export.group(1)] = _export_value(export.group(2))
+                    scopes[-1][export.group(1)] = _export_value(export.group(2))
                 if unset:
-                    state.pop(unset.group(1), None)
+                    scopes[-1].pop(unset.group(1), None)
             if "pytest" in segment:
+                visible: dict[str, str] = {}
+                for frame in scopes:
+                    visible.update(frame)
                 filtered = has_marker_filter(segment) or any(
-                    key in PYTEST_ENV_KEYS and has_marker_filter(value) for key, value in state.items()
+                    key in PYTEST_ENV_KEYS and has_marker_filter(value) for key, value in visible.items()
                 )
-                invocations.append(Invocation(text=segment.strip(), filtered=filtered))
+                invocations.append(Invocation(text=command, filtered=filtered))
+            for _ in range(closes):
+                if len(scopes) > 1:
+                    scopes.pop()
         pip = any(_PIP.search(_unquoted(part)) and _INSTALL.search(_unquoted(part)) for part in segments)
         return cls(
             source=run,

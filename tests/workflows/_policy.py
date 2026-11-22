@@ -2,22 +2,38 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Annotated
+from typing import Annotated, Protocol, runtime_checkable
 
 from pydantic import AfterValidator, BaseModel, ConfigDict
 
 from tests.workflows._admission import admit_or_none as _admit_or_none
 from tests.workflows._names import JobId, StepName, WorkflowStem
 
+
+@runtime_checkable
+class StepLike(Protocol):
+    name: str | None
+
+
+@runtime_checkable
+class JobLike(Protocol):
+    workflow: str
+    key: str
+    steps: tuple[StepLike, ...]
+
+
+@runtime_checkable
+class WorkflowLike(Protocol):
+    stem: str
+
+
 STRICT = ConfigDict(extra="forbid", frozen=True)
 
 _REFUSALS = frozenset(
     {
-        "unknown_rule",
-        "blank_reason",
         "missing_ceiling",
         "ceiling_drift",
         "stale_job",
@@ -132,15 +148,15 @@ def waived_continue_on_error(workflow: str, job: str, step: str | None) -> bool:
 
 class Policy:
     """An admitted waiver surface: every exemption names a live target and every
-    rule has a ceiling. There is no way to build one that is not."""
+    rule has a ceiling. No public constructor path skips admission."""
 
     __slots__ = ("_ceilings", "_waivers")
 
     def __init__(
         self,
         waivers: tuple[Waiver, ...],
-        jobs,
-        workflows,
+        jobs: Sequence[JobLike],
+        workflows: Sequence[WorkflowLike],
         *,
         ceilings: Mapping[RuleId, int] = CEILINGS,
     ) -> None:
@@ -152,7 +168,12 @@ class Policy:
         self._ceilings = MappingProxyType(dict(ceilings))
 
     @staticmethod
-    def _admit(waivers, jobs, workflows, ceilings) -> None:
+    def _admit(
+        waivers: tuple[Waiver, ...],
+        jobs: Sequence[JobLike],
+        workflows: Sequence[WorkflowLike],
+        ceilings: Mapping[RuleId, int],
+    ) -> None:
         if not workflows:
             raise ValueError("empty_tree")
         if set(ceilings) != set(RuleId):
@@ -172,8 +193,13 @@ class Policy:
     @classmethod
     def create(cls, raw: object, *, context: Mapping[str, object] | None = None) -> Policy:
         context = context or {}
-        jobs = context["jobs"]
-        workflows = context["workflows"]
+        raw_jobs, raw_workflows = context["jobs"], context["workflows"]
+        if not isinstance(raw_jobs, Sequence) or not isinstance(raw_workflows, Sequence):
+            raise ValueError("empty_tree")
+        jobs = tuple(item for item in raw_jobs if isinstance(item, JobLike))
+        workflows = tuple(item for item in raw_workflows if isinstance(item, WorkflowLike))
+        if len(jobs) != len(raw_jobs) or len(workflows) != len(raw_workflows):
+            raise ValueError("empty_tree")
         ceilings = context.get("ceilings", CEILINGS)
         if not isinstance(raw, tuple) or not all(isinstance(item, Waiver) for item in raw):
             raise ValueError("invalid_waivers")

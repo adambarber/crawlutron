@@ -7,8 +7,9 @@ from pathlib import Path
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
+from tests.workflows._admission import admit_or_none
 from tests.workflows._facts import CommandFacts
-from tests.workflows._model import Job, Step, Workflow, parse_workflow, workflow
+from tests.workflows._model import JOBS, Job, Step, Workflow, parse_workflow, workflow
 from tests.workflows._names import ActionRef, EnvName, Expression, StepName
 
 
@@ -103,6 +104,25 @@ def test_an_unknown_workflow_trigger_is_rejected() -> None:
     }
     with pytest.raises(ValidationError, match="unknown workflow trigger"):
         Workflow.create(payload)
+
+
+def test_admit_or_none_collapses_only_refusals() -> None:
+    def refuse(_: object) -> Step:
+        raise ValueError("refused")
+
+    def explode(_: object) -> Step:
+        raise RuntimeError("foreign")
+
+    assert admit_or_none(refuse, 1) is None
+    with pytest.raises(RuntimeError):
+        admit_or_none(explode, 1)
+    assert Step.admit_or_none({"name": "Bite", "run": "true", "continue-on-error": True, "line": 1}) is None
+
+
+def test_copying_a_waived_step_keeps_its_admission() -> None:
+    waived = next(step for job in JOBS for step in job.steps if step.continue_on_error)
+    copied = waived.model_copy(update={"name": waived.name})
+    assert copied.continue_on_error is True
 
 
 def test_a_step_cannot_be_constructed_without_validation() -> None:
