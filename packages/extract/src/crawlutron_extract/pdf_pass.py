@@ -37,6 +37,13 @@ _TIER2_FLAG = "pdf_tier2"
 #: Flag emitted when table reconstruction could not form a rectangular grid.
 _TABLE_DEGRADED_FLAG = "pdf_table_degraded"
 
+
+#: Raised internally when a PDF stream breaches the cumulative inflated cap;
+#: extract_pdf converts it to a refused result with a named flag.
+class _PdfInflatedRefused(Exception):
+    """Internal signal: a PDF stream exceeded its inflated-byte cap."""
+
+
 #: Vertical proximity tolerance (in points) for grouping chars into one row.
 _ROW_Y_TOLERANCE = 3.0
 
@@ -52,16 +59,33 @@ def extract_pdf(content: bytes, limits) -> dict:
     """Extract text from a PDF: tier-1 sweep, then pdfminer.six tier 2 below floor.
 
     Never raises; a tier-2 failure keeps the tier-1 result and sets a flag.
+    A stream that breaches the cumulative inflated cap refuses the whole PDF.
     """
     flags: list[str] = []
     tier2_used = False
     pages: list[str] = []
-    for m in _STREAM_RE.finditer(content):
-        body = m.group(1)
-        decompressed = _inflate(body)
-        if decompressed is None:
-            continue
-        pages.append(_text_from_stream(decompressed))
+    budget: dict[str, int] = {"used": 0}
+    try:
+        for count, m in enumerate(_STREAM_RE.finditer(content)):
+            if count >= limits.max_pdf_pages:
+                break
+            body = m.group(1)
+            decompressed = _inflate(body, limits, budget)
+            if decompressed is None:
+                continue
+            pages.append(_text_from_stream(decompressed))
+    except _PdfInflatedRefused as refusal:
+        result = _base_result()
+        result.update(
+            {
+                "text": "",
+                "markdown": "",
+                "metadata": {},
+                "quality_flags": flags + [str(refusal)],
+                "_quality": "failed",
+            }
+        )
+        return result
 
     text, quality = _assemble(pages, limits, flags)
 
@@ -94,10 +118,25 @@ def extract_pdf(content: bytes, limits) -> dict:
     return result
 
 
-def _inflate(body: bytes) -> str | None:
-    """zlib-decompress a stream body; fall back to raw text; None on total failure."""
+def _inflate(body: bytes, limits, budget: dict[str, int]) -> str | None:
+    """zlib-decompress a stream body, bounded by max_length and the cumulative cap.
+
+    Falls back to raw text for non-zlib bodies. Raises _PdfInflatedRefused when
+    decompressed output would exceed the remaining cumulative budget.
+    """
     try:
-        return zlib.decompress(body).decode("utf-8", errors="replace")
+        decompressor = zlib.decompressobj()
+        remaining = limits.max_pdf_inflated_bytes - budget["used"]
+        decompressed = decompressor.decompress(body, remaining + 1)
+        if len(decompressed) > remaining:
+            raise _PdfInflatedRefused("pdf_inflated_exceeds_cumulative_cap")
+        decompressed += decompressor.flush()
+        if len(decompressed) > remaining:
+            raise _PdfInflatedRefused("pdf_inflated_exceeds_cumulative_cap")
+        budget["used"] += len(decompressed)
+        return decompressed.decode("utf-8", errors="replace")
+    except _PdfInflatedRefused:
+        raise
     except Exception:
         return body.decode("utf-8", errors="replace")
 

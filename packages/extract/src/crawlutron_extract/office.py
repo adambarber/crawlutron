@@ -47,12 +47,28 @@ def _open_zip(content: bytes) -> zipfile.ZipFile | None:
         return None
 
 
-def _read_zip_member(zf: zipfile.ZipFile, name: str) -> bytes | None:
-    """Read a zip member, returning None if not present."""
+#: Raised internally when a zip member breaches a per-member or cumulative cap;
+#: _zip_frame converts it to a refused container result with a named flag.
+class _ZipMemberRefused(Exception):
+    """Internal signal: a zip member exceeded its size cap."""
+
+
+def _read_zip_member(
+    zf: zipfile.ZipFile, name: str, limits: ExtractLimits, budget: dict[str, int]
+) -> bytes | None:
+    """Read a zip member under per-member/cumulative inflated caps; refuse."""
     try:
-        return zf.read(name)
+        info = zf.getinfo(name)
     except KeyError:
         return None
+    if info.file_size > limits.max_zip_member_bytes:
+        raise _ZipMemberRefused("zip_member_exceeds_member_cap")
+    with zf.open(info) as fh:
+        inflated = fh.read(limits.max_zip_member_bytes + 1)
+    budget["used"] += len(inflated)
+    if budget["used"] > limits.max_zip_inflated_bytes:
+        raise _ZipMemberRefused("zip_inflated_exceeds_cumulative_cap")
+    return inflated
 
 
 def _has_dtd_or_entities(content: bytes) -> bool:
@@ -93,14 +109,14 @@ def _zip_frame(
     content: bytes,
     limits: ExtractLimits,
     flags: list[str],
-    read_members: Callable[[zipfile.ZipFile, list[str]], str | None],
+    read_members: Callable[[zipfile.ZipFile, list[str], ExtractLimits, dict[str, int]], str | None],
     container: str,
     fmt: str,
 ) -> dict:
-    """Open zip; ``read_members(zf, flags)`` returns extracted text or None on DTD refusal.
+    """Open zip; ``read_members(zf, flags, limits, budget)`` returns extracted text or None on DTD refusal.
 
     Security: entry-count cap, no ``../`` traversal, duplicate-entry last-wins,
-    ratio-bomb refusal.
+    ratio-bomb refusal, per-member cap, cumulative inflated-byte budget.
     """
     zf = _open_zip(content)
     if zf is None:
@@ -127,15 +143,19 @@ def _zip_frame(
             return _empty_result("corrupt_container", ["zip_bomb_refused"])
     except Exception:
         flags.append("zip_ratio_unknown")
-    text = read_members(zf, flags)
+    budget: dict[str, int] = {"used": 0}
+    try:
+        text = read_members(zf, flags, limits, budget)
+    except _ZipMemberRefused as refusal:
+        return _empty_result("corrupt_container", [str(refusal)])
     if text is None:
         return _empty_result("xml_dtd_refused", ["xml_dtd_refused"])
     return _assemble_extraction(text, limits, flags, False, container, fmt)
 
 
-def _docx_read(zf: zipfile.ZipFile, flags: list[str]) -> str | None:
+def _docx_read(zf: zipfile.ZipFile, flags: list[str], limits: ExtractLimits, budget: dict[str, int]):
     """Extract text from DOCX document.xml with paragraph structure and tables."""
-    xml = _read_zip_member(zf, "word/document.xml")
+    xml = _read_zip_member(zf, "word/document.xml", limits, budget)
     if xml is None:
         return ""
     if not _check_no_dtd_or_entities(xml, flags):
@@ -179,13 +199,13 @@ def _docx_read(zf: zipfile.ZipFile, flags: list[str]) -> str | None:
     return "\n".join(parts)
 
 
-def _pptx_read(zf: zipfile.ZipFile, flags: list[str]) -> str | None:
+def _pptx_read(zf: zipfile.ZipFile, flags: list[str], limits: ExtractLimits, budget: dict[str, int]):
     """Extract text from every slide, with slide boundaries and speaker notes."""
     text_parts: list[str] = []
     slide_num = 0
     for name in zf.namelist():
         if name.startswith("ppt/slides/slide") and name.endswith(".xml"):
-            slide_xml = _read_zip_member(zf, name)
+            slide_xml = _read_zip_member(zf, name, limits, budget)
             if slide_xml is None:
                 continue
             if not _check_no_dtd_or_entities(slide_xml, flags):
@@ -199,7 +219,7 @@ def _pptx_read(zf: zipfile.ZipFile, flags: list[str]) -> str | None:
                 text_parts.append(slide_text_content)
             # Speaker notes
             notes_name = name.replace("/slides/slide", "/slides/notesSlide").replace(".xml", "-notes.xml")
-            notes_xml = _read_zip_member(zf, notes_name)
+            notes_xml = _read_zip_member(zf, notes_name, limits, budget)
             if notes_xml:
                 if not _check_no_dtd_or_entities(notes_xml, flags):
                     return None
@@ -209,13 +229,13 @@ def _pptx_read(zf: zipfile.ZipFile, flags: list[str]) -> str | None:
     return "\n".join(text_parts)
 
 
-def _xlsx_read(zf: zipfile.ZipFile, flags: list[str]) -> str | None:
+def _xlsx_read(zf: zipfile.ZipFile, flags: list[str], limits: ExtractLimits, budget: dict[str, int]):
     """Extract text from every worksheet, using shared strings for cached values."""
     text_parts: list[str] = []
 
     # Load shared strings
     shared_strings: list[str] = []
-    sst_xml = _read_zip_member(zf, "xl/sharedStrings.xml")
+    sst_xml = _read_zip_member(zf, "xl/sharedStrings.xml", limits, budget)
     if sst_xml is not None:
         if not _check_no_dtd_or_entities(sst_xml, flags):
             return None
@@ -224,7 +244,7 @@ def _xlsx_read(zf: zipfile.ZipFile, flags: list[str]) -> str | None:
 
     for name in zf.namelist():
         if name.startswith("xl/worksheets/sheet") and name.endswith(".xml"):
-            sheet_xml = _read_zip_member(zf, name)
+            sheet_xml = _read_zip_member(zf, name, limits, budget)
             if sheet_xml is None:
                 continue
             if not _check_no_dtd_or_entities(sheet_xml, flags):
@@ -249,9 +269,9 @@ def _xlsx_read(zf: zipfile.ZipFile, flags: list[str]) -> str | None:
     return " ".join(text_parts)
 
 
-def _epub_read(zf: zipfile.ZipFile, flags: list[str]) -> str | None:
+def _epub_read(zf: zipfile.ZipFile, flags: list[str], limits: ExtractLimits, budget: dict[str, int]):
     """Extract XHTML text from EPUB spine documents in spine order, excluding nav."""
-    container_xml = _read_zip_member(zf, "META-INF/container.xml")
+    container_xml = _read_zip_member(zf, "META-INF/container.xml", limits, budget)
     if container_xml is None:
         return ""
     if not _check_no_dtd_or_entities(container_xml, flags):
@@ -263,7 +283,7 @@ def _epub_read(zf: zipfile.ZipFile, flags: list[str]) -> str | None:
         return ""
     opf_path = opf_match.group(1)
     opf_dir = opf_path.rsplit("/", 1)[0] if "/" in opf_path else ""
-    opf_content = _read_zip_member(zf, opf_path)
+    opf_content = _read_zip_member(zf, opf_path, limits, budget)
     if opf_content is None:
         return ""
     if not _check_no_dtd_or_entities(opf_content, flags):
@@ -297,7 +317,7 @@ def _epub_read(zf: zipfile.ZipFile, flags: list[str]) -> str | None:
         item_path = href
         if not item_path.startswith("/"):
             item_path = opf_dir + "/" + href if opf_dir else href
-        item_content = _read_zip_member(zf, item_path.lstrip("/"))
+        item_content = _read_zip_member(zf, item_path.lstrip("/"), limits, budget)
         if item_content is None:
             continue
         if not _check_no_dtd_or_entities(item_content, flags):
