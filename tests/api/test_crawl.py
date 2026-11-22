@@ -3,6 +3,7 @@
 import asyncio
 import json
 import time
+from http.server import BaseHTTPRequestHandler
 
 import pytest
 
@@ -25,6 +26,7 @@ from tests._fetcher_factories import make_crawl_payload
 from tests._host_assert import host_of
 from tests._policy_factories import crawl_policy
 from tests.api._asgi_base import _AsgiEndpointTests
+from tests.helpers.server import spawn_threaded_server
 
 #: Discovery turned fully on. Three tests assert on what robots, sitemaps and feeds contributed, and spelling
 #: the triple at each is how one of them kept asking for feeds the fixture never served.
@@ -36,6 +38,20 @@ EXAMPLE_SCOPE = r"^https://example\.com"
 
 #: Room for 100 links and one level of depth, so the scope is the only thing deciding what comes back.
 WIDE_LIMITS: JsonValue = {"max_discovered_links": 100, "max_depth": 1}
+
+
+class _SlowOrigin(BaseHTTPRequestHandler):
+    """A loopback origin that holds its response open to simulate a slow render."""
+
+    def do_GET(self):
+        time.sleep(16)
+        self.send_response(200)
+        self.send_header("content-type", "text/html")
+        self.end_headers()
+        self.wfile.write(b"<html><body>slow render</body></html>")
+
+    def log_message(self, *args):
+        return
 
 
 class TestCrawlApi(_AsgiEndpointTests):
@@ -203,6 +219,32 @@ class TestCrawlApi(_AsgiEndpointTests):
         )
         assert resp.status_code == 422
 
+    @pytest.mark.real_sleeps
+    async def test_async_crawl_slow_render_meets_caller_timeout(self):
+        # A slow loopback render (~16s) that outlasts the 15s default poll deadline -- the #1298 defect.
+        server = spawn_threaded_server(_SlowOrigin)
+        try:
+            payload: dict[str, JsonValue] = {
+                "url": f"http://127.0.0.1:{server.server_port}/slow",
+                "async_mode": True,
+                "policy": {
+                    "strategies": ["HTTP_DECLARED_CRAWLER"],
+                    "limits": {
+                        "timeout_seconds": 20,
+                        "max_retries": 0,
+                        "respect_robots": False,
+                    },
+                },
+            }
+            # Caller deadline derived from the real work: a 16s render plus a small margin = 25s poll budget,
+            # with a 2s interval to stay under the anonymous rate limit and the 120s ceiling.
+            _, completed = await submit_async_crawl(self.client, payload, timeout=25.0, interval=2.0)
+            assert completed.status_code == 200
+            assert completed.json()["success"] is True
+        finally:
+            server.shutdown()
+            server.server_close()
+
 
 class TestMapApi(_AsgiEndpointTests):
     """/v1/map against a real local server (no mocks)."""
@@ -247,6 +289,8 @@ class TestShadowDomApi(_AsgiEndpointTests):
 
         await initialize_browser_pool()
         try:
+            # #1154: headed Firefox empties the 35s sync door; async door polls completion instead.
+            # Poll deadline = 45s declared timeout_seconds + 5s margin = 50s; under the 120s ceiling.
             _, completed = await submit_async_crawl(
                 self.client,
                 {
@@ -254,11 +298,11 @@ class TestShadowDomApi(_AsgiEndpointTests):
                     "async_mode": True,
                     "policy": {
                         "strategies": ["BROWSER_HEADLESS"],
-                        "limits": {"timeout_seconds": 30, "max_retries": 0, "max_discovered_links": 50},
+                        "limits": {"timeout_seconds": 45, "max_retries": 0, "max_discovered_links": 50},
                     },
                 },
+                timeout=50.0,
             )
-            # #1154: headed Firefox empties the 35s REST sync door; async door polls completion instead.
             result = wire_result(completed.json())
             assert result["status"] == "success"
             # After flattening, the shadow-root anchor is in the HTML and extracted.

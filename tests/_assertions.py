@@ -303,11 +303,20 @@ async def submit_async_crawl(
     client,
     payload: dict[str, JsonValue],
     *,
+    timeout: float = 15.0,
+    interval: float = 0.1,
     message: str = "Async crawl did not complete in time",
     on_pending=None,
 ):
     response = await client.post("/v1/crawl", json=payload)
     assert response.status_code == 202, response.text
     request_id = response.json()["request_id"]
-    completed = await poll_crawl_completion(client, request_id, message=message, on_pending=on_pending)
+    completed = await poll_crawl_completion(
+        client,
+        request_id,
+        timeout=timeout,
+        interval=interval,
+        message=message,
+        on_pending=on_pending,
+    )
     return request_id, completed
