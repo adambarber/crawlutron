@@ -9,6 +9,23 @@ import pytest
 from crawlutron.storage.safe_db import ReadRejected, txn_read
 
 
+@pytest.fixture(autouse=True)
+def _close_raw_connections(monkeypatch):
+    """Raw test connections are test-owned: close them before the session sweep."""
+    opened: list[sqlite3.Connection] = []
+    real_connect = sqlite3.connect
+
+    def tracked(*args, **kwargs):
+        conn = real_connect(*args, **kwargs)
+        opened.append(conn)
+        return conn
+
+    monkeypatch.setattr(sqlite3, "connect", tracked)
+    yield
+    for conn in opened:
+        conn.close()
+
+
 def _make_conn() -> sqlite3.Connection:
     """Thin database-backed connection with a custom row factory."""
     conn = sqlite3.connect(":memory:")

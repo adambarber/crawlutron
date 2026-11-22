@@ -1,5 +1,7 @@
 """API-suite fixtures: the loop-guard store doubles serve every offload test."""
 
+from collections.abc import Iterator
+
 import pytest
 
 from tests._job_harnesses import keyed_jobs_client
@@ -10,16 +12,24 @@ from tests._watch_harnesses import keyed_watches_client
 
 
 @pytest.fixture
-def loop_guard_store(tmp_path) -> LoopGuardJobStore:
-    return LoopGuardJobStore(tmp_path / "jobs.db", policy=UNRESTRICTED_HOST_POLICY, tier=deployment_tier())
+def loop_guard_store(tmp_path) -> Iterator[LoopGuardJobStore]:
+    store = LoopGuardJobStore(tmp_path / "jobs.db", policy=UNRESTRICTED_HOST_POLICY, tier=deployment_tier())
+    try:
+        yield store
+    finally:
+        store.close()
 
 
 result_store = loop_permitted_store(lambda path: LoopGuardResultStore(path / "results.db"))
 
 
 @pytest.fixture
-def loop_guard_watch_store(tmp_path) -> LoopGuardWatchStore:
-    return LoopGuardWatchStore(tmp_path / "watches.db")
+def loop_guard_watch_store(tmp_path) -> Iterator[LoopGuardWatchStore]:
+    store = LoopGuardWatchStore(tmp_path / "watches.db")
+    try:
+        yield store
+    finally:
+        store.close()
 
 
 @pytest.fixture

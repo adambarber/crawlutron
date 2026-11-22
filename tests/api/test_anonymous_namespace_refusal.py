@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import TypedDict
 
@@ -55,32 +56,36 @@ def test_anonymous_declaration_is_refused_at_the_crawl_door(tmp_path: Path):
 
     async def run():
         store, results, keys = stores(tmp_path)
-        app = isolation_app(store, results, keys)
-        app.dependency_overrides[get_settings] = lambda: CrawlerSettings.from_mapping({})
-        app.dependency_overrides[get_shutdown_event] = asyncio.Event
-        issued = await keys.aissue_key("agent-a")
-        declared = {
-            "url": "http://example.com/",
-            "async_mode": True,
-            "policy": {
-                "limits": {"max_pages": 1},
-                "request_profile": {"cookie_namespace": "tenant-x"},
-            },
-        }
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            refused = await client.post("/v1/crawl", json=declared)
-            assert refused.status_code == 422, refused.text
-            envelope = _door_envelope(refused)
-            assert envelope["code"] == "anonymous_cookie_namespace"
-            assert "anonymous" in envelope["message"].lower()
+        try:
+            app = isolation_app(store, results, keys)
+            app.dependency_overrides[get_settings] = lambda: CrawlerSettings.from_mapping({})
+            app.dependency_overrides[get_shutdown_event] = asyncio.Event
+            issued = await keys.aissue_key("agent-a")
+            declared = {
+                "url": "http://example.com/",
+                "async_mode": True,
+                "policy": {
+                    "limits": {"max_pages": 1},
+                    "request_profile": {"cookie_namespace": "tenant-x"},
+                },
+            }
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                refused = await client.post("/v1/crawl", json=declared)
+                assert refused.status_code == 422, refused.text
+                envelope = _door_envelope(refused)
+                assert envelope["code"] == "anonymous_cookie_namespace"
+                assert "anonymous" in envelope["message"].lower()
 
-            keyed = await client.post("/v1/crawl", headers={"X-API-Key": issued.secret}, json=declared)
-            assert keyed.status_code == 202, keyed.text
+                keyed = await client.post("/v1/crawl", headers={"X-API-Key": issued.secret}, json=declared)
+                assert keyed.status_code == 202, keyed.text
 
-        stored = await store.aload(keyed.json()["request_id"])
-        assert stored is not None
-        # #226: the keyed declaration is pinned to the key id, never the declared text.
-        assert stored.policy.request_profile.get("cookie_namespace") == issued.key_id
+            stored = await store.aload(keyed.json()["request_id"])
+            assert stored is not None
+            # #226: the keyed declaration is pinned to the key id, never the declared text.
+            assert stored.policy.request_profile.get("cookie_namespace") == issued.key_id
+        finally:
+            for owned in (store, results, keys):
+                await asyncio.to_thread(owned.close)
 
     asyncio.run(run())
 
@@ -128,12 +133,15 @@ async def test_anonymous_jobs_declaration_is_refused_at_the_door(tmp_path: Path)
     from tests._job_harnesses import _make_app
 
     store: JobStore = make_store(tmp_path / "jobs.db")
-    app = _make_app(store)
-    app.dependency_overrides[get_settings] = lambda: CrawlerSettings.from_mapping({})
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        refused = await client.post(
-            "/v1/jobs",
-            json={"root_url": "http://example.com/", "policy": dict(_DECLARED_BODY)},
-        )
-    _refusal_is_envelope(refused)
-    assert await store.alist_jobs() == [], "a refused declaration must not create a job"
+    try:
+        app = _make_app(store)
+        app.dependency_overrides[get_settings] = lambda: CrawlerSettings.from_mapping({})
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            refused = await client.post(
+                "/v1/jobs",
+                json={"root_url": "http://example.com/", "policy": dict(_DECLARED_BODY)},
+            )
+        _refusal_is_envelope(refused)
+        assert await store.alist_jobs() == [], "a refused declaration must not create a job"
+    finally:
+        await asyncio.to_thread(store.close)

@@ -218,30 +218,7 @@ def pytest_sessionfinish(session, exitstatus):  # args unused; hook signature
         sys.stderr.flush()
     except ValueError, OSError:
         logging.getLogger(__name__).debug("final flush unavailable")
-    # The module-level app's stores hold long-lived connections (#838); close
-    # them HERE, before interpreter exit relies on GC finalization.
-    from tests._app_factory import service_app
-
-    try:
-        app = service_app()
-    except AssertionError, ImportError:
-        return
-    for attr in (
-        "job_store",
-        "result_store",
-        "spill_store",
-        "watch_store",
-        "caller_key_store",
-        "audit_store",
-    ):
-        store = getattr(app.state, attr, None)
-        if store is not None:
-            store.close()
-    # The concurrency tracker's coordination-store connection is app-owned too;
-    # close it here so teardown is complete (#1092).
-    tracker = getattr(app.state, "concurrency_tracker", None)
-    if tracker is not None:
-        tracker.close()
+    close_module_app_stores()
     from tests.conftest import assert_no_live_session_connections
 
     assert_no_live_session_connections()
@@ -455,6 +432,20 @@ def _every_store_connection_a_test_opens_it_closes(monkeypatch, request):
     ledger_mod._CURRENT_TEST = "?"
     with _LEDGER_LOCK:
         _LEDGER.clear()
+
+
+def close_module_app_stores() -> None:
+    """Close the long-lived app-owned connections before a leak sweep (#838)."""
+    import asyncio
+
+    from crawlutron.service.store_shutdown import close_app_stores
+    from tests._app_factory import service_app
+
+    try:
+        app = service_app()
+    except AssertionError, ImportError:
+        return
+    asyncio.run(close_app_stores(app))
 
 
 def assert_no_live_session_connections() -> None:

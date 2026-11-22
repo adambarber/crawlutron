@@ -51,7 +51,7 @@ async def watch_harness(tmp_path: Path) -> AsyncGenerator[WatchHarness]:
     from crawlutron_rest.api.keys_router import router as keys_router
     from crawlutron_rest.api.watch_router import router as watch_router
 
-    _, _, keys = stores(tmp_path)
+    jobs, results, keys = stores(tmp_path)
     app = harness_app(mcp_router, watch_router, keys_router)
     watch_store = WatchStore(tmp_path / "watches.db")
     app.state.watch_store = watch_store
@@ -60,8 +60,12 @@ async def watch_harness(tmp_path: Path) -> AsyncGenerator[WatchHarness]:
         get_settings: lambda: CrawlerSettings.from_mapping({}),
         get_shutdown_event: asyncio.Event,
     }
-    async with keyed_client(app, keys=keys, overrides=overrides) as client:
-        yield WatchHarness(client=client, secret=await issue_key(client))
+    try:
+        async with keyed_client(app, keys=keys, overrides=overrides) as client:
+            yield WatchHarness(client=client, secret=await issue_key(client))
+    finally:
+        for owned in (jobs, results, keys, watch_store):
+            await asyncio.to_thread(owned.close)
 
 
 async def _registered(h: WatchHarness, url: str = TARGET) -> dict[str, object]:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import pathlib
 
@@ -75,6 +76,8 @@ async def test_anonymous_listing_is_refused_at_the_production_door(tmp_path):
     finally:
         for client in clients:
             await client.aclose()
+        for store in stores:
+            await asyncio.to_thread(store.close)
 
 
 @pytest.mark.asyncio
@@ -97,6 +100,8 @@ async def test_anonymous_watch_listing_is_refused_at_the_production_door(tmp_pat
     finally:
         for client in clients:
             await client.aclose()
+        for store in stores:
+            await asyncio.to_thread(store.close)
 
 
 __all__ = ["test_listing_doors_refuse_anonymous_callers"]
