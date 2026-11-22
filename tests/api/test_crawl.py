@@ -15,6 +15,7 @@ from tests._assertions import (
     browser_integration_test,
     completed_crawl,
     poll_webhook_delivery,
+    submit_async_crawl,
     wire_dict,
     wire_member,
     wire_result,
@@ -246,17 +247,19 @@ class TestShadowDomApi(_AsgiEndpointTests):
 
         await initialize_browser_pool()
         try:
-            body = await completed_crawl(
+            _, completed = await submit_async_crawl(
                 self.client,
                 {
                     "url": f"{self.base}/shadow",
+                    "async_mode": True,
                     "policy": {
                         "strategies": ["BROWSER_HEADLESS"],
                         "limits": {"timeout_seconds": 30, "max_retries": 0, "max_discovered_links": 50},
                     },
                 },
             )
-            result = wire_result(body)
+            # #1154: headed Firefox empties the 35s REST sync door; async door polls completion instead.
+            result = wire_result(completed.json())
             assert result["status"] == "success"
             # After flattening, the shadow-root anchor is in the HTML and extracted.
             rendered = str(result.get("html") or "")
