@@ -1,7 +1,7 @@
-"""The admission kernel uses no concrete time/sleep primitive: only injected seams.
+"""The admission decision core uses only injected time/sleep seams.
 
-The source-scan gate fails on any ``time.*`` clock call, ``asyncio.sleep``/``asyncio.Event``
-(and aliases) in ``admission/**``; the Clock/Signal are injected, never implemented here.
+Scans ``crawlutron_admit/**`` minus the four ``sensing/**`` adapters (§8 / #1177);
+``crawlutron/admission/`` is never in scope.
 """
 
 from __future__ import annotations

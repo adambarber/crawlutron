@@ -1040,8 +1040,9 @@ none — the v1 plan declared it; v2 makes it a real Protocol member).
      `from crawlutron import …`, naming file:line. It is a gate, not a
      comment.
    - **Source-scan gate**: a second `Rule` (same `Bites`/`Registry` shape)
-     fails on any `time.monotonic`/`asyncio.sleep` (and aliases) appearing in
-     `packages/crawlutron-admit/src/crawlutron_admit/**`, forcing the `Clock`/`Signal` seams.
+     fails on any `time.monotonic`/`asyncio.sleep` (and aliases) in the
+     **decision core** under `packages/crawlutron-admit/src/crawlutron_admit`;
+     the four `sensing/**` host adapters are the owner-sanctioned skip (§8, #1177).
    - **Mutation gate on the floor law**: a scratch-tree mutation proof (per
      the canon) that a mutant removing `max(1, …)` from `floor_global`, or
      dropping a lane's `min(want, capacity)` clamp, reds a named test. `-n0`
@@ -1059,11 +1060,11 @@ none — the v1 plan declared it; v2 makes it a real Protocol member).
      produce identical lane decisions wherever the old path returned a
      fully-granted batch, and asserts the *delta* (floor vs `(0,0)`) holds
      exactly at saturation.
-       - **Source-scan gate scope (M4 + MINOR-4 descriptor)**: the
-       `time.monotonic`/`asyncio.sleep`-and-aliases `Rule` scans the **decision
-       core under `packages/crawlutron-admit/src/crawlutron_admit/`** with descriptor
-       **`scope = lambda *, exclude: trees_under(ADMISSION_ROOT)`** and a named
-       `skip` of the four `sensing/**` host adapters (§8)
+   - **Source-scan gate scope (M4 + MINOR-4 descriptor)**: the
+     `time.monotonic`/`asyncio.sleep`-and-aliases `Rule` scans the **decision
+     core under `packages/crawlutron-admit/src/crawlutron_admit/`** with descriptor
+     **`scope = lambda *, exclude: trees_under(ADMISSION_ROOT)`** and a named
+     `skip` of the four `sensing/**` host adapters (§8)
      (`trees_under` from `tests/chokepoint_walks.py`; `REPO_ROOT`
      `tests/_walk_primitives.py`). The default `Rule` scope is `app_trees`
      (crawlutron-only — `tests/rules.py:131`, `tests/_walk_trees.py:69-80`)
