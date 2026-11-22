@@ -80,23 +80,28 @@ def _ensure_wal(
     busy_timeout_ms: int,
     wal_retry_seconds: float,
 ) -> None:
-    """Put the database in WAL, retrying while a sibling process holds the file.
-    Each attempt runs under its own timeout OR the deadline's remainder --
-    whichever is smaller -- and the connection's configured timeout is restored on the way out.
+    """Bound WAL setup to the caller's total wal_retry_seconds on every platform.
+
+    Each attempt caps busy_timeout at the remaining time; a progress handler aborts
+    any conversion past the deadline. The handler is cleared on exit; busy_timeout is restored.
     """
     deadline = time.monotonic() + wal_retry_seconds
     try:
         while True:
             remaining_ms = int((deadline - time.monotonic()) * 1000)
+            if remaining_ms <= 0:
+                raise sqlite3.OperationalError("database is locked")
             _set_busy_timeout(conn, max(1, min(busy_timeout_ms, remaining_ms)))
+            conn.set_progress_handler(lambda: 1 if time.monotonic() >= deadline else 0, 1000)
             try:
                 conn.execute("PRAGMA journal_mode=WAL")
                 return
             except sqlite3.OperationalError:
                 if time.monotonic() >= deadline:
                     raise
-                time.sleep(_WAL_RETRY_BACKOFF_SECONDS)
+                time.sleep(min(_WAL_RETRY_BACKOFF_SECONDS, max(0, remaining_ms / 1000.0)))
     finally:
+        conn.set_progress_handler(None, 0)
         _set_busy_timeout(conn, busy_timeout_ms)
 
 
