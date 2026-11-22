@@ -7,6 +7,13 @@ from tests.chokepoint_walks import trees_under
 from tests.invariants._clock_family import suite_trees
 
 
+def test_suite_trees_is_one_shared_copy_set() -> None:
+    """The shared walk parses the tests tree once; no caller evicts it."""
+    first = suite_trees()
+    assert first, "suite_trees() returned no modules"
+    assert suite_trees() is first
+
+
 def test_suite_trees_same_metadata_and_structure_as_trees_under():
     """Every path in suite_trees() yields a copy with identical metadata and
     structural equality (ast.dump) to trees_under(). Object identity NOT required.
