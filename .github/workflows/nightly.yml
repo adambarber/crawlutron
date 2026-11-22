@@ -62,7 +62,7 @@ jobs:
           CRAWLUTRON_HEADLESS: "false"
           GATE_FANOUT_WALL_SECONDS: "300"
           PYTEST_ADDOPTS: "--cov=crawlutron --cov-branch --cov-report= --cov-append -p pytest_cov --junitxml=junit-nightly.xml"
-        run: xvfb-run -a .venv/bin/python -m pytest
+        run: xvfb-run -a .venv/bin/python -m pytest -o addopts=
 
       - name: Generate coverage reports
         run: .venv/bin/python -m scripts.coverage_reports

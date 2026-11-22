@@ -471,7 +471,7 @@ jobs:
           #            camoufox's own CI and works reliably.
           NO_PROXY: 127.0.0.1,localhost
           CRAWLUTRON_HEADLESS: "false"
-        run: xvfb-run -a .venv/bin/python -m pytest --cov=crawlutron --cov-report= --cov-append -p pytest_cov --junitxml=junit-browser.xml
+        run: xvfb-run -a .venv/bin/python -m pytest -o addopts= -m "browser" --cov=crawlutron --cov-report= --cov-append -p pytest_cov --junitxml=junit-browser.xml
       - name: Upload coverage data artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ always() }}

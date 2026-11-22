@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 import yaml
 
 from tests.chokepoint_paths import REPO_ROOT
@@ -68,6 +69,31 @@ def test_nightly_triggers_schedule() -> None:
     assert dispatch is not None, "workflow_dispatch trigger required"
 
 
+def _assert_nightly_pytest_drops_addopts(doc: dict[object, object]) -> None:
+    """nightly's pytest step must drop ini addopts with -o addopts= so
+    pytest.ini's marker filter cannot filter browser tests out of the run."""
+    jobs = doc.get("jobs")
+    assert isinstance(jobs, dict), "jobs must be a mapping"
+
+    test_job = jobs.get("test")
+    assert isinstance(test_job, dict), "test job required"
+
+    steps = test_job.get("steps")
+    assert isinstance(steps, list), "test job must have steps"
+
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        run = step.get("run", "")
+        if "xvfb-run" in run and "pytest" in run:
+            assert "-o addopts=" in run, (
+                "nightly pytest step must drop ini addopts with -o addopts="
+                " so browser tests are not filtered out"
+            )
+            return
+    raise AssertionError("nightly pytest step with xvfb-run not found")
+
+
 def test_nightly_no_m_filter() -> None:
     """nightly.yml must run full test suite WITHOUT -m filter (slow+browser+real_pbkdf2 all run)."""
     doc = workflow_document()
@@ -108,6 +134,13 @@ def test_nightly_no_m_filter() -> None:
     # Check for pytest -m filter in PYTEST_ADDOPTS
     pytest_addopts_m_filter = re.search(r"-m\s+", pytest_addopts)
     assert not pytest_addopts_m_filter, "nightly must not use -m filter in PYTEST_ADDOPTS"
+
+
+def test_nightly_drops_ini_addopts() -> None:
+    """nightly.yml must drop ini addopts with -o addopts= so pytest.ini's
+    `-m "not (browser or slow or real_pbkdf2)"` cannot filter browser tests
+    out of the nightly full-suite run."""
+    _assert_nightly_pytest_drops_addopts(workflow_document())
 
 
 def test_nightly_slow_marker_registered_and_not_deselected() -> None:
@@ -346,6 +379,20 @@ def test_nightly_coverage_source_pkgs_not_overridden() -> None:
     # Must not have --cov-source or --cov-config that would override
     assert "--cov-source" not in pytest_addopts, "must not override --cov-source"
     assert "--cov-config" not in pytest_addopts, "must not override --cov-config"
+
+
+def test_nightly_addopts_override_is_required() -> None:
+    """Bite: removing -o addopts= from nightly's pytest step must fail the
+    contract, because ini addopts would re-filter browser tests out."""
+    import re
+
+    import yaml
+
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    broken = re.sub(r"\s+-o\s+addopts=", "", workflow)
+    assert broken != workflow, "the -o addopts= removal did not apply; the probe proves nothing"
+    with pytest.raises(AssertionError):
+        _assert_nightly_pytest_drops_addopts(yaml.safe_load(broken))
 
 
 if __name__ == "__main__":
