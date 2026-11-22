@@ -62,6 +62,23 @@ def test_adhoc_key_is_content_bound_and_stable(monkeypatch) -> None:
     assert _run_key() != before
 
 
+def test_untracked_content_edit_changes_the_key(tmp_path, monkeypatch) -> None:
+    """An untracked file's content is part of the no-index verdict identity."""
+    monkeypatch.delenv("PRE_COMMIT_INDEX_FILE", raising=False)
+    target = tmp_path / "untracked.py"
+    target.write_text("pass\n")
+
+    def fake_capture(args, env=None):
+        if args[:3] == ["ls-files", "--others", "--exclude-standard"]:
+            return f"{target}\0"
+        return ""
+
+    monkeypatch.setattr("scripts.gate_fanout._git_capture", fake_capture)
+    before = _run_key()
+    target.write_text("def broken(:\n")
+    assert _run_key() != before
+
+
 def test_run_key_differs_when_config_changes(tmp_path) -> None:
     """A config digest change yields a different key even with identical staged tree."""
     entries = ["100644 aaa 0\ta.py"]

@@ -97,12 +97,28 @@ def _staged_tree_digest(index_file: str) -> str:
     return hashlib.sha256(out.encode()).hexdigest()
 
 
+def _untracked_digest() -> str:
+    """Hash untracked bodies so a content edit cannot reuse a cached verdict."""
+    listing = _git_capture(["ls-files", "--others", "--exclude-standard", "-z"])
+    digest = hashlib.sha256()
+    for name in listing.split("\0"):
+        if not name:
+            continue
+        try:
+            body = (SERVICE_ROOT / name).read_bytes()[:1_048_576]
+        except OSError:
+            continue
+        digest.update(name.encode() + b"\0" + body)
+    return digest.hexdigest()
+
+
 def _worktree_digest() -> str:
-    """Digest of the worktree gates read with --all-files (no staged index)."""
+    """Digest of the worktree in the pure no-staged-index path."""
     parts = (
         _git_capture(["ls-files", "--stage"]),
         _git_capture(["diff", "--no-ext-diff", "--binary", "HEAD"]),
         _git_capture(["status", "--porcelain"]),
+        _untracked_digest(),
     )
     return hashlib.sha256("".join(parts).encode()).hexdigest()
 
