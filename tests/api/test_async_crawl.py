@@ -322,6 +322,31 @@ class TestAsyncCrawlApi:
             server.server_close()
             OverlapProbeHandler.reset()
 
+    async def test_poll_crawl_completion_surfaces_429_rather_than_treating_it_as_pending(
+        self, crawl_api, monkeypatch
+    ):
+        """A throttled 429 on the status poll must surface explicitly instead of being swallowed as a pending
+        poll (the shadow-DOM throttle defect: every non-200 was treated as pending until the 50s deadline)."""
+
+        async def throttled_get(path):
+            class Response:
+                status_code = 429
+
+            return Response()
+
+        monkeypatch.setattr(crawl_api.client, "get", throttled_get)
+
+        raised: BaseException | None = None
+        try:
+            await poll_crawl_completion(crawl_api.client, "crawl_throttled", timeout=1.0, interval=0.1)
+        # pytest.fail() raises an OutcomeException (BaseException, not Exception), so catch BaseException
+        # to observe whatever outcome poll_crawl_completion surfaces for a throttled 429.
+        except BaseException as exc:
+            raised = exc
+        assert raised is not None, "429 was swallowed as pending instead of being surfaced"
+        assert "429" in str(raised)
+        assert "throttl" in str(raised).lower()
+
 
 class TestAsyncCrawlJobStoreIntegration:
     """Tests verifying job_store integration for async crawls."""

@@ -69,44 +69,6 @@ def _assert_codecov_upload_flags(
     assert with_.get("report_type") == report_type
 
 
-def test_battery_is_only_fast_suite_execution() -> None:
-    """The battery job runs pytest with coverage via PYTEST_ADDOPTS; no other job runs the fast suite."""
-    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-    jobs = _jobs(workflow)
-
-    # Battery must exist and run pytest with coverage via PYTEST_ADDOPTS
-    assert "battery" in jobs
-    battery_steps = job_steps(workflow, "battery")
-    battery_step = next((s for s in battery_steps if s.get("name") == "battery"), None)
-    assert battery_step is not None, "battery step must exist"
-    battery_env = cast(StepMapping, battery_step.get("env", {}))
-    pytest_addopts = cast(str, battery_env.get("PYTEST_ADDOPTS", ""))
-    assert "--cov=crawlutron" in pytest_addopts, "battery must have --cov in PYTEST_ADDOPTS"
-    assert "--cov-report=" in pytest_addopts, "battery must have --cov-report in PYTEST_ADDOPTS"
-    assert "--cov-append" in pytest_addopts, "battery must have --cov-append in PYTEST_ADDOPTS"
-    assert "junit" in pytest_addopts.lower(), "battery must have junit in PYTEST_ADDOPTS"
-    assert "-p pytest_cov" in pytest_addopts, "battery must have -p pytest_cov in PYTEST_ADDOPTS"
-
-    # Coverage job must NOT run pytest (report-only)
-    assert "coverage" in jobs
-    coverage_steps = job_steps(workflow, "coverage")
-    coverage_runs = " ".join(str(cast(StepMapping, step).get("run", "")) for step in coverage_steps)
-    assert "pytest" not in coverage_runs, "coverage job must not re-run pytest (report-only)"
-    assert "coverage combine" in coverage_runs, "coverage job must run coverage combine"
-    assert "scripts.coverage_reports" in coverage_runs, "coverage job must call frozen report script"
-
-    # real-pbkdf2 and test-browser must not run the fast suite
-    for job_name in ("real-pbkdf2", "test-browser"):
-        job_runs = " ".join(
-            str(cast(StepMapping, step).get("run", "")) for step in job_steps(workflow, job_name)
-        )
-        # They run their own marker selection, not the fast suite
-        assert "-m " in job_runs, f"{job_name} must select its own markers"
-        assert "not (browser or slow or real_pbkdf2)" not in job_runs, (
-            f"{job_name} must not run the battery's marker filter"
-        )
-
-
 def test_coverage_job_depends_on_battery_real_pbkdf2_test_browser() -> None:
     """Coverage needs the change filter plus the three test jobs."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
@@ -200,13 +162,13 @@ def test_battery_uploads_junit_artifact() -> None:
 def test_real_pbkdf2_uploads_junit_artifact() -> None:
     """real-pbkdf2 job uploads junit-real-pbkdf2.xml artifact named junit-real-pbkdf2."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-    _assert_junit_upload(workflow, "real-pbkdf2", "junit-real-pbkdf2", "junit-real-pbkdf2.xml")
+    _assert_junit_upload(workflow, "real-pbkdf2", "junit-real-pbkdf2", "junit-real-pbkdf2-*.xml")
 
 
 def test_test_browser_uploads_junit_artifact() -> None:
-    """test-browser job uploads junit-browser.xml artifact named junit-test-browser."""
+    """test-browser job uploads junit-test-browser-*.xml artifact named junit-test-browser."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-    _assert_junit_upload(workflow, "test-browser", "junit-test-browser", "junit-browser.xml")
+    _assert_junit_upload(workflow, "test-browser", "junit-test-browser", "junit-test-browser-*.xml")
 
 
 def test_coverage_job_downloads_junit_artifacts_to_distinct_paths() -> None:
@@ -259,8 +221,8 @@ def test_coverage_job_uploads_per_surface_codecov_with_explicit_files() -> None:
     expected_files = {
         "behavioral": "junit/split/behavioral/junit-*.xml",
         "invariants": "junit/split/invariants/junit-*.xml",
-        "real-pbkdf2": "junit/real-pbkdf2/junit-real-pbkdf2.xml",
-        "test-browser": "junit/test-browser/junit-browser.xml",
+        "real-pbkdf2": "junit/real-pbkdf2/junit-real-pbkdf2-*.xml",
+        "test-browser": "junit/test-browser/junit-test-browser-*.xml",
     }
 
     for step in test_results_uploads:
@@ -451,18 +413,6 @@ def test_coverage_job_uploads_generated_coverage_xml() -> None:
         assert step.get("if") == "${{ !cancelled() }}"
 
 
-def test_battery_job_env_includes_pytest_addopts_with_coverage() -> None:
-    """Battery job sets PYTEST_ADDOPTS with --cov, --cov-report, and per-invocation junit."""
-    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-    # Check battery job has PYTEST_ADDOPTS with coverage flags
-    assert "PYTEST_ADDOPTS" in workflow
-    assert "--cov=crawlutron" in workflow
-    assert "--cov-report=" in workflow
-    assert "--cov-append" in workflow
-    assert "junit" in workflow.lower()
-    assert "-p pytest_cov" in workflow
-
-
 def test_coverage_job_emits_single_artifact() -> None:
     """Coverage job emits one combined artifact after calling coverage_reports.py."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
@@ -475,20 +425,3 @@ def test_coverage_job_emits_single_artifact() -> None:
         if isinstance(step, dict) and "uses" in step and "upload-artifact" in str(step.get("uses", ""))
     ]
     assert len(artifact_steps) == 1, f"coverage job must emit one artifact, got {len(artifact_steps)}"
-
-
-def test_coverage_producers_use_distinct_coverage_files() -> None:
-    """Each producer names its data file so coverage combine can merge all three."""
-    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-    expected = (
-        ("battery", "battery", ".coverage.battery"),
-        ("real-pbkdf2", "Run pytest (real PBKDF2) with coverage", ".coverage.real-pbkdf2"),
-        ("test-browser", "Run pytest (browser, PRs only)", ".coverage.test-browser"),
-    )
-    for job_name, step_name, file_name in expected:
-        producers = [step for step in job_steps(workflow, job_name) if step.get("name") == step_name]
-        assert producers, f"{job_name} must have a step named {step_name!r}"
-        env = cast(StepMapping, producers[0].get("env", {}))
-        assert env.get("COVERAGE_FILE") == file_name, (
-            f"{job_name} must set COVERAGE_FILE={file_name}; got {env.get('COVERAGE_FILE')!r}"
-        )

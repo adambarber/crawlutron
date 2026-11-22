@@ -63,6 +63,8 @@ class RuleId(StrEnum):
     UNIQUE_STEP_IDS = "unique-step-ids"
     DECLARES_PERMISSIONS = "declares-permissions"
     HAS_TRIGGER = "has-trigger"
+    TESTS_USE_DOOR = "tests-use-door"
+    DOOR_NO_IF = "door-no-if"
 
 
 class Waiver(BaseModel):
@@ -91,27 +93,6 @@ WAIVERS: tuple[Waiver, ...] = (
         reason="A fail-closed guard step follows; the token is advisory, not the gate",
     ),
     Waiver(
-        rule=RuleId.NO_BARE_PYTEST,
-        workflow="ci",
-        job="test-browser",
-        step="Run pytest (all markers, main push and release calls)",
-        reason="The main-push browser job intentionally runs the full suite",
-    ),
-    Waiver(
-        rule=RuleId.NO_BARE_PYTEST,
-        workflow="nightly",
-        job="test",
-        step="Run full test suite (no -m filter) with coverage",
-        reason="The nightly exists to run the full unfiltered suite",
-    ),
-    Waiver(
-        rule=RuleId.NO_BARE_PYTEST,
-        workflow="weekly",
-        job="mutation-testing",
-        step="Run mutation testing on invariant-critical modules",
-        reason="Mutation testing selects its own targets, not the battery",
-    ),
-    Waiver(
         rule=RuleId.NO_PIP_INSTALL,
         workflow="weekly",
         job="lowest-direct-resolution",
@@ -124,13 +105,15 @@ CEILINGS: Mapping[RuleId, int] = MappingProxyType(
     {
         RuleId.CONTINUE_ON_ERROR: 1,
         RuleId.NO_EVENT_SPLICING: 0,
-        RuleId.NO_BARE_PYTEST: 3,
+        RuleId.NO_BARE_PYTEST: 0,
         RuleId.NO_PIP_INSTALL: 1,
         RuleId.NO_HEREDOC: 0,
         RuleId.NEEDS_RESOLVE: 0,
         RuleId.UNIQUE_STEP_IDS: 0,
         RuleId.DECLARES_PERMISSIONS: 0,
         RuleId.HAS_TRIGGER: 0,
+        RuleId.TESTS_USE_DOOR: 0,
+        RuleId.DOOR_NO_IF: 0,
     }
 )
 

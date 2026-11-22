@@ -1,0 +1,78 @@
+name: Run tests through the shared door
+description: >
+  One sanctioned pytest door: every test job runs the battery through this
+  action. No direct `run: pytest` lives outside this action.
+inputs:
+  marker:
+    description: "pytest marker expression (deselects browser/slow/real_pbkdf2)"
+    required: false
+    default: "not (browser or slow or real_pbkdf2)"
+  browser:
+    description: "run under xvfb with browser env"
+    required: false
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - name: Validate browser input
+      if: ${{ inputs.browser != 'true' && inputs.browser != 'false' }}
+      shell: bash
+      run: |
+        echo "run-tests: refusing success: browser input must be 'true' or 'false'" >&2
+        exit 1
+    - name: Install pinned fpgen fingerprint model
+      if: ${{ inputs.browser == 'true' }}
+      shell: bash
+      run: .venv/bin/python -c "from camoufox.fpgen_model import ensure_fpgen_model; ensure_fpgen_model()"
+    - name: Cache Camoufox browser binary
+      if: ${{ inputs.browser == 'true' }}
+      id: camoufox
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/camoufox
+        key: camoufox-${{ runner.os }}-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+    - name: Install Camoufox browser binary
+      if: ${{ inputs.browser == 'true' && steps.camoufox.outputs.cache-hit != 'true' }}
+      shell: bash
+      run: .venv/bin/python -m camoufox fetch
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+    - name: Run pytest
+      shell: bash
+      env:
+        NO_PROXY: 127.0.0.1,localhost
+        CRAWLUTRON_HEADLESS: "false"
+        COVERAGE_FILE: .coverage.${{ github.job }}
+        MARKER: ${{ inputs.marker }}
+        BROWSER: ${{ inputs.browser }}
+      run: |
+        set -euo pipefail
+        if [ "$BROWSER" = "true" ]; then
+          exec xvfb-run -a .venv/bin/python -m pytest -m "$MARKER" --cov=crawlutron --cov-report= --cov-append -p pytest_cov --junitxml="junit-${{ github.job }}-%p.xml"
+        fi
+        exec .venv/bin/python -m pytest -m "$MARKER" --cov=crawlutron --cov-report= --cov-append -p pytest_cov --junitxml="junit-${{ github.job }}-%p.xml"
+    - name: Refuse success when the door ran no tests
+      shell: bash
+      run: |
+        set -euo pipefail
+        shopt -s nullglob
+        files=(junit-${{ github.job }}-*.xml)
+        coverage=.coverage.${{ github.job }}
+        if [ ${#files[@]} -eq 0 ]; then
+          echo "door ran no tests: refusing success" >&2
+          exit 1
+        fi
+        ran=0
+        skipped=0
+        for f in "${files[@]}"; do
+          ran=$((ran + $(grep -c '<testcase ' "$f" || true)))
+          skipped=$((skipped + $(grep -c '<skipped' "$f" || true)))
+        done
+        if [ "$((ran - skipped))" -le 0 ]; then
+          echo "door ran no non-skipped tests: refusing success" >&2
+          exit 1
+        fi
+        if [ ! -s "$coverage" ]; then
+          echo "door produced no coverage data: refusing success" >&2
+          exit 1
+        fi

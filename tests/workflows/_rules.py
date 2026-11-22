@@ -73,6 +73,8 @@ def no_bare_pytest(workflow: Workflow, job: Job) -> Iterator[Finding]:
         for invocation in step.command_facts.pytest_invocations:
             if invocation.filtered:
                 continue
+            if not _invocation_is_direct_pytest(invocation.text):
+                continue
             yield Finding(
                 "no-bare-pytest",
                 workflow.stem,
@@ -81,6 +83,23 @@ def no_bare_pytest(workflow: Workflow, job: Job) -> Iterator[Finding]:
                 f"{workflow.path}:{step.line}: a second default-suite run can drift from the battery: "
                 f"{invocation.text}",
             )
+
+
+def _invocation_is_direct_pytest(text: str) -> bool:
+    """True when pytest is the command being run, not an argument to another tool."""
+    stripped = text.strip()
+    if stripped.startswith("xvfb-run -a "):
+        stripped = stripped[len("xvfb-run -a ") :]
+    if stripped.startswith("pytest") and (len(stripped) == 6 or stripped[6] in " \t"):
+        return True
+    if stripped.startswith("python -m pytest") or stripped.startswith("python3 -m pytest"):
+        return True
+    for prefix in (".venv/bin/python ", ".venv/bin/python3 "):
+        if stripped.startswith(prefix):
+            rest = stripped[len(prefix) :]
+            if rest.startswith("-m pytest") and (len(rest) == 9 or rest[9] in " \t"):
+                return True
+    return False
 
 
 def no_pip_install(workflow: Workflow, job: Job) -> Iterator[Finding]:
@@ -121,6 +140,46 @@ def unique_step_ids(workflow: Workflow, job: Job) -> Iterator[Finding]:
         )
 
 
+def uses_tests_door(workflow: Workflow, job: Job) -> Iterator[Finding]:
+    """Every job with a direct pytest invocation must call the shared run-tests door."""
+    if not _job_directly_runs_pytest(job):
+        return
+    calls_door = any(step.uses and "run-tests" in str(step.uses) for step in job.steps)
+    if not calls_door:
+        yield Finding(
+            "tests-use-door",
+            workflow.stem,
+            job.key,
+            job.line,
+            f"{workflow.path}:{job.line}: job runs pytest directly but does not call "
+            f"the shared run-tests door",
+        )
+
+
+def _job_directly_runs_pytest(job: Job) -> bool:
+    for step in job.steps:
+        for invocation in step.command_facts.pytest_invocations:
+            if _invocation_is_direct_pytest(invocation.text):
+                return True
+    return False
+
+
+def door_no_if(workflow: Workflow, job: Job) -> Iterator[Finding]:
+    """The door step may not carry a step-level `if:` -- a skipped door must be
+    unrepresentable so the refusal inside the action can never be bypassed."""
+    for step in job.steps:
+        if step.uses and "run-tests" in str(step.uses):
+            if step.if_ is not None:
+                yield Finding(
+                    "door-no-if",
+                    workflow.stem,
+                    job.key,
+                    step.line,
+                    f"{workflow.path}:{step.line}: the run-tests door step carries "
+                    f"step-level if={step.if_!r}, which could skip the refusal",
+                )
+
+
 JOB_RULES = (
     Rule("needs-resolve", Scope.ALL, "a needs edge to a missing job never becomes green", needs_resolve),
     Rule(
@@ -130,6 +189,13 @@ JOB_RULES = (
         no_event_splicing_in_run,
     ),
     Rule("no-bare-pytest", Scope.WITH_STEPS, "one default suite per push", no_bare_pytest),
+    Rule("uses-tests-door", Scope.WITH_STEPS, "every pytest job calls the shared door", uses_tests_door),
+    Rule(
+        "door-no-if",
+        Scope.WITH_STEPS,
+        "the door step may not carry a step-level if",
+        door_no_if,
+    ),
     Rule("no-pip-install", Scope.WITH_STEPS, "the lock freezes the graph", no_pip_install),
     Rule("no-heredoc", Scope.WITH_STEPS, "a heredoc hides control flow", no_heredoc),
     Rule("unique-step-ids", Scope.WITH_STEPS, "step outputs are addressed by id", unique_step_ids),

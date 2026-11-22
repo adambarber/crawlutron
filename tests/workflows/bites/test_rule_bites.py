@@ -8,12 +8,14 @@ from tests.workflows._model import JOBS, WORKFLOWS, Job, Step, Workflow, parent_
 from tests.workflows._rules import (
     JOB_RULES,
     WORKFLOW_RULES,
+    door_no_if,
     needs_resolve,
     no_bare_pytest,
     no_event_splicing_in_run,
     no_heredoc,
     no_pip_install,
     unique_step_ids,
+    uses_tests_door,
 )
 
 _SAMPLE: Job = next(job for job in JOBS if job.steps)
@@ -179,6 +181,38 @@ def test_a_harmless_context_read_is_not_event_splicing() -> None:
     assert not list(no_event_splicing_in_run(parent_workflow(clean), clean))
 
 
+def test_a_job_with_a_direct_pytest_must_use_the_door() -> None:
+    broken = _mutate(steps=(_step(name="Bite", run="pytest"),))
+    assert list(uses_tests_door(parent_workflow(broken), broken))
+
+
+def test_a_door_step_without_if_is_clean() -> None:
+    clean = _mutate(
+        steps=(
+            _step(name="Door", uses="$/.github/actions/run-tests"),
+            _step(name="Prove", run="true"),
+        )
+    )
+    assert not list(door_no_if(parent_workflow(clean), clean))
+
+
+def test_a_door_step_with_if_false_is_refused() -> None:
+    """Planting step-level if:false on the door must be named file:line."""
+    door = _step(name="Door", uses="$/.github/actions/run-tests").model_copy(update={"if": "${{ false }}"})
+    broken = _mutate(steps=(door, _step(name="Prove", run="true")))
+    findings = list(door_no_if(parent_workflow(broken), broken))
+    assert findings
+    assert findings[0].rule == "door-no-if"
+    assert parent_workflow(broken).path.name in findings[0].message
+
+
+def test_a_direct_pytest_under_if_false_is_still_bare_pytest() -> None:
+    """`if: false` does not bypass the sealed no-bare-pytest rule."""
+    base = _step(name="Bite", run="pytest")
+    broken = _mutate(steps=(base.model_copy(update={"if": "${{ false }}"}),))
+    assert list(no_bare_pytest(parent_workflow(broken), broken))
+
+
 def test_an_unrelated_install_command_is_not_pip() -> None:
     clean = _mutate(steps=(_step(name="Bite", run='echo "pip" && install-deps.sh'),))
     assert not list(no_pip_install(parent_workflow(clean), clean))
@@ -194,6 +228,8 @@ def test_every_job_rule_has_a_bite() -> None:
         "needs-resolve",
         "no-event-splicing-in-run",
         "no-bare-pytest",
+        "uses-tests-door",
+        "door-no-if",
         "no-pip-install",
         "no-heredoc",
         "unique-step-ids",
