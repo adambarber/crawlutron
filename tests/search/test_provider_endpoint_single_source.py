@@ -10,9 +10,9 @@ from crawlutron.search.providers import PROVIDER_ENDPOINTS
 from tests.chokepoint_paths import REPO_ROOT
 
 _MODULES = [
-    Path("packages/core/src/crawlutron/search/providers.py"),
-    Path("packages/core/src/crawlutron/search/providers_api.py"),
-    Path("packages/core/src/crawlutron/search/providers_html.py"),
+    REPO_ROOT / "packages/core/src/crawlutron/search/providers.py",
+    REPO_ROOT / "packages/core/src/crawlutron/search/providers_api.py",
+    REPO_ROOT / "packages/core/src/crawlutron/search/providers_html.py",
 ]
 
 # Anything that looks like a URL literal, including the scheme-relative DDG

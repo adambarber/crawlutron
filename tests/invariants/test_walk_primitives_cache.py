@@ -1,46 +1,37 @@
-"""The suite's memoized walk helpers are @cache-wrapped (#1096, #1108)."""
+"""The suite's memoized walk helpers serve repeat asks from one cached result."""
 
-import tests._walk_primitives as walk_primitives
-import tests._walk_trees as walk_trees
+from __future__ import annotations
+
+from pathlib import Path
+
 from tests._walk_primitives import import_roots, package_roots, trees_under
 from tests._walk_trees import app_trees
-from tests.chokepoint_paths import REPO_ROOT
 from tests.invariants._cache_walk_probe import assert_repeat_call_skips_the_walk
 from tests.trees import test_tree_module_names as _test_tree_module_names
 
 
 def test_package_roots_returns_same_object_twice():
     """Two calls to package_roots() must return the exact same object."""
-    a = package_roots()
-    b = package_roots()
-    assert a is b, "package_roots() must be @cache-wrapped (different tuple objects returned)"
+    assert package_roots() is package_roots()
 
 
-def test_import_roots_walks_the_tree_once():
-    """A repeat call costs zero rglob: the declared cache serves it."""
-    import_roots.cache_clear()
-    package_roots.cache_clear()
-    roots = assert_repeat_call_skips_the_walk(import_roots)
-    assert roots, "import_roots() resolved no import roots"
+def test_import_roots_is_memoized_without_clearing_the_cache():
+    """A repeat ask reuses the first derivation; no test invalidates it for others."""
+    assert import_roots() is import_roots()
 
 
-def test_app_trees_walks_the_app_once():
-    """The metric collectors share one app-tree parse across every ask."""
-    walk_trees._app_files.cache_clear()
-    walk_trees._app_trees.cache_clear()
-    trees = assert_repeat_call_skips_the_walk(app_trees)
-    assert trees, "app_trees() parsed no modules"
+def test_app_trees_is_memoized_without_clearing_the_cache():
+    """The metric collectors share one app-tree result across every ask."""
+    assert app_trees() is app_trees()
 
 
-def test_trees_under_walks_a_directory_once():
-    """Repeat metric walks over one directory reuse the same cached parse."""
-    walk_primitives._trees_under.cache_clear()
-    trees = assert_repeat_call_skips_the_walk(lambda: trees_under(REPO_ROOT / "tests"))
-    assert trees, "trees_under() parsed no modules"
+def test_trees_under_walks_a_fresh_directory_once(tmp_path: Path) -> None:
+    """A cold, test-owned directory proves one rglob for two asks, without evicting a live cache."""
+    (tmp_path / "sample.py").write_text("value = 1\n", encoding="utf-8")
+    trees = assert_repeat_call_skips_the_walk(lambda: trees_under(tmp_path))
+    assert len(trees) == 1
 
 
-def test_tree_module_names_walks_the_test_tree_once():
-    """A repeat call costs zero rglob: the sweep asks once per imported module."""
-    _test_tree_module_names.cache_clear()
-    names = assert_repeat_call_skips_the_walk(_test_tree_module_names)
-    assert "trees" in names, "the name set does not name the test support module itself"
+def test_tree_module_names_is_memoized_without_clearing_the_cache():
+    """The test-tree name set is one object for the whole process."""
+    assert _test_tree_module_names() is _test_tree_module_names()

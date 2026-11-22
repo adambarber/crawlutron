@@ -7,11 +7,11 @@ compose mem_limit the README quotes. Written red: 100/20 starved admission.
 from __future__ import annotations
 
 import re
-from pathlib import Path
 from unittest.mock import patch
 
 import crawlutron.config.settings as settings_mod
 from crawlutron.config.settings import CrawlerSettings
+from tests.chokepoint_paths import REPO_ROOT
 
 _REFERENCE_LIMIT = 3 * 1024 * 1024 * 1024
 _KNOB = re.compile(r"\bCRAWLUTRON_[A-Z0-9_]+\b")
@@ -23,7 +23,7 @@ class _FakeStats:
 
 def _env_example_values() -> dict[str, str]:
     values: dict[str, str] = {}
-    for line in Path(".env.example").read_text(encoding="utf-8").splitlines():
+    for line in (REPO_ROOT / ".env.example").read_text(encoding="utf-8").splitlines():
         stripped = line.strip()
         if stripped.startswith("#") or "=" not in stripped:
             continue

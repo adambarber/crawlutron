@@ -5,9 +5,11 @@ from pathlib import Path
 
 import pytest
 
-RELEASE_WORKFLOW = Path(".github/workflows/release.yml")
-REHEARSAL_WORKFLOW = Path(".github/workflows/rehearsal.yml")
-REHEARSAL_SPEC = Path("docs/REHEARSAL-SPEC.md")
+from tests.chokepoint_paths import REPO_ROOT
+
+RELEASE_WORKFLOW = REPO_ROOT / ".github/workflows/release.yml"
+REHEARSAL_WORKFLOW = REPO_ROOT / ".github/workflows/rehearsal.yml"
+REHEARSAL_SPEC = REPO_ROOT / "docs/REHEARSAL-SPEC.md"
 
 
 def _yaml_section(text: str, job_name: str) -> str:
@@ -108,7 +110,7 @@ class TestImageJob:
         assert "python3 -m scripts.release.image" in image_job
         for credential in ("packages: write", "attestations: write", "id-token: write"):
             assert credential in image_job, f"Image job missing '{credential}'"
-        doc_text = Path("docs/REHEARSAL.md").read_text().lower()
+        doc_text = (REPO_ROOT / "docs/REHEARSAL.md").read_text().lower()
         assert "unrehearsed-surface" in doc_text, "image surface not documented as unrehearsed"
 
     def test_rehearsal_has_no_image_job_with_write_permissions(self) -> None:
@@ -202,12 +204,12 @@ class TestOwnersAndPosture:
 
     def test_codeowners_contains_rehearsal_and_release(self) -> None:
         """Both release adapters have a named owner."""
-        text = Path(".github/CODEOWNERS").read_text()
+        text = (REPO_ROOT / ".github/CODEOWNERS").read_text()
         for workflow in ("rehearsal.yml", "release.yml"):
             assert workflow in text, f"CODEOWNERS missing '{workflow}'"
 
     def test_zizmor_keeps_permission_audit_enabled(self) -> None:
         """zizmor keeps its default excessive-permissions audit enabled."""
-        text = Path(".github/zizmor.yml").read_text()
+        text = (REPO_ROOT / ".github/zizmor.yml").read_text()
         assert "posture:" not in text, "zizmor has no posture rule"
         assert "disable: true" not in text, "no zizmor audit may be disabled"
