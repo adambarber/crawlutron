@@ -104,9 +104,6 @@ class TextSink:
         if free_text:
             self.append_md(data)
 
-    def set_title_state(self, in_title: bool) -> None:
-        self._in_title = in_title
-
     def _open_strong(self) -> None:
         self._in_strong += 1
         self.append_md("**")
