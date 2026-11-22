@@ -32,9 +32,15 @@ def _step(**changes):
     [
         (needs_resolve, _mutate(needs=("ghost-job",))),
         (no_event_splicing_in_run, _mutate(steps=(_step(run="echo ${{ github.event.x }}"),))),
+        (no_event_splicing_in_run, _mutate(steps=(_step(run="echo ${{github.event.x}}"),))),
         (no_bare_pytest, _mutate(steps=(_step(name="Bite", run="python -m pytest"),))),
+        (
+            no_bare_pytest,
+            _mutate(steps=(_step(name="Bite", run="pytest", env={"UNRELATED": "-m not slow"}),)),
+        ),
         (no_pip_install, _mutate(steps=(_step(name="Bite", run="pip install x"),))),
         (no_pip_install, _mutate(steps=(_step(name="Bite", run="pip3 install x"),))),
+        (no_pip_install, _mutate(steps=(_step(name="Bite", run="pip --no-cache-dir install x"),))),
         (no_heredoc, _mutate(steps=(_step(run="cat <<EOF"),))),
         (no_heredoc, _mutate(steps=(_step(run="cat <<'PY' > x.py"),))),
         (no_heredoc, _mutate(steps=(_step(run="python <<PYCODE"),))),
@@ -69,6 +75,11 @@ def test_a_rule_names_the_injected_violation(rule, broken) -> None:
 def test_a_workflow_rule_names_the_injected_violation(rule, broken: Workflow) -> None:
     findings = list(rule.check(broken))
     assert findings and findings[0].rule == rule.name
+
+
+def test_an_inline_marker_filter_is_not_a_bare_suite_run() -> None:
+    filtered = _mutate(steps=(_step(name="Bite", run="PYTEST_ADDOPTS='-m slow' pytest"),))
+    assert not list(no_bare_pytest(parent_workflow(filtered), filtered))
 
 
 def test_every_job_rule_has_a_bite() -> None:

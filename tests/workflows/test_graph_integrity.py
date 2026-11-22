@@ -7,31 +7,45 @@ import re
 from tests.chokepoint_paths import REPO_ROOT
 from tests.workflows._model import JOBS, WORKFLOWS, Workflow, parent_workflow
 
-_CALLS = "$/.github/workflows/"
-_ACTIONS = "$/.github/actions/"
+_WORKFLOW_PREFIX = ".github/workflows/"
+_ACTION_PREFIX = ".github/actions/"
+
+
+def _local_target(uses: str | None) -> str | None:
+    for prefix in ("$/", "./"):
+        if uses and uses.startswith(prefix):
+            return uses[len(prefix) :]
+    return None
 
 
 def _callee(job) -> Workflow | None:
-    if not job.uses or _CALLS not in job.uses:
+    target = _local_target(job.uses)
+    if target is None or _WORKFLOW_PREFIX not in target:
         return None
-    stem = job.uses.rsplit("/", 1)[-1].split("@", 1)[0].removesuffix(".yml")
+    stem = target.rsplit("/", 1)[-1].split("@", 1)[0].removesuffix(".yml")
     return next((item for item in WORKFLOWS if item.stem == stem), None)
 
 
 def test_every_local_reusable_call_resolves_to_a_workflow_on_disk() -> None:
-    calls = [job for job in JOBS if job.uses and _CALLS in job.uses]
+    calls = [
+        job for job in JOBS if (target := _local_target(job.uses)) is not None and _WORKFLOW_PREFIX in target
+    ]
     assert calls, "no reusable calls found: the graph check would pass vacuously"
     for job in calls:
         assert _callee(job) is not None, f"{job.workflow}:{job.key} calls a missing workflow"
 
 
 def test_every_local_action_resolves_to_a_directory() -> None:
-    steps = [step for job in JOBS for step in job.steps if step.uses and _ACTIONS in step.uses]
+    steps = [
+        step
+        for job in JOBS
+        for step in job.steps
+        if (target := _local_target(step.uses)) is not None and _ACTION_PREFIX in target
+    ]
     assert steps, "no local actions found: the path check would pass vacuously"
     for step in steps:
-        uses = step.uses or ""
-        target = uses.split("@", 1)[0].removeprefix("$/")
-        assert (REPO_ROOT / target).is_dir(), f"missing local action {uses}"
+        target = (_local_target(step.uses) or "").split("@", 1)[0]
+        assert (REPO_ROOT / target).is_dir(), f"missing local action {step.uses}"
 
 
 def test_the_call_graph_has_no_cycle() -> None:
@@ -59,6 +73,7 @@ def test_the_call_graph_has_no_cycle() -> None:
 
 
 def test_every_called_output_maps_through_a_job_output_to_a_step() -> None:
+    checked_outputs = 0
     for item in WORKFLOWS:
         called = item.on_.get("workflow_call")
         if not isinstance(called, dict):
@@ -67,6 +82,7 @@ def test_every_called_output_maps_through_a_job_output_to_a_step() -> None:
         if not isinstance(outputs, dict):
             continue
         for output, spec in outputs.items():
+            checked_outputs += 1
             assert isinstance(spec, dict)
             value = str(spec.get("value", ""))
             match = re.fullmatch(r"\$\{\{ jobs\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z0-9_-]+) \}\}", value)
@@ -77,6 +93,7 @@ def test_every_called_output_maps_through_a_job_output_to_a_step() -> None:
             assert re.fullmatch(
                 r"\$\{\{ steps\.[A-Za-z0-9_-]+\.outputs\.[A-Za-z0-9_-]+ \}\}", str(step_ref)
             ), f"{item.stem}: {output} never reaches a step output"
+    assert checked_outputs, "no callable outputs were checked: the chain check would be vacuous"
 
 
 def test_every_caller_passes_the_inputs_the_callee_declares() -> None:

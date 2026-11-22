@@ -11,6 +11,7 @@ from tests.workflows._registry import CATALOG, Decision, decision
 
 
 def test_every_workflow_on_disk_has_a_named_decision() -> None:
+    assert WORKFLOWS and CATALOG, "the census cannot be satisfied by an empty surface"
     assert not missing_decisions(), f"workflows with no decision: {sorted(missing_decisions())}"
     assert set(CATALOG) == {item.stem for item in WORKFLOWS}
 

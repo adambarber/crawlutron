@@ -76,6 +76,9 @@ def test_a_bad_schedule_cron_is_rejected() -> None:
     }
     with pytest.raises(ValidationError, match="cron"):
         Workflow.model_validate(payload)
+    payload["on"] = {"schedule": [{"cron": "61 99 * * MONDAY"}]}
+    with pytest.raises(ValidationError, match="cron range|cron name"):
+        Workflow.model_validate(payload)
 
 
 def test_a_call_job_with_steps_is_rejected() -> None:

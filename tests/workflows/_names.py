@@ -57,9 +57,32 @@ def _expression(value: str) -> str:
     return value
 
 
+_MONTHS = frozenset("JAN FEB MAR APR MAY JUN JUL AUG SEP OCT NOV DEC".split())
+_DAYS = frozenset("SUN MON TUE WED THU FRI SAT".split())
+_CRON_RANGES = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
+
+
+def _cron_field(text: str, low: int, high: int, names: frozenset[str]) -> None:
+    for part in re.split(r"[,/-]", text):
+        if not part or part == "*":
+            continue
+        if part.isalpha():
+            if part.upper() not in names:
+                raise ValueError(f"{part!r} is not a cron name")
+        elif part.isdigit():
+            if not low <= int(part) <= high:
+                raise ValueError(f"{part!r} is outside cron range {low}-{high}")
+        else:
+            raise ValueError(f"{part!r} is not a cron value")
+
+
 def _cron(value: str) -> str:
-    if len(value.split()) != 5:
+    fields = value.split()
+    if len(fields) != 5:
         raise ValueError(f"{value!r} is not a five-field cron expression")
+    names: tuple[frozenset[str], ...] = (frozenset(), frozenset(), frozenset(), _MONTHS, _DAYS)
+    for field, (low, high), allowed in zip(fields, _CRON_RANGES, names, strict=True):
+        _cron_field(field, low, high, allowed)
     return value
 
 

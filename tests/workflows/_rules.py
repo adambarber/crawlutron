@@ -65,9 +65,21 @@ def needs_resolve(workflow: Workflow, job: Job) -> Iterator[Finding]:
             )
 
 
+_EVENT = re.compile(r"\$\{\{\s*github\s*\.\s*event\b", re.IGNORECASE)
+_PYTEST_ENV = frozenset({"PYTEST_ADDOPTS", "PYTEST_ARGS"})
+
+
+def _marker_selected(text: str) -> bool:
+    """A real -m marker filter, not python's -m module invocation."""
+    return any(
+        match and match.group(1).strip("\"'").lower() != "pytest"
+        for match in re.finditer(r"(?:^|[\s'\"])-m[= ]+['\"]?([^\s'\"]+)", text)
+    )
+
+
 def no_event_splicing_in_run(workflow: Workflow, job: Job) -> Iterator[Finding]:
     for step in job.steps:
-        if "${{ github.event" in (step.run or ""):
+        if _EVENT.search(step.run or ""):
             yield Finding(
                 "no-event-splicing-in-run",
                 workflow.stem,
@@ -82,9 +94,10 @@ def no_bare_pytest(workflow: Workflow, job: Job) -> Iterator[Finding]:
         run = step.run or ""
         if "pytest" not in run:
             continue
-        selected = re.search(r"(?:^|\s)-m(?:\s|=)", run.split("pytest", 1)[1])
-        env_selected = any(re.search(r"(?:^|\s)-m(?:\s|=)", str(value)) for value in step.env.values())
-        if selected or env_selected:
+        env_selected = any(
+            _marker_selected(str(value)) for key, value in step.env.items() if key in _PYTEST_ENV
+        )
+        if _marker_selected(run) or env_selected:
             continue
         if (workflow.stem, job.key, step.name) in BARE_PYTEST_WAIVERS:
             continue
@@ -100,7 +113,7 @@ def no_bare_pytest(workflow: Workflow, job: Job) -> Iterator[Finding]:
 def no_pip_install(workflow: Workflow, job: Job) -> Iterator[Finding]:
     for step in job.steps:
         run = step.run or ""
-        pip = re.search(r"\bpip(?:3)?\s+install\b", run)
+        pip = re.search(r"\bpip(?:3(?:\.\d+)?)?\b[^;\n]*\binstall\b", run)
         if pip and (workflow.stem, job.key, step.name) not in PIP_INSTALL_WAIVERS:
             yield Finding(
                 "no-pip-install",

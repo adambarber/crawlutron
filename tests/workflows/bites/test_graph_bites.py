@@ -9,11 +9,37 @@ from tests.workflows._model import JOBS, WORKFLOWS, workflow
 
 
 def test_a_ghost_reusable_call_is_caught(monkeypatch) -> None:
-    job = next(job for job in JOBS if job.uses and graph._CALLS in job.uses)
+    job = next(job for job in JOBS if job.uses and ".github/workflows/" in job.uses)
     broken = job.model_copy(update={"uses": "$/.github/workflows/ghost.yml"})
     monkeypatch.setattr(graph, "JOBS", (broken,))
     with pytest.raises(AssertionError, match="missing workflow"):
         graph.test_every_local_reusable_call_resolves_to_a_workflow_on_disk()
+
+
+def test_a_ghost_call_in_dot_slash_form_is_caught(monkeypatch) -> None:
+    job = next(job for job in JOBS if job.uses and ".github/workflows/" in (job.uses or ""))
+    broken = job.model_copy(update={"uses": "./.github/workflows/ghost.yml"})
+    monkeypatch.setattr(graph, "JOBS", (broken,))
+    with pytest.raises(AssertionError, match="missing workflow"):
+        graph.test_every_local_reusable_call_resolves_to_a_workflow_on_disk()
+
+
+def test_a_broken_output_chain_is_caught(monkeypatch) -> None:
+    source = workflow("released")
+    triggers = dict(source.on_)
+    declared = triggers["workflow_call"]
+    assert isinstance(declared, dict)
+    call = dict(declared)
+    declared_outputs = call["outputs"]
+    assert isinstance(declared_outputs, dict)
+    outputs = dict(declared_outputs)
+    outputs["bad"] = {"value": "nonsense"}
+    call["outputs"] = outputs
+    triggers["workflow_call"] = call
+    broken = source.model_copy(update={"on_": triggers})
+    monkeypatch.setattr(graph, "WORKFLOWS", (broken,))
+    with pytest.raises(AssertionError, match="does not map"):
+        graph.test_every_called_output_maps_through_a_job_output_to_a_step()
 
 
 def test_a_cycle_is_caught(monkeypatch) -> None:
