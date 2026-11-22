@@ -110,7 +110,19 @@ def _export_value(text: str) -> str:
         quote = value[0]
         end = value.find(quote, 1)
         return value[1:end] if end > 0 else value[1:]
-    return value.split()[0]
+    token: list[str] = []
+    escaped = False
+    for char in value:
+        if escaped:
+            token.append(char)
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char.isspace():
+            break
+        else:
+            token.append(char)
+    return "".join(token)
 
 
 class CommandFacts(BaseModel):

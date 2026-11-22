@@ -87,6 +87,11 @@ def test_a_workflow_rule_names_the_injected_violation(rule, broken: Workflow) ->
     assert findings and findings[0].rule == rule.name
 
 
+def test_an_escaped_unquoted_export_value_is_honoured() -> None:
+    filtered = _mutate(steps=(_step(name="Bite", run="export PYTEST_ADDOPTS=-m\\ slow; pytest"),))
+    assert not list(no_bare_pytest(parent_workflow(filtered), filtered))
+
+
 def test_quoted_parentheses_do_not_change_scope() -> None:
     for run in (
         '(export PYTEST_ADDOPTS="-m slow)"; pytest)',
