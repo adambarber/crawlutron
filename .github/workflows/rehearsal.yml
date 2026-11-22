@@ -53,8 +53,14 @@ jobs:
           fetch-tags: true
           persist-credentials: false
       - uses: $/.github/actions/prepare
-      - name: Run the fast hermetic test suite
-        run: .venv/bin/python -m pytest -q -m "not (browser or slow or real_pbkdf2)"
+      - uses: $/.github/actions/run-tests
+        id: rehearsal-door
+        with:
+          coverage-file: .coverage.rehearsal
+          junit-file: junit-rehearsal.xml
+      - name: Refuse success when the door ran no tests
+        if: ${{ steps.rehearsal-door.outputs.tests-ran != 'true' }}
+        run: exit 1
 
   install-graph:
     name: Verify package resolves from the published index

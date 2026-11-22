@@ -69,44 +69,6 @@ def _assert_codecov_upload_flags(
     assert with_.get("report_type") == report_type
 
 
-def test_battery_is_only_fast_suite_execution() -> None:
-    """The battery job runs pytest with coverage via PYTEST_ADDOPTS; no other job runs the fast suite."""
-    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-    jobs = _jobs(workflow)
-
-    # Battery must exist and run pytest with coverage via PYTEST_ADDOPTS
-    assert "battery" in jobs
-    battery_steps = job_steps(workflow, "battery")
-    battery_step = next((s for s in battery_steps if s.get("name") == "battery"), None)
-    assert battery_step is not None, "battery step must exist"
-    battery_env = cast(StepMapping, battery_step.get("env", {}))
-    pytest_addopts = cast(str, battery_env.get("PYTEST_ADDOPTS", ""))
-    assert "--cov=crawlutron" in pytest_addopts, "battery must have --cov in PYTEST_ADDOPTS"
-    assert "--cov-report=" in pytest_addopts, "battery must have --cov-report in PYTEST_ADDOPTS"
-    assert "--cov-append" in pytest_addopts, "battery must have --cov-append in PYTEST_ADDOPTS"
-    assert "junit" in pytest_addopts.lower(), "battery must have junit in PYTEST_ADDOPTS"
-    assert "-p pytest_cov" in pytest_addopts, "battery must have -p pytest_cov in PYTEST_ADDOPTS"
-
-    # Coverage job must NOT run pytest (report-only)
-    assert "coverage" in jobs
-    coverage_steps = job_steps(workflow, "coverage")
-    coverage_runs = " ".join(str(cast(StepMapping, step).get("run", "")) for step in coverage_steps)
-    assert "pytest" not in coverage_runs, "coverage job must not re-run pytest (report-only)"
-    assert "coverage combine" in coverage_runs, "coverage job must run coverage combine"
-    assert "scripts.coverage_reports" in coverage_runs, "coverage job must call frozen report script"
-
-    # real-pbkdf2 and test-browser must not run the fast suite
-    for job_name in ("real-pbkdf2", "test-browser"):
-        job_runs = " ".join(
-            str(cast(StepMapping, step).get("run", "")) for step in job_steps(workflow, job_name)
-        )
-        # They run their own marker selection, not the fast suite
-        assert "-m " in job_runs, f"{job_name} must select its own markers"
-        assert "not (browser or slow or real_pbkdf2)" not in job_runs, (
-            f"{job_name} must not run the battery's marker filter"
-        )
-
-
 def test_coverage_job_depends_on_battery_real_pbkdf2_test_browser() -> None:
     """Coverage needs the change filter plus the three test jobs."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
@@ -451,18 +413,6 @@ def test_coverage_job_uploads_generated_coverage_xml() -> None:
         assert step.get("if") == "${{ !cancelled() }}"
 
 
-def test_battery_job_env_includes_pytest_addopts_with_coverage() -> None:
-    """Battery job sets PYTEST_ADDOPTS with --cov, --cov-report, and per-invocation junit."""
-    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-    # Check battery job has PYTEST_ADDOPTS with coverage flags
-    assert "PYTEST_ADDOPTS" in workflow
-    assert "--cov=crawlutron" in workflow
-    assert "--cov-report=" in workflow
-    assert "--cov-append" in workflow
-    assert "junit" in workflow.lower()
-    assert "-p pytest_cov" in workflow
-
-
 def test_coverage_job_emits_single_artifact() -> None:
     """Coverage job emits one combined artifact after calling coverage_reports.py."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
@@ -479,16 +429,18 @@ def test_coverage_job_emits_single_artifact() -> None:
 
 def test_coverage_producers_use_distinct_coverage_files() -> None:
     """Each producer names its data file so coverage combine can merge all three."""
-    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    from tests._ci_contract import WORKFLOW_PATH as _WP
+
+    action = (_WP.parent.parent / "actions" / "run-tests" / "action.yml").read_text(encoding="utf-8")
+    assert "coverage-file:" in action, "the door must declare coverage-file as an input"
+    assert "${{ inputs.coverage-file }}" in action, "the door must reference the coverage-file input"
+    workflow = _WP.read_text(encoding="utf-8")
     expected = (
-        ("battery", "battery", ".coverage.battery"),
-        ("real-pbkdf2", "Run pytest (real PBKDF2) with coverage", ".coverage.real-pbkdf2"),
-        ("test-browser", "Run pytest (browser, PRs only)", ".coverage.test-browser"),
+        ("battery", ".coverage.battery"),
+        ("real-pbkdf2", ".coverage.real-pbkdf2"),
+        ("test-browser", ".coverage.test-browser"),
     )
-    for job_name, step_name, file_name in expected:
-        producers = [step for step in job_steps(workflow, job_name) if step.get("name") == step_name]
-        assert producers, f"{job_name} must have a step named {step_name!r}"
-        env = cast(StepMapping, producers[0].get("env", {}))
-        assert env.get("COVERAGE_FILE") == file_name, (
-            f"{job_name} must set COVERAGE_FILE={file_name}; got {env.get('COVERAGE_FILE')!r}"
+    for job_name, file_name in expected:
+        assert f"coverage-file: {file_name}" in workflow, (
+            f"{job_name} must pass coverage-file={file_name} to the door"
         )

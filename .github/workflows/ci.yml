@@ -205,18 +205,14 @@ jobs:
       # them into .pyc hits (the S4 pattern) so the run starts warm.
       - name: Pre-warm bytecode for the battery
         run: .venv/bin/python -m compileall -q packages/*/src tests scripts
-      - name: battery
-        run: .venv/bin/pre-commit run battery --all-files
-        env:
-          # The battery is the one gate that legitimately runs for a minute:
-          # ~50s warm, longer on a cold runner. The fan-out wall exists to stop
-          # a hung gate hanging the job forever, so it gets hang-guard room
-          # here rather than a budget. Commit admission keeps the 60s default.
-          GATE_FANOUT_WALL_SECONDS: "300"
-          COVERAGE_FILE: .coverage.battery
-          # Coverage flags for the battery run -- the ONLY fast-suite execution.
-          # Per-invocation junit avoids filename collisions across xdist workers.
-          PYTEST_ADDOPTS: "--cov=crawlutron --cov-report= --cov-append -p pytest_cov --junitxml=junit-%p.xml"
+      - uses: $/.github/actions/run-tests
+        id: battery-door
+        with:
+          coverage-file: .coverage.battery
+          junit-file: junit-*.xml
+      - name: Refuse success when the door ran no tests
+        if: ${{ steps.battery-door.outputs.tests-ran != 'true' }}
+        run: exit 1
       - name: Upload coverage data artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ always() }}
@@ -374,11 +370,16 @@ jobs:
           fetch-tags: false
           persist-credentials: false
       - uses: $/.github/actions/prepare
-      - name: Run pytest (real PBKDF2) with coverage
+      - uses: $/.github/actions/run-tests
+        id: real-pbkdf2-door
         if: ${{ needs.changes.outputs.real-pbkdf2 == 'true' }}
-        env:
-          COVERAGE_FILE: .coverage.real-pbkdf2
-        run: .venv/bin/python -m pytest -m "real_pbkdf2" --cov=crawlutron --cov-report= --cov-append -p pytest_cov --junitxml=junit-real-pbkdf2.xml
+        with:
+          marker: "real_pbkdf2"
+          coverage-file: .coverage.real-pbkdf2
+          junit-file: junit-real-pbkdf2.xml
+      - name: Refuse success when the door ran no tests
+        if: ${{ always() && steps.real-pbkdf2-door.outcome != 'skipped' && steps.real-pbkdf2-door.outputs.tests-ran != 'true' }}
+        run: exit 1
       - name: Upload coverage data artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ always() }}
@@ -416,62 +417,18 @@ jobs:
           fetch-tags: false
           persist-credentials: false
       - uses: $/.github/actions/prepare
-      # camoufox fetch installs this model, but the browser-binary cache skips
-      # fetch on warm runs while the venv is rebuilt every run. Install it here
-      # so no hermetic test ever triggers a GitHub download itself.
-      - name: Install pinned fpgen fingerprint model
-        run: .venv/bin/python -c "from camoufox.fpgen_model import ensure_fpgen_model; ensure_fpgen_model()"
-      # Camoufox downloads ~200 MB of Firefox on first use (#490). The binary
-      # lands in ~/.cache/camoufox and is version-locked by the pin in
-      # pyproject.toml, so a cache keyed on that pin skips the fetch on warm
-      # runs. NOT lookup-only: that skips the download (the cache would be
-      # saved but never read) and the fetch would run on every push.
-      - name: Cache Camoufox browser binary
-        id: camoufox
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/camoufox
-          key: camoufox-${{ runner.os }}-{{ hashFiles('pyproject.toml') }}
-      - name: Install Camoufox browser binary
-        if: ${{ steps.camoufox.outputs.cache-hit != 'true' }}
-        run: .venv/bin/python -m camoufox fetch
-        env:
-          # camoufox resolves its release through the GitHub API, which answers
-          # an unauthenticated runner at 60 req/h: the fetch 403s on a busy
-          # day. The job's own token lifts it to the repository's rate limit.
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: $/.github/actions/prepare-browser
-      # Firefox on a bare ubuntu-24.04 runner needs an X server and its runtime
-      # libraries; xvfb-run provides both (camoufox CI does the same).
-      - name: Run pytest (browser, PRs only)
-        if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.browser == 'true' }}
-        env:
-          # Firefox on GitHub Actions ubuntu-24.04 cannot connect to the
-          # in-process test server at 127.0.0.1 -- network_error on every
-          # navigation. Two causes, both fixed here:
-          #   NO_PROXY:  Firefox honors system proxy env vars; without this
-          #            it may try to proxy localhost through a nonexistent proxy.
-          #   CRAWLUTRON_HEADLESS=false: boolean headless Firefox on Linux has
-          #            limited networking; headed mode under xvfb-run matches
-          #            camoufox's own CI and works reliably.
-          NO_PROXY: 127.0.0.1,localhost
-          CRAWLUTRON_HEADLESS: "false"
-          COVERAGE_FILE: .coverage.test-browser
-        run: xvfb-run -a .venv/bin/python -m pytest -m "browser" --cov=crawlutron --cov-report= --cov-append -p pytest_cov --junitxml=junit-browser.xml
-      - name: Run pytest (all markers, main push and release calls)
-        if: ${{ github.event_name != 'pull_request' }}
-        env:
-          # Firefox on GitHub Actions ubuntu-24.04 cannot connect to the
-          # in-process test server at 127.0.0.1 -- network_error on every
-          # navigation. Two causes, both fixed here:
-          #   NO_PROXY:  Firefox honors system proxy env vars; without this
-          #            it may try to proxy localhost through a nonexistent proxy.
-          #   CRAWLUTRON_HEADLESS=false: boolean headless Firefox on Linux has
-          #            limited networking; headed mode under xvfb-run matches
-          #            camoufox's own CI and works reliably.
-          NO_PROXY: 127.0.0.1,localhost
-          CRAWLUTRON_HEADLESS: "false"
-        run: xvfb-run -a .venv/bin/python -m pytest -o addopts= -m "browser" --cov=crawlutron --cov-report= --cov-append -p pytest_cov --junitxml=junit-browser.xml
+      - uses: $/.github/actions/run-tests
+        id: test-browser-door
+        if: ${{ (github.event_name == 'pull_request' && needs.changes.outputs.browser == 'true') || github.event_name != 'pull_request' }}
+        with:
+          browser: true
+          coverage-file: .coverage.test-browser
+          junit-file: junit-browser.xml
+          marker: ${{ github.event_name == 'pull_request' && 'browser' || 'not (browser or slow or real_pbkdf2)' }}
+      - name: Refuse success when the door ran no tests
+        if: ${{ always() && steps.test-browser-door.outcome != 'skipped' && steps.test-browser-door.outputs.tests-ran != 'true' }}
+        run: exit 1
       - name: Upload coverage data artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ always() }}
@@ -602,7 +559,7 @@ jobs:
         uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
         with:
           config-file: '.github/dependency-review-config.yml'
-          base-ref: ${{ github.event.before && github.event.before != '0000000000000000000000000000000000000000' && github.event.before || github.event.pull_request.base.sha || github.sha }}
+          base-ref: ${{ github.event.before || github.event.pull_request.base.sha }}
           head-ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
   # One required check, and only on the PR path (this workflow runs top-level

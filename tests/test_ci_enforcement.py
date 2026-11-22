@@ -73,8 +73,11 @@ def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
     )
     assert _field(jscpd, "files") == ENFORCEMENT_TRIGGER_PATTERN
 
-    assert workflow.count(".venv/bin/pre-commit run") == len(
-        precommit_hook_ids(CONFIG_PATH.read_text(encoding="utf-8"))
+    # Every pre-commit hook is enforced in CI except battery, which now runs
+    # through the shared run-tests door action instead of a direct pre-commit run.
+    assert (
+        workflow.count(".venv/bin/pre-commit run")
+        == len(precommit_hook_ids(CONFIG_PATH.read_text(encoding="utf-8"))) - 1
     )
     assert "scripts/jscpd_gate.py" not in workflow
     required = _required_needs(workflow)
@@ -207,13 +210,11 @@ def _assert_every_publish_job_gated_on_ci(jobs: dict[str, object]) -> None:
 
 
 def test_every_precommit_hook_has_a_ci_job_that_runs_the_hook() -> None:
-    """One definition per gate: every pre-commit hook has a job, and that job runs
-    the hook itself. CI therefore cannot drift from what a local commit runs, and
-    a new hook cannot arrive without a job that enforces it.
-    """
+    """Every hook has a CI job; battery runs through the shared door."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
     config = CONFIG_PATH.read_text(encoding="utf-8")
-    _assert_every_hook_has_a_job(workflow, precommit_hook_ids(config))
+    hook_ids = tuple(h for h in precommit_hook_ids(config) if h != "battery")
+    _assert_every_hook_has_a_job(workflow, hook_ids)
 
 
 def test_a_new_precommit_hook_without_a_ci_job_is_caught() -> None:

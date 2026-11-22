@@ -1,0 +1,58 @@
+name: Run tests through the shared door
+description: >
+  One sanctioned pytest door: every test job runs the battery through this
+  action and consumes its `tests-ran` output. No direct `run: pytest` lives
+  outside this action.
+inputs:
+  marker:
+    description: "pytest marker expression (deselects browser/slow/real_pbkdf2)"
+    required: false
+    default: "not (browser or slow or real_pbkdf2)"
+  coverage-file:
+    description: "COVERAGE_FILE value for this job's data file"
+    required: true
+  junit-file:
+    description: "junit XML path this job writes"
+    required: true
+  browser:
+    description: "run under xvfb with browser env"
+    required: false
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - name: Install pinned fpgen fingerprint model
+      if: ${{ inputs.browser == 'true' }}
+      run: .venv/bin/python -c "from camoufox.fpgen_model import ensure_fpgen_model; ensure_fpgen_model()"
+    - name: Cache Camoufox browser binary
+      if: ${{ inputs.browser == 'true' }}
+      id: camoufox
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/camoufox
+        key: camoufox-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+    - name: Install Camoufox browser binary
+      if: ${{ inputs.browser == 'true' && steps.camoufox.outputs.cache-hit != 'true' }}
+      run: .venv/bin/python -m camoufox fetch
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: Run pytest
+      env:
+        NO_PROXY: 127.0.0.1,localhost
+        CRAWLUTRON_HEADLESS: "false"
+        COVERAGE_FILE: ${{ inputs.coverage-file }}
+      run: |
+        set -euo pipefail
+        if [ "${{ inputs.browser }}" = "true" ]; then
+          exec xvfb-run -a .venv/bin/python -m pytest -m "${{ inputs.marker }}" --cov=crawlutron --cov-report= --cov-append -p pytest_cov --junitxml="${{ inputs.junit-file }}"
+        fi
+        exec .venv/bin/python -m pytest -m "${{ inputs.marker }}" --cov=crawlutron --cov-report= --cov-append -p pytest_cov --junitxml="${{ inputs.junit-file }}"
+    - name: Compute tests-ran proof
+      id: proof
+      shell: bash
+      run: |
+        if ls ${{ inputs.junit-file }} >/dev/null 2>&1 && grep -lq '<testcase ' ${{ inputs.junit-file }}; then
+          echo "tests-ran=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "tests-ran=false" >> "$GITHUB_OUTPUT"
+        fi

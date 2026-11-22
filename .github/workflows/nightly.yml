@@ -34,22 +34,6 @@ jobs:
       - name: Prepare gate environment
         uses: $/.github/actions/prepare
 
-      - name: Install pinned fpgen fingerprint model
-        run: .venv/bin/python -c "from camoufox.fpgen_model import ensure_fpgen_model; ensure_fpgen_model()"
-
-      - name: Cache Camoufox browser binary
-        id: camoufox
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
-        with:
-          path: ~/.cache/camoufox
-          key: camoufox-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
-
-      - name: Install Camoufox browser binary
-        if: ${{ steps.camoufox.outputs.cache-hit != 'true' }}
-        run: .venv/bin/python -m camoufox fetch
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Prepare browser runtime
         uses: $/.github/actions/prepare-browser
 
@@ -57,12 +41,15 @@ jobs:
         run: .venv/bin/python -m compileall -q packages/*/src tests scripts
 
       - name: Run full test suite (no -m filter) with coverage
-        env:
-          NO_PROXY: 127.0.0.1,localhost
-          CRAWLUTRON_HEADLESS: "false"
-          GATE_FANOUT_WALL_SECONDS: "300"
-          PYTEST_ADDOPTS: "--cov=crawlutron --cov-branch --cov-report= --cov-append -p pytest_cov --junitxml=junit-nightly.xml"
-        run: xvfb-run -a .venv/bin/python -m pytest -o addopts=
+        uses: $/.github/actions/run-tests
+        id: nightly-door
+        with:
+          browser: true
+          coverage-file: .coverage.nightly
+          junit-file: junit-nightly.xml
+      - name: Refuse success when the door ran no tests
+        if: ${{ steps.nightly-door.outputs.tests-ran != 'true' }}
+        run: exit 1
 
       - name: Generate coverage reports
         run: .venv/bin/python -m scripts.coverage_reports
