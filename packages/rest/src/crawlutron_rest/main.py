@@ -35,10 +35,10 @@ else:
         FastAPI = None
         RequestValidationError = Exception
 
-from crawlutron.health.readiness import create_health_router
 from crawlutron.runtime.logging_config import configure_service_logging
 from crawlutron_rest.discovery.agent_hints import create_agent_hints_router
 from crawlutron_rest.discovery.capabilities import create_capabilities_router
+from crawlutron_rest.discovery.health import create_health_router
 from crawlutron_rest.discovery.well_known import create_well_known_router
 
 _TeardownStep = tuple[str, Callable[[], Awaitable[None]]]
@@ -314,7 +314,7 @@ async def _startup_services(_app: FastAPI, settings: CrawlerSettings, database_p
     cookies load before job recovery (a clear-then-populate load drops them).
     """
     install_default_executor(asyncio.get_running_loop())
-    from crawlutron.health.readiness import READINESS_STATE
+    from crawlutron.runtime.readiness_state import READINESS_STATE
     from crawlutron.orchestration.engine import resource_gate
 
     # Readiness saturation comes from the live resource gate, not the
@@ -423,7 +423,7 @@ set_module_app_provider(module_app)
 
 async def _shutdown_services(_app: FastAPI) -> None:
     """Stop the world FIRST: no webhooks against cleared deps; jar needs no step."""
-    from crawlutron.health.readiness import READINESS_STATE
+    from crawlutron.runtime.readiness_state import READINESS_STATE
     from crawlutron.orchestration.engine import resource_gate
 
     shutdown_event = _app.state.shutdown_event

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Protocol
 
-if TYPE_CHECKING:
-    from fastapi import FastAPI
+
+class _StoreCarrier(Protocol):
+    @property
+    def state(self) -> object: ...
+
 
 _STORE_ATTRS = (
     "job_store",
@@ -23,7 +26,7 @@ _TRACKER_ATTR = "concurrency_tracker"
 __all__ = ["close_app_stores"]
 
 
-async def close_app_stores(app: FastAPI) -> None:
+async def close_app_stores(app: _StoreCarrier) -> None:
     """Close the stores create_app built; a second close is a sqlite3 no-op.
 
     Every store on ``app.state`` is the app's own, so shutdown closes them all,

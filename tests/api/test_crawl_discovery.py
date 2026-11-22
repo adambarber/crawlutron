@@ -28,7 +28,7 @@ class TestDiscoveryAndRenderApi:
         # (memory #4740), not inline in the router module (#305).
         from fastapi.routing import APIRoute
 
-        from crawlutron.health.readiness import create_health_router
+        from crawlutron_rest.discovery.health import create_health_router
         from tests.model_index import resolve_declared_type
 
         router, _ = create_health_router()

@@ -22,7 +22,7 @@ _DIRECT_FACTORY_ROUTERS = {
     "crawlutron_rest.discovery.agent_hints",
     "crawlutron_rest.discovery.capabilities",
     "crawlutron_rest.discovery.well_known",
-    "crawlutron.health.readiness",
+    "crawlutron_rest.discovery.health",
     "crawlutron_rest.api.mcp_router",
 }
 

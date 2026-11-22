@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "crawlutron-core"
 version = "0.5.0"
-description = "Policy-driven, self-hosted web crawler and content-extraction service built around FastAPI"
+description = "Framework-free policy-driven web crawler and content-extraction engine"
 readme = "README.md"
 requires-python = ">=3.14"
 license = "MIT"
@@ -26,7 +26,6 @@ dependencies = [
     # crawlutron-safe-url ships complete: regex and publicsuffixlist are hard
     # dependencies, so admission and site grouping never silently degrade.
     "crawlutron-safe-url>=0.4.0.dev0",
-    "fastapi==0.165.0",
     "camoufox==0.5.9",
     "curl_cffi==0.17.0",
     "charset-normalizer==3.5.2",

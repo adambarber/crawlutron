@@ -19,7 +19,7 @@ crawlutron-sdk = { workspace = true }
 [project]
 name = "crawlutron"
 version = "0.5.2"
-description = "Policy-driven, self-hosted web crawler and content-extraction service built around FastAPI"
+description = "Policy-driven, self-hosted web crawler and content-extraction service (FastAPI surface via crawlutron-rest)"
 readme = "README.md"
 requires-python = ">=3.14"
 license = "MIT"

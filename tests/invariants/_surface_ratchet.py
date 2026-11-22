@@ -177,6 +177,7 @@ DECLARED_SURFACE_RATCHET = {
     # #649: derived discovery -- one thin re-export and one surface walk.
     "packages/rest/src/crawlutron_rest/discovery/recommended.py": (1, 1),
     "packages/rest/src/crawlutron_rest/discovery/recommended_surface.py": (3, 1),
+    "packages/rest/src/crawlutron_rest/discovery/health.py": (1, 1),
     "packages/rest/src/crawlutron_rest/api/router_identity.py": (1, 1),
     "packages/rest/src/crawlutron_rest/api/identity_router.py": (5, 3),
     "packages/core/src/crawlutron/service/job_runner.py": (15, 12),
@@ -186,9 +187,6 @@ DECLARED_SURFACE_RATCHET = {
     # #1083: crawl_tail is the shared crawl tail both doors call (completion
     # metric + result-store put); MCP previously half-tailed.
     "packages/core/src/crawlutron/service/main_helpers.py": (4, 4),
-    # #871: readiness state re-homed framework-free; health keeps the FastAPI wire
-    # door (router factory) while the state names re-export for patch-seam survival.
-    "packages/core/src/crawlutron/health/readiness.py": (1, 1),
     # #871: lazy app-module reference so service sweeps avoid the fastapi graph.
     "packages/core/src/crawlutron/runtime/app_module_ref.py": (
         6,

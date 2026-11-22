@@ -51,7 +51,6 @@ _EGRESS_FAMILY = frozenset(
     }
 )
 
-_SKIP_FASTAPI = frozenset({"packages/core/src/crawlutron/health/readiness.py"})
 _SKIP_EGRESS = frozenset(
     {
         "packages/rest/src/crawlutron_rest/cli/__main__.py",
@@ -385,7 +384,6 @@ RULE_FASTAPI_REST_ONLY = Rule(
     find=_fastapi_imports,
     summary="fastapi imported outside packages/rest",
     scope=_scope,
-    skip=_SKIP_FASTAPI,
     bite=lambda: Bites("from fastapi import FastAPI\n", "fastapi"),
     clean=lambda: ["import httpx\n"],
 )
