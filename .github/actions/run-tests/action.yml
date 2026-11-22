@@ -36,7 +36,7 @@ runs:
       shell: bash
       run: .venv/bin/python -m camoufox fetch
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ github.token }}
     - name: Run pytest
       shell: bash
       env:
