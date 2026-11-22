@@ -304,7 +304,6 @@ async def submit_async_crawl(
     payload: dict[str, JsonValue],
     *,
     timeout: float = 15.0,
-    interval: float = 0.1,
     message: str = "Async crawl did not complete in time",
     on_pending=None,
 ):
@@ -315,7 +314,6 @@ async def submit_async_crawl(
         client,
         request_id,
         timeout=timeout,
-        interval=interval,
         message=message,
         on_pending=on_pending,
     )
