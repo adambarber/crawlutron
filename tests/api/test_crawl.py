@@ -260,6 +260,7 @@ class TestShadowDomApi(_AsgiEndpointTests):
                     },
                 },
                 timeout=50.0,
+                interval=2.0,  # ANON_MAX_REQUESTS=120 per 60s; 2.0s -> 25 polls/50s under quota
             )
             result = wire_result(completed.json())
             assert result["status"] == "success"

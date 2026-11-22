@@ -264,9 +264,13 @@ async def poll_crawl_completion(
     async def done() -> bool:
         nonlocal response
         response = await client.get(f"/v1/crawl/{request_id}")
-        if response.status_code != 200 and on_pending is not None:
+        if response.status_code == 200:
+            return True
+        if response.status_code == 429:
+            pytest.fail(f"{message}: status poll was throttled (429); polls exceeded the anonymous quota")
+        if on_pending is not None:
             on_pending(response)
-        return response.status_code == 200
+        return False
 
     await poll_until(done, timeout=timeout, interval=interval, message=message)
     return response
@@ -304,6 +308,7 @@ async def submit_async_crawl(
     payload: dict[str, JsonValue],
     *,
     timeout: float = 15.0,
+    interval: float = 0.1,
     message: str = "Async crawl did not complete in time",
     on_pending=None,
 ):
@@ -314,6 +319,7 @@ async def submit_async_crawl(
         client,
         request_id,
         timeout=timeout,
+        interval=interval,
         message=message,
         on_pending=on_pending,
     )
