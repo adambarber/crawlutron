@@ -590,13 +590,14 @@ set) are unaffected (MINOR-2).
   **single event-with-optional-timeout primitive**: `gate._wait_for_progress()`
   awaits the injected `Signal` (an `asyncio.Event`-equivalent) with an optional
   `Duration` timeout, then re-checks the version. The **concrete event/sleep
-  primitive lives OUTSIDE `packages/crawlutron-admit/src/crawlutron_admit/`** — injected from the seam; the kernel
+  primitive lives OUTSIDE the decision core** — injected from the seam; the kernel
   declares only a `Signal` Protocol (`.wait(timeout)`, `.set()`). The
-  source-scan gate (§9.6) is satisfiable under exactly this reading: it scans
-  the **top-level `packages/crawlutron-admit/src/crawlutron_admit/**`** for direct
-  `time.monotonic`/`asyncio.sleep` (and aliases); because the concrete
-  blocking/awaiting primitive is never implemented in-package, the seam's
-  event class (which may legitimately use `asyncio.sleep`) is out of scope.
+  source-scan gate (§9.6) scans the **decision core** (`gate.py`,
+  `gate_decisions.py`, `policy.py`, `values.py`, `seams.py`) for direct
+  `time.monotonic`/`asyncio.sleep` (and aliases). `crawlutron_admit/sensing/**`
+  is a named, owner-sanctioned exemption: those host adapters own cache TTLs
+  and default their injected clock/sleep to the real primitives; the gate
+  skips exactly those four files by name.
   **Never keyed on `packages/core/src/crawlutron/admission/`.** It is the **one** gate-side
   yield (§8).
 - **Versioned wakeup is global, not per-lane**: one monotonic `version: int`
@@ -964,10 +965,12 @@ none — the v1 plan declared it; v2 makes it a real Protocol member).
   reads the gate's own injected clock and `Progress` record only. The
   two-clock bug (`AdmissionStallGuard.__init__` defaulting its own
   `time.monotonic`, `admission_stall.py:49`) is killed.
-- `Clock` / `Signal` — the only time/seam surfaces; **both declared as
-  Protocols in the kernel, their concrete implementations injected from the
-  seam** (M4). No `time.monotonic`, no `asyncio.sleep`, no concrete
-  `asyncio.Event` construction inside `packages/crawlutron-admit/src/crawlutron_admit/**` (source-scan gate, §9.6).
+- `Clock` / `Signal` — the only time/seam surfaces **of the decision core**;
+  both declared as Protocols in the kernel, their concrete implementations
+  injected from the seam (M4). No `time.monotonic`, no `asyncio.sleep`, no
+  concrete `asyncio.Event` in `gate.py`, `gate_decisions.py`, `policy.py`,
+  `values.py`, `seams.py` (source-scan gate, §9.6). The `sensing/**` adapters
+  are an owner-sanctioned exemption for host cache TTLs and clock defaults.
 
 ## 9. Migration plan (every gap closed — M1..M7)
 
@@ -1023,9 +1026,11 @@ none — the v1 plan declared it; v2 makes it a real Protocol member).
      (`test_file_size.py:88-91`) asserts `set(_BUDGETS) ==
      set(python_bearing_roots())`, and `test_scan_roots_equal_every_python_
      bearing_tree` (`test_scan_roots.py:16`) pins
-     `SCAN_ROOTS == python_bearing_roots()` (eight roots, derived from the uv
-     members). A new member auto-enters that surface; its ratchet row must land in
-     the same commit (`test_file_size.py:18-23`). This is also
+     `SCAN_ROOTS`, the derived 10-tuple of python-bearing trees under the four
+     roots `python_bearing_roots()` yields (`packages`, `scripts`, `tests`,
+     `utils`). A new member auto-enters that surface; its ratchet row must land in
+     the same commit (`test_file_size.py:18-23`).
+     This is also
      governed by the invariant-scope law (SCAN_ROOTS is derived,
      `_walk_primitives.python_bearing_roots()`).
    - **Zero-crawlutron-import gate**: a new invariant (modeled on
@@ -1054,10 +1059,11 @@ none — the v1 plan declared it; v2 makes it a real Protocol member).
      produce identical lane decisions wherever the old path returned a
      fully-granted batch, and asserts the *delta* (floor vs `(0,0)`) holds
      exactly at saturation.
-   - **Source-scan gate scope (M4 + MINOR-4 descriptor)**: the
-     `time.monotonic`/`asyncio.sleep`-and-aliases `Rule` scans **top-level
-     `packages/crawlutron-admit/src/crawlutron_admit/**` only** with the exact descriptor
-     **`scope = lambda *, exclude: trees_under(ADMISSION_ROOT)`**
+       - **Source-scan gate scope (M4 + MINOR-4 descriptor)**: the
+       `time.monotonic`/`asyncio.sleep`-and-aliases `Rule` scans the **decision
+       core under `packages/crawlutron-admit/src/crawlutron_admit/`** with descriptor
+       **`scope = lambda *, exclude: trees_under(ADMISSION_ROOT)`** and a named
+       `skip` of the four `sensing/**` host adapters (§8)
      (`trees_under` from `tests/chokepoint_walks.py`; `REPO_ROOT`
      `tests/_walk_primitives.py`). The default `Rule` scope is `app_trees`
      (crawlutron-only — `tests/rules.py:131`, `tests/_walk_trees.py:69-80`)
