@@ -20,6 +20,9 @@ dependencies = [
     # plain `pip install crawlutron-core` cannot lose the import the manifest does
     # not grant (workspace resolution masks the defect locally).
     "crawlutron-extract>=0.4.0.dev0",
+    # The admission kernel core imports at module load; a standalone core/MCP
+    # install must not lose it to workspace shadowing.
+    "crawlutron-admit>=0.1.0",
     # crawlutron-safe-url ships complete: regex and publicsuffixlist are hard
     # dependencies, so admission and site grouping never silently degrade.
     "crawlutron-safe-url>=0.4.0.dev0",
