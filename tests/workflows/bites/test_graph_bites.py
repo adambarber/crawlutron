@@ -24,6 +24,23 @@ def test_a_ghost_call_in_dot_slash_form_is_caught(monkeypatch) -> None:
         graph.test_every_local_reusable_call_resolves_to_a_workflow_on_disk()
 
 
+def test_a_missing_local_action_is_caught(monkeypatch) -> None:
+    source = next(step for job in JOBS for step in job.steps if step.uses and ".github/actions/" in step.uses)
+    ghost = source.model_copy(update={"uses": "./.github/actions/ghost"})
+    job = next(job for job in JOBS if source in job.steps)
+    broken = job.model_copy(update={"steps": (ghost,)})
+    monkeypatch.setattr(graph, "JOBS", (broken,))
+    with pytest.raises(AssertionError, match="missing local action"):
+        graph.test_every_local_action_resolves_to_a_directory()
+
+
+def test_a_job_without_a_parent_workflow_is_caught(monkeypatch) -> None:
+    job = next(iter(JOBS)).model_copy(update={"workflow": "ghost"})
+    monkeypatch.setattr(graph, "JOBS", (job,))
+    with pytest.raises(AssertionError):
+        graph.test_every_job_in_the_model_has_a_parent_workflow()
+
+
 def test_a_broken_output_chain_is_caught(monkeypatch) -> None:
     source = workflow("released")
     triggers = dict(source.on_)

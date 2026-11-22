@@ -63,6 +63,11 @@ _CRON_RANGES = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
 
 
 def _cron_field(text: str, low: int, high: int, names: frozenset[str]) -> None:
+    if "/" in text:
+        base, step = text.split("/", 1)
+        if not step.isdigit() or not 1 <= int(step) <= high:
+            raise ValueError(f"{step!r} is not a valid cron step")
+        text = base
     for part in re.split(r"[,/-]", text):
         if not part or part == "*":
             continue

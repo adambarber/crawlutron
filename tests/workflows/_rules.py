@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -65,21 +64,9 @@ def needs_resolve(workflow: Workflow, job: Job) -> Iterator[Finding]:
             )
 
 
-_EVENT = re.compile(r"\$\{\{\s*github\s*\.\s*event\b", re.IGNORECASE)
-_PYTEST_ENV = frozenset({"PYTEST_ADDOPTS", "PYTEST_ARGS"})
-
-
-def _marker_selected(text: str) -> bool:
-    """A real -m marker filter, not python's -m module invocation."""
-    return any(
-        match and match.group(1).strip("\"'").lower() != "pytest"
-        for match in re.finditer(r"(?:^|[\s'\"])-m[= ]+['\"]?([^\s'\"]+)", text)
-    )
-
-
 def no_event_splicing_in_run(workflow: Workflow, job: Job) -> Iterator[Finding]:
     for step in job.steps:
-        if _EVENT.search(step.run or ""):
+        if step.event_spliced:
             yield Finding(
                 "no-event-splicing-in-run",
                 workflow.stem,
@@ -91,13 +78,9 @@ def no_event_splicing_in_run(workflow: Workflow, job: Job) -> Iterator[Finding]:
 
 def no_bare_pytest(workflow: Workflow, job: Job) -> Iterator[Finding]:
     for step in job.steps:
-        run = step.run or ""
-        if "pytest" not in run:
+        if "pytest" not in (step.run or ""):
             continue
-        env_selected = any(
-            _marker_selected(str(value)) for key, value in step.env.items() if key in _PYTEST_ENV
-        )
-        if _marker_selected(run) or env_selected:
+        if step.command_facts.marker_filter or step.pytest_env_marker:
             continue
         if (workflow.stem, job.key, step.name) in BARE_PYTEST_WAIVERS:
             continue
@@ -112,9 +95,7 @@ def no_bare_pytest(workflow: Workflow, job: Job) -> Iterator[Finding]:
 
 def no_pip_install(workflow: Workflow, job: Job) -> Iterator[Finding]:
     for step in job.steps:
-        run = step.run or ""
-        pip = re.search(r"\bpip(?:3(?:\.\d+)?)?\b[^;\n]*\binstall\b", run)
-        if pip and (workflow.stem, job.key, step.name) not in PIP_INSTALL_WAIVERS:
+        if step.command_facts.pip_install and (workflow.stem, job.key, step.name) not in PIP_INSTALL_WAIVERS:
             yield Finding(
                 "no-pip-install",
                 workflow.stem,
@@ -126,8 +107,7 @@ def no_pip_install(workflow: Workflow, job: Job) -> Iterator[Finding]:
 
 def no_heredoc(workflow: Workflow, job: Job) -> Iterator[Finding]:
     for step in job.steps:
-        run = step.run or ""
-        if re.search(r"<<-?\s*['\"]?[A-Za-z_]", run):
+        if step.command_facts.heredoc:
             yield Finding(
                 "no-heredoc",
                 workflow.stem,

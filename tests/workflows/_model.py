@@ -19,6 +19,7 @@ from pydantic import (
 )
 
 from tests.chokepoint_paths import REPO_ROOT
+from tests.workflows._facts import PYTEST_ENV_KEYS, CommandFacts, ExpressionFacts, has_marker_filter
 from tests.workflows._names import (
     ActionRef,
     Cron,
@@ -86,6 +87,18 @@ class Step(BaseModel):
     shell: str | None = None
     continue_on_error: bool | None = Field(default=None, alias="continue-on-error")
     line: int
+
+    @property
+    def event_spliced(self) -> bool:
+        return ExpressionFacts.parse(self.run or "").references_event
+
+    @property
+    def command_facts(self) -> CommandFacts:
+        return CommandFacts.parse(self.run or "")
+
+    @property
+    def pytest_env_marker(self) -> bool:
+        return any(has_marker_filter(str(value)) for key, value in self.env.items() if key in PYTEST_ENV_KEYS)
 
     @model_validator(mode="after")
     def refusal(self, info: ValidationInfo) -> Step:
