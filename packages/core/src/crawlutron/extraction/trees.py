@@ -50,12 +50,6 @@ _parse_tally_lock = threading.Lock()
 _parse_tally = 0
 
 
-def parse_count() -> int:
-    """How many DOM trees this process has built -- cumulative and monotonic."""
-    with _parse_tally_lock:
-        return _parse_tally
-
-
 def parse_html_tree(html: str | None) -> Tree | None:
     """Build one bounded DOM tree from HTML; None for empty or invalid input.
 

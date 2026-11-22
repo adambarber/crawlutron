@@ -409,11 +409,6 @@ def matches_chain(node: DOMNode, chain: list[tuple[list[tuple[str, ...]], str | 
     return True
 
 
-def matches_selector(node: DOMNode, selector_chain: list) -> bool:
-    """Check if node matches a selector chain."""
-    return matches_chain(node, selector_chain)
-
-
 def find_all(root: DOMNode, selector_chain: list) -> list[DOMNode]:
     """Find all descendant-or-self nodes matching the selector chain."""
     results: list[DOMNode] = []

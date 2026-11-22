@@ -50,7 +50,7 @@ is a directory, not a tutorial — see `docs/testing.md` for the design "why").
 | `_lock_scope_walks` | Lock-scope detectors: no slow work lexically inside `with self._lock:`. |
 | `_loop_liveness` | A liveness probe shared by the event-loop discipline tests. |
 | `_metrics_budget_ledger` | Hermetic budget ledger for the metrics gates (#253). |
-| `_parse_budget` | The lxml parse budget, bracketing `extraction.parse_count()`. |
+| `_parse_budget` | The lxml parse budget applied by extraction's HTML tree builder. |
 | `_policy_factories` | Crawl-policy defaults, and the one way a test admits discovered links. |
 | `_policy_harnesses` | An app over the crawl and policy routers with stores the test owns. |
 | `_pool_harnesses` | Adapt a zero-argument fake factory to the `build(settings)` builder contract. |
