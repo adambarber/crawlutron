@@ -1,29 +1,29 @@
 """Red-first test: AST cache returns isolated copies with metadata.
 
-Each caller receives an independent copy of the parsed AST carrying version +
+Each caller receives an independent copy of the _parsed_copy AST carrying version +
 validation metadata (source SHA-256, AST schema version, validation result).
 """
 
 import ast
 from pathlib import Path
 
-from tests._walk_primitives import _PARSE_CACHE, parsed
+from tests._walk_primitives import _PARSE_CACHE, _parsed_copy
 from tests.chokepoint_paths import REPO_ROOT
 
 
 def test_ast_cache_returns_isolated_copies_with_metadata():
-    """Each call to parsed() for the same file must return a distinct object
+    """Each call to _parsed_copy() for the same file must return a distinct object
     carrying metadata, and mutating one must not affect the other.
     """
     # Pick a stable test file
     test_file = REPO_ROOT / "tests" / "_walk_primitives.py"
 
     # Parse twice - should get two independent copies
-    tree1 = parsed(test_file)
-    tree2 = parsed(test_file)
+    tree1 = _parsed_copy(test_file)
+    tree2 = _parsed_copy(test_file)
 
     # They must be different objects (isolated copies)
-    assert tree1 is not tree2, "parsed() must return isolated copies, not shared object"
+    assert tree1 is not tree2, "_parsed_copy() must return isolated copies, not shared object"
 
     # Both must be ast.Module instances
     assert isinstance(tree1, ast.Module)
@@ -54,8 +54,8 @@ def test_ast_cache_mutation_isolation():
     """Mutating one caller's tree must not affect another caller's tree."""
     test_file = REPO_ROOT / "tests" / "_walk_primitives.py"
 
-    tree1 = parsed(test_file)
-    tree2 = parsed(test_file)
+    tree1 = _parsed_copy(test_file)
+    tree2 = _parsed_copy(test_file)
 
     # Record initial structure
     initial_dump1 = ast.dump(tree1)
@@ -79,9 +79,9 @@ def test_ast_cache_canonical_tree_stored_once(tmp_path: Path) -> None:
     test_file.write_text("value = 1\n", encoding="utf-8")
     before = len(_PARSE_CACHE)
 
-    parsed(test_file)
+    _parsed_copy(test_file)
     after_first = len(_PARSE_CACHE)
-    parsed(test_file)
+    _parsed_copy(test_file)
 
     assert after_first == before + 1
     assert len(_PARSE_CACHE) == after_first
@@ -95,7 +95,7 @@ def test_ast_cache_different_sources_different_entries(tmp_path: Path) -> None:
     second.write_text("b = 2\n", encoding="utf-8")
     before = len(_PARSE_CACHE)
 
-    parsed(first)
-    parsed(second)
+    _parsed_copy(first)
+    _parsed_copy(second)
 
     assert len(_PARSE_CACHE) == before + 2

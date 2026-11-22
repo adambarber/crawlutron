@@ -40,6 +40,7 @@ from utils.paths import (
 
 __all__ = [
     "ADMISSION_ROOT",
+    "canonical_tree",
     "APP_ROOT",
     "APP_ROOTS",
     "MCP_ROOT",
@@ -132,11 +133,8 @@ def parsed_source(source: str, filename: str = "<module>") -> ast.Module:
     return ast.parse(source, filename=filename)
 
 
-def parsed(path: pathlib.Path) -> ast.Module:
-    """The AST of `path`, parsed once per session and cached canonically.
-    Each caller receives an isolated copy with metadata (SHA-256, schema version, validation).
-    Callers must not share a mutable ast.Module.
-    """
+def _canonical_pair(path: pathlib.Path) -> tuple[ast.Module, CacheMetadata]:
+    """Parse once per (path, digest); metadata lives on the canonical tree."""
     if not path.is_file():
         raise FileNotFoundError(f"ast requested for a nonexistent source file: {path}")
     source = path.read_text(encoding="utf-8")
@@ -144,28 +142,34 @@ def parsed(path: pathlib.Path) -> ast.Module:
     key = (str(path), source_sha256)
     cached = _PARSE_CACHE.get(key)
     if cached is None:
-        canonical_tree = parsed_source(source, str(path))
+        tree = parsed_source(source, str(path))
         metadata = CacheMetadata(
             source_sha256=source_sha256,
             ast_schema_version=_AST_SCHEMA_VERSION,
-            validation_result=_validate_ast(canonical_tree),
+            validation_result=_validate_ast(tree),
         )
-        _PARSE_CACHE[key] = (canonical_tree, metadata)
+        object.__setattr__(
+            tree,
+            "_cache_metadata",
+            {
+                "source_sha256": metadata.source_sha256,
+                "ast_schema_version": metadata.ast_schema_version,
+                "validation_result": metadata.validation_result,
+            },
+        )
+        _PARSE_CACHE[key] = (tree, metadata)
         cached = _PARSE_CACHE[key]
-    canonical_tree, metadata = cached
-    # Return a deep copy with metadata attached
-    tree_copy = copy.deepcopy(canonical_tree)
-    # Attach metadata as an attribute (not part of the AST proper)
-    object.__setattr__(
-        tree_copy,
-        "_cache_metadata",
-        {
-            "source_sha256": metadata.source_sha256,
-            "ast_schema_version": metadata.ast_schema_version,
-            "validation_result": metadata.validation_result,
-        },
-    )
-    return tree_copy
+    return cached
+
+
+def canonical_tree(path: pathlib.Path) -> ast.Module:
+    """The one shared read-only AST for `path`; callers must not mutate it."""
+    return _canonical_pair(path)[0]
+
+
+def _parsed_copy(path: pathlib.Path) -> ast.Module:
+    """Private copy door for mutation-boundary tests; readers use canonical_tree."""
+    return copy.deepcopy(canonical_tree(path))
 
 
 def nodes_of(root: ast.AST) -> tuple[ast.AST, ...]:
@@ -282,13 +286,13 @@ def empty_scan_roots(roots: tuple[str, ...], base: pathlib.Path = REPO_ROOT) -> 
 
 @cache
 def _trees_under(directory: pathlib.Path) -> tuple[tuple[pathlib.Path, ast.Module], ...]:
-    return tuple((path, parsed(path)) for path in sorted(directory.rglob("*.py")))
+    return tuple((path, canonical_tree(path)) for path in sorted(directory.rglob("*.py")))
 
 
 def file_tree(relative: str) -> tuple[pathlib.Path, ast.Module]:
     """Parse one module by its repo-relative path (e.g. crawlutron/service/webhooks.py)."""
     path = REPO_ROOT / relative
-    return path, parsed(path)
+    return path, canonical_tree(path)
 
 
 def offender(path: pathlib.Path, lineno: int, detail: str = "") -> str:

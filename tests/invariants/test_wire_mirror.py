@@ -10,7 +10,7 @@ from typing import get_args
 import pytest
 
 from tests.chokepoint_paths import REPO_ROOT
-from tests.chokepoint_walks import file_tree, parsed
+from tests.chokepoint_walks import canonical_tree, file_tree
 
 # --- A wire model may not silently drop a domain model's field ---- crawlutron/models/taxonomy.py holds
 # the internal dataclasses and the pydantic response models are the ones under crawlutron/models/
@@ -33,10 +33,11 @@ def _stem_pairs(package: str) -> dict[str, tuple[pathlib.Path, ast.ClassDef, ast
             continue
         owners = [
             n
-            for n in parsed(owner_path).body
+            for n in canonical_tree(owner_path).body
             if isinstance(n, ast.ClassDef) and _is_record(n) and not _is_pydantic_model(n)
         ]
-        twins = [n for n in parsed(twin).body if isinstance(n, ast.ClassDef) and _is_pydantic_model(n)]
+        twin_tree = canonical_tree(twin)
+        twins = [n for n in twin_tree.body if isinstance(n, ast.ClassDef) and _is_pydantic_model(n)]
         if len(owners) == 1 and len(twins) == 1:
             pairs[owner_path.stem] = (owner_path, owners[0], twins[0])
     return pairs
@@ -88,7 +89,7 @@ def _wire_tree() -> ast.Module:
     """Every response model in the package, merged into one comparable tree."""
     merged = ast.Module(body=[], type_ignores=[])
     for path in sorted(REPO_ROOT.glob(f"{_WIRE_MODEL_DIR}/*.py")):
-        merged.body.extend(parsed(path).body)
+        merged.body.extend(canonical_tree(path).body)
     return merged
 
 
@@ -258,7 +259,7 @@ def _attempt_funnel_field_sets() -> dict[str, set[str]]:
     sets: dict[str, set[str]] = {}
     for spec in _FUNNEL_ATTEMPT_FIELDS:
         module_path, function_name = spec.split(":")
-        tree = parsed(REPO_ROOT / module_path)
+        tree = canonical_tree(REPO_ROOT / module_path)
         sets[spec] = _constructor_keywords(tree, function_name, "CrawlStrategyAttempt")
     return sets
 

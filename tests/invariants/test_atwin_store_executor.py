@@ -7,14 +7,14 @@ import ast
 
 from tests._walk_assertions import assert_detectors_clean
 from tests.chokepoint_paths import APP_ROOT
-from tests.chokepoint_walks import attribute_call_on, call_offenders, parsed
+from tests.chokepoint_walks import attribute_call_on, call_offenders, canonical_tree
 
 _STORE = APP_ROOT / "storage" / "coordination_store.py"
 
 
 def test_async_store_calls_run_on_a_dedicated_executor() -> None:
     assert_detectors_clean(
-        parsed(_STORE),
+        canonical_tree(_STORE),
         path=_STORE,
         detectors=(_asyncio_to_thread_offenders, _atwin_executor_offenders),
     )

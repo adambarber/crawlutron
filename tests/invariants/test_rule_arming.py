@@ -12,7 +12,7 @@ from collections.abc import Iterator, Sequence
 
 from tests._walk_primitives import _narrow
 from tests.chokepoint_paths import REPO_ROOT
-from tests.chokepoint_walks import parsed
+from tests.chokepoint_walks import canonical_tree
 from tests.invariants._armed_detectors import ArmedHandRolled, hand_rolled_detectors
 from tests.invariants._cache_walk_probe import assert_second_call_skips_the_walk
 from tests.invariants._shared import app_names
@@ -68,7 +68,7 @@ def declared_rules() -> Iterator[ArmedRule]:
     Derived from the tree rather than a module list: a left-out module is a
     rule nothing audits."""
     for path in sorted((REPO_ROOT / "tests" / "invariants").glob("test_*.py")):
-        module = parsed(path)
+        module = canonical_tree(path)
         functions = _function_index(module)
         constants = _string_constants(module)
         for node in ast.walk(module):

@@ -1,4 +1,4 @@
-"""S6 contract: parsed() shares one canonical AST per (path, content) per session and returns
+"""S6 contract: _parsed_copy() shares one canonical AST per (path, content) per session and returns
 isolated copies with metadata. Re-parses on any content change -- even a rewrite that keeps
 size and mtime identical (the same-size-same-mtime stale hole).
 """
@@ -6,7 +6,7 @@ size and mtime identical (the same-size-same-mtime stale hole).
 import ast
 import os
 
-from tests._walk_primitives import parsed
+from tests._walk_primitives import _parsed_copy, canonical_tree
 from tests.invariants._clock_family import single_target_assigns
 
 
@@ -15,7 +15,7 @@ def _assigned_constant(tree: ast.Module, name: str) -> object:
     for target, node in single_target_assigns(tree):
         if target == name and isinstance(node.value, ast.Constant):
             return node.value.value
-    raise AssertionError(f"no literal assignment to {name} in parsed tree")
+    raise AssertionError(f"no literal assignment to {name} in _parsed_copy tree")
 
 
 def test_parsed_returns_isolated_copies_with_identical_metadata_and_structure(tmp_path) -> None:
@@ -25,10 +25,10 @@ def test_parsed_returns_isolated_copies_with_identical_metadata_and_structure(tm
     """
     path = tmp_path / "share.py"
     path.write_text("SHARED = 1\n", encoding="utf-8")
-    tree1 = parsed(path)
-    tree2 = parsed(path)
+    tree1 = _parsed_copy(path)
+    tree2 = _parsed_copy(path)
     # Must be different objects (isolated copies)
-    assert tree1 is not tree2, "parsed() must return isolated copies, not shared object"
+    assert tree1 is not tree2, "_parsed_copy() must return isolated copies, not shared object"
     # Both must carry cache metadata
     assert hasattr(tree1, "_cache_metadata"), "tree1 missing _cache_metadata"
     assert hasattr(tree2, "_cache_metadata"), "tree2 missing _cache_metadata"
@@ -38,22 +38,35 @@ def test_parsed_returns_isolated_copies_with_identical_metadata_and_structure(tm
     assert ast.dump(tree1) == ast.dump(tree2), "copies must be structurally identical"
 
 
+def test_canonical_tree_is_shared_while_parsed_still_copies(tmp_path) -> None:
+    """Readers share the canonical tree; mutation tests still get copies."""
+    path = tmp_path / "shared.py"
+    path.write_text("SHARED = 1\n", encoding="utf-8")
+    first = canonical_tree(path)
+    assert canonical_tree(path) is first
+    metadata = getattr(first, "_cache_metadata", None)
+    assert isinstance(metadata, dict) and metadata["source_sha256"]
+    copy = _parsed_copy(path)
+    assert copy is not first
+    assert ast.dump(copy) == ast.dump(first)
+
+
 def test_same_size_same_mtime_rewrite_is_reparsed(tmp_path) -> None:
-    """A rewrite preserving both size and mtime is still re-parsed from fresh source.
+    """A rewrite preserving both size and mtime is still re-_parsed_copy from fresh source.
 
     Keying on (mtime_ns, size) cannot identify content; keying on the content digest can.
     """
     path = tmp_path / "rewrite.py"
     path.write_text("BODY = 10\n", encoding="utf-8")  # ten bytes
     stamp = path.stat()
-    assert _assigned_constant(parsed(path), "BODY") == 10
+    assert _assigned_constant(_parsed_copy(path), "BODY") == 10
 
     path.write_text("BODY = 20\n", encoding="utf-8")  # still ten bytes
     os.utime(path, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
     assert path.stat().st_size == stamp.st_size
     assert path.stat().st_mtime_ns == stamp.st_mtime_ns
 
-    value = _assigned_constant(parsed(path), "BODY")
+    value = _assigned_constant(_parsed_copy(path), "BODY")
     assert value == 20, f"stale source served after same-size-same-mtime rewrite: got {value}"
 
 
@@ -61,8 +74,8 @@ def test_parsed_copies_are_mutation_isolated(tmp_path) -> None:
     """Mutating one caller's copy must not affect another caller's copy."""
     path = tmp_path / "mutate.py"
     path.write_text("X = 1\nY = 2\n", encoding="utf-8")
-    tree1 = parsed(path)
-    tree2 = parsed(path)
+    tree1 = _parsed_copy(path)
+    tree2 = _parsed_copy(path)
     initial_dump2 = ast.dump(tree2)
     # Mutate tree1
     bogus_node = ast.Expr(value=ast.Constant(value="MUTATED", lineno=99999))

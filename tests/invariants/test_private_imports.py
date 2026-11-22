@@ -14,9 +14,9 @@ import pytest
 from tests.chokepoint_paths import APP_ROOT, REPO_ROOT, relative_posix
 from tests.chokepoint_walks import (
     assignment_targets,
+    canonical_tree,
     from_imports,
     nodes_of,
-    parsed,
     resolved_expr_name,
     trees_under,
 )
@@ -337,7 +337,7 @@ def _module_public_names(tree: ast.Module) -> frozenset[str]:
 
 
 def _owner_public_names() -> dict[str, frozenset[str]]:
-    """``module -> public names`` for every crawlutron module, parsed once per process."""
+    """``module -> public names`` for every crawlutron module, canonical_tree once per process."""
     global _OWNER_PUBLIC
     if _OWNER_PUBLIC is None:
         _OWNER_PUBLIC = {_module_of(path): _module_public_names(tree) for path, tree in trees_under(APP_ROOT)}
@@ -452,7 +452,7 @@ def _conftest_trees(*, exclude: frozenset[str] = frozenset()) -> tuple[tuple[pat
     ``trees_under`` rglobs, so handed a FILE it returns nothing -- green while
     inspecting zero files: the empty-trigger construction error."""
     del exclude
-    tree = parsed(_CONFTEST)
+    tree = canonical_tree(_CONFTEST)
     return ((_CONFTEST, tree),)
 
 

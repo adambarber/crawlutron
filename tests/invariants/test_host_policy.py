@@ -11,12 +11,12 @@ import pathlib
 
 from tests.chokepoint_paths import APP_ROOT
 from tests.chokepoint_walks import (
+    canonical_tree,
     functions,
     local_nodes,
     local_subtree,
     offender_at,
     parent_map,
-    parsed,
     resolved_call_name,
 )
 from tests.rules import Bites, Rule, Trips
@@ -475,7 +475,7 @@ def test_host_policy_detector_accepts_fixed_extraction_boundaries():
     ever flags these, the sanction needs a second look.
     """
     path = APP_ROOT / "extraction" / "trees.py"
-    tree = parsed(path)
+    tree = canonical_tree(path)
     assert not [
         offender
         for offender in _required_host_policy_offenders(tree, path)

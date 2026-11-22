@@ -11,7 +11,7 @@ import pathlib
 from collections.abc import Iterator
 from functools import cache
 
-from tests._walk_primitives import parsed
+from tests._walk_primitives import _parsed_copy
 from tests.chokepoint_paths import REPO_ROOT
 
 __all__ = [
@@ -91,7 +91,7 @@ def wall_read(node: ast.expr, wall: set[str]) -> bool:
 def suite_trees() -> tuple[tuple[pathlib.Path, ast.Module], ...]:
     """One shared copy set of ``tests/**``, isolated from ``trees_under``'s copies."""
     return tuple(
-        (path, parsed(path))
+        (path, _parsed_copy(path))
         for path in sorted((REPO_ROOT / "tests").rglob("*.py"))
         if "__pycache__" not in path.parts
     )

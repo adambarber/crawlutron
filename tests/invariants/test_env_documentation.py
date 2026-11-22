@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import ast
 import re
-from functools import lru_cache
+from functools import cache, lru_cache
 
 from tests._walk_primitives import SCAN_ROOTS
 from tests.chokepoint_paths import REPO_ROOT
-from tests.chokepoint_walks import parsed
+from tests.chokepoint_walks import canonical_tree
 from tests.invariants._env_knobs import _consumed_knobs
 
 
@@ -22,6 +22,7 @@ def _documented_env() -> dict[str, str]:
     return values
 
 
+@cache
 def _app_and_scripts_sources() -> list[tuple[str, ast.Module]]:
     """(relative path, tree) for every source the env-documentation sweeps read."""
     found: list[tuple[str, ast.Module]] = []
@@ -29,7 +30,7 @@ def _app_and_scripts_sources() -> list[tuple[str, ast.Module]]:
         for path in sorted((REPO_ROOT / base).rglob("*.py")):
             if "__pycache__" in path.parts:
                 continue
-            found.append((path.relative_to(REPO_ROOT).as_posix(), parsed(path)))
+            found.append((path.relative_to(REPO_ROOT).as_posix(), canonical_tree(path)))
     return found
 
 

@@ -6,13 +6,13 @@ recency refresh goes through the explicit ``touch`` door.
 import ast
 
 from tests.chokepoint_paths import APP_ROOT
-from tests.chokepoint_walks import parsed, stmt_offenders
+from tests.chokepoint_walks import canonical_tree, stmt_offenders
 
 _STORE = APP_ROOT / "storage" / "coordination_cookies.py"
 
 
 def test_load_is_read_only() -> None:
-    tree = parsed(_STORE)
+    tree = canonical_tree(_STORE)
     assert not _load_mutation_offenders(tree), "load performs a mutation"
 
 

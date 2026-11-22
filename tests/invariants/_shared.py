@@ -14,7 +14,7 @@ from pathlib import Path
 
 from tests._walk_primitives import import_roots
 from tests.chokepoint_paths import APP_ROOT, APP_ROOTS, REPO_ROOT, relative_posix
-from tests.chokepoint_walks import app_trees, nodes_of, parsed, resolved_call_name
+from tests.chokepoint_walks import app_trees, canonical_tree, nodes_of, resolved_call_name
 from tests.property_registry import Property
 
 __all__ = [
@@ -51,7 +51,7 @@ def _app_file_paths() -> list[pathlib.Path]:
 def _app_names(_key: tuple[tuple[str, int, int], ...]) -> set[str]:
     names: set[str] = set()
     for path in _app_file_paths():
-        for node in ast.walk(parsed(path)):
+        for node in ast.walk(canonical_tree(path)):
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
                 names.add(node.name)
             elif isinstance(node, ast.Attribute):

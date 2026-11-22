@@ -90,6 +90,7 @@ def _premises() -> dict[str, Callable[[], None]]:
         "bool-env": _observed("bool-env"),
         "robots-policy": _observed("robots-policy"),
         "public-target": _observed("public-target"),
+        "canonical-read-only": _subject_imports(_INVARIANTS.parent.parent / "tests" / "_walk_primitives.py"),
     }
 
 
@@ -109,6 +110,12 @@ def hand_rolled_detectors() -> tuple[ArmedHandRolled, ...]:
     base = [
         ArmedHandRolled(name=n, module=_INVARIANTS / m, function=f, premise=premises[p])
         for n, m, f, p in (
+            (
+                "canonical-read-only",
+                "test_canonical_tree_read_only.py",
+                "_canonical_mutation_offenders",
+                "canonical-read-only",
+            ),
             (
                 "undecodable-encoding",
                 "test_encoding_bounds.py",
