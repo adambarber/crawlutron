@@ -206,13 +206,6 @@ jobs:
       - name: Pre-warm bytecode for the battery
         run: .venv/bin/python -m compileall -q packages/*/src tests scripts
       - uses: $/.github/actions/run-tests
-        id: battery-door
-        with:
-          coverage-file: .coverage.battery
-          junit-file: junit-*.xml
-      - name: Refuse success when the door ran no tests
-        if: ${{ steps.battery-door.outputs.tests-ran != 'true' }}
-        run: exit 1
       - name: Upload coverage data artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ always() }}
@@ -332,7 +325,7 @@ jobs:
         if: ${{ !cancelled() && needs.changes.outputs.real-pbkdf2 == 'true' }}
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
-          files: junit/real-pbkdf2/junit-real-pbkdf2.xml
+          files: junit/real-pbkdf2/junit-real-pbkdf2-*.xml
           flags: real-pbkdf2
           report_type: test_results
           use_oidc: true
@@ -341,7 +334,7 @@ jobs:
         if: ${{ !cancelled() }}
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
-          files: junit/test-browser/junit-browser.xml
+          files: junit/test-browser/junit-test-browser-*.xml
           flags: test-browser
           report_type: test_results
           use_oidc: true
@@ -371,15 +364,8 @@ jobs:
           persist-credentials: false
       - uses: $/.github/actions/prepare
       - uses: $/.github/actions/run-tests
-        id: real-pbkdf2-door
-        if: ${{ needs.changes.outputs.real-pbkdf2 == 'true' }}
         with:
           marker: "real_pbkdf2"
-          coverage-file: .coverage.real-pbkdf2
-          junit-file: junit-real-pbkdf2.xml
-      - name: Refuse success when the door ran no tests
-        if: ${{ always() && steps.real-pbkdf2-door.outcome != 'skipped' && steps.real-pbkdf2-door.outputs.tests-ran != 'true' }}
-        run: exit 1
       - name: Upload coverage data artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ always() }}
@@ -393,7 +379,7 @@ jobs:
         if: ${{ always() }}
         with:
           name: junit-real-pbkdf2
-          path: junit-real-pbkdf2.xml
+          path: junit-real-pbkdf2-*.xml
           if-no-files-found: warn
 
   test-browser:
@@ -419,16 +405,9 @@ jobs:
       - uses: $/.github/actions/prepare
       - uses: $/.github/actions/prepare-browser
       - uses: $/.github/actions/run-tests
-        id: test-browser-door
-        if: ${{ (github.event_name == 'pull_request' && needs.changes.outputs.browser == 'true') || github.event_name != 'pull_request' }}
         with:
           browser: true
-          coverage-file: .coverage.test-browser
-          junit-file: junit-browser.xml
           marker: ${{ github.event_name == 'pull_request' && 'browser' || 'not (browser or slow or real_pbkdf2)' }}
-      - name: Refuse success when the door ran no tests
-        if: ${{ always() && steps.test-browser-door.outcome != 'skipped' && steps.test-browser-door.outputs.tests-ran != 'true' }}
-        run: exit 1
       - name: Upload coverage data artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ always() }}
@@ -442,7 +421,7 @@ jobs:
         if: ${{ always() }}
         with:
           name: junit-test-browser
-          path: junit-browser.xml
+          path: junit-test-browser-*.xml
           if-no-files-found: warn
 
   # #623: dependency audit against the frozen lock. The export/pip-audit tools
@@ -559,7 +538,7 @@ jobs:
         uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
         with:
           config-file: '.github/dependency-review-config.yml'
-          base-ref: ${{ github.event.before || github.event.pull_request.base.sha }}
+          base-ref: ${{ github.event.before && github.event.before != '0000000000000000000000000000000000000000' && github.event.before || github.event.pull_request.base.sha || github.sha }}
           head-ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
   # One required check, and only on the PR path (this workflow runs top-level

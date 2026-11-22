@@ -8,7 +8,7 @@ from tests.workflows._model import JOBS, WORKFLOWS, Job, Step, Workflow, parent_
 from tests.workflows._rules import (
     JOB_RULES,
     WORKFLOW_RULES,
-    door_proof_consumed,
+    door_no_if,
     needs_resolve,
     no_bare_pytest,
     no_event_splicing_in_run,
@@ -186,27 +186,24 @@ def test_a_job_with_a_direct_pytest_must_use_the_door() -> None:
     assert list(uses_tests_door(parent_workflow(broken), broken))
 
 
-def test_a_door_caller_must_consume_the_proof() -> None:
-    broken = _mutate(
+def test_a_door_step_without_if_is_clean() -> None:
+    clean = _mutate(
         steps=(
             _step(name="Door", uses="$/.github/actions/run-tests"),
             _step(name="Prove", run="true"),
         )
     )
-    assert list(door_proof_consumed(parent_workflow(broken), broken))
+    assert not list(door_no_if(parent_workflow(clean), clean))
 
 
-def test_a_door_consumer_that_refuses_skipped_runs() -> None:
-    consumed = _mutate(
-        steps=(
-            _step(name="Door", uses="$/.github/actions/run-tests"),
-            _step(
-                name="Refuse",
-                run="test '${{ steps.Door.outputs.tests-ran }}' = 'true'",
-            ),
-        )
-    )
-    assert not list(door_proof_consumed(parent_workflow(consumed), consumed))
+def test_a_door_step_with_if_false_is_refused() -> None:
+    """Planting step-level if:false on the door must be named file:line."""
+    door = _step(name="Door", uses="$/.github/actions/run-tests").model_copy(update={"if": "${{ false }}"})
+    broken = _mutate(steps=(door, _step(name="Prove", run="true")))
+    findings = list(door_no_if(parent_workflow(broken), broken))
+    assert findings
+    assert findings[0].rule == "door-no-if"
+    assert parent_workflow(broken).path.name in findings[0].message
 
 
 def test_a_direct_pytest_under_if_false_is_still_bare_pytest() -> None:
@@ -232,7 +229,7 @@ def test_every_job_rule_has_a_bite() -> None:
         "no-event-splicing-in-run",
         "no-bare-pytest",
         "uses-tests-door",
-        "door-proof-consumed",
+        "door-no-if",
         "no-pip-install",
         "no-heredoc",
         "unique-step-ids",

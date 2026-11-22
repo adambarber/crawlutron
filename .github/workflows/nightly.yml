@@ -42,14 +42,8 @@ jobs:
 
       - name: Run full test suite (no -m filter) with coverage
         uses: $/.github/actions/run-tests
-        id: nightly-door
         with:
           browser: true
-          coverage-file: .coverage.nightly
-          junit-file: junit-nightly.xml
-      - name: Refuse success when the door ran no tests
-        if: ${{ steps.nightly-door.outputs.tests-ran != 'true' }}
-        run: exit 1
 
       - name: Generate coverage reports
         run: .venv/bin/python -m scripts.coverage_reports
@@ -67,7 +61,7 @@ jobs:
         if: ${{ always() }}
         with:
           name: junit-nightly
-          path: junit-nightly.xml
+          path: junit-test-*.xml
           if-no-files-found: warn
 
       - name: Upload coverage reports artifact
@@ -140,7 +134,7 @@ jobs:
         if: ${{ !cancelled() }}
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
         with:
-          files: junit/nightly/junit-nightly.xml
+          files: junit/nightly/junit-test-*.xml
           flags: nightly
           report_type: test_results
           use_oidc: true

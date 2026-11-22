@@ -64,7 +64,7 @@ class RuleId(StrEnum):
     DECLARES_PERMISSIONS = "declares-permissions"
     HAS_TRIGGER = "has-trigger"
     TESTS_USE_DOOR = "tests-use-door"
-    DOOR_PROOF_CONSUMED = "door-proof-consumed"
+    DOOR_NO_IF = "door-no-if"
 
 
 class Waiver(BaseModel):
@@ -113,7 +113,7 @@ CEILINGS: Mapping[RuleId, int] = MappingProxyType(
         RuleId.DECLARES_PERMISSIONS: 0,
         RuleId.HAS_TRIGGER: 0,
         RuleId.TESTS_USE_DOOR: 0,
-        RuleId.DOOR_PROOF_CONSUMED: 0,
+        RuleId.DOOR_NO_IF: 0,
     }
 )
 

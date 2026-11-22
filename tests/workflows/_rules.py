@@ -164,27 +164,20 @@ def _job_directly_runs_pytest(job: Job) -> bool:
     return False
 
 
-def door_proof_consumed(workflow: Workflow, job: Job) -> Iterator[Finding]:
-    """Every door caller must refuse success unless tests-ran is true."""
-    calls_door = any(step.uses and "run-tests" in str(step.uses) for step in job.steps)
-    if not calls_door:
-        return
-    consumed = any(
-        (step.run or "")
-        and "tests-ran" in str(step.run)
-        or (step.if_ is not None)
-        and "tests-ran" in str(step.if_)
-        for step in job.steps
-    )
-    if not consumed:
-        yield Finding(
-            "door-proof-consumed",
-            workflow.stem,
-            job.key,
-            job.line,
-            f"{workflow.path}:{job.line}: job calls the run-tests door but never "
-            f"consumes its tests-ran output",
-        )
+def door_no_if(workflow: Workflow, job: Job) -> Iterator[Finding]:
+    """The door step may not carry a step-level `if:` -- a skipped door must be
+    unrepresentable so the refusal inside the action can never be bypassed."""
+    for step in job.steps:
+        if step.uses and "run-tests" in str(step.uses):
+            if step.if_ is not None:
+                yield Finding(
+                    "door-no-if",
+                    workflow.stem,
+                    job.key,
+                    step.line,
+                    f"{workflow.path}:{step.line}: the run-tests door step carries "
+                    f"step-level if={step.if_!r}, which could skip the refusal",
+                )
 
 
 JOB_RULES = (
@@ -198,10 +191,10 @@ JOB_RULES = (
     Rule("no-bare-pytest", Scope.WITH_STEPS, "one default suite per push", no_bare_pytest),
     Rule("uses-tests-door", Scope.WITH_STEPS, "every pytest job calls the shared door", uses_tests_door),
     Rule(
-        "door-proof-consumed",
+        "door-no-if",
         Scope.WITH_STEPS,
-        "every door caller consumes its tests-ran proof",
-        door_proof_consumed,
+        "the door step may not carry a step-level if",
+        door_no_if,
     ),
     Rule("no-pip-install", Scope.WITH_STEPS, "the lock freezes the graph", no_pip_install),
     Rule("no-heredoc", Scope.WITH_STEPS, "a heredoc hides control flow", no_heredoc),

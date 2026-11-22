@@ -162,13 +162,13 @@ def test_battery_uploads_junit_artifact() -> None:
 def test_real_pbkdf2_uploads_junit_artifact() -> None:
     """real-pbkdf2 job uploads junit-real-pbkdf2.xml artifact named junit-real-pbkdf2."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-    _assert_junit_upload(workflow, "real-pbkdf2", "junit-real-pbkdf2", "junit-real-pbkdf2.xml")
+    _assert_junit_upload(workflow, "real-pbkdf2", "junit-real-pbkdf2", "junit-real-pbkdf2-*.xml")
 
 
 def test_test_browser_uploads_junit_artifact() -> None:
-    """test-browser job uploads junit-browser.xml artifact named junit-test-browser."""
+    """test-browser job uploads junit-test-browser-*.xml artifact named junit-test-browser."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-    _assert_junit_upload(workflow, "test-browser", "junit-test-browser", "junit-browser.xml")
+    _assert_junit_upload(workflow, "test-browser", "junit-test-browser", "junit-test-browser-*.xml")
 
 
 def test_coverage_job_downloads_junit_artifacts_to_distinct_paths() -> None:
@@ -221,8 +221,8 @@ def test_coverage_job_uploads_per_surface_codecov_with_explicit_files() -> None:
     expected_files = {
         "behavioral": "junit/split/behavioral/junit-*.xml",
         "invariants": "junit/split/invariants/junit-*.xml",
-        "real-pbkdf2": "junit/real-pbkdf2/junit-real-pbkdf2.xml",
-        "test-browser": "junit/test-browser/junit-browser.xml",
+        "real-pbkdf2": "junit/real-pbkdf2/junit-real-pbkdf2-*.xml",
+        "test-browser": "junit/test-browser/junit-test-browser-*.xml",
     }
 
     for step in test_results_uploads:
@@ -425,22 +425,3 @@ def test_coverage_job_emits_single_artifact() -> None:
         if isinstance(step, dict) and "uses" in step and "upload-artifact" in str(step.get("uses", ""))
     ]
     assert len(artifact_steps) == 1, f"coverage job must emit one artifact, got {len(artifact_steps)}"
-
-
-def test_coverage_producers_use_distinct_coverage_files() -> None:
-    """Each producer names its data file so coverage combine can merge all three."""
-    from tests._ci_contract import WORKFLOW_PATH as _WP
-
-    action = (_WP.parent.parent / "actions" / "run-tests" / "action.yml").read_text(encoding="utf-8")
-    assert "coverage-file:" in action, "the door must declare coverage-file as an input"
-    assert "${{ inputs.coverage-file }}" in action, "the door must reference the coverage-file input"
-    workflow = _WP.read_text(encoding="utf-8")
-    expected = (
-        ("battery", ".coverage.battery"),
-        ("real-pbkdf2", ".coverage.real-pbkdf2"),
-        ("test-browser", ".coverage.test-browser"),
-    )
-    for job_name, file_name in expected:
-        assert f"coverage-file: {file_name}" in workflow, (
-            f"{job_name} must pass coverage-file={file_name} to the door"
-        )

@@ -56,8 +56,9 @@ def test_dependency_review_config_is_tracked() -> None:
     assert CONFIG_PATH.is_file()
 
 
-def test_real_pbkdf2_execution_is_one_shared_decision() -> None:
-    """The PBKDF2 door call carries the shared decision; report consumers are guarded."""
+def test_real_pkdf2_execution_uses_the_shared_door() -> None:
+    """The PBKDF2 job always calls the shared door (no step-level if: on the
+    door) and passes the real_pbkdf2 marker; report consumers stay guarded."""
     jobs = _workflow_jobs()
     changes = jobs["changes"]
     assert isinstance(changes, dict)
@@ -71,13 +72,13 @@ def test_real_pbkdf2_execution_is_one_shared_decision() -> None:
     producer = jobs["real-pbkdf2"]
     assert isinstance(producer, dict)
     assert "if" not in producer, "a skipped job reddens the required aggregate"
-    guard = "needs.changes.outputs.real-pbkdf2 == 'true'"
 
-    # The door step carries the PBKDF2 guard and marker.
+    # The door step carries no step-level if: (a skipped door is unrepresentable
+    # -- the refusal lives inside the action) but still passes the marker.
     door_steps = [step for step in _steps(producer) if "run-tests" in str(step.get("uses", ""))]
     assert len(door_steps) == 1, "real-pbkdf2 job must call the run-tests door"
     door_step = door_steps[0]
-    assert guard in str(door_step.get("if", "")), "door step lost the shared PBKDF2 decision"
+    assert "if" not in door_step, "door step must not carry a step-level if"
     with_ = door_step.get("with", {})
     assert isinstance(with_, dict)
     assert str(with_.get("marker", "")) == "real_pbkdf2", "door must pass real_pbkdf2 marker"
@@ -86,4 +87,5 @@ def test_real_pbkdf2_execution_is_one_shared_decision() -> None:
     for step in _steps(jobs["coverage"]):
         name = str(step.get("name", ""))
         if name.startswith("Download real-pbkdf2") or name.startswith("Upload real-pbkdf2"):
+            guard = "needs.changes.outputs.real-pbkdf2 == 'true'"
             assert guard in str(step.get("if", "")), f"{name} lost the shared PBKDF2 decision"
