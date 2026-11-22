@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
+from tests.workflows._facts import CommandFacts
 from tests.workflows._model import Job, Step, Workflow, parse_workflow, workflow
 from tests.workflows._names import ActionRef, EnvName, Expression, StepName
 
@@ -83,6 +84,39 @@ def test_a_bad_schedule_cron_is_rejected() -> None:
         payload["on"] = {"schedule": [{"cron": invalid}]}
         with pytest.raises(ValidationError, match="cron step"):
             Workflow.model_validate(payload)
+
+
+def test_an_unknown_workflow_trigger_is_rejected() -> None:
+    payload = {
+        "stem": "ghost",
+        "path": Path("ghost.yml"),
+        "name": "Ghost",
+        "on": {"ghost_trigger": None},
+        "jobs": {
+            "j": {
+                "key": "j",
+                "workflow": "ghost",
+                "line": 1,
+                "uses": "$/.github/workflows/ci.yml",
+            }
+        },
+    }
+    with pytest.raises(ValidationError, match="unknown workflow trigger"):
+        Workflow.model_validate(payload)
+
+
+def test_facts_are_computed_once_per_step(monkeypatch) -> None:
+    seen: list[str] = []
+    original = CommandFacts.parse
+
+    def counted(run: str) -> CommandFacts:
+        seen.append(run)
+        return original(run)
+
+    monkeypatch.setattr(CommandFacts, "parse", counted)
+    step = Step.model_validate({"name": "Once", "run": "echo hi", "line": 1})
+    assert step.command_facts == step.command_facts
+    assert len(seen) == 1
 
 
 def test_a_call_job_with_steps_is_rejected() -> None:

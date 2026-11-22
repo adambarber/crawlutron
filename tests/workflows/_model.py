@@ -34,6 +34,7 @@ from tests.workflows._names import (
 )
 
 STRICT = ConfigDict(extra="forbid", frozen=True)
+_FACT_FIELDS = frozenset({"event_spliced", "command_facts", "pytest_env_marker"})
 
 
 class Runner(StrEnum):
@@ -87,18 +88,27 @@ class Step(BaseModel):
     shell: str | None = None
     continue_on_error: bool | None = Field(default=None, alias="continue-on-error")
     line: int
+    event_spliced: bool = False
+    command_facts: CommandFacts = Field(default_factory=CommandFacts)
+    pytest_env_marker: bool = False
 
-    @property
-    def event_spliced(self) -> bool:
-        return ExpressionFacts.parse(self.run or "").references_event
+    @model_validator(mode="before")
+    def strip_facts(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        return {key: value for key, value in data.items() if key not in _FACT_FIELDS}
 
-    @property
-    def command_facts(self) -> CommandFacts:
-        return CommandFacts.parse(self.run or "")
-
-    @property
-    def pytest_env_marker(self) -> bool:
-        return any(has_marker_filter(str(value)) for key, value in self.env.items() if key in PYTEST_ENV_KEYS)
+    @model_validator(mode="after")
+    def derive_facts(self) -> Step:
+        run = self.run or ""
+        object.__setattr__(self, "event_spliced", ExpressionFacts.parse(run).references_event)
+        object.__setattr__(self, "command_facts", CommandFacts.parse(run))
+        object.__setattr__(
+            self,
+            "pytest_env_marker",
+            any(has_marker_filter(str(v)) for k, v in self.env.items() if k in PYTEST_ENV_KEYS),
+        )
+        return self
 
     @model_validator(mode="after")
     def refusal(self, info: ValidationInfo) -> Step:

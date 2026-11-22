@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.workflows._model import JOBS, WORKFLOWS, Job, Workflow, parent_workflow
+from tests.workflows._model import JOBS, WORKFLOWS, Job, Step, Workflow, parent_workflow
 from tests.workflows._rules import (
     JOB_RULES,
     WORKFLOW_RULES,
@@ -23,8 +23,13 @@ def _mutate(**changes) -> Job:
     return _SAMPLE.model_copy(update=changes)
 
 
-def _step(**changes):
-    return _SAMPLE.steps[0].model_copy(update=changes)
+def _step(**changes) -> Step:
+    raw = {**_SAMPLE.steps[0].model_dump(by_alias=True), **changes}
+    if "run" in changes:
+        raw.pop("uses", None)
+    if "uses" in changes:
+        raw.pop("run", None)
+    return Step.model_validate(raw)
 
 
 @pytest.mark.parametrize(
@@ -80,6 +85,28 @@ def test_a_rule_names_the_injected_violation(rule, broken) -> None:
 def test_a_workflow_rule_names_the_injected_violation(rule, broken: Workflow) -> None:
     findings = list(rule.check(broken))
     assert findings and findings[0].rule == rule.name
+
+
+def test_two_pytest_invocations_yield_two_findings() -> None:
+    mixed = _mutate(steps=(_step(name="Bite", run="pytest -m slow; pytest"),))
+    assert len(list(no_bare_pytest(parent_workflow(mixed), mixed))) == 1
+    broken = _mutate(steps=(_step(name="Bite", run="pytest; pytest"),))
+    assert len(list(no_bare_pytest(parent_workflow(broken), broken))) == 2
+
+
+def test_an_exported_inline_marker_filter_is_honoured() -> None:
+    filtered = _mutate(steps=(_step(name="Bite", run='export PYTEST_ADDOPTS="-m slow"; pytest'),))
+    assert not list(no_bare_pytest(parent_workflow(filtered), filtered))
+
+
+def test_an_attached_marker_filter_is_honoured() -> None:
+    filtered = _mutate(steps=(_step(name="Bite", run='pytest -m"not slow"'),))
+    assert not list(no_bare_pytest(parent_workflow(filtered), filtered))
+
+
+def test_a_harmless_context_read_is_not_event_splicing() -> None:
+    clean = _mutate(steps=(_step(run="echo ${{ github.event_name }}"),))
+    assert not list(no_event_splicing_in_run(parent_workflow(clean), clean))
 
 
 def test_an_unrelated_install_command_is_not_pip() -> None:

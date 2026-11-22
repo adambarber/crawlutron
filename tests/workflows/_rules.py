@@ -78,19 +78,19 @@ def no_event_splicing_in_run(workflow: Workflow, job: Job) -> Iterator[Finding]:
 
 def no_bare_pytest(workflow: Workflow, job: Job) -> Iterator[Finding]:
     for step in job.steps:
-        if "pytest" not in (step.run or ""):
-            continue
-        if step.command_facts.marker_filter or step.pytest_env_marker:
-            continue
         if (workflow.stem, job.key, step.name) in BARE_PYTEST_WAIVERS:
             continue
-        yield Finding(
-            "no-bare-pytest",
-            workflow.stem,
-            job.key,
-            step.line,
-            f"{workflow.path}:{step.line}: a second default-suite run can drift from the battery",
-        )
+        if step.pytest_env_marker or step.command_facts.exported_markers:
+            continue
+        for segment in step.command_facts.unfiltered_pytest_segments:
+            yield Finding(
+                "no-bare-pytest",
+                workflow.stem,
+                job.key,
+                step.line,
+                f"{workflow.path}:{step.line}: a second default-suite run can drift from the battery: "
+                f"{segment.strip()}",
+            )
 
 
 def no_pip_install(workflow: Workflow, job: Job) -> Iterator[Finding]:
