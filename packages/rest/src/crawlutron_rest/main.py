@@ -314,8 +314,8 @@ async def _startup_services(_app: FastAPI, settings: CrawlerSettings, database_p
     cookies load before job recovery (a clear-then-populate load drops them).
     """
     install_default_executor(asyncio.get_running_loop())
-    from crawlutron.runtime.readiness_state import READINESS_STATE
     from crawlutron.orchestration.engine import resource_gate
+    from crawlutron.runtime.readiness_state import READINESS_STATE
 
     # Readiness saturation comes from the live resource gate, not the
     # metrics gauges (which only recursive crawls refresh).
@@ -423,8 +423,8 @@ set_module_app_provider(module_app)
 
 async def _shutdown_services(_app: FastAPI) -> None:
     """Stop the world FIRST: no webhooks against cleared deps; jar needs no step."""
-    from crawlutron.runtime.readiness_state import READINESS_STATE
     from crawlutron.orchestration.engine import resource_gate
+    from crawlutron.runtime.readiness_state import READINESS_STATE
 
     shutdown_event = _app.state.shutdown_event
     shutdown_event.set()
