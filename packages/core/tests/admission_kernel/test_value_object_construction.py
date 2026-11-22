@@ -157,7 +157,7 @@ def test_progress_enforces_advance_after_decision() -> None:
 
 
 def test_instant_is_hidden_constructor_only() -> None:
-    """Instant is built only by Clock.now(); the raw form is a private _of door."""
+    """Instant is built only by Clock.now(); the raw form is the explicit of door."""
     with pytest.raises(TypeError):
         Instant(3.0)
     inst = Instant.of(3.0)

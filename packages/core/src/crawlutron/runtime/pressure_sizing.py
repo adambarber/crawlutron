@@ -27,6 +27,7 @@ from crawlutron_admit import (
     PacingPolicy,
     Ratio,
     ResourceId,
+    RideCpuWhenFree,
     Sensing,
     SensorBinding,
     Signal,
@@ -239,10 +240,12 @@ def kernel_lane_specs(policy: AdmissionPolicy, budget: TaskRamBudget) -> dict[La
     caps and per-unit costs are the task RAM weights, all in bytes.
     """
     return {
+        # Item 7: cheap HTTP work rides the CPU scale when CPU headroom > 0.5,
+        # escaping the memory held by browser processes. HEAVY stays min-all.
         LaneId.GENERAL: LaneSpec(
             ceiling=Count(policy.max_http_concurrency),
             cost=Cost(Bytes(budget.http_task_bytes)),
-            scale_source=MinAll(),
+            scale_source=RideCpuWhenFree(Ratio(0.5)),
         ),
         LaneId.HEAVY: LaneSpec(
             ceiling=Count(policy.max_browser_concurrency),

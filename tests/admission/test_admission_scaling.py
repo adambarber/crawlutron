@@ -1,5 +1,6 @@
 """Batches scale with pressure; HTTP-heavy work escapes memory accounting."""
 
+import asyncio
 import itertools
 import time
 
@@ -48,21 +49,18 @@ async def _crawl_under_pressure(*, cpu_ratio, memory_ratio):
 
 
 @pytest.mark.parametrize(
-    ("cpu_ratio", "memory_ratio", "saturated"),
-    [(0.0, 0.89, "memory"), (0.93, 0.0, "CPU")],
-    ids=["memory", "cpu"],
+    ("cpu_ratio", "memory_ratio", "throttled"),
+    [(0.0, 0.89, False), (0.93, 0.0, True)],
+    ids=["http-escapes-memory", "cpu-pressure-throttles"],
 )
-async def test_engine_throttles_batches_under_pressure(cpu_ratio, memory_ratio, saturated):
-    """Integration: with one sampler in the soft zone, the engine throttles its
-    batches (kernel floor-law pacing) yet the crawl still completes, the other
-    resource idle."""
-    out, throttled = await _crawl_under_pressure(cpu_ratio=cpu_ratio, memory_ratio=memory_ratio)
-    # Engine results carry the value object; identity is its ``.raw`` text.
+async def test_engine_admission_under_pressure(cpu_ratio, memory_ratio, throttled):
+    """HTTP work rides a free CPU (item 7); CPU pressure still throttles."""
+    out, observed = await _crawl_under_pressure(cpu_ratio=cpu_ratio, memory_ratio=memory_ratio)
     assert {r.normalized_url.raw for r in out["results"]} == {
         "http://example.com/",
         "http://example.com/a",
     }
-    assert throttled > 0, f"engine dispatched unthrottled under {saturated} soft-zone pressure"
+    assert (observed > 0) is throttled
 
 
 def test_direct_reads_do_not_perturb_slope(monkeypatch):
@@ -220,3 +218,44 @@ class TestHttpScaleEscapesMemory:
         assert http_scale > browser_scale
         assert browser_scale < 1.0
         assert http_scale == pytest.approx(1.0, rel=0.01)
+
+
+async def test_production_http_lane_rides_cpu_under_browser_memory_pressure() -> None:
+    """Item 7 is wired at the seam: GENERAL rides CPU, HEAVY stays min-all."""
+    from crawlutron.runtime.pressure_sizing import AdmissionPolicy, TaskRamBudget, kernel_lane_specs
+    from crawlutron_admit import Count, LaneId, MinAll, RideCpuWhenFree, Want
+    from tests._support._gate_factory import GateSpec, build_gate
+
+    policy = AdmissionPolicy(
+        http_task_bytes=48 * 1024 * 1024,
+        browser_task_bytes=700 * 1024 * 1024,
+        browser_pool_reserve_bytes=0,
+        max_http_concurrency=32,
+        max_browser_concurrency=8,
+    )
+    source = kernel_lane_specs(policy, TaskRamBudget())[LaneId.GENERAL].scale_source
+    assert isinstance(source, RideCpuWhenFree)
+
+    async def general_grant(scale_source):
+        gate, _ = build_gate(
+            GateSpec(
+                memory_usage=0.88,
+                mem_target=0.85,
+                mem_hard=0.90,
+                cpu_usage=0.10,
+                cpu_target=0.90,
+                cpu_hard=0.95,
+                scale_source=scale_source,
+                ramp_floor=128,
+                ramp_max=128,
+                initial_ramp=128,
+                memory_budget_mib=100_000,
+            )
+        )
+        want = Want.of(general=Count(16), heavy=Count(1))
+        async with gate.admit(want) as granted:
+            return granted.allocation.for_lane(LaneId.GENERAL).value
+
+    riding = await asyncio.wait_for(general_grant(source), 1.0)
+    min_all = await asyncio.wait_for(general_grant(MinAll()), 1.0)
+    assert riding > min_all

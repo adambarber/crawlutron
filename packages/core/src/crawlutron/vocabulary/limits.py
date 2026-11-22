@@ -109,9 +109,6 @@ SITEMAP_FANOUT_TIMEOUT_SECONDS: int = 45
 # hostile sitemapindex could spawn tens of thousands of tasks.
 SITEMAP_INDEX_FANOUT: int = 16
 
-# Engine scheduling: a recursive-crawl batch pulls global_concurrency * this.
-ENGINE_BATCH_CONCURRENCY_MULTIPLIER: int = 2
-
 # Browser runtime limits (also exposed as CrawlerSettings fields with
 # CRAWLUTRON_* env mappings).
 DEFAULT_MAX_BROWSER_RENDERS: int = 100

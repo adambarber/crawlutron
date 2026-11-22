@@ -1,13 +1,14 @@
 # crawlutron-core
 
 The crawler engine: URL admission, fetch and transport, extraction, orchestration,
-storage, and the `admission` resource-adaptive admission kernel.
+and storage. The resource-adaptive admission kernel ships separately as
+`crawlutron-admit`.
 
 This is a library, not a service. To run the HTTP service, install
 `crawlutron-rest`; to run it in a container, see the `crawlutron` image.
 
 ```python
-from crawlutron.admission import AdmissionGate
+from crawlutron_admit import AdmissionGate
 ```
 
 The package ships `py.typed`: its annotations are part of the contract.

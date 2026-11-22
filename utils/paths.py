@@ -141,8 +141,7 @@ def package_roots(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
 def _member_import_packages(base: pathlib.Path, member: str) -> tuple[str, ...]:
     """The import names a member's wheel ships, from its own ``packages`` list.
 
-    ``crawlutron, admission`` for core, ``crawlutron_rest`` for rest; a member
-    without a wheel target is a stub container and ships nothing.
+    A member without a wheel target is a stub container and ships nothing.
     """
     pyproject = base / member / "pyproject.toml"
     if not pyproject.is_file():

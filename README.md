@@ -425,17 +425,12 @@ the taxonomy maps onto) rather than on transport status.
   memory/CPU ceiling and throttles recursive-batch dispatch to ride at the
   targets instead of OOMing or tripping the kernel CPU throttle. No operator
   tuning is required.
-- **HTTP-aware admission (item 7)**: browser crawls are the memory hog (one
-  ≈700 MiB (≈600–900 MiB RSS) browser process each), and when browser processes hold memory
-  the whole batch used to be throttled — even cheap HTTP work. Today, when the
-  upcoming batch is predominantly domains *pinned* to an HTTP strategy (they've
-  already proven they fetch without a browser) and CPU has spare headroom, the
-  dispatcher uses the **HTTP-aware scale** (`ResourceGate.http_scale_factor`),
-  which rides the CPU-implied rate and is *not* dragged down by memory held by
-  browser processes of other domains. Browser-bound and cold (unpinned) batches
-  keep the conservative combined memory+CPU gate, so the extra concurrency is
-  always ramp-bounded (≤ `RECURSIVE_RAMP_MAX × multiplier`) and cannot overshoot
-  memory.
+- **HTTP-aware admission (item 7)**: browser pages are the memory hog (one
+  ≈700 MiB (≈600–900 MiB RSS) browser process each). The admission kernel gives
+  the HTTP lane a `RideCpuWhenFree(0.5)` scale: when CPU headroom exceeds 50%,
+  cheap HTTP work rides the CPU-implied rate instead of being dragged down by
+  memory held by browser processes. The browser lane keeps the conservative
+  combined memory+CPU gate, and both lanes stay inside their derived ceilings.
 
 ---
 

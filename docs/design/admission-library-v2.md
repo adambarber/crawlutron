@@ -28,7 +28,7 @@ folds the ceiling into the OVERSIZE predicate; ramp growth gets a hysteresis
 window; nested admits are prohibited, the lease over-counts unused grant, and
 the state lock is released before the `with` body yields; `Idle` precedence is
 STALE-first → OVERSIZE → RETRY_PRESSURE; the source-scan gate scope descriptor
-is pinned to `trees_under(REPO_ROOT / "admission")`; cold-probe
+is pinned to `trees_under(ADMISSION_ROOT)`; cold-probe
 lane-starvation is accepted. Full rulings table: the v2.2 fix round.
 
 **v2.3 (fix round, adversarial review round 3):** the OVERSIZE trace is
@@ -399,8 +399,8 @@ structurally impossible because the caller holds no ramp reference.
   **named floor** (`recursive.py:197`). P0-1's point —
   `max(global_concurrency, ramp*scale)` conflates a maximum with a floor — is
   resolved by **naming the two bounds**: `ramp_floor = global_concurrency`
-  (the floor it never decays below) and `ramp_max = RECURSIVE_RAMP_MAX` (the
-  cap it never grows past, `recursive.py:261`). Both are `Count` fields on
+  (the floor it never decays below) and `ramp_max = 16 × widest ceiling` (the
+  cap the seam pins, `pressure_sizing.py:390-395`). Both are `Count` fields on
   `PacingPolicy`; decays occur **once per sensing update** and **once per
   release** (an in-flight drop can pull the ramp down).
 - **After stalls and idle periods**: a terminal `AdmissionRefused(
@@ -1023,9 +1023,9 @@ none — the v1 plan declared it; v2 makes it a real Protocol member).
      (`test_file_size.py:88-91`) asserts `set(_BUDGETS) ==
      set(python_bearing_roots())`, and `test_scan_roots_equal_every_python_
      bearing_tree` (`test_scan_roots.py:16`) pins
-     `SCAN_ROOTS == ("crawlutron", "crawlutron_sdk", "scripts", "tests")`.
-     **Both must add `admission` in the same commit** as the new package, and
-     `_BUDGETS["admission"] = 0` (`test_file_size.py:18-23`). This is also
+     `SCAN_ROOTS == python_bearing_roots()` (eight roots, derived from the uv
+     members). A new member auto-enters that surface; its ratchet row must land in
+     the same commit (`test_file_size.py:18-23`). This is also
      governed by the invariant-scope law (SCAN_ROOTS is derived,
      `_walk_primitives.python_bearing_roots()`).
    - **Zero-crawlutron-import gate**: a new invariant (modeled on
@@ -1057,7 +1057,7 @@ none — the v1 plan declared it; v2 makes it a real Protocol member).
    - **Source-scan gate scope (M4 + MINOR-4 descriptor)**: the
      `time.monotonic`/`asyncio.sleep`-and-aliases `Rule` scans **top-level
      `packages/crawlutron-admit/src/crawlutron_admit/**` only** with the exact descriptor
-     **`scope = lambda *, exclude: trees_under(REPO_ROOT / "admission")`**
+     **`scope = lambda *, exclude: trees_under(ADMISSION_ROOT)`**
      (`trees_under` from `tests/chokepoint_walks.py`; `REPO_ROOT`
      `tests/_walk_primitives.py`). The default `Rule` scope is `app_trees`
      (crawlutron-only — `tests/rules.py:131`, `tests/_walk_trees.py:69-80`)
@@ -1202,8 +1202,8 @@ and must stay green through the seam migration.
    world-parks" contract** (§6.5) — the review's M2 missed that a test already
    encodes the no-park doctrine.
 5. **The review's M6 ratchet framing is incomplete**: the deeper gate is the
-   **derived scan surface** — `test_scan_roots.py:16` pins `SCAN_ROOTS` as a
-   4-tuple and `test_file_size.py:88-91` requires
+   **derived scan surface** — `test_scan_roots.py` pins `SCAN_ROOTS` to the
+   derived root tuple and `test_file_size.py:88-91` requires
    `set(_BUDGETS) == set(python_bearing_roots())`. A new `packages/crawlutron-admit/src/crawlutron_admit/` root
    auto-claims both and **both must change in the same commit**; just adding
    a `_BUDGETS` row without updating the `SCAN_ROOTS` tuple-reds incorrectly.
