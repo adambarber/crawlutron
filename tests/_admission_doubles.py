@@ -43,9 +43,11 @@ class FakeResourceGauge:
         return self.http
 
     def memory_ratio(self) -> float:
+        self.calls.append("mem")
         return self._mem
 
     def cpu_ratio(self) -> float:
+        self.calls.append("cpu")
         return self._cpu
 
 
@@ -65,7 +67,7 @@ async def run_sync_batch(
     RAM/batch mocks the admission tests share, and return the result envelope."""
     from crawlutron.orchestration import request_pipeline as rp
     from crawlutron.orchestration.engine import crawl_request
-    from crawlutron.runtime.pressure_memory import MemoryStats
+    from crawlutron_admit.sensing.pressure_memory import MemoryStats
 
     monkeypatch.setattr(rp, "read_memory_stats", lambda: MemoryStats(total_bytes=total_bytes, used_bytes=0))
     monkeypatch.setattr(rp, "derive_browser_pool_size", lambda: 2)

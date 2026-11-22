@@ -9,7 +9,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from admission import (
+from crawlutron.config.env import get_env_float, get_env_int
+from crawlutron.runtime.admit_sensing import register as register_admission_sensing
+from crawlutron_admit import (
     AdmissionGate,
     AdmissionRefused,
     Bytes,
@@ -25,16 +27,18 @@ from admission import (
     PacingPolicy,
     Ratio,
     ResourceId,
+    RideCpuWhenFree,
     Sensing,
     SensorBinding,
     Signal,
     Want,
 )
-from admission.gauge import ResourceGauge as KernelResourceGauge
-from crawlutron.config.env import get_env_float, get_env_int
-from crawlutron.runtime.pressure_gates import CpuGate, ResourceGate
-from crawlutron.runtime.pressure_memory import read_memory_stats
-from crawlutron.runtime.pressure_probes import LoopLagProbe, read_cpu_quota, read_cpu_usage_seconds
+from crawlutron_admit.gauge import ResourceGauge as KernelResourceGauge
+from crawlutron_admit.sensing.pressure_gates import CpuGate, ResourceGate
+from crawlutron_admit.sensing.pressure_memory import read_memory_stats
+from crawlutron_admit.sensing.pressure_probes import LoopLagProbe, read_cpu_quota, read_cpu_usage_seconds
+
+register_admission_sensing()
 
 __all__ = [
     "CpuGate",
@@ -236,10 +240,12 @@ def kernel_lane_specs(policy: AdmissionPolicy, budget: TaskRamBudget) -> dict[La
     caps and per-unit costs are the task RAM weights, all in bytes.
     """
     return {
+        # Item 7: cheap HTTP work rides the CPU scale when CPU headroom > 0.5,
+        # escaping the memory held by browser processes. HEAVY stays min-all.
         LaneId.GENERAL: LaneSpec(
             ceiling=Count(policy.max_http_concurrency),
             cost=Cost(Bytes(budget.http_task_bytes)),
-            scale_source=MinAll(),
+            scale_source=RideCpuWhenFree(Ratio(0.5)),
         ),
         LaneId.HEAVY: LaneSpec(
             ceiling=Count(policy.max_browser_concurrency),
@@ -281,7 +287,7 @@ class _MonotonicClock:
     """The kernel's monotonic Clock bound to the real monotonic timeline."""
 
     def now(self) -> Instant:
-        return Instant._of(time.monotonic())
+        return Instant.of(time.monotonic())
 
 
 def _seam_signal() -> Signal:

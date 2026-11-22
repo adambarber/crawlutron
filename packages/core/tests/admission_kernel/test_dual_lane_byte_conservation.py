@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from admission.values import Allocation
+from crawlutron_admit.values import Allocation
 from tests._support._doors import Count, LaneId, Want
 from tests._support._gate_factory import GateSpec, build_gate
 

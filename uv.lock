@@ -13,6 +13,7 @@ resolution-markers = [
 [manifest]
 members = [
     "crawlutron",
+    "crawlutron-admit",
     "crawlutron-core",
     "crawlutron-extract",
     "crawlutron-mcp",
@@ -512,6 +513,7 @@ name = "crawlutron"
 version = "0.5.2"
 source = { editable = "." }
 dependencies = [
+    { name = "crawlutron-admit" },
     { name = "crawlutron-core" },
     { name = "crawlutron-extract" },
     { name = "crawlutron-mcp" },
@@ -551,6 +553,7 @@ requires-dist = [
     { name = "basedpyright", marker = "extra == 'dev'", specifier = "==1.40.2" },
     { name = "brotli-stubs", marker = "extra == 'dev'", specifier = "==1.2.1" },
     { name = "coverage", marker = "extra == 'dev'", specifier = "==7.17.3" },
+    { name = "crawlutron-admit", editable = "packages/crawlutron-admit" },
     { name = "crawlutron-core", editable = "packages/core" },
     { name = "crawlutron-extract", editable = "packages/extract" },
     { name = "crawlutron-mcp", editable = "packages/mcp" },
@@ -578,6 +581,11 @@ requires-dist = [
 provides-extras = ["dev"]
 
 [[package]]
+name = "crawlutron-admit"
+version = "0.1.0"
+source = { editable = "packages/crawlutron-admit" }
+
+[[package]]
 name = "crawlutron-core"
 version = "0.5.0"
 source = { editable = "packages/core" }
@@ -585,6 +593,7 @@ dependencies = [
     { name = "brotli" },
     { name = "camoufox" },
     { name = "charset-normalizer" },
+    { name = "crawlutron-admit" },
     { name = "crawlutron-extract" },
     { name = "crawlutron-safe-url" },
     { name = "curl-cffi" },
@@ -601,6 +610,7 @@ requires-dist = [
     { name = "brotli", specifier = "==1.2.1" },
     { name = "camoufox", specifier = "==0.5.9" },
     { name = "charset-normalizer", specifier = "==3.5.2" },
+    { name = "crawlutron-admit", editable = "packages/crawlutron-admit" },
     { name = "crawlutron-extract", editable = "packages/extract" },
     { name = "crawlutron-safe-url", editable = "packages/safe-url" },
     { name = "curl-cffi", specifier = "==0.17.0" },

@@ -12,7 +12,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from crawlutron.runtime.cgroup_sense import read_int
+from crawlutron_admit.sensing.cgroup_sense import read_int
 
 # Target 0.85 leaves ~0.45 GiB headroom against first-batch burst overshoot; the hard
 # ceiling still leaves a safety margin before OOM.

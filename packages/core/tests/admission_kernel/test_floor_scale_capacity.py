@@ -10,8 +10,8 @@ import dataclasses
 
 import pytest
 
-from admission import Bytes, Cost, LaneSpec, MinAll, Scale
-from admission.values import Allocation
+from crawlutron_admit import Bytes, Cost, LaneSpec, MinAll, Scale
+from crawlutron_admit.values import Allocation
 from tests._support._doors import AdmissionRefused, Count, IdleReason, LaneId, Want
 from tests._support._gate_factory import GateSpec, build_gate
 

@@ -8,6 +8,7 @@ members = ["packages/*"]
 [tool.uv.sources]
 # Resolve the member wheels from the workspace, never PyPI: their versions are
 # git-derived at build time and each lives in this repository.
+crawlutron-admit = { workspace = true }
 crawlutron-core = { workspace = true }
 crawlutron-extract = { workspace = true }
 crawlutron-mcp = { workspace = true }
@@ -50,6 +51,7 @@ dependencies = [
     # a bare `uv sync` produce an importable environment (CI's test job runs
     # plain `pytest` with no PYTHONPATH). Each member declares its own runtime
     # set, so this list is members only and never a second copy of theirs.
+    "crawlutron-admit>=0.1.0",
     "crawlutron-core>=0.4.0.dev0",
     "crawlutron-extract>=0.4.0.dev0",
     "crawlutron-mcp>=0.4.0.dev0",
@@ -158,8 +160,8 @@ bypass-selection = true
 core = "sysmon"
 branch = false
 source_pkgs = [
-    "admission",
     "crawlutron",
+    "crawlutron_admit",
     "crawlutron_extract",
     "crawlutron_mcp",
     "crawlutron_rest",
@@ -214,7 +216,7 @@ ignore = [
 # is no longer at the repo root and ruff no longer auto-detects it as first-party.
 # Naming it keeps isort grouping the package and test trees where it always has,
 # rather than re-folded into the third-party block.
-known-first-party = ["admission", "crawlutron", "crawlutron_extract", "crawlutron_mcp", "crawlutron_rest", "crawlutron_sdk", "safe_url", "tests", "scripts"]
+known-first-party = ["crawlutron", "crawlutron_admit", "crawlutron_extract", "crawlutron_mcp", "crawlutron_rest", "crawlutron_sdk", "safe_url", "tests", "scripts"]
 # PLR0911 (too-many-returns) and PLR0913 (too-many-arguments) are deliberately
 # NOT selected, having been measured rather than assumed:
 #

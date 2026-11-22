@@ -389,8 +389,8 @@ def test_coverage_config_has_source_pkgs_relative_files_parallel() -> None:
     # source_pkgs should list all seven import names
     source_pkgs = cast(list[str], coverage_run.get("source_pkgs", []))
     expected_packages = [
-        "admission",
         "crawlutron",
+        "crawlutron_admit",
         "crawlutron_extract",
         "crawlutron_mcp",
         "crawlutron_rest",

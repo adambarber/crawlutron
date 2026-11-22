@@ -100,6 +100,8 @@ _SKIP_MUTABLE = frozenset(
     {
         "packages/core/src/crawlutron/extraction/llm_format.py",
         "packages/core/src/crawlutron/transport/robots.py",
+        # Its core adapter registers this cache's reset/probe pair on import.
+        "packages/crawlutron-admit/src/crawlutron_admit/sensing/cgroup_sense.py",
     }
 )
 

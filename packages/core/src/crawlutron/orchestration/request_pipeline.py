@@ -7,7 +7,6 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, cast
 
-from admission import AdmissionGate
 from crawlutron.admission.admission import normalize_sitemap_candidates
 from crawlutron.admission.admission_links import gather_robots_decisions
 from crawlutron.admission.policy import DiscoveryFlags, discovery_flags
@@ -22,8 +21,6 @@ from crawlutron.models.crawl_worker import CrawlWorker
 from crawlutron.models.taxonomy import Classification
 from crawlutron.orchestration.recursive import run_recursive_crawl
 from crawlutron.orchestration.strategy_chain import execute_crawl_chain
-from crawlutron.runtime.pressure_gates import ResourceGate
-from crawlutron.runtime.pressure_memory import read_memory_stats
 from crawlutron.runtime.pressure_sizing import (
     TaskRamBudget,
     build_admission_gate,
@@ -47,6 +44,9 @@ from crawlutron.transport.results import (
 from crawlutron.transport.robots import FetchAndDecode, RobotsRules
 from crawlutron.transport.scheduler import DomainScheduler
 from crawlutron.vocabulary.strategies import BROWSER_STRATEGIES
+from crawlutron_admit import AdmissionGate
+from crawlutron_admit.sensing.pressure_gates import ResourceGate
+from crawlutron_admit.sensing.pressure_memory import read_memory_stats
 from safe_url.host_policy import HostPolicy
 from safe_url.normalized_url import admit_or_none
 from safe_url.safe_regex import BoundedPattern

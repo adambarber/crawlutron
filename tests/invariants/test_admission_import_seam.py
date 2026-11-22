@@ -58,7 +58,7 @@ ADMISSION_IMPORTS_NO_CRAWLUTRON = Rule(
     clean=lambda: (
         Silent("import crawlutron\n\nX = 1\n", at=_ELSEWHERE),
         Silent("import asyncio\n\nX = 1\n"),
-        Silent("import admission\n\nX = 1\n"),
+        Silent("import crawlutron_admit\n\nX = 1\n"),
     ),
 )
 

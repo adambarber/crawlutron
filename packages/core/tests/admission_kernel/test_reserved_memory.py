@@ -9,7 +9,7 @@ import dataclasses
 
 import pytest
 
-from admission import AdmissionRefused, IdleReason
+from crawlutron_admit import AdmissionRefused, IdleReason
 from tests._support._doors import _GENERAL_ONE
 from tests._support._gate_factory import GateSpec, build_gate
 

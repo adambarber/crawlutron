@@ -51,9 +51,11 @@ class ContentionFreeGate(FakeResourceGauge):
         return self.scale
 
     def memory_ratio(self) -> float:
+        self.consultations += 1
         return 0.0
 
     def cpu_ratio(self) -> float:
+        self.consultations += 1
         return 0.0
 
 

@@ -6,12 +6,12 @@ queueing. Door: ``async with gate.admit(want) as granted:`` yields a live :class
 
 from __future__ import annotations
 
-from admission.errors import AdmissionRefused, NestedAdmitError, WrongGateError
-from admission.gate import AdmissionGate, Decision, DecisionKind, StallGuard
-from admission.gauge import GaugeState, ResourceGauge
-from admission.policy import LaneSpec, PacingPolicy
-from admission.seams import Clock, Signal
-from admission.values import (
+from crawlutron_admit.errors import AdmissionRefused, NestedAdmitError, WrongGateError
+from crawlutron_admit.gate import AdmissionGate, Decision, DecisionKind, StallGuard
+from crawlutron_admit.gauge import GaugeState, ResourceGauge
+from crawlutron_admit.policy import LaneSpec, PacingPolicy
+from crawlutron_admit.seams import Clock, Signal
+from crawlutron_admit.values import (
     Allocation,
     AllocationEntry,
     Bytes,

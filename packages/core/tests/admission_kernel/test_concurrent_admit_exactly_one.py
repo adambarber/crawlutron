@@ -9,7 +9,7 @@ import dataclasses
 import sys
 import threading
 
-from admission import LaneId
+from crawlutron_admit import LaneId
 from tests._support._doors import _GENERAL_ONE
 from tests._support._gate_factory import GateSpec, build_gate
 

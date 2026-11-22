@@ -7,7 +7,7 @@ from __future__ import annotations
 import inspect
 
 import tests._admission_doubles as doubles
-from crawlutron.runtime.pressure_gates import ResourceGate
+from crawlutron_admit.sensing.pressure_gates import ResourceGate
 
 
 def test_admission_doubles_inventory():

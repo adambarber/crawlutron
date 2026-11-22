@@ -15,8 +15,8 @@ from crawlutron.orchestration.recursive import (
     crawl_recursive_batch,
 )
 from crawlutron.runtime.metrics import get_metrics
-from crawlutron.runtime.pressure_gates import ResourceGate
 from crawlutron.runtime.pressure_sizing import build_admission_gate
+from crawlutron_admit.sensing.pressure_gates import ResourceGate
 from tests._admission_runs import minimum_admission_run
 from tests._recursive_harnesses import make_crawl_task
 

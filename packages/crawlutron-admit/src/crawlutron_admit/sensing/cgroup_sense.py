@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import time
 
-from crawlutron.runtime import process_state
-
 # Cached for a short window: cgroup reads happen on every dispatch tick and sample, and a
 # burst makes them redundant syscalls without a window -- so it is deliberately short.
 _CGROUP_READ_TTL_SECONDS = 0.1
@@ -18,17 +16,14 @@ _CGROUP_READ_TTL_SECONDS = 0.1
 _CGROUP_CACHE: dict[str, tuple[float, str | None]] = {}
 
 
-def _reset() -> None:
-    """Drop all cached cgroup reads."""
+def reset_cache() -> None:
+    """Drop all cached cgroup reads: the core adapter registers this pair."""
     _CGROUP_CACHE.clear()
 
 
-def _has() -> bool:
+def has_cache() -> bool:
     """Whether any cgroup reading is memoized right now."""
     return bool(_CGROUP_CACHE)
-
-
-process_state.register(__name__, _reset, _has)
 
 
 def read_text(path: str) -> str | None:

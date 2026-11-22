@@ -37,7 +37,7 @@ component_management:
       carryforward: true
     admission:
       paths:
-        - packages/core/src/admission/
+        - packages/crawlutron-admit/src/crawlutron_admit/
       carryforward: true
     crawl:
       paths:

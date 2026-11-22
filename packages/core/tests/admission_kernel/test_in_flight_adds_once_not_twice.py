@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 
-from admission import Count, LaneId, Want
+from crawlutron_admit import Count, LaneId, Want
 from tests._support._doors import _GENERAL_ONE, Granted, _finish, _live
 from tests._support._gate_factory import GateSpec, build_gate
 

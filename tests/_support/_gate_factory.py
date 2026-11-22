@@ -10,7 +10,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from admission import (
+from crawlutron_admit import (
     AdmissionGate,
     Bytes,
     Clock,
@@ -251,7 +251,7 @@ def build_gate(spec: GateSpec | None = None) -> tuple[AdmissionGate, GateHandles
 
     class _Clock:
         def now(self) -> Instant:
-            return Instant._of(handles.read())
+            return Instant.of(handles.read())
 
     clock: Clock = _Clock()
     signal: FakeSignal | ThreadSafeSignal = ThreadSafeSignal() if s.thread_safe_signal else FakeSignal()

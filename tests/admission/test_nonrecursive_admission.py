@@ -6,10 +6,10 @@ from __future__ import annotations
 
 import pytest
 
-from admission import AdmissionGate, LaneId, Want
 from crawlutron.orchestration import request_pipeline
-from crawlutron.runtime.pressure_gates import ResourceGate
 from crawlutron.runtime.pressure_sizing import AdmissionPolicy, TaskRamBudget
+from crawlutron_admit import AdmissionGate, LaneId, Want
+from crawlutron_admit.sensing.pressure_gates import ResourceGate
 from tests._admission_doubles import run_sync_batch
 
 

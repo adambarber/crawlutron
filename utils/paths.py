@@ -141,8 +141,7 @@ def package_roots(base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
 def _member_import_packages(base: pathlib.Path, member: str) -> tuple[str, ...]:
     """The import names a member's wheel ships, from its own ``packages`` list.
 
-    ``crawlutron, admission`` for core, ``crawlutron_rest`` for rest; a member
-    without a wheel target is a stub container and ships nothing.
+    A member without a wheel target is a stub container and ships nothing.
     """
     pyproject = base / member / "pyproject.toml"
     if not pyproject.is_file():
@@ -257,7 +256,7 @@ def _import_root(name: str) -> pathlib.Path:
 def _app_roots() -> tuple[pathlib.Path, pathlib.Path, pathlib.Path, pathlib.Path, pathlib.Path]:
     return (
         _import_root("crawlutron"),
-        _import_root("admission"),
+        _import_root("crawlutron_admit"),
         _import_root("crawlutron_rest"),
         _import_root("crawlutron_mcp"),
         _import_root("safe_url"),
@@ -273,7 +272,7 @@ _DERIVATIONS: Mapping[str, Callable[[], object]] = MappingProxyType(
         "REST_ROOT": lambda: _app_roots()[2],
         "MCP_ROOT": lambda: _app_roots()[3],
         "SAFE_URL_ROOT": lambda: _app_roots()[4],
-        "APP_ROOTS": lambda: tuple(_app_roots()[i] for i in (0, 2, 3, 4)),
+        "APP_ROOTS": lambda: tuple(_app_roots()[i] for i in (0, 1, 2, 3, 4)),
         "TRANSPORT_DIR": lambda: _app_roots()[0] / "transport",
     }
 )

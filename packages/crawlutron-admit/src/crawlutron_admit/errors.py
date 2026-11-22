@@ -6,7 +6,7 @@ The door is ``async with gate.admit(want)`` -- a live :class:`Granted` or a rais
 
 from __future__ import annotations
 
-from admission.values import IdleReason
+from crawlutron_admit.values import IdleReason
 
 __all__ = ["AdmissionRefused", "NestedAdmitError", "WrongGateError"]
 

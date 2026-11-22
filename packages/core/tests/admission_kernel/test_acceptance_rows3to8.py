@@ -11,7 +11,7 @@ import dataclasses
 
 import pytest
 
-from admission import (
+from crawlutron_admit import (
     AdmissionRefused,
     Count,
     Duration,

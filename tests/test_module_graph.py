@@ -114,7 +114,7 @@ def test_the_walk_pins_each_canonical_package_root_vs_a_vanishing_member() -> No
     vanishes from BOTH sides together, so a disappeared mcp must red the walk explicitly."""
     modules, _importers = build_graph()
     prefixes = {name.split(".", 1)[0] for name in modules}
-    canonical = {"admission", "crawlutron", "crawlutron_mcp", "crawlutron_rest", "crawlutron_sdk"}
+    canonical = {"crawlutron_admit", "crawlutron", "crawlutron_mcp", "crawlutron_rest", "crawlutron_sdk"}
     not_walked = sorted(canonical - prefixes)
     assert not not_walked, (
         "the module graph no longer walks these canonical package roots; a vanished "

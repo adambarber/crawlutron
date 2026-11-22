@@ -5,12 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import deque
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
-from itertools import islice
 from typing import Protocol, cast
 
-from admission import AdmissionGate
 from crawlutron.admission.admission_links import (
     AdmittedLink,
     admit_discovered_links,
@@ -26,14 +24,14 @@ from crawlutron.orchestration.admission_stall import (
     spill_result,
 )
 from crawlutron.runtime.metrics import MetricsStore, get_metrics
-from crawlutron.runtime.pressure_gates import ResourceGate
-from crawlutron.runtime.pressure_sizing import build_admission_gate, kernel_admit
+from crawlutron.runtime.pressure_sizing import build_admission_gate
 from crawlutron.storage.result_store import CrawlSpillStore
 from crawlutron.transport.results import failed_result_for
 from crawlutron.transport.scheduler import DomainScheduler
-from crawlutron.vocabulary.limits import ENGINE_BATCH_CONCURRENCY_MULTIPLIER
-from crawlutron.vocabulary.strategies import BROWSER_STRATEGIES, HTTP_STRATEGIES
+from crawlutron.vocabulary.strategies import BROWSER_STRATEGIES
 from crawlutron.vocabulary.taxonomy import is_transient_classification
+from crawlutron_admit import AdmissionGate, AdmissionRefused, Count, LaneId, Want
+from crawlutron_admit.sensing.pressure_gates import ResourceGate
 from safe_url.host_policy import HostPolicy
 from safe_url.normalized_url import NormalizedUrl
 from safe_url.safe_regex import BoundedPattern
@@ -75,8 +73,6 @@ class CrawlRun:
     resource_gate: ResourceGate
     admission: AdmissionGate
     host_policy: HostPolicy
-    ramp_max: int
-    http_heavy_lookahead: int
     robots_timeout_seconds: float = 30.0
 
 
@@ -89,24 +85,6 @@ class _PinProvider(Protocol):
 def _pinned_strategy(scheduler: _PinProvider, task: CrawlTask) -> str | None:
     """The strategy this task's domain is pinned to, or None when unpinned."""
     return scheduler.get_pinned_strategy(task.domain)
-
-
-def batch_is_http_heavy(
-    scheduler: _PinProvider,
-    frontier: Sequence[tuple[int, CrawlTask]],
-    sample: int,
-) -> bool:
-    if not frontier or sample <= 0:
-        return False
-    counted = 0
-    http_count = 0
-    for _, task in islice(frontier, sample):
-        if not task.domain:
-            continue
-        counted += 1
-        if _pinned_strategy(scheduler, task) in HTTP_STRATEGIES:
-            http_count += 1
-    return counted > 0 and http_count >= counted / 2
 
 
 def _take_and_bucket(
@@ -177,47 +155,22 @@ async def _resource_admitted_batch(
     state: CrawlState,
     metrics: MetricsStore,
 ) -> list[_Admitted]:
-    scale = run.resource_gate.batch_scale_factor()
+    """Size the batch in the one admission authority, then select from the frontier."""
     metrics.resource_memory_utilization = run.resource_gate.memory_ratio()
     metrics.resource_cpu_utilization = run.resource_gate.cpu_ratio()
-    http_scale = getattr(run.resource_gate, "http_scale_factor", None)
-    if http_scale is not None and batch_is_http_heavy(
-        run.scheduler, state.frontier, run.http_heavy_lookahead
-    ):
-        scale = http_scale()
-    cpu = getattr(run.resource_gate, "cpu", None)
-    concurrency_multiplier = ENGINE_BATCH_CONCURRENCY_MULTIPLIER
-    if cpu is not None and not cpu.is_warm():
-        concurrency_multiplier = 1
-    if scale >= 1.0:
-        state.ramp = min(float(run.ramp_max), state.ramp * 1.10)
-    else:
-        state.ramp = max(float(run.global_concurrency), state.ramp * scale)
-    base = max(1, int(state.ramp))
-    # The cap reads through the one remaining-capacity helper so the unbounded
-    # sentinel (max_pages<=0) means "no term", never a clamped one-page budget.
-    bounds = [len(state.frontier), max(1, base * concurrency_multiplier)]
     remaining = remaining_page_capacity(state.page_count, run.max_pages)
-    if remaining is not None:
-        bounds.append(max(1, remaining))
-    batch_size = min(bounds)
-    if scale < 1.0:
-        limited_by = "cpu" if run.resource_gate.cpu_ratio() >= run.resource_gate.memory_ratio() else "memory"
-        logger.debug(
-            "resource admission: throttling batch (scale=%.2f, limited_by=%s, mem=%.2f cpu=%.2f)",
-            scale,
-            limited_by,
-            metrics.resource_memory_utilization,
-            metrics.resource_cpu_utilization,
-        )
-        batch_size = max(1, int(batch_size * scale))
+    take = len(state.frontier) if remaining is None else min(len(state.frontier), remaining)
+    http_items, browser_items = _take_and_bucket(state.frontier, run.scheduler, take)
+    want = Want.of(general=Count(len(http_items)), heavy=Count(len(browser_items)))
+    try:
+        async with run.admission.admit(want) as granted:
+            admit_http = granted.allocation.for_lane(LaneId.GENERAL).value
+            admit_browser = granted.allocation.for_lane(LaneId.HEAVY).value
+            if granted.scale.value < 1.0:
+                await metrics.record_throttle()
+    except AdmissionRefused:
+        admit_http = admit_browser = 0
         await metrics.record_throttle()
-    http_items, browser_items = _take_and_bucket(state.frontier, run.scheduler, batch_size)
-    want_http, want_browser = len(http_items), len(browser_items)
-    admit_http, admit_browser = await kernel_admit(run.admission, want_http, want_browser)
-    if admit_http + admit_browser < batch_size:
-        await metrics.record_throttle()
-        batch_size = admit_http + admit_browser
     selected = http_items[:admit_http] + browser_items[:admit_browser]
     excess = http_items[admit_http:] + browser_items[admit_browser:]
     for item in reversed(excess):
@@ -254,15 +207,6 @@ def requeue_transient(
     return True
 
 
-# Self-managed concurrency ceiling (#self-tuning): per-batch concurrency ramps
-# while the gate is open, which pulls it back under pressure.
-RECURSIVE_RAMP_MAX: int = 128
-
-# How far into the frontier we look to call the next batch cheap-HTTP or
-# not; it matches the max achievable batch size we are about to size.
-_HTTP_HEAVY_LOOKAHEAD: int = RECURSIVE_RAMP_MAX * ENGINE_BATCH_CONCURRENCY_MULTIPLIER
-
-
 @dataclass(slots=True)
 class CrawlState:
     """The only mutable carrier of one recursive crawl: rewritten per batch."""
@@ -270,7 +214,6 @@ class CrawlState:
     frontier: deque[tuple[int, CrawlTask]]
     visited: set[NormalizedUrl]
     next_index: int
-    ramp: float
     # The threaded occupied set: each admission's ``known_delta`` unioned
     # in, so each expansion dedupes against the value without re-deriving it.
     known: set[NormalizedUrl]
@@ -402,7 +345,6 @@ async def _start_recursive_state(
         frontier=deque((0, job) for job in jobs),
         visited=set(),
         next_index=len(jobs),
-        ramp=float(run.global_concurrency),
         known=set(seed_identities),
     )
     await _seed_recursive_frontier(run, state, state.frontier, seed_identities)
@@ -457,8 +399,6 @@ async def run_recursive_crawl(
         admission=admission or build_admission_gate(resource_gate),
         host_policy=host_policy,
         robots_timeout_seconds=robots_timeout_seconds,
-        ramp_max=RECURSIVE_RAMP_MAX,
-        http_heavy_lookahead=_HTTP_HEAVY_LOOKAHEAD,
     )
     state = await _start_recursive_state(run, jobs)
     await crawl_batches(
@@ -473,11 +413,9 @@ async def run_recursive_crawl(
 
 
 __all__ = [
-    "RECURSIVE_RAMP_MAX",
     "CrawlRun",
     "CrawlState",
     "admit_recursive_batch",
-    "batch_is_http_heavy",
     "commit_recursive_results",
     "crawl_recursive_batch",
     "requeue_transient",

@@ -1,6 +1,6 @@
 """The gate's configuration objects: pacing policy and per-lane specification.
 
-Validated value objects consumed by :class:`~admission.gate.AdmissionGate`; the seam
+Validated value objects consumed by :class:`~crawlutron_admit.gate.AdmissionGate`; the seam
 produces ceilings/costs, never the kernel's internals.
 """
 
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from admission.values import (
+from crawlutron_admit.values import (
     Cost,
     Count,
     Duration,
@@ -34,7 +34,7 @@ class LaneSpec:
 
 @dataclass(frozen=True)
 class PacingPolicy:
-    """The ramp/park posture of an :class:`~admission.gate.AdmissionGate`.
+    """The ramp/park posture of an :class:`~crawlutron_admit.gate.AdmissionGate`.
 
     ``floor_fraction`` is a positive integer denominator (the retype of the legacy
     ``saturated_dispatch_floor`` divisor); ``ramp_floor`` is the decay floor."""

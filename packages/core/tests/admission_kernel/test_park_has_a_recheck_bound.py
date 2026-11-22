@@ -11,7 +11,7 @@ import time
 
 import pytest
 
-from admission import (
+from crawlutron_admit import (
     AdmissionRefused,
     Bytes,
     Cost,
@@ -30,8 +30,8 @@ from admission import (
     Sensing,
     SensorBinding,
 )
-from admission.gate import AdmissionGate
-from admission.values import Instant
+from crawlutron_admit.gate import AdmissionGate
+from crawlutron_admit.values import Instant
 from tests._support._doors import _GENERAL_ONE, _ceiling_one_gate, _live
 from tests._support._gate_factory import FakeGauge, FakeSignal
 
@@ -67,7 +67,7 @@ def _build_parked_gate(stale_bound: float = 0.5) -> tuple:
 
     class _RealClock:
         def now(self) -> Instant:
-            return Instant._of(time.monotonic())
+            return Instant.of(time.monotonic())
 
     sensing = Sensing(
         {

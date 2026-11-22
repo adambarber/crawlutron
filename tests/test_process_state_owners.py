@@ -16,7 +16,7 @@ from safe_url import process_state as safe_url_process_state
 # Registered owners the registry tests reach into directly (these pin the names).
 # safe_url owns a separate seam (no crawlutron import); its owners use safe_url's registry, not core's.
 KNOWN = (
-    "crawlutron.runtime.cgroup_sense",
+    "crawlutron.runtime.admit_sensing",
     "crawlutron.orchestration.engine",
     "crawlutron.transport.cache",
     "crawlutron.transport.content_cache",

@@ -10,14 +10,14 @@ from collections import deque
 from contextlib import asynccontextmanager
 from typing import NamedTuple, cast
 
-from admission import AdmissionGate, Allocation, AllocationEntry, Count, LaneId, Want
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.crawl_task import CrawlTask
 from crawlutron.models.discovered_link import DiscoveredLink
 from crawlutron.orchestration.recursive import CrawlRun
-from crawlutron.runtime.pressure_gates import ResourceGate
 from crawlutron.transport.scheduler import DomainScheduler
 from crawlutron.vocabulary.strategies import BROWSER_HEADLESS
+from crawlutron_admit import AdmissionGate, Allocation, AllocationEntry, Count, LaneId, Scale, Want
+from crawlutron_admit.sensing.pressure_gates import ResourceGate
 from safe_url.host_policy import HostPolicy
 from safe_url.normalized_url import NormalizedUrl
 from tests._policy_factories import canonical
@@ -109,9 +109,10 @@ class FixedAdmission:
 
 
 class _FixedGranted(NamedTuple):
-    """The kernel-Granted shape the admission door reads: just the allocation."""
+    """The kernel-Granted shape the admission door reads: allocation and scale."""
 
     allocation: Allocation
+    scale: Scale = Scale(1.0)
 
 
 # The admission path must never dispatch on the crawl-carrying fields; each stub is a typed no-op that FAILS
@@ -152,7 +153,6 @@ def minimum_admission_run(frontier, *, http_quota, browser_quota, batch_pages=10
     """A minimal run/state for ``admit_recursive_batch``: only the admission
     path is exercised, with ``respect_robots=False`` short-circuiting robots.
     """
-    from crawlutron.vocabulary.limits import ENGINE_BATCH_CONCURRENCY_MULTIPLIER
 
     admission = FixedAdmission(http_quota, browser_quota)
     scheduler = DomainScheduler(global_limit=8, per_domain_limit=8, delay_seconds=0.0)
@@ -181,7 +181,5 @@ def minimum_admission_run(frontier, *, http_quota, browser_quota, batch_pages=10
         resource_gate=cast("ResourceGate", ContentionFreeGate(1.0)),  # provenance: structurally satisfied
         admission=cast("AdmissionGate", admission),  # provenance: FixedAdmission is the admit() shape
         host_policy=HostPolicy.unrestricted(),
-        ramp_max=128,
-        http_heavy_lookahead=128 * ENGINE_BATCH_CONCURRENCY_MULTIPLIER,
     )
     return run_state, _minimum_admission_state(frontier, batch_pages=batch_pages), admission

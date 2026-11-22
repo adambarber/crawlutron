@@ -10,8 +10,6 @@ from crawlutron.orchestration.request_pipeline import (
     PipelineState,
     compute_ram_derived_concurrency,
 )
-from crawlutron.runtime.pressure_gates import ResourceGate
-from crawlutron.runtime.pressure_memory import read_memory_stats
 from crawlutron.runtime.pressure_sizing import (
     TaskRamBudget,
     build_admission_policy,
@@ -22,6 +20,8 @@ from crawlutron.storage.result_store import CrawlSpillStore
 from crawlutron.transport.browser_pool import derive_browser_pool_size
 from crawlutron.transport.cache import HttpCache
 from crawlutron.transport.content_cache import ContentCache
+from crawlutron_admit.sensing.pressure_gates import ResourceGate
+from crawlutron_admit.sensing.pressure_memory import read_memory_stats
 from tests._fetch_doubles import FetcherDouble
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 

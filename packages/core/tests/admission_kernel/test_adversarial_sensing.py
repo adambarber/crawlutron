@@ -11,7 +11,7 @@ import logging
 
 import pytest
 
-from admission.values import Ratio
+from crawlutron_admit.values import Ratio
 from tests._support._doors import AdmissionRefused, Count, IdleReason, LaneId, Want
 from tests._support._gate_factory import GateSpec, build_gate
 

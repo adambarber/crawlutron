@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from admission import (
+from crawlutron_admit import (
     AdmissionRefused,
     Allocation,
     Count,

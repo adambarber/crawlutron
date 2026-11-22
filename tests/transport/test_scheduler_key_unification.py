@@ -34,7 +34,6 @@ def _empty_state(next_index: int = 0, known: set[NormalizedUrl] | None = None) -
         frontier=deque(),
         visited=set(),
         next_index=next_index,
-        ramp=4.0,
         known=set() if known is None else known,
     )
 

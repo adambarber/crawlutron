@@ -5,9 +5,9 @@ import asyncio
 import pytest
 
 from crawlutron.runtime import process_state
-from crawlutron.runtime.cgroup_sense import read_int
-from crawlutron.runtime.pressure_memory import MemoryGate, ResourceGauge
 from crawlutron.runtime.pressure_sizing import LoopLagProbe
+from crawlutron_admit.sensing.cgroup_sense import read_int
+from crawlutron_admit.sensing.pressure_memory import MemoryGate, ResourceGauge
 from tests._lag_scheduling import lag_clock, scripted_sleep
 
 
@@ -78,13 +78,13 @@ def test_leading_memory_signal_anticipates_climb(tmp_path, monkeypatch):
     idx = [0]
 
     def _fake_stats(*, cgroup_root):
-        from crawlutron.runtime.pressure_memory import MemoryStats
+        from crawlutron_admit.sensing.pressure_memory import MemoryStats
 
         v = values[idx[0] % len(values)]
         idx[0] += 1
         return MemoryStats(total_bytes=100, used_bytes=int(v * 100))
 
-    monkeypatch.setattr("crawlutron.runtime.pressure_memory.read_memory_stats", _fake_stats)
+    monkeypatch.setattr("crawlutron_admit.sensing.pressure_memory.read_memory_stats", _fake_stats)
     process_state.reset_all_process_state()
 
     ratios = [gate.leading_usage_ratio() for _ in range(len(values))]

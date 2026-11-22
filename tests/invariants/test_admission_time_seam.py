@@ -1,7 +1,7 @@
-"""The admission kernel uses no concrete time/sleep primitive: only injected seams.
+"""The admission decision core uses only injected time/sleep seams.
 
-The source-scan gate fails on any ``time.*`` clock call, ``asyncio.sleep``/``asyncio.Event``
-(and aliases) in ``admission/**``; the Clock/Signal are injected, never implemented here.
+Scans ``crawlutron_admit/**`` minus the four ``sensing/**`` adapters (§8 / #1177);
+``crawlutron/admission/`` is never in scope.
 """
 
 from __future__ import annotations
@@ -103,10 +103,16 @@ ADMISSION_USES_NO_CONCRETE_TIME_OR_SLEEP = Rule(
     name="admission-uses-no-concrete-time-or-sleep",
     find=_time_seam_offenders,
     summary=(
-        "no admission/** module may read a clock or await a concrete event: "
-        "the injected Clock/Signal are the package's only time surfaces (\u00a78)"
+        "no decision-core module may read a clock or await a concrete event: "
+        "the injected Clock/Signal are its only time surfaces; sensing/** is exempt (\u00a78)"
     ),
     scope=lambda *, exclude: trees_under(ADMISSION_ROOT),
+    # Owner-sanctioned scope narrow: sensing/** are host adapters (cache TTL,
+    # real-clock defaults), not decision surfaces; the core stays scanned.
+    skip=frozenset(
+        f"packages/crawlutron-admit/src/crawlutron_admit/sensing/{name}.py"
+        for name in ("cgroup_sense", "pressure_memory", "pressure_probes", "pressure_gates")
+    ),
     proof_path=_SYNTHETIC,
     bite=lambda: (
         Bites(

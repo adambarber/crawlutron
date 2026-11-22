@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
-    from admission.gate import AdmissionGate
+    from crawlutron_admit.gate import AdmissionGate
 
 __all__ = [
     "Allocation",
@@ -207,8 +207,8 @@ class Count(_Value):
 class Instant:
     """A monotonic copy of an injected clock's last read; never a wall time.
 
-    Only :meth:`Clock.now` produces an :class:`Instant`; the raw ``_of`` door
-    exists for the clock seam and value-construction tests.
+    Only a Clock produces an Instant; ``of`` is the named seam door for
+    clock implementations and value-construction tests, never a wall reading.
     """
 
     __slots__ = ("value",)
@@ -221,7 +221,7 @@ class Instant:
         pass
 
     @classmethod
-    def _of(cls, now: float) -> Instant:
+    def of(cls, now: float) -> Instant:
         self = super().__new__(cls)
         self.value = float(now)
         return self
