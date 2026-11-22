@@ -121,3 +121,21 @@ def test_pdf_clean_long_page_reaches_high():
     result = extract(pdf, "application/pdf")
     assert result.quality == Quality.HIGH
     assert body in result.text
+
+
+def test_pdf_single_stream_inflated_cap_refuses():
+    """One stream decompressing past max_pdf_inflated_bytes is refused as failed."""
+    limits = ExtractLimits(max_pdf_inflated_bytes=100)
+    result = extract(_make_pdf("x" * 200), "application/pdf", limits=limits)
+    assert result.quality == Quality.FAILED
+    assert result.text == ""
+    assert "pdf_inflated_exceeds_cumulative_cap" in result.flags
+
+
+def test_pdf_cumulative_inflated_cap_refuses():
+    """Streams under any single cap but over the cumulative cap are refused."""
+    limits = ExtractLimits(max_pdf_inflated_bytes=100)
+    result = extract(_make_pdf("x" * 60, "x" * 60), "application/pdf", limits=limits)
+    assert result.quality == Quality.FAILED
+    assert result.text == ""
+    assert "pdf_inflated_exceeds_cumulative_cap" in result.flags

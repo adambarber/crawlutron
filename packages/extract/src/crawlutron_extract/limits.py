@@ -57,3 +57,7 @@ class ExtractLimits:
     max_fields_per_record: int = 100
     max_zip_entries: int = 10_000
     max_zip_ratio: int = 1000
+    max_zip_member_bytes: int = 1_000_000
+    max_zip_inflated_bytes: int = 10_000_000
+    max_pdf_pages: int = 1000
+    max_pdf_inflated_bytes: int = 10_000_000

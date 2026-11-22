@@ -1,7 +1,5 @@
-"""Office container extraction: DOCX, PPTX, XLSX, EPUB adversarial tests.
-
-Matrix: DOCX/PPTX/XLSX/EPUB extraction, DTD/entity refusal, .doc refusal,
-zip bombs, truncated archives, duplicate entries.
+"""Office extraction adversarial tests: DTD/entity refusal, .doc refusal,
+zip bombs, truncated archives, duplicate entries, per-member/cumulative caps.
 """
 
 from __future__ import annotations
@@ -11,14 +9,13 @@ import zipfile
 
 from crawlutron_extract import ExtractLimits, Quality, extract
 
+DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+PPTX_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+EPUB_TYPE = "application/epub+zip"
 
-def _make_zip(
-    content_types: bytes,
-    rels: bytes,
-    main_xml: bytes,
-    extra: list[tuple[str, bytes]] | None = None,
-    main_path: str = "word/document.xml",
-) -> bytes:
+
+def _make_zip(content_types, rels, main_xml, extra=None, main_path="word/document.xml"):
     """Build a minimal zip container in memory."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
@@ -30,7 +27,7 @@ def _make_zip(
     return buf.getvalue()
 
 
-def _content_types_xml(overrides: list[tuple[bytes, bytes]]) -> bytes:
+def _content_types_xml(overrides):
     """Build [Content_Types].xml bytes with the given (part, content-type) overrides."""
     parts = [
         b'<?xml version="1.0" encoding="UTF-8"?>',
@@ -44,7 +41,7 @@ def _content_types_xml(overrides: list[tuple[bytes, bytes]]) -> bytes:
     return b"".join(parts)
 
 
-def _make_docx() -> bytes:
+def _make_docx():
     """Build a minimal DOCX in memory."""
     return _make_zip(
         _content_types_xml(
@@ -73,7 +70,7 @@ def _make_docx() -> bytes:
     )
 
 
-def _make_pptx() -> bytes:
+def _make_pptx():
     """Build a minimal PPTX in memory."""
     slide1_xml = (
         b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -107,7 +104,7 @@ def _make_pptx() -> bytes:
     )
 
 
-def _make_xlsx() -> bytes:
+def _make_xlsx():
     """Build a minimal XLSX in memory."""
     workbook_xml = (
         b'<?xml version="1.0" encoding="UTF-8"?>'
@@ -158,7 +155,7 @@ def _make_xlsx() -> bytes:
     )
 
 
-def _make_epub() -> bytes:
+def _make_epub():
     """Build a minimal EPUB in memory."""
     container_xml = (
         b'<?xml version="1.0" encoding="UTF-8"?>'
@@ -183,7 +180,6 @@ def _make_epub() -> bytes:
         b"</html>"
     )
     mimetype = b"application/epub+zip"
-
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         zf.writestr("mimetype", mimetype)
@@ -193,7 +189,7 @@ def _make_epub() -> bytes:
     return buf.getvalue()
 
 
-def _bomb_zip(compress_type: int = zipfile.ZIP_STORED) -> bytes:
+def _bomb_zip(compress_type=zipfile.ZIP_STORED):
     """Build a zip whose single 1 MB entry is highly compressible."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
@@ -203,7 +199,7 @@ def _bomb_zip(compress_type: int = zipfile.ZIP_STORED) -> bytes:
 
 def test_docx_extract():
     """DOCX extraction should return text from document.xml."""
-    result = extract(_make_docx(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    result = extract(_make_docx(), DOCX_TYPE)
     assert result.quality == Quality.MEDIUM
     assert "Hello World" in result.text
     assert "Heading One" in result.text
@@ -213,8 +209,7 @@ def test_docx_extract():
 
 def test_pptx_extract():
     """PPTX extraction should return text from slide XML."""
-    content_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-    result = extract(_make_pptx(), content_type)
+    result = extract(_make_pptx(), PPTX_TYPE)
     assert result.quality == Quality.MEDIUM
     assert "Slide Title" in result.text
     assert result.metadata["container"] == "pptx"
@@ -222,7 +217,7 @@ def test_pptx_extract():
 
 def test_xlsx_extract():
     """XLSX extraction should return text from sheet XML."""
-    result = extract(_make_xlsx(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    result = extract(_make_xlsx(), XLSX_TYPE)
     assert result.quality == Quality.MEDIUM
     assert "Cell A1" in result.text
     assert "Cell B1" in result.text
@@ -231,7 +226,7 @@ def test_xlsx_extract():
 
 def test_epub_extract():
     """EPUB extraction should return text from spine documents."""
-    result = extract(_make_epub(), "application/epub+zip")
+    result = extract(_make_epub(), EPUB_TYPE)
     assert result.quality == Quality.MEDIUM
     assert "Chapter 1 text" in result.text
     assert result.metadata["container"] == "epub"
@@ -246,7 +241,7 @@ def test_docx_empty_document():
             b'<?xml version="1.0"?><w:document xmlns:w="http://schemas.'
             b'openxmlformats.org/wordprocessingml/2006/main"><w:body/></w:document>',
         ),
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        DOCX_TYPE,
     )
     assert result.quality == Quality.LOW
     assert result.text == ""
@@ -271,7 +266,7 @@ def test_xml_dtd_refused():
             b"<w:document><w:body><w:p><w:t>Hello</w:t></w:p></w:body>"
             b"</w:document>",
         ),
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        DOCX_TYPE,
     )
     assert result.quality == Quality.FAILED
     assert "xml_dtd_refused" in result.flags
@@ -287,31 +282,16 @@ def test_xml_entity_refused():
             b"<w:document><w:body><w:p><w:t>Hello</w:t></w:p></w:body>"
             b"</w:document>",
         ),
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        DOCX_TYPE,
     )
     assert result.quality == Quality.FAILED
     assert "xml_dtd_refused" in result.flags
 
 
-def test_zip_bomb_refused():
-    """Zip ratio bomb should be refused or yield empty result."""
-    bomb = _bomb_zip()
-    original_size = len(bomb)
-    import zlib
-
-    compressed = zlib.compress(b"A" * 1_000_000)
-    ratio = original_size / len(compressed) if len(compressed) > 0 else float("inf")
-    assert ratio > 100
-
-    result = extract(bomb, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-    limits = ExtractLimits()
-    assert result.text == "" or len(result.text) <= limits.max_text_chars
-
-
 def test_truncated_archive_refused():
     """Truncated ZIP should be refused."""
     truncated = b"PK\x03\x04" + b"\x00" * 100
-    result = extract(truncated, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    result = extract(truncated, DOCX_TYPE)
     assert result.quality == Quality.FAILED
     assert result.text == ""
 
@@ -337,9 +317,7 @@ def test_duplicate_entries():
                 b'openxmlformats.org/wordprocessingml/2006/main"><w:body>'
                 b"<w:p><w:t>Second</w:t></w:p></w:body></w:document>",
             )
-    result = extract(
-        buf2.getvalue(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    )
+    result = extract(buf2.getvalue(), DOCX_TYPE)
     assert "Second" in result.text
 
 
@@ -347,12 +325,8 @@ def test_determinism():
     """Extraction should be deterministic."""
     docx = _make_docx()
     limits = ExtractLimits()
-    a = extract(
-        docx, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", limits=limits
-    )
-    b = extract(
-        docx, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", limits=limits
-    )
+    a = extract(docx, DOCX_TYPE, limits=limits)
+    b = extract(docx, DOCX_TYPE, limits=limits)
     assert a == b
 
 
@@ -391,7 +365,7 @@ def test_pptx_slide_boundaries_and_speaker_notes():
         extra=[("ppt/slides/notesSlide1-notes.xml", notes_xml)],
         main_path="ppt/slides/slide1.xml",
     )
-    result = extract(pptx, "application/vnd.openxmlformats-officedocument.presentationml.presentation")
+    result = extract(pptx, PPTX_TYPE)
     assert result.quality == Quality.MEDIUM
     assert "[Slide 1]" in result.text
     assert "Slide Title" in result.text
@@ -426,7 +400,7 @@ def test_xlsx_cached_values_preferred_over_formulas():
         extra=[("xl/worksheets/sheet1.xml", sheet)],
         main_path="xl/workbook.xml",
     )
-    result = extract(xlsx, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    result = extract(xlsx, XLSX_TYPE)
     assert result.quality == Quality.MEDIUM
     assert "99" in result.text
     assert "7" in result.text
@@ -457,10 +431,11 @@ def test_epub_spine_order_skips_nav():
             b"</rootfiles></container>",
         )
         zf.writestr("OEBPS/content.opf", opf)
-        chapter1_xhtml = b'<?xml version="1.0"?><html><body><p>Chapter 1 text</p></body></html>'
-        zf.writestr("OEBPS/chapter1.xhtml", chapter1_xhtml)
+        zf.writestr(
+            "OEBPS/chapter1.xhtml", b'<?xml version="1.0"?><html><body><p>Chapter 1 text</p></body></html>'
+        )
         zf.writestr("OEBPS/nav.xhtml", nav_xml)
-    result = extract(buf.getvalue(), "application/epub+zip")
+    result = extract(buf.getvalue(), EPUB_TYPE)
     assert result.quality == Quality.MEDIUM
     assert "Chapter 1 text" in result.text
     assert "NAV SHOULD BE SKIPPED" not in result.text
@@ -469,8 +444,7 @@ def test_epub_spine_order_skips_nav():
 def test_zip_bomb_is_refused_not_expanded():
     """Zip ratio bomb is refused with FAILED quality (defect 7)."""
     bomb = _bomb_zip(zipfile.ZIP_DEFLATED)
-    docx_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    result = extract(bomb, docx_type)
+    result = extract(bomb, DOCX_TYPE)
     assert result.quality == Quality.FAILED
     assert result.text == ""
     assert "zip_bomb_refused" in result.flags
@@ -481,8 +455,7 @@ def test_zip_traversal_is_refused():
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         zf.writestr("../evil.xml", b"<w:t>x</w:t>")
-    docx_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    result = extract(buf.getvalue(), docx_type)
+    result = extract(buf.getvalue(), DOCX_TYPE)
     assert result.quality == Quality.FAILED and result.text == ""
     assert "zip_traversal_refused" in result.flags
 
@@ -490,10 +463,34 @@ def test_zip_traversal_is_refused():
 def test_zip_entry_count_cap():
     """Too many zip entries is refused (defect 7)."""
     limits = ExtractLimits(max_zip_entries=5)
-    docx_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         for i in range(8):
             zf.writestr(f"file{i}.txt", b"x")
-    result = extract(buf.getvalue(), docx_type, limits=limits)
+    result = extract(buf.getvalue(), DOCX_TYPE, limits=limits)
     assert result.quality == Quality.FAILED and result.text == ""
+
+
+def test_zip_member_cap_refuses_oversized_member():
+    """A member over max_zip_member_bytes is refused."""
+    limits = ExtractLimits(max_zip_member_bytes=100, max_zip_inflated_bytes=100_000)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("word/document.xml", b"A" * 200)
+    result = extract(buf.getvalue(), DOCX_TYPE, limits=limits)
+    assert result.quality == Quality.FAILED
+    assert result.text == ""
+    assert "zip_member_exceeds_member_cap" in result.flags
+
+
+def test_zip_cumulative_inflated_cap_refuses():
+    """Members under the per-member cap but over the cumulative cap are refused."""
+    limits = ExtractLimits(max_zip_member_bytes=2000, max_zip_inflated_bytes=3000)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for i in range(3):
+            zf.writestr(f"ppt/slides/slide{i}.xml", b"<a:t>" + b"x" * 1000 + b"</a:t>")
+    result = extract(buf.getvalue(), PPTX_TYPE, limits=limits)
+    assert result.quality == Quality.FAILED
+    assert result.text == ""
+    assert "zip_inflated_exceeds_cumulative_cap" in result.flags
