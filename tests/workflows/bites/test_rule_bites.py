@@ -29,7 +29,7 @@ def _step(**changes) -> Step:
         raw.pop("uses", None)
     if "uses" in changes:
         raw.pop("run", None)
-    return Step.model_validate(raw)
+    return Step.create(raw)
 
 
 @pytest.mark.parametrize(
@@ -85,6 +85,16 @@ def test_a_rule_names_the_injected_violation(rule, broken) -> None:
 def test_a_workflow_rule_names_the_injected_violation(rule, broken: Workflow) -> None:
     findings = list(rule.check(broken))
     assert findings and findings[0].rule == rule.name
+
+
+def test_a_subshell_export_does_not_filter_the_outer_run() -> None:
+    scoped = _mutate(steps=(_step(name="Bite", run='(export PYTEST_ADDOPTS="-m slow"); pytest'),))
+    assert len(list(no_bare_pytest(parent_workflow(scoped), scoped))) == 1
+
+
+def test_an_echoed_export_is_not_an_export() -> None:
+    echoed = _mutate(steps=(_step(name="Bite", run='echo "export PYTEST_ADDOPTS=-m=slow"; pytest'),))
+    assert len(list(no_bare_pytest(parent_workflow(echoed), echoed))) == 1
 
 
 def test_an_export_only_filters_subsequent_invocations() -> None:

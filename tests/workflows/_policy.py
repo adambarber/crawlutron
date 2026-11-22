@@ -1,21 +1,36 @@
-"""Typed policy: one waiver table, validated rules, and a ratchet."""
+"""Admitted policy: constructing one IS admission against the live workflow tree."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Annotated
 
 from pydantic import AfterValidator, BaseModel, ConfigDict
 
+from tests.workflows._admission import admit_or_none as _admit_or_none
 from tests.workflows._names import JobId, StepName, WorkflowStem
 
 STRICT = ConfigDict(extra="forbid", frozen=True)
 
+_REFUSALS = frozenset(
+    {
+        "unknown_rule",
+        "blank_reason",
+        "missing_ceiling",
+        "ceiling_drift",
+        "stale_job",
+        "stale_step",
+        "empty_tree",
+        "invalid_waivers",
+    }
+)
+
 
 def _reason(value: str) -> str:
     if not value.strip() or len(value) > 160:
-        raise ValueError("a waiver reason must be 1-160 characters")
+        raise ValueError("blank_reason")
     return value.strip()
 
 
@@ -42,78 +57,167 @@ class Waiver(BaseModel):
     step: StepName | None
     reason: Reason
 
+    @classmethod
+    def create(cls, raw: object, *, context: Mapping[str, object] | None = None) -> Waiver:
+        return cls.model_validate(raw)
 
-class Policy(BaseModel):
-    model_config = STRICT
-    waivers: tuple[Waiver, ...]
-    ceilings: Mapping[RuleId, int]
+    @classmethod
+    def admit_or_none(cls, raw: object, *, context: Mapping[str, object] | None = None) -> Waiver | None:
+        return _admit_or_none(lambda value: cls.create(value), raw)
+
+
+WAIVERS: tuple[Waiver, ...] = (
+    Waiver(
+        rule=RuleId.CONTINUE_ON_ERROR,
+        workflow="agent-review",
+        job="review",
+        step="Create GitHub App token",
+        reason="A fail-closed guard step follows; the token is advisory, not the gate",
+    ),
+    Waiver(
+        rule=RuleId.NO_BARE_PYTEST,
+        workflow="ci",
+        job="test-browser",
+        step="Run pytest (all markers, main push and release calls)",
+        reason="The main-push browser job intentionally runs the full suite",
+    ),
+    Waiver(
+        rule=RuleId.NO_BARE_PYTEST,
+        workflow="nightly",
+        job="test",
+        step="Run full test suite (no -m filter) with coverage",
+        reason="The nightly exists to run the full unfiltered suite",
+    ),
+    Waiver(
+        rule=RuleId.NO_BARE_PYTEST,
+        workflow="weekly",
+        job="mutation-testing",
+        step="Run mutation testing on invariant-critical modules",
+        reason="Mutation testing selects its own targets, not the battery",
+    ),
+    Waiver(
+        rule=RuleId.NO_PIP_INSTALL,
+        workflow="weekly",
+        job="lowest-direct-resolution",
+        step="Install lowest-direct dependencies",
+        reason="The lowest-direct probe must resolve against an older graph on purpose",
+    ),
+)
+
+CEILINGS: Mapping[RuleId, int] = MappingProxyType(
+    {
+        RuleId.CONTINUE_ON_ERROR: 1,
+        RuleId.NO_EVENT_SPLICING: 0,
+        RuleId.NO_BARE_PYTEST: 3,
+        RuleId.NO_PIP_INSTALL: 1,
+        RuleId.NO_HEREDOC: 0,
+        RuleId.NEEDS_RESOLVE: 0,
+        RuleId.UNIQUE_STEP_IDS: 0,
+        RuleId.DECLARES_PERMISSIONS: 0,
+        RuleId.HAS_TRIGGER: 0,
+    }
+)
+
+
+def waived_continue_on_error(workflow: str, job: str, step: str | None) -> bool:
+    """Parse-door admission for one step; no tree needed, no Policy instance needed."""
+    return any(
+        item.rule is RuleId.CONTINUE_ON_ERROR
+        and item.workflow == workflow
+        and item.job == job
+        and item.step == step
+        for item in WAIVERS
+    )
+
+
+class Policy:
+    """An admitted waiver surface: every exemption names a live target and every
+    rule has a ceiling. There is no way to build one that is not."""
+
+    __slots__ = ("_ceilings", "_waivers")
+
+    def __init__(
+        self,
+        waivers: tuple[Waiver, ...],
+        jobs,
+        workflows,
+        *,
+        ceilings: Mapping[RuleId, int] = CEILINGS,
+    ) -> None:
+        try:
+            self._admit(waivers, jobs, workflows, ceilings)
+        except ValueError as error:
+            raise ValueError(_refusal_literal(str(error))) from error
+        self._waivers = tuple(waivers)
+        self._ceilings = MappingProxyType(dict(ceilings))
+
+    @staticmethod
+    def _admit(waivers, jobs, workflows, ceilings) -> None:
+        if not workflows:
+            raise ValueError("empty_tree")
+        if set(ceilings) != set(RuleId):
+            raise ValueError("missing_ceiling")
+        for waiver in waivers:
+            job = next(
+                (item for item in jobs if item.workflow == waiver.workflow and item.key == waiver.job), None
+            )
+            if job is None:
+                raise ValueError("stale_job")
+            if waiver.step is not None and not any(step.name == waiver.step for step in job.steps):
+                raise ValueError("stale_step")
+        for rule in RuleId:
+            if sum(item.rule is rule for item in waivers) != ceilings[rule]:
+                raise ValueError("ceiling_drift")
+
+    @classmethod
+    def create(cls, raw: object, *, context: Mapping[str, object] | None = None) -> Policy:
+        context = context or {}
+        jobs = context["jobs"]
+        workflows = context["workflows"]
+        ceilings = context.get("ceilings", CEILINGS)
+        if not isinstance(raw, tuple) or not all(isinstance(item, Waiver) for item in raw):
+            raise ValueError("invalid_waivers")
+        if not isinstance(ceilings, Mapping) or set(ceilings) != set(RuleId):
+            raise ValueError("missing_ceiling")
+        return cls(raw, jobs, workflows, ceilings=ceilings)
+
+    @classmethod
+    def admit_or_none(cls, raw: object, *, context: Mapping[str, object] | None = None) -> Policy | None:
+        return _admit_or_none(lambda value: cls.create(value, context=context), raw)
 
     def is_waived(self, workflow: str, job: str, step: str | None, rule: RuleId) -> bool:
         return any(
             item.rule is rule and item.workflow == workflow and item.job == job and item.step == step
-            for item in self.waivers
+            for item in self._waivers
         )
 
     def count(self, rule: RuleId) -> int:
-        return sum(item.rule is rule for item in self.waivers)
+        return sum(item.rule is rule for item in self._waivers)
 
-    def validate_targets(self, workflows, jobs) -> None:
-        """Every waiver must name a live rule target; a stale waiver fails closed."""
-        names = {(job.workflow, job.key) for job in jobs}
-        for waiver in self.waivers:
-            assert (waiver.workflow, waiver.job) in names, (
-                f"waiver names missing job {waiver.workflow}:{waiver.job}"
-            )
-            job = next(job for job in jobs if job.workflow == waiver.workflow and job.key == waiver.job)
-            if waiver.step is not None:
-                assert any(step.name == waiver.step for step in job.steps), (
-                    f"waiver names missing step {waiver.workflow}:{waiver.job}:{waiver.step}"
-                )
-        assert {rule: self.count(rule) for rule in self.ceilings} == dict(self.ceilings)
-        assert workflows
+    @property
+    def waivers(self) -> tuple[Waiver, ...]:
+        return self._waivers
+
+    @property
+    def ceilings(self) -> Mapping[RuleId, int]:
+        return self._ceilings
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, _source_type, handler):
+        """Accept only an already-admitted Policy; raw waivers have no tree."""
+        from pydantic_core import core_schema
+
+        def _validate(value: object) -> Policy:
+            if isinstance(value, cls):
+                return value
+            raise TypeError(f"{cls.__name__} is admitted by construction, not validated")
+
+        return core_schema.no_info_plain_validator_function(_validate)
 
 
-POLICY = Policy(
-    waivers=(
-        Waiver(
-            rule=RuleId.CONTINUE_ON_ERROR,
-            workflow="agent-review",
-            job="review",
-            step="Create GitHub App token",
-            reason="A fail-closed guard step follows; the token is advisory, not the gate",
-        ),
-        Waiver(
-            rule=RuleId.NO_BARE_PYTEST,
-            workflow="ci",
-            job="test-browser",
-            step="Run pytest (all markers, main push and release calls)",
-            reason="The main-push browser job intentionally runs the full suite",
-        ),
-        Waiver(
-            rule=RuleId.NO_BARE_PYTEST,
-            workflow="nightly",
-            job="test",
-            step="Run full test suite (no -m filter) with coverage",
-            reason="The nightly exists to run the full unfiltered suite",
-        ),
-        Waiver(
-            rule=RuleId.NO_BARE_PYTEST,
-            workflow="weekly",
-            job="mutation-testing",
-            step="Run mutation testing on invariant-critical modules",
-            reason="Mutation testing selects its own targets, not the battery",
-        ),
-        Waiver(
-            rule=RuleId.NO_PIP_INSTALL,
-            workflow="weekly",
-            job="lowest-direct-resolution",
-            step="Install lowest-direct dependencies",
-            reason="The lowest-direct probe must resolve against an older graph on purpose",
-        ),
-    ),
-    ceilings={
-        RuleId.CONTINUE_ON_ERROR: 1,
-        RuleId.NO_BARE_PYTEST: 3,
-        RuleId.NO_PIP_INSTALL: 1,
-    },
-)
+def _refusal_literal(reason: str) -> str:
+    return reason if reason in _REFUSALS else "ceiling_drift"
+
+
+def refusal_literals() -> frozenset[str]:
+    return frozenset(_REFUSALS)

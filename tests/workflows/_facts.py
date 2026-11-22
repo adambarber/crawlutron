@@ -7,6 +7,8 @@ from collections.abc import Mapping
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from tests.workflows._admission import admit_or_none as _admit_or_none
+
 _SEGMENT = re.compile(r"&&|;|\||\n")
 _EXPRESSION = re.compile(r"\$\{\{(.*?)\}\}", re.DOTALL)
 _EVENT_REF = re.compile(r"(?<![\w.])github\s*(?:\.\s*event\b|\[\s*['\"]event['\"]\s*\])", re.IGNORECASE)
@@ -28,6 +30,18 @@ class ExpressionFacts(BaseModel):
     model_config = ConfigDict(frozen=True)
     source: str
     references_event: bool
+
+    @classmethod
+    def create(cls, raw: object, *, context: Mapping[str, object] | None = None) -> ExpressionFacts:
+        if not isinstance(raw, str):
+            raise ValueError("invalid_expression")
+        return cls.parse(raw)
+
+    @classmethod
+    def admit_or_none(
+        cls, raw: object, *, context: Mapping[str, object] | None = None
+    ) -> ExpressionFacts | None:
+        return _admit_or_none(lambda value: cls.create(value), raw)
 
     @classmethod
     def parse(cls, text: str) -> ExpressionFacts:
@@ -70,18 +84,36 @@ class CommandFacts(BaseModel):
     heredoc: bool = False
 
     @classmethod
+    def create(cls, raw: object, *, context: Mapping[str, object] | None = None) -> CommandFacts:
+        if not isinstance(raw, str):
+            raise ValueError("invalid_command")
+        inherited = (context or {}).get("env")
+        env = inherited if isinstance(inherited, Mapping) else None
+        return cls.parse(raw, env)
+
+    @classmethod
+    def admit_or_none(
+        cls, raw: object, *, context: Mapping[str, object] | None = None
+    ) -> CommandFacts | None:
+        return _admit_or_none(lambda value: cls.create(value, context=context), raw)
+
+    @classmethod
     def parse(cls, run: str, env: Mapping[str, object] | None = None) -> CommandFacts:
         flat = re.sub(r"\\\s*\n\s*", " ", run)
         segments = tuple(part for part in _SEGMENT.split(flat) if part.strip())
         state = {key: str(value) for key, value in (env or {}).items()}
         invocations: list[Invocation] = []
+        depth = 0
         for segment in segments:
-            export = _EXPORT.search(segment)
-            unset = _UNSET.search(segment)
-            if export:
-                state[export.group(1)] = _export_value(export.group(2))
-            if unset:
-                state.pop(unset.group(1), None)
+            depth += segment.count("(") - segment.count(")")
+            command = segment.strip()
+            if depth <= 0 and command.startswith(("export ", "unset ")):
+                export = _EXPORT.search(command)
+                unset = _UNSET.search(command)
+                if export:
+                    state[export.group(1)] = _export_value(export.group(2))
+                if unset:
+                    state.pop(unset.group(1), None)
             if "pytest" in segment:
                 filtered = has_marker_filter(segment) or any(
                     key in PYTEST_ENV_KEYS and has_marker_filter(value) for key, value in state.items()

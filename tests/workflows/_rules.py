@@ -6,8 +6,8 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from enum import Enum, auto
 
-from tests.workflows._model import WORKFLOWS, Job, Workflow
-from tests.workflows._policy import POLICY, RuleId
+from tests.workflows._model import POLICY, WORKFLOWS, Job, Workflow
+from tests.workflows._policy import RuleId
 
 
 @dataclass(frozen=True)

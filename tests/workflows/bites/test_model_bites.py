@@ -29,12 +29,12 @@ def test_a_typed_primitive_names_its_violation(adapter, value, token) -> None:
 
 def test_a_truthy_continue_on_error_is_rejected_without_a_waiver() -> None:
     with pytest.raises(ValidationError, match="continue-on-error"):
-        Step.model_validate({"name": "Bite", "run": "true", "continue-on-error": "true", "line": 7})
+        Step.create({"name": "Bite", "run": "true", "continue-on-error": "true", "line": 7})
 
 
 def test_a_runner_job_without_a_timeout_is_rejected() -> None:
     with pytest.raises(ValidationError, match="timeout-minutes"):
-        Job.model_validate(
+        Job.create(
             {
                 "key": "broken",
                 "workflow": "ci",
@@ -76,14 +76,14 @@ def test_a_bad_schedule_cron_is_rejected() -> None:
         },
     }
     with pytest.raises(ValidationError, match="cron"):
-        Workflow.model_validate(payload)
+        Workflow.create(payload)
     payload["on"] = {"schedule": [{"cron": "61 99 * * MONDAY"}]}
     with pytest.raises(ValidationError, match="cron range|cron name"):
-        Workflow.model_validate(payload)
+        Workflow.create(payload)
     for invalid in ("*/0 * * * *", "1/0 * * * *"):
         payload["on"] = {"schedule": [{"cron": invalid}]}
         with pytest.raises(ValidationError, match="cron step"):
-            Workflow.model_validate(payload)
+            Workflow.create(payload)
 
 
 def test_an_unknown_workflow_trigger_is_rejected() -> None:
@@ -102,7 +102,12 @@ def test_an_unknown_workflow_trigger_is_rejected() -> None:
         },
     }
     with pytest.raises(ValidationError, match="unknown workflow trigger"):
-        Workflow.model_validate(payload)
+        Workflow.create(payload)
+
+
+def test_a_step_cannot_be_constructed_without_validation() -> None:
+    with pytest.raises(TypeError, match="admitted by validation"):
+        Step.model_construct(name="x", run="pip install x", line=1)
 
 
 def test_facts_are_computed_once_per_step(monkeypatch) -> None:
@@ -114,14 +119,14 @@ def test_facts_are_computed_once_per_step(monkeypatch) -> None:
         return original(run, env)
 
     monkeypatch.setattr(CommandFacts, "parse", counted)
-    step = Step.model_validate({"name": "Once", "run": "echo hi", "line": 1})
+    step = Step.create({"name": "Once", "run": "echo hi", "line": 1})
     assert step.command_facts == step.command_facts
     assert len(seen) == 1
 
 
 def test_a_call_job_with_steps_is_rejected() -> None:
     with pytest.raises(ValidationError, match="either calls"):
-        Job.model_validate(
+        Job.create(
             {
                 "key": "broken",
                 "workflow": "ci",
@@ -136,4 +141,4 @@ def test_an_unknown_github_key_fails_closed() -> None:
     raw = workflow("ci").model_dump(mode="json")
     raw["invented-key"] = "value"
     with pytest.raises(ValidationError, match="invented-key"):
-        Workflow.model_validate(raw)
+        Workflow.create(raw)

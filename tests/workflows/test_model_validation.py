@@ -5,6 +5,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from tests.workflows._admission import Admitted
+from tests.workflows._facts import CommandFacts, ExpressionFacts
 from tests.workflows._model import (
     JOBS,
     PARSE_COUNT,
@@ -13,6 +15,14 @@ from tests.workflows._model import (
     Step,
     workflow,
 )
+
+
+def test_every_model_implements_the_admission_protocol() -> None:
+    from tests.workflows._model import Job, Policy, Step, Workflow
+    from tests.workflows._policy import Waiver
+
+    for model in (Step, Job, Workflow, Policy, Waiver, CommandFacts, ExpressionFacts):
+        assert isinstance(model, Admitted), f"{model.__name__} has no create/admit_or_none door"
 
 
 def test_every_workflow_on_disk_parses_exactly_once() -> None:
@@ -30,9 +40,9 @@ def test_a_call_job_has_no_steps_and_a_runner_job_has_no_uses() -> None:
 def test_truthy_continue_on_error_is_unparseable_unless_waived() -> None:
     base = {"name": "Emit", "run": "true", "line": 1}
     with pytest.raises(ValidationError, match="continue-on-error"):
-        Step.model_validate({**base, "continue-on-error": True})
+        Step.create({**base, "continue-on-error": True})
     with pytest.raises(ValidationError, match="continue-on-error"):
-        Step.model_validate({**base, "continue-on-error": "${{ true }}"})
+        Step.create({**base, "continue-on-error": "${{ true }}"})
 
 
 def test_the_only_truthy_continue_on_error_in_the_tree_is_the_waived_guard() -> None:
@@ -43,7 +53,7 @@ def test_the_only_truthy_continue_on_error_in_the_tree_is_the_waived_guard() -> 
 
 def test_a_job_with_both_uses_and_steps_is_unparseable() -> None:
     with pytest.raises(ValidationError, match="either calls"):
-        Job.model_validate(
+        Job.create(
             {
                 "key": "broken",
                 "workflow": "ci",

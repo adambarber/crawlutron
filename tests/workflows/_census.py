@@ -5,13 +5,12 @@ from __future__ import annotations
 from collections.abc import Iterable
 from importlib import import_module
 
-from tests.workflows._model import JOBS, WORKFLOWS
-from tests.workflows._policy import POLICY, RuleId
+from tests.workflows._model import POLICY, WORKFLOWS
+from tests.workflows._policy import RuleId
 from tests.workflows._registry import CATALOG
 
 import_module("tests.workflows._decision_catalog")  # registration, not collection
 
-POLICY.validate_targets(WORKFLOWS, JOBS)
 WAIVER_CEILINGS = {rule.value: ceiling for rule, ceiling in POLICY.ceilings.items()}
 
 

@@ -18,6 +18,7 @@ from pydantic import (
 )
 
 from tests.chokepoint_paths import REPO_ROOT
+from tests.workflows._admission import admit_or_none as _admit_or_none
 from tests.workflows._facts import CommandFacts, ExpressionFacts
 from tests.workflows._names import (
     ActionRef,
@@ -31,11 +32,10 @@ from tests.workflows._names import (
     TimeoutMinutes,
     WorkflowStem,
 )
-from tests.workflows._policy import POLICY, RuleId
+from tests.workflows._policy import CEILINGS, WAIVERS, Policy, waived_continue_on_error
 
 STRICT = ConfigDict(extra="forbid", frozen=True)
 _FACT_FIELDS = frozenset({"event_spliced", "command_facts"})
-_VERBATIM = frozenset({"run", "env", "uses", "with_", "if_", "continue_on_error"})
 _ALIASES = {"with_": "with", "if_": "if", "continue_on_error": "continue-on-error"}
 
 
@@ -58,6 +58,10 @@ class PermissionLevel(StrEnum):
     READ = "read"
     WRITE = "write"
     NONE = "none"
+
+
+def _reject_construction(cls, *args: object, **kwargs: object) -> Step:
+    raise TypeError("Step is admitted by validation, not construction")
 
 
 class Step(BaseModel):
@@ -84,9 +88,17 @@ class Step(BaseModel):
     @model_validator(mode="after")
     def derive_facts(self) -> Step:
         run = self.run or ""
-        object.__setattr__(self, "event_spliced", ExpressionFacts.parse(run).references_event)
-        object.__setattr__(self, "command_facts", CommandFacts.parse(run, dict(self.env)))
+        object.__setattr__(self, "event_spliced", ExpressionFacts.create(run).references_event)
+        object.__setattr__(self, "command_facts", CommandFacts.create(run, context={"env": dict(self.env)}))
         return self
+
+    @classmethod
+    def create(cls, raw: object, *, context: Mapping[str, object] | None = None) -> Step:
+        return cls.model_validate(raw, context=context)
+
+    @classmethod
+    def admit_or_none(cls, raw: object, *, context: Mapping[str, object] | None = None) -> Step | None:
+        return _admit_or_none(lambda value: cls.create(value, context=context), raw)
 
     @model_validator(mode="after")
     def refusal(self, info: ValidationInfo) -> Step:
@@ -98,12 +110,14 @@ class Step(BaseModel):
         return self
 
     def model_copy(self, *, update=None, deep=False) -> Step:
-        if update and _VERBATIM & set(update):
-            raw = self.model_dump(by_alias=True)
-            for key, value in update.items():
-                raw[_ALIASES.get(key, key)] = value
-            return Step.model_validate(raw)
-        return super().model_copy(update=update, deep=deep)
+        raw = self.model_dump(by_alias=True)
+        for key, value in (update or {}).items():
+            raw[_ALIASES.get(key, key)] = value
+        return Step.create(raw)
+
+
+_CONSTRUCTION_DOOR = "model_construct"
+setattr(Step, _CONSTRUCTION_DOOR, classmethod(_reject_construction))
 
 
 class Strategy(BaseModel):
@@ -130,6 +144,14 @@ class Job(BaseModel):
     outputs: Mapping[str, Expression] = Field(default_factory=dict)
     strategy: Strategy | None = None
     steps: tuple[Step, ...] = ()
+
+    @classmethod
+    def create(cls, raw: object, *, context: Mapping[str, object] | None = None) -> Job:
+        return cls.model_validate(raw, context=context)
+
+    @classmethod
+    def admit_or_none(cls, raw: object, *, context: Mapping[str, object] | None = None) -> Job | None:
+        return _admit_or_none(lambda value: cls.create(value, context=context), raw)
 
     @model_validator(mode="after")
     def call_or_run(self) -> Job:
@@ -171,6 +193,14 @@ class Workflow(BaseModel):
     defaults: object | None = None
     run_name: str | None = Field(default=None, alias="run-name")
     jobs: Mapping[JobId, Job] = Field(min_length=1)
+
+    @classmethod
+    def create(cls, raw: object, *, context: Mapping[str, object] | None = None) -> Workflow:
+        return cls.model_validate(raw, context=context)
+
+    @classmethod
+    def admit_or_none(cls, raw: object, *, context: Mapping[str, object] | None = None) -> Workflow | None:
+        return _admit_or_none(lambda value: cls.create(value, context=context), raw)
 
     @field_validator("on_")
     def known_triggers(cls, value: Mapping[str, object]) -> Mapping[str, object]:
@@ -237,16 +267,17 @@ def parse_workflow(path: Path) -> Workflow:
             step["line"] = index.get(("jobs", str(job_key), "steps", str(number)), 0)
             if "waived_continue_on_error" in step:
                 raise ValueError(f"{path.name}:{step['line']}: waiver field is author-controlled")
-            waived = POLICY.is_waived(stem, job_key, step.get("name"), RuleId.CONTINUE_ON_ERROR)
+            waived = waived_continue_on_error(stem, job_key, step.get("name"))
             if waived:
                 if not step.get("continue-on-error"):
                     raise ValueError(f"{path.name}:{step['line']}: waiver without the violation")
                 waived_lines.add(step["line"])
-    return Workflow.model_validate(raw, context={"waived_lines": waived_lines})
+    return Workflow.create(raw, context={"waived_lines": waived_lines})
 
 
 WORKFLOWS: tuple[Workflow, ...] = tuple(parse_workflow(path) for path in sorted(WORKFLOW_DIR.glob("*.yml")))
 JOBS: tuple[Job, ...] = tuple(job for item in WORKFLOWS for job in item.jobs.values())
+POLICY = Policy.create(WAIVERS, context={"jobs": JOBS, "workflows": WORKFLOWS, "ceilings": CEILINGS})
 
 
 def workflow(stem: WorkflowStem) -> Workflow:
