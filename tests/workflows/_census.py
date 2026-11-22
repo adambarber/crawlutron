@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from importlib import import_module
 
 from tests.workflows._model import CONTINUE_ON_ERROR_WAIVERS, WORKFLOWS
 from tests.workflows._registry import CATALOG
 from tests.workflows._rules import BARE_PYTEST_WAIVERS, PIP_INSTALL_WAIVERS
+
+import_module("tests.workflows._decision_catalog")  # registration, not collection
 
 WAIVER_CEILINGS = {"continue-on-error": 1, "bare-pytest": 3, "pip-install": 1}
 

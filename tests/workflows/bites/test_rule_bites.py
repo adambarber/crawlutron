@@ -10,7 +10,7 @@ from tests.workflows._rules import (
     WORKFLOW_RULES,
     needs_resolve,
     no_bare_pytest,
-    no_event_splicing,
+    no_event_splicing_in_run,
     no_heredoc,
     no_pip_install,
     unique_step_ids,
@@ -31,10 +31,13 @@ def _step(**changes):
     ("rule", "broken"),
     [
         (needs_resolve, _mutate(needs=("ghost-job",))),
-        (no_event_splicing, _mutate(steps=(_step(run="echo ${{ github.event.x }}"),))),
+        (no_event_splicing_in_run, _mutate(steps=(_step(run="echo ${{ github.event.x }}"),))),
         (no_bare_pytest, _mutate(steps=(_step(name="Bite", run="python -m pytest"),))),
         (no_pip_install, _mutate(steps=(_step(name="Bite", run="pip install x"),))),
+        (no_pip_install, _mutate(steps=(_step(name="Bite", run="pip3 install x"),))),
         (no_heredoc, _mutate(steps=(_step(run="cat <<EOF"),))),
+        (no_heredoc, _mutate(steps=(_step(run="cat <<'PY' > x.py"),))),
+        (no_heredoc, _mutate(steps=(_step(run="python <<PYCODE"),))),
         (
             unique_step_ids,
             _mutate(steps=(_step(id="same"), _step(id="same"))),
@@ -71,7 +74,7 @@ def test_a_workflow_rule_names_the_injected_violation(rule, broken: Workflow) ->
 def test_every_job_rule_has_a_bite() -> None:
     assert {rule.check.__name__.replace("_", "-") for rule in JOB_RULES} == {
         "needs-resolve",
-        "no-event-splicing",
+        "no-event-splicing-in-run",
         "no-bare-pytest",
         "no-pip-install",
         "no-heredoc",

@@ -8,11 +8,20 @@ from enum import StrEnum
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from tests.chokepoint_paths import REPO_ROOT
 from tests.workflows._names import (
     ActionRef,
+    Cron,
     DisplayName,
     EnvName,
     Expression,
@@ -76,15 +85,15 @@ class Step(BaseModel):
     if_: Expression | None = Field(default=None, alias="if")
     shell: str | None = None
     continue_on_error: bool | None = Field(default=None, alias="continue-on-error")
-    waived_continue_on_error: bool = False
     line: int
 
     @model_validator(mode="after")
-    def refusal(self) -> Step:
-        assert not self.continue_on_error or self.waived_continue_on_error, (
-            "continue-on-error may not be truthy"
-        )
-        assert not (self.uses and self.run), "a step either uses an action or runs a script"
+    def refusal(self, info: ValidationInfo) -> Step:
+        waived = (info.context or {}).get("waived_lines", set())
+        if self.continue_on_error and self.line not in waived:
+            raise ValueError("continue-on-error may not be truthy")
+        if self.uses and self.run:
+            raise ValueError("a step either uses an action or runs a script")
         return self
 
 
@@ -115,7 +124,10 @@ class Job(BaseModel):
 
     @model_validator(mode="after")
     def call_or_run(self) -> Job:
-        assert bool(self.uses) != bool(self.steps), "a job either calls a workflow or has steps"
+        if bool(self.uses) == bool(self.steps):
+            raise ValueError("a job either calls a workflow or has steps")
+        if self.runs_on is not None and self.timeout_minutes is None:
+            raise ValueError("timeout-minutes is required for a runner job")
         return self
 
     def step_named(self, name: str) -> Step:
@@ -123,6 +135,19 @@ class Job(BaseModel):
             if step.name == name:
                 return step
         raise AssertionError(f"job {self.workflow}:{self.key} has no step named {name!r}")
+
+
+KNOWN_TRIGGERS = frozenset(
+    {
+        "branch_protection_rule",
+        "pull_request",
+        "push",
+        "schedule",
+        "workflow_call",
+        "workflow_dispatch",
+        "workflow_run",
+    }
+)
 
 
 class Workflow(BaseModel):
@@ -133,14 +158,29 @@ class Workflow(BaseModel):
     on_: Mapping[str, object] = Field(alias="on")
     permissions: Mapping[PermissionScope, PermissionLevel] = Field(default_factory=dict)
     concurrency: object | None = None
+    env: Mapping[EnvName, object] = Field(default_factory=dict)
+    defaults: object | None = None
+    run_name: str | None = Field(default=None, alias="run-name")
     jobs: Mapping[JobId, Job] = Field(min_length=1)
+
+    @field_validator("on_")
+    def known_triggers(cls, value: Mapping[str, object]) -> Mapping[str, object]:
+        unknown = set(value) - KNOWN_TRIGGERS
+        if unknown:
+            raise ValueError(f"unknown workflow trigger(s): {sorted(unknown)}")
+        schedule = value.get("schedule")
+        if isinstance(schedule, list):
+            for entry in schedule:
+                if isinstance(entry, dict) and "cron" in entry:
+                    TypeAdapter(Cron).validate_python(entry["cron"])
+        return value
 
 
 WORKFLOW_DIR = REPO_ROOT / ".github" / "workflows"
 PARSE_COUNT = 0
 
 
-def _line_index(text: str) -> dict[tuple[str, ...], int]:
+def _line_index(root) -> dict[tuple[str, ...], int]:
     """Key paths to their YAML line, from the composed node tree."""
     found: dict[tuple[str, ...], int] = {}
 
@@ -155,40 +195,48 @@ def _line_index(text: str) -> dict[tuple[str, ...], int]:
                 found[(*path, str(index))] = item.start_mark.line + 1
                 walk(item, (*path, str(index)))
 
-    root = yaml.compose(text)
     if root is not None:
         walk(root, ())
     return found
 
 
 def parse_workflow(path: Path) -> Workflow:
-    """The one read + one parse of a workflow file, for the whole suite."""
+    """One read and one compose; line index and objects share the node tree."""
     global PARSE_COUNT
     PARSE_COUNT += 1
     text = path.read_text(encoding="utf-8")
-    raw = yaml.safe_load(text)
-    assert isinstance(raw, dict), f"{path.name} is not a workflow mapping"
+    loader = yaml.SafeLoader(text)
+    root = loader.get_single_node()
+    index = _line_index(root)
+    raw = loader.construct_document(root)
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path.name} is not a workflow mapping")
     if True in raw:
         raw["on"] = raw.pop(True)
     stem = path.stem
-    index = _line_index(text)
     raw["stem"] = stem
     raw["path"] = path
     jobs = raw["jobs"]
-    assert isinstance(jobs, dict)
+    if not isinstance(jobs, dict):
+        raise ValueError(f"{path.name} declares no jobs mapping")
+    waived_lines: set[int] = set()
     for job_key, job in jobs.items():
         job["key"] = job_key
         job["workflow"] = stem
         job["line"] = index.get(("jobs", str(job_key)), 0)
         for number, step in enumerate(job.get("steps") or ()):
             step["line"] = index.get(("jobs", str(job_key), "steps", str(number)), 0)
-            name = step.get("name")
+            if "waived_continue_on_error" in step:
+                raise ValueError(f"{path.name}:{step['line']}: waiver field is author-controlled")
             waived = any(
-                w.workflow == stem and w.job == job_key and w.step == name for w in CONTINUE_ON_ERROR_WAIVERS
+                w.workflow == stem and w.job == job_key and w.step == step.get("name")
+                for w in CONTINUE_ON_ERROR_WAIVERS
             )
             if waived:
-                step["waived_continue_on_error"] = True
-    return Workflow.model_validate(raw)
+                if not step.get("continue-on-error"):
+                    raise ValueError(f"{path.name}:{step['line']}: waiver without the violation")
+                waived_lines.add(step["line"])
+    return Workflow.model_validate(raw, context={"waived_lines": waived_lines})
 
 
 WORKFLOWS: tuple[Workflow, ...] = tuple(parse_workflow(path) for path in sorted(WORKFLOW_DIR.glob("*.yml")))

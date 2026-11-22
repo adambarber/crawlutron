@@ -7,7 +7,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from enum import Enum, auto
 
-from tests.workflows._model import JOBS, WORKFLOWS, Job, Workflow
+from tests.workflows._model import WORKFLOWS, Job, Workflow
 
 BARE_PYTEST_WAIVERS = frozenset(
     {
@@ -65,11 +65,11 @@ def needs_resolve(workflow: Workflow, job: Job) -> Iterator[Finding]:
             )
 
 
-def no_event_splicing(workflow: Workflow, job: Job) -> Iterator[Finding]:
+def no_event_splicing_in_run(workflow: Workflow, job: Job) -> Iterator[Finding]:
     for step in job.steps:
         if "${{ github.event" in (step.run or ""):
             yield Finding(
-                "no-event-splicing",
+                "no-event-splicing-in-run",
                 workflow.stem,
                 job.key,
                 step.line,
@@ -82,7 +82,9 @@ def no_bare_pytest(workflow: Workflow, job: Job) -> Iterator[Finding]:
         run = step.run or ""
         if "pytest" not in run:
             continue
-        if re.search(r"(?:^|\s)-m(?:\s|=)", run.split("pytest", 1)[1]):
+        selected = re.search(r"(?:^|\s)-m(?:\s|=)", run.split("pytest", 1)[1])
+        env_selected = any(re.search(r"(?:^|\s)-m(?:\s|=)", str(value)) for value in step.env.values())
+        if selected or env_selected:
             continue
         if (workflow.stem, job.key, step.name) in BARE_PYTEST_WAIVERS:
             continue
@@ -98,7 +100,8 @@ def no_bare_pytest(workflow: Workflow, job: Job) -> Iterator[Finding]:
 def no_pip_install(workflow: Workflow, job: Job) -> Iterator[Finding]:
     for step in job.steps:
         run = step.run or ""
-        if "pip install" in run and (workflow.stem, job.key, step.name) not in PIP_INSTALL_WAIVERS:
+        pip = re.search(r"\bpip(?:3)?\s+install\b", run)
+        if pip and (workflow.stem, job.key, step.name) not in PIP_INSTALL_WAIVERS:
             yield Finding(
                 "no-pip-install",
                 workflow.stem,
@@ -110,8 +113,8 @@ def no_pip_install(workflow: Workflow, job: Job) -> Iterator[Finding]:
 
 def no_heredoc(workflow: Workflow, job: Job) -> Iterator[Finding]:
     for step in job.steps:
-        run = (step.run or "").upper()
-        if "<<EOF" in run or "<<EOH" in run:
+        run = step.run or ""
+        if re.search(r"<<-?\s*['\"]?[A-Za-z_]", run):
             yield Finding(
                 "no-heredoc",
                 workflow.stem,
@@ -135,7 +138,12 @@ def unique_step_ids(workflow: Workflow, job: Job) -> Iterator[Finding]:
 
 JOB_RULES = (
     Rule("needs-resolve", Scope.ALL, "a needs edge to a missing job never becomes green", needs_resolve),
-    Rule("no-event-splicing", Scope.WITH_STEPS, "event text is attacker-shaped", no_event_splicing),
+    Rule(
+        "no-event-splicing-in-run",
+        Scope.WITH_STEPS,
+        "event text must reach a script only through env",
+        no_event_splicing_in_run,
+    ),
     Rule("no-bare-pytest", Scope.WITH_STEPS, "one default suite per push", no_bare_pytest),
     Rule("no-pip-install", Scope.WITH_STEPS, "the lock freezes the graph", no_pip_install),
     Rule("no-heredoc", Scope.WITH_STEPS, "a heredoc hides control flow", no_heredoc),
@@ -172,4 +180,3 @@ CASES = tuple(
     if rule.scope.matches(job)
 )
 WF_CASES = tuple((item, rule) for item in WORKFLOWS for rule in WORKFLOW_RULES)
-assert JOBS

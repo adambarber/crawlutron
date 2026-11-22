@@ -29,9 +29,9 @@ def test_every_job_either_runs_steps_or_calls_a_workflow() -> None:
     assert all(bool(job.steps) or bool(job.uses) for job in JOBS)
 
 
-def test_waiver_tables_only_shrink() -> None:
+def test_waiver_tables_match_their_ceilings() -> None:
     counts = waiver_counts()
-    assert all(counts[name] <= ceiling for name, ceiling in WAIVER_CEILINGS.items())
+    assert counts == WAIVER_CEILINGS
 
 
 def test_a_mistyped_workflow_or_decision_cannot_be_registered() -> None:
@@ -40,3 +40,4 @@ def test_a_mistyped_workflow_or_decision_cannot_be_registered() -> None:
     typo = "XCFB"
     with pytest.raises(AttributeError):
         getattr(Decision, typo)
+    assert len(Decision.__members__) == len({item.value for item in Decision})
