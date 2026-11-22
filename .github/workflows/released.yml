@@ -1,0 +1,48 @@
+name: Resolve released packages
+
+# One definition of the roster resolution both release adapters need. It stays
+# read-only and publishes nothing; release.yml keeps its publishing jobs
+# top-level because PyPI trusted publishing rejects OIDC in a called workflow.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Released tag to resolve (leave empty for this commit)
+        required: false
+        type: string
+        default: ""
+    outputs:
+      packages:
+        description: Packages tagged at this commit
+        value: ${{ jobs.released.outputs.packages }}
+      root_version:
+        description: Version of the root package, or empty
+        value: ${{ jobs.released.outputs.root_version }}
+      primary:
+        description: Whether this commit is the primary release
+        value: ${{ jobs.released.outputs.primary }}
+
+permissions:
+  contents: read
+
+jobs:
+  released:
+    name: Resolve the packages this commit released
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      packages: ${{ steps.roster.outputs.packages }}
+      root_version: ${{ steps.roster.outputs.root_version }}
+      primary: ${{ steps.roster.outputs.primary }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - name: Emit the released packages
+        id: roster
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: python3 -m scripts.release.emit_roster

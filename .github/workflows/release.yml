@@ -55,27 +55,11 @@ jobs:
   released:
     name: Resolve the packages this commit released
     if: ${{ github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    uses: $/.github/workflows/released.yml
+    with:
+      tag: ${{ inputs.tag }}
     permissions:
       contents: read
-    outputs:
-      packages: ${{ steps.roster.outputs.packages }}
-      root_version: ${{ steps.roster.outputs.root_version }}
-      primary: ${{ steps.roster.outputs.primary }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
-          fetch-tags: true
-          persist-credentials: false
-      - name: Emit the released packages
-        id: roster
-        env:
-          RELEASE_TAG: ${{ inputs.tag }}
-          GITHUB_OUTPUT: ${{ github.output }}
-        run: python3 -m scripts.release.emit_roster
 
   # Build with no OIDC in scope: a build backend executes arbitrary code, and
   # any step in a job holding id-token can mint the publish credential. The

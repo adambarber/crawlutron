@@ -16,6 +16,7 @@ from tests._ci_contract import SERVICE_ROOT
 from tests.chokepoint_paths import REPO_ROOT
 
 RELEASE_WORKFLOW_PATH = REPO_ROOT / ".github/workflows/release.yml"
+RELEASED_WORKFLOW_PATH = REPO_ROOT / ".github/workflows/released.yml"
 GIT = shutil.which("git") or "git"
 
 
@@ -125,7 +126,9 @@ def test_only_the_primary_tag_runs_the_gates_and_publishes() -> None:
     document = yaml.safe_load(RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8"))
     jobs = document["jobs"]
     assert jobs["released"].get("needs") in (None, [])
-    assert "primary" in jobs["released"]["outputs"]
+    called = yaml.safe_load(RELEASED_WORKFLOW_PATH.read_text(encoding="utf-8"))
+    triggers = called.get("on", called.get(True))
+    assert "primary" in triggers["workflow_call"]["outputs"]
     assert "needs.released.outputs.primary == 'true'" in jobs["ci"]["if"]
     for name in (
         "publish-build",
@@ -159,7 +162,10 @@ def test_a_manual_retry_can_publish_an_existing_tag_from_the_fixed_workflow() ->
     assert "version('crawlutron')" in image_script
     assert '"docker"' in image_script and '"inspect"' in image_script
     released_job = workflow_doc["jobs"]["released"]
-    assert released_job["steps"][0]["with"]["ref"] == "${{ github.sha }}"
+    assert released_job["uses"] == "$/.github/workflows/released.yml"
+    called = yaml.safe_load(RELEASED_WORKFLOW_PATH.read_text(encoding="utf-8"))
+    roster_step = called["jobs"]["released"]["steps"][0]
+    assert roster_step["with"]["ref"] == "${{ github.sha }}"
     image_job = workflow_doc["jobs"]["image"]
     assert image_job["steps"][0]["with"]["ref"] == "${{ github.sha }}"
 
