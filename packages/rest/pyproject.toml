@@ -19,8 +19,7 @@ keywords = [
 ]
 dependencies = [
     # rest is the FastAPI-carrying package; core is framework-free and never
-    # imports this wheel. The floor is the first release that shipped the
-    # disjoint api/main/cli surface under packages/rest (Wave A, #900/#902).
+    # imports this wheel. The /health and /ready wire door lives here, too.
     "crawlutron-core>=0.4.0.dev0",
     "fastapi==0.165.0",
     "uvicorn[standard]==0.54.0",

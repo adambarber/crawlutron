@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import pytest
 
-    from crawlutron.health.readiness import ReadinessState
+    from crawlutron.runtime.readiness_state import ReadinessState
 
 
 def stub_heavy_teardown(monkeypatch: pytest.MonkeyPatch) -> ReadinessState:
@@ -19,8 +19,8 @@ def stub_heavy_teardown(monkeypatch: pytest.MonkeyPatch) -> ReadinessState:
     a sampler test asserts against.
     """
     import crawlutron_rest.main as main_mod
-    from crawlutron.health import readiness as readiness_mod
-    from crawlutron.health.readiness import ReadinessState
+    from crawlutron.runtime import readiness_state as readiness_mod
+    from crawlutron.runtime.readiness_state import ReadinessState
     from crawlutron.service import job_runner as job_runner_mod
     from crawlutron.service import store_shutdown as store_shutdown_mod
     from crawlutron.transport import http_client_pool as http_mod
