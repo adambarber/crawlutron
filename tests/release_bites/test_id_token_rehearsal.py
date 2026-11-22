@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from tests.release_bites.conftest import REPO_ROOT
+from tests.chokepoint_paths import REPO_ROOT
 
 ABSENT_TAG = "v0.0.0-no-package-carries-this"
 
@@ -16,7 +16,7 @@ def test_emit_roster_writes_the_release_outputs(tmp_path: Path):
     """A rehearsal run needs no id-token and writes its exact summary and outputs."""
     github_output = tmp_path / "github_output"
     result = subprocess.run(
-        [sys.executable, "scripts/release/emit_roster.py"],
+        [sys.executable, "-m", "scripts.release.emit_roster"],
         capture_output=True,
         text=True,
         cwd=str(REPO_ROOT),

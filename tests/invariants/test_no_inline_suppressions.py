@@ -8,7 +8,8 @@ import tokenize
 
 import pytest
 
-from tests._walk_primitives import REPO_ROOT, SCAN_ROOTS
+from tests._walk_primitives import SCAN_ROOTS
+from tests.chokepoint_paths import REPO_ROOT
 
 #: A directive is a comment that actually suppresses: noqa or a type-ignore
 #: spelling. A backticked mention or an explanation is prose, never a hit.

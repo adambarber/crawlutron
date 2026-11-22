@@ -92,7 +92,7 @@ def test_battery_is_only_fast_suite_execution() -> None:
     coverage_runs = " ".join(str(cast(StepMapping, step).get("run", "")) for step in coverage_steps)
     assert "pytest" not in coverage_runs, "coverage job must not re-run pytest (report-only)"
     assert "coverage combine" in coverage_runs, "coverage job must run coverage combine"
-    assert "coverage_reports.py" in coverage_runs, "coverage job must call frozen report script"
+    assert "scripts.coverage_reports" in coverage_runs, "coverage job must call frozen report script"
 
     # real-pbkdf2 and test-browser must not run the fast suite
     for job_name in ("real-pbkdf2", "test-browser"):
@@ -251,12 +251,13 @@ def test_coverage_job_uploads_per_surface_codecov_with_explicit_files() -> None:
         for step in upload_steps
         if "junit" in str(cast(StepMapping, step.get("with", {})).get("files", ""))
     ]
-    assert len(test_results_uploads) == 3, (
-        "coverage job must have 3 test_results uploads (battery, real-pbkdf2, test-browser)"
+    assert len(test_results_uploads) == 4, (
+        "coverage job must have 4 test_results uploads (behavioral, invariants, real-pbkdf2, test-browser)"
     )
 
     expected_files = {
-        "battery": "junit/battery/junit-*.xml",
+        "behavioral": "junit/split/behavioral/junit-*.xml",
+        "invariants": "junit/split/invariants/junit-*.xml",
         "real-pbkdf2": "junit/real-pbkdf2/junit-real-pbkdf2.xml",
         "test-browser": "junit/test-browser/junit-browser.xml",
     }
@@ -274,6 +275,25 @@ def test_coverage_job_uploads_per_surface_codecov_with_explicit_files() -> None:
             else "${{ !cancelled() }}"
         )
         assert step.get("if") == expected_if
+
+
+def test_coverage_job_splits_battery_junit_before_upload() -> None:
+    """Battery JUnit is split once, before the two flagged Codecov uploads."""
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    steps = job_steps(workflow, "coverage")
+    split_indexes = [
+        index
+        for index, step in enumerate(steps)
+        if "scripts.split_junit junit/battery junit/split" in str(step.get("run", ""))
+    ]
+    assert len(split_indexes) == 1
+    upload_indexes = [
+        index
+        for index, step in enumerate(steps)
+        if "junit/split/" in str(cast(StepMapping, step.get("with", {})).get("files", ""))
+    ]
+    assert len(upload_indexes) == 2
+    assert all(index > split_indexes[0] for index in upload_indexes)
 
 
 def test_no_direct_codecov_upload_in_real_pbkdf2_and_test_browser() -> None:

@@ -6,8 +6,8 @@ stays legal, so caller growth cannot red -- the only red is a second implementat
 import ast
 from pathlib import Path
 
-from tests._walk_primitives import APP_ROOTS, string_constants
-from tests.chokepoint_walks import REPO_ROOT
+from tests._walk_primitives import string_constants
+from tests.chokepoint_paths import APP_ROOTS, REPO_ROOT
 
 #: The one sanctioned home for masking implementation (safe_url owns redaction).
 HOME = Path("packages/safe-url/src/safe_url/url_redaction.py")

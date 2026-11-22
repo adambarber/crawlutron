@@ -11,15 +11,14 @@ import inspect
 import pathlib
 from collections.abc import Iterator
 
-from tests.chokepoint_walks import APP_ROOT, trees_under
-
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+from tests.chokepoint_paths import APP_ROOT, REPO_ROOT, SAFE_URL_ROOT
+from tests.chokepoint_walks import trees_under
 
 
 def _model_declared_names() -> dict[str, str]:
     """Every public name crawlutron/models/ declares, mapped to the module that declares it."""
     models_root = APP_ROOT / "models"
-    safe_url_root = REPO_ROOT / "packages" / "safe-url" / "src" / "safe_url"
+    safe_url_root = SAFE_URL_ROOT
     declared: dict[str, str] = {}
     for root in (models_root, safe_url_root):
         for path, tree in trees_under(root):

@@ -5,14 +5,8 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from tests.chokepoint_walks import (
-    APP_ROOT,
-    app_trees,
-    local_subtree,
-    nodes_of,
-    offender,
-    resolved_call_name,
-)
+from tests.chokepoint_paths import APP_ROOT
+from tests.chokepoint_walks import app_trees, local_subtree, nodes_of, offender, resolved_call_name
 from tests.invariants._registry_machinery import (
     _OBSERVERS,
     _PROPERTY_MODULES,

@@ -11,8 +11,9 @@ from pathlib import Path
 import yaml
 
 from tests._walk_primitives import package_roots
+from tests.chokepoint_paths import REPO_ROOT
 
-SERVICE_ROOT = Path(__file__).resolve().parents[1]
+SERVICE_ROOT = REPO_ROOT
 
 CONFIG_PATH = SERVICE_ROOT / ".pre-commit-config.yaml"
 
@@ -24,6 +25,7 @@ WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "ci.yml"
 # The version-triggered publish workflow and the packaging probe, contracted
 # alongside ci.yml.
 RELEASE_WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "release.yml"
+RELEASED_WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "released.yml"
 PACKAGING_WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "packaging.yml"
 
 # The one gate environment every job starts from.

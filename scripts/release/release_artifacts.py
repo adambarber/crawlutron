@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import sys
 
-from _common import REPO_ROOT, _gh_release_upload, _release_credentials, _run
+from scripts.release._common import _gh_release_upload, _release_credentials, _run
+from utils.paths import REPO_ROOT
 
 
 def _build_checksums() -> None:

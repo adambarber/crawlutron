@@ -9,7 +9,8 @@ from typing import get_args
 
 import pytest
 
-from tests.chokepoint_walks import REPO_ROOT, file_tree, parsed
+from tests.chokepoint_paths import REPO_ROOT
+from tests.chokepoint_walks import file_tree, parsed
 
 # --- A wire model may not silently drop a domain model's field ---- crawlutron/models/taxonomy.py holds
 # the internal dataclasses and the pydantic response models are the ones under crawlutron/models/

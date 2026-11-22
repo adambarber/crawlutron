@@ -10,7 +10,8 @@ import pathlib
 import re
 
 from tests._walk_primitives import import_roots
-from tests.chokepoint_walks import APP_ROOT, REPO_ROOT, assignment_targets, parsed, relative_posix
+from tests.chokepoint_paths import APP_ROOT, REPO_ROOT, relative_posix
+from tests.chokepoint_walks import assignment_targets, parsed
 from tests.invariants._shared import _declared_public_symbols
 from tests.invariants._surface_ratchet import (
     DECLARED_SURFACE_RATCHET as _DECLARED_SURFACE_RATCHET,

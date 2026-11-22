@@ -6,14 +6,13 @@ mounting a crawlutron router is a harness app, built only in the one builder mod
 from __future__ import annotations
 
 import ast
-import pathlib
 from collections.abc import Iterator
 
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from tests.chokepoint_paths import REPO_ROOT
 from tests.chokepoint_walks import enclosing_function, parent_map, trees_under
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 BUILDER_MODULE = "tests/_app_harnesses.py"
 GATE_MODULE = "tests/invariants/test_harness_middleware_parity.py"
 

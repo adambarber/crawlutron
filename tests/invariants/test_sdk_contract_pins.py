@@ -7,12 +7,12 @@ admission, or model internals. The server remains the sole chokepoint.
 from __future__ import annotations
 
 import importlib
-import pathlib
 import re
+
+from tests.chokepoint_paths import REPO_ROOT
 
 _CRAWLUTRON_IMPORT = re.compile(r"^\s*(import crawlutron\b|from crawlutron\b)")
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 SDK_ROOT = REPO_ROOT / "packages/sdk"
 # The importable package sits under src/ in the uv src-layout; the member root holds the pyproject.
 _SDK_SRC = SDK_ROOT / "src" / "crawlutron_sdk"

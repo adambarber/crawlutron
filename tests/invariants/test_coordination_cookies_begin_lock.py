@@ -3,7 +3,8 @@
 import ast
 
 from tests._walk_assertions import assert_detectors_clean
-from tests.chokepoint_walks import APP_ROOT, offender_at, parent_map, parsed
+from tests.chokepoint_paths import APP_ROOT
+from tests.chokepoint_walks import offender_at, parent_map, parsed
 
 _STORE = APP_ROOT / "storage" / "coordination_cookies.py"
 

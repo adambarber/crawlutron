@@ -8,7 +8,8 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from tests.chokepoint_walks import relative_posix, trees_under
+from tests.chokepoint_paths import relative_posix
+from tests.chokepoint_walks import trees_under
 from tests.invariants._shared import _private_from_import_names
 from tests.rules import Registry, Rule
 

@@ -14,7 +14,7 @@ from pathlib import Path
 def test_missing_coverage_data_refusal_message(scripts_tree: Path):
     """The report step fails naming the missing `.coverage` file and its location."""
     result = subprocess.run(
-        [sys.executable, "scripts/coverage_reports.py"],
+        [sys.executable, "-m", "scripts.coverage_reports"],
         capture_output=True,
         text=True,
         cwd=str(scripts_tree),

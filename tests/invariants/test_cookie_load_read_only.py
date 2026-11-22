@@ -5,7 +5,8 @@ recency refresh goes through the explicit ``touch`` door.
 
 import ast
 
-from tests.chokepoint_walks import APP_ROOT, parsed, stmt_offenders
+from tests.chokepoint_paths import APP_ROOT
+from tests.chokepoint_walks import parsed, stmt_offenders
 
 _STORE = APP_ROOT / "storage" / "coordination_cookies.py"
 

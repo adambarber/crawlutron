@@ -7,25 +7,24 @@ from __future__ import annotations
 
 import os
 import subprocess
-from pathlib import Path
+
+from tests.chokepoint_paths import REPO_ROOT
 
 
 def test_missing_roster_tag_key_specific_message():
     """Verify specific ERROR message for missing required env var."""
-    venv_python = Path(__file__).resolve().parents[2] / ".venv" / "bin" / "python"
+    venv_python = REPO_ROOT / ".venv" / "bin" / "python"
     missing_var = "RASTER_TAG_KEY_THAT_DOES_NOT_EXIST"
 
     result = subprocess.run(
         [
             str(venv_python),
             "-c",
-            f"import sys; sys.path.insert(0, 'scripts'); "
-            f"from release._common import _require_env; "
-            f"_require_env('{missing_var}')",
+            f"from scripts.release._common import _require_env; _require_env('{missing_var}')",
         ],
         capture_output=True,
         text=True,
-        env={k: v for k, v in os.environ.items() if k != missing_var},
+        env={k: v for k, v in os.environ.items() if k != missing_var} | {"PYTHONPATH": str(REPO_ROOT)},
     )
 
     combined = result.stdout + result.stderr

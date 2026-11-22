@@ -13,9 +13,11 @@ from pathlib import Path
 
 import pytest
 
+from tests.chokepoint_paths import REPO_ROOT
+
 # The root both path derivations start from: this file is `tests/<name>.py`, so the service root is two
 # parents up.
-SERVICE_ROOT = Path(__file__).resolve().parent.parent
+SERVICE_ROOT = REPO_ROOT
 
 #: Configs that decide what the gates run, and so can decide that a run does not vary.
 ORDER_PINNING_CONFIGS = (
@@ -98,7 +100,7 @@ def _subprocess_gate_run(tmp_path, pin) -> str:
     )
     probe = tmp_path / "probe_test.py"
     probe.write_text(gate)
-    environ = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parent.parent))
+    environ = dict(os.environ, PYTHONPATH=str(REPO_ROOT))
     if isinstance(pin, tuple) and pin[0] == "env":
         environ["PYTEST_ADDOPTS"] = pin[1]
         pin = None

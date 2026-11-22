@@ -8,7 +8,8 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from tests._walk_primitives import REPO_ROOT, SCAN_ROOTS, comment_lines, is_exempt, string_constants
+from tests._walk_primitives import SCAN_ROOTS, comment_lines, is_exempt, string_constants
+from tests.chokepoint_paths import REPO_ROOT
 
 __all__ = ["RETIRED_SYMBOLS"]
 

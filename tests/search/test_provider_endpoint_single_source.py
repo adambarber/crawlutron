@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from crawlutron.search.providers import PROVIDER_ENDPOINTS
+from tests.chokepoint_paths import REPO_ROOT
 
 _MODULES = [
     Path("packages/core/src/crawlutron/search/providers.py"),
@@ -24,13 +25,13 @@ def _url_literals(path: Path) -> set[str]:
 
 
 def test_registry_matches_declared_urls() -> None:
-    root = Path(__file__).resolve().parents[2]
+    root = REPO_ROOT
     for url in PROVIDER_ENDPOINTS:
         assert url in _url_literals(root / "packages/core/src/crawlutron/search/providers.py"), url
 
 
 @pytest.mark.parametrize("module", _MODULES[1:], ids=lambda p: p.name)
 def test_no_endpoint_literal_outside_providers(module: Path) -> None:
-    root = Path(__file__).resolve().parents[2]
+    root = REPO_ROOT
     leaked = {u for u in _url_literals(root / module) if u in PROVIDER_ENDPOINTS}
     assert not leaked, f"{module} restates registry endpoints: {sorted(leaked)}"

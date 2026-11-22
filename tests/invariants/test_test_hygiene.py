@@ -9,16 +9,8 @@ import ast
 import configparser
 import pathlib
 
-from tests.chokepoint_walks import (
-    APP_ROOT,
-    REPO_ROOT,
-    TESTS_DIR,
-    app_offenders,
-    nodes_of,
-    offender_at,
-    parsed,
-    trees_under,
-)
+from tests.chokepoint_paths import APP_ROOT, REPO_ROOT, TESTS_DIR
+from tests.chokepoint_walks import app_offenders, nodes_of, offender_at, parsed, trees_under
 from tests.invariants._shared import assert_trees_clean
 from tests.membership_gate import (
     aliased_dynamic_pattern_re_offenders,

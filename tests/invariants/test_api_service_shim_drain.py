@@ -8,7 +8,7 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from tests.chokepoint_walks import APP_ROOT, REPO_ROOT
+from tests.chokepoint_paths import APP_ROOT, REPO_ROOT
 
 __all__ = ["_api_shim_offenders"]
 

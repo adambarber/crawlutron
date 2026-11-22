@@ -8,7 +8,8 @@ import pathlib
 import yaml
 
 from scripts.gate_fanout import SCAN_ROOTS_MARKER
-from tests._walk_primitives import REPO_ROOT, SCAN_ROOTS, declared_root_files
+from tests._walk_primitives import SCAN_ROOTS, declared_root_files
+from tests.chokepoint_paths import REPO_ROOT
 
 #: The root-literal tuples the completeness gate names; SCAN_ROOTS members
 #: appearing as a local loop/parametrize tuple are the drift machine.

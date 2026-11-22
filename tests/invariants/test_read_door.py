@@ -17,7 +17,7 @@ from tests import _walk_readers as _wr
 from tests import chokepoint_walks as _cw
 from tests.rules import Rule
 
-_STORAGE_DIR = _wp.REPO_ROOT / "packages" / "core" / "src" / "crawlutron" / "storage"
+_STORAGE_DIR = _wp.APP_ROOT / "storage"
 
 _READ_METHODS = frozenset({"execute", "executemany"})
 _READ_KEYWORDS = frozenset({"select", "pragma", "with", "explain"})

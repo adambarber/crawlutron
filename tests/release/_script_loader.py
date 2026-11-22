@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import sys
 from importlib.util import module_from_spec, spec_from_file_location
-from pathlib import Path
 from types import ModuleType
 
-_SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "release"
+from tests.chokepoint_paths import REPO_ROOT
+
+_SCRIPTS = REPO_ROOT / "scripts" / "release"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 

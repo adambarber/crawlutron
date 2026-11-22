@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from crawlutron.models.browser_profile_record import BrowserProfileRecord
 from crawlutron.models.crawl_strategy import CrawlStrategy
 from crawlutron.vocabulary.limits import MAX_CRAWL_STRATEGIES
+from tests.chokepoint_paths import TRANSPORT_DIR
 
 
 class TestBrowserActionKeysAreClosed:
@@ -56,7 +57,7 @@ class TestBrowserActionKeysAreClosed:
         import ast
 
         from crawlutron.vocabulary.browser import BROWSER_ACTION_KEYS
-        from tests.chokepoint_walks import TRANSPORT_DIR, attribute_calls, string_argument
+        from tests.chokepoint_walks import attribute_calls, string_argument
 
         source = (TRANSPORT_DIR / "browser_driver.py").read_text()
         read: set[str] = set()

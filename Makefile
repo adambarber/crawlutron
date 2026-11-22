@@ -90,8 +90,8 @@ typecheck:
 # says how much work a split is, its fan-in says how much risk. `--mermaid`
 # regenerates docs/module-graph.md.
 graph:
-	cd "$(SUITE_DIR)" && $(PYTHON) scripts/module_graph.py
-	cd "$(SUITE_DIR)" && $(PYTHON) scripts/module_graph.py --mermaid -o docs/module-graph.md
+	cd "$(SUITE_DIR)" && $(PYTHON) -m scripts.module_graph
+	cd "$(SUITE_DIR)" && $(PYTHON) -m scripts.module_graph --mermaid -o docs/module-graph.md
 
 clean:
 	# Remove top-level caches and patterns first; ignore-missing tolerates

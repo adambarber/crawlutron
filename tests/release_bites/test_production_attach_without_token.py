@@ -8,15 +8,16 @@ from __future__ import annotations
 
 import os
 import subprocess
-from pathlib import Path
+
+from tests.chokepoint_paths import REPO_ROOT
 
 
 def test_production_attach_without_token_refusal_message():
     """release_artifacts.py refuses when GH_TOKEN is missing."""
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = REPO_ROOT
     venv_python = repo_root / ".venv" / "bin" / "python"
     result = subprocess.run(
-        [str(venv_python), "scripts/release/release_artifacts.py"],
+        [str(venv_python), "-m", "scripts.release.release_artifacts"],
         capture_output=True,
         text=True,
         env={**os.environ, "TAG": "test-v1.0.0"},

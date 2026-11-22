@@ -13,8 +13,10 @@ import yaml
 
 from scripts.release_roster import primary_tag, released, roster
 from tests._ci_contract import SERVICE_ROOT
+from tests.chokepoint_paths import REPO_ROOT
 
-RELEASE_WORKFLOW_PATH = Path(__file__).resolve().parents[1] / ".github/workflows/release.yml"
+RELEASE_WORKFLOW_PATH = REPO_ROOT / ".github/workflows/release.yml"
+RELEASED_WORKFLOW_PATH = REPO_ROOT / ".github/workflows/released.yml"
 GIT = shutil.which("git") or "git"
 
 
@@ -124,7 +126,9 @@ def test_only_the_primary_tag_runs_the_gates_and_publishes() -> None:
     document = yaml.safe_load(RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8"))
     jobs = document["jobs"]
     assert jobs["released"].get("needs") in (None, [])
-    assert "primary" in jobs["released"]["outputs"]
+    called = yaml.safe_load(RELEASED_WORKFLOW_PATH.read_text(encoding="utf-8"))
+    triggers = called.get("on", called.get(True))
+    assert "primary" in triggers["workflow_call"]["outputs"]
     assert "needs.released.outputs.primary == 'true'" in jobs["ci"]["if"]
     for name in (
         "publish-build",
@@ -158,7 +162,10 @@ def test_a_manual_retry_can_publish_an_existing_tag_from_the_fixed_workflow() ->
     assert "version('crawlutron')" in image_script
     assert '"docker"' in image_script and '"inspect"' in image_script
     released_job = workflow_doc["jobs"]["released"]
-    assert released_job["steps"][0]["with"]["ref"] == "${{ github.sha }}"
+    assert released_job["uses"] == "$/.github/workflows/released.yml"
+    called = yaml.safe_load(RELEASED_WORKFLOW_PATH.read_text(encoding="utf-8"))
+    roster_step = called["jobs"]["released"]["steps"][0]
+    assert roster_step["with"]["ref"] == "${{ github.sha }}"
     image_job = workflow_doc["jobs"]["image"]
     assert image_job["steps"][0]["with"]["ref"] == "${{ github.sha }}"
 
@@ -187,7 +194,7 @@ def test_an_explicit_tag_resolves_the_roster_without_moving_the_checkout(tmp_pat
 
 def test_the_root_declares_every_workspace_member_as_a_runtime_dependency() -> None:
     """An omitted member makes the published app unimportable."""
-    manifest_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    manifest_path = REPO_ROOT / "pyproject.toml"
     manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
     declared = {
         str(dependency).split("[")[0].split(">=")[0].split("==")[0]

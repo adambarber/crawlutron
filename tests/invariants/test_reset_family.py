@@ -9,7 +9,8 @@ import ast
 import pathlib
 
 from tests._walk_primitives import offender
-from tests.chokepoint_walks import APP_ROOT, nodes_of
+from tests.chokepoint_paths import APP_ROOT, REPO_ROOT
+from tests.chokepoint_walks import nodes_of
 from tests.invariants._shared import function_defs, module_level_bindings
 from tests.rules import Bites, Rule
 
@@ -110,7 +111,6 @@ def _hand_copied_pair_offenders() -> list[str]:
     The pair lives once, in ``crawlutron.runtime.process_state``; every owner
     registers private closures with the registry instead of exporting a copy.
     """
-    from tests.chokepoint_walks import REPO_ROOT
 
     offenders: list[str] = []
     for path in sorted(APP_ROOT.rglob("*.py")):

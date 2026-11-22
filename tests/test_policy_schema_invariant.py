@@ -7,11 +7,12 @@ POLICY_SCHEMA_VERSION, and the commit-msg gate refuses a synthetic breaking-feat
 from __future__ import annotations
 
 import subprocess
-from pathlib import Path
 
 import pytest
 
-SERVICE_ROOT = Path(__file__).resolve().parents[1]
+from tests.chokepoint_paths import REPO_ROOT
+
+SERVICE_ROOT = REPO_ROOT
 POLICY_PATH = "packages/core/src/crawlutron/models/crawl_policy.py"
 _DECL = 'POLICY_SCHEMA_VERSION = "'
 

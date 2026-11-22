@@ -8,7 +8,8 @@ import pathlib
 import pytest
 
 from tests._host_assert import is_host_literal
-from tests._walk_primitives import REPO_ROOT, SCAN_ROOTS
+from tests._walk_primitives import SCAN_ROOTS
+from tests.chokepoint_paths import REPO_ROOT
 
 
 def _string_value(node: ast.AST) -> str | None:

@@ -16,6 +16,7 @@ from crawlutron.storage.job_store import FrontierEntry, JobStatus
 from crawlutron.storage.sqlite_store import table_columns
 from tests._job_store_doubles import frontier, loaded_job, make_job_store, seed_frontier
 from tests._policy_factories import canonical
+from tests.chokepoint_paths import REPO_ROOT
 
 
 def _queued_job(store, count: int):
@@ -196,12 +197,11 @@ class TestMigrationCarriesTheQueue:
         """0006's (apply, rollback), loaded the identity test's way: yoyo's
         step() walks the stack for a frame holding the collector."""
         import importlib.util
-        import pathlib
 
         from yoyo import migrations as _yoyo
 
         migration_path = (
-            pathlib.Path(__file__).parents[2]
+            REPO_ROOT
             / "packages"
             / "core"
             / "src"

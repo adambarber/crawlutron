@@ -12,7 +12,9 @@ from pathlib import Path
 import httpx
 import pytest
 
-SERVICE_ROOT = Path(__file__).resolve().parents[2]
+from tests.chokepoint_paths import REPO_ROOT
+
+SERVICE_ROOT = REPO_ROOT
 REGISTRY_PATH = SERVICE_ROOT / ".github" / "review-agents.toml"
 AGENT_REVIEW_SCRIPT = SERVICE_ROOT / "scripts" / "agent_review.py"
 REVIEW_PROBES_SCRIPT = SERVICE_ROOT / "scripts" / "review_probes.py"

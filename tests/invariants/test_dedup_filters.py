@@ -7,14 +7,8 @@ import tokenize
 from collections.abc import Iterable
 from pathlib import Path
 
-from tests.chokepoint_walks import (
-    APP_ROOT,
-    app_python_files,
-    calls_named,
-    comprehensions,
-    offender_at,
-    relative_posix,
-)
+from tests.chokepoint_paths import APP_ROOT, relative_posix
+from tests.chokepoint_walks import app_python_files, calls_named, comprehensions, offender_at
 from tests.invariants._shared import _enclosing_defs
 from tests.rules import Bites, Registry, Rule, Silent
 

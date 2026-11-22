@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import tomllib
-from pathlib import Path
 
-SERVICE_ROOT = Path(__file__).resolve().parent.parent
+from tests.chokepoint_paths import REPO_ROOT
+
+SERVICE_ROOT = REPO_ROOT
 
 
 def _project_field(field: str):

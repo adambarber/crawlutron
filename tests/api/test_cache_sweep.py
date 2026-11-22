@@ -5,9 +5,9 @@ loop, and the lifespan starts and drains the maintenance task.
 
 import asyncio
 import os
-import pathlib
 
 from tests._clocks import advance_clock, arrange_clock
+from tests.chokepoint_paths import REPO_ROOT
 
 
 class TestMaintenanceTick:
@@ -47,7 +47,7 @@ class TestNamespaceCoverage:
         """
         import re
 
-        root = pathlib.Path(__file__).resolve().parents[2] / "packages" / "core" / "src" / "crawlutron"
+        root = REPO_ROOT / "packages" / "core" / "src" / "crawlutron"
         sites = [
             str(p.relative_to(root))
             for p in root.rglob("*.py")

@@ -8,7 +8,8 @@ import tokenize
 
 import pytest
 
-from tests._walk_primitives import REPO_ROOT, SCAN_ROOTS
+from tests._walk_primitives import SCAN_ROOTS
+from tests.chokepoint_paths import REPO_ROOT
 
 _SHA_LITERAL = re.compile(r"[0-9a-f]{40}\Z")
 

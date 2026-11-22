@@ -6,7 +6,8 @@ import ast
 import pathlib
 import sys
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+from tests.chokepoint_paths import REPO_ROOT
+
 EXTRACT_ROOT = REPO_ROOT / "packages" / "extract" / "src" / "crawlutron_extract"
 
 #: Permitted import roots: stdlib, the package itself, safe_url, pdfminer.

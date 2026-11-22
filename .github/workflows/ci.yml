@@ -291,10 +291,12 @@ jobs:
         with:
           name: junit-test-browser
           path: junit/test-browser
+      - name: Split battery JUnit by test family
+        run: .venv/bin/python -m scripts.split_junit junit/battery junit/split
       - name: Combine coverage data
         run: .venv/bin/python -m coverage combine
       - name: Generate coverage reports
-        run: .venv/bin/python scripts/coverage_reports.py
+        run: .venv/bin/python -m scripts.coverage_reports
       - name: Upload coverage XML to Codecov
         if: ${{ !cancelled() }}
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
@@ -312,12 +314,21 @@ jobs:
           if-no-files-found: error
       # Per-surface Codecov uploads with informational status.
       # Uses !cancelled() so uploads run even when a prior job failed.
-      - name: Upload battery coverage to Codecov
+      - name: Upload behavioral test results to Codecov
         if: ${{ !cancelled() }}
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
-          files: junit/battery/junit-*.xml
-          flags: battery
+          files: junit/split/behavioral/junit-*.xml
+          flags: behavioral
+          report-type: test_results
+          use_oidc: true
+          fail_ci_if_error: false
+      - name: Upload invariant test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          files: junit/split/invariants/junit-*.xml
+          flags: invariants
           report-type: test_results
           use_oidc: true
           fail_ci_if_error: false

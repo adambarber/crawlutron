@@ -11,6 +11,7 @@ import yaml
 from tests._ci_contract import (
     PACKAGING_WORKFLOW_PATH,
     RELEASE_WORKFLOW_PATH,
+    RELEASED_WORKFLOW_PATH,
     SERVICE_ROOT,
     WORKFLOW_PATH,
     _job_run_steps,
@@ -22,7 +23,12 @@ def test_every_action_is_sha_pinned_and_permissions_are_declared() -> None:
     full-length commit SHA, and the workflow must declare its permissions so
     the default write-all token scope cannot leak into a compromised step.
     """
-    for workflow_path in (WORKFLOW_PATH, RELEASE_WORKFLOW_PATH, PACKAGING_WORKFLOW_PATH):
+    for workflow_path in (
+        WORKFLOW_PATH,
+        RELEASE_WORKFLOW_PATH,
+        RELEASED_WORKFLOW_PATH,
+        PACKAGING_WORKFLOW_PATH,
+    ):
         document = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
         assert isinstance(document, dict)
 
@@ -59,18 +65,18 @@ def _assert_no_event_splicing(workflow: str, label: str) -> None:
 
 def test_no_run_step_splices_event_input_into_shell() -> None:
     """zizmor template-injection: a branch named like a tag must never become code."""
-    for path in (WORKFLOW_PATH, RELEASE_WORKFLOW_PATH, PACKAGING_WORKFLOW_PATH):
+    for path in (WORKFLOW_PATH, RELEASE_WORKFLOW_PATH, RELEASED_WORKFLOW_PATH, PACKAGING_WORKFLOW_PATH):
         _assert_no_event_splicing(path.read_text(encoding="utf-8"), path.name)
 
 
 def test_a_run_step_that_splices_an_event_field_is_caught() -> None:
     """Bites: the old inline branch interpolation fails the check."""
-    workflow = RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8")
-    marker = "python3 scripts/release/emit_roster.py"
+    workflow = RELEASED_WORKFLOW_PATH.read_text(encoding="utf-8")
+    marker = "python3 -m scripts.release.emit_roster"
     broken = workflow.replace(marker, f'{marker} "${{{{ github.event.workflow_run.head_branch }}}}"', 1)
     assert broken != workflow, "the injection did not apply; the probe proves nothing"
     with pytest.raises(AssertionError):
-        _assert_no_event_splicing(broken, "mutated release")
+        _assert_no_event_splicing(broken, "mutated released")
 
 
 def _publishes(step: dict[str, object]) -> bool:

@@ -10,7 +10,9 @@ from types import ModuleType
 
 import pytest
 
-_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "coverage_reports.py"
+from tests.chokepoint_paths import REPO_ROOT
+
+_SCRIPT = REPO_ROOT / "scripts" / "coverage_reports.py"
 
 
 def _load() -> ModuleType:

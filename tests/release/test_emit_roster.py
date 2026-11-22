@@ -6,9 +6,10 @@ import json
 import tempfile
 from pathlib import Path
 
+from tests.chokepoint_paths import REPO_ROOT
 from tests.release._test_base import _make_script_runner
 
-SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "release" / "emit_roster.py"
+SCRIPT = REPO_ROOT / "scripts" / "release" / "emit_roster.py"
 _run_script = _make_script_runner("emit_roster.py")
 
 

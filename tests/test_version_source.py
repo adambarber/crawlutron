@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import configparser
 import tomllib
-from pathlib import Path
 
 import crawlutron
 from tests._ci_contract import _jobs, job_steps
 from tests._walk_primitives import workspace_package_dirs, workspace_project
+from tests.chokepoint_paths import REPO_ROOT
 from tests.invariants.test_mypy_scope import _jsonc_load_source
 
-SERVICE_ROOT = Path(__file__).resolve().parents[1]
+SERVICE_ROOT = REPO_ROOT
 
 
 def test_every_package_declares_a_static_version() -> None:

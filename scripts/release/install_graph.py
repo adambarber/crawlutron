@@ -10,7 +10,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from _common import _require_env, _run
+from scripts.release._common import _require_env, _run
 
 
 def _validate_env() -> tuple[str, str]:

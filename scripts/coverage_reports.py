@@ -6,12 +6,13 @@ Produces repo-wide and per-package coverage reports (XML, HTML, Markdown).
 from __future__ import annotations
 
 # Add scripts directory to path for absolute imports
-import pathlib
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "scripts"))
-from release._common import REPO_ROOT, _run, roster
+from utils.paths import REPO_ROOT
+
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+from scripts.release._common import _run, roster
 
 _COVERAGE = [sys.executable, "-m", "coverage"]
 

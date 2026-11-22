@@ -6,20 +6,12 @@ the OpenAPI-derived schema components, so flag->renamed-field drift reds at coll
 from __future__ import annotations
 
 import ast
-import pathlib
 
 from tests._app_factory import service_app
+from tests.chokepoint_paths import REPO_ROOT
 from tests.invariants._facade_tables import CLI_CLIENT_ONLY_FLAGS, accepted_knobs
 
-_CLI_MAIN = (
-    pathlib.Path(__file__).resolve().parents[2]
-    / "packages"
-    / "rest"
-    / "src"
-    / "crawlutron_rest"
-    / "cli"
-    / "__main__.py"
-)
+_CLI_MAIN = REPO_ROOT / "packages" / "rest" / "src" / "crawlutron_rest" / "cli" / "__main__.py"
 _ROUTE = ("POST", "/v1/crawl")
 #: Container variable -> wire schema that owns the keys written into it.
 _CONTAINER_SCHEMAS = {"policy": "CrawlPolicy", "limits": "CrawlPolicyLimits"}

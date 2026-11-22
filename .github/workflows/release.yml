@@ -55,27 +55,11 @@ jobs:
   released:
     name: Resolve the packages this commit released
     if: ${{ github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    uses: $/.github/workflows/released.yml
+    with:
+      tag: ${{ inputs.tag }}
     permissions:
       contents: read
-    outputs:
-      packages: ${{ steps.roster.outputs.packages }}
-      root_version: ${{ steps.roster.outputs.root_version }}
-      primary: ${{ steps.roster.outputs.primary }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
-          fetch-tags: true
-          persist-credentials: false
-      - name: Emit the released packages
-        id: roster
-        env:
-          RELEASE_TAG: ${{ inputs.tag }}
-          GITHUB_OUTPUT: ${{ github.output }}
-        run: python3 scripts/release/emit_roster.py
 
   # Build with no OIDC in scope: a build backend executes arbitrary code, and
   # any step in a job holding id-token can mint the publish credential. The
@@ -110,7 +94,7 @@ jobs:
         env:
           SELECTOR: ${{ matrix.package.selector }}
           EXPECTED_VERSION: ${{ matrix.package.version }}
-        run: python3 scripts/release/build_assert.py
+        run: python3 -m scripts.release.build_assert
       - name: Stage the verified distribution
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -177,7 +161,7 @@ jobs:
         env:
           NAME: ${{ matrix.package.name }}
           VERSION: ${{ matrix.package.version }}
-        run: python3 scripts/release/install_graph.py
+        run: python3 -m scripts.release.install_graph
 
   image:
     name: Publish the container image
@@ -208,7 +192,7 @@ jobs:
           GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python3 scripts/release/image.py
+        run: python3 -m scripts.release.image
       - name: Attest the SBOM to the pushed image
         uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
         with:
@@ -244,7 +228,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ matrix.package.tag }}
-        run: python3 scripts/release/sbom.py
+        run: python3 -m scripts.release.sbom
 
   release-artifacts:
     name: Attach ${{ matrix.package.name }} distributions and checksums
@@ -276,4 +260,4 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ matrix.package.tag }}
           SELECTOR: ${{ matrix.package.selector }}
-        run: python3 scripts/release/release_artifacts.py
+        run: python3 -m scripts.release.release_artifacts

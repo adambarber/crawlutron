@@ -16,7 +16,8 @@ from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.json_value import JsonValue
 from crawlutron.models.render_request import RenderRequest
-from tests.chokepoint_walks import REPO_ROOT, parsed
+from tests.chokepoint_paths import REPO_ROOT
+from tests.chokepoint_walks import parsed
 from tests.invariants._env_knobs import _KNOB_PATTERN, _consumed_knobs
 from tests.rules import Rule
 

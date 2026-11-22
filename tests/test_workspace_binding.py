@@ -6,12 +6,8 @@ import pathlib
 import sys
 import tomllib
 
-from tests._walk_primitives import (
-    REPO_ROOT,
-    member_import_names,
-    member_src_roots,
-    prepend_member_roots,
-)
+from tests._walk_primitives import member_import_names, member_src_roots, prepend_member_roots
+from tests.chokepoint_paths import REPO_ROOT
 
 
 def test_member_roots_are_manifest_derived() -> None:

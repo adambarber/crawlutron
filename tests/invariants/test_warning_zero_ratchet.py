@@ -3,7 +3,7 @@
 import configparser
 from pathlib import Path
 
-from tests.chokepoint_walks import REPO_ROOT
+from tests.chokepoint_paths import REPO_ROOT
 
 _INI = Path("pytest.ini")
 

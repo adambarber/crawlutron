@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import yaml
 
-SERVICE_ROOT = Path(__file__).resolve().parents[2]
+from tests.chokepoint_paths import REPO_ROOT
+
+SERVICE_ROOT = REPO_ROOT
 WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "nightly.yml"
 PYTEST_INI_PATH = SERVICE_ROOT / "pytest.ini"
 PYPROJECT_PATH = SERVICE_ROOT / "pyproject.toml"
@@ -247,16 +247,16 @@ def test_nightly_per_package_reports() -> None:
         if test_job:
             steps = test_job.get("steps", [])
             for step in steps:
-                if isinstance(step, dict) and "coverage_reports.py" in step.get("run", ""):
+                if isinstance(step, dict) and "scripts.coverage_reports" in step.get("run", ""):
                     return
 
     if coverage_job:
         steps = coverage_job.get("steps", [])
         for step in steps:
-            if isinstance(step, dict) and "coverage_reports.py" in step.get("run", ""):
+            if isinstance(step, dict) and "scripts.coverage_reports" in step.get("run", ""):
                 return
 
-    raise AssertionError("coverage_reports.py step required for per-package reports")
+    raise AssertionError("scripts.coverage_reports step required for per-package reports")
 
 
 def test_nightly_artifacts() -> None:

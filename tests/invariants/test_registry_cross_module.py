@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import ast
 
-from tests.chokepoint_walks import APP_ROOT, nodes_of
+from tests.chokepoint_paths import APP_ROOT
+from tests.chokepoint_walks import nodes_of
 from tests.invariants._registry_machinery import (
     _owner_definition_ids,
     _property,

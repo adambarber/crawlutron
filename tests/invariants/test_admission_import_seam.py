@@ -10,7 +10,8 @@ import ast
 import pathlib
 from collections.abc import Iterable
 
-from tests.chokepoint_walks import ADMISSION_ROOT, APP_ROOT, REPO_ROOT, trees_under
+from tests.chokepoint_paths import ADMISSION_ROOT, APP_ROOT, REPO_ROOT
+from tests.chokepoint_walks import trees_under
 from tests.rules import Bites, Rule, Silent
 
 _SYNTHETIC = ADMISSION_ROOT / "_synthetic.py"

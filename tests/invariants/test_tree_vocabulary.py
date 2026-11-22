@@ -6,15 +6,8 @@ from collections.abc import Iterator
 from functools import lru_cache
 
 from tests._walk_primitives import _narrow
-from tests.chokepoint_walks import (
-    APP_ROOT,
-    REPO_ROOT,
-    from_imports,
-    offender_at,
-    plain_imports,
-    resolved_expr_name,
-    trees_under,
-)
+from tests.chokepoint_paths import APP_ROOT, REPO_ROOT
+from tests.chokepoint_walks import from_imports, offender_at, plain_imports, resolved_expr_name, trees_under
 from tests.invariants._cache_walk_probe import assert_second_call_skips_the_walk
 from tests.rules import Bites, Registry, Rule, Silent
 from tests.trees import test_tree_module_names as _test_tree_module_names

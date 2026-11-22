@@ -7,7 +7,7 @@ import json
 
 from tests._walk_primitives import get_test_roots as derived_test_roots
 from tests._walk_primitives import import_roots
-from tests.chokepoint_walks import REPO_ROOT
+from tests.chokepoint_paths import REPO_ROOT
 
 _MYPY_INI = REPO_ROOT / "mypy.ini"
 #: The derived test scope terms mypy.ini must carry; one per python-bearing

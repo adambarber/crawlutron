@@ -4,10 +4,8 @@ import ast
 import contextlib
 import pathlib
 
+from tests.chokepoint_paths import APP_ROOT, REPO_ROOT, TESTS_DIR
 from tests.chokepoint_walks import (
-    APP_ROOT,
-    REPO_ROOT,
-    TESTS_DIR,
     call_nodes,
     functions,
     nodes_of,

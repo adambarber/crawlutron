@@ -9,7 +9,8 @@ import fnmatch
 import pathlib
 from collections.abc import Iterator
 
-from tests.chokepoint_walks import APP_ROOT, REPO_ROOT, offender_at
+from tests.chokepoint_paths import APP_ROOT, REPO_ROOT
+from tests.chokepoint_walks import offender_at
 from tests.invariants._clock_family import (
     CLOCK_HOME,
     WALL_MEMBERS,

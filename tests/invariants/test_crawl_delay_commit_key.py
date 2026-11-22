@@ -5,13 +5,8 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from tests.chokepoint_walks import (
-    APP_ROOT,
-    call_nodes,
-    local_nodes,
-    offender_at,
-    resolved_call_name,
-)
+from tests.chokepoint_paths import APP_ROOT
+from tests.chokepoint_walks import call_nodes, local_nodes, offender_at, resolved_call_name
 from tests.rules import Bites, Rule
 
 #: The seam: its key parameter must be the scheduler domain key (a ``site``),

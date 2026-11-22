@@ -3,7 +3,8 @@
 import ast
 
 from tests._walk_primitives import _PARSE_CACHE, _trees_under
-from tests.chokepoint_walks import REPO_ROOT, trees_under
+from tests.chokepoint_paths import REPO_ROOT
+from tests.chokepoint_walks import trees_under
 from tests.invariants._clock_family import suite_trees
 
 

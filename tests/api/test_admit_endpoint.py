@@ -20,6 +20,7 @@ from httpx import AsyncClient
 
 from crawlutron.config.settings import CrawlerSettings
 from tests._app_harnesses import harness_app
+from tests.chokepoint_paths import SAFE_URL_ROOT
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -360,9 +361,8 @@ def _raisable_producer_reasons(normalized_url_path: Path) -> set[str]:
 
 def _producers_missing_rows(known: frozenset[str]) -> list[str]:
     """Raisable producer reasons with no table row, as file:line findings."""
-    from tests.chokepoint_walks import REPO_ROOT
 
-    normalized_url_path = REPO_ROOT / "packages" / "safe-url" / "src" / "safe_url" / "normalized_url.py"
+    normalized_url_path = SAFE_URL_ROOT / "normalized_url.py"
     return [
         f"{path}:{lineno}: {reason!r} is raisable but has no _REASON_TABLE row"
         for path, collect in _producer_set(normalized_url_path)
@@ -390,9 +390,8 @@ class TestProducerVocabularyLoop:
         """
         import crawlutron.service.admit_endpoint as endpoint_module
         from safe_url.normalized_url import refusal_literals
-        from tests.chokepoint_walks import REPO_ROOT
 
-        models_dir = REPO_ROOT / "packages" / "safe-url" / "src" / "safe_url"
+        models_dir = SAFE_URL_ROOT
         raisable = _raisable_producer_reasons(models_dir / "normalized_url.py")
         boundary_gaps = raisable - refusal_literals()
         table_gaps = refusal_literals() - set(endpoint_module.known_reasons())

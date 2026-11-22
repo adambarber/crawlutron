@@ -6,14 +6,13 @@ jobs stay OIDC-free and the publish job stays a logic-free adapter.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import yaml
 
 import scripts.pin_verify as pv
 from tests._ci_contract import RELEASE_WORKFLOW_PATH
+from tests.chokepoint_paths import REPO_ROOT
 
-SERVICE_ROOT = Path(__file__).resolve().parents[2]
+SERVICE_ROOT = REPO_ROOT
 IMAGE_SCRIPT = SERVICE_ROOT / "scripts" / "release" / "image.py"
 SUPPORTED_ACTIONS = ("actions/attest-build-provenance", "actions/attest-sbom")
 

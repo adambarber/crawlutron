@@ -10,7 +10,9 @@ from pathlib import Path
 
 import pytest
 
-_SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
+from tests.chokepoint_paths import REPO_ROOT
+
+_SCRIPTS_DIR = REPO_ROOT / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
@@ -36,7 +38,7 @@ class PinTree:
     def check(self) -> subprocess.CompletedProcess[str]:
         """Run the copy's real `pin_verify.py check` from the copy root."""
         return subprocess.run(
-            [sys.executable, "scripts/pin_verify.py", "check"],
+            [sys.executable, "-m", "scripts.pin_verify", "check"],
             capture_output=True,
             text=True,
             cwd=str(self.root),
@@ -50,6 +52,8 @@ def pin_tree(tmp_path: Path) -> PinTree:
     root = tmp_path / "pin_tree"
     (root / "scripts").mkdir(parents=True)
     shutil.copy2(REPO_ROOT / "scripts" / "pin_verify.py", root / "scripts" / "pin_verify.py")
+    shutil.copytree(REPO_ROOT / "utils", root / "utils", ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copy2(REPO_ROOT / "pyproject.toml", root / "pyproject.toml")
     (root / ".github").mkdir()
     shutil.copy2(REPO_ROOT / ".github" / "versions.toml", root / ".github" / "versions.toml")
     for surface in ("workflows", "actions"):
@@ -65,4 +69,6 @@ def scripts_tree(tmp_path: Path) -> Path:
     root = tmp_path / "scripts_tree"
     root.mkdir()
     shutil.copytree(_SCRIPTS_DIR, root / "scripts", ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(REPO_ROOT / "utils", root / "utils", ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copy2(REPO_ROOT / "pyproject.toml", root / "pyproject.toml")
     return root

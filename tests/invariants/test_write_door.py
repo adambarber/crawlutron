@@ -9,12 +9,13 @@ import ast
 import pathlib
 
 from tests._walk_doors import conn_callee, inside_door, sql_operand
-from tests._walk_primitives import REPO_ROOT, enclosing_function, offender_at, parent_map
+from tests._walk_primitives import enclosing_function, offender_at, parent_map
 from tests._walk_readers import attribute_calls
+from tests.chokepoint_paths import APP_ROOT
 from tests.chokepoint_walks import trees_under
 from tests.rules import Rule
 
-_STORAGE_DIR = REPO_ROOT / "packages" / "core" / "src" / "crawlutron" / "storage"
+_STORAGE_DIR = APP_ROOT / "storage"
 
 _WRITE_METHODS = frozenset({"execute", "executemany", "commit", "rollback", "executescript"})
 _WRITE_KEYWORDS = frozenset({"insert", "update", "delete", "begin"})

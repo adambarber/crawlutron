@@ -11,9 +11,8 @@ import re
 
 from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
 from crawlutron.storage.migrations.manifest import LEGACY_COLUMNS, StoreSchema
+from tests.chokepoint_paths import APP_ROOT, REPO_ROOT, relative_posix
 from tests.chokepoint_walks import (
-    APP_ROOT,
-    REPO_ROOT,
     SANCTIONED,
     call_keyword_values,
     calls_named,
@@ -21,7 +20,6 @@ from tests.chokepoint_walks import (
     functions,
     named_calls_to_any,
     offender_at,
-    relative_posix,
     string_literals,
 )
 from tests.rules import Bites, Registry, Rule, Silent

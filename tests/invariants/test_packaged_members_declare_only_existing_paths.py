@@ -9,7 +9,7 @@ from __future__ import annotations
 import pathlib
 import tomllib
 
-from tests.chokepoint_walks import REPO_ROOT
+from tests.chokepoint_paths import REPO_ROOT
 
 _PACKAGE_DIR = REPO_ROOT / "packages"
 #: Fields whose value is a repo-relative path (or list of paths) hatch requires to exist.

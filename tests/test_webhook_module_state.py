@@ -6,9 +6,9 @@ apparatus here would recreate the island -- so its absence is pinned.
 from __future__ import annotations
 
 import ast
-import pathlib
 
 from crawlutron.service import webhooks as wm
+from tests.chokepoint_paths import REPO_ROOT
 from tests.chokepoint_walks import nodes_of
 
 ISLAND_NAMES = (
@@ -47,7 +47,7 @@ def test_deliver_pinned_webhook_is_called_only_from_post_webhook():
     shape the deleted island violated by composing its own crawl; a second caller
     means the size-cap/validation story can drift from the funnel.
     """
-    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     callers: set[str] = set()
     for path in sorted((repo_root / "packages" / "core" / "src" / "crawlutron").rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))

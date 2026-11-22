@@ -6,7 +6,8 @@ readyState poll, the poll itself on ``self._async_sleep(1)``.
 import ast
 
 from tests._walk_assertions import assert_detectors_clean
-from tests.chokepoint_walks import APP_ROOT, attribute_call_on, offender_at, parsed
+from tests.chokepoint_paths import APP_ROOT
+from tests.chokepoint_walks import attribute_call_on, offender_at, parsed
 
 _BROWSER = APP_ROOT / "transport" / "browser.py"
 

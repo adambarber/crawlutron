@@ -10,7 +10,8 @@ import pathlib
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 
-from tests.chokepoint_walks import APP_ROOT, app_trees, relative_posix
+from tests.chokepoint_paths import APP_ROOT, relative_posix
+from tests.chokepoint_walks import app_trees
 
 #: Where a bite proof's synthetic module is pretended to live.
 _SYNTHETIC = APP_ROOT / "_synthetic.py"

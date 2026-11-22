@@ -12,6 +12,7 @@ import logging
 import pytest
 
 from crawlutron.runtime.logging_config import configure_service_logging
+from tests.chokepoint_paths import REPO_ROOT
 
 
 @pytest.fixture
@@ -75,9 +76,8 @@ def test_uvicorn_loggers_route_through_the_service_sink():
     """
     import io
     import logging.config
-    from pathlib import Path
 
-    config_path = Path(__file__).resolve().parents[1] / "uvicorn-log-config.json"
+    config_path = REPO_ROOT / "uvicorn-log-config.json"
     config = json.loads(config_path.read_text())
     root = logging.getLogger()
     saved_handlers = root.handlers[:]

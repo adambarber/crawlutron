@@ -67,7 +67,7 @@ class TestAttachParity:
             (
                 "install-graph",
                 "install-graph",
-                "scripts/release/install_graph.py",
+                "scripts.release.install_graph",
                 ["released"],
                 {"NAME": "", "VERSION": ""},
             ),
@@ -88,9 +88,8 @@ class TestAttachParity:
         assert release_job in release_text, f"Release job '{release_job}' missing"
         assert rehearsal_twin in _job_names(rehearsal_text), f"Rehearsal twin '{rehearsal_twin}' missing"
         if entrypoint:
-            assert entrypoint in REHEARSAL_SPEC.read_text(), (
-                f"Entrypoint '{entrypoint}' not frozen in the spec"
-            )
+            spec = REHEARSAL_SPEC.read_text()
+            assert entrypoint in spec, f"Entrypoint '{entrypoint}' not frozen in the spec"
             assert entrypoint in rehearsal_text, f"Entrypoint '{entrypoint}' not in rehearsal.yml"
         twin = _yaml_section(rehearsal_text, rehearsal_twin)
         for edge in needs_edges:
@@ -106,7 +105,7 @@ class TestImageJob:
     def test_image_job_has_unrehearsed_surface_entry(self) -> None:
         """The privileged image surface is documented and thin-adapter wired."""
         image_job = _yaml_section(_read_yml(RELEASE_WORKFLOW), "image")
-        assert "python3 scripts/release/image.py" in image_job
+        assert "python3 -m scripts.release.image" in image_job
         for credential in ("packages: write", "attestations: write", "id-token: write"):
             assert credential in image_job, f"Image job missing '{credential}'"
         doc_text = Path("docs/REHEARSAL.md").read_text().lower()

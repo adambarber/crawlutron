@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import yaml
 
-SERVICE_ROOT = Path(__file__).resolve().parents[2]
+from tests.chokepoint_paths import REPO_ROOT
+
+SERVICE_ROOT = REPO_ROOT
 WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "ci.yml"
 CONFIG_PATH = SERVICE_ROOT / ".github" / "dependency-review-config.yml"
 

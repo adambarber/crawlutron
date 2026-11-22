@@ -6,7 +6,7 @@ import ast
 import pathlib
 from collections.abc import Callable
 
-from tests._walk_primitives import REPO_ROOT
+from tests.chokepoint_paths import REPO_ROOT
 
 
 def assert_detector(

@@ -3,9 +3,9 @@ and bare `docker build .` fetches the browser over the wire."""
 
 from __future__ import annotations
 
-from pathlib import Path
+from tests.chokepoint_paths import REPO_ROOT
 
-SERVICE_ROOT = Path(__file__).resolve().parents[1]
+SERVICE_ROOT = REPO_ROOT
 
 DOCKERFILE_PATH = SERVICE_ROOT / "Dockerfile"
 
@@ -123,9 +123,9 @@ def test_image_builds_supply_no_secret() -> None:
                 for job in jobs.values()
                 if isinstance(job, dict) and job.get("name") == "Publish the container image"
                 for step in job.get("steps", [])
-                if isinstance(step, dict) and "image.py" in str(step.get("run", ""))
+                if isinstance(step, dict) and "scripts.release.image" in str(step.get("run", ""))
             ]
-            assert image_steps, "release.yml must call image.py script"
+            assert image_steps, "release.yml must call scripts.release.image"
             # Verify no secrets in the script call
             for step in image_steps:
                 assert "secrets" not in step.get("with", {}), f"{name} passes a secret into a build"

@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import yaml
 
 from tests._walk_primitives import workspace_package_dirs, workspace_project
+from tests.chokepoint_paths import REPO_ROOT
 
-SERVICE_ROOT = Path(__file__).resolve().parents[1]
+SERVICE_ROOT = REPO_ROOT
 CONFIG_PATH = SERVICE_ROOT / "release-please-config.json"
 MANIFEST_PATH = SERVICE_ROOT / ".release-please-manifest.json"
 WORKFLOW_PATH = SERVICE_ROOT / ".github/workflows/release-please.yml"
