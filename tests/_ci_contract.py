@@ -86,6 +86,7 @@ REPORTING_JOBS = {
     "secret-scan",
     "zizmor",
     "pin-verify",
+    "pin-freshness",
     "dependency-review",
 }
 

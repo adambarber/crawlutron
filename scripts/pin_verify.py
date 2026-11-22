@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import tomllib
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from utils.paths import REPO_ROOT
@@ -16,6 +17,7 @@ ROOT = REPO_ROOT
 REGISTRY_PATH = ROOT / ".github" / "versions.toml"
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 USES = re.compile(r"uses:\s*(\S+?)(?:\s+#\s*(\S+))?\s*$")
+_VERSION = re.compile(r"\d+(?:\.\d+)*\Z")
 
 # Positional aliases keep the registry data out of a class the metrics budget seals at zero.
 Pin = tuple[str, str]
@@ -117,7 +119,7 @@ def verify_pins() -> list[str]:
     return errors
 
 
-def _gh_json(endpoint: str) -> dict[str, object] | None:
+def _gh_value(endpoint: str) -> object | None:
     executable = shutil.which("gh")
     if executable is None:
         return None
@@ -131,9 +133,13 @@ def _gh_json(endpoint: str) -> dict[str, object] | None:
     if result.returncode != 0:
         return None
     try:
-        data: object = json.loads(result.stdout)
+        return json.loads(result.stdout)
     except json.JSONDecodeError:
         return None
+
+
+def _gh_json(endpoint: str) -> dict[str, object] | None:
+    data = _gh_value(endpoint)
     return data if isinstance(data, dict) else None
 
 
@@ -152,6 +158,80 @@ def peel_to_commit(dependency: str, version: str) -> str | None:
     if not SHA.fullmatch(sha) or _gh_json(f"repos/{dependency}/commits/{sha}") is None:
         return None
     return sha
+
+
+def parse_version(value: str) -> tuple[int, ...] | None:
+    """Numeric dotted version; pre-releases and bundle-style tags are not stable."""
+    text = value.removeprefix("v")
+    if not _VERSION.fullmatch(text):
+        return None
+    return tuple(int(part) for part in text.split("."))
+
+
+def latest_stable_tag(tags: Sequence[str]) -> str | None:
+    """The greatest numeric tag; prereleases and non-version tags are ignored."""
+    stable = [(version, tag) for tag in tags if (version := parse_version(tag)) is not None]
+    if not stable:
+        return None
+    return max(stable, key=lambda item: item[0])[1]
+
+
+def waivers() -> dict[str, str]:
+    """Intentional holds on newer releases; every entry must justify itself."""
+    table = _object(tomllib.loads(REGISTRY_PATH.read_text(encoding="utf-8")), "outdated_waivers") or {}
+    result: dict[str, str] = {}
+    for name, reason in table.items():
+        if not isinstance(name, str) or not isinstance(reason, str) or not reason.strip():
+            raise ValueError(f"{REGISTRY_PATH.name}: waiver for {name!r} needs a reason")
+        result[name] = reason
+    return result
+
+
+def registry_line(dependency: str) -> int:
+    """The registry line that declares a dependency, for an actionable finding."""
+    for number, line in enumerate(REGISTRY_PATH.read_text(encoding="utf-8").splitlines(), 1):
+        if line.lstrip().startswith(f'"{dependency}"'):
+            return number
+    return 0
+
+
+def outdated_pins(latest_of: Callable[[str], str | None]) -> list[str]:
+    """Every current pin must be the latest stable version, unless waived."""
+    registry = load_registry()
+    waived = waivers()
+    errors: list[str] = []
+    for dependency in sorted(waived):
+        if dependency not in registry:
+            errors.append(f"{REGISTRY_PATH.name}: unregistered waiver {dependency}")
+    for name, (version, _sha) in sorted(registry.items()):
+        if name in waived:
+            continue
+        latest = latest_of(name)
+        if latest is None:
+            errors.append(f"{name}: cannot determine latest stable version")
+            continue
+        current, newest = parse_version(version), parse_version(latest)
+        if current is None or newest is None:
+            errors.append(f"{name}: unparseable version pair {version!r}/{latest!r}")
+        elif newest > current:
+            errors.append(
+                f"{REGISTRY_PATH.name}:{registry_line(name)}: {name} is outdated: "
+                f"registry {version}, latest {latest}"
+            )
+    return errors
+
+
+def _gh_items(endpoint: str) -> list[object] | None:
+    data = _gh_value(endpoint)
+    return data if isinstance(data, list) else None
+
+
+def latest_version(dependency: str) -> str | None:
+    """Latest stable upstream tag from the tag list, not a bundle-style release."""
+    items = _gh_items(f"repos/{dependency}/tags?per_page=100") or []
+    tags = [item["name"] for item in items if isinstance(item, dict) and isinstance(item.get("name"), str)]
+    tag = latest_stable_tag(tags)
+    return tag.removeprefix("v") if tag else None
 
 
 def refresh_registry() -> list[str]:
@@ -173,9 +253,14 @@ def refresh_registry() -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("check", "refresh"))
+    parser.add_argument("command", choices=("check", "refresh", "outdated"))
     command = parser.parse_args(argv).command
-    errors = verify_pins() if command == "check" else refresh_registry()
+    if command == "check":
+        errors = verify_pins()
+    elif command == "refresh":
+        errors = refresh_registry()
+    else:
+        errors = outdated_pins(latest_version)
     if errors:
         for error in errors:
             print(error)
@@ -183,8 +268,10 @@ def main(argv: list[str] | None = None) -> int:
     if command == "check":
         sites = sum(len(extract_pins(path)) for path in discover_sources())
         print(f"pins verified against registry: {sites} sites, {len(load_registry())} dependencies")
-    else:
+    elif command == "refresh":
         print(f"registry verified upstream: {len(load_registry())} dependencies")
+    else:
+        print(f"all pins current: {len(load_registry())} dependencies")
     return 0
 
 
