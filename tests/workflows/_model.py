@@ -101,6 +101,14 @@ class Step(BaseModel):
         return _admit_or_none(lambda value: cls.create(value, context=context), raw)
 
     @model_validator(mode="after")
+    def codecov_inputs(self) -> Step:
+        if self.uses and "codecov/codecov-action" in self.uses:
+            bad = sorted(key for key in self.with_ if "-" in key)
+            if bad:
+                raise ValueError(f"invalid codecov input(s) {bad}: action inputs are snake_case")
+        return self
+
+    @model_validator(mode="after")
     def refusal(self, info: ValidationInfo) -> Step:
         waived = (info.context or {}).get("waived_lines", set())
         if self.continue_on_error and self.line not in waived:

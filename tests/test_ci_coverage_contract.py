@@ -65,7 +65,8 @@ def _assert_codecov_upload_flags(
         assert "flags" in with_, f"{job_name} codecov upload must specify flags"
     assert with_.get("use_oidc") is True or with_.get("use_oidc") == "true"
     assert with_.get("fail_ci_if_error") is False or with_.get("fail_ci_if_error") == "false"
-    assert with_.get("report_type", with_.get("report-type", "coverage")) == report_type
+    assert "report-type" not in with_, "action input is report_type (underscore), not report-type"
+    assert with_.get("report_type") == report_type
 
 
 def test_battery_is_only_fast_suite_execution() -> None:

@@ -320,7 +320,7 @@ jobs:
         with:
           files: junit/split/behavioral/junit-*.xml
           flags: behavioral
-          report-type: test_results
+          report_type: test_results
           use_oidc: true
           fail_ci_if_error: false
       - name: Upload invariant test results to Codecov
@@ -329,7 +329,7 @@ jobs:
         with:
           files: junit/split/invariants/junit-*.xml
           flags: invariants
-          report-type: test_results
+          report_type: test_results
           use_oidc: true
           fail_ci_if_error: false
       - name: Upload real-pbkdf2 coverage to Codecov
@@ -338,7 +338,7 @@ jobs:
         with:
           files: junit/real-pbkdf2/junit-real-pbkdf2.xml
           flags: real-pbkdf2
-          report-type: test_results
+          report_type: test_results
           use_oidc: true
           fail_ci_if_error: false
       - name: Upload test-browser coverage to Codecov
@@ -347,7 +347,7 @@ jobs:
         with:
           files: junit/test-browser/junit-browser.xml
           flags: test-browser
-          report-type: test_results
+          report_type: test_results
           use_oidc: true
           fail_ci_if_error: false
 
@@ -645,7 +645,8 @@ jobs:
   # Dev builds go to TestPyPI on green main pushes only. Trusted publishing
   # rejects OIDC from a called workflow, so both jobs live here at top level;
   # the guard is load-bearing and must not be widened to dispatch or tags.
-  # Skip redundant build when declared root version already exists on TestPyPI.
+  # Skip only when every declared distribution is already on TestPyPI; a new
+  # member with an existing root version must still publish.
   testpypi-build:
     name: Build dev distributions for TestPyPI
     needs: [required]
@@ -668,36 +669,15 @@ jobs:
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: false
-      # Check if root version already exists on TestPyPI to skip redundant build.
-      # Release-please owns the declared version in every pyproject; no CI step
-      # rewrites it. A repeat push reuses the declared version and `skip-existing`
-      # makes the TestPyPI upload a no-op until release-please bumps it.
-      - name: Get root version from pyproject.toml
-        id: get-version
-        run: |
-          set -euo pipefail
-          uv run --no-project --python 3.14 python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])" > /tmp/root_version.txt
-          ROOT_VERSION="$(cat /tmp/root_version.txt)"
-          echo "ROOT_VERSION=${ROOT_VERSION}" >> "${GITHUB_OUTPUT}"
-      - name: Check if version exists on TestPyPI
+      # The decision is a pure door over every declared distribution's version;
+      # release-please owns those versions, no CI step rewrites them.
+      - name: Check if every declared version exists on TestPyPI
         id: check-version
-        env:
-          ROOT_VERSION: ${{ steps.get-version.outputs.ROOT_VERSION }}
         run: |
           set -euo pipefail
-          echo "Root version: ${ROOT_VERSION}"
-          # Use twine to check if version exists on TestPyPI
-          if uvx twine check --strict --repository-url https://test.pypi.org/legacy/ dist/ 2>/dev/null; then
-            # Actually check via PyPI API
-            URL="https://test.pypi.org/pypi/crawlutron/${ROOT_VERSION}/json"
-            RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "${URL}")
-            if [ "${RESPONSE}" = "200" ]; then
-              echo "skip=true" >> "${GITHUB_OUTPUT}"
-              echo "Version ${ROOT_VERSION} already exists on TestPyPI, skipping build."
-              exit 0
-            fi
-          fi
-          echo "skip=false" >> "${GITHUB_OUTPUT}"
+          SKIP="$(uv run --no-project --python 3.14 python scripts/testpypi_guard.py --index-url https://test.pypi.org)"
+          echo "skip=${SKIP}" >> "${GITHUB_OUTPUT}"
+          echo "TestPyPI build skip: ${SKIP}"
       - name: Build and inspect every distribution
         if: ${{ steps.check-version.outputs.skip != 'true' }}
         run: |

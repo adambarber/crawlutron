@@ -155,6 +155,6 @@ jobs:
         with:
           files: junit/nightly/junit-nightly.xml
           flags: nightly
-          report-type: test_results
+          report_type: test_results
           use_oidc: true
           fail_ci_if_error: false
