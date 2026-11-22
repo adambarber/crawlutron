@@ -157,6 +157,18 @@ def test_a_call_job_with_steps_is_rejected() -> None:
         )
 
 
+def test_a_hyphenated_codecov_input_is_refused() -> None:
+    with pytest.raises(ValidationError, match="codecov input"):
+        Step.create(
+            {
+                "name": "Upload",
+                "uses": "codecov/codecov-action@" + "a" * 40,
+                "with": {"report-type": "test_results"},
+                "line": 7,
+            }
+        )
+
+
 def test_an_unknown_github_key_fails_closed() -> None:
     raw = workflow("ci").model_dump(mode="json")
     raw["invented-key"] = "value"

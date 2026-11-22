@@ -6,6 +6,7 @@ import json
 
 import yaml
 
+from tests._ci_contract import workflow_files
 from tests._walk_primitives import workspace_package_dirs, workspace_project
 from tests.chokepoint_paths import REPO_ROOT
 
@@ -135,7 +136,7 @@ def test_config_lets_commit_types_choose_the_bump() -> None:
 
 def test_no_workflow_rewrites_a_declared_version() -> None:
     """Release-please is the only writer of a package version number."""
-    for path in sorted((SERVICE_ROOT / ".github/workflows").glob("*.yml")):
+    for path in workflow_files(SERVICE_ROOT / ".github/workflows"):
         document = yaml.safe_load(path.read_text(encoding="utf-8"))
         for job in _mapping(document["jobs"]).values():
             for step in _steps(job):

@@ -14,7 +14,7 @@ from collections.abc import Callable
 import pytest
 
 from scripts.extract_comments import over_line_docstrings
-from tests._walk_primitives import SCAN_ROOTS, declared_root_files, parsed
+from tests._walk_primitives import SCAN_ROOTS, canonical_tree, declared_root_files
 from tests.chokepoint_paths import REPO_ROOT
 
 #: The most consecutive full-line ``#`` comments a block may run.
@@ -91,7 +91,7 @@ def _root_findings[T](
 ) -> dict[str, list[T]]:
     """Every ``collect`` hit under one root, as ``{file: [findings]}``. ``include_gate_bash`` adds the
     entry-point scripts (scripts/gate and scripts/run-tests.sh) to the sweep; the docstring scan never
-    asks for them. ``collect`` gets the file's source; tree-taking readers parse via ``parsed``.
+    asks for them. ``collect`` gets the file's source; tree readers use ``canonical_tree``.
     """
     files = list(declared_root_files(root))
     if include_gate_bash and root == "scripts":
@@ -114,7 +114,7 @@ def _root_tree_findings[T](
     serves every reader, so the docstring gates stop re-parsing each file."""
     found: dict[str, list[T]] = {}
     for path in declared_root_files(root):
-        findings = collect(parsed(path), path)
+        findings = collect(canonical_tree(path), path)
         if findings:
             found[path.relative_to(REPO_ROOT).as_posix()] = findings
     return found
@@ -287,6 +287,6 @@ def test_declared_scan_roots_fail_loud_when_vacuous(
         walk.declared_root_files("hollow")
     assert [p.name for p in walk.declared_root_files("exists")] == ["real.py"]
 
-    # AST-ask seam: parsed() blows up at the ask for a nonexistent file.
+    # AST-ask seam: canonical_tree() blows up at the ask for a nonexistent file.
     with pytest.raises(FileNotFoundError, match="nonexistent source file"):
-        walk.parsed(tmp_path / "absent" / "ghost.py")
+        walk.canonical_tree(tmp_path / "absent" / "ghost.py")

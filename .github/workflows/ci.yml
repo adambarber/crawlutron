@@ -53,7 +53,7 @@ jobs:
           fetch-depth: 1
           fetch-tags: false
           persist-credentials: false
-      - uses: dorny/paths-filter@0bc4621a3135347011ad047f9ecf449bf72ce2bd # v3.0.0
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:
           filters: |
@@ -256,37 +256,37 @@ jobs:
           persist-credentials: false
       - uses: $/.github/actions/prepare
       - name: Download battery coverage data
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: ${{ always() }}
         with:
           name: coverage-data
           path: .
       - name: Download battery junit results
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: ${{ always() }}
         with:
           name: junit-results
           path: junit/battery
       - name: Download real-pbkdf2 coverage data
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: ${{ always() && needs.changes.outputs.real-pbkdf2 == 'true' }}
         with:
           name: coverage-data-real-pbkdf2
           path: .
       - name: Download real-pbkdf2 junit results
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: ${{ always() && needs.changes.outputs.real-pbkdf2 == 'true' }}
         with:
           name: junit-real-pbkdf2
           path: junit/real-pbkdf2
       - name: Download test-browser coverage data
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: ${{ always() && needs.changes.outputs.browser == 'true' }}
         with:
           name: coverage-data-test-browser
           path: .
       - name: Download test-browser junit results
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: ${{ always() && needs.changes.outputs.browser == 'true' }}
         with:
           name: junit-test-browser
@@ -320,7 +320,7 @@ jobs:
         with:
           files: junit/split/behavioral/junit-*.xml
           flags: behavioral
-          report-type: test_results
+          report_type: test_results
           use_oidc: true
           fail_ci_if_error: false
       - name: Upload invariant test results to Codecov
@@ -329,7 +329,7 @@ jobs:
         with:
           files: junit/split/invariants/junit-*.xml
           flags: invariants
-          report-type: test_results
+          report_type: test_results
           use_oidc: true
           fail_ci_if_error: false
       - name: Upload real-pbkdf2 coverage to Codecov
@@ -338,7 +338,7 @@ jobs:
         with:
           files: junit/real-pbkdf2/junit-real-pbkdf2.xml
           flags: real-pbkdf2
-          report-type: test_results
+          report_type: test_results
           use_oidc: true
           fail_ci_if_error: false
       - name: Upload test-browser coverage to Codecov
@@ -347,7 +347,7 @@ jobs:
         with:
           files: junit/test-browser/junit-browser.xml
           flags: test-browser
-          report-type: test_results
+          report_type: test_results
           use_oidc: true
           fail_ci_if_error: false
 
@@ -428,7 +428,7 @@ jobs:
       # saved but never read) and the fetch would run on every push.
       - name: Cache Camoufox browser binary
         id: camoufox
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/camoufox
           key: camoufox-${{ runner.os }}-{{ hashFiles('pyproject.toml') }}
@@ -507,7 +507,7 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14"
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -565,6 +565,24 @@ jobs:
       - name: pin-verify check
         run: .venv/bin/pre-commit run pin-verify --all-files
 
+  pin-freshness:
+    name: pin-freshness
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: false
+      - uses: $/.github/actions/prepare
+      - name: pin-verify latest-stable check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: .venv/bin/python -m scripts.pin_verify outdated
+
   # Dependency review -- checks for vulnerable/malicious dependencies in PRs.
   # SHA-pinned, contents:read only. Runs on all PRs and main pushes.
   dependency-review:
@@ -581,7 +599,7 @@ jobs:
           fetch-tags: false
           persist-credentials: false
       - name: Dependency review
-        uses: actions/dependency-review-action@4081bf99e2866ebe428fc0477b69eb4fcda7220a # v4.4.0
+        uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
         with:
           config-file: '.github/dependency-review-config.yml'
           base-ref: ${{ github.event.before || github.event.pull_request.base.sha }}
@@ -612,6 +630,7 @@ jobs:
       - secret-scan
       - zizmor
       - pin-verify
+      - pin-freshness
       - dependency-review
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -638,6 +657,7 @@ jobs:
           test "${{ needs.secret-scan.result }}" = "success"
           test "${{ needs.zizmor.result }}" = "success"
           test "${{ needs.pin-verify.result }}" = "success"
+          test "${{ needs.pin-freshness.result }}" = "success"
           test "${{ needs.dependency-review.result }}" = "success"
           # Filtered surfaces are no-op steps inside jobs that still report
           # success; a skipped job would fail this aggregate by design.
@@ -645,7 +665,8 @@ jobs:
   # Dev builds go to TestPyPI on green main pushes only. Trusted publishing
   # rejects OIDC from a called workflow, so both jobs live here at top level;
   # the guard is load-bearing and must not be widened to dispatch or tags.
-  # Skip redundant build when declared root version already exists on TestPyPI.
+  # Skip only when every declared distribution is already on TestPyPI; a new
+  # member with an existing root version must still publish.
   testpypi-build:
     name: Build dev distributions for TestPyPI
     needs: [required]
@@ -665,39 +686,18 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14"
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           enable-cache: false
-      # Check if root version already exists on TestPyPI to skip redundant build.
-      # Release-please owns the declared version in every pyproject; no CI step
-      # rewrites it. A repeat push reuses the declared version and `skip-existing`
-      # makes the TestPyPI upload a no-op until release-please bumps it.
-      - name: Get root version from pyproject.toml
-        id: get-version
-        run: |
-          set -euo pipefail
-          uv run --no-project --python 3.14 python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])" > /tmp/root_version.txt
-          ROOT_VERSION="$(cat /tmp/root_version.txt)"
-          echo "ROOT_VERSION=${ROOT_VERSION}" >> "${GITHUB_OUTPUT}"
-      - name: Check if version exists on TestPyPI
+      # The decision is a pure door over every declared distribution's version;
+      # release-please owns those versions, no CI step rewrites them.
+      - name: Check if every declared version exists on TestPyPI
         id: check-version
-        env:
-          ROOT_VERSION: ${{ steps.get-version.outputs.ROOT_VERSION }}
         run: |
           set -euo pipefail
-          echo "Root version: ${ROOT_VERSION}"
-          # Use twine to check if version exists on TestPyPI
-          if uvx twine check --strict --repository-url https://test.pypi.org/legacy/ dist/ 2>/dev/null; then
-            # Actually check via PyPI API
-            URL="https://test.pypi.org/pypi/crawlutron/${ROOT_VERSION}/json"
-            RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "${URL}")
-            if [ "${RESPONSE}" = "200" ]; then
-              echo "skip=true" >> "${GITHUB_OUTPUT}"
-              echo "Version ${ROOT_VERSION} already exists on TestPyPI, skipping build."
-              exit 0
-            fi
-          fi
-          echo "skip=false" >> "${GITHUB_OUTPUT}"
+          SKIP="$(uv run --no-project --python 3.14 python scripts/testpypi_guard.py --index-url https://test.pypi.org)"
+          echo "skip=${SKIP}" >> "${GITHUB_OUTPUT}"
+          echo "TestPyPI build skip: ${SKIP}"
       - name: Build and inspect every distribution
         if: ${{ steps.check-version.outputs.skip != 'true' }}
         run: |
@@ -724,7 +724,7 @@ jobs:
       id-token: write
     steps:
       - name: Download the dev distributions
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: dev-dist
           path: dist/

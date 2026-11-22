@@ -22,6 +22,12 @@ MAKEFILE_PATH = SERVICE_ROOT / "Makefile"
 
 WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "ci.yml"
 
+
+def workflow_files(root: Path) -> tuple[Path, ...]:
+    """Every workflow file on disk, in both extensions GitHub accepts."""
+    return tuple(sorted(root.glob("*.y*ml")))
+
+
 # The version-triggered publish workflow and the packaging probe, contracted
 # alongside ci.yml.
 RELEASE_WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "release.yml"
@@ -86,6 +92,7 @@ REPORTING_JOBS = {
     "secret-scan",
     "zizmor",
     "pin-verify",
+    "pin-freshness",
     "dependency-review",
 }
 

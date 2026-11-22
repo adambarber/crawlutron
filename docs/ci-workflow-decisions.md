@@ -83,8 +83,8 @@ This document records the architectural decisions made in the CI workflow redesi
 
 ## UV_PYTHON_PREFERENCE=only-system
 
-**Change:** Added `python-preference: only-system` to setup-uv in the prepare action, and `UV_PYTHON_PREFERENCE=only-system` env var to the uv sync step. This ensures CI uses the system Python 3.14 provided by actions/setup-python, avoiding any uv-managed Python downloads that could introduce version drift.
+**Change:** Set `UV_PYTHON_PREFERENCE=only-system` on the uv sync step in the prepare action. This ensures CI uses the system Python 3.14 provided by actions/setup-python, avoiding any uv-managed Python downloads that could introduce version drift. The old `python-preference` setup-uv input was removed: it was never a declared input and silently did nothing.
 
 ## Dependency Review Action
 
-**Added:** `dependency-review` job using `actions/dependency-review-action@v4.4.0` (SHA-pinned) with `contents:read` permission. Runs on all PRs and main pushes. Configured via `.github/dependency-review-config.yml` to fail on high/critical vulnerabilities. Added to `required` job's `needs` list.
+**Added:** `dependency-review` job using `actions/dependency-review-action@v5.0.1` (SHA-pinned) with `contents:read` permission. Runs on all PRs and main pushes. Configured via `.github/dependency-review-config.yml` to fail on high/critical vulnerabilities. Added to `required` job's `needs` list.

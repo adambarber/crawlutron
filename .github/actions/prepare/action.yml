@@ -16,11 +16,10 @@ runs:
     # relative to the service root, and every hook is `language: system`, so this
     # is the only place the tools come from. Installed from the frozen lock
     # (#622) -- an unpinned install would re-resolve the transitive graph.
-    - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+    - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
       with:
         enable-cache: true
         cache-dependency-glob: uv.lock
-        python-preference: only-system
     - name: Install the frozen environment
       run: uv sync --frozen --extra dev
       env:
@@ -37,7 +36,7 @@ runs:
     # from an earlier run" and killed -- or raise, which is what redded every
     # gate when CI split into one job per gate.
     - name: Cache gate state
-      uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: |
           .mypy_cache

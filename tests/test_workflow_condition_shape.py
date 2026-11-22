@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tests._ci_contract import SERVICE_ROOT, mapping, workflow_document
+from tests._ci_contract import SERVICE_ROOT, mapping, workflow_document, workflow_files
 
 
 def test_every_job_condition_is_one_well_formed_expression() -> None:
@@ -11,7 +11,7 @@ def test_every_job_condition_is_one_well_formed_expression() -> None:
     GitHub reports it as a workflow-file issue and the job never runs, which reads
     here as a packaging failure that has nothing to do with packaging.
     """
-    workflows = sorted(SERVICE_ROOT.joinpath(".github/workflows").glob("*.yml"))
+    workflows = workflow_files(SERVICE_ROOT / ".github/workflows")
     assert workflows, "no workflows to check: the gate would pass vacuously"
     for path in workflows:
         document = workflow_document(path)

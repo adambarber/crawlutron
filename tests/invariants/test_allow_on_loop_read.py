@@ -10,10 +10,10 @@ import pathlib
 
 from tests._walk_primitives import (
     SCAN_ROOTS,
+    canonical_tree,
     enclosing_function,
     offender_at,
     parent_map,
-    parsed,
     trees_under,
 )
 from tests.chokepoint_paths import REPO_ROOT
@@ -90,7 +90,7 @@ def test_allow_on_loop_read_walk_past_names_two_offenders() -> None:
 def test_allow_on_loop_read_exemption_is_live() -> None:
     """The sanctioned function still exists and still calls the facility."""
     path = REPO_ROOT / _EXCLUDED
-    tree = parsed(path)
+    tree = canonical_tree(path)
     found_function = False
     found_call = False
     for node in ast.walk(tree):

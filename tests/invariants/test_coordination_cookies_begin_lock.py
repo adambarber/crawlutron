@@ -4,7 +4,7 @@ import ast
 
 from tests._walk_assertions import assert_detectors_clean
 from tests.chokepoint_paths import APP_ROOT
-from tests.chokepoint_walks import offender_at, parent_map, parsed
+from tests.chokepoint_walks import canonical_tree, offender_at, parent_map
 
 _STORE = APP_ROOT / "storage" / "coordination_cookies.py"
 
@@ -13,7 +13,7 @@ _WRITE_METHODS = ("merge", "put", "touch", "clear")
 
 
 def test_reads_take_store_lock_and_begin_stays_inside_lock() -> None:
-    tree = parsed(_STORE)
+    tree = canonical_tree(_STORE)
     assert_detectors_clean(
         tree,
         path=_STORE,

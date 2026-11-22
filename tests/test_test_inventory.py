@@ -1,11 +1,14 @@
 """Smoke tests for the test inventory tool."""
 
+import ast
 import contextlib
 import io
 import json
 import sys
 
+from scripts import test_inventory
 from scripts.test_inventory import main
+from tests.chokepoint_paths import REPO_ROOT
 
 
 def _run(fmt: str) -> tuple[int, str]:
@@ -19,6 +22,27 @@ def _run(fmt: str) -> tuple[int, str]:
     finally:
         sys.argv = old_argv
     return code, buffer.getvalue()
+
+
+def test_inventory_collects_the_tree_once_per_process() -> None:
+    first = test_inventory.collect_once()
+    count = test_inventory.COLLECTION_COUNT
+    _run("text")
+    _run("json")
+    _run("text")
+    assert test_inventory.collect_once() is first
+    assert test_inventory.COLLECTION_COUNT == count
+    assert count > 0
+
+
+def test_scripts_expose_no_collectable_test_helpers() -> None:
+    """A bare `pytest .` must not collect production helpers as tests."""
+    offenders: list[str] = []
+    for path in sorted((REPO_ROOT / "scripts").rglob("*.py")):
+        for node in ast.parse(path.read_text(encoding="utf-8")).body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_"):
+                offenders.append(f"{path}:{node.lineno}: {node.name}")
+    assert not offenders, f"scripts helpers must not be collectable as tests: {offenders}"
 
 
 def test_inventory_text_reports_a_total():

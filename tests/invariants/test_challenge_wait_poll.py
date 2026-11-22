@@ -7,14 +7,14 @@ import ast
 
 from tests._walk_assertions import assert_detectors_clean
 from tests.chokepoint_paths import APP_ROOT
-from tests.chokepoint_walks import attribute_call_on, offender_at, parsed
+from tests.chokepoint_walks import attribute_call_on, canonical_tree, offender_at
 
 _BROWSER = APP_ROOT / "transport" / "browser.py"
 
 
 def test_challenge_wait_injected_clock_two_extracts() -> None:
     assert_detectors_clean(
-        parsed(_BROWSER),
+        canonical_tree(_BROWSER),
         path=_BROWSER,
         detectors=(_raw_sleep_offenders, _too_many_extract_offenders),
     )

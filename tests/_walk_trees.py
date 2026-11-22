@@ -6,7 +6,7 @@ import tokenize
 from collections.abc import Callable, Iterable, Iterator
 from functools import cache
 
-from tests._walk_primitives import _narrow, parsed, trees_under
+from tests._walk_primitives import _narrow, canonical_tree, trees_under
 from tests.chokepoint_paths import APP_ROOTS, relative_posix
 
 # crawlutron/safety/safe_regex.py is the sanctioned regex wrapper (the third-party `regex`
@@ -85,10 +85,10 @@ def _app_files(exclude: frozenset[str]) -> tuple[pathlib.Path, ...]:
 def _app_trees(exclude: frozenset[str]) -> tuple[tuple[pathlib.Path, ast.Module], ...]:
     """``(path, tree)`` per exclude set, sharing each file's one cached parse.
 
-    The exclude-set key is per-list only; the parse lives in ``parsed``, keyed
-    on the file itself, so fifteen exclude lists still parse each file once.
+    The exclude-set key is per-list only; the parse lives in ``canonical_tree``,
+    keyed on the file itself, so fifteen exclude lists still parse each file once.
     """
-    return tuple((path, parsed(path)) for path in _app_files(exclude))
+    return tuple((path, canonical_tree(path)) for path in _app_files(exclude))
 
 
 def app_offenders(

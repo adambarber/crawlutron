@@ -17,7 +17,7 @@ from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.json_value import JsonValue
 from crawlutron.models.render_request import RenderRequest
 from tests.chokepoint_paths import REPO_ROOT
-from tests.chokepoint_walks import parsed
+from tests.chokepoint_walks import canonical_tree
 from tests.invariants._env_knobs import _KNOB_PATTERN, _consumed_knobs
 from tests.rules import Rule
 
@@ -212,7 +212,7 @@ def _app_symbol_definitions(root: pathlib.Path = REPO_ROOT) -> dict[str, frozens
         root / "packages" / "safe-url" / "src" / "safe_url",
     ):
         for path in sorted(pkg_root.rglob("*.py")):
-            tree = parsed(path)
+            tree = canonical_tree(path)
             relative = path.relative_to(root).as_posix()
             for node in tree.body:
                 if isinstance(node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
@@ -308,7 +308,7 @@ DOC_SYMBOLS_RESOLVE_TO_DEFINITIONS = Rule(
         "A backticked app symbol in a live doc must name something app/ actually defines, "
         "so a rename or deletion can't leave docs citing ghosts."
     ),
-    # The detector reads doc FILES (root/documents/symbols), not a parsed tree, so no snippet can go
+    # The detector reads doc FILES (root/documents/symbols), not a canonical_tree tree, so no snippet can go
     # through check_bites' ast.parse -- its bite and clean halves are the tmp-copy tests below.
     proof_path=REPO_ROOT / "CONTRIBUTING.md",
     bite=lambda: (),
@@ -453,7 +453,7 @@ def test_doc_symbols_resolve_to_definitions():
 def test_doc_symbol_detector_bites(tmp_path):
     """The gate must catch a stale dotted path and a stale bare symbol.
 
-    The rule's detector reads doc FILES, not a parsed tree, so its bite is a
+    The rule's detector reads doc FILES, not a canonical_tree tree, so its bite is a
     synthetic ghost citation in a copy, not a parseable snippet."""
     symbols = _app_symbol_definitions()
     assert _doc_symbol_offenders(symbols=symbols) == []

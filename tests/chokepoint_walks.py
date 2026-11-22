@@ -18,6 +18,7 @@ from tests._walk_membership import (
 )
 from tests._walk_primitives import (
     attribute_call_on,
+    canonical_tree,
     enclosing_function,
     file_tree,
     lineno,
@@ -25,7 +26,6 @@ from tests._walk_primitives import (
     offender,
     offender_at,
     parent_map,
-    parsed,
     parsed_source,
     trees_under,
 )
@@ -101,6 +101,7 @@ __all__ = [
     "call_nodes",
     "callable_defs",
     "call_offenders",
+    "canonical_tree",
     "calls_named",
     "calls_named_leaf",
     "calls_to_any",
@@ -127,7 +128,6 @@ __all__ = [
     "offenders_over_functions",
     "or_nodes",
     "parent_map",
-    "parsed",
     "parsed_source",
     "plain_imports",
     "real_members",

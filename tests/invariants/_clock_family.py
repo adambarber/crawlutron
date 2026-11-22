@@ -9,8 +9,9 @@ from __future__ import annotations
 import ast
 import pathlib
 from collections.abc import Iterator
+from functools import cache
 
-from tests._walk_primitives import parsed
+from tests._walk_primitives import _parsed_copy
 from tests.chokepoint_paths import REPO_ROOT
 
 __all__ = [
@@ -86,12 +87,14 @@ def wall_read(node: ast.expr, wall: set[str]) -> bool:
     )
 
 
-def suite_trees() -> Iterator[tuple[pathlib.Path, ast.Module]]:
-    """Every ``tests/**`` module, walked once (the sweeps' shared population)."""
-    for path in sorted((REPO_ROOT / "tests").rglob("*.py")):
-        if "__pycache__" in path.parts:
-            continue
-        yield path, parsed(path)
+@cache
+def suite_trees() -> tuple[tuple[pathlib.Path, ast.Module], ...]:
+    """One shared copy set of ``tests/**``, isolated from ``trees_under``'s copies."""
+    return tuple(
+        (path, _parsed_copy(path))
+        for path in sorted((REPO_ROOT / "tests").rglob("*.py"))
+        if "__pycache__" not in path.parts
+    )
 
 
 def single_target_assigns(tree: ast.Module) -> Iterator[tuple[str, ast.Assign]]:

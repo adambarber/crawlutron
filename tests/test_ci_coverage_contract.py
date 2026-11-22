@@ -65,7 +65,8 @@ def _assert_codecov_upload_flags(
         assert "flags" in with_, f"{job_name} codecov upload must specify flags"
     assert with_.get("use_oidc") is True or with_.get("use_oidc") == "true"
     assert with_.get("fail_ci_if_error") is False or with_.get("fail_ci_if_error") == "false"
-    assert with_.get("report_type", with_.get("report-type", "coverage")) == report_type
+    assert "report-type" not in with_, "action input is report_type (underscore), not report-type"
+    assert with_.get("report_type") == report_type
 
 
 def test_battery_is_only_fast_suite_execution() -> None:
@@ -268,7 +269,8 @@ def test_coverage_job_uploads_per_surface_codecov_with_explicit_files() -> None:
         flag = with_.get("flags")
         assert flag in expected_files, f"unknown flag {flag}"
         assert files == expected_files[flag], f"flag {flag} expects files={expected_files[flag]}, got {files}"
-        assert with_.get("report_type") == "test_results" or with_.get("report-type") == "test_results"
+        assert "report-type" not in with_, "action input is report_type (underscore), not report-type"
+        assert with_.get("report_type") == "test_results"
         expected_if = (
             "${{ !cancelled() && needs.changes.outputs.real-pbkdf2 == 'true' }}"
             if flag == "real-pbkdf2"
@@ -444,7 +446,8 @@ def test_coverage_job_uploads_generated_coverage_xml() -> None:
     for step in uploads:
         with_ = cast(StepMapping, step.get("with", {}))
         assert "coverage_reports/coverage.xml" in str(with_.get("files", ""))
-        assert with_.get("report_type", with_.get("report-type", "coverage")) == "coverage"
+        assert "report-type" not in with_, "action input is report_type (underscore), not report-type"
+        assert with_.get("report_type", "coverage") == "coverage"
         assert step.get("if") == "${{ !cancelled() }}"
 
 

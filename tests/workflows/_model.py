@@ -17,6 +17,7 @@ from pydantic import (
     model_validator,
 )
 
+from tests._ci_contract import workflow_files
 from tests.chokepoint_paths import REPO_ROOT
 from tests.workflows._admission import admit_or_none as _admit_or_none
 from tests.workflows._facts import CommandFacts, ExpressionFacts
@@ -99,6 +100,14 @@ class Step(BaseModel):
     @classmethod
     def admit_or_none(cls, raw: object, *, context: Mapping[str, object] | None = None) -> Step | None:
         return _admit_or_none(lambda value: cls.create(value, context=context), raw)
+
+    @model_validator(mode="after")
+    def codecov_inputs(self) -> Step:
+        if self.uses and "codecov/codecov-action" in self.uses:
+            bad = sorted(key for key in self.with_ if "-" in key)
+            if bad:
+                raise ValueError(f"invalid codecov input(s) {bad}: action inputs are snake_case")
+        return self
 
     @model_validator(mode="after")
     def refusal(self, info: ValidationInfo) -> Step:
@@ -276,7 +285,7 @@ def parse_workflow(path: Path) -> Workflow:
     return Workflow.create(raw, context={"waived_lines": waived_lines})
 
 
-WORKFLOWS: tuple[Workflow, ...] = tuple(parse_workflow(path) for path in sorted(WORKFLOW_DIR.glob("*.yml")))
+WORKFLOWS: tuple[Workflow, ...] = tuple(parse_workflow(path) for path in workflow_files(WORKFLOW_DIR))
 JOBS: tuple[Job, ...] = tuple(job for item in WORKFLOWS for job in item.jobs.values())
 POLICY = Policy.create(WAIVERS, context={"jobs": JOBS, "workflows": WORKFLOWS, "ceilings": CEILINGS})
 

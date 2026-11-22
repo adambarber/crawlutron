@@ -6,7 +6,7 @@ dispatch function, so the handler factories and their module-level handle_* alia
 from __future__ import annotations
 
 from tests.chokepoint_paths import REPO_ROOT
-from tests.chokepoint_walks import parsed
+from tests.chokepoint_walks import canonical_tree
 from tests.invariants.test_public_surface import _owned_public_symbols
 
 _HANDLERS = REPO_ROOT / "packages/mcp/src/crawlutron_mcp/handlers.py"
@@ -42,6 +42,6 @@ _FACTORY_FUNCTIONS = frozenset(
 def test_no_factory_bindings_or_factories_survive():
     """Every handle_* the factories produced is a deleted binding, and no
     factory function remains in handlers.py."""
-    names = _owned_public_symbols(parsed(_HANDLERS))
+    names = _owned_public_symbols(canonical_tree(_HANDLERS))
     leaked = sorted((names & _FACTORY_BINDINGS) | (names & _FACTORY_FUNCTIONS))
     assert not leaked, f"factory machinery survived the collapse: {leaked}"

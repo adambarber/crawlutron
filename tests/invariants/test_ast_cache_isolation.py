@@ -1,28 +1,29 @@
 """Red-first test: AST cache returns isolated copies with metadata.
 
-Each caller receives an independent copy of the parsed AST carrying version +
+Each caller receives an independent copy of the _parsed_copy AST carrying version +
 validation metadata (source SHA-256, AST schema version, validation result).
 """
 
 import ast
+from pathlib import Path
 
-from tests._walk_primitives import _PARSE_CACHE, parsed
+from tests._walk_primitives import _PARSE_CACHE, _parsed_copy
 from tests.chokepoint_paths import REPO_ROOT
 
 
 def test_ast_cache_returns_isolated_copies_with_metadata():
-    """Each call to parsed() for the same file must return a distinct object
+    """Each call to _parsed_copy() for the same file must return a distinct object
     carrying metadata, and mutating one must not affect the other.
     """
     # Pick a stable test file
     test_file = REPO_ROOT / "tests" / "_walk_primitives.py"
 
     # Parse twice - should get two independent copies
-    tree1 = parsed(test_file)
-    tree2 = parsed(test_file)
+    tree1 = _parsed_copy(test_file)
+    tree2 = _parsed_copy(test_file)
 
     # They must be different objects (isolated copies)
-    assert tree1 is not tree2, "parsed() must return isolated copies, not shared object"
+    assert tree1 is not tree2, "_parsed_copy() must return isolated copies, not shared object"
 
     # Both must be ast.Module instances
     assert isinstance(tree1, ast.Module)
@@ -53,8 +54,8 @@ def test_ast_cache_mutation_isolation():
     """Mutating one caller's tree must not affect another caller's tree."""
     test_file = REPO_ROOT / "tests" / "_walk_primitives.py"
 
-    tree1 = parsed(test_file)
-    tree2 = parsed(test_file)
+    tree1 = _parsed_copy(test_file)
+    tree2 = _parsed_copy(test_file)
 
     # Record initial structure
     initial_dump1 = ast.dump(tree1)
@@ -72,33 +73,29 @@ def test_ast_cache_mutation_isolation():
     assert ast.dump(tree1) != initial_dump1, "tree1 mutation not reflected"
 
 
-def test_ast_cache_canonical_tree_stored_once():
-    """The canonical tree is stored once per (path, source_digest) in _PARSE_CACHE."""
-    test_file = REPO_ROOT / "tests" / "_walk_primitives.py"
+def test_ast_cache_canonical_tree_stored_once(tmp_path: Path) -> None:
+    """A fresh source is stored once; the shared cache is never evicted."""
+    test_file = tmp_path / "unique_module.py"
+    test_file.write_text("value = 1\n", encoding="utf-8")
+    before = len(_PARSE_CACHE)
 
-    # Clear cache to start fresh
-    _PARSE_CACHE.clear()
+    _parsed_copy(test_file)
+    after_first = len(_PARSE_CACHE)
+    _parsed_copy(test_file)
 
-    # First parse populates cache
-    parsed(test_file)
-    cache_size_after_first = len(_PARSE_CACHE)
-
-    # Second parse should NOT add to cache (same source digest)
-    parsed(test_file)
-    cache_size_after_second = len(_PARSE_CACHE)
-
-    assert cache_size_after_first == 1, "cache should have 1 entry after first parse"
-    assert cache_size_after_second == 1, "cache should still have 1 entry after second parse (same source)"
+    assert after_first == before + 1
+    assert len(_PARSE_CACHE) == after_first
 
 
-def test_ast_cache_different_sources_different_entries():
-    """Different source files (or same file with different content) get different cache entries."""
-    test_file1 = REPO_ROOT / "tests" / "_walk_primitives.py"
-    test_file2 = REPO_ROOT / "tests" / "chokepoint_walks.py"
+def test_ast_cache_different_sources_different_entries(tmp_path: Path) -> None:
+    """Two fresh sources add two entries without clearing the shared cache."""
+    first = tmp_path / "one.py"
+    second = tmp_path / "two.py"
+    first.write_text("a = 1\n", encoding="utf-8")
+    second.write_text("b = 2\n", encoding="utf-8")
+    before = len(_PARSE_CACHE)
 
-    _PARSE_CACHE.clear()
+    _parsed_copy(first)
+    _parsed_copy(second)
 
-    parsed(test_file1)
-    parsed(test_file2)
-
-    assert len(_PARSE_CACHE) == 2, "different files should have separate cache entries"
+    assert len(_PARSE_CACHE) == before + 2

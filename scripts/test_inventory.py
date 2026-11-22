@@ -12,6 +12,7 @@ import json
 import pathlib
 import sys
 from collections import defaultdict
+from functools import cache
 
 from utils.paths import REPO_ROOT
 
@@ -36,7 +37,7 @@ def is_production(name: str) -> bool:
     return name.split(".", 1)[0] in PRODUCTION
 
 
-def test_node_id(relative: str, class_name: str | None, test_name: str) -> str:
+def node_id(relative: str, class_name: str | None, test_name: str) -> str:
     """Build a pytest-style node id from relative path, optional class, test name."""
     parts = [relative]
     if class_name is not None:
@@ -82,6 +83,17 @@ def _call_objects(tree: ast.Module, node: ast.AST) -> set[str]:
         if resolved and is_production(resolved):
             found.add(resolved)
     return found
+
+
+COLLECTION_COUNT = 0
+
+
+@cache
+def collect_once() -> list[dict]:
+    """The one tree collection per process; callers share its result."""
+    global COLLECTION_COUNT
+    COLLECTION_COUNT += 1
+    return collect_tests()
 
 
 def collect_tests() -> list[dict]:
@@ -141,7 +153,7 @@ def _test_record(
         primary = "unresolved"
     objects = test_imports | call_objects
     return {
-        "node_id": test_node_id(relative, class_name, fn.name),
+        "node_id": node_id(relative, class_name, fn.name),
         "file": relative,
         "line": fn.lineno,
         "class": class_name,
@@ -271,7 +283,7 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        tests = collect_tests()
+        tests = collect_once()
         groups = build_groups(tests)
         duplication = duplication_flags(groups)
         fragmentation = fragmentation_flags(groups)

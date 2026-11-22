@@ -6,12 +6,20 @@ live in their own Prometheus families, and the caller dimension is overflow-capp
 
 from __future__ import annotations
 
+import pytest
 from httpx import ASGITransport, AsyncClient
 
-from crawlutron.runtime.metrics import MetricsStore, get_metrics
+from crawlutron.runtime.metrics import MetricsStore, get_metrics, unbind_metric_counters
 from crawlutron.storage.coordination_counters import CoordinationCounters
 from crawlutron_rest.api.metrics_router import router as metrics_router
 from tests._app_harnesses import harness_app
+
+
+@pytest.fixture(autouse=True)
+def _unbind_singleton_counters():
+    """The singleton is process-global; detach its store before the leak sweep."""
+    yield
+    unbind_metric_counters()
 
 
 def _store(tmp_path) -> MetricsStore:

@@ -7,7 +7,7 @@ outside the lock block -- so one detector serves both instead of two copies.
 import ast
 import pathlib
 
-from tests._walk_primitives import parsed
+from tests._walk_primitives import canonical_tree
 from tests.chokepoint_paths import REPO_ROOT
 
 
@@ -16,10 +16,10 @@ def calls_inside_self_lock(
 ) -> list[str]:
     """Calls named in ``call_names`` under ``with self._lock:`` in the named functions.
 
-    Paths are repo-relative; the file is parsed from disk so the assertion
+    Paths are repo-relative; the file is canonical_tree from disk so the assertion
     reads the live source rather than a stale import."""
     file_path = REPO_ROOT / path
-    tree: ast.Module = parsed(file_path)
+    tree: ast.Module = canonical_tree(file_path)
     offenders: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.FunctionDef) or node.name not in function_names:

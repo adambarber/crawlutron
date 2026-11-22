@@ -8,9 +8,10 @@ from __future__ import annotations
 import ast
 import configparser
 import pathlib
+from functools import cache
 
 from tests.chokepoint_paths import APP_ROOT, REPO_ROOT, TESTS_DIR
-from tests.chokepoint_walks import app_offenders, nodes_of, offender_at, parsed, trees_under
+from tests.chokepoint_walks import app_offenders, canonical_tree, nodes_of, offender_at, trees_under
 from tests.invariants._shared import assert_trees_clean
 from tests.membership_gate import (
     aliased_dynamic_pattern_re_offenders,
@@ -339,12 +340,13 @@ def test_doubles_do_not_accept_and_drop_kwargs():
     )
 
 
+@cache
 def _scheduler_run_positional_names() -> tuple[str, ...]:
     """The real ``DomainScheduler.run`` positional names, in order.
 
     Read from production, not typed: the count and names tell a double from an
     unrelated ``run``, and a hand-kept tuple stales when the signature grows."""
-    tree = parsed(APP_ROOT / "transport" / "scheduler.py")
+    tree = canonical_tree(APP_ROOT / "transport" / "scheduler.py")
     for node in nodes_of(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "run":
             args = node.args

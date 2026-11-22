@@ -1,20 +1,23 @@
-"""suite_trees() yields AST copies with identical metadata and structure via parsed() (#1098)."""
+"""suite_trees() yields isolated AST copies with matching metadata and structure (#1098)."""
 
 import ast
 
-from tests._walk_primitives import _PARSE_CACHE, _trees_under
 from tests.chokepoint_paths import REPO_ROOT
 from tests.chokepoint_walks import trees_under
 from tests.invariants._clock_family import suite_trees
+
+
+def test_suite_trees_is_one_shared_copy_set() -> None:
+    """The shared walk parses the tests tree once; no caller evicts it."""
+    first = suite_trees()
+    assert first, "suite_trees() returned no modules"
+    assert suite_trees() is first
 
 
 def test_suite_trees_same_metadata_and_structure_as_trees_under():
     """Every path in suite_trees() yields a copy with identical metadata and
     structural equality (ast.dump) to trees_under(). Object identity NOT required.
     """
-    # Clear caches to ensure fresh canonical trees
-    _PARSE_CACHE.clear()
-    _trees_under.cache_clear()
     suite_map = {path: tree for path, tree in suite_trees()}
     trees_map = {path: tree for path, tree in trees_under(REPO_ROOT / "tests")}
     for path in suite_map:

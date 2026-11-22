@@ -9,7 +9,7 @@ import pathlib
 from dataclasses import dataclass
 
 from tests.chokepoint_paths import REPO_ROOT
-from tests.chokepoint_walks import calls_to_any, from_imports, functions, parsed
+from tests.chokepoint_walks import calls_to_any, canonical_tree, from_imports, functions
 from tests.invariants._armed_detectors import hand_rolled_detectors
 
 INVARIANTS_ROOT = REPO_ROOT / "tests" / "invariants"
@@ -129,7 +129,7 @@ def _survey(root: pathlib.Path) -> tuple[list[DetectorEntry], list[DetectorEntry
     for path in sorted(root.rglob("*.py")):
         if "__pycache__" in path.parts:
             continue
-        tree = parsed(path)
+        tree = canonical_tree(path)
         wired = _wired_finds(tree)
         for node in functions(tree):
             if not node.name.endswith(DETECTOR_SUFFIX):

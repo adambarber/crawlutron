@@ -7,13 +7,13 @@ import ast
 import pathlib
 
 from tests.chokepoint_paths import APP_ROOT
-from tests.chokepoint_walks import parsed
+from tests.chokepoint_walks import canonical_tree
 
 _STORE = APP_ROOT / "storage" / "coordination_cookies.py"
 
 
 def test_every_cookie_table_read_is_namespace_scoped() -> None:
-    tree = parsed(_STORE)
+    tree = canonical_tree(_STORE)
     name = pathlib.Path(_STORE).name
     offenders = []
     for node in ast.walk(tree):

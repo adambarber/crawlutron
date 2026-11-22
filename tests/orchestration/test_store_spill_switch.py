@@ -6,6 +6,9 @@ The file spill (mkstemp + flock + NDJSON) is gone: the same write/read shape rid
 
 from __future__ import annotations
 
+import sqlite3
+from contextlib import closing
+
 import pytest
 
 from crawlutron.storage.result_store import CrawlSpillStore
@@ -27,7 +30,7 @@ async def test_the_crawl_spills_each_result_into_the_store(tmp_path):
     store = _store(tmp_path)
     try:
         out = await crawled_results(_PAGES, spill_store=store)
-        with __import__("sqlite3").connect(tmp_path / "spills.db") as conn:
+        with closing(sqlite3.connect(tmp_path / "spills.db")) as conn:
             count = conn.execute("SELECT COUNT(*) FROM crawl_spills").fetchone()[0]
         assert count == len(out["results"]) >= 1, (
             f"expected one row per result ({len(out['results'])}), saw {count}"
