@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import sys
 import tomllib
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from functools import cache
+from types import MappingProxyType, ModuleType
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -91,21 +93,21 @@ def _expanded_members(base: pathlib.Path, pattern: str) -> tuple[str, ...]:
     return tuple(sorted(p.relative_to(base).as_posix() for p in base.glob(pattern) if p.is_dir()))
 
 
-def workspace_package_dirs(base: pathlib.Path = REPO_ROOT) -> dict[str, pathlib.Path]:
+def workspace_package_dirs(base: pathlib.Path = REPO_ROOT) -> Mapping[str, pathlib.Path]:
     """The root project plus every workspace member, keyed by base-relative path."""
     dirs: dict[str, pathlib.Path] = {".": base}
     for pattern in uv_workspace_members(base) or ():
         dirs.update({member: base / member for member in _expanded_members(base, pattern)})
-    return dirs
+    return MappingProxyType(dirs)
 
 
-def workspace_project(directory: pathlib.Path) -> dict[str, object]:
+def workspace_project(directory: pathlib.Path) -> Mapping[str, object]:
     """A package's ``[project]`` table, keyed by string."""
     with (directory / "pyproject.toml").open("rb") as handle:
         project = tomllib.load(handle)["project"]
     if not isinstance(project, dict):
         raise AssertionError(f"[project] table is not a mapping in {directory}")
-    return {str(key): value for key, value in project.items()}
+    return MappingProxyType({str(key): value for key, value in project.items()})
 
 
 def _member_package_roots(base: pathlib.Path, members: tuple[str, ...]) -> tuple[str, ...]:
@@ -262,26 +264,47 @@ def _app_roots() -> tuple[pathlib.Path, pathlib.Path, pathlib.Path, pathlib.Path
     )
 
 
-_LAZY: dict[str, Callable[[], object]] = {
-    "SCAN_ROOTS": scan_roots,
-    "PACKAGE_ROOTS": package_roots,
-    "APP_ROOT": lambda: _app_roots()[0],
-    "ADMISSION_ROOT": lambda: _app_roots()[1],
-    "REST_ROOT": lambda: _app_roots()[2],
-    "MCP_ROOT": lambda: _app_roots()[3],
-    "SAFE_URL_ROOT": lambda: _app_roots()[4],
-    "APP_ROOTS": lambda: tuple(_app_roots()[i] for i in (0, 2, 3, 4)),
-    "TRANSPORT_DIR": lambda: _app_roots()[0] / "transport",
-}
+_DERIVATIONS: Mapping[str, Callable[[], object]] = MappingProxyType(
+    {
+        "PACKAGE_ROOTS": package_roots,
+        "SCAN_ROOTS": scan_roots,
+        "APP_ROOT": lambda: _app_roots()[0],
+        "ADMISSION_ROOT": lambda: _app_roots()[1],
+        "REST_ROOT": lambda: _app_roots()[2],
+        "MCP_ROOT": lambda: _app_roots()[3],
+        "SAFE_URL_ROOT": lambda: _app_roots()[4],
+        "APP_ROOTS": lambda: tuple(_app_roots()[i] for i in (0, 2, 3, 4)),
+        "TRANSPORT_DIR": lambda: _app_roots()[0] / "transport",
+    }
+)
+
+
+@cache
+def _surface(name: str) -> object:
+    """Derive a named surface once; the memo lives in the function, not module state."""
+    return _DERIVATIONS[name]()
 
 
 def __getattr__(name: str) -> object:
-    """Derive surfaces on first use, so a bare script in a scratch tree needs only REPO_ROOT."""
-    if name not in _LAZY:
+    """Serve every derived name through the same write-once cache."""
+    if name not in _DERIVATIONS:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    value = _LAZY[name]()
-    globals()[name] = value
-    return value
+    return _surface(name)
+
+
+class _FrozenModule(ModuleType):
+    """A module whose name bindings are fixed once its surface is built."""
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if getattr(self, "_frozen", False):
+            raise AttributeError(f"{self.__name__}.{name} is immutable")
+        super().__setattr__(name, value)
+
+
+def freeze_module(module: ModuleType) -> None:
+    """Lock a module's names; every imported name is already derived and immutable."""
+    module.__dict__["_frozen"] = True
+    module.__class__ = _FrozenModule
 
 
 def path_components(expr: ast.expr) -> list[ast.expr]:
@@ -303,3 +326,6 @@ def path_components(expr: ast.expr) -> list[ast.expr]:
 def relative_posix(path: pathlib.Path) -> str:
     """The repo-relative path label a detector names a finding by."""
     return path.relative_to(REPO_ROOT).as_posix()
+
+
+freeze_module(sys.modules[__name__])

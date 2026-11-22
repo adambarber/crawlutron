@@ -5,7 +5,11 @@ import os
 import pathlib
 import subprocess
 import sys
+from types import MappingProxyType
 
+import pytest
+
+import utils.paths as path_door
 from tests._walk_primitives import SCAN_ROOTS, member_src_roots
 from tests.chokepoint_paths import REPO_ROOT
 from tests.chokepoint_walks import nodes_of, offender_at, parsed_source, trees_under
@@ -166,6 +170,20 @@ def test_local_parser_is_detected() -> None:
 def test_detectors_stay_clean_on_a_conforming_module() -> None:
     probe = parsed_source("from tests.chokepoint_paths import REPO_ROOT\nROOT = REPO_ROOT\n")
     assert not any(d(probe, REPO_ROOT / "probe.py") for d in (_ad_hoc, _wrong_door, _local_parser))
+
+
+def test_the_door_freezes_its_names() -> None:
+    with pytest.raises(AttributeError, match="immutable"):
+        path_door.REPO_ROOT = pathlib.Path("elsewhere")
+
+
+def test_derived_names_are_cached_once_and_immutable() -> None:
+    roots = path_door.SCAN_ROOTS
+    misses = path_door._surface.cache_info().misses
+    assert path_door.SCAN_ROOTS is roots
+    assert path_door._surface.cache_info().misses == misses
+    assert isinstance(roots, tuple)
+    assert isinstance(path_door.workspace_package_dirs(path_door.REPO_ROOT), MappingProxyType)
 
 
 def test_no_ad_hoc_root_derivation_survives() -> None:

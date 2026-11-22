@@ -1,5 +1,7 @@
 """The public test-facing name for the one path door in ``utils.paths``."""
 
+import sys
+
 from utils.paths import (
     ADMISSION_ROOT,
     APP_ROOT,
@@ -10,6 +12,7 @@ from utils.paths import (
     SAFE_URL_ROOT,
     TESTS_DIR,
     TRANSPORT_DIR,
+    freeze_module,
     path_components,
     relative_posix,
 )
@@ -27,3 +30,5 @@ __all__ = [
     "path_components",
     "relative_posix",
 ]
+
+freeze_module(sys.modules[__name__])
