@@ -87,6 +87,16 @@ def test_a_workflow_rule_names_the_injected_violation(rule, broken: Workflow) ->
     assert findings and findings[0].rule == rule.name
 
 
+def test_quoted_parentheses_do_not_change_scope() -> None:
+    for run in (
+        '(export PYTEST_ADDOPTS="-m slow)"; pytest)',
+        '(export PYTEST_ADDOPTS="-m (slow)"; pytest)',
+        'then (export PYTEST_ADDOPTS="-m slow"; pytest)',
+    ):
+        filtered = _mutate(steps=(_step(name="Bite", run=run),))
+        assert not list(no_bare_pytest(parent_workflow(filtered), filtered)), run
+
+
 def test_an_export_inside_the_same_subshell_filters_its_pytest() -> None:
     scoped = _mutate(steps=(_step(name="Bite", run='(export PYTEST_ADDOPTS="-m slow"; pytest)'),))
     assert not list(no_bare_pytest(parent_workflow(scoped), scoped))

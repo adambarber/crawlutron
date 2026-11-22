@@ -6,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from tests.workflows._model import JOBS, POLICY, WORKFLOWS
-from tests.workflows._policy import CEILINGS, Policy, RuleId, Waiver, refusal_literals
+from tests.workflows._policy import CEILINGS, WAIVERS, Policy, RuleId, Waiver, refusal_literals
 
 
 def test_an_unknown_rule_in_a_waiver_is_unrepresentable() -> None:
@@ -56,6 +56,16 @@ def test_a_partial_ceiling_table_fails_at_construction() -> None:
         Policy.create(
             (), context={"jobs": JOBS, "workflows": WORKFLOWS, "ceilings": {RuleId.NO_BARE_PYTEST: 0}}
         )
+
+
+def test_an_empty_workflow_tree_is_refused() -> None:
+    with pytest.raises(ValueError, match="empty_tree"):
+        Policy.create(WAIVERS, context={"jobs": JOBS, "workflows": ()})
+
+
+def test_a_non_tuple_waiver_container_is_refused() -> None:
+    with pytest.raises(ValueError, match="invalid_waivers"):
+        Policy.create([WAIVERS[0]], context={"jobs": JOBS, "workflows": WORKFLOWS})
 
 
 def test_the_shipped_policy_is_admitted() -> None:

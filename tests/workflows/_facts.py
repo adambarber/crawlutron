@@ -64,6 +64,19 @@ def _unquoted(text: str) -> str:
     return re.sub(r"['\"].*?['\"]", "", text)
 
 
+def _first_open(text: str) -> int:
+    quote = ""
+    for index, char in enumerate(text):
+        if quote:
+            if char == quote:
+                quote = ""
+        elif char in "'\"":
+            quote = char
+        elif char == "(":
+            return index
+    return -1
+
+
 def _export_value(text: str) -> str:
     value = text.strip()
     if not value:
@@ -105,10 +118,13 @@ class CommandFacts(BaseModel):
         invocations: list[Invocation] = []
         for segment in segments:
             command = segment.strip()
-            opens, closes = command.count("("), command.count(")")
-            if opens and command.startswith("("):
+            scope_view = _unquoted(command)
+            opens, closes = scope_view.count("("), scope_view.count(")")
+            opener = _first_open(command)
+            if opener >= 0:
                 scopes.extend(dict(scopes[-1]) for _ in range(opens))
-            body = command.lstrip("(").strip()
+            body = command[opener + 1 :] if opener >= 0 else command
+            body = body.strip()
             if body.startswith(("export ", "unset ")):
                 export = _EXPORT.search(body)
                 unset = _UNSET.search(body)
