@@ -61,18 +61,43 @@ class Invocation(BaseModel):
 
 
 def _unquoted(text: str) -> str:
-    return re.sub(r"['\"].*?['\"]", "", text)
+    """Quoted spans removed; only the matching quote closes, escapes honoured."""
+    kept: list[str] = []
+    quote = ""
+    escaped = False
+    for char in text:
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = ""
+            continue
+        if char in "'\"":
+            quote = char
+            continue
+        kept.append(char)
+    return "".join(kept)
 
 
 def _first_open(text: str) -> int:
+    """Index of the first unquoted '('; the same scanner as _unquoted."""
     quote = ""
+    escaped = False
     for index, char in enumerate(text):
         if quote:
-            if char == quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
                 quote = ""
-        elif char in "'\"":
+            continue
+        if char in "'\"":
             quote = char
-        elif char == "(":
+            continue
+        if char == "(":
             return index
     return -1
 

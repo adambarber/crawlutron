@@ -91,6 +91,8 @@ def test_quoted_parentheses_do_not_change_scope() -> None:
     for run in (
         '(export PYTEST_ADDOPTS="-m slow)"; pytest)',
         '(export PYTEST_ADDOPTS="-m (slow)"; pytest)',
+        "(export PYTEST_ADDOPTS=\"-m 'not (browser or slow)'\"; pytest)",
+        "then (export PYTEST_ADDOPTS=\"-m 'not (slow)'\"; pytest)",
         'then (export PYTEST_ADDOPTS="-m slow"; pytest)',
     ):
         filtered = _mutate(steps=(_step(name="Bite", run=run),))
