@@ -101,19 +101,48 @@ def test_the_ledger_catches_a_leaked_connection(tmp_path):
             _SITES.pop(id(conn), None)
 
 
+def _open_sites_for(nodeid: str) -> set[int]:
+    """Connection ids whose _SITES attribution contains ``nodeid``."""
+    with _LEDGER_LOCK:
+        return {cid for cid, site in _SITES.items() if f" [{nodeid}]" in site}
+
+
+def _sites_still_alive(cids: set[int]) -> set[int]:
+    """Subset of ``cids`` whose connection object is still alive (gc.collect first)."""
+    gc.collect()
+    with _LEDGER_LOCK:
+        tracked = set(_SESSION_LEDGER)
+    alive: set[int] = set()
+    for obj in gc.get_objects():
+        oid = id(obj)
+        if oid in cids and oid in tracked and isinstance(obj, sqlite3.Connection):
+            try:
+                obj.execute("SELECT 1")
+            except sqlite3.ProgrammingError:
+                continue
+            alive.add(oid)
+    return alive
+
+
 async def test_service_app_teardown_closes_every_connection():
-    """close_app_stores closes every connection an app opened, measured as
-    a delta so prior tests' open connections do not skew the count.
+    """close_app_stores closes exactly the connections this test's fresh_app
+    opened, measured by identity (nodeid attribution), not a gc-sensitive count.
+    Uses the per-test ledger delta so connections from sibling fixtures are excluded.
     """
     from crawlutron.service.store_shutdown import close_app_stores
     from tests._app_factory import fresh_app
 
-    before = len(live_ledgered_sites())
+    with _LEDGER_LOCK:
+        before = set(_LEDGER)
     app = fresh_app()
     assert app is not None
-    assert len(live_ledgered_sites()) > before, "the app opened connections that teardown must close"
+    with _LEDGER_LOCK:
+        mine = set(_LEDGER) - before
+    assert mine, "fresh_app opened no connections to measure"
     await close_app_stores(app)
-    assert len(live_ledgered_sites()) == before, "teardown closed every connection the app opened"
+    assert not _sites_still_alive(mine), (
+        f"teardown left the app's connections open: {[_SITES.get(c, '?') for c in _sites_still_alive(mine)]}"
+    )
 
 
 __all__ = ["live_ledgered_sites", "test_the_ledger_catches_a_leaked_connection"]
