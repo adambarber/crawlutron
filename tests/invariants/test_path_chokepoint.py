@@ -13,7 +13,7 @@ import pytest
 import utils.paths as path_door
 from tests._walk_primitives import SCAN_ROOTS, member_src_roots
 from tests.chokepoint_paths import REPO_ROOT
-from tests.chokepoint_walks import nodes_of, offender_at, parsed_source, trees_under
+from tests.chokepoint_walks import discovered_files, nodes_of, offender_at, parsed_source, trees_under
 
 _OWNED = frozenset(
     {
@@ -292,7 +292,7 @@ def _fs_sweep() -> list[str]:
 def test_fs_traversal_sites_never_grow() -> None:
     """Ceiling on raw-FS traversal sites; owner's follow-up drives it to zero."""
     found = _fs_sweep()
-    assert len(found) <= 358, f"raw-FS traversal sites: {found[:8]}"
+    assert len(found) <= 351, f"raw-FS traversal sites: {found[:8]}"
 
 
 def test_fs_traversal_detector_bites() -> None:
@@ -305,6 +305,18 @@ def test_fs_traversal_detector_bites() -> None:
     assert _fs_traversal(os_walk, REPO_ROOT / "probe.py"), "os.walk is raw FS traversal"
     clean = parsed_source("docs = discovered_files(REPO_ROOT, '*.md')\n")
     assert not _fs_traversal(clean, REPO_ROOT / "probe.py"), "door use must stay clean"
+    raw_read = parsed_source("x = REPO_ROOT.read_text()\n")
+    assert _fs_traversal(raw_read, REPO_ROOT / "probe.py"), "read_text must be detected"
+
+
+def test_discovered_files_content_mode_maps_paths_to_text() -> None:
+    """include_content=True returns {path: text}; text equals read_text, keys equal path mode."""
+    by_path = discovered_files(REPO_ROOT, "*.md", include_content=True)
+    assert by_path
+    paths = discovered_files(REPO_ROOT, "*.md")
+    assert set(by_path) == set(paths)
+    for path, text in by_path.items():
+        assert path.read_text(encoding="utf-8") == text
 
 
 def test_root_is_independent_of_the_callers_cwd(tmp_path: pathlib.Path) -> None:
