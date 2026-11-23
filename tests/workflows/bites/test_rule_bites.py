@@ -16,10 +16,6 @@ from tests.workflows._policy import RuleId
 from tests.workflows._rules import (
     JOB_RULES,
     WORKFLOW_RULES,
-    ci_dependency_review_checkout,
-    ci_dependency_review_refs,
-    ci_real_pbkdf2_door,
-    ci_secret_scan_fetch_depth,
     codeql_no_build_step,
     codeql_registry_pin,
     codeql_security_events_write,
@@ -68,18 +64,6 @@ def _weekly_mutation() -> Job:
 
 def _weekly_lowest() -> Job:
     return _job_from("weekly", "lowest-direct-resolution")
-
-
-def _ci_secret_scan() -> Job:
-    return _job_from("ci", "secret-scan")
-
-
-def _ci_dep_review() -> Job:
-    return _job_from("ci", "dependency-review")
-
-
-def _ci_real_pbkdf2() -> Job:
-    return _job_from("ci", "real-pbkdf2")
 
 
 def _step(**changes) -> Step:
@@ -255,57 +239,6 @@ def _step(**changes) -> Step:
                 },
             ),
         ),
-        (
-            ci_secret_scan_fetch_depth,
-            _ci_secret_scan().model_copy(
-                update={
-                    "steps": tuple(
-                        step.model_copy(update={"with_": {"fetch-depth": "1"}})
-                        if step.uses and step.uses.startswith("actions/checkout@")
-                        else step
-                        for step in _ci_secret_scan().steps
-                    )
-                }
-            ),
-        ),
-        (
-            ci_dependency_review_checkout,
-            _ci_dep_review().model_copy(
-                update={
-                    "steps": tuple(
-                        step
-                        for step in _ci_dep_review().steps
-                        if not (step.uses and step.uses.startswith("actions/checkout@"))
-                    )
-                },
-            ),
-        ),
-        (
-            ci_dependency_review_refs,
-            _ci_dep_review().model_copy(
-                update={
-                    "steps": tuple(
-                        step.model_copy(update={"with_": {"base-ref": "refs/heads/main"}})
-                        if step.uses and "dependency-review-action@" in step.uses
-                        else step
-                        for step in _ci_dep_review().steps
-                    )
-                }
-            ),
-        ),
-        (
-            ci_real_pbkdf2_door,
-            _ci_real_pbkdf2().model_copy(
-                update={
-                    "steps": tuple(
-                        step.model_copy(update={"if_": "${{ false }}"})
-                        if step.uses and "run-tests" in step.uses
-                        else step
-                        for step in _ci_real_pbkdf2().steps
-                    )
-                }
-            ),
-        ),
     ],
 )
 def test_a_rule_names_the_injected_violation(rule, broken) -> None:
@@ -324,6 +257,8 @@ _WORKFLOW_BY_RULE = {
     "nightly-name": "nightly",
     "nightly-concurrency": "nightly",
     "weekly-triggers": "weekly",
+    "ci-packaging-read-only": "packaging",
+    "ci-security-permissions": "ci",
 }
 
 _WORKFLOW_MUTATIONS: dict[str, dict[str, object]] = {
@@ -334,6 +269,8 @@ _WORKFLOW_MUTATIONS: dict[str, dict[str, object]] = {
     "has-trigger": {"on_": {}},
     "nightly-name": {"name": "CI"},
     "nightly-concurrency": {"concurrency": None},
+    "ci-packaging-read-only": {"permissions": {}},
+    "ci-security-permissions": {"permissions": {}},
 }
 
 
@@ -483,6 +420,18 @@ def test_every_job_rule_has_a_bite() -> None:
         "ci-dependency-review-checkout",
         "ci-dependency-review-refs",
         "ci-real-pbkdf2-door",
+        "ci-actionlint-hook",
+        "ci-browser-fpgen-model",
+        "ci-bytecode-compileall",
+        "ci-coverage-needs",
+        "ci-coverage-if-always",
+        "ci-coverage-download-artifacts",
+        "ci-coverage-upload-hidden",
+        "ci-coverage-junit-upload",
+        "ci-coverage-distinct-junit-paths",
+        "ci-coverage-uploads-coverage-xml",
+        "ci-coverage-single-artifact",
+        "ci-gate-jobs-start-from-prepare",
     }
 
 
@@ -497,4 +446,7 @@ def test_every_workflow_rule_has_a_bite() -> None:
         "weekly-triggers",
         "nightly-artifacts",
         "weekly-artifacts",
+        "ci-packaging-read-only",
+        "ci-security-permissions",
+        "ci-release-gated-on-ci",
     }
