@@ -82,12 +82,12 @@ async def _drain_running_crawls(*, guard: float = 10.0) -> None:
         return [row["job_id"] for row in await job_store.alist_jobs() if row["status"] not in terminal_codes]
 
     async def drained() -> bool:
-        await asyncio.sleep(0)
+        await asyncio.sleep(0.005)
         return not await acting()
 
     try:
-        # A 5ms poll keeps the DB question off the hot path (a sleep(0) spin ran
-        # ``list_jobs`` ~2000x/s); the bound and the swallow are unchanged.
+        # A 5ms poll keeps the DB question off the hot path; the guard bounds
+        # the wait so a stuck crawl fails loudly instead of holding later tests.
         await asyncio.wait_for(drained(), timeout=guard)
     except AssertionError, TimeoutError:
         # A stuck crawl is reported, not raised: raising here would mask the assertion of the test that

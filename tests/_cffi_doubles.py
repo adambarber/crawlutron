@@ -6,7 +6,11 @@ Shared by the cffi visibility and streaming tests; the queue shape matches the p
 
 from __future__ import annotations
 
+import asyncio
+
 from curl_cffi.requests.models import STREAM_END
+
+from tests._clocks import HANG_GUARD_SECONDS
 
 
 class _Queue:
@@ -14,15 +18,16 @@ class _Queue:
 
     def __init__(self, items):
         self._items = list(items)
-        self._wedge = __import__("asyncio").Event()
+        self._wedge = asyncio.Event()
         self.drained = False
 
     async def get(self):
         if self._items:
-            await __import__("asyncio").sleep(0)
+            await asyncio.sleep(0)
             return self._items.pop(0)
         self.drained = True
-        await self._wedge.wait()
+        assert not self._wedge.is_set(), f"{self!r}: drained stream read past STREAM_END without a producer"
+        await asyncio.wait_for(self._wedge.wait(), timeout=HANG_GUARD_SECONDS)
 
 
 class RecordingSession:

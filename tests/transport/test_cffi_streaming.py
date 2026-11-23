@@ -19,7 +19,7 @@ from tests._fetch_doubles import FetcherDouble
 from tests._fetch_outcome import FetchFailed
 from tests._fetcher_factories import real_cffi_fetch_outcome, strategy_request
 from tests._policy_factories import canonical, make_base_policy
-from tests._timing_harnesses import await_until
+from tests._timing_harnesses import HANG_GUARD_SECONDS, await_until
 from tests.helpers.server import SilentHandler, spawn_threaded_server
 
 # The impersonating transport, bound once for this module.
@@ -71,8 +71,9 @@ URL = "http://example.test/page"
 class _Queue:
     """Yields scripted items then wedges, like a producer that never finishes.
 
-    The wedge is a never-set ``Event``: it cannot be short-circuited by any
-    sleep patch, so the cancel is guaranteed to land inside the queue wait."""
+    The wedge is a bounded wait on a never-set ``Event``: a drained read raises
+    quickly instead of hanging the suite.
+    """
 
     def __init__(self, items):
         self._items = list(items)
@@ -84,7 +85,8 @@ class _Queue:
             await asyncio.sleep(0)
             return self._items.pop(0)
         self.drained = True
-        await self._wedge.wait()
+        assert not self._wedge.is_set(), f"{self!r}: drained stream read past STREAM_END without a producer"
+        await asyncio.wait_for(self._wedge.wait(), timeout=HANG_GUARD_SECONDS)
 
 
 class _Response:
@@ -188,6 +190,17 @@ async def test_cancellation_of_the_queue_wait_releases_the_handle(stub_builder):
 
     assert released == [response], "a cancelled cffi fetch abandoned its response handle on a shared session"
     assert response.awaited is False
+
+
+async def test_drained_queue_get_raises_instead_of_hanging():
+    """A drained scripted-stream read fails fast and bounded, never hangs.
+
+    Without the wait_for bound this blocks on a never-set Event; the bound turns
+    the hang into a TimeoutError naming this test.
+    """
+    queue = _Queue([])
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(queue.get(), timeout=HANG_GUARD_SECONDS)
 
 
 async def test_cap_exceeded_and_still_releases_exactly_once(stub_builder, monkeypatch):
