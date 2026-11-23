@@ -28,6 +28,37 @@ def _syncing_stages() -> list[str]:
     return stages
 
 
+def _alias_of(stage: str) -> str | None:
+    """The AS name of a stage chunk, or None for the pre-FROM header."""
+    lines = stage.splitlines()
+    if not lines or " AS " not in lines[0]:
+        return None
+    return lines[0].rsplit(" AS ", 1)[1].strip()
+
+
+def _default_stage() -> str:
+    """The last stage, which `docker build .` produces when no --target is given."""
+    return _stages()[-1]
+
+
+def _effective_text(alias: str, stages: dict[str, str]) -> str:
+    """A stage plus every earlier stage it derives from, following FROM bases."""
+    parts: list[str] = []
+    seen: set[str] = set()
+    pending = [alias]
+    while pending:
+        current = pending.pop()
+        if current in seen or current not in stages:
+            continue
+        seen.add(current)
+        stage = stages[current]
+        parts.append(stage)
+        head = stage.splitlines()[0].split(" AS ")[0].strip()
+        if head and not head.startswith("${"):
+            pending.append(head)
+    return "\n".join(parts)
+
+
 def test_base_image_is_digest_pinned_3_14() -> None:
     """The 3.14 base must be pinned by tag AND digest, so a rebuild is
     byte-for-byte reproducible and the major version is explicit (#625).
@@ -140,3 +171,34 @@ def test_image_builds_supply_no_secret() -> None:
             assert builds, f"{name} has no image build step"
             for step in builds:
                 assert "secrets" not in step.get("with", {}), f"{name} passes a secret into a build"
+
+
+def test_default_build_target_is_the_reload_free_runtime() -> None:
+    """`docker build .` must ship the production image, not hot-reload dev."""
+    stages = {alias: stage for stage in _stages() if (alias := _alias_of(stage))}
+    default = _alias_of(_default_stage())
+    assert default is not None
+    effective = _effective_text(default, stages)
+    assert "--reload" not in effective, f"the default stage {default!r} runs uvicorn with --reload"
+    assert "--log-level debug" not in effective
+    assert "--workers ${CRAWLUTRON_WORKERS:-1}" in effective
+    assert "--log-level ${CRAWLUTRON_LOG_LEVEL:-info}" in effective
+
+
+def test_default_stage_is_named_runtime() -> None:
+    """The production stage is last so it is the build default."""
+    assert _alias_of(_default_stage()) == "runtime"
+
+
+def test_development_stage_keeps_hot_reload_as_an_opt_in() -> None:
+    """The dev workflow survives via --target development."""
+    assert "--reload" in _stage("development")
+    assert "--log-level debug" in _stage("development")
+
+
+def test_compose_builds_the_development_target() -> None:
+    """Local compose opts into the hot-reload target explicitly."""
+    import yaml
+
+    document = yaml.safe_load((SERVICE_ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+    assert document["services"]["crawlutron"]["build"]["target"] == "development"

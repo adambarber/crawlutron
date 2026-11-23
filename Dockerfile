@@ -85,9 +85,12 @@ RUN --mount=type=cache,target=/root/.cache/camoufox-mount,sharing=locked \
     cp -a /root/.cache/camoufox-mount/camoufox/. /camoufox-bundle/
 
 # ==========================================
-# 2. Runtime Stage: Lean production image
+# 3. Shared runtime content (base for both images)
 # ==========================================
-FROM ${CRAWLUTRON_BASE_IMAGE} AS runtime
+# Every layer the service needs at runtime lives here. Both the production and
+# the development image derive from it, so the dev extra never enters the
+# default image and the ~1.3 GB browser bundle is fetched exactly once.
+FROM ${CRAWLUTRON_BASE_IMAGE} AS runtime-base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -136,7 +139,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libxkbcommon0=1.5.0-1 libxshmfence1=1.3-1 libfontconfig1=2.14.1-4 \
     && rm -rf /var/lib/apt/lists/*
 
-
 # Create a non-root user for security
 RUN useradd -m -s /bin/bash appuser \
     && mkdir -p /app/logs /app/cache \
@@ -179,21 +181,18 @@ EXPOSE 8765
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:8765/health || exit 1
 
-# Production command. The bind interface defaults to loopback (callers
-# authenticate with an API key; see SECURITY.md); CRAWLUTRON_HOST must be set explicitly to
-# expose the port (the compose file sets 0.0.0.0, gated by its loopback mapping).
-CMD ["sh", "-c", "exec uvicorn crawlutron_rest.main:app --host ${CRAWLUTRON_HOST:-127.0.0.1} --port 8765 --workers ${CRAWLUTRON_WORKERS:-1} --log-config /app/uvicorn-log-config.json --log-level ${CRAWLUTRON_LOG_LEVEL:-info}"]
+# No CMD here: the two final stages select their own command.
 
 # ==========================================
-# 3. Development Stage: Hot-reloading and dev tools
+# 4. Development stage (opt-in: --target development)
 # ==========================================
-FROM runtime AS development
+FROM runtime-base AS development
 
 # Switch back to root to install dev dependencies
 USER root
 
 # Install uv and sync the dev extra (pytest, pytest-asyncio, ruff, etc.) into
-# the venv the runtime stage already copied in, on top of the exact locked pins.
+# the venv the base stage already copied in, on top of the exact locked pins.
 # The workspace members arrive with the lockfile for the same reason as the
 # builder stage: `uv sync` resolves every member through `[tool.uv.sources]`.
 COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /uvx /bin/
@@ -207,3 +206,15 @@ USER appuser
 
 # Development command with hot-reloading and debug logging
 CMD ["sh", "-c", "exec uvicorn crawlutron_rest.main:app --host ${CRAWLUTRON_HOST:-127.0.0.1} --port 8765 --reload --log-config /app/uvicorn-log-config.json --log-level debug"]
+
+# ==========================================
+# 5. Runtime stage: FINAL / default image
+# ==========================================
+# Last stage, so `docker build .` yields the lean production image with no dev
+# extra and no hot reload. Release still pins --target runtime explicitly.
+FROM runtime-base AS runtime
+
+# Production command. The bind interface defaults to loopback (callers
+# authenticate with an API key; see SECURITY.md); CRAWLUTRON_HOST must be set explicitly to
+# expose the port (the compose file sets 0.0.0.0, gated by its loopback mapping).
+CMD ["sh", "-c", "exec uvicorn crawlutron_rest.main:app --host ${CRAWLUTRON_HOST:-127.0.0.1} --port 8765 --workers ${CRAWLUTRON_WORKERS:-1} --log-config /app/uvicorn-log-config.json --log-level ${CRAWLUTRON_LOG_LEVEL:-info}"]
