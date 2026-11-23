@@ -195,25 +195,51 @@ def registry_line(dependency: str) -> int:
     return 0
 
 
-def outdated_pins(latest_of: Callable[[str], str | None]) -> list[str]:
-    """Every current pin must be the latest stable version, unless waived."""
+def _freshness(
+    errors: list[str],
+    name: str,
+    version: str,
+    latest_of: Callable[[str], str | None],
+) -> tuple[str, tuple[int, ...], tuple[int, ...]] | None:
+    """Append any freshness failure; return latest tag and parsed versions when sound."""
+    latest = latest_of(name)
+    if latest is None:
+        errors.append(f"{name}: cannot determine latest stable version")
+        return None
+    current, newest = parse_version(version), parse_version(latest)
+    if current is None or newest is None:
+        errors.append(f"{name}: unparseable version pair {version!r}/{latest!r}")
+        return None
+    return latest, current, newest
+
+
+ResolvedPin = tuple[str, str, str, str, tuple[int, ...], tuple[int, ...]]
+
+
+def _resolved_pins(errors: list[str], latest_of: Callable[[str], str | None]) -> list[ResolvedPin]:
+    """Resolve every non-waived pin with its latest tag and parsed versions."""
     registry = load_registry()
     waived = waivers()
-    errors: list[str] = []
     for dependency in sorted(waived):
         if dependency not in registry:
             errors.append(f"{REGISTRY_PATH.name}: unregistered waiver {dependency}")
-    for name, (version, _sha) in sorted(registry.items()):
+    resolved: list[ResolvedPin] = []
+    for name, (version, sha) in sorted(registry.items()):
         if name in waived:
             continue
-        latest = latest_of(name)
-        if latest is None:
-            errors.append(f"{name}: cannot determine latest stable version")
+        freshness = _freshness(errors, name, version, latest_of)
+        if freshness is None:
             continue
-        current, newest = parse_version(version), parse_version(latest)
-        if current is None or newest is None:
-            errors.append(f"{name}: unparseable version pair {version!r}/{latest!r}")
-        elif newest > current:
+        latest, current, newest = freshness
+        resolved.append((name, version, sha, latest, current, newest))
+    return resolved
+
+
+def outdated_pins(latest_of: Callable[[str], str | None]) -> list[str]:
+    """Every current pin must be the latest stable version, unless waived."""
+    errors: list[str] = []
+    for name, version, _sha, latest, current, newest in _resolved_pins(errors, latest_of):
+        if newest > current:
             errors.append(
                 f"{REGISTRY_PATH.name}:{registry_line(name)}: {name} is outdated: "
                 f"registry {version}, latest {latest}"
@@ -251,16 +277,94 @@ def refresh_registry() -> list[str]:
     return errors
 
 
+def _rewrite_registry(changes: dict[str, tuple[str, str, str, str]]) -> None:
+    lines = REGISTRY_PATH.read_text(encoding="utf-8").splitlines(keepends=True)
+    for name, (old_v, old_sha, new_v, new_sha) in changes.items():
+        for number, line in enumerate(lines):
+            if line.lstrip().startswith(f'"{name}"'):
+                lines[number] = line.replace(f'version = "{old_v}"', f'version = "{new_v}"', 1).replace(
+                    f'sha = "{old_sha}"', f'sha = "{new_sha}"', 1
+                )
+                break
+    REGISTRY_PATH.write_text("".join(lines), encoding="utf-8")
+
+
+def _rewrite_sites(changes: dict[str, tuple[str, str, str, str]]) -> None:
+    by_dependency = {name: (new_v, new_sha) for name, (_v, _s, new_v, new_sha) in changes.items()}
+    for source in discover_sources():
+        lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
+        updated = False
+        for number, line in enumerate(lines):
+            match = USES.search(line)
+            if match is None:
+                continue
+            ref, comment = match.groups()
+            name, separator, _ = ref.partition("@")
+            if not separator or name.startswith("./"):
+                continue
+            try:
+                dependency = dependency_name(name)
+            except ValueError:
+                continue
+            if dependency not in by_dependency:
+                continue
+            new_v, new_sha = by_dependency[dependency]
+            revised = line.replace(ref, f"{name}@{new_sha}", 1)
+            revised = (
+                revised.replace(comment, f"v{new_v}", 1)
+                if comment
+                else revised.rstrip("\r\n") + f" # v{new_v}\n"
+            )
+            lines[number] = revised
+            updated = True
+        if updated:
+            source.write_text("".join(lines), encoding="utf-8")
+
+
+def bump(
+    latest_of: Callable[[str], str | None],
+    peel: Callable[[str, str], str | None],
+    dry_run: bool = False,
+) -> list[str]:
+    """Auto-bump every non-waived outdated pin to its authentic latest commit."""
+    errors: list[str] = []
+    resolved = _resolved_pins(errors, latest_of)
+    if errors:
+        return errors
+    changes: dict[str, tuple[str, str, str, str]] = {}
+    for name, version, sha, latest, current, newest in resolved:
+        if newest <= current:
+            continue
+        commit = peel(name, latest)
+        if commit is None or not SHA.fullmatch(commit):
+            errors.append(f"{name}: cannot peel v{latest} to a commit")
+            continue
+        changes[name] = (version, sha, latest, commit)
+    if errors:
+        return errors
+    for name, (old_v, old_sha, new_v, new_sha) in changes.items():
+        print(f"{name}: v{old_v}@{old_sha} -> v{new_v}@{new_sha}")
+    if not dry_run:
+        _rewrite_registry(changes)
+        _rewrite_sites(changes)
+        errors = verify_pins() + outdated_pins(latest_of)
+    return errors
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("check", "refresh", "outdated"))
-    command = parser.parse_args(argv).command
+    parser.add_argument("command", choices=("check", "refresh", "outdated", "bump"))
+    parser.add_argument("--dry-run", action="store_true", help="bump: propose changes only")
+    args = parser.parse_args(argv)
+    command = args.command
     if command == "check":
         errors = verify_pins()
     elif command == "refresh":
         errors = refresh_registry()
-    else:
+    elif command == "outdated":
         errors = outdated_pins(latest_version)
+    else:
+        errors = bump(latest_version, peel_to_commit, dry_run=args.dry_run)
     if errors:
         for error in errors:
             print(error)
@@ -270,8 +374,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"pins verified against registry: {sites} sites, {len(load_registry())} dependencies")
     elif command == "refresh":
         print(f"registry verified upstream: {len(load_registry())} dependencies")
-    else:
+    elif command == "outdated":
         print(f"all pins current: {len(load_registry())} dependencies")
+    else:
+        state = "would be current" if args.dry_run else "current"
+        print(f"pins {state} after bump: {len(load_registry())} dependencies")
     return 0
 
 
