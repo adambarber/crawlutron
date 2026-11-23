@@ -245,12 +245,24 @@ def _is_fs_door(relative: str) -> bool:
     )
 
 
+def _os_module(receiver: ast.expr) -> bool:
+    """True only for a bare ``os`` receiver: ``os.walk``/``os.scandir`` are raw FS; ``ast.walk`` is not."""
+    return isinstance(receiver, ast.Name) and receiver.id == "os"
+
+
 def _fs_traversal_nodes(tree: ast.Module) -> list[ast.AST]:
-    """Raw filesystem traversal calls: rglob, glob, iterdir, scandir, walk, read_text, read_bytes."""
+    """Raw filesystem traversal calls: rglob, glob, iterdir, scandir, walk, read_text, read_bytes.
+
+    ``walk`` and ``scandir`` are receiver-aware: only ``os.<attr>`` counts; ``ast.walk`` is AST
+    traversal, not filesystem traversal, and object-bound ``.scandir()`` is not the FS form.
+    """
     return [
         node
         for node in nodes_of(tree)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in _FS_ATTRS
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in _FS_ATTRS
+        and (node.func.attr not in {"walk", "scandir"} or _os_module(node.func.value))
     ]
 
 
@@ -280,13 +292,17 @@ def _fs_sweep() -> list[str]:
 def test_fs_traversal_sites_never_grow() -> None:
     """Ceiling on raw-FS traversal sites; owner's follow-up drives it to zero."""
     found = _fs_sweep()
-    assert len(found) <= 515, f"raw-FS traversal sites: {found[:8]}"
+    assert len(found) <= 358, f"raw-FS traversal sites: {found[:8]}"
 
 
 def test_fs_traversal_detector_bites() -> None:
-    """Injected Path(...).rglob is detected; a clean probe is not."""
+    """rglob detected, ast.walk not (precision), os.walk detected, clean door use not."""
     dirty = parsed_source("paths = list(REPO_ROOT.rglob('*.py'))\n")
     assert _fs_traversal(dirty, REPO_ROOT / "probe.py"), "rglob must be detected"
+    ast_walk = parsed_source("x = ast.walk(tree)\n")
+    assert not _fs_traversal(ast_walk, REPO_ROOT / "probe.py"), "ast.walk is AST traversal, not raw FS"
+    os_walk = parsed_source("x = os.walk(root)\n")
+    assert _fs_traversal(os_walk, REPO_ROOT / "probe.py"), "os.walk is raw FS traversal"
     clean = parsed_source("docs = discovered_files(REPO_ROOT, '*.md')\n")
     assert not _fs_traversal(clean, REPO_ROOT / "probe.py"), "door use must stay clean"
 
