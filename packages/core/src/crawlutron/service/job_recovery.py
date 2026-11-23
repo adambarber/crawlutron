@@ -10,6 +10,7 @@ from collections.abc import Callable
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.service.job_lifecycle import start_tracked_task
 from crawlutron.storage.job_store import DEFAULT_JOB_CLAIM_SECONDS, JobKind, JobStatus, JobStore
+from crawlutron.storage.safe_db import StorageError
 
 # The spawn seam is injected so this module never imports the runner; it
 # spawns a job the way ``crawlutron.service.job_runner.start_job`` does.
@@ -131,3 +132,23 @@ async def recover_and_start_pending_jobs(
         )
         started += len(backlog)
     return started
+
+
+async def pause_for_recovery(job_store: JobStore, job_id: str, token: str, error: str | None) -> None:
+    """Transition RUNNING to PAUSED so recovery resumes the job (claim preserved).
+    Fail-safe: a StorageError from aset_status(PAUSED) leaves the row RUNNING
+    with a cleared claim so boot recovery rewinds it -- never a new FAILED path."""
+    try:
+        await job_store.aset_status(
+            job_id,
+            JobStatus.PAUSED,
+            expected=JobStatus.RUNNING,
+            error=error,
+        )
+        return
+    except StorageError as exc:
+        _logger.exception("job_runner_pause_failed job_id=%s error=%r", job_id, exc)
+    try:
+        await job_store.aclear_job_claim(job_id)
+    except StorageError:
+        _logger.exception("job_runner_claim_clear_failed job_id=%s", job_id)
