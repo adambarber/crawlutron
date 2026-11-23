@@ -286,6 +286,46 @@ class TestJobApi(_AsgiEndpointTests):
         self._seeded_ids.append(job.job_id)
         return job.job_id
 
+    async def test_sync_crawl_timeout_refuses_504_instead_of_empty_200(self, monkeypatch):
+        """A sync crawl exceeding the policy timeout is a typed 504 envelope, never an
+        empty 200 {submitted_count: 0, results: []}; the bound is policy-derived."""
+        from crawlutron.service.effects import (
+            EffectContainer,
+            EffectKind,
+            EffectOutcome,
+            EffectResult,
+        )
+
+        seen: dict[str, object] = {}
+
+        async def _timed_out_fetch(
+            self_, *, url, op=None, timeout_seconds=None, caller_timeout_seconds=None, bounds=None
+        ):
+            if op is not None:
+                await op()
+            seen["timeout_seconds"] = timeout_seconds
+            return EffectResult(
+                kind=EffectKind.FETCH,
+                outcome=EffectOutcome.TIMED_OUT,
+                error="effect timed out",
+                error_code="effect_timeout",
+                elapsed_seconds=0.0,
+            )
+
+        monkeypatch.setattr(EffectContainer, "fetch", _timed_out_fetch)
+        payload = make_crawl_payload(
+            f"{self.base}/",
+            policy={"strategies": [HTTP_DECLARED_CRAWLER], "limits": {"timeout_seconds": 25}},
+        )
+        resp = await self.client.post("/v1/crawl", json=payload)
+        assert resp.status_code == 504, resp.text
+        body = resp.json()
+        assert body["code"] == "effect_timeout", body
+        assert seen["timeout_seconds"] == 25.0, "bound must come from policy timeout, not settings default"
+        assert not (
+            resp.status_code == 200 and body.get("submitted_count") == 0 and body.get("results") == []
+        ), "timeout must not return the old empty-200 envelope"
+
     @pytest.fixture(autouse=True)
     def _purge_seeded_rows(self):
         """Tombstone every row this class seeded, so a PENDING anonymous seed

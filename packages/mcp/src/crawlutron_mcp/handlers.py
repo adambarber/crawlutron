@@ -209,7 +209,7 @@ async def _crawled(
 ):
     """Run the crawl under ``container.fetch``, then answer through the shared tail."""
     _crawl_started = time.monotonic()
-    timeout_seconds = float(settings.default_timeout_seconds) if settings is not None else 30.0
+    timeout_seconds = float(payload.policy.limits.timeout_seconds) if settings is not None else 30.0
 
     async def _crawl_op() -> ProducerEnvelope:
         return await execute_crawl(payload, settings=settings, shutdown_event=shutdown_event)
@@ -388,7 +388,7 @@ async def _search_door(payload: BaseModel, door: DoorEnv) -> ToolResult:
 async def _map_door(payload: BaseModel, door: DoorEnv) -> ToolResult:
     """The map door: admission over the policy's page limit, then the frontier walk."""
     map_payload = cast("MapRequest", payload)
-    timeout_seconds = float(door.settings.default_timeout_seconds) if door.settings is not None else 30.0
+    timeout_seconds = float(map_payload.policy.limits.timeout_seconds) if door.settings is not None else 30.0
 
     async def _map_op():
         return await map_site(map_payload, settings=door.settings, shutdown_event=door.shutdown_event)

@@ -166,7 +166,7 @@ def _crawl_timing_fields() -> CrawlTimingRecord:
     """Per-URL budget facts and the large-crawl guidance text."""
     return {
         "per_url_budget_seconds": DEFAULT_TOTAL_URL_BUDGET_SECONDS,
-        "sync_has_server_time_ceiling": False,
+        "sync_has_server_time_ceiling": True,
         "large_crawl_guidance": LARGE_CRAWL_GUIDANCE,
     }
 

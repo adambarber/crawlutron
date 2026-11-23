@@ -72,13 +72,14 @@ DEFAULT_TOTAL_URL_BUDGET_SECONDS: float = 180.0
 # The single source for large-crawl guidance; one constant feeds capabilities,
 # agent-hints and the OpenAPI description so the advice cannot drift.
 LARGE_CRAWL_GUIDANCE: Final[str] = (
-    "Synchronous POST /v1/crawl has no server-side time ceiling: duration scales with "
-    "max_depth, max_pages, per-domain politeness delays, and the per-URL "
-    "total_url_budget_seconds (which fails one tarpit URL, not the crawl). For large or "
-    "recursive crawls set async_mode=true (or webhook_url) for an immediate 202 with a "
-    "status_url to poll at GET /v1/crawl/{request_id}, or use POST /v1/jobs for durable "
-    "resumable whole-site jobs; job progress persists and supports pause/cancel/resume "
-    "across restarts."
+    "Synchronous POST /v1/crawl has a server-side time ceiling: the caller's policy "
+    "timeout (limits.timeout_seconds, 1-120s), and a crawl exceeding it is refused as "
+    "a typed 504 (`effect_timeout`), never an empty 200. Duration scales with "
+    "max_depth, max_pages, per-domain politeness delays, and per-URL "
+    "total_url_budget_seconds. For large or recursive crawls set async_mode=true (or "
+    "webhook_url) for an immediate 202 with a status_url to poll at "
+    "GET /v1/crawl/{request_id}, or use POST /v1/jobs for durable resumable whole-site "
+    "jobs; job progress persists and supports pause/cancel/resume across restarts."
 )
 MAX_TOTAL_URL_BUDGET_SECONDS: float = 900.0
 # Upper bound for the per-domain token-bucket rate limiter; the API model's

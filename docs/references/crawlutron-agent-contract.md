@@ -177,10 +177,12 @@ Persist these fields downstream for auditability and policy review:
 Completed `/v1/crawl` responses are stored under their `request_id` (default
 retention: 1 hour / 1000 entries) and retrievable at `GET /v1/crawl/{request_id}` —
 the same URL advertised as `status_url` in `async_mode`/webhook-accepted 202
-responses. A synchronous `POST /v1/crawl` has **no server-side time ceiling**: it
-returns only when the whole bounded recursion finishes, so its duration scales with
-`max_depth`, `max_pages`, per-domain politeness delays, and the per-URL budget
-(`limits.total_url_budget_seconds`, which fails a single tarpit URL, not the crawl).
+responses. A synchronous `POST /v1/crawl` is bounded by the caller's policy timeout
+(`limits.timeout_seconds`, 1-120s): a crawl exceeding it is refused as a typed 504
+(`effect_timeout`), never an empty 200. Duration scales with `max_depth`, `max_pages`,
+per-domain politeness delays, and per-URL `total_url_budget_seconds`. For long crawls
+use `async_mode=true` (or `webhook_url`) for an immediate 202, or `POST /v1/jobs` for
+durable resumable whole-site jobs.
 Per-domain concurrency, delays, and circuit breakers are enforced **within one
 request** (each request runs its own scheduler); concurrent requests each enforce
 them independently, so serializing or pacing across requests is the caller's job

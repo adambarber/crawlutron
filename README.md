@@ -401,11 +401,11 @@ the taxonomy maps onto) rather than on transport status.
   or truncates eligible queued or discovered work; normal `BATCH_SIZE` chunking
   does not set it. Already-admitted in-flight work is never dropped: recovery
   preserves at-least-once delivery and records `stats.cap_overcommitted=1`.
-- **Crawl duration & async**: a synchronous `POST /v1/crawl` has **no server-side
-  time ceiling** — it returns only when the whole bounded recursion finishes, so
-  duration scales with `max_depth`, `max_pages`, per-domain politeness delays, and
-  the per-URL budget (`limits.total_url_budget_seconds`, default 180s, which fails a
-  single tarpit URL, not the crawl). For large or recursive crawls send
+- **Crawl duration & async**: a synchronous `POST /v1/crawl` is bounded by the
+  caller's policy timeout (`limits.timeout_seconds`, 1-120s): a crawl exceeding it
+  is refused as a typed 504 (`effect_timeout`), never an empty 200. Duration scales
+  with `max_depth`, `max_pages`, per-domain politeness delays, and per-URL
+  `total_url_budget_seconds`. For large or recursive crawls send
   `async_mode=true` (or `webhook_url`) to get an immediate `202` + `status_url`, then
   poll `GET /v1/crawl/{request_id}`; or use `POST /v1/jobs` for durable, resumable,
   pause/cancel-able whole-site jobs. Read timeouts on the sync path must cover the

@@ -104,7 +104,7 @@ class TestCapabilitiesWireContract:
         timing = body.get("crawl_timing")
         assert timing is not None, "crawl_timing dropped by CapabilitiesResponse response_model"
         assert timing["per_url_budget_seconds"] == body["default_limits"]["total_url_budget_seconds"]
-        assert timing["sync_has_server_time_ceiling"] is False
+        assert timing["sync_has_server_time_ceiling"] is True
         assert "async_mode" in timing["large_crawl_guidance"]
         assert "/v1/jobs" in timing["large_crawl_guidance"]
         assert body["features"]["async_mode"] is True
@@ -122,7 +122,8 @@ class TestCapabilitiesWireContract:
         description = openapi["paths"]["/v1/crawl"]["post"]["description"]
         assert guidance in description, "OpenAPI description drifted from the shared guidance constant"
         # Routing content survives the unification (behavior, not wording).
-        assert "no server-side time ceiling" in guidance
+        assert "no server-side time ceiling" not in guidance
+        assert "time ceiling" in guidance
         assert "async_mode" in guidance and "/v1/jobs" in guidance
 
 
