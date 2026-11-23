@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
+from tests._ci_contract import REPORTING_JOBS
 from tests.workflows._model import Job, Step, Workflow
 from tests.workflows._policy import Finding, RuleId
 
@@ -139,3 +140,253 @@ def ci_real_pbkdf2_door(workflow: Workflow, job: Job) -> Iterator[Finding]:
                         step.line,
                         f"{workflow.path}:{step.line}: coverage step {name!r} lost the real-pbkdf2 guard",
                     )
+
+
+def ci_actionlint_hook(workflow: Workflow, job: Job) -> Iterator[Finding]:
+    if workflow.stem != "ci" or job.key != "actionlint":
+        return
+    if not any(
+        step.run and ".venv/bin/pre-commit run actionlint --all-files" in step.run for step in job.steps
+    ):
+        yield Finding(
+            RuleId.CI_ACTIONLINT_HOOK.value,
+            workflow.stem,
+            job.key,
+            job.line,
+            f"{workflow.path}:{job.line}: actionlint job must run the actionlint hook itself",
+        )
+
+
+def ci_browser_fpgen_model(workflow: Workflow, job: Job) -> Iterator[Finding]:
+    if workflow.stem != "ci" or job.key != "test-browser":
+        return
+    if not any(step.uses and "run-tests" in step.uses for step in job.steps):
+        yield Finding(
+            RuleId.CI_BROWSER_FPGEN_MODEL.value,
+            workflow.stem,
+            job.key,
+            job.line,
+            f"{workflow.path}:{job.line}: test-browser job must call the run-tests door",
+        )
+
+
+def ci_bytecode_compileall(workflow: Workflow, job: Job) -> Iterator[Finding]:
+    if workflow.stem != "ci" or job.key != "battery":
+        return
+    runs = " ".join(str(step.run or "") for step in job.steps)
+    if "compileall" not in runs:
+        yield Finding(
+            RuleId.CI_BYTECODE_COMPILEALL.value,
+            workflow.stem,
+            job.key,
+            job.line,
+            f"{workflow.path}:{job.line}: battery job must precompile bytecode with compileall",
+        )
+        return
+    if "packages/*/src" not in runs:
+        yield Finding(
+            RuleId.CI_BYTECODE_COMPILEALL.value,
+            workflow.stem,
+            job.key,
+            job.line,
+            f"{workflow.path}:{job.line}: compileall must derive scope from member src roots",
+        )
+    if "tests" not in runs or "scripts" not in runs:
+        yield Finding(
+            RuleId.CI_BYTECODE_COMPILEALL.value,
+            workflow.stem,
+            job.key,
+            job.line,
+            f"{workflow.path}:{job.line}: compileall must cover tests and scripts",
+        )
+
+
+def ci_coverage_needs(workflow: Workflow, job: Job) -> Iterator[Finding]:
+    if workflow.stem != "ci" or job.key != "coverage":
+        return
+    needs = job.needs
+    if set(needs) != {"changes", "battery", "real-pbkdf2", "test-browser"}:
+        yield Finding(
+            RuleId.CI_COVERAGE_NEEDS.value,
+            workflow.stem,
+            job.key,
+            job.line,
+            f"{workflow.path}:{job.line}: coverage needs must be changes, battery, real-pbkdf2, test-browser",
+        )
+
+
+def ci_coverage_if_always(workflow: Workflow, job: Job) -> Iterator[Finding]:
+    if workflow.stem != "ci" or job.key != "coverage":
+        return
+    if str(job.if_ or "") != "${{ always() }}":
+        yield Finding(
+            RuleId.CI_COVERAGE_IF_ALWAYS.value,
+            workflow.stem,
+            job.key,
+            job.line,
+            f"{workflow.path}:{job.line}: coverage job must run if: always()",
+        )
+
+
+def ci_coverage_download_artifacts(workflow: Workflow, job: Job) -> Iterator[Finding]:
+    if workflow.stem != "ci" or job.key != "coverage":
+        return
+    names = [
+        str(step.with_.get("name", ""))
+        for step in job.steps
+        if step.uses and "download-artifact" in step.uses
+    ]
+    for required in (
+        "coverage-data",
+        "junit-results",
+        "coverage-data-real-pbkdf2",
+        "coverage-data-test-browser",
+    ):
+        if required not in names:
+            yield Finding(
+                RuleId.CI_COVERAGE_DOWNLOAD_ARTIFACTS.value,
+                workflow.stem,
+                job.key,
+                job.line,
+                f"{workflow.path}:{job.line}: coverage must download {required} artifact",
+            )
+
+
+def ci_coverage_upload_hidden(workflow: Workflow, job: Job) -> Iterator[Finding]:
+    if workflow.stem != "ci" or job.key not in {"battery", "real-pbkdf2", "test-browser"}:
+        return
+    uploads = [step for step in job.steps if step.uses and "upload-artifact" in step.uses]
+    hidden = [s for s in uploads if str(s.with_.get("path", "")) == ".coverage*"]
+    if not any(str(s.with_.get("include-hidden-files")) in ("True", "true") for s in hidden):
+        yield Finding(
+            RuleId.CI_COVERAGE_UPLOAD_HIDDEN.value,
+            workflow.stem,
+            job.key,
+            job.line,
+            f"{workflow.path}:{job.line}: {job.key} must upload .coverage* with include-hidden-files",
+        )
+
+
+def ci_coverage_junit_upload(workflow: Workflow, job: Job) -> Iterator[Finding]:
+    if workflow.stem != "ci" or job.key not in {"battery", "real-pbkdf2", "test-browser"}:
+        return
+    junit = [
+        step
+        for step in job.steps
+        if step.uses and "upload-artifact" in step.uses and "junit" in str(step.with_.get("name", "")).lower()
+    ]
+    if not junit:
+        yield Finding(
+            RuleId.CI_COVERAGE_JUNIT_UPLOAD.value,
+            workflow.stem,
+            job.key,
+            job.line,
+            f"{workflow.path}:{job.line}: {job.key} must upload a junit artifact",
+        )
+
+
+def ci_coverage_distinct_junit_paths(workflow: Workflow, job: Job) -> Iterator[Finding]:
+    if workflow.stem != "ci" or job.key != "coverage":
+        return
+    downloads = [step for step in job.steps if step.uses and "download-artifact" in step.uses]
+    junit_downloads = [s for s in downloads if "junit" in str(s.with_.get("name", "")).lower()]
+    paths = {str(s.with_.get("path", ".")) for s in junit_downloads}
+    if len(paths) != len(junit_downloads):
+        yield Finding(
+            RuleId.CI_COVERAGE_DISTINCT_JUNIT_PATHS.value,
+            workflow.stem,
+            job.key,
+            job.line,
+            f"{workflow.path}:{job.line}: coverage junit downloads must use distinct paths",
+        )
+
+
+def ci_coverage_uploads_coverage_xml(workflow: Workflow, job: Job) -> Iterator[Finding]:
+    if workflow.stem != "ci" or job.key != "coverage":
+        return
+    uploads = [
+        step
+        for step in job.steps
+        if step.uses and "codecov" in str(step.uses) and "coverage.xml" in str(step.with_.get("files", ""))
+    ]
+    if not uploads:
+        yield Finding(
+            RuleId.CI_COVERAGE_UPLOADS_COVERAGE_XML.value,
+            workflow.stem,
+            job.key,
+            job.line,
+            f"{workflow.path}:{job.line}: coverage job must upload coverage_reports/coverage.xml to Codecov",
+        )
+
+
+def ci_coverage_single_artifact(workflow: Workflow, job: Job) -> Iterator[Finding]:
+    if workflow.stem != "ci" or job.key != "coverage":
+        return
+    artifacts = [step for step in job.steps if step.uses and "upload-artifact" in step.uses]
+    if len(artifacts) != 1:
+        yield Finding(
+            RuleId.CI_COVERAGE_SINGLE_ARTIFACT.value,
+            workflow.stem,
+            job.key,
+            job.line,
+            f"{workflow.path}:{job.line}: coverage job must emit exactly one artifact",
+        )
+
+
+def ci_packaging_read_only(workflow: Workflow) -> Iterator[Finding]:
+    if workflow.stem != "packaging":
+        return
+    if dict(workflow.permissions) != {"contents": "read"}:
+        yield Finding(
+            RuleId.CI_PACKAGING_READ_ONLY.value,
+            workflow.stem,
+            "",
+            1,
+            f"{workflow.path}: packaging workflow must declare only contents: read",
+        )
+    for job in workflow.jobs.values():
+        for step in job.steps:
+            uses = str(step.uses or "")
+            run = str(step.run or "")
+            for banned in ("pypi-publish", "twine upload", "docker push", "push: true"):
+                if banned in uses or banned in run:
+                    yield Finding(
+                        RuleId.CI_PACKAGING_READ_ONLY.value,
+                        workflow.stem,
+                        job.key,
+                        step.line,
+                        f"{workflow.path}:{step.line}: packaging workflow must not publish ({banned!r})",
+                    )
+
+
+def ci_gate_jobs_start_from_prepare(workflow: Workflow, job: Job) -> Iterator[Finding]:
+    if workflow.stem != "ci":
+        return
+    if job.key in {"audit", "secret-scan", "dependency-review"}:
+        return
+    if job.key not in REPORTING_JOBS:
+        return
+    uses_prepare = any(
+        step.uses and str(step.uses).startswith("$/.github/actions/prepare") for step in job.steps
+    )
+    if not uses_prepare:
+        yield Finding(
+            RuleId.CI_GATE_JOBS_START_FROM_PREPARE.value,
+            workflow.stem,
+            job.key,
+            job.line,
+            f"{workflow.path}:{job.line}: gate job must start from $/.github/actions/prepare",
+        )
+
+
+def ci_security_permissions(workflow: Workflow) -> Iterator[Finding]:
+    if workflow.stem != "ci":
+        return
+    if dict(workflow.permissions) != {"contents": "read", "pull-requests": "read"}:
+        yield Finding(
+            RuleId.CI_SECURITY_PERMISSIONS.value,
+            workflow.stem,
+            "",
+            1,
+            f"{workflow.path}: CI must declare exactly contents:read and pull-requests:read",
+        )

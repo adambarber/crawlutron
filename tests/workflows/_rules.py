@@ -1,15 +1,27 @@
 """Total rules over the typed workflow model; waivers are named and ratcheted."""
 
-from __future__ import annotations
-
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 
 from tests.workflows._ci_rules import (
+    ci_actionlint_hook,
+    ci_browser_fpgen_model,
+    ci_bytecode_compileall,
+    ci_coverage_distinct_junit_paths,
+    ci_coverage_download_artifacts,
+    ci_coverage_if_always,
+    ci_coverage_junit_upload,
+    ci_coverage_needs,
+    ci_coverage_single_artifact,
+    ci_coverage_upload_hidden,
+    ci_coverage_uploads_coverage_xml,
     ci_dependency_review_checkout,
     ci_dependency_review_refs,
+    ci_gate_jobs_start_from_prepare,
+    ci_packaging_read_only,
     ci_real_pbkdf2_door,
     ci_secret_scan_fetch_depth,
+    ci_security_permissions,
 )
 from tests.workflows._codeql_rules import (
     codeql_no_build_step,
@@ -153,7 +165,7 @@ def unique_step_ids(workflow: Workflow, job: Job) -> Iterator[Finding]:
 
 
 def uses_tests_door(workflow: Workflow, job: Job) -> Iterator[Finding]:
-    """Every job with a direct pytest invocation must call the shared run-tests door."""
+    """Every direct-pytest job must call the shared run-tests door."""
     if not _job_directly_runs_pytest(job):
         return
     calls_door = any(step.uses and "run-tests" in str(step.uses) for step in job.steps)
@@ -169,8 +181,7 @@ def uses_tests_door(workflow: Workflow, job: Job) -> Iterator[Finding]:
 
 
 def no_silent_uploads(workflow: Workflow, job: Job) -> Iterator[Finding]:
-    """No step may swallow evidence: fail_ci_if_error:false, if-no-files-found:warn,
-    or an artifact consumer gated on a re-derived path filter instead of the producer result."""
+    """No step may swallow evidence or gate artifact downloads on a re-derived filter."""
     for step in job.steps:
         if step.with_.get("fail_ci_if_error") is False:
             yield Finding(
@@ -210,8 +221,7 @@ def _job_directly_runs_pytest(job: Job) -> bool:
 
 
 def door_no_if(workflow: Workflow, job: Job) -> Iterator[Finding]:
-    """The door step may not carry a step-level `if:` -- a skipped door must be
-    unrepresentable so the refusal inside the action can never be bypassed."""
+    """The run-tests door step may not carry a step-level if."""
     for step in job.steps:
         if step.uses and "run-tests" in str(step.uses):
             if step.if_ is not None:
@@ -235,12 +245,7 @@ JOB_RULES = (
     ),
     Rule("no-bare-pytest", Scope.WITH_STEPS, "one default suite per push", no_bare_pytest),
     Rule("uses-tests-door", Scope.WITH_STEPS, "every pytest job calls the shared door", uses_tests_door),
-    Rule(
-        "door-no-if",
-        Scope.WITH_STEPS,
-        "the door step may not carry a step-level if",
-        door_no_if,
-    ),
+    Rule("door-no-if", Scope.WITH_STEPS, "the door step may not carry a step-level if", door_no_if),
     Rule("no-pip-install", Scope.WITH_STEPS, "the lock freezes the graph", no_pip_install),
     Rule("no-heredoc", Scope.WITH_STEPS, "a heredoc hides control flow", no_heredoc),
     Rule("unique-step-ids", Scope.WITH_STEPS, "step outputs are addressed by id", unique_step_ids),
@@ -340,6 +345,78 @@ JOB_RULES = (
         "ci real-pbkdf2 job calls the run-tests door with no step-level if",
         ci_real_pbkdf2_door,
     ),
+    Rule(
+        RuleId.CI_ACTIONLINT_HOOK.value,
+        Scope.WITH_STEPS,
+        "ci actionlint job runs the actionlint hook itself",
+        ci_actionlint_hook,
+    ),
+    Rule(
+        RuleId.CI_BROWSER_FPGEN_MODEL.value,
+        Scope.WITH_STEPS,
+        "ci test-browser job installs the pinned fpgen model via the door",
+        ci_browser_fpgen_model,
+    ),
+    Rule(
+        RuleId.CI_BYTECODE_COMPILEALL.value,
+        Scope.WITH_STEPS,
+        "ci battery job precompiles bytecode over derived member src roots",
+        ci_bytecode_compileall,
+    ),
+    Rule(
+        RuleId.CI_COVERAGE_NEEDS.value,
+        Scope.WITH_STEPS,
+        "ci coverage job needs changes, battery, real-pbkdf2, test-browser",
+        ci_coverage_needs,
+    ),
+    Rule(
+        RuleId.CI_COVERAGE_IF_ALWAYS.value,
+        Scope.WITH_STEPS,
+        "ci coverage job runs if: always()",
+        ci_coverage_if_always,
+    ),
+    Rule(
+        RuleId.CI_COVERAGE_DOWNLOAD_ARTIFACTS.value,
+        Scope.WITH_STEPS,
+        "ci coverage job downloads all four coverage artifacts tolerantly",
+        ci_coverage_download_artifacts,
+    ),
+    Rule(
+        RuleId.CI_COVERAGE_UPLOAD_HIDDEN.value,
+        Scope.WITH_STEPS,
+        "ci battery/real-pbkdf2/test-browser upload hidden coverage data",
+        ci_coverage_upload_hidden,
+    ),
+    Rule(
+        RuleId.CI_COVERAGE_JUNIT_UPLOAD.value,
+        Scope.WITH_STEPS,
+        "ci battery/real-pbkdf2/test-browser upload junit artifacts",
+        ci_coverage_junit_upload,
+    ),
+    Rule(
+        RuleId.CI_COVERAGE_DISTINCT_JUNIT_PATHS.value,
+        Scope.WITH_STEPS,
+        "ci coverage job downloads junit artifacts to distinct paths",
+        ci_coverage_distinct_junit_paths,
+    ),
+    Rule(
+        RuleId.CI_COVERAGE_UPLOADS_COVERAGE_XML.value,
+        Scope.WITH_STEPS,
+        "ci coverage job uploads coverage_reports/coverage.xml to Codecov",
+        ci_coverage_uploads_coverage_xml,
+    ),
+    Rule(
+        RuleId.CI_COVERAGE_SINGLE_ARTIFACT.value,
+        Scope.WITH_STEPS,
+        "ci coverage job emits exactly one artifact",
+        ci_coverage_single_artifact,
+    ),
+    Rule(
+        RuleId.CI_GATE_JOBS_START_FROM_PREPARE.value,
+        Scope.WITH_STEPS,
+        "ci gate jobs start from $/.github/actions/prepare",
+        ci_gate_jobs_start_from_prepare,
+    ),
 )
 
 
@@ -373,9 +450,7 @@ WORKFLOW_RULES = (
         nightly_triggers,
     ),
     WorkflowRule(
-        RuleId.NIGHTLY_NAME.value,
-        "nightly workflow name identifies the nightly plane",
-        nightly_name,
+        RuleId.NIGHTLY_NAME.value, "nightly workflow name identifies the nightly plane", nightly_name
     ),
     WorkflowRule(
         RuleId.NIGHTLY_CONCURRENCY.value,
@@ -397,7 +472,18 @@ WORKFLOW_RULES = (
         "weekly uploads mutation and resolution artifacts across jobs",
         weekly_artifacts,
     ),
+    WorkflowRule(
+        RuleId.CI_PACKAGING_READ_ONLY.value,
+        "packaging workflow declares only contents: read and publishes nothing",
+        ci_packaging_read_only,
+    ),
+    WorkflowRule(
+        RuleId.CI_SECURITY_PERMISSIONS.value,
+        "ci.yml declares exactly contents:read and pull-requests:read",
+        ci_security_permissions,
+    ),
 )
+
 
 CASES = tuple(
     (item, job, rule)

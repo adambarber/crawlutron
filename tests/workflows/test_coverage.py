@@ -5,7 +5,12 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from tests.workflows._census import WAIVER_CEILINGS, missing_decisions, waiver_counts
+from tests.workflows._census import (
+    WAIVER_CEILINGS,
+    legacy_ci_tests_remaining,
+    missing_decisions,
+    waiver_counts,
+)
 from tests.workflows._model import JOBS, WORKFLOWS
 from tests.workflows._registry import CATALOG, Decision, decision
 
@@ -42,3 +47,19 @@ def test_a_mistyped_workflow_or_decision_cannot_be_registered() -> None:
     with pytest.raises(AttributeError):
         getattr(Decision, typo)
     assert len(Decision.__members__) == len({item.value for item in Decision})
+
+
+def test_no_legacy_ci_tests_remain() -> None:
+    """Every legacy top-level CI text-contract test must be retired by typed migration."""
+    remaining = legacy_ci_tests_remaining()
+    assert not remaining, f"legacy CI tests must be deleted; still present: {sorted(remaining)}"
+
+
+def test_legacy_ci_tests_census_detects_a_ghost(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bite: a stray tests/test_ci_ghost.py must be named by the census."""
+    ghost = tmp_path / "test_ci_ghost.py"
+    ghost.write_text("def test_ghost() -> None: ...\n", encoding="utf-8")
+    monkeypatch.setattr("tests.workflows._census.TESTS_DIR", tmp_path)
+    assert legacy_ci_tests_remaining() == {"test_ci_ghost.py"}
+    monkeypatch.setattr("tests.workflows._census.TESTS_DIR", tmp_path)
+    assert legacy_ci_tests_remaining() == {"test_ci_ghost.py"}
