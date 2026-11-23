@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 from pydantic import ValidationError
 
 from crawlutron.models.json_value import JsonValue
+from crawlutron.service.error_rendering import MachineCode, redact_urls_in_text
 from crawlutron_mcp.constants import (
     CACHE_SCOPE,
     DEFAULT_TTL_MS,
@@ -137,7 +138,10 @@ def _validate_protocol_version(request_id: int | str, header: str | None) -> Non
             request_id,
             UNSUPPORTED_PROTOCOL_VERSION,
             "Unsupported protocol version",
-            data={"supported": list(SUPPORTED_PROTOCOL_VERSIONS), "requested": header},
+            data={
+                "supported": list(SUPPORTED_PROTOCOL_VERSIONS),
+                "requested": redact_urls_in_text(header),
+            },
         )
 
 
@@ -151,7 +155,8 @@ def _validate_meta_matches_header(
         raise _protocol_error(
             request_id,
             HEADER_MISMATCH,
-            f"MCP-Protocol-Version header '{header}' does not match _meta '{meta_version}'",
+            "MCP-Protocol-Version header does not match _meta",
+            data={"code": MachineCode.HEADER_MISMATCH.value},
         )
 
 
@@ -161,7 +166,10 @@ def _validate_method_header(request_id: int | str, method: JsonValue, header: st
         raise _protocol_error(request_id, HEADER_MISMATCH, "Missing required header: Mcp-Method")
     if header != method:
         raise _protocol_error(
-            request_id, HEADER_MISMATCH, f"Mcp-Method header '{header}' does not match method '{method}'"
+            request_id,
+            HEADER_MISMATCH,
+            "Mcp-Method header does not match the request method",
+            data={"code": MachineCode.HEADER_MISMATCH.value},
         )
 
 
@@ -174,8 +182,23 @@ def _validate_name_header(request_id: int | str, params: dict[str, JsonValue], h
         raise _protocol_error(
             request_id,
             HEADER_MISMATCH,
-            f"Mcp-Name header '{header}' does not match tool name '{tool_name}'",
+            "Mcp-Name header does not match the tool name",
+            data={"code": MachineCode.HEADER_MISMATCH.value},
         )
+
+
+def _unknown_tool(request_id: int | str) -> dict[str, JsonValue]:
+    """A stable refusal: the caller-supplied name is never echoed."""
+    return error_response(
+        request_id, INVALID_PARAMS, "Unknown tool", data={"code": MachineCode.UNKNOWN_TOOL.value}
+    )
+
+
+def _unknown_method(request_id: int | str) -> dict[str, JsonValue]:
+    """A stable refusal: the caller-supplied method is never echoed."""
+    return error_response(
+        request_id, METHOD_NOT_FOUND, "Method not found", data={"code": MachineCode.UNKNOWN_METHOD.value}
+    )
 
 
 async def call_tool(
@@ -187,17 +210,18 @@ async def call_tool(
     **door,
 ) -> JsonValue:
     """Invoke one declared tool; the door environment forwards to dispatch."""
-    from crawlutron_mcp.handlers import dispatch, validation_message
+    from crawlutron_mcp.handlers import dispatch
     from crawlutron_mcp.registry import TOOLS_BY_NAME
+    from crawlutron_mcp.tool_results import validation_message
 
     params = body
 
     name = params.get("name")
     if not isinstance(name, str):
-        return error_response(request_id, INVALID_PARAMS, f"Unknown tool: {name}")
+        return _unknown_tool(request_id)
     spec = TOOLS_BY_NAME.get(name)
     if spec is None:
-        return error_response(request_id, INVALID_PARAMS, f"Unknown tool: {name}")
+        return _unknown_tool(request_id)
     arguments = params.get("arguments")
     if not isinstance(arguments, dict):
         return error_response(request_id, INVALID_PARAMS, "Tool arguments must be an object")
@@ -257,7 +281,7 @@ async def _dispatch_method(
         return 200, result_response(request_id, tools_list_result())
     if method == "tools/call":
         return 200, await call_tool(request_id, params, settings, shutdown_event, container=container, **door)
-    return 404, error_response(request_id, METHOD_NOT_FOUND, f"Method not found: {method}")
+    return 404, _unknown_method(request_id)
 
 
 async def handle_mcp_request(

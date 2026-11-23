@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import pathlib
 
+from tests._error_door_trees import error_door_trees
 from tests.chokepoint_walks import (
     SANCTIONED,
     calls_named_leaf,
@@ -15,7 +16,7 @@ from tests.chokepoint_walks import (
 from tests.rules import Bites, Registry, Rule, Trips
 
 # --------------------------------------------------------------------------- Error-envelope shape
-ENVELOPE_SANCTIONED = SANCTIONED | {"exceptions.py"}  # owner: builds the factory envelopes itself
+ENVELOPE_SANCTIONED = SANCTIONED | {"exceptions.py", "error_rendering.py"}  # the serializer home
 
 
 def _dict_keys(node: ast.Dict) -> set[str]:
@@ -53,8 +54,9 @@ def _envelope_dict_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 _HAND_ROLLED_ERROR_ENVELOPES_FORBIDDEN = Rule(
     name="no-hand-rolled-error-envelopes",
     find=_envelope_dict_offenders,
-    summary="Use crawlutron_rest.api.exceptions.http_error/browser_pool_unavailable",
+    summary="Use the shared render_error/http_error, never a hand-built envelope",
     excludes=ENVELOPE_SANCTIONED,
+    scope=error_door_trees,
     bite=lambda: (
         # Four offenders from one source: two bare HTTPException builds, one detail= envelope literal, one
         # three-key dict.
@@ -115,6 +117,7 @@ NO_RAW_EXCEPTION_TEXT_IN_RESULT_ERROR_FIELD = Rule(
     find=_raw_exception_error_offenders,
     summary="classify via classify_error_code, never raw exception text",
     excludes=SANCTIONED | _TERMINAL_RESULT_SANCTIONED,
+    scope=error_door_trees,
     bite=lambda: (
         # ``str(exc)`` on a direct result construction, and the same through the sanctioned primitive -- both
         # sinks carry the raw text verbatim.

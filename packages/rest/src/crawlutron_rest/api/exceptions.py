@@ -15,6 +15,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from crawlutron.models.error_response import ErrorEnvelope
 from crawlutron.models.json_value import JsonValue
+from crawlutron.service.error_rendering import ErrorDoor, error_envelope, render_error
 from crawlutron.service.errors import (
     BROWSER_POOL_MESSAGE,
     BrowserPoolUnavailable,
@@ -22,15 +23,6 @@ from crawlutron.service.errors import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def error_envelope(code: str, message: str, details: JsonValue | None = None) -> ErrorEnvelope:
-    """The single definition of the wire error shape.
-
-    ``details`` is always present — a hand-rolled site that forgets it is
-    exactly the drift this factory exists to prevent.
-    """
-    return {"code": code, "message": message, "details": details or {}}
 
 
 #: Synthetic code for an HTTPException whose detail is not envelope-shaped: a
@@ -123,7 +115,8 @@ async def domain_error_handler(request: Request, exc: Exception) -> JSONResponse
             status_code=500,
             content=error_envelope("internal_error", "Unhandled exception in request handling"),
         )
-    return JSONResponse(status_code=exc.status, content=error_envelope(exc.code, exc.message, exc.details))
+    rendered = render_error(exc, ErrorDoor.REST)
+    return JSONResponse(status_code=rendered.status, content=rendered.envelope)
 
 
 __all__ = [
