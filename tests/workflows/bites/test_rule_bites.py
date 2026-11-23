@@ -30,6 +30,7 @@ from tests.workflows._rules import (
     no_event_splicing_in_run,
     no_heredoc,
     no_pip_install,
+    publish_no_cache_restore,
     unique_step_ids,
     uses_tests_door,
     weekly_artifacts,
@@ -394,6 +395,25 @@ def test_an_inline_marker_filter_is_not_a_bare_suite_run() -> None:
     assert not list(no_bare_pytest(parent_workflow(filtered), filtered))
 
 
+def test_publish_ancestry_cache_restore_is_named() -> None:
+    """A cache restore planted in the publish job is named file:line."""
+    publish = _job_from("release", "publish")
+    restore = Step.create(
+        {
+            "name": "Cached setup",
+            "uses": f"astral-sh/setup-uv@{'a' * 40}",
+            "with": {"enable-cache": True},
+            "line": 112,
+        }
+    )
+    broken = publish.model_copy(update={"steps": (*publish.steps, restore)})
+    findings = list(publish_no_cache_restore(parent_workflow(broken), broken))
+    assert findings
+    assert findings[0].rule == RuleId.PUBLISH_NO_CACHE_RESTORE.value
+    assert "release.yml" in findings[0].message
+    assert str(restore.line) in findings[0].message
+
+
 def test_every_job_rule_has_a_bite() -> None:
     assert {rule.check.__name__.replace("_", "-") for rule in JOB_RULES} == {
         "needs-resolve",
@@ -432,6 +452,7 @@ def test_every_job_rule_has_a_bite() -> None:
         "ci-coverage-uploads-coverage-xml",
         "ci-coverage-single-artifact",
         "ci-gate-jobs-start-from-prepare",
+        "publish-no-cache-restore",
     }
 
 

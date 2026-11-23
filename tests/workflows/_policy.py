@@ -121,6 +121,7 @@ class RuleId(StrEnum):
     CI_RELEASE_GATED_ON_CI = "ci-release-gated-on-ci"
     CI_COVERAGE_UPLOADS_COVERAGE_XML = "ci-coverage-uploads-coverage-xml"
     CI_COVERAGE_SINGLE_ARTIFACT = "ci-coverage-single-artifact"
+    PUBLISH_NO_CACHE_RESTORE = "publish-no-cache-restore"
 
 
 class Waiver(BaseModel):
@@ -208,6 +209,7 @@ CEILINGS: Mapping[RuleId, int] = MappingProxyType(
         RuleId.CI_RELEASE_GATED_ON_CI: 0,
         RuleId.CI_COVERAGE_UPLOADS_COVERAGE_XML: 0,
         RuleId.CI_COVERAGE_SINGLE_ARTIFACT: 0,
+        RuleId.PUBLISH_NO_CACHE_RESTORE: 0,
     }
 )
 

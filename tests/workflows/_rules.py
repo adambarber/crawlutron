@@ -28,7 +28,7 @@ from tests.workflows._codeql_rules import (
     codeql_security_extended,
     codeql_single_sarif_upload,
 )
-from tests.workflows._model import POLICY, WORKFLOWS, Job, Workflow
+from tests.workflows._model import POLICY, WORKFLOWS, Job, Step, Workflow
 from tests.workflows._nightly_rules import (
     nightly_artifacts as nightly_artifacts,
 )
@@ -231,6 +231,73 @@ def door_no_if(workflow: Workflow, job: Job) -> Iterator[Finding]:
                 )
 
 
+_PUBLISH_ACTION = "gh-action-pypi-publish"
+
+# Actions whose sole purpose is restoring or saving a build cache.
+_CACHE_ACTIONS = (
+    "actions/cache@",
+    "actions/cache/restore@",
+    "actions/cache/save@",
+    "/actions/prepare",
+)
+
+
+def _publishes(job: Job) -> bool:
+    # Only direct publish steps are in scope; a publisher reached through a
+    # reusable workflow call has its body in that called workflow, not here.
+    return any(step.uses and _PUBLISH_ACTION in step.uses for step in job.steps)
+
+
+def _restores_cache(step: Step) -> bool:
+    uses = step.uses or ""
+    if any(marker in uses for marker in _CACHE_ACTIONS):
+        return True
+    if "astral-sh/setup-uv@" not in uses:
+        return False
+    if "enable-cache" not in step.with_:
+        return True
+    value = step.with_["enable-cache"]
+    return value is True or (isinstance(value, str) and value.lower() == "true")
+
+
+def _uploads_artifact(job: Job) -> bool:
+    return any(step.uses and "actions/upload-artifact@" in step.uses for step in job.steps)
+
+
+def _publish_ancestry(workflow: Workflow) -> set[str]:
+    """Publishers and every artifact-producing job upstream through needs."""
+    publishers = {key for key, item in workflow.jobs.items() if _publishes(item)}
+    pending = list(publishers)
+    seen: set[str] = set()
+    while pending:
+        key = pending.pop()
+        if key in seen:
+            continue
+        seen.add(key)
+        item = workflow.jobs.get(key)
+        # Pure gate jobs restore read-only caches (zizmor allows them) and
+        # carry no artifact; only producers can pass a poisoned cache onward.
+        if item is not None and (key in publishers or _uploads_artifact(item)):
+            pending.extend(item.needs)
+    return seen
+
+
+def publish_no_cache_restore(workflow: Workflow, job: Job) -> Iterator[Finding]:
+    """Publish doors and their artifact builders restore no cache."""
+    if job.key not in _publish_ancestry(workflow):
+        return
+    for step in job.steps:
+        if _restores_cache(step):
+            yield Finding(
+                RuleId.PUBLISH_NO_CACHE_RESTORE.value,
+                workflow.stem,
+                job.key,
+                step.line,
+                f"{workflow.path}:{step.line}: publish-ancestry job {job.key} "
+                f"restores a cache via {step.uses}",
+            )
+
+
 JOB_RULES = (
     Rule("needs-resolve", Scope.ALL, "a needs edge to a missing job never becomes green", needs_resolve),
     Rule(
@@ -412,6 +479,12 @@ JOB_RULES = (
         Scope.WITH_STEPS,
         "ci gate jobs start from $/.github/actions/prepare",
         ci_gate_jobs_start_from_prepare,
+    ),
+    Rule(
+        RuleId.PUBLISH_NO_CACHE_RESTORE.value,
+        Scope.WITH_STEPS,
+        "publish doors and their builders restore no cache",
+        publish_no_cache_restore,
     ),
 )
 
