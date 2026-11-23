@@ -101,12 +101,14 @@ async def http_exception_handler(request: Request, exc: Exception) -> JSONRespon
     (a Starlette child) stay on the unwrap; anything else is a 500 envelope.
     """
     if not isinstance(exc, StarletteHTTPException):
-        logger.exception(
+        # Plain call, not logger.exception: exc_info would log raw exception text (#1375).
+        logger.error(
             "unhandled_request_error",
             extra={
                 "request_id": new_request_id(),
                 "path": redact_urls_in_text(str(request.url.path)),
                 "method": request.method,
+                "error_detail": redact_urls_in_text(str(exc)),
             },
         )
         return JSONResponse(

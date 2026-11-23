@@ -12,6 +12,7 @@ from starlette.requests import Request
 
 from crawlutron.service.errors import QuotaRefusal
 from crawlutron_rest.api.exceptions import error_envelope, http_error
+from tests._host_assert import host_in_text
 
 
 def _bare_request() -> Request:
@@ -192,8 +193,8 @@ class TestEnvelopeFromDetail:
         }
 
     async def test_unhandled_exception_logs_one_structured_record(self, caplog):
-        """The catch-all 500 logs once with a correlation id and never the request's
-        headers, query or body -- the wire message stays unchanged."""
+        """The catch-all 500 logs once with a correlation id and a redacted error
+        detail, never a raw traceback or the request's headers, query or body."""
         import logging
 
         import httpx
@@ -206,14 +207,14 @@ class TestEnvelopeFromDetail:
 
         @app.get("/boom")
         async def _boom():
-            raise RuntimeError("kaboom")
+            raise RuntimeError("failed GET https://example.com/x?token=s3cret")
 
         async with httpx.ASGITransport(app=app, raise_app_exceptions=False) as transport:
             async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
                 with caplog.at_level(logging.ERROR, logger="crawlutron_rest.api.exceptions"):
                     resp = await client.get(
-                        "/boom?token=TOP_SECRET_QUERY",
-                        headers={"X-Secret": "TOP_SECRET_HEADER"},
+                        "/boom?token=s3cret",
+                        headers={"X-Secret": "s3cret"},
                     )
 
         assert resp.status_code == 500
@@ -226,14 +227,13 @@ class TestEnvelopeFromDetail:
         assert len(records) == 1, caplog.text
         rec = records[0]
         assert rec.levelno == logging.ERROR
-        assert rec.exc_info is not None
         assert isinstance(rec.request_id, str) and rec.request_id.startswith("crawl_")
         assert rec.path == "/boom"
         assert rec.method == "GET"
-        seen = " ".join(str(v) for k, v in vars(rec).items() if k != "exc_info")
-        seen += logging.Formatter().formatException(rec.exc_info)
-        assert "TOP_SECRET_QUERY" not in seen
-        assert "TOP_SECRET_HEADER" not in seen
+        seen = " ".join(str(v) for k, v in vars(rec).items())
+        assert "s3cret" not in seen
+        assert rec.exc_info is None
+        assert host_in_text(rec.error_detail, "example.com")
 
 
 class TestCrossDoorErrorParity:
