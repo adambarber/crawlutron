@@ -12,6 +12,8 @@ import json
 import re
 from typing import cast
 
+from lxml import etree
+
 from crawlutron_extract.limits import _empty_result
 
 __all__ = ["extract_text_format"]
@@ -251,11 +253,7 @@ def _json_to_text(obj: object, limits, flags: list[str]) -> str:
 
 
 def _extract_xml(content: str, limits) -> dict[str, object]:
-    """Extract text from XML, refusing DTD and malformed markup.
-
-    Regex-based extraction (no ElementTree) avoids XXE risks without
-    third-party deps. DOCTYPE and unmatched tags mean FAILED.
-    """
+    """Extract text from XML with a strict lxml parse; refuse DTD and bad markup."""
     flags: list[str] = []
     truncated = False
 
@@ -263,26 +261,27 @@ def _extract_xml(content: str, limits) -> dict[str, object]:
         flags.append("xml_dtd_refused")
         return _empty_result("xml_dtd_refused", ["xml_dtd_refused"])
 
-    # Strip XML declaration, processing instructions, comments.
-    text = re.sub(r"<\?xml[^>]*\?>", " ", content)
-    text = re.sub(r"<\?[^>]*\?>", " ", text)
-    text = re.sub(r"<!--[^>]*-->", " ", text)
-
-    # Tag balance: opening vs closing tags must match, else malformed.
-    opens = len(re.findall(r"<([A-Za-z_][A-Za-z0-9_.-]*)\b[^>/]*(?<!/)>", text))
-    closes = len(re.findall(r"</([A-Za-z_][A-Za-z0-9_.-]*)\s*>", text))
-    if opens != closes:
+    parser = etree.XMLParser(
+        resolve_entities=False,
+        recover=False,
+        huge_tree=False,
+        load_dtd=False,
+        dtd_validation=False,
+        no_network=True,
+        remove_comments=True,
+        remove_pis=True,
+    )
+    # The caller already decoded bytes; drop a stale encoding declaration so
+    # lxml cannot mis-decode the re-encoded text.
+    body = re.sub(r"^\s*<\?xml[^>]*\?>", "", content, count=1)
+    try:
+        root = etree.fromstring(body.encode("utf-8"), parser)
+    except etree.XMLSyntaxError, ValueError:
         flags.append("xml_parse_error")
         return _empty_result("xml_parse_error", ["xml_parse_error"])
 
-    # Capture root element name for metadata.
-    root_match = re.match(r"<([A-Za-z_][A-Za-z0-9_.-]*)\b", text)
-    root_name = root_match.group(1) if root_match else ""
-
-    # Strip all remaining tags, leaving text runs.
-    text = re.sub(r"<[^>]*>", " ", text)
-    # Collapse whitespace.
-    text = " ".join(text.split())
+    root_name = etree.QName(root).localname if isinstance(root.tag, str) else ""
+    text = " ".join(" ".join(root.itertext()).split())
     text, truncated = _cap_text(text, limits, flags, truncated)
 
     quality = "low" if truncated or flags else "medium"

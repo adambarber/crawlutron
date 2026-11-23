@@ -184,3 +184,40 @@ def test_image_png_refused():
     assert result.quality == Quality.FAILED
     assert "format_refused" in result.flags
     assert result.text == ""
+
+
+def test_xml_gt_in_quoted_attribute_extracts():
+    content = b'<root><item id="a>b"/>Hello</root>'
+    result = extract(content, "application/xml")
+    assert result.quality == Quality.MEDIUM
+    assert "Hello" in result.text
+
+
+def test_xml_cdata_with_markup_extracts():
+    content = b"<root><![CDATA[<b>unclosed]]></root>"
+    result = extract(content, "application/xml")
+    assert result.quality == Quality.MEDIUM
+    assert "<b>unclosed" in result.text
+
+
+def test_xml_equal_count_mismatched_nesting_refused():
+    content = b"<a><b></a></b>"
+    result = extract(content, "application/xml")
+    assert result.quality == Quality.FAILED
+    assert "xml_parse_error" in result.flags
+
+
+def test_xml_valid_document_still_extracts():
+    content = b'<?xml version="1.0"?><catalog><book><title>Hello</title></book></catalog>'
+    result = extract(content, "application/xml")
+    assert result.quality == Quality.MEDIUM
+    assert "Hello" in result.text
+    assert result.metadata["root"] == "catalog"
+
+
+def test_xml_external_dtd_refused_before_parse():
+    content = b'<!DOCTYPE root SYSTEM "http://example.invalid/evil.dtd"><root>ok</root>'
+    result = extract(content, "application/xml")
+    assert result.quality == Quality.FAILED
+    assert "xml_dtd_refused" in result.flags
+    assert result.text == ""
