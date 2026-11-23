@@ -1,4 +1,4 @@
-"""crawlutron_extract: stdlib-only content extraction, bounded and deterministic."""
+"""crawlutron_extract: bounded, deterministic extraction; declares lxml, pdfminer and safe-url."""
 
 from __future__ import annotations
 

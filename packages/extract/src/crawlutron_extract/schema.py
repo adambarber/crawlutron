@@ -1,7 +1,6 @@
-"""Schema-driven extraction: CSS-selector based field extraction from HTML.
+"""Schema-driven CSS-selector field extraction from HTML.
 
-Defines FieldSpec, Schema, and extract_records(). Built on top of the
-stdlib HTML parser + CSS selector engine; no third-party dependencies.
+Defines FieldSpec, Schema, extract_records(); declares lxml, pdfminer, safe-url.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""The extract leaf seal: crawlutron_extract imports only stdlib, its own modules, safe_url and pdfminer."""
+"""The extract leaf seal: extract imports only stdlib, internals, safe_url, pdfminer and lxml."""
 
 from __future__ import annotations
 
@@ -6,22 +6,26 @@ import ast
 import pathlib
 import sys
 
+import pytest
+
 from tests.chokepoint_paths import REPO_ROOT
 
 EXTRACT_ROOT = REPO_ROOT / "packages" / "extract" / "src" / "crawlutron_extract"
 
-#: Permitted import roots: stdlib, the package itself, safe_url, pdfminer.
+#: Permitted import roots: stdlib, the package itself, safe_url, pdfminer, lxml.
+#: lxml is the owner-authorized strict XML parser (#1356); bs4 stays forbidden.
 _ALLOWED = {
     "crawlutron",
     "crawlutron_extract",
     "safe_url",
     "pdfminer",
+    "lxml",
 }
 
 
 def _is_forbidden(top: str) -> bool:
-    """True if ``top`` is crawlutron (core wheel) or any third-party module
-    other than safe_url and pdfminer."""
+    """True if ``top`` is crawlutron (core wheel) or a third-party module
+    other than safe_url, pdfminer and lxml."""
     top_level = top.split(".")[0]
     if top_level == "crawlutron":
         return True  # core wheel
@@ -51,8 +55,8 @@ def _extract_modules() -> list[pathlib.Path]:
 
 
 def test_no_extract_module_reaches_crawlutron_or_third_party():
-    """The seal: every crawlutron_extract module must only import stdlib,
-    crawlutron_extract internals, safe_url, or pdfminer."""
+    """The seal: extract modules import only stdlib, internals, safe_url,
+    pdfminer or lxml."""
     offenders: list[str] = []
     for path in _extract_modules():
         for top in sorted(_module_imports(path)):
@@ -101,13 +105,8 @@ def test_extract_leaf_every_module_is_scanned():
         ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
-def test_extract_leaf_allows_safe_url_edge():
-    """safe_url is an explicit admission dependency; it is NOT an offender."""
-    assert not _is_forbidden("safe_url")
-    assert not _is_forbidden("safe_url.normalized_url")
-
-
-def test_extract_leaf_allows_pdfminer_edge():
-    """pdfminer.six is a hard dependency; it is NOT an offender."""
-    assert not _is_forbidden("pdfminer")
-    assert not _is_forbidden("pdfminer.high_level")
+@pytest.mark.parametrize("root", ["safe_url", "pdfminer", "lxml"])
+def test_extract_leaf_allows_declared_dependency(root):
+    """Each declared extract dependency is NOT an offender."""
+    assert not _is_forbidden(root)
+    assert not _is_forbidden(f"{root}.submodule")
