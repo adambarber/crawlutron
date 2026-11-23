@@ -64,7 +64,7 @@ def _assert_codecov_upload_flags(
     if require_flags:
         assert "flags" in with_, f"{job_name} codecov upload must specify flags"
     assert with_.get("use_oidc") is True or with_.get("use_oidc") == "true"
-    assert with_.get("fail_ci_if_error") is False or with_.get("fail_ci_if_error") == "false"
+    assert with_.get("fail_ci_if_error") is True or with_.get("fail_ci_if_error") == "true"
     assert "report-type" not in with_, "action input is report_type (underscore), not report-type"
     assert with_.get("report_type") == report_type
 
@@ -96,7 +96,7 @@ def test_coverage_job_downloads_artifacts_tolerantly() -> None:
     for step in download_steps:
         name = cast(StepMapping, step.get("with", {})).get("name")
         if "test-browser" in str(name):
-            expected = "${{ always() && needs.changes.outputs.browser == 'true' }}"
+            expected = "${{ always() && needs.test-browser.result != 'skipped' }}"
         elif "real-pbkdf2" in str(name):
             expected = "${{ always() && needs.changes.outputs.real-pbkdf2 == 'true' }}"
         else:
@@ -149,7 +149,7 @@ def _assert_junit_upload(workflow: str, job_name: str, artifact_name: str, artif
     with_ = cast(StepMapping, junit_uploads[0].get("with", {}))
     assert with_.get("name") == artifact_name, f"{job_name} junit artifact must be named {artifact_name}"
     assert with_.get("path") == artifact_path, f"{job_name} must upload {artifact_path}"
-    assert with_.get("if-no-files-found") == "warn"
+    assert with_.get("if-no-files-found") == "error"
     assert junit_uploads[0].get("if") == "${{ always() }}", f"{job_name} junit upload must have if: always()"
 
 
@@ -375,11 +375,11 @@ def test_coverage_config_has_source_pkgs_relative_files_parallel() -> None:
 
 
 def test_no_blocking_threshold_anywhere() -> None:
-    """No --cov-fail-under, no fail_ci_if_error: true, no threshold in codecov.yml."""
+    """No --cov-fail-under, no silent fail_ci_if_error:false, no threshold in codecov.yml."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
     assert "--cov-fail-under" not in workflow
-    assert "fail_ci_if_error: true" not in workflow
-    assert "fail_ci_if_error: 'true'" not in workflow
+    assert "fail_ci_if_error: false" not in workflow
+    assert "fail_ci_if_error: true" in workflow
 
     codecov_path = WORKFLOW_PATH.parent.parent.parent / "codecov.yml"
     config = yaml.safe_load(codecov_path.read_text(encoding="utf-8"))

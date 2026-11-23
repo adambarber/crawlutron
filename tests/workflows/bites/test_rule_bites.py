@@ -232,5 +232,6 @@ def test_every_job_rule_has_a_bite() -> None:
         "door-no-if",
         "no-pip-install",
         "no-heredoc",
+        "no-silent-uploads",
         "unique-step-ids",
     }
