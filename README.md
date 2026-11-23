@@ -558,14 +558,19 @@ with `422`.
 ## Testing
 
 Behavior tests run against the real stack (a local `http.server`, a real Camoufox
-browser, and real fixtures — no mocks). Use the dedicated venv:
+browser, and real fixtures — no mocks). Use the workspace venv:
 
 ```bash
-pip install -e ".[dev]"
+uv sync --extra dev
 make test          # fast hermetic suite (default)
 # or
-python3 -m pytest -q
+uv run pytest -q
 ```
+
+Plain `pip` cannot install this workspace: it ignores `[tool.uv.sources]`, so the
+member wheels fall through to PyPI where they are not published. A pip-style
+install of just the packages is `uv pip install -e packages/*`; the pinned test
+and toolchain packages still come from the root `dev` extra via `uv sync`.
 
 The manual test plan lives at `docs/references/crawlutron-manual-test-plan.md`
 and the agent integration contract at `docs/references/crawlutron-agent-contract.md`.

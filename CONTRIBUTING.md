@@ -10,11 +10,14 @@ mechanics of submitting a change.
 git clone https://github.com/adambarber/crawlutron.git
 cd crawlutron
 
-# Install dependencies in a virtualenv (Python 3.14+)
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+# Install the workspace members and pinned dev tools from uv.lock (Python 3.14+)
+uv sync --extra dev
 ```
+
+Plain `pip` cannot install this workspace: it ignores `[tool.uv.sources]`, so the
+member wheels fall through to PyPI where they are not published. A pip-style
+install of just the packages is `uv pip install -e packages/*`; the test and
+toolchain pins still require `uv sync --extra dev`.
 
 Logging is configured by ``packages/core/src/crawlutron/runtime.logging_config.configure_service_logging``
 and lives entirely in this repository; no external shared-tree package is
