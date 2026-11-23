@@ -36,7 +36,11 @@ class ResourceGovernor(Protocol):
 
 
 def build_resource_governor(gate: ResourceGate) -> AdmissionGate:
-    """Derive the one RAM budget once, from the process gauge."""
+    """Derive the one RAM budget once, from the process gauge.
+
+    The ceiling is the fixed process default, never a caller's
+    max_concurrent_pages: one shared chokepoint cannot be resized by one crawl.
+    """
     budget = TaskRamBudget(doc_workers=doc_worker_count())
     return build_admission_gate(
         gate,

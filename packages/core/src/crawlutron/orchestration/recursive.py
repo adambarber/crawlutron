@@ -164,7 +164,11 @@ async def admit_recursive_batch(
 ) -> list[_Admitted]:
     """Resource-gate the frontier, then robots-filter whatever survived."""
     admitted = await _resource_admitted_batch(run, state, metrics)
-    selected = await _robots_admitted_batch(run, state, admitted)
+    try:
+        selected = await _robots_admitted_batch(run, state, admitted)
+    except BaseException:
+        await admitted.stack.aclose()
+        raise
     return _LeasedBatch(selected, admitted.stack)
 
 
