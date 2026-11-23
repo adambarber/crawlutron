@@ -46,7 +46,7 @@ jobs:
         with:
           name: mutation-testing-report
           path: html/
-          if-no-files-found: warn
+          if-no-files-found: error
 
       - name: Upload mutation testing results artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
@@ -54,7 +54,7 @@ jobs:
         with:
           name: mutation-testing-results
           path: .mutmut-cache
-          if-no-files-found: warn
+          if-no-files-found: error
 
   lowest-direct-resolution:
     name: Lowest-direct resolution probe
@@ -117,4 +117,4 @@ jobs:
         with:
           name: lowest-direct-resolution-probe
           path: /tmp/lowest-direct.txt
-          if-no-files-found: warn
+          if-no-files-found: error

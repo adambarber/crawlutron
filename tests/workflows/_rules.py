@@ -156,6 +156,39 @@ def uses_tests_door(workflow: Workflow, job: Job) -> Iterator[Finding]:
         )
 
 
+def no_silent_uploads(workflow: Workflow, job: Job) -> Iterator[Finding]:
+    """No step may swallow evidence: fail_ci_if_error:false, if-no-files-found:warn,
+    or an artifact consumer gated on a re-derived path filter instead of the producer result."""
+    for step in job.steps:
+        if step.with_.get("fail_ci_if_error") is False:
+            yield Finding(
+                "no-silent-uploads",
+                workflow.stem,
+                job.key,
+                step.line,
+                f"{workflow.path}:{step.line}: {step.name or 'unnamed step'} sets fail_ci_if_error:false",
+            )
+        if step.with_.get("if-no-files-found") == "warn":
+            yield Finding(
+                "no-silent-uploads",
+                workflow.stem,
+                job.key,
+                step.line,
+                f"{workflow.path}:{step.line}: {step.name or 'unnamed step'} sets if-no-files-found:warn",
+            )
+        if step.uses and "download-artifact" in str(step.uses):
+            guard = str(step.if_) if step.if_ is not None else ""
+            if "changes.outputs.browser" in guard:
+                yield Finding(
+                    "no-silent-uploads",
+                    workflow.stem,
+                    job.key,
+                    step.line,
+                    f"{workflow.path}:{step.line}: {step.name or 'unnamed step'} gates a browser download on "
+                    f"changes.outputs.browser instead of needs.test-browser.result",
+                )
+
+
 def _job_directly_runs_pytest(job: Job) -> bool:
     for step in job.steps:
         for invocation in step.command_facts.pytest_invocations:
@@ -199,6 +232,12 @@ JOB_RULES = (
     Rule("no-pip-install", Scope.WITH_STEPS, "the lock freezes the graph", no_pip_install),
     Rule("no-heredoc", Scope.WITH_STEPS, "a heredoc hides control flow", no_heredoc),
     Rule("unique-step-ids", Scope.WITH_STEPS, "step outputs are addressed by id", unique_step_ids),
+    Rule(
+        "no-silent-uploads",
+        Scope.WITH_STEPS,
+        "no silent uploads or unguarded artifact consumers",
+        no_silent_uploads,
+    ),
 )
 
 

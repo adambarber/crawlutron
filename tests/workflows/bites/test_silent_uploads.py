@@ -1,0 +1,75 @@
+"""Every silent-upload token is named file:line by the no-silent-uploads rule."""
+
+from __future__ import annotations
+
+import pytest
+
+from tests.workflows._model import JOBS, Job, Step, parent_workflow
+from tests.workflows._rules import no_silent_uploads
+
+_SAMPLE: Job = next(job for job in JOBS if job.steps)
+_ALIAS = {"if_": "if", "with_": "with", "continue_on_error": "continue-on-error"}
+
+
+def _mutate(**changes) -> Job:
+    return _SAMPLE.model_copy(update=changes)
+
+
+def _step(**changes) -> Step:
+    raw = {**_SAMPLE.steps[0].model_dump(by_alias=True)}
+    for key, value in changes.items():
+        raw[_ALIAS.get(key, key)] = value
+    if "run" in changes:
+        raw.pop("uses", None)
+    if "uses" in changes:
+        raw.pop("run", None)
+    return Step.create(raw)
+
+
+@pytest.mark.parametrize(
+    ("broken",),
+    [
+        (_mutate(steps=(_step(with_={"fail_ci_if_error": False}),)),),
+        (_mutate(steps=(_step(with_={"if-no-files-found": "warn"}),)),),
+        (
+            _mutate(
+                steps=(
+                    _step(
+                        uses="actions/download-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
+                        if_="${{ always() && needs.changes.outputs.browser == 'true' }}",
+                    ),
+                )
+            ),
+        ),
+    ],
+)
+def test_a_silent_upload_token_is_named(broken) -> None:
+    parent = parent_workflow(broken)
+    findings = list(no_silent_uploads(parent, broken))
+    assert findings
+    assert findings[0].rule == "no-silent-uploads"
+    assert findings[0].workflow == broken.workflow
+    assert findings[0].job == broken.key
+    assert parent.path.name in findings[0].message
+
+
+def test_a_fail_ci_if_error_true_step_is_clean() -> None:
+    clean = _mutate(steps=(_step(with_={"fail_ci_if_error": True}),))
+    assert not list(no_silent_uploads(parent_workflow(clean), clean))
+
+
+def test_an_if_no_files_found_error_step_is_clean() -> None:
+    clean = _mutate(steps=(_step(with_={"if-no-files-found": "error"}),))
+    assert not list(no_silent_uploads(parent_workflow(clean), clean))
+
+
+def test_a_download_gated_on_producer_result_is_clean() -> None:
+    clean = _mutate(
+        steps=(
+            _step(
+                uses="actions/download-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
+                if_="${{ always() && needs.test-browser.result != 'skipped' }}",
+            ),
+        )
+    )
+    assert not list(no_silent_uploads(parent_workflow(clean), clean))

@@ -212,7 +212,7 @@ jobs:
         with:
           name: coverage-data
           path: .coverage*
-          if-no-files-found: warn
+          if-no-files-found: error
           include-hidden-files: true
       - name: Upload junit artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -220,7 +220,7 @@ jobs:
         with:
           name: junit-results
           path: junit-*.xml
-          if-no-files-found: warn
+          if-no-files-found: error
 
   # Report-only coverage job: consumes artifacts from battery, real-pbkdf2, and
   # test-browser; never re-runs tests. Combines coverage data, invokes the
@@ -270,13 +270,13 @@ jobs:
           path: junit/real-pbkdf2
       - name: Download test-browser coverage data
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        if: ${{ always() && needs.changes.outputs.browser == 'true' }}
+        if: ${{ always() && needs.test-browser.result != 'skipped' }}
         with:
           name: coverage-data-test-browser
           path: .
       - name: Download test-browser junit results
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        if: ${{ always() && needs.changes.outputs.browser == 'true' }}
+        if: ${{ always() && needs.test-browser.result != 'skipped' }}
         with:
           name: junit-test-browser
           path: junit/test-browser
@@ -293,7 +293,7 @@ jobs:
           files: coverage_reports/coverage.xml
           flags: battery
           use_oidc: true
-          fail_ci_if_error: false
+          fail_ci_if_error: true
       - name: Upload combined coverage report artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ always() }}
@@ -311,7 +311,7 @@ jobs:
           flags: behavioral
           report_type: test_results
           use_oidc: true
-          fail_ci_if_error: false
+          fail_ci_if_error: true
       - name: Upload invariant test results to Codecov
         if: ${{ !cancelled() }}
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
@@ -320,7 +320,7 @@ jobs:
           flags: invariants
           report_type: test_results
           use_oidc: true
-          fail_ci_if_error: false
+          fail_ci_if_error: true
       - name: Upload real-pbkdf2 coverage to Codecov
         if: ${{ !cancelled() && needs.changes.outputs.real-pbkdf2 == 'true' }}
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
@@ -329,7 +329,7 @@ jobs:
           flags: real-pbkdf2
           report_type: test_results
           use_oidc: true
-          fail_ci_if_error: false
+          fail_ci_if_error: true
       - name: Upload test-browser coverage to Codecov
         if: ${{ !cancelled() }}
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
@@ -338,7 +338,7 @@ jobs:
           flags: test-browser
           report_type: test_results
           use_oidc: true
-          fail_ci_if_error: false
+          fail_ci_if_error: true
 
   # The battery deselects `real_pbkdf2`, so the real 210k-iteration PBKDF2 path
   # in storage/caller_key_store.py is never exercised by commit admission. This
@@ -372,7 +372,7 @@ jobs:
         with:
           name: coverage-data-real-pbkdf2
           path: .coverage*
-          if-no-files-found: warn
+          if-no-files-found: error
           include-hidden-files: true
       - name: Upload junit artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -380,7 +380,7 @@ jobs:
         with:
           name: junit-real-pbkdf2
           path: junit-real-pbkdf2-*.xml
-          if-no-files-found: warn
+          if-no-files-found: error
 
   test-browser:
     name: Test suite (browser)
@@ -414,7 +414,7 @@ jobs:
         with:
           name: coverage-data-test-browser
           path: .coverage*
-          if-no-files-found: warn
+          if-no-files-found: error
           include-hidden-files: true
       - name: Upload junit artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -422,7 +422,7 @@ jobs:
         with:
           name: junit-test-browser
           path: junit-test-browser-*.xml
-          if-no-files-found: warn
+          if-no-files-found: error
 
   # #623: dependency audit against the frozen lock. The export/pip-audit tools
   # install inside CI's runner (owner-bandwidth is irrelevant there); the DB

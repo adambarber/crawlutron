@@ -65,6 +65,7 @@ class RuleId(StrEnum):
     HAS_TRIGGER = "has-trigger"
     TESTS_USE_DOOR = "tests-use-door"
     DOOR_NO_IF = "door-no-if"
+    SILENT_UPLOADS = "no-silent-uploads"
 
 
 class Waiver(BaseModel):
@@ -114,6 +115,7 @@ CEILINGS: Mapping[RuleId, int] = MappingProxyType(
         RuleId.HAS_TRIGGER: 0,
         RuleId.TESTS_USE_DOOR: 0,
         RuleId.DOOR_NO_IF: 0,
+        RuleId.SILENT_UPLOADS: 0,
     }
 )
 
