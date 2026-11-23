@@ -15,7 +15,7 @@ from crawlutron.models.result_record import ProducerEnvelope
 from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
 from crawlutron.runtime.metrics import get_metrics
 from crawlutron.runtime.readiness_state import READINESS_STATE as readiness_state
-from crawlutron.service.errors import CapacityExceeded, DomainError, ValidationRefusal
+from crawlutron.service.errors import CapacityExceeded, DomainError, ValidationRefusal, validation_refusal
 from crawlutron.service.response_shaping import aunified_response_from_result
 from crawlutron.storage.job_store import JobStatusView
 from crawlutron.storage.result_store import CrawlResultStore
@@ -112,8 +112,4 @@ __all__ = ["build_job_status", "crawl_tail", "record_crawl_completion", "request
 
 def _validation_refusal(error: ValueError) -> ValidationRefusal:
     """The default ValueError refusal: the shared 422 validation envelope."""
-    return ValidationRefusal(
-        "validation_error",
-        "Request validation failed",
-        {"errors": [{"msg": str(error)}]},
-    )
+    return validation_refusal(error)

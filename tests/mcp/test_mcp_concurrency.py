@@ -10,6 +10,7 @@ import contextlib
 import json
 from pathlib import Path
 
+from crawlutron.service.errors import QUOTA_EXCEEDED_MESSAGE
 from crawlutron.storage.job_store import JobStatus
 from crawlutron.storage.safe_db import allow_on_loop
 from tests._async_harnesses import issue_key
@@ -75,7 +76,9 @@ def _assert_quota_refused(response, result) -> None:
     """The MCP quota-refusal shape: a 200 JSON-RPC with an isError tool result."""
     assert response.status_code == 200, response.text
     assert result["isError"] is True, result
-    assert "concurrency quota" in result["content"][0]["text"]
+    assert result["content"][0]["text"] == QUOTA_EXCEEDED_MESSAGE
+    assert result["structuredContent"]["code"] == "quota_exceeded"
+    assert set(result["structuredContent"]["details"]) == {"limit", "requested"}
 
 
 async def test_keyed_mcp_crawl_refused_when_holding_an_async_job(tmp_path):

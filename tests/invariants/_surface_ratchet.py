@@ -210,9 +210,9 @@ DECLARED_SURFACE_RATCHET = {
     "packages/core/src/crawlutron/service/crawl_endpoint_cores.py": (4, 4),
     "packages/core/src/crawlutron/service/policy_suggestions.py": (3, 2),
     "packages/core/src/crawlutron/service/watch_sweep.py": (4, 2),
-    # #849: the typed domain refusals both doors map — one base + named subclasses
-    # plus the single-homed quota predicate the sweep reads.
-    "packages/core/src/crawlutron/service/errors.py": (17, 16),
+    # #849: typed refusals + single-homed quota predicate; #1373 adds the stable
+    # quota/validation messages and the one validation_error factory.
+    "packages/core/src/crawlutron/service/errors.py": (20, 17),
     # #1374: the one typed renderer shared by REST/MCP/CLI/SDK.
     "packages/core/src/crawlutron/service/error_rendering.py": (5, 2),
     # #1082: admit_webhook_target is the validate-then-admit chokepoint facade.

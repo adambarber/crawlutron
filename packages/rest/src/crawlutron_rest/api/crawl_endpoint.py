@@ -16,6 +16,7 @@ from crawlutron.config.settings import CrawlerSettings
 from crawlutron.delta import DeltaContext
 from crawlutron.extraction.output_formats import serialize_results
 from crawlutron.models.caller_identity import CallerIdentity
+from crawlutron.models.crawl_accepted import CrawlAccepted
 from crawlutron.models.crawl_pending import CrawlPendingError
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.trace_response import TraceResponse
@@ -29,7 +30,8 @@ from crawlutron.service.crawl_endpoint_cores import (
 )
 from crawlutron.service.crawl_executor import execute_crawl
 from crawlutron.service.effects import EffectBounds, EffectContainer, EffectOutcome
-from crawlutron.service.errors import DomainError, ValidationRefusal
+from crawlutron.service.error_rendering import ErrorDoor, render_error
+from crawlutron.service.errors import DomainError, validation_refusal
 from crawlutron.service.job_lifecycle import start_tracked_task
 from crawlutron.service.main_helpers import crawl_tail, request_gate
 from crawlutron.service.webhooks import admit_webhook_target
@@ -83,11 +85,7 @@ async def _crawl_rejection(error: ValueError) -> DomainError:
     than a line a handler can forget once the reject tail stopped being its own.
     """
     await get_metrics().observe_crawl(errors=1)
-    return ValidationRefusal(
-        "validation_error",
-        "Request validation failed",
-        {"errors": [{"msg": str(error)}]},
-    )
+    return validation_refusal(error)
 
 
 # The delta loader and the stored-payload reader moved to service.crawl_endpoint_cores
@@ -102,7 +100,8 @@ def _serialize_or_reject(items: list[dict[str, JsonValue]], output_format: str) 
     try:
         return serialize_results(items, output_format)
     except ValueError as error:
-        raise http_error(422, "validation_error", str(error)) from error
+        rendered = render_error(validation_refusal(error), ErrorDoor.REST)
+        raise http_error(422, "validation_error", rendered.message, rendered.details) from error
 
 
 async def crawl(
@@ -255,15 +254,13 @@ async def _accepted_async(
         ),
     )
     await get_metrics().observe_crawl(accepted=True, caller_id=owner)
-    return JSONResponse(
-        status_code=202,
-        content={
-            "status": "accepted",
-            "request_id": request_id,
-            "status_url": f"/v1/crawl/{request_id}",
-            "webhook_url": None if webhook_url is None else webhook_url.redacted(),
-        },
+    accepted = CrawlAccepted(
+        status="accepted",
+        request_id=request_id,
+        status_url=f"/v1/crawl/{request_id}",
+        webhook_url=None if webhook_url is None else webhook_url.redacted(),
     )
+    return JSONResponse(status_code=202, content=accepted.model_dump())
 
 
 async def _run_sync_crawl(

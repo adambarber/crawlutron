@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from httpx import AsyncClient
 
 from crawlutron.service.effects import EffectContainer, EffectKind
+from crawlutron.service.errors import QUOTA_EXCEEDED_MESSAGE
 from tests._app_harnesses import mounted_app
 from tests._async_harnesses import issue_key
 from tests._quota_harness import mcp_crawl_keys_routers, service_client
@@ -140,7 +141,8 @@ async def test_slow_render_holds_quota_slot_for_same_caller(tmp_path, monkeypatc
             timeout=5,
         )
         assert crawl_result["isError"] is True, crawl_result
-        assert "concurrency quota" in crawl_result["content"][0]["text"], crawl_result
+        assert crawl_result["content"][0]["text"] == QUOTA_EXCEEDED_MESSAGE, crawl_result
+        assert crawl_result["structuredContent"]["code"] == "quota_exceeded", crawl_result
 
         # Different caller: not blocked by the slow render's held slot.
         fast_result = await asyncio.wait_for(
@@ -179,7 +181,8 @@ async def test_same_key_concurrent_crawls_do_not_both_run(tmp_path, monkeypatch)
         second = asyncio.create_task(tool_call(client, "crawl", {"url": "http://example.com/b"}, key=secret))
         second_result = await asyncio.wait_for(second, timeout=5)
         assert second_result["isError"] is True, second_result
-        assert "concurrency quota" in second_result["content"][0]["text"], second_result
+        assert second_result["content"][0]["text"] == QUOTA_EXCEEDED_MESSAGE, second_result
+        assert second_result["structuredContent"]["code"] == "quota_exceeded", second_result
 
         released.set()
         first_result = await asyncio.wait_for(first, timeout=5)

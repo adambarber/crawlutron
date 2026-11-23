@@ -17,18 +17,27 @@ __all__ = [
     "JobNotFound",
     "JobStateConflict",
     "KeyVerifyThrottled",
+    "QUOTA_EXCEEDED_MESSAGE",
     "QuotaRefusal",
     "RequestNotFound",
     "SearchProviderError",
     "SearchProviderUnavailable",
+    "VALIDATION_ERROR_MESSAGE",
     "ValidationRefusal",
     "WatchLimitExceeded",
     "WatchNotFound",
     "is_quota_refusal",
+    "validation_refusal",
 ]
 
 #: The canonical 503 pool-down message render endpoints and the crawl executor share.
 BROWSER_POOL_MESSAGE = "Browser pool is not initialized; the service is starting up or shutting down."
+
+#: One stable quota message; the varying numbers ride in structured details.
+QUOTA_EXCEEDED_MESSAGE = "Caller quota exceeded; the configured limit was reached."
+
+#: One validation_error message; the raw error text rides in structured details.
+VALIDATION_ERROR_MESSAGE = "Request validation failed"
 
 
 class DomainError(Exception):
@@ -123,8 +132,21 @@ class CookieNamespaceRefusal(DomainError):
 
 
 class QuotaRefusal(DomainError):
-    def __init__(self, message: str) -> None:
-        super().__init__(429, "quota_exceeded", message)
+    def __init__(
+        self, message: str | None = None, *, limit: int | None = None, requested: int | None = None
+    ) -> None:
+        details: JsonValue | None = None
+        if limit is not None and requested is not None:
+            details = {"limit": limit, "requested": requested}
+        super().__init__(429, "quota_exceeded", message or QUOTA_EXCEEDED_MESSAGE, details)
+
+
+def validation_refusal(
+    error: Exception, *, status: int = 422, errors: list[JsonValue] | None = None
+) -> ValidationRefusal:
+    """The one validation_error triplet: stable message, raw text in structured details."""
+    detail: JsonValue = errors if errors is not None else [{"msg": str(error)}]
+    return ValidationRefusal("validation_error", VALIDATION_ERROR_MESSAGE, {"errors": detail}, status=status)
 
 
 def is_quota_refusal(exc: object) -> bool:

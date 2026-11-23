@@ -236,3 +236,23 @@ class TestDiscoveryAndRenderApi:
         )
         response = await validation_exception_handler(request, exc)
         assert response.status_code == 422
+
+    async def test_validation_error_message_is_stable_across_all_doors(self):
+        """One validation_error message with structured errors at every door."""
+        from crawlutron.service import errors as domain_errors
+        from crawlutron.service.error_rendering import ErrorDoor, render_error
+        from crawlutron_rest.api.exceptions import validation_http_error
+
+        error = ValueError("bad-url")
+        from crawlutron.service.errors import VALIDATION_ERROR_MESSAGE
+
+        assert validation_http_error(error).detail == {
+            "code": "validation_error",
+            "message": VALIDATION_ERROR_MESSAGE,
+            "details": {"errors": [{"msg": "bad-url"}]},
+        }
+        for door in ErrorDoor:
+            rendered = render_error(domain_errors.validation_refusal(error), door)
+            assert rendered.message == VALIDATION_ERROR_MESSAGE
+            assert rendered.code == "validation_error"
+            assert rendered.details == {"errors": [{"msg": "bad-url"}]}
