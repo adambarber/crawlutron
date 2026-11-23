@@ -55,6 +55,7 @@ def row_to_state(
             "transient_retries": transient_retries,
             "claimed_by": row["claimed_by"] if "claimed_by" in row.keys() else None,
             "claimed_at": row["claimed_at"] if "claimed_at" in row.keys() else None,
+            "generation": row["generation"] if "generation" in row.keys() else 0,
         },
         host_policy=host_policy,
         tier=tier,

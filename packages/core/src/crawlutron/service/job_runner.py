@@ -370,14 +370,14 @@ async def run_job(
     if job is None:
         return
     try:
-        last_error: StorageError | None = None
+        last_error: StorageError | TimeoutError | None = None
         for _attempt in range(_STORAGE_RETRY_ATTEMPTS):
             try:
                 await _run_job_body(job, job_id, job_store, settings, shutdown_event, fetch_and_decode, token)
                 return
-            except StorageError as exc:
+            except (StorageError, TimeoutError) as exc:
                 last_error = exc
-                if _attempt + 1 == _STORAGE_RETRY_ATTEMPTS:
+                if isinstance(exc, TimeoutError) or _attempt + 1 == _STORAGE_RETRY_ATTEMPTS:
                     break
                 await asyncio.sleep(_STORAGE_RETRY_BACKOFF_SECONDS)
         await pause_for_recovery(

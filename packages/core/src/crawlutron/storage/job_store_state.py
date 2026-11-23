@@ -84,6 +84,7 @@ class CrawlJobRow(TypedDict):
     transient_retries: dict[str, int]
     claimed_by: str | None
     claimed_at: float | None
+    generation: int
 
 
 def _read_claim_fields(data: CrawlJobRow) -> tuple[str | None, float | None]:
@@ -113,6 +114,7 @@ class CrawlJobState:
     # Runner lease: who owns this RUNNING row and when they last renewed it.
     claimed_by: str | None = None
     claimed_at: float | None = None
+    generation: int = 0
     # Whole-site fields (used when kind == WHOLE_SITE)
     frontier: list[FrontierEntry] = field(default_factory=list)
     # The live-only frontier sync: ``frontier_mark`` is the persisted prefix and
@@ -161,6 +163,7 @@ class CrawlJobState:
             status=JobStatus(status),
             claimed_by=claimed_by,
             claimed_at=claimed_at,
+            generation=int(data.get("generation", 0)),
             frontier=frontier,
             visited=normalize_visited(list(data.get("visited", [])), host_policy=host_policy),
             in_flight=normalize_frontier(
@@ -183,13 +186,14 @@ class CrawlJobState:
         return job
 
 
-#: Late-save tombstone defense: a post-tombstone upsert is a no-op, so a racing
-#: late ``save()`` cannot resurrect data columns on a tombstoned row.
+#: Late-write fence: a tombstoned row or a stale generation makes the upsert a
+#: no-op, so an orphaned thread cannot overwrite a terminal row's reason.
 _UPSERT_JOB_ROW_SQL = """
       INSERT INTO crawl_jobs (
           job_id, kind, root_url, policy, status, created_at, updated_at,
-          error, stats, in_flight, transient_retries, owner, claimed_by, claimed_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          error, stats, in_flight, transient_retries, owner, claimed_by, claimed_at,
+          generation
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(job_id) DO UPDATE SET
     kind=excluded.kind,
     root_url=excluded.root_url,
@@ -198,8 +202,9 @@ ON CONFLICT(job_id) DO UPDATE SET
     error=excluded.error,
     stats=excluded.stats,
     in_flight=excluded.in_flight,
-    transient_retries=excluded.transient_retries
-WHERE deleted_at IS NULL
+    transient_retries=excluded.transient_retries,
+    generation=excluded.generation
+WHERE deleted_at IS NULL AND crawl_jobs.generation + 1 = excluded.generation
 """
 
 
@@ -232,6 +237,7 @@ def _job_row_params(job: CrawlJobState) -> tuple[object, ...]:
         job.owner,
         job.claimed_by,
         job.claimed_at,
+        job.generation + 1,
     )
 
 

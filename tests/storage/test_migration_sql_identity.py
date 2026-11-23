@@ -106,6 +106,9 @@ _ADD_COLUMN_SQL: dict[str, list[tuple[str, str, str]]] = {
         ("crawl_jobs", "claimed_by", "claimed_by TEXT"),
         ("crawl_jobs", "claimed_at", "claimed_at REAL"),
     ],
+    "0008_crawl_jobs_add_generation": [
+        ("crawl_jobs", "generation", "generation INTEGER NOT NULL DEFAULT 0"),
+    ],
     "0002_caller_keys_add_previous": [
         ("caller_keys", "previous_hash", "previous_hash TEXT"),
         ("caller_keys", "previous_rotated_at", "previous_rotated_at REAL"),
