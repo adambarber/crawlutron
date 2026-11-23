@@ -104,6 +104,44 @@ def _subject_detector(test_module_rel: str, source_rel: str, function: str) -> A
     )
 
 
+def _subject_detectors() -> tuple[ArmedHandRolled, ...]:
+    """Detectors whose premise is that their subject source module loads."""
+    return (
+        _subject_detector(
+            "test_coordination_cookies_begin_lock.py",
+            "packages/core/src/crawlutron/storage/coordination_cookies.py",
+            "_read_methods_must_use_store_lock",
+        ),
+        _subject_detector(
+            "test_coordination_cookies_begin_lock.py",
+            "packages/core/src/crawlutron/storage/coordination_cookies.py",
+            "_begin_immediate_outside_lock",
+        ),
+        _subject_detector(
+            "test_atwin_store_executor.py",
+            "packages/core/src/crawlutron/storage/coordination_store.py",
+            "_asyncio_to_thread_offenders",
+        ),
+        _subject_detector(
+            "test_atwin_store_executor.py",
+            "packages/core/src/crawlutron/storage/coordination_store.py",
+            "_atwin_executor_offenders",
+        ),
+        _subject_detector(
+            "test_cookie_load_read_only.py",
+            "packages/core/src/crawlutron/storage/coordination_cookies.py",
+            "_load_mutation_offenders",
+        ),
+        _subject_detector("test_challenge_wait_poll.py", _BROWSER, "_raw_sleep_offenders"),
+        _subject_detector("test_challenge_wait_poll.py", _BROWSER, "_too_many_extract_offenders"),
+        _subject_detector(
+            "test_browser_cookie_host_scoping.py",
+            "packages/core/src/crawlutron/transport/browser_cookies.py",
+            "_site_key_offenders",
+        ),
+    )
+
+
 def hand_rolled_detectors() -> tuple[ArmedHandRolled, ...]:
     """Every detector in the suite that no ``Rule`` declares."""
     premises = _premises()
@@ -134,33 +172,4 @@ def hand_rolled_detectors() -> tuple[ArmedHandRolled, ...]:
             ("public-target", "test_registry_targets.py", "public_target_offenders", "public-target"),
         )
     ]
-    chokepoint = [
-        _subject_detector(
-            "test_coordination_cookies_begin_lock.py",
-            "packages/core/src/crawlutron/storage/coordination_cookies.py",
-            "_read_methods_must_use_store_lock",
-        ),
-        _subject_detector(
-            "test_coordination_cookies_begin_lock.py",
-            "packages/core/src/crawlutron/storage/coordination_cookies.py",
-            "_begin_immediate_outside_lock",
-        ),
-        _subject_detector(
-            "test_atwin_store_executor.py",
-            "packages/core/src/crawlutron/storage/coordination_store.py",
-            "_asyncio_to_thread_offenders",
-        ),
-        _subject_detector(
-            "test_atwin_store_executor.py",
-            "packages/core/src/crawlutron/storage/coordination_store.py",
-            "_atwin_executor_offenders",
-        ),
-        _subject_detector(
-            "test_cookie_load_read_only.py",
-            "packages/core/src/crawlutron/storage/coordination_cookies.py",
-            "_load_mutation_offenders",
-        ),
-        _subject_detector("test_challenge_wait_poll.py", _BROWSER, "_raw_sleep_offenders"),
-        _subject_detector("test_challenge_wait_poll.py", _BROWSER, "_too_many_extract_offenders"),
-    ]
-    return (*base, *chokepoint)
+    return (*base, *_subject_detectors())

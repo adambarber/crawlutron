@@ -251,3 +251,60 @@ class TestActionChainIsOneBoundedHold:
             f"{[r.getMessage() for r in caplog.records]!r}"
         )
         assert exhausted[0].__dict__.get("url") == "http://example.com/page"
+
+
+class TestHarvestedCookiesAreHostScoped:
+    """A harvested session replays only to its exact host, over its own scheme."""
+
+    class _Cookies:
+        def __init__(self, cookies):
+            self._cookies = cookies
+
+        async def cookies(self, url):
+            return self._cookies
+
+    def _page(self, cookies):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(context=self._Cookies(cookies))
+
+    async def test_exact_host_replay_survives_registrable_site(self):
+        url = canonical("https://a.tenant.example/login")
+        with isolated_browser_cookies(url):
+            await harvest_session_cookies(self._page([{"name": "sess", "value": "abc"}]), url)
+            assert get_browser_cookies_for(url.host) == "sess=abc"
+
+    async def test_site_keyed_replay_is_dead(self):
+        url = canonical("https://a.tenant.example/login")
+        with isolated_browser_cookies(url) as site:
+            await harvest_session_cookies(self._page([{"name": "sess", "value": "abc"}]), url)
+            assert get_browser_cookies_for(site) is None
+
+    async def test_secure_cookie_never_replays_over_http(self):
+        url = canonical("https://a.tenant.example/login")
+        with isolated_browser_cookies(url):
+            await harvest_session_cookies(
+                self._page([{"name": "secure_tok", "value": "s3cr3t", "secure": True}]),
+                url,
+            )
+            assert get_browser_cookies_for(url.host, scheme="http", path="/login") is None
+            assert get_browser_cookies_for(url.host, scheme="https", path="/login") == "secure_tok=s3cr3t"
+
+    async def test_namespace_isolation_survives_exact_host_keying(self):
+        url = canonical("https://a.tenant.example/login")
+        with isolated_browser_cookies(url):
+            token = COOKIE_NAMESPACE.set("caller-a")
+            try:
+                await harvest_session_cookies(self._page([{"name": "sess", "value": "a-secret"}]), url)
+            finally:
+                COOKIE_NAMESPACE.reset(token)
+            token = COOKIE_NAMESPACE.set("caller-b")
+            try:
+                assert get_browser_cookies_for(url.host) is None
+            finally:
+                COOKIE_NAMESPACE.reset(token)
+            token = COOKIE_NAMESPACE.set("caller-a")
+            try:
+                assert get_browser_cookies_for(url.host) == "sess=a-secret"
+            finally:
+                COOKIE_NAMESPACE.reset(token)
