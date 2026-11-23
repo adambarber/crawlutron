@@ -61,7 +61,7 @@ async def test_reset_ramp_for_quiescence_guards_in_flight() -> None:
     gate, _ = build_gate(_ramp_spec())
     cm, granted = await _live(gate, _GENERAL)
     try:
-        with pytest.raises(AssertionError):
+        with pytest.raises(RuntimeError):
             gate.reset_ramp_for_quiescence()
     finally:
         granted.lease.release()
