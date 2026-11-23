@@ -12,10 +12,26 @@ import sys
 
 from scripts.release._common import _require_env, _run
 
+TAG_TREE_MISMATCH = "release tag does not point at HEAD: refusing to emit roster"
+
+
+def _git_rev_parse(target: str) -> str | None:
+    """The commit a ref names, or None when it cannot be resolved."""
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    result = _run(["git", "rev-parse", target], env=environment)
+    return result.stdout.strip() if result.returncode == 0 else None
+
 
 def main() -> int:
     # Resolve RELEASE_TAG: empty string means "tags at HEAD"
     release_tag = os.environ.get("RELEASE_TAG")
+    if release_tag:
+        # A tag at another commit would publish a roster built from this tree.
+        tagged = _git_rev_parse(f"{release_tag}^{{commit}}")
+        head = _git_rev_parse("HEAD")
+        if tagged is not None and head is not None and tagged != head:
+            print(TAG_TREE_MISMATCH, file=sys.stderr)
+            return 4
 
     # Get released entries (or all roster if RELEASE_TAG not set)
     if release_tag is not None:

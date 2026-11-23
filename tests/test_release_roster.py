@@ -165,7 +165,7 @@ def test_a_manual_retry_can_publish_an_existing_tag_from_the_fixed_workflow() ->
     assert released_job["uses"] == "$/.github/workflows/released.yml"
     called = yaml.safe_load(RELEASED_WORKFLOW_PATH.read_text(encoding="utf-8"))
     roster_step = called["jobs"]["released"]["steps"][0]
-    assert roster_step["with"]["ref"] == "${{ github.sha }}"
+    assert roster_step["with"]["ref"] == "${{ inputs.tag || github.sha }}"
     image_job = workflow_doc["jobs"]["image"]
     assert image_job["steps"][0]["with"]["ref"] == "${{ github.sha }}"
 
