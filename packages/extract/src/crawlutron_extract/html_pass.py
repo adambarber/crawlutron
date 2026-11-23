@@ -59,6 +59,7 @@ class _HTMLExtractor(html_parser.HTMLParser):
         self._limits = limits
         self._stack: list[dict] = []
         self._in_main = 0
+        self._boilerplate_depth = 0
         self._found_main = False
         self._policy = policy
         self._base_url = None
@@ -80,13 +81,15 @@ class _HTMLExtractor(html_parser.HTMLParser):
 
     @property
     def _in_boilerplate(self) -> bool:
-        return any(f["boilerplate"] for f in self._stack)
+        return self._boilerplate_depth > 0
 
     def handle_starttag(self, tag, attrs) -> None:
         attr_dict = {k: (v or "") for k, v in attrs}
         is_boilerplate = tag in _BOILERPLATE_TAGS or _role_is_boilerplate(attr_dict)
         is_main = tag in _MAIN_TAGS or "main" in attr_dict.get("role", "").split()
         self._stack.append({"tag": tag, "boilerplate": is_boilerplate, "main": is_main})
+        if is_boilerplate:
+            self._boilerplate_depth += 1
         if is_main:
             self._in_main += 1
             self._found_main = True
@@ -153,6 +156,8 @@ class _HTMLExtractor(html_parser.HTMLParser):
         if not self._stack:
             return
         frame = self._stack.pop()
+        if frame["boilerplate"]:
+            self._boilerplate_depth -= 1
         if frame["main"]:
             self._in_main -= 1
         if tag == "a":

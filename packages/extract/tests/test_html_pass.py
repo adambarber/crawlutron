@@ -6,6 +6,8 @@ entities, duplicate attributes, null bytes, 5 MB single line, 100k-row table.
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from crawlutron_extract import ExtractLimits, Quality, extract
@@ -57,7 +59,6 @@ def test_link_with_no_text_emits_nothing():
 
 
 def test_block_elements_do_not_concatenate():
-    """Block boundaries separate text; heading and paragraph do not run together."""
     html = b"<h1>Title</h1><p>Read the body.</p>"
     result = extract(html, "text/html")
     assert "TitleRead" not in result.text
@@ -160,9 +161,33 @@ def test_duplicate_attributes_does_not_raise():
 
 
 def test_deep_nesting_does_not_raise():
-    html = b"<div>" * 10000 + b"deep" + b"</div>" * 10000
-    result = extract(html, "text/html")
-    assert "deep" in result.text
+    assert "deep" in extract(b"<div>" * 10000 + b"deep" + b"</div>" * 10000, "text/html").text
+
+
+def test_boilerplate_check_scales_linearly_with_depth():
+    def _time(depth: int) -> float:
+        start = time.perf_counter()
+        extract(b"<div>" * depth + b"deep" + b"</div>" * depth, "text/html")
+        return time.perf_counter() - start
+
+    first = min(_time(2000) for _ in range(3))
+    second = min(_time(4000) for _ in range(3))
+    assert second < 2.8 * first, f"scaled {second / first:.2f}x for 2x depth"
+
+
+def test_boilerplate_edge_cases():
+    assert "inner" not in extract(b"<nav><nav>inner</nav></nav>", "text/html").text
+    assert "child" not in extract(b"<nav><p>child</p></nav>", "text/html").text
+    assert "main text" in extract(b"<nav><main>main text</main></nav>", "text/html").text
+    assert "after" in extract(b"<nav>nav</nav><p>after</p>", "text/html").text
+    result = extract(b'<div role="banner">banner</div><p>ok</p>', "text/html")
+    assert "banner" not in result.text
+    assert "ok" in result.text
+
+
+def test_self_closing_void_tags_do_not_break_counter():
+    assert "text" in extract(b"<br><hr><img src='x'>text", "text/html").text
+    assert "deep" in extract(b"<div><br/></div>deep", "text/html").text
 
 
 def test_unclosed_tags_does_not_raise():
@@ -234,7 +259,6 @@ def test_html_lossy_decode_is_low():
 
 
 def test_html_only_links_text_is_emitted():
-    """A link-only page carries its text as body text, so MEDIUM not LOW."""
     html = b'<a href="https://example.com">Link</a>'
     result = extract(html, "text/html")
     assert "Link" in result.text
@@ -249,7 +273,6 @@ def test_html_body_text_no_main_is_medium():
 
 
 def test_html_main_below_floor_is_medium():
-    # RICH_TEXT_FLOOR is 200; body text at floor-1 with main-content → MEDIUM
     body = "x" * (200 - 1)
     html = f"<main>{body}</main>".encode()
     result = extract(html, "text/html")
@@ -257,7 +280,6 @@ def test_html_main_below_floor_is_medium():
 
 
 def test_html_main_at_floor_is_high():
-    # RICH_TEXT_FLOOR is 200; body text at floor with main-content → HIGH
     body = "x" * 200
     html = f"<main>{body}</main>".encode()
     result = extract(html, "text/html")
@@ -265,7 +287,6 @@ def test_html_main_at_floor_is_high():
 
 
 def test_html_main_above_floor_is_high():
-    # RICH_TEXT_FLOOR is 200; body text at floor+1 with main-content → HIGH
     body = "x" * 201
     html = f"<main>{body}</main>".encode()
     result = extract(html, "text/html")
@@ -273,7 +294,6 @@ def test_html_main_above_floor_is_high():
 
 
 def test_html_main_with_lossy_decode_is_low():
-    # Lossy decode overrides main-content → LOW
     content = b"\xff\xfe" + b"<main>" + b"x" * 300 + b"</main>"
     result = extract(content, "text/html")
     assert result.quality == Quality.LOW
@@ -281,7 +301,6 @@ def test_html_main_with_lossy_decode_is_low():
 
 
 def test_links_collected_inside_boilerplate():
-    """Links in nav/footer are collected document-wide (frontier discovery)."""
     html = (
         b'<nav role="navigation"><a href="/nav-link">Nav link</a></nav>'
         b'<footer><a href="/footer-link">Footer link</a></footer>'
@@ -294,7 +313,6 @@ def test_links_collected_inside_boilerplate():
 
 
 def test_main_inside_boilerplate_extracts_text():
-    """Wikipedia nests <main> inside boilerplate wrappers; text must extract."""
     html = (
         b'<nav role="navigation"><a href="/nav">Nav</a></nav>'
         b'<div role="banner"><main>' + b"x" * 300 + b"</main></div>"
@@ -321,7 +339,6 @@ def test_determinism():
             "https://example.com/ok",
             1,
         ),
-        # protocol-relative URL resolved against base
         (
             b'<a href="//example.com/abs">Protocol-relative</a>',
             "https://example.com/abs",
@@ -357,7 +374,7 @@ def test_links_resolve(html, expected_url, expected_refused):
 def test_links_dedup_by_trailing_slash():
     html = b'<a href="https://example.com/page">A</a><a href="https://example.com/page/">B</a>'
     result = extract(html, "text/html", url="https://example.com/")
-    assert len(result.links) == 2  # /page and /page/ are different URLs
+    assert len(result.links) == 2
 
 
 def test_links_10k_capped_and_steady_memory():
@@ -378,49 +395,41 @@ def test_links_all_refused():
 
 
 def test_strong_emphasis_markdown():
-    """<strong> renders as **bold** in markdown."""
     result = extract(b"<p><strong>bold</strong></p>", "text/html")
     assert "**bold**" in result.markdown
 
 
 def test_em_emphasis_markdown():
-    """<em> renders as *italic* in markdown."""
     result = extract(b"<p><em>italic</em></p>", "text/html")
     assert "*italic*" in result.markdown
 
 
 def test_inline_code_markdown():
-    """<code> renders as `code` in markdown."""
     result = extract(b"<p><code>fmt</code></p>", "text/html")
     assert "`fmt`" in result.markdown
 
 
 def test_nested_emphasis_markdown():
-    """Nested <strong>/<em> nest their markers."""
     result = extract(b"<p><strong>a <em>b</em> c</strong></p>", "text/html")
     assert "**a *b* c**" in result.markdown
 
 
 def test_blockquote_markdown():
-    """<blockquote> renders with a > prefix in markdown."""
     result = extract(b"<blockquote>quoted</blockquote>", "text/html")
     assert "> quoted" in result.markdown
 
 
 def test_image_markdown():
-    """<img> renders as ![alt](src) in markdown."""
     result = extract(b'<img alt="An image" src="https://example.com/img.png">', "text/html")
     assert "![An image](https://example.com/img.png)" in result.markdown
 
 
 def test_horizontal_rule_markdown():
-    """<hr> renders as --- in markdown."""
     result = extract(b"<p>a</p><hr><p>b</p>", "text/html")
     assert "---\n" in result.markdown
 
 
 def test_nested_list_indentation():
-    """Nested list items are indented by two spaces per level."""
     html = b"<ul><li>outer<ul><li>inner</li></ul></li></ul>"
     result = extract(html, "text/html")
     assert "- outer" in result.markdown
@@ -428,14 +437,12 @@ def test_nested_list_indentation():
 
 
 def test_ordered_list_start():
-    """<ol start> begins numbering at the declared value."""
     result = extract(b'<ol start="4"><li>a</li><li>b</li></ol>', "text/html")
     assert "4. a" in result.markdown
     assert "5. b" in result.markdown
 
 
 def test_table_header_row():
-    """<th> cells form a header row with a markdown separator."""
     html = b"<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>"
     result = extract(html, "text/html")
     md = result.markdown
@@ -445,14 +452,12 @@ def test_table_header_row():
 
 
 def test_table_caption():
-    """<caption> text appears in the table markdown."""
     html = b"<table><caption>Summary</caption><tr><td>1</td></tr></table>"
     result = extract(html, "text/html")
     assert "Summary" in result.markdown
 
 
 def test_table_colspan_degraded():
-    """colspan is degraded honestly (repeated cell), never crashes."""
     html = b'<table><tr><td colspan="2">merged</td></tr></table>'
     result = extract(html, "text/html")
     assert isinstance(result.markdown, str)
@@ -460,21 +465,18 @@ def test_table_colspan_degraded():
 
 
 def test_table_rowspan_degraded():
-    """rowspan is degraded honestly, never crashes."""
     html = b'<table><tr><td rowspan="2">spanning</td><td>b</td></tr><tr><td>c</td></tr></table>'
     result = extract(html, "text/html")
     assert isinstance(result.markdown, str)
 
 
 def test_nested_table_refused():
-    """A table inside a cell is flattened with a flag, never crashes."""
     html = b"<table><tr><td><table><tr><td>nested</td></tr></table></td></tr></table>"
     result = extract(html, "text/html")
     assert "nested_table_flattened" in result.flags
 
 
 def test_quality_medium_paths_distinguishable():
-    """Both MEDIUM paths (no-main vs below-floor) are reachable."""
     no_main = extract(b"<p>Some body text without a main content marker.</p>", "text/html")
     assert no_main.quality == Quality.MEDIUM
     below_floor = extract(b"<main>" + b"x" * 199 + b"</main>", "text/html")
@@ -482,7 +484,6 @@ def test_quality_medium_paths_distinguishable():
 
 
 def test_nested_table_preserves_outer_and_inner_content():
-    """A nested table is flattened; the outer table is kept and no cell text dropped (defect 8)."""
     nested_html = (
         b"<table><tr><td>Outer before <table><tr><td>nested</td></tr></table> Outer after</td></tr></table>"
     )
@@ -493,7 +494,6 @@ def test_nested_table_preserves_outer_and_inner_content():
 
 
 def test_rowspan_carries_down_keeps_grid_rectangular():
-    """Rowspan carries content down the spanned rows; grid stays rectangular (defect 9)."""
     html = b'<table><tr><td rowspan="2">spanning</td><td>b</td></tr><tr><td>c</td></tr></table>'
     result = extract(html, "text/html")
     assert "table_grid_degraded" in result.flags
