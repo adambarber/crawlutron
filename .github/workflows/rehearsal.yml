@@ -1,16 +1,6 @@
 name: Rehearsal
 
 on:
-  push:
-    tags:
-      - "v*"
-      - "crawlutron-v*"
-      - "crawlutron-core-v*"
-      - "crawlutron-extract-v*"
-      - "crawlutron-mcp-v*"
-      - "crawlutron-rest-v*"
-      - "crawlutron-safe-url-v*"
-      - "crawlutron-sdk-v*"
   workflow_dispatch:
     inputs:
       tag:
@@ -23,13 +13,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.sha }}
+  group: rehearsal-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
   released:
     name: Resolve the packages this commit released
-    if: ${{ github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' }}
     uses: $/.github/workflows/released.yml
     with:
       tag: ${{ inputs.tag }}

@@ -6,10 +6,13 @@ from pathlib import Path
 import pytest
 
 from tests.chokepoint_paths import REPO_ROOT
+from tests.workflows._model import workflow
 
 RELEASE_WORKFLOW = REPO_ROOT / ".github/workflows/release.yml"
 REHEARSAL_WORKFLOW = REPO_ROOT / ".github/workflows/rehearsal.yml"
+CI_WORKFLOW = REPO_ROOT / ".github/workflows/ci.yml"
 REHEARSAL_SPEC = REPO_ROOT / "docs/REHEARSAL-SPEC.md"
+SHARED_TEST_DOOR = "$/.github/actions/run-tests"
 
 
 def _yaml_section(text: str, job_name: str) -> str:
@@ -63,13 +66,14 @@ class TestAttachParity:
     """Rehearsal twins use the same entrypoints, needs edges, and env contract."""
 
     @pytest.mark.parametrize(
-        ("release_job", "rehearsal_twin", "entrypoint", "needs_edges", "env_contract"),
+        ("release_job", "rehearsal_twin", "entrypoint", "door_source", "needs_edges", "env_contract"),
         [
-            ("ci", "ci", "", ["released"], {}),
+            ("ci", "ci", SHARED_TEST_DOOR, CI_WORKFLOW, ["released"], {}),
             (
                 "install-graph",
                 "install-graph",
                 "scripts.release.install_graph",
+                REHEARSAL_SPEC,
                 ["released"],
                 {"NAME": "", "VERSION": ""},
             ),
@@ -80,19 +84,20 @@ class TestAttachParity:
         release_job: str,
         rehearsal_twin: str,
         entrypoint: str,
+        door_source: Path,
         needs_edges: list[str],
         env_contract: dict[str, str],
     ) -> None:
-        """Each twin exists and preserves the production job's needs edges."""
+        """Each twin invokes the same frozen door and preserves needs edges."""
         release_text = _read_yml(RELEASE_WORKFLOW)
         rehearsal_text = _read_yml(REHEARSAL_WORKFLOW)
         assert release_text, "Release workflow is empty"
         assert release_job in release_text, f"Release job '{release_job}' missing"
         assert rehearsal_twin in _job_names(rehearsal_text), f"Rehearsal twin '{rehearsal_twin}' missing"
-        if entrypoint:
-            spec = REHEARSAL_SPEC.read_text()
-            assert entrypoint in spec, f"Entrypoint '{entrypoint}' not frozen in the spec"
-            assert entrypoint in rehearsal_text, f"Entrypoint '{entrypoint}' not in rehearsal.yml"
+        assert entrypoint in door_source.read_text(), (
+            f"Entrypoint '{entrypoint}' not frozen in {door_source.name}"
+        )
+        assert entrypoint in rehearsal_text, f"Entrypoint '{entrypoint}' not in rehearsal.yml"
         twin = _yaml_section(rehearsal_text, rehearsal_twin)
         for edge in needs_edges:
             assert f"needs: [{edge}" in twin, f"Rehearsal job '{rehearsal_twin}' missing needs edge '{edge}'"
@@ -122,18 +127,16 @@ class TestImageJob:
             assert action not in text, f"Rehearsal must not run '{action}'"
 
 
-# Test 3: the tag glob set is identical in both adapters.
+# Test 3: release owns the tag globs; rehearsal is dispatch-only.
 class TestPrPathContract:
-    """Both adapters declare the same full set of release tag globs."""
+    """Release declares the tag globs; rehearsal declares none."""
 
-    def test_release_globs_declared_in_both_workflows(self) -> None:
-        """Rehearsal mirrors every release tag glob."""
+    def test_release_globs_declared_only_in_release(self) -> None:
+        """Tag pushes enter through release.yml, never through rehearsal."""
         release_globs = _tag_globs(_read_yml(RELEASE_WORKFLOW))
         rehearsal_globs = _tag_globs(_read_yml(REHEARSAL_WORKFLOW))
         assert release_globs, "release.yml declares no tag globs"
-        assert release_globs == rehearsal_globs, (
-            f"Tag globs differ: release={release_globs}, rehearsal={rehearsal_globs}"
-        )
+        assert not rehearsal_globs, f"rehearsal must not declare tag globs: {rehearsal_globs}"
 
     def test_globs_cover_declared_set_in_spec(self) -> None:
         """The frozen spec declares the release glob vocabulary."""
@@ -205,11 +208,32 @@ class TestOwnersAndPosture:
     def test_codeowners_contains_rehearsal_and_release(self) -> None:
         """Both release adapters have a named owner."""
         text = (REPO_ROOT / ".github/CODEOWNERS").read_text()
-        for workflow in ("rehearsal.yml", "release.yml"):
-            assert workflow in text, f"CODEOWNERS missing '{workflow}'"
+        for filename in ("rehearsal.yml", "release.yml"):
+            assert filename in text, f"CODEOWNERS missing '{filename}'"
 
     def test_zizmor_keeps_permission_audit_enabled(self) -> None:
         """zizmor keeps its default excessive-permissions audit enabled."""
         text = (REPO_ROOT / ".github/zizmor.yml").read_text()
         assert "posture:" not in text, "zizmor has no posture rule"
         assert "disable: true" not in text, "no zizmor audit may be disabled"
+
+
+# Test 7: rehearsal is isolated from release on triggers and concurrency.
+class TestRehearsalIsolation:
+    """Rehearsal is dispatch-only and never shares release's concurrency group."""
+
+    def test_rehearsal_triggers_only_on_dispatch(self) -> None:
+        """No tag push can start a rehearsal run."""
+        assert set(workflow("rehearsal").on_) == {"workflow_dispatch"}
+
+    def test_rehearsal_group_cannot_collide_with_release(self) -> None:
+        """The two adapters serialize on distinct groups."""
+        rehearsal = workflow("rehearsal").concurrency
+        release = workflow("release").concurrency
+        assert isinstance(rehearsal, dict) and isinstance(release, dict)
+        assert str(rehearsal["group"]).startswith("rehearsal-")
+        assert rehearsal["group"] != release["group"]
+
+    def test_rehearsal_released_job_has_no_dead_if(self) -> None:
+        """The tautological trigger guard is absent on dispatch-only rehearsal."""
+        assert workflow("rehearsal").jobs["released"].if_ is None
