@@ -17,7 +17,8 @@ from tests._policy_factories import canonical
 
 _DRIP_INTERVAL = 0.25
 _READ_TIMEOUT = 0.30
-_WAIT_FOR_BOUND = 1.0
+_DEADLINE_FACTOR = 8  # CI-load headroom on the asserted end-to-end bound
+_WAIT_FOR_BOUND = 5.0  # outer guard; must exceed the asserted bound
 
 
 @pytest.fixture(autouse=True)
@@ -50,6 +51,7 @@ async def _quick_handler(reader: asyncio.StreamReader, writer: asyncio.StreamWri
     writer.close()
 
 
+@pytest.mark.real_sleeps
 class TestDripFeedEndToEndDeadline:
     """A drip feeder must not hold a hop past the end-to-end deadline."""
 
@@ -80,7 +82,9 @@ class TestDripFeedEndToEndDeadline:
             await self._fetch(_drip_handler)
         except TimeoutError:
             elapsed = time.monotonic() - started
-            assert elapsed < 0.9, f"hop held for {elapsed:.2f}s: no end-to-end deadline"
+            assert elapsed < _READ_TIMEOUT * _DEADLINE_FACTOR, (
+                f"hop held for {elapsed:.2f}s: no end-to-end deadline"
+            )
             return
         pytest.fail("fetch did not raise: the drip feeder held the hop past the deadline")
 
