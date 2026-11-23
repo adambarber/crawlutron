@@ -120,18 +120,23 @@ async def crawl_batches(
             return
         page_count_before = state.page_count
         allowed_jobs = await stages.start_runner(run, state, metrics)
-        if not allowed_jobs and stall_guard.stalled():
-            if run.spill is not None:
-                await fail_remaining_frontier(run, state.frontier)
-            return
-        if not allowed_jobs:
-            # Zero-admission pass: back off meaningfully -- never hot-spin the gates.
-            await asyncio.sleep(_ZERO_ADMISSION_BACKOFF_SECONDS)
-            continue
-        scheduled_results = await stages.crawl_batch(run, allowed_jobs)
-        await stages.commit_batch(run, state, allowed_jobs, scheduled_results)
-        if state.page_count > page_count_before:
-            stall_guard.record_progress()
+        try:
+            if not allowed_jobs and stall_guard.stalled():
+                if run.spill is not None:
+                    await fail_remaining_frontier(run, state.frontier)
+                return
+            if not allowed_jobs:
+                # Zero-admission pass: back off meaningfully -- never hot-spin the gates.
+                await asyncio.sleep(_ZERO_ADMISSION_BACKOFF_SECONDS)
+                continue
+            scheduled_results = await stages.crawl_batch(run, allowed_jobs)
+            await stages.commit_batch(run, state, allowed_jobs, scheduled_results)
+            if state.page_count > page_count_before:
+                stall_guard.record_progress()
+        finally:
+            release = getattr(allowed_jobs, "release_lease", None)
+            if release is not None:
+                await release()
 
 
 __all__ = [

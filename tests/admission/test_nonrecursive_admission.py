@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from crawlutron.orchestration import request_pipeline
+from crawlutron.orchestration import resource_governor as rg
 from crawlutron.runtime.pressure_sizing import AdmissionPolicy, TaskRamBudget
 from crawlutron_admit import AdmissionGate, LaneId, Want
 from crawlutron_admit.sensing.pressure_gates import ResourceGate
@@ -26,10 +26,9 @@ class _RecordingGate:
 
 
 async def _admission_spy(monkeypatch):
-    """Wrap the gate the sync path builds and capture each admit's want, via the
-    public ``request_pipeline.build_admission_gate`` door -- no private name."""
+    """Wrap the gate the shared governor builds and capture each admit's want."""
     admits: list[tuple[int, int]] = []
-    original_build = request_pipeline.build_admission_gate
+    original_build = rg.build_admission_gate
 
     def spy_build(
         gate: ResourceGate, policy: AdmissionPolicy, budget: TaskRamBudget | None = None
@@ -37,7 +36,7 @@ async def _admission_spy(monkeypatch):
         real = original_build(gate, policy, budget)
         return _RecordingGate(admits, real)
 
-    monkeypatch.setattr(request_pipeline, "build_admission_gate", spy_build)
+    monkeypatch.setattr(rg, "build_admission_gate", spy_build)
     return admits
 
 

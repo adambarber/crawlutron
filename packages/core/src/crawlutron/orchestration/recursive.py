@@ -6,6 +6,7 @@ import asyncio
 import logging
 from collections import deque
 from collections.abc import Awaitable, Callable
+from contextlib import AsyncExitStack
 from dataclasses import dataclass, field, replace
 from typing import Protocol, cast
 
@@ -23,14 +24,17 @@ from crawlutron.orchestration.admission_stall import (
     crawl_batches,
     spill_result,
 )
+from crawlutron.orchestration.resource_governor import (
+    ResourceGovernor,
+    build_resource_governor,
+)
 from crawlutron.runtime.metrics import MetricsStore, get_metrics
-from crawlutron.runtime.pressure_sizing import build_admission_gate
 from crawlutron.storage.result_store import CrawlSpillStore
 from crawlutron.transport.results import failed_result_for
 from crawlutron.transport.scheduler import DomainScheduler
 from crawlutron.vocabulary.strategies import BROWSER_STRATEGIES
 from crawlutron.vocabulary.taxonomy import is_transient_classification
-from crawlutron_admit import AdmissionGate, AdmissionRefused, Count, LaneId, Want
+from crawlutron_admit import AdmissionRefused, Count, LaneId, Want
 from crawlutron_admit.sensing.pressure_gates import ResourceGate
 from safe_url.host_policy import HostPolicy
 from safe_url.normalized_url import NormalizedUrl
@@ -44,6 +48,18 @@ MAX_TRANSIENT_REQUEUES = 3
 
 # One admitted item: (depth, task), named once so stage boundaries reference it.
 type _Admitted = tuple[int, CrawlTask]
+
+
+class _LeasedBatch(list[_Admitted]):
+    """A selected batch whose admission lease stays live until its work ends."""
+
+    def __init__(self, jobs: list[_Admitted], stack: AsyncExitStack) -> None:
+        super().__init__(jobs)
+        self.stack = stack
+
+    async def release_lease(self) -> None:
+        """Close the lease after the crawl stage consumed this batch."""
+        await self.stack.aclose()
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,7 +87,7 @@ class CrawlRun:
     global_concurrency: int
     seed_sitemaps: bool
     resource_gate: ResourceGate
-    admission: AdmissionGate
+    admission: ResourceGovernor
     host_policy: HostPolicy
     robots_timeout_seconds: float = 30.0
 
@@ -147,14 +163,16 @@ async def admit_recursive_batch(
     metrics: MetricsStore,
 ) -> list[_Admitted]:
     """Resource-gate the frontier, then robots-filter whatever survived."""
-    return await _robots_admitted_batch(run, state, await _resource_admitted_batch(run, state, metrics))
+    admitted = await _resource_admitted_batch(run, state, metrics)
+    selected = await _robots_admitted_batch(run, state, admitted)
+    return _LeasedBatch(selected, admitted.stack)
 
 
 async def _resource_admitted_batch(
     run: CrawlRun,
     state: CrawlState,
     metrics: MetricsStore,
-) -> list[_Admitted]:
+) -> _LeasedBatch:
     """Size the batch in the one admission authority, then select from the frontier."""
     metrics.resource_memory_utilization = run.resource_gate.memory_ratio()
     metrics.resource_cpu_utilization = run.resource_gate.cpu_ratio()
@@ -162,20 +180,22 @@ async def _resource_admitted_batch(
     take = len(state.frontier) if remaining is None else min(len(state.frontier), remaining)
     http_items, browser_items = _take_and_bucket(state.frontier, run.scheduler, take)
     want = Want.of(general=Count(len(http_items)), heavy=Count(len(browser_items)))
+    stack = AsyncExitStack()
     try:
-        async with run.admission.admit(want) as granted:
-            admit_http = granted.allocation.for_lane(LaneId.GENERAL).value
-            admit_browser = granted.allocation.for_lane(LaneId.HEAVY).value
-            if granted.scale.value < 1.0:
-                await metrics.record_throttle()
+        granted = await stack.enter_async_context(run.admission.admit(want))
+        admit_http = granted.allocation.for_lane(LaneId.GENERAL).value
+        admit_browser = granted.allocation.for_lane(LaneId.HEAVY).value
+        if granted.scale.value < 1.0:
+            await metrics.record_throttle()
     except AdmissionRefused:
+        await stack.aclose()
         admit_http = admit_browser = 0
         await metrics.record_throttle()
     selected = http_items[:admit_http] + browser_items[:admit_browser]
     excess = http_items[admit_http:] + browser_items[admit_browser:]
     for item in reversed(excess):
         state.frontier.appendleft(item)
-    return selected
+    return _LeasedBatch(selected, stack)
 
 
 def _engine_envelope(job: CrawlTask, exc: BaseException) -> EngineCrawlResult:
@@ -373,7 +393,7 @@ async def run_recursive_crawl(
     global_concurrency: int,
     seed_sitemaps: bool,
     resource_gate: ResourceGate,
-    admission: AdmissionGate | None = None,
+    admission: ResourceGovernor | None = None,
     host_policy: HostPolicy,
     robots_timeout_seconds: float = 30.0,
     stall_guard: AdmissionStallGuard | None = None,
@@ -396,7 +416,7 @@ async def run_recursive_crawl(
         global_concurrency=global_concurrency,
         seed_sitemaps=seed_sitemaps,
         resource_gate=resource_gate,
-        admission=admission or build_admission_gate(resource_gate),
+        admission=admission or build_resource_governor(resource_gate),
         host_policy=host_policy,
         robots_timeout_seconds=robots_timeout_seconds,
     )

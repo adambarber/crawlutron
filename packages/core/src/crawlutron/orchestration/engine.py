@@ -26,6 +26,11 @@ from crawlutron.orchestration.request_pipeline import (
     PipelineState,
     run_crawl_request,
 )
+from crawlutron.orchestration.resource_governor import (
+    build_resource_governor,
+    install_resource_governor,
+    resource_governor,
+)
 from crawlutron.runtime import process_state
 from crawlutron.storage.result_store import CrawlSpillStore
 from crawlutron.transport import robots as _robots_policy
@@ -260,6 +265,9 @@ def _pipeline_dependencies(
     resource_gate: ResourceGate | None,
 ) -> PipelineDependencies:
     """The process-wide dependencies a crawl binds: shared caches and gate."""
+    if resource_gate is not None:
+        # An explicitly injected gauge is a test seam: size the one governor from it.
+        install_resource_governor(build_resource_governor(resource_gate))
     return PipelineDependencies(
         get_content_cache=shared_content_cache,
         compile_scope_regex_safe=compile_scope_pattern,
@@ -267,6 +275,7 @@ def _pipeline_dependencies(
         fetch_and_decode=fetch_and_decode,
         shared_http_cache=shared_http_cache(),
         resource_gate=resource_gate if resource_gate is not None else _resource_gate,
+        resource_governor=resource_governor(),
     )
 
 

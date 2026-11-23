@@ -20,11 +20,9 @@ from crawlutron.models.crawl_task import CrawlTask
 from crawlutron.models.crawl_worker import CrawlWorker
 from crawlutron.models.taxonomy import Classification
 from crawlutron.orchestration.recursive import run_recursive_crawl
+from crawlutron.orchestration.resource_governor import ResourceGovernor
 from crawlutron.orchestration.strategy_chain import execute_crawl_chain
 from crawlutron.runtime.pressure_sizing import (
-    TaskRamBudget,
-    build_admission_gate,
-    build_admission_policy,
     derive_browser_pool_size,
     doc_worker_count,
     kernel_admit,
@@ -44,7 +42,6 @@ from crawlutron.transport.results import (
 from crawlutron.transport.robots import FetchAndDecode, RobotsRules
 from crawlutron.transport.scheduler import DomainScheduler
 from crawlutron.vocabulary.strategies import BROWSER_STRATEGIES
-from crawlutron_admit import AdmissionGate
 from crawlutron_admit.sensing.pressure_gates import ResourceGate
 from crawlutron_admit.sensing.pressure_memory import read_memory_stats
 from safe_url.host_policy import HostPolicy
@@ -70,6 +67,7 @@ class PipelineDependencies:
     fetch_and_decode: FetchAndDecode | None
     shared_http_cache: HttpCache
     resource_gate: ResourceGate
+    resource_governor: ResourceGovernor
 
 
 @dataclass
@@ -292,21 +290,9 @@ async def _spill_one(state: PipelineState, index: int, result: EngineCrawlResult
     await state.spill.aput(state.request_id, index, result)
 
 
-def _build_admission(state: PipelineState) -> AdmissionGate:
-    """The kernel admission gate for one crawl, shared by both the
-    recursive and non-recursive paths so they cannot drift on the same bound.
-    """
-    budget = TaskRamBudget(doc_workers=doc_worker_count())
-    return build_admission_gate(
-        state.dependencies.resource_gate,
-        build_admission_policy(
-            read_memory_stats().total_bytes or 0,
-            pool_size=derive_browser_pool_size(),
-            max_concurrent_pages=state.settings.max_concurrent_pages,
-            budget=budget,
-        ),
-        budget=budget,
-    )
+def _build_admission(state: PipelineState) -> ResourceGovernor:
+    """The injected shared governor -- one process pool, never a per-crawl copy."""
+    return state.dependencies.resource_governor
 
 
 def _bucket_tasks_by_tier(
@@ -350,29 +336,32 @@ async def _dispatch_paced(
 
     while remaining:
         http_jobs, browser_jobs = _bucket_tasks_by_tier(scheduler, remaining, state.policy)
-        admit_http, admit_browser = await kernel_admit(admission, len(http_jobs), len(browser_jobs))
-        take_http = http_jobs[:admit_http] if admit_http else []
-        take_browser = browser_jobs[:admit_browser] if admit_browser else []
-        # The kernel grants a floor >= 1 whenever a lane fits; an empty grant is
-        # a terminal OVERSIZE. Dispatch the head job so the batch drains.
-        if not take_http and not take_browser and remaining:
-            if http_jobs:
-                take_http = http_jobs[:1]
-            else:
-                take_browser = browser_jobs[:1]
-        chunk = take_http + take_browser
-        remaining = http_jobs[len(take_http) :] + browser_jobs[len(take_browser) :]
-        await scheduler.run(
-            chunk,
-            lambda job: _worker(state, job),
-            on_result=_spill_tracked,
-            failed_result=lambda job, exc: engine_result_from_exception(
-                error=exc,
-                original_url=job.original_url,
-                normalized_url=job.normalized_url,
-                strategy=None,
-            ),
-        )
+        async with kernel_admit(admission, len(http_jobs), len(browser_jobs)) as (
+            admit_http,
+            admit_browser,
+        ):
+            take_http = http_jobs[:admit_http] if admit_http else []
+            take_browser = browser_jobs[:admit_browser] if admit_browser else []
+            # The kernel grants a floor >= 1 whenever a lane fits; an empty grant is
+            # a terminal OVERSIZE. Dispatch the head job so the batch drains.
+            if not take_http and not take_browser and remaining:
+                if http_jobs:
+                    take_http = http_jobs[:1]
+                else:
+                    take_browser = browser_jobs[:1]
+            chunk = take_http + take_browser
+            remaining = http_jobs[len(take_http) :] + browser_jobs[len(take_browser) :]
+            await scheduler.run(
+                chunk,
+                lambda job: _worker(state, job),
+                on_result=_spill_tracked,
+                failed_result=lambda job, exc: engine_result_from_exception(
+                    error=exc,
+                    original_url=job.original_url,
+                    normalized_url=job.normalized_url,
+                    strategy=None,
+                ),
+            )
     state.delivery_failures = delivery_failures
 
 

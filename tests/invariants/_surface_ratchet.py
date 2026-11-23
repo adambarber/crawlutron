@@ -256,6 +256,8 @@ DECLARED_SURFACE_RATCHET = {
     "packages/core/src/crawlutron/orchestration/admission_stall.py": (6, 4),
     "packages/core/src/crawlutron/orchestration/recursive.py": (9, 6),
     "packages/core/src/crawlutron/orchestration/request_pipeline.py": (5, 3),
+    # #1023: the one injected admission governor; a future coordinator swaps in here.
+    "packages/core/src/crawlutron/orchestration/resource_governor.py": (4, 4),
     "packages/core/src/crawlutron/transport/robots_parse.py": (6, 6),
     "packages/core/src/crawlutron/orchestration/strategy_chain.py": (4, 2),
     "packages/core/src/crawlutron/runtime/worker_dispatch.py": (1, 1),

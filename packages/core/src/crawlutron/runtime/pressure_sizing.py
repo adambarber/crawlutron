@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import AsyncGenerator, Callable
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from crawlutron.config.env import get_env_float, get_env_int
 from crawlutron.runtime.admit_sensing import register as register_admission_sensing
@@ -39,6 +40,9 @@ from crawlutron_admit.sensing.pressure_memory import read_memory_stats
 from crawlutron_admit.sensing.pressure_probes import LoopLagProbe, read_cpu_quota, read_cpu_usage_seconds
 
 register_admission_sensing()
+
+if TYPE_CHECKING:
+    from crawlutron.orchestration.resource_governor import ResourceGovernor
 
 __all__ = [
     "CpuGate",
@@ -413,17 +417,22 @@ def build_admission_gate(
     )
 
 
-async def kernel_admit(gate: AdmissionGate, want_http: int, want_browser: int) -> tuple[int, int]:
-    """Admit a batch through the kernel gate; a refusal (OVERSIZE) yields (0, 0).
-    The kernel parks internally under pressure and grants a floor >= 1."""
+@asynccontextmanager
+async def kernel_admit(
+    governor: ResourceGovernor, want_http: int, want_browser: int
+) -> AsyncGenerator[tuple[int, int]]:
+    """Hold the admission lease across the caller's work; refusal yields (0, 0)."""
     if want_http + want_browser < 1:
-        return 0, 0
+        yield 0, 0
+        return
     want = Want.of(general=Count(want_http), heavy=Count(want_browser))
-    try:
-        async with gate.admit(want) as granted:
-            return (
-                granted.allocation.for_lane(LaneId.GENERAL).value,
-                granted.allocation.for_lane(LaneId.HEAVY).value,
-            )
-    except AdmissionRefused:
-        return 0, 0
+    async with AsyncExitStack() as stack:
+        try:
+            granted = await stack.enter_async_context(governor.admit(want))
+        except AdmissionRefused:
+            yield 0, 0
+            return
+        yield (
+            granted.allocation.for_lane(LaneId.GENERAL).value,
+            granted.allocation.for_lane(LaneId.HEAVY).value,
+        )

@@ -10,6 +10,7 @@ from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.orchestration.request_pipeline import PipelineDependencies, PipelineState, build_jobs
+from crawlutron.orchestration.resource_governor import resource_governor
 from crawlutron.storage.result_store import CrawlSpillStore
 from crawlutron.transport.cache import HttpCache
 from crawlutron.transport.content_cache import ContentCache
@@ -109,6 +110,7 @@ class TestBuildJobsConsumesPairs:
                 fetch_and_decode=None,
                 shared_http_cache=HttpCache(),
                 resource_gate=_idle_gate(),  # nothing fires
+                resource_governor=resource_governor(),
             ),
         )
         jobs = build_jobs(state)
