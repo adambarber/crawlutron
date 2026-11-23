@@ -60,6 +60,37 @@ def _add_trigger(bundle: Bundle, stem: str, trigger: str) -> Bundle:
     return _replace_workflow(bundle, stem, item.model_copy(update={"on_": {**item.on_, trigger: {}}}))
 
 
+def _set_fail_fast(bundle: Bundle) -> Bundle:
+    release = _workflow(bundle, "release")
+    jobs = {
+        key: (
+            job.model_copy(update={"strategy": job.strategy.model_copy(update={"fail_fast": True})})
+            if job.strategy and job.strategy.matrix
+            else job
+        )
+        for key, job in release.jobs.items()
+    }
+    return _replace_workflow(bundle, "release", release.model_copy(update={"jobs": jobs}))
+
+
+def _drop_validation_gate(bundle: Bundle) -> Bundle:
+    release = _workflow(bundle, "release")
+    validator = next(
+        job
+        for job in release.jobs.values()
+        if any(step.run and "scripts.release.validate_all" in step.run for step in job.steps)
+    )
+    publisher = next(
+        job
+        for job in release.jobs.values()
+        if any(step.uses and "gh-action-pypi-publish" in step.uses for step in job.steps)
+    )
+    needs = tuple(need for need in publisher.needs if need != validator.key)
+    jobs = dict(release.jobs)
+    jobs[publisher.key] = publisher.model_copy(update={"needs": needs})
+    return _replace_workflow(bundle, "release", release.model_copy(update={"jobs": jobs}))
+
+
 def _mutate_job_step(bundle: Bundle, stem: str, key: str, needle: str, **changes) -> Bundle:
     item = _workflow(bundle, stem)
     job = item.jobs[key]
@@ -200,6 +231,8 @@ MUTATIONS = (
     ),
     (RuleId.CI_NO_DIRECT_CODECOV, _add_direct_codecov, "directly to Codecov"),
     (RuleId.RELEASE_TRIGGERS, lambda b: _add_trigger(b, "release", "workflow_run"), "push and dispatch"),
+    (RuleId.RELEASE_NO_FAIL_FAST_MATRIX, _set_fail_fast, "fail-fast"),
+    (RuleId.RELEASE_VALIDATE_BEFORE_UPLOAD, _drop_validation_gate, "not gated on validate_all"),
 )
 
 

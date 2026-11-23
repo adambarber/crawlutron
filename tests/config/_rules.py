@@ -31,7 +31,9 @@ from tests.config._workflow_rules import (
     ci_supply_chain_jobs,
     packaging_triggers,
     packaging_verify_steps,
+    release_no_fail_fast_matrix,
     release_triggers,
+    release_validate_before_upload,
 )
 from tests.workflows._model import WORKFLOWS
 
@@ -81,4 +83,14 @@ RULES: tuple[Rule, ...] = (
     ),
     Rule(RuleId.CI_NO_DIRECT_CODECOV, "only coverage reports to Codecov", ci_no_direct_codecov),
     Rule(RuleId.RELEASE_TRIGGERS, "release fires only on named tags and dispatch", release_triggers),
+    Rule(
+        RuleId.RELEASE_NO_FAIL_FAST_MATRIX,
+        "a cancelled roster leg cannot leave a partial version set",
+        release_no_fail_fast_matrix,
+    ),
+    Rule(
+        RuleId.RELEASE_VALIDATE_BEFORE_UPLOAD,
+        "no upload until every artifact clears the roster gate",
+        release_validate_before_upload,
+    ),
 )
