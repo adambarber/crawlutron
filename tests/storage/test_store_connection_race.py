@@ -108,6 +108,10 @@ def test_setup_refuses_a_peer_that_never_releases(monkeypatch) -> None:
         def __init__(self) -> None:
             self.timeouts: list[int] = []
             self.attempts = 0
+            self.progress_handler = None
+
+        def set_progress_handler(self, handler, n: int) -> None:
+            self.progress_handler = handler
 
         def execute(self, statement: str):
             if statement.startswith("PRAGMA busy_timeout="):
@@ -128,6 +132,48 @@ def test_setup_refuses_a_peer_that_never_releases(monkeypatch) -> None:
 
     assert sleeps == [], "a spent deadline must not buy another backoff sleep"
     assert stub.timeouts == [5000, 500, 5000], stub.timeouts
+
+
+def test_stalled_wal_conversion_refused_within_budget(monkeypatch) -> None:
+    """A stalled WAL conversion is refused within the wal_retry_seconds budget."""
+    timeline = Timeline(1000.0)
+    sleeps: list[float] = []
+    wal_retry_seconds = 0.5
+    quantum = 0.005  # one progress-handler tick may advance the clock past the deadline
+
+    class _StalledConnection:
+        isolation_level = None
+
+        def __init__(self) -> None:
+            self.timeouts: list[int] = []
+            self.progress_handler = None
+
+        def set_progress_handler(self, handler, n: int) -> None:
+            self.progress_handler = handler
+
+        def execute(self, statement: str):
+            if statement.startswith("PRAGMA busy_timeout="):
+                self.timeouts.append(int(statement.rsplit("=", 1)[1]))
+                return self
+            # Simulate a busy wait that ignores busy_timeout; it yields only when
+            # the progress handler aborts at the deadline.
+            if self.progress_handler is None:
+                timeline.advance(10.0)
+            else:
+                while self.progress_handler() == 0:
+                    timeline.advance(0.005)
+            raise sqlite3.OperationalError("database is locked")
+
+    stub = _StalledConnection()
+    conn = cast(sqlite3.Connection, stub)
+    monkeypatch.setattr(sqlite_store, "time", SimpleNamespace(monotonic=timeline, sleep=sleeps.append))
+
+    started = timeline()
+    with pytest.raises(sqlite3.OperationalError, match="locked"):
+        configure_store_connection(conn, busy_timeout_ms=5000, wal_retry_seconds=0.5)
+
+    assert timeline() - started <= wal_retry_seconds + quantum, f"overshot budget: {timeline() - started}s"
+    assert sleeps == [], "no backoff sleep past the deadline"
 
 
 def test_already_wal_database_is_never_written(tmp_path):
