@@ -97,7 +97,9 @@ async def _construct_http_result(
     extracted: ExtractedHttpContent,
 ) -> EngineCrawlResult:
     """Run discovery shaping and construct the successful strategy result."""
-    classification, classification_evidence, revalidated_304 = _classify_http_content(ctx, resp, extracted)
+    classification, classification_evidence, revalidated_304 = await _classify_http_content(
+        ctx, resp, extracted
+    )
     status = status_for_classification(classification)
     diagnostics: CrawlDiagnostics = {
         "decompression_failed": extracted.strategy_decompression_failed or resp.decompression_failed,
@@ -151,7 +153,7 @@ async def _construct_http_result(
     )
 
 
-def _classify_http_content(
+async def _classify_http_content(
     ctx: HttpStrategyContext,
     resp: FetchedResponse,
     extracted: ExtractedHttpContent,
@@ -161,7 +163,7 @@ def _classify_http_content(
     The 304 re-serves the cached body, so it is not a fresh render: kept
     content lets WatchSweeper diff, not fire a webhook.
     """
-    classification, classification_evidence = classify_extracted_content(ctx, resp, extracted)
+    classification, classification_evidence = await classify_extracted_content(ctx, resp, extracted)
     if ctx.revalidated_304:
         return Classification.not_modified, [], True
     return classification, classification_evidence, False

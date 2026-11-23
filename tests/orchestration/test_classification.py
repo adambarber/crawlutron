@@ -9,10 +9,10 @@ from crawlutron.vocabulary.taxonomy import (
 )
 
 
-def test_single_soft_phrase_does_not_classify():
+async def test_single_soft_phrase_does_not_classify():
     """A benign page mentioning one phrase must stay rendered."""
     assert (
-        classify_page(
+        await classify_page(
             "<html><body>Sorry, too many requests. Enjoy the rest of our site.</body></html>",
             None,
         )
@@ -20,43 +20,43 @@ def test_single_soft_phrase_does_not_classify():
     )
 
 
-def test_corroborated_soft_phrases_classify():
+async def test_corroborated_soft_phrases_classify():
     html = "<html><title>429 Too Many Requests</title><body>rate limit exceeded</body></html>"
-    assert classify_page(html, "rate limit exceeded", title="429 Too Many Requests") == "rate_limited"
+    assert await classify_page(html, "rate limit exceeded", title="429 Too Many Requests") == "rate_limited"
 
 
-def test_structural_cloudflare_marker_in_script_is_detected():
+async def test_structural_cloudflare_marker_in_script_is_detected():
     html = "<html><head><script>window._cf_chl_opt = {};</script></head><body>ok</body></html>"
-    assert classify_page(html, "ok") == "bot_challenge_detected"
+    assert await classify_page(html, "ok") == "bot_challenge_detected"
 
 
-def test_captcha_plumbing_marker():
-    assert classify_page('<form><div class="g-recaptcha" data-sitekey="x"></div></form>', "") == (
+async def test_captcha_plumbing_marker():
+    assert await classify_page('<form><div class="g-recaptcha" data-sitekey="x"></div></form>', "") == (
         "captcha_detected"
     )
 
 
-def test_access_denied_with_login_prompt_still_login_wall():
+async def test_access_denied_with_login_prompt_still_login_wall():
     # Two distinct signals corroborate; top-priority (login_required) wins.
-    assert classify_page(None, "Access denied - please sign in to continue") == "login_required"
+    assert await classify_page(None, "Access denied - please sign in to continue") == "login_required"
 
 
-def test_benign_stays_rendered():
-    assert classify_page("<html><body>Welcome to our site</body></html>", "Welcome to our site") == (
+async def test_benign_stays_rendered():
+    assert await classify_page("<html><body>Welcome to our site</body></html>", "Welcome to our site") == (
         "rendered"
     )
 
 
-def test_classify_unchanged_after_refactor():
+async def test_classify_unchanged_after_refactor():
     from crawlutron.extraction.classify import classify_page
 
     # spoof attempt still neutralized
     assert (
-        classify_page("<!-- access denied --><body>Welcome to our site</body>", "Welcome to our site")
+        await classify_page("<!-- access denied --><body>Welcome to our site</body>", "Welcome to our site")
         == "rendered"
     )
     # visible block phrase (hard classification) detected
-    assert classify_page("<body>access denied</body>", "access denied") == "access_denied"
+    assert await classify_page("<body>access denied</body>", "access denied") == "access_denied"
 
 
 _GROUPINGS = (
@@ -86,13 +86,13 @@ class TestClassificationComments:
 
 
 class TestClassifyHtmlComments:
-    def test_comment_only_signal_is_not_classified(self):
+    async def test_comment_only_signal_is_not_classified(self):
         html = "<html><!-- access denied --></html>"
         # The signature lives ONLY inside an HTML comment (not user-visible). It must NOT force a block
         # classification.
-        assert classify_page(html, "clean visible text") == "rendered"
+        assert await classify_page(html, "clean visible text") == "rendered"
 
-    def test_html_comment_cannot_spoof_any_signature(self):
+    async def test_html_comment_cannot_spoof_any_signature(self):
         # A comment containing every block signature must still yield "rendered" when the visible content is
         # benign.
         comment = (
@@ -106,12 +106,12 @@ class TestClassifyHtmlComments:
             + " -->"
         )
         html = f"<html>{comment}<body>Welcome to our site</body></html>"
-        assert classify_page(html, "Welcome to our site") == "rendered"
+        assert await classify_page(html, "Welcome to our site") == "rendered"
 
-    def test_visible_signal_still_classified(self):
+    async def test_visible_signal_still_classified(self):
         # Regression guard: signals in VISIBLE text must still be detected.
         html = "<html><body>access denied</body></html>"
-        assert classify_page(html, "access denied") == "access_denied"
+        assert await classify_page(html, "access denied") == "access_denied"
 
 
 def test_wire_classification_literal_matches_the_enum():

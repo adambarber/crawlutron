@@ -236,7 +236,7 @@ async def extract_with_pdf_fallback(
         )
         html = html if options.include_html else None
         title = await bounded_evaluate(page, "() => document.title")
-        classification = classify_page(html, pdf_text, title=str(title))
+        classification = await classify_page(html, pdf_text, title=str(title))
         text = pdf_text
         method = "pdf_text"
     return PdfOutcome(html, text, classification, method)
