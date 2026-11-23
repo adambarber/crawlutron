@@ -13,6 +13,7 @@ rules:
       # and restores nothing, so a poisoned entry has no path to a published
       # artifact. packaging.yml builds and checks but never uploads; the
       # release rebuilds without its caches for the same reason.
+      # Enforced by publish-no-cache-restore in tests/workflows/_rules.py.
       - ci.yml
       - packaging.yml
   dangerous-triggers:

@@ -28,7 +28,7 @@ from tests.workflows._codeql_rules import (
     codeql_security_extended,
     codeql_single_sarif_upload,
 )
-from tests.workflows._model import POLICY, WORKFLOWS, Job, Workflow
+from tests.workflows._model import POLICY, WORKFLOWS, Job, Step, Workflow
 from tests.workflows._nightly_rules import (
     nightly_artifacts as nightly_artifacts,
 )
@@ -231,6 +231,41 @@ def door_no_if(workflow: Workflow, job: Job) -> Iterator[Finding]:
                 )
 
 
+_PUBLISH_ACTION = "gh-action-pypi-publish"
+
+
+def _publishes(job: Job) -> bool:
+    return any(step.uses and _PUBLISH_ACTION in step.uses for step in job.steps)
+
+
+def _restores_cache(step: Step) -> bool:
+    uses = step.uses or ""
+    if "actions/cache@" in uses or "/actions/prepare" in uses:
+        return True
+    if "astral-sh/setup-uv@" not in uses:
+        return False
+    value = step.with_.get("enable-cache")
+    return value is True or value == "true"
+
+
+def publish_no_cache_restore(workflow: Workflow, job: Job) -> Iterator[Finding]:
+    """Publish doors and their artifact builders restore no cache."""
+    publishers = {key for key, item in workflow.jobs.items() if _publishes(item)}
+    in_ancestry = job.key in publishers or any(job.key in workflow.jobs[key].needs for key in publishers)
+    if not in_ancestry:
+        return
+    for step in job.steps:
+        if _restores_cache(step):
+            yield Finding(
+                RuleId.PUBLISH_NO_CACHE_RESTORE.value,
+                workflow.stem,
+                job.key,
+                step.line,
+                f"{workflow.path}:{step.line}: publish-ancestry job {job.key} "
+                f"restores a cache via {step.uses}",
+            )
+
+
 JOB_RULES = (
     Rule("needs-resolve", Scope.ALL, "a needs edge to a missing job never becomes green", needs_resolve),
     Rule(
@@ -412,6 +447,12 @@ JOB_RULES = (
         Scope.WITH_STEPS,
         "ci gate jobs start from $/.github/actions/prepare",
         ci_gate_jobs_start_from_prepare,
+    ),
+    Rule(
+        RuleId.PUBLISH_NO_CACHE_RESTORE.value,
+        Scope.WITH_STEPS,
+        "publish doors and their builders restore no cache",
+        publish_no_cache_restore,
     ),
 )
 
