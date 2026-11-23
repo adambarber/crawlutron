@@ -53,7 +53,7 @@ jobs:
     permissions:
       contents: read
     strategy:
-      fail-fast: true
+      fail-fast: false
       max-parallel: 1
       matrix:
         package: ${{ fromJSON(needs.released.outputs.packages) }}

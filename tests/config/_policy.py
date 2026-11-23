@@ -25,6 +25,8 @@ class RuleId(StrEnum):
     CI_COVERAGE_DOWNLOAD_GUARDS = "ci-coverage-download-guards"
     CI_NO_DIRECT_CODECOV = "ci-no-direct-codecov"
     RELEASE_TRIGGERS = "release-triggers"
+    RELEASE_NO_FAIL_FAST_MATRIX = "release-no-fail-fast-matrix"
+    RELEASE_VALIDATE_BEFORE_UPLOAD = "release-validate-before-upload"
     PACKAGING_TRIGGERS = "packaging-triggers"
     PACKAGING_VERIFY_STEPS = "packaging-verify-steps"
 

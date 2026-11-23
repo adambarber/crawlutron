@@ -7,6 +7,7 @@ from collections.abc import Iterator
 from tests._host_assert import host_in_text
 from tests.config._bundle import Bundle, _finding, _job, _workflow
 from tests.config._policy import Finding, RuleId
+from tests.workflows._model import Job, Workflow
 
 
 def ci_supply_chain_jobs(bundle: Bundle) -> Iterator[Finding]:
@@ -222,6 +223,74 @@ def ci_no_direct_codecov(bundle: Bundle) -> Iterator[Finding]:
                     step.line,
                     f"{key} must not upload directly to Codecov",
                 )
+
+
+def _roster_matrix(job: Job) -> bool:
+    matrix = job.strategy.matrix if job.strategy else {}
+    return any("released.outputs.packages" in str(value) for value in matrix.values())
+
+
+def _publisher(bundle: Bundle, stem: str) -> Job | None:
+    for job in _workflow(bundle, stem).jobs.values():
+        if any(step.uses and "gh-action-pypi-publish" in step.uses for step in job.steps):
+            return job
+    return None
+
+
+def _validator(bundle: Bundle) -> tuple[Workflow, Job] | None:
+    for item in bundle.workflows:
+        for job in item.jobs.values():
+            if any(step.run and "scripts.release.validate_all" in step.run for step in job.steps):
+                return item, job
+    return None
+
+
+def release_no_fail_fast_matrix(bundle: Bundle) -> Iterator[Finding]:
+    """A roster matrix must opt out: an absent fail-fast defaults to true."""
+    for item in bundle.workflows:
+        for job in item.jobs.values():
+            if not _roster_matrix(job) or not job.strategy or job.strategy.fail_fast is False:
+                continue
+            yield _finding(
+                RuleId.RELEASE_NO_FAIL_FAST_MATRIX,
+                item.path.name,
+                job.line,
+                f"{item.path.name}:{job.line}: roster matrix {job.key} leaves fail-fast on "
+                f"(absent defaults true)",
+            )
+
+
+def release_validate_before_upload(bundle: Bundle) -> Iterator[Finding]:
+    """Publishing starts only after a whole-roster validation gate is green."""
+    found = _validator(bundle)
+    if found is None:
+        publisher_wf = next(
+            (
+                item
+                for item in bundle.workflows
+                for job in item.jobs.values()
+                for step in job.steps
+                if step.uses and "gh-action-pypi-publish" in step.uses
+            ),
+            None,
+        )
+        target = publisher_wf.path.name if publisher_wf else "workflow"
+        yield _finding(RuleId.RELEASE_VALIDATE_BEFORE_UPLOAD, target, 1, "missing publish preflight gate")
+        return
+    item, validator = found
+    publisher = _publisher(bundle, item.stem)
+    if publisher is None:
+        yield _finding(
+            RuleId.RELEASE_VALIDATE_BEFORE_UPLOAD, item.path.name, 1, "no publisher beside the gate"
+        )
+        return
+    if validator.key not in publisher.needs:
+        yield _finding(
+            RuleId.RELEASE_VALIDATE_BEFORE_UPLOAD,
+            item.path.name,
+            publisher.line,
+            f"{item.path.name}:{publisher.line}: publish is not gated on validate_all",
+        )
 
 
 def release_triggers(bundle: Bundle) -> Iterator[Finding]:
