@@ -81,3 +81,35 @@ def _assert_refused_error(result, key):
     first = content[0]
     assert isinstance(first, dict)
     assert key in first["text"]
+
+
+async def test_mcp_crawl_timeout_refuses_504_not_empty(async_client, base_url, monkeypatch):
+    """An MCP crawl exceeding the policy timeout is a typed tool error (504/effect_timeout),
+    never an empty successful result."""
+    from crawlutron.service.effects import EffectContainer, EffectKind, EffectOutcome, EffectResult
+
+    async def _timed_out_fetch(
+        self_, *, url, op=None, timeout_seconds=None, caller_timeout_seconds=None, bounds=None
+    ):
+        seen["timeout_seconds"] = timeout_seconds
+        return EffectResult(
+            kind=EffectKind.FETCH,
+            outcome=EffectOutcome.TIMED_OUT,
+            error="effect timed out",
+            error_code="effect_timeout",
+            elapsed_seconds=0.0,
+        )
+
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(EffectContainer, "fetch", _timed_out_fetch)
+    result = await _crawl_call(
+        async_client, {"url": f"{base_url}/", "policy": {"limits": {"timeout_seconds": 25}}}
+    )
+    assert result["isError"] is True, result
+    content = result["content"]
+    assert isinstance(content, list) and content
+    first = content[0]
+    assert isinstance(first, dict)
+    text = str(first.get("text", ""))
+    assert "effect_timeout" in text or "timed out" in text
+    assert seen["timeout_seconds"] == 25.0, "bound must come from policy timeout, not settings default"

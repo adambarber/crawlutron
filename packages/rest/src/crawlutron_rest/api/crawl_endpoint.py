@@ -28,7 +28,7 @@ from crawlutron.service.crawl_endpoint_cores import (
     stored_response_payload,
 )
 from crawlutron.service.crawl_executor import execute_crawl
-from crawlutron.service.effects import EffectBounds, EffectContainer
+from crawlutron.service.effects import EffectBounds, EffectContainer, EffectOutcome
 from crawlutron.service.errors import DomainError, ValidationRefusal
 from crawlutron.service.job_lifecycle import start_tracked_task
 from crawlutron.service.main_helpers import crawl_tail, request_gate
@@ -36,6 +36,7 @@ from crawlutron.service.webhooks import admit_webhook_target
 from crawlutron.storage.ids import new_request_id
 from crawlutron.storage.job_store import FrontierEntry, JobStore
 from crawlutron.storage.result_store import CrawlResultStore, CrawlSpillStore
+from crawlutron.vocabulary.limits import MAX_HTTP_TIMEOUT_SECONDS
 from crawlutron_rest.api.exceptions import http_error
 from safe_url.host_policy import HostPolicy
 
@@ -279,7 +280,7 @@ async def _run_sync_crawl(
 ) -> Response | UnifiedCrawlResponse:
     """The sync door: disconnect-aware crawl, metrics, store, then the body."""
     _crawl_started = time.monotonic()
-    result = await _fetch_sync_crawl(container, crawl_awaitable, request, checked, settings)
+    result = await _fetch_sync_crawl(payload, container, crawl_awaitable, request, checked, settings)
     response_model = await crawl_tail(
         result,
         _crawl_started,
@@ -300,18 +301,18 @@ async def _run_sync_crawl(
 
 
 async def _fetch_sync_crawl(
+    payload: CrawlRequest,
     container: EffectContainer,
     crawl_awaitable: Awaitable[ProducerEnvelope] | None,
     request: Request | None,
     checked: list[tuple[str, NormalizedUrl]],
     settings: CrawlerSettings,
 ) -> ProducerEnvelope:
-    """Run the crawl under the container bound; return the producer envelope."""
+    """Run the crawl under the policy-derived effect bound; a timeout is a typed 504,
+    never an empty 200 envelope."""
     if crawl_awaitable is None:
         raise AssertionError("the sync door always receives a built awaitable")
-    timeout_seconds = settings.default_timeout_seconds
-    if not isinstance(timeout_seconds, (int, float)):
-        timeout_seconds = 30.0
+    timeout_seconds = min(float(payload.policy.limits.timeout_seconds), MAX_HTTP_TIMEOUT_SECONDS)
     crawl_output: list[ProducerEnvelope] = []
 
     async def _crawl_op() -> None:
@@ -320,7 +321,7 @@ async def _fetch_sync_crawl(
         else:
             crawl_output.append(await await_or_client_gone(crawl_awaitable, request))
 
-    await container.fetch(
+    result = await container.fetch(
         url=checked[0][1].raw,
         op=_crawl_op,
         timeout_seconds=timeout_seconds,
@@ -332,16 +333,13 @@ async def _fetch_sync_crawl(
             min_seconds=10.0,
         ),
     )
-    return (
-        crawl_output[0]
-        if crawl_output
-        else {
-            "request_id": "",
-            "submitted_count": 0,
-            "policy_schema_version": "",
-            "results": [],
-        }
-    )
+    if result.outcome is EffectOutcome.TIMED_OUT:
+        raise DomainError(
+            504,
+            "effect_timeout",
+            f"sync crawl effect timed out after {timeout_seconds}s",
+        )
+    return crawl_output[0]
 
 
 # The stored-payload reader lives in service.crawl_endpoint_cores (#849); the
