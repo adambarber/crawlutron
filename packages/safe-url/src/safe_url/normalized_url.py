@@ -6,6 +6,7 @@ other way to build it. Host and site ride the value; ``raw`` is the text form.
 from __future__ import annotations
 
 import ipaddress
+import re
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from safe_url.host_canonical import idna_host
@@ -98,13 +99,14 @@ def _bracketed_netloc(host: str, port: int | None) -> str:
     return host_part if port is None else f"{host_part}:{port}"
 
 
-def _reject_control_chars(text: str) -> None:
-    """Refuse raw C0 controls and DEL in a wire segment.
+#: One C-level prefilter pass rejects raw C0 controls / DEL in a wire segment;
+#: the per-char walk it replaces keeps identical verdicts.
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
 
-    A control byte ends the segment differently in lenient clients, so the
-    canonical form must never carry one; ``%``-escapes stay literal and pass.
-    """
-    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in text):
+
+def _reject_control_chars(text: str) -> None:
+    """Refuse raw C0 controls and DEL in a wire segment (one C-level pass)."""
+    if _CONTROL_CHAR_RE.search(text) is not None:
         raise ValueError("invalid_url")
 
 
@@ -123,8 +125,7 @@ def _reject_raw_wire_controls(url: str, *, scheme: str) -> None:
     authority = rest[:boundary]
     if any(ch.isspace() for ch in authority):
         raise ValueError("invalid_url")
-    _reject_control_chars(authority)
-    _reject_control_chars(rest[boundary:])
+    _reject_control_chars(rest)
 
 
 def _canonical_parts(url: str, *, policy: HostPolicy) -> tuple[str, str, str, str, int | None, str, str]:
