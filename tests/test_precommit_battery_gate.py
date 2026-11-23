@@ -126,6 +126,55 @@ def test_the_fanout_refuses_a_config_with_zero_gates(monkeypatch, tmp_path) -> N
         gate_fanout._gate_argv()
 
 
+def test_fanout_wall_report_names_the_gate_reason_and_timing() -> None:
+    """Kill the ambiguous-message mutant: the wall report must name the gate,
+    the distinct reason token, elapsed, wall limit and child pid."""
+    text = gate_fanout._diagnose("battery", gate_fanout.Path("/none"), gate_fanout.FAIL_WALL, "4242", 61.3)
+    assert "battery" in text
+    assert gate_fanout.FAIL_WALL in text
+    assert "elapsed=61.3s" in text
+    assert f"wall={int(gate_fanout.WALL_SECONDS)}s" in text
+    assert "child_pid=4242" in text
+
+
+def test_fanout_report_shows_sibling_gate_states(tmp_path, monkeypatch) -> None:
+    """Contention evidence: a live sibling and a finished sibling must appear."""
+    status = tmp_path / ".gate_fanout"
+    status.mkdir()
+    (status / "battery.pid").write_text("111")
+    (status / "mypy.pid").write_text("222")
+    (status / "ruff.rc").write_text("0")
+    monkeypatch.setattr(gate_fanout, "_alive", lambda pid: True)
+    text = gate_fanout._diagnose("battery", status, gate_fanout.FAIL_WALL, "111", 61.3)
+    assert "mypy=running" in text
+    assert "ruff=verdict:0" in text
+
+
+def test_fanout_distinguishes_child_death_from_wall(tmp_path, monkeypatch, capsys) -> None:
+    """The two failure modes must emit different reason tokens."""
+    status = tmp_path / ".gate_fanout"
+    status.mkdir()
+    (status / "battery.pid").write_text("4242")
+    monkeypatch.setattr(gate_fanout, "_alive", lambda pid: False)
+    monkeypatch.setattr(gate_fanout, "WALL_SECONDS", 0.01)
+    code = gate_fanout._wait_own("battery", status)
+    assert code == 1
+    assert gate_fanout.FAIL_DIED in capsys.readouterr().err
+
+
+def test_fanout_wall_kill_reports_wall_reason(tmp_path, monkeypatch, capsys) -> None:
+    """A wall kill of a live child must say so, not 'died or hit the wall'."""
+    status = tmp_path / ".gate_fanout"
+    status.mkdir()
+    (status / "battery.pid").write_text("4242")
+    monkeypatch.setattr(gate_fanout, "_alive", lambda pid: True)
+    monkeypatch.setattr(gate_fanout.os, "killpg", lambda pid, sig: None)
+    monkeypatch.setattr(gate_fanout, "WALL_SECONDS", 0.01)
+    code = gate_fanout._wait_own("battery", status)
+    assert code == 1
+    assert gate_fanout.FAIL_WALL in capsys.readouterr().err
+
+
 def test_a_stale_pidfile_from_another_runner_is_not_a_hung_child(tmp_path, monkeypatch) -> None:
     """The red: a pidfile whose group is gone used to kill the whole gate.
 

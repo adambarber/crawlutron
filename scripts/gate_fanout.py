@@ -31,6 +31,9 @@ SCAN_ROOTS_MARKER = "{{SCAN_ROOTS}}"
 WALL_SECONDS = float(os.environ.get("GATE_FANOUT_WALL_SECONDS", "60"))
 #: Any status artifact this old is a dead run's residue: discard it.
 STALE_SECONDS = 600.0
+#: Distinct failure modes — an agent must tell a crash from a wall kill.
+FAIL_WALL = "WALL_TIMEOUT"
+FAIL_DIED = "CHILD_DIED"
 
 
 def _python() -> str:
@@ -197,9 +200,38 @@ def _dispatch(status_dir: Path) -> None:
         _spawn(hook_id, argv, status_dir)
 
 
+def _sibling_states(status_dir: Path, own: str) -> str:
+    """Every other gate's last-known state, for contention diagnosis."""
+    states: list[str] = []
+    for path in sorted(status_dir.glob("*.rc")):
+        gate = path.name[:-3]
+        if gate != own:
+            states.append(f"{gate}=verdict:{path.read_text().strip()}")
+    for path in sorted(status_dir.glob("*.pid")):
+        gate = path.name[:-4]
+        if gate != own and gate not in {s.split("=", 1)[0] for s in states}:
+            pid_text = path.read_text().strip()
+            state = "running" if pid_text.isdigit() and _alive(int(pid_text)) else "exited-no-verdict"
+            states.append(f"{gate}={state}")
+    return ", ".join(states) or "none"
+
+
+def _diagnose(hook_id: str, status_dir: Path, reason: str, child_pid: str, elapsed: float) -> str:
+    """A self-contained failure line: gate, mode, timing, pid, siblings."""
+    return (
+        f"gate fanout: {hook_id} {reason} "
+        f"elapsed={elapsed:.1f}s wall={WALL_SECONDS:.0f}s "
+        f"child_pid={child_pid or 'none'} "
+        f"siblings=[{_sibling_states(status_dir, hook_id)}]"
+    )
+
+
 def _wait_own(hook_id: str, status_dir: Path) -> int:
     rc = status_dir / f"{hook_id}.rc"
     pidfile = status_dir / f"{hook_id}.pid"
+    start = time.monotonic()
+    child_pid = ""
+    died = False
     deadline = time.monotonic() + WALL_SECONDS
     while time.monotonic() < deadline:
         if rc.is_file():
@@ -210,17 +242,23 @@ def _wait_own(hook_id: str, status_dir: Path) -> int:
                 return int(text)
         if pidfile.is_file():
             pid_text = pidfile.read_text().strip()
-            if pid_text and not _alive(int(pid_text)):
-                break
+            if pid_text:
+                child_pid = pid_text
+                if not _alive(int(pid_text)):
+                    died = True
+                    break
         time.sleep(0.05)
     if pidfile.is_file():
         pid_text = pidfile.read_text().strip()
         if pid_text:
             pid = int(pid_text)
+            child_pid = pid_text
             if _alive(pid):
                 os.killpg(pid, 9)
         pidfile.unlink(missing_ok=True)
-    print(f"gate fanout: {hook_id} died or hit the wall clock; session killed", file=sys.stderr)
+    reason = FAIL_DIED if died else FAIL_WALL
+    elapsed = time.monotonic() - start
+    print(_diagnose(hook_id, status_dir, reason, child_pid, elapsed), file=sys.stderr)
     return 1
 
 
