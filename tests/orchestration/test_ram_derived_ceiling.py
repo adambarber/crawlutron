@@ -10,6 +10,7 @@ from crawlutron.orchestration.request_pipeline import (
     PipelineState,
     compute_ram_derived_concurrency,
 )
+from crawlutron.orchestration.resource_governor import resource_governor
 from crawlutron.runtime.pressure_sizing import (
     TaskRamBudget,
     build_admission_policy,
@@ -68,6 +69,7 @@ def _never_read_dependencies() -> PipelineDependencies:
         fetch_and_decode=None,
         shared_http_cache=HttpCache(),
         resource_gate=ResourceGate(memory_ratio=lambda: 0.0, cpu_ratio=lambda: 0.0),  # idle by construction
+        resource_governor=resource_governor(),
     )
 
 
