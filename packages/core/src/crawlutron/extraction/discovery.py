@@ -134,7 +134,12 @@ def extract_post_fetch_discovery(
     }
     if include_diagnostics:
         envelope["diagnostics"] = (
-            cast("dict[str, JsonValue]", html_diagnostics(html, final_url, tree=None)) if html else {}
+            cast(
+                "dict[str, JsonValue]",
+                html_diagnostics(html, final_url, tree=None, limits=ExtractLimits()),
+            )
+            if html
+            else {}
         )
     if include_links:
         links, count, truncated = extract_discovered_links(html, final_url, max_links=max_links)

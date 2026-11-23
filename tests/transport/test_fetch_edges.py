@@ -22,6 +22,7 @@ from crawlutron.transport.request_profile import (
 )
 from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 from crawlutron.vocabulary.taxonomy import status_for_classification
+from crawlutron_extract.limits import ExtractLimits
 from tests._extraction_helpers import extract_discovered_links
 from tests._fetch_doubles import FetcherDouble, make_fetch
 from tests._fetcher_factories import FEED_ADVERTISING_PAGE
@@ -155,6 +156,44 @@ class TestFetchHelperUtilities:
         assert len(forms) == 1
         tags = {c["tag"] for c in forms[0]["controls"]}
         assert {"input", "select", "textarea", "button"} <= tags
+
+    def test_forms_capped_at_max_forms(self) -> None:
+        """Over-cap form count is bounded at ExtractLimits.max_forms, not 150."""
+        html = "".join(f'<form action="/submit{i}"></form>' for i in range(150))
+        walked = walkable(html, canonical("http://x/"), None)
+        assert walked is not None
+        forms = forms_from(walked)
+        assert len(forms) == ExtractLimits.max_forms
+
+    def test_form_attrs_truncated_to_max_attr_chars(self) -> None:
+        """Over-long form/control name/id/value/target are truncated to max_attr_chars."""
+        long = "x" * (ExtractLimits.max_attr_chars + 500)
+        html = (
+            f'<form action="/submit" target="{long}" name="{long}" id="{long}">'
+            f'<input type="text" name="{long}" id="{long}" value="{long}">'
+            f"</form>"
+        )
+        walked = walkable(html, canonical("http://x/"), None)
+        assert walked is not None
+        forms = forms_from(walked)
+        assert len(forms) == 1
+        f = forms[0]
+        assert len(f["target"]) == ExtractLimits.max_attr_chars
+        assert len(f["name"]) == ExtractLimits.max_attr_chars
+        assert len(f["id"]) == ExtractLimits.max_attr_chars
+        c = f["controls"][0]
+        assert len(c["name"]) == ExtractLimits.max_attr_chars
+        assert len(c["id"]) == ExtractLimits.max_attr_chars
+        assert len(c["value"]) == ExtractLimits.max_attr_chars
+
+    def test_at_cap_forms_classify_identically(self) -> None:
+        """At-cap form count keeps every form with untruncated short attrs."""
+        html = "".join(f'<form action="/submit{i}"></form>' for i in range(ExtractLimits.max_forms))
+        walked = walkable(html, canonical("http://x/"), None)
+        assert walked is not None
+        forms = forms_from(walked)
+        assert len(forms) == ExtractLimits.max_forms
+        assert all(f["action"] == f"http://x/submit{i}" for i, f in enumerate(forms))
 
     def test_extract_discovered_links_skips_ftp_scheme(self) -> None:
         links, count, truncated = extract_discovered_links(

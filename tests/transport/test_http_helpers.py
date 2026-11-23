@@ -29,6 +29,7 @@ from crawlutron.vocabulary.extraction import (
     EXTRACTION_TRAFILATURA,
 )
 from crawlutron.vocabulary.strategies import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
+from crawlutron_extract.limits import ExtractLimits
 from tests._assertions import assert_result_failed, assert_result_success
 from tests._extraction_helpers import extract_discovered_links
 from tests._fetch_doubles import FetcherDouble, make_fetch
@@ -264,6 +265,39 @@ class TestPureParsing:
         assert walked is not None
         frames = frames_from(walked, canonical("http://same.example/"))
         assert len(frames) == 1
+
+    def test_frames_capped_at_max_frames(self) -> None:
+        """Over-cap frame count is bounded at ExtractLimits.max_frames, not 150."""
+        html = "".join(
+            f'<iframe src="http://same.example/f{i}" name="n{i}" title="t{i}"></iframe>' for i in range(150)
+        )
+        walked = walkable(html, canonical("http://same.example/"), None)
+        assert walked is not None
+        frames = frames_from(walked, canonical("http://same.example/"))
+        assert len(frames) == ExtractLimits.max_frames
+
+    def test_frame_attrs_truncated_to_max_attr_chars(self) -> None:
+        """Over-long frame name/title are truncated to max_attr_chars."""
+        long = "x" * (ExtractLimits.max_attr_chars + 500)
+        html = f'<iframe src="http://same.example/f" name="{long}" title="{long}"></iframe>'
+        walked = walkable(html, canonical("http://same.example/"), None)
+        assert walked is not None
+        frames = frames_from(walked, canonical("http://same.example/"))
+        assert len(frames) == 1
+        assert len(frames[0]["name"]) == ExtractLimits.max_attr_chars
+        assert len(frames[0]["title"]) == ExtractLimits.max_attr_chars
+
+    def test_at_cap_frames_classify_identically(self) -> None:
+        """At-cap frame count keeps every frame with untruncated short attrs."""
+        html = "".join(
+            f'<iframe src="http://same.example/f{i}" name="n{i}" title="t{i}"></iframe>'
+            for i in range(ExtractLimits.max_frames)
+        )
+        walked = walkable(html, canonical("http://same.example/"), None)
+        assert walked is not None
+        frames = frames_from(walked, canonical("http://same.example/"))
+        assert len(frames) == ExtractLimits.max_frames
+        assert all(f["name"] == f"n{i}" and f["title"] == f"t{i}" for i, f in enumerate(frames))
 
     def test_extract_discovered_links_skips_bad_scheme(self) -> None:
         html = '<a href="mailto:a@b.com">x</a><a href="http://other.example/p">y</a>'

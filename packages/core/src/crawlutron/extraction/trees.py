@@ -138,12 +138,28 @@ class FrameCollector:
             )
 
 
-def frames_from(walkable: _Walkable, source_url: NormalizedUrl | None = None) -> list[FrameDiagnostic]:
+def _cap_attr(value: str, limits: ExtractLimits) -> str:
+    """Truncate one attribute value to the per-attribute char cap."""
+    if len(value) > limits.max_attr_chars:
+        return value[: limits.max_attr_chars]
+    return value
+
+
+def frames_from(
+    walkable: _Walkable,
+    source_url: NormalizedUrl | None = None,
+    *,
+    limits: ExtractLimits | None = None,
+) -> list[FrameDiagnostic]:
     """Frame/iframe diagnostics admitted through the source URL's policy."""
+    if limits is None:
+        limits = ExtractLimits()
     source_host = walkable.source_url.host
     frames: list[FrameDiagnostic] = []
     seen: set[NormalizedUrl] = set()
     for el in _frame_elements(walkable.tree):
+        if len(frames) >= limits.max_frames:
+            break
         src = (el.get_attribute("src") or "").strip()
         if not src:
             continue
@@ -156,8 +172,8 @@ def frames_from(walkable: _Walkable, source_url: NormalizedUrl | None = None) ->
             {
                 "url": normalized_url.raw,
                 "normalized_url": normalized_url.raw,
-                "name": el.get_attribute("name") or "",
-                "title": el.get_attribute("title") or "",
+                "name": _cap_attr(el.get_attribute("name") or "", limits),
+                "title": _cap_attr(el.get_attribute("title") or "", limits),
                 "source_url": source_url.raw if source_url is not None else None,
                 "host": frame_host,
                 "is_same_host": bool(frame_host) and frame_host == source_host,
@@ -169,9 +185,17 @@ def frames_from(walkable: _Walkable, source_url: NormalizedUrl | None = None) ->
 _CONTROL_TAGS = ("input", "select", "textarea", "button")
 
 
-def forms_from(walkable: _Walkable) -> list[FormDiagnostic]:
+def forms_from(
+    walkable: _Walkable,
+    *,
+    limits: ExtractLimits | None = None,
+) -> list[FormDiagnostic]:
+    if limits is None:
+        limits = ExtractLimits()
     forms: list[FormDiagnostic] = []
     for form_el in _form_elements(walkable.tree):
+        if len(forms) >= limits.max_forms:
+            break
         attrs = {key.lower(): value for key, value in form_el.attrs.items()}
         action = unescape(str(attrs.get("action", "")).strip())
         normalized_action = walkable.source_url.resolve(action or walkable.source_url.raw)
@@ -190,9 +214,9 @@ def forms_from(walkable: _Walkable) -> list[FormDiagnostic]:
                 {
                     "tag": tag,
                     "type": control_type,
-                    "name": cattrs.get("name", ""),
-                    "id": cattrs.get("id", ""),
-                    "value": cattrs.get("value", ""),
+                    "name": _cap_attr(cattrs.get("name", ""), limits),
+                    "id": _cap_attr(cattrs.get("id", ""), limits),
+                    "value": _cap_attr(cattrs.get("value", ""), limits),
                 }
             )
         forms.append(
@@ -200,9 +224,9 @@ def forms_from(walkable: _Walkable) -> list[FormDiagnostic]:
                 "method": (attrs.get("method") or "GET").upper(),
                 "action": normalized_action.raw,
                 "normalized_action": normalized_action.raw,
-                "target": attrs.get("target", ""),
-                "name": attrs.get("name", ""),
-                "id": attrs.get("id", ""),
+                "target": _cap_attr(attrs.get("target", ""), limits),
+                "name": _cap_attr(attrs.get("name", ""), limits),
+                "id": _cap_attr(attrs.get("id", ""), limits),
                 "controls": controls,
             }
         )
@@ -210,15 +234,21 @@ def forms_from(walkable: _Walkable) -> list[FormDiagnostic]:
 
 
 def html_diagnostics(
-    html: str | None, source_url: NormalizedUrl | None, *, tree: Tree | None = None
+    html: str | None,
+    source_url: NormalizedUrl | None,
+    *,
+    tree: Tree | None = None,
+    limits: ExtractLimits | None = None,
 ) -> HtmlDiagnostics:
     """Frame and form diagnostics for one page: one parse, one guard."""
+    if limits is None:
+        limits = ExtractLimits()
     diagnostics: HtmlDiagnostics = {}
     walked = walkable(html, source_url, tree)
     if walked is None:
         return diagnostics
-    frames = frames_from(walked, source_url)
-    forms = forms_from(walked)
+    frames = frames_from(walked, source_url, limits=limits)
+    forms = forms_from(walked, limits=limits)
     if frames:
         diagnostics["frames"] = frames
     if forms:
