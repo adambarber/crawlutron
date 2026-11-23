@@ -191,6 +191,50 @@ class TestEnvelopeFromDetail:
             "details": {},
         }
 
+    async def test_unhandled_exception_logs_one_structured_record(self, caplog):
+        """The catch-all 500 logs once with a correlation id and never the request's
+        headers, query or body -- the wire message stays unchanged."""
+        import logging
+
+        import httpx
+        from fastapi import FastAPI
+
+        from crawlutron_rest.main import install_error_surface
+
+        app = FastAPI()
+        install_error_surface(app)
+
+        @app.get("/boom")
+        async def _boom():
+            raise RuntimeError("kaboom")
+
+        async with httpx.ASGITransport(app=app, raise_app_exceptions=False) as transport:
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                with caplog.at_level(logging.ERROR, logger="crawlutron_rest.api.exceptions"):
+                    resp = await client.get(
+                        "/boom?token=TOP_SECRET_QUERY",
+                        headers={"X-Secret": "TOP_SECRET_HEADER"},
+                    )
+
+        assert resp.status_code == 500
+        assert resp.json() == {
+            "code": "internal_error",
+            "message": "Unhandled exception in request handling",
+            "details": {},
+        }
+        records = [r for r in caplog.records if r.getMessage() == "unhandled_request_error"]
+        assert len(records) == 1, caplog.text
+        rec = records[0]
+        assert rec.levelno == logging.ERROR
+        assert rec.exc_info is not None
+        assert isinstance(rec.request_id, str) and rec.request_id.startswith("crawl_")
+        assert rec.path == "/boom"
+        assert rec.method == "GET"
+        seen = " ".join(str(v) for k, v in vars(rec).items() if k != "exc_info")
+        seen += logging.Formatter().formatException(rec.exc_info)
+        assert "TOP_SECRET_QUERY" not in seen
+        assert "TOP_SECRET_HEADER" not in seen
+
 
 class TestCrossDoorErrorParity:
     """One typed refusal renders the same triplet to every door."""
