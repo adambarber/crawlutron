@@ -433,26 +433,40 @@ async def _call_tool(
 class TestInternalErrorContract:
     """N-4: an unexpected tool exception must stay inside the JSON-RPC shape."""
 
-    async def test_unexpected_tool_exception_returns_internal_error(self, monkeypatch):
+    async def test_unexpected_tool_exception_returns_internal_error(self, monkeypatch, caplog):
+        """The catch-all stays in the JSON-RPC shape and logs a redacted detail only."""
+        import logging
+
         import crawlutron_mcp.server as server_mod
         from crawlutron_mcp.server import handle_mcp_request
+        from tests._host_assert import host_in_text
 
-        async def boom(**kwargs):
-            raise ValueError("simulated tool crash")
+        async def boom(*args, **kwargs):
+            raise RuntimeError("failed GET https://example.com/x?token=s3cret")
 
         monkeypatch.setattr(server_mod, "call_tool", boom)
         body = _body("tools/call", params={"name": "search", "arguments": {}, "_meta": {**_META}})
-        status, payload = await handle_mcp_request(
-            body,
-            protocol_version_header=_PROTOCOL_VERSION,
-            method_header="tools/call",
-            name_header="search",
-            settings=None,
-            shutdown_event=None,
-        )
+        with caplog.at_level(logging.ERROR, logger=server_mod.logger.name):
+            status, payload = await handle_mcp_request(
+                body,
+                protocol_version_header=_PROTOCOL_VERSION,
+                method_header="tools/call",
+                name_header="search",
+                settings=None,
+                shutdown_event=None,
+            )
         assert status == 500 and payload and isinstance(payload, dict)
         assert _member(payload, "error")["code"] == -32603
         assert payload["id"] == 1
+        records = [r for r in caplog.records if r.getMessage() == "mcp_request_failed"]
+        assert len(records) == 1, caplog.text
+        rec = records[0]
+        assert rec.levelno == logging.ERROR
+        seen = " ".join(str(v) for v in vars(rec).values())
+        seen += " " + rec.getMessage() + " " + logging.Formatter().format(rec)
+        assert "s3cret" not in seen
+        assert rec.exc_info is None
+        assert host_in_text(rec.error_detail, "example.com")
 
 
 class TestEnvelopeValidation:
