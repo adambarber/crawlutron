@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
+from tests._host_assert import host_in_text
 from tests.config._bundle import Bundle, _finding, _job, _workflow
 from tests.config._policy import Finding, RuleId
 
@@ -27,7 +28,7 @@ def ci_supply_chain_jobs(bundle: Bundle) -> Iterator[Finding]:
                     yield _finding(
                         RuleId.CI_SUPPLY_CHAIN_JOBS, ci.path.name, job.line, f"audit must run {needle}"
                     )
-        if "gitleaks.io" in runs:
+        if host_in_text(runs, "gitleaks.io"):
             yield _finding(
                 RuleId.CI_SUPPLY_CHAIN_JOBS,
                 ci.path.name,
