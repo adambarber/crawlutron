@@ -246,16 +246,17 @@ def _validator(bundle: Bundle) -> tuple[Workflow, Job] | None:
 
 
 def release_no_fail_fast_matrix(bundle: Bundle) -> Iterator[Finding]:
-    """A cancelled roster leg leaves an incomplete immutable version set."""
+    """A roster matrix must opt out: an absent fail-fast defaults to true."""
     for item in bundle.workflows:
         for job in item.jobs.values():
-            if not _roster_matrix(job) or not job.strategy or job.strategy.fail_fast is not True:
+            if not _roster_matrix(job) or not job.strategy or job.strategy.fail_fast is False:
                 continue
             yield _finding(
                 RuleId.RELEASE_NO_FAIL_FAST_MATRIX,
                 item.path.name,
                 job.line,
-                f"{item.path.name}:{job.line}: roster matrix {job.key} uses fail-fast",
+                f"{item.path.name}:{job.line}: roster matrix {job.key} leaves fail-fast on "
+                f"(absent defaults true)",
             )
 
 

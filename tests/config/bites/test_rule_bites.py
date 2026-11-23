@@ -73,6 +73,19 @@ def _set_fail_fast(bundle: Bundle) -> Bundle:
     return _replace_workflow(bundle, "release", release.model_copy(update={"jobs": jobs}))
 
 
+def _clear_fail_fast(bundle: Bundle) -> Bundle:
+    release = _workflow(bundle, "release")
+    jobs = {
+        key: (
+            job.model_copy(update={"strategy": job.strategy.model_copy(update={"fail_fast": None})})
+            if job.strategy and job.strategy.matrix
+            else job
+        )
+        for key, job in release.jobs.items()
+    }
+    return _replace_workflow(bundle, "release", release.model_copy(update={"jobs": jobs}))
+
+
 def _drop_validation_gate(bundle: Bundle) -> Bundle:
     release = _workflow(bundle, "release")
     validator = next(
@@ -232,6 +245,7 @@ MUTATIONS = (
     (RuleId.CI_NO_DIRECT_CODECOV, _add_direct_codecov, "directly to Codecov"),
     (RuleId.RELEASE_TRIGGERS, lambda b: _add_trigger(b, "release", "workflow_run"), "push and dispatch"),
     (RuleId.RELEASE_NO_FAIL_FAST_MATRIX, _set_fail_fast, "fail-fast"),
+    (RuleId.RELEASE_NO_FAIL_FAST_MATRIX, _clear_fail_fast, "absent defaults true"),
     (RuleId.RELEASE_VALIDATE_BEFORE_UPLOAD, _drop_validation_gate, "not gated on validate_all"),
 )
 
