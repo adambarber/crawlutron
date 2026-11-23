@@ -219,7 +219,15 @@ def _stash_state(
     from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
 
     app.state.caller_quota_admission = CALLER_QUOTA_ADMISSION
-    app.state.concurrency_tracker = CallerConcurrencyTracker(coordination_db_path=str(job_store.db_path))
+    from crawlutron.runtime import process_state
+
+    tracker = CallerConcurrencyTracker(coordination_db_path=str(job_store.db_path))
+    app.state.concurrency_tracker = tracker
+    process_state.register(
+        "crawlutron.service.caller_concurrency",
+        tracker.reset,
+        tracker.has_state,
+    )
     app.state.effect_container = EffectContainer()
 
 

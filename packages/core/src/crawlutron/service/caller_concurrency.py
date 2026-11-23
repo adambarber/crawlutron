@@ -82,6 +82,18 @@ class CallerConcurrencyTracker:
         """The admit mutex for ``caller_id``; persists for the tracker's lifetime (#665)."""
         return self._slot_locks.setdefault(caller_id, asyncio.Lock())
 
+    def reset(self) -> None:
+        """Clear admit locks, in-flight counts, held slots between tests."""
+        # Registered with process_state so reset_all_process_state() drops stale
+        # reservations. Clearing admit locks avoids stale event-loop binding (#665).
+        self._slot_locks.clear()
+        self._in_flight.clear()
+        self._held.clear()
+
+    def has_state(self) -> bool:
+        """Whether the tracker holds any in-process reservation right now."""
+        return bool(self._in_flight or self._held or self._slot_locks)
+
     def close(self) -> None:
         """Close the coordination store connection."""
         if self._coord is not None:
