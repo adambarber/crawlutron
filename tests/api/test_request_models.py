@@ -112,6 +112,7 @@ _BOUND_REQUEST_BODIES = (
     "JobIdRequest",
     "JobListRequest",
     "KeyCreateRequest",
+    "KeyRotateRequest",
     "MapRequest",
     "PolicySuggestionsRequest",
     "RenderRequest",
