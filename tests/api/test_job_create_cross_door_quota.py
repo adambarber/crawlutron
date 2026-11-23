@@ -6,10 +6,14 @@ quota_exceeded because create_job_core sees the same tracker the sync door reser
 
 from __future__ import annotations
 
+import asyncio
 import inspect
+
+import pytest
 
 from tests._api_harnesses import mount_tracker
 from tests._concurrency_probe import (
+    assert_second_concurrent_refused,
     block_sync_crawl,
     crawl_then_second_refused,
 )
@@ -54,3 +58,56 @@ def test_create_job_core_requires_a_concurrency_tracker():
     tracker = parameters["concurrency_tracker"]
     assert tracker.kind is inspect.Parameter.KEYWORD_ONLY
     assert tracker.default is inspect.Parameter.empty
+
+
+async def test_second_refused_assertion_failure_still_releases_first():
+    """A failed second-request assertion still sets ``released`` (try/finally).
+    ``entered`` is set inside fake_post's first branch so the probe's
+    ``entered.wait()`` guarantees the first call is parked before ``second`` is issued.
+    """
+    released = asyncio.Event()
+    entered = asyncio.Event()
+    calls = {"n": 0}
+
+    def make_response(is_first: bool) -> object:
+        return type(
+            "R",
+            (),
+            {
+                "status_code": 200 if is_first else 500,
+                "text": "ok" if is_first else "not 429",
+            },
+        )()
+
+    async def fake_post(_client, target, *, headers=None, json=None):
+        calls["n"] += 1
+        is_first = calls["n"] == 1
+        if is_first:
+            entered.set()  # probe's entered.wait() now syncs before the first call parks
+            await released.wait()  # first task parks until released
+        return make_response(is_first)
+
+    client = type("C", (), {"post": fake_post})()
+
+    async def _issue(target, payload):
+        return await client.post(target, headers={}, json=payload)
+
+    first = asyncio.create_task(_issue("/v1/crawl", {"url": "http://example.com/"}))
+
+    try:
+        await assert_second_concurrent_refused(
+            client,
+            url="/v1/crawl",
+            headers=None,
+            body={"url": "http://example.com/"},
+            entered=entered,
+            released=released,
+            first_ok=(200, 201),
+        )
+        pytest.fail("expected AssertionError from the second-request assertion")
+    except AssertionError:
+        pass
+
+    assert released.is_set(), "released must be set even when the second-request assertion fails"
+    response = await asyncio.wait_for(first, timeout=5)
+    assert response.status_code == 200

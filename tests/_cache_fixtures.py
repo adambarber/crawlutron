@@ -10,6 +10,7 @@ from typing import Any
 
 import crawlutron.transport.content_cache as cc
 from crawlutron.transport.content_cache import ContentCache
+from tests._clocks import HANG_GUARD_SECONDS
 
 
 @contextlib.contextmanager
@@ -35,7 +36,7 @@ def parked_entry_unlink(monkeypatch, cache) -> Generator[tuple[threading.Event, 
     def parked(self_, *args, **kwargs):
         if self_.parent == cache.cache_dir and not self_.name.startswith("."):
             started.set()
-            release.wait(timeout=30)
+            release.wait(timeout=HANG_GUARD_SECONDS)
         return real_unlink(self_, *args, **kwargs)
 
     monkeypatch.setattr(cc.Path, "unlink", parked)

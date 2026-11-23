@@ -104,8 +104,10 @@ async def assert_second_concurrent_refused(
     first = asyncio.create_task(_issue(url, body))
     await asyncio.wait_for(entered.wait(), timeout=5)
     second = await _issue(second_url or url, second_body or body)
-    assert second.status_code == 429, second.text
-    assert second.json()["code"] == "quota_exceeded"
-    released.set()
+    try:
+        assert second.status_code == 429, second.text
+        assert second.json()["code"] == "quota_exceeded"
+    finally:
+        released.set()
     response = await asyncio.wait_for(first, timeout=5)
     assert response.status_code in first_ok, response.text
