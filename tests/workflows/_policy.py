@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from enum import StrEnum
+from dataclasses import dataclass
+from enum import Enum, StrEnum, auto
 from types import MappingProxyType
 from typing import Annotated, Protocol, runtime_checkable
 
@@ -53,6 +54,23 @@ def _reason(value: str) -> str:
 Reason = Annotated[str, AfterValidator(_reason)]
 
 
+@dataclass(frozen=True)
+class Finding:
+    rule: str
+    workflow: str
+    job: str
+    line: int
+    message: str
+
+
+class Scope(Enum):
+    ALL = auto()
+    WITH_STEPS = auto()
+
+    def matches(self, job: object) -> bool:
+        return self is Scope.ALL or bool(getattr(job, "steps", ()))
+
+
 class RuleId(StrEnum):
     CONTINUE_ON_ERROR = "continue-on-error"
     NO_EVENT_SPLICING = "no-event-splicing-in-run"
@@ -66,6 +84,28 @@ class RuleId(StrEnum):
     TESTS_USE_DOOR = "tests-use-door"
     DOOR_NO_IF = "door-no-if"
     SILENT_UPLOADS = "no-silent-uploads"
+    CODEQL_TRIGGERS = "codeql-triggers"
+    CODEQL_SECURITY_EVENTS_WRITE = "codeql-security-events-write"
+    CODEQL_REGISTRY_PIN = "codeql-registry-pin"
+    CODEQL_SECURITY_EXTENDED = "codeql-security-extended"
+    CODEQL_NO_BUILD_STEP = "codeql-no-build-step"
+    CODEQL_SINGLE_SARIF_UPLOAD = "codeql-single-sarif-upload"
+    NIGHTLY_TRIGGERS = "nightly-triggers"
+    NIGHTLY_NAME = "nightly-name"
+    NIGHTLY_CONCURRENCY = "nightly-concurrency"
+    NIGHTLY_DOOR_CALL = "nightly-door-call"
+    NIGHTLY_COVERAGE_REPORTS = "nightly-coverage-reports"
+    NIGHTLY_ARTIFACTS = "nightly-artifacts"
+    WEEKLY_TRIGGERS = "weekly-triggers"
+    WEEKLY_MUTATION_TIMEBOX = "weekly-mutation-timebox"
+    WEEKLY_MUTATION_TOOL = "weekly-mutation-tool"
+    WEEKLY_MUTATION_TARGETS = "weekly-mutation-targets"
+    WEEKLY_LOWEST_DIRECT = "weekly-lowest-direct"
+    WEEKLY_ARTIFACTS = "weekly-artifacts"
+    CI_SECRET_SCAN_FETCH_DEPTH = "ci-secret-scan-fetch-depth"
+    CI_DEPENDENCY_REVIEW_CHECKOUT = "ci-dependency-review-checkout"
+    CI_DEPENDENCY_REVIEW_REFS = "ci-dependency-review-refs"
+    CI_REAL_PBKDF2_DOOR = "ci-real-pbkdf2-door"
 
 
 class Waiver(BaseModel):
@@ -116,6 +156,28 @@ CEILINGS: Mapping[RuleId, int] = MappingProxyType(
         RuleId.TESTS_USE_DOOR: 0,
         RuleId.DOOR_NO_IF: 0,
         RuleId.SILENT_UPLOADS: 0,
+        RuleId.CODEQL_TRIGGERS: 0,
+        RuleId.CODEQL_SECURITY_EVENTS_WRITE: 0,
+        RuleId.CODEQL_REGISTRY_PIN: 0,
+        RuleId.CODEQL_SECURITY_EXTENDED: 0,
+        RuleId.CODEQL_NO_BUILD_STEP: 0,
+        RuleId.CODEQL_SINGLE_SARIF_UPLOAD: 0,
+        RuleId.NIGHTLY_TRIGGERS: 0,
+        RuleId.NIGHTLY_NAME: 0,
+        RuleId.NIGHTLY_CONCURRENCY: 0,
+        RuleId.NIGHTLY_DOOR_CALL: 0,
+        RuleId.NIGHTLY_COVERAGE_REPORTS: 0,
+        RuleId.NIGHTLY_ARTIFACTS: 0,
+        RuleId.WEEKLY_TRIGGERS: 0,
+        RuleId.WEEKLY_MUTATION_TIMEBOX: 0,
+        RuleId.WEEKLY_MUTATION_TOOL: 0,
+        RuleId.WEEKLY_MUTATION_TARGETS: 0,
+        RuleId.WEEKLY_LOWEST_DIRECT: 0,
+        RuleId.WEEKLY_ARTIFACTS: 0,
+        RuleId.CI_SECRET_SCAN_FETCH_DEPTH: 0,
+        RuleId.CI_DEPENDENCY_REVIEW_CHECKOUT: 0,
+        RuleId.CI_DEPENDENCY_REVIEW_REFS: 0,
+        RuleId.CI_REAL_PBKDF2_DOOR: 0,
     }
 )
 
