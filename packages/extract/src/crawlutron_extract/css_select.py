@@ -5,6 +5,7 @@ Supports type, class, id, attribute, combinator and pseudo selectors.
 
 from __future__ import annotations
 
+import re
 from typing import cast
 
 from crawlutron_extract._select_common import (
@@ -177,8 +178,8 @@ def _parse_simple_selector(tokens: list[tuple[str, str]], pos: int) -> tuple[lis
                 parts.append(("PSEUDO_LAST_CHILD",))
             elif pseudo.startswith(":nth-child("):
                 inner = pseudo[len(":nth-child(") : -1]
-                n = int(inner.strip())
-                parts.append(("PSEUDO_NTH_CHILD", n))
+                a, b = _parse_an_plus_b(inner)
+                parts.append(("PSEUDO_NTH_CHILD", a, b))
             elif pseudo.startswith(":not("):
                 inner = pseudo[len(":not(") : -1]
                 inner_tokens = _tokenize(inner)
@@ -192,6 +193,35 @@ def _parse_simple_selector(tokens: list[tuple[str, str]], pos: int) -> tuple[lis
             break
 
     return parts, pos
+
+
+_AN_PLUS_B_RE = re.compile(r"^\s*([+-]?\d*)n(?:\s*([+-])\s*(\d+))?\s*$")
+_INTEGER_RE = re.compile(r"^\s*([+-]?\d+)\s*$")
+
+
+def _parse_an_plus_b(inner: str) -> tuple[int, int]:
+    """Parse an :nth-child() An+B argument into (a, b); reject malformed input."""
+    text = inner.strip()
+    if text == "odd":
+        return (2, 1)
+    if text == "even":
+        return (2, 2)
+    integer = _INTEGER_RE.fullmatch(text)
+    if integer:
+        return (0, int(integer.group(1)))
+    match = _AN_PLUS_B_RE.fullmatch(text)
+    if match:
+        a_text = match.group(1)
+        if a_text in ("", "+"):
+            a = 1
+        elif a_text == "-":
+            a = -1
+        else:
+            a = int(a_text)
+        b_sign, b_digits = match.group(2), match.group(3)
+        b = int(b_sign + b_digits) if b_sign is not None else 0
+        return (a, b)
+    raise SelectorError(f":nth-child() argument {inner!r} is not a valid An+B form")
 
 
 def _parse_selector(
@@ -215,6 +245,8 @@ def _parse_selector(
             _consume(tokens, pos, "PLUS")
             pos += 1
             combinator = "adjacent"
+        elif tok is not None and tok[0] != "COMMA":
+            combinator = "descendant"
         chain.append((simple, combinator))
         if combinator is None:
             break
@@ -342,10 +374,16 @@ def _matches_pseudo_last_child(node: DOMNode) -> bool:
 
 
 def _matches_pseudo_nth_child(node: DOMNode, part: tuple[str, ...]) -> bool:
-    n = part[1]
+    a, b = cast(int, part[1]), cast(int, part[2])
     if not node.parent:
         return False
-    return _element_index_before(node) + 1 == n
+    index = _element_index_before(node) + 1
+    if a == 0:
+        return index == b
+    diff = index - b
+    if diff % a != 0:
+        return False
+    return (diff // a) >= 0
 
 
 def _element_index_before(node: DOMNode) -> int:
