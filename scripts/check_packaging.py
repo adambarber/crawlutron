@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import configparser
+import os
 import pathlib
 import shutil
 import subprocess
@@ -65,6 +67,50 @@ def _own_top_levels(wheel: pathlib.Path) -> list[str]:
     return sorted(roots)
 
 
+def _declared_scripts(wheel: pathlib.Path) -> list[tuple[str, str]]:
+    """Console scripts declared by the wheel, as (command, module:attr) pairs."""
+    with zipfile.ZipFile(wheel) as archive:
+        entries = [name for name in archive.namelist() if name.endswith(".dist-info/entry_points.txt")]
+        if not entries:
+            return []
+        parser = configparser.ConfigParser(interpolation=None)
+        parser.read_string(archive.read(entries[0]).decode("utf-8"))
+    if not parser.has_section("console_scripts"):
+        return []
+    return [(command, target) for command, target in parser.items("console_scripts")]
+
+
+def _probe_import(
+    probe: pathlib.Path, code: str, *, cwd: pathlib.Path | None = None, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    """Run one import probe in the wheel's clean environment."""
+    return subprocess.run(
+        [str(probe / "bin" / "python"), "-c", code],
+        cwd=str(cwd) if cwd is not None else None,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _script_import_error(probe: pathlib.Path, command: str, target: str) -> str | None:
+    """None when the target imports from the wheel env, else a named gate failure."""
+    module, separator, attribute = target.partition(":")
+    if not separator or not module or not attribute:
+        return f"pyproject.toml [project.scripts] {command}: malformed target {target!r}"
+    statements = ["import importlib", f"obj = importlib.import_module({module!r})"]
+    statements.extend(f"obj = getattr(obj, {part!r})" for part in attribute.split("."))
+    env = dict(os.environ)
+    env.pop("PYTHONPATH", None)
+    done = _probe_import(probe, "; ".join(statements), cwd=probe, env=env)
+    if done.returncode:
+        return (
+            f"pyproject.toml [project.scripts] {command} = {target}: "
+            f"not importable from the wheel: {done.stderr.strip()}"
+        )
+    return None
+
+
 def main() -> int:
     """Every wheel in dist/ installs into its own environment and imports."""
     wheels = sorted((REPO_ROOT / "dist").glob("*.whl"))
@@ -75,22 +121,25 @@ def main() -> int:
     failures: list[str] = []
     for wheel in wheels:
         tops = _own_top_levels(wheel)
-        if not tops:
-            # A distribution that ships no code is a meta-package: the app wheel
-            # exists to pull its members in, and has nothing of its own to import.
+        scripts = _declared_scripts(wheel)
+        if not tops and not scripts:
+            # No code and no entry points: the app wheel pulls its members in,
+            # with nothing of its own to import or launch.
             print(f"{wheel.name} -> meta-package (no importable top level): ok")
             continue
         probe = _probe_environment(wheel)
         for top in tops:
-            done = subprocess.run(
-                [str(probe / "bin" / "python"), "-c", f"import {top}"],
-                capture_output=True,
-                text=True,
-            )
+            done = _probe_import(probe, f"import {top}")
             if done.returncode:
                 failures.append(f"{wheel.name}: `import {top}` failed: {done.stderr.strip()}")
             else:
                 print(f"{wheel.name} -> {top}: ok")
+        for command, target in scripts:
+            error = _script_import_error(probe, command, target)
+            if error:
+                failures.append(f"{wheel.name}: {error}")
+            else:
+                print(f"{wheel.name} -> script {command}: ok")
 
     for line in failures:
         print(f"::error::{line}")

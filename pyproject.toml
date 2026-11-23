@@ -124,10 +124,8 @@ dev = [
     "mutmut==3.2.0",
 ]
 
-[project.scripts]
-pin-verify = "scripts.pin_verify:main"
-agent-review = "scripts.agent_review:main"
-review-probes = "scripts.review_probes:main"
+# No [project.scripts]: this wheel ships no modules (bypass-selection below),
+# so any console script would be broken on install. Dev tools run via `python -m scripts.*`.
 
 [project.urls]
 # The canonical remote, and the same value as crawlutron.vocabulary.identity.REPOSITORY_URL --
