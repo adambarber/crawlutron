@@ -10,43 +10,48 @@ coverage:
         target: 90%
         informational: true
 
-# Six Codecov components for per-surface measurement:
-# - battery: the fast suite (commit admission)
-# - real-pbkdf2: real PBKDF2 stress surface
-# - test-browser: browser integration surface
-# - admission: admission package coverage
-# - crawl: crawl package coverage
-# - sdk: SDK package coverage
-# All components use carryforward so a surface absent on a given run does not
-# crater the total. Status targets remain informational; no blocking threshold.
+# Components are path-based: the single combined coverage XML carries every
+# source file, so flag_regexes surfaces can never receive coverage here.
+# Package ids and globs are checked against the live uv members by config bites.
 component_management:
+  individual_components:
+    - component_id: battery
+      paths:
+        - packages/**/src/**
+    - component_id: real-pbkdf2
+      paths:
+        - packages/core/src/crawlutron/storage/**
+    - component_id: test-browser
+      paths:
+        - packages/core/src/crawlutron/transport/browser*.py
+    - component_id: crawlutron
+      paths:
+        - packages/core/src/crawlutron/**
+    - component_id: crawlutron_admit
+      paths:
+        - packages/crawlutron-admit/src/crawlutron_admit/**
+    - component_id: crawlutron_extract
+      paths:
+        - packages/extract/src/crawlutron_extract/**
+    - component_id: crawlutron_mcp
+      paths:
+        - packages/mcp/src/crawlutron_mcp/**
+    - component_id: crawlutron_rest
+      paths:
+        - packages/rest/src/crawlutron_rest/**
+    - component_id: safe_url
+      paths:
+        - packages/safe-url/src/safe_url/**
+    - component_id: crawlutron_sdk
+      paths:
+        - packages/sdk/src/crawlutron_sdk/**
+
+# Codecov reads carryforward only here, not inside component_management.
+flag_management:
   default_rules:
     carryforward: true
-  individual_components:
-    battery:
-      flag_regexes:
-        - battery
-      carryforward: true
-    real-pbkdf2:
-      flag_regexes:
-        - real-pbkdf2
-      carryforward: true
-    test-browser:
-      flag_regexes:
-        - test-browser
-      carryforward: true
-    admission:
-      paths:
-        - packages/crawlutron-admit/src/crawlutron_admit/
-      carryforward: true
-    crawl:
-      paths:
-        - packages/core/src/crawlutron/
-      carryforward: true
-    sdk:
-      paths:
-        - packages/sdk/src/crawlutron_sdk/
-      carryforward: true
 
-# Informational status per component; no gate fails on coverage.
-# Each component's project/patch status inherits the global informational setting.
+# Nightly coverage must not join the primary report.
+flags:
+  nightly:
+    joined: false
