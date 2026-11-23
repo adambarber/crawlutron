@@ -8,9 +8,12 @@ import ast
 import asyncio
 import threading
 
+import pytest
+
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.storage.job_store import CrawlJobState, JobStatus, JobStore
-from crawlutron.storage.safe_db import allow_on_loop
+from crawlutron.storage.job_store_accumulators import JobAccumulators
+from crawlutron.storage.safe_db import StorageBusy, allow_on_loop
 from safe_url.normalized_url import NormalizedUrl
 from tests._job_harnesses import frontier, loaded_job, make_job_store, run_to_terminal
 from tests._policy_factories import canonical
@@ -159,6 +162,26 @@ class TestStatusPlane:
         assert row.status is JobStatus.FAILED
         assert row.error == "runner timeout"
         assert row.stats["total_failed"] != 99
+
+    def test_a_rolled_back_save_does_not_advance_the_in_memory_generation(
+        self, tmp_path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """A post-commit failure must not leave memory ahead of the rolled-back row."""
+        store = _store(tmp_path)
+        job = _loaded(store, _create_job(store, "").job_id)
+        before = job.generation
+
+        def _failing_append(self, job):
+            raise StorageBusy("append failed")
+
+        monkeypatch.setattr(JobAccumulators, "append", _failing_append)
+        with pytest.raises(StorageBusy):
+            store.save(job)
+        monkeypatch.undo()
+        assert job.generation == before
+        job.stats["total_crawled"] = 5
+        store.save(job)
+        assert loaded_job(store, job.job_id).stats["total_crawled"] == 5
 
     async def test_terminal_claim_respects_a_concurrent_cancel(self, tmp_path):
         """A cancelled job is settled, and nothing may claim otherwise.

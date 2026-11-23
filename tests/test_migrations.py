@@ -21,6 +21,7 @@ from crawlutron.storage.migrations import (
     CURRENT_SCHEMAS,
     LEGACY_COLUMNS,
     MIGRATION_IDS,
+    MIGRATION_SEQUENCES,
     ColumnSchema,
     StoreSchema,
     TableSchema,
@@ -240,6 +241,34 @@ def test_legacy_job_database_is_stamped_without_losing_rows_or_columns(tmp_path)
     _assert_migration_recorded(conn, StoreSchema.CRAWL_JOBS)
     conn.close()
     store.close()
+
+
+def test_a_store_stamped_through_0007_upgrades_to_the_generation_fence(tmp_path, monkeypatch):
+    """A 0007-stamped ledger must receive the generation column on reopen.
+
+    An unregistered migration leaves no pending work and the schema check fails.
+    """
+    db_path = tmp_path / "stamped-0007.db"
+    current = CURRENT_SCHEMAS[StoreSchema.CRAWL_JOBS]
+    legacy = replace(current, columns=tuple(c for c in current.columns if c.name != "generation"))
+    conn = sqlite3.connect(db_path)
+    conn.execute(create_table_sql(legacy))
+    conn.commit()
+    conn.close()
+
+    sequence = MIGRATION_SEQUENCES[StoreSchema.CRAWL_JOBS]
+    through_0007 = sequence[: sequence.index("0007_crawl_jobs_add_runner_claim") + 1]
+    with monkeypatch.context() as m:
+        m.setitem(MIGRATION_SEQUENCES, StoreSchema.CRAWL_JOBS, through_0007)
+        m.setitem(CURRENT_SCHEMAS, StoreSchema.CRAWL_JOBS, legacy)
+        stamp_store(db_path, StoreSchema.CRAWL_JOBS)
+
+    migrate_store(db_path, StoreSchema.CRAWL_JOBS)
+
+    after = sqlite3.connect(db_path)
+    assert "generation" in _column_names(after, "crawl_jobs")
+    assert schema_drift(after, CURRENT_SCHEMAS[StoreSchema.CRAWL_JOBS]) == ()
+    after.close()
 
 
 def test_historical_canonicalized_column_is_removed_during_legacy_stamping(tmp_path):

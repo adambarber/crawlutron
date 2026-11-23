@@ -314,6 +314,7 @@ MIGRATION_SEQUENCES = {
         "0005_crawl_jobs_add_deleted_at",
         "0006_crawl_jobs_split_frontier",
         "0007_crawl_jobs_add_runner_claim",
+        "0008_crawl_jobs_add_generation",
     ),
     StoreSchema.RESULTS: ("0001_results_initial", "0002_results_add_owner"),
     StoreSchema.COORDINATION_COUNTERS: ("0001_coordination_counters_initial",),

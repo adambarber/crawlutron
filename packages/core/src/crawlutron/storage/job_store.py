@@ -202,10 +202,10 @@ class JobStore:
             version = connection_data_version(self._conn)
             job.updated_at = time.time()
             applied = self._conn.execute(_UPSERT_JOB_ROW_SQL, _job_row_params(job)).rowcount == 1
-            if applied:
-                job.generation += 1
             self._accumulators.append(job)
         self._accumulators._seed_version(job.job_id, version)
+        if applied:
+            job.generation += 1
 
     def set_status(
         self,
