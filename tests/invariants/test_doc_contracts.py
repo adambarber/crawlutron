@@ -69,9 +69,10 @@ def _broken_doc_reference_offenders(
     Records of what was true legitimately cite deleted files -- exempted BY
     NAME. The span must claim this tree's layout; the params enable a copy bite."""
     offenders: list[str] = []
+    contents = discovered_files(root, "*.md", include_content=True)
     for name in _live_documents() if documents is None else documents:
         document = root / name
-        for span in re.findall(r"`([^`\n]+)`", document.read_text(encoding="utf-8")):
+        for span in re.findall(r"`([^`\n]+)`", contents[document]):
             candidate = span.strip()
             if not candidate:
                 # Double backticks (``word``) leave whitespace captures.
@@ -191,7 +192,7 @@ def _app_symbol_definitions(root: pathlib.Path = REPO_ROOT) -> dict[str, frozens
         root / "packages" / "core" / "src" / "crawlutron",
         root / "packages" / "safe-url" / "src" / "safe_url",
     ):
-        for path in sorted(pkg_root.rglob("*.py")):
+        for path in discovered_files(pkg_root, "*.py"):
             tree = canonical_tree(path)
             relative = path.relative_to(root).as_posix()
             for node in tree.body:
@@ -231,9 +232,10 @@ def _doc_symbol_offenders(
         symbols = _app_symbol_definitions(app_root)
     docs = _live_documents() if documents is None else documents
     offenders: list[str] = []
+    contents = discovered_files(root, "*.md", include_content=True)
     for name in docs:
         document = root / name
-        text = document.read_text(encoding="utf-8")
+        text = contents[document]
         for span in re.findall(r"`([^`\n]+)`", text):
             candidate = span.strip()
             if not candidate:
@@ -262,7 +264,8 @@ def _check_dotted_symbol(name: str, candidate: str, app_root: pathlib.Path) -> l
             return []
         module_path = src_root / pkg_dir / pathlib.Path(*parts[1:-1]).with_suffix(".py")
         if module_path.exists():
-            tree = ast.parse(module_path.read_text(encoding="utf-8"))
+            contents = discovered_files(module_path.parent, module_path.name, include_content=True)
+            tree = ast.parse(contents[module_path])
             if _symbol_defined_in(tree, symbol):
                 return []
             return [f"{name}: `{candidate}` symbol not defined in {module_path.relative_to(app_root)}"]
@@ -318,9 +321,10 @@ def _doc_example_offenders(root: pathlib.Path = REPO_ROOT, documents: list[str] 
     Blocks that do not parse or do not name a request shape are skipped.
     """
     offenders: list[str] = []
+    contents = discovered_files(root, "*.md", include_content=True)
     for name in _live_documents() if documents is None else documents:
         document = root / name
-        for index, block in enumerate(_FENCED_JSON.findall(document.read_text(encoding="utf-8")), start=1):
+        for index, block in enumerate(_FENCED_JSON.findall(contents[document]), start=1):
             try:
                 payload = json.loads(block)
             except json.JSONDecodeError:
@@ -378,9 +382,10 @@ def _deployment_knobs(manifest: pathlib.Path | None = None) -> set[str] | None:
     manifest = manifest if manifest is not None else _compose_file()
     if not manifest.exists():
         return None
+    contents = discovered_files(manifest.parent, manifest.name, include_content=True)
     return {
         name
-        for line in manifest.read_text(encoding="utf-8").splitlines()
+        for line in contents[manifest].splitlines()
         if not line.lstrip().startswith("#")
         for name in _KNOB_PATTERN.findall(line)
     }
@@ -444,11 +449,13 @@ def test_doc_symbol_detector_bites(tmp_path):
     offenders = _doc_symbol_offenders(root=tmp_path, documents=["CONTRIBUTING.md"], symbols=symbols)
     assert any("module does not exist" in hit for hit in offenders), offenders
     assert any("names no app symbol" in hit for hit in offenders), offenders
-    (tmp_path / "app_transport_ghost.md").write_text(
+    ghost_root = tmp_path / "ghosts"
+    ghost_root.mkdir()
+    (ghost_root / "app_transport_ghost.md").write_text(
         "See ``crawlutron/transport.robots_parse.no_such_symbol_xyz``.\n",
         encoding="utf-8",
     )
-    offenders = _doc_symbol_offenders(root=tmp_path, documents=["app_transport_ghost.md"], symbols=symbols)
+    offenders = _doc_symbol_offenders(root=ghost_root, documents=["app_transport_ghost.md"], symbols=symbols)
     assert any("symbol not defined in" in hit for hit in offenders), offenders
 
 
@@ -456,8 +463,9 @@ def test_doc_symbol_detector_spared_clean_references(tmp_path):
     """Real symbols and non-symbol bare words don't fire the gate."""
     symbols = _app_symbol_definitions()
     document = REPO_ROOT / "CONTRIBUTING.md"
+    content = discovered_files(document.parent, document.name, include_content=True)[document]
     (tmp_path / "CONTRIBUTING.md").write_text(
-        document.read_text(encoding="utf-8")
+        content
         + "\nSee ``safe_url/host_policy.HostPolicy`` and ``filter_js_endpoints``.\n"
         + "And ``git``, ``main`` and ``PEP 8`` are not symbols.\n",
         encoding="utf-8",

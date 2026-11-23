@@ -12,6 +12,7 @@ import tokenize
 import weakref
 from dataclasses import dataclass
 from functools import cache
+from typing import Literal, overload
 
 from utils.paths import (
     ADMISSION_ROOT,
@@ -78,9 +79,27 @@ _SKIP_DIRECTORIES = frozenset(
 )
 
 
+@overload
+def discovered_files(
+    root: pathlib.Path, pattern: str, *, include_content: Literal[False] = False
+) -> tuple[pathlib.Path, ...]: ...
+
+
+@overload
+def discovered_files(
+    root: pathlib.Path, pattern: str, *, include_content: Literal[True]
+) -> dict[pathlib.Path, str]: ...
+
+
 @cache
-def discovered_files(root: pathlib.Path, pattern: str) -> tuple[pathlib.Path, ...]:
-    """Git-tracked files under ``root`` matching ``pattern``; skip dirs pruned."""
+def discovered_files(
+    root: pathlib.Path, pattern: str, *, include_content: bool = False
+) -> tuple[pathlib.Path, ...] | dict[pathlib.Path, str]:
+    """Git-tracked files under ``root`` matching ``pattern``; skip dirs pruned.
+
+    ``include_content=True`` returns ``{path: text}`` instead of paths; cached
+    per ``(root, pattern, include_content)`` so discovery and reads share one door.
+    """
     keep: list[pathlib.Path] = []
     for dirpath, dirnames, filenames in os.walk(root, topdown=True):
         dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRECTORIES]
@@ -89,17 +108,22 @@ def discovered_files(root: pathlib.Path, pattern: str) -> tuple[pathlib.Path, ..
             if path.match(pattern):
                 keep.append(path)
     if not (root / ".git").exists():
-        return tuple(sorted(keep))
-    git = shutil.which("git") or "git"
-    result = subprocess.run(
-        [git, "-C", str(root), "ls-files", pattern],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        return tuple(sorted(keep))
-    tracked = set(result.stdout.splitlines())
-    return tuple(sorted(p for p in keep if p.relative_to(root).as_posix() in tracked))
+        selected = tuple(sorted(keep))
+    else:
+        git = shutil.which("git") or "git"
+        result = subprocess.run(
+            [git, "-C", str(root), "ls-files", pattern],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            selected = tuple(sorted(keep))
+        else:
+            tracked = set(result.stdout.splitlines())
+            selected = tuple(sorted(p for p in keep if p.relative_to(root).as_posix() in tracked))
+    if include_content:
+        return {path: path.read_text(encoding="utf-8") for path in selected}
+    return selected
 
 
 @dataclass(frozen=True)
