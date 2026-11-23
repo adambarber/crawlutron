@@ -232,6 +232,81 @@ def test_path_composition_has_one_home() -> None:
     assert not _sweep(_local_parser), f"local parsers: {_sweep(_local_parser)[:8]}"
 
 
+_FS_ATTRS = frozenset({"rglob", "glob", "iterdir", "scandir", "walk", "read_text", "read_bytes"})
+
+
+def _is_fs_door(relative: str) -> bool:
+    """Sanctioned filesystem-door modules may use raw FS traversal."""
+    return (
+        relative.startswith("tests/_walk_")
+        or relative.startswith("tests/chokepoint_")
+        or relative == "utils/paths.py"
+        or relative == "tests/invariants/test_path_chokepoint.py"
+    )
+
+
+def _os_module(receiver: ast.expr) -> bool:
+    """True only for a bare ``os`` receiver: ``os.walk``/``os.scandir`` are raw FS; ``ast.walk`` is not."""
+    return isinstance(receiver, ast.Name) and receiver.id == "os"
+
+
+def _fs_traversal_nodes(tree: ast.Module) -> list[ast.AST]:
+    """Raw filesystem traversal calls: rglob, glob, iterdir, scandir, walk, read_text, read_bytes.
+
+    ``walk`` and ``scandir`` are receiver-aware: only ``os.<attr>`` counts; ``ast.walk`` is AST
+    traversal, not filesystem traversal, and object-bound ``.scandir()`` is not the FS form.
+    """
+    return [
+        node
+        for node in nodes_of(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in _FS_ATTRS
+        and (node.func.attr not in {"walk", "scandir"} or _os_module(node.func.value))
+    ]
+
+
+def _fs_traversal(tree: ast.Module, path: pathlib.Path) -> list[str]:
+    return [
+        offender_at(
+            path,
+            node,
+            "raw filesystem traversal must go through tests._walk_primitives.discovered_files",
+        )
+        for node in _fs_traversal_nodes(tree)
+    ]
+
+
+def _fs_sweep() -> list[str]:
+    """FS-traversal detector over all roots; sanctioned doors and the gate itself excluded."""
+    out: list[str] = []
+    for root in SCAN_ROOTS:
+        for path, tree in trees_under(REPO_ROOT / root):
+            relative = path.relative_to(REPO_ROOT).as_posix()
+            if _is_fs_door(relative):
+                continue
+            out.extend(_fs_traversal(tree, path))
+    return out
+
+
+def test_fs_traversal_sites_never_grow() -> None:
+    """Ceiling on raw-FS traversal sites; owner's follow-up drives it to zero."""
+    found = _fs_sweep()
+    assert len(found) <= 358, f"raw-FS traversal sites: {found[:8]}"
+
+
+def test_fs_traversal_detector_bites() -> None:
+    """rglob detected, ast.walk not (precision), os.walk detected, clean door use not."""
+    dirty = parsed_source("paths = list(REPO_ROOT.rglob('*.py'))\n")
+    assert _fs_traversal(dirty, REPO_ROOT / "probe.py"), "rglob must be detected"
+    ast_walk = parsed_source("x = ast.walk(tree)\n")
+    assert not _fs_traversal(ast_walk, REPO_ROOT / "probe.py"), "ast.walk is AST traversal, not raw FS"
+    os_walk = parsed_source("x = os.walk(root)\n")
+    assert _fs_traversal(os_walk, REPO_ROOT / "probe.py"), "os.walk is raw FS traversal"
+    clean = parsed_source("docs = discovered_files(REPO_ROOT, '*.md')\n")
+    assert not _fs_traversal(clean, REPO_ROOT / "probe.py"), "door use must stay clean"
+
+
 def test_root_is_independent_of_the_callers_cwd(tmp_path: pathlib.Path) -> None:
     """The door is installed at one canonical place: importing it from a foreign cwd
     must still name this tree, or a caller can silently redirect every gate."""

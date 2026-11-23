@@ -6,8 +6,6 @@ import ast
 import json
 import pathlib
 import re
-import shutil
-import subprocess
 
 import pytest
 from pydantic import BaseModel
@@ -17,7 +15,7 @@ from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.json_value import JsonValue
 from crawlutron.models.render_request import RenderRequest
 from tests.chokepoint_paths import REPO_ROOT
-from tests.chokepoint_walks import canonical_tree
+from tests.chokepoint_walks import canonical_tree, discovered_files
 from tests.invariants._env_knobs import _KNOB_PATTERN, _consumed_knobs
 from tests.rules import Rule
 
@@ -30,11 +28,6 @@ _DOC_REFERENCE_EXCLUSIONS = {
     "docs/review-and-refactoring-plan.md": "stamped ARCHIVED; describes a topology that no longer exists",
     "docs/2026-09-15-performance-review.md": "a dated performance review quoting the tree it measured",
 }
-
-
-_SKIP_DIRECTORIES = frozenset(
-    {".git", ".venv", "work", ".hardstand", "node_modules", ".pytest_cache", "__pycache__"}
-)
 
 
 _BACKTICKED_PATH = re.compile(
@@ -56,21 +49,8 @@ def _is_tree_path_claim(candidate: str) -> bool:
 
 
 def _markdown_documents() -> list[str]:
-    # Tracked *.md only -- an untracked task brief (never committed) must not red the doc gate.
-    all_docs = sorted(
-        str(document.relative_to(REPO_ROOT))
-        for document in REPO_ROOT.rglob("*.md")
-        if not _SKIP_DIRECTORIES.intersection(document.relative_to(REPO_ROOT).parts)
-    )
-    if not (REPO_ROOT / ".git").exists():
-        return all_docs
-    lf = subprocess.run(
-        [shutil.which("git") or "git", "-C", str(REPO_ROOT), "ls-files", "*.md"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.splitlines()
-    return [name for name in all_docs if name in set(lf)]
+    """Tracked *.md only -- an untracked task brief (never committed) must not red the doc gate."""
+    return [str(document.relative_to(REPO_ROOT)) for document in discovered_files(REPO_ROOT, "*.md")]
 
 
 def _live_documents() -> list[str]:

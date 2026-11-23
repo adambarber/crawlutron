@@ -4,7 +4,10 @@ import ast
 import copy
 import hashlib
 import io
+import os
 import pathlib
+import shutil
+import subprocess
 import tokenize
 import weakref
 from dataclasses import dataclass
@@ -65,7 +68,38 @@ __all__ = [
     "uv_workspace_members",
     "workspace_package_dirs",
     "workspace_project",
+    "discovered_files",
 ]
+
+
+# Directories never descended into during file discovery.
+_SKIP_DIRECTORIES = frozenset(
+    {".git", ".venv", "work", ".hardstand", "node_modules", ".pytest_cache", "__pycache__"}
+)
+
+
+@cache
+def discovered_files(root: pathlib.Path, pattern: str) -> tuple[pathlib.Path, ...]:
+    """Git-tracked files under ``root`` matching ``pattern``; skip dirs pruned."""
+    keep: list[pathlib.Path] = []
+    for dirpath, dirnames, filenames in os.walk(root, topdown=True):
+        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRECTORIES]
+        for name in filenames:
+            path = pathlib.Path(dirpath) / name
+            if path.match(pattern):
+                keep.append(path)
+    if not (root / ".git").exists():
+        return tuple(sorted(keep))
+    git = shutil.which("git") or "git"
+    result = subprocess.run(
+        [git, "-C", str(root), "ls-files", pattern],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return tuple(sorted(keep))
+    tracked = set(result.stdout.splitlines())
+    return tuple(sorted(p for p in keep if p.relative_to(root).as_posix() in tracked))
 
 
 @dataclass(frozen=True)
