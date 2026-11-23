@@ -39,4 +39,7 @@ tmp/
 codeql-db/
 results.sarif
 
+# Local operating doctrine; AGENTS.md.example is the public template (#1196).
+AGENTS.md
+
 
