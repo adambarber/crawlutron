@@ -134,10 +134,31 @@ class TestStatusPlane:
         # Runner resumes: commits the batch's data from the stale snapshot.
         snapshot.visited.add(canonical("https://a.example/"))
         snapshot.frontier = []
+        snapshot.stats["total_crawled"] = 7
         store.save(snapshot)
         row = loaded_job(store, "j1")
         assert row.status is JobStatus.PAUSED, "data save resurrected the runner's stale status"
         assert row.visited == {canonical("https://a.example/")}  # data plane still flows
+        assert row.stats["total_crawled"] == 7  # row columns still flow on a reasonless pause
+
+    def test_a_stale_save_cannot_wipe_a_terminal_failure_reason(self, tmp_path):
+        """A late save from the runner's snapshot cannot overwrite a terminal row.
+
+        The orphaned db_write thread commits after the failure CAS: its error,
+        stats and counters must never replace the recorded failure reason.
+        """
+        store = _store(tmp_path)
+        snapshot = _running_job(store)
+        assert store.set_status("j1", JobStatus.FAILED, expected=JobStatus.RUNNING, error="runner timeout")
+        snapshot.error = "orphan overwrite"
+        snapshot.stats["total_failed"] = 99
+        snapshot.in_flight = []
+        snapshot.transient_retries = {}
+        store.save(snapshot)
+        row = loaded_job(store, "j1")
+        assert row.status is JobStatus.FAILED
+        assert row.error == "runner timeout"
+        assert row.stats["total_failed"] != 99
 
     async def test_terminal_claim_respects_a_concurrent_cancel(self, tmp_path):
         """A cancelled job is settled, and nothing may claim otherwise.

@@ -10,7 +10,7 @@ import sqlite3
 import threading
 import time
 
-from crawlutron.storage.job_store_collections import JobStatus
+from crawlutron.storage.job_store_collections import TERMINAL_STATUSES, JobStatus
 from crawlutron.storage.safe_db import txn_read, txn_write
 
 DEFAULT_JOB_CLAIM_SECONDS = 300.0
@@ -151,7 +151,7 @@ def retire_orphan_running(
     statement = """
         UPDATE crawl_jobs
            SET status = ?, updated_at = ?, error = COALESCE(?, error),
-               claimed_by = NULL, claimed_at = NULL
+               generation = generation + 1, claimed_by = NULL, claimed_at = NULL
          WHERE job_id = ? AND deleted_at IS NULL AND status = ?
            AND (claimed_by IS NULL OR claimed_at IS NULL OR claimed_at < ?)
     """
@@ -171,14 +171,16 @@ def _status_with_claim(
     claim_now: float,
     claim_seconds: float,
 ) -> tuple[str, tuple[object, ...]]:
+    bump = 1 if (new in TERMINAL_STATUSES or error is not None) else 0
     if wanted == {JobStatus.RUNNING} and new is JobStatus.RUNNING:
         stmt = (
-            "UPDATE crawl_jobs SET status=?, updated_at=?, error=COALESCE(?, error), "
-            "claimed_by=?, claimed_at=? WHERE job_id=? AND deleted_at IS NULL "
-            "AND status IN (SELECT value FROM json_each(?)) "
+            "UPDATE crawl_jobs SET generation=generation+?, status=?, updated_at=?, "
+            "error=COALESCE(?, error), claimed_by=?, claimed_at=? WHERE job_id=? "
+            "AND deleted_at IS NULL AND status IN (SELECT value FROM json_each(?)) "
             "AND (claimed_by IS NULL OR claimed_at IS NULL OR claimed_at < ? OR claimed_by = ?)"
         )
         params = (
+            bump,
             new.value,
             now,
             error,
@@ -191,11 +193,11 @@ def _status_with_claim(
         )
         return stmt, params
     stmt = (
-        "UPDATE crawl_jobs SET status=?, updated_at=?, error=COALESCE(?, error), "
-        "claimed_by=?, claimed_at=? WHERE job_id=? AND deleted_at IS NULL "
-        "AND status IN (SELECT value FROM json_each(?))"
+        "UPDATE crawl_jobs SET generation=generation+?, status=?, updated_at=?, "
+        "error=COALESCE(?, error), claimed_by=?, claimed_at=? WHERE job_id=? "
+        "AND deleted_at IS NULL AND status IN (SELECT value FROM json_each(?))"
     )
-    return stmt, (new.value, now, error, claimed_by, claim_now, job_id, wanted_json)
+    return stmt, (bump, new.value, now, error, claimed_by, claim_now, job_id, wanted_json)
 
 
 def set_status(
@@ -217,6 +219,7 @@ def set_status(
     wanted = {expected} if isinstance(expected, JobStatus) else set(expected)
     now = claim_now if claim_now is not None else time.time()
     wanted_json = json.dumps(sorted(s.value for s in wanted))
+    bump = 1 if (new in TERMINAL_STATUSES or error is not None) else 0
     if claimed_by is not None and claim_now is not None:
         stmt, params = _status_with_claim(
             wanted,
@@ -231,17 +234,18 @@ def set_status(
         )
     elif clear_claim:
         stmt = (
-            "UPDATE crawl_jobs SET status=?, updated_at=?, error=COALESCE(?, error), "
-            "claimed_by=NULL, claimed_at=NULL WHERE job_id=? AND deleted_at IS NULL "
-            "AND status IN (SELECT value FROM json_each(?))"
+            "UPDATE crawl_jobs SET generation=generation+?, status=?, updated_at=?, "
+            "error=COALESCE(?, error), claimed_by=NULL, claimed_at=NULL WHERE job_id=? "
+            "AND deleted_at IS NULL AND status IN (SELECT value FROM json_each(?))"
         )
-        params = (new.value, now, error, job_id, wanted_json)
+        params = (bump, new.value, now, error, job_id, wanted_json)
     else:
         stmt = (
-            "UPDATE crawl_jobs SET status=?, updated_at=?, error=COALESCE(?, error) "
-            "WHERE job_id=? AND deleted_at IS NULL AND status IN (SELECT value FROM json_each(?))"
+            "UPDATE crawl_jobs SET generation=generation+?, status=?, updated_at=?, "
+            "error=COALESCE(?, error) WHERE job_id=? AND deleted_at IS NULL "
+            "AND status IN (SELECT value FROM json_each(?))"
         )
-        params = (new.value, now, error, job_id, wanted_json)
+        params = (bump, new.value, now, error, job_id, wanted_json)
     if (
         require_owner
         and claimed_by is not None

@@ -73,6 +73,7 @@ CRAWL_JOBS_SCHEMA = TableSchema(
         # Runner lease: the worker owning this RUNNING row and when it last renewed.
         ColumnSchema("claimed_by", "TEXT", False, None),
         ColumnSchema("claimed_at", "REAL", False, None),
+        ColumnSchema("generation", "INTEGER", True, "0"),
     ),
 )
 

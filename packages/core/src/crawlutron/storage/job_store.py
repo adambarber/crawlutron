@@ -62,7 +62,7 @@ _DEFAULT_CONTAINER = EffectContainer()
 
 _ROW_COLUMNS = (
     "SELECT job_id, kind, owner, root_url, policy, status, created_at, updated_at, error, "
-    "stats, in_flight, transient_retries, claimed_by, claimed_at FROM crawl_jobs"
+    "stats, in_flight, transient_retries, claimed_by, claimed_at, generation FROM crawl_jobs"
 )
 
 
@@ -201,7 +201,9 @@ class JobStore:
             self._accumulators._seed_table_truth(job.job_id)
             version = connection_data_version(self._conn)
             job.updated_at = time.time()
-            self._conn.execute(_UPSERT_JOB_ROW_SQL, _job_row_params(job))
+            applied = self._conn.execute(_UPSERT_JOB_ROW_SQL, _job_row_params(job)).rowcount == 1
+            if applied:
+                job.generation += 1
             self._accumulators.append(job)
         self._accumulators._seed_version(job.job_id, version)
 

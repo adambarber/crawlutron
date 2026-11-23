@@ -58,6 +58,24 @@ class TestStorageFailurePausesForRecovery:
         assert finished.status is JobStatus.PAUSED
         assert finished.status is not JobStatus.FAILED
 
+    async def test_db_write_timeout_pauses_for_recovery_not_failed(
+        self, tmp_path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An unknown-outcome db_write timeout pauses for boot rewind, never FAILED."""
+        store = make_job_store(tmp_path)
+        job = _seed_job(store, ROOT, POLICY, frontier=[ROOT])
+
+        async def _unknown_write(txn, *, owner="", timeout_seconds=30.0):
+            raise TimeoutError("orphaned txn outcome unknown")
+
+        monkeypatch.setattr(store._container, "db_write", _unknown_write)
+        await job_runner.run_job(job.job_id, store, CrawlerSettings.from_mapping({}), asyncio.Event())
+        finished = await store.aload(job.job_id)
+        assert finished is not None
+        assert finished.status is JobStatus.PAUSED
+        assert finished.status is not JobStatus.FAILED
+        assert finished.error is not None
+
     async def test_non_storage_exception_still_fails_terminal(self, tmp_path) -> None:
         """A non-storage exception keeps the pre-existing terminal-failure path."""
         store = make_job_store(tmp_path)
