@@ -1,8 +1,6 @@
-"""Contract tests for CI jobs that need history or config from the tree."""
+"""Residual contract tests for CI jobs not covered by the typed workflow rules."""
 
 from __future__ import annotations
-
-import yaml
 
 from tests.chokepoint_paths import REPO_ROOT
 
@@ -12,6 +10,8 @@ CONFIG_PATH = SERVICE_ROOT / ".github" / "dependency-review-config.yml"
 
 
 def _workflow_jobs() -> dict[str, object]:
+    import yaml
+
     document = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
     assert isinstance(document, dict)
     jobs = document["jobs"]
@@ -26,39 +26,14 @@ def _steps(job: object) -> list[dict[str, object]]:
     return [step for step in steps if isinstance(step, dict)]
 
 
-def _checkouts(job: object) -> list[dict[str, object]]:
-    return [step for step in _steps(job) if str(step.get("uses", "")).startswith("actions/checkout@")]
-
-
-def test_secret_scan_fetches_full_history() -> None:
-    checkouts = _checkouts(_workflow_jobs()["secret-scan"])
-    assert len(checkouts) == 1
-    options = checkouts[0].get("with")
-    assert isinstance(options, dict)
-    assert str(options.get("fetch-depth")) == "0"
-
-
-def test_dependency_review_checks_out_config_source() -> None:
-    assert len(_checkouts(_workflow_jobs()["dependency-review"])) == 1
-
-
-def test_dependency_review_supplies_refs_on_push_events() -> None:
-    steps = _steps(_workflow_jobs()["dependency-review"])
-    review = [step for step in steps if "dependency-review-action@" in str(step.get("uses", ""))]
-    assert len(review) == 1
-    options = review[0].get("with")
-    assert isinstance(options, dict)
-    assert "github.event.before" in str(options.get("base-ref", ""))
-    assert "github.sha" in str(options.get("head-ref", ""))
-
-
 def test_dependency_review_config_is_tracked() -> None:
+    """The dependency-review config file must be tracked in the tree."""
     assert CONFIG_PATH.is_file()
 
 
 def test_real_pkdf2_execution_uses_the_shared_door() -> None:
-    """The PBKDF2 job always calls the shared door (no step-level if: on the
-    door) and passes the real_pbkdf2 marker; report consumers stay guarded."""
+    """The PBKDF2 job always calls the shared door (no step-level if:) and
+    report consumers stay guarded."""
     jobs = _workflow_jobs()
     changes = jobs["changes"]
     assert isinstance(changes, dict)
@@ -73,8 +48,6 @@ def test_real_pkdf2_execution_uses_the_shared_door() -> None:
     assert isinstance(producer, dict)
     assert "if" not in producer, "a skipped job reddens the required aggregate"
 
-    # The door step carries no step-level if: (a skipped door is unrepresentable
-    # -- the refusal lives inside the action) but still passes the marker.
     door_steps = [step for step in _steps(producer) if "run-tests" in str(step.get("uses", ""))]
     assert len(door_steps) == 1, "real-pbkdf2 job must call the run-tests door"
     door_step = door_steps[0]
@@ -83,7 +56,6 @@ def test_real_pkdf2_execution_uses_the_shared_door() -> None:
     assert isinstance(with_, dict)
     assert str(with_.get("marker", "")) == "real_pbkdf2", "door must pass real_pbkdf2 marker"
 
-    # Coverage job download/upload steps for real-pbkdf2 are also guarded.
     for step in _steps(jobs["coverage"]):
         name = str(step.get("name", ""))
         if name.startswith("Download real-pbkdf2") or name.startswith("Upload real-pbkdf2"):

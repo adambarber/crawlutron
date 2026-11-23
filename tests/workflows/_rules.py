@@ -4,27 +4,39 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from enum import Enum, auto
 
+from tests.workflows._ci_rules import (
+    ci_dependency_review_checkout,
+    ci_dependency_review_refs,
+    ci_real_pbkdf2_door,
+    ci_secret_scan_fetch_depth,
+)
+from tests.workflows._codeql_rules import (
+    codeql_no_build_step,
+    codeql_registry_pin,
+    codeql_security_events_write,
+    codeql_security_extended,
+    codeql_single_sarif_upload,
+    codeql_triggers,
+)
 from tests.workflows._model import POLICY, WORKFLOWS, Job, Workflow
-from tests.workflows._policy import RuleId
-
-
-@dataclass(frozen=True)
-class Finding:
-    rule: str
-    workflow: str
-    job: str
-    line: int
-    message: str
-
-
-class Scope(Enum):
-    ALL = auto()
-    WITH_STEPS = auto()
-
-    def matches(self, job: Job) -> bool:
-        return self is Scope.ALL or bool(job.steps)
+from tests.workflows._nightly_rules import (
+    nightly_artifacts,
+    nightly_concurrency,
+    nightly_coverage_reports,
+    nightly_door_call,
+    nightly_name,
+    nightly_triggers,
+)
+from tests.workflows._policy import Finding, RuleId, Scope
+from tests.workflows._weekly_rules import (
+    weekly_artifacts,
+    weekly_lowest_direct,
+    weekly_mutation_targets,
+    weekly_mutation_timebox,
+    weekly_mutation_tool,
+    weekly_triggers,
+)
 
 
 @dataclass(frozen=True)
@@ -238,6 +250,96 @@ JOB_RULES = (
         "no silent uploads or unguarded artifact consumers",
         no_silent_uploads,
     ),
+    Rule(
+        RuleId.CODEQL_SECURITY_EVENTS_WRITE.value,
+        Scope.ALL,
+        "codeql analyze job holds security-events:write",
+        codeql_security_events_write,
+    ),
+    Rule(
+        RuleId.CODEQL_REGISTRY_PIN.value,
+        Scope.WITH_STEPS,
+        "codeql init/analyze use the registry-pinned SHA",
+        codeql_registry_pin,
+    ),
+    Rule(
+        RuleId.CODEQL_SECURITY_EXTENDED.value,
+        Scope.WITH_STEPS,
+        "codeql init uses security-extended queries",
+        codeql_security_extended,
+    ),
+    Rule(
+        RuleId.CODEQL_NO_BUILD_STEP.value,
+        Scope.WITH_STEPS,
+        "codeql python job has no build step",
+        codeql_no_build_step,
+    ),
+    Rule(
+        RuleId.CODEQL_SINGLE_SARIF_UPLOAD.value,
+        Scope.WITH_STEPS,
+        "codeql analyze uploads SARIF once, no redundant upload step",
+        codeql_single_sarif_upload,
+    ),
+    Rule(
+        RuleId.NIGHTLY_DOOR_CALL.value,
+        Scope.WITH_STEPS,
+        "nightly test job calls the run-tests door",
+        nightly_door_call,
+    ),
+    Rule(
+        RuleId.NIGHTLY_COVERAGE_REPORTS.value,
+        Scope.WITH_STEPS,
+        "nightly runs scripts.coverage_reports",
+        nightly_coverage_reports,
+    ),
+    Rule(
+        RuleId.WEEKLY_MUTATION_TIMEBOX.value,
+        Scope.ALL,
+        "weekly mutation-testing job is timeboxed",
+        weekly_mutation_timebox,
+    ),
+    Rule(
+        RuleId.WEEKLY_MUTATION_TOOL.value,
+        Scope.WITH_STEPS,
+        "weekly runs mutmut for mutation testing",
+        weekly_mutation_tool,
+    ),
+    Rule(
+        RuleId.WEEKLY_MUTATION_TARGETS.value,
+        Scope.WITH_STEPS,
+        "weekly mutmut targets invariant-critical modules",
+        weekly_mutation_targets,
+    ),
+    Rule(
+        RuleId.WEEKLY_LOWEST_DIRECT.value,
+        Scope.WITH_STEPS,
+        "weekly lowest-direct probe compiles and imports",
+        weekly_lowest_direct,
+    ),
+    Rule(
+        RuleId.CI_SECRET_SCAN_FETCH_DEPTH.value,
+        Scope.WITH_STEPS,
+        "ci secret-scan checks out with fetch-depth 0",
+        ci_secret_scan_fetch_depth,
+    ),
+    Rule(
+        RuleId.CI_DEPENDENCY_REVIEW_CHECKOUT.value,
+        Scope.WITH_STEPS,
+        "ci dependency-review checks out the trusted tree",
+        ci_dependency_review_checkout,
+    ),
+    Rule(
+        RuleId.CI_DEPENDENCY_REVIEW_REFS.value,
+        Scope.WITH_STEPS,
+        "ci dependency-review supplies base/head refs",
+        ci_dependency_review_refs,
+    ),
+    Rule(
+        RuleId.CI_REAL_PBKDF2_DOOR.value,
+        Scope.WITH_STEPS,
+        "ci real-pbkdf2 job calls the run-tests door with no step-level if",
+        ci_real_pbkdf2_door,
+    ),
 )
 
 
@@ -260,6 +362,41 @@ def has_trigger(workflow: Workflow) -> Iterator[Finding]:
 WORKFLOW_RULES = (
     WorkflowRule("declares-permissions", "a missing block means write-all", declares_permissions),
     WorkflowRule("has-trigger", "a workflow with no trigger is dead surface", has_trigger),
+    WorkflowRule(
+        RuleId.CODEQL_TRIGGERS.value,
+        "codeql triggers on PR main, push main, and weekly cron",
+        codeql_triggers,
+    ),
+    WorkflowRule(
+        RuleId.NIGHTLY_TRIGGERS.value,
+        "nightly triggers on daily schedule and workflow_dispatch",
+        nightly_triggers,
+    ),
+    WorkflowRule(
+        RuleId.NIGHTLY_NAME.value,
+        "nightly workflow name identifies the nightly plane",
+        nightly_name,
+    ),
+    WorkflowRule(
+        RuleId.NIGHTLY_CONCURRENCY.value,
+        "nightly declares concurrency with cancel-in-progress",
+        nightly_concurrency,
+    ),
+    WorkflowRule(
+        RuleId.WEEKLY_TRIGGERS.value,
+        "weekly triggers on weekly schedule and workflow_dispatch",
+        weekly_triggers,
+    ),
+    WorkflowRule(
+        RuleId.NIGHTLY_ARTIFACTS.value,
+        "nightly uploads coverage and junit artifacts across jobs",
+        nightly_artifacts,
+    ),
+    WorkflowRule(
+        RuleId.WEEKLY_ARTIFACTS.value,
+        "weekly uploads mutation and resolution artifacts across jobs",
+        weekly_artifacts,
+    ),
 )
 
 CASES = tuple(

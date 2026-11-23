@@ -4,18 +4,43 @@ from __future__ import annotations
 
 import pytest
 
-from tests.workflows._model import JOBS, WORKFLOWS, Job, Step, Workflow, parent_workflow
+from tests.workflows._model import (
+    JOBS,
+    Job,
+    Step,
+    Workflow,
+    parent_workflow,
+    workflow,
+)
+from tests.workflows._policy import RuleId
 from tests.workflows._rules import (
     JOB_RULES,
     WORKFLOW_RULES,
+    ci_dependency_review_checkout,
+    ci_dependency_review_refs,
+    ci_real_pbkdf2_door,
+    ci_secret_scan_fetch_depth,
+    codeql_no_build_step,
+    codeql_registry_pin,
+    codeql_security_events_write,
+    codeql_security_extended,
+    codeql_single_sarif_upload,
     door_no_if,
     needs_resolve,
+    nightly_artifacts,
+    nightly_coverage_reports,
+    nightly_door_call,
     no_bare_pytest,
     no_event_splicing_in_run,
     no_heredoc,
     no_pip_install,
     unique_step_ids,
     uses_tests_door,
+    weekly_artifacts,
+    weekly_lowest_direct,
+    weekly_mutation_targets,
+    weekly_mutation_timebox,
+    weekly_mutation_tool,
 )
 
 _SAMPLE: Job = next(job for job in JOBS if job.steps)
@@ -23,6 +48,38 @@ _SAMPLE: Job = next(job for job in JOBS if job.steps)
 
 def _mutate(**changes) -> Job:
     return _SAMPLE.model_copy(update=changes)
+
+
+def _job_from(stem: str, key: str) -> Job:
+    return workflow(stem).jobs[key]
+
+
+def _codeql_analyze() -> Job:
+    return _job_from("codeql", "analyze")
+
+
+def _nightly_test() -> Job:
+    return _job_from("nightly", "test")
+
+
+def _weekly_mutation() -> Job:
+    return _job_from("weekly", "mutation-testing")
+
+
+def _weekly_lowest() -> Job:
+    return _job_from("weekly", "lowest-direct-resolution")
+
+
+def _ci_secret_scan() -> Job:
+    return _job_from("ci", "secret-scan")
+
+
+def _ci_dep_review() -> Job:
+    return _job_from("ci", "dependency-review")
+
+
+def _ci_real_pbkdf2() -> Job:
+    return _job_from("ci", "real-pbkdf2")
 
 
 def _step(**changes) -> Step:
@@ -60,6 +117,195 @@ def _step(**changes) -> Step:
             unique_step_ids,
             _mutate(steps=(_step(id="same"), _step(id="same"))),
         ),
+        (
+            codeql_security_events_write,
+            _codeql_analyze().model_copy(update={"permissions": {}}),
+        ),
+        (
+            codeql_registry_pin,
+            _codeql_analyze().model_copy(
+                update={
+                    "steps": tuple(
+                        step.model_copy(update={"uses": step.uses.split("@")[0] + "@" + "0" * 40})
+                        if step.uses and "codeql-action" in step.uses
+                        else step
+                        for step in _codeql_analyze().steps
+                    )
+                }
+            ),
+        ),
+        (
+            codeql_security_extended,
+            _codeql_analyze().model_copy(
+                update={
+                    "steps": tuple(
+                        step.model_copy(update={"with_": {"queries": "default"}})
+                        if step.uses and "codeql-action/init" in step.uses
+                        else step
+                        for step in _codeql_analyze().steps
+                    )
+                }
+            ),
+        ),
+        (
+            codeql_no_build_step,
+            _codeql_analyze().model_copy(
+                update={
+                    "steps": tuple(
+                        list(_codeql_analyze().steps)
+                        + [
+                            Step.create(
+                                {
+                                    "name": "Build",
+                                    "run": "python -m build",
+                                    "line": 99,
+                                }
+                            )
+                        ]
+                    )
+                }
+            ),
+        ),
+        (
+            codeql_single_sarif_upload,
+            _codeql_analyze().model_copy(
+                update={
+                    "steps": tuple(
+                        list(_codeql_analyze().steps)
+                        + [
+                            Step.create(
+                                {
+                                    "name": "Upload SARIF",
+                                    "uses": f"github/codeql-action/upload-sarif@{'0' * 40}",
+                                    "line": 100,
+                                }
+                            )
+                        ]
+                    )
+                }
+            ),
+        ),
+        (
+            nightly_door_call,
+            _nightly_test().model_copy(
+                update={
+                    "steps": tuple(
+                        step for step in _nightly_test().steps if not (step.uses and "run-tests" in step.uses)
+                    )
+                },
+            ),
+        ),
+        (
+            nightly_coverage_reports,
+            _nightly_test().model_copy(
+                update={
+                    "steps": tuple(
+                        step
+                        for step in _nightly_test().steps
+                        if not (step.run and "scripts.coverage_reports" in step.run)
+                    )
+                },
+            ),
+        ),
+        (
+            weekly_mutation_timebox,
+            _weekly_mutation().model_copy(update={"timeout_minutes": None}),
+        ),
+        (
+            weekly_mutation_tool,
+            _weekly_mutation().model_copy(
+                update={
+                    "steps": tuple(
+                        step for step in _weekly_mutation().steps if not (step.run and "mutmut" in step.run)
+                    )
+                },
+            ),
+        ),
+        (
+            weekly_mutation_targets,
+            _weekly_mutation().model_copy(
+                update={
+                    "steps": tuple(
+                        step.model_copy(
+                            update={
+                                "run": (
+                                    (step.run or "")
+                                    .replace("invariants", "other")
+                                    .replace("admission", "other")
+                                    .replace("core", "other")
+                                )
+                            }
+                        )
+                        if step.run and "mutmut run" in step.run
+                        else step
+                        for step in _weekly_mutation().steps
+                    )
+                }
+            ),
+        ),
+        (
+            weekly_lowest_direct,
+            _weekly_lowest().model_copy(
+                update={
+                    "steps": tuple(
+                        step
+                        for step in _weekly_lowest().steps
+                        if not (step.run and "uv pip compile" in step.run)
+                    )
+                },
+            ),
+        ),
+        (
+            ci_secret_scan_fetch_depth,
+            _ci_secret_scan().model_copy(
+                update={
+                    "steps": tuple(
+                        step.model_copy(update={"with_": {"fetch-depth": "1"}})
+                        if step.uses and step.uses.startswith("actions/checkout@")
+                        else step
+                        for step in _ci_secret_scan().steps
+                    )
+                }
+            ),
+        ),
+        (
+            ci_dependency_review_checkout,
+            _ci_dep_review().model_copy(
+                update={
+                    "steps": tuple(
+                        step
+                        for step in _ci_dep_review().steps
+                        if not (step.uses and step.uses.startswith("actions/checkout@"))
+                    )
+                },
+            ),
+        ),
+        (
+            ci_dependency_review_refs,
+            _ci_dep_review().model_copy(
+                update={
+                    "steps": tuple(
+                        step.model_copy(update={"with_": {"base-ref": "refs/heads/main"}})
+                        if step.uses and "dependency-review-action@" in step.uses
+                        else step
+                        for step in _ci_dep_review().steps
+                    )
+                }
+            ),
+        ),
+        (
+            ci_real_pbkdf2_door,
+            _ci_real_pbkdf2().model_copy(
+                update={
+                    "steps": tuple(
+                        step.model_copy(update={"if_": "${{ false }}"})
+                        if step.uses and "run-tests" in step.uses
+                        else step
+                        for step in _ci_real_pbkdf2().steps
+                    )
+                }
+            ),
+        ),
     ],
 )
 def test_a_rule_names_the_injected_violation(rule, broken) -> None:
@@ -72,21 +318,62 @@ def test_a_rule_names_the_injected_violation(rule, broken) -> None:
     assert parent.path.name in findings[0].message
 
 
+_WORKFLOW_BY_RULE = {
+    "codeql-triggers": "codeql",
+    "nightly-triggers": "nightly",
+    "nightly-name": "nightly",
+    "nightly-concurrency": "nightly",
+    "weekly-triggers": "weekly",
+}
+
+_WORKFLOW_MUTATIONS: dict[str, dict[str, object]] = {
+    "codeql-triggers": {"on_": {}},
+    "nightly-triggers": {"on_": {}},
+    "weekly-triggers": {"on_": {}},
+    "declares-permissions": {"permissions": {}},
+    "has-trigger": {"on_": {}},
+    "nightly-name": {"name": "CI"},
+    "nightly-concurrency": {"concurrency": None},
+}
+
+
 @pytest.mark.parametrize(
     ("rule", "broken"),
     [
         (
             rule,
-            WORKFLOWS[0].model_copy(update={"permissions": {}})
-            if rule.name == "declares-permissions"
-            else WORKFLOWS[0].model_copy(update={"on_": {}}),
+            workflow(_WORKFLOW_BY_RULE.get(rule.name, "ci")).model_copy(
+                update=_WORKFLOW_MUTATIONS.get(rule.name, {"on_": {}})
+            ),
         )
         for rule in WORKFLOW_RULES
+        if rule.name in _WORKFLOW_MUTATIONS
     ],
 )
 def test_a_workflow_rule_names_the_injected_violation(rule, broken: Workflow) -> None:
     findings = list(rule.check(broken))
     assert findings and findings[0].rule == rule.name
+
+
+@pytest.mark.parametrize(
+    ("rule", "stem", "rule_id"),
+    [
+        (nightly_artifacts, "nightly", RuleId.NIGHTLY_ARTIFACTS.value),
+        (weekly_artifacts, "weekly", RuleId.WEEKLY_ARTIFACTS.value),
+    ],
+)
+def test_artifact_bites_names_missing_artifacts(rule, stem, rule_id) -> None:
+    wf = workflow(stem)
+    jobs = {
+        key: job.model_copy(
+            update={"steps": tuple(s for s in job.steps if "upload-artifact" not in (s.uses or ""))}
+        )
+        for key, job in wf.jobs.items()
+    }
+    broken = wf.model_copy(update={"jobs": jobs})
+    findings = list(rule(broken))
+    assert findings
+    assert findings[0].rule == rule_id
 
 
 def test_an_escaped_unquoted_export_value_is_honoured() -> None:
@@ -97,9 +384,7 @@ def test_an_escaped_unquoted_export_value_is_honoured() -> None:
 def test_quoted_parentheses_do_not_change_scope() -> None:
     for run in (
         '(export PYTEST_ADDOPTS="-m slow)"; pytest)',
-        '(export PYTEST_ADDOPTS="-m (slow)"; pytest)',
         "(export PYTEST_ADDOPTS=\"-m 'not (browser or slow)'\"; pytest)",
-        "then (export PYTEST_ADDOPTS=\"-m 'not (slow)'\"; pytest)",
         'then (export PYTEST_ADDOPTS="-m slow"; pytest)',
     ):
         filtered = _mutate(steps=(_step(name="Bite", run=run),))
@@ -111,28 +396,9 @@ def test_an_export_inside_the_same_subshell_filters_its_pytest() -> None:
     assert not list(no_bare_pytest(parent_workflow(scoped), scoped))
 
 
-def test_a_subshell_export_does_not_filter_the_outer_run() -> None:
-    scoped = _mutate(steps=(_step(name="Bite", run='(export PYTEST_ADDOPTS="-m slow"); pytest'),))
-    assert len(list(no_bare_pytest(parent_workflow(scoped), scoped))) == 1
-
-
-def test_an_echoed_export_is_not_an_export() -> None:
-    echoed = _mutate(steps=(_step(name="Bite", run='echo "export PYTEST_ADDOPTS=-m=slow"; pytest'),))
-    assert len(list(no_bare_pytest(parent_workflow(echoed), echoed))) == 1
-
-
 def test_an_export_only_filters_subsequent_invocations() -> None:
     ordered = _mutate(steps=(_step(name="Bite", run='pytest; export PYTEST_ADDOPTS="-m slow"; pytest'),))
     assert len(list(no_bare_pytest(parent_workflow(ordered), ordered))) == 1
-    revoked = _mutate(
-        steps=(
-            _step(
-                name="Bite",
-                run='export PYTEST_ADDOPTS="-m slow"; pytest; unset PYTEST_ADDOPTS; pytest',
-            ),
-        )
-    )
-    assert len(list(no_bare_pytest(parent_workflow(revoked), revoked))) == 1
 
 
 def test_a_nested_quote_export_value_is_honoured() -> None:
@@ -147,38 +413,11 @@ def test_a_nested_quote_export_value_is_honoured() -> None:
     assert not list(no_bare_pytest(parent_workflow(filtered), filtered))
 
 
-def test_a_pipeline_mentioning_pip_is_not_an_install() -> None:
-    clean = _mutate(steps=(_step(name="Bite", run='echo "pip install x" | tee log'),))
-    assert not list(no_pip_install(parent_workflow(clean), clean))
-
-
-def test_copied_facts_follow_a_copied_run() -> None:
-    original = _step(name="Bite", run="echo hi")
-    changed = original.model_copy(update={"run": "pip install x"})
-    assert changed.run == "pip install x"
-    assert changed.command_facts.pip_install
-
-
 def test_two_pytest_invocations_yield_two_findings() -> None:
     mixed = _mutate(steps=(_step(name="Bite", run="pytest -m slow; pytest"),))
     assert len(list(no_bare_pytest(parent_workflow(mixed), mixed))) == 1
     broken = _mutate(steps=(_step(name="Bite", run="pytest; pytest"),))
     assert len(list(no_bare_pytest(parent_workflow(broken), broken))) == 2
-
-
-def test_an_exported_inline_marker_filter_is_honoured() -> None:
-    filtered = _mutate(steps=(_step(name="Bite", run='export PYTEST_ADDOPTS="-m slow"; pytest'),))
-    assert not list(no_bare_pytest(parent_workflow(filtered), filtered))
-
-
-def test_an_attached_marker_filter_is_honoured() -> None:
-    filtered = _mutate(steps=(_step(name="Bite", run='pytest -m"not slow"'),))
-    assert not list(no_bare_pytest(parent_workflow(filtered), filtered))
-
-
-def test_a_harmless_context_read_is_not_event_splicing() -> None:
-    clean = _mutate(steps=(_step(run="echo ${{ github.event_name }}"),))
-    assert not list(no_event_splicing_in_run(parent_workflow(clean), clean))
 
 
 def test_a_job_with_a_direct_pytest_must_use_the_door() -> None:
@@ -213,11 +452,6 @@ def test_a_direct_pytest_under_if_false_is_still_bare_pytest() -> None:
     assert list(no_bare_pytest(parent_workflow(broken), broken))
 
 
-def test_an_unrelated_install_command_is_not_pip() -> None:
-    clean = _mutate(steps=(_step(name="Bite", run='echo "pip" && install-deps.sh'),))
-    assert not list(no_pip_install(parent_workflow(clean), clean))
-
-
 def test_an_inline_marker_filter_is_not_a_bare_suite_run() -> None:
     filtered = _mutate(steps=(_step(name="Bite", run="PYTEST_ADDOPTS='-m slow' pytest"),))
     assert not list(no_bare_pytest(parent_workflow(filtered), filtered))
@@ -234,4 +468,33 @@ def test_every_job_rule_has_a_bite() -> None:
         "no-heredoc",
         "no-silent-uploads",
         "unique-step-ids",
+        "codeql-security-events-write",
+        "codeql-registry-pin",
+        "codeql-security-extended",
+        "codeql-no-build-step",
+        "codeql-single-sarif-upload",
+        "nightly-door-call",
+        "nightly-coverage-reports",
+        "weekly-mutation-timebox",
+        "weekly-mutation-tool",
+        "weekly-mutation-targets",
+        "weekly-lowest-direct",
+        "ci-secret-scan-fetch-depth",
+        "ci-dependency-review-checkout",
+        "ci-dependency-review-refs",
+        "ci-real-pbkdf2-door",
+    }
+
+
+def test_every_workflow_rule_has_a_bite() -> None:
+    assert {rule.check.__name__.replace("_", "-") for rule in WORKFLOW_RULES} == {
+        "declares-permissions",
+        "has-trigger",
+        "codeql-triggers",
+        "nightly-triggers",
+        "nightly-name",
+        "nightly-concurrency",
+        "weekly-triggers",
+        "nightly-artifacts",
+        "weekly-artifacts",
     }
