@@ -3,54 +3,93 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from pathlib import PurePosixPath
 
-from tests._walk_primitives import member_import_names
-from tests.config._bundle import Bundle, _finding, _job
+from tests._walk_primitives import import_roots, member_import_names
+from tests.config._bundle import Bundle, _finding
+from tests.config._model import Codecov
 from tests.config._policy import Finding, RuleId
 
+_ALLOWED_CARRYFORWARD = frozenset({"flag_management", "flags"})
 
-def codecov_components(bundle: Bundle) -> Iterator[Finding]:
-    """Six components: three surfaces from ci's coverage needs, three packages."""
-    codecov = bundle.codecov
-    coverage = _job(bundle, "ci", "coverage")
-    needs = set(coverage.needs) if coverage else set()
-    surfaces = needs - {"changes"}
-    packages = frozenset({"admission", "crawl", "sdk"})
-    expected = surfaces | packages
-    if not codecov.default_carryforward:
-        yield _finding(
-            RuleId.CODECOV_COMPONENTS, codecov.path.name, 1, "default_rules.carryforward must be true"
-        )
-    missing = expected - codecov.component_names
+
+def _component_shape(codecov: Codecov) -> Iterator[Finding]:
+    if not codecov.components:
+        yield _finding(RuleId.CODECOV_COMPONENTS, codecov.path.name, 1, "individual_components is empty")
+    for name, component in sorted(codecov.components.items()):
+        if not name:
+            yield _finding(RuleId.CODECOV_COMPONENTS, codecov.path.name, 1, "component_id is required")
+        if component.carryforward:
+            yield _finding(
+                RuleId.CODECOV_COMPONENTS, codecov.path.name, 1, f"component {name!r} carries carryforward"
+            )
+        if component.flag_regexes:
+            yield _finding(
+                RuleId.CODECOV_COMPONENTS,
+                codecov.path.name,
+                1,
+                f"component {name!r} must be path-based, not flag_regexes",
+            )
+        if not component.paths:
+            yield _finding(RuleId.CODECOV_COMPONENTS, codecov.path.name, 1, f"component {name!r} needs paths")
+
+
+def _derived_members(codecov: Codecov) -> Iterator[Finding]:
+    expected = {PurePosixPath(root).name: f"{root}/**" for root in import_roots()}
+    missing = set(expected) - codecov.component_names
     if missing:
         yield _finding(
             RuleId.CODECOV_COMPONENTS,
             codecov.path.name,
             1,
-            f"individual_components missing {sorted(missing)}",
+            f"individual_components missing derived members {sorted(missing)}",
         )
-    for name in sorted(surfaces & codecov.component_names):
-        component = codecov.components[name]
-        if component.flag_regexes != (name,) or not component.carryforward:
+    for name, glob in expected.items():
+        component = codecov.components.get(name)
+        if component is not None and component.paths != (glob,):
             yield _finding(
                 RuleId.CODECOV_COMPONENTS,
                 codecov.path.name,
                 1,
-                f"component {name!r} needs flag_regexes=[{name!r}] and carryforward",
+                f"component {name!r} paths must be ({glob!r},)",
             )
-    for name in sorted(packages & codecov.component_names):
-        component = codecov.components[name]
-        if not component.paths or not component.carryforward:
+
+
+def _carryforward(codecov: Codecov) -> Iterator[Finding]:
+    for site in codecov.carryforward_sites:
+        if not site or site[0] not in _ALLOWED_CARRYFORWARD:
             yield _finding(
                 RuleId.CODECOV_COMPONENTS,
                 codecov.path.name,
                 1,
-                f"component {name!r} needs paths and carryforward",
+                f"carryforward at {'.'.join(site)} outside flag_management/flags",
             )
+    if not codecov.flag_carryforward:
+        yield _finding(
+            RuleId.CODECOV_COMPONENTS,
+            codecov.path.name,
+            1,
+            "flag_management.default_rules.carryforward must be true",
+        )
+    if codecov.nightly_joined is not False:
+        yield _finding(RuleId.CODECOV_COMPONENTS, codecov.path.name, 1, "flags.nightly.joined must be false")
+
+
+def codecov_components(bundle: Bundle) -> Iterator[Finding]:
+    """Path-based components cover every uv member and carry no carryforward."""
+    codecov = bundle.codecov
+    if not codecov.individual_components_is_list:
+        yield _finding(
+            RuleId.CODECOV_COMPONENTS, codecov.path.name, 1, "individual_components must be a list"
+        )
+        return
+    yield from _component_shape(codecov)
+    yield from _derived_members(codecov)
+    yield from _carryforward(codecov)
 
 
 def codecov_informational(bundle: Bundle) -> Iterator[Finding]:
-    """Status is informational; a blocking threshold or flag_management is a defect."""
+    """Status is informational; a blocking threshold is a defect."""
     codecov = bundle.codecov
     for label, status in (("project", codecov.project), ("patch", codecov.patch)):
         if not status.informational:
@@ -64,13 +103,6 @@ def codecov_informational(bundle: Bundle) -> Iterator[Finding]:
                 1,
                 f"unexpected project threshold {status.threshold!r}",
             )
-    if codecov.flag_management is not None:
-        yield _finding(
-            RuleId.CODECOV_INFORMATIONAL,
-            codecov.path.name,
-            1,
-            "flag_management is retired; use component_management",
-        )
 
 
 def coverage_source_pkgs(bundle: Bundle) -> Iterator[Finding]:

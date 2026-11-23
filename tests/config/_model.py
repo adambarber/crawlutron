@@ -23,6 +23,7 @@ class StatusDefault(BaseModel):
 
 class Component(BaseModel):
     model_config = STRICT
+    component_id: str = ""
     carryforward: bool = False
     flag_regexes: tuple[str, ...] = ()
     paths: tuple[str, ...] = ()
@@ -35,9 +36,11 @@ class Codecov(BaseModel):
     path: Path
     project: StatusDefault
     patch: StatusDefault
-    default_carryforward: bool = False
+    individual_components_is_list: bool = False
     components: Mapping[str, Component] = Field(default_factory=dict)
-    flag_management: object | None = None
+    carryforward_sites: tuple[tuple[str, ...], ...] = ()
+    flag_carryforward: bool = False
+    nightly_joined: bool | None = None
 
     @property
     def component_names(self) -> frozenset[str]:
@@ -87,17 +90,30 @@ def parse_codecov(path: Path) -> Codecov:
     patch = _status_default(status.get("patch"))
     management = raw.get("component_management")
     management = management if isinstance(management, dict) else {}
-    rules = management.get("default_rules")
+    raw_components = management.get("individual_components")
+    components = {}
+    is_list = isinstance(raw_components, list)
+    if isinstance(raw_components, list):
+        for entry in raw_components:
+            component = _component(entry)
+            components[component.component_id] = component
+    flag_management = raw.get("flag_management")
+    flag_management = flag_management if isinstance(flag_management, dict) else {}
+    rules = flag_management.get("default_rules")
     rules = rules if isinstance(rules, dict) else {}
-    components = management.get("individual_components")
-    components = components if isinstance(components, dict) else {}
+    flags = raw.get("flags")
+    flags = flags if isinstance(flags, dict) else {}
+    nightly = flags.get("nightly")
+    nightly = nightly if isinstance(nightly, dict) else {}
     return Codecov(
         path=path,
         project=project,
         patch=patch,
-        default_carryforward=rules.get("carryforward") is True,
-        components={str(name): _component(value) for name, value in components.items()},
-        flag_management=raw.get("flag_management"),
+        individual_components_is_list=is_list,
+        components=components,
+        carryforward_sites=_carryforward_sites(raw),
+        flag_carryforward=rules.get("carryforward") is True,
+        nightly_joined=nightly.get("joined") if isinstance(nightly.get("joined"), bool) else None,
     )
 
 
@@ -115,10 +131,25 @@ def _status_default(raw: object) -> StatusDefault:
 def _component(raw: object) -> Component:
     table = raw if isinstance(raw, dict) else {}
     return Component(
+        component_id=str(table.get("component_id", "")),
         carryforward=table.get("carryforward") is True,
         flag_regexes=tuple(str(item) for item in table.get("flag_regexes") or ()),
         paths=tuple(str(item) for item in table.get("paths") or ()),
     )
+
+
+def _carryforward_sites(node: object, trail: tuple[str, ...] = ()) -> tuple[tuple[str, ...], ...]:
+    if isinstance(node, dict):
+        own = ((*trail, "carryforward"),) if "carryforward" in node else ()
+        nested = tuple(
+            site for key, value in node.items() for site in _carryforward_sites(value, (*trail, str(key)))
+        )
+        return (*own, *nested)
+    if isinstance(node, list):
+        return tuple(
+            site for i, value in enumerate(node) for site in _carryforward_sites(value, (*trail, str(i)))
+        )
+    return ()
 
 
 def parse_pyproject(path: Path) -> Pyproject:

@@ -118,20 +118,15 @@ def _with_ruff(bundle: Bundle, **changes) -> Bundle:
 MUTATIONS = (
     (
         RuleId.CODECOV_COMPONENTS,
-        lambda b: b.model_copy(update={"codecov": b.codecov.model_copy(update={"components": {}})}),
-        "individual_components",
+        lambda b: b.model_copy(
+            update={"codecov": b.codecov.model_copy(update={"individual_components_is_list": False})}
+        ),
+        "individual_components must be a list",
     ),
     (
         RuleId.CODECOV_INFORMATIONAL,
         lambda b: b.model_copy(
-            update={
-                "codecov": b.codecov.model_copy(
-                    update={
-                        "project": StatusDefault(informational=False),
-                        "flag_management": {"individual_flags": {}},
-                    }
-                )
-            }
+            update={"codecov": b.codecov.model_copy(update={"project": StatusDefault(informational=False)})}
         ),
         "informational",
     ),

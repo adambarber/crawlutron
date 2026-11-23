@@ -47,7 +47,7 @@ LIVE = Bundle(
 )
 
 RULES: tuple[Rule, ...] = (
-    Rule(RuleId.CODECOV_COMPONENTS, "per-surface measurement names six components", codecov_components),
+    Rule(RuleId.CODECOV_COMPONENTS, "path-based components cover every uv member", codecov_components),
     Rule(RuleId.CODECOV_INFORMATIONAL, "coverage never blocks a merge", codecov_informational),
     Rule(RuleId.COVERAGE_SOURCE_PKGS, "one package list from the uv members", coverage_source_pkgs),
     Rule(RuleId.COVERAGE_MEASURE_ONCE, "one measure-once coverage surface", coverage_measure_once),
