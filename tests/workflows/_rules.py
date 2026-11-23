@@ -233,26 +233,58 @@ def door_no_if(workflow: Workflow, job: Job) -> Iterator[Finding]:
 
 _PUBLISH_ACTION = "gh-action-pypi-publish"
 
+# Actions whose sole purpose is restoring or saving a build cache.
+_CACHE_ACTIONS = (
+    "actions/cache@",
+    "actions/cache/restore@",
+    "actions/cache/save@",
+    "/actions/prepare",
+)
+
 
 def _publishes(job: Job) -> bool:
+    # Only direct publish steps are in scope; a publisher reached through a
+    # reusable workflow call has its body in that called workflow, not here.
     return any(step.uses and _PUBLISH_ACTION in step.uses for step in job.steps)
 
 
 def _restores_cache(step: Step) -> bool:
     uses = step.uses or ""
-    if "actions/cache@" in uses or "/actions/prepare" in uses:
+    if any(marker in uses for marker in _CACHE_ACTIONS):
         return True
     if "astral-sh/setup-uv@" not in uses:
         return False
-    value = step.with_.get("enable-cache")
-    return value is True or value == "true"
+    if "enable-cache" not in step.with_:
+        return True
+    value = step.with_["enable-cache"]
+    return value is True or (isinstance(value, str) and value.lower() == "true")
+
+
+def _uploads_artifact(job: Job) -> bool:
+    return any(step.uses and "actions/upload-artifact@" in step.uses for step in job.steps)
+
+
+def _publish_ancestry(workflow: Workflow) -> set[str]:
+    """Publishers and every artifact-producing job upstream through needs."""
+    publishers = {key for key, item in workflow.jobs.items() if _publishes(item)}
+    pending = list(publishers)
+    seen: set[str] = set()
+    while pending:
+        key = pending.pop()
+        if key in seen:
+            continue
+        seen.add(key)
+        item = workflow.jobs.get(key)
+        # Pure gate jobs restore read-only caches (zizmor allows them) and
+        # carry no artifact; only producers can pass a poisoned cache onward.
+        if item is not None and (key in publishers or _uploads_artifact(item)):
+            pending.extend(item.needs)
+    return seen
 
 
 def publish_no_cache_restore(workflow: Workflow, job: Job) -> Iterator[Finding]:
     """Publish doors and their artifact builders restore no cache."""
-    publishers = {key for key, item in workflow.jobs.items() if _publishes(item)}
-    in_ancestry = job.key in publishers or any(job.key in workflow.jobs[key].needs for key in publishers)
-    if not in_ancestry:
+    if job.key not in _publish_ancestry(workflow):
         return
     for step in job.steps:
         if _restores_cache(step):
