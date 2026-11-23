@@ -115,4 +115,9 @@ def test_every_root_is_at_its_declared_file_budget() -> None:
             worst = sorted(found.items(), key=lambda kv: -kv[1])[:5]
             detail = "; ".join(f"{name}: {lines}" for name, lines in worst)
             failures.append(f"{root}: {len(found)} overlong, budget {budget} ({detail}).")
-    assert not failures, "\n".join(failures)
+    hint = (
+        " SPLIT the overlong file into logically named smaller files"
+        " (separate rule groups / bite domains / helpers into their own modules)."
+        " Do NOT delete comments or docstrings to fit under the limit."
+    )
+    assert not failures, "\n".join(failures) + ("\n" + hint if failures else "")
