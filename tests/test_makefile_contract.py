@@ -20,8 +20,8 @@ from tests._ci_contract import (
     _require_exactly_one_jscpd_gate,
     _required_gate_script,
     _required_gate_shell,
+    _required_job,
     _required_needs,
-    _result_assertion,
     _run_script,
 )
 
@@ -123,51 +123,50 @@ def test_a_makefile_target_naming_an_unknown_hook_id_is_caught() -> None:
 
 
 def _evasive_workflow(evasion: str) -> str:
+    """Return ci.yml with one required-gate evasion applied; each needle is
+    confirmed present in the live workflow before it is mutated."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-    if evasion == "continue-on-error":
-        mutated = workflow.replace(
-            "  enforcement:\n    name: Pre-commit enforcement\n",
-            "  enforcement:\n    name: Pre-commit enforcement\n    continue-on-error: true\n",
-            1,
-        )
-    elif evasion == "step-continue-on-error":
-        mutated = workflow.replace(
-            "      - name: Run all configured hooks\n",
-            "      - name: Run all configured hooks\n        continue-on-error: true\n",
-            1,
-        )
-    elif evasion == "expression-continue-on-error":
-        # GitHub evaluates `continue-on-error` as an expression.
-        mutated = workflow.replace(
-            "      - name: Run all configured hooks\n",
-            "      - name: Run all configured hooks\n        continue-on-error: ${{ true }}\n",
-            1,
-        )
-    elif evasion == "dropped-assertion":
-        mutated = workflow.replace("          " + _result_assertion("enforcement") + "\n", "", 1)
-    elif evasion == "dropped-aggregate-need":
-        mutated = workflow.replace(
-            "needs: [lint, typecheck, enforcement, test-fast]", "needs: [lint, typecheck, test-fast]", 1
-        )
-    elif evasion == "dropped-reporting-job":
-        # Drop a REPORTING job (not the aggregate) from `needs:` and its result assertion.
-        mutated = workflow.replace(
-            "needs: [lint, typecheck, enforcement, test-fast]", "needs: [lint, enforcement, test-fast]", 1
-        )
-        mutated = mutated.replace("          " + _result_assertion("typecheck") + "\n", "", 1)
-    elif evasion == "no-always":
-        # Target the required job's if: always() (job-level)
-        mutated = workflow.replace(
-            "  required:\n    name: Required quality gate\n    if: ${{ always() }}",
-            "  required:\n    name: Required quality gate",
-            1,
-        )
-    elif evasion == "no-errexit":
-        mutated = workflow.replace("        shell: " + ERREXIT_SHELL + "\n", "", 1)
-    elif evasion == "sh-shell":
-        mutated = workflow.replace("        shell: " + ERREXIT_SHELL + "\n", "        shell: sh\n", 1)
-    else:
+    required = _required_job(workflow)
+    needs_raw = required.get("needs")
+    assert isinstance(needs_raw, list) and needs_raw, "the required aggregate must declare needs"
+    needs = [str(job) for job in needs_raw]
+    first_need = needs[0]
+    mutations = {
+        "continue-on-error": (
+            "  required:\n    name: Required quality gate\n",
+            "  required:\n    name: Required quality gate\n    continue-on-error: true\n",
+        ),
+        "step-continue-on-error": (
+            "      - name: Require every gate to have succeeded\n",
+            "      - name: Require every gate to have succeeded\n        continue-on-error: true\n",
+        ),
+        "expression-continue-on-error": (
+            "      - name: Require every gate to have succeeded\n",
+            "      - name: Require every gate to have succeeded\n        continue-on-error: ${{ true }}\n",
+        ),
+        "dropped-assertion": (
+            '          test "${{ needs.actionlint.result }}" = "success"\n',
+            "",
+        ),
+        "dropped-aggregate-need": (f"      - {first_need}\n", ""),
+        "dropped-reporting-job": (f"      - {first_need}\n", ""),
+        "no-always": (
+            "  required:\n    name: Required quality gate\n    if: ${{ always() }}\n",
+            "  required:\n    name: Required quality gate\n",
+        ),
+        "no-errexit": ("        shell: " + ERREXIT_SHELL + "\n", ""),
+        "sh-shell": ("        shell: " + ERREXIT_SHELL + "\n", "        shell: sh\n"),
+    }
+    if evasion not in mutations:
         raise AssertionError(f"unknown evasion: {evasion}")
+    needle, replacement = mutations[evasion]
+    assert needle in workflow, f"{evasion}: needle absent from live ci.yml"
+    mutated = workflow.replace(needle, replacement, 1)
+    if evasion == "dropped-reporting-job":
+        # Drop one real reporting job from needs and its result assertion.
+        assertion = '          test "${{ needs.' + first_need + '.result }}" = "success"\n'
+        assert assertion in workflow, f"{evasion}: assertion needle absent from live ci.yml"
+        mutated = mutated.replace(assertion, "", 1)
     assert mutated != workflow, f"the {evasion} mutation did not apply, so this test would prove nothing"
     return mutated
 
@@ -187,8 +186,21 @@ def _evasive_workflow(evasion: str) -> str:
     ],
 )
 def test_required_gate_evasions_are_rejected(evasion) -> None:
+    mutated = _evasive_workflow(evasion)  # bite applied for real: guard outside raises
     with pytest.raises(AssertionError):
-        _assert_failure_propagation(_evasive_workflow(evasion))
+        _assert_failure_propagation(mutated)  # failure propagation asserted separately
+
+
+def test_stale_needle_cannot_slip_the_bite() -> None:
+    """A needle absent from live ci.yml fails the bite instead of proving
+    nothing: the non-vacuity guard reds when the mutation never applies."""
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    stale = "needs: [lint, typecheck, enforcement, test-fast]"
+    assert stale not in workflow
+    mutated = workflow.replace(stale, "needs: [lint, typecheck, test-fast]", 1)
+    assert mutated == workflow
+    with pytest.raises(AssertionError, match="did not apply"):
+        assert mutated != workflow, "the stale-needle mutation did not apply"
 
 
 def test_the_aggregate_script_is_what_fails_not_just_what_it_says() -> None:
