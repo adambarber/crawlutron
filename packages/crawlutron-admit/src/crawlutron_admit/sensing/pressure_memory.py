@@ -34,7 +34,7 @@ def _total_system_ram() -> int:
     """Total physical RAM (host fallback when no cgroup limit applies)."""
     try:
         return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
-    except ValueError, OSError:
+    except (ValueError, OSError):
         return 0
 
 

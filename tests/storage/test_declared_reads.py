@@ -55,7 +55,7 @@ def test_a_frontier_entry_that_is_not_an_entry_fails_at_persist(tmp_path):
     try:
         with allow_on_loop():
             store.save(job)
-    except AttributeError, TypeError:
+    except (AttributeError, TypeError):
         pass
     else:
         raise AssertionError("a non-entry frontier element was persisted silently")

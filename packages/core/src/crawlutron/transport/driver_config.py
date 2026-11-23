@@ -45,7 +45,7 @@ def _profile_knob[Knob: (int, float)](
         value = coerce(raw)
         if value != value:  # NaN: keep the default rather than poisoning waits
             return default
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return default
     return _clamp_knob(type(default)(max(0, value)), ceiling)
 
@@ -86,7 +86,7 @@ def ACTION_WAIT_MS(action: BrowserAction) -> int:
     """
     try:
         requested_ms = int(action.get("timeout", 5000))
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         requested_ms = 5000
     return max(1, min(requested_ms, int(MAX_ACTION_WAIT_SECONDS * 1000)))
 

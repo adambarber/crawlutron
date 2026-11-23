@@ -165,7 +165,7 @@ def _mapping_number[T: (int, float)](
         return fallback
     try:
         value = parse(str(raw).strip())
-    except TypeError, ValueError, OverflowError:
+    except (TypeError, ValueError, OverflowError):
         logging.getLogger(__name__).warning(
             invalid_event, extra={"env_name": name, "env_value": raw, "fallback": fallback}
         )

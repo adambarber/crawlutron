@@ -19,7 +19,7 @@ def _sha_literals(path: pathlib.Path) -> list[tuple[int, str]]:
     with path.open("rb") as stream:
         try:
             tokens = list(tokenize.tokenize(stream.readline))
-        except tokenize.TokenError, SyntaxError, IndentationError:
+        except (tokenize.TokenError, SyntaxError, IndentationError):
             return []
     return [
         (token.start[0], token.string)

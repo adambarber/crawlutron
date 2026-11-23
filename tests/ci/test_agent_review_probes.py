@@ -144,7 +144,7 @@ def test_probe_result_record_accessors_validate_input() -> None:
     }
     try:
         as_probe_result_record(bad_type, "test")
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         pass
     else:
         raise AssertionError("Expected TypeError or ValueError for wrong type")

@@ -43,7 +43,7 @@ def _open_zip(content: bytes) -> zipfile.ZipFile | None:
     """Open a zip file from bytes, returning None if corrupt."""
     try:
         return zipfile.ZipFile(io.BytesIO(content))
-    except zipfile.BadZipFile, OSError:
+    except (zipfile.BadZipFile, OSError):
         return None
 
 

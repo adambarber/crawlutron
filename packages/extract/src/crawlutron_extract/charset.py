@@ -87,7 +87,7 @@ def decode_content(content: bytes, content_type: str) -> tuple[str, str, list[st
 
     try:
         text = body.decode(charset)
-    except UnicodeDecodeError, LookupError:
+    except (UnicodeDecodeError, LookupError):
         flags.append("charset_lossy")
         text = body.decode("utf-8", errors="replace")
 

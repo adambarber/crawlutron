@@ -36,7 +36,7 @@ def probe_index(connection: http.client.HTTPConnection, name: str, version: str)
         response = connection.getresponse()
         response.read()
         return response.status == 200
-    except OSError, http.client.HTTPException:
+    except (OSError, http.client.HTTPException):
         return False
     finally:
         connection.close()

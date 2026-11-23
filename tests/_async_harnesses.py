@@ -89,7 +89,7 @@ async def _drain_running_crawls(*, guard: float = 10.0) -> None:
         # A 5ms poll keeps the DB question off the hot path; the guard bounds
         # the wait so a stuck crawl fails loudly instead of holding later tests.
         await asyncio.wait_for(drained(), timeout=guard)
-    except AssertionError, TimeoutError:
+    except (AssertionError, TimeoutError):
         # A stuck crawl is reported, not raised: raising here would mask the assertion of the test that
         # actually caused it.
         pass

@@ -170,7 +170,7 @@ def _extract_json(content: str, limits) -> dict[str, object]:
 
     try:
         data = json.loads(content)
-    except json.JSONDecodeError, ValueError, RecursionError:
+    except (json.JSONDecodeError, ValueError, RecursionError):
         # Try JSONL line-by-line.
         lines = content.splitlines()
         parsed: list[object] = []
@@ -183,7 +183,7 @@ def _extract_json(content: str, limits) -> dict[str, object]:
                 break
             try:
                 parsed.append(json.loads(line))
-            except json.JSONDecodeError, ValueError, RecursionError:
+            except (json.JSONDecodeError, ValueError, RecursionError):
                 flags.append("jsonl_parse_error")
                 break
         if not parsed:
@@ -276,7 +276,7 @@ def _extract_xml(content: str, limits) -> dict[str, object]:
     body = re.sub(r"^\s*<\?xml[^>]*\?>", "", content, count=1)
     try:
         root = etree.fromstring(body.encode("utf-8"), parser)
-    except etree.XMLSyntaxError, ValueError:
+    except (etree.XMLSyntaxError, ValueError):
         flags.append("xml_parse_error")
         return _empty_result("xml_parse_error", ["xml_parse_error"])
 

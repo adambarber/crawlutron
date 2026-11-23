@@ -131,7 +131,7 @@ def _value_matches(raw: str, default: int | float | str | bool | bytes) -> bool:
     if isinstance(default, (int, float)):
         try:
             return type(default)(raw) == default
-        except ValueError, TypeError:
+        except (ValueError, TypeError):
             return False
     return raw == default
 

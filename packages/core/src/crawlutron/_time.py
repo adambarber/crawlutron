@@ -22,7 +22,7 @@ def http_date_epoch(value: str | None) -> float | None:
         from email.utils import parsedate_to_datetime
 
         return utc_timestamp(parsedate_to_datetime(value))
-    except TypeError, ValueError, OverflowError:
+    except (TypeError, ValueError, OverflowError):
         return None
 
 

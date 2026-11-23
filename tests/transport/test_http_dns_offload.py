@@ -58,7 +58,7 @@ async def _dead_port_fetch_outcome(seen: dict[str, threading.Thread]):
             timeout_seconds=2,
             pin=_thread_recording_spy(seen),
         )
-    except httpx.ConnectError, httpx.TimeoutException:
+    except (httpx.ConnectError, httpx.TimeoutException):
         return None
 
 
