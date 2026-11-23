@@ -19,6 +19,7 @@ from tests._walk_membership import (
 from tests._walk_primitives import (
     attribute_call_on,
     canonical_tree,
+    discovered_files,
     enclosing_function,
     file_tree,
     lineno,
@@ -108,6 +109,7 @@ __all__ = [
     "class_defs",
     "comprehensions",
     "dict_displays",
+    "discovered_files",
     "enclosing_function",
     "f_strings",
     "file_tree",
