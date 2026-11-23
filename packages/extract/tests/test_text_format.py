@@ -6,7 +6,10 @@ nesting, JSONL, malformed JSON, XML with DTD (refused, not expanded).
 
 from __future__ import annotations
 
+from typing import cast
+
 from crawlutron_extract import ExtractLimits, Quality, extract
+from crawlutron_extract.text_format import extract_text_format
 
 
 def test_csv_basic():
@@ -53,8 +56,38 @@ def test_json_basic():
 def test_json_deep_nesting():
     content = b"[" * 60 + b"]" * 60
     result = extract(content, "application/json")
-    assert "json_depth_capped" in result.flags
-    assert result.quality == Quality.MEDIUM
+    assert result.quality == Quality.FAILED
+    assert "json_depth_refused" in result.flags
+
+
+def test_json_2000_deep_refused_never_raises():
+    payload = "[" * 2000 + "0" + "]" * 2000
+    result = extract_text_format(payload, "application/json", ExtractLimits())
+    assert result.get("_quality", "failed") == "failed"
+    assert "json_depth_refused" in cast(list[str], result["quality_flags"])
+
+
+def test_json_depth_boundary_49_50_51():
+    for n, expected in ((49, "medium"), (50, "medium"), (51, "failed")):
+        payload = "[" * n + "0" + "]" * n
+        result = extract_text_format(payload, "application/json", ExtractLimits())
+        if expected == "failed":
+            assert result.get("_quality", "failed") == "failed"
+            assert "json_depth_refused" in cast(list[str], result["quality_flags"])
+        else:
+            assert result.get("_quality", "failed") == "medium"
+
+
+def test_json_brackets_inside_string_not_refused():
+    payload = '{"a": "[["}'
+    result = extract_text_format(payload, "application/json", ExtractLimits())
+    assert result.get("_quality", "failed") == "medium"
+
+
+def test_jsonl_deep_line_refused():
+    payload = '{"id": 1}\n' + "[" * 2000 + "0" + "]" * 2000
+    result = extract_text_format(payload, "application/jsonl", ExtractLimits())
+    assert result.get("_quality", "failed") == "failed"
 
 
 def test_jsonl():
