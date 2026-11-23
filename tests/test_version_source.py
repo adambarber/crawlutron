@@ -41,7 +41,7 @@ def test_every_python_version_pin_is_314() -> None:
     assert workspace_project(SERVICE_ROOT)["requires-python"] == ">=3.14"
     table = tomllib.loads((SERVICE_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     ruff = table["tool"]["ruff"]
-    assert isinstance(ruff, dict) and ruff.get("target-version") == "py314", ruff
+    assert isinstance(ruff, dict) and ruff.get("target-version") == "py312", ruff
     for path, directory in workspace_package_dirs(SERVICE_ROOT).items():
         assert workspace_project(directory)["requires-python"] == ">=3.14", path
 

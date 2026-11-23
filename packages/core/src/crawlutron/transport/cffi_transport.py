@@ -193,7 +193,7 @@ class CffiTransport:
                 stream_release(response)
                 await release(response)
                 raise
-            except RequestException, asyncio.CancelledError:
+            except (RequestException, asyncio.CancelledError):
                 stream_release(response)
                 await release(response)
                 raise
@@ -203,7 +203,7 @@ class CffiTransport:
             )
             await release(response)  # close the one-shot session exactly once
             return result
-        except BodyTooLarge, RequestException, asyncio.CancelledError:
+        except (BodyTooLarge, RequestException, asyncio.CancelledError):
             # Already released by the inner handler; just propagate.
             raise
         except Exception:

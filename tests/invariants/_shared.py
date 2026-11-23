@@ -175,7 +175,7 @@ def _declared_public_symbols(tree: ast.Module) -> set[str] | None:
         return None
     try:
         declared = ast.literal_eval(value)
-    except ValueError, TypeError:
+    except (ValueError, TypeError):
         return None
     if not isinstance(declared, (list, tuple, set)) or not all(isinstance(name, str) for name in declared):
         return None

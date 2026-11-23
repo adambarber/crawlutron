@@ -114,7 +114,7 @@ class SharedCookieStore(CoordinationStore):
     def _decode(payload: str) -> dict[str, str]:
         try:
             decoded = json.loads(payload)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return {}
         return {str(k): str(v) for k, v in decoded.items()} if isinstance(decoded, dict) else {}
 

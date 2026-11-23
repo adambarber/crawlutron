@@ -35,7 +35,7 @@ def _json_list(raw) -> list[JsonValue]:
         return []
     try:
         value = json.loads(raw)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return []
     return value if isinstance(value, list) else []
 

@@ -1,5 +1,7 @@
 """Superseded clients queue for close; drains stay bounded."""
 
+from __future__ import annotations
+
 import asyncio
 from typing import Protocol, cast
 

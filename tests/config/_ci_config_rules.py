@@ -71,7 +71,7 @@ def jscpd_single_gate(bundle: Bundle) -> Iterator[Finding]:
             int(flags["min_tokens"]),
             float(flags["threshold"]),
         )
-    except KeyError, TypeError, ValueError:
+    except (KeyError, TypeError, ValueError):
         observed = None
     if observed != expected:
         yield _finding(

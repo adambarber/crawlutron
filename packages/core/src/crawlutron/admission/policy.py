@@ -304,7 +304,7 @@ def validate_wire_policy(raw: PolicyLike | None, tier: PolicyTier | None = None)
         pages = int(requested_pages) if isinstance(requested_pages, (int, float, str)) else 0
         if pages <= 0:
             limits["max_pages"] = DEFAULT_MAX_PAGES
-    except TypeError, ValueError, OverflowError:
+    except (TypeError, ValueError, OverflowError):
         raise ValueError("invalid_policy_limits") from None
     # A body cap absent at the wire edge means "scale with RAM" (the model's
     # own None): an explicit 0 stays 0 -- the consumer reads truthiness either way.

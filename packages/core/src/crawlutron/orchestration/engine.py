@@ -83,7 +83,7 @@ def parse_lastmod(lastmod: str | None) -> float | None:
         from email.utils import parsedate_to_datetime
 
         ts = utc_timestamp(parsedate_to_datetime(s))
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         pass
     if ts is None:
         iso = s.replace("Z", "+00:00")

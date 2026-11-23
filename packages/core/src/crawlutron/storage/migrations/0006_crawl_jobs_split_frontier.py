@@ -33,7 +33,7 @@ def _json_list(raw: object) -> list[JsonValue]:
         return []
     try:
         value = json.loads(raw)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return []
     return value if isinstance(value, list) else []
 
@@ -49,7 +49,7 @@ def _entries(raw: object):
             continue
         try:
             depth = max(0, int(str(depth)))
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             depth = 0
         yield url, depth
 

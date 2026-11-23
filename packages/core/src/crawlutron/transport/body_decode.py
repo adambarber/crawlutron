@@ -40,7 +40,7 @@ def decode_body(body: bytes | bytearray | memoryview, content_type: str | None) 
     # Fast path: strict decode with the declared (or default UTF-8) charset.
     try:
         return body.decode(charset)
-    except UnicodeDecodeError, LookupError:
+    except (UnicodeDecodeError, LookupError):
         pass
 
     # Fallback to charset-normalizer if the strict decode failed.

@@ -59,7 +59,7 @@ def _tracked_files() -> list[pathlib.Path]:
                 check=True,
                 timeout=30,
             )
-        except OSError, subprocess.SubprocessError:
+        except (OSError, subprocess.SubprocessError):
             pass
         else:
             return [REPO_ROOT / name for name in completed.stdout.decode().split("\0") if name]
