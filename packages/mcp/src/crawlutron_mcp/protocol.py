@@ -64,13 +64,13 @@ def error_response(
     message: str,
     data: JsonValue = None,
 ) -> dict[str, JsonValue]:
-    """Build a JSON-RPC error response (``id`` omitted for malformed requests)."""
+    """Build a JSON-RPC error response; an undetectable id is reported as null."""
     error: dict[str, JsonValue] = {"code": code, "message": message}
     if data is not None:
         error["data"] = data
     payload: dict[str, JsonValue] = {"jsonrpc": "2.0", "error": error}
-    if request_id is not None:
-        payload["id"] = request_id
+    # JSON-RPC 2.0 s5: notifications get no response, so every response has an id.
+    payload["id"] = request_id
     return payload
 
 
