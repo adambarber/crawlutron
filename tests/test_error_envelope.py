@@ -12,6 +12,7 @@ from starlette.requests import Request
 
 from crawlutron.service.errors import QuotaRefusal
 from crawlutron_rest.api.exceptions import error_envelope, http_error
+from tests._host_assert import host_in_text
 
 
 def _bare_request() -> Request:
@@ -190,6 +191,49 @@ class TestEnvelopeFromDetail:
             "message": "Unhandled exception in request handling",
             "details": {},
         }
+
+    async def test_unhandled_exception_logs_one_structured_record(self, caplog):
+        """The catch-all 500 logs once with a correlation id and a redacted error
+        detail, never a raw traceback or the request's headers, query or body."""
+        import logging
+
+        import httpx
+        from fastapi import FastAPI
+
+        from crawlutron_rest.main import install_error_surface
+
+        app = FastAPI()
+        install_error_surface(app)
+
+        @app.get("/boom")
+        async def _boom():
+            raise RuntimeError("failed GET https://example.com/x?token=s3cret")
+
+        async with httpx.ASGITransport(app=app, raise_app_exceptions=False) as transport:
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                with caplog.at_level(logging.ERROR, logger="crawlutron_rest.api.exceptions"):
+                    resp = await client.get(
+                        "/boom?token=s3cret",
+                        headers={"X-Secret": "s3cret"},
+                    )
+
+        assert resp.status_code == 500
+        assert resp.json() == {
+            "code": "internal_error",
+            "message": "Unhandled exception in request handling",
+            "details": {},
+        }
+        records = [r for r in caplog.records if r.getMessage() == "unhandled_request_error"]
+        assert len(records) == 1, caplog.text
+        rec = records[0]
+        assert rec.levelno == logging.ERROR
+        assert isinstance(rec.request_id, str) and rec.request_id.startswith("crawl_")
+        assert rec.path == "/boom"
+        assert rec.method == "GET"
+        seen = " ".join(str(v) for k, v in vars(rec).items())
+        assert "s3cret" not in seen
+        assert rec.exc_info is None
+        assert host_in_text(rec.error_detail, "example.com")
 
 
 class TestCrossDoorErrorParity:

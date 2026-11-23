@@ -15,14 +15,23 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from crawlutron.models.error_response import ErrorEnvelope
 from crawlutron.models.json_value import JsonValue
-from crawlutron.service.error_rendering import ErrorDoor, error_envelope, render_error
+from crawlutron.service.error_rendering import (
+    ErrorDoor,
+    error_envelope,
+    redact_urls_in_text,
+    render_error,
+)
 from crawlutron.service.errors import (
     BROWSER_POOL_MESSAGE,
     BrowserPoolUnavailable,
     DomainError,
 )
+from crawlutron.storage.ids import new_request_id
 
 logger = logging.getLogger(__name__)
+
+# Private: a public constant would grow this module's declared surface budget (#1375).
+_INTERNAL_ERROR_MESSAGE = "Unhandled exception in request handling"
 
 
 #: Synthetic code for an HTTPException whose detail is not envelope-shaped: a
@@ -74,7 +83,7 @@ async def validation_exception_handler(request: Request, exc: Exception) -> JSON
     if not isinstance(exc, RequestValidationError):
         return JSONResponse(
             status_code=500,
-            content=error_envelope("internal_error", "Unhandled exception in request handling"),
+            content=error_envelope("internal_error", _INTERNAL_ERROR_MESSAGE),
         )
     sanitized: list[JsonValue] = [
         cast(dict[str, JsonValue], {"loc": err.get("loc"), "msg": err.get("msg")}) for err in exc.errors()
@@ -92,9 +101,19 @@ async def http_exception_handler(request: Request, exc: Exception) -> JSONRespon
     (a Starlette child) stay on the unwrap; anything else is a 500 envelope.
     """
     if not isinstance(exc, StarletteHTTPException):
+        # Plain call, not logger.exception: exc_info would log raw exception text (#1375).
+        logger.error(
+            "unhandled_request_error",
+            extra={
+                "request_id": new_request_id(),
+                "path": redact_urls_in_text(str(request.url.path)),
+                "method": request.method,
+                "error_detail": redact_urls_in_text(str(exc)),
+            },
+        )
         return JSONResponse(
             status_code=500,
-            content=error_envelope("internal_error", "Unhandled exception in request handling"),
+            content=error_envelope("internal_error", _INTERNAL_ERROR_MESSAGE),
         )
     detail = getattr(exc, "detail", None)
     headers = getattr(exc, "headers", None)
@@ -113,7 +132,7 @@ async def domain_error_handler(request: Request, exc: Exception) -> JSONResponse
     if not isinstance(exc, DomainError):
         return JSONResponse(
             status_code=500,
-            content=error_envelope("internal_error", "Unhandled exception in request handling"),
+            content=error_envelope("internal_error", _INTERNAL_ERROR_MESSAGE),
         )
     rendered = render_error(exc, ErrorDoor.REST)
     return JSONResponse(status_code=rendered.status, content=rendered.envelope)
