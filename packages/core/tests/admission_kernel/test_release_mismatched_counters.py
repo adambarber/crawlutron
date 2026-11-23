@@ -20,7 +20,7 @@ async def test_release_with_mismatched_counters_raises_and_signals_never_silentl
     gate, _ = build_gate()
     before = gate.progress().last_decision.value
     lease = Lease._of(gate, _MISMATCHED, cold=False)
-    with pytest.raises(AssertionError):
+    with pytest.raises(RuntimeError):
         lease.release(work_completed=True)
     # Mutant (silent return): the release "succeeds" and half-releases; the
     # follow-up grant below must still fit, proving the raise path left none.

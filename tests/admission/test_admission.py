@@ -9,7 +9,17 @@ import pytest
 from crawlutron.health.readiness import ReadinessState
 from crawlutron.runtime.metrics import get_metrics
 from crawlutron.runtime.pressure_sizing import CpuGate, ResourceGate, read_cpu_quota, read_cpu_usage_seconds
-from crawlutron_admit import AdmissionRefused, Count, IdleReason, LaneId, Ratio, RideCpuWhenFree, Want
+from crawlutron_admit import (
+    AdmissionRefused,
+    Count,
+    IdleReason,
+    LaneId,
+    Lease,
+    Ratio,
+    RideCpuWhenFree,
+    Scale,
+    Want,
+)
 from crawlutron_admit.sensing.pressure_memory import MemoryStats, read_memory_stats
 from tests._support._doors import _GENERAL_ONE, _finish, _live
 from tests._support._gate_factory import GateSpec, build_gate
@@ -236,6 +246,33 @@ async def test_oversize_want_refuses_bounded_rather_than_spinning():
     with pytest.raises(AdmissionRefused) as exc:
         await asyncio.wait_for(_live(gate, Want.of(general=Count(0), heavy=Count(1))), 1.0)
     assert exc.value.reason is IdleReason.OVERSIZE
+
+
+# --- runtime corruption guards must be ordinary runtime errors ---
+
+
+async def test_quiescence_reset_refuses_a_live_lease() -> None:
+    """A mid-flight ramp reset is a runtime error, not a debug assertion."""
+    gate, _ = build_gate(GateSpec(general_ceiling=2))
+    cm, _granted = await _live(gate, Want.of(general=Count(1), heavy=Count(0)))
+    try:
+        with pytest.raises(RuntimeError, match="reset_ramp_for_quiescence requires zero in-flight leases"):
+            gate.reset_ramp_for_quiescence()
+    finally:
+        await _finish(cm)
+
+
+def test_release_refuses_an_over_release() -> None:
+    """A lease claiming more than the gate holds is refused without decrementing."""
+    gate, _ = build_gate()
+    corrupt = Lease(
+        gate,
+        {LaneId.GENERAL: 1, LaneId.HEAVY: 0},
+        cold=False,
+        scale=Scale(1.0),
+    )
+    with pytest.raises(RuntimeError, match="release counter mismatch on general: in_flight 0 < lease 1"):
+        corrupt.release()
 
 
 # --- ramp decay follows the same scale law as admit (bifurcation seam) ---

@@ -118,7 +118,7 @@ class AdmissionGate(CapacityMixin, RampMixin):
         """Restore the cold initial ramp; guarded against running mid-flight."""
         with self._lock:
             if any(self._in_flight.values()):
-                raise AssertionError("reset_ramp_for_quiescence requires zero in-flight leases")
+                raise RuntimeError("reset_ramp_for_quiescence requires zero in-flight leases")
             initial = self._pacing.initial_ramp or Count(max(1, self._ramp_floor // 4))
             self._ramp = initial.value
 
@@ -212,7 +212,7 @@ class AdmissionGate(CapacityMixin, RampMixin):
             # return half-releases and starves parked waiters. Mismatch is corruption.
             for lane, amount in per_lane.items():
                 if amount > 0 and self._in_flight[lane] < amount:
-                    raise AssertionError(
+                    raise RuntimeError(
                         f"release counter mismatch on {lane}: "
                         f"in_flight {self._in_flight[lane]} < lease {amount}"
                     )
