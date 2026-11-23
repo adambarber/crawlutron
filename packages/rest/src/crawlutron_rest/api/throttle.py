@@ -104,6 +104,9 @@ class Throttle(MeterLedger):
         self._store: CoordinationThrottleStore | None = None
         self._shared_db_path: Path | None = None
         self._reservations: dict[str, _Reservation] = {}
+        # Proven keys are verified identities, never guesses (#1342); the set
+        # grows only with distinct keys actually verified this process.
+        self._proven: set[str] = set()
         if shared_db_path is not None:
             self.bind_shared_db(shared_db_path)
 
@@ -205,8 +208,9 @@ class Throttle(MeterLedger):
     # -- key-verify ----------------------------------------------------------
 
     def check(self, presented: str, remote: str | None = None) -> None:
-        self._kv_check(self._key_for(presented))
-        if remote is not None:
+        key = self._key_for(presented)
+        self._kv_check(key)
+        if remote is not None and key not in self._proven:
             self._kv_check(self._ip_key_for(remote))
 
     def record_failure(self, presented: str, remote: str | None = None) -> None:
@@ -215,7 +219,10 @@ class Throttle(MeterLedger):
             self._kv_record_fail(self._ip_key_for(remote), self.IP_MAX_FAILURES)
 
     def record_success(self, presented: str, remote: str | None = None) -> None:
-        self._kv_clear_sync(self._key_for(presented))
+        key = self._key_for(presented)
+        self._kv_clear_sync(key)
+        with self._lock:
+            self._proven.add(key)
 
     def _kv_clear_sync(self, key: str) -> None:
         if self._store is None:
@@ -325,6 +332,7 @@ class Throttle(MeterLedger):
         with self._lock:
             self._buckets.clear()
             self._reservations.clear()
+            self._proven.clear()
             store = self._store
         if store is not None:
             store.clear_kind("key_verify")

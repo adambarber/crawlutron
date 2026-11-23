@@ -306,3 +306,44 @@ def test_concurrent_failures_reach_cooldown_threshold():
     with pytest.raises(KeyVerifyThrottled) as raised:
         throttle.check(key)
     assert raised.value.status == 429
+
+
+def test_a_proven_key_is_not_locked_out_by_a_cotenants_guesses(tmp_path):
+    """A key already proved valid from one IP still checks after a stranger
+    behind that IP burns the shared guess-ledger with its own failures (#1342)."""
+    store = CallerKeyStore(tmp_path / "keys.db")
+    throttle = Throttle()
+    good = store.issue_key("good-tenant")
+    remote = "198.51.100.44"
+
+    assert store.verify_key(good.secret) is not None
+    throttle.record_success(good.secret, remote)
+    _flood_remote(throttle, remote, Throttle.IP_MAX_FAILURES)
+
+    # The stranger's own guess still trips the shared IP cap.
+    _assert_ip_refuses(throttle, "ck_0000000000000000.guess", remote)
+    # The proven key is a verified identity, not another guess.
+    throttle.check(good.secret, remote)
+
+
+async def test_a_verified_key_still_answers_from_a_poisoned_ip(tmp_path):
+    """Contract gate (#1034): through the real /v1/crawl door, a key proved
+    from one address still crawls after junk guesses cool that same address."""
+    from tests.factories.client import isolation_client
+
+    async with isolation_client(tmp_path) as (client, _store, _results, keys):
+        good = (await keys.aissue_key("co-tenant")).secret
+        body = {"url": "http://example.com/", "async_mode": True}
+        first = await client.post("/v1/crawl", headers={"X-API-Key": good}, json=body)
+        assert first.status_code == 202, first.text
+
+        for i in range(Throttle.IP_MAX_FAILURES):
+            refused = await client.post(
+                "/v1/crawl",
+                headers={"X-API-Key": f"ck_{i:016x}.junk-{i}"},
+                json=body,
+            )
+            assert refused.status_code == 401, refused.text
+
+        still = await client.post("/v1/crawl", headers={"X-API-Key": good}, json=body)
+        assert still.status_code == 202, still.text
