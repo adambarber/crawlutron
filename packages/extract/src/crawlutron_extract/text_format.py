@@ -121,14 +121,54 @@ def _cap_text(
     return text, truncated
 
 
+def _json_text_depth(content: str) -> int:
+    """Max bracket/brace nesting depth in raw text, ignoring quoted strings.
+
+    O(n), non-recursive; brackets inside JSON strings do not count as nesting.
+    """
+    depth = 0
+    max_depth = 0
+    i = 0
+    n = len(content)
+    in_string = False
+    quote = ""
+    while i < n:
+        c = content[i]
+        if in_string:
+            if c == "\\" and i + 1 < n:
+                i += 2
+                continue
+            if c == quote:
+                in_string = False
+            i += 1
+            continue
+        if c in "'\"":
+            in_string = True
+            quote = c
+            i += 1
+            continue
+        if c in "{[":
+            depth += 1
+            if depth > max_depth:
+                max_depth = depth
+        elif c in "}]":
+            if depth > 0:
+                depth -= 1
+        i += 1
+    return max_depth
+
+
 def _extract_json(content: str, limits) -> dict[str, object]:
     """Parse JSON/JSONL with bounded nesting depth. Never raises."""
     flags: list[str] = []
     truncated = False
 
+    if _json_text_depth(content) > _MAX_JSON_DEPTH:
+        return _empty_result("json_depth_refused", ["json_depth_refused"])
+
     try:
         data = json.loads(content)
-    except json.JSONDecodeError, ValueError:
+    except json.JSONDecodeError, ValueError, RecursionError:
         # Try JSONL line-by-line.
         lines = content.splitlines()
         parsed: list[object] = []
@@ -136,9 +176,12 @@ def _extract_json(content: str, limits) -> dict[str, object]:
             line = line.strip()
             if not line:
                 continue
+            if _json_text_depth(line) > _MAX_JSON_DEPTH:
+                flags.append("jsonl_parse_error")
+                break
             try:
                 parsed.append(json.loads(line))
-            except json.JSONDecodeError, ValueError:
+            except json.JSONDecodeError, ValueError, RecursionError:
                 flags.append("jsonl_parse_error")
                 break
         if not parsed:
@@ -171,17 +214,21 @@ def _extract_json(content: str, limits) -> dict[str, object]:
     )
 
 
-def _json_depth(obj: object, depth: int = 0) -> int:
-    """Compute JSON nesting depth."""
-    if isinstance(obj, dict):
-        if not obj:
-            return depth
-        return max(_json_depth(v, depth + 1) for v in obj.values())
-    if isinstance(obj, list):
-        if not obj:
-            return depth
-        return max(_json_depth(v, depth + 1) for v in obj)
-    return depth
+def _json_depth(obj: object) -> int:
+    """Compute JSON nesting depth iteratively; never recurses."""
+    max_depth = 0
+    stack: list[tuple[object, int]] = [(obj, 0)]
+    while stack:
+        node, depth = stack.pop()
+        if depth > max_depth:
+            max_depth = depth
+        if isinstance(node, dict):
+            for value in node.values():
+                stack.append((value, depth + 1))
+        elif isinstance(node, list):
+            for value in node:
+                stack.append((value, depth + 1))
+    return max_depth
 
 
 def _json_to_text(obj: object, limits, flags: list[str]) -> str:
