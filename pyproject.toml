@@ -121,7 +121,7 @@ dev = [
     "vulture==2.16",
     # Mutation testing for weekly.yml invariant-critical probe; pinned so the
     # weekly workflow doesn't need a runtime pip install.
-    "mutmut==3.2.0",
+    "mutmut==3.8.1",
 ]
 
 # No [project.scripts]: this wheel ships no modules (bypass-selection below),

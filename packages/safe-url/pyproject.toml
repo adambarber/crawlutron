@@ -11,7 +11,7 @@ requires-python = ">=3.14"
 license = "MIT"
 dependencies = [
     "regex==2026.11.19",
-    "publicsuffixlist==1.1.2.20261101",
+    "publicsuffixlist==1.1.2.20261116",
 ]
 
 [tool.hatch.build.targets.wheel]
