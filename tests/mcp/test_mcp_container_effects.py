@@ -110,11 +110,9 @@ async def test_concurrent_mcp_effects_bounded_by_container_width(tmp_path, monke
     assert probe.max[EffectKind.RENDER] <= 1
 
 
-async def test_slow_render_does_not_block_admission_for_other_callers(tmp_path, monkeypatch):
-    """A slow render holds no quota slot while its effect runs, so another
-    caller's crawl admission decision returns promptly instead of queuing behind
-    the render's effect duration."""
-    probe = _EffectProbe()
+async def test_slow_render_holds_quota_slot_for_same_caller(tmp_path, monkeypatch):
+    """A slow render holds the quota slot while its effect runs: a same-key crawl
+    is refused (REST parity) while a different-key crawl is not blocked."""
     entered = asyncio.Event()
     released = asyncio.Event()
 
@@ -123,22 +121,66 @@ async def test_slow_render_does_not_block_admission_for_other_callers(tmp_path, 
         await released.wait()
         return {}
 
+    probe = _EffectProbe()
     _stub_effects(monkeypatch, probe, slow_render)
 
     async with _mcp_client(tmp_path, fetch_width=1, render_width=1) as client:
-        secret = await issue_key(client, max_pages=0, max_concurrency=1)
+        slow_secret = await issue_key(client, max_pages=0, max_concurrency=1)
+        fast_secret = await issue_key(client, max_pages=0, max_concurrency=1)
 
         render_task = asyncio.create_task(
-            tool_call(client, "render", {"url": "http://example.com/slow"}, key=secret)
+            tool_call(client, "render", {"url": "http://example.com/slow"}, key=slow_secret)
         )
         await asyncio.wait_for(entered.wait(), timeout=5)
 
-        crawl_task = asyncio.create_task(
-            tool_call(client, "crawl", {"url": "http://example.com/fast"}, key=secret)
+        # Same caller: the slot is held across the render's effect, so a same-key
+        # crawl is refused instead of running concurrently.
+        crawl_result = await asyncio.wait_for(
+            tool_call(client, "crawl", {"url": "http://example.com/fast"}, key=slow_secret),
+            timeout=5,
         )
-        crawl_result = await asyncio.wait_for(crawl_task, timeout=5)
-        assert crawl_result["isError"] is False, crawl_result
+        assert crawl_result["isError"] is True, crawl_result
+        assert "concurrency quota" in crawl_result["content"][0]["text"], crawl_result
+
+        # Different caller: not blocked by the slow render's held slot.
+        fast_result = await asyncio.wait_for(
+            tool_call(client, "crawl", {"url": "http://example.com/other"}, key=fast_secret),
+            timeout=5,
+        )
+        assert fast_result["isError"] is False, fast_result
 
         released.set()
         render_result = await asyncio.wait_for(render_task, timeout=5)
         assert render_result["isError"] is False, render_result
+
+
+async def test_same_key_concurrent_crawls_do_not_both_run(tmp_path, monkeypatch):
+    """With max_concurrency=1, two concurrent same-key MCP crawls must not both
+    run; the second is paced/refused while the first holds the quota slot."""
+    entered = asyncio.Event()
+    released = asyncio.Event()
+    crawl_result = {"results": [], "request_id": "req", "submitted_count": 0, "policy_schema_version": ""}
+
+    async def slow_crawl(*args, **kwargs):
+        entered.set()
+        await released.wait()
+        return crawl_result
+
+    probe = _EffectProbe()
+    _stub_effects(monkeypatch, probe, probe.render_stub)
+    monkeypatch.setattr("crawlutron_mcp.handlers.execute_crawl", slow_crawl)
+
+    async with _mcp_client(tmp_path, fetch_width=2, render_width=1) as client:
+        secret = await issue_key(client, max_pages=0, max_concurrency=1)
+
+        first = asyncio.create_task(tool_call(client, "crawl", {"url": "http://example.com/a"}, key=secret))
+        await asyncio.wait_for(entered.wait(), timeout=5)
+
+        second = asyncio.create_task(tool_call(client, "crawl", {"url": "http://example.com/b"}, key=secret))
+        second_result = await asyncio.wait_for(second, timeout=5)
+        assert second_result["isError"] is True, second_result
+        assert "concurrency quota" in second_result["content"][0]["text"], second_result
+
+        released.set()
+        first_result = await asyncio.wait_for(first, timeout=5)
+        assert first_result["isError"] is False, first_result

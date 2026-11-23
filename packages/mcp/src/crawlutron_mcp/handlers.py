@@ -186,15 +186,15 @@ async def _admit_tool(
     work: Callable[[], Awaitable[ToolResult]],
     caller_auth: CallerQuotaAdmission | None = None,
 ) -> ToolResult:
-    """Admit one fetch tool under the readiness gate; the quota slot is decision-only."""
+    """Admit one fetch tool; hold the quota slot across the effect run (REST parity)."""
     port = CALLER_QUOTA_ADMISSION if caller_auth is None else caller_auth
-    # request_gate OUTER, admit INNER: the slot is released before the effect runs.
+    # request_gate OUTER, admit INNER: the slot stays held while work() runs.
     try:
         async with request_gate("mcp_request_rejected", logger=_logger):
             async with port.admit(caller, pages, tracking=tracking, payload=payload) as owner:
-                # Admission decision only: page bound, quotas, reservation.
+                # Admission decision made; the slot stays held across the effect run.
                 _ = owner
-            return await work()
+                return await work()
     except DomainError as error:
         return _tool_error(error)
 
