@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 
 from crawlutron.admission.render_options import policy_wants_markdown
@@ -115,13 +116,15 @@ _STATUS_OVERRIDES: tuple[tuple[int, Classification, str], ...] = (
 )
 
 
-def classify_extracted_content(
+async def classify_extracted_content(
     ctx: HttpStrategyContext,
     resp: FetchedResponse,
     extracted: ExtractedHttpContent,
 ) -> tuple[Classification, list[ClassificationEvidenceRecord]]:
     """Apply status overrides to the page classifier's evidence."""
-    classification, evidence = classify_page_with_evidence(extracted.html, extracted.text)
+    classification, evidence = await asyncio.to_thread(
+        classify_page_with_evidence, extracted.html, extracted.text
+    )
     status = resp.status_code
     override: tuple[int, Classification, str] | None = next(
         (row for row in _STATUS_OVERRIDES if row[0] == status),

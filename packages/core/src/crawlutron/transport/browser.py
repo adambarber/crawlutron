@@ -308,7 +308,7 @@ class BrowserRenderer:
         text = await self.extract_text(page) if options.include_text else None
         raw_title = await bounded_evaluate(page, "() => document.title")
         title = raw_title if isinstance(raw_title, str) else None
-        classification = classify_page(html, text, title=title)
+        classification = await classify_page(html, text, title=title)
 
         if classification != "bot_challenge_detected":
             return html, text, classification, False
@@ -330,7 +330,7 @@ class BrowserRenderer:
             next_text = await self.extract_text(page) if options.include_text else None
             raw_next_title = await bounded_evaluate(page, "() => document.title")
             next_title = raw_next_title if isinstance(raw_next_title, str) else None
-            next_classification = classify_page(next_html, next_text, title=next_title)
+            next_classification = await classify_page(next_html, next_text, title=next_title)
             if next_classification != "bot_challenge_detected":
                 return next_html, next_text, next_classification, True
             html, text, classification = next_html, next_text, next_classification

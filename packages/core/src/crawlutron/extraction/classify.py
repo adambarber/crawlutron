@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 from typing import NamedTuple
 
 from crawlutron.models.classification_evidence import ClassificationEvidenceRecord
 from crawlutron.models.taxonomy import Classification
+from crawlutron.safety.bounded_io import truncate_html_input
 
 # Named Classification members, not bare literals: a literal in return position
 # widens to ``str`` and hands the caller a plain string that merely spells a member.
@@ -100,8 +102,9 @@ CLASSIFICATION_SIGNATURES: tuple[tuple[Classification, tuple[str, ...]], ...] = 
 )
 
 
-def classify_page(html: str | None, text: str | None, *, title: str | None = None) -> Classification:
-    classification, _evidence = classify_page_with_evidence(html, text, title=title)
+async def classify_page(html: str | None, text: str | None, *, title: str | None = None) -> Classification:
+    """Offload the pure CPU classifier off the event loop (single chokepoint)."""
+    classification, _evidence = await asyncio.to_thread(classify_page_with_evidence, html, text, title=title)
     return classification
 
 
@@ -148,6 +151,7 @@ SOFT_SINGLE_SIGNAL_CLASSIFICATIONS = frozenset(
 def classify_page_with_evidence(
     html: str | None, text: str | None, *, title: str | None = None
 ) -> tuple[Classification, list[ClassificationEvidenceRecord]]:
+    html = truncate_html_input(html)
     visible_haystack = f"{title or ''}\n{text or ''}".lower()
     html_haystack = (text or "").lower()
     if not (text or "").strip() and not (title or "").strip() and _html_has_no_user_visible_content(html):

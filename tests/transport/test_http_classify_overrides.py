@@ -108,8 +108,8 @@ _EVIDENCE = {
 
 
 @pytest.mark.parametrize("status", sorted(_EVIDENCE))
-def test_status_override_evidence_is_pinned(status: int) -> None:
+async def test_status_override_evidence_is_pinned(status: int) -> None:
     response = FetchedResponse.of(_RawResponse(status))
-    classification, evidence = classify_extracted_content(_ctx(), response, _extracted())
+    classification, evidence = await classify_extracted_content(_ctx(), response, _extracted())
     assert classification == _EVIDENCE[status][0]["classification"]
     assert evidence == _EVIDENCE[status]
