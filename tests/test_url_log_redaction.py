@@ -317,3 +317,86 @@ def test_invariant_benign_compound_names_stay_clean_property_shaped(word, delimi
     else:
         name = f"a{delimiter}{word}{delimiter}z"
     assert not is_secret_name(name), f"benign name {name!r} was over-masked"
+
+
+class TestMcpErrorFieldsNeverReflectCredentials:
+    """MCP error text and structured fields carry the redaction chokepoint."""
+
+    ATTACK = "https://user:s3cret@evil.example/hook?token=leak"
+
+    @staticmethod
+    def _body():
+        return {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "_meta": {
+                    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                    "io.modelcontextprotocol/clientCapabilities": {},
+                },
+                "name": "crawl",
+                "arguments": {},
+            },
+        }
+
+    @staticmethod
+    def _call(body, *, protocol="2026-07-28", method="tools/call", name="crawl"):
+        import asyncio
+
+        from crawlutron_mcp.server import handle_mcp_request
+
+        return asyncio.run(
+            handle_mcp_request(
+                body,
+                protocol_version_header=protocol,
+                method_header=method,
+                name_header=name,
+                settings=None,
+                shutdown_event=None,
+            )
+        )
+
+    @staticmethod
+    def _assert_no_leak(payload):
+        text = str(payload)
+        assert "s3cret" not in text and "leak" not in text
+
+    def test_name_header_mismatch_never_reflects_the_header(self):
+        _status, payload = self._call(self._body(), name=self.ATTACK)
+        self._assert_no_leak(payload)
+        assert payload["error"]["data"]["code"] == "header_mismatch"
+
+    def test_method_header_mismatch_never_reflects_the_header(self):
+        _status, payload = self._call(self._body(), method=self.ATTACK)
+        self._assert_no_leak(payload)
+        assert payload["error"]["data"]["code"] == "header_mismatch"
+
+    def test_unknown_tool_name_never_reflects_the_name(self):
+        body = self._body()
+        body["params"]["name"] = self.ATTACK
+        _status, payload = self._call(body, name=self.ATTACK)
+        self._assert_no_leak(payload)
+        assert payload["error"]["data"]["code"] == "unknown_tool"
+
+    def test_unknown_method_never_reflects_the_method(self):
+        body = self._body()
+        body["method"] = self.ATTACK
+        _status, payload = self._call(body, method=self.ATTACK)
+        self._assert_no_leak(payload)
+        assert payload["error"]["data"]["code"] == "unknown_method"
+
+    def test_tool_error_message_and_structured_fields_are_redacted(self):
+        import asyncio
+        import json
+
+        from crawlutron.service.errors import QuotaRefusal
+        from crawlutron_mcp.tool_results import tool_result
+
+        async def _raise():
+            raise QuotaRefusal(f"quota exceeded at {self.ATTACK}")
+
+        result = asyncio.run(tool_result(_raise()))
+        wire = json.dumps(result.structured)
+        assert "s3cret" not in wire and "leak" not in wire
+        assert "[REDACTED]" in wire

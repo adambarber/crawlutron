@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     ADMISSION_ROOT: pathlib.Path
     REST_ROOT: pathlib.Path
     MCP_ROOT: pathlib.Path
+    SDK_ROOT: pathlib.Path
     SAFE_URL_ROOT: pathlib.Path
     APP_ROOTS: tuple[pathlib.Path, ...]
     TRANSPORT_DIR: pathlib.Path
@@ -271,6 +272,7 @@ _DERIVATIONS: Mapping[str, Callable[[], object]] = MappingProxyType(
         "ADMISSION_ROOT": lambda: _app_roots()[1],
         "REST_ROOT": lambda: _app_roots()[2],
         "MCP_ROOT": lambda: _app_roots()[3],
+        "SDK_ROOT": lambda: _import_root("crawlutron_sdk"),
         "SAFE_URL_ROOT": lambda: _app_roots()[4],
         "APP_ROOTS": lambda: tuple(_app_roots()[i] for i in (0, 1, 2, 3, 4)),
         "TRANSPORT_DIR": lambda: _app_roots()[0] / "transport",

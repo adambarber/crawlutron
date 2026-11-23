@@ -4,9 +4,9 @@ import ast
 import pathlib
 import re
 
+from tests._error_door_trees import error_door_trees
 from tests.chokepoint_walks import (
     SANCTIONED,
-    app_trees,
     assignments,
     bare_callee,
     call_nodes,
@@ -257,7 +257,7 @@ POOL_EXHAUSTION_CATCH_SITES_ARE_SANCTIONED = Rule(
 
 def test_status_resolver_lives_in_the_vocabulary_home():
     """status_for_classification is defined once, in the taxonomy module."""
-    for path, tree in app_trees(exclude=SANCTIONED | frozenset({"taxonomy.py"})):
+    for path, tree in error_door_trees(exclude=SANCTIONED | frozenset({"taxonomy.py"})):
         for node in functions(tree):
             if node.name == "status_for_classification":
                 raise AssertionError(
@@ -269,7 +269,7 @@ def test_classifier_lives_in_the_neutral_home():
     """classify_error_code must be defined in the classification module, not
     re-defined in a strategy module (the old site, http.py, forced browser.py
     to import across strategies)."""
-    for path, tree in app_trees(exclude=SANCTIONED | _ERROR_CHOKEPOINT_SANCTIONED):
+    for path, tree in error_door_trees(exclude=SANCTIONED | _ERROR_CHOKEPOINT_SANCTIONED):
         for node in functions(tree):
             if node.name == "classify_error_code":
                 raise AssertionError(

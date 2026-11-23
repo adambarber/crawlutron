@@ -5,23 +5,20 @@ the REST doors use, returning a ``ToolResult``.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum, auto
 from typing import TYPE_CHECKING, Any, NotRequired, Protocol, TypedDict, Unpack, cast
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.models.crawl_pending import CrawlPendingError
-from crawlutron.models.json_value import JsonValue
 from crawlutron.models.policy_suggestions_response import PolicySuggestionsResponse
 from crawlutron.models.result_record import ProducerEnvelope
-from crawlutron.safety.json_safe import json_default
 from crawlutron.search.endpoint import search as search_endpoint_handler
 from crawlutron.service.admit_endpoint import admit_url
 from crawlutron.service.caller_auth import CALLER_QUOTA_ADMISSION, CallerQuotaAdmission, Tracking
@@ -29,7 +26,7 @@ from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
 from crawlutron.service.crawl_endpoint_cores import delta_context_for
 from crawlutron.service.crawl_executor import execute_crawl
 from crawlutron.service.effects import EffectContainer, EffectKind, container_effect
-from crawlutron.service.errors import DomainError
+from crawlutron.service.errors import BrowserPoolUnavailable, DomainError
 from crawlutron.service.job_cores import create_job_core
 from crawlutron.service.main_helpers import crawl_tail, request_gate
 from crawlutron.service.map_endpoint import map_site
@@ -39,6 +36,12 @@ from crawlutron.storage.result_store import CrawlResultStore
 from crawlutron.storage.watch_store import WatchStore
 from crawlutron.transport.browser_pool import get_browser_pool
 from crawlutron_mcp.crawl_shaping import CrawlProjection, projected
+from crawlutron_mcp.tool_results import (
+    ToolResult,
+    tool_error_result,
+    tool_result,
+    tool_success_result,
+)
 
 if TYPE_CHECKING:
     from crawlutron.models.admit_request import AdmitRequest
@@ -49,47 +52,6 @@ if TYPE_CHECKING:
     from crawlutron.models.search_request import SearchRequest
 
 _logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class ToolResult:
-    """A ``tools/call`` outcome: text content plus optional structured data."""
-
-    text: str
-    structured: JsonValue | None = None
-    is_error: bool = False
-
-
-def validation_message(error: Exception) -> str:
-    if isinstance(error, ValidationError):
-        return "; ".join(
-            f"{'.'.join(str(part) for part in err.get('loc', []))}: {err.get('msg', '')}"
-            for err in error.errors()
-        )
-    return str(error)
-
-
-def _tool_error(error: ValueError | DomainError) -> ToolResult:
-    message = str(error.message) if isinstance(error, DomainError) else str(error)
-    return ToolResult(text=message, is_error=True)
-
-
-def _tool_success(value: BaseModel | Mapping[str, object]) -> ToolResult:
-    # Validated boundary: a model dump is JSON by construction; a caller's mapping
-    # crossing the wire is the JSON values it carries.
-    dump = value.model_dump() if isinstance(value, BaseModel) else cast("JsonValue", dict(value))
-    return ToolResult(text=json.dumps(dump, default=json_default), structured=dump)
-
-
-async def tool_result(coro: Awaitable[BaseModel | Mapping[str, object]]) -> ToolResult:
-    """Cross the MCP boundary for one tool call: run it, or turn the endpoint's
-    ``DomainError``/``ValueError`` into a tool error rather than a traceback.
-    """
-    try:
-        result = await coro
-    except (DomainError, ValueError) as error:
-        return _tool_error(error)
-    return _tool_success(result)
 
 
 def caller_for(caller: CallerIdentity | None) -> CallerIdentity:
@@ -196,7 +158,7 @@ async def _admit_tool(
                 _ = owner
                 return await work()
     except DomainError as error:
-        return _tool_error(error)
+        return tool_error_result(error)
 
 
 async def _crawled(
@@ -279,7 +241,7 @@ async def _running_answer(payload, job_store, result_store, caller, read) -> Too
     """Shape the read's three outcomes: the record, the typed pending state, and
     the 404 miss the replay doors report."""
     try:
-        return _tool_success(
+        return tool_success_result(
             await read(payload.request_id, job_store, result_store, caller_id=caller_for(caller).caller_id)
         )
     except CrawlPendingError as pending:
@@ -292,7 +254,7 @@ async def _running_answer(payload, job_store, result_store, caller, read) -> Too
             },
         )
     except DomainError as error:
-        return _tool_error(error)
+        return tool_error_result(error)
 
 
 async def _store_tool(payload: BaseModel, door: DoorEnv, door_data: DoorBinding) -> ToolResult:
@@ -337,10 +299,7 @@ async def _render_door(payload: BaseModel, door: DoorEnv) -> ToolResult:
     """The render door: browser-pool guard, the caller's cookie namespace, admission."""
     render_payload = cast("RenderRequest", payload)
     if get_browser_pool() is None:
-        return ToolResult(
-            text="Browser pool is not initialized; the service is starting up or shutting down.",
-            is_error=True,
-        )
+        return tool_error_result(BrowserPoolUnavailable())
     settings = door.settings
     if settings is None:
         raise ValueError("render requires initialized settings")
@@ -492,9 +451,6 @@ __all__ = [
     "DoorBinding",
     "DoorEnv",
     "DoorKind",
-    "ToolResult",
     "caller_for",
     "dispatch",
-    "tool_result",
-    "validation_message",
 ]

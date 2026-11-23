@@ -10,6 +10,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
+from crawlutron.service.errors import QuotaRefusal
 from crawlutron_rest.api.exceptions import error_envelope, http_error
 
 
@@ -189,3 +190,61 @@ class TestEnvelopeFromDetail:
             "message": "Unhandled exception in request handling",
             "details": {},
         }
+
+
+class TestCrossDoorErrorParity:
+    """One typed refusal renders the same triplet to every door."""
+
+    @staticmethod
+    def _refusal() -> QuotaRefusal:
+        return QuotaRefusal("concurrency quota: 4/4 pages in flight")
+
+    def _rendered(self):
+        from crawlutron.service.error_rendering import ErrorDoor, render_error
+
+        return {door: render_error(self._refusal(), door) for door in ErrorDoor}
+
+    def test_code_and_details_match_across_all_four_doors(self):
+        rendered = self._rendered()
+        assert len(rendered) == 4
+        assert {r.code for r in rendered.values()} == {"quota_exceeded"}
+        assert len({json.dumps(r.details, sort_keys=True) for r in rendered.values()}) == 1
+
+    def test_every_door_shares_one_status(self):
+        assert {r.status for r in self._rendered().values()} == {429}
+
+    def test_mcp_structured_content_is_the_shared_envelope(self):
+        rendered = self._rendered()
+        assert rendered["mcp"].wire["structuredContent"] == rendered["rest"].wire
+
+    def test_cli_and_sdk_wires_are_the_shared_envelope(self):
+        rendered = self._rendered()
+        assert rendered["cli"].wire == rendered["rest"].wire
+        assert rendered["sdk"].wire == rendered["rest"].wire
+
+    def test_rest_handler_emits_the_rendered_wire(self):
+        from crawlutron_rest.api.exceptions import domain_error_handler
+
+        rendered = self._rendered()["rest"]
+        response = asyncio.run(domain_error_handler(_bare_request(), self._refusal()))
+        assert response.status_code == rendered.status
+        assert json.loads(bytes(response.body)) == rendered.wire
+
+    def test_mcp_tool_result_carries_code_and_details(self):
+        from crawlutron_mcp.handlers import tool_result
+
+        async def _raise():
+            raise self._refusal()
+
+        result = asyncio.run(tool_result(_raise()))
+        rendered = self._rendered()["mcp"]
+        assert result.is_error is True
+        assert result.structured == rendered.wire["structuredContent"]
+
+    def test_sdk_consumes_the_rendered_envelope_into_a_typed_error(self):
+        from crawlutron_sdk.errors import error_from_response
+
+        rendered = self._rendered()["sdk"]
+        error = error_from_response(rendered.status, dict(rendered.wire))
+        assert error.code == "quota_exceeded"
+        assert error.status_code == 429

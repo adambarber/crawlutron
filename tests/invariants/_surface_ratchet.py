@@ -169,9 +169,9 @@ DECLARED_SURFACE_RATCHET = {
     # #656 raised 16,7 -> 18,8: get_concurrency_tracker + TrackerDep make the
     # app-state stash load-bearing (the getattr-None scatter is refused loudly).
     "packages/rest/src/crawlutron_rest/api/dependencies.py": (22, 10),
-    # #813: is_quota_refusal is the named quota-refusal match the sweep reads.
-    # #849: the predicate single-homed to service/errors; handler joins here.
-    "packages/rest/src/crawlutron_rest/api/exceptions.py": (10, 8),
+    # #813/#849: the quota predicate is single-homed here; #1374 moved
+    # error_envelope to the shared renderer, lowering this row.
+    "packages/rest/src/crawlutron_rest/api/exceptions.py": (9, 7),
     # #668: the single-homed discovery-link constants the 404 details reuse.
     "packages/core/src/crawlutron/discovery/links.py": (3, 0),
     # #649: derived discovery -- one thin re-export and one surface walk.
@@ -213,6 +213,8 @@ DECLARED_SURFACE_RATCHET = {
     # #849: the typed domain refusals both doors map — one base + named subclasses
     # plus the single-homed quota predicate the sweep reads.
     "packages/core/src/crawlutron/service/errors.py": (17, 16),
+    # #1374: the one typed renderer shared by REST/MCP/CLI/SDK.
+    "packages/core/src/crawlutron/service/error_rendering.py": (5, 2),
     # #1082: admit_webhook_target is the validate-then-admit chokepoint facade.
     "packages/core/src/crawlutron/service/webhooks.py": (16, 14),
     # #668 raised 18,0 -> 19,0: RATE_LIMITED is the JSON-RPC code the anonymous
@@ -228,12 +230,10 @@ DECLARED_SURFACE_RATCHET = {
     # #645: tools.py split into registry + handlers (500-line ceiling); the read
     # tools joined. Closures lowered both entry counts.
     "packages/mcp/src/crawlutron_mcp/registry.py": (4, 1),
-    # #646: the four job-tool handlers joined via _job_tool_handler. #647: create_job.
-    # ARCH-1: factory collapse (data-driven dispatch) deleted the factories + watch_handlers.py.
-    "packages/mcp/src/crawlutron_mcp/handlers.py": (
-        8,
-        5,
-    ),  # lowered from (9, 6) by the HTTPException-arm deletion (#869).
+    # #646/#647/ARCH-1: handlers collapsed; #1374 split tool-result shaping into
+    # tool_results.py for the file ceiling.
+    "packages/mcp/src/crawlutron_mcp/handlers.py": (5, 3),
+    "packages/mcp/src/crawlutron_mcp/tool_results.py": (5, 4),
     # #646: the one control-plane transition both job doors run, plus its shared 404/409 raisers.
     "packages/core/src/crawlutron/service/job_control.py": (3, 3),
     # #647: the typed job cores both doors run (create/list/get/control/delete).
