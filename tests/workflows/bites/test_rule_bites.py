@@ -448,4 +448,5 @@ def test_every_workflow_rule_has_a_bite() -> None:
         "weekly-artifacts",
         "ci-packaging-read-only",
         "ci-security-permissions",
+        "ci-release-gated-on-ci",
     }

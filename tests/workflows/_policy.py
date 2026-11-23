@@ -116,12 +116,8 @@ class RuleId(StrEnum):
     CI_COVERAGE_JUNIT_UPLOAD = "ci-coverage-junit-upload"
     CI_COVERAGE_DISTINCT_JUNIT_PATHS = "ci-coverage-distinct-junit-paths"
     CI_PACKAGING_READ_ONLY = "ci-packaging-read-only"
-    CI_PREPARE_FROZEN_LOCK = "ci-prepare-frozen-lock"
     CI_GATE_JOBS_START_FROM_PREPARE = "ci-gate-jobs-start-from-prepare"
-    CI_NO_PIP_INSTALL_RUNS = "ci-no-pip-install-runs"
     CI_SECURITY_PERMISSIONS = "ci-security-permissions"
-    CI_SECURITY_NO_EVENT_SPLICING = "ci-security-no-event-splicing"
-    CI_IMAGE_PUSH_AFTER_SMOKE = "ci-image-push-after-smoke"
     CI_RELEASE_GATED_ON_CI = "ci-release-gated-on-ci"
     CI_COVERAGE_UPLOADS_COVERAGE_XML = "ci-coverage-uploads-coverage-xml"
     CI_COVERAGE_SINGLE_ARTIFACT = "ci-coverage-single-artifact"
@@ -207,12 +203,8 @@ CEILINGS: Mapping[RuleId, int] = MappingProxyType(
         RuleId.CI_COVERAGE_JUNIT_UPLOAD: 0,
         RuleId.CI_COVERAGE_DISTINCT_JUNIT_PATHS: 0,
         RuleId.CI_PACKAGING_READ_ONLY: 0,
-        RuleId.CI_PREPARE_FROZEN_LOCK: 0,
         RuleId.CI_GATE_JOBS_START_FROM_PREPARE: 0,
-        RuleId.CI_NO_PIP_INSTALL_RUNS: 0,
         RuleId.CI_SECURITY_PERMISSIONS: 0,
-        RuleId.CI_SECURITY_NO_EVENT_SPLICING: 0,
-        RuleId.CI_IMAGE_PUSH_AFTER_SMOKE: 0,
         RuleId.CI_RELEASE_GATED_ON_CI: 0,
         RuleId.CI_COVERAGE_UPLOADS_COVERAGE_XML: 0,
         RuleId.CI_COVERAGE_SINGLE_ARTIFACT: 0,

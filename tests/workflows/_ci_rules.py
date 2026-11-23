@@ -390,3 +390,27 @@ def ci_security_permissions(workflow: Workflow) -> Iterator[Finding]:
             1,
             f"{workflow.path}: CI must declare exactly contents:read and pull-requests:read",
         )
+
+
+def ci_release_gated_on_ci(workflow: Workflow) -> Iterator[Finding]:
+    """Every release job but the read-only roster must depend on ci transitively."""
+    if workflow.stem != "release":
+        return
+    jobs = workflow.jobs
+    gated = {"ci"} if "ci" in jobs else set()
+    changed = True
+    while changed:
+        changed = False
+        for name, job in jobs.items():
+            if name not in gated and set(job.needs) & gated:
+                gated.add(name)
+                changed = True
+    for name, job in jobs.items():
+        if name not in gated and name != "released":
+            yield Finding(
+                RuleId.CI_RELEASE_GATED_ON_CI.value,
+                workflow.stem,
+                name,
+                job.line,
+                f"{workflow.path}:{job.line}: {name} is not downstream of the ci gate",
+            )

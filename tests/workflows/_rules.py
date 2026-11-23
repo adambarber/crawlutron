@@ -18,10 +18,8 @@ from tests.workflows._ci_rules import (
     ci_dependency_review_checkout,
     ci_dependency_review_refs,
     ci_gate_jobs_start_from_prepare,
-    ci_packaging_read_only,
     ci_real_pbkdf2_door,
     ci_secret_scan_fetch_depth,
-    ci_security_permissions,
 )
 from tests.workflows._codeql_rules import (
     codeql_no_build_step,
@@ -29,25 +27,30 @@ from tests.workflows._codeql_rules import (
     codeql_security_events_write,
     codeql_security_extended,
     codeql_single_sarif_upload,
-    codeql_triggers,
 )
 from tests.workflows._model import POLICY, WORKFLOWS, Job, Workflow
 from tests.workflows._nightly_rules import (
-    nightly_artifacts,
-    nightly_concurrency,
+    nightly_artifacts as nightly_artifacts,
+)
+from tests.workflows._nightly_rules import (
     nightly_coverage_reports,
     nightly_door_call,
-    nightly_name,
-    nightly_triggers,
 )
 from tests.workflows._policy import Finding, RuleId, Scope
 from tests.workflows._weekly_rules import (
-    weekly_artifacts,
+    weekly_artifacts as weekly_artifacts,
+)
+from tests.workflows._weekly_rules import (
     weekly_lowest_direct,
     weekly_mutation_targets,
     weekly_mutation_timebox,
     weekly_mutation_tool,
-    weekly_triggers,
+)
+from tests.workflows._workflow_rules import (
+    WORKFLOW_RULES,
+)
+from tests.workflows._workflow_rules import (
+    ci_release_gated_on_ci as ci_release_gated_on_ci,
 )
 
 
@@ -57,13 +60,6 @@ class Rule:
     scope: Scope
     rationale: str
     check: Callable[[Workflow, Job], Iterator[Finding]]
-
-
-@dataclass(frozen=True)
-class WorkflowRule:
-    name: str
-    rationale: str
-    check: Callable[[Workflow], Iterator[Finding]]
 
 
 def needs_resolve(workflow: Workflow, job: Job) -> Iterator[Finding]:
@@ -416,71 +412,6 @@ JOB_RULES = (
         Scope.WITH_STEPS,
         "ci gate jobs start from $/.github/actions/prepare",
         ci_gate_jobs_start_from_prepare,
-    ),
-)
-
-
-def declares_permissions(workflow: Workflow) -> Iterator[Finding]:
-    if not workflow.permissions:
-        yield Finding(
-            "declares-permissions",
-            workflow.stem,
-            "",
-            1,
-            f"{workflow.path}: no workflow permissions",
-        )
-
-
-def has_trigger(workflow: Workflow) -> Iterator[Finding]:
-    if not workflow.on_:
-        yield Finding("has-trigger", workflow.stem, "", 1, f"{workflow.path}: no trigger declared")
-
-
-WORKFLOW_RULES = (
-    WorkflowRule("declares-permissions", "a missing block means write-all", declares_permissions),
-    WorkflowRule("has-trigger", "a workflow with no trigger is dead surface", has_trigger),
-    WorkflowRule(
-        RuleId.CODEQL_TRIGGERS.value,
-        "codeql triggers on PR main, push main, and weekly cron",
-        codeql_triggers,
-    ),
-    WorkflowRule(
-        RuleId.NIGHTLY_TRIGGERS.value,
-        "nightly triggers on daily schedule and workflow_dispatch",
-        nightly_triggers,
-    ),
-    WorkflowRule(
-        RuleId.NIGHTLY_NAME.value, "nightly workflow name identifies the nightly plane", nightly_name
-    ),
-    WorkflowRule(
-        RuleId.NIGHTLY_CONCURRENCY.value,
-        "nightly declares concurrency with cancel-in-progress",
-        nightly_concurrency,
-    ),
-    WorkflowRule(
-        RuleId.WEEKLY_TRIGGERS.value,
-        "weekly triggers on weekly schedule and workflow_dispatch",
-        weekly_triggers,
-    ),
-    WorkflowRule(
-        RuleId.NIGHTLY_ARTIFACTS.value,
-        "nightly uploads coverage and junit artifacts across jobs",
-        nightly_artifacts,
-    ),
-    WorkflowRule(
-        RuleId.WEEKLY_ARTIFACTS.value,
-        "weekly uploads mutation and resolution artifacts across jobs",
-        weekly_artifacts,
-    ),
-    WorkflowRule(
-        RuleId.CI_PACKAGING_READ_ONLY.value,
-        "packaging workflow declares only contents: read and publishes nothing",
-        ci_packaging_read_only,
-    ),
-    WorkflowRule(
-        RuleId.CI_SECURITY_PERMISSIONS.value,
-        "ci.yml declares exactly contents:read and pull-requests:read",
-        ci_security_permissions,
     ),
 )
 

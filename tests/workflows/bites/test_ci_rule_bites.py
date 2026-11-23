@@ -21,6 +21,7 @@ from tests.workflows._rules import (
     ci_dependency_review_refs,
     ci_gate_jobs_start_from_prepare,
     ci_real_pbkdf2_door,
+    ci_release_gated_on_ci,
     ci_secret_scan_fetch_depth,
 )
 
@@ -269,3 +270,21 @@ def test_ci_rule_names_the_injected_violation(rule, broken) -> None:
     assert findings[0].job == broken.key
     assert findings[0].rule == rule.__name__.replace("_", "-")
     assert parent.path.name in findings[0].message
+
+
+def test_release_gating_names_a_publish_job_detached_from_ci() -> None:
+    """A publish job whose needs no longer reach ci is reported by name."""
+    release = workflow("release")
+    broken = release.model_copy(
+        update={
+            "jobs": {
+                key: (value.model_copy(update={"needs": ("released",)}) if key == "publish-build" else value)
+                for key, value in release.jobs.items()
+            }
+        }
+    )
+    findings = list(ci_release_gated_on_ci(broken))
+    assert findings
+    assert all(item.rule == "ci-release-gated-on-ci" for item in findings)
+    assert "publish-build" in {item.job for item in findings}
+    assert all(release.path.name in item.message for item in findings)
