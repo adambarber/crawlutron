@@ -16,15 +16,18 @@ FastAPI. It exposes a single, machine-readable crawl contract that supports:
   for JavaScript-dependent pages.
 - **Document extraction** — PDF/DOCX/PPTX/XLSX/TXT via markitdown, plus main-text
   extraction via trafilatura.
-- **Content classification** — 36 crawl classifications (rendered, blocked,
-  network_error, robots_disallowed, waf_challenge_detected, etc.) so callers can branch
-  on outcome rather than guessing.
+- **Content classification** — a normalized classification enum (examples: `rendered`,
+  `not_modified`, `captcha_detected`, `waf_challenge_detected`, `robots_disallowed`,
+  `network_error`); `GET /v1/capabilities` serves the authoritative value set under
+  `supported_classifications`, so callers branch on outcome rather than guessing and
+  never depend on a count frozen in prose.
 - **Discovery endpoints** — capabilities, agent hints, and a `.well-known` service
   descriptor so agents/bots can discover the contract without prior knowledge.
 - **Web search** — `POST /v1/search` discovers public URLs from a query through a
   keyed provider (Tavily / Brave / Serper) with a keyless DuckDuckGo fallback.
-- **MCP** — `POST /mcp` exposes search/crawl/map/render as tools over the
-  Model Context Protocol (2026-07-28, stateless streamable HTTP).
+- **MCP** — `POST /mcp` serves the Model Context Protocol (2026-07-28, stateless
+  streamable HTTP); the authoritative tool catalog is published by `tools/list` and
+  mirrored by `GET /v1/capabilities`, so callers discover tools rather than hard-coding a set.
 - **SSRF protection** — target URLs are validated to be public HTTP(S) only.
 - **Webhooks, batching, recursion, rate limiting, robots.txt respect** — best-effort,
   caller-owned frontier semantics.
@@ -257,11 +260,12 @@ PYTHONPATH=packages/core/src .venv/bin/python -m crawlutron.storage.migrations r
 | `POST` | `/v1/render` | Render a URL with the browser engine and return structured output. |
 | `POST` | `/v1/search` | Discover public URLs from a query via the configured search provider. |
 | `POST` | `/v1/map` | Crawl a site's link graph and return the discovered URL set (no content extraction). |
+| `POST` | `/v1/admit` | Pre-flight admission verdict for one URL (validity, host policy, egress guard, optional robots check) without fetching. |
 | `GET` | `/v1/crawl/{request_id}` | Fetch the result of an async crawl submission. |
 | `GET` | `/v1/crawl/{request_id}/trace` | Per-URL strategy attempt trace (statuses, classifications, timings; no page bodies). |
 | `POST`/`GET`/`DELETE` | `/v1/watches` | Revalidation watches: register, list, get, delete; sweeps recheck due watches and POST webhooks on change. |
 | `GET`/`POST` | `/v1/jobs` | Whole-site resumable jobs: create (with frontier), list, inspect, pause/resume/cancel. |
-| `POST` | `/mcp` | MCP 2026-07-28 endpoint exposing search/crawl/map/render as tools. |
+| `POST` | `/mcp` | MCP 2026-07-28 endpoint; `tools/list` is the authoritative tool catalog. |
 | `GET`  | `/v1/capabilities` | Declares supported strategies, classifications, extraction methods, profiles. |
 | `GET`  | `/v1/agent-hints` | Machine-readable guidance for agents/bots (request shapes, caveats). |
 | `GET`  | `/.well-known/crawler-service` | Service discovery descriptor (links to OpenAPI, agent hints, capabilities). |
@@ -293,9 +297,11 @@ provider and the configured provider list.
 
 ## MCP
 
-`POST /mcp` exposes `search`, `crawl`, `map`, and `render` as tools over the
-**Model Context Protocol (2026-07-28)** — the stateless revision: no
-`initialize` handshake, no sessions. Every request carries its protocol
+`POST /mcp` serves the **Model Context Protocol (2026-07-28)** — the stateless
+revision: no `initialize` handshake, no sessions. The authoritative catalog of
+tools is published by `tools/list` on the same endpoint and mirrored by
+`GET /v1/capabilities`; callers should discover the current set from those endpoints
+rather than from a fixed list in prose. Every request carries its protocol
 version and client capabilities in `_meta`, and the transport validates the
 `MCP-Protocol-Version`, `Mcp-Method`, and `Mcp-Name` headers against the body.
 
@@ -361,9 +367,10 @@ exhausted.
 
 ## Classifications
 
-Every crawl result carries a `classification` from a fixed enum of **36 values**
-(defined in `packages/core/src/crawlutron/vocabulary/taxonomy.py`, returned by `GET /v1/capabilities` under
-`supported_classifications`). Examples: `rendered`, `not_modified`, `captcha_detected`,
+Every crawl result carries a `classification` from a fixed enum
+(defined in `packages/core/src/crawlutron/vocabulary/taxonomy.py`, returned live by `GET /v1/capabilities` under
+`supported_classifications` — treat that endpoint as the authoritative value set, not any count in prose).
+Examples: `rendered`, `not_modified`, `captcha_detected`,
 `waf_challenge_detected`, `robots_disallowed`, `navigation_timeout`,
 `private_network_target`, `network_error`, `http_error`, `url_budget_exceeded`,
 `payload_too_large`. Callers should branch on `classification` (whose
@@ -456,14 +463,11 @@ defaults shown):
 | `CRAWLUTRON_SEARCH_TIMEOUT_SECONDS` | `15` | Provider call timeout. |
 | `CRAWLUTRON_MAX_BATCH_SIZE` | `50` | Max URLs per batch request. |
 | `CRAWLUTRON_WARMUP_URLS` | `""` | Comma-separated URLs fetched once at browser startup to warm engine caches (`browser.py`). Warmup URLs are normalized through the same public-URL policy as crawl targets. Related: `browser_profile.storage_state` paths are honored only under `CRAWLUTRON_CACHE_DIR` (the allowlist root); without a cache dir no storage_state is accepted. |
-
-Two DNS posture values are **not** env-tunable — they are module constants in
-`packages/core/src/crawlutron/transport/pinned_dns.py`: `DNS_WORKERS = 32` (the dedicated DNS
-resolver thread pool) and `DNS_WAIT_SECONDS = 5.0` (the ceiling on a resolver
-wait; a request's own timeout tightens it further). They implement the
-pinned-DNS saturation law: when every worker is inside a live resolve, a new
-resolve refuses fast (`ResolverBudgetExceeded`, classifiable as `dns_error`)
-instead of queueing behind an uncancellable `getaddrinfo`.
+| `CRAWLUTRON_KEY_ADMIN_TOKEN` | `""` | Operator token presented as `X-API-Key`; gates key issue/list/revoke on `/v1/keys` and the per-caller metric families on `/metrics`. With no token configured the keys surface is sealed. |
+| `CRAWLUTRON_WEBHOOK_SECRET` | `""` | Shared HMAC-SHA256 secret for outbound webhook signatures (`X-Crawlutron-Webhook-Signature` / `X-Crawlutron-Webhook-Timestamp`). Empty means signing is off: the **first unsigned delivery** logs one warning and the delivery proceeds unsigned (opt-in, fail-open) — set it in production. |
+| `CRAWLUTRON_MAX_WEBHOOK_SIZE` | `10485760` | Max serialized outbound webhook payload/response size in bytes (10 MiB); a larger payload is dropped rather than delivered. |
+| `CRAWLUTRON_WEBHOOK_MAX_ATTEMPTS` | `3` | Delivery attempts before giving up (minimum `1`). |
+| `CRAWLUTRON_WEBHOOK_BACKOFF_BASE_MS` | `200` | First retry delay in ms; each retry doubles it, capped at one minute (minimum `0`). |
 | `CRAWLUTRON_DEFAULT_TIMEOUT_SECONDS` | `30` | Default per-request timeout. |
 | `CRAWLUTRON_DEFAULT_MAX_RETRIES` | `5` | Default retry count. |
 | `CRAWLUTRON_RESPECT_ROBOTS` | `true` | Respect robots.txt by default. |
@@ -473,6 +477,14 @@ instead of queueing behind an uncancellable `getaddrinfo`.
 | `CRAWLUTRON_LOG_FILE` | `./logs/crawlutron.jsonl` (repo-relative; the container image overrides it to `/app/logs/crawlutron.jsonl`) | Structured JSONL log path. |
 | `CRAWLUTRON_LOG_MAX_BYTES` | `10485760` | Log rotation size. |
 | `CRAWLUTRON_LOG_BACKUP_COUNT` | `3` | Number of rotated log files to keep. |
+
+Two DNS posture values are **not** env-tunable — they are module constants in
+`packages/core/src/crawlutron/transport/pinned_dns.py`: `DNS_WORKERS = 32` (the dedicated DNS
+resolver thread pool) and `DNS_WAIT_SECONDS = 5.0` (the ceiling on a resolver
+wait; a request's own timeout tightens it further). They implement the
+pinned-DNS saturation law: when every worker is inside a live resolve, a new
+resolve refuses fast (`ResolverBudgetExceeded`, classifiable as `dns_error`)
+instead of queueing behind an uncancellable `getaddrinfo`.
 
 Host policy is applied at the shared public-URL chokepoint before the SSRF/private-target check. Entries are normalized as case-insensitive IDNA hostnames (`_policy_host_entry` in `packages/safe-url/src/safe_url/host_policy.py` parses each value via `urlparse(...).hostname`); a port in a config value is stripped during normalization and never matched — an entry is a hostname, not a `host:port` pair. A denied host wins over an allowed host, while an empty allowlist permits every otherwise-valid public host.
 
@@ -525,7 +537,7 @@ with `422`.
 │   │       ├── service/      # store_bootstrap, watch_cores, job lifecycle, …
 │   │       ├── storage/      # job_store, result_store, watch_store, sqlite_store, migrations/
 │   │       ├── transport/    # http.py, browser.py, document.py, content_cache.py, scheduler.py, robots.py
-│   │       └── vocabulary/   # taxonomy.py (36-value classification enum), strategy names
+│   │       └── vocabulary/   # taxonomy.py (classification enum), strategy names
 │   ├── rest/
 │   │   └── src/crawlutron_rest/   # REST facade: FastAPI app + routers + CLI
 │   │       ├── main.py        # FastAPI factory (lifespan, app.state, router wiring)
