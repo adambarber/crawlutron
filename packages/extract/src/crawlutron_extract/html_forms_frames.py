@@ -88,6 +88,8 @@ class FormFrameCollector:
             self._textarea_field = field
 
     def _handle_frame_start(self, attrs: dict[str, str]) -> None:
+        if len(self._frames) >= self._limits.max_frames:
+            return
         frame_entry: dict = {
             "src": attrs.get("src", ""),
             "srcdoc": attrs.get("srcdoc", ""),
