@@ -10,11 +10,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      # Build the runtime stage explicitly: the Dockerfile's LAST stage is
-      # ``development`` (uvicorn --reload --log-level debug), so the default
-      # build would run the service in hot-reload dev mode under a supervisor
-      # process. The runtime stage is the production command.
-      target: runtime
+      # Compose is a local development environment, so opt into the explicit
+      # ``development`` target (uvicorn --reload --log-level debug). The
+      # Dockerfile's default/last stage is the lean production ``runtime``.
+      target: development
     image: crawlutron:local
     container_name: crawlutron
     restart: unless-stopped
