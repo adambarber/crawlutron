@@ -9,7 +9,7 @@ import re
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import replace
-from typing import cast
+from typing import Final, cast
 
 from crawlutron.admission.admission import (
     JobAdmissionContext,
@@ -37,6 +37,7 @@ from crawlutron.service.job_lifecycle import (
     tracked_task,
 )
 from crawlutron.service.job_recovery import (
+    pause_for_recovery,
     recover_and_start_pending_jobs,
     recover_orphaned_running_jobs,
 )
@@ -50,6 +51,7 @@ from crawlutron.storage.job_store import (
     job_max_pages,
     normalize_job_state,
 )
+from crawlutron.storage.safe_db import StorageError
 from crawlutron.transport.robots import FetchAndDecode
 from safe_url.normalized_url import NormalizedUrl, admit_or_none
 from safe_url.url_redaction import redact_url
@@ -57,6 +59,9 @@ from safe_url.url_redaction import redact_url
 logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 8
+
+_STORAGE_RETRY_ATTEMPTS: Final[int] = 3  # then PAUSED for recovery, never terminal FAILED
+_STORAGE_RETRY_BACKOFF_SECONDS: Final[float] = 0.01
 
 
 ExecuteCrawl = Callable[..., Awaitable[ProducerEnvelope]]
@@ -137,7 +142,7 @@ def job_engine_payload(job: CrawlJobState, batch: Sequence[FrontierEntry]) -> Cr
 
 
 def job_batch_timeout_seconds(payload: CrawlRequest) -> float:
-    """The batch wall bound: the policy's per-URL budget across its URLs."""
+    """Per-URL policy budget across the batch's URLs."""
     url_count = len(payload.urls) if payload.urls is not None else 1
     return payload.policy.limits.total_url_budget_seconds * url_count
 
@@ -328,6 +333,25 @@ async def _run_claimed_loop(
         job = updated
 
 
+async def _run_job_body(
+    job: CrawlJobState,
+    job_id: str,
+    job_store: JobStore,
+    settings: CrawlerSettings,
+    shutdown_event: asyncio.Event,
+    fetch_and_decode: FetchAndDecode | None,
+    token: str,
+) -> None:
+    """One job attempt: context, optional sitemap seed, claim loop.
+    Retried on StorageError, resuming each pass from the persisted row."""
+    context = JobAdmissionContext.create(job.policy, job.tier, settings, fetch_and_decode)
+    container = EffectContainer()
+    if context.max_depth > 0 and context.seed_sitemaps:
+        await _seed_job_sitemaps(job, context, container)
+        await job_store.asave(job)
+    await _run_claimed_loop(job, job_id, job_store, settings, shutdown_event, context, token, container)
+
+
 async def run_job(
     job_id: str,
     job_store: JobStore,
@@ -346,12 +370,20 @@ async def run_job(
     if job is None:
         return
     try:
-        context = JobAdmissionContext.create(job.policy, job.tier, settings, fetch_and_decode)
-        container = EffectContainer()
-        if context.max_depth > 0 and context.seed_sitemaps:
-            await _seed_job_sitemaps(job, context, container)
-            await job_store.asave(job)
-        await _run_claimed_loop(job, job_id, job_store, settings, shutdown_event, context, token, container)
+        last_error: StorageError | None = None
+        for _attempt in range(_STORAGE_RETRY_ATTEMPTS):
+            try:
+                await _run_job_body(job, job_id, job_store, settings, shutdown_event, fetch_and_decode, token)
+                return
+            except StorageError as exc:
+                last_error = exc
+                if _attempt + 1 == _STORAGE_RETRY_ATTEMPTS:
+                    break
+                await asyncio.sleep(_STORAGE_RETRY_BACKOFF_SECONDS)
+        await pause_for_recovery(
+            job_store, job_id, token, _scrubbed(str(last_error)) if last_error is not None else None
+        )
+        return
     except Exception as exc:
         logger.exception("job_runner_failed job_id=%s error=%r", job_id, exc)
         await arecord_terminal_failure(job_store, job_id, str(exc), claimed_by=token)
