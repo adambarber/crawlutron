@@ -30,7 +30,6 @@ from crawlutron.service.crawl_endpoint_cores import (
 )
 from crawlutron.service.crawl_executor import execute_crawl
 from crawlutron.service.effects import EffectBounds, EffectContainer, EffectOutcome
-from crawlutron.service.error_rendering import ErrorDoor, render_error
 from crawlutron.service.errors import DomainError, validation_refusal
 from crawlutron.service.job_lifecycle import start_tracked_task
 from crawlutron.service.main_helpers import crawl_tail, request_gate
@@ -92,18 +91,6 @@ async def _crawl_rejection(error: ValueError) -> DomainError:
 # (#849); the HTTP doors below keep their wire shapes over the shared cores.
 
 
-def _serialize_or_reject(items: list[dict[str, JsonValue]], output_format: str) -> tuple[str, str]:
-    """Serialize ``items`` for ``output_format``, or refuse as the 422 the
-    contract names -- the one edge a refused format surfaces. Callers that only
-    want the format checked pass no items; the validation is the point, not bytes.
-    """
-    try:
-        return serialize_results(items, output_format)
-    except ValueError as error:
-        rendered = render_error(validation_refusal(error), ErrorDoor.REST)
-        raise http_error(422, "validation_error", rendered.message, rendered.details) from error
-
-
 async def crawl(
     payload: CrawlRequest,
     settings: CrawlerSettings,
@@ -124,7 +111,7 @@ async def crawl(
     async with request_gate("crawl_request_rejected", logger=_logger, reject=_crawl_rejection):
         if payload.output_format:
             # Format is validated pre-branch: the async path fails unseen.
-            _serialize_or_reject([], payload.output_format)
+            serialize_results([], payload.output_format)
         # Batch size is gated pre-202: an oversized async batch fails unseen.
         host_policy = HostPolicy.from_settings(settings)
         checked_pairs = checked_payload_urls(payload, settings.max_batch_size, host_policy=host_policy)
@@ -290,9 +277,7 @@ async def _run_sync_crawl(
     )
     output_format = payload.output_format
     if output_format and output_format.lower() != "json":
-        body, media_type = _serialize_or_reject(
-            [u.model_dump() for u in response_model.results], output_format
-        )
+        body, media_type = serialize_results([u.model_dump() for u in response_model.results], output_format)
         return Response(content=body, media_type=media_type)
     return response_model
 
