@@ -30,6 +30,8 @@ _DOOR_PATHS = frozenset(
         "packages/core/src/crawlutron/service/job_lifecycle.py",
     }
 )
+# The door's conformance suite constructs raw tasks to prove stop cancels them.
+_DOOR_TEST_FILES = frozenset({"tests/admission/test_task_scope.py"})
 _BAN_RECEIVERS = ("task", "runner", "handler", "probe", "fetch", "forward", "closing_task")
 _NARROW_RECEIVERS = ("timer", "future", "concurrent_future")
 _MONKEY_LEAVES = frozenset({"setattr", "setitem"})
@@ -118,7 +120,8 @@ def _in_admitted(tree: ast.Module, node: ast.AST, parents: dict[int, ast.AST]) -
 
 
 def _spawn_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
-    if _is_door_file(relative_posix(path)):
+    relative = relative_posix(path)
+    if _is_door_file(relative) or relative in _DOOR_TEST_FILES:
         return []
     parents = parent_map(tree)
     return [
@@ -145,7 +148,7 @@ def _wait_for_retirement(tree: ast.Module, node: ast.Call, aliases: dict[str, st
 
 def _retire_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
     relative = relative_posix(path)
-    if _is_door_file(relative):
+    if _is_door_file(relative) or relative in _DOOR_TEST_FILES:
         return []
     aliases = _alias_names(tree)
     offenders: list[str] = []
@@ -333,6 +336,21 @@ def test_door_exemption_is_by_relative_path_not_basename() -> None:
     ]
     door = REPO_ROOT / "packages/crawlutron-admit/src/crawlutron_admit/task_scope.py"
     assert _spawn_offenders(parsed_source(source, filename=str(door)), door) == []
+
+
+def test_door_test_admission_is_by_relative_path_not_basename() -> None:
+    source = "async def f():\n    asyncio.create_task(g())\n"
+    decoy = REPO_ROOT / "tests" / "decoys" / "test_task_scope.py"
+    assert _spawn_offenders(parsed_source(source, filename=str(decoy)), decoy) == [
+        "tests/decoys/test_task_scope.py:2 unmediated task spawn"
+    ]
+    cancel_source = "async def f(handler):\n    handler.cancel()\n"
+    assert _retire_offenders(parsed_source(cancel_source, filename=str(decoy)), decoy) == [
+        "tests/decoys/test_task_scope.py:2 bare lifecycle cancel"
+    ]
+    admitted = REPO_ROOT / "tests" / "admission" / "test_task_scope.py"
+    assert _spawn_offenders(parsed_source(source, filename=str(admitted)), admitted) == []
+    assert _retire_offenders(parsed_source(cancel_source, filename=str(admitted)), admitted) == []
 
 
 def test_framework_narrowings_and_the_door_do_not_fire() -> None:
