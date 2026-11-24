@@ -83,7 +83,7 @@ def jscpd_single_gate(bundle: Bundle) -> Iterator[Finding]:
 
 
 def coverage_at_prepush(bundle: Bundle) -> Iterator[Finding]:
-    """Coverage measures at pre-push; no commit-time threshold anywhere."""
+    """Coverage enforces its floor at pre-push, never at commit time (#1358)."""
     coverage = [hook for hook in bundle.precommit.hooks if hook.id == "coverage"]
     if len(coverage) != 1:
         yield _finding(
@@ -97,14 +97,13 @@ def coverage_at_prepush(bundle: Bundle) -> Iterator[Finding]:
             coverage[0].line,
             f"coverage stages {list(coverage[0].stages)} must be ['pre-push']",
         )
-    for hook in bundle.precommit.hooks:
-        if "--cov-fail-under" in hook.entry:
-            yield _finding(
-                RuleId.COVERAGE_AT_PREPUSH,
-                bundle.precommit.path.name,
-                hook.line,
-                f"hook {hook.id!r} imposes a coverage threshold",
-            )
+    if not any(token.startswith("--cov-fail-under=") for token in coverage[0].entry.split()):
+        yield _finding(
+            RuleId.COVERAGE_AT_PREPUSH,
+            bundle.precommit.path.name,
+            coverage[0].line,
+            "the pre-push coverage hook lost its --cov-fail-under floor",
+        )
 
 
 def prepare_action_env(bundle: Bundle) -> Iterator[Finding]:

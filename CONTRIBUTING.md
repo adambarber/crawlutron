@@ -36,6 +36,14 @@ required.
 ./scripts/run-tests.sh -o addopts=
 ```
 
+### Coverage floor
+
+The pre-push coverage hook enforces a 90% overall floor and the coverage-floor
+hook enforces per-package floors. Both floor values come from the single measured
+artifact `coverage-floors.json`; package roots are derived from the uv workspace
+members. Floors ratchet UP only — a raise belongs in the same commit as the
+coverage improvement that earns it. Codecov statuses are informational.
+
 ## Live End-to-End Verification
 
 Beyond the in-process suite, `scripts/e2e_verify.py` drives a *running*

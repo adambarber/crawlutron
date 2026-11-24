@@ -1,0 +1,22 @@
+{
+  "overall_floor": 90.0,
+  "seeded_from": "authoritative pre-push coverage run 2026-11-24 (11527 passed, 95% overall)",
+  "measured": {
+    "packages/core": 95.2063,
+    "packages/crawlutron-admit": 95.5727,
+    "packages/extract": 92.5517,
+    "packages/mcp": 96.0894,
+    "packages/rest": 95.8132,
+    "packages/safe-url": 94.7883,
+    "packages/sdk": 92.8082
+  },
+  "package_floors": {
+    "packages/core": 95.2,
+    "packages/crawlutron-admit": 95.5,
+    "packages/extract": 92.5,
+    "packages/mcp": 96.0,
+    "packages/rest": 95.8,
+    "packages/safe-url": 94.7,
+    "packages/sdk": 92.8
+  }
+}
