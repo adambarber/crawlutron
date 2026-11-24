@@ -12,6 +12,7 @@ from tests.chokepoint_walks import (
     dict_displays,
     named_calls_to_any,
     offender_at,
+    resolved_expr_name,
 )
 from tests.rules import Bites, Registry, Rule, Trips
 
@@ -87,16 +88,17 @@ _TOOL_ERROR_SINKS = frozenset({"ToolResult"})
 
 
 _EXCEPTION_NAMES = frozenset({"error", "exc", "exception", "err"})
+_SANCTIONED_TOOL_TEXT_ARG = "rendered.message"  # resolved renderer message; never a name allowlist
 
 
-def _is_raw_exception_text(value: ast.expr, *, named_arg: bool = False) -> bool:
-    """True for ``str(exc)``/``repr(exc)`` or an f-string interpolating one."""
+def _is_raw_exception_text(value: ast.expr, tree: ast.AST, *, named_arg: bool = False) -> bool:
+    """Flag raw exception text; ToolResult.text admits only the renderer's str(rendered.message)."""
     if isinstance(value, ast.Call) and isinstance(value.func, ast.Name) and value.func.id in ("str", "repr"):
         if not named_arg:
             return True
-        return bool(
-            value.args and isinstance(value.args[0], ast.Name) and value.args[0].id in _EXCEPTION_NAMES
-        )
+        if not value.args:
+            return True
+        return resolved_expr_name(tree, value.args[0]) != _SANCTIONED_TOOL_TEXT_ARG
     if isinstance(value, ast.JoinedStr):
         return any(
             isinstance(part, ast.FormattedValue)
@@ -114,7 +116,7 @@ def _raw_wire_text_offenders(
     offenders: list[str] = []
     for node, callee in named_calls_to_any(tree, sinks):
         for kw in node.keywords:
-            if kw.arg == field and _is_raw_exception_text(kw.value, named_arg=named_arg):
+            if kw.arg == field and _is_raw_exception_text(kw.value, tree, named_arg=named_arg):
                 offenders.append(offender_at(path, node, f"{callee}({field}=<raw exception text>)"))
     return offenders
 
@@ -154,9 +156,18 @@ NO_RAW_EXCEPTION_TEXT_IN_TOOL_RESULT = Rule(
             "def f(error):\n    return ToolResult(text=str(error), is_error=True)\n",
             "raw exception text",
         ),
+        Bites(
+            "def f(cause):\n    return ToolResult(text=str(cause), is_error=True)\n",
+            "raw exception text",
+        ),
+        Bites(
+            "def f(other):\n    return ToolResult(text=str(other.message), is_error=True)\n",
+            "raw exception text",
+        ),
     ),
     clean=lambda: (
-        "def f(error):\n"
+        "def f(rendered):\n    return ToolResult(text=str(rendered.message), is_error=True)\n",
+        "def g(error):\n"
         "    return tool_error_result(ValidationRefusal('validation_error', validation_message(error)))\n",
     ),
 )
@@ -174,3 +185,8 @@ RULES = Registry(
 def test_no_rule_violations():
     """Every HTTP error body flows through error_envelope/http_error."""
     RULES.check_all_clean()
+
+
+def test_rules_have_working_bites():
+    """Each declared bite must fire, or its rule enforces nothing."""
+    RULES.check_all_bite()
