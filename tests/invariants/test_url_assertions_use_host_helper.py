@@ -5,11 +5,8 @@ from __future__ import annotations
 import ast
 import pathlib
 
-import pytest
-
 from tests._host_assert import is_host_literal
-from tests._walk_primitives import SCAN_ROOTS
-from tests.chokepoint_paths import REPO_ROOT
+from tests._walk_primitives import scan_findings
 
 
 def _string_value(node: ast.AST) -> str | None:
@@ -47,19 +44,18 @@ def _offending_lines(tree: ast.AST) -> list[int]:
     return sorted(lines)
 
 
-def _scanned_files() -> list[pathlib.Path]:
-    """Every Python file in the derived scan roots, sorted by repo-relative path."""
-    return sorted(path for root in SCAN_ROOTS for path in (REPO_ROOT / root).rglob("*.py") if path.is_file())
-
-
-@pytest.mark.parametrize("path", _scanned_files(), ids=lambda p: str(p.relative_to(REPO_ROOT)))
-def test_no_unsafe_url_substring_assertion(path: pathlib.Path) -> None:
-    """Every scanned file routes host comparisons through tests._host_assert."""
+def _url_findings(path: pathlib.Path) -> list[tuple[int, str]]:
+    """Unsafe assertion lines as (line, detail) for the one shared finding door."""
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    offenders = _offending_lines(tree)
-    assert not offenders, (
-        f"{path}: unsafe URL substring assertion at {offenders}; "
-        "use tests._host_assert.host_of/host_in/host_in_source"
+    return [(line, "unsafe URL substring assertion") for line in _offending_lines(tree)]
+
+
+def test_no_unsafe_url_substring_assertion() -> None:
+    """One loop reports every file:line substring assertion, so no failure hides another."""
+    failures = scan_findings(_url_findings)
+    assert not failures, (
+        "unsafe URL substring assertion; use tests._host_assert.host_of/host_in/host_in_source:\n"
+        + "\n".join(failures)
     )
 
 
