@@ -83,10 +83,16 @@ def _premises() -> dict[str, Callable[[], None]]:
     def public_surface() -> None:
         assert OWNER_PUBLIC_SURFACE_RATCHET, "the public-surface ratchet is empty"
 
+    def lifecycle_tree() -> None:
+        from tests._walk_primitives import SCAN_ROOTS
+
+        assert len(SCAN_ROOTS) >= 4, "the lifecycle gate's derived surface is empty"
+
     return {
         "undecodable-encoding": encoding,
         "resolved-env-reader": knob,
         "public-surface": public_surface,
+        "lifecycle-tree": lifecycle_tree,
         "bool-env": _observed("bool-env"),
         "robots-policy": _observed("robots-policy"),
         "public-target": _observed("public-target"),
@@ -170,6 +176,24 @@ def hand_rolled_detectors() -> tuple[ArmedHandRolled, ...]:
             ("bool-env", "test_registry_bool_env.py", "bool_env_offenders", "bool-env"),
             ("robots-policy", "test_registry_robots.py", "robots_policy_offenders", "robots-policy"),
             ("public-target", "test_registry_targets.py", "public_target_offenders", "public-target"),
+            (
+                "lifecycle-spawn",
+                "test_no_unmediated_lifecycle.py",
+                "_spawn_offenders",
+                "lifecycle-tree",
+            ),
+            (
+                "lifecycle-retire",
+                "test_no_unmediated_lifecycle.py",
+                "_retire_offenders",
+                "lifecycle-tree",
+            ),
+            (
+                "lifecycle-substitution",
+                "test_no_unmediated_lifecycle.py",
+                "_substitution_offenders",
+                "lifecycle-tree",
+            ),
         )
     ]
     return (*base, *_subject_detectors())
