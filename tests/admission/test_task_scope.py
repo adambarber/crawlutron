@@ -316,3 +316,43 @@ def test_process_scope_stop_releases_the_registry_slot():
         await scope.__aexit__(None, None, None)
 
     asyncio.run(run())
+
+
+def test_spawn_now_registers_a_task_from_sync_code():
+    async def run() -> None:
+        scope = _process()
+        handle = scope.spawn_now(_never)
+        assert isinstance(handle.task, asyncio.Task)
+        assert handle.task in asyncio.all_tasks()
+        assert scope.registry.active.value == 1
+        await scope.__aexit__(None, None, None)
+
+    asyncio.run(run())
+
+
+def test_stop_now_cancels_and_releases_without_awaiting():
+    async def run() -> None:
+        scope = _process()
+        handle = scope.spawn_now(_never)
+        scope.stop_now(handle)
+        await asyncio.sleep(0)
+        assert handle.task.cancelled()
+        assert scope.registry.active.value == 0
+        await scope.__aexit__(None, None, None)
+
+    asyncio.run(run())
+
+
+def test_adopt_registers_a_running_task_for_door_stop():
+    async def run() -> None:
+        scope = _process()
+        running = asyncio.create_task(_never())
+        handle = scope.adopt(running)
+        assert handle.task is running
+        assert scope.registry.active.value == 1
+        await scope.stop(handle, Grace(0.1))
+        assert running.cancelled()
+        assert scope.registry.active.value == 0
+        await scope.__aexit__(None, None, None)
+
+    asyncio.run(run())
