@@ -103,12 +103,9 @@ _INHERITED_CACHE_DIR = os.environ.get("CRAWLUTRON_CACHE_DIR", "")
 
 
 @pytest.fixture(autouse=True)
-def _reset_settings_cache_per_test():
-    """Reset the settings cache before each test so tests read fresh env.
-
-    Production caches one parse of os.environ per process; tests monkeypatch
-    CRAWLUTRON_* variables, so each test needs a fresh read.
-    """
+def _reset_settings_cache_per_test(monkeypatch):
+    """Reset the settings cache per test (test-only seam)."""
+    monkeypatch.setenv("CRAWLUTRON_TEST_ALLOW_SETTINGS_RESET", "1")
     from crawlutron.config.settings_cache import reset_cached_settings
 
     reset_cached_settings()

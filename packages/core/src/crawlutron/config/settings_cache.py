@@ -6,6 +6,8 @@ through ``CrawlerSettings.from_mapping`` so per-test env patches still apply.
 
 from __future__ import annotations
 
+import os
+
 from crawlutron.config.settings import CrawlerSettings
 
 _CACHED_SETTINGS: CrawlerSettings | None = None
@@ -25,8 +27,10 @@ def get_cached_settings() -> CrawlerSettings:
 def reset_cached_settings() -> None:
     """Reset the cached settings so the next call re-reads os.environ.
 
-    Test seam: lets each test read fresh env instead of a stale cache, since
-    tests monkeypatch CRAWLUTRON_* variables that production code reads.
+    Test-only seam: production cannot re-parse mid-process. Tests enable it
+    with CRAWLUTRON_TEST_ALLOW_SETTINGS_RESET=1.
     """
+    if os.environ.get("CRAWLUTRON_TEST_ALLOW_SETTINGS_RESET") != "1":
+        raise RuntimeError("settings cache reset is test-only; set CRAWLUTRON_TEST_ALLOW_SETTINGS_RESET=1")
     global _CACHED_SETTINGS
     _CACHED_SETTINGS = None

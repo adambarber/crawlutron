@@ -141,10 +141,7 @@ class CrawlerSettings:
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, str] | None = None) -> CrawlerSettings:
-        """Build settings from a mapping (os.environ by default).
-
-        An explicit mapping refuses unknown keys; os.environ is read key-by-key.
-        """
+        """Build settings from a mapping (os.environ by default); explicit mapping refuses unknown keys."""
         source = os.environ if values is None else values
         if values is not None:
             unknown = sorted(set(values) - RECOGNIZED_SETTING_KEYS)
@@ -162,10 +159,11 @@ class CrawlerSettings:
         )
 
 
-# Recognized env keys: one per dataclass field plus the alias targets below.
-# An explicit mapping may only carry these; anything else fails loud.
+# Recognized keys: readers' consumed keys minus alias-source field forms they
+# never read, plus alias targets they do. Alias-source field forms are unknown.
 RECOGNIZED_SETTING_KEYS: frozenset[str] = frozenset(
     {f"CRAWLUTRON_{f.name.upper()}" for f in fields(CrawlerSettings)}
+    - {f"CRAWLUTRON_{f.name.upper()}" for f in fields(CrawlerSettings) if f.name in ENVIRONMENT_FIELD_ALIASES}
     | set(ENVIRONMENT_FIELD_ALIASES.values())
 )
 
