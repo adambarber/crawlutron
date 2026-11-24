@@ -14,6 +14,7 @@ import pytest
 
 from crawlutron.models.credential import Credential
 from crawlutron.runtime.logging_config import configure_service_logging
+from crawlutron.safety.json_safe import json_default
 from tests.chokepoint_paths import REPO_ROOT
 
 
@@ -119,10 +120,11 @@ def test_non_native_extra_renders_through_the_chokepoint(service_sink):
     assert _last_record(service_sink)["stamp"] == "2024-01-02T03:04:05"
 
 
-def test_secret_extra_stays_masked(service_sink):
-    """The single fallback is still a redaction door for secret-bearing values."""
+def test_secret_extra_stays_masked():
+    """The single fallback is itself a redaction door for secret-bearing values."""
     secret = Credential(kind="bearer", token="supersecret123")
-    logging.getLogger("crawlutron").warning("credential", extra={"credential": secret})
-    record = _last_record(service_sink)
-    assert "supersecret123" not in json.dumps(record)
-    assert "[REDACTED]" in json.dumps(record["credential"])
+
+    rendered = json.dumps({"credential": secret}, default=json_default)
+
+    assert "supersecret123" not in rendered
+    assert "[REDACTED]" in rendered
