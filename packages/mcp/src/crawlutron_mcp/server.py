@@ -290,8 +290,8 @@ def _log_request_failure(method: JsonValue, request_id: int | str, exc: Exceptio
     logger.error(
         "mcp_request_failed",
         extra={
-            "method": method,
-            "request_id": request_id,
+            "method": redact_urls_in_text(str(method)),
+            "request_id": redact_urls_in_text(str(request_id)),
             "error_detail": redact_urls_in_text(str(exc)),
         },
     )
