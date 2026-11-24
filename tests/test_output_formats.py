@@ -109,30 +109,30 @@ def test_unsupported_format_raises():
 
 class TestOutputFormatDefaults:
     def test_output_formats_default_with_dict(self):
-        from crawlutron.extraction.output_formats import jsonify
+        from crawlutron.safety.json_safe import json_default
 
         # Object with model_dump method
         class FakeObj:
             def model_dump(self):
                 return {"serialized": "true"}
 
-        result = jsonify(FakeObj())
+        result = json_default(FakeObj())
         assert result == {"serialized": "true"}
 
     def test_output_formats_default_dict_method(self):
-        from crawlutron.extraction.output_formats import jsonify
+        from crawlutron.safety.json_safe import json_default
 
         class DictObj:
             def dict(self):
                 return {"from_dict": "value"}
 
-        result = jsonify(DictObj())
+        result = json_default(DictObj())
         assert result == {"from_dict": "value"}
 
     def test_output_formats_default_str_fallback(self):
-        from crawlutron.extraction.output_formats import jsonify
+        from crawlutron.safety.json_safe import json_default
 
-        result = jsonify(42)
+        result = json_default(42)
         assert result == "42"
 
 
@@ -229,14 +229,14 @@ class TestOutputFormatsEdges:
     """Cover remaining branches in output_formats.py"""
 
     def test_serialize_default_fallback(self):
-        from crawlutron.extraction.output_formats import jsonify
+        from crawlutron.safety.json_safe import json_default
 
         class CustomObj:
             def __init__(self):
                 self.attr = "value"
 
         obj = CustomObj()
-        result = jsonify(obj)
+        result = json_default(obj)
         assert result == {"attr": "value"}
 
     # One body per shape, named once.

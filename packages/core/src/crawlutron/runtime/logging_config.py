@@ -11,6 +11,8 @@ import logging.handlers
 import os
 from datetime import UTC, datetime
 
+from crawlutron.safety.json_safe import json_default
+
 _RESERVED_LOGRECORD_ATTRS = {
     "name",
     "msg",
@@ -51,16 +53,12 @@ class _JsonFormatter(logging.Formatter):
         }
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
-        # Pull extras (anything that isn't a reserved LogRecord attribute).
+        # Extras reach the one chokepoint below, never a per-extra probe.
         for key, value in record.__dict__.items():
             if key in _RESERVED_LOGRECORD_ATTRS or key.startswith("_"):
                 continue
-            try:
-                json.dumps(value)
-                payload[key] = value
-            except TypeError:
-                payload[key] = repr(value)
-        return json.dumps(payload, ensure_ascii=False, default=str)
+            payload[key] = value
+        return json.dumps(payload, ensure_ascii=False, default=json_default)
 
 
 class _ServiceFieldFilter(logging.Filter):

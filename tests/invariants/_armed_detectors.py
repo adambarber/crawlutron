@@ -88,11 +88,17 @@ def _premises() -> dict[str, Callable[[], None]]:
 
         assert len(SCAN_ROOTS) >= 4, "the lifecycle gate's derived surface is empty"
 
+    def json_fallback_tree() -> None:
+        from tests.chokepoint_walks import app_trees
+
+        assert any(str(path).endswith("safety/json_safe.py") for path, _ in app_trees(exclude=frozenset()))
+
     return {
         "undecodable-encoding": encoding,
         "resolved-env-reader": knob,
         "public-surface": public_surface,
         "lifecycle-tree": lifecycle_tree,
+        "json-fallback": json_fallback_tree,
         "bool-env": _observed("bool-env"),
         "robots-policy": _observed("robots-policy"),
         "public-target": _observed("public-target"),
@@ -193,6 +199,12 @@ def hand_rolled_detectors() -> tuple[ArmedHandRolled, ...]:
                 "test_no_unmediated_lifecycle.py",
                 "_substitution_offenders",
                 "lifecycle-tree",
+            ),
+            (
+                "json-fallback",
+                "test_json_fallback_chokepoint.py",
+                "_fallback_offenders",
+                "json-fallback",
             ),
         )
     ]
