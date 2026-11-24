@@ -95,6 +95,64 @@ The service is intended to be deployed as a Docker container. A standalone
 `docker-compose.yml` lives at the repository root for local development;
 production deployments typically front it with a transport-auth reverse proxy (TLS termination, `Server` header stripping, request-id logging); built-in per-caller auth (`/v1/keys`, `X-API-Key`/`Authorization: Bearer`) is the caller security boundary, and the proxy is transport hardening, not a substitute for it.
 
+## Quickstart — first crawl in 30 seconds
+
+Start the service from a fresh clone, then POST one public URL. No API key is
+needed on localhost; keyless callers use a bounded shared identity.
+
+```bash
+docker compose up -d crawlutron
+
+curl -sS -X POST http://127.0.0.1:8765/v1/crawl \
+  -H 'Content-Type: application/json' \
+  -d '{"url": "https://example.com/"}'
+```
+
+The `200` response is a unified envelope. Trimmed to its top-level fields:
+
+```json
+{
+  "request_id": "crawl_...",
+  "submitted_count": 1,
+  "policy_schema_version": "2026-06-23",
+  "success": true,
+  "results": [ ... ]
+}
+```
+
+Each entry in `results` carries the per-URL outcome: `status`, `classification`,
+and extracted `markdown`. The authoritative field and classification sets are
+served by `GET /v1/capabilities`; the durable request/response contract is in
+`docs/references/crawlutron-agent-contract.md`.
+
+### Python SDK
+
+```bash
+pip install crawlutron-sdk
+```
+
+```python
+import asyncio
+
+from crawlutron_sdk import CrawlRequest, CrawlutronClient
+
+
+async def main():
+    async with CrawlutronClient() as client:
+        accepted = await client.crawl_async(CrawlRequest(url="https://example.com/"))
+        result = await client.wait_for(accepted.request_id)
+        print(result.success, result.submitted_count)
+
+
+asyncio.run(main())
+```
+
+`CrawlutronClient` defaults to `http://127.0.0.1:8765`. `crawl_async` submits
+and returns a `request_id`; `wait_for` polls the crawl result route until the
+outcome is terminal. Use `crawl` for a single blocking call instead.
+
+---
+
 ## Security Posture
 
 crawlutron is **localhost-bound by default**: it binds to `127.0.0.1` unless
@@ -198,29 +256,32 @@ See `docs/architecture-governance.md`.
 
 ## Build & Run
 
-The service ships with a standalone `docker-compose.yml` and a multi-stage
-`Dockerfile` so it can be built and run from a fresh clone without any parent
-monorepo or shared-helper tree.
+The quickstart above is the shortest path to a first crawl; this section is
+about the image build and the browser-rendering prerequisite behind it. The
+service ships with a standalone `docker-compose.yml` and a multi-stage
+`Dockerfile`, so it builds from a fresh clone without any parent monorepo.
 
 ```bash
-# Build the image (multi-stage; the Camoufox browser binary is fetched once in an
-# isolated stage so editing requirements.txt does not re-download ~1.3 GB).
+# `docker compose up -d crawlutron` builds the image on first run; this makes
+# the build explicit. The Camoufox binary is fetched once in an isolated stage.
 docker compose build crawlutron
 
 # Run it (recreates only this service).
 docker compose up -d crawlutron
 ```
 
+The image build fetches the Camoufox browser binary (~1.3 GB) in a dedicated
+`camoufox-binary` stage that depends only on the `camoufox` requirement line,
+then copies it into the runtime image. That binary is the prerequisite for the
+browser-rendering strategies (`BROWSER_HEADLESS`, `BROWSER_HEADED_WARMED`) used
+for JavaScript-dependent pages; direct HTTP strategies do not invoke it. The
+stage isolation means an unrelated change to `requirements.txt` (for example
+adding `h2`) no longer invalidates the multi-minute binary download.
+
 The container listens on `127.0.0.1:8765`. The served API docs (Swagger UI)
 are available at `/docs` and the machine-readable schema at `/openapi.json`.
 For local-hostname routing (e.g. `http://crawlutron.local`), front the
 container with Caddy or another reverse proxy that owns the `.local` zone.
-
-> **Note on the build:** The Camoufox browser binary is downloaded in a dedicated
-> `camoufox-binary` stage that depends *only* on the `camoufox` requirement line,
-> then copied into the runtime image. This isolation means an unrelated change to
-> `requirements.txt` (for example adding `h2`) no longer invalidates the
-> multi-minute binary download.
 
 ---
 
