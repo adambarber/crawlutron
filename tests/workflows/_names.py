@@ -26,6 +26,8 @@ def _upper_snake(value: str) -> str:
 def _prose(value: str, *, interpolate: bool) -> str:
     if not value.strip() or len(value) > 120 or "\n" in value:
         raise ValueError("name must be 1-120 chars on one line")
+    if _BARE_OPEN.search(value):
+        raise ValueError("missing `$` before `{{`")
     if "${{" in value:
         if not interpolate:
             raise ValueError("a step name must not interpolate an expression")

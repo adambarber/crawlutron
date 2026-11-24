@@ -11,7 +11,7 @@ from tests.workflows._admission import admit_or_none
 from tests.workflows._cache_keys import CacheKey
 from tests.workflows._facts import CommandFacts
 from tests.workflows._model import JOBS, Job, Step, Workflow, parse_workflow, workflow
-from tests.workflows._names import ActionRef, EnvName, Expression, ExpressionText, StepName
+from tests.workflows._names import ActionRef, DisplayName, EnvName, Expression, ExpressionText, StepName
 
 
 @pytest.mark.parametrize(
@@ -115,6 +115,16 @@ def test_a_cache_key_type_refuses_the_old_typo_and_admits_a_valid_expression() -
     assert CacheKey.admit_or_none({"key": bad, "line": 9, "source": "ghost.yml"}) is None
     assert TypeAdapter(ExpressionText).validate_python(good) == good
     assert CacheKey.create({"key": good, "line": 9, "source": "ghost.yml"}).key == good
+
+
+def test_a_name_type_refuses_a_bare_expression_and_admits_plain_text() -> None:
+    for adapter in (TypeAdapter(DisplayName), TypeAdapter(StepName)):
+        for bad in ("Cache {{ typo }}", "Cache {{ typo }"):
+            with pytest.raises(ValidationError, match=r"missing `\$"):
+                adapter.validate_python(bad)
+        assert adapter.validate_python("Cache build") == "Cache build"
+    good = "Publish ${{ github.ref }}"
+    assert TypeAdapter(DisplayName).validate_python(good) == good
 
 
 def test_a_missing_dollar_step_input_is_refused_at_admission() -> None:
