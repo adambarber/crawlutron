@@ -24,7 +24,7 @@ class Decision(StrEnum):
     TWO_PLANE_TRUST = "two-plane-trust"
     SECURITY_EVENTS_WRITE = "security-events-write"
     SCHEDULED_ANALYSIS = "scheduled-analysis"
-    MUTATION_TIMEBOX = "mutation-timebox"
+    MUTATION_RETIRED = "mutation-retired"
 
 
 def _known_workflow(value: str) -> str:

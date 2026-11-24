@@ -97,9 +97,6 @@ class RuleId(StrEnum):
     NIGHTLY_COVERAGE_REPORTS = "nightly-coverage-reports"
     NIGHTLY_ARTIFACTS = "nightly-artifacts"
     WEEKLY_TRIGGERS = "weekly-triggers"
-    WEEKLY_MUTATION_TIMEBOX = "weekly-mutation-timebox"
-    WEEKLY_MUTATION_TOOL = "weekly-mutation-tool"
-    WEEKLY_MUTATION_TARGETS = "weekly-mutation-targets"
     WEEKLY_LOWEST_DIRECT = "weekly-lowest-direct"
     WEEKLY_ARTIFACTS = "weekly-artifacts"
     CI_SECRET_SCAN_FETCH_DEPTH = "ci-secret-scan-fetch-depth"
@@ -185,9 +182,6 @@ CEILINGS: Mapping[RuleId, int] = MappingProxyType(
         RuleId.NIGHTLY_COVERAGE_REPORTS: 0,
         RuleId.NIGHTLY_ARTIFACTS: 0,
         RuleId.WEEKLY_TRIGGERS: 0,
-        RuleId.WEEKLY_MUTATION_TIMEBOX: 0,
-        RuleId.WEEKLY_MUTATION_TOOL: 0,
-        RuleId.WEEKLY_MUTATION_TARGETS: 0,
         RuleId.WEEKLY_LOWEST_DIRECT: 0,
         RuleId.WEEKLY_ARTIFACTS: 0,
         RuleId.CI_SECRET_SCAN_FETCH_DEPTH: 0,
