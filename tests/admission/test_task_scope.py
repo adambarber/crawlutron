@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
 
 import pytest
@@ -145,6 +146,34 @@ def test_scope_exit_stops_all_then_releases_lease():
     asyncio.run(run())
 
 
+def test_scope_exit_stops_siblings_when_one_task_raises_on_cancel():
+    async def run() -> None:
+        started = asyncio.Event()
+
+        async def raises_on_cancel() -> None:
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                raise ValueError("work failed while stopping") from None
+
+        cm, scope, _, granted = await _fresh()
+        await scope.spawn(raises_on_cancel)
+        sibling = await scope.spawn(_never)
+        await asyncio.wait_for(started.wait(), 1.0)
+        try:
+            await scope.__aexit__(None, None, None)
+        finally:
+            sibling.task.cancel()
+            await asyncio.wait_for(asyncio.gather(sibling.task, return_exceptions=True), 1.0)
+        assert sibling.task.cancelled()
+        assert scope.registry.active.value == 0
+        assert granted.lease.release() is False
+        await _finish(cm)
+
+    asyncio.run(run())
+
+
 def test_named_registry_refuses_at_its_own_limit():
     registry = NamedRegistry("ratelimit:anon:ip-address", Count(1), Duration(0.5))
     registry.admit()
@@ -155,6 +184,12 @@ def test_named_registry_refuses_at_its_own_limit():
     assert caught.value.retry_after == Duration(0.5)
     registry.release()
     registry.admit()
+
+
+def test_named_registry_release_refuses_underflow():
+    registry = NamedRegistry("ratelimit:anon:ip-address", Count(1), Duration(0.5))
+    with pytest.raises(ValueError):
+        registry.release()
 
 
 def test_refused_spawn_never_constructs_the_work():
@@ -207,8 +242,8 @@ def test_refusal_is_never_empty():
 
 def test_module_stays_pure_and_io_free():
     source = Path(scope_module.__file__).read_text()
-    assert "from crawlutron import" not in source
-    assert "import crawlutron\n" not in source
-    assert "from crawlutron." not in source
+    core_import = re.compile(r"^\s*(from|import)\s+crawlutron(\.|\s|$)")
+    for line in source.splitlines():
+        assert core_import.search(line) is None, f"impure core import: {line!r}"
     for banned in ("sqlite3", "socket", "aiohttp", "pathlib", "open("):
         assert banned not in source

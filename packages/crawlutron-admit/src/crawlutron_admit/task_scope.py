@@ -6,6 +6,7 @@ Stop cancels and awaits a handle, releasing its admission; scope exit stops all,
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import enum
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
@@ -156,10 +157,8 @@ class TaskScope:
                     limit=self._registry.limit,
                     retry_after=Duration(grace.value),
                 )
-            try:
+            with contextlib.suppress(Exception, asyncio.CancelledError):
                 handle.task.result()
-            except asyncio.CancelledError:
-                pass
         finally:
             self._registry.release()
 
