@@ -367,6 +367,16 @@ class TestMcpErrorFieldsNeverReflectCredentials:
         self._assert_no_leak(payload)
         assert payload["error"]["data"]["code"] == "header_mismatch"
 
+    def test_name_header_credential_never_reaches_a_log(self, caplog):
+        """The Mcp-Name header is compared, never logged; its credential stays out of every sink (#1392)."""
+        with caplog.at_level(logging.DEBUG, logger="crawlutron_mcp.server"):
+            status, payload = self._call(self._body(), name=self.ATTACK)
+        assert status == 400
+        assert payload["error"]["data"]["code"] == "header_mismatch"
+        seen = " ".join(str(v) for record in caplog.records for v in vars(record).values())
+        seen += " " + " ".join(logging.Formatter().format(record) for record in caplog.records)
+        assert "s3cret" not in seen and "leak" not in seen
+
     def test_method_header_mismatch_never_reflects_the_header(self):
         _status, payload = self._call(self._body(), method=self.ATTACK)
         self._assert_no_leak(payload)
