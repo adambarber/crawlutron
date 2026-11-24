@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from pydantic import BaseModel
 
 from crawlutron.models.caller_identity import CallerIdentity
+from crawlutron.safety.json_safe import json_default
 from crawlutron.storage.ids import REQUEST_ID_PREFIX
 
 IDEMPOTENCY_HEADER = "Idempotency-Key"
@@ -25,7 +26,7 @@ _KEYED_PREFIX = "key:"
 def _canonical(payload: BaseModel | Mapping[str, object]) -> str:
     """Canonical JSON of every request field; no field here is volatile."""
     data = payload if isinstance(payload, Mapping) else payload.model_dump(mode="json")
-    return json.dumps(data, sort_keys=True, separators=(",", ":"), default=str)
+    return json.dumps(data, sort_keys=True, separators=(",", ":"), default=json_default)
 
 
 def derive_request_id(

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pydantic import BaseModel
+
 from crawlutron.models.caller_identity import CallerIdentity
 from crawlutron.service.request_identity import derive_request_id
 from crawlutron_rest.api.caller_auth import get_caller_identity
@@ -155,4 +157,24 @@ def test_unicode_token_is_hashed_as_utf8():
     )
     assert derive_request_id("résumé-令牌", caller, payload, "secret") != derive_request_id(
         "resume-", caller, payload, "secret"
+    )
+
+
+def test_fingerprint_bytes_survive_the_json_default_door():
+    """Pin the HMAC bytes so a canonicalization drift reds (#1152)."""
+
+    class Payload(BaseModel):
+        url: str
+        n: int
+
+    mapping = {"url": "https://example.com/", "n": 3, "flag": True, "none": None}
+    assert derive_request_id("t", CallerIdentity(), mapping, "secret") == (
+        "crawl_ee30ce2be35d905c24003e93657bdad7"
+    )
+    assert (
+        derive_request_id("t", CallerIdentity(caller_id="key_a", authenticated=True), mapping, "secret")
+        == "crawl_c9190f45dcde05f921e399a4ea72ca66"
+    )
+    assert derive_request_id("t", CallerIdentity(), Payload(url="https://example.com/", n=3), "secret") == (
+        "crawl_72ccf2db0819dcffaae129c11f6e4e53"
     )
