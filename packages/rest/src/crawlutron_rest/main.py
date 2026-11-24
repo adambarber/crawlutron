@@ -5,7 +5,7 @@ import logging
 import os
 import traceback
 from collections.abc import Awaitable, Callable, Sequence
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 from crawlutron.config.settings import CrawlerSettings
@@ -20,7 +20,6 @@ from crawlutron.transport.browser_pool import (
 from crawlutron.vocabulary.identity import SERVICE_ID, SERVICE_VERSION
 from crawlutron_rest.policy import build_runtime_policy
 from safe_url.address_class import is_loopback_bind
-from safe_url.host_policy import HostPolicy
 
 if TYPE_CHECKING:
     # Imported for annotations under type checking; the runtime import carries the real classes.
@@ -40,6 +39,7 @@ from crawlutron_rest.discovery.agent_hints import create_agent_hints_router
 from crawlutron_rest.discovery.capabilities import create_capabilities_router
 from crawlutron_rest.discovery.health import create_health_router
 from crawlutron_rest.discovery.well_known import create_well_known_router
+from crawlutron_rest.sweep_lifecycle import start_sweeps, stop_sweeps
 
 _TeardownStep = tuple[str, Callable[[], Awaitable[None]]]
 
@@ -366,40 +366,13 @@ async def _recover_jobs_and_start_sweep(_app: FastAPI, settings: CrawlerSettings
     shutdown event is minted here, not at import (an import-time event is set
     by the first teardown and cancels every later run's crawls).
     """
-    from crawlutron.service.cache_sweep import sweep_cache_forever
     from crawlutron.service.job_recovery import recover_and_start_pending_jobs
     from crawlutron.service.job_runner import start_job
-    from crawlutron.service.retention_sweep import sweep_retention_forever
-    from crawlutron.service.spill_sweep import sweep_spills_forever
-    from crawlutron.service.watch_sweep import sweep_watches_forever
 
     shutdown_event = asyncio.Event()
     _app.state.shutdown_event = shutdown_event
     await recover_and_start_pending_jobs(_app.state.job_store, settings, shutdown_event, start_job)
-    _app.state.cache_maintenance_task = asyncio.create_task(sweep_cache_forever(shutdown_event))
-    ttl = _app.state.result_store.ttl_seconds
-    _app.state.spill_maintenance_task = asyncio.create_task(
-        sweep_spills_forever(_app.state.spill_store, shutdown_event=shutdown_event, max_age_seconds=ttl)
-    )
-    _app.state.retention_sweep_task = asyncio.create_task(
-        sweep_retention_forever(
-            _app.state.job_store,
-            _app.state.result_store,
-            shutdown_event,
-            grace_seconds=settings.retention_sweep_grace_seconds,
-        )
-    )
-    _app.state.watch_sweep_task = asyncio.create_task(
-        sweep_watches_forever(
-            _app.state.watch_store,
-            host_policy=HostPolicy.from_settings(settings),
-            settings=settings,
-            shutdown_event=shutdown_event,
-            key_store=_app.state.caller_key_store,
-            concurrency_tracker=_app.state.concurrency_tracker,
-            job_store=_app.state.job_store,
-        )
-    )
+    await start_sweeps(_app, settings, shutdown_event)
 
 
 def _load_cookie_jar(settings: CrawlerSettings, _app: FastAPI, database_path: str) -> None:
@@ -436,7 +409,9 @@ async def _shutdown_services(_app: FastAPI) -> None:
 
     shutdown_event = _app.state.shutdown_event
     shutdown_event.set()
-    await _drain_watch_sweep(_app)
+    sweep_scope = getattr(_app.state, "sweep_scope", None)
+    if sweep_scope is not None:
+        await stop_sweeps(sweep_scope)
     from crawlutron.service.job_runner import shutdown_job_runner
 
     await shutdown_job_runner()
@@ -478,21 +453,3 @@ async def _shutdown_services(_app: FastAPI) -> None:
     )
     # Symmetry with set_utilization_sampler(...): release the closed gate's sampler.
     READINESS_STATE.set_utilization_sampler(None)
-
-
-async def _drain_watch_sweep(_app: FastAPI) -> None:
-    """Cancel sweeps while the key store is still open (no closed-handle race)."""
-    await _drain_task(_app, "cache_maintenance_task")
-    await _drain_task(_app, "spill_maintenance_task")
-    await _drain_task(_app, "retention_sweep_task")
-    await _drain_task(_app, "watch_sweep_task")
-
-
-async def _drain_task(_app, name: str) -> None:
-    """Cancel and await one lifespan-created background task."""
-    task = getattr(_app.state, name, None)
-    if task is None:
-        return
-    task.cancel()
-    with suppress(asyncio.CancelledError):
-        await task
