@@ -6,8 +6,7 @@ through :func:`redact_url`. Names are decoded ONCE (#659): double-encoded pass.
 
 from __future__ import annotations
 
-import re
-from urllib.parse import parse_qsl, quote, urlsplit
+from urllib.parse import parse_qsl, quote, unquote, urlsplit
 
 # Query parameters whose values are secrets by name (#659): a DECODED name
 # carrying one of these SUBSTRINGS (case-insensitive) is masked regardless of host.
@@ -116,41 +115,75 @@ def redact_url(url: str) -> str:
     return f"{parts.scheme}://{netloc}{parts.path}{suffix}"
 
 
-_SECRET_PARAM_SPAN = re.compile(r"[?&]([^=&\s]+)=([^&\s]*)")
+def _log_safe(text: str) -> str:
+    """Escape controls so a redacted value can never forge a log line (#1414)."""
+    flat = text.replace("\r", "\\r").replace("\n", "\\n").replace("\t", "\\t")
+    return "".join(f"\\x{ord(ch):02x}" if ord(ch) < 32 or ord(ch) == 127 else ch for ch in flat)
 
 
 def _redact_secret_params_in_text(text: str) -> str:
     """Free text with every secret-named query value masked (#660).
 
-    Raised-into-a-log shapes can carry a query outside any ``scheme://`` span;
-    the same decoded-name door decides, so prose is never masked.
+    One linear scan replaces a backtracking regex (#1414): the same decoded-name
+    door decides, so prose is never masked.
     """
-    from urllib.parse import unquote
-
-    def _sub(match: re.Match[str]) -> str:
-        name = unquote(match.group(1))
-        if is_secret_name(name):
-            return f"{match.group(0)[:1]}{match.group(1)}={_REDACTED}"
-        return match.group(0)
-
-    return _SECRET_PARAM_SPAN.sub(_sub, text)
+    pieces: list[str] = []
+    pos = 0
+    length = len(text)
+    while pos < length:
+        marker = text[pos]
+        if marker != "?" and marker != "&":
+            pieces.append(marker)
+            pos += 1
+            continue
+        name_start = pos + 1
+        scan = name_start
+        while scan < length and text[scan] != "=" and text[scan] != "&" and not text[scan].isspace():
+            scan += 1
+        if scan == name_start or scan >= length or text[scan] != "=":
+            pieces.append(text[pos:scan])
+            pos = scan
+            continue
+        name = text[name_start:scan]
+        value_end = scan + 1
+        while value_end < length and text[value_end] != "&" and not text[value_end].isspace():
+            value_end += 1
+        if is_secret_name(unquote(name)):
+            pieces.append(f"{marker}{name}={_REDACTED}")
+        else:
+            pieces.append(text[pos:value_end])
+        pos = value_end
+    return "".join(pieces)
 
 
 def redact_urls_in_text(text: str) -> str:
     """Every URL's log-safe form inside free exception text (#660).
 
-    The mask runs at the shared sink; only ``scheme://``-prefixed spans are
-    rewritten, so error prose passes through untouched.
+    One linear scan replaces a backtracking regex (#1414); only ``scheme://``
+    spans are rewritten, so error prose passes through untouched.
     """
     pieces: list[str] = []
     pos = 0
-    for match in re.finditer(r"[A-Za-z][A-Za-z0-9+.-]*://\S+", text):
-        span = match.group(0)
-        pieces.append(text[pos : match.start()])
-        pieces.append(redact_url(span))
-        pos = match.end()
-    pieces.append(text[pos:])
-    return _redact_secret_params_in_text("".join(pieces))
+    length = len(text)
+    while pos < length:
+        char = text[pos]
+        if not (char.isascii() and char.isalpha()):
+            pieces.append(char)
+            pos += 1
+            continue
+        scan = pos + 1
+        while scan < length and text[scan].isascii() and (text[scan].isalnum() or text[scan] in "+.-"):
+            scan += 1
+        if text[scan : scan + 3] != "://" or scan + 3 >= length:
+            pieces.append(text[pos:scan])
+            pos = scan
+            continue
+        end = scan + 3
+        while end < length and not text[end].isspace():
+            end += 1
+        pieces.append(redact_url(text[pos:end]))
+        pos = end
+    return _log_safe(_redact_secret_params_in_text("".join(pieces)))
 
 
 __all__ = [
