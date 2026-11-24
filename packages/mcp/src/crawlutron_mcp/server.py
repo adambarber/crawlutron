@@ -284,6 +284,19 @@ async def _dispatch_method(
     return 404, _unknown_method(request_id)
 
 
+def _log_request_failure(method: JsonValue, request_id: int | str, exc: Exception) -> None:
+    """Log one redacted record for an unhandled request exception."""
+    # Plain call, not logger.exception: exc_info would log raw exception text (#1375).
+    logger.error(
+        "mcp_request_failed",
+        extra={
+            "method": method,
+            "request_id": request_id,
+            "error_detail": redact_urls_in_text(str(exc)),
+        },
+    )
+
+
 async def handle_mcp_request(
     body: dict[str, JsonValue],
     *,
@@ -341,8 +354,8 @@ async def handle_mcp_request(
         )
     except ProtocolValidationError as error:
         return error.status_code, error.payload
-    except Exception:
-        logger.exception("mcp_request_failed", extra={"method": method, "request_id": request_id})
+    except Exception as exc:
+        _log_request_failure(method, request_id, exc)
         return 500, error_response(request_id, INTERNAL_ERROR, "Internal error")
 
 
