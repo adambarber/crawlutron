@@ -32,7 +32,7 @@ def _string_value(token_text: str) -> str:
 
 
 def _sha_literals(path: pathlib.Path, relative: str | None = None) -> list[tuple[int, str]]:
-    """String tokens carrying a bare commit SHA, as (line, value)."""
+    """Adjacent string tokens folded into logical values; reports (line, value)."""
     rel = relative or (
         path.relative_to(REPO_ROOT).as_posix() if path.is_relative_to(REPO_ROOT) else path.name
     )
@@ -44,11 +44,19 @@ def _sha_literals(path: pathlib.Path, relative: str | None = None) -> list[tuple
         except (tokenize.TokenError, SyntaxError, IndentationError):
             return []
     found: list[tuple[int, str]] = []
+    parts: list[str] = []
+    start = 0
     for token in tokens:
         if token.type == tokenize.STRING:
-            value = _string_value(token.string)
-            if _BARE_SHA.search(value):
-                found.append((token.start[0], value))
+            if not parts:
+                start = token.start[0]
+            parts.append(_string_value(token.string))
+        elif token.type not in (tokenize.COMMENT, tokenize.NL):
+            if parts:
+                value = "".join(parts)
+                if _BARE_SHA.search(value):
+                    found.append((start, value))
+                parts = []
     return found
 
 
@@ -88,3 +96,11 @@ def test_fixture_sha_paths_admit_only_their_exact_paths(tmp_path: pathlib.Path) 
         assert not _sha_literals(plant(relative), relative=relative)
         decoy = "decoy/" + relative
         assert _sha_literals(plant(decoy), relative=decoy) == [(1, _SHA)]
+
+
+def test_split_implicit_concatenation_sha_is_detected(tmp_path: pathlib.Path) -> None:
+    """Bite: a pin split across two STRING tokens must still be reported."""
+    left, right = _SHA[:20], _SHA[20:]
+    planted = tmp_path / "split.py"
+    planted.write_text(f'PIN = ("{left}"\n       "{right}")\n', encoding="utf-8")
+    assert _sha_literals(planted) == [(1, _SHA)]
