@@ -33,6 +33,7 @@ from crawlutron.service.effects import EffectBounds, EffectContainer, EffectOutc
 from crawlutron.service.errors import DomainError, validation_refusal
 from crawlutron.service.job_lifecycle import start_tracked_task
 from crawlutron.service.main_helpers import crawl_tail, request_gate
+from crawlutron.service.request_identity import IDEMPOTENCY_HEADER, derive_request_id
 from crawlutron.service.webhooks import admit_webhook_target
 from crawlutron.storage.ids import new_request_id
 from crawlutron.storage.job_store import FrontierEntry, JobStore
@@ -159,23 +160,12 @@ async def _admitted_crawl(
 ) -> JSONResponse | Response | UnifiedCrawlResponse:
     """One admission for both doors: sync holds a slot; async persists a durable job row."""
     async_door = bool(payload.async_mode or webhook_url)
-    tracking = Tracking(job_store=job_store, concurrency_tracker=concurrency_tracker)
     async with admission.admit(
         active_caller,
         payload.policy.limits.max_pages,
-        tracking=tracking,
+        tracking=Tracking(job_store=job_store, concurrency_tracker=concurrency_tracker),
         payload=payload,
     ) as owner:
-        if async_door:
-            crawl_awaitable: Awaitable[ProducerEnvelope] | None = None
-        else:
-            crawl_awaitable = execute_crawl(
-                payload,
-                settings=settings,
-                shutdown_event=shutdown_event,
-                url_pairs=checked_pairs,
-                spill_store=spill_store,
-            )
         if async_door:
             return await _accepted_async(
                 payload,
@@ -185,10 +175,18 @@ async def _admitted_crawl(
                 spill_store=spill_store,
                 shutdown_event=shutdown_event,
                 checked=checked_pairs,
-                owner=owner,
+                caller=active_caller,
                 webhook_url=webhook_url,
                 delta_context=delta_context,
+                request=request,
             )
+        crawl_awaitable = execute_crawl(
+            payload,
+            settings=settings,
+            shutdown_event=shutdown_event,
+            url_pairs=checked_pairs,
+            spill_store=spill_store,
+        )
         return await _run_sync_crawl(
             payload,
             result_store=result_store,
@@ -202,6 +200,17 @@ async def _admitted_crawl(
         )
 
 
+def _accepted_response(request_id: str, webhook_url: WebhookTarget | None) -> JSONResponse:
+    """The 202 body a fresh accept and a replayed retry both answer."""
+    accepted = CrawlAccepted(
+        status="accepted",
+        request_id=request_id,
+        status_url=f"/v1/crawl/{request_id}",
+        webhook_url=None if webhook_url is None else webhook_url.redacted(),
+    )
+    return JSONResponse(status_code=202, content=accepted.model_dump())
+
+
 async def _accepted_async(
     payload: CrawlRequest,
     *,
@@ -211,12 +220,19 @@ async def _accepted_async(
     spill_store: CrawlSpillStore | None,
     shutdown_event: asyncio.Event,
     checked: list[tuple[str, NormalizedUrl]],
-    owner: str,
+    caller: CallerIdentity,
     webhook_url: WebhookTarget | None,
     delta_context: DeltaContext | None,
+    request: Request | None = None,
 ) -> JSONResponse:
     """The 202 door: persist the job row and start the runner (probe ran before admit)."""
-    request_id = new_request_id()
+    owner = caller.caller_id
+    token = request.headers.get(IDEMPOTENCY_HEADER) if request is not None else None
+    request_id = (
+        derive_request_id(token, caller, payload, settings.webhook_secret) if token else new_request_id()
+    )
+    if token and await job_store.astatus_for_caller(request_id, owner) is not None:
+        return _accepted_response(request_id, webhook_url)
     # The store's tier, not ``settings``: the row is read back with the
     # store's tier, and two tier sources drift apart the moment they differ.
     batch = [FrontierEntry(url=url, depth=0) for _, url in checked]
@@ -241,13 +257,7 @@ async def _accepted_async(
         ),
     )
     await get_metrics().observe_crawl(accepted=True, caller_id=owner)
-    accepted = CrawlAccepted(
-        status="accepted",
-        request_id=request_id,
-        status_url=f"/v1/crawl/{request_id}",
-        webhook_url=None if webhook_url is None else webhook_url.redacted(),
-    )
-    return JSONResponse(status_code=202, content=accepted.model_dump())
+    return _accepted_response(request_id, webhook_url)
 
 
 async def _run_sync_crawl(

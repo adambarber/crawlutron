@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import Query
+from fastapi import Header, Query
 
 from crawlutron.models.error_response import ErrorResponse
 from crawlutron.models.job_control_request import JobControlRequest
@@ -22,6 +22,7 @@ from crawlutron.service import job_runner
 from crawlutron.service.job_control import control_job_core, raise_job_not_found
 from crawlutron.service.job_cores import create_job_core, delete_job_core, list_jobs_core
 from crawlutron.service.main_helpers import build_job_status
+from crawlutron.service.request_identity import IDEMPOTENCY_HEADER, MAX_TOKEN_LENGTH
 from crawlutron.vocabulary.limits import DEFAULT_JOB_LIST_LIMIT, MAX_JOB_LIST_LIMIT
 from crawlutron_rest.api.caller_auth import (
     auth_denials,
@@ -53,7 +54,8 @@ _ = job_runner
         "background runner. The durable runner owns depth-aware canonical "
         "frontier admission (scope, documents, analytics, robots, and max_pages), "
         "then uses the shared crawl engine for non-recursive page batches. "
-        "Control the job via POST /v1/jobs/{job_id}/control."
+        "Control the job via POST /v1/jobs/{job_id}/control. Send an Idempotency-Key header "
+        "to make a retry of the same token and payload return the original job."
     ),
     responses={
         **quota_denials(),
@@ -67,6 +69,7 @@ async def create_job(
     shutdown_event: ShutdownEventDep,
     caller: CallerDep,
     tracking: TrackingDep,
+    token: Annotated[str | None, Header(alias=IDEMPOTENCY_HEADER, max_length=MAX_TOKEN_LENGTH)] = None,
 ) -> JobCreateResponse:
     try:
         return await create_job_core(
@@ -76,6 +79,7 @@ async def create_job(
             shutdown_event,
             caller,
             concurrency_tracker=tracking.concurrency_tracker,
+            token=token,
         )
     except ValueError as error:
         raise validation_http_error(error) from error
