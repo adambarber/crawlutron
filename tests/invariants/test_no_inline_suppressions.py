@@ -6,10 +6,7 @@ import pathlib
 import re
 import tokenize
 
-import pytest
-
-from tests._walk_primitives import SCAN_ROOTS
-from tests.chokepoint_paths import REPO_ROOT
+from tests._walk_primitives import scan_findings
 
 #: A directive is a comment that actually suppresses: noqa or a type-ignore
 #: spelling. A backticked mention or an explanation is prose, never a hit.
@@ -26,17 +23,19 @@ def _comment_lines(path: pathlib.Path) -> list[tuple[int, str]]:
     return [(token.start[0], token.string) for token in tokens if token.type == tokenize.COMMENT]
 
 
-def _scanned_files() -> list[pathlib.Path]:
-    """One instance per scanned file, derived from SCAN_ROOTS directly -- no
-    private root tuple, so a tree added later generates its own instances."""
-    files: list[pathlib.Path] = []
-    for root in SCAN_ROOTS:
-        files.extend(p for p in (REPO_ROOT / root).rglob("*.py") if p.is_file())
-    return sorted(files)
+def _suppression_findings(path: pathlib.Path) -> list[tuple[int, str]]:
+    """Directive-bearing comments as (line, text) for the one shared finding door."""
+    return [(line, comment) for line, comment in _comment_lines(path) if _DIRECTIVE.search(comment)]
 
 
-@pytest.mark.parametrize("path", _scanned_files())
-def test_file_carries_no_inline_suppression(path: pathlib.Path) -> None:
-    """Every comment token in every scanned file must be directive-free."""
-    offenders = [(line, comment) for line, comment in _comment_lines(path) if _DIRECTIVE.search(comment)]
-    assert not offenders, f"{path}: inline suppression banned by the zero-suppressor law: {offenders}"
+def test_no_inline_suppression_anywhere() -> None:
+    """One loop reports every file:line suppressor, so no failure hides another."""
+    failures = scan_findings(_suppression_findings)
+    assert not failures, "inline suppression banned by the zero-suppressor law:\n" + "\n".join(failures)
+
+
+def test_detector_flags_a_planted_suppression_with_its_line(tmp_path: pathlib.Path) -> None:
+    """Kills the mutant that drops comment tokens: a planted directive must be named."""
+    planted = tmp_path / "planted.py"
+    planted.write_text("x = 1  # noqa\n")
+    assert _suppression_findings(planted) == [(1, "# noqa")]

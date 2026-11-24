@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import tokenize
 import weakref
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import cache
 from typing import Literal, overload
@@ -70,6 +71,8 @@ __all__ = [
     "workspace_package_dirs",
     "workspace_project",
     "discovered_files",
+    "scanned_files",
+    "scan_findings",
 ]
 
 
@@ -328,6 +331,21 @@ def declared_root_files(root: str) -> tuple[pathlib.Path, ...]:
     if not files:
         raise AssertionError(f"declared scan root contains no .py files: {root}/ (gate would scan nothing)")
     return files
+
+
+@cache
+def scanned_files() -> tuple[pathlib.Path, ...]:
+    """Every .py under the declared scan roots, via the cached vacuity-checked door."""
+    return tuple(sorted(path for root in SCAN_ROOTS for path in declared_root_files(root)))
+
+
+def scan_findings(detect: Callable[[pathlib.Path], Sequence[tuple[int, str]]]) -> list[str]:
+    """`file:line detail` for every finding across all scanned files, one loop."""
+    return [
+        f"{path.relative_to(REPO_ROOT).as_posix()}:{line} {detail}"
+        for path in scanned_files()
+        for line, detail in detect(path)
+    ]
 
 
 def empty_scan_roots(roots: tuple[str, ...], base: pathlib.Path = REPO_ROOT) -> tuple[str, ...]:
