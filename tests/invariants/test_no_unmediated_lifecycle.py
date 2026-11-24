@@ -20,10 +20,16 @@ from tests.chokepoint_walks import (
     parsed_source,
     resolved_call_name,
     resolved_expr_name,
+    single_target_name_assignments,
 )
 
 _SPAWN_LEAVES = frozenset({"create_task", "ensure_future"})
-_DOOR_FILES = frozenset({"task_scope.py", "job_lifecycle.py"})
+_DOOR_PATHS = frozenset(
+    {
+        "packages/crawlutron-admit/src/crawlutron_admit/task_scope.py",
+        "packages/core/src/crawlutron/service/job_lifecycle.py",
+    }
+)
 _BAN_RECEIVERS = ("task", "runner", "handler", "probe", "fetch", "forward", "closing_task")
 _NARROW_RECEIVERS = ("timer", "future", "concurrent_future")
 _MONKEY_LEAVES = frozenset({"setattr", "setitem"})
@@ -57,16 +63,33 @@ def _resolved_leaf(tree: ast.Module, call: ast.Call) -> str:
     return _call_name(tree, call).rsplit(".", 1)[-1]
 
 
-def _receiver(tree: ast.Module, call: ast.Call) -> str:
-    func = call.func
-    if not isinstance(func, ast.Attribute):
-        return ""
-    value = func.value
-    if isinstance(value, (ast.Name, ast.Attribute)):
-        return resolved_expr_name(tree, value).lower()
-    if isinstance(value, ast.Call):
-        return _call_name(tree, value).rsplit(".", 1)[-1].lower()
-    return ""
+def _alias_names(tree: ast.Module) -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for node, name in single_target_name_assignments(nodes_of(tree), lambda _: True):
+        resolved = resolved_expr_name(tree, node.value).lower()
+        if resolved:
+            aliases[name] = resolved
+    return aliases
+
+
+def _base_expr(expr: ast.expr) -> ast.expr:
+    if isinstance(expr, ast.Subscript):
+        return _base_expr(expr.value)
+    return expr
+
+
+def _banned_expr(tree: ast.Module, expr: ast.expr, aliases: dict[str, str]) -> bool:
+    base = _base_expr(expr)
+    if isinstance(base, ast.Call):
+        return _banned_receiver(_call_name(tree, base).rsplit(".", 1)[-1].lower())
+    if _banned_receiver(resolved_expr_name(tree, base).lower()):
+        return True
+    alias = aliases.get(base.id) if isinstance(base, ast.Name) else None
+    return bool(alias and _banned_receiver(alias))
+
+
+def _is_door_file(relative: str) -> bool:
+    return relative in _DOOR_PATHS
 
 
 def _banned_receiver(name: str) -> bool:
@@ -95,14 +118,14 @@ def _in_admitted(tree: ast.Module, node: ast.AST, parents: dict[int, ast.AST]) -
 
 
 def _spawn_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
-    if path.name in _DOOR_FILES:
+    if _is_door_file(relative_posix(path)):
         return []
     parents = parent_map(tree)
     return [
         offender_at(path, node, "unmediated task spawn")
         for node in nodes_of(tree)
         if isinstance(node, ast.Call)
-        and _leaf(node) in _SPAWN_LEAVES
+        and _resolved_leaf(tree, node) in _SPAWN_LEAVES
         and not _in_admitted(tree, node, parents)
     ]
 
@@ -111,22 +134,20 @@ def _status_bypass(node: ast.Call) -> bool:
     if _leaf(node) != "set_status":
         return False
     values = [*node.args, *(keyword.value for keyword in node.keywords)]
-    return any("CANCELLED" in ast.unparse(value) for value in values)
+    return any("CANCELLED" in ast.unparse(value).upper() for value in values)
 
 
-def _wait_for_retirement(tree: ast.Module, node: ast.Call) -> bool:
+def _wait_for_retirement(tree: ast.Module, node: ast.Call, aliases: dict[str, str]) -> bool:
     if _leaf(node) != "wait_for" or not node.args:
         return False
-    first = node.args[0]
-    if isinstance(first, (ast.Name, ast.Attribute)):
-        return _banned_receiver(resolved_expr_name(tree, first).lower())
-    return False
+    return _banned_expr(tree, node.args[0], aliases)
 
 
 def _retire_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
     relative = relative_posix(path)
-    if path.name in _DOOR_FILES:
+    if _is_door_file(relative):
         return []
+    aliases = _alias_names(tree)
     offenders: list[str] = []
     for node in nodes_of(tree):
         if not isinstance(node, ast.Call):
@@ -135,12 +156,12 @@ def _retire_offenders(tree: ast.Module, path: pathlib.Path) -> list[str]:
         if (
             isinstance(func, ast.Attribute)
             and func.attr == "cancel"
-            and _banned_receiver(_receiver(tree, node))
+            and _banned_expr(tree, func.value, aliases)
         ):
             offenders.append(offender_at(path, node, "bare lifecycle cancel"))
         elif "job_store" not in relative and _status_bypass(node):
             offenders.append(offender_at(path, node, "status-plane bypass"))
-        elif _wait_for_retirement(tree, node):
+        elif _wait_for_retirement(tree, node, aliases):
             offenders.append(offender_at(path, node, "wait_for as retirement"))
     return offenders
 
@@ -228,13 +249,13 @@ def _measured() -> dict[str, int]:
     return counts
 
 
-# Seeded from the audited alternate surface; counts derive from `_measured()` and
-# move DOWN only, in the same commit as the caller migration that earns them.
+# Detector-correction re-seed: wider detection (subscript/alias/call receivers,
+# import aliases, folded status, path doors); all rows >= prior. Migration moves DOWN.
 _RATCHET = {
     "spawn.load_bearing": 16,
-    "spawn.removable": 67,
-    "retire.load_bearing": 9,
-    "retire.removable": 37,
+    "spawn.removable": 68,
+    "retire.load_bearing": 12,
+    "retire.removable": 57,
     "substitution.load_bearing": 0,
     "substitution.removable": 6,
 }
@@ -289,6 +310,31 @@ def test_each_violation_class_bites_by_file_and_line() -> None:
     assert substitute["substitution"] == ["tests/_lifecycle_probe.py:2 lifecycle seam substituted"]
 
 
+def test_evasion_shapes_bite_by_file_and_line() -> None:
+    subscript = _probe("async def f(tasks):\n    tasks[key].cancel()\n")
+    assert subscript["retire"] == ["tests/_lifecycle_probe.py:2 bare lifecycle cancel"]
+    alias = _probe("async def f():\n    t = get_handler()\n    t.cancel()\n")
+    assert alias["retire"] == ["tests/_lifecycle_probe.py:3 bare lifecycle cancel"]
+    imported = _probe("from asyncio import create_task as ct\ndef f():\n    ct(g())\n")
+    assert imported["spawn"] == ["tests/_lifecycle_probe.py:3 unmediated task spawn"]
+    lowercase = _probe("def f(store):\n    store.set_status('j', JobStatus.cancelled)\n")
+    assert lowercase["retire"] == ["tests/_lifecycle_probe.py:2 status-plane bypass"]
+    wf_sub = _probe("async def f(tasks):\n    await asyncio.wait_for(tasks[key])\n")
+    assert wf_sub["retire"] == ["tests/_lifecycle_probe.py:2 wait_for as retirement"]
+    wf_call = _probe("async def f():\n    await asyncio.wait_for(get_handler())\n")
+    assert wf_call["retire"] == ["tests/_lifecycle_probe.py:2 wait_for as retirement"]
+
+
+def test_door_exemption_is_by_relative_path_not_basename() -> None:
+    source = "async def f():\n    asyncio.create_task(g())\n"
+    decoy = REPO_ROOT / "tests" / "decoys" / "task_scope.py"
+    assert _spawn_offenders(parsed_source(source, filename=str(decoy)), decoy) == [
+        "tests/decoys/task_scope.py:2 unmediated task spawn"
+    ]
+    door = REPO_ROOT / "packages/crawlutron-admit/src/crawlutron_admit/task_scope.py"
+    assert _spawn_offenders(parsed_source(source, filename=str(door)), door) == []
+
+
 def test_framework_narrowings_and_the_door_do_not_fire() -> None:
     admitted = _probe(
         "async def f(scope):\n"
@@ -303,5 +349,6 @@ def test_framework_narrowings_and_the_door_do_not_fire() -> None:
     assert not any(admitted.values())
     door = _probe("async def f():\n    asyncio.create_task(g())\n")
     door_tree = parsed_source("async def f():\n    asyncio.create_task(g())\n")
-    assert _spawn_offenders(door_tree, pathlib.Path("task_scope.py")) == []
+    door_path = REPO_ROOT / "packages/crawlutron-admit/src/crawlutron_admit/task_scope.py"
+    assert _spawn_offenders(door_tree, door_path) == []
     assert door["spawn"]
