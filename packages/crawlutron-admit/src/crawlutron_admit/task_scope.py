@@ -107,17 +107,22 @@ class NamedRegistry:
 
 
 class TaskScope:
-    """Two verbs over a live grant: spawn registers a task, stop closes it."""
+    """Two verbs over a lease or a process marker: spawn registers, stop closes."""
 
     __slots__ = ("_granted", "_registry", "_grace", "_handles", "_stopped", "_counter")
 
-    def __init__(self, *, granted: Granted, registry: NamedRegistry, grace: Grace) -> None:
+    def __init__(self, *, granted: Granted | None, registry: NamedRegistry, grace: Grace) -> None:
         self._granted = granted
         self._registry = registry
         self._grace = grace
         self._handles: dict[str, Handle] = {}
         self._stopped: set[str] = set()
         self._counter = 0
+
+    @classmethod
+    def process(cls, *, registry: NamedRegistry, grace: Grace) -> TaskScope:
+        """Build a lease-free scope for long-lived process work."""
+        return cls(granted=None, registry=registry, grace=grace)
 
     @property
     def registry(self) -> NamedRegistry:
@@ -176,6 +181,7 @@ class TaskScope:
                     if refused is None:
                         refused = failure
         finally:
-            self._granted.lease.release()
+            if self._granted is not None:
+                self._granted.lease.release()
         if refused is not None:
             raise refused
