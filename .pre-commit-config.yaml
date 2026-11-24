@@ -270,7 +270,8 @@ repos:
       # package against its seed. coverage-floors.json is the single measured source and
       # floors ratchet UP only, in the commit whose coverage improvement earns the raise.
       # It runs at pre-push -- a measurement pass on every commit would train --no-verify
-      # -- and `files:` scopes it to crawlutron/tests so docs-only commits skip it entirely.
+      # -- and `files:` shares the service trigger, matching everything outside docker/
+      # (docs included): docs-only commits DO run both hooks; that over-trigger is deliberate, safe.
       # The engine config lives once in pyproject.toml ([tool.coverage.run], core = "sysmon"
       # via PEP 669 on Python 3.14, the lever that holds tracer overhead to a measured
       # median-of-3 figure recorded in the coverage hook's ticket evidence).
