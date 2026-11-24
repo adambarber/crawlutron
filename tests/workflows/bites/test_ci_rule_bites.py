@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from tests.workflows._cache_keys import find_unrendered_cache_keys
 from tests.workflows._model import Job, parent_workflow, workflow
 from tests.workflows._rules import (
     ci_actionlint_hook,
@@ -288,3 +289,17 @@ def test_release_gating_names_a_publish_job_detached_from_ci() -> None:
     assert all(item.rule == "ci-release-gated-on-ci" for item in findings)
     assert "publish-build" in {item.job for item in findings}
     assert all(release.path.name in item.message for item in findings)
+
+
+def test_the_old_missing_dollar_cache_key_is_named_at_its_line(tmp_path, monkeypatch) -> None:
+    ghost = tmp_path / "ghost.yml"
+    ghost.write_text(
+        "name: Ghost\non: push\njobs:\n  j:\n    runs-on: ubuntu-24.04\n"
+        "    steps:\n      - uses: actions/cache@" + "a" * 40 + "\n"
+        "        with:\n          key: camoufox-${{ runner.os }}-{{ hashFiles('pyproject.toml') }}\n",
+        encoding="utf-8",
+    )
+    expected = next(i for i, line in enumerate(ghost.read_text().splitlines(), 1) if "key: camoufox" in line)
+    monkeypatch.setattr("tests.workflows._cache_keys.cache_documents", lambda: (ghost,))
+    findings = list(find_unrendered_cache_keys())
+    assert any(item.line == expected and ghost.name in item.message for item in findings), findings

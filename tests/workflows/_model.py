@@ -27,6 +27,8 @@ from tests.workflows._names import (
     DisplayName,
     EnvName,
     Expression,
+    ExpressionText,
+    InputValue,
     JobId,
     StepId,
     StepName,
@@ -70,11 +72,11 @@ class Step(BaseModel):
     name: StepName | None = None
     id: StepId | None = None
     uses: ActionRef | None = None
-    run: str | None = None
-    with_: Mapping[str, object] = Field(default_factory=dict, alias="with")
-    env: Mapping[EnvName, object] = Field(default_factory=dict)
+    run: ExpressionText | None = None
+    with_: Mapping[str, InputValue] = Field(default_factory=dict, alias="with")
+    env: Mapping[EnvName, InputValue] = Field(default_factory=dict)
     if_: Expression | None = Field(default=None, alias="if")
-    shell: str | None = None
+    shell: ExpressionText | None = None
     continue_on_error: bool | None = Field(default=None, alias="continue-on-error")
     line: int
     event_spliced: bool = False
@@ -134,7 +136,7 @@ class Strategy(BaseModel):
     model_config = STRICT
     fail_fast: bool | None = Field(default=None, alias="fail-fast")
     max_parallel: int | None = Field(default=None, alias="max-parallel")
-    matrix: Mapping[str, object] = Field(default_factory=dict)
+    matrix: Mapping[str, InputValue] = Field(default_factory=dict)
 
 
 class Job(BaseModel):
@@ -146,11 +148,11 @@ class Job(BaseModel):
     needs: tuple[JobId, ...] = ()
     if_: Expression | None = Field(default=None, alias="if")
     uses: ActionRef | None = None
-    with_: Mapping[str, object] = Field(default_factory=dict, alias="with")
+    with_: Mapping[str, InputValue] = Field(default_factory=dict, alias="with")
     permissions: Mapping[PermissionScope, PermissionLevel] = Field(default_factory=dict)
     runs_on: Runner | None = Field(default=None, alias="runs-on")
     timeout_minutes: TimeoutMinutes | None = Field(default=None, alias="timeout-minutes")
-    environment: object | None = None
+    environment: InputValue | None = None
     outputs: Mapping[str, Expression] = Field(default_factory=dict)
     strategy: Strategy | None = None
     steps: tuple[Step, ...] = ()
@@ -196,12 +198,12 @@ class Workflow(BaseModel):
     stem: WorkflowStem
     path: Path
     name: DisplayName
-    on_: Mapping[str, object] = Field(alias="on")
+    on_: Mapping[str, InputValue] = Field(alias="on")
     permissions: Mapping[PermissionScope, PermissionLevel] = Field(default_factory=dict)
-    concurrency: object | None = None
-    env: Mapping[EnvName, object] = Field(default_factory=dict)
-    defaults: object | None = None
-    run_name: str | None = Field(default=None, alias="run-name")
+    concurrency: InputValue | None = None
+    env: Mapping[EnvName, InputValue] = Field(default_factory=dict)
+    defaults: InputValue | None = None
+    run_name: ExpressionText | None = Field(default=None, alias="run-name")
     jobs: Mapping[JobId, Job] = Field(min_length=1)
 
     @classmethod
@@ -249,15 +251,18 @@ def _line_index(root) -> dict[tuple[str, ...], int]:
     return found
 
 
+def parse_document(path: Path) -> tuple[object, dict[tuple[str, ...], int]]:
+    """The one YAML compose door: document and line index share a node tree."""
+    loader = yaml.SafeLoader(path.read_text(encoding="utf-8"))
+    root = loader.get_single_node()
+    return loader.construct_document(root), _line_index(root)
+
+
 def parse_workflow(path: Path) -> Workflow:
     """One read and one compose; line index and objects share the node tree."""
     global PARSE_COUNT
     PARSE_COUNT += 1
-    text = path.read_text(encoding="utf-8")
-    loader = yaml.SafeLoader(text)
-    root = loader.get_single_node()
-    index = _line_index(root)
-    raw = loader.construct_document(root)
+    raw, index = parse_document(path)
     if not isinstance(raw, dict):
         raise ValueError(f"{path.name} is not a workflow mapping")
     if True in raw:

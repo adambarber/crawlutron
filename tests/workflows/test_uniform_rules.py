@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from tests.workflows._cache_keys import find_unrendered_cache_keys
 from tests.workflows._model import JOBS, WORKFLOWS
 from tests.workflows._rules import CASES, JOB_RULES, WF_CASES, WORKFLOW_RULES
 
@@ -29,4 +30,9 @@ def test_job_rule(workflow, job, rule) -> None:
 @pytest.mark.parametrize(("workflow", "rule"), WF_CASES)
 def test_workflow_rule(workflow, rule) -> None:
     findings = list(rule.check(workflow))
+    assert not findings, "\n".join(f.message for f in findings)
+
+
+def test_every_cache_key_renders_without_literal_braces() -> None:
+    findings = list(find_unrendered_cache_keys())
     assert not findings, "\n".join(f.message for f in findings)
