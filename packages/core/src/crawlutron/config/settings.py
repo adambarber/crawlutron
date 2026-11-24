@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import TypedDict
 
 from crawlutron.config.env import get_mapping_float, get_mapping_int, in_range, parse_bool_value
@@ -143,10 +143,13 @@ class CrawlerSettings:
     def from_mapping(cls, values: Mapping[str, str] | None = None) -> CrawlerSettings:
         """Build settings from a mapping (os.environ by default).
 
-        Numeric reads go through the never-raise chokepoints (typo -> dataclass default +
-        warning), and booleans through ``parse_bool_value`` so a typo never flips a policy open.
+        An explicit mapping refuses unknown keys; os.environ is read key-by-key.
         """
         source = os.environ if values is None else values
+        if values is not None:
+            unknown = sorted(set(values) - RECOGNIZED_SETTING_KEYS)
+            if unknown:
+                raise ValueError("unknown setting keys: " + ", ".join(unknown))
         return cls(
             **_core_fields(cls, source),
             **_policy_fields(cls, source),
@@ -157,6 +160,14 @@ class CrawlerSettings:
             **_search_fields(cls, source),
             **_retention_fields(cls, source),
         )
+
+
+# Recognized env keys: one per dataclass field plus the alias targets below.
+# An explicit mapping may only carry these; anything else fails loud.
+RECOGNIZED_SETTING_KEYS: frozenset[str] = frozenset(
+    {f"CRAWLUTRON_{f.name.upper()}" for f in fields(CrawlerSettings)}
+    | set(ENVIRONMENT_FIELD_ALIASES.values())
+)
 
 
 class _CoreFields(TypedDict):

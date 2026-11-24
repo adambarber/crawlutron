@@ -15,6 +15,7 @@ from crawlutron.admission.admission_links import (
     remaining_page_capacity,
 )
 from crawlutron.admission.policy import PolicyLike, PolicyTier, discovery_flags, read_policy
+from crawlutron.config.settings_cache import get_cached_settings
 from crawlutron.models.crawl_extraction_method import CrawlExtractionMethod
 from crawlutron.safety.safe_regex import BoundedPattern
 from crawlutron.service.effects import EffectContainer
@@ -96,7 +97,7 @@ class JobAdmissionContext:
         """
         normalized = read_policy(policy, tier)
         limits = normalized.limits
-        active_settings = settings or CrawlerSettings.from_mapping()
+        active_settings = settings or get_cached_settings()
         host_policy = HostPolicy.from_settings(active_settings)
         robots = RobotsGate(normalized, host_policy, fetch_and_decode)
         scheduler = DomainScheduler.from_settings(

@@ -100,6 +100,20 @@ _SCRATCH_CACHE_DIR = (
     / f"crawlutron-tests-{os.environ.get('PYTEST_XDIST_WORKER', 'master')}-{os.getpid()}"
 )
 _INHERITED_CACHE_DIR = os.environ.get("CRAWLUTRON_CACHE_DIR", "")
+
+
+@pytest.fixture(autouse=True)
+def _reset_settings_cache_per_test():
+    """Reset the settings cache before each test so tests read fresh env.
+
+    Production caches one parse of os.environ per process; tests monkeypatch
+    CRAWLUTRON_* variables, so each test needs a fresh read.
+    """
+    from crawlutron.config.settings_cache import reset_cached_settings
+
+    reset_cached_settings()
+
+
 # (Suite plumbing, not a knob default: the gate reads the settings-home default, never this face.)
 _INHERITED_IS_SUITE_SCRATCH = (
     _INHERITED_CACHE_DIR.startswith(f"{Path(tempfile.gettempdir())}{os.sep}")

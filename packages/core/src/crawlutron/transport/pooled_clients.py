@@ -354,9 +354,9 @@ class _NoStoreCookieJar(_StdlibCookieJar):
 
 def _default_settings() -> CrawlerSettings:
     """Get default crawler settings for HTTP client configuration."""
-    from crawlutron.config.settings import CrawlerSettings
+    from crawlutron.config.settings_cache import get_cached_settings
 
-    return CrawlerSettings.from_mapping()
+    return get_cached_settings()
 
 
 class _LoopBound(Protocol):

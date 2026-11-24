@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 from crawlutron.config.settings import CrawlerSettings
+from crawlutron.config.settings_cache import get_cached_settings
 from crawlutron.runtime.app_module_ref import set_module_app_provider
 from crawlutron.runtime.pressure_sizing import default_executor_workers
 from crawlutron.service.effects import EffectContainer
@@ -60,7 +61,7 @@ def create_app(settings: CrawlerSettings | None = None) -> FastAPI:
     """Build the wired service app; importing stays side-effect free."""
     if FastAPI is None:
         raise RuntimeError("create_app requires FastAPI, which is not importable here")
-    settings = settings or CrawlerSettings.from_mapping()
+    settings = settings or get_cached_settings()
     stores = build_stores(settings)
     job_store = stores.job_store
     result_store = stores.result_store

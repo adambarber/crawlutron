@@ -88,6 +88,16 @@ class TestFromMappingHardening:
         assert settings.respect_robots is False
         assert settings.adaptive_throttling is True
 
+    def test_unknown_mapping_key_raises_instead_of_silently_defaulting(self):
+        """A typo'd mapping key must fail loud, not silently fall back to a default."""
+        with pytest.raises(ValueError, match="unknown setting"):
+            CrawlerSettings.from_mapping(
+                {
+                    "CRAWLUTRON_HOST": "0.0.0.0",
+                    "CRAWLUTRON_TYPO_HOST": "x",
+                }
+            )
+
 
 class TestBatchSizeLoBound:
     """A negative or zero batch size must clamp to the lo bound like the sibling knobs

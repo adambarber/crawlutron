@@ -4,7 +4,7 @@ import asyncio
 import logging
 import time
 
-from crawlutron.config.settings import CrawlerSettings
+from crawlutron.config.settings_cache import get_cached_settings
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.discovery_config import DiscoveryConfig
 from crawlutron.models.map_request import MapRequest
@@ -38,7 +38,7 @@ async def map_site(
     )
     crawl = CrawlRequest(url=payload.url, policy=policy)
     _crawl_started = time.monotonic()
-    active_settings = settings or CrawlerSettings.from_mapping()
+    active_settings = settings or get_cached_settings()
     result = await execute_crawl(
         crawl,
         settings=active_settings,
