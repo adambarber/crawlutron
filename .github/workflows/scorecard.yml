@@ -27,6 +27,8 @@ jobs:
           persist-credentials: false
       - uses: ossf/scorecard-action@23f22cd43608bae7a1f1fa2603d7314dee9538a5 # v2.6.0
         with:
+          # Use the amd64 manifest digest to avoid OCI index negotiation
+          image: ghcr.io/ossf/scorecard-action@sha256:7a62770a1e88f3bcaed20cbf9a57206c6531eb77653e415ca3c3c6e8d140877b
           results_file: results.sarif
           results_format: sarif
           publish_results: true
