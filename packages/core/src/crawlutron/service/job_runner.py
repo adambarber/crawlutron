@@ -25,6 +25,7 @@ from crawlutron.config.settings import CrawlerSettings
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.crawl_result import EngineCrawlResult
 from crawlutron.models.result_record import ProducerEnvelope
+from crawlutron.runtime import process_state
 from crawlutron.service.crawl_executor import execute_crawl as _real_execute_crawl
 from crawlutron.service.effects import EffectContainer, EffectOutcome, run_crawl_with_claim
 from crawlutron.service.job_batch import absorb_batch
@@ -109,6 +110,14 @@ async def arecord_terminal_failure(
 def reset_execute_crawl() -> None:
     global _execute_crawl
     _execute_crawl = _real_execute_crawl
+
+
+def _has() -> bool:
+    """Whether a non-default execute_crawl is installed (leaked state)."""
+    return _execute_crawl is not _real_execute_crawl
+
+
+process_state.register(__name__, reset_execute_crawl, _has)
 
 
 def pop_frontier(job: CrawlJobState) -> list[FrontierEntry]:

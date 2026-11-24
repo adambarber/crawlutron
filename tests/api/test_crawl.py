@@ -203,6 +203,21 @@ class TestCrawlApi(_AsgiEndpointTests):
         )
         assert resp.status_code == 422
 
+    async def test_serialize_or_reject_value_error_covered(self, monkeypatch):
+        """Monkeypatch serialize_results to raise in crawl_endpoint's namespace;
+        exercises _serialize_or_reject's ValueError handler (crawl_endpoint.py:104-105).
+        """
+
+        def _raise(*args, **kwargs):
+            raise ValueError("unsupported_output_format: test")
+
+        monkeypatch.setattr("crawlutron_rest.api.crawl_endpoint.serialize_results", _raise)
+
+        resp = await self.client.post(
+            "/v1/crawl", json=make_crawl_payload(f"{self.base}/", output_format="json")
+        )
+        assert resp.status_code == 422, resp.text
+
 
 class TestMapApi(_AsgiEndpointTests):
     """/v1/map against a real local server (no mocks)."""
