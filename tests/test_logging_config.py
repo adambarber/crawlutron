@@ -6,11 +6,13 @@ dropped; the doc worker suppresses pdfminer chatter at its source.
 from __future__ import annotations
 
 import contextlib
+import datetime
 import json
 import logging
 
 import pytest
 
+from crawlutron.models.credential import Credential
 from crawlutron.runtime.logging_config import configure_service_logging
 from tests.chokepoint_paths import REPO_ROOT
 
@@ -100,3 +102,27 @@ def test_uvicorn_loggers_route_through_the_service_sink():
     assert record["logger"] == "uvicorn.error"
     assert record["message"] == "uvicorn_started"
     assert record["service"] == "crawlutron"
+
+
+def test_native_extra_renders_identically(service_sink):
+    """A natively serializable extra keeps its exact wire shape."""
+    logging.getLogger("crawlutron").warning("native", extra={"count": 3})
+    record = _last_record(service_sink)
+    assert record["count"] == 3
+    assert record["message"] == "native"
+
+
+def test_non_native_extra_renders_through_the_chokepoint(service_sink):
+    """A non-native extra is serialized once by json_default, not repr-probed twice."""
+    stamp = datetime.datetime(2024, 1, 2, 3, 4, 5)
+    logging.getLogger("crawlutron").warning("stamped", extra={"stamp": stamp})
+    assert _last_record(service_sink)["stamp"] == "2024-01-02T03:04:05"
+
+
+def test_secret_extra_stays_masked(service_sink):
+    """The single fallback is still a redaction door for secret-bearing values."""
+    secret = Credential(kind="bearer", token="supersecret123")
+    logging.getLogger("crawlutron").warning("credential", extra={"credential": secret})
+    record = _last_record(service_sink)
+    assert "supersecret123" not in json.dumps(record)
+    assert "[REDACTED]" in json.dumps(record["credential"])

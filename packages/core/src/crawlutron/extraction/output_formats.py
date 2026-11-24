@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from typing import Literal, get_args
 
 from crawlutron.models.json_value import JsonValue
+from crawlutron.safety.json_safe import json_default
 
 #: The formats a caller may name. ``Literal`` needs literal members, and this
 #: module dispatches on them; everything else derives from this set.
@@ -23,18 +24,11 @@ OutputFormat = Literal["json", "jsonl", "ndjson", "markdown", "csv"]
 SUPPORTED_OUTPUT_FORMATS: tuple[str, ...] = get_args(OutputFormat)
 
 
-def jsonify(obj: object) -> object:
-    """Output fallback -- now the shared crawlutron.safety.json_safe chokepoint."""
-    from crawlutron.safety.json_safe import json_default
-
-    return json_default(obj)
-
-
 def safe_value(val: object) -> str:
     if isinstance(val, Mapping):
-        return json.dumps(val, ensure_ascii=False, default=jsonify)
+        return json.dumps(val, ensure_ascii=False, default=json_default)
     if isinstance(val, list):
-        return json.dumps(val, ensure_ascii=False, default=jsonify)
+        return json.dumps(val, ensure_ascii=False, default=json_default)
     return "" if val is None else str(val)
 
 
@@ -48,11 +42,11 @@ def serialize_results(results: list[dict[str, JsonValue]], fmt: str | None) -> t
         raise ValueError(f"unsupported_output_format: {fmt}")
     if fmt == "json":
         return (
-            json.dumps(results, ensure_ascii=False, indent=2, default=jsonify),
+            json.dumps(results, ensure_ascii=False, indent=2, default=json_default),
             "application/json",
         )
     if fmt in ("jsonl", "ndjson"):
-        lines = [json.dumps(r, ensure_ascii=False, default=jsonify) for r in results]
+        lines = [json.dumps(r, ensure_ascii=False, default=json_default) for r in results]
         return "\n".join(lines), "application/x-ndjson"
     if fmt == "markdown":
         return _to_markdown(results), "text/markdown; charset=utf-8"
@@ -80,7 +74,7 @@ def _to_markdown(results: list[dict[str, JsonValue]]) -> str:
             lines.append(safe_value(md))
         lines.append("")
         lines.append("```json")
-        lines.append(json.dumps(r, ensure_ascii=False, indent=2, default=jsonify))
+        lines.append(json.dumps(r, ensure_ascii=False, indent=2, default=json_default))
         lines.append("```")
         lines.append("")
         sections.append("\n".join(lines))
