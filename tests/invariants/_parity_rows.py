@@ -30,6 +30,7 @@ PRINCIPLED_ROWS: tuple[ParityRow, ...] = (
     ParityRow("POST", "/v1/keys", "keys are the operator trust plane"),
     ParityRow("GET", "/v1/keys", "keys are the operator trust plane"),
     ParityRow("DELETE", "/v1/keys/{key_id}", "keys are the operator trust plane"),
+    ParityRow("POST", "/v1/keys/{key_id}/rotate", "keys are the operator trust plane"),
     ParityRow("GET", "/metrics", "operator metrics endpoint, not a crawl capability"),
 )
 

@@ -304,3 +304,83 @@ async def test_rotated_previous_key_crawls_within_grace_window(tmp_path):
 
         crawl = await _post_crawl(client, issued.json()["secret"])
         assert crawl.status_code == 202, crawl.text  # previous still valid within grace
+
+
+async def test_operator_rotates_key_through_http_door(tmp_path):
+    """The POST rotate door swaps the secret: the new one crawls, the old one is in grace."""
+    async with isolation_client(tmp_path) as (client, _store, _results, _keys):
+        issued = await _issue_key_as_admin(client)
+        key_id = issued.json()["key_id"]
+        new_secret = f"ck_{key_id[4:]}.{secrets.token_urlsafe(32)}"
+
+        rotated = await client.post(
+            f"/v1/keys/{key_id}/rotate",
+            json={"new_secret": new_secret},
+            headers={"X-API-Key": "test-admin-token"},
+        )
+        assert rotated.status_code == 200, rotated.text
+        assert rotated.json() == {"status": "rotated", "key_id": key_id}
+
+        assert (await _post_crawl(client, new_secret)).status_code == 202
+        assert (await _post_crawl(client, issued.json()["secret"])).status_code == 202
+
+
+async def test_rotating_unknown_key_is_404(tmp_path):
+    """The rotate door answers 404 when key_id names no live key."""
+    async with isolation_client(tmp_path) as (client, _store, _results, _keys):
+        missing = f"key_{secrets.token_hex(8)}"
+        rotated = await client.post(
+            f"/v1/keys/{missing}/rotate",
+            json={"new_secret": f"ck_{missing[4:]}.{secrets.token_urlsafe(32)}"},
+            headers={"X-API-Key": "test-admin-token"},
+        )
+        assert rotated.status_code == 404, rotated.text
+        assert rotated.json()["code"] == "not_found"
+        assert rotated.json()["message"] == f"Unknown key_id: {missing}"
+
+
+async def test_non_operator_cannot_rotate_a_key(tmp_path):
+    """A tenant key (or no credential) is refused at the rotate door; the victim stays live."""
+    async with isolation_client(tmp_path) as (client, _store, _results, keys):
+        victim_secret = await issue_key(client)
+        victim_key = await keys.averify_key(victim_secret)
+        assert victim_key is not None
+        new_secret = f"ck_{victim_key.key_id[4:]}.{secrets.token_urlsafe(32)}"
+
+        refused = await client.post(
+            f"/v1/keys/{victim_key.key_id}/rotate",
+            json={"new_secret": new_secret},
+            headers={"X-API-Key": victim_secret},
+        )
+        _assert_401(refused)
+        anonymous = await client.post(f"/v1/keys/{victim_key.key_id}/rotate", json={"new_secret": new_secret})
+        _assert_401(anonymous)
+        assert await keys.averify_key(victim_secret) is not None
+
+
+async def test_previous_secret_is_refused_after_the_grace_window(tmp_path, monkeypatch):
+    """An injected clock moves past 300s: the rotated-away secret stops, the new one works."""
+    import crawlutron.storage.caller_key_store as key_store_module
+
+    async with isolation_client(tmp_path) as (client, _store, _results, _keys):
+        issued = await _issue_key_as_admin(client)
+        key_id = issued.json()["key_id"]
+        new_secret = f"ck_{key_id[4:]}.{secrets.token_urlsafe(32)}"
+        rotated = await client.post(
+            f"/v1/keys/{key_id}/rotate",
+            json={"new_secret": new_secret},
+            headers={"X-API-Key": "test-admin-token"},
+        )
+        assert rotated.status_code == 200, rotated.text
+
+        real_time = key_store_module.time
+        offset = key_store_module.GRACE_WINDOW_SECONDS + 1.0
+
+        class _FutureClock:
+            @staticmethod
+            def time() -> float:
+                return real_time.time() + offset
+
+        monkeypatch.setattr(key_store_module, "time", _FutureClock)
+        _assert_401(await _post_crawl(client, issued.json()["secret"]))
+        assert (await _post_crawl(client, new_secret)).status_code == 202

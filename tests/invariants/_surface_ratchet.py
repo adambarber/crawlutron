@@ -52,7 +52,7 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     "packages/core/src/crawlutron/transport/fetch_policy.py": (5, 5),
     # #998: HostPolicy moved to safe_url/host_policy.py; this file is gone.
     # The next two surface modules are new since the list was pinned.
-    "packages/rest/src/crawlutron_rest/api/keys_router.py": (4, 3),
+    "packages/rest/src/crawlutron_rest/api/keys_router.py": (5, 4),  # #823: rotate door entry point
     # #645: the two read cores joined. #714: delta_context_for is the shared
     # delta loader. #849: the cores moved to service.crawl_endpoint_cores.
     "packages/rest/src/crawlutron_rest/api/crawl_endpoint.py": (4, 4),

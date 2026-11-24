@@ -94,3 +94,16 @@ async def test_only_quota_spending_routes_declare_429(async_client):
     responses = _spec_responses()
     declared = {op for op, codes in responses.items() if "429" in codes}
     assert declared == _QUOTA_ROUTES | {_WATCH_LIMIT_ROUTE, _ADMIT_ROBOTS_ROUTE}
+
+
+async def test_rotate_route_declares_its_wire_shape(async_client):
+    """The OpenAPI contract pins the rotate body field and its 404 refusal."""
+    from crawlutron_rest.main import app
+
+    assert app is not None, "the lifespan-set app is absent; re-ground this spec walk"
+    spec = app.openapi()
+    op = spec["paths"]["/v1/keys/{key_id}/rotate"]["post"]
+    assert "404" in op["responses"]
+    ref = op["requestBody"]["content"]["application/json"]["schema"]["$ref"]
+    body = spec["components"]["schemas"][ref.rsplit("/", 1)[-1]]
+    assert set(body["properties"]) == {"new_secret"}

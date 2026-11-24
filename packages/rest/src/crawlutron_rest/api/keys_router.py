@@ -9,8 +9,11 @@ from __future__ import annotations
 from crawlutron.models.error_response import ErrorResponse
 from crawlutron.models.issued_key import IssuedKey
 from crawlutron.models.key_create_request import KeyCreateRequest
+from crawlutron.models.key_rotate_request import KeyRotateRequest
 from crawlutron.models.key_summary import KeySummary
 from crawlutron.models.revoked_key import RevokedKey
+from crawlutron.models.rotated_key import RotatedKey
+from crawlutron.storage.caller_key_store import GRACE_WINDOW_SECONDS
 from crawlutron_rest.api.dependencies import CallerKeyStoreDep
 from crawlutron_rest.api.exceptions import http_error
 from crawlutron_rest.api.route_layer import admin_guarded_router
@@ -78,4 +81,28 @@ async def revoke_key(
     return RevokedKey(status="revoked", key_id=key_id)
 
 
-__all__ = ["issue_key", "list_keys", "revoke_key", "router"]
+@router.post(
+    "/{key_id}/rotate",
+    response_model=RotatedKey,
+    summary="Rotate a caller API key",
+    description=(
+        f"Replace a live key's secret. The previous secret keeps authenticating for "
+        f"{int(GRACE_WINDOW_SECONDS)} seconds by design, then stops. The new secret is "
+        "accepted only through the store's shape door; it is not echoed back. "
+        "Requires the operator token (X-API-Key: CRAWLUTRON_KEY_ADMIN_TOKEN)."
+    ),
+    responses={
+        404: {"model": ErrorResponse, "description": "Key not found or secret does not match key_id."},
+    },
+)
+async def rotate_key(
+    key_id: str,
+    payload: KeyRotateRequest,
+    key_store: CallerKeyStoreDep,
+) -> RotatedKey:
+    if not await key_store.arotate_key(key_id, payload.new_secret):
+        raise http_error(404, "not_found", f"Unknown key_id: {key_id}")
+    return RotatedKey(status="rotated", key_id=key_id)
+
+
+__all__ = ["issue_key", "list_keys", "revoke_key", "rotate_key", "router"]

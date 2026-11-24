@@ -95,6 +95,7 @@ SDK_KNOB_ROWS: dict[tuple[str, str], frozenset[str]] = {
     ("GET", "/v1/crawl/{request_id}/trace"): frozenset({"request_id"}),
     ("POST", "/v1/keys"): frozenset({"label", "max_concurrency", "max_pages"}),
     ("DELETE", "/v1/keys/{key_id}"): frozenset({"key_id"}),
+    ("POST", "/v1/keys/{key_id}/rotate"): frozenset({"key_id", "new_secret"}),
 }
 
 #: The CLI forwards POST /v1/crawl only (audit-1: intentionally thin).
@@ -115,6 +116,7 @@ CLI_EXCLUDED_ROUTES: tuple[tuple[str, str], ...] = (
     ("GET", "/v1/watches/{watch_id}"),
     ("DELETE", "/v1/watches/{watch_id}"),
     ("DELETE", "/v1/keys/{key_id}"),
+    ("POST", "/v1/keys/{key_id}/rotate"),
 )
 
 #: CLI flags consumed client-side (polling, output shaping, auth transport);

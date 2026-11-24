@@ -15,7 +15,13 @@ DISCOVERY_DOORS: tuple[str, ...] = (
 #: The operator trust plane: live routes deliberately outside the caller-facing
 #: recommendation list (the keys door is reachable; it is not self-served).
 OPERATOR_EXCLUSIONS: frozenset[str] = frozenset(
-    {"GET /metrics", "POST /v1/keys", "GET /v1/keys", "DELETE /v1/keys/{key_id}"}
+    {
+        "GET /metrics",
+        "POST /v1/keys",
+        "GET /v1/keys",
+        "DELETE /v1/keys/{key_id}",
+        "POST /v1/keys/{key_id}/rotate",
+    }
 )
 
 #: Registry modules first in the recommendation list, in agent-use order
