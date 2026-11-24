@@ -260,7 +260,8 @@ _RATCHET = {
     "retire.load_bearing": 8,
     "retire.removable": 57,
     "substitution.load_bearing": 0,
-    "substitution.removable": 6,
+    # #1404: five blanket closer no-ops became recording, resource-releasing doubles.
+    "substitution.removable": 1,
 }
 
 

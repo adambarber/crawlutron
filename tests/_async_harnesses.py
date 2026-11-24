@@ -63,18 +63,22 @@ async def crawl_api(async_client, base_url) -> AsyncGenerator[CrawlApi]:
 
 
 async def _drain_running_crawls(*, guard: float = 10.0) -> None:
-    """Wait for every still-active job to reach terminal, then clear strays.
+    """Wait for active jobs, then retire their tasks through the door.
 
-    Bounded, not open-ended: a genuinely stuck crawl should fail at its own
-    assertion, not hold later tests open."""
+    A status write alone leaves the crawl's connections running into teardown.
+    """
     import asyncio
 
+    from crawlutron.service import job_lifecycle
     from crawlutron.storage.job_store import TERMINAL_STATUSES, JobStatus
+    from crawlutron_admit import Count, Duration
+    from crawlutron_admit.task_scope import Grace, NamedRegistry, ScopeRefused, TaskScope
     from tests._app_factory import service_app
 
     job_store = service_app().state.job_store
-
     terminal_codes = {status.value for status in TERMINAL_STATUSES}
+    grace = Grace(0.05)
+    budget = 1.0
 
     async def acting() -> list[str]:
         # ``list_jobs`` is the status view, not the state, so this reads the row dict rather than
@@ -86,17 +90,33 @@ async def _drain_running_crawls(*, guard: float = 10.0) -> None:
         return not await acting()
 
     try:
-        # A 5ms poll keeps the DB question off the hot path; the guard bounds
-        # the wait so a stuck crawl fails loudly instead of holding later tests.
         await asyncio.wait_for(drained(), timeout=guard)
     except (AssertionError, TimeoutError):
         # A stuck crawl is reported, not raised: raising here would mask the assertion of the test that
         # actually caused it.
         pass
-    # A stale PENDING/RUNNING anonymous row would bleed into the next test's quota; a
-    # bounded wait that cannot retire it force-cancels it so none leaks.
+
+    # A stale row bleeds into the next test's quota, so the terminal write stays
+    # as a backstop; the task itself is cancelled and awaited through the door.
+    pending = frozenset({JobStatus.PENDING, JobStatus.RUNNING})
+    clock = asyncio.get_running_loop().time
     for job_id in await acting():
-        pending = frozenset({JobStatus.PENDING, JobStatus.RUNNING})
+        deadline = clock() + budget
+        while clock() < deadline:
+            owned = job_lifecycle.tracked_task(job_id)
+            if owned is None:
+                break
+            scope = TaskScope.process(
+                registry=NamedRegistry("test:crawl-drain", Count(1), Duration(0.25)),
+                grace=grace,
+            )
+            try:
+                await scope.stop(scope.adopt(owned), grace)
+            except ScopeRefused:
+                # A task swallowing one cancellation past the grace gets a
+                # fresh handle and another bounded stop within the budget.
+                continue
+            break
         with allow_on_loop():
             job_store.set_status(job_id, JobStatus.CANCELLED, expected=pending)
 
