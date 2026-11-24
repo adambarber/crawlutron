@@ -71,6 +71,7 @@ _SKIP_SETTINGS = frozenset(
         "packages/core/src/crawlutron/transport/content_cache.py",
         "packages/core/src/crawlutron/transport/content_cache_key.py",
         "packages/core/src/crawlutron/transport/content_pipeline.py",
+        "packages/core/src/crawlutron/config/settings_cache.py",
         "packages/core/src/crawlutron/transport/http.py",
         "packages/core/src/crawlutron/transport/http_response.py",
         "packages/core/src/crawlutron/transport/pooled_clients.py",

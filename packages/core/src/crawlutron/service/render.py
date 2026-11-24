@@ -14,6 +14,7 @@ from crawlutron.admission.admission_links import gather_deadline_bounded
 from crawlutron.admission.payload_helpers import checked_payload_urls
 from crawlutron.admission.render_options import resolve_render_options
 from crawlutron.config.settings import CrawlerSettings
+from crawlutron.config.settings_cache import get_cached_settings
 from crawlutron.models.crawl_job import CrawlJob
 from crawlutron.models.crawl_policy import POLICY_SCHEMA_VERSION
 from crawlutron.models.crawl_result import CrawlResult
@@ -128,7 +129,7 @@ async def render_request(
     ``payload`` is the request the router already validated and admitted; the
     door's type lives there, so this funnel never melts back to wire shape.
     """
-    active_settings = settings or CrawlerSettings.from_mapping()
+    active_settings = settings or get_cached_settings()
     host_policy = HostPolicy.from_settings(active_settings)
     submitted_pairs = _admitted_pairs(payload, active_settings, host_policy)
     submitted = [text for text, _ in submitted_pairs]

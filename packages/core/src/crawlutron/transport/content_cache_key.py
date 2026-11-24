@@ -55,10 +55,10 @@ def content_ram_budget_bytes() -> int:
 
 
 def _default_global_concurrency() -> int:
-    from crawlutron.config.settings import CrawlerSettings
+    from crawlutron.config.settings_cache import get_cached_settings
 
     try:
-        return max(1, int(CrawlerSettings.from_mapping().global_concurrency))
+        return max(1, int(get_cached_settings().global_concurrency))
     except Exception:  # pragma: no cover - settings should always parse
         return 4
 

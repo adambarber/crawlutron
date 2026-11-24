@@ -11,7 +11,7 @@ def override_settings():
 
     The suite's only spelling of "env plus overrides becomes settings";
     test files used to carry private module-level copies of the same lines."""
-    from crawlutron.config.settings import CrawlerSettings
+    from crawlutron.config.settings import RECOGNIZED_SETTING_KEYS, CrawlerSettings
     from tests._app_factory import service_app
 
     app = service_app()
@@ -19,7 +19,9 @@ def override_settings():
     original = app.state.crawler_settings
 
     def _apply(**overrides) -> CrawlerSettings:
-        merged = dict(os.environ)
+        # Only settings env vars are inputs; unrelated process vars (PATH, HOME, …)
+        # were always ignored by from_mapping and must not trip the unknown-key refusal.
+        merged = {k: v for k, v in os.environ.items() if k in RECOGNIZED_SETTING_KEYS}
         for key, value in overrides.items():
             merged[f"CRAWLUTRON_{key.upper()}"] = str(value)
         settings = CrawlerSettings.from_mapping(merged)

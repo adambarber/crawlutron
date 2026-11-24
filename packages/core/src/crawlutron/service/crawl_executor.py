@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from crawlutron.config.settings import CrawlerSettings
+from crawlutron.config.settings_cache import get_cached_settings
 from crawlutron.models.taxonomy import as_classification
 from crawlutron.orchestration.engine import crawl_request
 from crawlutron.service.errors import BrowserPoolUnavailable
@@ -58,7 +58,7 @@ async def execute_crawl(
     :class:`CrawlRequest`; invalid URL 422, missing pool 503 for browser-needed
     chains. crawl_request is the single admission; this adds the pool guard.
     """
-    active_settings = settings or CrawlerSettings.from_mapping()
+    active_settings = settings or get_cached_settings()
     host_policy = HostPolicy.from_settings(active_settings)
     if payload.url is not None:
         try:

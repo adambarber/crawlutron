@@ -105,7 +105,7 @@ class TestMaxContentLengthBytesActuallyEnforced:
         from crawlutron.vocabulary.strategies import HTTP_DECLARED_CRAWLER
 
         monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "1")
-        settings = CrawlerSettings.from_mapping({"CRAWLUTRON_ALLOW_PRIVATE_TARGETS": "1"})
+        settings = CrawlerSettings.from_mapping({})
         result = await crawl_request(
             {
                 "url": f"{base_url}/",

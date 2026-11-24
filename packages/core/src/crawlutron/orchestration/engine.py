@@ -19,6 +19,7 @@ from crawlutron.admission.payload_helpers import checked_payload_urls, payload_p
 from crawlutron.admission.policy import PolicyTier
 from crawlutron.config.env import get_env_int
 from crawlutron.config.settings import CrawlerSettings
+from crawlutron.config.settings_cache import get_cached_settings
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.result_record import ProducerEnvelope
 from crawlutron.orchestration.request_pipeline import (
@@ -180,7 +181,7 @@ def _admission_preamble(
     gate the async endpoint uses before accepting, so the doors cannot drift."""
     if not isinstance(payload, CrawlRequest):
         payload = CrawlRequest.model_validate(dict(payload))
-    active_settings = settings or CrawlerSettings.from_mapping()
+    active_settings = settings or get_cached_settings()
     host_policy = HostPolicy.from_settings(active_settings)
     pairs = checked_payload_urls(
         payload, active_settings.max_batch_size, url_pairs=url_pairs, host_policy=host_policy

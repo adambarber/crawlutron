@@ -14,7 +14,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 from pathlib import Path
 
-from crawlutron.config.settings import CrawlerSettings
+from crawlutron.config.settings_cache import get_cached_settings
 from crawlutron.models.cache_envelope import CacheEnvelope
 from crawlutron.models.json_value import JsonValue
 from crawlutron.runtime import process_state
@@ -430,7 +430,7 @@ def shared_content_cache() -> ContentCache:
     """The process-wide content cache, built once from settings on first use."""
     global _SHARED_CONTENT_CACHE
     if _SHARED_CONTENT_CACHE is None:
-        settings = CrawlerSettings.from_mapping()
+        settings = get_cached_settings()
         _SHARED_CONTENT_CACHE = ContentCache(
             cache_dir=settings.cache_dir,
             default_ttl=settings.cache_ttl_seconds,

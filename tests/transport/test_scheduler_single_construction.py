@@ -32,7 +32,6 @@ def test_both_paths_agree_on_scheduler_config():
         {
             "CRAWLUTRON_PER_DOMAIN_CONCURRENCY": "3",
             "CRAWLUTRON_PER_DOMAIN_DELAY_MS": "750",
-            "CRAWLUTRON_MAX_RPS": "4.5",
             "CRAWLUTRON_ADAPTIVE_THROTTLING": "false",
             "CRAWLUTRON_ADAPTIVE_MIN_DELAY": "0.2",
             "CRAWLUTRON_ADAPTIVE_MAX_DELAY": "12.0",
