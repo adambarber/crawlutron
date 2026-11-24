@@ -21,6 +21,7 @@ _BEGIN = "<!-- SUPPORTED_VERSIONS:BEGIN -->"
 _END = "<!-- SUPPORTED_VERSIONS:END -->"
 _BACKTICK = re.compile(r"`([^`\n]+)`")
 _VERSION_LINE = re.compile(r"\b\d+\.\d+\.x\b")
+_OWNER = re.compile(r"@[A-Za-z0-9][A-Za-z0-9-]*")
 
 _BANNED_CLAIMS = (
     re.compile(r"github\.com/sponsors", re.I),
@@ -108,20 +109,38 @@ def _urls() -> dict[str, object]:
     return {str(key): item for key, item in value.items()}
 
 
-def _required_tokens() -> dict[str, tuple[str, ...]]:
+def _maintainers(root: Path) -> tuple[str, ...]:
+    """Owners cited by the live CODEOWNERS file, derived not hand-maintained."""
+    text = _read(root / ".github" / "CODEOWNERS")
+    owners = {
+        owner
+        for raw in text.splitlines()
+        if raw.strip() and not raw.lstrip().startswith("#")
+        for owner in _OWNER.findall(raw)
+    }
+    return tuple(sorted(owners))
+
+
+def _maintainer_line(lines: list[str]) -> int:
+    """Line carrying the maintainer claim, for a file:line bite on a stale owner."""
+    return next((number for number, raw in enumerate(lines, start=1) if "maintainer" in raw.lower()), 1)
+
+
+def _required_tokens(root: Path = REPO_ROOT) -> dict[str, tuple[str, ...]]:
     raw_urls = _urls()
     urls = {key: str(value) for key, value in raw_urls.items()}
     license_name = str(_project()["license"])
     return {
         "SUPPORT.md": (urls["Issues"], urls["Security"], license_name),
-        "GOVERNANCE.md": (urls["Issues"], license_name),
+        "GOVERNANCE.md": (urls["Issues"], license_name, *_maintainers(root)),
         "FUNDING.md": (license_name,),
     }
 
 
 def _adoption_offenders(root: Path) -> list[str]:
     offenders: list[str] = []
-    for name, tokens in _required_tokens().items():
+    maintainers = _maintainers(root)
+    for name, tokens in _required_tokens(root).items():
         path = root / name
         if not path.is_file():
             offenders.append(f"{name}: adoption surface is missing")
@@ -129,7 +148,8 @@ def _adoption_offenders(root: Path) -> list[str]:
         lines = _read(path).splitlines()
         for token in tokens:
             if not any(token in line for line in lines):
-                offenders.append(f"{name}: does not cite live token {token!r}")
+                where = f"{name}:{_maintainer_line(lines)}" if token in maintainers else name
+                offenders.append(f"{where}: does not cite live token {token!r}")
         for number, raw in enumerate(lines, start=1):
             if any(pattern.search(raw) for pattern in _BANNED_CLAIMS):
                 offenders.append(f"{name}:{number}: banned sponsor, metric, or bypass claim")
@@ -142,6 +162,9 @@ def _write_valid_adoption(root: Path) -> None:
         (root / name).write_text(
             "\n".join(f"Live claim: {token}" for token in tokens) + "\n", encoding="utf-8"
         )
+    codeowners = root / ".github" / "CODEOWNERS"
+    codeowners.parent.mkdir(parents=True, exist_ok=True)
+    codeowners.write_text(_read(REPO_ROOT / ".github" / "CODEOWNERS"), encoding="utf-8")
 
 
 def _notice_dead_paths(text: str) -> list[str]:
@@ -270,3 +293,27 @@ def test_changelog_gate_bites_a_dead_workflow_citation():
     assert any("does not name the live release workflow" in hit for hit in _changelog_offenders(stale)), (
         _changelog_offenders(stale)
     )
+
+
+def _scratch_ownership(root: Path, owner: str, claim_owner: str) -> None:
+    """Seed a scratch adoption tree with a CODEOWNERS owner and governance claim."""
+    _write_valid_adoption(root)
+    governance = root / "GOVERNANCE.md"
+    governance.write_text(
+        _read(governance) + f"\nthe maintainer is {claim_owner}, as recorded in CODEOWNERS.\n",
+        encoding="utf-8",
+    )
+    codeowners = root / ".github" / "CODEOWNERS"
+    codeowners.parent.mkdir(parents=True, exist_ok=True)
+    codeowners.write_text(f"jscpd-expectations.json {owner}\n", encoding="utf-8")
+
+
+def test_adoption_gate_bites_an_ownership_transfer(tmp_path):
+    _scratch_ownership(tmp_path, "@newmaintainer", "@adambarber")
+    failures = _adoption_offenders(tmp_path)
+    assert any(re.search(r"GOVERNANCE\.md:\d+.*@newmaintainer", hit) for hit in failures), failures
+
+
+def test_adoption_gate_follows_a_transferred_owner_when_governance_updates(tmp_path):
+    _scratch_ownership(tmp_path, "@newmaintainer", "@newmaintainer")
+    assert not _adoption_offenders(tmp_path), _adoption_offenders(tmp_path)
