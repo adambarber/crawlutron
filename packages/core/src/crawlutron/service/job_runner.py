@@ -42,6 +42,11 @@ from crawlutron.service.job_recovery import (
     recover_orphaned_running_jobs,
 )
 from crawlutron.service.job_runner_lease import new_claim_token
+from crawlutron.service.job_runner_state import (
+    load_and_claim,
+    mark_complete_if_empty,
+    should_stop,
+)
 from crawlutron.storage.job_store import (
     DEFAULT_JOB_CLAIM_SECONDS,
     CrawlJobState,
@@ -53,6 +58,8 @@ from crawlutron.storage.job_store import (
 )
 from crawlutron.storage.safe_db import StorageError
 from crawlutron.transport.robots import FetchAndDecode
+from crawlutron_admit import Count, Duration
+from crawlutron_admit.task_scope import Grace, NamedRegistry, ScopeRefused, TaskScope
 from safe_url.normalized_url import NormalizedUrl, admit_or_none
 from safe_url.url_redaction import redact_url
 
@@ -155,64 +162,6 @@ async def _seed_job_sitemaps(
     job.stats["total_discovered"] = job.stats.get("total_discovered", 0) + outcome.accepted
 
 
-async def _load_and_claim(
-    job_id: str, job_store: JobStore, *, preclaimed: bool, claim_token: str, claim_seconds: float
-) -> CrawlJobState | None:
-    job = await job_store.aload(job_id)
-    if job is None:
-        return None
-    now = time.time()
-    if preclaimed:
-        if not await job_store.arenew_job_claim(job_id, claim_token, now=now):
-            return None
-    elif not await job_store.aset_status(
-        job_id,
-        JobStatus.RUNNING,
-        expected=JobStatus.PENDING,
-        claimed_by=claim_token,
-        claim_now=now,
-        claim_seconds=claim_seconds,
-    ):
-        return None
-    return replace(job, status=JobStatus.RUNNING, claimed_by=claim_token, claimed_at=now)
-
-
-async def _should_stop(
-    job: CrawlJobState, job_id: str, job_store: JobStore, shutdown_event: asyncio.Event, *, claim_token: str
-) -> bool:
-    if job.status in {JobStatus.PAUSED, JobStatus.CANCELLED}:
-        return True
-    if shutdown_event.is_set():
-        await job_store.asave(job)
-        await job_store.aset_status(
-            job_id,
-            JobStatus.PAUSED,
-            expected=JobStatus.RUNNING,
-            claimed_by=claim_token,
-            require_owner=True,
-            clear_claim=True,
-        )
-        return True
-    return False
-
-
-async def _mark_complete_if_empty(
-    job: CrawlJobState, job_id: str, job_store: JobStore, batch: Sequence[FrontierEntry], *, claim_token: str
-) -> bool:
-    if batch:
-        return False
-    await job_store.asave(job)
-    await job_store.aset_status(
-        job_id,
-        JobStatus.COMPLETED,
-        expected=JobStatus.RUNNING,
-        claimed_by=claim_token,
-        require_owner=True,
-        clear_claim=True,
-    )
-    return True
-
-
 def _resolve_redirects(
     items: Sequence[EngineCrawlResult], resolved: dict[NormalizedUrl, EngineCrawlResult]
 ) -> None:
@@ -307,10 +256,10 @@ async def _run_claimed_loop(
         if state is None:
             return
         job = replace(state, results=job.results, visited=job.visited, visited_mark=job.visited_mark)
-        if await _should_stop(job, job_id, job_store, shutdown_event, claim_token=token):
+        if await should_stop(job, job_id, job_store, shutdown_event, claim_token=token):
             return
         batch = pop_frontier(job)
-        if await _mark_complete_if_empty(job, job_id, job_store, batch, claim_token=token):
+        if await mark_complete_if_empty(job, job_id, job_store, batch, claim_token=token):
             return
         if not job.in_flight:
             job.in_flight = list(batch)
@@ -364,7 +313,7 @@ async def run_job(
     claim_seconds: float = DEFAULT_JOB_CLAIM_SECONDS,
 ) -> None:
     token = claim_token or new_claim_token(job_id)
-    job = await _load_and_claim(
+    job = await load_and_claim(
         job_id, job_store, preclaimed=preclaimed, claim_token=token, claim_seconds=claim_seconds
     )
     if job is None:
@@ -458,9 +407,13 @@ async def resume_job(
             try:
                 await asyncio.wait_for(asyncio.shield(old), timeout=wedge_grace_seconds)
             except TimeoutError:
-                old.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await old
+                scope = TaskScope.process(
+                    registry=NamedRegistry("process:job-retire", Count(1), Duration(0.25)),
+                    grace=Grace(wedge_grace_seconds),
+                )
+                handle = scope.adopt(old)
+                with contextlib.suppress(ScopeRefused):
+                    await scope.stop(handle, Grace(wedge_grace_seconds))
         start_job(
             job_id,
             job_store,

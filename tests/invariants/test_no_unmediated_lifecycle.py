@@ -257,7 +257,7 @@ def _measured() -> dict[str, int]:
 _RATCHET = {
     "spawn.load_bearing": 10,
     "spawn.removable": 68,
-    "retire.load_bearing": 9,
+    "retire.load_bearing": 8,
     "retire.removable": 57,
     "substitution.load_bearing": 0,
     "substitution.removable": 6,
