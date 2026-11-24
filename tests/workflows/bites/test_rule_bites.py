@@ -35,9 +35,6 @@ from tests.workflows._rules import (
     uses_tests_door,
     weekly_artifacts,
     weekly_lowest_direct,
-    weekly_mutation_targets,
-    weekly_mutation_timebox,
-    weekly_mutation_tool,
 )
 
 _SAMPLE: Job = next(job for job in JOBS if job.steps)
@@ -57,10 +54,6 @@ def _codeql_analyze() -> Job:
 
 def _nightly_test() -> Job:
     return _job_from("nightly", "test")
-
-
-def _weekly_mutation() -> Job:
-    return _job_from("weekly", "mutation-testing")
 
 
 def _weekly_lowest() -> Job:
@@ -190,42 +183,6 @@ def _step(**changes) -> Step:
                         if not (step.run and "scripts.coverage_reports" in step.run)
                     )
                 },
-            ),
-        ),
-        (
-            weekly_mutation_timebox,
-            _weekly_mutation().model_copy(update={"timeout_minutes": None}),
-        ),
-        (
-            weekly_mutation_tool,
-            _weekly_mutation().model_copy(
-                update={
-                    "steps": tuple(
-                        step for step in _weekly_mutation().steps if not (step.run and "mutmut" in step.run)
-                    )
-                },
-            ),
-        ),
-        (
-            weekly_mutation_targets,
-            _weekly_mutation().model_copy(
-                update={
-                    "steps": tuple(
-                        step.model_copy(
-                            update={
-                                "run": (
-                                    (step.run or "")
-                                    .replace("invariants", "other")
-                                    .replace("admission", "other")
-                                    .replace("core", "other")
-                                )
-                            }
-                        )
-                        if step.run and "mutmut run" in step.run
-                        else step
-                        for step in _weekly_mutation().steps
-                    )
-                }
             ),
         ),
         (
@@ -432,9 +389,6 @@ def test_every_job_rule_has_a_bite() -> None:
         "codeql-single-sarif-upload",
         "nightly-door-call",
         "nightly-coverage-reports",
-        "weekly-mutation-timebox",
-        "weekly-mutation-tool",
-        "weekly-mutation-targets",
         "weekly-lowest-direct",
         "ci-secret-scan-fetch-depth",
         "ci-dependency-review-checkout",

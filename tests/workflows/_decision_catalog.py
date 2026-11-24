@@ -79,7 +79,6 @@ def test_scorecard_runs_on_a_schedule_and_writes_findings() -> None:
     assert item.jobs["analysis"].permissions.get(PermissionScope.SECURITY_EVENTS) == PermissionLevel.WRITE
 
 
-@decision("weekly", Decision.MUTATION_TIMEBOX, jobs=("mutation-testing",))
-def test_weekly_mutation_job_is_timeboxed() -> None:
-    job = workflow("weekly").jobs["mutation-testing"]
-    assert job.timeout_minutes is not None and job.timeout_minutes <= 120
+@decision("weekly", Decision.MUTATION_RETIRED, jobs=())
+def test_weekly_has_no_mutation_testing_job() -> None:
+    assert "mutation-testing" not in workflow("weekly").jobs

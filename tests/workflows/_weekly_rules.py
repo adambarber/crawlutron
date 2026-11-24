@@ -41,56 +41,6 @@ def weekly_triggers(workflow: Workflow) -> Iterator[Finding]:
         )
 
 
-def weekly_mutation_timebox(workflow: Workflow, job: Job) -> Iterator[Finding]:
-    if workflow.stem != "weekly" or job.key != "mutation-testing":
-        return
-    if job.timeout_minutes is None or job.timeout_minutes > 120:
-        yield Finding(
-            RuleId.WEEKLY_MUTATION_TIMEBOX.value,
-            workflow.stem,
-            job.key,
-            job.line,
-            f"{workflow.path}:{job.line}: mutation-testing timeout must be <= 120 minutes",
-        )
-
-
-def weekly_mutation_tool(workflow: Workflow, job: Job) -> Iterator[Finding]:
-    if workflow.stem != "weekly" or job.key != "mutation-testing":
-        return
-    if not any(step.run and "mutmut" in step.run for step in job.steps):
-        yield Finding(
-            RuleId.WEEKLY_MUTATION_TOOL.value,
-            workflow.stem,
-            job.key,
-            job.line,
-            f"{workflow.path}:{job.line}: mutation-testing must run mutmut",
-        )
-
-
-def weekly_mutation_targets(workflow: Workflow, job: Job) -> Iterator[Finding]:
-    if workflow.stem != "weekly" or job.key != "mutation-testing":
-        return
-    for step in job.steps:
-        run = step.run or ""
-        if "mutmut run" in run:
-            if not any(token in run for token in ("invariants", "admission", "core")):
-                yield Finding(
-                    RuleId.WEEKLY_MUTATION_TARGETS.value,
-                    workflow.stem,
-                    job.key,
-                    step.line,
-                    f"{workflow.path}:{step.line}: mutmut must target invariant-critical modules",
-                )
-            return
-    yield Finding(
-        RuleId.WEEKLY_MUTATION_TARGETS.value,
-        workflow.stem,
-        job.key,
-        job.line,
-        f"{workflow.path}:{job.line}: mutmut run step targeting invariant-critical modules not found",
-    )
-
-
 def weekly_lowest_direct(workflow: Workflow, job: Job) -> Iterator[Finding]:
     if workflow.stem != "weekly" or job.key != "lowest-direct-resolution":
         return
@@ -135,26 +85,14 @@ def weekly_lowest_direct(workflow: Workflow, job: Job) -> Iterator[Finding]:
 def weekly_artifacts(workflow: Workflow) -> Iterator[Finding]:
     if workflow.stem != "weekly":
         return
-    has_mutation = False
     has_resolution = False
     for job in workflow.jobs.values():
         for step in job.steps:
             uses = step.uses or ""
             if "upload-artifact" in uses:
-                path = str(step.with_.get("path", ""))
                 name = str(step.name or "").lower()
-                if "mutation" in name or "html" in path:
-                    has_mutation = True
                 if "resolution" in name or "lowest" in name or "probe" in name:
                     has_resolution = True
-    if not has_mutation:
-        yield Finding(
-            RuleId.WEEKLY_ARTIFACTS.value,
-            workflow.stem,
-            "",
-            1,
-            f"{workflow.path}: weekly must upload a mutation testing artifact",
-        )
     if not has_resolution:
         yield Finding(
             RuleId.WEEKLY_ARTIFACTS.value,

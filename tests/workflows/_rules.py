@@ -40,12 +40,7 @@ from tests.workflows._policy import Finding, RuleId, Scope
 from tests.workflows._weekly_rules import (
     weekly_artifacts as weekly_artifacts,
 )
-from tests.workflows._weekly_rules import (
-    weekly_lowest_direct,
-    weekly_mutation_targets,
-    weekly_mutation_timebox,
-    weekly_mutation_tool,
-)
+from tests.workflows._weekly_rules import weekly_lowest_direct
 from tests.workflows._workflow_rules import (
     WORKFLOW_RULES,
 )
@@ -359,24 +354,6 @@ JOB_RULES = (
         Scope.WITH_STEPS,
         "nightly runs scripts.coverage_reports",
         nightly_coverage_reports,
-    ),
-    Rule(
-        RuleId.WEEKLY_MUTATION_TIMEBOX.value,
-        Scope.ALL,
-        "weekly mutation-testing job is timeboxed",
-        weekly_mutation_timebox,
-    ),
-    Rule(
-        RuleId.WEEKLY_MUTATION_TOOL.value,
-        Scope.WITH_STEPS,
-        "weekly runs mutmut for mutation testing",
-        weekly_mutation_tool,
-    ),
-    Rule(
-        RuleId.WEEKLY_MUTATION_TARGETS.value,
-        Scope.WITH_STEPS,
-        "weekly mutmut targets invariant-critical modules",
-        weekly_mutation_targets,
     ),
     Rule(
         RuleId.WEEKLY_LOWEST_DIRECT.value,

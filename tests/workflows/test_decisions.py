@@ -13,7 +13,7 @@ from tests.workflows._decision_catalog import (
     test_the_probe_plane_holds_no_trusted_credential,
     test_the_rehearsal_workflow_has_no_write_scope,
     test_the_roster_resolver_exposes_its_three_outputs,
-    test_weekly_mutation_job_is_timeboxed,
+    test_weekly_has_no_mutation_testing_job,
 )
 
 __all__ = [
@@ -27,5 +27,5 @@ __all__ = [
     "test_the_probe_plane_holds_no_trusted_credential",
     "test_the_rehearsal_workflow_has_no_write_scope",
     "test_the_roster_resolver_exposes_its_three_outputs",
-    "test_weekly_mutation_job_is_timeboxed",
+    "test_weekly_has_no_mutation_testing_job",
 ]

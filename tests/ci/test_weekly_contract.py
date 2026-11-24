@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import shlex
+from collections.abc import Iterator
+from pathlib import Path
+
 from tests.chokepoint_paths import REPO_ROOT
 
 SERVICE_ROOT = REPO_ROOT
@@ -87,3 +91,76 @@ def test_mutmut_in_dev_dependencies() -> None:
 
     mutmut_found = any(dep.startswith("mutmut==3.2.0") for dep in dev_deps)
     assert mutmut_found, f"mutmut==3.2.0 not found in dev dependencies: {dev_deps}"
+
+
+def _mutmut_cli_surface() -> tuple[frozenset[str], dict[str, frozenset[str]]]:
+    """Derive commands and flags from the pinned mutmut click CLI."""
+    from mutmut.__main__ import cli
+
+    commands = frozenset(cli.commands)
+    flags = {
+        name: frozenset(
+            option
+            for param in command.params
+            for option in (*param.opts, *param.secondary_opts)
+            if option.startswith("-")
+        )
+        | {"--help"}
+        for name, command in cli.commands.items()
+    }
+    return commands, flags
+
+
+def _mutmut_argument_lists(document: object) -> Iterator[list[str]]:
+    """Yield argument vectors for every mutmut call in a workflow document."""
+    if not isinstance(document, dict):
+        return
+    jobs = document.get("jobs")
+    if not isinstance(jobs, dict):
+        return
+    for job in jobs.values():
+        if not isinstance(job, dict):
+            continue
+        steps = job.get("steps")
+        if not isinstance(steps, list):
+            continue
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            run = step.get("run", "")
+            if not isinstance(run, str):
+                continue
+            for line in run.replace("\\\n", " ").splitlines():
+                if "mutmut" not in line:
+                    continue
+                tokens = shlex.split(line, comments=True)
+                for position, token in enumerate(tokens):
+                    if Path(token).name == "mutmut":
+                        yield tokens[position + 1 :]
+
+
+def test_weekly_invokes_only_flags_from_the_pinned_mutmut_cli() -> None:
+    """No mutmut call in weekly.yml may use a flag or command the pin lacks."""
+    commands, flags = _mutmut_cli_surface()
+    for args in _mutmut_argument_lists(workflow_document()):
+        command = next((arg for arg in args if not arg.startswith("-")), None)
+        assert command in commands, f"unknown mutmut command {command!r}; supported: {sorted(commands)}"
+        unsupported = [arg for arg in args if arg.startswith("-") and arg.split("=")[0] not in flags[command]]
+        assert not unsupported, f"flags absent from pinned mutmut {command}: {unsupported}"
+
+
+def test_mutmut_flag_guard_names_a_reintroduced_two_x_flag() -> None:
+    """Bite: a planted 2.x flag fails the pinned-CLI guard."""
+    planted = {
+        "jobs": {"weekly": {"steps": [{"run": ".venv/bin/mutmut run --paths-to-mutate tests/invariants"}]}}
+    }
+    commands, flags = _mutmut_cli_surface()
+    assert list(_mutmut_argument_lists(planted)) == [["run", "--paths-to-mutate", "tests/invariants"]]
+    assert "run" in commands and "--paths-to-mutate" not in flags["run"]
+
+
+def test_weekly_has_no_broken_mutation_job() -> None:
+    """The never-working mutmut 2.x job must stay removed until the pin supports it."""
+    jobs = workflow_document().get("jobs")
+    assert isinstance(jobs, dict)
+    assert "mutation-testing" not in jobs
