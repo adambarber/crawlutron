@@ -21,7 +21,9 @@ class TestEmitRoster:
         with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
             github_output = f.name
         try:
-            result = _run_script({"RELEASE_TAG": "", "GITHUB_OUTPUT": github_output})
+            result = _run_script(
+                {"RELEASE_TAG": "", "GITHUB_OUTPUT": github_output}, unset=("GITHUB_EVENT_NAME",)
+            )
             assert result.returncode == 0
             assert "0 package(s) tagged" in result.stdout
             assert "root=not released" in result.stdout

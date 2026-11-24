@@ -58,6 +58,8 @@ def _nightly_test() -> Job:
 
 def _nightly_coverage() -> Job:
     return _job_from("nightly", "coverage")
+
+
 def _weekly_lowest() -> Job:
     return _job_from("weekly", "lowest-direct-resolution")
 
