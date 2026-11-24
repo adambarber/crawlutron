@@ -135,6 +135,8 @@ DECLARED_SURFACE_RATCHET = {
     "packages/crawlutron-admit/src/crawlutron_admit/gauge.py": (2, 1),
     "packages/crawlutron-admit/src/crawlutron_admit/policy.py": (2, 0),
     "packages/crawlutron-admit/src/crawlutron_admit/seams.py": (2, 2),
+    # #1401: pure task-lifetime door (Grace, Handle, NamedRegistry, refusal, TaskScope).
+    "packages/crawlutron-admit/src/crawlutron_admit/task_scope.py": (6, 4),
     "packages/crawlutron-admit/src/crawlutron_admit/values.py": (24, 17),
     "packages/sdk/src/crawlutron_sdk/client.py": (2, 2),
     "packages/sdk/src/crawlutron_sdk/errors.py": (18, 2),

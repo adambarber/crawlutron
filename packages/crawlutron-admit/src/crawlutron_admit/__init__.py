@@ -11,6 +11,14 @@ from crawlutron_admit.gate import AdmissionGate, Decision, DecisionKind, StallGu
 from crawlutron_admit.gauge import GaugeState, ResourceGauge
 from crawlutron_admit.policy import LaneSpec, PacingPolicy
 from crawlutron_admit.seams import Clock, Signal
+from crawlutron_admit.task_scope import (
+    Grace,
+    Handle,
+    NamedRegistry,
+    RefusalReason,
+    ScopeRefused,
+    TaskScope,
+)
 from crawlutron_admit.values import (
     Allocation,
     AllocationEntry,
@@ -52,7 +60,9 @@ __all__ = [
     "Duration",
     "FloorDivisor",
     "GaugeState",
+    "Grace",
     "Granted",
+    "Handle",
     "IdleReason",
     "Instant",
     "LaneId",
@@ -61,19 +71,23 @@ __all__ = [
     "Limits",
     "MinAll",
     "Multiplier",
+    "NamedRegistry",
     "NestedAdmitError",
     "PacingPolicy",
     "Progress",
     "Ratio",
+    "RefusalReason",
     "ResourceGauge",
     "ResourceId",
     "RideCpuWhenFree",
     "Scale",
     "ScaleSource",
+    "ScopeRefused",
     "SensorBinding",
     "Sensing",
     "Signal",
     "StallGuard",
+    "TaskScope",
     "Want",
     "WrongGateError",
 ]
