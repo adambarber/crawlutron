@@ -48,7 +48,7 @@ async def search(
         await get_metrics().observe_search(provider=provider.name, errors=1, caller_id=caller_id)
         logger.warning(
             "search_request_provider_error",
-            extra={"provider": provider.name, "error": str(error)},
+            extra={"provider": provider.name, "error": redact_urls_in_text(str(error))},
         )
         raise DomainProviderError(str(error)) from error
     elapsed_ms = (time.monotonic() - started) * 1000
