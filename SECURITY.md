@@ -2,11 +2,17 @@
 
 ## Supported Versions
 
-| Version | Supported          |
-|---------|--------------------|
-| 0.4.x   | Yes                |
-| 0.3.x   | Critical fixes only|
-| < 0.3   | No                 |
+Security fixes are provided for the current release line only. The table below
+is generated from the released version in `.release-please-manifest.json`
+(the same value `pyproject.toml` declares); `tests/invariants/test_doc_drift_contract.py`
+fails if it drifts from that live source.
+
+<!-- SUPPORTED_VERSIONS:BEGIN -->
+| Version | Supported     |
+|---------|---------------|
+| 0.5.x   | Yes (current) |
+| < 0.5   | No            |
+<!-- SUPPORTED_VERSIONS:END -->
 
 ## Reporting a Vulnerability
 
