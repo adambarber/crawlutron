@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import enum
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any
 
@@ -22,9 +22,7 @@ class RefusalReason(enum.StrEnum):
     """The closed reason vocabulary a scope refusal surfaces."""
 
     TARGET_NOT_REGISTERED = "target_not_registered"
-    RETRY_PRESSURE = "retry_pressure"
-    GRACE_EXCEEDED = "grace_exceeded"
-    OVERSIZE = "oversize"
+    RESOURCE_PRESSURE = "resource_pressure"
 
 
 class ScopeRefused(Exception):
@@ -94,7 +92,7 @@ class NamedRegistry:
         """Consume one slot or refuse with reason, limit and retry-after."""
         if self._active >= self._limit.value:
             raise ScopeRefused(
-                reason=RefusalReason.RETRY_PRESSURE,
+                reason=RefusalReason.RESOURCE_PRESSURE,
                 limit=self._limit,
                 retry_after=self._retry_after,
             )
@@ -124,11 +122,11 @@ class TaskScope:
     def registry(self) -> NamedRegistry:
         return self._registry
 
-    async def spawn(self, work: Coroutine[Any, Any, Any]) -> Handle:
-        """Register a real asyncio task under this scope's live lease."""
+    async def spawn(self, factory: Callable[[], Coroutine[Any, Any, Any]]) -> Handle:
+        """Admit, then register a real asyncio task built from the factory."""
         self._registry.admit()
         try:
-            task = asyncio.create_task(work)
+            task = asyncio.create_task(factory())
         except BaseException:
             self._registry.release()
             raise
@@ -154,7 +152,7 @@ class TaskScope:
             _done, pending = await asyncio.wait({handle.task}, timeout=grace.value)
             if pending:
                 raise ScopeRefused(
-                    reason=RefusalReason.GRACE_EXCEEDED,
+                    reason=RefusalReason.RESOURCE_PRESSURE,
                     limit=self._registry.limit,
                     retry_after=Duration(grace.value),
                 )

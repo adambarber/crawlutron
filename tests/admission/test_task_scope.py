@@ -46,7 +46,7 @@ def test_spawn_returns_a_registered_task_handle():
     async def run() -> None:
         cm, scope, _, _ = await _fresh()
         try:
-            handle = await scope.spawn(_never())
+            handle = await scope.spawn(_never)
             assert isinstance(handle.task, asyncio.Task)
             assert handle.task in asyncio.all_tasks()
             assert scope.registry.active.value == 1
@@ -61,7 +61,7 @@ def test_stop_cancels_and_awaits_the_task():
     async def run() -> None:
         cm, scope, _, _ = await _fresh()
         try:
-            handle = await scope.spawn(_never())
+            handle = await scope.spawn(_never)
             await scope.stop(handle, Grace(0.1))
             assert handle.task.done()
             with pytest.raises(asyncio.CancelledError):
@@ -79,11 +79,11 @@ def test_stop_grace_exceeded_refuses_by_name_without_hanging():
         cm, scope, _, _ = await _fresh()
         started = asyncio.Event()
         try:
-            handle = await scope.spawn(_ignores_first_cancel(started))
+            handle = await scope.spawn(lambda: _ignores_first_cancel(started))
             await asyncio.wait_for(started.wait(), 1.0)
             with pytest.raises(ScopeRefused) as caught:
                 await asyncio.wait_for(scope.stop(handle, Grace(0.01)), 1.0)
-            assert caught.value.reason is RefusalReason.GRACE_EXCEEDED
+            assert caught.value.reason is RefusalReason.RESOURCE_PRESSURE
             assert isinstance(caught.value.limit, Count)
             assert isinstance(caught.value.retry_after, Duration)
             handle.task.cancel()
@@ -119,7 +119,7 @@ def test_repeated_stop_of_known_handle_is_idempotent():
     async def run() -> None:
         cm, scope, _, _ = await _fresh()
         try:
-            handle = await scope.spawn(_never())
+            handle = await scope.spawn(_never)
             await scope.stop(handle, Grace(0.1))
             await scope.stop(handle, Grace(0.1))
             assert scope.registry.active.value == 0
@@ -133,8 +133,8 @@ def test_repeated_stop_of_known_handle_is_idempotent():
 def test_scope_exit_stops_all_then_releases_lease():
     async def run() -> None:
         cm, scope, _, granted = await _fresh()
-        first = await scope.spawn(_never())
-        second = await scope.spawn(_never())
+        first = await scope.spawn(_never)
+        second = await scope.spawn(_never)
         await scope.__aexit__(None, None, None)
         assert first.task.done() and second.task.done()
         assert first.task.cancelled() and second.task.cancelled()
@@ -150,11 +150,35 @@ def test_named_registry_refuses_at_its_own_limit():
     registry.admit()
     with pytest.raises(ScopeRefused) as caught:
         registry.admit()
-    assert caught.value.reason is RefusalReason.RETRY_PRESSURE
+    assert caught.value.reason is RefusalReason.RESOURCE_PRESSURE
     assert caught.value.limit == Count(1)
     assert caught.value.retry_after == Duration(0.5)
     registry.release()
     registry.admit()
+
+
+def test_refused_spawn_never_constructs_the_work():
+    async def run() -> None:
+        cm, scope, _, _ = await _fresh()
+        constructed = False
+
+        def factory():
+            nonlocal constructed
+            constructed = True
+            return _never()
+
+        try:
+            await scope.spawn(_never)
+            await scope.spawn(_never)
+            with pytest.raises(ScopeRefused) as caught:
+                await scope.spawn(factory)
+            assert caught.value.reason is RefusalReason.RESOURCE_PRESSURE
+            assert constructed is False
+        finally:
+            await scope.__aexit__(None, None, None)
+            await _finish(cm)
+
+    asyncio.run(run())
 
 
 def test_grace_is_bounded_finite_and_nonnegative():
