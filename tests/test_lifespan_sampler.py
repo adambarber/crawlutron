@@ -17,10 +17,13 @@ def _spy_on_every_teardown(monkeypatch, http_closer) -> list[str]:
     from crawlutron_rest import main as main_mod
 
     ran: list[str] = []
+    real_cffi = http_mod.close_cffi_session
+    real_browser = main_mod.close_browser_pool
 
-    def _record(name):
+    def _record(name, real):
         async def _close():
             ran.append(name)
+            await real()
 
         return _close
 
@@ -28,8 +31,8 @@ def _spy_on_every_teardown(monkeypatch, http_closer) -> list[str]:
     # step (extraction now runs through crawlutron_extract).
     stub_heavy_teardown(monkeypatch)
     monkeypatch.setattr(http_mod, "close_async_http_client", http_closer)
-    monkeypatch.setattr(http_mod, "close_cffi_session", _record("cffi"))
-    monkeypatch.setattr(main_mod, "close_browser_pool", _record("browser"))
+    monkeypatch.setattr(http_mod, "close_cffi_session", _record("cffi", real_cffi))
+    monkeypatch.setattr(main_mod, "close_browser_pool", _record("browser", real_browser))
     monkeypatch.setattr(engine_mod.resource_gate(), "close", lambda: ran.append("gate"))
     return ran
 
@@ -70,8 +73,12 @@ class TestShutdownRunsEveryStep:
 
     async def test_a_clean_shutdown_runs_every_step_and_raises_nothing(self, monkeypatch):
 
+        from crawlutron.transport import http_client_pool as http_mod
+
+        real_http = http_mod.close_async_http_client
+
         async def _close():
-            return None
+            await real_http()
 
         ran = _spy_on_every_teardown(monkeypatch, _close)
         app = service_app()
