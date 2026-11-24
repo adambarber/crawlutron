@@ -255,7 +255,7 @@ def _measured() -> dict[str, int]:
 # Detector-correction re-seed: wider detection (subscript/alias/call receivers,
 # import aliases, folded status, path doors); all rows >= prior. Migration moves DOWN.
 _RATCHET = {
-    "spawn.load_bearing": 11,
+    "spawn.load_bearing": 10,
     "spawn.removable": 68,
     "retire.load_bearing": 9,
     "retire.removable": 57,
