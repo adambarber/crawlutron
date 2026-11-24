@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import html
 import inspect
 import re as _re
@@ -32,6 +33,8 @@ from crawlutron.vocabulary.limits import (
     SITEMAP_MAX_DEPTH,
     SITEMAP_MAX_URLS,
 )
+from crawlutron_admit import Count, Duration
+from crawlutron_admit.task_scope import Grace, NamedRegistry, ScopeRefused, TaskScope
 from safe_url.host_policy import HostPolicy
 from safe_url.normalized_url import NormalizedUrl
 
@@ -236,22 +239,34 @@ async def _fanout_sitemap_children(
     walk: _SitemapWalk, current_url: NormalizedUrl, children: list[str], depth: int
 ) -> None:
     """Schedule bounded fan-out over one sitemapindex's children."""
-    for offset in range(0, len(children), SITEMAP_INDEX_FANOUT):
-        if len(walk.page_urls) >= walk.max_urls:
-            break
-        chunk = children[offset : offset + SITEMAP_INDEX_FANOUT]
-        pending = []
-        for child in chunk:
-            admitted = current_url.resolve(child)
-            if admitted is not None and admitted not in walk.visited:
-                pending.append(asyncio.create_task(_recurse_sitemap(walk, admitted, depth + 1, None)))
-        if pending:
-            # Stragglers are cancelled so one slow server cannot gate the
-            # entire resolution.
-            done, _ = await asyncio.wait(pending, timeout=SITEMAP_FANOUT_TIMEOUT_SECONDS)
-            for t in pending:
-                if t not in done:
-                    t.cancel()
+    scope = TaskScope.process(
+        registry=NamedRegistry("process:sitemap-fanout", Count(SITEMAP_INDEX_FANOUT), Duration(0.25)),
+        grace=Grace(1.0),
+    )
+    try:
+        for offset in range(0, len(children), SITEMAP_INDEX_FANOUT):
+            if len(walk.page_urls) >= walk.max_urls:
+                break
+            chunk = children[offset : offset + SITEMAP_INDEX_FANOUT]
+            handles = []
+            for child in chunk:
+                admitted = current_url.resolve(child)
+                if admitted is not None and admitted not in walk.visited:
+                    work = functools.partial(_recurse_sitemap, walk, admitted, depth + 1, None)
+                    handles.append(await scope.spawn(work))
+            if handles:
+                tasks = [handle.task for handle in handles]
+                done, _ = await asyncio.wait(tasks, timeout=SITEMAP_FANOUT_TIMEOUT_SECONDS)
+                for handle in handles:
+                    if handle.task in done:
+                        scope.stop_now(handle)
+                    else:
+                        # Stragglers stop through the door so one slow server
+                        # cannot gate the entire resolution.
+                        with contextlib.suppress(ScopeRefused):
+                            await scope.stop(handle, Grace(1.0))
+    finally:
+        await scope.__aexit__(None, None, None)
 
 
 async def _recurse_sitemap(

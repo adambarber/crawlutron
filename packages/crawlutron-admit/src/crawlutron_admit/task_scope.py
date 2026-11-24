@@ -107,11 +107,11 @@ class NamedRegistry:
 
 
 class TaskScope:
-    """Two verbs over a live grant: spawn registers a task, stop closes it."""
+    """Two verbs over a lease or a process marker: spawn registers, stop closes."""
 
     __slots__ = ("_granted", "_registry", "_grace", "_handles", "_stopped", "_counter")
 
-    def __init__(self, *, granted: Granted, registry: NamedRegistry, grace: Grace) -> None:
+    def __init__(self, *, granted: Granted | None, registry: NamedRegistry, grace: Grace) -> None:
         self._granted = granted
         self._registry = registry
         self._grace = grace
@@ -119,35 +119,69 @@ class TaskScope:
         self._stopped: set[str] = set()
         self._counter = 0
 
+    @classmethod
+    def process(cls, *, registry: NamedRegistry, grace: Grace) -> TaskScope:
+        """Build a lease-free scope for long-lived process work."""
+        return cls(granted=None, registry=registry, grace=grace)
+
     @property
     def registry(self) -> NamedRegistry:
         return self._registry
 
-    async def spawn(self, factory: Callable[[], Coroutine[Any, Any, Any]]) -> Handle:
-        """Admit, then register a real asyncio task built from the factory."""
+    def _register(self, task: asyncio.Task[Any]) -> Handle:
+        """Give an admitted task a typed identity under this scope."""
+        self._counter += 1
+        handle = Handle(id=f"handle-{self._counter}", task=task)
+        self._handles[handle.id] = handle
+        return handle
+
+    def _claim(self, handle: Handle) -> bool:
+        """Detach a live handle; False when already stopped, refuse when foreign."""
+        if handle.id in self._handles:
+            del self._handles[handle.id]
+            self._stopped.add(handle.id)
+            return True
+        if handle.id in self._stopped:
+            return False
+        raise ScopeRefused(
+            reason=RefusalReason.TARGET_NOT_REGISTERED,
+            limit=self._registry.limit,
+            retry_after=self._registry.retry_after,
+        )
+
+    def spawn_now(self, factory: Callable[[], Coroutine[Any, Any, Any]]) -> Handle:
+        """Admit and register a task from sync code already on the event loop."""
         self._registry.admit()
         try:
             task = asyncio.create_task(factory())
         except BaseException:
             self._registry.release()
             raise
-        self._counter += 1
-        handle = Handle(id=f"handle-{self._counter}", task=task)
-        self._handles[handle.id] = handle
-        return handle
+        return self._register(task)
+
+    async def spawn(self, factory: Callable[[], Coroutine[Any, Any, Any]]) -> Handle:
+        """Admit, then register a real asyncio task built from the factory."""
+        return self.spawn_now(factory)
+
+    def adopt(self, task: asyncio.Task[Any]) -> Handle:
+        """Register an already-running task from the legacy door for door retire."""
+        self._registry.admit()
+        return self._register(task)
+
+    def stop_now(self, handle: Handle) -> None:
+        """Cancel and release a task synchronously, without awaiting its exit."""
+        if not self._claim(handle):
+            return
+        try:
+            if not handle.task.done():
+                handle.task.cancel()
+        finally:
+            self._registry.release()
 
     async def stop(self, handle: Handle, grace: Grace) -> None:
         """Cancel and await a registered task, then release its slot."""
-        if handle.id not in self._handles:
-            if handle.id in self._stopped:
-                return
-            raise ScopeRefused(
-                reason=RefusalReason.TARGET_NOT_REGISTERED,
-                limit=self._registry.limit,
-                retry_after=self._registry.retry_after,
-            )
-        del self._handles[handle.id]
-        self._stopped.add(handle.id)
+        if not self._claim(handle):
+            return
         try:
             handle.task.cancel()
             _done, pending = await asyncio.wait({handle.task}, timeout=grace.value)
@@ -176,6 +210,7 @@ class TaskScope:
                     if refused is None:
                         refused = failure
         finally:
-            self._granted.lease.release()
+            if self._granted is not None:
+                self._granted.lease.release()
         if refused is not None:
             raise refused

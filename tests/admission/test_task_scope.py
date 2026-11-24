@@ -247,3 +247,112 @@ def test_module_stays_pure_and_io_free():
         assert core_import.search(line) is None, f"impure core import: {line!r}"
     for banned in ("sqlite3", "socket", "aiohttp", "pathlib", "open("):
         assert banned not in source
+
+
+def _process(limit: int = 2) -> TaskScope:
+    """A lease-free process scope with its own bounded named registry."""
+    return TaskScope.process(
+        registry=NamedRegistry("process:sweep", Count(limit), Duration(0.25)),
+        grace=Grace(0.1),
+    )
+
+
+def test_process_scope_spawns_and_stops_without_a_lease():
+    async def run() -> None:
+        scope = _process()
+        handle = await scope.spawn(_never)
+        assert isinstance(handle.task, asyncio.Task)
+        await scope.stop(handle, Grace(0.1))
+        assert handle.task.done()
+        assert scope.registry.active.value == 0
+        await scope.__aexit__(None, None, None)
+
+    asyncio.run(run())
+
+
+def test_process_scope_exit_stops_all_without_a_lease():
+    async def run() -> None:
+        scope = _process()
+        first = await scope.spawn(_never)
+        second = await scope.spawn(_never)
+        await scope.__aexit__(None, None, None)
+        assert first.task.cancelled() and second.task.cancelled()
+        assert scope.registry.active.value == 0
+
+    asyncio.run(run())
+
+
+def test_process_scope_refusals_match_the_leased_door():
+    async def run() -> None:
+        scope = _process(limit=1)
+        await scope.spawn(_never)
+        with pytest.raises(ScopeRefused) as caught:
+            await scope.spawn(_never)
+        assert caught.value.reason is RefusalReason.RESOURCE_PRESSURE
+        assert caught.value.limit == Count(1)
+        assert isinstance(caught.value.retry_after, Duration)
+        stray = asyncio.create_task(_never())
+        try:
+            with pytest.raises(ScopeRefused) as foreign:
+                await scope.stop(Handle(id="never-registered", task=stray), Grace(0.1))
+            assert foreign.value.reason is RefusalReason.TARGET_NOT_REGISTERED
+            assert foreign.value.limit == scope.registry.limit
+            assert foreign.value.retry_after == scope.registry.retry_after
+        finally:
+            stray.cancel()
+            await asyncio.gather(stray, return_exceptions=True)
+        await scope.__aexit__(None, None, None)
+
+    asyncio.run(run())
+
+
+def test_process_scope_stop_releases_the_registry_slot():
+    async def run() -> None:
+        scope = _process(limit=1)
+        first = await scope.spawn(_never)
+        await scope.stop(first, Grace(0.1))
+        second = await scope.spawn(_never)
+        assert isinstance(second.task, asyncio.Task)
+        await scope.__aexit__(None, None, None)
+
+    asyncio.run(run())
+
+
+def test_spawn_now_registers_a_task_from_sync_code():
+    async def run() -> None:
+        scope = _process()
+        handle = scope.spawn_now(_never)
+        assert isinstance(handle.task, asyncio.Task)
+        assert handle.task in asyncio.all_tasks()
+        assert scope.registry.active.value == 1
+        await scope.__aexit__(None, None, None)
+
+    asyncio.run(run())
+
+
+def test_stop_now_cancels_and_releases_without_awaiting():
+    async def run() -> None:
+        scope = _process()
+        handle = scope.spawn_now(_never)
+        scope.stop_now(handle)
+        await asyncio.sleep(0)
+        assert handle.task.cancelled()
+        assert scope.registry.active.value == 0
+        await scope.__aexit__(None, None, None)
+
+    asyncio.run(run())
+
+
+def test_adopt_registers_a_running_task_for_door_stop():
+    async def run() -> None:
+        scope = _process()
+        running = asyncio.create_task(_never())
+        handle = scope.adopt(running)
+        assert handle.task is running
+        assert scope.registry.active.value == 1
+        await scope.stop(handle, Grace(0.1))
+        assert running.cancelled()
+        assert scope.registry.active.value == 0
+        await scope.__aexit__(None, None, None)
+
+    asyncio.run(run())

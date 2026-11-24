@@ -26,6 +26,8 @@ from crawlutron.runtime import process_state
 from crawlutron.safety.bounded_io import BodyTooLarge, read_capped_async
 from crawlutron.transport.http_client_pool import get_async_http_client
 from crawlutron.transport.timeouts import Timeouts
+from crawlutron_admit import Count, Duration
+from crawlutron_admit.task_scope import Grace, Handle, NamedRegistry, ScopeRefused, TaskScope
 from safe_url.host_policy import HostPolicy
 from safe_url.normalized_url import NormalizedUrl
 from safe_url.url_redaction import redact_urls_in_text
@@ -41,7 +43,11 @@ _WEBHOOK_BACKOFF_MS_DEFAULT = 200
 # In-flight delivery tasks, tracked so shutdown drains a callback even when the
 # runner was cancelled after its terminal write landed. Hard cap (#655).
 DELIVERIES_CAP = 1024
-_DELIVERIES: set[asyncio.Task] = set()
+_DELIVERY_SCOPE = TaskScope.process(
+    registry=NamedRegistry("webhook:delivery", Count(DELIVERIES_CAP), Duration(0.25)),
+    grace=Grace(1.0),
+)
+_DELIVERIES: set[Handle] = set()
 
 #: One-time flag: the first delivery under an unset secret warns once (#655),
 #: not once per delivery -- an unsigned deployment would otherwise flood the log.
@@ -64,10 +70,16 @@ def webhook_secret() -> str:
 def _reset() -> None:
     """Cancel in-flight deliveries and empty the tracked set."""
     global _UNSIGNED_WARNING_EMITTED
-    for task in list(_DELIVERIES):
-        task.cancel()
+    for handle in list(_DELIVERIES):
+        _DELIVERY_SCOPE.stop_now(handle)
     _DELIVERIES.clear()
     _UNSIGNED_WARNING_EMITTED = False
+
+
+def _release_delivery(handle: Handle, _task: asyncio.Task) -> None:
+    """Done callback: drop the handle and return its admission slot."""
+    _DELIVERIES.discard(handle)
+    _DELIVERY_SCOPE.stop_now(handle)
 
 
 def _has() -> bool:
@@ -190,25 +202,31 @@ async def drain_webhook_deliveries() -> None:
     callback is delivered before the stores close -- under a total deadline:
     one hung receiver must not wedge shutdown past the delivery budget.
     """
-    tasks = list(_DELIVERIES)
-    if not tasks:
+    handles = list(_DELIVERIES)
+    if not handles:
         return
+    tasks = [handle.task for handle in handles]
     try:
-        done, pending = await asyncio.wait(tasks, timeout=webhook_drain_deadline_seconds())
+        _done, pending = await asyncio.wait(tasks, timeout=webhook_drain_deadline_seconds())
     except asyncio.CancelledError:
         raise
-    for task in pending:
-        task.cancel()
-        # The delivery already logged its loss; abandonment is named here.
-        logger.warning("webhook_drain_abandoned", extra={"task": repr(task)})
-    for task in done:
-        try:
-            task.result()
-        except asyncio.CancelledError:
-            pass
-        except Exception as exc:
-            # The delivery already logged its loss; a re-raised error is drained.
-            logger.warning("webhook_drain_error", extra={"error": redact_urls_in_text(str(exc))})
+    for handle in handles:
+        if handle.task in pending:
+            try:
+                await _DELIVERY_SCOPE.stop(handle, Grace(1.0))
+            except ScopeRefused:
+                pass
+            # The delivery already logged its loss; abandonment is named here.
+            logger.warning("webhook_drain_abandoned", extra={"task": repr(handle.task)})
+        else:
+            _DELIVERY_SCOPE.stop_now(handle)
+            try:
+                handle.task.result()
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:
+                # The delivery already logged its loss; a re-raised error is drained.
+                logger.warning("webhook_drain_error", extra={"error": redact_urls_in_text(str(exc))})
 
 
 def _should_retry(delivery_exc: Exception, attempt: int, attempts: int) -> bool:
@@ -315,10 +333,14 @@ def _tracked_delivery(
             extra={"cap": DELIVERIES_CAP, "url": target.redacted()},
         )
         return None
-    task = asyncio.create_task(post_webhook(target, payload))
-    _DELIVERIES.add(task)
-    task.add_done_callback(_DELIVERIES.discard)
-    return task
+    try:
+        handle = _DELIVERY_SCOPE.spawn_now(lambda: post_webhook(target, payload))
+    except ScopeRefused:
+        logger.warning("webhook_delivery_refused_at_cap", extra={"cap": DELIVERIES_CAP})
+        return None
+    _DELIVERIES.add(handle)
+    handle.task.add_done_callback(functools.partial(_release_delivery, handle))
+    return handle.task
 
 
 async def post_webhook_guarded(
