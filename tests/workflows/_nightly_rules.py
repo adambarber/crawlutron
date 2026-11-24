@@ -83,13 +83,22 @@ def nightly_door_call(workflow: Workflow, job: Job) -> Iterator[Finding]:
 def nightly_coverage_reports(workflow: Workflow, job: Job) -> Iterator[Finding]:
     if workflow.stem != "nightly":
         return
-    if not any(step.run and "scripts.coverage_reports" in step.run for step in job.steps):
+    reports = any(step.run and "scripts.coverage_reports" in step.run for step in job.steps)
+    if job.key == "coverage" and not reports:
         yield Finding(
             RuleId.NIGHTLY_COVERAGE_REPORTS.value,
             workflow.stem,
             job.key,
             job.line,
-            f"{workflow.path}:{job.line}: nightly must run scripts.coverage_reports",
+            f"{workflow.path}:{job.line}: nightly consumer must report after combining fragments",
+        )
+    if job.key == "test" and reports:
+        yield Finding(
+            RuleId.NIGHTLY_COVERAGE_REPORTS.value,
+            workflow.stem,
+            job.key,
+            job.line,
+            f"{workflow.path}:{job.line}: producer cannot report from the door's uncombined fragment",
         )
 
 

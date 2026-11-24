@@ -56,6 +56,8 @@ def _nightly_test() -> Job:
     return _job_from("nightly", "test")
 
 
+def _nightly_coverage() -> Job:
+    return _job_from("nightly", "coverage")
 def _weekly_lowest() -> Job:
     return _job_from("weekly", "lowest-direct-resolution")
 
@@ -175,12 +177,29 @@ def _step(**changes) -> Step:
         ),
         (
             nightly_coverage_reports,
-            _nightly_test().model_copy(
+            _nightly_coverage().model_copy(
                 update={
                     "steps": tuple(
                         step
-                        for step in _nightly_test().steps
+                        for step in _nightly_coverage().steps
                         if not (step.run and "scripts.coverage_reports" in step.run)
+                    )
+                },
+            ),
+        ),
+        (
+            nightly_coverage_reports,
+            _nightly_test().model_copy(
+                update={
+                    "steps": _nightly_test().steps
+                    + (
+                        Step.create(
+                            {
+                                "name": "Early reports",
+                                "run": ".venv/bin/python -m scripts.coverage_reports",
+                                "line": 99,
+                            }
+                        ),
                     )
                 },
             ),
