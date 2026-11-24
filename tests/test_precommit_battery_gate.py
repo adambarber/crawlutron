@@ -22,6 +22,7 @@ from tests._ci_contract import (
     _field,
     _hook_blocks,
 )
+from tests.invariants._coverage_floors import OVERALL_FLOOR
 
 BATTERY_HOOK_ID = "battery"
 
@@ -81,7 +82,7 @@ def test_the_battery_child_runs_the_whole_suite_with_default_addopts() -> None:
 def test_the_coverage_child_is_the_battery_child_plus_coverage_switches() -> None:
     """Kills the push-gate drift mutant: `-o addopts=""` or a re-spelled
     -n/--dist on the coverage hook reds — the push gate must run exactly the
-    suite the battery certifies, plus coverage (2026-11-12)."""
+    suite the battery certifies, plus coverage (2026-11-12) and its floor."""
     hooks = _hook_blocks(_config())
     battery = shlex.split(_entry(_battery(hooks)).split(" -- ", 1)[1])
     coverage = [block for hook_id, block in hooks if hook_id == "coverage"]
@@ -90,9 +91,21 @@ def test_the_coverage_child_is_the_battery_child_plus_coverage_switches() -> Non
     # command starts after the shared gate-helper prologue, not after a `--`.
     cov_argv = shlex.split(_entry(coverage[0]).partition("' gate ")[2].strip())
     assert cov_argv[:3] == battery[:3] == [".venv/bin/python", "-m", "pytest"]
-    assert cov_argv[3:] == battery[3:] + ["--cov=crawlutron", "--cov-report="], (
-        f"coverage child drifted from battery + coverage: {cov_argv[3:]}"
-    )
+    assert cov_argv[3:] == battery[3:] + [
+        "--cov=crawlutron",
+        "--cov-report=",
+        f"--cov-fail-under={OVERALL_FLOOR:g}",
+    ], f"coverage child drifted from battery + coverage switches: {cov_argv[3:]}"
+
+
+def test_the_per_package_floor_hook_is_declared_at_pre_push() -> None:
+    """Kills the delete-the-floor-hook mutant: without it the per-package
+    floors are prose only, so a package can regress unnoticed (#1358)."""
+    hooks = _hook_blocks(_config())
+    floor = [block for hook_id, block in hooks if hook_id == "coverage-floor"]
+    assert len(floor) == 1, "exactly one per-package coverage-floor hook required"
+    assert floor[0]["stages"] == ["pre-push"]
+    assert "scripts.coverage_floor_gate" in _entry(floor[0])
 
 
 def test_the_fanout_discovers_every_precommit_pytest_child() -> None:

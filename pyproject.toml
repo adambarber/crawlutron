@@ -83,8 +83,8 @@ dev = [
     # workflow `run:` blocks. Both are pinned gate tools for the actionlint hook.
     "actionlint-py==1.7.12.25",
     "shellcheck-py==0.11.0.1",
-    # Coverage measurement, opt-in only (`make coverage`). No threshold, no
-    # fail-under: measurement exists so the number is real; policy is separate.
+    # Coverage measurement, opt-in only (`make coverage`). The enforced floor
+    # lives in the pre-push hook and coverage-floors.json (#1358), not here.
     "pytest-cov==7.1.0",
     # Coverage engine itself, pinned so the gate surface doesn't float. The
     # dev extra installs it; CI's enforcement job builds from -e .[dev].

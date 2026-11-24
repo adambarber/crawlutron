@@ -265,34 +265,48 @@ repos:
         pass_filenames: true
         stages: [commit-msg]
 
-      # Coverage as a measured-descriptive surface, not a gate: no threshold,
-      # no fail-under, no ratchet until the owner rules one. It runs at the
-      # pre-push stage -- a measurement pass on every commit would train
-      # --no-verify -- and `files:` scopes it to crawlutron/tests so docs-only
-      # commits skip it entirely. The engine config lives once in
-      # pyproject.toml ([tool.coverage.run], core = "sysmon" via PEP 669 on
-      # Python 3.14, the lever that holds tracer overhead to a measured
+      # Coverage enforces a floor at pre-push (owner ruling #1358): --cov-fail-under=90
+      # gates the overall number; the sibling coverage-floor hook checks every derived
+      # package against its seed. coverage-floors.json is the single measured source and
+      # floors ratchet UP only, in the commit whose coverage improvement earns the raise.
+      # It runs at pre-push -- a measurement pass on every commit would train --no-verify
+      # -- and `files:` shares the service trigger, matching everything outside docker/
+      # (docs included): docs-only commits DO run both hooks; that over-trigger is deliberate, safe.
+      # The engine config lives once in pyproject.toml ([tool.coverage.run], core = "sysmon"
+      # via PEP 669 on Python 3.14, the lever that holds tracer overhead to a measured
       # median-of-3 figure recorded in the coverage hook's ticket evidence).
-      # The report is a separate untimed step (`python -m coverage report
-      # --skip-covered`) so the timed pass measures tracing only.
       #
-      # The child is the BATTERY child plus the coverage switches -- the same
-      # `pytest -q`, inheriting the same ini addopts (marker filter + workers).
-      # It used to run `-o addopts=""`, re-spelling -n/--dist and executing the
-      # browser/slow population the battery deselects, which reddened on timing
-      # tests three times under tracing (2026-11-12, push-gate audit). No
-      # override, no re-declared flags: it is identical to the pre-commit gate
-      # plus coverage, and tests/test_precommit_battery_gate.py pins that identity.
+      # The child is the BATTERY child plus the coverage switches -- the same `pytest -q`,
+      # inheriting the same ini addopts (marker filter + workers). It used to run
+      # `-o addopts=""`, re-spelling -n/--dist and executing the browser/slow population
+      # the battery deselects, which reddened on timing tests three times under tracing
+      # (2026-11-12, push-gate audit). No override, no re-declared flags: it is identical
+      # to the pre-commit gate plus coverage -- including the fail-under switch, which is
+      # part of that contract -- and tests/test_precommit_battery_gate.py pins the identity.
       #
       # Depth is NOT configured here: the deeper surface (branch +
       # dynamic_context="test_function", weekly / pre-release) pairs with the
       # mutation-proof evidence story and is documented in pyproject's
       # [tool.coverage] comment block instead of being a second wired command.
       - id: coverage
-        name: coverage (measured-descriptive, pre-push)
+        name: coverage floor (pre-push)
         entry: >-
           bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
-          .venv/bin/python -m pytest -q --cov=crawlutron --cov-report=
+          .venv/bin/python -m pytest -q --cov=crawlutron --cov-report= --cov-fail-under=90
+        language: system
+        files: *service_trigger
+        pass_filenames: false
+        stages: [pre-push]
+
+      # The per-package half of the floor. Runs after `coverage` in the same pre-push
+      # stage so the combined .coverage it reads is the one the coverage child just
+      # wrote. It is a separate hook because hooks run as argv, not a shell: an `&&`
+      # appended to the coverage entry would be passed to pytest as a literal argument.
+      - id: coverage-floor
+        name: per-package coverage floors (pre-push)
+        entry: >-
+          bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
+          .venv/bin/python -m scripts.coverage_floor_gate
         language: system
         files: *service_trigger
         pass_filenames: false

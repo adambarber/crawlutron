@@ -245,12 +245,11 @@ This is unusually thorough for an open-source project. New attack
 classes should land alongside a dedicated adversarial test that fails
 without the fix.
 
-**Coverage is measured, not a badge.** No coverage badge or coverage
-ratchet is claimed. The pre-push coverage hook is measured-descriptive
-only — no threshold, no fail-under, no ratchet until the owner rules one
-(`.pre-commit-config.yaml:229-237`). The safety boundary is the invariant
-suite and the fail-closed SSRF/auth guards, not a coverage percentage.
-See `docs/architecture-governance.md`.
+**Coverage is enforced at pre-push, not through Codecov.** The Codecov badge
+is informational; the pre-push hook enforces a 90% overall floor
+(`--cov-fail-under=90`) and per-package floors seeded from the measured run in
+`coverage-floors.json`, ratcheting up only. The safety boundary stays the
+invariant suite and the fail-closed SSRF/auth guards. See `docs/architecture-governance.md`.
 
 ---
 
