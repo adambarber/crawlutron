@@ -93,12 +93,18 @@ def _premises() -> dict[str, Callable[[], None]]:
 
         assert any(str(path).endswith("safety/json_safe.py") for path, _ in app_trees(exclude=frozenset()))
 
+    def json_loads_premise() -> None:
+        from tests.chokepoint_paths import REPO_ROOT
+
+        assert (REPO_ROOT / "packages/core/src/crawlutron/safety/json_safe.py").is_file()
+
     return {
         "undecodable-encoding": encoding,
         "resolved-env-reader": knob,
         "public-surface": public_surface,
         "lifecycle-tree": lifecycle_tree,
         "json-fallback": json_fallback_tree,
+        "json-loads": json_loads_premise,
         "bool-env": _observed("bool-env"),
         "robots-policy": _observed("robots-policy"),
         "public-target": _observed("public-target"),
@@ -206,6 +212,7 @@ def hand_rolled_detectors() -> tuple[ArmedHandRolled, ...]:
                 "_fallback_offenders",
                 "json-fallback",
             ),
+            ("json-loads", "test_json_loads_chokepoint.py", "_json_loads_offenders", "json-loads"),
         )
     ]
     return (*base, *_subject_detectors())

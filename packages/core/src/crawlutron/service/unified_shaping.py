@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import Mapping, Sequence
 from typing import cast, get_type_hints
 
@@ -21,6 +20,7 @@ from crawlutron.models.serialization import to_dict as _result_to_dict
 from crawlutron.models.strategy_attempt import StrategyAttempt
 from crawlutron.models.taxonomy import CrawlStrategyName
 from crawlutron.models.unified_crawl_result import UnifiedCrawlResult
+from crawlutron.safety.json_safe import ParseRefused, parse_json
 from crawlutron.vocabulary.taxonomy import CrawlClassification
 from crawlutron_extract import extract as _package_extract
 from safe_url.normalized_url import NormalizedUrl
@@ -28,6 +28,10 @@ from safe_url.normalized_url import NormalizedUrl
 #: The batch shaper is generic over its result shape so ``adapt`` and ``results``
 #: agree; browser results with an engine adapter are no longer expressible.
 _JSON_MEMBERSHIP = (type(None), bool, int, float, str, list, dict)
+
+#: JSON-LD comes from attacker-controlled HTML; a deep nest is a malformed
+#: document, not a payload to allocate.
+_JSON_LD_MAX_DEPTH = 16
 
 
 def _build_field_types() -> dict[str, type | tuple[type, ...]]:
@@ -77,16 +81,16 @@ def extract_llm_metadata(html: str, url: NormalizedUrl | None) -> PageMetadata:
     raw_json_ld = metadata.get("json_ld")
     if isinstance(raw_json_ld, str):
         try:
-            metadata["json_ld"] = json.loads(raw_json_ld)
-        except (ValueError, TypeError):
+            metadata["json_ld"] = parse_json(raw_json_ld, expected=(dict, list), max_depth=_JSON_LD_MAX_DEPTH)
+        except ParseRefused:
             # The package joins multiple blocks with "\n"; parse each as a separate document.
             blocks = [block for block in raw_json_ld.split("\n") if block.strip()]
             parsed: list[object] = []
             ok = True
             for block in blocks:
                 try:
-                    parsed.append(json.loads(block))
-                except (ValueError, TypeError):
+                    parsed.append(parse_json(block, expected=(dict, list), max_depth=_JSON_LD_MAX_DEPTH))
+                except ParseRefused:
                     ok = False
                     break
             if ok and len(blocks) > 1:
