@@ -12,7 +12,7 @@ from pydantic import BaseModel, ValidationError
 from crawlutron.models.json_value import JsonValue
 from crawlutron.safety.json_safe import json_default
 from crawlutron.service.error_rendering import ErrorDoor, redact_urls_in_text, render_error
-from crawlutron.service.errors import DomainError
+from crawlutron.service.errors import DomainError, ValidationRefusal
 
 
 @dataclass(frozen=True)
@@ -46,7 +46,8 @@ def tool_error_result(error: DomainError) -> ToolResult:
 def _tool_error(error: ValueError | DomainError) -> ToolResult:
     if isinstance(error, DomainError):
         return tool_error_result(error)
-    return ToolResult(text=str(error), is_error=True)
+    refusal = ValidationRefusal("validation_error", validation_message(error))
+    return tool_error_result(refusal)
 
 
 def tool_success_result(value: BaseModel | Mapping[str, object]) -> ToolResult:

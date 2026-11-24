@@ -410,3 +410,19 @@ class TestMcpErrorFieldsNeverReflectCredentials:
         wire = json.dumps(result.structured)
         assert "s3cret" not in wire and "leak" not in wire
         assert "[REDACTED]" in wire
+
+    def test_value_error_is_redacted_and_coded_not_raw_text(self):
+        import asyncio
+        import json
+
+        from crawlutron_mcp.tool_results import tool_result
+
+        async def _raise():
+            raise ValueError("invalid target https://example.com/x?token=s3cret")
+
+        result = asyncio.run(tool_result(_raise()))
+        assert result.is_error is True
+        assert "s3cret" not in result.text
+        assert "[REDACTED]" in result.text
+        wire = json.dumps(result.structured)
+        assert '"code": "validation_error"' in wire
