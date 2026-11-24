@@ -15,6 +15,7 @@ from crawlutron.search.providers_api import get_search_provider
 from crawlutron.service.caller_auth import CALLER_QUOTA_ADMISSION, CallerQuotaAdmission
 from crawlutron.service.errors import SearchProviderError as DomainProviderError
 from crawlutron.service.errors import SearchProviderUnavailable as DomainProviderUnavailable
+from safe_url.url_redaction import redact_urls_in_text
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,11 @@ async def search(
     )
     logger.info(
         "search_request_completed",
-        extra={"provider": provider.name, "query": payload.query, "result_count": len(results)},
+        extra={
+            "provider": provider.name,
+            "query": redact_urls_in_text(payload.query),
+            "result_count": len(results),
+        },
     )
     return SearchResponse(
         success=True,

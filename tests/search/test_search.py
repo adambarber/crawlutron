@@ -136,6 +136,25 @@ class TestSearchEndpoint:
         assert body["limit"] == 1
         assert body["data"][0] == {"url": "https://example.gov/a", "title": "A", "description": "desc"}
 
+    async def test_search_completion_log_never_leaks_query_credentials(
+        self, async_client, override_settings, fake_provider_http, caplog
+    ):
+        """The completion log routes the caller query through the redaction chokepoint (#1392)."""
+        import logging
+
+        from tests._host_assert import host_in_text
+
+        one_search_result(override_settings, fake_provider_http)
+        query = "https://example.com/x?token=s3cret"
+        with caplog.at_level(logging.INFO, logger="crawlutron.search.endpoint"):
+            resp = await async_client.post("/v1/search", json={"query": query})
+        assert resp.status_code == 200
+        rec = next(r for r in caplog.records if r.getMessage() == "search_request_completed")
+        seen = " ".join(str(v) for v in vars(rec).values())
+        seen += " " + rec.getMessage() + " " + logging.Formatter().format(rec)
+        assert "s3cret" not in seen
+        assert host_in_text(rec.query, "example.com")
+
     async def test_search_clamps_limit_to_server_max(self, async_client, override_settings, monkeypatch):
         override_settings(search_provider="tavily", tavily_api_key="k", search_limit_max=3)
         capture: list[dict[str, object]] = []
