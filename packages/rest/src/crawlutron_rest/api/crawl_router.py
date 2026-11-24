@@ -6,7 +6,9 @@ Pure router: binds :func:`crawlutron_rest.api.crawl_endpoint.crawl` and
 
 from __future__ import annotations
 
-from fastapi import Body, Depends, Request
+from typing import Annotated
+
+from fastapi import Body, Depends, Header, Request
 from fastapi.responses import Response
 
 from crawlutron.models.crawl_accepted import CrawlAccepted
@@ -15,6 +17,7 @@ from crawlutron.models.error_response import ErrorResponse
 from crawlutron.models.trace_response import TraceResponse
 from crawlutron.models.unified_crawl_response import UnifiedCrawlResponse
 from crawlutron.service.policy_defaults import BROWSER_FALLBACK_POLICY, DOCUMENT_EXTRACTION_POLICY
+from crawlutron.service.request_identity import IDEMPOTENCY_HEADER, MAX_TOKEN_LENGTH
 from crawlutron.vocabulary.limits import LARGE_CRAWL_GUIDANCE
 from crawlutron_rest.api.caller_auth import quota_denials
 from crawlutron_rest.api.crawl_endpoint import crawl as crawl_handler
@@ -83,7 +86,9 @@ _REPLAY_RESPONSES: dict[int | str, dict[str, object]] = {
         "configured "
         "depth and page bounds; callers must preserve form/search state before enqueueing pagination URLs "
         "themselves. It classifies denial/challenge outcomes without "
-        "CAPTCHA solving, proxy or identity rotation, credential injection, or bypass behavior."
+        "CAPTCHA solving, proxy or identity rotation, credential injection, or bypass behavior. "
+        "For async acceptance (async_mode or webhook_url), send an Idempotency-Key header to make "
+        "a retry of the same token and payload return the original 202 and status_url."
     ),
     responses={
         **quota_denials(),
@@ -138,6 +143,7 @@ async def crawl(
     result_store=Depends(get_result_store),
     spill_store=Depends(get_spill_store),
     shutdown_event=Depends(get_shutdown_event),
+    token: Annotated[str | None, Header(alias=IDEMPOTENCY_HEADER, max_length=MAX_TOKEN_LENGTH)] = None,
 ):
     return await crawl_handler(
         payload,

@@ -165,11 +165,13 @@ class JobStore:
         """One row read through the declared record; the frontier always loads."""
         return self._read_collections(row, with_accumulators=with_accumulators)
 
-    def create(self, root_url: str, policy: PolicyLike, *, owner: str = "") -> CrawlJobState:
+    def create(
+        self, root_url: str, policy: PolicyLike, *, owner: str = "", job_id: str | None = None
+    ) -> CrawlJobState:
         canonical_root = NormalizedUrl(root_url, policy=self._host_policy)
         return _create_job(
             self,
-            new_job_id(),
+            job_id or new_job_id(),
             JobKind.WHOLE_SITE,
             canonical_root.raw,
             read_policy(policy, self.tier),

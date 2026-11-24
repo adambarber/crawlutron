@@ -198,9 +198,9 @@ def make_crawled_job_store(tmpdir: str, pages: int) -> tuple[JobStore, CrawlJobS
 class LoopGuardJobStore(JobStore):
     """The real store, with every sync entry point refusing to run on the loop."""
 
-    def create(self, root_url, policy, *, owner=""):
+    def create(self, root_url, policy, *, owner="", job_id=None):
         _refuse_on_loop("JobStore.create")
-        return super().create(root_url, policy, owner=owner)
+        return super().create(root_url, policy, owner=owner, job_id=job_id)
 
     def create_single_shot(self, job_id, root_url, policy, *, owner="", frontier=None):
         _refuse_on_loop("JobStore.create_single_shot")

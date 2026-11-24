@@ -26,6 +26,7 @@ from crawlutron.service.caller_auth import (
 from crawlutron.service.errors import AuthRefusal
 from crawlutron.service.job_control import control_job_core, raise_job_not_found
 from crawlutron.service.main_helpers import build_job_status
+from crawlutron.service.request_identity import derive_request_id
 from crawlutron.transport.request_profile import cookie_namespace_for
 from crawlutron.vocabulary.limits import DEFAULT_JOB_LIST_LIMIT
 from safe_url.host_policy import HostPolicy
@@ -41,6 +42,21 @@ if TYPE_CHECKING:
     from crawlutron.storage.result_store import CrawlResultStore
 
 
+async def _replayed_job_response(
+    job_store: JobStore, request_id: str, caller_id: str
+) -> JobCreateResponse | None:
+    """The original create response when this derived handle already exists."""
+    existing = await job_store.astatus_for_caller(request_id, caller_id)
+    if existing is None:
+        return None
+    return JobCreateResponse(
+        job_id=existing["job_id"],
+        status=existing["status"],
+        root_url=existing["root_url"],
+        created_at=existing["created_at"],
+    )
+
+
 async def create_job_core(
     payload: JobCreateRequest,
     job_store: JobStore,
@@ -49,8 +65,14 @@ async def create_job_core(
     caller: CallerIdentity,
     *,
     concurrency_tracker,
+    token: str | None = None,
 ) -> JobCreateResponse:
     """Persist one whole-site crawl job for ``caller`` and start its runner."""
+    request_id = derive_request_id(token, caller, payload, settings.webhook_secret) if token else None
+    if request_id is not None:
+        replay = await _replayed_job_response(job_store, request_id, caller.caller_id)
+        if replay is not None:
+            return replay
     host_policy = HostPolicy.from_settings(settings)
     checked = checked_payload_urls(
         CrawlRequest(url=str(payload.root_url)),
@@ -77,7 +99,9 @@ async def create_job_core(
     # check->insert window and hands it to the durable row at block exit.
     tracking = Tracking(job_store=job_store, concurrency_tracker=concurrency_tracker)
     async with admit(caller, bound, tracking=tracking):
-        job = await job_store.acreate(checked[0][0], resolved_policy, owner=caller.caller_id)
+        job = await job_store.acreate(
+            checked[0][0], resolved_policy, owner=caller.caller_id, job_id=request_id
+        )
     job_runner.start_job(job.job_id, job_store, settings, shutdown_event)
     row = await job_store.astatus(job.job_id)
     # Non-None by construction -- `acreate` wrote it moments ago on the same

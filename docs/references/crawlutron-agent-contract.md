@@ -193,6 +193,23 @@ get an immediate 202 + `status_url` and poll it, or use `POST /v1/jobs` for dura
 resumable whole-site jobs. Use `GET /v1/crawl/{request_id}` both to poll an async
 result and to recover a result if your HTTP connection drops mid-response.
 
+## Retry Identity
+
+`POST /v1/crawl` (the async 202 path) and `POST /v1/jobs` accept an optional
+`Idempotency-Key` header (at most 256 characters). With the header, the job handle is
+derived as `HMAC(server webhook secret, caller identity + token + canonical payload)`;
+the job-row primary key makes a retry of one logical request answer with the original
+`request_id` / `status_url` (or `job_id`) instead of starting a second crawl. Requests
+without the header mint a fresh handle exactly as before.
+
+The token is caller-supplied, case-sensitive, and must stay stable across retries.
+Reusing it with a changed payload or a different caller identity derives a different
+handle — the old job is never silently returned. Anonymous callers share one bounded
+identity bucket, so two anonymous requests with the same token and payload are one
+logical request. Configure `CRAWLUTRON_WEBHOOK_SECRET` in every deployment so handles
+are not predictable. There is no server-side token state and no retention window: the
+caller owns the token and keeps it for as long as a retry remains possible.
+
 ## Diagnostics Interpretation
 
 `diagnostics` is structured metadata for operators and caller-owned crawl
