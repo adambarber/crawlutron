@@ -50,9 +50,7 @@ class CallerConcurrencyTracker:
             raise ValueError("max_concurrency required when using coordination")
         slot_id = await self._coord.areserve(caller_id, max_concurrency, already_active)
         if slot_id is None:
-            raise QuotaRefusal(
-                f"Caller concurrency quota is {max_concurrency}, quota already filled",
-            )
+            raise QuotaRefusal(limit=max_concurrency, requested=already_active)
         self._held.setdefault(caller_id, []).append(slot_id)
 
     async def release(self, caller_id: str) -> None:

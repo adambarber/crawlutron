@@ -9,6 +9,7 @@ from __future__ import annotations
 from fastapi import Body, Depends, Request
 from fastapi.responses import Response
 
+from crawlutron.models.crawl_accepted import CrawlAccepted
 from crawlutron.models.crawl_request import CrawlRequest
 from crawlutron.models.error_response import ErrorResponse
 from crawlutron.models.trace_response import TraceResponse
@@ -88,7 +89,7 @@ _REPLAY_RESPONSES: dict[int | str, dict[str, object]] = {
         **quota_denials(),
         200: {"model": UnifiedCrawlResponse, "description": "Successful crawl results (JSON output format)."},
         202: {
-            "model": ErrorResponse,
+            "model": CrawlAccepted,
             "description": "Accepted for async delivery (async_mode or webhook_url); check status_url.",
         },
         422: {"model": ErrorResponse, "description": "Invalid crawl request or unsupported output format."},

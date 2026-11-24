@@ -25,6 +25,7 @@ from crawlutron.service.errors import (
     BROWSER_POOL_MESSAGE,
     BrowserPoolUnavailable,
     DomainError,
+    validation_refusal,
 )
 from crawlutron.storage.ids import new_request_id
 
@@ -60,12 +61,8 @@ def http_error(status_code: int, code: str, message: str, details: JsonValue | N
 
 
 def validation_http_error(error: ValueError) -> HTTPException:
-    return http_error(
-        422,
-        "validation_error",
-        "Request validation failed",
-        {"errors": [{"msg": str(error)}]},
-    )
+    rendered = render_error(validation_refusal(error), ErrorDoor.REST)
+    return http_error(422, "validation_error", rendered.message, rendered.details)
 
 
 def browser_pool_unavailable(message: str | None = None) -> BrowserPoolUnavailable:
@@ -88,10 +85,8 @@ async def validation_exception_handler(request: Request, exc: Exception) -> JSON
     sanitized: list[JsonValue] = [
         cast(dict[str, JsonValue], {"loc": err.get("loc"), "msg": err.get("msg")}) for err in exc.errors()
     ]
-    return JSONResponse(
-        status_code=422,
-        content=error_envelope("validation_error", "Request validation failed", {"errors": sanitized}),
-    )
+    rendered = render_error(validation_refusal(exc, errors=sanitized), ErrorDoor.REST)
+    return JSONResponse(status_code=rendered.status, content=rendered.envelope)
 
 
 async def http_exception_handler(request: Request, exc: Exception) -> JSONResponse:

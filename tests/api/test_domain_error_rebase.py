@@ -246,6 +246,54 @@ def test_quota_refusal_across_the_sweep_predicate_covers_every_site():
         assert is_quota_refusal(exc_info.value) is True
 
 
+def test_every_quota_raise_site_shares_one_message_and_structured_details(tmp_path):
+    """One stable message and {limit, requested} at all three QuotaRefusal raises."""
+    from crawlutron.models.caller_identity import CallerIdentity
+    from crawlutron.service.caller_concurrency import CallerConcurrencyTracker
+    from crawlutron.service.errors import QuotaRefusal
+    from crawlutron_rest.api import caller_auth
+
+    pages = CallerIdentity(caller_id="k", authenticated=True, max_pages=5)
+    conc = CallerIdentity(caller_id="k", authenticated=True, max_concurrency=2)
+
+    def _sync_slot():
+        async def _go():
+            db = tmp_path / "quota-stability.db"
+            first = CallerConcurrencyTracker(coordination_db_path=db)
+            second = CallerConcurrencyTracker(coordination_db_path=db)
+            try:
+                await first.reserve("k", max_concurrency=1)
+                await second.reserve("k", max_concurrency=1)
+            finally:
+                first.close()
+                second.close()
+
+        asyncio.run(_go())
+
+    refusals: list[QuotaRefusal] = []
+    for raise_ in (
+        lambda: caller_auth.check_page_quota(pages, 10),
+        lambda: caller_auth.check_concurrency_quota(conc, 2),
+        _sync_slot,
+    ):
+        with pytest.raises(QuotaRefusal) as exc_info:
+            raise_()
+        refusals.append(exc_info.value)
+
+    messages = {r.message for r in refusals}
+    assert len(messages) == 1, messages
+    from crawlutron.service.errors import QUOTA_EXCEEDED_MESSAGE
+
+    assert messages == {QUOTA_EXCEEDED_MESSAGE}
+    assert {r.code for r in refusals} == {"quota_exceeded"}
+    assert {r.status for r in refusals} == {429}
+    for refusal in refusals:
+        details = refusal.details
+        assert isinstance(details, dict)
+        assert set(details) == {"limit", "requested"}
+        assert all(isinstance(value, int) for value in details.values())
+
+
 def test_crawl_executor_pool_refusal_is_browser_pool_unavailable():
     from crawlutron.service.errors import BrowserPoolUnavailable
 

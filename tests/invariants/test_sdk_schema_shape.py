@@ -16,10 +16,6 @@ _REQUEST_EXTRA = "forbid"
 #: docstring sanctions extra="allow"; the served schema omits additionalProperties.
 EXTRA_POLICY_EXCEPTIONS = {"WatchCreateRequest"}
 
-#: 202 accepted body is not a declared response schema in openapi() — a
-#: DERIVATION CEILING, not a clean bill; revisited if derivation widens (#846).
-UNSERVED_SDK_CLASSES = {"CrawlAccepted"}
-
 
 def _rows() -> tuple[SchemaShapeRow, ...]:
     return schema_shape_rows()
@@ -96,7 +92,5 @@ def test_sdk_extra_policy_requests_forbid_responses_allow():
 
 def test_every_sdk_mirror_names_a_served_schema():
     """An SDK class with no OpenAPI counterpart (renamed/removed on the wire) reds."""
-    orphaned = [
-        row.sdk_name for row in _rows() if row.role == "unserved" and row.sdk_name not in UNSERVED_SDK_CLASSES
-    ]
+    orphaned = [row.sdk_name for row in _rows() if row.role == "unserved"]
     assert not orphaned, f"SDK mirror classes with no served OpenAPI schema: {orphaned}"

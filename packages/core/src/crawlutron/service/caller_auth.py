@@ -141,17 +141,13 @@ def resolve_page_limit(caller: CallerIdentity, requested_max_pages: int) -> int:
 def check_page_quota(caller: CallerIdentity, requested_max_pages: int) -> None:
     """Refuse a crawl past the caller's page budget with a 429."""
     if caller.max_pages > 0 and requested_max_pages > caller.max_pages:
-        raise QuotaRefusal(
-            f"Caller page quota is {caller.max_pages}, requested {requested_max_pages}",
-        )
+        raise QuotaRefusal(limit=caller.max_pages, requested=requested_max_pages)
 
 
 def check_concurrency_quota(caller: CallerIdentity, active_count: int) -> None:
     """Refuse when the caller's live jobs already fill its concurrency budget."""
     if caller.max_concurrency > 0 and active_count >= caller.max_concurrency:
-        raise QuotaRefusal(
-            f"Caller concurrency quota is {caller.max_concurrency}, {active_count} already active",
-        )
+        raise QuotaRefusal(limit=caller.max_concurrency, requested=active_count)
 
 
 @asynccontextmanager
