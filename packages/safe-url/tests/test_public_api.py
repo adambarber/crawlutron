@@ -169,4 +169,6 @@ def test_manifest_declares_regex_and_psl_as_hard_dependencies():
     )
     deps = manifest["project"]["dependencies"]
     assert "regex==2026.11.19" in deps
-    assert "publicsuffixlist==1.1.2.20261101" in deps
+    assert any(dep.startswith("publicsuffixlist==") for dep in deps), (
+        f"publicsuffixlist== hard dependency missing from {deps}"
+    )

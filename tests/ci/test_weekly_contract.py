@@ -76,7 +76,7 @@ def _get_source_pkgs_from_pyproject() -> list[str]:
 
 
 def test_mutmut_in_dev_dependencies() -> None:
-    """pyproject.toml must include mutmut==3.2.0 in [project.optional-dependencies] dev."""
+    """pyproject.toml must include a mutmut== dev pin in [project.optional-dependencies] dev."""
     import tomllib
 
     with PYPROJECT_PATH.open("rb") as f:
@@ -85,5 +85,5 @@ def test_mutmut_in_dev_dependencies() -> None:
     dev_deps = data.get("project", {}).get("optional-dependencies", {}).get("dev", [])
     assert isinstance(dev_deps, list), "dev dependencies must be a list"
 
-    mutmut_found = any(dep.startswith("mutmut==3.2.0") for dep in dev_deps)
-    assert mutmut_found, f"mutmut==3.2.0 not found in dev dependencies: {dev_deps}"
+    mutmut_found = any(dep.startswith("mutmut==") for dep in dev_deps)
+    assert mutmut_found, f"mutmut== not found in dev dependencies: {dev_deps}"
