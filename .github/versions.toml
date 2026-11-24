@@ -18,7 +18,7 @@
 "docker/build-push-action" = { version = "7.4.0", sha = "c3c9e263c25d99ce0380d002d59b67737d91b0dc" }
 "docker/setup-buildx-action" = { version = "4.4.1", sha = "f87e5991a6d7451dcb8d9637bfbc97413f497069" }
 "dorny/paths-filter" = { version = "4.0.3", sha = "ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d" }
-"github/codeql-action" = { version = "4.39.4", sha = "1bd86f2fdb4b86187fa4059f16f31a3202acc9ea" }
+"github/codeql-action" = { version = "4.39.5", sha = "915412ff23e8b7659517e607487dbeae018f2934" }
 "gitleaks/gitleaks-action" = { version = "3.0.0", sha = "e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e" }
 "googleapis/release-please-action" = { version = "5.0.0", sha = "45996ed1f6d02564a971a2fa1b5860e934307cf7" }
 "ossf/scorecard-action" = { version = "2.6.0", sha = "23f22cd43608bae7a1f1fa2603d7314dee9538a5" }
