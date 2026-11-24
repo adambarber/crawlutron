@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from typing import Annotated
 
 from pydantic import AfterValidator, Field, StringConstraints
@@ -25,6 +26,8 @@ def _upper_snake(value: str) -> str:
 def _prose(value: str, *, interpolate: bool) -> str:
     if not value.strip() or len(value) > 120 or "\n" in value:
         raise ValueError("name must be 1-120 chars on one line")
+    if _BARE_OPEN.search(value):
+        raise ValueError("missing `$` before `{{`")
     if "${{" in value:
         if not interpolate:
             raise ValueError("a step name must not interpolate an expression")
@@ -49,9 +52,31 @@ def _action_ref(value: str) -> str:
     return value
 
 
-def _expression(value: str) -> str:
+_BARE_OPEN = re.compile(r"(?<!\$)\{\{")
+
+
+def _expression_text(value: str) -> str:
+    if _BARE_OPEN.search(value):
+        raise ValueError("missing `$` before `{{`")
     if value.count("${{") != value.count("}}"):
-        raise ValueError("expression has unbalanced braces")
+        raise ValueError("unbalanced expression braces")
+    return value
+
+
+def _input_value(value: object) -> object:
+    if isinstance(value, str):
+        return _expression_text(value)
+    if isinstance(value, Mapping):
+        return {key: _input_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_input_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_input_value(item) for item in value)
+    return value
+
+
+def _expression(value: str) -> str:
+    _expression_text(value)
     if "${{" in value and not (value.startswith("${{") and value.endswith("}}")):
         raise ValueError("expression must be fully wrapped or fully bare")
     return value
@@ -103,5 +128,7 @@ ActionRef = Annotated[
 StepName = Annotated[str, _PROSE, AfterValidator(_step_name)]
 DisplayName = Annotated[str, _PROSE, AfterValidator(_display_name)]
 Expression = Annotated[str, _ONE_LINE, AfterValidator(_expression)]
+ExpressionText = Annotated[str, AfterValidator(_expression_text)]
+InputValue = Annotated[object, AfterValidator(_input_value)]
 Cron = Annotated[str, _ONE_LINE, AfterValidator(_cron)]
 TimeoutMinutes = Annotated[int, Field(ge=1, le=120)]
