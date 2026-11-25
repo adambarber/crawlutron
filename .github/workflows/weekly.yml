@@ -29,7 +29,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
-          python-version: "3.14"
+          python-version: "3.12"
 
       - name: Setup uv
         uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d  # v10.4.0
@@ -37,10 +37,10 @@ jobs:
           enable-cache: false
 
       - name: Compile lowest-direct resolution
-        run: uv pip compile --resolution lowest-direct pyproject.toml -o /tmp/lowest-direct.txt --python 3.14
+        run: uv pip compile --resolution lowest-direct pyproject.toml -o /tmp/lowest-direct.txt --python 3.12
 
       - name: Create clean virtual environment
-        run: uv venv /tmp/lowest-venv --python 3.14 --seed
+        run: uv venv /tmp/lowest-venv --python 3.12 --seed
 
       - name: Install lowest-direct dependencies
         run: uv pip install --python /tmp/lowest-venv/bin/python -r /tmp/lowest-direct.txt

@@ -7,7 +7,7 @@ name = "crawlutron-admit"
 version = "0.1.0"
 description = "Resource-adaptive paced admission: typed lanes, leases, floor law, and cgroup-aware sensing"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 license = "MIT"
 dependencies = []
 

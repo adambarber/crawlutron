@@ -4,6 +4,8 @@ The ``frontier`` column re-serialized the whole queue per batch persist; as a
 keyed table a batch costs one INSERT per admitted entry, one DELETE per pop.
 """
 
+from __future__ import annotations
+
 import json
 from typing import TYPE_CHECKING
 

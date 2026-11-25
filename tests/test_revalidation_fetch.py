@@ -3,6 +3,8 @@ conditional GET, and a 200 answer must be used and stored -- the code once fell
 through to a second unconditional fetch (double load for one crawl).
 """
 
+from __future__ import annotations
+
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 

@@ -83,7 +83,7 @@ This document records the architectural decisions made in the CI workflow redesi
 
 ## UV_PYTHON_PREFERENCE=only-system
 
-**Change:** Set `UV_PYTHON_PREFERENCE=only-system` on the uv sync step in the prepare action. This ensures CI uses the system Python 3.14 provided by actions/setup-python, avoiding any uv-managed Python downloads that could introduce version drift. The old `python-preference` setup-uv input was removed: it was never a declared input and silently did nothing.
+**Change:** Set `UV_PYTHON_PREFERENCE=only-system` on the uv sync step in the prepare action. This ensures CI uses the system Python 3.12 provided by actions/setup-python, avoiding any uv-managed Python downloads that could introduce version drift. The old `python-preference` setup-uv input was removed: it was never a declared input and silently did nothing.
 
 ## Dependency Review Action
 

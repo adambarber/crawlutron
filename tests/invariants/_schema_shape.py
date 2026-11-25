@@ -6,6 +6,7 @@ The SDK annotation and the OpenAPI projection each reduce to a ``Shape``: a lite
 
 from __future__ import annotations
 
+import types
 from dataclasses import dataclass
 from typing import Annotated, Literal, Union, get_args, get_origin
 
@@ -50,7 +51,7 @@ def annotation_shape(annotation: object) -> Shape:
     if get_origin(annotation) is Annotated:
         return annotation_shape(get_args(annotation)[0])
     origin = get_origin(annotation)
-    if origin is Union:
+    if origin is Union or origin is types.UnionType:
         return _merge_shapes([annotation_shape(a) for a in get_args(annotation) if a is not type(None)])
     if origin is Literal:
         return Shape(vocabulary=frozenset(get_args(annotation)))

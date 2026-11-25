@@ -59,15 +59,15 @@ def _effective_text(alias: str, stages: dict[str, str]) -> str:
     return "\n".join(parts)
 
 
-def test_base_image_is_digest_pinned_3_14() -> None:
-    """The 3.14 base must be pinned by tag AND digest, so a rebuild is
+def test_base_image_is_digest_pinned_3_12() -> None:
+    """The 3.12 base must be pinned by tag AND digest, so a rebuild is
     byte-for-byte reproducible and the major version is explicit (#625).
     """
     text = DOCKERFILE_PATH.read_text(encoding="utf-8")
     arg = [line for line in text.splitlines() if line.startswith("ARG CRAWLUTRON_BASE_IMAGE=")]
     assert len(arg) == 1, "exactly one CRAWLUTRON_BASE_IMAGE ARG must pin the base"
     value = arg[0].split("=", 1)[1]
-    assert "python:3.14" in value, f"base must be a 3.14 tag: {value!r}"
+    assert "python:3.12" in value, f"base must be a 3.12 tag: {value!r}"
     assert "@sha256:" in value, f"base must be digest-pinned: {value!r}"
 
 
