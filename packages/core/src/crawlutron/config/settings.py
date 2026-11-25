@@ -3,9 +3,19 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field, fields
-from typing import TypedDict
 
 from crawlutron.config.env import get_mapping_float, get_mapping_int, in_range, parse_bool_value
+from crawlutron.config.settings_shapes import (
+    BrowserFields,
+    CoreFields,
+    ExtractionFields,
+    OpsFields,
+    PersistenceFields,
+    PolicyFields,
+    RetentionFields,
+    SearchFields,
+    TransportFields,
+)
 from crawlutron.models.crawl_policy_limits import CrawlPolicyLimits
 from crawlutron.runtime.pressure_sizing import (
     derive_browser_pool_size,
@@ -138,6 +148,11 @@ class CrawlerSettings:
     # Retention sweep grace: tombstones reclaimed this many seconds after
     # deletion. 86400s (24h) is our stated retention promise.
     retention_sweep_grace_seconds: int = 86400
+    # Operator knobs parsed once here; they used to be raw env reads in service/transport.
+    max_webhook_size: int = 10_485_760
+    user_agent: str = ""
+    headless: bool = True
+    warmup_urls: tuple[str, ...] = ()
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, str] | None = None) -> CrawlerSettings:
@@ -156,6 +171,7 @@ class CrawlerSettings:
             **_extraction_fields(cls, source),
             **_search_fields(cls, source),
             **_retention_fields(cls, source),
+            **_ops_fields(cls, source),
         )
 
 
@@ -168,94 +184,7 @@ RECOGNIZED_SETTING_KEYS: frozenset[str] = frozenset(
 )
 
 
-class _CoreFields(TypedDict):
-    """The keys `_core_fields` reads; the constructor consumes them by name."""
-
-    host: str
-    global_concurrency: int
-    per_domain_concurrency: int
-    per_domain_delay_ms: int
-    max_batch_size: int
-    default_timeout_seconds: int
-    default_max_retries: int
-
-
-class _PolicyFields(TypedDict):
-    """The keys `_policy_fields` reads: robots, hosts, and the log sink."""
-
-    respect_robots: bool
-    allowed_hosts: str
-    denied_hosts: str
-    log_level: str
-    log_file_path: str
-    log_file_max_bytes: int
-    log_file_backup_count: int
-
-
-class _PersistenceFields(TypedDict):
-    """The keys `_persistence_fields` reads: caches and adaptive throttling."""
-
-    cache_dir: str
-    cache_ttl_seconds: int
-    content_cache_enabled: bool
-    adaptive_throttling: bool
-    adaptive_min_delay: float
-    adaptive_max_delay: float
-    adaptive_latency_factor: float
-    cookie_persistence_enabled: bool
-    cookie_jar_path: str
-
-
-class _TransportFields(TypedDict):
-    """The keys `_transport_fields` reads: the HTTP connection pool."""
-
-    http_max_connections: int
-    http_max_keepalive: int
-    http_keepalive_expiry: float
-
-
-class _BrowserFields(TypedDict):
-    """The keys `_browser_fields` reads: render caps and fixed overheads."""
-
-    max_browser_renders: int
-    max_concurrent_pages: int
-    challenge_wait_seconds: int
-    browser_lazy_scroll_steps: int
-    browser_lazy_scroll_delay_seconds: float
-    browser_cookie_harvest_timeout_seconds: float
-
-
-class _ExtractionFields(TypedDict):
-    """The keys `_extraction_fields` reads: extraction deadlines and caps."""
-
-    extraction_doc_timeout: float
-    extraction_selector_timeout: float
-    extraction_doc_acquire_timeout: float
-    extraction_max_markdown: int
-
-
-class _SearchFields(TypedDict):
-    """The keys `_search_fields` reads: search providers and key admin."""
-
-    search_provider: str
-    tavily_api_key: str
-    brave_api_key: str
-    serper_api_key: str
-    search_limit_default: int
-    search_limit_max: int
-    search_timeout_seconds: int
-    key_admin_token: str
-    webhook_secret: str
-    max_watches_per_caller: int
-
-
-class _RetentionFields(TypedDict):
-    """The keys `_retention_fields` reads: the retention sweep grace."""
-
-    retention_sweep_grace_seconds: int
-
-
-def _core_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> _CoreFields:
+def _core_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> CoreFields:
     """Host, global/per-domain concurrency, batch size, timeout and retry ceilings."""
     return {
         "host": source.get("CRAWLUTRON_HOST", cls.host),
@@ -294,7 +223,7 @@ def _core_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> _Core
     }
 
 
-def _policy_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> _PolicyFields:
+def _policy_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> PolicyFields:
     """Robots, host allow/deny lists, and the log sink's level and rotation."""
     return {
         "respect_robots": parse_bool_value(
@@ -315,7 +244,7 @@ def _policy_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> _Po
     }
 
 
-def _persistence_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> _PersistenceFields:
+def _persistence_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> PersistenceFields:
     """Disk caches, cookie persistence, and the adaptive-throttling triple."""
     return {
         "cache_dir": source.get("CRAWLUTRON_CACHE_DIR", cls.cache_dir),
@@ -354,7 +283,7 @@ def _persistence_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -
     }
 
 
-def _transport_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> _TransportFields:
+def _transport_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> TransportFields:
     """HTTP connection-pool sizing and keepalive expiry."""
     # <= 0 bricks the httpx client at first fetch; 512 is the pool cap the
     # README and .env.example document (the admission concurrency ceiling).
@@ -390,7 +319,7 @@ def _transport_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> 
     }
 
 
-def _browser_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> _BrowserFields:
+def _browser_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> BrowserFields:
     """Browser render caps, challenge wait, and the fixed-overhead render knobs."""
     _cw_lo, _cw_hi = CrawlPolicyLimits.challenge_wait_bounds()
     return {
@@ -432,7 +361,7 @@ def _browser_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> _B
     }
 
 
-def _extraction_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> _ExtractionFields:
+def _extraction_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> ExtractionFields:
     """Extraction deadlines and the markdown size cap."""
     return {
         "extraction_doc_timeout": get_mapping_float(
@@ -456,7 +385,7 @@ def _extraction_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) ->
     }
 
 
-def _search_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> _SearchFields:
+def _search_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> SearchFields:
     """Search provider selection, API keys, result limits, and key admin."""
     return {
         "search_provider": source.get("CRAWLUTRON_SEARCH_PROVIDER", cls.search_provider),
@@ -478,7 +407,7 @@ def _search_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> _Se
     }
 
 
-def _retention_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> _RetentionFields:
+def _retention_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> RetentionFields:
     """Retention sweep grace: tombstones are reclaimed this many seconds after deletion.
 
     Reads ``CRAWLUTRON_RETENTION_SWEEP_GRACE_SECONDS``; out-of-range is refused
@@ -494,4 +423,21 @@ def _retention_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> 
             validate=in_range(0, MAX_TOMBSTONE_GRACE_SECONDS),
             validate_event="operator_retention_grace_out_of_range",
         ),
+    }
+
+
+def _ops_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> OpsFields:
+    """The webhook cap, user agent, headless switch, and warmup URL list."""
+    raw_warmup = source.get("CRAWLUTRON_WARMUP_URLS", "")
+    return {
+        "max_webhook_size": get_mapping_int(
+            source, "CRAWLUTRON_MAX_WEBHOOK_SIZE", cls.max_webhook_size, lo=1
+        ),
+        "user_agent": source.get("CRAWLUTRON_USER_AGENT", cls.user_agent).strip(),
+        "headless": parse_bool_value(
+            source.get("CRAWLUTRON_HEADLESS"),
+            cls.headless,
+            env_name="CRAWLUTRON_HEADLESS",
+        ),
+        "warmup_urls": tuple(u.strip() for u in raw_warmup.split(",") if u.strip()),
     }

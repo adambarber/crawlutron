@@ -7,11 +7,11 @@ It must not fetch, decode, extract, or construct crawl results.
 from __future__ import annotations
 
 import hashlib
-import os
 from collections.abc import Iterable, Mapping
 from typing import Protocol, runtime_checkable
 
 from crawlutron.admission.credentials import apply_credentials as apply_credentials
+from crawlutron.config.settings_cache import get_cached_settings
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.request_profile_record import RequestProfileRecord
 from crawlutron.safety.header_authority import service_identity_headers
@@ -161,7 +161,7 @@ def headers_for_strategy(
         )
     if "accept_language" in fp:
         headers["Accept-Language"] = fp["accept_language"]
-    configured_user_agent = os.environ.get("CRAWLUTRON_USER_AGENT", "").strip()
+    configured_user_agent = get_cached_settings().user_agent
     if configured_user_agent:
         headers["User-Agent"] = configured_user_agent
     cookie_header = cookie_header_for_url(resolved_profile, url)

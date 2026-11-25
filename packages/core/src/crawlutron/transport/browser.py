@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 from collections.abc import (
     Awaitable,
@@ -14,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from crawlutron.config.env import get_env_float, get_env_int
 from crawlutron.config.settings import CrawlerSettings
+from crawlutron.config.settings_cache import get_cached_settings
 from crawlutron.extraction.classify import classify_page
 from crawlutron.models.crawl_policy_limits import CrawlPolicyLimits
 from crawlutron.models.crawl_result import CrawlResult
@@ -139,7 +139,9 @@ class BrowserRenderer:
         # overridable collaborators, so a test substitutes behaviour, not internals.
         self._extract = extract or self.extract_with_challenge_wait
         self._looks_like = looks_like_pdf or self._looks_like_pdf
-        self._warmup_urls = warmup_urls if warmup_urls is not None else self._warmup_urls_from_env()
+        self._warmup_urls = (
+            warmup_urls if warmup_urls is not None else self._warmup_urls_from_settings(settings)
+        )
         # The two SSRF pin rules and the failure-path classifier: all three decide
         # something the render cannot recover from, so tests steer them by argument.
         self._pin = pin or build_pinned_request_async
@@ -383,9 +385,10 @@ class BrowserRenderer:
             error=error,
         )
 
-    def _warmup_urls_from_env(self) -> list[str]:
-        value = os.environ.get("CRAWLUTRON_WARMUP_URLS", "")
-        return [url.strip() for url in value.split(",") if url.strip()]
+    def _warmup_urls_from_settings(self, settings: CrawlerSettings | None) -> list[str]:
+        """Warmup URLs from injected settings, else the cached settings home."""
+        source = settings if settings is not None else get_cached_settings()
+        return list(source.warmup_urls)
 
     def _looks_like_pdf(self, url: str) -> bool:
         return looks_like_pdf(url)

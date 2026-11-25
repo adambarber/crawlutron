@@ -146,33 +146,36 @@ class TestWebhookDeliveryPinning:
 
 
 def test_webhook_size_cap_honors_a_live_env_override(monkeypatch):
-    """The cap is read 2-3 times per delivery; caching it on the raw env value parses
-    once per distinct value while an override -- operator env, or a test -- is still
-    picked up on the very next call.
-    """
+    """The cap comes from the settings home; an env change is honored after a re-parse."""
+    from crawlutron.config.settings_cache import reset_cached_settings
     from crawlutron.service import webhooks
 
     monkeypatch.setenv("CRAWLUTRON_MAX_WEBHOOK_SIZE", "1234")
+    reset_cached_settings()
     assert webhooks.max_webhook_size() == 1234, "the override was not honored"
 
-    # A later change to the same env var is reflected without a reload.
+    # A later change is picked up through the settings re-parse.
     monkeypatch.setenv("CRAWLUTRON_MAX_WEBHOOK_SIZE", "4321")
+    reset_cached_settings()
     assert webhooks.max_webhook_size() == 4321, "a cached value shadowed the new override"
 
     # Removing the override restores the default, not a stale cached value.
     monkeypatch.delenv("CRAWLUTRON_MAX_WEBHOOK_SIZE")
+    reset_cached_settings()
     assert webhooks.max_webhook_size() == 10_485_760
 
 
 def test_webhook_size_cap_keeps_the_unit_floor(monkeypatch):
-    """The ``lo=1`` floor survives the caching path: a zero/negative cap would
-    cap every delivery at nothing and silently drop all webhooks."""
+    """The ``lo=1`` floor survives the settings path: a zero cap drops no webhooks."""
+    from crawlutron.config.settings_cache import reset_cached_settings
     from crawlutron.service import webhooks
 
     monkeypatch.setenv("CRAWLUTRON_MAX_WEBHOOK_SIZE", "0")
+    reset_cached_settings()
     assert webhooks.max_webhook_size() == 1
 
     monkeypatch.setenv("CRAWLUTRON_MAX_WEBHOOK_SIZE", "not-an-int")
+    reset_cached_settings()
     assert webhooks.max_webhook_size() == 10_485_760, "a garbage value must fall back, not raise"
 
 
