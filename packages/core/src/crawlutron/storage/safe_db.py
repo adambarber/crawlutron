@@ -155,6 +155,8 @@ def txn_write(conn: sqlite3.Connection, *, owner: str = "") -> Generator[None]:
     """BEGIN IMMEDIATE, commit, roll back on failure; one write txn per thread."""
     _off_loop()
     state = _state_for(conn)
+    if state.poisoned:
+        raise StoreConnectionPoisoned(f"connection {conn!r} is poisoned; fail-closed")
     if state.active:
         raise WriteRejected(f"nested write transaction on {conn!r}; already open by {state.owner}")
     depth = getattr(_WRITE_TXN, "depth", 0)
@@ -174,7 +176,8 @@ def txn_write(conn: sqlite3.Connection, *, owner: str = "") -> Generator[None]:
         _WRITE_TXN.depth = depth
         state.active = False
         state.owner = ""
-        _drop_state(conn)
+        if not state.poisoned:
+            _drop_state(conn)
 
 
 @contextmanager
@@ -233,12 +236,16 @@ def txn_read(
     Reentrant: a nested call joins the outer snapshot; depth restored on every path.
     Bounds stack: the tightest active cap/deadline wins."""
     assert_off_main_thread()
+    state = _state_for(conn)
+    if state.poisoned:
+        raise StoreConnectionPoisoned(f"connection {conn!r} is poisoned; fail-closed")
     depth = getattr(_READ_TXN, "depth", 0)
     outer_conn = getattr(_READ_TXN, "conn", None)
     if deadline is not None and time.monotonic() > deadline:
         raise ReadRejected(f"read deadline exceeded for {owner!r}")
     bounded = max_rows is not None or max_bytes is not None or deadline is not None
     context = None
+    stack = None
     if bounded:
         context = {"rows": 0, "bytes": 0, "max_rows": max_rows, "max_bytes": max_bytes, "deadline": deadline}
         stack = cast(list, getattr(_READ_TXN, "bound_stack", None))
@@ -253,11 +260,23 @@ def txn_read(
                 yield
             finally:
                 _READ_TXN.depth = depth
-                if context is not None:
+                if context is not None and stack is not None:
                     stack.pop()
             return
         raise ReadRejected("second concurrent read transaction on this thread")
-    _READ_TXN.depth = depth + 1
+    with _read_fresh(conn, owner, context, stack):
+        yield
+
+
+@contextmanager
+def _read_fresh(
+    conn: sqlite3.Connection,
+    owner: str,
+    context: dict | None,
+    stack: list | None,
+) -> Generator[None]:
+    """Run one fresh read transaction (depth == 0): counting row factory + txn."""
+    _READ_TXN.depth = 1
     _READ_TXN.conn = conn
 
     original_row_factory = conn.row_factory
@@ -268,18 +287,18 @@ def txn_read(
             return original_row_factory(_cursor, row)
         return row
 
-    if bounded:
+    if context is not None:
         conn.row_factory = counting_row_factory
     try:
         with _transaction(conn, "BEGIN DEFERRED", state=None):
             yield
     finally:
-        if bounded:
+        if context is not None:
             conn.row_factory = original_row_factory
+        if stack is not None:
             stack.pop()
-        _READ_TXN.depth = depth
-        if depth == 0:
-            _READ_TXN.conn = None
+        _READ_TXN.depth = 0
+        _READ_TXN.conn = None
 
 
 def read_data_version(conn: sqlite3.Connection) -> int:

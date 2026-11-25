@@ -318,3 +318,16 @@ def test_scheduler_reads_the_taxonomy_domain_health_table():
         "the accounting table names a status the taxonomy does not define: "
         f"{sorted(set(taxonomy.DOMAIN_HEALTH_BY_STATUS) - members)}"
     )
+
+
+def test_known_admission_refusal_classifies_not_network_error() -> None:
+    """AdmissionRefused is a knowable failure; it must classify to a named row,
+    never the generic network_error fallback."""
+    from crawlutron.models.taxonomy import Classification
+    from crawlutron.transport.classification import classify_error_code
+    from crawlutron_admit import AdmissionRefused
+    from crawlutron_admit.values import IdleReason
+
+    classified = classify_error_code(AdmissionRefused(IdleReason.STALE))
+    assert classified == Classification.admission_stalled
+    assert classified != Classification.network_error

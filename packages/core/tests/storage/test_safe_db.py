@@ -167,6 +167,34 @@ def test_txn_write_raises_store_connection_poisoned_on_commit_failure() -> None:
     assert failing.began
 
 
+def test_poisoned_connection_refuses_next_write() -> None:
+    """A planted poison is fail-closed: the next write on that connection is refused."""
+    failing = _CommitFailsConn()
+    conn = cast(sqlite3.Connection, failing)
+    # The first write poisons the connection (COMMIT fails); its state persists.
+    with pytest.raises(StoreConnectionPoisoned):
+        with txn_write(conn, owner="m"):
+            assert failing.began
+    # The poisoned connection is never reused for a subsequent write.
+    with pytest.raises(StoreConnectionPoisoned, match="poisoned"):
+        with txn_write(conn, owner="m"):
+            pass
+
+
+def test_poisoned_connection_refuses_next_read() -> None:
+    """A planted poison is fail-closed: the next read on that connection is refused."""
+    failing = _CommitFailsConn()
+    conn = cast(sqlite3.Connection, failing)
+    # The first write poisons the connection (COMMIT fails); its state persists.
+    with pytest.raises(StoreConnectionPoisoned):
+        with txn_write(conn, owner="m"):
+            assert failing.began
+    # The poisoned connection is never reused for a subsequent read.
+    with pytest.raises(StoreConnectionPoisoned, match="poisoned"):
+        with txn_read(conn, owner="m"):
+            pass
+
+
 def test_txn_write_raises_store_closed_on_closed_connection() -> None:
     conn = sqlite3.connect(":memory:", isolation_level=None)
     conn.close()

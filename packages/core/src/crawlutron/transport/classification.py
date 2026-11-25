@@ -16,10 +16,12 @@ from curl_cffi.requests.exceptions import SSLError as CffiSSLError
 
 from crawlutron.models.browser_pool_exhausted import BrowserPoolExhaustedError
 from crawlutron.models.taxonomy import Classification, CrawlStrategyName
+from crawlutron.storage.safe_db import ReadRejected, WriteRejected
 from crawlutron.transport.decompression import DecompressionError, DecompressionTooLargeError
 from crawlutron.transport.pinned_dns import ResolverBudgetExceeded
 from crawlutron.transport.scheduler_exceptions import CircuitBreakerOpen
 from crawlutron.vocabulary.taxonomy import is_transient_classification
+from crawlutron_admit import AdmissionRefused
 from safe_url.url_redaction import redact_urls_in_text
 
 _logger = logging.getLogger(__name__)
@@ -32,6 +34,12 @@ CLASSIFICATION_BY_EXCEPTION: tuple[tuple[tuple[type[BaseException], ...], Classi
     # Capacity, not a page failure: the URL was never attempted, which is why it
     # stays distinct from the transport rows below and stays retryable.
     ((CircuitBreakerOpen,), Classification.circuit_breaker_open),
+    # Admission refused the request before a renderer was ever assigned.
+    ((AdmissionRefused,), Classification.admission_stalled),
+    # Storage read/write refusals are programming or capacity errors, never page
+    # failures: they keep a named verdict instead of the network_error fallback.
+    ((ReadRejected,), Classification.connection_error),
+    ((WriteRejected,), Classification.connection_error),
     ((DecompressionTooLargeError,), Classification.payload_too_large),
     # The declared encoding did not decode; its ValueError base is a zlib
     # detail, so without this row a transient fault reads as terminal.
