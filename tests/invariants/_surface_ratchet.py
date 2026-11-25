@@ -85,6 +85,8 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
     ),  # saturation via the real resolve door (ParkedResolver)
     # #1448: the loopback proxy's one door plus its lifecycle surface.
     "packages/core/src/crawlutron/transport/egress_proxy.py": (5, 4),
+    # #1452: the sync-builder seam that owns the proxy listener lifecycle.
+    "packages/core/src/crawlutron/transport/egress_proxy_runtime.py": (3, 3),
     # #998: safe-url package modules.
     "packages/safe-url/src/safe_url/address_class.py": (3, 2),
     "packages/safe-url/src/safe_url/host_canonical.py": (2, 2),

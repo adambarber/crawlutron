@@ -19,6 +19,7 @@ from safe_url import HostPolicy, NormalizedUrl, is_loopback_bind
 __all__ = ["ProxyBindRefused", "ProxyServer", "ProxyTarget", "admit_proxy_target", "serve_proxy"]
 
 _LOGGER = logging.getLogger(__name__)
+_REFUSAL_HEADER = "x-crawlutron-egress-refusal"
 _Reader = asyncio.StreamReader
 _Writer = asyncio.StreamWriter
 
@@ -66,9 +67,10 @@ async def _admit(authority: str, *, policy: HostPolicy, scheme: str) -> ProxyTar
     )
 
 
-async def _refuse(writer: _Writer, status: int, reason: str) -> None:
+async def _refuse(writer: _Writer, status: int, reason: str, failure: str | None = None) -> None:
     """Answer with a fixed reason only; the target and its headers never appear."""
-    body = f"HTTP/1.1 {status} {reason}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    marker = f"{_REFUSAL_HEADER}: {failure}\r\n" if failure else ""
+    body = f"HTTP/1.1 {status} {reason}\r\n{marker}Content-Length: 0\r\nConnection: close\r\n\r\n"
     writer.write(body.encode("ascii"))
     await writer.drain()
     writer.close()
@@ -82,23 +84,33 @@ async def _relay(
 ) -> None:
     """Copy bytes both ways untouched: no TLS termination, no rewriting."""
 
+    def abort(*writers: _Writer) -> None:
+        for target in writers:
+            if target.transport is not None:
+                target.transport.abort()
+
     async def client_to_origin() -> None:
-        while True:
-            data = await reader.read(65536)
-            if not data:
-                break
-            upstream_writer.write(data)
-            await upstream_writer.drain()
-        upstream_writer.close()
+        try:
+            while True:
+                data = await reader.read(65536)
+                if not data:
+                    break
+                upstream_writer.write(data)
+                await upstream_writer.drain()
+        finally:
+            # A client that stops reading must not leave the origin blocked in send.
+            abort(upstream_writer, writer)
 
     async def origin_to_client() -> None:
-        while True:
-            data = await upstream_reader.read(65536)
-            if not data:
-                break
-            writer.write(data)
-            await writer.drain()
-        writer.close()
+        try:
+            while True:
+                data = await upstream_reader.read(65536)
+                if not data:
+                    break
+                writer.write(data)
+                await writer.drain()
+        finally:
+            writer.close()
 
     await asyncio.gather(client_to_origin(), origin_to_client(), return_exceptions=True)
 
@@ -178,7 +190,7 @@ async def _dial(plan: ProxyTarget, writer: _Writer, dial: _Dial) -> tuple[_Reade
         return await dial(plan.pinned_ip, plan.port)
     except OSError:
         _LOGGER.warning("egress proxy could not reach the pinned target")
-        await _refuse(writer, 502, "Bad-Gateway")
+        await _refuse(writer, 502, "Bad-Gateway", failure="dial-failed")
         return None, None
 
 
@@ -230,6 +242,11 @@ class ProxyServer:
     def port(self) -> int:
         """The ephemeral loopback port this proxy listens on."""
         return self._port
+
+    @property
+    def is_live(self) -> bool:
+        """Whether the listener is still accepting connections."""
+        return self._server.is_serving()
 
     async def aclose(self) -> None:
         """Stop accepting and leave the lifecycle registry."""
