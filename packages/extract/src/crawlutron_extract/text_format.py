@@ -43,6 +43,8 @@ def extract_text_format(
 
 def _extract_csv(content: str, limits) -> dict[str, object]:
     """Parse CSV with embedded newlines and mixed line endings. Bounded rows."""
+    if len(content.encode("utf-8")) > limits.max_input_bytes:
+        return _empty_result("csv_input_capped", ["csv_input_capped"])
     flags: list[str] = []
     rows: list[list[str]] = []
     truncated = False
@@ -222,9 +224,13 @@ def _extract_json(content: str, limits) -> dict[str, object]:
 
 
 def _json_depth(obj: object) -> int:
-    """Compute JSON nesting depth iteratively; never recurses."""
+    """Compute JSON nesting depth iteratively; never recurses.
+
+    Root container counts as 1 (core convention, matches json_door); ``{}`` and
+    ``[]`` are depth 1, a scalar is depth 0.
+    """
     max_depth = 0
-    stack: list[tuple[object, int]] = [(obj, 0)]
+    stack: list[tuple[object, int]] = [(obj, 1)]
     while stack:
         node, depth = stack.pop()
         if depth > max_depth:
@@ -259,6 +265,8 @@ def _json_to_text(obj: object, limits, flags: list[str]) -> str:
 
 def _extract_xml(content: str, limits) -> dict[str, object]:
     """Extract text from XML with a strict lxml parse; refuse DTD and bad markup."""
+    if len(content.encode("utf-8")) > limits.max_input_bytes:
+        return _empty_result("xml_input_capped", ["xml_input_capped"])
     flags: list[str] = []
     truncated = False
 
