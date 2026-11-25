@@ -323,6 +323,11 @@ class ProxyServer:
         await self._server.wait_closed()
         _LIVE_SERVERS.discard(self)
 
+    async def serve_forever(self) -> None:
+        """Run the server until cancelled; the public lifecycle door for sidecar use."""
+        async with self._server:
+            await self._server.serve_forever()
+
 
 async def serve_proxy(
     *,

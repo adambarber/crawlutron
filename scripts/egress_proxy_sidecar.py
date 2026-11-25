@@ -48,9 +48,8 @@ async def main() -> int:
 
         _LOGGER.info("Egress proxy sidecar listening on %s:%s", sidecar_bind, server.port)
 
-        # Run forever
-        async with server._server:
-            await server._server.serve_forever()
+        # Run forever via the public lifecycle door
+        await server.serve_forever()
     except OSError as e:
         _LOGGER.error("Failed to start proxy: %s", e)
         return 1

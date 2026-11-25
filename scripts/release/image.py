@@ -101,6 +101,8 @@ def _run_container(name: str, image: str) -> None:
             name,
             "-e",
             "CRAWLUTRON_HOST=0.0.0.0",
+            "-e",
+            "CRAWLUTRON_EGRESS_PROXY_URL=",
             "-p",
             "8765:8765",
             image,
@@ -146,26 +148,58 @@ def _check_ready() -> None:
         sys.exit(3)
 
 
-def _check_baked_version(name: str, native_version: str) -> None:
-    baked_result = _run(
+def _exec_python_probe(name: str, probe: str) -> tuple[int, str, str]:
+    """Run a Python probe inside the container and return (exit_code, stdout, stderr)."""
+    result = _run(
         [
             "docker",
             "exec",
             name,
             "/app/.venv/bin/python",
             "-c",
-            "from importlib.metadata import version; print(version('crawlutron'))",
+            probe,
         ],
         capture=True,
     )
-    if baked_result.returncode != 0:
-        print(f"Smoke failed: could not bake version: {baked_result.stderr}", file=sys.stderr)
+    return result.returncode, result.stdout, result.stderr
+
+
+def _check_baked_version(name: str, native_version: str) -> None:
+    code, out, err = _exec_python_probe(
+        name,
+        "from importlib.metadata import version; print(version('crawlutron'))",
+    )
+    if code != 0:
+        print(f"Smoke failed: could not bake version: {err}", file=sys.stderr)
         sys.exit(3)
 
-    baked_version = baked_result.stdout.strip()
+    baked_version = out.strip()
     if baked_version != native_version:
         msg = f"Smoke failed: version mismatch: baked={baked_version}, expected={native_version}"
         print(msg, file=sys.stderr)
+        sys.exit(3)
+
+
+def _check_baked_proxy(name: str) -> None:
+    """Verify the in-process loopback proxy starts and returns a loopback URL."""
+    probe = (
+        "from crawlutron.config.settings_cache import get_cached_settings;"
+        "from crawlutron.transport.egress_proxy import egress_proxy_url;"
+        "from safe_url import HostPolicy;"
+        "settings = get_cached_settings();"
+        "assert settings.egress_proxy_url == '', "
+        "f'Expected empty egress_proxy_url, got {settings.egress_proxy_url}';"
+        "policy = HostPolicy.from_settings(settings);"
+        "url = egress_proxy_url(settings=settings);"
+        "assert url.startswith('http://127.0.0.1:'), "
+        "f'Proxy URL not loopback: {url}';"
+        "print(url)"
+    )
+    code, out, err = _exec_python_probe(name, probe)
+    if code != 0:
+        print(f"Smoke failed: baked proxy check failed: {err}", file=sys.stderr)
+        if out:
+            print(f"stdout: {out}", file=sys.stderr)
         sys.exit(3)
 
 
@@ -174,6 +208,7 @@ def _smoke_image(name: str, image: str, native_version: str) -> None:
     _wait_for_health(name)
     _check_ready()
     _check_baked_version(name, native_version)
+    _check_baked_proxy(name)
 
 
 def _generate_sbom(image: str) -> None:
