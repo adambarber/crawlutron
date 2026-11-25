@@ -11,7 +11,7 @@ import socket
 from crawlutron.runtime import process_state
 from crawlutron.transport import http_client_pool as pool_mod
 from crawlutron.transport.fetchers import default_http_fetcher
-from crawlutron.transport.pinned_transport import build_pinned_request, cffi_resolve_entry
+from crawlutron.transport.pinned_transport import build_pinned_request
 from tests._assertions import block_private_targets
 from tests._http_recording_backend import (
     RecordingBackend,
@@ -99,14 +99,6 @@ class TestKeepaliveDisableIsScoped:
         _pinned_resolver(monkeypatch, ("93.184.216.34", 443))
         request = build_pinned_request(canonical("https://93.184.216.34/"), {})
         assert request.headers.get("Connection") != "close"
-
-    def test_curl_cffi_resolve_table_is_unchanged(self, monkeypatch):
-        """The curl_cffi path drives SNI via its own resolve table (host:port:ip),
-        not the httpcore pool, so the header must not disturb its addressing."""
-        _pinned_resolver(monkeypatch, ("93.184.216.34", 443))
-        request = build_pinned_request(canonical("https://example.com/secure.pdf"), {})
-        entry = cffi_resolve_entry(request)
-        assert entry == ["example.com:443:93.184.216.34"]
 
 
 def _pinned_resolver(monkeypatch, addrs):

@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING
 from crawlutron.transport import pooled_cffi as _leaf
 from crawlutron.transport import pooled_clients as _core
 from crawlutron.transport.pooled_cffi import (
-    build_pinned_cffi_session,
     close_cffi_session,
     get_cffi_session,
 )
@@ -48,7 +47,6 @@ def pooled_client_builders(
 
 __all__ = [
     "CFFI_IMPERSONATE_TARGET",
-    "build_pinned_cffi_session",
     "close_async_http_client",
     "close_cffi_session",
     "get_async_http_client",

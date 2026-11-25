@@ -37,15 +37,13 @@ class Closeable(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class FetchRequest:
-    """One hop's admission: the wire URL to dial, the headers to send, the
-    logical URL (for results and cookies), the per-request timeout, and the
-    optional curl_cffi resolve table for pinned HTTPS hops."""
+    """One hop's admission: the pinned connect plan, the headers to send, the
+    logical URL (for results, cookies, and the proxied wire), and the timeout."""
 
     connect_url: str
     headers: dict[str, str]
     url: NormalizedUrl
     timeout_seconds: float
-    resolve_entry: list[str] | None = None
 
 
 class Transport(Protocol):
