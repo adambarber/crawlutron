@@ -1,4 +1,7 @@
-"""HTTP strategy entry: fetch, cache, extract and construct the result."""
+"""HTTP strategy entry: fetch, cache, extract and construct the result.
+
+wall-consumer
+"""
 
 from __future__ import annotations
 

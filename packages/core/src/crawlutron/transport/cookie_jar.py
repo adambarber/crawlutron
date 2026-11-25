@@ -1,6 +1,6 @@
-"""Owns namespaced persistent cookie storage and cookie context state; it must not
-construct HTTP clients or assemble headers. ``cookie_namespace`` is a PARTITIONING
-convention, not authorization (no callers are authenticated); multi-tenant deployments add their own auth.
+"""Owns namespaced persistent cookie storage and cookie context state.
+
+wall-consumer
 """
 
 from __future__ import annotations

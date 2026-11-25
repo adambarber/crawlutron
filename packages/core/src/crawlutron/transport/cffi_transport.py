@@ -1,7 +1,6 @@
-"""curl_cffi transport: one pinned hop per ``fetch()`` call.
+"""curl_cffi transport: one pinned hop per fetch() call.
 
-Mirrors the httpx transport's SSRF-safe redirect and header handling; raises on
-transport failure so the caller can fall back to plain httpx.
+wall-consumer
 """
 
 from __future__ import annotations
