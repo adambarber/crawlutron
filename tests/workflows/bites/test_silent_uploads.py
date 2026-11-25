@@ -37,6 +37,8 @@ def _codecov_step(**changes) -> Step:
     }
     for key, value in changes.items():
         raw[_ALIAS.get(key, key)] = value
+    if "uses" in changes:
+        raw["uses"] = changes["uses"]
     return Step.create(raw)
 
 
@@ -104,40 +106,22 @@ def test_non_codecov_with_fail_ci_if_error_false_reds_file_line() -> None:
 
 
 def test_lookalike_codecov_with_fail_ci_if_error_false_reds() -> None:
-    step = Step.__new__(Step)
-    object.__setattr__(step, "uses", _LOOKALIKE)
-    object.__setattr__(step, "name", "Upload coverage XML to Codecov")
-    object.__setattr__(step, "line", 9)
-    object.__setattr__(step, "run", None)
-    object.__setattr__(step, "event_spliced", False)
-    object.__setattr__(
-        step,
-        "with_",
-        {"fail_ci_if_error": False, "files": "coverage_reports/coverage.xml"},
+    clean = _SAMPLE.model_copy(
+        update={"steps": (_codecov_step(uses=_LOOKALIKE, with_={"fail_ci_if_error": False}),)}
     )
-    job = _SAMPLE.model_copy(update={"steps": (step,), "key": "coverage", "workflow": "ci"})
-    parent = parent_workflow(job)
-    findings = list(no_silent_uploads(parent, job))
+    parent = parent_workflow(clean)
+    findings = list(no_silent_uploads(parent, clean))
     assert findings
     assert findings[0].rule == "no-silent-uploads"
-    assert str(step.line) in findings[0].message
+    assert "9" in findings[0].message
 
 
 def test_codecov_with_if_no_files_found_warn_reds() -> None:
-    step = Step.__new__(Step)
-    object.__setattr__(step, "uses", _CODECOV)
-    object.__setattr__(step, "name", "Upload coverage XML to Codecov")
-    object.__setattr__(step, "line", 9)
-    object.__setattr__(step, "run", None)
-    object.__setattr__(step, "event_spliced", False)
-    object.__setattr__(
-        step,
-        "with_",
-        {"fail_ci_if_error": True, "if-no-files-found": "warn"},
+    clean = _SAMPLE.model_copy(
+        update={"steps": (_codecov_step(with_={"fail_ci_if_error": True, "if_no_files_found": "warn"}),)}
     )
-    job = _SAMPLE.model_copy(update={"steps": (step,), "key": "coverage", "workflow": "ci"})
-    parent = parent_workflow(job)
-    findings = list(no_silent_uploads(parent, job))
+    parent = parent_workflow(clean)
+    findings = list(no_silent_uploads(parent, clean))
     assert findings
     assert findings[0].rule == "no-silent-uploads"
-    assert str(step.line) in findings[0].message
+    assert "9" in findings[0].message

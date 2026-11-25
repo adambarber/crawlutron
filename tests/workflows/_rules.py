@@ -1,5 +1,6 @@
 """Total rules over the typed workflow model; waivers are named and ratcheted."""
 
+import re
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 
@@ -171,8 +172,6 @@ def uses_tests_door(workflow: Workflow, job: Job) -> Iterator[Finding]:
         )
 
 
-import re
-
 _CODECOV_ACTION_RE = re.compile(r"^codecov/codecov-action@[0-9a-f]{40}$")
 
 
@@ -194,7 +193,7 @@ def no_silent_uploads(workflow: Workflow, job: Job) -> Iterator[Finding]:
                 step.line,
                 f"{workflow.path}:{step.line}: {step.name or 'unnamed step'} sets fail_ci_if_error:false",
             )
-        if step.with_.get("if-no-files-found") == "warn":
+        if step.with_.get("if-no-files-found") == "warn" or step.with_.get("if_no_files_found") == "warn":
             yield Finding(
                 "no-silent-uploads",
                 workflow.stem,
