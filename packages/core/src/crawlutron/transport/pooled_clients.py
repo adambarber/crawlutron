@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import threading
-from collections.abc import Callable, Generator
-from contextlib import AbstractAsyncContextManager, contextmanager
+from collections.abc import AsyncGenerator, Callable, Generator
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, contextmanager
 from http.cookiejar import CookieJar as _StdlibCookieJar
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 
@@ -14,6 +14,11 @@ import httpx
 
 from crawlutron.runtime import process_state
 from crawlutron.runtime.resource_lifecycle import DeferredClose
+from crawlutron.transport.egress_proxy_runtime import (
+    egress_proxy_url,
+    has_egress_proxy,
+    reset_egress_proxy,
+)
 from crawlutron.transport.pinned_transport import PinnedRequest
 from crawlutron.transport.pooled_client_release import (
     PENDING_CLIENT_CLOSE,
@@ -27,6 +32,7 @@ from crawlutron.transport.pooled_client_release import (
 )
 from crawlutron.transport.timeouts import Timeouts
 from crawlutron.vocabulary.identity import DEFAULT_USER_AGENT
+from safe_url.host_policy import HostPolicy
 
 if TYPE_CHECKING:
     from crawlutron.config.settings import CrawlerSettings
@@ -62,6 +68,8 @@ def _build_async_client(settings: CrawlerSettings | None = None) -> PooledClient
         settings = _default_settings()
     client = httpx.AsyncClient(
         http2=True,
+        proxy=egress_proxy_url(HostPolicy.from_settings(_default_settings())),
+        trust_env=False,
         # Providers are operator-configured endpoints, so a redirect is suspicious
         # and never followed here; the crawl fetcher performs its own hops.
         follow_redirects=False,
@@ -280,7 +288,8 @@ class _PooledHttpClient:
         """
         await self.aclose()
 
-    def stream(
+    @asynccontextmanager
+    async def stream(
         self,
         method: str,
         request: PinnedRequest,
@@ -291,8 +300,8 @@ class _PooledHttpClient:
         json: object | None = None,
         data: dict[str, str] | None = None,
         follow_redirects: bool | None = None,
-    ) -> AbstractAsyncContextManager[httpx.Response]:
-        """One pinned stream: the connect URL is the validated IP from the pin."""
+    ) -> AsyncGenerator[httpx.Response, None]:
+        """One pinned stream via the proxy: TLS attests the logical host."""
         extensions = {"sni_hostname": request.tls_hostname} if request.tls_hostname else None
         kwargs: dict[str, Any] = {
             "headers": headers if headers is not None else request.headers,
@@ -305,7 +314,10 @@ class _PooledHttpClient:
             kwargs["timeout"] = timeout
         if follow_redirects is not None:
             kwargs["follow_redirects"] = follow_redirects
-        return self._client.stream(method, request.connect_url, **kwargs)
+        async with self._client.stream(method, request.url.raw, **kwargs) as response:
+            if response.headers.get("x-crawlutron-egress-refusal") == "dial-failed":
+                raise httpx.ConnectError("egress proxy could not reach the pinned target")
+            yield response
 
     def get(self, request: PinnedRequest) -> AbstractAsyncContextManager[httpx.Response]:
         """Pinned GET: the connect URL is the validated IP from the pin."""
@@ -404,6 +416,7 @@ def _reset() -> None:
     )
     from crawlutron.transport.pooled_socket_abort import abort_transport_sockets
 
+    reset_egress_proxy()
     if _DEFAULT_HTTP_CLIENT is not None:
         bound = _loop_bound_to(_DEFAULT_HTTP_CLIENT)
         if bound is not None and bound.is_closed():
@@ -433,8 +446,8 @@ def http_singleton() -> LoopBoundPooledClient:
 
 
 def _has() -> bool:
-    """Whether a lazily-created client or a queued close reference is still held."""
-    return _DEFAULT_HTTP_CLIENT is not None or bool(PENDING_CLIENT_CLOSE)
+    """Whether a lazily-created client, a queued close, or a proxy is still held."""
+    return _DEFAULT_HTTP_CLIENT is not None or bool(PENDING_CLIENT_CLOSE) or has_egress_proxy()
 
 
 process_state.register(__name__, _reset, _has)

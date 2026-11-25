@@ -53,7 +53,7 @@ async def test_http_fetcher_offloads_the_pin_rule_to_thread():
 async def _dead_port_fetch_outcome(seen: dict[str, threading.Thread]):
     try:
         return await default_http_fetcher(
-            canonical("http://example.com/"),
+            canonical("http://127.0.0.1:9/"),
             {},
             timeout_seconds=2,
             pin=_thread_recording_spy(seen),
