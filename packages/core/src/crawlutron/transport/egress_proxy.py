@@ -186,7 +186,7 @@ async def _read_headers(reader: _Reader) -> bytes | None:
     """Read one request's header block, capped so a hostile client cannot stall."""
     try:
         return await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 30.0)
-    except (asyncio.IncompleteReadError, TimeoutError, ValueError):
+    except (asyncio.IncompleteReadError, asyncio.LimitOverrunError, TimeoutError, ValueError):
         return None
 
 

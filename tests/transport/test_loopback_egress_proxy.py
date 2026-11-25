@@ -182,12 +182,31 @@ async def test_non_loopback_bind_is_refused() -> None:
         await serve_proxy(policy=UNRESTRICTED_HOST_POLICY, host="0.0.0.0", dial=_dial_to(1, []))
 
 
-def test_refusal_never_logs_the_target_or_its_secret(caplog) -> None:
-    """No target, credential or secret query value enters a log sink."""
+async def test_oversized_header_block_is_refused_without_traceback(caplog) -> None:
+    """An over-cap header block answers 400; no overrun traceback reaches a log sink."""
+    dial_seen: list[tuple[str, int]] = []
     with caplog.at_level(logging.DEBUG):
-        with pytest.raises(ValueError):
-            admit_proxy_target(
-                "example.com:443?token=s3cr3t-value", policy=host_policy_for("", "example.com")
-            )
+        async with _proxy(_dial_to(1, dial_seen)) as proxy_port:
+            answer = await _connect(proxy_port, b"GET / HTTP/1.1\r\nX-Big: " + b"A" * 70000)
+    assert answer.startswith(b"HTTP/1.1 400")
+    assert b"Bad-Request" in answer
+    assert "LimitOverrunError" not in caplog.text
+    assert "Traceback" not in caplog.text
+    assert dial_seen == []
+
+
+async def test_refusal_never_logs_the_target_or_its_secret(caplog) -> None:
+    """A wire refusal answers 403 with a fixed reason and logs no target or secret."""
+    authority = "example.com:443?token=s3cr3t-value"
+    dial_seen: list[tuple[str, int]] = []
+    server = await serve_proxy(policy=host_policy_for("", "example.com"), dial=_dial_to(1, dial_seen))
+    try:
+        with caplog.at_level(logging.DEBUG):
+            answer = await _connect(server.port, f"CONNECT {authority} HTTP/1.1\r\n\r\n".encode("ascii"))
+    finally:
+        await server.aclose()
+    assert answer.startswith(b"HTTP/1.1 403")
+    assert b"Forbidden" in answer
     assert "s3cr3t-value" not in caplog.text
-    assert host_of("example.com:443?token=s3cr3t-value") not in caplog.text
+    assert host_of(authority) not in caplog.text
+    assert dial_seen == []
