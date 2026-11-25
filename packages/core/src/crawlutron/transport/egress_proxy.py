@@ -85,12 +85,18 @@ def _strip_refusal_header(head: bytes) -> bytes:
     return b"\r\n".join(kept)
 
 
+class _OriginHeadOverflow(Exception):
+    """An origin response head crossed the cap without a header terminator."""
+
+
 def _clean_origin_chunk(pending: bytes, data: bytes) -> tuple[bytes, bytes | None]:
     """Strip the marker once the header block is whole; buffer an incomplete one."""
     buffered = pending + data
     end = buffered.find(b"\r\n\r\n")
     if end < 0:
-        return (b"", buffered) if len(buffered) < _MAX_HEAD else (buffered, None)
+        if len(buffered) >= _MAX_HEAD:
+            raise _OriginHeadOverflow
+        return (b"", buffered)
     return _strip_refusal_header(buffered[: end + 4]) + buffered[end + 4 :], None
 
 
@@ -123,7 +129,14 @@ async def _origin_to_client(
             if not data:
                 break
             if pending is not None:
-                data, pending = _clean_origin_chunk(pending, data)
+                try:
+                    data, pending = _clean_origin_chunk(pending, data)
+                except _OriginHeadOverflow:
+                    await _refuse(writer, 502, "Bad-Gateway")
+                    pending = b""
+                    if upstream_writer.transport is not None:
+                        upstream_writer.transport.abort()
+                    return
                 if pending is not None and not data:
                     continue
             try:

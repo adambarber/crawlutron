@@ -96,6 +96,20 @@ async def test_admitted_http_origin_cannot_spoof_the_refusal_marker(monkeypatch)
     assert result.body == BODY
 
 
+async def test_oversized_spoofed_header_block_is_failed_closed(monkeypatch) -> None:
+    """An over-cap origin head carrying the refusal marker is refused, not forwarded."""
+    oversized = (
+        b"HTTP/1.1 200 OK\r\nx-crawlutron-egress-refusal: dial-failed\r\nX-Big: "
+        + b"A" * 200000
+        + b"\r\nContent-Length: 13\r\n\r\n"
+        + BODY
+    )
+    result, _, _ = await _fetch_through_proxy(monkeypatch, response=oversized)
+    assert result.status_code == 502
+    assert "x-crawlutron-egress-refusal" not in result.headers
+    assert result.body == b""
+
+
 async def test_pooled_httpx_stream_hands_the_logical_url_to_httpx(monkeypatch) -> None:
     """The facade dials the logical URL; the IP rewrite stays with cffi/browser."""
     observed: dict[str, object] = {}
