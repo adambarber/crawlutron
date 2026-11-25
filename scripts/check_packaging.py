@@ -22,11 +22,11 @@ UV = shutil.which("uv") or "uv"
 
 
 def _probe_environment(wheel: pathlib.Path) -> pathlib.Path:
-    """A clean 3.14 environment holding exactly this wheel."""
+    """A clean 3.12 environment holding exactly this wheel."""
     probe = PROBE_ROOT / wheel.stem
     if not (probe / "bin" / "python").exists():
         subprocess.run(
-            [UV, "venv", "--python", "3.14", str(probe)],
+            [UV, "venv", "--python", "3.12", str(probe)],
             check=True,
             capture_output=True,
         )

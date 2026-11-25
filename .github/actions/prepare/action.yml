@@ -1,6 +1,6 @@
 name: Prepare a gate environment
 description: >
-  Everything a gate needs after the checkout: the 3.14 interpreter and the frozen
+  Everything a gate needs after the checkout: the 3.12 interpreter and the frozen
   install. One definition, so a new gate job cannot drift from the environment
   the others use. The checkout itself stays in the job: GitHub resolves a local
   action before any step runs, so an action that checked out would run before
@@ -11,7 +11,7 @@ runs:
   steps:
     - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
       with:
-        python-version: "3.14"
+        python-version: "3.12"
     # The venv is the service's own: the hook entries resolve `.venv/bin/...`
     # relative to the service root, and every hook is `language: system`, so this
     # is the only place the tools come from. Installed from the frozen lock

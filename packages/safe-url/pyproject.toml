@@ -7,7 +7,7 @@ name = "crawlutron-safe-url"
 version = "0.5.0"
 description = "SSRF-safe URL admission: NormalizedUrl, HostPolicy, IDNA canonicalization, registrable domain, private-target guard, credential-safe redaction"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 license = "MIT"
 dependencies = [
     "regex==2026.11.19",

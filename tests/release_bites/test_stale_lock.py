@@ -53,7 +53,7 @@ def test_the_declared_lock_gate_refuses_a_stale_project(tmp_path: Path):
     project = tmp_path / "stale"
     project.mkdir()
     manifest = project / "pyproject.toml"
-    manifest.write_text(_MANIFEST.format(python=">=3.14"), encoding="utf-8")
+    manifest.write_text(_MANIFEST.format(python=">=3.12"), encoding="utf-8")
     subprocess.run([uv, "lock"], cwd=str(project), capture_output=True, text=True, check=True)
     manifest.write_text(_MANIFEST.format(python=">=3.13"), encoding="utf-8")
 

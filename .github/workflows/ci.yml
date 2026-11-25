@@ -440,7 +440,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.14"
+          python-version: "3.12"
       - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           enable-cache: true
@@ -451,8 +451,8 @@ jobs:
           # and legibly instead of twenty seconds into a compiler subprocess.
           PIP_ONLY_BINARY: ":all:"
         run: |
-          uv export --frozen --no-dev --no-emit-workspace --format requirements-txt --python 3.14 -o /tmp/lock.txt
-          uv tool run --python 3.14 pip-audit -r /tmp/lock.txt --strict
+          uv export --frozen --no-dev --no-emit-workspace --format requirements-txt --python 3.12 -o /tmp/lock.txt
+          uv tool run --python 3.12 pip-audit -r /tmp/lock.txt --strict
 
   # #623: secret scanning over the whole tree and its history.
   secret-scan:
@@ -619,7 +619,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.14"
+          python-version: "3.12"
       - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           enable-cache: false
@@ -629,7 +629,7 @@ jobs:
         id: check-version
         run: |
           set -euo pipefail
-          SKIP="$(uv run --no-project --python 3.14 python scripts/testpypi_guard.py --index-url https://test.pypi.org)"
+          SKIP="$(uv run --no-project --python 3.12 python scripts/testpypi_guard.py --index-url https://test.pypi.org)"
           echo "skip=${SKIP}" >> "${GITHUB_OUTPUT}"
           echo "TestPyPI build skip: ${SKIP}"
       - name: Build and inspect every distribution

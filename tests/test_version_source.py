@@ -36,25 +36,25 @@ def test_runtime_has_no_version_literal() -> None:
     assert '_distribution_version("crawlutron-core")' in source
 
 
-def test_every_python_version_pin_is_314() -> None:
+def test_every_python_floor_pin_is_312() -> None:
     """One interpreter family: every checker, workflow and floor agree."""
-    assert workspace_project(SERVICE_ROOT)["requires-python"] == ">=3.14"
+    assert workspace_project(SERVICE_ROOT)["requires-python"] == ">=3.12"
     table = tomllib.loads((SERVICE_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     ruff = table["tool"]["ruff"]
     assert isinstance(ruff, dict) and ruff.get("target-version") == "py312", ruff
     for path, directory in workspace_package_dirs(SERVICE_ROOT).items():
-        assert workspace_project(directory)["requires-python"] == ">=3.14", path
+        assert workspace_project(directory)["requires-python"] == ">=3.12", path
 
     mypy = configparser.ConfigParser()
     mypy.read(SERVICE_ROOT / "mypy.ini", encoding="utf-8")
-    assert mypy["mypy"]["python_version"] == "3.14"
+    assert mypy["mypy"]["python_version"] == "3.12"
     pyright = _jsonc_load_source((SERVICE_ROOT / "pyrightconfig.json").read_text(encoding="utf-8"))
-    assert pyright["pythonVersion"] == "3.14"
-    assert (SERVICE_ROOT / ".python-version").read_text(encoding="utf-8").strip().startswith("3.14")
+    assert pyright["pythonVersion"] == "3.12"
+    assert (SERVICE_ROOT / ".python-version").read_text(encoding="utf-8").strip().startswith("3.12")
     lock = tomllib.loads((SERVICE_ROOT / "uv.lock").read_text(encoding="utf-8"))
-    assert lock["requires-python"] == ">=3.14"
+    assert lock["requires-python"] == ">=3.12"
 
-    for name in ("ci.yml", "release.yml", "packaging.yml"):
+    for name in ("ci.yml", "release.yml", "packaging.yml", "rehearsal.yml", "weekly.yml"):
         text = (SERVICE_ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
         jobs = _jobs(text)
         versions: set[str] = set()
@@ -65,4 +65,4 @@ def test_every_python_version_pin_is_314() -> None:
                 with_block = step.get("with")
                 if isinstance(with_block, dict) and "python-version" in with_block:
                     versions.add(str(with_block["python-version"]))
-        assert versions and versions == {"3.14"}, f"{name}: {versions}"
+        assert versions and versions == {"3.12"}, f"{name}: {versions}"

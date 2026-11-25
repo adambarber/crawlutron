@@ -7,7 +7,7 @@ name = "crawlutron-core"
 version = "0.5.0"
 description = "Framework-free policy-driven web crawler and content-extraction engine"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 license = "MIT"
 
 # The engine's own runtime set: every third-party library the `crawlutron`

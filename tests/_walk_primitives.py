@@ -175,7 +175,7 @@ _NODES_BY_KIND: weakref.WeakKeyDictionary[ast.AST, dict[str, tuple[ast.AST, ...]
 _PARSE_CACHE: dict[tuple[str, str], tuple[ast.Module, CacheMetadata]] = {}
 
 # AST schema version - increment when AST structure expectations change
-_AST_SCHEMA_VERSION = "3.14"
+_AST_SCHEMA_VERSION = "3.12"
 
 
 def _validate_ast(tree: ast.Module) -> str:

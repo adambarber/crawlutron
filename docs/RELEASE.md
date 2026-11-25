@@ -76,7 +76,7 @@ can ship under a version it does not carry.
 
 `.github/workflows/packaging.yml` runs on push and pull request and publishes
 nothing. It builds every member, inspects every artifact with `twine check
---strict`, installs each wheel into its own clean 3.14 environment, and imports
+--strict`, installs each wheel into its own clean 3.12 environment, and imports
 its top level (the import name comes from the wheel's own `__init__.py`
 contents, not installed metadata, so `crawlutron-safe-url` imports as
 `safe_url`). It also builds the container image without pushing. A packaging break therefore reds before merge, not at release.

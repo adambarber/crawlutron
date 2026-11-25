@@ -107,15 +107,15 @@ def coverage_at_prepush(bundle: Bundle) -> Iterator[Finding]:
 
 
 def prepare_action_env(bundle: Bundle) -> Iterator[Finding]:
-    """The one prepare action pins 3.14, uv, and non-racing caches."""
+    """The one prepare action pins 3.12, uv, and non-racing caches."""
     action = bundle.prepare
     versions = [step.inputs.get("python-version") for step in action.steps if "python-version" in step.inputs]
-    if versions != ["3.14"]:
+    if versions != ["3.12"]:
         yield _finding(
             RuleId.PREPARE_ACTION_ENV,
             action.path.name,
             1,
-            f"prepare action python-version must be 3.14, got {versions}",
+            f"prepare action python-version must be 3.12, got {versions}",
         )
     runs = " ".join(str(step.run or "") for step in action.steps)
     if "uv sync --frozen --extra dev" not in runs:

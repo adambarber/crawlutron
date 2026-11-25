@@ -21,7 +21,7 @@ name = "crawlutron"
 version = "0.5.2"
 description = "Policy-driven, self-hosted web crawler and content-extraction service (FastAPI surface via crawlutron-rest)"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [
@@ -42,6 +42,7 @@ classifiers = [
     "Intended Audience :: Developers",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.14",
     "Topic :: Internet :: WWW/HTTP",
     "Topic :: Text Processing :: Markup :: HTML",

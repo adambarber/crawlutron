@@ -8,9 +8,12 @@
 # The base image is pinned by tag AND digest (CRAWLUTRON_BASE_IMAGE below) so a
 # rebuilt image is byte-for-byte reproducible and a fast-moving upstream tag can
 # never silently roll the deployment forward. The digest is the multi-arch OCI
-# index captured 2026-11-02. A further major bump (Python 3.15) is deferred: the
-# frozen lock cannot resolve on 3.15 until upstream ships cp315 wheels.
-ARG CRAWLUTRON_BASE_IMAGE=python:3.14.10-slim-bookworm@sha256:516b51cb9db2ef061e465c803e50f64361b82cefd91e525b889b967b83e83527
+# index captured 2026-11-24 (`docker buildx imagetools inspect python:3.12-slim`
+# -> index sha256:191083cdf6c7bda8c76158983163ead5d5cf7b77cf3033e805bb0f5296f51b4b;
+# linux/amd64 manifest sha256:4a68d3169325c47e1bafbb86425220f03fbdff6f079a419e8d39407183288217).
+# A further major bump (Python 3.15) is deferred: the frozen lock cannot resolve
+# on 3.15 until upstream ships cp315 wheels.
+ARG CRAWLUTRON_BASE_IMAGE=python:3.12-slim@sha256:191083cdf6c7bda8c76158983163ead5d5cf7b77cf3033e805bb0f5296f51b4b
 
 # ==========================================
 # 1. Builder Stage: Compile Python dependencies

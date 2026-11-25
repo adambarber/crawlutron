@@ -146,7 +146,7 @@ def _with_run(bundle: Bundle, **changes) -> Bundle:
 
 def _downgrade_python(bundle: Bundle) -> Bundle:
     steps = tuple(
-        step.model_copy(update={"inputs": {"python-version": "3.12"}})
+        step.model_copy(update={"inputs": {"python-version": "3.10"}})
         if step.inputs.get("python-version")
         else step
         for step in bundle.prepare.steps
@@ -193,7 +193,7 @@ MUTATIONS = (
     (RuleId.PRECOMMIT_HOOK_SURFACE, lambda b: _without_hook(b, "ruff"), "ruff"),
     (RuleId.JSCPD_SINGLE_GATE, _duplicate_jscpd, "jscpd-tests"),
     (RuleId.COVERAGE_AT_PREPUSH, lambda b: _set_stages(b, "coverage", ("pre-commit",)), "pre-push"),
-    (RuleId.PREPARE_ACTION_ENV, _downgrade_python, "3.14"),
+    (RuleId.PREPARE_ACTION_ENV, _downgrade_python, "3.10"),
     (
         RuleId.CONFTEST_BYTECODE_ENABLED,
         lambda b: b.model_copy(

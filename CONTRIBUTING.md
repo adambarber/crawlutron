@@ -10,7 +10,7 @@ mechanics of submitting a change.
 git clone https://github.com/adambarber/crawlutron.git
 cd crawlutron
 
-# Install the workspace members and pinned dev tools from uv.lock (Python 3.14+)
+# Install the workspace members and pinned dev tools from uv.lock (Python 3.12+)
 uv sync --extra dev
 ```
 
@@ -66,7 +66,7 @@ them has no side effects, and the keyed checks only run when
 
 ## Coding Style
 
-- Python 3.14+ syntax; ruff enforces import order, pyupgrade, and the
+- Python 3.12+ syntax; ruff enforces import order, pyupgrade, and the
   baseline PEP 8 checks (see `pyproject.toml`).
 - 110-char line limit.
 - Public functions take keyword arguments where the call site benefits.
