@@ -68,7 +68,7 @@ def _build_async_client(settings: CrawlerSettings | None = None) -> PooledClient
         settings = _default_settings()
     client = httpx.AsyncClient(
         http2=True,
-        proxy=egress_proxy_url(HostPolicy.from_settings(_default_settings())),
+        proxy=egress_proxy_url(HostPolicy.from_settings(settings), settings=settings),
         trust_env=False,
         # Providers are operator-configured endpoints, so a redirect is suspicious
         # and never followed here; the crawl fetcher performs its own hops.

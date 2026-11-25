@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field, fields
+from urllib.parse import urlsplit
 
 from crawlutron.config.env import get_mapping_float, get_mapping_int, in_range, parse_bool_value
 from crawlutron.config.settings_shapes import (
@@ -153,6 +154,9 @@ class CrawlerSettings:
     user_agent: str = ""
     headless: bool = True
     warmup_urls: tuple[str, ...] = ()
+    # Operator-configured egress proxy endpoint. Empty → in-process loopback
+    # listener; configured → use that sidecar and do not start a listener.
+    egress_proxy_url: str = ""
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, str] | None = None) -> CrawlerSettings:
@@ -426,6 +430,27 @@ def _retention_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> 
     }
 
 
+def _parse_egress_proxy_url(raw: str) -> str:
+    """Validate the operator egress proxy endpoint: refuse userinfo, query/fragment,
+    unsupported scheme, missing host, invalid port. Private container hosts allowed."""
+    if not raw:
+        return ""
+    parts = urlsplit(raw)
+    if parts.scheme not in ("http", "https"):
+        raise ValueError(f"unsupported egress proxy scheme: {parts.scheme!r}")
+    if parts.username or parts.password:
+        raise ValueError("egress proxy must not include userinfo")
+    if parts.query or parts.fragment:
+        raise ValueError("egress proxy must not include query or fragment")
+    if parts.path and parts.path != "/":
+        raise ValueError("egress proxy must not include a path")
+    if not parts.hostname:
+        raise ValueError("egress proxy must include a host")
+    if parts.port is not None and (parts.port < 1 or parts.port > 65535):
+        raise ValueError(f"invalid egress proxy port: {parts.port}")
+    return raw
+
+
 def _ops_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> OpsFields:
     """The webhook cap, user agent, headless switch, and warmup URL list."""
     raw_warmup = source.get("CRAWLUTRON_WARMUP_URLS", "")
@@ -440,4 +465,7 @@ def _ops_fields(cls: type[CrawlerSettings], source: Mapping[str, str]) -> OpsFie
             env_name="CRAWLUTRON_HEADLESS",
         ),
         "warmup_urls": tuple(u.strip() for u in raw_warmup.split(",") if u.strip()),
+        "egress_proxy_url": _parse_egress_proxy_url(
+            source.get("CRAWLUTRON_EGRESS_PROXY_URL", cls.egress_proxy_url)
+        ),
     }

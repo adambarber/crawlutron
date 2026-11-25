@@ -2,36 +2,41 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import time
+import uuid
 
 import pytest
 
 from tests._subprocess_helpers import run_cmd
 from tests.chokepoint_paths import REPO_ROOT
 
-COMPOSE_FILE = REPO_ROOT / "docker-compose.egress.yml"
+COMPOSE_FILE = REPO_ROOT / "docker-compose.yml"
+TEST_COMPOSE_FILE = REPO_ROOT / "docker-compose.test.yml"
 DOCKERFILE = REPO_ROOT / "Dockerfile"
 
 
-def _docker_compose(
-    cmd: list[str],
-    **kwargs,
-) -> subprocess.CompletedProcess[str]:
-    """Run docker compose with the egress file."""
-    return run_cmd(
-        ["docker", "compose", "-f", str(COMPOSE_FILE)] + cmd,
-        **kwargs,
-    )
+def _docker_compose_project(project_name: str, cmd: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+    """Run docker compose with the main file and test override, scoped to project."""
+    base_cmd = [
+        "docker",
+        "compose",
+        "-p",
+        project_name,
+        "-f",
+        str(COMPOSE_FILE),
+        "-f",
+        str(TEST_COMPOSE_FILE),
+    ]
+    return run_cmd(base_cmd + cmd, **kwargs)
 
 
-def _wait_for_service(name: str, timeout: int = 300) -> bool:
-    """Wait for a service to be healthy."""
+def _wait_for_service_healthy(project_name: str, service_name: str, timeout: int = 120) -> bool:
+    """Wait for a service to be healthy using project-scoped docker compose."""
     for _ in range(timeout):
-        result = _docker_compose(["ps", "--format", "json", name])
+        result = _docker_compose_project(project_name, ["ps", "--format", "json", service_name])
         if result.returncode == 0 and result.stdout.strip():
-            import json
-
             for line in result.stdout.strip().split("\n"):
                 try:
                     info = json.loads(line)
@@ -43,67 +48,101 @@ def _wait_for_service(name: str, timeout: int = 300) -> bool:
     return False
 
 
+def _wait_for_container_running(project_name: str, service_name: str, timeout: int = 30) -> bool:
+    """Wait for a container to be running (for services without healthcheck)."""
+    for _ in range(timeout):
+        result = _docker_compose_project(project_name, ["ps", "--format", "json", service_name])
+        if result.returncode == 0 and result.stdout.strip():
+            for line in result.stdout.strip().split("\n"):
+                try:
+                    info = json.loads(line)
+                    if info.get("State") == "running":
+                        return True
+                except json.JSONDecodeError:
+                    pass
+        time.sleep(1)
+    return False
+
+
+def _get_container_name(project_name: str, service_name: str) -> str:
+    """Get the actual container name for a service in the project."""
+    result = _docker_compose_project(project_name, ["ps", "--format", "json", service_name])
+    if result.returncode == 0 and result.stdout.strip():
+        for line in result.stdout.strip().split("\n"):
+            try:
+                info = json.loads(line)
+                return info.get("Name", "")
+            except json.JSONDecodeError:
+                pass
+    return ""
+
+
 @pytest.fixture(scope="module")
 def egress_stack():
-    """Bring up the egress topology stack for testing."""
-    # Build the test image
-    print("Building egress test image...")
-    build_result = _docker_compose(["build", "crawlutron"], capture=False)
-    assert build_result.returncode == 0, "Failed to build crawlutron image"
+    """Bring up the egress topology stack for testing with unique project name."""
+    project_name = f"crawlutron-egress-test-{uuid.uuid4().hex[:8]}"
 
-    # Build proxy image (same Dockerfile, different target not needed)
-    build_proxy_result = _docker_compose(["build", "egress-proxy"], capture=False)
-    assert build_proxy_result.returncode == 0, "Failed to build egress-proxy image"
+    # Build images
+    print("Building egress test images...")
+    build_cmd = ["build", "crawlutron", "egress-proxy"]
+    build_result = _docker_compose_project(project_name, build_cmd, capture=False)
+    assert build_result.returncode == 0, "Failed to build images"
 
     # Pull origin image (pinned python alpine)
     print("Pulling origin image...")
-    pull_result = run_cmd(
-        ["docker", "pull", "python@sha256:c5ba3deef00c7758561a0f03c26f44f10589263d40e732b8748e0d1f38f6dd89"],
-        capture=False,
-    )
+    origin_img = "python@sha256:c5ba3deef00c7758561a0f03c26f44f10589263d40e732b8748e0d1f38f6dd89"
+    pull_result = run_cmd(["docker", "pull", origin_img], capture=False)
     assert pull_result.returncode == 0, "Failed to pull origin image"
 
     # Bring up the stack
     print("Bringing up egress topology stack...")
-    up_result = _docker_compose(["up", "-d"], capture=False)
+    up_result = _docker_compose_project(project_name, ["up", "-d"], capture=False)
     assert up_result.returncode == 0, "Failed to bring up stack"
 
     try:
-        # Wait for services to be healthy
+        # Wait for services to be healthy with bounded waits
         print("Waiting for crawlutron to be healthy...")
-        assert _wait_for_service("crawlutron", timeout=300), "crawlutron did not become healthy"
-        print("Waiting for egress-proxy...")
-        time.sleep(10)  # proxy has no healthcheck, give it time to start
-        print("Waiting for origin...")
-        time.sleep(5)  # origin is a simple HTTP server
+        healthy = _wait_for_service_healthy(project_name, "crawlutron", timeout=120)
+        assert healthy, "crawlutron did not become healthy"
+        print("Waiting for egress-proxy to be ready...")
+        ready = _wait_for_container_running(project_name, "egress-proxy", timeout=30)
+        assert ready, "egress-proxy did not become ready"
+        print("Waiting for origin to be ready...")
+        ready = _wait_for_container_running(project_name, "origin", timeout=30)
+        assert ready, "origin did not become ready"
 
-        yield
+        yield project_name
     finally:
-        # Teardown
+        # Teardown - always clean up
         print("Tearing down egress topology stack...")
-        _docker_compose(["down", "-v"], capture=False)
+        _docker_compose_project(project_name, ["down", "-v", "--remove-orphans"], capture=False)
 
 
 @pytest.mark.slow
-def test_direct_app_to_origin_fails(_egress_stack) -> None:
+def test_direct_app_to_origin_fails(egress_stack) -> None:
     """Direct app→origin must fail (no direct network path)."""
+    project_name = egress_stack
+    app_container = _get_container_name(project_name, "crawlutron")
     # Try to reach origin directly from crawlutron container
     # The origin is on the egress network only, app is on internal only
-    result = _docker_compose(["exec", "-T", "crawlutron", "curl", "--max-time", "5", "http://origin:80/"])
+    result = run_cmd(["docker", "exec", "-i", app_container, "curl", "--max-time", "5", "http://origin:80/"])
     # Should fail - no direct network path
     assert result.returncode != 0, f"Direct app→origin should fail but got: {result.stdout}"
     print(f"Direct app→origin correctly failed (exit code: {result.returncode})")
 
 
 @pytest.mark.slow
-def test_app_via_proxy_to_origin_succeeds(_egress_stack) -> None:
+def test_app_via_proxy_to_origin_succeeds(egress_stack) -> None:
     """App→proxy→origin succeeds using production proxy configuration."""
+    project_name = egress_stack
+    app_container = _get_container_name(project_name, "crawlutron")
     # App uses CRAWLUTRON_EGRESS_PROXY_URL; test via docker exec with httpx client
-    result = _docker_compose(
+    result = run_cmd(
         [
+            "docker",
             "exec",
-            "-T",
-            "crawlutron",
+            "-i",
+            app_container,
             "python",
             "-c",
             """
@@ -117,9 +156,10 @@ client = httpx.Client(proxy=proxy_url, timeout=10.0)
 try:
     response = client.get('http://origin:80/')
     print(f'Status: {response.status_code}')
-    print(f'Body: {response.text}')
+    print(f'Body: {response.text[:200]}')
     assert response.status_code == 200
-    assert 'ORIGIN-REACHED-VIA-PROXY' in response.text
+    # python -m http.server returns an HTML directory listing
+    assert '<title>Directory listing' in response.text or 'Directory listing' in response.text
     print('SUCCESS: App→proxy→origin works')
 except Exception as e:
     print(f'FAILED: {e}')
@@ -134,13 +174,16 @@ except Exception as e:
 
 
 @pytest.mark.slow
-def test_logical_url_and_pinning_intact(_egress_stack) -> None:
+def test_logical_url_and_pinning_intact(egress_stack) -> None:
     """Logical URL/Host identity preserved through proxy."""
-    result = _docker_compose(
+    project_name = egress_stack
+    app_container = _get_container_name(project_name, "crawlutron")
+    result = run_cmd(
         [
+            "docker",
             "exec",
-            "-T",
-            "crawlutron",
+            "-i",
+            app_container,
             "python",
             "-c",
             """
@@ -154,9 +197,10 @@ client = httpx.Client(proxy=proxy_url, timeout=10.0)
 try:
     response = client.get('http://origin:80/')
     print(f'Status: {response.status_code}')
-    print(f'Body: {response.text}')
+    print(f'Body: {response.text[:200]}')
     assert response.status_code == 200
-    assert 'ORIGIN-REACHED-VIA-PROXY' in response.text
+    # python -m http.server returns an HTML directory listing
+    assert '<title>Directory listing' in response.text or 'Directory listing' in response.text
     print('SUCCESS: Logical URL/pinning intact via proxy')
 except Exception as e:
     print(f'FAILED: {e}')
@@ -173,31 +217,32 @@ except Exception as e:
 
 
 @pytest.mark.slow
-def test_no_public_ports_on_app(_egress_stack) -> None:
-    """Verify app container has no published ports."""
-    result = run_cmd(
-        ["docker", "inspect", "crawlutron-egress", "--format", "{{json .NetworkSettings.Ports}}"]
-    )
+def test_loopback_only_published_port(egress_stack) -> None:
+    """Verify app container has loopback-only published port (127.0.0.1:8765)."""
+    project_name = egress_stack
+    app_container = _get_container_name(project_name, "crawlutron")
+    result = run_cmd(["docker", "inspect", app_container, "--format", "{{json .NetworkSettings.Ports}}"])
     assert result.returncode == 0
-    import json
-
     ports = json.loads(result.stdout.strip())
-    assert ports == {} or ports is None, f"App should have no published ports, got: {ports}"
-    print("App correctly has no published ports")
+    # Should have only the loopback mapping
+    expected = {"8765/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8765"}]}
+    assert ports == expected, f"App should have only loopback port mapping, got: {ports}"
+    print("App correctly has loopback-only published port")
 
 
 @pytest.mark.slow
-def test_network_topology(_egress_stack) -> None:
+def test_network_topology(egress_stack) -> None:
     """Verify network topology: app internal only, proxy dual-homed, origin egress only."""
+    project_name = egress_stack
     for name, expected_networks in [
-        ("crawlutron-egress", ["internal"]),
+        ("crawlutron", ["internal"]),
         ("egress-proxy", ["internal", "egress"]),
-        ("isolated-origin", ["egress"]),
+        ("origin", ["egress"]),
     ]:
-        result = run_cmd(["docker", "inspect", name, "--format", "{{json .NetworkSettings.Networks}}"])
+        container_name = _get_container_name(project_name, name)
+        fmt = "{{json .NetworkSettings.Networks}}"
+        result = run_cmd(["docker", "inspect", container_name, "--format", fmt])
         assert result.returncode == 0, f"Failed to inspect {name}"
-        import json
-
         networks = json.loads(result.stdout.strip())
         actual_networks = sorted(networks.keys())
         assert actual_networks == sorted(expected_networks), (
@@ -206,13 +251,15 @@ def test_network_topology(_egress_stack) -> None:
         print(f"{name}: correctly on networks {actual_networks}")
 
     # Verify internal network is internal-only
-    result = run_cmd(["docker", "network", "inspect", "egress_internal", "--format", "{{.Internal}}"])
+    net_name = f"{project_name}_internal"
+    result = run_cmd(["docker", "network", "inspect", net_name, "--format", "{{.Internal}}"])
     assert result.returncode == 0
     assert result.stdout.strip() == "true", "internal network must be internal-only"
     print("internal network correctly marked as internal-only")
 
     # Verify egress network is NOT internal-only
-    result = run_cmd(["docker", "network", "inspect", "egress_egress", "--format", "{{.Internal}}"])
+    net_name = f"{project_name}_egress"
+    result = run_cmd(["docker", "network", "inspect", net_name, "--format", "{{.Internal}}"])
     assert result.returncode == 0
     assert result.stdout.strip() == "false", "egress network must allow external access"
     print("egress network correctly allows external access")

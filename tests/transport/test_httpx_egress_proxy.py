@@ -66,7 +66,9 @@ async def _fetch_through_proxy(
         proxy = await serve_proxy(policy=UNRESTRICTED_HOST_POLICY, dial=_record_dial(origin_port, seen))
         try:
             monkeypatch.setattr(
-                pooled_clients, "egress_proxy_url", lambda policy: f"http://127.0.0.1:{proxy.port}"
+                pooled_clients,
+                "egress_proxy_url",
+                lambda policy, settings=None: f"http://127.0.0.1:{proxy.port}",
             )
             result = await default_http_fetcher(canonical(f"http://{LOGICAL}/page"), {}, 10)
         finally:

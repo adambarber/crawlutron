@@ -9,9 +9,13 @@ from __future__ import annotations
 import asyncio
 import threading
 from contextlib import suppress
+from typing import TYPE_CHECKING
 
 from crawlutron.transport.egress_proxy import ProxyServer, serve_proxy
 from safe_url.host_policy import HostPolicy
+
+if TYPE_CHECKING:
+    from crawlutron.config.settings import CrawlerSettings
 
 __all__ = ["egress_proxy_url", "has_egress_proxy", "reset_egress_proxy"]
 
@@ -21,9 +25,16 @@ _url: str | None = None
 _lock = threading.Lock()
 
 
+def _default_settings() -> CrawlerSettings:
+    """Get default crawler settings for the egress door."""
+    from crawlutron.config.settings_cache import get_cached_settings
+
+    return get_cached_settings()
+
+
 def reset_egress_proxy() -> None:
     """Drop the listener; the dedicated loop stays reusable for the next build."""
-    global _server, _url
+    global _loop, _server, _url
     with _lock:
         loop = _loop
         if _server is not None and _server.is_live and loop is not None:
@@ -32,9 +43,15 @@ def reset_egress_proxy() -> None:
         _server, _url = None, None
 
 
-def egress_proxy_url(policy: HostPolicy) -> str:
-    """Return the loopback proxy URL, starting one listener on its own loop."""
+def egress_proxy_url(policy: HostPolicy, settings: CrawlerSettings | None = None) -> str:
+    """Return the egress proxy URL: empty setting → in-process loopback listener;
+    configured → sidecar endpoint, returned as-is without starting a listener."""
     global _loop, _server, _url
+    if settings is None:
+        settings = _default_settings()
+    configured = settings.egress_proxy_url
+    if configured:
+        return configured
     with _lock:
         if _url is not None and _server is not None and _server.is_live:
             return _url
@@ -48,4 +65,5 @@ def egress_proxy_url(policy: HostPolicy) -> str:
 
 def has_egress_proxy() -> bool:
     """Whether a proxy listener or its cached URL is still held."""
+    global _url
     return _url is not None

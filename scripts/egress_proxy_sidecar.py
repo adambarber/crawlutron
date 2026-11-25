@@ -7,9 +7,9 @@ import logging
 import os
 import sys
 
+from crawlutron.config.settings_cache import get_cached_settings
 from crawlutron.transport.egress_proxy import CONTAINER_INTERNAL_BIND_ALL, serve_proxy_sidecar
 from safe_url import HostPolicy
-from tests.chokepoint_paths import REPO_ROOT
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -20,17 +20,15 @@ async def main() -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    # Ensure repo root is on sys.path for imports
-    if str(REPO_ROOT) not in sys.path:
-        sys.path.insert(0, str(REPO_ROOT))
-
     # Sidecar binds on all interfaces in the container (internal network);
     # binding all interfaces is intentional for dual-homed deployment.
     bind_host = os.environ.get("EGRESS_PROXY_BIND_HOST", CONTAINER_INTERNAL_BIND_ALL)
     bind_port = int(os.environ.get("EGRESS_PROXY_BIND_PORT", "8888"))
 
-    # Policy for outbound connections (from egress network)
-    policy = HostPolicy.unrestricted()
+    # Policy for outbound connections (from egress network), built from cached
+    # settings just like the in-process proxy.
+    settings = get_cached_settings()
+    policy = HostPolicy.from_settings(settings)
 
     _LOGGER.info("Starting egress proxy sidecar on %s:%s", bind_host, bind_port)
 

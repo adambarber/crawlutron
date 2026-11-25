@@ -42,12 +42,14 @@ def _build_cffi_session(settings: CrawlerSettings | None = None) -> CffiSession:
     """
     from crawlutron.config.settings_cache import get_cached_settings
 
+    if settings is None:
+        settings = get_cached_settings()
     # discard_cookies=True: no built-in jar (cross-tenant cookie replay).
     # trust_env=False: ambient proxies must never bypass the loopback door.
     session: cffi_requests.AsyncSession = cffi_requests.AsyncSession(
         impersonate=CFFI_IMPERSONATE_TARGET,
         discard_cookies=True,
-        proxy=egress_proxy_url(HostPolicy.from_settings(get_cached_settings())),
+        proxy=egress_proxy_url(HostPolicy.from_settings(settings), settings=settings),
         trust_env=False,
     )
     return bind_to_running_loop(session)

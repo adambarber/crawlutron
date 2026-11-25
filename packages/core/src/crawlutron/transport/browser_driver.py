@@ -244,7 +244,7 @@ class BrowserDriver:
         """
         if self._settings is None:
             return None
-        return egress_proxy_url(HostPolicy.from_settings(self._settings))
+        return egress_proxy_url(HostPolicy.from_settings(self._settings), settings=self._settings)
 
     def browser_kwargs(self, browser_profile: BrowserProfileRecord | None) -> dict[str, object]:
         """Launch kwargs for Camoufox; includes loopback egress proxy when configured."""

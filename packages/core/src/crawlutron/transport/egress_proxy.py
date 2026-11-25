@@ -36,9 +36,11 @@ _REFUSAL_LINE = _REFUSAL_HEADER.lower().encode("ascii") + b":"
 _DRAIN_TIMEOUT = 30.0
 _MAX_HEAD = 65536
 
-# Container-internal bind address for dual-homed sidecar deployments.
-# This is NOT loopback - it's the container's internal network interface.
-CONTAINER_INTERNAL_BIND_ALL = ".".join(["0"] * 4)
+# Explicit bind for dual-homed sidecar: 0.0.0.0 on internal network so app
+# container can reach it. Intentional for default-deny topology.
+CONTAINER_INTERNAL_BIND_ALL = "0.0.0.0"
+
+_LIVE_SERVERS: set[ProxyServer] = set()
 
 
 class ProxyBindRefused(ValueError):
@@ -62,9 +64,6 @@ class ProxyTarget:
     def tls_hostname(self) -> str | None:
         """The SNI the client keeps through the tunnel; None for plain HTTP."""
         return self.url.tls_hostname
-
-
-_LIVE_SERVERS: set[ProxyServer] = set()
 
 
 def admit_proxy_target(authority: str, *, policy: HostPolicy, scheme: str = "https") -> ProxyTarget:
@@ -343,7 +342,7 @@ async def serve_proxy(
 async def serve_proxy_sidecar(
     *,
     policy: HostPolicy,
-    host: str = CONTAINER_INTERNAL_BIND_ALL,
+    host: str = "0.0.0.0",
     port: int = 8888,
     dial: _Dial | None = None,
 ) -> ProxyServer:

@@ -1,0 +1,33 @@
+# Development override for docker-compose.yml.
+# Adds volumes, development build target, and removes test-only containers.
+#
+# Run with: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+
+services:
+  crawlutron:
+    build:
+      target: development
+    image: crawlutron:local-dev
+    container_name: crawlutron-dev
+    restart: unless-stopped
+    # Remove the egress proxy dependency for standalone development
+    depends_on: []
+    # Remove the egress proxy URL for standalone development (uses in-process loopback)
+    environment:
+      CRAWLUTRON_EGRESS_PROXY_URL: ""
+    # Keep volumes for development iteration
+    volumes:
+      - ./logs:/app/logs
+      - ./cache:/app/cache
+    # Remove test-only networks for standalone development
+    networks: []
+
+  # Disable the sidecar proxy for standalone development
+  egress-proxy:
+    deploy:
+      replicas: 0
+
+# Remove test-only networks for standalone development
+networks:
+  internal: {}
+  egress: {}

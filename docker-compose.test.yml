@@ -1,0 +1,23 @@
+# Test override for docker-compose.yml: adds isolated origin for runtime proof.
+# This simulates an external target that can ONLY be reached via the proxy.
+#
+# Run with: docker compose -f docker-compose.yml -f docker-compose.test.yml up -d
+
+services:
+  # Isolated origin: only on egress network, not reachable from internal.
+  origin:
+    image: python@sha256:c5ba3deef00c7758561a0f03c26f44f10589263d40e732b8748e0d1f38f6dd89
+    container_name: isolated-origin
+    restart: "no"
+    command: >
+      python -m http.server 80 --bind 0.0.0.0
+    networks:
+      - egress
+
+  # Override proxy to allow private targets for the test origin.
+  # This is a named test-topology exception; production keeps secure default.
+  egress-proxy:
+    environment:
+      CRAWLUTRON_ALLOW_PRIVATE_TARGETS: "1"
+    depends_on:
+      - origin

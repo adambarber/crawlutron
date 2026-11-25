@@ -67,8 +67,18 @@ _MARKER = "direct egress dial outside the proxy door"
 
 
 def _has_proxy_keyword(call) -> bool:
-    """True when ``call`` passes ``proxy=`` or ``proxies=`` as a keyword argument."""
-    return any(keyword.arg in ("proxy", "proxies") for keyword in call.keywords)
+    """True when ``call`` passes ``proxy=`` or ``proxies=`` with a sanctioned
+    egress_proxy_url(...) call as the value. Empty/None/arbitrary values are refused."""
+    for keyword in call.keywords:
+        if keyword.arg not in ("proxy", "proxies"):
+            continue
+        value = keyword.value
+        # Only accept a call to egress_proxy_url(...) as the sanctioned form.
+        if isinstance(value, ast.Call) and isinstance(value.func, ast.Name):
+            if value.func.id == "egress_proxy_url":
+                return True
+        # Reject None, empty dict, arbitrary expressions, env-driven configs.
+    return False
 
 
 def _is_socket_connect(call, tree) -> bool:
@@ -229,8 +239,8 @@ def test_unproxied_client_construction_fires() -> None:
 
 
 def test_proxied_client_construction_stays_clean() -> None:
-    """proxy= or proxies= construction is sanctioned topology, not a bypass."""
-    # proxy= singular
+    """Only egress_proxy_url(...) construction is sanctioned; dict/None/ambient are refused."""
+    # proxy= singular with sanctioned call
     proxied = "client = httpx.AsyncClient(proxy=egress_proxy_url(HostPolicy.from_settings(s)))\n"
     assert (
         _direct_dial_offenders(
@@ -238,8 +248,8 @@ def test_proxied_client_construction_stays_clean() -> None:
         )
         == []
     )
-    # proxies= plural
-    proxies = "client = httpx.AsyncClient(proxies={'http://': 'http://proxy:8080'})\n"
+    # proxies= plural with sanctioned call
+    proxies = "client = httpx.AsyncClient(proxies=egress_proxy_url(HostPolicy.from_settings(s)))\n"
     assert (
         _direct_dial_offenders(
             parsed_source(proxies, filename="x/proxies.py"), REPO_ROOT / "x" / "proxies.py"
@@ -253,6 +263,38 @@ def test_proxied_client_construction_stays_clean() -> None:
         )
         == []
     )
+
+
+def test_proxy_none_is_refused() -> None:
+    """proxy=None is not a sanctioned proxy configuration."""
+    source = "client = httpx.AsyncClient(proxy=None)\n"
+    assert _direct_dial_offenders(
+        parsed_source(source, filename="x/proxy_none.py"), REPO_ROOT / "x" / "proxy_none.py"
+    ) == [f"x/proxy_none.py:1 {_MARKER}"]
+
+
+def test_proxies_empty_dict_is_refused() -> None:
+    """proxies={} is not a sanctioned proxy configuration."""
+    source = "client = httpx.AsyncClient(proxies={})\n"
+    assert _direct_dial_offenders(
+        parsed_source(source, filename="x/proxies_empty.py"), REPO_ROOT / "x" / "proxies_empty.py"
+    ) == [f"x/proxies_empty.py:1 {_MARKER}"]
+
+
+def test_proxies_arbitrary_dict_is_refused() -> None:
+    """proxies={{'http://': 'http://proxy:8080'}} is not the sanctioned egress_proxy_url form."""
+    source = "client = httpx.AsyncClient(proxies={'http://': 'http://proxy:8080'})\n"
+    assert _direct_dial_offenders(
+        parsed_source(source, filename="x/proxies_arb.py"), REPO_ROOT / "x" / "proxies_arb.py"
+    ) == [f"x/proxies_arb.py:1 {_MARKER}"]
+
+
+def test_proxy_arbitrary_expression_is_refused() -> None:
+    """proxy=some_variable is not the sanctioned egress_proxy_url form."""
+    source = "proxy_url = 'http://proxy:8080'\nclient = httpx.AsyncClient(proxy=proxy_url)\n"
+    assert _direct_dial_offenders(
+        parsed_source(source, filename="x/proxy_arb.py"), REPO_ROOT / "x" / "proxy_arb.py"
+    ) == [f"x/proxy_arb.py:2 {_MARKER}"]
 
 
 def test_module_level_httpx_helpers_fire() -> None:
