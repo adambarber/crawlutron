@@ -1,5 +1,7 @@
 """Browser worker contract: returns classified results, re-queues capacity failures."""
 
+from __future__ import annotations
+
 from collections import deque
 from typing import TYPE_CHECKING
 

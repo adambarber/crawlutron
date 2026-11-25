@@ -4,6 +4,8 @@ The parse/extract/detect block runs synchronously in both strategy result
 builders, so it must move to ``asyncio.to_thread`` and return plain data.
 """
 
+from __future__ import annotations
+
 import asyncio
 from typing import TYPE_CHECKING, get_type_hints
 
