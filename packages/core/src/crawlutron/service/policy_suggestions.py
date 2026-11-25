@@ -22,6 +22,7 @@ from crawlutron.storage.result_store import CrawlResultStore
 from crawlutron.vocabulary.taxonomy import CrawlClassification
 from safe_url.host_policy import HostPolicy
 from safe_url.normalized_url import admit_or_none
+from safe_url.url_redaction import redact_urls_in_text
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +146,10 @@ def _valid_traces(payloads: list[JsonValue]) -> tuple[list[TraceResponse], int]:
             skipped += 1
             logger.warning(
                 "policy_suggestions_skip_malformed",
-                extra={"error": str(exc), "request_id": _request_id_of(payload)},
+                extra={
+                    "error": redact_urls_in_text(str(exc)),
+                    "request_id": _request_id_of(payload),
+                },
             )
     return traces, skipped
 
