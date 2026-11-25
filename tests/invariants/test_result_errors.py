@@ -190,3 +190,19 @@ def test_no_rule_violations():
 def test_rules_have_working_bites():
     """Each declared bite must fire, or its rule enforces nothing."""
     RULES.check_all_bite()
+
+
+# Known failures classify to named rows, never the network_error fallback
+def test_known_storage_refusals_classify_not_network_error() -> None:
+    """ReadRejected and WriteRejected are knowable storage failures; they must not
+    degrade to the generic network_error fallback."""
+    from crawlutron.models.taxonomy import Classification
+    from crawlutron.storage.safe_db import ReadRejected, WriteRejected
+    from crawlutron.transport.classification import classify_error_code
+
+    for exc in (ReadRejected("boom"), WriteRejected("boom")):
+        classified = classify_error_code(exc)
+        assert classified == Classification.connection_error
+        assert classified != Classification.network_error
+    # A genuinely unknowable exception still falls back to network_error.
+    assert classify_error_code(RuntimeError("boom")) == Classification.network_error
