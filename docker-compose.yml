@@ -16,7 +16,6 @@ services:
       dockerfile: Dockerfile
       target: runtime
     image: crawlutron:local
-    container_name: crawlutron
     restart: unless-stopped
     init: true
     mem_limit: 3g
@@ -69,7 +68,6 @@ services:
       dockerfile: Dockerfile
       target: runtime
     image: crawlutron:egress-proxy
-    container_name: egress-proxy
     restart: "no"
     init: true
     mem_limit: 512m

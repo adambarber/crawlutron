@@ -84,7 +84,7 @@ OWNER_PUBLIC_SURFACE_RATCHET = {
         7,
     ),  # saturation via the real resolve door (ParkedResolver)
     # #1448: loopback proxy door + lifecycle surface.
-    # #1456: sidecar admission folded into serve_proxy via allow_non_loopback.
+    # #1456: typed sidecar_bind admission (IPv4Address) folded into serve_proxy.
     "packages/core/src/crawlutron/transport/egress_proxy.py": (5, 4),
     # #1452: the sync-builder seam that owns the proxy listener lifecycle.
     "packages/core/src/crawlutron/transport/egress_proxy_runtime.py": (3, 3),

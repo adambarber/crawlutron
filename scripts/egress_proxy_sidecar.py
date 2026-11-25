@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import os
 import socket
@@ -22,8 +23,17 @@ async def main() -> int:
     )
 
     # Sidecar binds all interfaces (internal network); intentional for dual-homed deployment.
-    # Use socket.INADDR_ANY for semantic clarity (not string arithmetic).
-    bind_host = os.environ.get("EGRESS_PROXY_BIND_HOST", socket.INADDR_ANY)
+    # Parse optional environment string into IPv4Address; default to INADDR_ANY when absent.
+    bind_host_env = os.environ.get("EGRESS_PROXY_BIND_HOST")
+    if bind_host_env is not None:
+        try:
+            sidecar_bind = ipaddress.IPv4Address(bind_host_env)
+        except ValueError as e:
+            _LOGGER.error("Invalid EGRESS_PROXY_BIND_HOST: %s", e)
+            return 1
+    else:
+        sidecar_bind = ipaddress.IPv4Address(socket.INADDR_ANY)
+
     bind_port = int(os.environ.get("EGRESS_PROXY_BIND_PORT", "8888"))
 
     # Policy for outbound connections (from egress network), built from cached
@@ -31,12 +41,12 @@ async def main() -> int:
     settings = get_cached_settings()
     policy = HostPolicy.from_settings(settings)
 
-    _LOGGER.info("Starting egress proxy sidecar on %s:%s", bind_host, bind_port)
+    _LOGGER.info("Starting egress proxy sidecar on %s:%s", sidecar_bind, bind_port)
 
     try:
-        server = await serve_proxy(policy=policy, host=bind_host, port=bind_port, allow_non_loopback=True)
+        server = await serve_proxy(policy=policy, port=bind_port, sidecar_bind=sidecar_bind)
 
-        _LOGGER.info("Egress proxy sidecar listening on %s:%s", bind_host, server.port)
+        _LOGGER.info("Egress proxy sidecar listening on %s:%s", sidecar_bind, server.port)
 
         # Run forever
         async with server._server:

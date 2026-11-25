@@ -5,14 +5,18 @@
 
 services:
   # Isolated origin: only on egress network, not reachable from internal.
+  # Uses a test-only HTTP fixture that returns a unique success marker AND the received Host header.
   origin:
-    image: python@sha256:c5ba3deef00c7758561a0f03c26f44f10589263d40e732b8748e0d1f38f6dd89
-    container_name: isolated-origin
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: test-origin
     restart: "no"
-    command: >
-      python -m http.server 80 --bind 0.0.0.0
     networks:
       - egress
+    # Mount the test fixture read-only
+    volumes:
+      - ./tests/ci/fixtures:/app/fixtures:ro
 
   # Override proxy to allow private targets for the test origin.
   # This is a named test-topology exception; production keeps secure default.
