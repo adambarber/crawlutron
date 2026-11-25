@@ -145,6 +145,12 @@ def _drop_function(bundle: Bundle, name: str, field: str) -> Bundle:
     return bundle.model_copy(update={field: facts.model_copy(update={"facts": kept})})
 
 
+def _drop_call(bundle: Bundle, name: str, field: str) -> Bundle:
+    facts = getattr(bundle, field)
+    kept = tuple(fact for fact in facts.facts if not (fact.kind == "call" and fact.name == name))
+    return bundle.model_copy(update={field: facts.model_copy(update={"facts": kept})})
+
+
 def _with_run(bundle: Bundle, **changes) -> Bundle:
     run = bundle.pyproject.coverage_run.model_copy(update=changes)
     return bundle.model_copy(update={"pyproject": bundle.pyproject.model_copy(update={"coverage_run": run})})
@@ -230,6 +236,11 @@ MUTATIONS = (
         RuleId.IMAGE_RELEASE_SCRIPT,
         lambda b: _drop_function(b, "_check_baked_proxy", "image"),
         "baked proxy",
+    ),
+    (
+        RuleId.IMAGE_RELEASE_SCRIPT,
+        lambda b: _drop_call(b, "_check_baked_proxy", "image"),
+        "_smoke_image must call _check_baked_proxy",
     ),
     (RuleId.CI_SUPPLY_CHAIN_JOBS, lambda b: _drop_job(b, "ci", "audit"), "audit"),
     (

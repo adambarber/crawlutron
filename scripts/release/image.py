@@ -181,18 +181,26 @@ def _check_baked_version(name: str, native_version: str) -> None:
 
 
 def _check_baked_proxy(name: str) -> None:
-    """Verify the in-process loopback proxy starts and returns a loopback URL."""
+    """Verify the in-process loopback proxy starts and accepts a TCP connection."""
     probe = (
         "from crawlutron.config.settings_cache import get_cached_settings;"
-        "from crawlutron.transport.egress_proxy import egress_proxy_url;"
+        "from crawlutron.transport.egress_proxy_runtime import egress_proxy_url;"
         "from safe_url import HostPolicy;"
+        "import socket;"
         "settings = get_cached_settings();"
         "assert settings.egress_proxy_url == '', "
         "f'Expected empty egress_proxy_url, got {settings.egress_proxy_url}';"
         "policy = HostPolicy.from_settings(settings);"
-        "url = egress_proxy_url(settings=settings);"
+        "url = egress_proxy_url(policy=policy, settings=settings);"
         "assert url.startswith('http://127.0.0.1:'), "
         "f'Proxy URL not loopback: {url}';"
+        "# Prove a real TCP listener accepts a connection on the proxy's port"
+        "port = int(url.split(':')[-1]);"
+        "with socket.create_connection(('127.0.0.1', port), timeout=2) as s:"
+        "    s.sendall(b'CONNECT example.com:443 HTTP/1.1\\r\\n\\r\\n');"
+        "    resp = s.recv(1024);"
+        "    assert b'200 Connection established' in resp or b'403' in resp, "
+        "        f'Proxy did not respond correctly: {resp[:80]}';"
         "print(url)"
     )
     code, out, err = _exec_python_probe(name, probe)

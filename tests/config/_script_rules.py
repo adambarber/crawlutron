@@ -52,3 +52,12 @@ def image_release_script(bundle: Bundle) -> Iterator[Finding]:
         )
     if not any(fact.name == "lower" for fact in image.of_kind("call")):
         yield _finding(RuleId.IMAGE_RELEASE_SCRIPT, image.path.name, 1, "a tag must be lowercased before use")
+    # Verify _smoke_image calls _check_baked_proxy
+    calls = {fact.name for fact in image.of_kind("call")}
+    if "_check_baked_proxy" not in calls:
+        yield _finding(
+            RuleId.IMAGE_RELEASE_SCRIPT,
+            image.path.name,
+            1,
+            "_smoke_image must call _check_baked_proxy",
+        )
