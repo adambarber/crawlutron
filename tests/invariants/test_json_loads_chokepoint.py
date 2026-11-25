@@ -16,11 +16,12 @@ from tests.chokepoint_walks import app_trees, call_nodes, offender_at
 
 _PROBE_PATH = REPO_ROOT / "tests" / "_json_loads_probe.py"
 
-#: The door module is itself free of bare ``json.loads``; it is exempted by exact
-#: relative path, never by basename.
+#: Exempt door modules by exact relative path, never basename.
+#: Extract is scanned too (see _module_paths); json_door.py is its sole door.
 _DOOR_PATHS = frozenset(
     {
         "packages/core/src/crawlutron/safety/json_safe.py",
+        "packages/extract/src/crawlutron_extract/json_door.py",
     }
 )
 
@@ -41,7 +42,12 @@ _GROUPS = ("load_bearing",)
 
 
 def _module_paths() -> list[pathlib.Path]:
-    return [path for path, _ in app_trees()]
+    paths = [path for path, _ in app_trees()]
+    # extract is outside APP_ROOTS; scan it separately so the ratchet governs
+    # every production package (json_door.py is the sole exempted door).
+    extract_root = REPO_ROOT / "packages" / "extract" / "src" / "crawlutron_extract"
+    paths.extend(sorted(extract_root.rglob("*.py")))
+    return paths
 
 
 def _group(relative: str) -> str:
@@ -53,7 +59,8 @@ def _measured() -> dict[str, int]:
     for kind in _DETECTORS:
         for group in _GROUPS:
             counts[f"{kind}.{group}"] = 0
-    for path, tree in app_trees():
+    for path in _module_paths():
+        tree = canonical_tree(path)
         for kind, detector in _DETECTORS.items():
             counts[f"{kind}.load_bearing"] += len(detector(tree, path))
     return counts
@@ -114,4 +121,10 @@ def test_door_exemption_is_by_relative_path_not_basename() -> None:
         "tests/decoys/json_safe.py:3 bare json.loads outside the parse_json door"
     ]
     door = REPO_ROOT / "packages/core/src/crawlutron/safety/json_safe.py"
+    assert _json_loads_offenders(parsed_source(source, filename=str(door)), door) == []
+
+
+def test_extract_json_door_exempted_by_exact_path():
+    source = "import json\ndef f():\n    data = json.loads('{}')\n"
+    door = REPO_ROOT / "packages/extract/src/crawlutron_extract/json_door.py"
     assert _json_loads_offenders(parsed_source(source, filename=str(door)), door) == []

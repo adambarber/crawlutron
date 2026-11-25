@@ -97,6 +97,16 @@ def test_jsonl():
     assert '"id": 1' in result.text or "1" in result.text
 
 
+def test_json_input_capped_refused_before_jsonl_split():
+    """Oversized JSON input is refused before the JSONL line-by-line re-split,
+    so a body above the byte cap cannot be admitted as many small lines."""
+    limits = ExtractLimits(max_input_bytes=5)
+    payload = '{"a": 1}'
+    result = extract_text_format(payload, "application/json", limits)
+    assert result.get("_quality", "failed") == "failed"
+    assert "json_input_capped" in cast(list[str], result["quality_flags"])
+
+
 def test_malformed_json():
     content = b"{not valid json}"
     result = extract(content, "application/json")

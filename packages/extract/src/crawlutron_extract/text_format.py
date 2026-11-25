@@ -165,6 +165,11 @@ def _extract_json(content: str, limits) -> dict[str, object]:
     flags: list[str] = []
     truncated = False
 
+    # Refuse oversized input before any parse or JSONL re-split attempt, so a
+    # body above the byte cap cannot be admitted line-by-line as JSONL.
+    if len(content.encode("utf-8")) > limits.max_input_bytes:
+        return _empty_result("json_input_capped", ["json_input_capped"])
+
     if _json_text_depth(content) > _MAX_JSON_DEPTH:
         return _empty_result("json_depth_refused", ["json_depth_refused"])
 

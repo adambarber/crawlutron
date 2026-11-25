@@ -83,7 +83,7 @@ class MetadataCollector:
             block = "".join(self._json_ld_parts).strip()
             if block:
                 try:
-                    parse_json(block)  # validate only; malformed JSON-LD is skipped
+                    parse_json(block, expected=(dict, list))  # validate only; enforce JSON-LD root shape
                 except ValueError:
                     pass
                 else:
