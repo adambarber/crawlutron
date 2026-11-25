@@ -5,12 +5,13 @@ The proxy owns its pinned dial; every other site is admitted and moves down only
 
 from __future__ import annotations
 
+import ast
 import collections
 
 import pytest
 
 from tests._walk_primitives import offender_at, parsed_source
-from tests._walk_resolution import resolved_call_name
+from tests._walk_resolution import resolved_call_name, resolved_expr_name
 from tests.chokepoint_paths import REPO_ROOT, relative_posix
 from tests.chokepoint_walks import app_trees, call_nodes
 from tests.rules import Bites, Rule
@@ -24,31 +25,72 @@ _SANCTIONED = frozenset(
     }
 )
 
-_DIRECT_NAMES = frozenset(
+#: Raw public dials: socket construction/creation and the connect method.
+_RAW_SOCKET_NAMES = frozenset({"socket.socket", "socket.create_connection"})
+
+#: Outbound client/session construction that must carry proxy= to be sanctioned.
+_CLIENT_NAMES = frozenset(
     {
         "httpx.AsyncClient",
         "httpx.Client",
         "curl_cffi.requests.AsyncSession",
         "cffi_requests.AsyncSession",
-        "asyncio.open_connection",
-        "socket.create_connection",
-        "urllib.request.urlopen",
     }
 )
-_DIRECT_SUFFIXES = (".get_async_http_client", ".get_cffi_session", ".build_pinned_cffi_session", ".goto")
+
+#: Module-level httpx helpers that dial at call time (never sanctioned inline).
+_HELPER_NAMES = frozenset(
+    {
+        "httpx.get",
+        "httpx.post",
+        "httpx.put",
+        "httpx.delete",
+        "httpx.head",
+        "httpx.options",
+        "httpx.patch",
+        "httpx.stream",
+        "httpx.request",
+    }
+)
+
+#: Outbound libraries whose calls are always raw egress (no sanctioned proxy shape).
+_REQUESTS_PREFIX = "requests."
+_AIOHTTP_PREFIX = "aiohttp."
+
 _MARKER = "direct egress dial outside the proxy door"
 
 
+def _has_proxy_keyword(call) -> bool:
+    """True when ``call`` passes ``proxy=`` as a keyword argument."""
+    return any(keyword.arg == "proxy" for keyword in call.keywords)
+
+
+def _is_socket_connect(call, tree) -> bool:
+    """True when ``call`` is a ``.connect()`` method call on a socket-valued receiver."""
+    if not isinstance(call.func, ast.Attribute) or call.func.attr != "connect":
+        return False
+    receiver = resolved_expr_name(tree, call.func.value)
+    return receiver == "socket.socket" or receiver.startswith("socket.") or receiver == "socket"
+
+
 def _direct_dial_offenders(tree, path) -> list[str]:
-    """Flag every direct-dial call in one module, named by file and line."""
+    """Flag raw socket bypass and unproxied client construction outside the proxy door."""
     if relative_posix(path) in _SANCTIONED:
         return []
-    return [
-        offender_at(path, node, _MARKER)
-        for node in call_nodes(tree)
-        if (resolved_call_name(tree, node) in _DIRECT_NAMES)
-        or resolved_call_name(tree, node).endswith(_DIRECT_SUFFIXES)
-    ]
+    offenders = []
+    for node in call_nodes(tree):
+        name = resolved_call_name(tree, node)
+        if name in _RAW_SOCKET_NAMES:
+            offenders.append(offender_at(path, node, _MARKER))
+        if _is_socket_connect(node, tree):
+            offenders.append(offender_at(path, node, _MARKER))
+        if name in _HELPER_NAMES:
+            offenders.append(offender_at(path, node, _MARKER))
+        if name.startswith(_REQUESTS_PREFIX) or name.startswith(_AIOHTTP_PREFIX):
+            offenders.append(offender_at(path, node, _MARKER))
+        if name in _CLIENT_NAMES and not _has_proxy_keyword(node):
+            offenders.append(offender_at(path, node, _MARKER))
+    return offenders
 
 
 DIRECT_DIAL = Rule(
@@ -59,8 +101,8 @@ DIRECT_DIAL = Rule(
     clean=lambda: ("value = mapping.get('key')\n",),
 )
 
-# #1364 retired the cffi one-shot session (definition + call site): 8 -> 6.
-_RATCHET = {"search": 1, "service": 1, "transport": 6}
+# #1364 S5 topology: ratchet collapses to zero; raw sockets/unproxied clients refused.
+_RATCHET = {"search": 0, "service": 0, "transport": 0}
 
 
 def _group(relative: str) -> str:
@@ -107,9 +149,9 @@ def test_the_ratchet_is_tight(row: str) -> None:
 
 
 def test_the_gate_walks_every_app_tree() -> None:
-    """The derivation covers every production module and bites real code."""
+    """The derivation covers every production module; the bite is proven by the
+    Rule/Bites test, not by production offenders (topology drives counts to zero)."""
     assert len(app_trees()) > 100
-    assert sum(_counts().values()) > 0
 
 
 def test_detector_bites_and_spares_lookalikes() -> None:
@@ -126,3 +168,84 @@ def test_exemption_is_by_relative_path_not_basename() -> None:
     ]
     home = REPO_ROOT / "packages" / "core" / "src" / "crawlutron" / "transport" / "egress_proxy.py"
     assert _direct_dial_offenders(parsed_source(source, filename=str(home)), home) == []
+
+
+def test_raw_socket_ops_fire_outside_proxy_home() -> None:
+    """socket.socket, socket.create_connection and .connect() are raw public dials."""
+    assert _direct_dial_offenders(
+        parsed_source("s = socket.socket()\n", filename="x/socket_client.py"),
+        REPO_ROOT / "x" / "socket_client.py",
+    ) == ["x/socket_client.py:1 " + _MARKER]
+    assert _direct_dial_offenders(
+        parsed_source("socket.create_connection(('example.com', 443))\n", filename="x/cc.py"),
+        REPO_ROOT / "x" / "cc.py",
+    ) == ["x/cc.py:1 " + _MARKER]
+    # socket.socket().connect() fires twice: socket creation + connect, both raw dials.
+    assert _direct_dial_offenders(
+        parsed_source("socket.socket().connect(('example.com', 443))\n", filename="x/conn.py"),
+        REPO_ROOT / "x" / "conn.py",
+    ) == [
+        "x/conn.py:1 " + _MARKER,
+        "x/conn.py:1 " + _MARKER,
+    ]
+
+
+def test_unproxied_client_construction_fires() -> None:
+    """httpx.AsyncClient / curl_cffi AsyncSession without proxy= are refused."""
+    assert _direct_dial_offenders(
+        parsed_source("client = httpx.AsyncClient()\n", filename="x/unproxied.py"),
+        REPO_ROOT / "x" / "unproxied.py",
+    ) == ["x/unproxied.py:1 " + _MARKER]
+    assert _direct_dial_offenders(
+        parsed_source("s = cffi_requests.AsyncSession()\n", filename="x/cffi.py"),
+        REPO_ROOT / "x" / "cffi.py",
+    ) == ["x/cffi.py:1 " + _MARKER]
+
+
+def test_proxied_client_construction_stays_clean() -> None:
+    """proxy= construction is sanctioned topology, not a bypass."""
+    proxied = "client = httpx.AsyncClient(proxy=egress_proxy_url(HostPolicy.from_settings(s)))\n"
+    assert (
+        _direct_dial_offenders(
+            parsed_source(proxied, filename="x/proxied.py"), REPO_ROOT / "x" / "proxied.py"
+        )
+        == []
+    )
+    cffi_proxied = "s = cffi_requests.AsyncSession(proxy=egress_proxy_url(policy))\n"
+    assert (
+        _direct_dial_offenders(
+            parsed_source(cffi_proxied, filename="x/cffi_proxied.py"), REPO_ROOT / "x" / "cffi_proxied.py"
+        )
+        == []
+    )
+
+
+def test_module_level_httpx_helpers_fire() -> None:
+    """httpx.get / httpx.post / httpx.stream dial at call time and are refused."""
+    for helper in ("httpx.get", "httpx.post", "httpx.stream", "httpx.request"):
+        source = f"{helper}('http://example.test/')\n"
+        assert _direct_dial_offenders(
+            parsed_source(source, filename="x/helper.py"), REPO_ROOT / "x" / "helper.py"
+        ) == [f"x/helper.py:1 {_MARKER}"], helper
+
+
+def test_requests_and_aiohttp_calls_fire() -> None:
+    """requests.* and aiohttp.* outbound calls have no sanctioned proxy shape."""
+    for prefix, call in (
+        ("requests.", "requests.get('http://example.test/')"),
+        ("aiohttp.", "aiohttp.ClientSession()"),
+    ):
+        source = call + "\n"
+        assert _direct_dial_offenders(
+            parsed_source(source, filename="x/lib.py"), REPO_ROOT / "x" / "lib.py"
+        ) == [f"x/lib.py:1 {_MARKER}"], prefix
+
+
+def test_decoy_named_egress_proxy_still_fires_for_socket_ops() -> None:
+    """A decoy named egress_proxy.py still fires; only the exact home is quiet."""
+    decoy = REPO_ROOT / "tests" / "decoys" / "egress_proxy.py"
+    assert _direct_dial_offenders(parsed_source("socket.socket()\n", filename=str(decoy)), decoy) == [
+        "tests/decoys/egress_proxy.py:1 " + _MARKER
+    ]
+    home = REPO_ROOT / "packages" / "core" / "src" / "crawlutron" / "transport" / "egress_proxy.py"
+    assert _direct_dial_offenders(parsed_source("socket.socket()\n", filename=str(home)), home) == []

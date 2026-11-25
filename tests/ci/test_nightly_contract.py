@@ -84,3 +84,51 @@ def test_nightly_codeowners_entry_exists() -> None:
     assert ".github/workflows/nightly.yml" in content, "nightly.yml missing from CODEOWNERS"
     line = [ln for ln in content.splitlines() if ".github/workflows/nightly.yml" in ln][0]
     assert "@adambarber" in line, "nightly.yml must have @adambarber owner"
+
+
+def test_egress_default_deny_contract() -> None:
+    """Compose/CI contract: egress is default-deny; only the loopback proxy is the
+    sanctioned dial path. Required exceptions: proxy DNS resolution, loopback
+    healthcheck, published local ports are exempted and sinkholed."""
+
+    compose_path = REPO_ROOT / "docker-compose.yml"
+    dockerfile_path = REPO_ROOT / "Dockerfile"
+
+    compose = compose_path.read_text(encoding="utf-8")
+    dockerfile = dockerfile_path.read_text(encoding="utf-8")
+
+    # Service binds to loopback only: the loopback mapping is present and no
+    # all-interfaces or bare port mapping exposes the service to the network.
+    assert "127.0.0.1:8765:8765" in compose, "compose must bind the service port to loopback only"
+    assert "0.0.0.0:8765:8765" not in compose, "compose must not bind the service port to all interfaces"
+    assert '\n      - "8765:8765"' not in compose, (
+        "compose must not expose the service port without a loopback bind"
+    )
+
+    # Private targets are blocked by default: the secure default is on.
+    assert 'CRAWLUTRON_ALLOW_PRIVATE_TARGETS: "0"' in compose, "compose must block private targets by default"
+
+    # Telemetry sinkholes are declared for the sinks that have no opt-out flag.
+    assert "extra_hosts:" in compose, "compose must declare telemetry sinkholes"
+    for sink in (
+        "mobile.events.data.microsoft.com",
+        "browser.events.data.microsoft.com",
+        "dc.services.visualstudio.com",
+    ):
+        assert sink in compose, f"compose must sinkhole telemetry host {sink}"
+
+    # Healthcheck targets loopback only, never 0.0.0.0 or an external host.
+    assert "http://localhost:8765/health" in compose, "healthcheck must reference the loopback address"
+    assert "0.0.0.0:8765/health" not in compose, "healthcheck must not target all interfaces"
+
+    # Dockerfile installs curl solely for the loopback healthcheck (compose-verified).
+    assert "curl" in dockerfile, "Dockerfile must provide curl for the loopback healthcheck"
+
+    # No baked-outbound proxy: the proxy is runtime-managed through the egress door,
+    # not baked into the image as an ambient proxy that could bypass the door.
+    for line in dockerfile.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(("ARG ", "ENV ")) and "proxy" in stripped.lower():
+            assert "CRAWLUTRON_BASE_IMAGE" in stripped or "PYTHON" in stripped, (
+                f"Dockerfile bakes a proxy setting that could bypass the egress door: {stripped}"
+            )
