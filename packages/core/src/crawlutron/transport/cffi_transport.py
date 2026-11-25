@@ -1,5 +1,7 @@
 """curl_cffi transport: one pinned hop per fetch() call.
 
+reads time.monotonic() for fetch timing
+
 wall-consumer
 """
 

@@ -1,5 +1,7 @@
 """HTTP transport: one pinned hop over the pooled httpx client.
 
+reads time.monotonic() for request deadline
+
 wall-consumer
 """
 

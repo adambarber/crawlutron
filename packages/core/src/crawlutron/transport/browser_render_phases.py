@@ -1,5 +1,7 @@
 """The render phases a browser page passes through, as named functions.
 
+reads time.monotonic() for phase timing
+
 wall-consumer
 """
 

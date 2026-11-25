@@ -1,5 +1,7 @@
 """Transport protocol and result types for the unified fetch walk.
 
+reads time.monotonic() for hop timing
+
 wall-consumer
 """
 

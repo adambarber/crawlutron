@@ -1,5 +1,7 @@
 """RedirectWalker: the single redirect-walk implementation.
 
+reads time.monotonic() for walk deadline
+
 wall-consumer
 """
 

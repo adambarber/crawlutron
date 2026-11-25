@@ -1,5 +1,7 @@
 """Browser rendering: a headless browser for JavaScript-heavy pages.
 
+reads time.monotonic() for fetch deadlines
+
 wall-consumer
 """
 

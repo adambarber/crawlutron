@@ -107,6 +107,17 @@ def test_wall_consumer_marker_drives_the_narrowing_set():
         docstring = ast.get_docstring(ast.parse((_TRANSPORT / name).read_text(encoding="utf-8")))
         assert docstring is not None, f"{name} has no docstring"
         assert _WALL_CONSUMER_MARKER in docstring, f"{name} derived as a wall consumer but lacks the marker"
+    # Negative: every derived member must mention a time module; a marker on a
+    # non-time transport module is drift this test must catch.
+    time_modules = {
+        name
+        for name in derived
+        if _mentions_time_module(ast.parse((_TRANSPORT / name).read_text(encoding="utf-8")))
+    }
+    assert derived == time_modules, (
+        "wall-consumer marker on a non-time transport module: "
+        f"{derived - time_modules} -- remove the marker or the module reads no clock"
+    )
     # Minimal sanity: known delegated consumers are present.
     assert "browser.py" in derived
     assert "transport.py" in derived

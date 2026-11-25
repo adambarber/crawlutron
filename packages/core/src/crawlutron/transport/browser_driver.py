@@ -1,5 +1,7 @@
 """The live browser: launching, recycling, tabs and driver steps.
 
+reads time.sleep for page waits
+
 wall-consumer
 """
 
