@@ -6,12 +6,12 @@
 services:
   # Isolated origin: only on egress network, not reachable from internal.
   # Uses a test-only HTTP fixture that returns a unique success marker AND the received Host header.
+  # Runs on the pinned python:3.12-alpine image with the fixture mounted read-only.
+  # No build step - keeps test fixtures out of production Dockerfile.
   origin:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: test-origin
+    image: python@sha256:c5ba3deef00c7758561a0f03c26f44f10589263d40e732b8748e0d1f38f6dd89
     restart: "no"
+    command: python /app/fixtures/origin_fixture.py
     networks:
       - egress
     # Mount the test fixture read-only

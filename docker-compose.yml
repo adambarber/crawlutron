@@ -23,7 +23,9 @@ services:
       # Bind to loopback only; the service has no caller authentication by
       # design and must not be exposed to the network without a reverse
       # proxy in front of it.
-      - "127.0.0.1:8765:8765"
+      # COMPOSE_HOST_PORT=0 lets Docker allocate a free host port for test isolation.
+      # Default 8765 preserves the secure loopback-only mapping for ordinary Compose.
+      - "127.0.0.1:${COMPOSE_HOST_PORT:-8765}:8765"
     environment:
       CRAWLUTRON_HOST: "0.0.0.0"
       CRAWLUTRON_LOG_LEVEL: "info"

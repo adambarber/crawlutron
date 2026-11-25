@@ -212,21 +212,6 @@ USER appuser
 CMD ["sh", "-c", "exec uvicorn crawlutron_rest.main:app --host ${CRAWLUTRON_HOST:-127.0.0.1} --port 8765 --reload --log-config /app/uvicorn-log-config.json --log-level debug"]
 
 # ==========================================
-# 4b. Test origin fixture stage (opt-in: --target test-origin)
-# ==========================================
-# Runs a minimal HTTP server that returns a unique success marker and echoes
-# the Host header. Used by the runtime proof test to verify content and logical
-# identity without depending on a plain directory listing.
-FROM runtime-base AS test-origin
-
-# Copy the test fixture
-COPY --chown=appuser:appuser tests/ci/fixtures/origin_fixture.py /app/fixtures/origin_fixture.py
-
-# Run the fixture on port 80 (requires root for privileged port, but we use --user root)
-USER root
-CMD ["python", "/app/fixtures/origin_fixture.py"]
-
-# ==========================================
 # 5. Runtime stage: FINAL / default image
 # ==========================================
 # Last stage, so `docker build .` yields the lean production image with no dev

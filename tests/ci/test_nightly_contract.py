@@ -97,9 +97,10 @@ def test_egress_default_deny_contract() -> None:
     compose = compose_path.read_text(encoding="utf-8")
     dockerfile = dockerfile_path.read_text(encoding="utf-8")
 
-    # Service binds to loopback only: the loopback mapping is present and no
-    # all-interfaces or bare port mapping exposes the service to the network.
-    assert "127.0.0.1:8765:8765" in compose, "compose must bind the service port to loopback only"
+    # Service binds to loopback only; exact mapping with COMPOSE_HOST_PORT
+    assert "127.0.0.1:${COMPOSE_HOST_PORT:-8765}:8765" in compose, (
+        "compose must bind the service port to loopback only with COMPOSE_HOST_PORT"
+    )
     assert "0.0.0.0:8765:8765" not in compose, "compose must not bind the service port to all interfaces"
     assert '\n      - "8765:8765"' not in compose, (
         "compose must not expose the service port without a loopback bind"
