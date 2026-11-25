@@ -6,6 +6,8 @@ import asyncio
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
+import pytest
+
 from crawlutron.models.http_fetch_result import HttpFetchResult
 from crawlutron.runtime import process_state
 from crawlutron.transport import egress_proxy as egress_mod
@@ -121,3 +123,33 @@ async def test_pooled_cffi_session_carries_proxy_and_refuses_ambient_env(monkeyp
     assert observed["impersonate"] == CFFI_IMPERSONATE_TARGET
     assert observed["discard_cookies"] is True
     assert "curl_options" not in observed
+
+
+async def test_cffi_proxy_dial_failed_marker_raises_transport_exception(monkeypatch) -> None:
+    """A proxy dial-failed refusal is a transport failure, not a 502 page."""
+    from curl_cffi.requests.exceptions import RequestException
+
+    from crawlutron.transport.cffi_transport import CffiTransport
+    from crawlutron.transport.transport import FetchRequest
+
+    async def refuse_dial(host: str, port: int) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+        raise OSError(f"unreachable {host}:{port}")
+
+    monkeypatch.setattr(pinned_dns, "resolve_and_pin_host", lambda url: (url.host, PUBLIC_IP))
+    monkeypatch.setattr(egress_mod, "resolve_and_pin_host", lambda url: (url.host, PUBLIC_IP))
+    process_state.reset_all_process_state()
+    proxy = await serve_proxy(policy=UNRESTRICTED_HOST_POLICY, dial=refuse_dial)
+    try:
+        monkeypatch.setattr(pooled_cffi, "egress_proxy_url", lambda policy: f"http://127.0.0.1:{proxy.port}")
+        request = FetchRequest(
+            connect_url=f"http://{PUBLIC_IP}/page",
+            headers={"Host": LOGICAL},
+            url=canonical(f"http://{LOGICAL}/page"),
+            timeout_seconds=10.0,
+        )
+        with pytest.raises(RequestException, match="egress proxy could not reach the pinned target"):
+            await CffiTransport().fetch(request, max_bytes=1024)
+    finally:
+        await proxy.aclose()
+        process_state.reset_all_process_state()
+        await pooled_clients.drain_pending_client_closes()
