@@ -37,6 +37,7 @@ from crawlutron.storage.job_store import (
 from crawlutron.storage.result_store import CrawlSpillStore
 from crawlutron.transport.timeouts import Timeouts
 from safe_url.normalized_url import NormalizedUrl
+from safe_url.url_redaction import redact_urls_in_text
 
 logger = logging.getLogger(__name__)
 
@@ -380,7 +381,10 @@ async def _record_failure(
     container: EffectContainer,
 ) -> None:
     """Record the terminal FAILED write and POST the error webhook when it won."""
-    logger.error("async_crawl_failed", extra={"request_id": request_id, "error": error})
+    logger.error(
+        "async_crawl_failed",
+        extra={"request_id": request_id, "error": redact_urls_in_text(error)},
+    )
     recorded = await arecord_terminal_failure(job_store, request_id, error, claimed_by=claim_token)
     if webhook_url is not None and recorded:
         with contextlib.suppress(Exception):

@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import re
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import replace
@@ -62,7 +61,7 @@ from crawlutron.transport.robots import FetchAndDecode
 from crawlutron_admit import Count, Duration
 from crawlutron_admit.task_scope import Grace, NamedRegistry, ScopeRefused, TaskScope
 from safe_url.normalized_url import NormalizedUrl, admit_or_none
-from safe_url.url_redaction import redact_url
+from safe_url.url_redaction import redact_urls_in_text
 
 logger = logging.getLogger(__name__)
 
@@ -75,11 +74,8 @@ _STORAGE_RETRY_BACKOFF_SECONDS: Final[float] = 0.01
 ExecuteCrawl = Callable[..., Awaitable[ProducerEnvelope]]
 
 
-_URL_IN_TEXT = re.compile(r"https?://[^\s'\"<>]+")
-
-
 def _scrubbed(error: str) -> str:
-    return _URL_IN_TEXT.sub(lambda m: redact_url(m.group(0)), error)
+    return redact_urls_in_text(error)
 
 
 _execute_crawl: ExecuteCrawl = _real_execute_crawl
@@ -343,7 +339,10 @@ async def run_job(
         )
         return
     except Exception as exc:
-        logger.exception("job_runner_failed job_id=%s error=%r", job_id, exc)
+        logger.error(
+            "job_runner_failed",
+            extra={"job_id": job_id, "error": redact_urls_in_text(str(exc))},
+        )
         await arecord_terminal_failure(job_store, job_id, str(exc), claimed_by=token)
 
 
