@@ -29,6 +29,13 @@ def test_json_ld_malformed_skipped():
     assert "json_ld" not in result.metadata
 
 
+def test_json_ld_scalar_root_skipped():
+    """A JSON-LD block whose root is not dict/list is skipped (shape enforced)."""
+    html = b'<script type="application/ld+json">"just a string"</script>'
+    result = extract(html, "text/html", url="https://example.com/")
+    assert "json_ld" not in result.metadata
+
+
 def test_json_ld_wrong_type_skipped():
     """A script without the ld+json type is not JSON-LD."""
     html = b'<script type="application/javascript">{"x":1}</script>'

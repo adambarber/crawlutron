@@ -6,7 +6,6 @@ one owns the shared request/collect contract and the registry.
 from __future__ import annotations
 
 import abc
-import json
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -14,6 +13,7 @@ from typing import TYPE_CHECKING
 import httpx
 
 from crawlutron.safety.bounded_io import BodyTooLarge, read_capped_async
+from crawlutron.safety.json_safe import ParseRefused, parse_json
 from crawlutron.transport.http_client_pool import get_async_http_client
 from crawlutron.transport.pinned_dns import ResolverBudgetExceeded, bounded_thread_resolve
 from crawlutron.transport.pinned_transport import (
@@ -61,6 +61,10 @@ class SearchProviderError(Exception):
 # Search responses are snippets: a 1 MiB ceiling is generous (a DDG HTML
 # page is ~200 KB) and keeps hostile provider bodies out of RAM and lxml.
 _SEARCH_RESPONSE_MAX_BYTES = 1 * 1024 * 1024
+
+#: Provider result bodies are shallow keyed objects; a deep nest is a hostile
+#: document, not a provider response.
+_PROVIDER_JSON_MAX_DEPTH = 16
 
 
 class SearchProviderUnavailable(Exception):
@@ -207,10 +211,12 @@ def parse_provider_json(body: str) -> dict[str, JsonValue]:
     """An external provider body parsed as the JSON object it must be: keys the
     reader checks, values ``JsonValue`` -- a non-object body is an error at the door."""
     try:
-        payload: JsonValue = json.loads(body)
-    except (json.JSONDecodeError, TypeError) as error:
+        payload: JsonValue = parse_json(body, expected=dict, max_depth=_PROVIDER_JSON_MAX_DEPTH)
+    except ParseRefused as error:
         raise SearchProviderError("provider returned non-JSON body") from error
     if not isinstance(payload, dict):
+        # parse_json already enforces expected=dict at runtime; this narrows the
+        # static type for the declared return.
         raise SearchProviderError("provider returned a non-object JSON body")
     return payload
 

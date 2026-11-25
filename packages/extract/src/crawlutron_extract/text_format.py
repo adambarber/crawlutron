@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import csv
 import io
-import json
 import re
 from typing import cast
 
 from lxml import etree
 
+from crawlutron_extract.json_door import parse_json
 from crawlutron_extract.limits import _empty_result
 
 __all__ = ["extract_text_format"]
@@ -165,12 +165,17 @@ def _extract_json(content: str, limits) -> dict[str, object]:
     flags: list[str] = []
     truncated = False
 
+    # Refuse oversized input before any parse or JSONL re-split attempt, so a
+    # body above the byte cap cannot be admitted line-by-line as JSONL.
+    if len(content.encode("utf-8")) > limits.max_input_bytes:
+        return _empty_result("json_input_capped", ["json_input_capped"])
+
     if _json_text_depth(content) > _MAX_JSON_DEPTH:
         return _empty_result("json_depth_refused", ["json_depth_refused"])
 
     try:
-        data = json.loads(content)
-    except (json.JSONDecodeError, ValueError, RecursionError):
+        data = parse_json(content, max_bytes=limits.max_input_bytes, max_depth=_MAX_JSON_DEPTH)
+    except ValueError:
         # Try JSONL line-by-line.
         lines = content.splitlines()
         parsed: list[object] = []
@@ -182,8 +187,8 @@ def _extract_json(content: str, limits) -> dict[str, object]:
                 flags.append("jsonl_parse_error")
                 break
             try:
-                parsed.append(json.loads(line))
-            except (json.JSONDecodeError, ValueError, RecursionError):
+                parsed.append(parse_json(line, max_bytes=limits.max_input_bytes))
+            except ValueError:
                 flags.append("jsonl_parse_error")
                 break
         if not parsed:

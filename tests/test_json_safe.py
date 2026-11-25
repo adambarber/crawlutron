@@ -5,10 +5,17 @@ from __future__ import annotations
 import datetime
 import json
 
+import pytest
+
 from crawlutron.admission.credentials import origin_of
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.credential import Credential
-from crawlutron.safety.json_safe import json_default
+from crawlutron.safety.json_safe import (
+    MAX_JSON_INPUT_BYTES,
+    ParseRefused,
+    json_default,
+    parse_json,
+)
 
 
 class TestJsonDefault:
@@ -75,3 +82,86 @@ class TestJsonDefault:
         credential = json.loads(rendered)["credentials"][origin]
         assert credential["kind"] == "bearer"
         assert "REDACTED" in credential["token"]
+
+
+class TestParseJson:
+    """parse_json is the admit-or-refuse door that json_default's serializer
+    never had: cap bytes, bound depth, enforce the admitted shape, and refuse
+    with a message that never echoes the payload.
+    """
+
+    def test_valid_object_within_depth_is_admitted(self):
+        assert parse_json('{"a": 1, "b": {"c": 2}}', expected=dict, max_depth=3) == {
+            "a": 1,
+            "b": {"c": 2},
+        }
+
+    def test_valid_list_within_depth_is_admitted(self):
+        assert parse_json("[1, [2, 3]]", expected=list, max_depth=3) == [1, [2, 3]]
+
+    def test_depth_over_bound_is_refused_by_name(self):
+        # top object = 1, "a"'s object = 2, "b"'s object = 3; bound is 2
+        with pytest.raises(ParseRefused):
+            parse_json('{"a": {"b": {}}}', expected=dict, max_depth=2)
+
+    def test_depth_at_bound_is_admitted(self):
+        # top object = 1, nested object = 2; bound is 2
+        assert parse_json('{"a": {}}', expected=dict, max_depth=2) == {"a": {}}
+
+    def test_non_object_when_object_expected_is_refused_by_name(self):
+        with pytest.raises(ParseRefused):
+            parse_json("[1, 2, 3]", expected=dict, max_depth=5)
+
+    def test_invalid_json_is_refused_by_name(self):
+        with pytest.raises(ParseRefused):
+            parse_json("{not json", expected=dict, max_depth=5)
+
+    def test_oversized_payload_is_refused_by_name(self):
+        payload = "x" * (MAX_JSON_INPUT_BYTES + 1)
+        with pytest.raises(ParseRefused):
+            parse_json(payload, expected=dict, max_depth=5)
+
+    def test_refused_message_never_echoes_the_payload(self):
+        secret = '{"token": "supersecret123"}'
+        try:
+            parse_json(secret * 100000, expected=dict, max_depth=5)
+        except ParseRefused as error:
+            assert "supersecret123" not in str(error)
+        else:
+            raise AssertionError("expected ParseRefused for an oversized payload")
+
+    def test_parse_json_bytes_input_is_refused(self):
+        with pytest.raises(ParseRefused):
+            parse_json(b'{"a": 1}', expected=dict, max_depth=5)
+
+    def test_parse_json_empty_string_is_refused(self):
+        with pytest.raises(ParseRefused):
+            parse_json("", expected=dict, max_depth=5)
+
+    def test_parse_json_null_scalar_is_refused(self):
+        with pytest.raises(ParseRefused):
+            parse_json("null", expected=dict, max_depth=5)
+
+    def test_parse_json_max_depth_zero_refuses_everything(self):
+        with pytest.raises(ParseRefused):
+            parse_json("{}", expected=dict, max_depth=0)
+        with pytest.raises(ParseRefused):
+            parse_json("[]", expected=list, max_depth=0)
+
+    def test_parse_json_max_depth_one_admits_flat_refuses_nested(self):
+        assert parse_json("{}", expected=dict, max_depth=1) == {}
+        assert parse_json("[]", expected=list, max_depth=1) == []
+        assert parse_json('{"a": 1}', expected=dict, max_depth=1) == {"a": 1}
+        with pytest.raises(ParseRefused):
+            parse_json('{"a": {}}', expected=dict, max_depth=1)
+        with pytest.raises(ParseRefused):
+            parse_json('{"a": {"b": {}}}', expected=dict, max_depth=1)
+        with pytest.raises(ParseRefused):
+            parse_json("[[[]]]", expected=list, max_depth=1)
+
+    def test_parse_json_trailing_garbage_is_refused(self):
+        with pytest.raises(ParseRefused):
+            parse_json("{} junk", expected=dict, max_depth=5)
+
+    def test_parse_json_unicode_escape_parses(self):
+        assert parse_json(r'{"a":"\u0022"}', expected=dict, max_depth=5) == {"a": '"'}
