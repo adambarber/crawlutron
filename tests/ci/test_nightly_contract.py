@@ -6,6 +6,7 @@ from tests.chokepoint_paths import REPO_ROOT
 
 SERVICE_ROOT = REPO_ROOT
 WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "nightly.yml"
+CODEOWNERS_PATH = SERVICE_ROOT / ".github" / "CODEOWNERS"
 PYPROJECT_PATH = SERVICE_ROOT / "pyproject.toml"
 RUN_TESTS_ACTION_PATH = WORKFLOW_PATH.parent.parent / "actions" / "run-tests" / "action.yml"
 
@@ -75,3 +76,11 @@ def test_nightly_coverage_source_pkgs_not_overridden() -> None:
     assert set(cov_matches) == {"crawlutron"}, f"expected --cov=crawlutron only, got {cov_matches}"
     assert "--cov-source" not in action, "must not override --cov-source"
     assert "--cov-config" not in action, "must not override --cov-config"
+
+
+def test_nightly_codeowners_entry_exists() -> None:
+    """nightly.yml must have a CODEOWNERS entry."""
+    content = CODEOWNERS_PATH.read_text(encoding="utf-8")
+    assert ".github/workflows/nightly.yml" in content, "nightly.yml missing from CODEOWNERS"
+    line = [ln for ln in content.splitlines() if ".github/workflows/nightly.yml" in ln][0]
+    assert "@adambarber" in line, "nightly.yml must have @adambarber owner"
