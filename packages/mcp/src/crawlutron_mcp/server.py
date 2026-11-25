@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from crawlutron.models.json_value import JsonValue
 from crawlutron.service.error_rendering import MachineCode, redact_urls_in_text
+from crawlutron.service.errors import ValidationRefusal
 from crawlutron_mcp.constants import (
     CACHE_SCOPE,
     DEFAULT_TTL_MS,
@@ -212,7 +213,7 @@ async def call_tool(
     """Invoke one declared tool; the door environment forwards to dispatch."""
     from crawlutron_mcp.handlers import dispatch
     from crawlutron_mcp.registry import TOOLS_BY_NAME
-    from crawlutron_mcp.tool_results import validation_message
+    from crawlutron_mcp.tool_results import tool_error_result, validation_message
 
     params = body
 
@@ -228,19 +229,18 @@ async def call_tool(
     try:
         payload = spec.request_model(**arguments)
     except (ValidationError, ValueError) as error:
-        # that knows the tool's request model, so a tool cannot be added that surfaces a
-        # pydantic error as a transport failure instead of an is_error result.
-        return result_response(
-            request_id,
-            {
-                "resultType": "complete",
-                "content": [{"type": "text", "text": validation_message(error)}],
-                "isError": True,
-            },
+        # Every tool is admitted through its request model; a pydantic error is a tool error.
+        result = tool_error_result(
+            ValidationRefusal(
+                "validation_error",
+                validation_message(error),
+                {"errors": [{"msg": str(error)}]},
+            )
         )
-    result = await dispatch(
-        spec, payload, settings=settings, shutdown_event=shutdown_event, container=container, **door
-    )
+    else:
+        result = await dispatch(
+            spec, payload, settings=settings, shutdown_event=shutdown_event, container=container, **door
+        )
     success: dict[str, JsonValue] = {
         "resultType": "complete",
         "content": [{"type": "text", "text": result.text}],
