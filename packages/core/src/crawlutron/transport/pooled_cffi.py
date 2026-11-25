@@ -12,12 +12,14 @@ from typing import TYPE_CHECKING, cast
 import curl_cffi.requests as cffi_requests
 
 from crawlutron.runtime import process_state
+from crawlutron.transport.egress_proxy_runtime import egress_proxy_url
 from crawlutron.transport.pooled_client_release import discard_if_unowned_loop
 from crawlutron.transport.pooled_clients import (
     LoopBoundPooledClient,
     PooledClientBuilder,
     bind_to_running_loop,
 )
+from safe_url.host_policy import HostPolicy
 
 if TYPE_CHECKING:
     from crawlutron.config.settings import CrawlerSettings
@@ -34,31 +36,19 @@ _DEFAULT_CFFI_SESSION: CffiSession | None = None
 _CFFI_SESSION_INIT_LOCK = threading.Lock()
 
 
-def build_pinned_cffi_session(resolve_entry: list[str]) -> CffiSession:
-    """A one-shot impersonated session carrying the hop's resolve table.
-
-    curl_cffi has no per-request curl_options in 0.17.0, so the table rides the
-    session; per-hop lifetime keeps it from pinning a stale IP across fetches.
+def _build_cffi_session(settings: CrawlerSettings | None = None) -> CffiSession:
+    """Build a shared proxied curl_cffi AsyncSession; no timeout, so one session
+    serves every per-request budget. ``settings`` matches the shared builder seam.
     """
-    from curl_cffi.const import CurlOpt
+    from crawlutron.config.settings_cache import get_cached_settings
 
-    session: CffiSession = cffi_requests.AsyncSession(
+    # discard_cookies=True: no built-in jar (cross-tenant cookie replay).
+    # trust_env=False: ambient proxies must never bypass the loopback door.
+    session: cffi_requests.AsyncSession = cffi_requests.AsyncSession(
         impersonate=CFFI_IMPERSONATE_TARGET,
         discard_cookies=True,
-        curl_options={CurlOpt.RESOLVE: resolve_entry},
-    )
-    return bind_to_running_loop(session)
-
-
-def _build_cffi_session(settings: CrawlerSettings | None = None) -> CffiSession:
-    """Build a shared curl_cffi AsyncSession (impersonation fixed, no timeout --
-    the timeout rides each ``get()`` so one session serves every budget); ``settings``
-    is accepted and ignored to match the shared ``build(settings)`` contract.
-    """
-    # discard_cookies=True: the built-in jar would replay cookies outside the
-    # namespaced chokepoint -- a cross-tenant leak -- so it is born empty.
-    session: cffi_requests.AsyncSession = cffi_requests.AsyncSession(
-        impersonate=CFFI_IMPERSONATE_TARGET, discard_cookies=True
+        proxy=egress_proxy_url(HostPolicy.from_settings(get_cached_settings())),
+        trust_env=False,
     )
     return bind_to_running_loop(session)
 

@@ -48,33 +48,28 @@ async def test_cffi_ssl_error_classifies_as_tls_error():
 
 
 class TestPinnedHttpsWireShape:
-    """#574: the cffi hop dials the pinned IP with the logical hostname as TLS
-    identity. The wire must never carry an IP literal where a hostname attests."""
+    """#1364: the shared proxied session gets the logical URL; the proxy pins/dials."""
 
-    async def test_cffi_https_hop_gets_the_logical_url_not_the_ip_literal(self, monkeypatch):
-        import socket as socket_mod
+    async def test_cffi_https_hop_uses_shared_session_with_logical_url(self, stub_builder):
         from urllib.parse import urlparse
 
-        from tests._assertions import block_private_targets
+        from crawlutron.transport.cffi_transport import CffiTransport
+        from crawlutron.transport.transport import FetchRequest
         from tests._cffi_doubles import RecordingSession, terminal_response
 
-        block_private_targets(monkeypatch)
         session = RecordingSession()
         session.response = terminal_response()
+        stub_builder("cffi", lambda settings=None: session)
+        request = FetchRequest(
+            connect_url="https://93.184.216.34/",
+            headers={"Host": "example.com"},
+            url=canonical("https://example.com/"),
+            timeout_seconds=10,
+        )
 
-        def _one_shot(resolve_entry):
-            session.resolve_entry = resolve_entry
-            return session
+        await CffiTransport().fetch(request, max_bytes=1024)
 
-        monkeypatch.setattr(http_mod, "build_pinned_cffi_session", _one_shot)
-        fake_dns = [(socket_mod.AF_INET, socket_mod.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
-        monkeypatch.setattr(socket_mod, "getaddrinfo", lambda *a, **k: fake_dns)
-
-        await default_http_fetcher(canonical("https://example.com/"), {}, 10, 1024, impersonate=True)
-
-        assert session.calls, "the cffi transport was never reached"
+        assert session.calls, "the shared cffi session was never reached"
         parsed = urlparse(session.calls[0])
-        # The wire URL carries the hostname: SNI and cert verification follow it.
+        # The proxy dials the pin; the wire keeps the hostname for SNI/certs.
         assert parsed.hostname == "example.com", session.calls[0]
-        # The pin rides the resolve table, not the URL: dial the IP, attest the name.
-        assert session.resolve_entry == ["example.com:443:93.184.216.34"]

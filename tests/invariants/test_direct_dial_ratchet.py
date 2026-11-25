@@ -59,7 +59,8 @@ DIRECT_DIAL = Rule(
     clean=lambda: ("value = mapping.get('key')\n",),
 )
 
-_RATCHET = {"search": 1, "service": 1, "transport": 8}
+# #1364 retired the cffi one-shot session (definition + call site): 8 -> 6.
+_RATCHET = {"search": 1, "service": 1, "transport": 6}
 
 
 def _group(relative: str) -> str:

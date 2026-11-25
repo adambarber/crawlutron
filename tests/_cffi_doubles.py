@@ -31,11 +31,10 @@ class _Queue:
 
 
 class RecordingSession:
-    """Records each get()'s URL and the resolve table it was born with."""
+    """Records each get()'s URL on the shared proxied session."""
 
     def __init__(self):
         self.calls: list[str] = []
-        self.resolve_entry: list[str] | None = None
         self.response = CffiResponseDouble([])
         self.closed = False
 

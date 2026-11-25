@@ -21,7 +21,6 @@ from crawlutron.transport.pinned_transport import (
     PinnedRequest,
     PinRule,
     build_pinned_request,
-    cffi_resolve_entry,
     redirect_target,
 )
 from crawlutron.transport.transport import FetchRequest, Transport, http_408_deadline, http_413
@@ -154,13 +153,11 @@ class RedirectWalker:
 
     def _build_request(self, pinned: PinnedRequest, timeout_seconds: float) -> FetchRequest:
         """Build one hop's fetch request from the pinned request."""
-        resolve_entry = cffi_resolve_entry(pinned)
         return FetchRequest(
             connect_url=pinned.connect_url,
             headers=pinned.headers,
             url=pinned.url,
             timeout_seconds=timeout_seconds,
-            resolve_entry=resolve_entry,
         )
 
     async def _advance(

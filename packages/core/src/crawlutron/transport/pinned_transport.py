@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Protocol
-from urllib.parse import urlparse
 
 import httpx
 
@@ -140,17 +139,3 @@ async def _stripped_credentials(headers: dict[str, str], new_url: NormalizedUrl)
     if jar_cookie:
         stripped["Cookie"] = jar_cookie
     return stripped
-
-
-def cffi_resolve_entry(request: PinnedRequest) -> list[str] | None:
-    """The curl_cffi resolve table for a pinned hop: ``host:port:ip`` dialing the
-    pinned IP while SNI and cert verification stay on the logical hostname. None
-    when there is nothing to pin (HTTP hops, or a pin-is-hostname posture)."""
-    if request.connect_url == request.url.raw:
-        return None
-    tls = request.tls_hostname
-    if tls is None:
-        return None
-    parsed = urlparse(request.connect_url)
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    return [f"{tls}:{port}:{parsed.hostname}"]
