@@ -107,7 +107,6 @@ async def test_connect_tunnel_preserves_client_tls_bytes_and_identity(monkeypatc
             answer = await _connect(proxy_port, CONNECT_LINE, SNI_BYTES)
     assert answer == CERT_BYTES
     assert origin_capture == [SNI_BYTES]
-    assert b"example.com" in origin_capture[0]
     assert PUBLIC_IP.encode() not in origin_capture[0]
     assert dial_seen == [(PUBLIC_IP, 443)]
 
