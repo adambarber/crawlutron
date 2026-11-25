@@ -263,11 +263,15 @@ def _wait_own(hook_id: str, status_dir: Path) -> int:
 
 
 def _cleanup(status_dir: Path) -> None:
-    gates = _gate_argv()
-    if all((status_dir / f"{hook_id}.rc").is_file() for hook_id in gates):
-        for hook_id in gates:
-            (status_dir / f"{hook_id}.rc").unlink(missing_ok=True)
-            (status_dir / f"{hook_id}.pid").unlink(missing_ok=True)
+    for pidfile in status_dir.glob("*.pid"):
+        try:
+            if _child_is_running(pidfile):
+                return
+        except OSError:
+            return
+    for path in status_dir.iterdir():
+        if path.is_file():
+            path.unlink(missing_ok=True)
 
 
 def _run_gate(argv: list[str]) -> subprocess.CompletedProcess[str]:
@@ -300,14 +304,16 @@ def main() -> int:
     status_dir = _status_dir()
     entry_start = time.time()
     _purge(status_dir, entry_start)
-    _dispatch(status_dir)
-    code = _wait_own(hook_id, status_dir)
-    if code != 0:
-        log = status_dir / f"{hook_id}.log"
-        if log.is_file():
-            sys.stderr.write("".join(log.read_text().splitlines(keepends=True)[-80:]))
-    _cleanup(status_dir)
-    return code
+    try:
+        _dispatch(status_dir)
+        code = _wait_own(hook_id, status_dir)
+        if code != 0:
+            log = status_dir / f"{hook_id}.log"
+            if log.is_file():
+                sys.stderr.write("".join(log.read_text().splitlines(keepends=True)[-80:]))
+        return code
+    finally:
+        _cleanup(status_dir)
 
 
 if __name__ == "__main__":

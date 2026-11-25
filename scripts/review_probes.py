@@ -31,7 +31,22 @@ from crawlutron.review.probes import ProbeArtifact
 from crawlutron.review.support import ProbeResultRecord, probe_exit_code
 
 SHA_PATTERN: Final[re.Pattern[str]] = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
-REPOSITORY_PATTERN: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+_REPOSITORY_SEGMENT: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9_.-]+")
+
+
+def is_valid_repository(repository: str) -> bool:
+    """Accept only owner/repo names with safe, single-level segments."""
+    parts = repository.split("/")
+    if len(parts) != 2:
+        return False
+    for part in parts:
+        if not part or not _REPOSITORY_SEGMENT.fullmatch(part):
+            return False
+        if part in {".", ".."} or part.startswith(".") or part.endswith("."):
+            return False
+    return True
+
+
 INVARIANT_TESTS: Final[tuple[str, ...]] = (
     "tests/invariants/test_no_inline_suppressions.py",
     "tests/invariants/test_file_size.py",
@@ -153,7 +168,7 @@ def probe_ci_gates(run_id: str, output_path: Path) -> ProbeArtifact:
     if not run_id.isdigit():
         raise ValueError("run id must be numeric")
     repository = os.environ.get("GITHUB_REPOSITORY", "")
-    if not REPOSITORY_PATTERN.fullmatch(repository):
+    if not is_valid_repository(repository):
         raise ValueError("GITHUB_REPOSITORY must name an owner and repository")
     stdout_path, stderr_path = _artifact_paths(output_path)
     url = f"https://api.github.com/repos/{repository}/actions/runs/{run_id}/jobs?per_page=100"

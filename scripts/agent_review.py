@@ -14,13 +14,16 @@ from typing import TYPE_CHECKING, Final
 if TYPE_CHECKING:
     from scripts import review_registry as _registry
     from scripts import review_support as _support
+    from scripts.review_verdict_bounds import cap_findings, truncate_rationale
 else:
     if __package__:
         from scripts import review_registry as _registry
         from scripts import review_support as _support
+        from scripts.review_verdict_bounds import cap_findings, truncate_rationale
     else:
         import review_registry as _registry
         import review_support as _support
+        from review_verdict_bounds import cap_findings, truncate_rationale
 
 from crawlutron.review.types import Verdict, VerdictFinding
 
@@ -85,10 +88,13 @@ def _validate_verdict_payload(payload: object) -> Verdict:
                 line=line,
                 severity=severity,
                 rule=_support.non_empty_string(finding.get("rule"), f"finding {index} rule"),
-                rationale=_support.non_empty_string(finding.get("rationale"), f"finding {index} rationale"),
+                rationale=truncate_rationale(
+                    _support.non_empty_string(finding.get("rationale"), f"finding {index} rationale")
+                ),
                 confidence=confidence,
             )
         )
+    findings = cap_findings(findings)
     return Verdict(verdict=verdict, findings=tuple(findings), summary=summary)
 
 
