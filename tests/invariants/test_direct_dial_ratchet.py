@@ -28,7 +28,13 @@ _SANCTIONED = frozenset(
 #: Raw public dials: socket construction/creation and the connect method.
 _RAW_SOCKET_NAMES = frozenset({"socket.socket", "socket.create_connection"})
 
-#: Outbound client/session construction that must carry proxy= to be sanctioned.
+#: asyncio open_connection is a raw public dial.
+_ASYNCIO_OPEN_CONNECTION = frozenset({"asyncio.open_connection"})
+
+#: urllib.request.urlopen is a raw public dial.
+_URLLIB_URLOPEN = frozenset({"urllib.request.urlopen"})
+
+#: Outbound client/session construction that must carry proxy= or proxies= to be sanctioned.
 _CLIENT_NAMES = frozenset(
     {
         "httpx.AsyncClient",
@@ -61,8 +67,8 @@ _MARKER = "direct egress dial outside the proxy door"
 
 
 def _has_proxy_keyword(call) -> bool:
-    """True when ``call`` passes ``proxy=`` as a keyword argument."""
-    return any(keyword.arg == "proxy" for keyword in call.keywords)
+    """True when ``call`` passes ``proxy=`` or ``proxies=`` as a keyword argument."""
+    return any(keyword.arg in ("proxy", "proxies") for keyword in call.keywords)
 
 
 def _is_socket_connect(call, tree) -> bool:
@@ -83,6 +89,10 @@ def _direct_dial_offenders(tree, path) -> list[str]:
         if name in _RAW_SOCKET_NAMES:
             offenders.append(offender_at(path, node, _MARKER))
         if _is_socket_connect(node, tree):
+            offenders.append(offender_at(path, node, _MARKER))
+        if name in _ASYNCIO_OPEN_CONNECTION:
+            offenders.append(offender_at(path, node, _MARKER))
+        if name in _URLLIB_URLOPEN:
             offenders.append(offender_at(path, node, _MARKER))
         if name in _HELPER_NAMES:
             offenders.append(offender_at(path, node, _MARKER))
@@ -190,6 +200,22 @@ def test_raw_socket_ops_fire_outside_proxy_home() -> None:
     ]
 
 
+def test_asyncio_open_connection_fires_outside_proxy_home() -> None:
+    """asyncio.open_connection is a raw public dial."""
+    assert _direct_dial_offenders(
+        parsed_source("await asyncio.open_connection('example.com', 443)\n", filename="x/asyncio_conn.py"),
+        REPO_ROOT / "x" / "asyncio_conn.py",
+    ) == ["x/asyncio_conn.py:1 " + _MARKER]
+
+
+def test_urllib_request_urlopen_fires_outside_proxy_home() -> None:
+    """urllib.request.urlopen is a raw public dial."""
+    assert _direct_dial_offenders(
+        parsed_source("urllib.request.urlopen('http://example.com/')\n", filename="x/urlopen.py"),
+        REPO_ROOT / "x" / "urlopen.py",
+    ) == ["x/urlopen.py:1 " + _MARKER]
+
+
 def test_unproxied_client_construction_fires() -> None:
     """httpx.AsyncClient / curl_cffi AsyncSession without proxy= are refused."""
     assert _direct_dial_offenders(
@@ -203,11 +229,20 @@ def test_unproxied_client_construction_fires() -> None:
 
 
 def test_proxied_client_construction_stays_clean() -> None:
-    """proxy= construction is sanctioned topology, not a bypass."""
+    """proxy= or proxies= construction is sanctioned topology, not a bypass."""
+    # proxy= singular
     proxied = "client = httpx.AsyncClient(proxy=egress_proxy_url(HostPolicy.from_settings(s)))\n"
     assert (
         _direct_dial_offenders(
             parsed_source(proxied, filename="x/proxied.py"), REPO_ROOT / "x" / "proxied.py"
+        )
+        == []
+    )
+    # proxies= plural
+    proxies = "client = httpx.AsyncClient(proxies={'http://': 'http://proxy:8080'})\n"
+    assert (
+        _direct_dial_offenders(
+            parsed_source(proxies, filename="x/proxies.py"), REPO_ROOT / "x" / "proxies.py"
         )
         == []
     )

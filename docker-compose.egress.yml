@@ -1,0 +1,101 @@
+# Default-deny egress topology: app on internal network only, sidecar proxy is
+# the sole dual-homed container (internal + egress), isolated origin on egress only.
+# This file is used by the runtime topology proof test.
+#
+# Run with: docker compose -f docker-compose.yml -f docker-compose.egress.yml up -d
+
+services:
+  # The application container: ONLY on internal network, no published ports.
+  # All egress must go through the sidecar proxy.
+  crawlutron:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: crawlutron:egress-test
+    container_name: crawlutron-egress
+    restart: "no"
+    init: true
+    mem_limit: 3g
+    # NO ports mapping - app is not reachable from host or external networks
+    environment:
+      CRAWLUTRON_HOST: "0.0.0.0"
+      CRAWLUTRON_LOG_LEVEL: "info"
+      CRAWLUTRON_WORKERS: "1"
+      CRAWLUTRON_CACHE_DIR: "/app/cache"
+      CRAWLUTRON_LOG_FILE: "/app/logs/crawlutron.jsonl"
+      CRAWLUTRON_CONTENT_CACHE_ENABLED: "true"
+      CRAWLUTRON_ALLOW_PRIVATE_TARGETS: "0"
+      CRAWLUTRON_SEARCH_PROVIDER: "auto"
+      CRAWLUTRON_TAVILY_API_KEY: "${CRAWLUTRON_TAVILY_API_KEY:-}"
+      CRAWLUTRON_KEY_ADMIN_TOKEN: "${CRAWLUTRON_KEY_ADMIN_TOKEN:-}"
+      # Point to sidecar proxy for all egress
+      CRAWLUTRON_EGRESS_PROXY_URL: "http://egress-proxy:8888"
+    volumes:
+      - ./logs:/app/logs
+      - ./cache:/app/cache
+    networks:
+      - internal
+    # Telemetry sinkholes (same as main compose)
+    extra_hosts:
+      - "mobile.events.data.microsoft.com:0.0.0.0"
+      - "browser.events.data.microsoft.com:0.0.0.0"
+      - "default.events.data.microsoft.com:0.0.0.0"
+      - "settings-win.data.microsoft.com:0.0.0.0"
+      - "dc.services.visualstudio.com:0.0.0.0"
+      - "rt.services.visualstudio.com:0.0.0.0"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+    depends_on:
+      - egress-proxy
+
+  # Sidecar egress proxy: the ONLY dual-homed container.
+  # Attached to both internal (for app) and egress (for outbound) networks.
+  # Runs the crawlutron egress proxy (not socat) providing admission, DNS pinning,
+  # and logical-identity guarantee.
+  egress-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: crawlutron:egress-proxy
+    container_name: egress-proxy
+    restart: "no"
+    init: true
+    mem_limit: 512m
+    # Run the egress proxy sidecar entry point
+    command: ["python", "/app/scripts/egress_proxy_sidecar.py"]
+    environment:
+      EGRESS_PROXY_BIND_HOST: "0.0.0.0"
+      EGRESS_PROXY_BIND_PORT: "8888"
+    networks:
+      - internal
+      - egress
+    depends_on:
+      - origin
+
+  # Isolated origin: only on egress network, not reachable from internal.
+  # This simulates an external target that can ONLY be reached via the proxy.
+  origin:
+    image: python@sha256:c5ba3deef00c7758561a0f03c26f44f10589263d40e732b8748e0d1f38f6dd89
+    container_name: isolated-origin
+    restart: "no"
+    # Simple HTTP server that responds with identifiable content
+    command: >
+      python -m http.server 80 --bind 0.0.0.0
+    networks:
+      - egress
+
+networks:
+  # Internal network: app <-> proxy only. No internet access.
+  internal:
+    driver: bridge
+    internal: true
+  # Egress network: proxy <-> origin only. Has internet access via host.
+  egress:
+    driver: bridge
+    internal: false

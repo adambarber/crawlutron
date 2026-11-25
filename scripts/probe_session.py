@@ -12,11 +12,10 @@ import sys
 from pathlib import Path
 from typing import cast
 
-# Add tests directory to path for absolute imports
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests"))
-from _support._probe_types import _get_cookie_jar, _get_cookie_names
-
 from crawlutron.transport.browser_driver import BrowserDriver
+
+# Import from release image module (which already sets up tests sys.path)
+from scripts.release.image import _get_cookie_jar, _get_cookie_names
 
 # Resolve the repo root from this script location; works from container,
 # workstation, or CI checkout.

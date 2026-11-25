@@ -132,3 +132,49 @@ def test_egress_default_deny_contract() -> None:
             assert "CRAWLUTRON_BASE_IMAGE" in stripped or "PYTHON" in stripped, (
                 f"Dockerfile bakes a proxy setting that could bypass the egress door: {stripped}"
             )
+
+
+def test_egress_topology_contract() -> None:
+    """Default-deny egress topology contract: app on internal network only,
+    sidecar proxy is the sole dual-homed container (internal + egress),
+    isolated origin on egress only."""
+
+    compose_path = REPO_ROOT / "docker-compose.egress.yml"
+
+    compose = compose_path.read_text(encoding="utf-8")
+    import yaml
+
+    doc = yaml.safe_load(compose)
+    services = doc.get("services", {})
+    networks = doc.get("networks", {})
+
+    # Three services: crawlutron, egress-proxy, origin
+    assert set(services.keys()) == {"crawlutron", "egress-proxy", "origin"}, (
+        f"expected services crawlutron, egress-proxy, origin; got {set(services.keys())}"
+    )
+
+    # App (crawlutron) is ONLY on internal network, no ports published
+    app = services["crawlutron"]
+    assert "ports" not in app, "crawlutron must not publish any ports"
+    app_networks = app.get("networks", [])
+    assert app_networks == ["internal"], f"crawlutron must be on internal network only; got {app_networks}"
+    # Must have EGRESS_PROXY_URL pointing to sidecar
+    env = app.get("environment", {})
+    assert "CRAWLUTRON_EGRESS_PROXY_URL" in env, "crawlutron must have CRAWLUTRON_EGRESS_PROXY_URL"
+    assert env["CRAWLUTRON_EGRESS_PROXY_URL"] == "http://egress-proxy:8888"
+
+    # Proxy (egress-proxy) is dual-homed: internal + egress
+    proxy = services["egress-proxy"]
+    proxy_networks = proxy.get("networks", [])
+    assert set(proxy_networks) == {"internal", "egress"}, (
+        f"egress-proxy must be dual-homed (internal + egress); got {proxy_networks}"
+    )
+
+    # Origin is ONLY on egress network
+    origin = services["origin"]
+    origin_networks = origin.get("networks", [])
+    assert origin_networks == ["egress"], f"origin must be on egress network only; got {origin_networks}"
+
+    # Networks: internal is internal-only, egress has external access
+    assert networks["internal"].get("internal") is True, "internal network must be internal-only"
+    assert networks["egress"].get("internal") is not True, "egress network must allow external access"

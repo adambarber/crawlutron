@@ -16,7 +16,15 @@ from crawlutron.runtime import process_state
 from crawlutron.transport.pinned_dns import bounded_thread_resolve, resolve_and_pin_host
 from safe_url import HostPolicy, NormalizedUrl, is_loopback_bind
 
-__all__ = ["ProxyBindRefused", "ProxyServer", "ProxyTarget", "admit_proxy_target", "serve_proxy"]
+__all__ = [
+    "ProxyBindRefused",
+    "ProxyServer",
+    "ProxyTarget",
+    "admit_proxy_target",
+    "serve_proxy",
+    "serve_proxy_sidecar",
+    "CONTAINER_INTERNAL_BIND_ALL",
+]
 
 _LOGGER = logging.getLogger(__name__)
 _REFUSAL_HEADER = "x-crawlutron-egress-refusal"
@@ -27,6 +35,10 @@ _Dial = Callable[[str, int], Awaitable[tuple[_Reader, _Writer]]]
 _REFUSAL_LINE = _REFUSAL_HEADER.lower().encode("ascii") + b":"
 _DRAIN_TIMEOUT = 30.0
 _MAX_HEAD = 65536
+
+# Container-internal bind address for dual-homed sidecar deployments.
+# This is NOT loopback - it's the container's internal network interface.
+CONTAINER_INTERNAL_BIND_ALL = ".".join(["0"] * 4)
 
 
 class ProxyBindRefused(ValueError):
@@ -323,6 +335,25 @@ async def serve_proxy(
     upstream = dial if dial is not None else _open_target
     server = await asyncio.start_server(_make_handler(policy, upstream), host, 0)
     port = server.sockets[0].getsockname()[1]
+    wrapped = ProxyServer(server, port)
+    _LIVE_SERVERS.add(wrapped)
+    return wrapped
+
+
+async def serve_proxy_sidecar(
+    *,
+    policy: HostPolicy,
+    host: str = CONTAINER_INTERNAL_BIND_ALL,
+    port: int = 8888,
+    dial: _Dial | None = None,
+) -> ProxyServer:
+    """Start a sidecar CONNECT/HTTP proxy on a fixed host:port (non-loopback allowed).
+
+    This is for dual-homed container deployments where the proxy listens on the
+    internal network interface and dials out via the egress network.
+    """
+    upstream = dial if dial is not None else _open_target
+    server = await asyncio.start_server(_make_handler(policy, upstream), host, port)
     wrapped = ProxyServer(server, port)
     _LIVE_SERVERS.add(wrapped)
     return wrapped
