@@ -1,5 +1,7 @@
 """Owns retry policy, binary detection, and discovery diagnostics.
 
+reads datetime for expiry calculation
+
 wall-consumer
 """
 

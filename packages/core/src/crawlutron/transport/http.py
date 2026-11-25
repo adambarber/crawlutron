@@ -1,5 +1,7 @@
 """HTTP strategy entry: fetch, cache, extract and construct the result.
 
+reads time.monotonic() for fetch timing
+
 wall-consumer
 """
 

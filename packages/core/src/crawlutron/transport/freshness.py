@@ -2,7 +2,7 @@
 
 ContentCache and HttpCache decided expiry in two places; both now route through this single rule.
 
-wall-consumer
+wall-consumer: reads time.time() for TTL expiry
 """
 
 from __future__ import annotations

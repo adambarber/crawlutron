@@ -1,7 +1,4 @@
-"""Owns the direct httpx and curl_cffi fetch implementations.
-
-wall-consumer
-"""
+"""Owns the direct httpx and curl_cffi fetch implementations."""
 
 from __future__ import annotations
 

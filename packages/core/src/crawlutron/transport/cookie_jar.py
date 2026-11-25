@@ -1,5 +1,7 @@
 """Owns namespaced persistent cookie storage and cookie context state.
 
+reads time.time() for cookie expiry
+
 wall-consumer
 """
 

@@ -1,5 +1,7 @@
 """Browser pool: manages N persistent BrowserRenderer instances.
 
+reads time.monotonic() for pool deadlines
+
 wall-consumer
 """
 

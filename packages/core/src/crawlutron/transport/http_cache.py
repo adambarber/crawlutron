@@ -1,5 +1,7 @@
 """HTTP cache behavior: limits, revalidation and 304 answers.
 
+reads time.monotonic() and time.time() for cache expiry
+
 wall-consumer
 """
 
