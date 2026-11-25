@@ -1,7 +1,6 @@
 """The render phases a browser page passes through, as named functions.
 
-Each phase takes the collaborators it needs (the driver, the pin rules, the
-page) so the render loop reads as the sequence of phases a reviewer can name.
+wall-consumer
 """
 
 from __future__ import annotations

@@ -1,4 +1,7 @@
-"""HTTP transport: one pinned hop over the pooled httpx client."""
+"""HTTP transport: one pinned hop over the pooled httpx client.
+
+wall-consumer
+"""
 
 from __future__ import annotations
 

@@ -1,7 +1,7 @@
 """Transport protocol and result types for the unified fetch walk.
 
-The :class:`Transport` protocol owns a single SSRF-pinned hop; the walker owns
-the walk. Transports raise ``BodyTooLarge`` and the walker maps it to http_413."""
+wall-consumer
+"""
 
 from __future__ import annotations
 

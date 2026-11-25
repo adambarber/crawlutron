@@ -1,6 +1,8 @@
 """One freshness voice for both caches: a TTL-to-expiry rule and a boundary.
 
 ContentCache and HttpCache decided expiry in two places; both now route through this single rule.
+
+wall-consumer
 """
 
 from __future__ import annotations

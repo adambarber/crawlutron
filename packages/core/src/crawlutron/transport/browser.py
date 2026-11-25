@@ -1,4 +1,7 @@
-"""Browser rendering: a headless browser for JavaScript-heavy pages."""
+"""Browser rendering: a headless browser for JavaScript-heavy pages.
+
+wall-consumer
+"""
 
 from __future__ import annotations
 

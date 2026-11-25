@@ -1,7 +1,7 @@
 """Owns the direct httpx and curl_cffi fetch implementations.
 
-Delegates to :class:`~crawlutron.transport.redirect_walker.RedirectWalker`, which
-owns the walk (redirects, cookie capture, pin validation, header checks)."""
+wall-consumer
+"""
 
 from __future__ import annotations
 

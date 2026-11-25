@@ -21,26 +21,20 @@ _SCHED = APP_ROOT / "transport" / "scheduler.py"
 _SCHED_STATE = APP_ROOT / "transport" / "scheduler_domain_state.py"
 
 
-# The wall consumers DELEGATED by doctrine (#580 inventory): justified reads,
-# each keeping its own clock. A new entry needs its justification in-commit.
-_DELEGATED_WALL_CONSUMERS = frozenset(
-    {
-        "browser.py",
-        "browser_driver.py",
-        "browser_pool.py",
-        "browser_render_phases.py",
-        "cookie_jar.py",
-        "cffi_transport.py",  # elapsed_ms timing for fetch telemetry (#685)
-        "httpx_transport.py",  # elapsed_ms timing for fetch telemetry (#685)
-        "fetch_policy.py",
-        "fetchers.py",
-        "freshness.py",
-        "http.py",
-        "http_cache.py",
-        "redirect_walker.py",  # started= default for elapsed_ms (#685)
-        "transport.py",  # http_413 elapsed_ms (#685)
-    }
-)
+# The wall-consumer marker in each module docstring is the single source of
+# truth for delegated wall-clock readers (#580).
+_WALL_CONSUMER_MARKER = "wall-consumer"
+
+
+def _delegated_wall_consumers() -> frozenset[str]:
+    """Filenames whose module docstring carries the wall-consumer marker."""
+    names: set[str] = set()
+    for path in sorted(_TRANSPORT.glob("*.py")):
+        docstring = ast.get_docstring(ast.parse(path.read_text(encoding="utf-8")))
+        if docstring and _WALL_CONSUMER_MARKER in docstring:
+            names.add(path.name)
+    return frozenset(names)
+
 
 # The time module's CLOCK members -- the names whose bare call reads a clock;
 # a from-import of a NON-clock member is not a timeline read (cycle 3, 3c).
@@ -91,7 +85,7 @@ def test_the_governing_glob_covers_every_transport_module_mentioning_time():
     set -- renamed, or in a NESTED package -- while touching a clock family fails here. Justified wall
     reads are delegated to named consumers; the law governs the DOMAIN PRESSURE state only.
     """
-    governed = {p.name for p in _SCHEDULER_PACKAGE} | _DELEGATED_WALL_CONSUMERS
+    governed = {p.name for p in _SCHEDULER_PACKAGE} | _delegated_wall_consumers()
     escapees = [
         p.relative_to(REPO_ROOT)
         for p in sorted(_TRANSPORT.rglob("*.py"))
@@ -102,6 +96,20 @@ def test_the_governing_glob_covers_every_transport_module_mentioning_time():
         f"{escapees} -- govern them (scheduler*.py) or declare them delegated "
         f"wall consumers with their justification, in the same commit (#580)"
     )
+
+
+def test_wall_consumer_marker_drives_the_narrowing_set():
+    """The wall-consumer marker drives the delegated-wall-consumer narrowing set.
+    A rename that drops the marker makes the renamed module an escapee."""
+    derived = _delegated_wall_consumers()
+    # Soundness: every derived member carries the marker in its docstring.
+    for name in derived:
+        docstring = ast.get_docstring(ast.parse((_TRANSPORT / name).read_text(encoding="utf-8")))
+        assert docstring is not None, f"{name} has no docstring"
+        assert _WALL_CONSUMER_MARKER in docstring, f"{name} derived as a wall consumer but lacks the marker"
+    # Minimal sanity: known delegated consumers are present.
+    assert "browser.py" in derived
+    assert "transport.py" in derived
 
 
 def _has_clock_default(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:

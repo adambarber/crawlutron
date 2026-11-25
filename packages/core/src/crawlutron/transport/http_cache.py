@@ -1,4 +1,7 @@
-"""HTTP cache behavior: limits, revalidation and 304 answers."""
+"""HTTP cache behavior: limits, revalidation and 304 answers.
+
+wall-consumer
+"""
 
 from __future__ import annotations
 

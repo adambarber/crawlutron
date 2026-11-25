@@ -1,7 +1,7 @@
 """RedirectWalker: the single redirect-walk implementation.
 
-Owns the fetch walk: one transport.fetch() per hop, redirect following, deferred
-cookie capture, credential stripping, and pin validation in one place."""
+wall-consumer
+"""
 
 from __future__ import annotations
 

@@ -1,7 +1,6 @@
 """Owns retry policy, binary detection, and discovery diagnostics.
 
-This module owns bounded retry/backoff behavior and post-fetch discovery probes.
-It must not own client construction, body decoding, extraction, or result assembly.
+wall-consumer
 """
 
 from __future__ import annotations

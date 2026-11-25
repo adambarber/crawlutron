@@ -1,7 +1,6 @@
 """The live browser: launching, recycling, tabs and driver steps.
 
-``BrowserRenderer`` takes ``driver=`` since a test passes a driver whose page
-steps do nothing; the action vocabulary lives in ``crawlutron.vocabulary.browser``.
+wall-consumer
 """
 
 from __future__ import annotations
