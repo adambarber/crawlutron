@@ -173,6 +173,9 @@ async def test_webhook_log_paths_never_emit_a_secret(caplog, monkeypatch):
         await webhooks.post_webhook(target, {"data": {object()}})
         # Oversized-payload path: a tiny cap forces the too-large log line.
         monkeypatch.setenv("CRAWLUTRON_MAX_WEBHOOK_SIZE", "1")
+        from crawlutron.config.settings_cache import reset_cached_settings
+
+        reset_cached_settings()
         await webhooks.post_webhook(target, {})
         # Delivery-failure path: the receiver refuses permanently.
         from tests._webhook_doubles import record_webhook_delivery

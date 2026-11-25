@@ -12,14 +12,13 @@ import hmac
 import io
 import json
 import logging
-import os
 import time
 from collections.abc import Mapping
 from urllib.parse import urlparse
 
 from httpx import HTTPError
 
-from crawlutron.config.env import get_env_int, get_mapping_int
+from crawlutron.config.env import get_env_int
 from crawlutron.config.settings_cache import get_cached_settings
 from crawlutron.models.webhook_target import WebhookTarget
 from crawlutron.runtime import process_state
@@ -237,25 +236,9 @@ def _should_retry(delivery_exc: Exception, attempt: int, attempts: int) -> bool:
     return transient and attempt < attempts - 1
 
 
-_WEBHOOK_SIZE_DEFAULT = 10_485_760
-
-
-@functools.lru_cache(maxsize=256)
-def _parse_webhook_size(raw: str | None) -> int:
-    """Parse one distinct raw env value into the bounded webhook cap.
-    The parse and its never-raise ``lo=1`` contract live in get_mapping_int;
-    caching on the raw string parses once per value yet honors an override next call.
-    """
-    mapping = {} if raw is None else {"CRAWLUTRON_MAX_WEBHOOK_SIZE": raw}
-    return get_mapping_int(mapping, "CRAWLUTRON_MAX_WEBHOOK_SIZE", _WEBHOOK_SIZE_DEFAULT, lo=1)
-
-
 def max_webhook_size() -> int:
-    """The outbound webhook payload/response size cap.
-    Cached on the raw env value so the parse runs once per distinct value,
-    and an override (operator env or a test) is honored on the very next call.
-    """
-    return _parse_webhook_size(os.environ.get("CRAWLUTRON_MAX_WEBHOOK_SIZE"))
+    """The outbound webhook size cap, bounded and parsed at the settings home."""
+    return get_cached_settings().max_webhook_size
 
 
 def _serialize_webhook_payload(payload: Mapping[str, object], cap: int) -> bytes | None:

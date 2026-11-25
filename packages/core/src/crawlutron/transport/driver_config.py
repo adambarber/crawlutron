@@ -5,14 +5,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import os
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TypeVar
 
 from camoufox.async_api import AsyncCamoufox
 
-from crawlutron.config.env import parse_bool_value
+from crawlutron.config.settings_cache import get_cached_settings
 from crawlutron.models.browser_profile_record import BrowserProfileRecord
 from crawlutron.vocabulary.browser import BrowserAction
 from crawlutron.vocabulary.limits import DEFAULT_LAZY_SCROLL_DELAY_SECONDS, DEFAULT_LAZY_SCROLL_STEPS
@@ -126,11 +125,8 @@ def create_camoufox_browser(**kwargs: object) -> AsyncCamoufox:
 
 
 def headless_enabled() -> bool:
-    return parse_bool_value(
-        os.environ.get("CRAWLUTRON_HEADLESS"),
-        default=True,
-        env_name="CRAWLUTRON_HEADLESS",
-    )
+    """The headless switch, parsed once at the settings home."""
+    return get_cached_settings().headless
 
 
 def validate_storage_state_path(storage_state: str, cache_dir: str | Path | None) -> str | None:
