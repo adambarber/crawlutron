@@ -209,3 +209,42 @@ async def test_refusal_never_logs_the_target_or_its_secret(caplog) -> None:
     assert "s3cr3t-value" not in caplog.text
     assert host_of(authority) not in caplog.text
     assert dial_seen == []
+
+
+async def test_client_half_close_keeps_the_origin_response_flowing(monkeypatch) -> None:
+    """A client write-EOF must not reset the socket still carrying the response."""
+    resolves_in_sequence(monkeypatch, PUBLIC_IP)
+    head = b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\nabcd"
+
+    async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        await reader.read(65536)
+        writer.write(head)
+        await writer.drain()
+        try:
+            await reader.read()  # EOF when the proxy half-closes; RST on the abort path
+        except OSError:
+            return
+        writer.write(b"efgh")
+        await writer.drain()
+        writer.close()
+
+    origin = await asyncio.start_server(handle, "127.0.0.1", 0)
+    try:
+        async with _proxy(_dial_to(origin.sockets[0].getsockname()[1], [])) as proxy_port:
+            reader, writer = await asyncio.open_connection("127.0.0.1", proxy_port)
+            try:
+                writer.write(b"GET http://example.com/x HTTP/1.1\r\nHost: example.com\r\n\r\n")
+                await writer.drain()
+                first = await asyncio.wait_for(reader.read(1024), 5.0)
+                writer.write_eof()
+                await writer.drain()
+                try:
+                    rest = await asyncio.wait_for(reader.read(), 5.0)
+                except OSError:
+                    rest = b""
+            finally:
+                writer.close()
+    finally:
+        origin.close()
+        await origin.wait_closed()
+    assert first + rest == head + b"efgh"
