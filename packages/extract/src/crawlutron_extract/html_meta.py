@@ -6,8 +6,7 @@ Mirrors core's ``PageMetadata`` key set (see ``crawlutron.models.page_metadata``
 
 from __future__ import annotations
 
-import json
-
+from crawlutron_extract.json_door import parse_json
 from safe_url import NormalizedUrl
 
 __all__ = ["MetadataCollector"]
@@ -84,8 +83,8 @@ class MetadataCollector:
             block = "".join(self._json_ld_parts).strip()
             if block:
                 try:
-                    json.loads(block)  # validate only; malformed JSON-LD is skipped
-                except (ValueError, json.JSONDecodeError):
+                    parse_json(block)  # validate only; malformed JSON-LD is skipped
+                except ValueError:
                     pass
                 else:
                     self._json_ld.append(block)

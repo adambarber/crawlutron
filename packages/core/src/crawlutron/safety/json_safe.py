@@ -59,8 +59,10 @@ def _json_depth(text: str) -> int:
     return max_depth
 
 
-def parse_json(text: str, *, expected: type | tuple[type, ...], max_depth: int) -> JsonValue:
+def parse_json(text: object, *, expected: type | tuple[type, ...], max_depth: int) -> JsonValue:
     """Admit-or-refuse JSON door: cap bytes, bound depth, enforce type, refuse."""
+    if not isinstance(text, str):
+        raise ParseRefused("JSON input must be str, not bytes")
     encoded = text.encode("utf-8")
     if len(encoded) > MAX_JSON_INPUT_BYTES:
         raise ParseRefused("JSON payload exceeds byte cap")
