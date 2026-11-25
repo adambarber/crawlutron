@@ -10,6 +10,7 @@ from tests.workflows._rules import no_silent_uploads
 _SAMPLE: Job = next(job for job in JOBS if job.steps)
 _ALIAS = {"if_": "if", "with_": "with", "continue_on_error": "continue-on-error"}
 _CODECOV = "codecov/codecov-action@" + "a" * 40
+_LOOKALIKE = "evil-codecov/codecov-action@" + "b" * 40
 
 
 def _mutate(**changes) -> Job:
@@ -100,6 +101,26 @@ def test_non_codecov_with_fail_ci_if_error_false_reds_file_line() -> None:
     assert findings
     assert findings[0].rule == "no-silent-uploads"
     assert str(broken.steps[0].line) in findings[0].message
+
+
+def test_lookalike_codecov_with_fail_ci_if_error_false_reds() -> None:
+    step = Step.__new__(Step)
+    object.__setattr__(step, "uses", _LOOKALIKE)
+    object.__setattr__(step, "name", "Upload coverage XML to Codecov")
+    object.__setattr__(step, "line", 9)
+    object.__setattr__(step, "run", None)
+    object.__setattr__(step, "event_spliced", False)
+    object.__setattr__(
+        step,
+        "with_",
+        {"fail_ci_if_error": False, "files": "coverage_reports/coverage.xml"},
+    )
+    job = _SAMPLE.model_copy(update={"steps": (step,), "key": "coverage", "workflow": "ci"})
+    parent = parent_workflow(job)
+    findings = list(no_silent_uploads(parent, job))
+    assert findings
+    assert findings[0].rule == "no-silent-uploads"
+    assert str(step.line) in findings[0].message
 
 
 def test_codecov_with_if_no_files_found_warn_reds() -> None:

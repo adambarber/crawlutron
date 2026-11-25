@@ -171,13 +171,15 @@ def uses_tests_door(workflow: Workflow, job: Job) -> Iterator[Finding]:
         )
 
 
-_CODECOV_ACTION = "codecov/codecov-action@"
+import re
+
+_CODECOV_ACTION_RE = re.compile(r"^codecov/codecov-action@[0-9a-f]{40}$")
 
 
 def _is_pinned_codecov(step: Step) -> bool:
     """True when the step uses the SHA-pinned Codecov action (the only admitted
     silent-upload carve-out target)."""
-    return bool(step.uses and _CODECOV_ACTION in str(step.uses))
+    return bool(step.uses and _CODECOV_ACTION_RE.fullmatch(str(step.uses)))
 
 
 def no_silent_uploads(workflow: Workflow, job: Job) -> Iterator[Finding]:

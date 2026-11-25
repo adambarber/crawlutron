@@ -21,6 +21,7 @@ jscpd-expectations.json @adambarber
 .github/workflows/release.yml @adambarber
 .github/workflows/release-please.yml @adambarber
 .github/workflows/ci.yml @adambarber
+.github/workflows/nightly.yml @adambarber
 .github/workflows/packaging.yml @adambarber
 .github/workflows/agent-review.yml @adambarber
 .github/review-agents.toml @adambarber
