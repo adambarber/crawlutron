@@ -24,6 +24,9 @@ _Reader = asyncio.StreamReader
 _Writer = asyncio.StreamWriter
 
 _Dial = Callable[[str, int], Awaitable[tuple[_Reader, _Writer]]]
+_REFUSAL_LINE = _REFUSAL_HEADER.lower().encode("ascii") + b":"
+_DRAIN_TIMEOUT = 30.0
+_MAX_HEAD = 65536
 
 
 class ProxyBindRefused(ValueError):
@@ -76,43 +79,83 @@ async def _refuse(writer: _Writer, status: int, reason: str, failure: str | None
     writer.close()
 
 
+def _strip_refusal_header(head: bytes) -> bytes:
+    """Remove the private marker from an origin's HTTP response header block."""
+    kept = [line for line in head.split(b"\r\n") if not line.lower().startswith(_REFUSAL_LINE)]
+    return b"\r\n".join(kept)
+
+
+def _clean_origin_chunk(pending: bytes, data: bytes) -> tuple[bytes, bytes | None]:
+    """Strip the marker once the header block is whole; buffer an incomplete one."""
+    buffered = pending + data
+    end = buffered.find(b"\r\n\r\n")
+    if end < 0:
+        return (b"", buffered) if len(buffered) < _MAX_HEAD else (buffered, None)
+    return _strip_refusal_header(buffered[: end + 4]) + buffered[end + 4 :], None
+
+
+async def _client_to_origin(reader: _Reader, upstream_writer: _Writer) -> None:
+    """Forward request bytes; a client write-EOF half-closes the origin."""
+    try:
+        while True:
+            data = await reader.read(65536)
+            if not data:
+                break
+            upstream_writer.write(data)
+            await upstream_writer.drain()
+    finally:
+        # Client write-EOF means no more request bytes: half-close the origin's
+        # write side. The client-facing writer stays open -- it may still read.
+        if upstream_writer.can_write_eof():
+            upstream_writer.write_eof()
+        else:
+            upstream_writer.close()
+
+
+async def _origin_to_client(
+    upstream_reader: _Reader, writer: _Writer, upstream_writer: _Writer, *, strip_refusal: bool
+) -> None:
+    """Forward origin bytes; a stalled client write releases the origin."""
+    pending: bytes | None = b"" if strip_refusal else None
+    try:
+        while True:
+            data = await upstream_reader.read(65536)
+            if not data:
+                break
+            if pending is not None:
+                data, pending = _clean_origin_chunk(pending, data)
+                if pending is not None and not data:
+                    continue
+            try:
+                writer.write(data)
+                await asyncio.wait_for(writer.drain(), _DRAIN_TIMEOUT)
+            except (TimeoutError, OSError):
+                # A client that stopped reading must not leave the origin blocked
+                # in send; the bounded drain is the release valve.
+                if upstream_writer.transport is not None:
+                    upstream_writer.transport.abort()
+                raise
+    finally:
+        if pending:
+            writer.write(pending)
+        writer.close()
+        upstream_writer.close()
+
+
 async def _relay(
     reader: _Reader,
     writer: _Writer,
     upstream_reader: _Reader,
     upstream_writer: _Writer,
+    *,
+    strip_refusal: bool = False,
 ) -> None:
-    """Copy bytes both ways untouched: no TLS termination, no rewriting."""
-
-    def abort(*writers: _Writer) -> None:
-        for target in writers:
-            if target.transport is not None:
-                target.transport.abort()
-
-    async def client_to_origin() -> None:
-        try:
-            while True:
-                data = await reader.read(65536)
-                if not data:
-                    break
-                upstream_writer.write(data)
-                await upstream_writer.drain()
-        finally:
-            # A client that stops reading must not leave the origin blocked in send.
-            abort(upstream_writer, writer)
-
-    async def origin_to_client() -> None:
-        try:
-            while True:
-                data = await upstream_reader.read(65536)
-                if not data:
-                    break
-                writer.write(data)
-                await writer.drain()
-        finally:
-            writer.close()
-
-    await asyncio.gather(client_to_origin(), origin_to_client(), return_exceptions=True)
+    """Copy bytes both ways; HTTP forward drops the origin's private marker."""
+    await asyncio.gather(
+        _client_to_origin(reader, upstream_writer),
+        _origin_to_client(upstream_reader, writer, upstream_writer, strip_refusal=strip_refusal),
+        return_exceptions=True,
+    )
 
 
 def _with_logical_host(raw: bytes, host: str, port: int, scheme: str) -> bytes:
@@ -170,7 +213,7 @@ async def _forward(
     rewritten = _with_logical_host(headers, plan.logical_host, plan.port, plan.url.scheme)
     upstream_writer.write(request_line + rewritten)
     await upstream_writer.drain()
-    await _relay(reader, writer, upstream_reader, upstream_writer)
+    await _relay(reader, writer, upstream_reader, upstream_writer, strip_refusal=True)
 
 
 async def _tunnel(reader: _Reader, writer: _Writer, target: str, policy: HostPolicy, dial: _Dial) -> None:
