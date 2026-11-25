@@ -60,54 +60,35 @@ def _pinned_handler(monkeypatch, lookups: list[str]):
     return ssrf_route_handler()
 
 
-async def test_https_subresource_revalidates_fresh_per_request(monkeypatch) -> None:
-    """HTTPS validation must not trust a cached answer: the browser re-resolves at connect, so a cached
-    validation up to the TTL stale would let a rebind in that window past -- each subresource validates
-    against fresh resolves (#387), doubled for the #540 stability verdict (two fresh answers must agree).
-    """
+async def test_https_subresource_does_not_dns_resolve_in_browser(monkeypatch) -> None:
+    """S4: browser route handler does not resolve DNS; proxy owns resolution and
+    rebinding defense. Handler admits via NormalizedUrl and continues logical URL."""
     lookups: list[str] = []
-    handler = _pinned_handler(monkeypatch, lookups)
+    block_private_targets(monkeypatch)
+    monkeypatch.setattr(socket, "getaddrinfo", _counting_resolver(lookups))
+    handler = ssrf_route_handler()
     await handler(FakeRoute(), FakeRequest("https://1.2.3.4/a", "document"))
     await handler(FakeRoute(), FakeRequest("https://1.2.3.4/b", "document"))
-    # Two subresources -> two fresh stability verdicts (two resolves each),
-    # never one cached answer reused.
-    assert len(lookups) == 4, f"expected two fresh resolves per subresource, got {lookups}"
+    assert lookups == [], f"browser handler must not DNS-resolve in S4: {lookups}"
 
 
-async def test_https_subresource_refuses_a_mixed_public_private_answer(monkeypatch) -> None:
-    """A mixed public/private DNS answer is refused on the browser https path: the
-    browser dials its own connect and may pick the private member, so it cannot
-    select the public one the way the fetch pin does (which owns its dial) (#387)."""
+async def test_https_subresource_continues_logical_url_no_host_override(monkeypatch) -> None:
+    """S4: https subresources continue with logical URL; proxy owns dialing/SNI."""
     block_private_targets(monkeypatch)
-
-    def mixed(host, *args, **kwargs):
-        del host, args, kwargs
-        return [
-            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443)),
-            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 443)),
-        ]
-
-    monkeypatch.setattr(socket, "getaddrinfo", mixed)
     route = FakeRoute()
     await ssrf_route_handler()(route, FakeRequest("https://example.com/x", "document"))
-    assert route.decision == "abort"
+    assert route.decision == "continue"
+    assert route.continued_url == "https://example.com/x"
+    assert route.continued_headers is ROUTE_ARG_UNSET
 
 
-async def test_http_subresource_still_connects_to_the_fresh_pinned_ip(monkeypatch) -> None:
-    """Plain HTTP keeps the pin: the connection is forced to the resolved IP
-    with the original hostname preserved, and the resolve stays uncached so a
-    DNS rebind inside the cache TTL cannot slip past the check."""
+async def test_http_subresource_continues_logical_url_no_host_override(monkeypatch) -> None:
+    """S4: plain HTTP no longer rewritten to pinned IP; proxy owns dialing."""
     lookups: list[str] = []
     handler = _pinned_handler(monkeypatch, lookups)
     route = FakeRoute()
     await handler(route, FakeRequest("http://1.2.3.4/x", "document"))
     assert route.decision == "continue"
     assert route.continued_url == "http://1.2.3.4/x"
-    assert route.continued_headers == {"Host": "1.2.3.4"}
-    # The pin governs the connection, so each request resolves again rather than reusing a cached IP: a rebind
-    # inside the cache TTL cannot slip past a connection that never looked.
-    lookups_after_first = len(lookups)
-    await handler(FakeRoute(), FakeRequest("http://1.2.3.4/y", "document"))
-    assert len(lookups) > lookups_after_first, (
-        f"the second pin reused the first resolve instead of resolving again: {lookups}"
-    )
+    assert route.continued_headers is ROUTE_ARG_UNSET
+    assert lookups == [], f"browser handler must not DNS-resolve in S4: {lookups}"

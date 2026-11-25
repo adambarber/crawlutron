@@ -1,12 +1,14 @@
+"""Browser SSRF protection under S4 loopback egress proxy.
+
+Browser hands hostnames to the proxy; handlers remain fail-closed admission complements.
+"""
+
 import socket
-import threading
-import time
 
 import pytest
 
 import crawlutron.transport.document as doc_mod
 from crawlutron.transport.browser import make_ssrf_route_handler, resolve_browser_target
-from crawlutron.transport.pinned_transport import build_pinned_request, build_pinned_request_async
 from tests._assertions import block_private_targets
 from tests._browser_doubles import (
     BrowserFakePage,
@@ -18,9 +20,9 @@ from tests._browser_doubles import (
     pinned_page_renderer,
     render_bare,
     render_pinned,
-    stub_pinned_request,
 )
-from tests._host_assert import host_of
+
+# host_of is no longer needed for IP-pinning tests - browser now navigates to logical URL
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
 # -------------------------------------------------------------------------- document.py: SSRF gate on urlopen
@@ -61,55 +63,22 @@ async def test_document_extractor_invokes_ssrf_check(monkeypatch):
     assert seen.get("url") == "example.com"
 
 
-# -------------------------------------------------------------------------- browser.py helpers: pinning +
-# post-navigation re-validation --------------------------------------------------------------------------
+# Proxy-based navigation helpers.
 
 
-async def test_resolve_browser_target_pins_ip_and_preserves_host():
-    pinned_url, headers = await resolve_browser_target(
-        canonical("http://example.com/path"),
-        pin=stub_pinned_request(("http://1.2.3.4:80/path", {"Host": "example.com"})),
-    )
-    assert pinned_url == "http://1.2.3.4:80/path"
-    assert headers == {"Host": "example.com"}
+async def test_resolve_browser_target_returns_logical_url():
+    """resolve_browser_target returns logical URL; proxy owns dialing (#991)."""
+    pinned_url, headers = await resolve_browser_target(canonical("http://example.com/path"))
+    # Returns the logical URL - proxy handles dialing
+    assert pinned_url == "http://example.com/path"
+    assert headers == {}
 
 
-async def test_browser_pin_resolve_does_not_run_on_the_event_loop(monkeypatch):
-    """Blocking DNS must not happen on the loop thread, and this is the render path.
-
-    Every rendered page is pinned before navigation, so a resolve on the loop
-    stalls every in-flight crawl -- and the pin builder is what got fixed.
-    """
-    block_private_targets(monkeypatch)
-    loop_thread = threading.get_ident()
-    resolving_threads: list[int] = []
-
-    def _getaddrinfo(host, port, *args, **kwargs):
-        resolving_threads.append(threading.get_ident())
-        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))]
-
-    monkeypatch.setattr(socket, "getaddrinfo", _getaddrinfo)
-
-    await resolve_browser_target(
-        canonical("http://example.com/path"),
-        pin=build_pinned_request_async,
-    )
-
-    assert resolving_threads, "no resolver call was observed, so the invariant was not exercised"
-    assert all(ident != loop_thread for ident in resolving_threads), (
-        "navigation pinning resolved DNS on the event loop thread, which blocks "
-        f"every other crawl in the process once per rendered page (loop thread "
-        f"{loop_thread}, resolver threads {resolving_threads})"
-    )
-
-
-async def test_render_navigates_to_pinned_ip_with_host_header(monkeypatch):
+async def test_render_navigates_to_logical_url(monkeypatch):
+    """Render navigates to the logical URL; proxy owns dialing."""
     page, result = await render_pinned(monkeypatch)
-    # Navigate to the pinned IP, not the hostname (DNS-rebinding safe).
-    assert page.goto_calls[0][0] == "http://1.2.3.4:80/"
-    # Should use set_extra_http_headers, NOT extra_http_headers param; the pinned Host is cleared right after
-    # navigation.
-    assert page.set_extra_http_headers_calls == [{"Host": "example.com"}, {}]
+    # Navigate to the logical URL - the proxy handles dialing
+    assert page.goto_calls[0][0] == "http://example.com/"
     assert result.status == "success"
 
 
@@ -126,8 +95,13 @@ async def test_render_rejects_internal_redirect_target(monkeypatch):
 
 
 async def test_ssrf_route_handler_aborts_unsafe_and_continues_safe(monkeypatch):
+    """The route handler aborts SSRF-unsafe hosts and continues safe ones.
+
+    With loopback egress proxy, the handler validates via NormalizedUrl admission
+    and continues with the logical URL for safe hosts.
+    """
     monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
-    handler = make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY, pin=build_pinned_request)
+    handler = make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
 
     bad = FakeRoute()
     await handler(bad, FakeRequest("http://127.0.0.1:9/", "document"))
@@ -180,168 +154,27 @@ async def test_ssrf_guards_install_at_context_level(monkeypatch):
     assert any(pattern == "**/*" for pattern, _ in ctx.ws_calls)
 
 
-# -------------------------------------------------------------------------- #405: the browser's SSRF
-# resolve waits are budget-bounded and fail as a classifiable resolution failure
+# S4: proxy owns DNS resolution; browser validates via NormalizedUrl admission.
 
 
-def _hanging_resolver(seconds: float):
-    def resolve(host, *args, **kwargs):
-        time.sleep(seconds)
-        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.2.3.4", kwargs.get("port", 80)))]
+async def test_ssrf_route_handler_validates_via_normalized_url(monkeypatch):
+    """The route handler validates URLs via NormalizedUrl admission.
 
-    return resolve
-
-
-def _hanging_pin():
-    from tests._browser_doubles import pinned_request
-
-    def pin(url, headers):
-        time.sleep(7)
-        return pinned_request(url, "http://1.2.3.4/", {})
-
-    return pin
-
-
-async def _handler_aborts_within_budget(handler, route=None) -> None:
-    """One hang through the handler: it must abort fail-closed and fast, not wait
-    out the pin's own 7s sleep."""
-    route = FakeRoute() if route is None else route
-    started = time.monotonic()
-    await handler(route, FakeRequest("http://example.com/x", "document"))
-    assert route.decision == "abort"
-    assert time.monotonic() - started < 6.5, "the handler waited out the hanging pin"
-
-
-@pytest.mark.real_sleeps
-async def test_abort_bound_tolerates_contended_clocks(monkeypatch):
-    """The budget is a generous headroom below the pin's own 7s hang, not a tight
-    wall bound: a contended machine that reports 5s for an abort that fired
-    correctly must still pass (#658) -- only waiting OUT the hang fails."""
-    calls = [0]
-
-    def contended_clock():
-        calls[0] += 1
-        return 0.0 if calls[0] == 1 else 5.0
-
-    monkeypatch.setattr(time, "monotonic", contended_clock)
-
-    class ProbeRoute:
-        decision = "abort"
-
-    async def aborting_handler(route, request):
-        return None
-
-    await _handler_aborts_within_budget(aborting_handler, ProbeRoute())
-
-
-@pytest.mark.real_sleeps
-async def test_route_handler_resolve_is_bounded_by_the_dns_posture(monkeypatch):
-    """A resolver that outlasts the DNS posture must not hold the route handler
-    open (#405): the handler aborts fail-closed within the posture, not when the
-    pin's own hang ends."""
-    from crawlutron.transport import pinned_dns
-
-    monkeypatch.setattr(pinned_dns, "DNS_WAIT_SECONDS", 0.2)
-    handler = make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY, pin=_hanging_pin())
-    await _handler_aborts_within_budget(handler)
-
-
-@pytest.mark.real_sleeps
-async def test_route_handler_resolve_honors_the_render_budget_parameter(monkeypatch):
-    """The budget the browser already has (options.timeout_seconds) tightens the
-    handler's resolve wait below the DNS posture."""
-    handler = make_ssrf_route_handler(
-        policy=UNRESTRICTED_HOST_POLICY, pin=_hanging_pin(), timeout_seconds=0.2
-    )
-    await _handler_aborts_within_budget(handler)
-
-
-@pytest.mark.real_sleeps
-async def test_websocket_handler_resolve_is_bounded_by_the_dns_posture(monkeypatch):
-    """The websocket guard's resolve carries the same bound: a hung resolver
-    closes the socket within the posture instead of stalling the upgrade."""
-    from crawlutron.transport import pinned_dns
-    from crawlutron.transport.browser_targets import make_ssrf_websocket_handler
-
-    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
-    monkeypatch.setattr(pinned_dns, "DNS_WAIT_SECONDS", 0.2)
-    monkeypatch.setattr(socket, "getaddrinfo", _hanging_resolver(7.0))
-
-    class FakeWS:
-        url = "wss://example.test/socket"
-        closed = False
-        connected = False
-
-        async def close(self):
-            self.closed = True
-
-        def connect_to_server(self):
-            self.connected = True
-
-    ws = FakeWS()
-    handler = make_ssrf_websocket_handler(policy=UNRESTRICTED_HOST_POLICY)
-    started = time.monotonic()
-    await handler(ws)
-    assert ws.closed and not ws.connected
-    # Contention-tolerant bound (#658 shape): generous headroom below the pin's
-    # own 7s hang — only waiting OUT the hang fails, a slow abort that fired does not.
-    assert time.monotonic() - started < 6.5, "the websocket guard waited out the resolver"
-
-
-@pytest.mark.real_sleeps
-async def test_resolver_budget_timeout_is_a_resolution_failure_not_a_navigation_timeout(monkeypatch):
-    """#405: when the bounded resolve outlasts the render budget, the caller gets
-    the classifiable resolution failure (dns_error), not navigation_timeout."""
-    from crawlutron.models.render_options import RenderOptions
-
-    block_private_targets(monkeypatch)
-    monkeypatch.setattr(socket, "getaddrinfo", _hanging_resolver(7.0))
-    page = BrowserFakePage()
-    renderer = build_pinned_renderer(page)
-
-    result = await renderer.render(
-        canonical("http://example.com/"),
-        RenderOptions(timeout_seconds=1, max_retries=0),
-        policy=UNRESTRICTED_HOST_POLICY,
-    )
-
-    assert result.classification == "dns_error"
-    assert result.error == "dns_error"
-
-
-async def test_https_navigation_dials_the_hostname_for_cert_verification(monkeypatch):
-    """The pin law at the render door: TLS cert identity must be verified against
-    the pinned hostname, so HTTPS navigation dials the hostname (real SNI), gated
-    by the fresh+stable double-resolve -- never an IP literal with a Host override.
+    When routing through the loopback egress proxy, DNS resolution happens on
+    the proxy side. The handler validates the URL via NormalizedUrl admission.
     """
-    block_private_targets(monkeypatch)
-    _stub_dns_to_example_com(monkeypatch)
-    checks: list[str] = []
-    from crawlutron.runtime import process_state
-    from crawlutron.transport import pinned_dns
+    # Need to disable private targets for this test to check SSRF blocking
+    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
+    handler = make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
 
-    process_state.reset_all_process_state()
-    original = pinned_dns.check_ssrf_protection_stable
+    # SSRF-unsafe host is aborted by NormalizedUrl admission.
+    bad = FakeRoute()
+    await handler(bad, FakeRequest("http://127.0.0.1:9/", "document"))
+    assert bad.decision == "abort", "loopback URL should be aborted by NormalizedUrl admission"
 
-    def spy(url):
-        checks.append(url.host)
-        original(url)
-
-    monkeypatch.setattr("crawlutron.transport.browser_targets.check_ssrf_protection_stable", spy)
-    from tests._browser_doubles import pinned_request
-
-    def recording_pin(url, headers, timeout_seconds=None):
-        return pinned_request(url, "https://1.2.3.4/", {"Host": url.host})
-
-    async def awaitable_pin(url, headers, timeout_seconds=None):
-        return recording_pin(url, headers, timeout_seconds=timeout_seconds)
-
-    pinned_url, headers = await resolve_browser_target(
-        canonical("https://example.com/path"), pin=awaitable_pin
-    )
-    assert pinned_url == "https://example.com/path"
-    assert headers == {}
-    assert checks == ["example.com"]
+    good = FakeRoute()
+    await handler(good, FakeRequest("http://example.com/", "document"))
+    assert good.decision == "continue"
 
 
 def _stub_dns_to_example_com(monkeypatch):
@@ -357,28 +190,19 @@ def _stub_dns_to_example_com(monkeypatch):
 
 class _CertMismatchPage(BrowserFakePage):
     """A page whose navigation hits a certificate whose identity does not match
-    the pinned hostname -- Playwright's real refusal shape, surfaced verbatim."""
+    the hostname -- Playwright's real refusal shape, surfaced verbatim."""
 
     async def goto(self, url, wait_until="load", **kwargs):
         raise Exception("net::ERR_CERT_COMMON_NAME_INVALID at https://example.com/")
 
 
 async def test_a_cert_identity_mismatch_is_a_classified_refusal_not_silence(monkeypatch):
-    """The pin law observed, not assumed: a presented certificate whose identity does not match the pinned
-    hostname ends the render in a terminal ``tls_error`` classification reaching the caller.
-    """
+    """Cert identity mismatch is classified as tls_error, not silence."""
     block_private_targets(monkeypatch)
     _stub_dns_to_example_com(monkeypatch)
-    from crawlutron.transport.browser_targets import resolve_browser_target as _resolve
-
-    pinned_url, _headers = await _resolve(
-        canonical("https://example.com/path"),
-        pin=stub_pinned_request(("https://example.com/path", {})),
-    )
-    assert host_of(pinned_url) == "example.com", pinned_url
 
     page = _CertMismatchPage()
-    renderer = build_pinned_renderer(page, pin=stub_pinned_request(("https://example.com/path", {})))
+    renderer = build_pinned_renderer(page)
     from crawlutron.models.render_options import RenderOptions
 
     result = await renderer.render(

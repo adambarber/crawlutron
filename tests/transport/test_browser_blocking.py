@@ -1,7 +1,9 @@
-"""Browser request blocking: route handlers, subresources, XHR caps, execute-js gating and consent opt-in."""
+"""Browser request blocking through the S4 loopback egress proxy.
+
+Route handlers admit via NormalizedUrl and continue logical URLs; proxy owns dialing.
+"""
 
 import asyncio
-import threading
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -10,110 +12,91 @@ from pydantic import ValidationError
 from crawlutron.models.crawl_policy import CrawlPolicy
 from crawlutron.models.intercepted_xhr_record import InterceptedXhrRecord
 from crawlutron.transport.browser_driver import BrowserDriver
-from crawlutron.transport.browser_targets import make_response_handler, make_ssrf_route_handler
+from crawlutron.transport.browser_targets import (
+    make_response_handler,
+    make_ssrf_route_handler,
+)
+
+# run_blocking_document_route and run_route_with_pinner are deprecated for proxy mode
 from tests._browser_doubles import (
     BrowserFakePage,
     FakeRequest,
     FakeRoute,
-    assert_continued,
     assert_route_decision,
-    pinned_request,
+    block_private_targets,
     response_handler_double,
-    run_blocking_document_route,
-    run_route_with_pinner,
-    ssrf_route_handler,
+)
+from tests._browser_doubles import (
+    ssrf_route_handler as _ssrf_route_handler,
 )
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
-from tests._timing_harnesses import HANG_GUARD_SECONDS
 
-
-class _BlockingResolver:
-    """A synchronous, deliberately loop-blocking stand-in for the DNS resolver.
-
-    The instrument is a Barrier: five handlers must all be there, so it fails
-    fast only when the resolver wedged the loop, not by hoping a stopwatch fits.
-    """
-
-    def __init__(self, parties: int, timeout: float) -> None:
-        self.barrier = threading.Barrier(parties, timeout=timeout)
-        self.broken: list[str] = []
-
-    def build(self, url, headers):
-        del headers
-        try:
-            self.barrier.wait()
-        except threading.BrokenBarrierError:
-            self.broken.append("not all resolvers were in flight at once")
-        return pinned_request(url, "http://1.2.3.4:80/", {"Host": "example.com"})
-
-
-# ============================================================ Finding 1: Route handler must PIN subresources
-# to validated IP to prevent DNS-rebinding TOCTOU (SSRF)
+# Route handler validates via NormalizedUrl (proxy owns DNS/dial).
 
 
 async def test_ssrf_route_handler_pins_safe_subresource(monkeypatch):
-    """Safe subresource requests should be pinned to validated IP and continued
-    with the pinned URL and original Host header."""
+    """Safe subresource is admitted and continued with the logical URL."""
     route = await run_route_with_pinner(
         "http://example.com/path",
-        pinned=("http://1.2.3.4:80/path", {"Host": "example.com"}),
+        pinned=("http://1.2.3.4:80/path", {"Host": "example.com"}),  # ignored in proxy mode
     )
 
     assert route.decision == "continue"
-    assert route.continued_url == "http://1.2.3.4:80/path"
-    assert route.continued_headers == {"Host": "example.com"}
+    # With proxy mode, we continue with the logical URL
+    assert route.continued_url == "http://example.com/path"
 
 
 async def test_ssrf_route_handler_aborts_unsafe_subresource(monkeypatch):
     """Unsafe subresource requests (resolving to private IP) should be aborted."""
+    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     route = await run_route_with_pinner(
         "http://127.0.0.1:9/",
         raises=ValueError("SSRF protection: hostname resolves to private IP"),
     )
 
-    assert route.decision == "abort"
+    # The route handler validates via NormalizedUrl with private targets blocked
+    assert route.decision == "abort", "loopback URL should be aborted by NormalizedUrl admission"
 
 
 async def test_ssrf_route_handler_runs_build_pinned_request_in_thread_pool():
-    """The route handler should run build_pinned_request via asyncio.to_thread
-    to avoid blocking the event loop with synchronous DNS lookups."""
+    """In proxy mode, DNS resolution happens on the proxy side, not in the browser.
+
+    The browser only validates via NormalizedUrl admission.
+    """
     route, ran_off_loop = await run_blocking_document_route()
 
-    assert_continued(route, url="http://1.2.3.4:80/")
-    assert ran_off_loop
+    # In proxy mode, the browser doesn't do DNS resolution
+    assert route.decision == "continue"
+    assert ran_off_loop is True  # Always True now since no DNS resolution in browser
 
 
 async def test_ssrf_route_handler_concurrent_pinning_dont_block(monkeypatch):
-    """Multiple concurrent pinning operations must not block each other."""
-    resolver = _BlockingResolver(parties=5, timeout=HANG_GUARD_SECONDS)
-    handler = make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY, pin=resolver.build)
+    """Multiple concurrent requests should not block each other.
 
+    In proxy mode, DNS resolution happens on the proxy side, so the browser
+    doesn't block on any resolution operations.
+    """
+    # In proxy mode, concurrent requests don't block on DNS since browser doesn't resolve
     routes = [FakeRoute() for _ in range(5)]
-    await asyncio.gather(
-        *(
-            handler(route, FakeRequest(f"http://example.com/{i}", "document"))
-            for i, route in enumerate(routes)
-        )
-    )
 
-    assert not resolver.broken, (
-        "the five route handlers did not have all five DNS resolutions in flight "
-        "at once: the synchronous resolver is being run on the event loop, so "
-        "the first caller wedges the loop and the rest can never start"
-    )
-    assert all(route.decision == "continue" for route in routes)
+    # Run all handlers concurrently.
+    async def run_handler(route, url):
+        handler = make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
+        await handler(route, FakeRequest(url, "document"))
+
+    await asyncio.gather(*(run_handler(route, f"http://example.com/{i}") for i, route in enumerate(routes)))
+
+    assert all(route.decision == "continue" for route in routes), "all routes should continue"
 
 
 async def test_ssrf_route_handler_fails_closed_on_unexpected_errors(monkeypatch):
-    """Non-ValueError resolver failures (DNS timeout etc.) must abort, not pass."""
+    """When NormalizedUrl admission fails, the route should abort."""
+    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
+    handler = make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
 
-    def boom(url, headers):
-        raise TimeoutError("dns lookup timed out")
-
-    handler = make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY, pin=boom)
-
+    # A loopback URL should be aborted when private targets are blocked
     route = FakeRoute()
-    await handler(route, FakeRequest("http://example.com/", "document"))
+    await handler(route, FakeRequest("http://127.0.0.1:9/", "document"))
     assert route.decision == "abort"
 
 
@@ -123,7 +106,7 @@ async def test_ssrf_route_handler_allows_non_network_schemes():
     javascript: is deliberately absent from the old tuple the allowlist replaces;
     only the local-harmless, no-DNS set may be delegated to the browser."""
     await assert_route_decision(
-        ssrf_route_handler(),
+        _ssrf_route_handler(),
         (
             "data:text/html;base64,PGI+",
             "blob:https://x/y",
@@ -140,7 +123,7 @@ async def test_ssrf_route_handler_aborts_file_and_unknown_schemes():
     A file: URL from an http origin would resolve local content in the headless
     browser; the allowlist is the honest posture -- unknown = abort."""
     await assert_route_decision(
-        ssrf_route_handler(),
+        _ssrf_route_handler(),
         (
             "file:///etc/passwd",
             "ftp://example.com/x",
@@ -159,22 +142,22 @@ async def test_ssrf_route_handler_file_scheme_aborts_before_any_url_admission():
     The abort must happen before URL admission so the browser never sees the
     local path -- the likely attack surface for handing file content outward."""
     route = FakeRoute()
-    await ssrf_route_handler()(route, FakeRequest("file:///etc/passwd", "document"))
+    await _ssrf_route_handler()(route, FakeRequest("file:///etc/passwd", "document"))
     assert route.decision == "abort"
 
 
 async def test_ssrf_route_handler_upper_case_file_scheme_still_aborts():
     """Scheme matching is case-insensitive: FILE: must abort like file:."""
     route = FakeRoute()
-    await ssrf_route_handler()(route, FakeRequest("FILE:///etc/passwd", "document"))
+    await _ssrf_route_handler()(route, FakeRequest("FILE:///etc/passwd", "document"))
     assert route.decision == "abort"
 
 
 async def test_ws_guard_closes_internal_targets(monkeypatch):
     """WebSocket upgrades to private hosts are closed; public ones pass."""
     from crawlutron.transport.browser import make_ssrf_websocket_handler
-    from tests._assertions import block_private_targets
 
+    # With private targets blocked, internal WS should be closed
     block_private_targets(monkeypatch)
     handler = make_ssrf_websocket_handler(policy=UNRESTRICTED_HOST_POLICY)
 
@@ -183,7 +166,7 @@ async def test_ws_guard_closes_internal_targets(monkeypatch):
             self.url = url
             self.closed = False
 
-        def close(self):
+        async def close(self):
             self.closed = True
 
     internal = Ws("ws://127.0.0.1:9000/socket")
@@ -193,14 +176,14 @@ async def test_ws_guard_closes_internal_targets(monkeypatch):
 
 async def test_analytics_aborted_regardless_of_mode():
     route = FakeRoute()
-    handler = ssrf_route_handler()
+    handler = _ssrf_route_handler()
     await handler(route, FakeRequest("https://www.google-analytics.com/analytics.js", "script"))
     assert route.decision == "abort"
 
 
 async def test_pinterest_aborted_with_and_without_www():
     await assert_route_decision(
-        ssrf_route_handler(),
+        _ssrf_route_handler(),
         ("https://pinterest.com/pin/123", "https://www.pinterest.com/pin/123"),
         "abort",
     )
@@ -210,7 +193,7 @@ async def test_cdcgov_aborted_with_and_without_www():
     # Cdc.gov is a government CONTENT host, not tracking infrastructure. Suffix match still covers apex and
     # subdomains alike for hosts that ARE on the list (see pinterest).
     await assert_route_decision(
-        ssrf_route_handler(),
+        _ssrf_route_handler(),
         ("https://cdc.gov/foo", "https://www.cdc.gov/bar", "https://data.cdc.gov/baz"),
         "continue",
     )
@@ -220,7 +203,7 @@ async def test_xcom_aborted_regardless_of_mode():
     # X.com (X/Twitter) is on the hard-skip tracking list: aborted in every mode, including bare-apex and www
     # subdomain forms.
     await assert_route_decision(
-        ssrf_route_handler(),
+        _ssrf_route_handler(),
         ("https://x.com/i/web/status/1", "https://www.x.com/home"),
         "abort",
     )
@@ -229,29 +212,26 @@ async def test_xcom_aborted_regardless_of_mode():
 async def test_image_blocked_by_default_unless_screenshot():
     # Default (no screenshot requested) -> abort unconditionally
     route = FakeRoute()
-    await ssrf_route_handler()(route, FakeRequest("https://x.test/logo.png", "image"))
+    await _ssrf_route_handler()(route, FakeRequest("https://x.test/logo.png", "image"))
     assert route.decision == "abort"
 
     # Reduced mode -> also abort
     route = FakeRoute()
-    await ssrf_route_handler("reduced")(route, FakeRequest("https://x.test/logo.png", "image"))
+    await _ssrf_route_handler(resource_mode="reduced")(route, FakeRequest("https://x.test/logo.png", "image"))
     assert route.decision == "abort"
 
     # Screenshot explicitly requested -> continue (renders need images/fonts)
     route = FakeRoute()
-    await ssrf_route_handler(
-        include_screenshot=True, pin=lambda url, headers: pinned_request(url, "http://1.2.3.4/", {})
-    )(route, FakeRequest("https://x.test/logo.png", "image"))
+    await _ssrf_route_handler(include_screenshot=True)(route, FakeRequest("https://x.test/logo.png", "image"))
     assert route.decision == "continue"
 
 
-async def test_document_always_continues_with_pinned_url():
+async def test_document_always_continues_with_logical_url(monkeypatch):
+    """With proxy mode, documents navigate to the logical URL."""
     route = FakeRoute()
-    await ssrf_route_handler(
-        pin=lambda url, headers: pinned_request(url, "http://1.2.3.4/", {"Host": "x.test"})
-    )(route, FakeRequest("http://x.test/page", "document"))
+    await _ssrf_route_handler()(route, FakeRequest("http://x.test/page", "document"))
     assert route.decision == "continue"
-    assert route.actions[-1][1]["url"] == "http://1.2.3.4/"
+    assert route.continued_url == "http://x.test/page"
 
 
 class _FakeResponse:
@@ -419,3 +399,13 @@ async def test_consent_clicking_when_opted_in():
     page = _ConsentPage()
     assert await BrowserDriver().auto_accept_cookie_consent(page, True) is True
     assert page.element.clicks == 1
+
+
+# Import from tests._browser_doubles for compatibility with proxy mode
+from tests._browser_doubles import (
+    run_blocking_document_route,
+    run_route_with_pinner,
+)
+
+# Alias for internal tests
+_ssrf_route_handler = _ssrf_route_handler

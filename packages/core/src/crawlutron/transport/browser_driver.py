@@ -37,6 +37,7 @@ from crawlutron.transport.driver_pages import (
     flatten_shadow_dom,
     safe_close_page,
 )
+from crawlutron.transport.egress_proxy_runtime import egress_proxy_url
 from crawlutron.transport.render_page import RenderPage
 from crawlutron.transport.timeouts import bounded_evaluate
 from crawlutron.vocabulary.browser import ACTIONS_REQUIRING_SELECTOR, BROWSER_ACTION_TYPES, BrowserAction
@@ -44,6 +45,7 @@ from crawlutron.vocabulary.limits import (
     DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS,
     DEFAULT_MAX_BROWSER_RENDERS,
 )
+from safe_url.host_policy import HostPolicy
 from safe_url.url_redaction import redact_url, redact_urls_in_text
 
 if TYPE_CHECKING:
@@ -178,6 +180,8 @@ class BrowserDriver:
             if settings is None
             else float(settings.browser_cookie_harvest_timeout_seconds)
         )
+        # Store settings for proxy URL access (Issue #1364 S4)
+        self._settings = settings
         self._browser_cm: BrowserContextManager | None = None
         self._browser: BrowserHandle | None = None
         self._browser_reused = False
@@ -232,20 +236,26 @@ class BrowserDriver:
         """A storage_state path under the cache dir, or None."""
         return validate_storage_state_path(storage_state, self._cache_dir)
 
+    def _egress_proxy_url(self) -> str | None:
+        """Loopback egress proxy URL for browser launch (Issue #1364 S4).
+
+        The browser never resolves targets; the proxy owns SSRF validation and
+        dialing. Returns None only when settings are absent (test doubles).
+        """
+        if self._settings is None:
+            return None
+        return egress_proxy_url(HostPolicy.from_settings(self._settings))
+
     def browser_kwargs(self, browser_profile: BrowserProfileRecord | None) -> dict[str, object]:
-        """Launch-only kwargs for the Camoufox/Playwright browser factory."""
-        return browser_kwargs(browser_profile, self._cache_dir)
+        """Launch kwargs for Camoufox; includes loopback egress proxy when configured."""
+        return browser_kwargs(browser_profile, self._cache_dir, self._egress_proxy_url())
 
     def page_kwargs(self, browser_profile: BrowserProfileRecord | None) -> dict[str, object]:
         """Page/context kwargs, applied at ``browser.new_page`` time."""
         return page_kwargs(browser_profile)
 
     async def _acquire_browser(self, browser_profile: BrowserProfileRecord | None) -> BrowserHandle:
-        """Return a reused browser instance, launching one on first use.
-
-        Recycles the browser once it has served ``_max_browser_renders`` to
-        bound memory growth of a long-lived Camoufox process.
-        """
+        """Return/recycle a browser; launch key includes proxy URL (S4)."""
         launch_kwargs = self.browser_kwargs(browser_profile)
         launch_key = _launch_key(launch_kwargs)
         if (

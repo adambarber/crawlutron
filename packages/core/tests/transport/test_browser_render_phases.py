@@ -57,7 +57,6 @@ def _socketless_page() -> BrowserFakePage:
 def _wire() -> WireGuard:
     """The wire bundle every render guard test builds; the pin is never reached."""
     return WireGuard(
-        pin_sync=_dummy_pin,
         policy=UNRESTRICTED_HOST_POLICY,
         timeout_seconds=10.0,
     )

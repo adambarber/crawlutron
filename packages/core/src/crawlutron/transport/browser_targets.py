@@ -4,27 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import (
-    Awaitable,
-    Callable,
-)
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Protocol, cast
 
 from crawlutron.models.intercepted_xhr_record import InterceptedXhrRecord
 from crawlutron.safety.json_safe import json_default
-from crawlutron.transport.pinned_dns import (
-    bounded_thread_resolve,
-    check_ssrf_protection_stable,
-)
 from crawlutron.transport.pinned_transport import PinnedRequest
 from safe_url.host_policy import HostPolicy
 from safe_url.normalized_url import NormalizedUrl
 
 if TYPE_CHECKING:
     from crawlutron.models.json_value import JsonValue
-
-# The resolve bound is the pinned transport's own: one implementation for both families.
-_BOUNDED = bounded_thread_resolve
 
 
 class RouteResponse(Protocol):
@@ -40,22 +30,12 @@ class RouteResponse(Protocol):
 async def resolve_browser_target(
     url: NormalizedUrl,
     *,
-    pin: Callable[..., Awaitable[PinnedRequest]],
+    pin: Callable[..., Awaitable[PinnedRequest]] | None = None,
     timeout_seconds: float | None = None,
 ) -> tuple[str, dict[str, str]]:
-    """SSRF-check ``url`` for browser navigation, per scheme (#617).
-
-    HTTPS keeps the hostname so TLS SNI and cert verification attest the pinned
-    identity; plain HTTP pins the resolved IP with the original Host."""
-    if url.scheme == "https":
-        await _BOUNDED(
-            lambda: check_ssrf_protection_stable(url),
-            timeout_seconds=timeout_seconds,
-        )
-        return url.raw, {}
-    pinned = await pin(url, {}, timeout_seconds=timeout_seconds)
-    host = pinned.headers.get("Host")
-    return pinned.connect_url, ({"Host": host} if host else {})
+    """Return logical URL for proxy-mediated navigation; proxy owns dialing (#991)."""
+    # S4: browser navigates logical hostname; proxy validates and dials.
+    return url.raw, {}
 
 
 # Subresource types with no crawlable text: aborted in reduced-resource mode.
@@ -72,17 +52,12 @@ def make_ssrf_route_handler(
     *,
     include_screenshot: bool = False,
     policy: HostPolicy,
-    pin: Callable[..., PinnedRequest],
+    pin: Callable[..., Awaitable[PinnedRequest]] | None = None,
     timeout_seconds: float | None = None,
 ):
-    """A Playwright ``page.route`` handler aborting requests to SSRF-unsafe hosts:
-    every navigation, redirect, and subresource is blocklist-checked (DNS in a
-    thread pool). Plain HTTP uses the fresh pinned IP; HTTPS keeps the hostname.
-    """
+    """Route handler: NormalizedUrl admit/abort, continue logical URL via proxy."""
 
     async def _handler(route, request):
-        # Re-pin the IP per subresource request (DNS-rebinding TOCTOU): raises on
-        # private/loopback, returns (pinned_url, {Host: hostname}) to preserve routing.
         request_scheme = request.url.split(":", 1)[0].lower()
         if request_scheme in _LOCAL_HARMLESS_SCHEMES:
             await route.continue_()
@@ -104,67 +79,15 @@ def make_ssrf_route_handler(
         ):
             await route.abort()
             return
-        resolution = await _resolve_ssrf_pinned_url(
-            request,
-            request_scheme,
-            admitted,
-            pin=pin,
-            timeout_seconds=timeout_seconds,
-            abort=route.abort,
-        )
-        if resolution is None:
-            return  # the failure path already aborted (fail closed)
-        pinned_url, host_headers = resolution
-        overrides = {}
-        if host_headers.get("Host"):
-            overrides["Host"] = host_headers["Host"]
-        # Omit headers= when empty: Playwright treats an explicit dict as a full
-        # replacement, so {} would wipe UA/cookies/accept off every HTTPS subresource.
-        if overrides:
-            await route.continue_(url=pinned_url, headers=overrides)
-        else:
-            await route.continue_(url=pinned_url)
+        # With loopback egress proxy, continue with logical URL.
+        # DNS resolution happens on proxy side.
+        await route.continue_(url=request.url)
 
     return _handler
 
 
-async def _resolve_ssrf_pinned_url(
-    request,
-    request_scheme: str,
-    admitted: NormalizedUrl,
-    *,
-    pin: Callable[..., PinnedRequest],
-    timeout_seconds: float | None,
-    abort: Callable[[], Awaitable[None]],
-) -> tuple[str, dict[str, str]] | None:
-    """Pin the request URL per scheme; None after aborting (fail closed).
-
-    HTTPS validates fresh and stable; plain HTTP re-pins through
-    the caller's rule.
-    """
-    try:
-        if request_scheme == "https":
-            # Two fresh resolves must agree: the browser dials after this check
-            # with no dial ownership, so a changed answer is the rebinding signature.
-            await _BOUNDED(
-                lambda: check_ssrf_protection_stable(admitted),
-                timeout_seconds=timeout_seconds,
-            )
-            return request.url, {}
-        pinned = await _BOUNDED(lambda: pin(admitted, {}), timeout_seconds=timeout_seconds)
-        return pinned.connect_url, pinned.headers
-    except Exception:
-        # Fail closed: DNS timeout, resolver errors, anything unexpected ->
-        # abort rather than let an unchecked connection proceed.
-        await abort()
-        return None
-
-
 def make_ssrf_websocket_handler(*, policy: HostPolicy, timeout_seconds: float | None = None):
-    """A Playwright websocket-route handler blocking SSRF-unsafe WS targets:
-    ``page.route`` cannot intercept WebSocket upgrades, so this closes any that
-    resolve internal and forwards the rest (``connect_to_server``).
-    """
+    """WS route handler: NormalizedUrl admit/abort, forward via proxy."""
 
     async def _ws_handler(ws):
         url = getattr(ws, "url", "") or ""
@@ -177,16 +100,9 @@ def make_ssrf_websocket_handler(*, policy: HostPolicy, timeout_seconds: float | 
             return
         http_equivalent = ("https" if scheme == "wss" else "http") + url[len(scheme) :]
         try:
-            normalized = await _BOUNDED(
-                lambda: NormalizedUrl(http_equivalent, policy=policy), timeout_seconds=timeout_seconds
-            )
-            # Fresh and stable, never TTL-cached; a changed answer between
-            # immediate repeats is the rebinding signature.
-            await _BOUNDED(
-                lambda: check_ssrf_protection_stable(normalized),
-                timeout_seconds=timeout_seconds,
-            )
-        except Exception:
+            # Normalize the URL through the policy; the proxy will resolve and dial.
+            NormalizedUrl(http_equivalent, policy=policy)
+        except ValueError:
             close = getattr(ws, "close", None)
             if close is not None:
                 result = close()
@@ -245,3 +161,7 @@ def make_response_handler(
         collected.append(entry)
 
     return on_response
+
+
+# Compat alias: S4 renamed to make_ssrf_route_handler.
+ssrf_route_handler = make_ssrf_route_handler

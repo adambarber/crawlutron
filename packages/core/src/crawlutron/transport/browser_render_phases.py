@@ -29,7 +29,6 @@ from crawlutron.transport.browser_targets import (
     make_ssrf_route_handler,
     make_ssrf_websocket_handler,
 )
-from crawlutron.transport.pinned_transport import PinnedRequest
 from crawlutron.transport.render_page import RenderPage
 from crawlutron.transport.timeouts import (
     bounded_evaluate,
@@ -46,9 +45,8 @@ if TYPE_CHECKING:
 
 
 class WireGuard(NamedTuple):
-    """The collaborators the SSRF guards need: the sync pin, the policy, the budget."""
+    """SSRF guard collaborators: policy and render budget (S4: proxy owns dial)."""
 
-    pin_sync: Callable[..., PinnedRequest]
     policy: HostPolicy
     timeout_seconds: float
 
@@ -135,8 +133,6 @@ async def wire_ssrf_guards(
             _profile_str(profile, "resource_mode"),
             include_screenshot=_profile_bool(profile, "include_screenshot"),
             policy=wire.policy,
-            pin=wire.pin_sync,
-            timeout_seconds=wire.timeout_seconds,
         ),
     )
     ws_guard = make_ssrf_websocket_handler(policy=wire.policy, timeout_seconds=wire.timeout_seconds)
@@ -175,20 +171,11 @@ async def navigate_with_host_override(
     *,
     goto_and_settle: Callable[[str], Awaitable[None]],
     pinned_url: str,
-    goto_headers: dict[str, str],
     timeout_seconds: float,
 ) -> None:
-    """Navigate under the pinned Host override, then clear it.
-
-    The override travels via ``set_extra_http_headers`` (goto takes no
-    headers); the wait honors the timeout floored at 1s.
-    """
+    """Navigate to the logical URL through the proxy (S4: no Host override)."""
     navigation_timeout = render_phase_seconds(timeout_seconds)
-    if goto_headers:
-        await page.set_extra_http_headers(goto_headers)
     await asyncio.wait_for(goto_and_settle(pinned_url), timeout=navigation_timeout)
-    if goto_headers:
-        await page.set_extra_http_headers({})
 
 
 async def run_pre_extraction_chain(
@@ -303,11 +290,10 @@ async def guarded_render(
     options: RenderOptions,
     *,
     pinned_url: str,
-    goto_headers: dict[str, str],
     started: float,
     collaborators: RenderCollaborators,
 ) -> CrawlResult:
-    """The guarded render setup: wire guards, warm up, navigate to the pin."""
+    """The guarded render setup: wire guards, warm up, navigate to the target."""
     intercepted_xhr: list[InterceptedXhrRecord] = []
     await wire_ssrf_guards(
         page, wire=collaborators.wire, profile=options.browser_profile, on_response=intercepted_xhr
@@ -323,7 +309,6 @@ async def guarded_render(
         page,
         goto_and_settle=lambda pinned: collaborators.navigate_and_settle(pinned),
         pinned_url=pinned_url,
-        goto_headers=goto_headers,
         timeout_seconds=options.timeout_seconds,
     )
     return await render_and_extract(
