@@ -7,9 +7,6 @@ nothing but data modelling. This file pins the seam statically and at runtime.
 from __future__ import annotations
 
 import ast
-import inspect
-import pathlib
-import sys
 from collections.abc import Callable
 
 from crawlutron.admission.policy import (
@@ -19,6 +16,8 @@ from crawlutron.admission.policy import (
     validate_wire_policy,
 )
 from crawlutron.models.json_value import JsonValue
+from tests.chokepoint_paths import REPO_ROOT
+from tests.chokepoint_walks import discovered_files
 
 #: Imports the policy module must never make: the effect-container seam plus
 #: any network, database, or side-effect stdlib/third-party module.
@@ -45,9 +44,11 @@ _WIRE_INPUTS: tuple[PolicyLike | None, ...] = (
     {"limits": {"max_pages": 7, "max_retries": 2}},
 )
 
-_module = sys.modules["crawlutron.admission.policy"]
-assert _module is not None
-_POLICY_PATH = pathlib.Path(inspect.getfile(_module))
+# Read the policy module source via the sanctioned discovered_files door.
+# The module lives at packages/core/src/crawlutron/admission/policy.py
+_POLICY_SOURCE = discovered_files(
+    REPO_ROOT / "packages/core/src/crawlutron/admission", "policy.py", include_content=True
+)[REPO_ROOT / "packages/core/src/crawlutron/admission/policy.py"]
 
 
 def _imported_references(source: str) -> list[tuple[int, str]]:
@@ -73,19 +74,21 @@ def _offending_imports(source: str, forbidden: tuple[str, ...]) -> list[str]:
         dotted = f".{reference}."
         for bad in forbidden:
             if f".{bad}." in dotted:
-                offenders.append(f"{_POLICY_PATH}:{line} imports {reference}")
+                offenders.append(
+                    f"packages/core/src/crawlutron/admission/policy.py:{line} imports {reference}"
+                )
     return offenders
 
 
 def test_policy_module_imports_no_service_effects():
     """The effect-container seam is not imported by the policy module."""
-    offenders = _offending_imports(_POLICY_PATH.read_text(), ("service.effects",))
+    offenders = _offending_imports(_POLICY_SOURCE, ("service.effects",))
     assert not offenders, "\n".join(offenders)
 
 
 def test_policy_module_imports_no_network_or_db_modules():
     """No requests/httpx/aiohttp/sqlite3/psycopg import reaches the policy module."""
-    offenders = _offending_imports(_POLICY_PATH.read_text(), _FORBIDDEN_IMPORTS[1:])
+    offenders = _offending_imports(_POLICY_SOURCE, _FORBIDDEN_IMPORTS[1:])
     assert not offenders, "\n".join(offenders)
 
 

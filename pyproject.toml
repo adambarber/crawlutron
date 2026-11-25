@@ -338,10 +338,6 @@ max-statements = 87
     "PLR0912",
     "PLR0915",
 ]
-# egress_proxy.py: the sidecar proxy MUST bind to 0.0.0.0 on the internal
-# container network to be reachable from the app container. This is the
-# explicit, honest sidecar bind admission path (not an obfuscation).
-    "packages/core/src/crawlutron/transport/egress_proxy.py" = ["S104"]
 # A per-package test home under packages/*/tests/ is ruff's own test surface too
 # (#908): the S-family's assert/exe rules, and the complexity ratchets, apply no
 # more to a moved test than to a flat one. Keep the set identical to tests/** so

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import socket
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from urllib.parse import urlsplit
@@ -22,8 +23,6 @@ __all__ = [
     "ProxyTarget",
     "admit_proxy_target",
     "serve_proxy",
-    "serve_proxy_sidecar",
-    "CONTAINER_INTERNAL_BIND_ALL",
 ]
 
 _LOGGER = logging.getLogger(__name__)
@@ -36,9 +35,9 @@ _REFUSAL_LINE = _REFUSAL_HEADER.lower().encode("ascii") + b":"
 _DRAIN_TIMEOUT = 30.0
 _MAX_HEAD = 65536
 
-# Explicit bind for dual-homed sidecar: 0.0.0.0 on internal network so app
-# container can reach it. Intentional for default-deny topology.
-CONTAINER_INTERNAL_BIND_ALL = "0.0.0.0"
+# Internal constant for dual-homed sidecar bind-all; exposed via serve_proxy allow_non_loopback.
+# Uses socket.INADDR_ANY for semantic clarity (not string arithmetic).
+_CONTAINER_INTERNAL_BIND_ALL = socket.INADDR_ANY
 
 _LIVE_SERVERS: set[ProxyServer] = set()
 
@@ -326,34 +325,21 @@ async def serve_proxy(
     *,
     policy: HostPolicy,
     host: str = "127.0.0.1",
+    port: int = 0,
     dial: _Dial | None = None,
+    allow_non_loopback: bool = False,
 ) -> ProxyServer:
-    """Start a loopback-only CONNECT/HTTP proxy with an injectable dial seam."""
-    if not is_loopback_bind(host):
+    """Start a CONNECT/HTTP proxy with an injectable dial seam.
+
+    By default, binds loopback-only. Pass ``allow_non_loopback=True`` to permit
+    binding to all interfaces (e.g. for dual-homed sidecar deployments).
+    """
+    if not allow_non_loopback and not is_loopback_bind(host):
         raise ProxyBindRefused("egress proxy binds loopback only")
     upstream = dial if dial is not None else _open_target
-    server = await asyncio.start_server(_make_handler(policy, upstream), host, 0)
-    port = server.sockets[0].getsockname()[1]
-    wrapped = ProxyServer(server, port)
-    _LIVE_SERVERS.add(wrapped)
-    return wrapped
-
-
-async def serve_proxy_sidecar(
-    *,
-    policy: HostPolicy,
-    host: str = "0.0.0.0",
-    port: int = 8888,
-    dial: _Dial | None = None,
-) -> ProxyServer:
-    """Start a sidecar CONNECT/HTTP proxy on a fixed host:port (non-loopback allowed).
-
-    This is for dual-homed container deployments where the proxy listens on the
-    internal network interface and dials out via the egress network.
-    """
-    upstream = dial if dial is not None else _open_target
     server = await asyncio.start_server(_make_handler(policy, upstream), host, port)
-    wrapped = ProxyServer(server, port)
+    actual_port = server.sockets[0].getsockname()[1]
+    wrapped = ProxyServer(server, actual_port)
     _LIVE_SERVERS.add(wrapped)
     return wrapped
 

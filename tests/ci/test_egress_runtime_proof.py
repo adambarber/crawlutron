@@ -14,7 +14,6 @@ from tests.chokepoint_paths import REPO_ROOT
 
 COMPOSE_FILE = REPO_ROOT / "docker-compose.yml"
 TEST_COMPOSE_FILE = REPO_ROOT / "docker-compose.test.yml"
-DOCKERFILE = REPO_ROOT / "Dockerfile"
 
 
 def _docker_compose_project(project_name: str, cmd: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
@@ -131,89 +130,131 @@ def test_direct_app_to_origin_fails(egress_stack) -> None:
     print(f"Direct app→origin correctly failed (exit code: {result.returncode})")
 
 
-@pytest.mark.slow
-def test_app_via_proxy_to_origin_succeeds(egress_stack) -> None:
-    """App→proxy→origin succeeds using production proxy configuration."""
-    project_name = egress_stack
-    app_container = _get_container_name(project_name, "crawlutron")
-    # App uses CRAWLUTRON_EGRESS_PROXY_URL; test via docker exec with httpx client
-    result = run_cmd(
+def _crawl_via_api(app_container: str, url: str) -> subprocess.CompletedProcess[str]:
+    """Invoke the production crawl API via the REST endpoint (loopback port 8765).
+    This uses the real production wiring: the service's pooled client configured
+    with CRAWLUTRON_EGRESS_PROXY_URL.
+    """
+    payload = json.dumps({"url": url})
+    return run_cmd(
         [
             "docker",
             "exec",
             "-i",
             app_container,
-            "python",
-            "-c",
-            """
-import httpx
-import os
-
-proxy_url = os.environ.get('CRAWLUTRON_EGRESS_PROXY_URL', 'http://egress-proxy:8888')
-print(f'Using proxy: {proxy_url}')
-
-client = httpx.Client(proxy=proxy_url, timeout=10.0)
-try:
-    response = client.get('http://origin:80/')
-    print(f'Status: {response.status_code}')
-    print(f'Body: {response.text[:200]}')
-    assert response.status_code == 200
-    # python -m http.server returns an HTML directory listing
-    assert '<title>Directory listing' in response.text or 'Directory listing' in response.text
-    print('SUCCESS: App→proxy→origin works')
-except Exception as e:
-    print(f'FAILED: {e}')
-    import sys
-    sys.exit(1)
-""",
+            "curl",
+            "-s",
+            "-X",
+            "POST",
+            "-H",
+            "Content-Type: application/json",
+            "-d",
+            payload,
+            "http://localhost:8765/v1/crawl",
         ]
     )
-    assert result.returncode == 0, f"App→proxy→origin failed: {result.stderr}"
-    assert "SUCCESS" in result.stdout
-    print("App→proxy→origin correctly succeeded")
+
+
+@pytest.mark.slow
+def test_app_via_proxy_to_origin_succeeds(egress_stack) -> None:
+    """App→proxy→origin succeeds using production proxy configuration via crawl API."""
+    project_name = egress_stack
+    app_container = _get_container_name(project_name, "crawlutron")
+    # Use the production crawl API which consumes CRAWLUTRON_EGRESS_PROXY_URL
+    result = _crawl_via_api(app_container, "http://origin:80/")
+    assert result.returncode == 0, f"Crawl API call failed: {result.stderr}"
+    try:
+        response_data = json.loads(result.stdout.strip())
+        request_id = response_data.get("request_id")
+        assert request_id, f"No request_id in response: {result.stdout}"
+        print(f"Crawl request submitted: {request_id}")
+        # Poll for job completion (bounded)
+        for _ in range(60):
+            time.sleep(2)
+            status_result = run_cmd(
+                [
+                    "docker",
+                    "exec",
+                    "-i",
+                    app_container,
+                    "curl",
+                    "-s",
+                    f"http://localhost:8765/v1/crawl/{request_id}",
+                ]
+            )
+            if status_result.returncode == 0:
+                try:
+                    status_data = json.loads(status_result.stdout.strip())
+                except json.JSONDecodeError:
+                    continue
+                # Check if the crawl is completed (has results array)
+                if "results" in status_data and status_data["results"]:
+                    # Verify the result contains the origin content
+                    result_url = status_data["results"][0].get("url", "")
+                    assert result_url == "http://origin:80/", f"Unexpected result URL: {result_url}"
+                    # The content should be the directory listing
+                    content = status_data["results"][0].get("content", "")
+                    assert "Directory listing" in content or "<title>Directory listing" in content, (
+                        f"Origin content not found in result: {content[:200]}"
+                    )
+                    print("SUCCESS: App→proxy→origin works via production crawl API")
+                    print("App→proxy→origin correctly succeeded via production crawl API")
+                    return
+            time.sleep(1)
+        raise AssertionError("Crawl job did not complete within timeout")
+    except json.JSONDecodeError:
+        # If the API returns non-JSON (e.g., error), fail
+        raise AssertionError(f"Invalid JSON response from crawl API: {result.stdout[:200]}") from None
 
 
 @pytest.mark.slow
 def test_logical_url_and_pinning_intact(egress_stack) -> None:
-    """Logical URL/Host identity preserved through proxy."""
+    """Logical URL/Host identity preserved through proxy via production crawl API."""
     project_name = egress_stack
     app_container = _get_container_name(project_name, "crawlutron")
-    result = run_cmd(
-        [
-            "docker",
-            "exec",
-            "-i",
-            app_container,
-            "python",
-            "-c",
-            """
-import httpx
-import os
-
-proxy_url = os.environ.get('CRAWLUTRON_EGRESS_PROXY_URL', 'http://egress-proxy:8888')
-print(f'Using proxy: {proxy_url}')
-
-client = httpx.Client(proxy=proxy_url, timeout=10.0)
-try:
-    response = client.get('http://origin:80/')
-    print(f'Status: {response.status_code}')
-    print(f'Body: {response.text[:200]}')
-    assert response.status_code == 200
-    # python -m http.server returns an HTML directory listing
-    assert '<title>Directory listing' in response.text or 'Directory listing' in response.text
-    print('SUCCESS: Logical URL/pinning intact via proxy')
-except Exception as e:
-    print(f'FAILED: {e}')
-    import traceback
-    traceback.print_exc()
-    import sys
-    sys.exit(1)
-""",
-        ]
-    )
-    assert result.returncode == 0, f"Logical URL test failed: {result.stderr}"
-    assert "SUCCESS" in result.stdout
-    print("Logical URL/pinning correctly intact")
+    # Use the production crawl API which consumes CRAWLUTRON_EGRESS_PROXY_URL
+    result = _crawl_via_api(app_container, "http://origin:80/")
+    assert result.returncode == 0, f"Crawl API call failed: {result.stderr}"
+    try:
+        response_data = json.loads(result.stdout.strip())
+        request_id = response_data.get("request_id")
+        assert request_id, f"No request_id in response: {result.stdout}"
+        print(f"Crawl request submitted: {request_id}")
+        # Poll for job completion (bounded)
+        for _ in range(60):
+            time.sleep(2)
+            status_result = run_cmd(
+                [
+                    "docker",
+                    "exec",
+                    "-i",
+                    app_container,
+                    "curl",
+                    "-s",
+                    f"http://localhost:8765/v1/crawl/{request_id}",
+                ]
+            )
+            if status_result.returncode == 0:
+                try:
+                    status_data = json.loads(status_result.stdout.strip())
+                except json.JSONDecodeError:
+                    continue
+                # Check if the crawl is completed (has results array)
+                if "results" in status_data and status_data["results"]:
+                    # Verify logical URL/Host identity: the result URL should be the logical origin URL
+                    result_url = status_data["results"][0].get("url", "")
+                    assert result_url == "http://origin:80/", f"Logical URL not preserved: got {result_url}"
+                    content = status_data["results"][0].get("content", "")
+                    assert "Directory listing" in content or "<title>Directory listing" in content, (
+                        f"Origin content not found in result: {content[:200]}"
+                    )
+                    print("SUCCESS: Logical URL/pinning intact via production crawl API")
+                    print("Logical URL/pinning correctly intact via production crawl API")
+                    return
+            time.sleep(1)
+        raise AssertionError("Crawl job did not complete within timeout")
+    except json.JSONDecodeError:
+        raise AssertionError(f"Invalid JSON response from crawl API: {result.stdout[:200]}") from None
 
 
 @pytest.mark.slow

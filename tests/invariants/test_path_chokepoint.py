@@ -292,7 +292,7 @@ def _fs_sweep() -> list[str]:
 def test_fs_traversal_sites_never_grow() -> None:
     """Ceiling on raw-FS traversal sites; owner's follow-up drives it to zero."""
     found = _fs_sweep()
-    assert len(found) <= 352, f"raw-FS traversal sites: {found[:8]}"
+    assert len(found) <= 350, f"raw-FS traversal sites: {found[:8]}"
 
 
 def test_fs_traversal_detector_bites() -> None:

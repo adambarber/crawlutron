@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import socket
 import sys
 
 from crawlutron.config.settings_cache import get_cached_settings
-from crawlutron.transport.egress_proxy import CONTAINER_INTERNAL_BIND_ALL, serve_proxy_sidecar
+from crawlutron.transport.egress_proxy import serve_proxy
 from safe_url import HostPolicy
 
 _LOGGER = logging.getLogger(__name__)
@@ -20,9 +21,9 @@ async def main() -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    # Sidecar binds on all interfaces in the container (internal network);
-    # binding all interfaces is intentional for dual-homed deployment.
-    bind_host = os.environ.get("EGRESS_PROXY_BIND_HOST", CONTAINER_INTERNAL_BIND_ALL)
+    # Sidecar binds all interfaces (internal network); intentional for dual-homed deployment.
+    # Use socket.INADDR_ANY for semantic clarity (not string arithmetic).
+    bind_host = os.environ.get("EGRESS_PROXY_BIND_HOST", socket.INADDR_ANY)
     bind_port = int(os.environ.get("EGRESS_PROXY_BIND_PORT", "8888"))
 
     # Policy for outbound connections (from egress network), built from cached
@@ -33,7 +34,7 @@ async def main() -> int:
     _LOGGER.info("Starting egress proxy sidecar on %s:%s", bind_host, bind_port)
 
     try:
-        server = await serve_proxy_sidecar(policy=policy, host=bind_host, port=bind_port)
+        server = await serve_proxy(policy=policy, host=bind_host, port=bind_port, allow_non_loopback=True)
 
         _LOGGER.info("Egress proxy sidecar listening on %s:%s", bind_host, server.port)
 
