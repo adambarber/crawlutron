@@ -246,3 +246,18 @@ def test_a_fresh_live_child_is_left_alone(tmp_path, monkeypatch) -> None:
     )
 
     assert gate_fanout._child_is_running(pidfile) is True
+
+
+def test_partial_run_status_dir_is_cleaned_in_finally(tmp_path, monkeypatch) -> None:
+    """A killed partial run must not leave status residue behind."""
+    status = tmp_path / ".gate_fanout"
+    status.mkdir()
+    (status / "ruff.rc").write_text("0", encoding="utf-8")
+    (status / "mypy.pid").write_text("999999", encoding="utf-8")
+    (status / "mypy.log").write_text("partial", encoding="utf-8")
+
+    monkeypatch.setattr(gate_fanout, "_alive", lambda pid: False)
+
+    gate_fanout._cleanup(status)
+
+    assert not any(status.iterdir())

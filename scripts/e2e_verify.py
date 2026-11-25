@@ -89,7 +89,8 @@ def _retrieval(c: httpx.Client, base: str, rid: str) -> None:
 
 def _validation(c: httpx.Client, base: str, target: str) -> None:
     r = c.post(f"{base}/v1/crawl", json={"url": "http://127.0.0.1:8765/health"})
-    check("SSRF internal rejected", r.status_code in (400, 422))
+    e = r.json()
+    check("SSRF internal rejected", r.status_code == 422 and e.get("code") == "validation_error")
     r = c.post(f"{base}/v1/crawl", json={"url": "not a url"})
     e = r.json()
     check("validation shape standardized", r.status_code == 422 and e.get("code") == "validation_error")

@@ -307,6 +307,58 @@ def test_validate_verdict_rejects_unknown_and_malformed_fields() -> None:
         )
 
 
+def test_validate_verdict_caps_findings_and_rationale_length() -> None:
+    from scripts.agent_review import validate_verdict
+    from scripts.review_verdict_bounds import MAX_FINDINGS, MAX_RATIONALE_LENGTH
+
+    finding = {
+        "file": "x.py",
+        "line": 1,
+        "severity": "P2",
+        "rule": "r",
+        "rationale": "R" * (MAX_RATIONALE_LENGTH + 500),
+        "confidence": "High",
+    }
+    payload = {
+        "verdict": "REQUEST_CHANGES",
+        "findings": [finding for _ in range(10_000)],
+        "summary": "oversized",
+    }
+    verdict = validate_verdict(json.dumps(payload))
+
+    assert len(verdict.findings) == MAX_FINDINGS
+    assert verdict.findings[0].rationale.endswith("[truncated]")
+    assert len(verdict.findings[0].rationale) <= MAX_RATIONALE_LENGTH
+    assert "findings omitted" in verdict.findings[-1].rationale
+
+
+def test_validate_verdict_caps_only_beyond_the_exact_boundaries() -> None:
+    from scripts.agent_review import validate_verdict
+    from scripts.review_verdict_bounds import MAX_FINDINGS, MAX_RATIONALE_LENGTH
+
+    def payload(count: int, rationale_length: int) -> str:
+        finding = {
+            "file": "x.py",
+            "line": 1,
+            "severity": "P2",
+            "rule": "r",
+            "rationale": "R" * rationale_length,
+            "confidence": "High",
+        }
+        return json.dumps(
+            {"verdict": "REQUEST_CHANGES", "findings": [finding] * count, "summary": "boundary"}
+        )
+
+    exact = validate_verdict(payload(MAX_FINDINGS, MAX_RATIONALE_LENGTH))
+    assert len(exact.findings) == MAX_FINDINGS
+    assert exact.findings[-1].rationale == "R" * MAX_RATIONALE_LENGTH
+
+    over = validate_verdict(payload(MAX_FINDINGS + 1, MAX_RATIONALE_LENGTH + 1))
+    assert len(over.findings) == MAX_FINDINGS
+    assert over.findings[0].rationale.endswith("[truncated]")
+    assert "1 findings omitted" in over.findings[-1].rationale
+
+
 def test_nvidia_call_uses_the_configured_model_and_fixed_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.agent_review import call_nvidia_api
 
