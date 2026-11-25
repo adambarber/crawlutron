@@ -62,7 +62,6 @@ __all__ = [
 from crawlutron.transport.document import default_document_text_extractor
 from crawlutron.transport.pinned_transport import (
     PinnedRequest,
-    build_pinned_request,
     build_pinned_request_async,
 )
 from crawlutron.vocabulary.browser import BrowserAction
@@ -121,7 +120,6 @@ class BrowserRenderer:
         settings: CrawlerSettings | None = None,
         driver: BrowserDriver | None = None,
         pin: Callable[..., Awaitable[PinnedRequest]] | None = None,
-        pin_sync: Callable[..., PinnedRequest] | None = None,
         status_for: Callable[[str], ResultStatus] | None = None,
     ) -> None:
         self._sleep = sleep
@@ -150,7 +148,6 @@ class BrowserRenderer:
         # The two SSRF pin rules and the failure-path classifier: all three decide
         # something the render cannot recover from, so tests steer them by argument.
         self._pin = pin or build_pinned_request_async
-        self._pin_sync = pin_sync or build_pinned_request
         self._status_for = status_for or status_for_classification
         # The browser and every page step live in the driver (recycle bound, scroll/
         # harvest knobs, storage_state allowlist); a test substitutes the driver.
@@ -257,11 +254,9 @@ class BrowserRenderer:
         *,
         policy: HostPolicy,
     ) -> CrawlResult:
-        # SSRF: validate + IP-pin the target (DNS-rebinding safe, Host preserved).
-        # Raises ValueError if the target is unsafe.
-        pinned_url, goto_headers = await resolve_browser_target(
-            url, pin=self._pin, timeout_seconds=options.timeout_seconds
-        )
+        # S4: NormalizedUrl admits; browser navigates logical URL through proxy.
+        # Proxy owns DNS/dial (#991); route handler is fail-closed complement.
+        pinned_url = url.raw
 
         started = time.monotonic()
 
@@ -274,13 +269,10 @@ class BrowserRenderer:
                 url,
                 options,
                 pinned_url=pinned_url,
-                goto_headers=goto_headers,
                 started=started,
                 collaborators=RenderCollaborators(
                     policy=policy,
-                    wire=WireGuard(
-                        pin_sync=self._pin_sync, policy=policy, timeout_seconds=options.timeout_seconds
-                    ),
+                    wire=WireGuard(policy=policy, timeout_seconds=options.timeout_seconds),
                     warmup_urls=self._warmup_urls,
                     driver=self._driver,
                     navigate_and_settle=lambda pinned: self._navigate_and_settle(page, pinned),

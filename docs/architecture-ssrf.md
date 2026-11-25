@@ -91,29 +91,24 @@ a credential for origin A can never attach to origin B.
 Proof: `tests/transport/test_redirect_target.py:78-85` (cross-host credential
 stripping) and `:90-100` (same-origin credentials kept).
 
-## Browser Host-rewrite pin (browser_targets.py)
+## Browser proxy-mediated egress (browser_targets.py, driver_config.py)
 
-Browser navigation has no dial ownership: the browser performs its own DNS
-and connect after the route handler's validation, so the last verifiable
-moment is the handler itself (`tests/transport/test_browser_target_stability.py:1-10`).
+S4 (#1364) routes browser egress through the loopback CONNECT egress proxy at
+launch (`driver_config.browser_kwargs` sets launch-level `proxy`; the browser
+never resolves target hostnames). The proxy resolves, applies HostPolicy/SSRF
+checks, pins the IP, and dials — closing the browser DNS-rebind residual
+(#991) by construction.
 
-`resolve_browser_target` (`browser_targets.py:40`) gate-keeps HTTPS with the
-fresh+stable double resolve `check_ssrf_protection_stable` (#617) and keeps
-the hostname for TLS SNI/cert verification; plain HTTP pins the resolved IP
-with the original `Host`. `make_ssrf_route_handler` (`browser_targets.py:70`)
-is the Playwright `page.route` handler that aborts any navigation, redirect,
-or subresource to an SSRF-unsafe host, re-pinning per subresource request and
-failing closed on any exception (`browser_targets.py:130-159`). `Host`
-header overrides are applied per hop; empty overrides are omitted so
-Playwright does not wipe UA/cookies/accept
-(`browser_targets.py:117-125`). WebSocket upgrades are handled by
-`make_ssrf_websocket_handler` (`browser_targets.py:162`), closing any that
-resolve internal.
+`make_ssrf_route_handler` (`browser_targets.py`) remains a fail-closed
+per-request NormalizedUrl admission complement: it aborts non-network,
+denied, or invalid targets and continues admitted http(s) requests with the
+logical URL. It does not pin, rewrite Host, or DNS-resolve. WebSocket
+upgrades are handled by `make_ssrf_websocket_handler`, which admits via
+NormalizedUrl and forwards through the proxy-configured browser.
 
-Proof: `tests/transport/test_browser_target_stability.py:22-72` — an HTTPS
-subresource whose second fresh answer differs from the first is aborted
-(`route.decision == "abort"`), identical stable answers pass, and answer
-order is ignored (set comparison, not list comparison).
+Proof: `tests/transport/test_browser_target_stability.py` — browser handlers
+do not DNS-resolve; admitted requests continue with logical URLs; policy
+denials abort. Proxy-side pinning/rebinding is proven by egress proxy tests.
 
 ## MCP Origin check (middleware.py, mcp/server.py)
 
@@ -156,6 +151,6 @@ admitted and the SSRF boundary is intentionally relaxed.
 | Address classification incl. IPv4-mapped/6to4/Teredo, resolver-numeric forms | `packages/safe-url/src/safe_url/address_class.py:28-164` | `tests/test_ssrf_route_subresources.py`, `tests/transport/test_dns_cache.py` |
 | Per-fetch fresh pin; validation cached, pin never cached | `packages/core/src/crawlutron/transport/pinned_dns.py:206`, `:174`, `:189` | `tests/transport/test_dns_cache.py:30-52` |
 | Redirect re-anchor, hop budget `MAX_REDIRECT_HOPS = 5`, credential strip | `packages/core/src/crawlutron/transport/pinned_transport.py:172`, `:163`, `:201` | `tests/transport/test_redirect_target.py:61-142` |
-| Browser Host-rewrite pin, stable-answer double resolve | `packages/core/src/crawlutron/transport/browser_targets.py:40`, `:70` | `tests/transport/test_browser_target_stability.py:22-72` |
+| Browser proxy-mediated egress, no browser DNS resolve | `packages/core/src/crawlutron/transport/browser_targets.py`, `packages/core/src/crawlutron/transport/driver_config.py` | `tests/transport/test_browser_target_stability.py`, `tests/transport/test_browser_ssrf.py` |
 | MCP Origin check, non-loopback → 403, Origin never echoed | `packages/rest/src/crawlutron_rest/api/middleware.py:22-41`, `packages/mcp/src/crawlutron_mcp/server.py:42-56` | `tests/api/test_origin_guard.py:9-43` |
 | Private-target guard; warned once per enabled value at first use | `packages/safe-url/src/safe_url/host_policy.py:85-160` | `tests/transport/test_dns_cache.py:55-66` |

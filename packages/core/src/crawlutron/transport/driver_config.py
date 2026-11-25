@@ -147,9 +147,11 @@ def validate_storage_state_path(storage_state: str, cache_dir: str | Path | None
 
 
 def browser_kwargs(
-    browser_profile: BrowserProfileRecord | None, cache_dir: str | Path | None
+    browser_profile: BrowserProfileRecord | None,
+    cache_dir: str | Path | None,
+    proxy_url: str | None = None,
 ) -> dict[str, object]:
-    """Launch-only kwargs for the Camoufox/Playwright browser factory."""
+    """Launch kwargs for Camoufox; sets loopback egress proxy when provided (S4)."""
     kwargs: dict[str, object] = {
         "headless": headless_enabled(),
         "humanize": True,
@@ -168,6 +170,10 @@ def browser_kwargs(
             kwargs["storage_state"] = safe_path
         else:
             logger.warning("invalid_storage_state_path", extra={"path": str(storage_state)})
+
+    # S4: loopback egress proxy; browser hands hostnames to proxy (#991).
+    if proxy_url:
+        kwargs["proxy"] = {"server": proxy_url}
 
     return kwargs
 

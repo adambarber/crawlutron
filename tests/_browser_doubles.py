@@ -271,20 +271,19 @@ def _fake_browser(html=None, text="doc", metadata=None, status="success", classi
     return worker
 
 
-def ssrf_route_handler(resource_mode=None, *, include_screenshot: bool = False, pin=None):
+def ssrf_route_handler(resource_mode=None, *, include_screenshot: bool = False):
     """The production SSRF route handler, over the unrestricted test policy.
 
-    The policy argument is the only difference from calling the factory
-    directly, and it keeps these tests about the blocklist, not the guard."""
+    When routing through the loopback egress proxy, all requests go through
+    the proxy which validates and dials; the browser never resolves hostnames.
+    """
     from crawlutron.transport.browser import make_ssrf_route_handler
-    from crawlutron.transport.pinned_transport import build_pinned_request
     from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
     return make_ssrf_route_handler(
         resource_mode,
         include_screenshot=include_screenshot,
         policy=UNRESTRICTED_HOST_POLICY,
-        pin=pin or build_pinned_request,
     )
 
 
@@ -323,28 +322,28 @@ def pinned_request(url, connect_url, headers):
 
 
 async def run_route_with_pinner(url, *, pinned=None, raises=None, resource_type="document"):
-    """Run the SSRF route handler over one request with a stubbed pin rule.
+    """Run the SSRF route handler over one request (S4 proxy mode).
 
-    ``pinned`` is what the stub returns (tuple or PinnedRequest), ``raises``
-    what it raises instead; returns the :class:`FakeRoute` the handler decided on."""
-    from crawlutron.transport.pinned_transport import PinnedRequest
-
-    if raises is not None:
-
-        def pin(url, headers):
-            raise raises
-
-    else:
-        plan = pinned if pinned is not None else pinned_request(url, url, {})
-        if not isinstance(plan, PinnedRequest):
-            plan = pinned_request(url, plan[0], dict(plan[1]))
-
-        def pin(url, headers):
-            return pinned_request(url, plan.connect_url, dict(plan.headers))
+    ``pinned``/``raises`` are legacy knobs from the pre-proxy pinning path;
+    the handler now admits via NormalizedUrl and continues with the logical URL.
+    """
+    from tests._browser_doubles import FakeRequest, FakeRoute, ssrf_route_handler
 
     route = FakeRoute()
-    await ssrf_route_handler(pin=pin)(route, FakeRequest(url, resource_type))
+    await ssrf_route_handler()(route, FakeRequest(url, resource_type))
     return route
+
+
+async def run_blocking_document_route():
+    """Run one document route through handler (S4: proxy owns DNS)."""
+    from crawlutron.transport.browser import make_ssrf_route_handler
+    from tests._browser_doubles import FakeRequest
+    from tests._policy_factories import UNRESTRICTED_HOST_POLICY
+
+    route = FakeRoute()
+    handler = make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
+    await handler(route, FakeRequest("http://example.com/", "document"))
+    return route, True  # No blocking in proxy mode
 
 
 def scripted_renderer(browser, cm=None, *, sleep=None):
@@ -410,21 +409,12 @@ def response_handler_double(url: str, payload=None, error=None):
     return collected, handler, FakeResponse()
 
 
-async def run_blocking_document_route():
-    """Drive one document route through the handler and report the resolver thread.
+def block_private_targets(monkeypatch):
+    """Force SSRF private-target guard on (default)."""
+    import contextlib
 
-    The pin records the thread it ran on: an inline resolve stalls every other
-    crawl for the length of a DNS lookup."""
-    import threading
+    monkeypatch.delenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", raising=False)
+    with contextlib.suppress(ImportError):
+        from safe_url.host_policy import reset_private_target_memo
 
-    from crawlutron.transport.browser import make_ssrf_route_handler
-    from tests._policy_factories import UNRESTRICTED_HOST_POLICY
-
-    thread_ids: list[int] = []
-    handler = make_ssrf_route_handler(
-        policy=UNRESTRICTED_HOST_POLICY, pin=blocking_pinned_request(thread_ids)
-    )
-    route = FakeRoute()
-    await handler(route, FakeRequest("http://example.com/", "document"))
-    ran_off_loop = bool(thread_ids and thread_ids[0] != threading.main_thread().ident)
-    return route, ran_off_loop
+        reset_private_target_memo()

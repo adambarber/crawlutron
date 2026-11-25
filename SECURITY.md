@@ -63,13 +63,13 @@ It is a powerful SSRF-enabled service that:
 
 ### Known residual weaknesses
 
-- **S1 — HTTPS DNS rebind window.** HTTP targets are IP-pinned end to end.
-  HTTPS browser navigation does two fresh DNS resolves but lets the browser
-  connect by hostname, so a hostile DNS server can rebind between check and
-  connect.
-- **S4 — credential origins ride the egress guard.** Credential origins pass
-  the same SSRF egress check as crawl targets: a private/loopback credential
-  origin requires `CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1`.
+- **Browser egress is proxy-owned (S4, #1364).** Browser navigation and
+  subresources route through the loopback egress proxy at launch; the browser
+  hands hostnames to the proxy, which resolves, applies HostPolicy/SSRF checks,
+  pins the IP, and dials. The browser never resolves target hostnames.
+- **Credential origins ride the egress guard.** Credential origins pass the
+  same SSRF egress check as crawl targets: a private/loopback credential origin
+  requires `CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1`.
 - **S7 — secrets are never written at rest, and refuse to reload as plaintext.**
   Stored policy rows (`crawl_jobs.policy`) are REDACTED: the JSON serializer
   masks every `SecretStr` value (`[REDACTED]`), so credential material lives
@@ -86,18 +86,17 @@ It is a powerful SSRF-enabled service that:
   Secrets reach the webhook receiver in the HMAC-signed POST body, never URL
   params. Pre-existing rows from before this refusal carry it unredacted
   (dev-stage stores are disposable; no migration).
-- **S6 — browser-initiated XHR/fetch is not fully host-policy-gated.** The
-  Playwright route handler (`packages/core/src/crawlutron/transport/browser_targets.py`, wired via
-  `wire_ssrf_guards`) blocks navigation and subresource loads to private hosts,
-  but JavaScript a hostile rendered page runs (XHR/fetch/`WebSocket` from page
-  code, service workers, or non-http schemes) can attempt requests the route
-  layer evaluates per-request only -- each request is judged independently, so
-  per-request blocks do not form a session-level policy; treat a rendered page
-  as able to make requests from the browser's own network position, not solely
-  through the main fetch's admission door. Related residual: a webhook
-  announcement whose in-flight delivery set is at `DELIVERIES_CAP` is dropped
-  (logged `webhook_delivery_refused_at_cap`) and not retried until the watch's
-  state changes again.
+- **S6 — browser-initiated requests are proxy-mediated, route checks are
+  per-request.** The browser is launched with the loopback egress proxy
+  (`packages/core/src/crawlutron/transport/browser_targets.py`, wired via
+  `wire_ssrf_guards`), so sockets are proxy-mediated. The Playwright route
+  handler remains a fail-closed per-request NormalizedUrl admission complement;
+  it does not form a session-level policy. JavaScript a hostile rendered page
+  runs (XHR/fetch/WebSocket, service workers, or non-http schemes) may still
+  attempt requests, but egress dials are owned by the proxy's SSRF/pinning
+  door. Related residual: a webhook announcement whose in-flight delivery set
+  is at `DELIVERIES_CAP` is dropped (logged `webhook_delivery_refused_at_cap`)
+  and not retried until the watch's state changes again.
 - **S5 — caller key secrets are verified with salted PBKDF2-SHA256.** Issued
   secrets embed their key id (`ck_<key_id>.<body>`, 256-bit-entropy body via
   `secrets.token_urlsafe(32)`). At rest the key row stores a salted
