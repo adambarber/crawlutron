@@ -107,6 +107,76 @@ def test_json_input_capped_refused_before_jsonl_split():
     assert "json_input_capped" in cast(list[str], result["quality_flags"])
 
 
+def test_json_input_at_exact_cap_admitted():
+    """Boundary: JSON input exactly at max_input_bytes is admitted."""
+    limits = ExtractLimits(max_input_bytes=5)
+    result = extract_text_format("false", "application/json", limits)
+    assert result.get("_quality", "failed") != "failed"
+    assert "json_input_capped" not in cast(list[str], result["quality_flags"])
+
+
+def test_json_input_one_byte_over_cap_refused():
+    """Boundary: JSON input one byte over max_input_bytes is refused."""
+    limits = ExtractLimits(max_input_bytes=5)
+    result = extract_text_format('{"":0}', "application/json", limits)
+    assert result.get("_quality", "failed") == "failed"
+    assert "json_input_capped" in cast(list[str], result["quality_flags"])
+
+
+def test_csv_input_over_byte_cap_refused():
+    """CSV input above max_input_bytes counts UTF-8 bytes and is refused."""
+    limits = ExtractLimits(max_input_bytes=5)
+    result = extract_text_format("a,b,c,d,e", "text/csv", limits)
+    assert result.get("_quality", "failed") == "failed"
+    assert "csv_input_capped" in cast(list[str], result["quality_flags"])
+
+
+def test_csv_input_at_exact_byte_cap_admitted():
+    """Boundary: CSV input exactly at max_input_bytes is admitted."""
+    limits = ExtractLimits(max_input_bytes=5)
+    result = extract_text_format("a,bc\n", "text/csv", limits)
+    assert result.get("_quality", "failed") != "failed"
+    assert "csv_input_capped" not in cast(list[str], result["quality_flags"])
+
+
+def test_csv_input_one_byte_over_byte_cap_refused():
+    """Boundary: CSV input one byte over max_input_bytes is refused."""
+    limits = ExtractLimits(max_input_bytes=5)
+    result = extract_text_format("a,bcd\n", "text/csv", limits)
+    assert result.get("_quality", "failed") == "failed"
+    assert "csv_input_capped" in cast(list[str], result["quality_flags"])
+
+
+def test_csv_byte_cap_counts_multibyte_utf8():
+    """Byte cap counts UTF-8 bytes: 3 chars = 6 bytes exceeds a 5-byte cap."""
+    limits = ExtractLimits(max_input_bytes=5)
+    result = extract_text_format("é,é\n", "text/csv", limits)
+    assert result.get("_quality", "failed") == "failed"
+    assert "csv_input_capped" in cast(list[str], result["quality_flags"])
+
+
+def test_xml_input_over_byte_cap_refused():
+    limits = ExtractLimits(max_input_bytes=5)
+    result = extract_text_format("<a>hello</a>", "application/xml", limits)
+    assert result.get("_quality", "failed") == "failed"
+    assert "xml_input_capped" in cast(list[str], result["quality_flags"])
+
+
+def test_xml_input_at_exact_byte_cap_admitted():
+    """Boundary: XML input exactly at max_input_bytes is admitted."""
+    limits = ExtractLimits(max_input_bytes=5)
+    result = extract_text_format("<ab/>", "application/xml", limits)
+    assert result.get("_quality", "failed") != "failed"
+    assert "xml_input_capped" not in cast(list[str], result["quality_flags"])
+
+
+def test_xml_input_one_byte_over_byte_cap_refused():
+    limits = ExtractLimits(max_input_bytes=5)
+    result = extract_text_format("<abc/>", "application/xml", limits)
+    assert result.get("_quality", "failed") == "failed"
+    assert "xml_input_capped" in cast(list[str], result["quality_flags"])
+
+
 def test_malformed_json():
     content = b"{not valid json}"
     result = extract(content, "application/json")
