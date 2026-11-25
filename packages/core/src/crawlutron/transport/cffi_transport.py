@@ -114,6 +114,11 @@ class CffiTransport:
             stream=True,
             timeout=Timeouts.for_request(request.timeout_seconds).read,
         )
+        # Check for egress proxy dial-failed marker: the proxy refused to reach
+        # the pinned target, so treat this as a transport failure for fallback.
+        if response.headers.get("x-crawlutron-egress-refusal") == "dial-failed":
+            await response.aclose()
+            raise RequestException("egress proxy could not reach the pinned target")
         # curl_cffi 0.17.0 types ``queue`` as a sync queue.Queue (models.py:130) yet
         # awaits it on its async path (models.py:405); the runtime object satisfies this.
         return cast(_CffiResponse, response)
