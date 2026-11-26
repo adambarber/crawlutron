@@ -1,7 +1,7 @@
-"""Extract every comment in the repository into one file, with file and line.
+"""Extract ``path:line:text`` comments, or render touched files as code fences.
 
 Usage: ``python scripts/extract_comments.py [-o OUT] [--touched REV] [--grep RE]``;
-one ``path:line:text`` record per line; ``--touched`` heads each whole touched file.
+``--touched`` emits whole files verbatim in tagged fences, ignoring ``--grep``.
 """
 
 from __future__ import annotations
@@ -25,6 +25,18 @@ LINE_COMMENT_SUFFIXES = frozenset(
     {".sh", ".bash", ".zsh", ".yml", ".yaml", ".toml", ".ini", ".cfg", ".example"}
 )
 LINE_COMMENT_NAMES = frozenset({"Dockerfile", "Makefile", "Jenkinsfile"})
+
+# Fence languages for the touched renderer; an unlisted suffix emits a bare fence.
+LANGUAGE_TAGS = {
+    ".py": "python",
+    ".sh": "bash",
+    ".bash": "bash",
+    ".yml": "yaml",
+    ".yaml": "yaml",
+    ".toml": "toml",
+    ".json": "json",
+    ".md": "markdown",
+}
 
 # Directories that are never part of a tracked tree but can appear when the
 # script is run outside a checkout. Only a fallback: git ls-files governs.
@@ -145,13 +157,18 @@ def _docstring_records(tree: ast.Module, lines: list[str]) -> list[tuple[int, in
     return records
 
 
+def _read_source(path: pathlib.Path, *, errors: str = "strict") -> str:
+    """The one whole-file read, byte-faithful for UTF-8 (no newline translation)."""
+    return path.read_bytes().decode("utf-8", errors=errors)
+
+
 def _python_records(path: pathlib.Path, *, include_docstrings: bool) -> Iterator[tuple[int, int, str]]:
     """Yield ``(row, col, text)`` for Python comments and docstrings.
 
     ``tokenize`` rather than a regex, so a ``#`` inside a string is not a comment;
     docstrings come from the AST, which the tokenizer cannot tell from data.
     """
-    source = path.read_text(encoding="utf-8")
+    source = _read_source(path)
     records: list[tuple[int, int, str]] = []
     try:
         for token in tokenize.generate_tokens(io.StringIO(source).readline):
@@ -180,7 +197,7 @@ def _text_records(path: pathlib.Path) -> Iterator[tuple[int, int, str]]:
     Whole-line only: an inline ``#`` in YAML/TOML may sit in a quoted scalar or
     after a URL, and reporting a fragment of a URL as a comment would make the extract lie.
     """
-    for row, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1):
+    for row, line in enumerate(_read_source(path, errors="replace").splitlines(), start=1):
         stripped = line.strip()
         if stripped.startswith("#"):
             yield row, 0, stripped
@@ -198,7 +215,6 @@ def _emitted(
     prefixes: tuple[str, ...],
     matcher: re.Pattern[str] | None,
     include_docstrings: bool,
-    touched: bool,
 ) -> tuple[list[str], dict[str, int], int]:
     """Records, per-extension counts and scanned count for one derived file list."""
     lines: list[str] = []
@@ -206,9 +222,7 @@ def _emitted(
     scanned = 0
     for path in paths:
         relative = str(path.relative_to(REPO_ROOT))
-        if touched and not path.is_file():
-            continue
-        if not _is_comment_file(path) or (prefixes and not relative.startswith(prefixes) and not touched):
+        if not _is_comment_file(path) or (prefixes and not relative.startswith(prefixes)):
             continue
         try:
             records = list(_records(path, include_docstrings=include_docstrings))
@@ -219,13 +233,33 @@ def _emitted(
             continue
         scanned += 1
         counts[path.suffix or path.name] = counts.get(path.suffix or path.name, 0) + len(records)
-        if touched:
-            lines.append(f"ENTIRETY OF FILE: {relative}")
         for row, _col, text in records:
-            if matcher is not None and not matcher.search(text) and not touched:
+            if matcher is not None and not matcher.search(text):
                 continue
             lines.append(f"{relative}:{row}:{text}")
     return lines, counts, scanned
+
+
+def _render_touched(paths: list[pathlib.Path]) -> tuple[str, int, int]:
+    """Fenced whole-file blocks, rendered count and scanned count; skips missing files."""
+    blocks: list[str] = []
+    rendered = 0
+    scanned = 0
+    for path in paths:
+        relative = str(path.relative_to(REPO_ROOT))
+        if not path.is_file():
+            continue
+        try:
+            content = _read_source(path)
+        except (OSError, UnicodeDecodeError) as error:
+            print(f"skipping {relative}: {error}", file=sys.stderr)
+            continue
+        scanned += 1
+        rendered += 1
+        block = content if content.endswith("\n") else f"{content}\n"
+        tag = LANGUAGE_TAGS.get(path.suffix, "")
+        blocks.append(f"{relative}\n```{tag}\n{block}```\n")
+    return "".join(blocks), rendered, scanned
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -244,30 +278,29 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--touched",
         metavar="REV",
-        help="derive touched files from REV..HEAD; emit each whole file's prose",
+        help="render each touched file as a whole-file code fence",
     )
     args = parser.parse_args(argv)
 
-    matcher = re.compile(args.grep) if args.grep else None
-    prefixes = tuple(args.path)
-    include_docstrings = not args.no_docstrings
-
     touched = args.touched is not None
-    paths = _touched_files(args.touched) if touched else _tracked_files()
-    lines, counts, scanned = _emitted(
-        paths,
-        prefixes=prefixes,
-        matcher=matcher,
-        include_docstrings=include_docstrings,
-        touched=touched,
-    )
-
-    if args.codes:
-        body = "\n".join(f"{suffix or 'other':>10}  {count}" for suffix, count in sorted(counts.items()))
+    if touched:
+        body, rendered, scanned = _render_touched(_touched_files(args.touched))
+        detail = f"{rendered} rendered"
     else:
-        body = "\n".join(lines)
-    if body:
-        body += "\n"
+        matcher = re.compile(args.grep) if args.grep else None
+        lines, counts, scanned = _emitted(
+            _tracked_files(),
+            prefixes=tuple(args.path),
+            matcher=matcher,
+            include_docstrings=not args.no_docstrings,
+        )
+        if args.codes:
+            body = "\n".join(f"{suffix or 'other':>10}  {count}" for suffix, count in sorted(counts.items()))
+        else:
+            body = "\n".join(lines)
+        if body:
+            body += "\n"
+        detail = f"{sum(counts.values())} comments, {len(lines)} emitted"
 
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -275,11 +308,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         sys.stdout.write(body)
 
-    print(
-        f"{scanned} files, {sum(counts.values())} comments, {len(lines)} emitted -> "
-        f"{args.output or 'stdout'}",
-        file=sys.stderr,
-    )
+    print(f"{scanned} files, {detail} -> {args.output or 'stdout'}", file=sys.stderr)
     return 0
 
 

@@ -66,23 +66,16 @@ def _install_tree(monkeypatch, tmp_path):
     return first, second
 
 
-def test_touched_emits_each_heading_and_every_record(tmp_path: Path, monkeypatch, capsys) -> None:
+def test_touched_renders_each_file_as_a_language_tagged_fence(tmp_path: Path, monkeypatch) -> None:
+    """A touched file is a path line plus a fenced whole file, not prose records."""
     first, second = _install_tree(monkeypatch, tmp_path)
-    monkeypatch.setattr(
-        "scripts.extract_comments._touched_files",
-        lambda rev: [first, second],
-    )
+    monkeypatch.setattr("scripts.extract_comments._touched_files", lambda rev: [first, second])
     out = tmp_path / "out.txt"
     assert main(["--touched", "BASE", "-o", str(out)]) == 0
-    text = _text_of(out)
-    lines = text.splitlines()
-    assert lines[0] == "ENTIRETY OF FILE: first.py"
-    assert "ENTIRETY OF FILE: second.py" in lines
-    assert 'first.py:1:"""One docstring."""' in lines
-    assert "first.py:2:# one comment" in lines
-    assert "second.py:1:# two comment" in lines
-    assert text.index("ENTIRETY OF FILE: first.py") < text.index("ENTIRETY OF FILE: second.py")
-    assert "skipping" not in capsys.readouterr().err
+    assert _text_of(out) == (
+        'first.py\n```python\n"""One docstring."""\n# one comment\nx = 1\n```\n'
+        "second.py\n```python\ny = 2  # two comment\n```\n"
+    )
 
 
 def test_touched_derives_files_from_the_rev_range(tmp_path: Path, monkeypatch) -> None:
@@ -127,16 +120,42 @@ def test_touched_passes_the_revision_to_the_derivation(tmp_path: Path, monkeypat
     assert seen == ["BASE..HEAD"]
 
 
-def test_touched_emits_records_a_grep_would_filter(tmp_path: Path, monkeypatch) -> None:
-    first, second = _install_tree(monkeypatch, tmp_path)
-    monkeypatch.setattr(
-        "scripts.extract_comments._touched_files",
-        lambda rev: [first, second],
-    )
+def test_touched_ignores_grep_and_emits_the_whole_file(tmp_path: Path, monkeypatch) -> None:
+    """--grep never filters a touched file: even a non-matching line is emitted."""
+    _first, second = _install_tree(monkeypatch, tmp_path)
+    monkeypatch.setattr("scripts.extract_comments._touched_files", lambda rev: [second])
     out = tmp_path / "out.txt"
     assert main(["--touched", "BASE", "--grep", "nomatch", "-o", str(out)]) == 0
+    assert _text_of(out) == "second.py\n```python\ny = 2  # two comment\n```\n"
+
+
+def test_touched_tags_every_supported_extension_and_leaves_unknown_untagged(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Fence languages follow the extension table; an unknown suffix stays bare."""
+    expected = {
+        ".py": "python",
+        ".sh": "bash",
+        ".bash": "bash",
+        ".yml": "yaml",
+        ".yaml": "yaml",
+        ".toml": "toml",
+        ".json": "json",
+        ".md": "markdown",
+        ".xyz": "",
+    }
+    files = []
+    for suffix in expected:
+        path = tmp_path / f"sample{suffix}"
+        path.write_text("body\n", encoding="utf-8")
+        files.append(path)
+    monkeypatch.setattr("scripts.extract_comments.REPO_ROOT", tmp_path)
+    monkeypatch.setattr("scripts.extract_comments._touched_files", lambda rev: files)
+    out = tmp_path / "out.txt"
+    assert main(["--touched", "BASE", "-o", str(out)]) == 0
     text = _text_of(out)
-    assert "second.py:1:# two comment" in text
+    for suffix, tag in expected.items():
+        assert f"sample{suffix}\n```{tag}\nbody\n```\n" in text
 
 
 def test_untouched_extract_keeps_its_original_shape(tmp_path: Path, monkeypatch) -> None:
