@@ -439,6 +439,13 @@ class TestInvariantExecutionIdiom:
             + ", ".join(relative_posix(path) for path in found)
         )
 
+    def test_the_hand_rolled_budget_is_not_stale(self):
+        found = _hand_rolled_invariants()
+        assert _HAND_ROLLED_BUDGET <= len(found), (
+            f"budget {_HAND_ROLLED_BUDGET} is stale; tree has {len(found)} hand-rolled module(s): "
+            + ", ".join(relative_posix(path) for path in found)
+        )
+
     def test_an_import_only_reference_is_not_a_constructor(self):
         assert not _constructs_registry(ast.parse("from tests.rules import Registry\n"))
 
