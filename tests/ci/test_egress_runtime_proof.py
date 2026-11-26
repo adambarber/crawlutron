@@ -10,7 +10,6 @@ import subprocess
 import time
 import uuid
 from dataclasses import dataclass
-from typing import TypedDict
 
 import pytest
 
@@ -24,12 +23,6 @@ TEST_COMPOSE_FILE = REPO_ROOT / "docker-compose.test.yml"
 TOTAL_DEADLINE_SECONDS = 90
 POLL_INTERVAL_SECONDS = 2
 MAX_POLL_ATTEMPTS = TOTAL_DEADLINE_SECONDS // POLL_INTERVAL_SECONDS
-
-
-class _OriginResponse(TypedDict):
-    success_marker: str
-    host_header: str
-    path: str
 
 
 # API response validation uses dict.get() for runtime validation to avoid
@@ -204,11 +197,12 @@ def _extract_crawl_artifact(status_data: dict[str, object]) -> CrawlArtifact:
     content = result.get("markdown", "") or result.get("text", "") or result.get("html", "")
     assert isinstance(content, str), "result content must be a string"
 
-    # Parse the content JSON to extract success_marker and host_header
-    try:
-        content_data: _OriginResponse = json.loads(content)
-    except json.JSONDecodeError as e:
-        raise AssertionError(f"Result content is not valid JSON: {content[:200]}") from e
+    # Production renders the origin body as plain "key: value" lines in result.text.
+    content_data: dict[str, str] = {}
+    for line in content.splitlines():
+        key, separator, value = line.partition(":")
+        if separator:
+            content_data[key.strip()] = value.strip()
 
     success_marker = content_data.get("success_marker", "")
     assert success_marker, f"No success_marker in content: {content_data}"
@@ -242,6 +236,28 @@ def test_egress_stack_build_does_not_force_builder_backend() -> None:
         if isinstance(n, ast.Constant) and isinstance(n.value, str) and n.value == "DOCKER_BUILDKIT"
     ]
     assert not offending, f"egress_stack must not force a builder backend (lines {offending})"
+
+
+def test_extract_crawl_artifact_parses_observed_plain_text_contract() -> None:
+    """Production returns the origin body as plain key: value lines in result.text."""
+    observed_text = "success_marker: CRAWLUTRON_EGRESS_PROOF_2624e4daba214411\nhost_header: origin\npath: /\n"
+    status_data: dict[str, object] = {
+        "request_id": "crawl_observed_contract",
+        "results": [
+            {
+                "original_url": "http://origin:80/",
+                "markdown": None,
+                "html": None,
+                "text": observed_text,
+            }
+        ],
+    }
+
+    artifact = _extract_crawl_artifact(status_data)
+
+    assert artifact.success_marker == "CRAWLUTRON_EGRESS_PROOF_2624e4daba214411"
+    assert artifact.host_header == "origin"
+    assert artifact.result_url == "http://origin:80/"
 
 
 @pytest.fixture(scope="module")
