@@ -316,16 +316,24 @@ class ProxyServer:
         """Whether the listener is still accepting connections."""
         return self._server.is_serving()
 
+    def _close(self) -> None:
+        """Idempotent lifecycle door: deregister and close the listener once."""
+        _LIVE_SERVERS.discard(self)
+        if self.is_live:
+            self._server.close()
+
     async def aclose(self) -> None:
         """Stop accepting and leave the lifecycle registry."""
-        self._server.close()
+        self._close()
         await self._server.wait_closed()
-        _LIVE_SERVERS.discard(self)
 
     async def serve_forever(self) -> None:
         """Run the server until cancelled; the public lifecycle door for sidecar use."""
-        async with self._server:
-            await self._server.serve_forever()
+        try:
+            async with self._server:
+                await self._server.serve_forever()
+        finally:
+            self._close()
 
 
 async def serve_proxy(
@@ -371,7 +379,7 @@ async def _open_target(host: str, port: int) -> tuple[_Reader, _Writer]:
 def _reset() -> None:
     """Stop every live proxy so a reset chain cannot leak listeners."""
     for server in tuple(_LIVE_SERVERS):
-        server._server.close()
+        server._close()
     _LIVE_SERVERS.clear()
 
 
