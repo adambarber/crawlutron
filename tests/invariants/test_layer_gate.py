@@ -9,7 +9,7 @@ from tests._walk_primitives import offender_at
 from tests._walk_readers import call_nodes
 from tests.chokepoint_paths import APP_ROOT, REPO_ROOT
 from tests.chokepoint_walks import trees_under
-from tests.rules import Bites, Rule
+from tests.rules import Bites, Registry, Rule
 
 #: Enforce the vacuity kill-switch: build_graph raises when it walks nothing.
 build_graph()
@@ -469,31 +469,24 @@ RULE_MUTABLE_CONTAINERS_REGISTER_STATE = Rule(
     clean=lambda: ["count = 0\n"],
 )
 
-LAYER_RULES = (
-    RULE_MODELS_VOCAB_IMPORT_NOTHING_ABOVE,
-    RULE_FASTAPI_REST_ONLY,
-    RULE_EGRESS_ONLY_FETCHERS,
-    RULE_SETTINGS_AT_OR_ABOVE_SERVICE,
-    RULE_UUID4_ONLY_IDS,
-    RULE_WRITE_MODE_OPEN_ATOMIC,
-    RULE_THREAD_POOL_ONLY_POOL,
-    RULE_SUBPROCESS_SANCTIONED,
-    RULE_MUTABLE_CONTAINERS_REGISTER_STATE,
+LAYER_RULES = Registry(
+    (
+        RULE_MODELS_VOCAB_IMPORT_NOTHING_ABOVE,
+        RULE_FASTAPI_REST_ONLY,
+        RULE_EGRESS_ONLY_FETCHERS,
+        RULE_SETTINGS_AT_OR_ABOVE_SERVICE,
+        RULE_UUID4_ONLY_IDS,
+        RULE_WRITE_MODE_OPEN_ATOMIC,
+        RULE_THREAD_POOL_ONLY_POOL,
+        RULE_SUBPROCESS_SANCTIONED,
+        RULE_MUTABLE_CONTAINERS_REGISTER_STATE,
+    )
 )
 
 
 def test_layer_gate_holds_on_live_tree() -> None:
-    failures: list[str] = []
-    for rule in LAYER_RULES:
-        found = rule.violations(rule.trees())
-        if found:
-            failures.append("  " + rule.name + ":\n    " + "\n    ".join(found))
-    assert not failures, (
-        "layer gate violations on the live tree (fix the surface or shrink a skip set in the same commit):\n"
-        + "\n".join(failures)
-    )
+    LAYER_RULES.check_all_clean()
 
 
 def test_layer_gate_every_rule_bites() -> None:
-    for rule in LAYER_RULES:
-        rule.check_bites()
+    LAYER_RULES.check_all_bite()

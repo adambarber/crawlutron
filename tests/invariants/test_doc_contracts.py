@@ -17,7 +17,7 @@ from crawlutron.models.render_request import RenderRequest
 from tests.chokepoint_paths import REPO_ROOT
 from tests.chokepoint_walks import canonical_tree, discovered_files
 from tests.invariants._env_knobs import _KNOB_PATTERN, _consumed_knobs
-from tests.rules import Rule
+from tests.rules import Registry, Rule
 
 _DOC_REFERENCE_EXCLUSIONS = {
     "CHANGELOG.md": "a record of what shipped; its citations name modules that were refactored away",
@@ -297,6 +297,9 @@ DOC_SYMBOLS_RESOLVE_TO_DEFINITIONS = Rule(
     bite=lambda: (),
     clean=None,
 )
+
+# The detector reads doc files, not a canonical_tree tree, so the tmp-copy tests below are its two halves.
+RULES = Registry((DOC_SYMBOLS_RESOLVE_TO_DEFINITIONS,))
 
 
 _FENCED_JSON = re.compile(r"```json\n(.*?)```", re.DOTALL)

@@ -10,7 +10,7 @@ import ast
 
 from tests.chokepoint_paths import relative_posix
 from tests.chokepoint_walks import call_nodes, offender_at, resolved_call_name
-from tests.rules import Bites, Rule
+from tests.rules import Bites, Registry, Rule
 
 #: The sanctioned egress home: fetchers.py owns the pooled client; nothing else builds one.
 _EGRESS_HOME = "packages/core/src/crawlutron/transport/fetchers.py"
@@ -137,16 +137,18 @@ RAW_EGRESS_DIAL = Rule(
 )
 
 
+RULES = Registry((INDEPENDENT_EGRESS_DOOR, RAW_EGRESS_DIAL))
+
+
 def test_independent_egress_door():
     """No module but fetchers.py's pool home constructs an outbound client."""
-    INDEPENDENT_EGRESS_DOOR.scan()
+    RULES.check_all_clean()
 
 
 def test_raw_egress_dial_is_named_by_file_and_line():
     """The pooled client's dial verbs refuse a raw URL string, and a planted
     client.get("http://example.test/") is named by file:line."""
-    RAW_EGRESS_DIAL.scan()
-    RAW_EGRESS_DIAL.check_bites()
+    RULES.check_all_bite()
 
 
 def test_egress_proxy_docstring_declares_the_sole_door() -> None:

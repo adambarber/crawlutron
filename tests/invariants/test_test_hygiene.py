@@ -19,7 +19,7 @@ from tests.membership_gate import (
     error_field_taxonomy_offenders,
     swallowing_test_double_offenders,
 )
-from tests.rules import Bites, Rule
+from tests.rules import Bites, Registry, Rule
 
 # --------------------------------------------------------------------------- Collectible tests: a test pytest
 # cannot see is a test that never runs
@@ -183,7 +183,7 @@ EVERY_PYTEST_MARKER_IS_REGISTERED = Rule(
 
 
 def test_every_pytest_marker_is_registered():
-    EVERY_PYTEST_MARKER_IS_REGISTERED.scan()
+    RULES.check_all_clean()
 
 
 # --------------------------------------------------------------------------- Alias-blindness: a dynamic
@@ -292,7 +292,7 @@ ERROR_FIELD_VALUES_ARE_TAXONOMY_MEMBERS = Rule(
 
 
 def test_every_test_function_is_one_pytest_can_collect():
-    EVERY_TEST_FUNCTION_IS_ONE_PYTEST_CAN_COLLECT.scan()
+    RULES.check_all_clean()
 
 
 # =========================================================================== ALIAS-BLINDNESS (program 3):
@@ -414,9 +414,26 @@ SCHEDULER_DOUBLES_BIND_FAILED_RESULT = Rule(
 )
 
 
+RULES = Registry(
+    (
+        EVERY_TEST_FUNCTION_IS_ONE_PYTEST_CAN_COLLECT,
+        EVERY_PYTEST_MARKER_IS_REGISTERED,
+        DYNAMIC_RE_PATTERNS_ROUTE_THROUGH_SAFE_REGEX,
+        SANCTIONED_FUNCS_ARE_NOT_ALIASED_PAST_THE_SPELLING_LISTS,
+        TEST_DOUBLES_ROUTE_THE_FAILED_RESULT,
+        ERROR_FIELD_VALUES_ARE_TAXONOMY_MEMBERS,
+        SCHEDULER_DOUBLES_BIND_FAILED_RESULT,
+    )
+)
+
+
 def test_no_existing_double_swallows_failed_result():
     """Derived from the production signature, not a hand-kept list.
 
     Every scheduler double in tests/ binds ``failed_result`` by name today;
     a ``**kwargs``-only regression is caught by this AND the sweep above."""
-    SCHEDULER_DOUBLES_BIND_FAILED_RESULT.scan()
+    RULES.check_all_clean()
+
+
+def test_test_hygiene_rules_have_working_bite():
+    RULES.check_all_bite()

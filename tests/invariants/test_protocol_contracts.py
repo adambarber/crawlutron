@@ -9,7 +9,7 @@ from pathlib import Path
 from tests.chokepoint_paths import APP_ROOT, REPO_ROOT, relative_posix
 from tests.chokepoint_walks import app_trees, attribute_reads, file_tree, lineno, name_reads, offender
 from tests.invariants._shared import _declared_public_symbols, _enclosing_calls, _enclosing_nodes
-from tests.rules import Bites, Rule
+from tests.rules import Bites, Registry, Rule
 
 _PROTOCOL_CONSTANTS_MODULE = "packages/mcp/src/crawlutron_mcp/constants.py"
 
@@ -126,7 +126,7 @@ CYCLE_GUARD_IS_CONSULTED_IN_EXACTLY_ONE_PLACE = Rule(
 def test_the_cycle_guard_is_applied_in_exactly_one_place():
     """The cycle guard is consulted in one place: one function in
     crawlutron/models/taxonomy.py, never once per container arm."""
-    CYCLE_GUARD_IS_CONSULTED_IN_EXACTLY_ONE_PLACE.scan()
+    RULES.check_all_clean()
 
 
 def test_cycle_guard_detector_respects_the_owner_parameter():
@@ -198,6 +198,15 @@ THE_META_KEY_REJECTION_REASON_IS_AUTHORED_ONCE = Rule(
 )
 
 
+RULES = Registry(
+    (CYCLE_GUARD_IS_CONSULTED_IN_EXACTLY_ONE_PLACE, THE_META_KEY_REJECTION_REASON_IS_AUTHORED_ONCE)
+)
+
+
 def test_the_meta_key_rejection_reason_is_authored_once():
     """packages/mcp/src/crawlutron_mcp/protocol.py spells the wrong-type _meta reason in one function."""
-    THE_META_KEY_REJECTION_REASON_IS_AUTHORED_ONCE.scan()
+    RULES.check_all_clean()
+
+
+def test_protocol_contract_rules_have_working_bite():
+    RULES.check_all_bite()

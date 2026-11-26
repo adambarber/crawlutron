@@ -15,7 +15,7 @@ from tests._walk_primitives import offender_at, parsed_source, python_bearing_ro
 from tests._walk_resolution import resolved_call_name, resolved_expr_name
 from tests.chokepoint_paths import REPO_ROOT, relative_posix
 from tests.chokepoint_walks import app_trees, call_nodes
-from tests.rules import Bites, Rule
+from tests.rules import Bites, Registry, Rule
 
 _SANCTIONED_APP = frozenset(
     {
@@ -150,6 +150,8 @@ DIRECT_DIAL = Rule(
     clean=lambda: ("value = mapping.get('key')\n",),
 )
 
+RULES = Registry((DIRECT_DIAL,))
+
 # #1364 S5 topology: ratchet collapses to zero; raw sockets/unproxied clients refused.
 _RATCHET = {"search": 0, "service": 0, "transport": 0, "scripts": 0}
 
@@ -228,7 +230,7 @@ def test_sidecar_admission_is_path_exact() -> None:
 
 def test_detector_bites_and_spares_lookalikes() -> None:
     """Rule/Bites proof: a direct dial fires by file:line, a dict get stays quiet."""
-    DIRECT_DIAL.check_bites()
+    RULES.check_all_bite()
 
 
 def test_exemption_is_by_relative_path_not_basename() -> None:

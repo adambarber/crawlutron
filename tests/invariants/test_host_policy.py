@@ -19,7 +19,7 @@ from tests.chokepoint_walks import (
     parent_map,
     resolved_call_name,
 )
-from tests.rules import Bites, Rule, Trips
+from tests.rules import Bites, Registry, Rule, Trips
 
 _HOST_POLICY_VALIDATORS = frozenset(
     {
@@ -483,5 +483,12 @@ def test_host_policy_detector_accepts_fixed_extraction_boundaries():
     ]
 
 
+RULES = Registry((URL_RETURNING_HELPERS_REQUIRE_HOST_POLICY,))
+
+
 def test_url_returning_helpers_require_host_policy():
-    URL_RETURNING_HELPERS_REQUIRE_HOST_POLICY.scan()
+    RULES.check_all_clean()
+
+
+def test_host_policy_rule_has_working_bite():
+    RULES.check_all_bite()
