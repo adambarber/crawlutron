@@ -345,10 +345,10 @@ async def serve_proxy(
     port: int = 0,
     dial: _Dial | None = None,
     sidecar_bind: ipaddress.IPv4Address | None = None,
+    register: bool = True,
 ) -> ProxyServer:
-    """Start a CONNECT/HTTP proxy with an injectable dial seam.
-    By default binds loopback-only; pass ``sidecar_bind=IPv4Address(socket.INADDR_ANY)``
-    for dual-homed sidecar (only unspecified IPv4 address admitted).
+    """Start a loopback proxy; sidecar_bind admits only the unspecified address.
+    ``register=False`` makes the caller sole owner of ``aclose`` on this loop.
     """
     # Validate sidecar_bind and host combination
     if sidecar_bind is not None:
@@ -369,7 +369,8 @@ async def serve_proxy(
     server = await asyncio.start_server(_make_handler(policy, upstream), bind_host, port)
     actual_port = server.sockets[0].getsockname()[1]
     wrapped = ProxyServer(server, actual_port, bind_host)
-    _LIVE_SERVERS.add(wrapped)
+    if register:
+        _LIVE_SERVERS.add(wrapped)
     return wrapped
 
 

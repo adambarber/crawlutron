@@ -58,7 +58,9 @@ def egress_proxy_url(policy: HostPolicy, settings: CrawlerSettings | None = None
         if _loop is None:
             _loop = asyncio.new_event_loop()
             threading.Thread(target=_loop.run_forever, daemon=True).start()
-        server = asyncio.run_coroutine_threadsafe(serve_proxy(policy=policy), _loop).result(timeout=10.0)
+        server = asyncio.run_coroutine_threadsafe(serve_proxy(policy=policy, register=False), _loop).result(
+            timeout=10.0
+        )
         _server, _url = server, f"http://127.0.0.1:{server.port}"
         return _url
 
