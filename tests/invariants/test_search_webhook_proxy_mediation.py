@@ -18,7 +18,7 @@ from safe_url.host_policy import HostPolicy
 from tests._walk_primitives import offender_at, parsed_source
 from tests.chokepoint_paths import REPO_ROOT, relative_posix
 from tests.chokepoint_walks import call_nodes
-from tests.rules import Bites, Rule, Silent
+from tests.rules import Bites, Registry, Rule, Silent
 
 # --- Search provider egress mediation ---
 
@@ -91,12 +91,12 @@ SEARCH_PROXY_MEDIATION = Rule(
 
 def test_search_provider_proxy_mediation():
     """Search providers must not construct independent outbound clients."""
-    SEARCH_PROXY_MEDIATION.scan()
+    RULES.check_all_clean()
 
 
 def test_search_provider_proxy_mediation_bites():
     """The rule's bite proof: an independent construction is named by file:line."""
-    SEARCH_PROXY_MEDIATION.check_bites()
+    RULES.check_all_bite()
 
 
 # --- Webhook delivery egress mediation ---
@@ -173,14 +173,17 @@ WEBHOOK_PROXY_MEDIATION = Rule(
 )
 
 
+RULES = Registry((SEARCH_PROXY_MEDIATION, WEBHOOK_PROXY_MEDIATION))
+
+
 def test_webhook_delivery_proxy_mediation():
     """Webhook delivery must not construct unproxied outbound clients."""
-    WEBHOOK_PROXY_MEDIATION.scan()
+    RULES.check_all_clean()
 
 
 def test_webhook_delivery_proxy_mediation_bites():
     """The rule's bite proof: an unproxied construction is named by file:line."""
-    WEBHOOK_PROXY_MEDIATION.check_bites()
+    RULES.check_all_bite()
 
 
 # --- Behavioral integration tests: verify runtime proxy usage ---

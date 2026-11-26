@@ -7,7 +7,7 @@ import pathlib
 
 from tests.chokepoint_paths import REPO_ROOT, relative_posix
 from tests.chokepoint_walks import from_imports, trees_under
-from tests.rules import Rule
+from tests.rules import Registry, Rule
 
 #: The one door every engine-result builder imports through.
 _RESULT_DOOR = "tests._result_builders"
@@ -143,12 +143,16 @@ DOOR_SURFACE_IS_EXACTLY_THE_ONE_BUILDER = Rule(
     proof_path=REPO_ROOT / "tests" / "_synthetic.py",
 )
 
-RULES = (RESULT_BUILDERS_IMPORT_ONLY_THROUGH_THE_DOOR, DOOR_SURFACE_IS_EXACTLY_THE_ONE_BUILDER)
+RULES = Registry((RESULT_BUILDERS_IMPORT_ONLY_THROUGH_THE_DOOR, DOOR_SURFACE_IS_EXACTLY_THE_ONE_BUILDER))
 
 
 def test_result_builders_import_only_through_the_door():
-    RESULT_BUILDERS_IMPORT_ONLY_THROUGH_THE_DOOR.scan()
+    RULES.check_all_clean()
 
 
 def test_result_builders_door_surface_is_exactly_the_one_builder():
-    DOOR_SURFACE_IS_EXACTLY_THE_ONE_BUILDER.scan()
+    RULES.check_all_clean()
+
+
+def test_result_builders_door_rules_have_working_bite():
+    RULES.check_all_bite()

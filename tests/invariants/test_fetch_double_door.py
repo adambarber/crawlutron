@@ -10,7 +10,7 @@ import pathlib
 
 from tests.chokepoint_paths import REPO_ROOT, relative_posix
 from tests.chokepoint_walks import from_imports, trees_under
-from tests.rules import Rule
+from tests.rules import Registry, Rule
 
 #: The one door every fetch double imports through.
 _FETCH_DOUBLES_DOOR = "tests._fetch_doubles"
@@ -152,11 +152,11 @@ def _staged_transport_offenders(tree: ast.Module, path: pathlib.Path) -> list[st
 
 
 def test_fetch_doubles_import_only_through_the_door():
-    FETCH_DOUBLES_IMPORT_ONLY_THROUGH_THE_DOOR.scan()
+    RULES.check_all_clean()
 
 
 def test_fetch_doubles_door_surface_is_exactly_the_two_constructions():
-    DOOR_SURFACE_IS_EXACTLY_THE_TWO_CONSTRUCTIONS.scan()
+    RULES.check_all_clean()
 
 
 STAGED_TRANSPORT_DOUBLES_IMPORT_ONLY_THROUGH_THE_DOOR = Rule(
@@ -184,5 +184,18 @@ STAGED_TRANSPORT_DOUBLES_IMPORT_ONLY_THROUGH_THE_DOOR = Rule(
 )
 
 
+RULES = Registry(
+    (
+        FETCH_DOUBLES_IMPORT_ONLY_THROUGH_THE_DOOR,
+        DOOR_SURFACE_IS_EXACTLY_THE_TWO_CONSTRUCTIONS,
+        STAGED_TRANSPORT_DOUBLES_IMPORT_ONLY_THROUGH_THE_DOOR,
+    )
+)
+
+
 def test_staged_transport_doubles_import_only_through_the_door():
-    STAGED_TRANSPORT_DOUBLES_IMPORT_ONLY_THROUGH_THE_DOOR.scan()
+    RULES.check_all_clean()
+
+
+def test_fetch_double_door_rules_have_working_bite():
+    RULES.check_all_bite()

@@ -12,7 +12,7 @@ from tests._walk_primitives import offender
 from tests.chokepoint_paths import APP_ROOT, REPO_ROOT
 from tests.chokepoint_walks import nodes_of
 from tests.invariants._shared import function_defs, module_level_bindings
-from tests.rules import Bites, Rule
+from tests.rules import Bites, Registry, Rule
 
 _EMPTIED_BY = frozenset({"clear"})
 
@@ -152,11 +152,11 @@ MUTATED_STATE_HAS_A_RESET_DOOR = Rule(
 
 
 def test_mutated_module_state_has_a_reset_door():
-    MUTATED_STATE_HAS_A_RESET_DOOR.scan()
+    RULES.check_all_clean()
 
 
 def test_reset_door_detector_bites():
-    MUTATED_STATE_HAS_A_RESET_DOOR.check_bites()
+    RULES.check_all_bite()
 
 
 def test_no_module_hand_copies_the_reset_pair():
@@ -218,9 +218,12 @@ RESET_SHAPED_STATE_IS_REGISTERED = Rule(
 )
 
 
+RULES = Registry((MUTATED_STATE_HAS_A_RESET_DOOR, RESET_SHAPED_STATE_IS_REGISTERED))
+
+
 def test_reset_shaped_state_is_registered():
-    RESET_SHAPED_STATE_IS_REGISTERED.scan()
+    RULES.check_all_clean()
 
 
 def test_reset_shaped_registration_bites():
-    RESET_SHAPED_STATE_IS_REGISTERED.check_bites()
+    RULES.check_all_bite()

@@ -12,8 +12,15 @@ from typing import TypedDict, Unpack, cast
 
 import pytest
 
-from tests.chokepoint_paths import REPO_ROOT, relative_posix
 from tests.chokepoint_walks import trees_under
+from tests.rule_census import (
+    PLAIN_ASSERTION_CEILING,
+    PLAIN_ASSERTION_SET,
+    as_relative,
+    ast_scanning_modules,
+    constructs,
+    plain_assertion_modules,
+)
 from tests.rules import Bites, Detector, Proof, Registry, Rule, Silent, Trips
 
 
@@ -384,85 +391,73 @@ class TestRegistryReportsEveryFailure:
         Registry((_urljoin_rule(),)).check_all_bite()
 
 
-_INVARIANTS_DIR = REPO_ROOT / "tests" / "invariants"
-#: Measured post-batch census; down only, deleted when zero.
-_HAND_ROLLED_BUDGET = 93
+class TestAstScanningIdiom:
+    """Class A: an AST-scanning invariant must construct a Registry, or its detector is unfenced."""
 
-
-def _registry_bindings(tree: ast.Module) -> tuple[set[str], set[str]]:
-    """(class names, module aliases) bound by imports from ``tests.rules``."""
-    classes: set[str] = set()
-    modules: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module == "tests.rules":
-            classes.update(alias.asname or alias.name for alias in node.names if alias.name == "Registry")
-        elif isinstance(node, ast.Import):
-            modules.update(alias.asname or "tests" for alias in node.names if alias.name == "tests.rules")
-    return classes, modules
-
-
-def _constructs_registry(tree: ast.Module) -> bool:
-    """Only a CALL to a Registry constructor executes the idiom; an import does not."""
-    classes, modules = _registry_bindings(tree)
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        if isinstance(node.func, ast.Name) and node.func.id in classes:
-            return True
-        if (
-            isinstance(node.func, ast.Attribute)
-            and node.func.attr == "Registry"
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id in modules
-        ):
-            return True
-    return False
-
-
-def _hand_rolled_invariants(directory: pathlib.Path = _INVARIANTS_DIR) -> list[pathlib.Path]:
-    """Invariant modules that never construct a Registry; no basename is exempted."""
-    return sorted(
-        path
-        for path, tree in trees_under(directory)
-        if path.name.startswith("test_") and not _constructs_registry(tree)
-    )
-
-
-class TestInvariantExecutionIdiom:
-    """The census counts execution, not imports, aliases or dead declarations."""
-
-    def test_the_hand_rolled_census_stays_within_its_down_only_budget(self):
-        found = _hand_rolled_invariants()
-        assert len(found) <= _HAND_ROLLED_BUDGET, (
-            f"{len(found)} invariant module(s) hand-roll their loop over the budget of "
-            f"{_HAND_ROLLED_BUDGET}; migrate one to Registry: "
-            + ", ".join(relative_posix(path) for path in found)
+    def test_every_ast_scanning_invariant_constructs_a_registry(self):
+        found = ast_scanning_modules()
+        assert not found, (
+            f"{len(found)} invariant module(s) declare a Rule but never construct a Registry: "
+            + ", ".join(as_relative(found))
         )
 
-    def test_the_hand_rolled_budget_is_not_stale(self):
-        found = _hand_rolled_invariants()
-        assert _HAND_ROLLED_BUDGET <= len(found), (
-            f"budget {_HAND_ROLLED_BUDGET} is stale; tree has {len(found)} hand-rolled module(s): "
-            + ", ".join(relative_posix(path) for path in found)
-        )
+    @pytest.mark.parametrize("symbol", ("Rule", "Registry"))
+    def test_an_import_only_reference_is_not_a_constructor(self, symbol):
+        assert not constructs(symbol, ast.parse(f"from tests.rules import {symbol}\n"))
 
-    def test_an_import_only_reference_is_not_a_constructor(self):
-        assert not _constructs_registry(ast.parse("from tests.rules import Registry\n"))
+    @pytest.mark.parametrize("symbol", ("Rule", "Registry"))
+    def test_a_dead_binding_is_not_a_constructor(self, symbol):
+        assert not constructs(symbol, ast.parse(f"from tests.rules import {symbol}\nB = {symbol}\n"))
 
-    def test_a_dead_binding_is_not_a_constructor(self):
-        assert not _constructs_registry(ast.parse("from tests.rules import Registry\nRULES = Registry\n"))
+    @pytest.mark.parametrize("symbol", ("Rule", "Registry"))
+    def test_an_aliased_class_constructor_is_counted(self, symbol):
+        assert constructs(symbol, ast.parse(f"from tests.rules import {symbol} as S\nB = S(())\n"))
 
-    def test_an_aliased_class_constructor_is_counted(self):
-        assert _constructs_registry(ast.parse("from tests.rules import Registry as Reg\nRULES = Reg(())\n"))
+    @pytest.mark.parametrize("symbol", ("Rule", "Registry"))
+    def test_an_aliased_module_constructor_is_counted(self, symbol):
+        source = f"import tests.rules as rules\nB = rules.{symbol}(())\n"
+        assert constructs(symbol, ast.parse(source))
 
-    def test_an_aliased_module_constructor_is_counted(self):
-        assert _constructs_registry(ast.parse("import tests.rules as rules\nRULES = rules.Registry(())\n"))
-
-    def test_a_planted_hand_rolled_module_is_named_by_the_census(self, tmp_path):
-        (tmp_path / "test_planted_handrolled.py").write_text(
-            "def test_x():\n    assert True\n", encoding="utf-8"
+    def test_a_planted_rule_only_module_is_named(self, tmp_path):
+        (tmp_path / "test_planted_rule_only.py").write_text(
+            "from tests.rules import Rule\nRULE = Rule('x', lambda: [], lambda: 'x = 1')\n",
+            encoding="utf-8",
         )
         (tmp_path / "test_planted_registry.py").write_text(
             "from tests.rules import Registry\nRULES = Registry(())\n", encoding="utf-8"
         )
-        assert [path.name for path in _hand_rolled_invariants(tmp_path)] == ["test_planted_handrolled.py"]
+        assert [path.name for path in ast_scanning_modules(tmp_path)] == ["test_planted_rule_only.py"]
+
+
+class TestPlainAssertionAdmission:
+    """Class B: config/runtime assertions are admitted by name, never faked as Rules."""
+
+    def test_no_new_plain_assertion_module(self):
+        found = set(as_relative(plain_assertion_modules()))
+        assert not (new := found - PLAIN_ASSERTION_SET), (
+            "new plain assertion invariant(s) must be admitted by name in #1474's set: "
+            + ", ".join(sorted(new))
+        )
+
+    def test_no_stale_admitted_path(self):
+        found = set(as_relative(plain_assertion_modules()))
+        assert not (stale := PLAIN_ASSERTION_SET - found), (
+            "admitted path(s) now construct a Rule or Registry; remove them from the named set: "
+            + ", ".join(sorted(stale))
+        )
+
+    def test_the_plain_assertion_ceiling_is_not_stale(self):
+        found = plain_assertion_modules()
+        assert len(found) == PLAIN_ASSERTION_CEILING, (
+            f"plain assertion ceiling {PLAIN_ASSERTION_CEILING} is stale; tree has {len(found)} module(s): "
+            + ", ".join(as_relative(found))
+        )
+
+    def test_a_planted_plain_module_is_separate_from_class_a(self, tmp_path):
+        (tmp_path / "test_planted_plain.py").write_text("def test_x():\n    assert True\n", encoding="utf-8")
+        (tmp_path / "test_planted_rule_only.py").write_text(
+            "from tests.rules import Rule\nRULE = Rule('x', lambda: [], lambda: 'x = 1')\n",
+            encoding="utf-8",
+        )
+        assert [path.name for path in plain_assertion_modules(tmp_path)] == ["test_planted_plain.py"]
+        assert [path.name for path in ast_scanning_modules(tmp_path)] == ["test_planted_rule_only.py"]
