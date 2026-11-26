@@ -1,7 +1,7 @@
 """Extract every comment in the repository into one file, with file and line.
 
-Usage: ``python scripts/extract_comments.py [-o OUT] [--grep RE] [--no-docstrings] [--path TREE]``
--- one ``path:line:text`` record per line; comment hygiene is a reader's call, not a regex gate.
+Usage: ``python scripts/extract_comments.py [-o OUT] [--touched REV] [--grep RE]``;
+one ``path:line:text`` record per line; ``--touched`` heads each whole touched file.
 """
 
 from __future__ import annotations
@@ -43,31 +43,47 @@ FALLBACK_SKIP = frozenset(
 )
 
 
+def _git_output(args: list[str]) -> bytes | None:
+    """The one git invocation site behind both derived file lists."""
+    git = shutil.which("git")
+    if git is None:
+        return None
+    try:
+        completed = subprocess.run(
+            [git, *args],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            check=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return completed.stdout
+
+
 def _tracked_files() -> list[pathlib.Path]:
     """Every tracked file, or a rglob fallback when git cannot answer.
 
     Honouring git rather than a hand-maintained skip list keeps scratch dirs out
     of the report; git is optional, so a missing git takes the fallback, not raise.
     """
-    git = shutil.which("git")
-    if git is not None:
-        try:
-            completed = subprocess.run(
-                [git, "ls-files", "-z"],
-                cwd=REPO_ROOT,
-                capture_output=True,
-                check=True,
-                timeout=30,
-            )
-        except (OSError, subprocess.SubprocessError):
-            pass
-        else:
-            return [REPO_ROOT / name for name in completed.stdout.decode().split("\0") if name]
+    output = _git_output(["ls-files", "-z"])
+    if output is not None:
+        return [REPO_ROOT / name for name in output.decode().split("\0") if name]
     return sorted(
         path
         for path in REPO_ROOT.rglob("*")
         if path.is_file() and not FALLBACK_SKIP.intersection(path.relative_to(REPO_ROOT).parts)
     )
+
+
+def _touched_files(rev: str) -> list[pathlib.Path]:
+    """Files changed between ``rev`` and HEAD; empty when git cannot answer."""
+    range_spec = rev if ".." in rev else f"{rev}..HEAD"
+    output = _git_output(["diff", "--name-only", range_spec])
+    if output is None:
+        return []
+    return [REPO_ROOT / name for name in output.decode().splitlines() if name]
 
 
 def _is_comment_file(path: pathlib.Path) -> bool:
@@ -176,6 +192,42 @@ def _records(path: pathlib.Path, *, include_docstrings: bool) -> Iterator[tuple[
     return _text_records(path)
 
 
+def _emitted(
+    paths: list[pathlib.Path],
+    *,
+    prefixes: tuple[str, ...],
+    matcher: re.Pattern[str] | None,
+    include_docstrings: bool,
+    touched: bool,
+) -> tuple[list[str], dict[str, int], int]:
+    """Records, per-extension counts and scanned count for one derived file list."""
+    lines: list[str] = []
+    counts: dict[str, int] = {}
+    scanned = 0
+    for path in paths:
+        relative = str(path.relative_to(REPO_ROOT))
+        if touched and not path.is_file():
+            continue
+        if not _is_comment_file(path) or (prefixes and not relative.startswith(prefixes) and not touched):
+            continue
+        try:
+            records = list(_records(path, include_docstrings=include_docstrings))
+        except (OSError, UnicodeDecodeError, tokenize.TokenError, SyntaxError) as error:
+            # SyntaxError here is the tokenizer's (IndentationError escapes
+            # generate_tokens): the file is named and skipped, never silent.
+            print(f"skipping {relative}: {error}", file=sys.stderr)
+            continue
+        scanned += 1
+        counts[path.suffix or path.name] = counts.get(path.suffix or path.name, 0) + len(records)
+        if touched:
+            lines.append(f"ENTIRETY OF FILE: {relative}")
+        for row, _col, text in records:
+            if matcher is not None and not matcher.search(text) and not touched:
+                continue
+            lines.append(f"{relative}:{row}:{text}")
+    return lines, counts, scanned
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("-o", "--output", type=pathlib.Path, help="write the extract here instead of stdout")
@@ -189,32 +241,26 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--codes", action="store_true", help="count by file extension instead of listing records"
     )
+    parser.add_argument(
+        "--touched",
+        metavar="REV",
+        help="derive touched files from REV..HEAD; emit each whole file's prose",
+    )
     args = parser.parse_args(argv)
 
     matcher = re.compile(args.grep) if args.grep else None
     prefixes = tuple(args.path)
     include_docstrings = not args.no_docstrings
 
-    lines: list[str] = []
-    counts: dict[str, int] = {}
-    scanned = 0
-    for path in _tracked_files():
-        relative = str(path.relative_to(REPO_ROOT))
-        if not _is_comment_file(path) or (prefixes and not relative.startswith(prefixes)):
-            continue
-        try:
-            records = list(_records(path, include_docstrings=include_docstrings))
-        except (OSError, UnicodeDecodeError, tokenize.TokenError, SyntaxError) as error:
-            # SyntaxError here is the tokenizer's (IndentationError escapes
-            # generate_tokens): the file is named and skipped, never silent.
-            print(f"skipping {relative}: {error}", file=sys.stderr)
-            continue
-        scanned += 1
-        counts[path.suffix or path.name] = counts.get(path.suffix or path.name, 0) + len(records)
-        for row, _col, text in records:
-            if matcher is not None and not matcher.search(text):
-                continue
-            lines.append(f"{relative}:{row}:{text}")
+    touched = args.touched is not None
+    paths = _touched_files(args.touched) if touched else _tracked_files()
+    lines, counts, scanned = _emitted(
+        paths,
+        prefixes=prefixes,
+        matcher=matcher,
+        include_docstrings=include_docstrings,
+        touched=touched,
+    )
 
     if args.codes:
         body = "\n".join(f"{suffix or 'other':>10}  {count}" for suffix, count in sorted(counts.items()))
