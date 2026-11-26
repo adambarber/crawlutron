@@ -438,6 +438,19 @@ def test_doc_symbols_resolve_to_definitions():
     assert not (failures := _doc_symbol_offenders()), "; ".join(failures)
 
 
+def test_doc_symbol_registry_clean_check_is_live():
+    """The Registry binding must execute the detector, not merely exist."""
+    rule = RULES.rules[0]
+    saved = (rule.find, rule.scope)
+    object.__setattr__(rule, "find", lambda tree, path: _doc_symbol_offenders())
+    object.__setattr__(rule, "scope", lambda *, exclude: [(REPO_ROOT, ast.parse(""))])
+    try:
+        RULES.check_all_clean()
+    finally:
+        object.__setattr__(rule, "find", saved[0])
+        object.__setattr__(rule, "scope", saved[1])
+
+
 def test_doc_symbol_detector_bites(tmp_path):
     """The gate must catch a stale dotted path and a stale bare symbol.
 
