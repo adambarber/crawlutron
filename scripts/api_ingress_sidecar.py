@@ -6,56 +6,27 @@ import asyncio
 import ipaddress
 import logging
 import os
-import re
-import socket
 import sys
 from collections.abc import Mapping
 
+from crawlutron.config.sidecar import SidecarConfig
 from crawlutron_admit.task_scope import Grace, Handle, NamedRegistry, TaskScope
 from crawlutron_admit.values import Count, Duration
 
 _LOGGER = logging.getLogger(__name__)
-_HOST_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]{0,251}[A-Za-z0-9])?\Z")
-_ANY = ipaddress.IPv4Address(socket.INADDR_ANY)
 
 # bind address, bind port, fixed upstream host, fixed upstream port.
 IngressConfig = tuple[ipaddress.IPv4Address, int, str, int]
 
 
-def _port(raw: str | None, name: str, default: int) -> int:
-    """Parse a fail-closed TCP port in 1..65535."""
-    text = raw if raw is not None else str(default)
-    try:
-        value = int(text)
-    except ValueError as exc:
-        raise ValueError(f"{name} must be a decimal port, got {text!r}") from exc
-    if not 1 <= value <= 65535:
-        raise ValueError(f"{name} must be in 1..65535, got {value}")
-    return value
-
-
 def parse_ingress_config(env: Mapping[str, str]) -> IngressConfig:
-    """Admit only the unspecified bind and a well-formed fixed upstream."""
-    bind_raw = env.get("API_INGRESS_BIND_HOST")
-    if bind_raw is None:
-        bind_host = _ANY
-    else:
-        try:
-            bind_host = ipaddress.IPv4Address(bind_raw)
-        except ValueError as exc:
-            raise ValueError(f"bad API_INGRESS_BIND_HOST {bind_raw!r}") from exc
-        if bind_host != _ANY:
-            raise ValueError("API_INGRESS_BIND_HOST must be 0.0.0.0")
-
-    host = env.get("API_INGRESS_UPSTREAM_HOST", "crawlutron")
-    if not (len(host) <= 253 and _HOST_RE.fullmatch(host)):
-        raise ValueError(f"bad API_INGRESS_UPSTREAM_HOST {host!r}")
-
+    """Project the shared typed door onto the relay's existing tuple contract."""
+    config = SidecarConfig.for_ingress(env)
     return (
-        bind_host,
-        _port(env.get("API_INGRESS_BIND_PORT"), "API_INGRESS_BIND_PORT", 8765),
-        host,
-        _port(env.get("API_INGRESS_UPSTREAM_PORT"), "API_INGRESS_UPSTREAM_PORT", 8765),
+        config.bind_host,
+        config.bind_port,
+        config.upstream_host,
+        config.upstream_port,
     )
 
 
