@@ -69,6 +69,12 @@ _TRACKING_PARAM_EXACT = frozenset(
 )
 
 
+# Parse work is bounded where it happens: every caller of the constructor
+# inherits the cap, and an oversized query is refused rather than truncated.
+_MAX_QUERY_BYTES = 8192
+_MAX_QUERY_FIELDS = 256
+
+
 def _is_tracking_param(key: str) -> bool:
     k = key.lower()
     return k.startswith("utm_") or k in _TRACKING_PARAM_EXACT
@@ -177,9 +183,15 @@ def _canonical_parts(url: str, *, policy: HostPolicy) -> tuple[str, str, str, st
     path = parsed.path or ""
     query = parsed.query
     if query:
+        if len(query) > _MAX_QUERY_BYTES:
+            raise ValueError("invalid_url")
         # Drop known tracking parameters so UTM-variants canonicalize to one key;
         # the rest are sorted, so parameter order alone canonicalizes identically.
-        pairs = [(k, v) for (k, v) in parse_qsl(query, keep_blank_values=True) if not _is_tracking_param(k)]
+        try:
+            parsed_pairs = parse_qsl(query, keep_blank_values=True, max_num_fields=_MAX_QUERY_FIELDS)
+        except ValueError as error:
+            raise ValueError("invalid_url") from error
+        pairs = [(k, v) for (k, v) in parsed_pairs if not _is_tracking_param(k)]
         pairs.sort()
         query = urlencode(pairs, doseq=True)
     canonical = urlunparse((scheme, netloc, path, parsed.params, query, ""))
