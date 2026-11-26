@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import http.client
 import inspect
 import json
 import subprocess
@@ -33,6 +34,15 @@ class _OriginResponse(TypedDict):
 
 # API response validation uses dict.get() for runtime validation to avoid
 # mirroring production field shapes (which triggers the harness doubles gate).
+
+
+@dataclass
+class _HTTPResult:
+    """Subprocess-shaped result from a bounded host loopback HTTP call."""
+
+    returncode: int
+    stdout: str
+    stderr: str
 
 
 @dataclass
@@ -111,46 +121,47 @@ def _get_container_name(project_name: str, service_name: str) -> str:
     return ""
 
 
-def _crawl_via_api(app_container: str, url: str) -> subprocess.CompletedProcess[str]:
-    """Invoke the production crawl API via the REST endpoint (loopback port 8765).
-    This uses the real production wiring: the service's pooled client configured
-    with CRAWLUTRON_EGRESS_PROXY_URL.
-    """
+def _host_port_for(project_name: str, service_name: str) -> int:
+    """Read the loopback host port published by a service's container."""
+    container = _get_container_name(project_name, service_name)
+    result = run_cmd(["docker", "inspect", container, "--format", "{{json .NetworkSettings.Ports}}"])
+    assert result.returncode == 0, f"Failed to inspect {service_name}: {result.stderr}"
+    ports = json.loads(result.stdout.strip())
+    bindings = ports.get("8765/tcp")
+    assert bindings and len(bindings) == 1, f"Expected one 8765/tcp binding, got: {ports}"
+    binding = bindings[0]
+    assert binding.get("HostIp") == "127.0.0.1", f"Expected loopback bind, got: {binding}"
+    host_port = int(binding.get("HostPort", "0"))
+    assert host_port > 0, f"Expected a nonzero assigned host port, got: {binding}"
+    return host_port
+
+
+def _http_request(host_port: int, path: str, payload: dict[str, object] | None = None) -> _HTTPResult:
+    """Issue one bounded host-loopback request through the API ingress relay."""
+    body = json.dumps(payload).encode("utf-8") if payload is not None else None
+    headers = {"Content-Type": "application/json"} if body is not None else {}
+    connection = http.client.HTTPConnection("127.0.0.1", host_port, timeout=10)
+    try:
+        connection.request("POST" if body is not None else "GET", path, body=body, headers=headers)
+        response = connection.getresponse()
+        status = response.status
+        return _HTTPResult(0 if 200 <= status < 300 else status, response.read().decode("utf-8"), "")
+    except OSError as exc:
+        return _HTTPResult(1, "", str(exc))
+    finally:
+        connection.close()
+
+
+def _crawl_via_api(host_port: int, url: str) -> _HTTPResult:
+    """Submit an async crawl through the real host loopback ingress path."""
     # async_mode makes the POST return 202 CrawlAccepted with a status_url.
-    payload = json.dumps({"url": url, "async_mode": True})
-    return run_cmd(
-        [
-            "docker",
-            "exec",
-            "-i",
-            app_container,
-            "curl",
-            "-s",
-            "-X",
-            "POST",
-            "-H",
-            "Content-Type: application/json",
-            "-d",
-            payload,
-            "http://localhost:8765/v1/crawl",
-        ]
-    )
+    return _http_request(host_port, "/v1/crawl", {"url": url, "async_mode": True})
 
 
-def _poll_crawl_result(app_container: str, request_id: str, deadline: float) -> dict[str, object] | None:
+def _poll_crawl_result(host_port: int, request_id: str, deadline: float) -> dict[str, object] | None:
     """Poll for crawl job completion until deadline. Returns result dict or None if timeout."""
     while time.monotonic() < deadline:
-        status_result = run_cmd(
-            [
-                "docker",
-                "exec",
-                "-i",
-                app_container,
-                "curl",
-                "-s",
-                f"http://localhost:8765/v1/crawl/{request_id}",
-            ]
-        )
+        status_result = _http_request(host_port, f"/v1/crawl/{request_id}")
         if status_result.returncode == 0:
             try:
                 raw_data = json.loads(status_result.stdout.strip())
@@ -244,7 +255,7 @@ def egress_stack():
 
     # Build images (uses cached base images by default)
     print("Building egress test images...")
-    build_cmd = ["build", "crawlutron", "egress-proxy"]
+    build_cmd = ["build", "crawlutron", "egress-proxy", "api-ingress"]
     build_result = _docker_compose(project_name, build_cmd, capture=False, env=env)
     assert build_result.returncode == 0, "Failed to build images"
 
@@ -267,6 +278,9 @@ def egress_stack():
         print("Waiting for origin to be ready...")
         ready = _wait_for_container_running(project_name, "origin", setup_deadline)
         assert ready, "origin did not become ready within setup deadline"
+        print("Waiting for api-ingress to be ready...")
+        ready = _wait_for_container_running(project_name, "api-ingress", setup_deadline)
+        assert ready, "api-ingress did not become ready within setup deadline"
 
         yield project_name
     finally:
@@ -286,11 +300,11 @@ def crawled_origin(egress_stack) -> CrawlArtifact:
     Returns a single CrawlArtifact that both success tests assert different properties of.
     """
     project_name = egress_stack
-    app_container = _get_container_name(project_name, "crawlutron")
+    host_port = _host_port_for(project_name, "api-ingress")
     deadline = time.monotonic() + TOTAL_DEADLINE_SECONDS
 
     # Submit crawl job via production API
-    result = _crawl_via_api(app_container, "http://origin:80/")
+    result = _crawl_via_api(host_port, "http://origin:80/")
     assert result.returncode == 0, f"Crawl API call failed: {result.stderr}"
 
     try:
@@ -303,7 +317,7 @@ def crawled_origin(egress_stack) -> CrawlArtifact:
     print(f"Crawl request submitted: {request_id}")
 
     # Poll for job completion with bounded monotonic deadline
-    status_data = _poll_crawl_result(app_container, request_id, deadline)
+    status_data = _poll_crawl_result(host_port, request_id, deadline)
     assert status_data is not None, f"Crawl job did not complete within {TOTAL_DEADLINE_SECONDS}s deadline"
 
     # Validate the returned request_id matches submission
@@ -371,21 +385,28 @@ def test_logical_host_header_preserved(crawled_origin: CrawlArtifact) -> None:
 
 @pytest.mark.slow
 def test_loopback_only_published_port(egress_stack) -> None:
-    """Verify app container has loopback-only published port with dynamic host port."""
+    """Only the ingress relay publishes a loopback host port; the app publishes none."""
     project_name = egress_stack
     app_container = _get_container_name(project_name, "crawlutron")
-    result = run_cmd(["docker", "inspect", app_container, "--format", "{{json .NetworkSettings.Ports}}"])
-    assert result.returncode == 0
-    ports = json.loads(result.stdout.strip())
-    # Should have only the loopback mapping on 8765/tcp with a nonzero HostPort
-    assert "8765/tcp" in ports, f"Expected 8765/tcp mapping, got: {ports}"
-    bindings = ports["8765/tcp"]
-    assert bindings is not None and len(bindings) == 1, f"Expected exactly one binding, got: {bindings}"
-    binding = bindings[0]
-    assert binding.get("HostIp") == "127.0.0.1", f"Expected loopback HostIp, got: {binding.get('HostIp')}"
-    host_port = binding.get("HostPort")
-    assert host_port and host_port != "0", f"Expected nonzero HostPort, got: {host_port}"
-    print(f"App correctly has loopback-only published port on 127.0.0.1:{host_port}")
+    app_ports = run_cmd(["docker", "inspect", app_container, "--format", "{{json .NetworkSettings.Ports}}"])
+    assert app_ports.returncode == 0
+    published = json.loads(app_ports.stdout.strip())
+    assert all(value is None for value in published.values()), (
+        f"The app must not publish ports; got: {published}"
+    )
+    host_port = _host_port_for(project_name, "api-ingress")
+    print(f"API ingress correctly publishes loopback port on 127.0.0.1:{host_port}")
+
+
+@pytest.mark.slow
+def test_host_loopback_health_via_ingress(egress_stack) -> None:
+    """A real host loopback GET reaches the internal app through the relay."""
+    host_port = _host_port_for(egress_stack, "api-ingress")
+    result = _http_request(host_port, "/health")
+    assert result.returncode == 0, f"Host loopback /health failed: {result.stderr}"
+    payload = json.loads(result.stdout)
+    assert payload.get("status") == "ok", f"Unexpected /health payload: {payload}"
+    print(f"Host loopback health via ingress OK on 127.0.0.1:{host_port}")
 
 
 @pytest.mark.slow
@@ -406,6 +427,7 @@ def test_network_topology(egress_stack) -> None:
     for name, expected_networks in [
         ("crawlutron", ["internal"]),
         ("egress-proxy", ["internal", "egress"]),
+        ("api-ingress", ["internal", "ingress"]),
         ("origin", ["egress"]),
     ]:
         qualified = [f"{project_name}_{net}" for net in expected_networks]
@@ -433,3 +455,10 @@ def test_network_topology(egress_stack) -> None:
     assert result.returncode == 0
     assert result.stdout.strip() == "false", "egress network must allow external access"
     print("egress network correctly allows external access")
+
+    # Ingress is an ordinary bridge: only the relay attaches, never the app.
+    net_name = f"{project_name}_ingress"
+    result = run_cmd(["docker", "network", "inspect", net_name, "--format", "{{.Internal}}"])
+    assert result.returncode == 0
+    assert result.stdout.strip() == "false", "ingress network must allocate a host port"
+    print("ingress network correctly allows loopback host port allocation")

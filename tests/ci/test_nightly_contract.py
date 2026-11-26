@@ -140,18 +140,23 @@ def test_egress_topology_contract() -> None:
     sidecar proxy is the sole dual-homed container (internal + egress),
     isolated origin on egress only."""
 
-    compose_path = REPO_ROOT / "docker-compose.egress.yml"
-
-    compose = compose_path.read_text(encoding="utf-8")
     import yaml
 
-    doc = yaml.safe_load(compose)
-    services = doc.get("services", {})
-    networks = doc.get("networks", {})
+    from tests._walk_primitives import discovered_files
 
-    # Three services: crawlutron, egress-proxy, origin
-    assert set(services.keys()) == {"crawlutron", "egress-proxy", "origin"}, (
-        f"expected services crawlutron, egress-proxy, origin; got {set(services.keys())}"
+    contents = discovered_files(REPO_ROOT, "docker-compose*.yml", include_content=True)
+    base = yaml.safe_load(contents[REPO_ROOT / "docker-compose.yml"])
+    overlay = yaml.safe_load(contents[REPO_ROOT / "docker-compose.egress.yml"])
+    services = {
+        name: {**base.get("services", {}).get(name, {}), **definition}
+        for name, definition in overlay.get("services", {}).items()
+    }
+    networks = {**base.get("networks", {}), **overlay.get("networks", {})}
+
+    # Four services: internal app, dual-homed proxy, fixed ingress relay, isolated origin
+    expected_services = {"crawlutron", "egress-proxy", "api-ingress", "origin"}
+    assert set(services.keys()) == expected_services, (
+        f"expected services {sorted(expected_services)}; got {set(services.keys())}"
     )
 
     # App (crawlutron) is ONLY on internal network, no ports published
@@ -171,11 +176,20 @@ def test_egress_topology_contract() -> None:
         f"egress-proxy must be dual-homed (internal + egress); got {proxy_networks}"
     )
 
+    # The API ingress relay is internal+ingress: it never reaches egress.
+    ingress = services["api-ingress"]
+    ingress_networks = ingress.get("networks", [])
+    assert set(ingress_networks) == {"internal", "ingress"}, (
+        f"api-ingress must be on internal+ingress only; got {ingress_networks}"
+    )
+    assert "ports" in ingress, "api-ingress must own the loopback host port"
+
     # Origin is ONLY on egress network
     origin = services["origin"]
     origin_networks = origin.get("networks", [])
     assert origin_networks == ["egress"], f"origin must be on egress network only; got {origin_networks}"
 
-    # Networks: internal is internal-only, egress has external access
+    # Networks: internal is internal-only, egress and ingress are ordinary bridges
     assert networks["internal"].get("internal") is True, "internal network must be internal-only"
     assert networks["egress"].get("internal") is not True, "egress network must allow external access"
+    assert networks["ingress"].get("internal") is not True, "ingress network needs host port allocation"

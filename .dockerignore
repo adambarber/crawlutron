@@ -20,7 +20,8 @@
 #                             stage copies no source, its venv carries all six)
 #   uvicorn-log-config.json   runtime
 #   Dockerfile                the build itself
-#   scripts/egress_proxy_sidecar.py  runtime-base (sidecar launcher)
+#   scripts/egress_proxy_sidecar.py  runtime-base (egress sidecar)
+#   scripts/api_ingress_sidecar.py   runtime-base (API ingress relay)
 *
 !packages/
 !packages/**
@@ -28,6 +29,7 @@
 !uv.lock
 !scripts/camoufox_offline_fetch.py
 !scripts/egress_proxy_sidecar.py
+!scripts/api_ingress_sidecar.py
 !README.md
 !LICENSE
 !uvicorn-log-config.json
