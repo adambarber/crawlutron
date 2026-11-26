@@ -5,13 +5,14 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from urllib.parse import urlparse
 
 import httpx
 import pytest
 
 from safe_url.host_canonical import idna_host
 from safe_url.host_policy import HostPolicy
-from safe_url.normalized_url import NormalizedUrl, _reject_control_chars
+from safe_url.normalized_url import _CONTROL_CHAR_RE, NormalizedUrl, _reject_control_chars
 
 UNRESTRICTED = HostPolicy.unrestricted()
 
@@ -126,3 +127,50 @@ def test_admitted_host_matches_transport_host(raw: str) -> None:
     """Where the transport host is stable, it names exactly the admitted host."""
     url = NormalizedUrl(raw, policy=UNRESTRICTED)
     assert idna_host(httpx.URL(url.raw).host) == url.host
+
+
+#: Legitimate identities and the hostile shapes that broke them in the past.
+_CANDIDATES = [
+    "http://example.com/",
+    "https://example.com/a/b?x=1",
+    "http://example.com:8080/x",
+    "http://bücher.example/",
+    "http://[2606:4700::1111]/",
+    "http://EXAMPLE.com./",
+    "http://example.com..",
+    "http://example.com/a%00b%7F",
+    "http://example.com/?q=a%20b",
+    "http\t://exam\x00ple.com/",
+    "http\n://exam\x00ple.com/",
+    "http\r://example.com/",
+    "\x00http://example.com/",
+    "http\t://exam ple.com/",
+    "http://exam ple.com/",
+    "http://./",
+    "http://../",
+    "http://.../",
+    "http://.example.com",
+    "http://127.0.0.1/",
+    "not a url",
+]
+
+
+def _assert_admission_contract(url: NormalizedUrl) -> None:
+    """An admitted answer is transport-constructible, re-admittable, and clean."""
+    assert idna_host(httpx.URL(url.raw).host) == url.host
+    again = NormalizedUrl(url.raw, policy=url.policy)
+    assert again.raw == url.raw
+    assert again.host == url.host
+    authority = urlparse(url.raw).netloc
+    assert _CONTROL_CHAR_RE.search(authority) is None
+    assert not any(ch.isspace() for ch in authority)
+
+
+def test_every_admitted_answer_satisfies_the_identity_contract() -> None:
+    """The oracle for the whole class: no admitted answer may drift from the wire."""
+    for candidate in _CANDIDATES:
+        try:
+            url = NormalizedUrl(candidate, policy=UNRESTRICTED)
+        except ValueError:
+            continue
+        _assert_admission_contract(url)
