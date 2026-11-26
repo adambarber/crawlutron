@@ -5,8 +5,10 @@ GET, the docs GETs, /mcp anonymous traffic, the route-miss oracle, and any respo
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
 import pytest
@@ -122,7 +124,14 @@ async def _admin_app_client() -> AsyncGenerator[tuple[httpx.AsyncClient, CallerK
     from crawlutron.service.store_shutdown import close_app_stores
     from crawlutron_rest.main import create_app
 
-    app = create_app(CrawlerSettings.from_mapping({"CRAWLUTRON_KEY_ADMIN_TOKEN": "test-admin-token"}))
+    app = create_app(
+        CrawlerSettings.from_mapping(
+            {
+                "CRAWLUTRON_CACHE_DIR": os.environ["CRAWLUTRON_CACHE_DIR"],
+                "CRAWLUTRON_KEY_ADMIN_TOKEN": "test-admin-token",
+            }
+        )
+    )
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         try:
             yield client, app.state.caller_key_store
@@ -425,6 +434,10 @@ async def test_valid_key_does_not_burn_anonymous_ip_bucket():
     """#986: verified key is exempt from the anonymous IP bucket."""
     process_state_reset()
     async with _admin_app_client() as (client, keys):
+        db_path = keys.db_path.resolve()
+        scratch = Path(os.environ["CRAWLUTRON_CACHE_DIR"]).resolve()
+        assert db_path.is_relative_to(scratch), f"{db_path} must live under {scratch}"
+        assert db_path != Path("./cache/crawler.db").resolve(), "all workers share ./cache"
         issued = await keys.aissue_key("test-key")
         secret = issued.secret
         for _ in range(ANON_MAX_REQUESTS):
