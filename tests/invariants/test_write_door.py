@@ -13,7 +13,7 @@ from tests._walk_primitives import enclosing_function, offender_at, parent_map
 from tests._walk_readers import attribute_calls
 from tests.chokepoint_paths import APP_ROOT
 from tests.chokepoint_walks import trees_under
-from tests.rules import Rule
+from tests.rules import Registry, Rule
 
 _STORAGE_DIR = APP_ROOT / "storage"
 
@@ -94,15 +94,12 @@ WRITE_DOOR_RULE = Rule(
 )
 
 
+RULES = Registry((WRITE_DOOR_RULE,))
+
+
 def test_storage_writes_funnel_through_the_write_door() -> None:
-    scope = WRITE_DOOR_RULE.scope
-    if scope is None:
-        raise AssertionError("write-door rule has no scope")
-    offenders: list[str] = []
-    for path, tree in scope(exclude=frozenset()):
-        offenders.extend(_bare_write_offenders(tree, path))
-    assert not offenders, "\n".join(offenders)
+    RULES.check_all_clean()
 
 
 def test_write_door_rule_has_working_bite() -> None:
-    WRITE_DOOR_RULE.check_bites()
+    RULES.check_all_bite()

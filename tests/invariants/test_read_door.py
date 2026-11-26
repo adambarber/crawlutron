@@ -15,7 +15,7 @@ from tests import _walk_doors as _dw
 from tests import _walk_primitives as _wp
 from tests import _walk_readers as _wr
 from tests import chokepoint_walks as _cw
-from tests.rules import Rule
+from tests.rules import Registry, Rule
 
 _STORAGE_DIR = _wp.APP_ROOT / "storage"
 
@@ -94,26 +94,15 @@ READ_DOOR_RULE = Rule(
 )
 
 
-def _count_offenders() -> list[str]:
-    scope = READ_DOOR_RULE.scope
-    if scope is None:
-        raise AssertionError("read-door rule has no scope")
-    offenders: list[str] = []
-    for path, tree in scope(exclude=frozenset()):
-        offenders.extend(_bare_read_offenders(tree, path))
-    return offenders
+RULES = Registry((READ_DOOR_RULE,))
 
 
 def test_storage_reads_funnel_through_the_read_door() -> None:
-    offenders = _count_offenders()
-    assert len(offenders) == 0, (
-        f"{len(offenders)} bare read(s) outside the read door; gate is sealed at zero:\n  "
-        + "\n  ".join(offenders)
-    )
+    RULES.check_all_clean()
 
 
 def test_read_door_rule_has_working_bite() -> None:
-    READ_DOOR_RULE.check_bites()
+    RULES.check_all_bite()
 
 
 # --------------------------------------------------------------------------- reentrancy

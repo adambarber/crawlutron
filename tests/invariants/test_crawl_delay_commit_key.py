@@ -7,7 +7,7 @@ import pathlib
 
 from tests.chokepoint_paths import APP_ROOT
 from tests.chokepoint_walks import call_nodes, local_nodes, offender_at, resolved_call_name
-from tests.rules import Bites, Rule
+from tests.rules import Bites, Registry, Rule
 
 #: The seam: its key parameter must be the scheduler domain key (a ``site``),
 #: never a bare host or URL -- #456's defect class.
@@ -104,6 +104,13 @@ COMMIT_CRAWL_DELAY_IS_SITE_KEYED = Rule(
 )
 
 
+RULES = Registry((COMMIT_CRAWL_DELAY_IS_SITE_KEYED,))
+
+
 def test_commit_crawl_delay_call_sites_are_site_keyed():
     """The #456 residual: a host-keyed commit through the seam must fail this gate."""
-    COMMIT_CRAWL_DELAY_IS_SITE_KEYED.scan()
+    RULES.check_all_clean()
+
+
+def test_commit_crawl_delay_rule_has_working_bite():
+    RULES.check_all_bite()

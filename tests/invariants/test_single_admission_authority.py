@@ -8,7 +8,7 @@ from collections.abc import Iterable
 
 from tests.chokepoint_paths import REPO_ROOT
 from tests.chokepoint_walks import nodes_of, offender_at, trees_under
-from tests.rules import Bites, Rule, Silent
+from tests.rules import Bites, Registry, Rule, Silent
 
 _ORCHESTRATION = REPO_ROOT / "packages/core/src/crawlutron/orchestration"
 _SYNTHETIC = _ORCHESTRATION / "_synthetic.py"
@@ -51,14 +51,16 @@ CALLER_SIDE_AUTHORITY = Rule(
     ),
 )
 
-RULES = (CALLER_SIDE_AUTHORITY,)
+RULES = Registry((CALLER_SIDE_AUTHORITY,))
 
 
 def test_orchestration_leaves_admission_decisions_to_the_kernel() -> None:
     """No caller-side scale or ramp survives in the dispatch path."""
-    for rule in RULES:
-        rule.scan()
-        rule.check_bites()
+    RULES.check_all_clean()
+
+
+def test_orchestration_rule_has_working_bite() -> None:
+    RULES.check_all_bite()
 
 
 def test_the_generic_admission_import_name_is_gone() -> None:

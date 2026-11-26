@@ -4,7 +4,7 @@ import ast
 import pathlib
 
 from tests.chokepoint_walks import nodes_of, offender_at, offenders_over_functions
-from tests.rules import Bites, Rule
+from tests.rules import Bites, Registry, Rule
 
 # The scheduler's delivery sink is not a worker step.
 _SINK_PARAM_NAME = "on_result"
@@ -92,5 +92,12 @@ DELIVERY_NEVER_RUNS_INSIDE_THE_WORKER_TRY = Rule(
 )
 
 
+RULES = Registry((DELIVERY_NEVER_RUNS_INSIDE_THE_WORKER_TRY,))
+
+
 def test_result_delivery_never_runs_inside_the_worker_try():
-    DELIVERY_NEVER_RUNS_INSIDE_THE_WORKER_TRY.scan()
+    RULES.check_all_clean()
+
+
+def test_result_sink_try_rule_has_working_bite():
+    RULES.check_all_bite()

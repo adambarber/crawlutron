@@ -10,7 +10,7 @@ import pathlib
 
 from tests.chokepoint_paths import REPO_ROOT, relative_posix
 from tests.chokepoint_walks import from_imports, trees_under
-from tests.rules import Rule
+from tests.rules import Registry, Rule
 
 _BROWSER_DOOR = "tests._browser_doubles"
 
@@ -68,5 +68,12 @@ BROWSER_DOUBLES_IMPORT_ONLY_THROUGH_THE_DOOR = Rule(
 )
 
 
+RULES = Registry((BROWSER_DOUBLES_IMPORT_ONLY_THROUGH_THE_DOOR,))
+
+
 def test_browser_doubles_import_only_through_the_door():
-    BROWSER_DOUBLES_IMPORT_ONLY_THROUGH_THE_DOOR.scan()
+    RULES.check_all_clean()
+
+
+def test_browser_doubles_rule_has_working_bite():
+    RULES.check_all_bite()

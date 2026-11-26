@@ -12,6 +12,7 @@ from typing import TypedDict, Unpack, cast
 
 import pytest
 
+from tests.chokepoint_paths import REPO_ROOT, relative_posix
 from tests.chokepoint_walks import trees_under
 from tests.rules import Bites, Detector, Proof, Registry, Rule, Silent, Trips
 
@@ -381,3 +382,80 @@ class TestRegistryReportsEveryFailure:
 
     def test_a_healthy_registry_reports_nothing(self):
         Registry((_urljoin_rule(),)).check_all_bite()
+
+
+_INVARIANTS_DIR = REPO_ROOT / "tests" / "invariants"
+#: Measured post-batch census; down only, deleted when zero.
+_HAND_ROLLED_BUDGET = 103
+
+
+def _registry_bindings(tree: ast.Module) -> tuple[set[str], set[str]]:
+    """(class names, module aliases) bound by imports from ``tests.rules``."""
+    classes: set[str] = set()
+    modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "tests.rules":
+            classes.update(alias.asname or alias.name for alias in node.names if alias.name == "Registry")
+        elif isinstance(node, ast.Import):
+            modules.update(alias.asname or "tests" for alias in node.names if alias.name == "tests.rules")
+    return classes, modules
+
+
+def _constructs_registry(tree: ast.Module) -> bool:
+    """Only a CALL to a Registry constructor executes the idiom; an import does not."""
+    classes, modules = _registry_bindings(tree)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if isinstance(node.func, ast.Name) and node.func.id in classes:
+            return True
+        if (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr == "Registry"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id in modules
+        ):
+            return True
+    return False
+
+
+def _hand_rolled_invariants(directory: pathlib.Path = _INVARIANTS_DIR) -> list[pathlib.Path]:
+    """Invariant modules that never construct a Registry; no basename is exempted."""
+    return sorted(
+        path
+        for path, tree in trees_under(directory)
+        if path.name.startswith("test_") and not _constructs_registry(tree)
+    )
+
+
+class TestInvariantExecutionIdiom:
+    """The census counts execution, not imports, aliases or dead declarations."""
+
+    def test_the_hand_rolled_census_stays_within_its_down_only_budget(self):
+        found = _hand_rolled_invariants()
+        assert len(found) <= _HAND_ROLLED_BUDGET, (
+            f"{len(found)} invariant module(s) hand-roll their loop over the budget of "
+            f"{_HAND_ROLLED_BUDGET}; migrate one to Registry: "
+            + ", ".join(relative_posix(path) for path in found)
+        )
+
+    def test_an_import_only_reference_is_not_a_constructor(self):
+        assert not _constructs_registry(ast.parse("from tests.rules import Registry\n"))
+
+    def test_a_dead_binding_is_not_a_constructor(self):
+        assert not _constructs_registry(ast.parse("from tests.rules import Registry\nRULES = Registry\n"))
+
+    def test_an_aliased_class_constructor_is_counted(self):
+        assert _constructs_registry(ast.parse("from tests.rules import Registry as Reg\nRULES = Reg(())\n"))
+
+    def test_an_aliased_module_constructor_is_counted(self):
+        assert _constructs_registry(ast.parse("import tests.rules as rules\nRULES = rules.Registry(())\n"))
+
+    def test_a_planted_hand_rolled_module_is_named_by_the_census(self, tmp_path):
+        (tmp_path / "test_planted_handrolled.py").write_text(
+            "def test_x():\n    assert True\n", encoding="utf-8"
+        )
+        (tmp_path / "test_planted_registry.py").write_text(
+            "from tests.rules import Registry\nRULES = Registry(())\n", encoding="utf-8"
+        )
+        assert [path.name for path in _hand_rolled_invariants(tmp_path)] == ["test_planted_handrolled.py"]
