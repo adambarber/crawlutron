@@ -95,24 +95,26 @@ class TestValidationHelpers:
                 CrawlerSettings.from_mapping(),
             )
 
-    def test_payload_policy_errors(self) -> None:
+    @pytest.mark.parametrize(
+        ("wire_policy", "expected"),
+        [
+            pytest.param("x", "invalid_policy", id="non-mapping"),
+            pytest.param({"limits": "x"}, "invalid_policy_limits", id="bad-limits"),
+            pytest.param({"headers": "x"}, "invalid_policy_headers", id="bad-headers"),
+            pytest.param({"strategies": "x"}, "invalid_policy_strategies", id="bad-strategies"),
+            pytest.param({"request_profile": "x"}, "invalid_policy_profile", id="bad-request-profile"),
+            pytest.param({"extraction": "bogus"}, "invalid_policy_extraction", id="bad-extraction"),
+        ],
+    )
+    def test_payload_policy_errors(self, wire_policy, expected) -> None:
         from crawlutron.admission.policy import validate_wire_policy
 
         tier = PolicyTier.model_defaults()
         # The wire door must reject non-mapping and bad-shape policies; a raw
         # object callable is the honest spelling of "deliberately wrong shape".
         bad_wire: Callable[..., object] = validate_wire_policy
-        cases: list[tuple[object, str]] = [
-            ("x", "invalid_policy"),
-            ({"limits": "x"}, "invalid_policy_limits"),
-            ({"headers": "x"}, "invalid_policy_headers"),
-            ({"strategies": "x"}, "invalid_policy_strategies"),
-            ({"request_profile": "x"}, "invalid_policy_profile"),
-            ({"extraction": "bogus"}, "invalid_policy_extraction"),
-        ]
-        for policy, expected in cases:
-            with pytest.raises(ValueError, match=rf"^{expected}$"):
-                bad_wire(policy, tier)
+        with pytest.raises(ValueError, match=rf"^{expected}$"):
+            bad_wire(wire_policy, tier)
 
     def test_retry_after_seconds_invalid(self) -> None:
         assert retry_after_seconds({"retry-after": "notanint"}) is None
@@ -340,15 +342,18 @@ class TestHttpStrategyResult:
     async def test_success_html(self) -> None:
         assert_result_success(await self._run())
 
-    async def test_status_classification_overrides(self) -> None:
-        for status, classification in [
-            (403, "access_denied"),
-            (404, "not_found"),
-            (410, "gone"),
-            (429, "rate_limited"),
-            (500, "site_error"),
-        ]:
-            assert (await self._run(status=status)).classification == classification, status
+    @pytest.mark.parametrize(
+        ("status", "classification"),
+        [
+            pytest.param(403, "access_denied", id="403-forbidden"),
+            pytest.param(404, "not_found", id="404-missing"),
+            pytest.param(410, "gone", id="410-gone"),
+            pytest.param(429, "rate_limited", id="429-throttled"),
+            pytest.param(500, "site_error", id="500-server-error"),
+        ],
+    )
+    async def test_status_classification_overrides(self, status, classification) -> None:
+        assert (await self._run(status=status)).classification == classification, status
 
     async def test_network_error_handler(self) -> None:
         # A raw ConnectionError classifies specifically as connection_error, not the generic network_error
