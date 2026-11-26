@@ -26,6 +26,7 @@ KNOWN = (
     "crawlutron.transport.pooled_clients",
     "crawlutron.transport.pinned_dns",
     "crawlutron.transport.egress_proxy",
+    "crawlutron.transport.egress_proxy_runtime",
     "crawlutron.transport.pooled_cffi",
     "crawlutron.service.webhooks",
     "crawlutron.storage.sqlite_store",

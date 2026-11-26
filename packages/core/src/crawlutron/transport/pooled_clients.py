@@ -17,7 +17,6 @@ from crawlutron.runtime.resource_lifecycle import DeferredClose
 from crawlutron.transport.egress_proxy_runtime import (
     egress_proxy_url,
     has_egress_proxy,
-    reset_egress_proxy,
 )
 from crawlutron.transport.pooled_client_release import (
     PENDING_CLIENT_CLOSE,
@@ -416,7 +415,6 @@ def _reset() -> None:
     )
     from crawlutron.transport.pooled_socket_abort import abort_transport_sockets
 
-    reset_egress_proxy()
     if _DEFAULT_HTTP_CLIENT is not None:
         bound = _loop_bound_to(_DEFAULT_HTTP_CLIENT)
         if bound is not None and bound.is_closed():

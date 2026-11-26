@@ -11,6 +11,7 @@ import threading
 from contextlib import suppress
 from typing import TYPE_CHECKING
 
+from crawlutron.runtime import process_state
 from crawlutron.transport.egress_proxy import ProxyServer, serve_proxy
 from safe_url.host_policy import HostPolicy
 
@@ -58,7 +59,9 @@ def egress_proxy_url(policy: HostPolicy, settings: CrawlerSettings | None = None
         if _loop is None:
             _loop = asyncio.new_event_loop()
             threading.Thread(target=_loop.run_forever, daemon=True).start()
-        server = asyncio.run_coroutine_threadsafe(serve_proxy(policy=policy), _loop).result(timeout=10.0)
+        server = asyncio.run_coroutine_threadsafe(serve_proxy(policy=policy, register=False), _loop).result(
+            timeout=10.0
+        )
         _server, _url = server, f"http://127.0.0.1:{server.port}"
         return _url
 
@@ -67,3 +70,11 @@ def has_egress_proxy() -> bool:
     """Whether a proxy listener or its cached URL is still held."""
     global _url
     return _url is not None
+
+
+def _has() -> bool:
+    """Whether the dedicated-loop listener is still held."""
+    return _server is not None
+
+
+process_state.register(__name__, reset_egress_proxy, _has)
