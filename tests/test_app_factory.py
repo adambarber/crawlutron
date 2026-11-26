@@ -1,5 +1,6 @@
 """The create_app factory owns store construction, logging and lifespan (#A1)."""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -26,10 +27,18 @@ def test_create_app_returns_a_wired_app():
 def test_create_app_accepts_settings():
     from crawlutron_rest.main import create_app
 
-    settings = CrawlerSettings.from_mapping({"CRAWLUTRON_KEY_ADMIN_TOKEN": "secret"})
+    settings = CrawlerSettings.from_mapping(
+        {
+            "CRAWLUTRON_CACHE_DIR": os.environ["CRAWLUTRON_CACHE_DIR"],
+            "CRAWLUTRON_KEY_ADMIN_TOKEN": "secret",
+        }
+    )
     app = create_app(settings)
     assert app.state.crawler_settings is settings
     assert app.state.crawler_settings.key_admin_token == "secret"
+    db_path = app.state.job_store.db_path.resolve()
+    scratch = Path(os.environ["CRAWLUTRON_CACHE_DIR"]).resolve()
+    assert db_path.is_relative_to(scratch), f"{db_path} must live under {scratch}"
 
 
 def test_import_configures_nothing(tmp_path):
