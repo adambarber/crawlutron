@@ -279,30 +279,13 @@ async def test_search_providers_use_proxied_pooled_client(recording_pooled_clien
 async def test_webhook_delivery_uses_proxied_pooled_client(recording_pooled_client, monkeypatch):
     """Webhook delivery must route through get_async_http_client()."""
     import crawlutron.service.webhooks as webhooks_module
-    from crawlutron.transport.pinned_transport import PinnedRequest
-    from safe_url.normalized_url import NormalizedUrl
 
     monkeypatch.setattr(webhooks_module, "get_async_http_client", lambda: recording_pooled_client)
-    # Also need to mock the DNS resolution to avoid network calls
+    # Validation admits shape only; target DNS and the dial belong to the proxy.
     monkeypatch.setattr(
         webhooks_module,
         "validate_webhook_url_async",
         AsyncMock(),
-    )
-    # Mock build_pinned_request_async from the correct module
-    import crawlutron.transport.pinned_transport as pinned_transport_module
-
-    admitted_url = NormalizedUrl("https://webhook.example.com/hook", policy=HostPolicy.unrestricted())
-    monkeypatch.setattr(
-        pinned_transport_module,
-        "build_pinned_request_async",
-        AsyncMock(
-            return_value=PinnedRequest(
-                connect_url="https://1.2.3.4/hook",
-                headers={"Host": "webhook.example.com"},
-                url=admitted_url,
-            )
-        ),
     )
 
     target = WebhookTarget.admit("https://webhook.example.com/hook", host_policy=HostPolicy.unrestricted())

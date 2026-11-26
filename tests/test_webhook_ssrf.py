@@ -1,6 +1,5 @@
-"""TDD tests for webhook SSRF (hostname not resolved): the validator must resolve
-DNS and reject private/loopback targets, and the delivery POST must connect to a
-pinned IP (DNS-rebinding safe) while preserving the original Host header.
+"""Webhook SSRF: admission checks shape only; the proxy owns target DNS and the
+sole dial. Delivery carries the logical host and preserves the original header.
 """
 
 import pytest
@@ -23,30 +22,36 @@ from tests._assertions import (
 from tests._webhook_doubles import assert_delivered_once, record_webhook_delivery
 
 
-def _assert_pinned_delivery(delivered) -> None:
-    """A delivery must connect to the pinned validated IP (never a re-resolved
-    hostname) with the original Host header preserved -- DNS-rebinding safe."""
+def _assert_logical_delivery(delivered) -> None:
+    """Delivery carries the logical host only; no resolved address reaches the wire."""
     assert_delivered_once(delivered)
-    assert "8.8.8.8" in str(delivered[0].url), delivered
+    assert str(delivered[0].url) == "https://webhook.example.com/cb", delivered
     assert delivered[0].headers.get("Host") == "webhook.example.com", delivered
 
 
 class TestWebhookUrlValidation:
-    async def test_blocks_private_dns_hostname(self, monkeypatch):
-        """A DNS name that resolves to a private IP must be rejected."""
-        with host_resolves_to(monkeypatch, "127.0.0.1"), pytest.raises(ValueError):
-            await _validate_webhook_url(
-                "http://evil.example.com/callback",
-                host_policy=HostPolicy.unrestricted(),
-            )
+    async def test_admits_shape_without_target_dns(self, monkeypatch):
+        """Admission never resolves the target; the proxy makes that decision."""
 
-    async def test_allows_public_dns_hostname(self, monkeypatch):
-        """A DNS name that resolves to a public IP is accepted."""
-        with host_resolves_to(monkeypatch, "8.8.8.8"):
-            await _validate_webhook_url(
-                "http://public.example.com/callback",
-                host_policy=HostPolicy.unrestricted(),
-            )
+        def refuse(*args, **kwargs):
+            raise AssertionError("webhook admission must not resolve its target")
+
+        monkeypatch.setattr("socket.getaddrinfo", refuse)
+        await _validate_webhook_url(
+            "http://evil.example.com/callback",
+            host_policy=HostPolicy.unrestricted(),
+        )
+
+    async def test_accepts_public_hostname_without_resolution(self, monkeypatch):
+        """A public hostname is admitted by shape, not by what DNS answers."""
+        monkeypatch.setattr(
+            "socket.getaddrinfo",
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("app DNS")),
+        )
+        await _validate_webhook_url(
+            "http://public.example.com/callback",
+            host_policy=HostPolicy.unrestricted(),
+        )
 
     async def test_rejects_non_http_scheme(self):
         with pytest.raises(ValueError):
@@ -91,35 +96,31 @@ class TestHttpsOnlyWebhookRefusal:
             ensure_https_webhook_url(scheme_url)
 
 
-class TestWebhookDeliveryPinning:
-    async def test_delivery_posts_to_pinned_ip(self, monkeypatch):
-        """The outbound POST must target the resolved/pinned IP, not the raw hostname, and
-        preserve the original Host header (DNS-rebinding safe), driven through the
-        production funnel so the guard protects the path real crawls take.
+class TestWebhookDeliveryStaysLogical:
+    async def test_delivery_posts_to_the_logical_host(self, monkeypatch):
+        """The outbound POST carries the logical host, never a resolved IP, and
+        preserves the original Host header -- driven through the production funnel.
         """
         delivered = record_webhook_delivery(monkeypatch)
-        with host_resolves_to(monkeypatch, "8.8.8.8"):
-            await _post_webhook(
-                WebhookTarget.admit("https://webhook.example.com/cb", host_policy=HostPolicy.unrestricted()),
-                {"results": []},
-            )
+        await _post_webhook(
+            WebhookTarget.admit("https://webhook.example.com/cb", host_policy=HostPolicy.unrestricted()),
+            {"results": []},
+        )
 
-        _assert_pinned_delivery(delivered)
+        _assert_logical_delivery(delivered)
 
-    async def test_https_delivery_connects_to_the_validated_ip(self, monkeypatch):
-        """HTTPS webhooks now connect to the validated pinned IP like HTTP (DNS-rebinding
-        safe); the logical hostname is preserved for TLS SNI via the request extension."""
+    async def test_https_delivery_keeps_the_logical_host_for_sni(self, monkeypatch):
+        """HTTPS delivery preserves the logical hostname for TLS SNI at the proxy."""
         from crawlutron.service.webhooks import deliver_pinned_webhook
 
         delivered = record_webhook_delivery(monkeypatch)
-        with host_resolves_to(monkeypatch, "8.8.8.8"):
-            await deliver_pinned_webhook(
-                "https://webhook.example.com/cb",
-                b"{}",
-                host_policy=HostPolicy.unrestricted(),
-            )
+        await deliver_pinned_webhook(
+            "https://webhook.example.com/cb",
+            b"{}",
+            host_policy=HostPolicy.unrestricted(),
+        )
 
-        _assert_pinned_delivery(delivered)
+        _assert_logical_delivery(delivered)
 
     async def test_delivery_response_body_is_capped(self, monkeypatch, caplog):
         """The webhook RESPONSE is attacker-controlled and must never be

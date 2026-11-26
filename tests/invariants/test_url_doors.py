@@ -150,10 +150,10 @@ def test_scope_matcher_has_exactly_one_definition():
 
 
 def test_no_pinned_url_leaks_into_final_url():
-    """A pinned fetch must never surface str(response.url) as final_url.
+    """A fetch must never surface a response-derived IP literal as final_url.
 
-    ``build_pinned_request_async`` rewrites the host to its resolved IP, so
-    surfacing it leaks topology and keys the cookie jar by IP.
+    The proxy owns DNS and the dial; a resolved address in the app's result or
+    cookie key would leak topology.
     """
     offenders = []
     for path, tree in app_trees():
@@ -186,10 +186,10 @@ def _is_response_url(node: ast.expr) -> bool:
 
 
 def test_no_inline_pinned_url_composition():
-    """The pin connect URL (IP, IPv6 bracketing, port, Host) is the builder's job alone.
+    """No app-side target-IP composition: the proxy owns DNS and the dial.
 
     Three divergent copies had drifted, disagreeing on port and lacking IPv6
-    bracketing; an f-string outside the builder re-opens that drift.
+    bracketing; an f-string composing a resolved address re-opens that drift.
     """
     offenders: list[str] = []
     for path, tree in app_trees(exclude=frozenset({"pinned_transport.py", "safe_regex.py"})):
@@ -208,9 +208,7 @@ def test_no_inline_pinned_url_composition():
                         and "pinned" in expr.id.lower()
                     ):
                         offenders.append(offender_at(path, node, f"f-string interpolates {expr.id}"))
-    assert not offenders, "compose pinned URLs via build_pinned_request(), never inline:\n" + "\n".join(
-        offenders
-    )
+    assert not offenders, "compose target URLs through NormalizedUrl, never inline:\n" + "\n".join(offenders)
 
 
 RULES = Registry((BATCH_DEDUP_KEYS_ON_ADMITTED_IDENTITY, EVERY_HTTP_BODY_READ_IS_CAPPED))

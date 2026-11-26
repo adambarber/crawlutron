@@ -92,7 +92,6 @@ def _shared_hop(
 
     transport = CffiTransport()
     request = FetchRequest(
-        connect_url="https://93.184.216.34/",
         headers={},
         url=NormalizedUrl("https://example.com/", policy=HostPolicy.unrestricted()),
         timeout_seconds=10,

@@ -206,7 +206,7 @@ async def test_shared_httpx_client_does_not_replay_cookies_it_received(base_url,
     """
     monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "1")
     from crawlutron.transport.http_client_pool import get_async_http_client
-    from crawlutron.transport.pinned_transport import build_pinned_request
+    from crawlutron.transport.transport import FetchRequest
     from safe_url.host_policy import HostPolicy
     from safe_url.normalized_url import NormalizedUrl
 
@@ -215,9 +215,9 @@ async def test_shared_httpx_client_does_not_replay_cookies_it_received(base_url,
     try:
         set_cookie = NormalizedUrl(base_url + "/set-cookie", policy=HostPolicy.unrestricted())
         check_cookie = NormalizedUrl(base_url + "/check-cookie", policy=HostPolicy.unrestricted())
-        async with client.get(build_pinned_request(set_cookie, {})) as _set:
+        async with client.get(FetchRequest(headers={}, url=set_cookie, timeout_seconds=10.0)) as _set:
             await _set.aread()
-        async with client.get(build_pinned_request(check_cookie, {})) as response:
+        async with client.get(FetchRequest(headers={}, url=check_cookie, timeout_seconds=10.0)) as response:
             await response.aread()
             replayed_text = response.text
     finally:

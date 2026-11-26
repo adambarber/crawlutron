@@ -16,7 +16,6 @@ import httpx
 import pytest
 
 from crawlutron.models.http_fetch_result import HttpFetchResult
-from crawlutron.transport.pinned_transport import PinnedRequest
 from crawlutron.transport.transport import FetchRequest
 from crawlutron.vocabulary.limits import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 from safe_url.normalized_url import NormalizedUrl
@@ -90,9 +89,9 @@ class ScriptedClient(httpx.AsyncClient):
 
 
 class _PinnedClient:
-    """Adapts a real httpx client to the pooled facade's pinned stream verb.
+    """Adapts a real httpx client to the pooled facade's logical stream verb.
 
-    ``stream`` dials ``request.connect_url``; everything else delegates inward.
+    ``stream`` dials ``request.url.raw``; everything else delegates inward.
     """
 
     __slots__ = ("_client", "captured_headers")
@@ -105,14 +104,14 @@ class _PinnedClient:
             client.captured_headers if isinstance(client, ScriptedClient) else []
         )
 
-    def stream(self, method: str, request: PinnedRequest, **kwargs: typing.Any):
+    def stream(self, method: str, request: FetchRequest, **kwargs: typing.Any):
         if "headers" not in kwargs:
             kwargs["headers"] = request.headers
         kwargs.setdefault(
             "extensions",
             {"sni_hostname": request.tls_hostname} if request.tls_hostname else None,
         )
-        return self._client.stream(method, request.connect_url, **kwargs)
+        return self._client.stream(method, request.url.raw, **kwargs)
 
     def __getattr__(self, name: str) -> object:
         return getattr(self._client, name)

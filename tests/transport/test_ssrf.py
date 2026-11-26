@@ -7,8 +7,8 @@ import pytest
 
 import crawlutron.transport.pinned_dns as http_mod
 from crawlutron.transport.pinned_dns import resolve_and_pin_host
-from crawlutron.transport.pinned_transport import build_pinned_request
 from crawlutron.transport.redirect_walker import RedirectWalker
+from crawlutron.transport.transport import FetchRequest
 from safe_url.host_policy import HostPolicy
 from safe_url.normalized_url import NormalizedUrl
 from tests._assertions import (
@@ -135,24 +135,36 @@ def test_resolve_and_pin_host_escape_hatch_survives_resolution_failure(monkeypat
     assert (hostname, pinned_ip) == ("service.local", "service.local")
 
 
-async def test_pinned_hop_never_targets_loopback_for_unresolvable(monkeypatch):
-    # Defense-in-depth: even if a caller skips the SSRF check, pinning must not point at 127.0.0.1 for an
-    # attacker-influenced, unresolvable hostname.
+async def test_logical_hop_never_targets_loopback_for_unresolvable(monkeypatch):
+    # Defense-in-depth: the app carries only the logical URL, so an attacker-influenced
+    # unresolvable host can never be rewritten to 127.0.0.1 by an app-side pin.
     _unresolvable_host(monkeypatch)
-    with pytest.raises(ValueError):
-        await RedirectWalker(
-            ScriptedTransport([make_fetch(status=200, body=b"ok")]), _void_store_cookies
-        ).walk(canonical("http://nonexistent.invalid/"), {}, 10, pin=build_pinned_request)
+    result = await RedirectWalker(
+        ScriptedTransport(
+            [
+                make_fetch(
+                    status=200,
+                    body=b"ok",
+                    url="http://nonexistent.invalid/",
+                    final_url="http://nonexistent.invalid/",
+                )
+            ]
+        ),
+        _void_store_cookies,
+    ).walk(canonical("http://nonexistent.invalid/"), {}, 10)
+
+    assert result is not None
+    assert str(result.url).startswith("http://nonexistent.invalid/")
 
 
-def test_pinned_builder_surfaces_unresolvable_host_as_an_ssrf_refusal(monkeypatch):
-    """The caller-visible contract: an unresolvable host is refused, not crashed on.
-
-    The refusal is the ordinary ValueError (same message as the SSRF check),
-    not a ``socket.gaierror`` leaking from a layer that documents ValueError."""
+def test_logical_request_never_resolves_unresolvable_host(monkeypatch):
+    """The app hands the logical URL to the proxy: no resolution happens here,
+    so an unresolvable host cannot become a loopback pin in the app."""
     _unresolvable_host(monkeypatch)
-    with pytest.raises(ValueError, match="SSRF protection: cannot resolve hostname"):
-        build_pinned_request(canonical("http://nonexistent.invalid/"), {})
+    url = canonical("http://nonexistent.invalid/")
+    request = FetchRequest(headers={}, url=url, timeout_seconds=10)
+    assert request.url == url
+    assert request.tls_hostname is None
 
 
 class TestSSRFProtection:

@@ -80,7 +80,7 @@ def recording_httpx_client(backend: RecordingBackend) -> _PinnedClient:
     """A httpx client presented through the pinned facade's stream verb.
 
     Wraps the real client whose httpcore pool dials through ``backend`` so the
-    pooled client's ``stream`` receives a ``PinnedRequest``, never a raw URL.
+    pooled client's ``stream`` receives a logical ``FetchRequest``, never a raw URL.
     """
     pool = httpcore.AsyncConnectionPool(network_backend=backend)
     transport = httpx.AsyncHTTPTransport(verify=False)

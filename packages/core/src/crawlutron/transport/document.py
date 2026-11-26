@@ -9,16 +9,12 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING
 
 from crawlutron.transport.httpx_transport import HttpxTransport
 from crawlutron.transport.redirect_walker import RedirectWalker
 from crawlutron.transport.timeouts import Timeouts
 from crawlutron_extract import extract as _package_extract
 from safe_url.normalized_url import NormalizedUrl
-
-if TYPE_CHECKING:
-    from crawlutron.transport import pinned_transport
 
 #: Explicit concurrency cap for document extraction off the event loop.
 _DOC_EXTRACTION_CONCURRENCY = 4
@@ -30,7 +26,6 @@ _DOC_EXTRACTION_MAX_BYTES = 20 * 1024 * 1024
 
 async def _afetch_document_bytes(
     url: NormalizedUrl,
-    pin: pinned_transport.PinRule | None = None,
     *,
     timeout_seconds: float | None = None,
 ) -> bytes:
@@ -47,7 +42,7 @@ async def _afetch_document_bytes(
         return None
 
     result = await RedirectWalker(HttpxTransport(), store_cookies=_noop_store_cookies).walk(
-        url, {}, budget.read, max_bytes=_DOC_EXTRACTION_MAX_BYTES, pin=pin
+        url, {}, budget.read, max_bytes=_DOC_EXTRACTION_MAX_BYTES
     )
     if result is None:
         # The walker always returns a terminal result or raises.

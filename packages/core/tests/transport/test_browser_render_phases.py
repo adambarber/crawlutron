@@ -21,7 +21,6 @@ from crawlutron.transport.browser_render_phases import (
     WireGuard,
     wire_ssrf_guards,
 )
-from crawlutron.transport.pinned_transport import PinnedRequest
 from crawlutron.transport.render_page import GuardContext
 from safe_url.host_policy import HostPolicy
 from safe_url.normalized_url import NormalizedUrl
@@ -29,15 +28,6 @@ from tests._browser_page_doubles import BrowserFakePage, FakePageContext
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, admitted
 
 _TARGET = "http://1.2.3.4/"
-
-
-def _dummy_pin(*args: object, **kwargs: object) -> PinnedRequest:
-    """A pin that is never reached: the refusal fires before any route is wired."""
-    return PinnedRequest(
-        connect_url=_TARGET,
-        headers={},
-        url=admitted(_TARGET, policy=UNRESTRICTED_HOST_POLICY),
-    )
 
 
 class _SocketlessContext:

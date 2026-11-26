@@ -60,10 +60,6 @@ __all__ = [
     "resolve_browser_target",
 ]
 from crawlutron.transport.document import default_document_text_extractor
-from crawlutron.transport.pinned_transport import (
-    PinnedRequest,
-    build_pinned_request_async,
-)
 from crawlutron.vocabulary.browser import BrowserAction
 from crawlutron.vocabulary.limits import DEFAULT_CHALLENGE_WAIT_SECONDS, DEFAULT_MAX_CONCURRENT_PAGES
 from crawlutron.vocabulary.taxonomy import ResultStatus, status_for_classification
@@ -119,7 +115,6 @@ class BrowserRenderer:
         warmup_urls: list[str] | None = None,
         settings: CrawlerSettings | None = None,
         driver: BrowserDriver | None = None,
-        pin: Callable[..., Awaitable[PinnedRequest]] | None = None,
         status_for: Callable[[str], ResultStatus] | None = None,
     ) -> None:
         self._sleep = sleep
@@ -145,9 +140,8 @@ class BrowserRenderer:
         self._warmup_urls = (
             warmup_urls if warmup_urls is not None else self._warmup_urls_from_settings(settings)
         )
-        # The two SSRF pin rules and the failure-path classifier: all three decide
-        # something the render cannot recover from, so tests steer them by argument.
-        self._pin = pin or build_pinned_request_async
+        # The failure-path classifier decides something the render cannot recover
+        # from, so tests steer it by argument.
         self._status_for = status_for or status_for_classification
         # The browser and every page step live in the driver (recycle bound, scroll/
         # harvest knobs, storage_state allowlist); a test substitutes the driver.

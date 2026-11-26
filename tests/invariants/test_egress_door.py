@@ -89,13 +89,13 @@ INDEPENDENT_EGRESS_DOOR = Rule(
 )
 
 
-#: The pooled client's dial verbs never take a raw URL string: every verb takes a
-#: PinnedRequest whose connect_url is the validated IP.
+#: The pooled client's dial verbs never take a raw URL string: every verb takes
+#: a logical FetchRequest; the proxy owns target DNS and the dial.
 _RAW_DIAL_VERBS = frozenset({"get", "post", "stream"})
 
 
 def _raw_egress_dial_offenders(tree, path):
-    """Flag a pooled-client dial verb handed a raw URL string instead of a PinnedRequest.
+    """Flag a pooled-client dial verb handed a raw URL string instead of a FetchRequest.
 
     A string URL there is the raw-dial shape the facade refuses; named file:line.
     """
@@ -122,7 +122,7 @@ RAW_EGRESS_DIAL = Rule(
     find=_raw_egress_dial_offenders,
     summary=(
         "get_async_http_client() hands out a facade whose get/post/stream take a "
-        "PinnedRequest, never a raw URL string; dialling a caller-supplied host at "
+        "FetchRequest, never a raw URL string; dialling a caller-supplied host at "
         "OS resolution time is inexpressible through this surface"
     ),
     bite=lambda: Bites(
@@ -131,7 +131,7 @@ RAW_EGRESS_DIAL = Rule(
         count=1,
     ),
     clean=lambda: (
-        # The sanctioned shape: a PinnedRequest, never a raw URL string.
+        # The sanctioned shape: a FetchRequest, never a raw URL string.
         "client.stream('GET', pinned, follow_redirects=False)\n",
     ),
 )

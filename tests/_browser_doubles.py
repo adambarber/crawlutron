@@ -108,11 +108,11 @@ def _always_success(classification: str) -> ResultStatus:
 
 
 def build_pinned_renderer(page, **overrides):
-    """A renderer whose page work is a fake driver and whose output is fixed.
-
-    ``overrides`` steer the two renderer-owned collaborators a test varies:
-    ``extract=`` and ``looks_like_pdf=``.
+    """A renderer with a fake driver and fixed output; ``overrides`` steer its
+    collaborators. The retired ``pin=`` seam is accepted and ignored: the proxy
+    owns target DNS and the dial.
     """
+    overrides.pop("pin", None)
 
     renderer = BrowserRenderer(
         warmup_urls=overrides.pop("warmup_urls", []),
@@ -131,15 +131,15 @@ PINNED_PUBLIC_IP = ("http://1.2.3.4:80/", {"Host": "example.com"})
 
 
 def stub_pinned_request(pinned: tuple[str, dict[str, str]] = PINNED_PUBLIC_IP):
-    """A stand-in for the off-loop pin entry, shaped like the real binding.
+    """A stand-in for the old off-loop pin entry, now a logical request.
 
-    The real builder is a coroutine produced by ``_off_loop``; returning one
-    built here keeps the tests on a fixed pin, not the live resolver."""
-    from crawlutron.transport.pinned_transport import PinnedRequest
+    Retained so tests that pass ``pin=`` keep building a request; the proxy,
+    not the app, decides the target address."""
+    from crawlutron.transport.transport import FetchRequest
 
     async def _stub(url, headers: dict[str, str], timeout_seconds: float | None = None):
         merged = {**headers, **pinned[1]}
-        return PinnedRequest(connect_url=pinned[0], headers=merged, url=url)
+        return FetchRequest(headers=merged, url=url, timeout_seconds=timeout_seconds or 10.0)
 
     return _stub
 
@@ -315,10 +315,14 @@ async def assert_route_decision(
 
 
 def pinned_request(url, connect_url, headers):
-    """One construction site for a test pin's return value."""
-    from crawlutron.transport.pinned_transport import PinnedRequest
+    """One construction site for a logical test request.
 
-    return PinnedRequest(connect_url=connect_url, headers=headers, url=url)
+    ``connect_url`` is accepted for call-site compatibility but never used:
+    the proxy owns DNS and the dial."""
+    from crawlutron.transport.transport import FetchRequest
+
+    _ = connect_url
+    return FetchRequest(headers=headers, url=url, timeout_seconds=10.0)
 
 
 async def run_route_with_pinner(url, *, pinned=None, raises=None, resource_type="document"):

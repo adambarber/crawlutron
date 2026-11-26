@@ -15,12 +15,8 @@ import httpx
 from crawlutron.safety.bounded_io import BodyTooLarge, read_capped_async
 from crawlutron.safety.json_safe import ParseRefused, parse_json
 from crawlutron.transport.http_client_pool import get_async_http_client
-from crawlutron.transport.pinned_dns import ResolverBudgetExceeded, bounded_thread_resolve
-from crawlutron.transport.pinned_transport import (
-    PinnedRequest,
-    build_pinned_request,
-)
 from crawlutron.transport.timeouts import Timeouts
+from crawlutron.transport.transport import FetchRequest
 from safe_url.host_policy import HostPolicy
 from safe_url.normalized_url import NormalizedUrl, admit_or_none
 
@@ -120,11 +116,11 @@ async def provider_http(
         request_url = request_url.copy_merge_params(
             {k: v for k, v in params.items() if isinstance(v, (str, int, float, bool)) or v is None}
         )
-    pinned = await _pinned_provider_request(request_url, headers, timeout_seconds)
+    request = _logical_provider_request(request_url, headers, timeout_seconds)
     try:
         async with client.stream(
             method,
-            pinned,
+            request,
             json=json_body,
             data=data,
             timeout=timeout,
@@ -143,23 +139,20 @@ async def provider_http(
         raise SearchProviderError(f"provider request failed: {error}") from error
 
 
-async def _pinned_provider_request(
+def _logical_provider_request(
     request_url: httpx.URL,
     headers: dict[str, str] | None,
     timeout_seconds: float,
-) -> PinnedRequest:
-    """The pinned provider request: the merged URL admitted, the connect
-    pinned to the freshly validated IP, SNI on the hostname. Fixed endpoint
-    registry, no caller input in the URL (pinned by test)."""
-    admitted = NormalizedUrl(str(request_url), policy=HostPolicy.unrestricted())
+) -> FetchRequest:
+    """The logical provider request: a fixed endpoint admitted by NormalizedUrl.
 
-    def pin() -> PinnedRequest:
-        return build_pinned_request(admitted, dict(headers or {}))
-
+    The proxy owns target DNS and the dial; no resolution happens in the app.
+    """
     try:
-        return await bounded_thread_resolve(pin, timeout_seconds=timeout_seconds)
-    except (ValueError, ResolverBudgetExceeded):
-        raise SearchProviderError("provider endpoint could not be resolved to a public address") from None
+        admitted = NormalizedUrl(str(request_url), policy=HostPolicy.unrestricted())
+    except ValueError:
+        raise SearchProviderError("provider endpoint refused admission") from None
+    return FetchRequest(headers=dict(headers or {}), url=admitted, timeout_seconds=timeout_seconds)
 
 
 def clip_text(text: str) -> str:

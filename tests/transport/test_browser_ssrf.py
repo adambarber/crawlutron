@@ -37,30 +37,29 @@ async def test_document_extractor_blocks_internal_url(monkeypatch):
         doc_mod.default_document_text_extractor(canonical("http://127.0.0.1:9/secret.pdf"))
 
 
-async def test_document_extractor_invokes_ssrf_check(monkeypatch):
-    """The document fetch must gate the URL before any socket opens.
-
-    The gate IS the pin (#383): the extractor swallows every failure, so the
-    recording resolver entry -- not an escaping sentinel -- is the observable.
-    """
+async def test_document_extractor_carries_the_logical_url_without_app_dns(monkeypatch):
+    """The document fetch hands the logical URL to the proxy; no resolver runs."""
     from unittest.mock import patch
+
+    import httpx
 
     from tests._fetcher_factories import MockResponse, scripted_transport_client
 
-    seen = {}
+    def refuse_resolution(*args, **kwargs):
+        raise AssertionError("document fetch must not resolve its target")
 
-    def fake_resolve(host, *args, **kwargs):
-        seen["url"] = host
-        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 80))]
-
+    observed: list[httpx.Request] = []
     monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
-    monkeypatch.setattr(socket, "getaddrinfo", fake_resolve)
+    monkeypatch.setattr(socket, "getaddrinfo", refuse_resolution)
     with patch(
         "crawlutron.transport.http_client_pool.get_async_http_client",
-        return_value=scripted_transport_client([MockResponse(200, {"content-type": "application/pdf"}, b"")]),
+        return_value=scripted_transport_client(
+            [MockResponse(200, {"content-type": "application/pdf"}, b"")],
+            observed_requests=observed,
+        ),
     ):
         doc_mod.default_document_text_extractor(canonical("http://example.com/x.pdf"))
-    assert seen.get("url") == "example.com"
+    assert [str(request.url) for request in observed] == ["http://example.com/x.pdf"]
 
 
 # Proxy-based navigation helpers.

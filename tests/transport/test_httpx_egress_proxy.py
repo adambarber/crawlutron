@@ -14,7 +14,7 @@ from crawlutron.transport import egress_proxy as egress_mod
 from crawlutron.transport import http_client_pool, pinned_dns, pooled_clients
 from crawlutron.transport.egress_proxy import serve_proxy
 from crawlutron.transport.fetchers import default_http_fetcher
-from crawlutron.transport.pinned_transport import PinnedRequest
+from crawlutron.transport.transport import FetchRequest
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, canonical
 
 PUBLIC_IP = "93.184.216.34"
@@ -133,12 +133,12 @@ async def test_pooled_httpx_stream_hands_the_logical_url_to_httpx(monkeypatch) -
     process_state.reset_all_process_state()
     try:
         facade = http_client_pool.get_async_http_client()
-        pinned = PinnedRequest(
-            connect_url=f"https://{PUBLIC_IP}/secret",
+        request = FetchRequest(
             headers={"Host": LOGICAL},
             url=canonical(f"https://{LOGICAL}/secret"),
+            timeout_seconds=5.0,
         )
-        async with facade.stream("GET", pinned):
+        async with facade.stream("GET", request):
             pass
     finally:
         process_state.reset_all_process_state()

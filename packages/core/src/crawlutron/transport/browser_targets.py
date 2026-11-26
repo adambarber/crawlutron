@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Protocol, cast
 
 from crawlutron.models.intercepted_xhr_record import InterceptedXhrRecord
 from crawlutron.safety.json_safe import json_default
-from crawlutron.transport.pinned_transport import PinnedRequest
 from safe_url.host_policy import HostPolicy
 from safe_url.normalized_url import NormalizedUrl
 
@@ -30,7 +29,6 @@ class RouteResponse(Protocol):
 async def resolve_browser_target(
     url: NormalizedUrl,
     *,
-    pin: Callable[..., Awaitable[PinnedRequest]] | None = None,
     timeout_seconds: float | None = None,
 ) -> tuple[str, dict[str, str]]:
     """Return logical URL for proxy-mediated navigation; proxy owns dialing (#991)."""
@@ -52,7 +50,6 @@ def make_ssrf_route_handler(
     *,
     include_screenshot: bool = False,
     policy: HostPolicy,
-    pin: Callable[..., Awaitable[PinnedRequest]] | None = None,
     timeout_seconds: float | None = None,
 ):
     """Route handler: NormalizedUrl admit/abort, continue logical URL via proxy."""

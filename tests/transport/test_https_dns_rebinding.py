@@ -1,14 +1,10 @@
-"""HTTPS DNS-rebinding TOCTOU SSRF in crawlutron/transport/pinned_transport.
-
-HTTPS kept the hostname (for SNI) and re-resolved at connect with no peer-IP
-verification; these tests pin it and assert a rebind is fail-closed.
+"""HTTPS rebinding cannot reach the app: it carries the logical host, and the
+proxy resolves and dials once. TLS SNI therefore keeps the original hostname.
 """
 
 from __future__ import annotations
 
 import socket
-
-import pytest
 
 from crawlutron.runtime import process_state
 from crawlutron.transport import http_client_pool as pool_mod
@@ -80,34 +76,34 @@ class TestHttpsDnsRebindingFetchIsBlocked:
         )
 
         assert result.status_code == 200
-        for _host, _port, ip in backend.connects:
+        for host, _port, ip in backend.connects:
+            assert host == "evil.example", backend.connects
             assert ip == _PUBLIC_IP, f"connected to a non-public IP {ip}: {backend.connects}"
         assert all(ip != _PRIVATE_IP for _h, _p, ip in backend.connects)
 
-    async def test_private_answer_at_pin_time_is_fail_closed(self, monkeypatch):
-        """The fail-closed discipline lives at the pin: a resolver whose answer AT
-        PIN TIME is private/loopback is refused before any connection (the SSRF
-        guarantee the double-resolve used to surface one hop later)."""
+    async def test_app_never_resolves_a_private_target(self, monkeypatch):
+        """A private DNS answer cannot reach the app: no resolver runs there."""
+        import httpx
+
+        from tests._fetcher_factories import MockResponse, scripted_transport_client
+
         block_private_targets(monkeypatch)
         process_state.reset_all_process_state()
-        backend = RecordingBackend()
-        _install_client(monkeypatch, backend)
+        observed: list[httpx.Request] = []
+        client = scripted_transport_client(
+            [MockResponse(200, {"content-type": "text/html"}, b"<ok>")],
+            observed_requests=observed,
+        )
+        monkeypatch.setattr(pool_mod, "get_async_http_client", lambda: client)
+        monkeypatch.setattr(
+            socket,
+            "getaddrinfo",
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("app DNS")),
+        )
 
-        def private_resolver(host, *args, **kwargs):
-            _ = (args, kwargs)
-            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (_PRIVATE_IP, 443))]
-
-        monkeypatch.setattr(socket, "getaddrinfo", private_resolver)
-
-        # The pin and the SSRF verdict now share one refusal, so the
-        # wording matches its sibling's "private/loopback" refusal (#525 SEC-07).
-        with pytest.raises(ValueError, match="private/loopback"):
-            await default_http_fetcher(
-                canonical("https://evil.example/ws"),
-                {},
-                30,
-            )
-        assert backend.connects == [], f"the private-target request connected: {backend.connects}"
+        result = await default_http_fetcher(canonical("https://evil.example/ws"), {}, 30)
+        assert result.status_code == 200
+        assert [str(request.url) for request in observed] == ["https://evil.example/ws"]
 
     async def test_plain_http_rebind_connects_only_to_the_validated_ip(self, monkeypatch):
         """Plain HTTP pins to a freshly validated IP, so a two-phase rebind cannot
@@ -126,6 +122,7 @@ class TestHttpsDnsRebindingFetchIsBlocked:
 
         assert result.status_code == 200
         assert backend.connects, "the fetch never connected"
+        assert all(host == "evil.example" for host, _p, _ip in backend.connects), backend.connects
         assert all(ip == _PUBLIC_IP for _h, _p, ip in backend.connects), backend.connects
 
 
@@ -147,7 +144,7 @@ class TestHttpsSafeTargetFetchesWithSniPreserved:
         )
 
         assert result.status_code == 200
-        # The connect target is the validated public IP, not the hostname (no re-resolve).
-        assert backend.connects == [("1.2.3.4", 443, "1.2.3.4")], backend.connects
+        # The app hands the logical host to the proxy, which resolves and dials once.
+        assert backend.connects == [("example.org", 443, "1.2.3.4")], backend.connects
         # TLS SNI carries the ORIGINAL hostname, so the origin still routes/attests correctly.
         assert backend.sni_hostnames == ["example.org"], backend.sni_hostnames

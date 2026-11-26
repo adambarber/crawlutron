@@ -5,11 +5,10 @@ import pytest
 
 import crawlutron.transport.fetchers as fetchers_mod
 import crawlutron.transport.http_client_pool as pool_mod
-import crawlutron.transport.pinned_dns as pinned_mod
 from crawlutron.config.settings import CrawlerSettings
 from crawlutron.extraction.discovery import extract_post_fetch_discovery
 from crawlutron.orchestration.engine import crawl_request
-from crawlutron.transport.pinned_transport import PinnedRequest
+from crawlutron.transport.transport import FetchRequest
 from safe_url.normalized_url import NormalizedUrl
 from tests._browser_doubles import _fake_browser
 from tests._fetch_doubles import FetcherDouble, make_fetch
@@ -121,10 +120,10 @@ class _Client:
         self.calls: list[tuple[str, bool, dict[str, object] | None]] = []
 
     def stream(self, method, url, headers=None, timeout=None, follow_redirects=False, extensions=None):
-        connect_url = url.connect_url if isinstance(url, PinnedRequest) else url
-        if isinstance(url, PinnedRequest) and url.tls_hostname:
+        logical = url.url.raw if isinstance(url, FetchRequest) else url
+        if isinstance(url, FetchRequest) and url.tls_hostname:
             extensions = {"sni_hostname": url.tls_hostname}
-        self.calls.append((connect_url, follow_redirects, extensions))
+        self.calls.append((logical, follow_redirects, extensions))
         return _Stream(self.response)
 
 
@@ -137,8 +136,6 @@ async def test_redirect_to_policy_blocked_host_is_refused_before_fetch(monkeypat
         )
     )
     monkeypatch.setattr(pool_mod, "get_async_http_client", lambda: client)
-    # HTTPS is pinned like plain HTTP: the connect host is the validated IP.
-    monkeypatch.setattr(pinned_mod, "resolve_and_pin_host", lambda url: (url.host, "93.184.216.34"))
 
     policy = host_policy_for("allowed.test", "blocked.test")
     with pytest.raises(ValueError, match="refused admission"):
@@ -148,9 +145,9 @@ async def test_redirect_to_policy_blocked_host_is_refused_before_fetch(monkeypat
             30,
         )
 
-    assert [url for url, _follow, _ext in client.calls] == ["https://93.184.216.34/"]
+    assert [url for url, _follow, _ext in client.calls] == ["https://allowed.test/"]
     assert all(follow is False for _url, follow, _ext in client.calls)
-    # The connect URL is the pinned IP, so TLS identity must ride the extension (#574).
+    # The logical host is carried to the proxy, so TLS identity rides the extension.
     assert all(ext == {"sni_hostname": "allowed.test"} for _url, _follow, ext in client.calls)
 
 

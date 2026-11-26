@@ -146,7 +146,6 @@ async def test_cffi_proxy_dial_failed_marker_raises_transport_exception(monkeypa
             pooled_cffi, "egress_proxy_url", lambda policy, settings=None: f"http://127.0.0.1:{proxy.port}"
         )
         request = FetchRequest(
-            connect_url=f"http://{PUBLIC_IP}/page",
             headers={"Host": LOGICAL},
             url=canonical(f"http://{LOGICAL}/page"),
             timeout_seconds=10.0,

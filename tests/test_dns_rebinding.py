@@ -1,6 +1,5 @@
-"""Tests that the DNS-rebinding (TOCTOU) fix actually pins the IP: before it, the
-client re-resolved at connect time so a second response could return a private IP;
-now ``resolve_and_pin_host`` resolves once and connects to the pinned IP.
+"""The proxy resolves once and dials the validated IP; the app carries only the
+logical URL, so no second resolution can rebind a hop to a private address.
 """
 
 from unittest.mock import patch
@@ -45,22 +44,22 @@ class TestDNSRebindingProtection:
         IP (first resolution) is what the connection uses."""
         assert_dns_pinning_uses_first_resolution(monkeypatch, "169.254.169.254")
 
-    async def test_fetcher_connects_to_pinned_ip_with_original_host(self, monkeypatch):
-        """The HTTP fetcher must connect to the pinned IP and forward the
-        original Host header (so virtual-host routing is preserved)."""
+    async def test_fetcher_carries_the_logical_host_with_no_app_resolution(self, monkeypatch):
+        """The fetcher must hand the logical host to the proxy and forward the
+        original Host header; no app-side answer can rebind the hop."""
         block_private_targets(monkeypatch)
-        # A real pooled client over a scripted transport: what is asserted below is the request httpx actually
-        # built, not a stand-in's account of it.
+        # A real pooled client over a scripted transport: assert what httpx built.
         requested: list[httpx.Request] = []
         client = scripted_transport_client(
             [MockResponse(200, {"content-type": "text/html"}, b"<html></html>")],
             observed_requests=requested,
         )
+        monkeypatch.setattr(
+            "socket.getaddrinfo",
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("app DNS in fetch path")),
+        )
 
-        with (
-            host_resolves_to(monkeypatch, "1.2.3.4"),
-            patch("crawlutron.transport.http_client_pool.get_async_http_client", return_value=client),
-        ):
+        with patch("crawlutron.transport.http_client_pool.get_async_http_client", return_value=client):
             result = await default_http_fetcher(
                 canonical("http://example.com/page"),
                 {},
@@ -70,6 +69,6 @@ class TestDNSRebindingProtection:
 
         request = requested[0]
         parsed = urlparse(str(request.url))
-        assert parsed.scheme == "http" and parsed.hostname == "1.2.3.4", request.url
+        assert parsed.scheme == "http" and parsed.hostname == "example.com", request.url
         assert request.headers["Host"] == "example.com", request.headers
         assert result.status_code == 200

@@ -61,7 +61,6 @@ class TestPinnedHttpsWireShape:
         session.response = terminal_response()
         stub_builder("cffi", lambda settings=None: session)
         request = FetchRequest(
-            connect_url="https://93.184.216.34/",
             headers={"Host": "example.com"},
             url=canonical("https://example.com/"),
             timeout_seconds=10,
