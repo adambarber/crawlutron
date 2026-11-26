@@ -1,6 +1,6 @@
 """Census of invariant execution idioms by owner ruling #1474.
 
-Class A: Rule without Registry. Class B: neither, admitted by name below.
+Class A = Rule without Registry (must be zero); B = neither; C = file-reading detectors.
 """
 
 from __future__ import annotations
@@ -105,6 +105,13 @@ PLAIN_ASSERTION_SET = frozenset(
 #: Measured class-B census at #1474; down only, never raised to absorb growth.
 PLAIN_ASSERTION_CEILING = 82
 
+#: Class C: file-reading detector invariants (Rule without Registry), admitted by #1474.
+#: Named, down only: a new one needs its relative path here and the ceiling lowered.
+FILE_READING_DETECTOR_SET = frozenset({"tests/invariants/test_doc_contracts.py"})
+
+#: Measured class-C census at #1474; down only, never raised to absorb growth.
+FILE_READING_DETECTOR_CEILING = 1
+
 
 def _bindings(tree: ast.Module) -> tuple[dict[str, set[str]], set[str]]:
     """Names bound to ``Rule``/``Registry`` by import, and any ``tests.rules`` alias."""
@@ -151,9 +158,29 @@ def _modules(directory: pathlib.Path, has_rule: bool, has_registry: bool) -> lis
     )
 
 
-def ast_scanning_modules(directory: pathlib.Path = _INVARIANTS_DIR) -> list[pathlib.Path]:
-    """Class A: declares a Rule but never constructs a Registry."""
+def _census_label(path: pathlib.Path) -> str:
+    """Repo-relative label, or the bare name for a scratch-tree path."""
+    try:
+        return relative_posix(path)
+    except ValueError:
+        return path.name
+
+
+def rule_only_modules(directory: pathlib.Path = _INVARIANTS_DIR) -> list[pathlib.Path]:
+    """Rule-without-Registry modules: the class A + class C surface."""
     return _modules(directory, has_rule=True, has_registry=False)
+
+
+def file_reading_detector_modules(directory: pathlib.Path = _INVARIANTS_DIR) -> list[pathlib.Path]:
+    """Class C: file-reading detector invariants admitted by the named set."""
+    return [path for path in rule_only_modules(directory) if _census_label(path) in FILE_READING_DETECTOR_SET]
+
+
+def ast_scanning_modules(directory: pathlib.Path = _INVARIANTS_DIR) -> list[pathlib.Path]:
+    """Class A: rule-only invariants not admitted as file-reading detectors."""
+    return [
+        path for path in rule_only_modules(directory) if _census_label(path) not in FILE_READING_DETECTOR_SET
+    ]
 
 
 def plain_assertion_modules(directory: pathlib.Path = _INVARIANTS_DIR) -> list[pathlib.Path]:

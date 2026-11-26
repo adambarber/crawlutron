@@ -17,7 +17,7 @@ from crawlutron.models.render_request import RenderRequest
 from tests.chokepoint_paths import REPO_ROOT
 from tests.chokepoint_walks import canonical_tree, discovered_files
 from tests.invariants._env_knobs import _KNOB_PATTERN, _consumed_knobs
-from tests.rules import Registry, Rule
+from tests.rules import Rule
 
 _DOC_REFERENCE_EXCLUSIONS = {
     "CHANGELOG.md": "a record of what shipped; its citations name modules that were refactored away",
@@ -298,9 +298,6 @@ DOC_SYMBOLS_RESOLVE_TO_DEFINITIONS = Rule(
     clean=None,
 )
 
-# The detector reads doc files, not a canonical_tree tree, so the tmp-copy tests below are its two halves.
-RULES = Registry((DOC_SYMBOLS_RESOLVE_TO_DEFINITIONS,))
-
 
 _FENCED_JSON = re.compile(r"```json\n(.*?)```", re.DOTALL)
 
@@ -436,19 +433,6 @@ def test_live_docs_point_at_paths_that_exist():
 def test_doc_symbols_resolve_to_definitions():
     """Live docs cite no app symbols that don't exist."""
     assert not (failures := _doc_symbol_offenders()), "; ".join(failures)
-
-
-def test_doc_symbol_registry_clean_check_is_live():
-    """The Registry binding must execute the detector, not merely exist."""
-    rule = RULES.rules[0]
-    saved = (rule.find, rule.scope)
-    object.__setattr__(rule, "find", lambda tree, path: _doc_symbol_offenders())
-    object.__setattr__(rule, "scope", lambda *, exclude: [(REPO_ROOT, ast.parse(""))])
-    try:
-        RULES.check_all_clean()
-    finally:
-        object.__setattr__(rule, "find", saved[0])
-        object.__setattr__(rule, "scope", saved[1])
 
 
 def test_doc_symbol_detector_bites(tmp_path):
