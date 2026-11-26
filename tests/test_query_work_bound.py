@@ -1,4 +1,4 @@
-"""Query work is bounded at the admission chokepoint: byte and field caps refuse."""
+"""Query work is bounded at the admission chokepoint: character and field caps refuse."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import pytest
 from safe_url.normalized_url import NormalizedUrl, admit_with_reason
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
-QUERY_BYTE_CAP = 8192
+QUERY_CHAR_CAP = 8192
 QUERY_FIELD_CAP = 256
 
 
@@ -29,20 +29,29 @@ def _reason(query: str) -> str | None:
 @pytest.mark.parametrize(
     ("length", "admitted"),
     [
-        (QUERY_BYTE_CAP - 1, True),
-        (QUERY_BYTE_CAP, True),
-        (QUERY_BYTE_CAP + 1, False),
+        (QUERY_CHAR_CAP - 1, True),
+        (QUERY_CHAR_CAP, True),
+        (QUERY_CHAR_CAP + 1, False),
     ],
     ids=["cap-minus-one", "at-cap", "cap-plus-one"],
 )
-def test_query_byte_cap_boundary(length: int, admitted: bool) -> None:
-    """Kills mutant: no byte cap (the unbounded parse_qsl call at the chokepoint)."""
+def test_query_char_cap_boundary(length: int, admitted: bool) -> None:
+    """Kills mutant: no character cap (the unbounded parse_qsl call at the chokepoint)."""
     query = "a=" + "x" * (length - 2)
     assert len(query) == length
     if admitted:
         assert _admit(query).query == query
     else:
         assert _reason(query) == "invalid_url"
+
+
+def test_query_cap_counts_code_points_not_encoded_bytes() -> None:
+    """Kills mutant: measuring UTF-8 bytes instead of Unicode code points."""
+    query = "a=" + "é" * (QUERY_CHAR_CAP - 2)
+    assert len(query) == QUERY_CHAR_CAP
+    assert len(query.encode("utf-8")) > QUERY_CHAR_CAP
+    assert _admit(query).query == "a=" + "%C3%A9" * (QUERY_CHAR_CAP - 2)
+    assert _reason("a=" + "é" * (QUERY_CHAR_CAP - 1)) == "invalid_url"
 
 
 @pytest.mark.parametrize(
@@ -68,23 +77,23 @@ def test_tracking_param_flood_is_refused_before_filtering() -> None:
     assert _reason(query) == "invalid_url"
 
 
-def test_raw_byte_cap_precedes_canonicalization() -> None:
-    """Kills mutant: byte cap measured on the canonical (empty) query instead of the raw one."""
+def test_raw_char_cap_precedes_canonicalization() -> None:
+    """Kills mutant: character cap measured on the canonical (empty) query instead of the raw one."""
     query = "&".join(["gclid=" + "z" * 40] * 300)
-    assert len(query) > QUERY_BYTE_CAP
+    assert len(query) > QUERY_CHAR_CAP
     assert _reason(query) == "invalid_url"
 
 
 def test_encoded_ampersand_is_not_a_field_separator_bypass() -> None:
     """Kills mutant: counting decoded separators treats %26 as a field boundary."""
     query = "%26".join(["a"] * 400)
-    assert len(query) < QUERY_BYTE_CAP
+    assert len(query) < QUERY_CHAR_CAP
     assert len(parse_qsl(_admit(query).query, keep_blank_values=True)) == 1
 
 
 def test_a_single_oversized_field_value_is_refused() -> None:
-    """Kills mutant: a byte cap applied per field instead of to the whole query."""
-    assert _reason("a=" + "x" * QUERY_BYTE_CAP) == "invalid_url"
+    """Kills mutant: a cap applied per field instead of to the whole query."""
+    assert _reason("a=" + "x" * QUERY_CHAR_CAP) == "invalid_url"
 
 
 def test_blank_fields_count_toward_the_field_cap() -> None:
@@ -95,7 +104,7 @@ def test_blank_fields_count_toward_the_field_cap() -> None:
 def test_hostile_query_work_is_bounded() -> None:
     """Kills mutant: the unbounded 400 KB / 100k-field parse on the event loop."""
     query = "&".join(["a=1"] * 100_000)
-    assert len(query) > QUERY_BYTE_CAP
+    assert len(query) > QUERY_CHAR_CAP
     started = time.monotonic()
     assert _reason(query) == "invalid_url"
     assert time.monotonic() - started < 1.0

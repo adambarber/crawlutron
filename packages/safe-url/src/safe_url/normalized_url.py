@@ -71,7 +71,7 @@ _TRACKING_PARAM_EXACT = frozenset(
 
 # Parse work is bounded where it happens: every caller of the constructor
 # inherits the cap, and an oversized query is refused rather than truncated.
-_MAX_QUERY_BYTES = 8192
+_MAX_QUERY_CHARS = 8192
 _MAX_QUERY_FIELDS = 256
 
 
@@ -136,7 +136,7 @@ def _reject_raw_wire_controls(url: str, *, scheme: str) -> None:
 
 def _canonical_query(query: str) -> str:
     """Bound parse work, drop tracking params, and sort pairs for a stable identity."""
-    if len(query) > _MAX_QUERY_BYTES:
+    if len(query) > _MAX_QUERY_CHARS:
         raise ValueError("invalid_url")
     # Drop known tracking parameters so UTM-variants canonicalize to one key;
     # the rest are sorted, so parameter order alone canonicalizes identically.

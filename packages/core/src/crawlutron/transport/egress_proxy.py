@@ -299,6 +299,8 @@ def _make_handler(policy: HostPolicy, dial: _Dial, owner: list[ProxyServer]):
         task = cast("asyncio.Task[None]", asyncio.current_task())
         writers: list[_Writer] = []
         server._track(task, writers)
+        # A header-stalled client still owns a socket the abort door must reach.
+        writers.append(writer)
         try:
             block = await _read_headers(reader)
             if block is None:

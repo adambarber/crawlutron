@@ -191,22 +191,39 @@ _DOOR_FILE = "packages/core/src/crawlutron/transport/transport.py"
 _DOOR_METHOD = "is_proxy_dial_failure"
 
 
+def _folded_constant(node: ast.AST) -> object | None:
+    """Fold a literal Add chain to one constant; None for anything dynamic."""
+    if isinstance(node, ast.Constant):
+        return node.value
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left, right = _folded_constant(node.left), _folded_constant(node.right)
+        if isinstance(left, str) and isinstance(right, str):
+            return left + right
+    return None
+
+
 def _marker_names(tree: ast.Module) -> set[str]:
     """Module constants holding the marker, so indirection cannot dodge the gate."""
     names: set[str] = set()
+    targets: list[ast.expr]
+    value: ast.expr | None
     for node in tree.body:
-        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Constant):
+        if isinstance(node, ast.Assign):
+            targets, value = node.targets, node.value
+        elif isinstance(node, ast.AnnAssign):
+            targets, value = [node.target], node.value
+        else:
             continue
-        if node.value.value != _MARKER:
+        if value is None or _folded_constant(value) != _MARKER:
             continue
-        names.update(target.id for target in node.targets if isinstance(target, ast.Name))
+        names.update(target.id for target in targets if isinstance(target, ast.Name))
     return names
 
 
 def _is_marker(node: ast.AST, names: set[str]) -> bool:
     """True when an expression carries the marker directly or by module constant."""
-    if isinstance(node, ast.Constant):
-        return node.value == _MARKER
+    if _folded_constant(node) == _MARKER:
+        return True
     return isinstance(node, ast.Name) and node.id in names
 
 
@@ -273,13 +290,46 @@ def test_the_door_path_rejects_a_sibling_method() -> None:
     assert "transport.py:3" in found[0], found
 
 
-def test_a_marker_constant_lookup_is_a_direct_check() -> None:
-    """Indirection through the proxy's constant does not hide a client-side check."""
+def _assert_client_marker_refused(source: str, line: int, message: str) -> None:
+    """Parse one client shape and require the gate to name its marker lookup."""
     relative = "packages/core/src/crawlutron/transport/client.py"
-    source = (
-        f'_REFUSAL_HEADER = "{_MARKER}"\n\ndef classify(headers):\n    return headers.get(_REFUSAL_HEADER)\n'
-    )
     tree = parsed_source(source, filename=relative)
     found = _direct_marker_sites_offenders(tree, relative)
-    assert found, "a marker lookup through a module constant escaped the gate"
-    assert "client.py:4" in found[0], found
+    assert found, message
+    assert f"client.py:{line}" in found[0], found
+
+
+def test_a_marker_constant_lookup_is_a_direct_check() -> None:
+    """Indirection through the proxy's constant does not hide a client-side check."""
+    _assert_client_marker_refused(
+        f'_REFUSAL_HEADER = "{_MARKER}"\n\ndef classify(headers):\n    return headers.get(_REFUSAL_HEADER)\n',
+        line=4,
+        message="a marker lookup through a module constant escaped the gate",
+    )
+
+
+def test_an_annotated_marker_constant_is_a_direct_check() -> None:
+    """An annotated module constant does not dodge the gate (#1479)."""
+    _assert_client_marker_refused(
+        f'_REFUSAL_HEADER: str = "{_MARKER}"\n\n'
+        "def classify(headers):\n    return headers.get(_REFUSAL_HEADER)\n",
+        line=4,
+        message="an annotated marker constant escaped the gate",
+    )
+
+
+@pytest.mark.parametrize(
+    ("source", "line"),
+    [
+        ('def classify(headers):\n    return headers.get("x-crawlutron-" + "egress-refusal")\n', 2),
+        (
+            '_REFUSAL_HEADER = "x-crawlutron-" + "egress-refusal"\n\n'
+            "def classify(headers):\n    return headers.get(_REFUSAL_HEADER)\n",
+            4,
+        ),
+    ],
+    ids=["concat-in-call", "concat-built-constant"],
+)
+def test_a_concat_built_marker_is_a_direct_check(source: str, line: int) -> None:
+    """A literal concat-built marker does not dodge the gate (#1479)."""
+    _assert_client_marker_refused(source, line=line, message="a concat-built marker escaped the gate")
