@@ -7,8 +7,8 @@ loop; httpx connects to it over TCP from whichever loop owns the client.
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
-from contextlib import suppress
 from typing import TYPE_CHECKING
 
 from crawlutron.runtime import process_state
@@ -19,6 +19,9 @@ if TYPE_CHECKING:
     from crawlutron.config.settings import CrawlerSettings
 
 __all__ = ["egress_proxy_url", "has_egress_proxy", "reset_egress_proxy"]
+
+_LOGGER = logging.getLogger(__name__)
+_RESET_CLOSE_TIMEOUT = 5.0
 
 _loop: asyncio.AbstractEventLoop | None = None
 _server: ProxyServer | None = None
@@ -33,15 +36,26 @@ def _default_settings() -> CrawlerSettings:
     return get_cached_settings()
 
 
+async def _abort_handlers(server: ProxyServer) -> None:
+    """Last-resort socket abort, scheduled on the loop that created them."""
+    server.abort_handlers()
+
+
 def reset_egress_proxy() -> None:
     """Drop the listener; the dedicated loop stays reusable for the next build."""
     global _loop, _server, _url
     with _lock:
-        loop = _loop
-        if _server is not None and _server.is_live and loop is not None:
-            with suppress(Exception):
-                asyncio.run_coroutine_threadsafe(_server.aclose(), loop).result(timeout=5.0)
+        loop, server = _loop, _server
         _server, _url = None, None
+    if server is None or loop is None or not server.is_live:
+        return
+    try:
+        asyncio.run_coroutine_threadsafe(server.aclose(), loop).result(timeout=_RESET_CLOSE_TIMEOUT)
+    except TimeoutError:
+        # The creating loop owns every socket; force the abort there, never
+        # from this thread, and never by swallowing the timeout.
+        _LOGGER.warning("egress proxy reset aborted its handlers on the creating loop")
+        asyncio.run_coroutine_threadsafe(_abort_handlers(server), loop)
 
 
 def egress_proxy_url(policy: HostPolicy, settings: CrawlerSettings | None = None) -> str:

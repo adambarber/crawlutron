@@ -11,6 +11,7 @@ import logging
 import socket
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import cast
 from urllib.parse import urlsplit
 
 from crawlutron.runtime import process_state
@@ -34,6 +35,9 @@ _Dial = Callable[[str, int], Awaitable[tuple[_Reader, _Writer]]]
 _REFUSAL_LINE = _REFUSAL_HEADER.lower().encode("ascii") + b":"
 _DRAIN_TIMEOUT = 30.0
 _MAX_HEAD = 65536
+_TUNNEL_LIFETIME = 300.0
+_HANDLER_JOIN_TIMEOUT = 5.0
+
 
 _LIVE_SERVERS: set[ProxyServer] = set()
 
@@ -168,13 +172,27 @@ async def _relay(
     upstream_writer: _Writer,
     *,
     strip_refusal: bool = False,
+    writers: list[_Writer] | None = None,
 ) -> None:
-    """Copy bytes both ways; HTTP forward drops the origin's private marker."""
-    await asyncio.gather(
-        _client_to_origin(reader, upstream_writer),
-        _origin_to_client(upstream_reader, writer, upstream_writer, strip_refusal=strip_refusal),
-        return_exceptions=True,
-    )
+    """Copy bytes both ways under a finite lifetime; no tunnel outlives its owner."""
+    if writers is not None:
+        writers.extend((writer, upstream_writer))
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(
+                _client_to_origin(reader, upstream_writer),
+                _origin_to_client(upstream_reader, writer, upstream_writer, strip_refusal=strip_refusal),
+                return_exceptions=True,
+            ),
+            _TUNNEL_LIFETIME,
+        )
+    except TimeoutError:
+        # The lifetime is a backstop, not a refusal: abort both sockets so the
+        # owning close never waits on a tunnel that stopped making progress.
+        for owned in (writer, upstream_writer):
+            if owned.transport is not None:
+                owned.transport.abort()
+        raise
 
 
 def _with_logical_host(raw: bytes, host: str, port: int, scheme: str) -> bytes:
@@ -215,6 +233,7 @@ async def _forward(
     headers: bytes,
     policy: HostPolicy,
     dial: _Dial,
+    writers: list[_Writer],
 ) -> None:
     """Absolute-form HTTP hop: admit the authority, then relay with Host logical."""
     parts = urlsplit(target)
@@ -232,10 +251,17 @@ async def _forward(
     rewritten = _with_logical_host(headers, plan.logical_host, plan.port, plan.url.scheme)
     upstream_writer.write(request_line + rewritten)
     await upstream_writer.drain()
-    await _relay(reader, writer, upstream_reader, upstream_writer, strip_refusal=True)
+    await _relay(reader, writer, upstream_reader, upstream_writer, strip_refusal=True, writers=writers)
 
 
-async def _tunnel(reader: _Reader, writer: _Writer, target: str, policy: HostPolicy, dial: _Dial) -> None:
+async def _tunnel(
+    reader: _Reader,
+    writer: _Writer,
+    target: str,
+    policy: HostPolicy,
+    dial: _Dial,
+    writers: list[_Writer],
+) -> None:
     """CONNECT hop: admit the authority, then pipe raw TLS bytes untouched."""
     admitted = await _admit_and_dial(target, writer, policy, dial, "https", "CONNECT")
     if admitted is None:
@@ -243,7 +269,7 @@ async def _tunnel(reader: _Reader, writer: _Writer, target: str, policy: HostPol
     _, upstream_reader, upstream_writer = admitted
     writer.write(b"HTTP/1.1 200 Connection established\r\n\r\n")
     await writer.drain()
-    await _relay(reader, writer, upstream_reader, upstream_writer)
+    await _relay(reader, writer, upstream_reader, upstream_writer, writers=writers)
 
 
 async def _dial(plan: ProxyTarget, writer: _Writer, dial: _Dial) -> tuple[_Reader | None, _Writer | None]:
@@ -264,29 +290,38 @@ async def _read_headers(reader: _Reader) -> bytes | None:
         return None
 
 
-def _make_handler(policy: HostPolicy, dial: _Dial):
+def _make_handler(policy: HostPolicy, dial: _Dial, owner: list[ProxyServer]):
     """Build one connection handler bound to this server's policy and dial seam."""
 
     async def handle(reader: _Reader, writer: _Writer) -> None:
-        block = await _read_headers(reader)
-        if block is None:
-            await _refuse(writer, 400, "Bad-Request")
-            return
-        first_line, _, rest = block.partition(b"\r\n")
+        server = owner[0]
+        # A connection handler always runs inside its own asyncio task.
+        task = cast("asyncio.Task[None]", asyncio.current_task())
+        writers: list[_Writer] = []
+        server._track(task, writers)
         try:
-            first = first_line.decode("ascii").strip()
-        except UnicodeError:
-            await _refuse(writer, 400, "Bad-Request")
-            return
-        parts = first.split()
-        if len(parts) != 3:
-            await _refuse(writer, 400, "Bad-Request")
-            return
-        method, target, _version = parts
-        if method == "CONNECT":
-            await _tunnel(reader, writer, target, policy, dial)
-        else:
-            await _forward(reader, writer, method, target, rest, policy, dial)
+            block = await _read_headers(reader)
+            if block is None:
+                await _refuse(writer, 400, "Bad-Request")
+                return
+            first_line, _, rest = block.partition(b"\r\n")
+            try:
+                first = first_line.decode("ascii").strip()
+            except UnicodeError:
+                await _refuse(writer, 400, "Bad-Request")
+                return
+            parts = first.split()
+            if len(parts) != 3:
+                await _refuse(writer, 400, "Bad-Request")
+                return
+            method, target, _version = parts
+            if method == "CONNECT":
+                await _tunnel(reader, writer, target, policy, dial, writers)
+            else:
+                await _forward(reader, writer, method, target, rest, policy, dial, writers)
+        finally:
+            server._untrack(task, writers)
+            writer.close()
 
     return handle
 
@@ -294,13 +329,14 @@ def _make_handler(policy: HostPolicy, dial: _Dial):
 class ProxyServer:
     """A running loopback proxy; ``aclose`` stops it and drops its registration."""
 
-    __slots__ = ("_port", "_server", "_bind_host", "_closed")
+    __slots__ = ("_handlers", "_port", "_server", "_bind_host", "_closed")
 
     def __init__(self, server: asyncio.AbstractServer, port: int, bind_host: str) -> None:
         self._server = server
         self._port = port
         self._bind_host = bind_host
         self._closed = False
+        self._handlers: dict[asyncio.Task[None], list[_Writer]] = {}
 
     @property
     def port(self) -> int:
@@ -317,6 +353,31 @@ class ProxyServer:
         """Whether the listener is still accepting connections."""
         return self._server.is_serving()
 
+    @property
+    def active_handlers(self) -> int:
+        """How many tunnel/forward handlers this listener still owns."""
+        return len(self._handlers)
+
+    @property
+    def tunnel_lifetime_seconds(self) -> float:
+        """The finite lifetime every relay is bounded by."""
+        return _TUNNEL_LIFETIME
+
+    def _track(self, task: asyncio.Task[None], writers: list[_Writer]) -> None:
+        """Own one handler and the writers it may have opened."""
+        self._handlers[task] = writers
+
+    def _untrack(self, task: asyncio.Task[None], writers: list[_Writer]) -> None:
+        """Release a handler that finished; the writers close in its finally."""
+        self._handlers.pop(task, None)
+
+    def abort_handlers(self) -> None:
+        """Abort every socket a live handler owns; call on the creating loop."""
+        for writers in tuple(self._handlers.values()):
+            for writer in writers:
+                if writer.transport is not None:
+                    writer.transport.abort()
+
     def _close(self) -> None:
         """Idempotent lifecycle door: deregister and close the listener once."""
         _LIVE_SERVERS.discard(self)
@@ -326,8 +387,18 @@ class ProxyServer:
         self._server.close()
 
     async def aclose(self) -> None:
-        """Stop accepting and leave the lifecycle registry."""
+        """Stop accepting and reap the handlers this listener created."""
         self._close()
+        # Closing the sockets ends each relay through its own read-EOF path.
+        self.abort_handlers()
+        if self._handlers:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*self._handlers, return_exceptions=True),
+                    _HANDLER_JOIN_TIMEOUT,
+                )
+            except TimeoutError:
+                self.abort_handlers()
         await self._server.wait_closed()
 
     async def serve_forever(self) -> None:
@@ -366,9 +437,11 @@ async def serve_proxy(
         bind_host = host
 
     upstream = dial if dial is not None else _open_target
-    server = await asyncio.start_server(_make_handler(policy, upstream), bind_host, port)
+    owner: list[ProxyServer] = []
+    server = await asyncio.start_server(_make_handler(policy, upstream, owner), bind_host, port)
     actual_port = server.sockets[0].getsockname()[1]
     wrapped = ProxyServer(server, actual_port, bind_host)
+    owner.append(wrapped)
     if register:
         _LIVE_SERVERS.add(wrapped)
     return wrapped
