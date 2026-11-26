@@ -11,6 +11,7 @@ import threading
 from contextlib import suppress
 from typing import TYPE_CHECKING
 
+from crawlutron.runtime import process_state
 from crawlutron.transport.egress_proxy import ProxyServer, serve_proxy
 from safe_url.host_policy import HostPolicy
 
@@ -69,3 +70,11 @@ def has_egress_proxy() -> bool:
     """Whether a proxy listener or its cached URL is still held."""
     global _url
     return _url is not None
+
+
+def _has() -> bool:
+    """Whether the dedicated-loop listener is still held."""
+    return _server is not None
+
+
+process_state.register(__name__, reset_egress_proxy, _has)
