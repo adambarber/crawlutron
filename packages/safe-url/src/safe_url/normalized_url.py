@@ -134,6 +134,21 @@ def _reject_raw_wire_controls(url: str, *, scheme: str) -> None:
     _reject_control_chars(rest)
 
 
+def _canonical_query(query: str) -> str:
+    """Bound parse work, drop tracking params, and sort pairs for a stable identity."""
+    if len(query) > _MAX_QUERY_BYTES:
+        raise ValueError("invalid_url")
+    # Drop known tracking parameters so UTM-variants canonicalize to one key;
+    # the rest are sorted, so parameter order alone canonicalizes identically.
+    try:
+        parsed_pairs = parse_qsl(query, keep_blank_values=True, max_num_fields=_MAX_QUERY_FIELDS)
+    except ValueError as error:
+        raise ValueError("invalid_url") from error
+    pairs = [(k, v) for (k, v) in parsed_pairs if not _is_tracking_param(k)]
+    pairs.sort()
+    return urlencode(pairs, doseq=True)
+
+
 def _canonical_parts(url: str, *, policy: HostPolicy) -> tuple[str, str, str, str, int | None, str, str]:
     """(canonical, scheme, host, site, port, path, query), or raise with the refusal reason."""
     # A scheme-anchored search can miss controls that urlparse later strips; scan
@@ -181,19 +196,7 @@ def _canonical_parts(url: str, *, policy: HostPolicy) -> tuple[str, str, str, st
     # Path and query are identity: a trailing colon or slash in them can name a
     # distinct resource, so only the authority segment is normalized here.
     path = parsed.path or ""
-    query = parsed.query
-    if query:
-        if len(query) > _MAX_QUERY_BYTES:
-            raise ValueError("invalid_url")
-        # Drop known tracking parameters so UTM-variants canonicalize to one key;
-        # the rest are sorted, so parameter order alone canonicalizes identically.
-        try:
-            parsed_pairs = parse_qsl(query, keep_blank_values=True, max_num_fields=_MAX_QUERY_FIELDS)
-        except ValueError as error:
-            raise ValueError("invalid_url") from error
-        pairs = [(k, v) for (k, v) in parsed_pairs if not _is_tracking_param(k)]
-        pairs.sort()
-        query = urlencode(pairs, doseq=True)
+    query = _canonical_query(parsed.query) if parsed.query else ""
     canonical = urlunparse((scheme, netloc, path, parsed.params, query, ""))
     return canonical, scheme, host, registrable_domain(host), port, path, query
 
