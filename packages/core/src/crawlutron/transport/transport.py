@@ -51,6 +51,10 @@ class FetchRequest:
         """The logical hostname TLS must attest, never a resolved IP."""
         return self.url.tls_hostname
 
+    def is_proxy_dial_failure(self, headers: Mapping[str, str]) -> bool:
+        """Only plain-HTTP answers carry a proxy dial marker; HTTPS tunnels carry origin bytes."""
+        return self.url.scheme == "http" and headers.get("x-crawlutron-egress-refusal") == "dial-failed"
+
 
 class Transport(Protocol):
     """One pinned hop: send the request, cap the body, return a FetchResult.

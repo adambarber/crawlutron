@@ -314,7 +314,7 @@ class _PooledHttpClient:
         if follow_redirects is not None:
             kwargs["follow_redirects"] = follow_redirects
         async with self._client.stream(method, request.url.raw, **kwargs) as response:
-            if response.headers.get("x-crawlutron-egress-refusal") == "dial-failed":
+            if request.is_proxy_dial_failure(response.headers):
                 raise httpx.ConnectError("egress proxy could not reach the pinned target")
             yield response
 
