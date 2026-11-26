@@ -14,6 +14,7 @@ from crawlutron.transport import egress_proxy_runtime
 from crawlutron.transport.egress_proxy import ProxyServer, serve_proxy
 from tests._assertions import resolves_in_sequence
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
+from tests._timing_harnesses import await_until
 
 Dial = Callable[[str, int], Awaitable[tuple[asyncio.StreamReader, asyncio.StreamWriter]]]
 CONNECT = b"CONNECT example.com:443 HTTP/1.1\r\n\r\n"
@@ -88,6 +89,25 @@ async def test_aclose_reaps_a_live_connect_tunnel(monkeypatch: pytest.MonkeyPatc
                 await asyncio.wait_for(server.aclose(), 3.0)
             finally:
                 writer.close()
+
+
+async def test_aclose_reaps_a_header_stalled_client() -> None:
+    """Kills mutant: the client writer is tracked only after the relay starts (#1496)."""
+
+    async def no_dial(_host: str, _port: int) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+        raise AssertionError("a header-stalled client must never dial")
+
+    server = await serve_proxy(policy=UNRESTRICTED_HOST_POLICY, dial=no_dial, register=False)
+    _reader, writer = await asyncio.open_connection("127.0.0.1", server.port)
+    try:
+        writer.write(b"CONNECT example.com:443 HTTP/1.1\r\nHost: example.com\r\n")
+        await writer.drain()
+        await await_until(lambda: server.active_handlers == 1, "the pre-relay handler to be tracked")
+        await asyncio.wait_for(server.aclose(), 3.0)
+        assert server.active_handlers == 0, "a pre-relay handler survived the close"
+    finally:
+        writer.close()
+        await asyncio.wait_for(server.aclose(), 3.0)
 
 
 def _holding_origin() -> tuple[socket.socket, list[socket.socket], threading.Event, threading.Event]:
