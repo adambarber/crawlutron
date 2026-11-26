@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import socket
 import threading
-import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
@@ -91,17 +90,20 @@ async def test_aclose_reaps_a_live_connect_tunnel(monkeypatch: pytest.MonkeyPatc
                 writer.close()
 
 
-def _holding_origin() -> tuple[socket.socket, list[socket.socket]]:
-    """A threaded origin whose accepted socket stays open until the proxy closes it."""
+def _holding_origin() -> tuple[socket.socket, list[socket.socket], threading.Event, threading.Event]:
+    """A threaded origin signalling accept and socket release; both are event-driven."""
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     listener.bind(("127.0.0.1", 0))
     listener.listen(1)
     accepted: list[socket.socket] = []
+    reached = threading.Event()
+    released = threading.Event()
 
     def hold() -> None:
         connection, _ = listener.accept()
         accepted.append(connection)
+        reached.set()
         try:
             while connection.recv(4096):
                 pass
@@ -109,9 +111,10 @@ def _holding_origin() -> tuple[socket.socket, list[socket.socket]]:
             pass
         finally:
             connection.close()
+            released.set()
 
     threading.Thread(target=hold, daemon=True).start()
-    return listener, accepted
+    return listener, accepted, reached, released
 
 
 def test_runtime_reset_reaps_a_live_tunnel(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -125,7 +128,8 @@ def test_runtime_reset_reaps_a_live_tunnel(monkeypatch: pytest.MonkeyPatch) -> N
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (PUBLIC_IP, port))]
 
     monkeypatch.setattr(socket, "getaddrinfo", _loopback_aware_resolve)
-    listener, accepted = _holding_origin()
+    listener, accepted, reached, released = _holding_origin()
+    liveness_wait = 10.0
     origin_port = listener.getsockname()[1]
     captured: list[ProxyServer] = []
     real_serve = egress_proxy_runtime.serve_proxy
@@ -147,17 +151,14 @@ def test_runtime_reset_reaps_a_live_tunnel(monkeypatch: pytest.MonkeyPatch) -> N
                 break
             response.extend(chunk)
         assert bytes(response).startswith(b"HTTP/1.1 200")
-        deadline = 2.0
-        while not accepted and deadline > 0:
-            time.sleep(0.01)
-            deadline -= 0.01
+        # The origin sets both signals at the syscall boundary: under xdist load
+        # the event fires when the work happens, never on a wall-clock budget.
+        assert reached.wait(liveness_wait), "the tunnel never reached the origin"
         assert accepted, "the tunnel never reached the origin"
         assert captured[0].active_handlers == 1
         egress_proxy_runtime.reset_egress_proxy()
         assert captured[0].active_handlers == 0, "a relay task survived the runtime reset"
-        deadline = time.monotonic() + 2.0
-        while accepted[0].fileno() != -1 and time.monotonic() < deadline:
-            time.sleep(0.01)
+        assert released.wait(liveness_wait), "the upstream socket survived the runtime reset"
         assert accepted[0].fileno() == -1, "the upstream socket survived the runtime reset"
         egress_proxy_runtime.reset_egress_proxy()
     finally:
