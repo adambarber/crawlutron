@@ -12,7 +12,7 @@ from pathlib import Path
 
 from tests.chokepoint_paths import APP_ROOT
 from tests.chokepoint_walks import app_trees, offender_at
-from tests.rules import Bites, Rule
+from tests.rules import Bites, Registry, Rule
 
 # --------------------------------------------------------------------------- Container protocols on app
 # classes
@@ -194,6 +194,13 @@ NO_UNCLAIMED_CONTAINER_PROTOCOL = Rule(
 )
 
 
+RULES = Registry((NO_UNCLAIMED_CONTAINER_PROTOCOL,))
+
+
 def test_no_app_class_promises_a_container_nobody_asks_for():
     """`_LockedDomainCookieStore` inherited ten methods no app/ caller reaches."""
-    NO_UNCLAIMED_CONTAINER_PROTOCOL.scan()
+    RULES.check_all_clean()
+
+
+def test_unclaimed_container_protocol_rule_has_working_bite() -> None:
+    RULES.check_all_bite()

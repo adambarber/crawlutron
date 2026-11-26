@@ -6,7 +6,7 @@ import ast
 import pathlib
 
 from tests.chokepoint_walks import SANCTIONED, call_nodes, offender_at, resolved_call_name
-from tests.rules import Bites, Rule
+from tests.rules import Bites, Registry, Rule
 
 # It is now inherited from ``models.LiteralChecked``, so the check is part of the class rather than something
 # it remembers to ask for -- and "inherited" is a claim the tree can check, which is what these
@@ -77,13 +77,20 @@ THE_LITERAL_FIELD_CHECK_IS_CALLED_BY_ONE_OWNER = Rule(
 )
 
 
+RULES = Registry((THE_LITERAL_FIELD_CHECK_IS_CALLED_BY_ONE_OWNER,))
+
+
 def test_the_literal_field_check_is_called_by_one_owner():
     """One caller for ``check_literal_fields``, and it is the owning base class.
 
     A second caller is a second place the check can be re-spelled -- the shape
     this consolidation removed (three trampolines into one function).
     """
-    THE_LITERAL_FIELD_CHECK_IS_CALLED_BY_ONE_OWNER.scan()
+    RULES.check_all_clean()
+
+
+def test_taxonomy_literal_rule_has_working_bite() -> None:
+    RULES.check_all_bite()
 
 
 def test_every_taxonomy_literal_dataclass_inherits_the_construction_check():

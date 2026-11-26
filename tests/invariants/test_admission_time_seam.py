@@ -12,7 +12,7 @@ import pathlib
 from tests.chokepoint_paths import ADMISSION_ROOT, APP_ROOT
 from tests.chokepoint_walks import offender_at, trees_under
 from tests.invariants._clock_family import dotted_name
-from tests.rules import Bites, Rule, Silent
+from tests.rules import Bites, Registry, Rule, Silent
 
 _SYNTHETIC = ADMISSION_ROOT / "_synthetic.py"
 _ELSEWHERE = APP_ROOT / "admission" / "policy.py"
@@ -163,11 +163,13 @@ ADMISSION_USES_NO_CONCRETE_TIME_OR_SLEEP = Rule(
     ),
 )
 
-RULES = (ADMISSION_USES_NO_CONCRETE_TIME_OR_SLEEP,)
+RULES = Registry((ADMISSION_USES_NO_CONCRETE_TIME_OR_SLEEP,))
 
 
 def test_admission_uses_no_concrete_time_or_sleep() -> None:
     """The kernel reads time only through its injected Clock/Signal (source-scan gate)."""
-    for rule in RULES:
-        rule.scan()
-        rule.check_bites()
+    RULES.check_all_clean()
+
+
+def test_admission_time_seam_rule_has_working_bite() -> None:
+    RULES.check_all_bite()

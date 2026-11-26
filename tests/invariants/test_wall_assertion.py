@@ -11,7 +11,7 @@ from collections.abc import Iterator
 from tests.chokepoint_paths import APP_ROOT, REPO_ROOT
 from tests.chokepoint_walks import offender_at
 from tests.invariants._clock_family import suite_trees, wall_names, wall_read
-from tests.rules import Bites, Rule, Silent
+from tests.rules import Bites, Registry, Rule, Silent
 
 # Wall reads here are arrangement (state construction, never asserted on) or
 # sanctioned bounds. The table only ever shrinks: a row deleted here is the ratchet.
@@ -164,9 +164,13 @@ WALL_ASSERTIONS_CARRY_THE_MARKER = Rule(
 )
 
 
-RULES = (WALL_ASSERTIONS_CARRY_THE_MARKER,)
+RULES = Registry((WALL_ASSERTIONS_CARRY_THE_MARKER,))
 
 
 def test_wall_assertions_carry_the_marker():
     """Every wall-elapsed assertion is marked (#843)."""
-    WALL_ASSERTIONS_CARRY_THE_MARKER.scan()
+    RULES.check_all_clean()
+
+
+def test_wall_assertion_rule_has_working_bite() -> None:
+    RULES.check_all_bite()

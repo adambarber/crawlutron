@@ -6,7 +6,7 @@ import ast
 import pathlib
 
 from tests.chokepoint_walks import call_nodes, offender_at
-from tests.rules import Bites, Rule
+from tests.rules import Bites, Registry, Rule
 
 
 def _is_screenshot_call(call: ast.Call) -> bool:
@@ -93,5 +93,12 @@ SCREENSHOT_PAYLOAD_ENCODED_ONCE = Rule(
 )
 
 
+RULES = Registry((SCREENSHOT_PAYLOAD_ENCODED_ONCE,))
+
+
 def test_screenshot_base64_is_capped_in_one_place() -> None:
-    SCREENSHOT_PAYLOAD_ENCODED_ONCE.scan()
+    RULES.check_all_clean()
+
+
+def test_screenshot_cap_rule_has_working_bite() -> None:
+    RULES.check_all_bite()

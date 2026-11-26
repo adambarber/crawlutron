@@ -17,7 +17,7 @@ from tests._walk_primitives import (
     trees_under,
 )
 from tests.chokepoint_paths import REPO_ROOT
-from tests.rules import Rule
+from tests.rules import Registry, Rule
 
 #: The one sanctioned caller: (file, enclosing function name) — never a line number.
 _EXCLUDED = "packages/core/tests/storage/test_safe_db.py"
@@ -66,12 +66,15 @@ ALLOW_ON_LOOP_READ_RULE = Rule(
 )
 
 
+RULES = Registry((ALLOW_ON_LOOP_READ_RULE,))
+
+
 def test_allow_on_loop_read_rule_holds_on_live_tree() -> None:
-    ALLOW_ON_LOOP_READ_RULE.scan()
+    RULES.check_all_clean()
 
 
 def test_allow_on_loop_read_rule_has_working_bite() -> None:
-    ALLOW_ON_LOOP_READ_RULE.check_bites()
+    RULES.check_all_bite()
 
 
 def test_allow_on_loop_read_walk_past_names_two_offenders() -> None:
