@@ -39,11 +39,14 @@ async def _stalled_origin(seen: list[asyncio.StreamWriter]) -> AsyncGenerator[in
         await server.wait_closed()
 
 
-def _dial_to(port: int) -> Dial:
-    """Dial the stalled loopback origin."""
+def _dial_to(port: int, writers: list[asyncio.StreamWriter] | None = None) -> Dial:
+    """Dial the stalled loopback origin, recording the proxy-side socket."""
 
     async def dial(_host: str, _target_port: int) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-        return await asyncio.open_connection("127.0.0.1", port)
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        if writers is not None:
+            writers.append(writer)
+        return reader, writer
 
     return dial
 
@@ -63,8 +66,9 @@ async def test_aclose_reaps_a_live_connect_tunnel(monkeypatch: pytest.MonkeyPatc
     """Kills mutant: no handler tracking (aclose waits forever on the relay)."""
     resolves_in_sequence(monkeypatch, PUBLIC_IP)
     upstream: list[asyncio.StreamWriter] = []
+    proxied: list[asyncio.StreamWriter] = []
     async with _stalled_origin(upstream) as origin_port:
-        async with _proxy(_dial_to(origin_port)) as server:
+        async with _proxy(_dial_to(origin_port, proxied)) as server:
             reader, writer = await asyncio.open_connection("127.0.0.1", server.port)
             try:
                 writer.write(CONNECT)
@@ -81,7 +85,7 @@ async def test_aclose_reaps_a_live_connect_tunnel(monkeypatch: pytest.MonkeyPatc
                 await asyncio.wait_for(server.aclose(), 3.0)
                 assert server.active_handlers == 0, "a relay task survived the close"
                 assert 0 < server.tunnel_lifetime_seconds < 60 * 60
-                assert upstream[0].is_closing(), "the upstream socket survived the close"
+                assert proxied[0].is_closing(), "the upstream socket survived the close"
                 await asyncio.wait_for(server.aclose(), 3.0)
             finally:
                 writer.close()
@@ -151,6 +155,9 @@ def test_runtime_reset_reaps_a_live_tunnel(monkeypatch: pytest.MonkeyPatch) -> N
         assert captured[0].active_handlers == 1
         egress_proxy_runtime.reset_egress_proxy()
         assert captured[0].active_handlers == 0, "a relay task survived the runtime reset"
+        deadline = time.monotonic() + 2.0
+        while accepted[0].fileno() != -1 and time.monotonic() < deadline:
+            time.sleep(0.01)
         assert accepted[0].fileno() == -1, "the upstream socket survived the runtime reset"
         egress_proxy_runtime.reset_egress_proxy()
     finally:
