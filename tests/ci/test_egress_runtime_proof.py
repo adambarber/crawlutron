@@ -116,7 +116,8 @@ def _crawl_via_api(app_container: str, url: str) -> subprocess.CompletedProcess[
     This uses the real production wiring: the service's pooled client configured
     with CRAWLUTRON_EGRESS_PROXY_URL.
     """
-    payload = json.dumps({"url": url})
+    # async_mode makes the POST return 202 CrawlAccepted with a status_url.
+    payload = json.dumps({"url": url, "async_mode": True})
     return run_cmd(
         [
             "docker",
@@ -238,8 +239,8 @@ def egress_stack():
     import os
 
     project_name = f"crawlutron-egress-test-{uuid.uuid4().hex[:8]}"
-    # Unique host port (0=auto); merge env for subprocess PATH
-    env = {**os.environ, "COMPOSE_HOST_PORT": "0"}
+    # Empty host port = Docker auto-allocates; merge env for subprocess PATH
+    env = {**os.environ, "COMPOSE_HOST_PORT": ""}
 
     # Build images (uses cached base images by default)
     print("Building egress test images...")
@@ -407,14 +408,15 @@ def test_network_topology(egress_stack) -> None:
         ("egress-proxy", ["internal", "egress"]),
         ("origin", ["egress"]),
     ]:
+        qualified = [f"{project_name}_{net}" for net in expected_networks]
         container_name = _get_container_name(project_name, name)
         fmt = "{{json .NetworkSettings.Networks}}"
         result = run_cmd(["docker", "inspect", container_name, "--format", fmt])
         assert result.returncode == 0, f"Failed to inspect {name}"
         networks = json.loads(result.stdout.strip())
         actual_networks = sorted(networks.keys())
-        assert actual_networks == sorted(expected_networks), (
-            f"{name}: expected networks {expected_networks}, got {actual_networks}"
+        assert actual_networks == sorted(qualified), (
+            f"{name}: expected networks {qualified}, got {actual_networks}"
         )
         print(f"{name}: correctly on networks {actual_networks}")
 
