@@ -6,8 +6,10 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 
+import httpx
 import pytest
 
+from safe_url.host_canonical import idna_host
 from safe_url.host_policy import HostPolicy
 from safe_url.normalized_url import NormalizedUrl, _reject_control_chars
 
@@ -83,3 +85,44 @@ def test_percent_escaped_control_stays_admitted() -> None:
     """A %-escaped control (%00 / %7F) is literal text and passes admission."""
     url = NormalizedUrl("http://example.com/a%00b%7F", policy=UNRESTRICTED)
     assert url.raw == "http://example.com/a%00b%7F"
+
+
+@pytest.mark.parametrize("separator", ["\t", "\n", "\r"])
+def test_raw_control_in_scheme_separator_is_refused(separator: str) -> None:
+    """A control in the scheme separator hides the raw authority from the prefilter."""
+    with pytest.raises(ValueError, match="invalid_url"):
+        NormalizedUrl(f"http{separator}://example.com/", policy=UNRESTRICTED)
+
+
+@pytest.mark.parametrize("control", ["\x00", "\x01", "\x7f"])
+def test_leading_control_is_refused(control: str) -> None:
+    """Raw controls are refused on the whole URL, before a scheme is located."""
+    with pytest.raises(ValueError, match="invalid_url"):
+        NormalizedUrl(f"{control}http://example.com/", policy=UNRESTRICTED)
+
+
+def test_tab_scheme_with_space_authority_is_refused() -> None:
+    """The verdict host must never differ from the transport host."""
+    with pytest.raises(ValueError, match="invalid_url"):
+        NormalizedUrl("http\t://exam ple.com/", policy=UNRESTRICTED)
+
+
+def test_space_in_authority_is_refused() -> None:
+    """The authority-whitespace rule survives the whole-URL prefilter."""
+    with pytest.raises(ValueError, match="invalid_url"):
+        NormalizedUrl("http://exam ple.com/", policy=UNRESTRICTED)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "http://example.com/a",
+        "http://example.com:8080/a?b=c",
+        "http://bücher.example/",
+        "http://[2606:4700::1111]/",
+    ],
+)
+def test_admitted_host_matches_transport_host(raw: str) -> None:
+    """Where the transport host is stable, it names exactly the admitted host."""
+    url = NormalizedUrl(raw, policy=UNRESTRICTED)
+    assert idna_host(httpx.URL(url.raw).host) == url.host

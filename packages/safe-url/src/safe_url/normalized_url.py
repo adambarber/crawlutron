@@ -130,6 +130,9 @@ def _reject_raw_wire_controls(url: str, *, scheme: str) -> None:
 
 def _canonical_parts(url: str, *, policy: HostPolicy) -> tuple[str, str, str, str, int | None, str, str]:
     """(canonical, scheme, host, site, port, path, query), or raise with the refusal reason."""
+    # A scheme-anchored search can miss controls that urlparse later strips; scan
+    # the whole raw URL first so no admitted identity differs from its wire form.
+    _reject_control_chars(url)
     try:
         parsed = urlparse(url)
     except ValueError as error:
