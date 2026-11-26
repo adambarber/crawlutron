@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ast
+import inspect
 import json
 import subprocess
 import time
@@ -216,6 +218,20 @@ def _extract_crawl_artifact(status_data: dict[str, object]) -> CrawlArtifact:
     )
 
 
+def test_egress_stack_build_does_not_force_builder_backend() -> None:
+    """Runtime proof must use the supported BuildKit default, never a forced builder backend.
+
+    A forced legacy backend failed live with a credential error; the default builds from cache.
+    """
+    tree = ast.parse(inspect.getsource(egress_stack))
+    offending = [
+        n.lineno
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Constant) and isinstance(n.value, str) and n.value == "DOCKER_BUILDKIT"
+    ]
+    assert not offending, f"egress_stack must not force a builder backend (lines {offending})"
+
+
 @pytest.fixture(scope="module")
 def egress_stack():
     """Bring up the egress topology stack for testing with unique project name."""
@@ -228,9 +244,7 @@ def egress_stack():
     # Build images (uses cached base images by default)
     print("Building egress test images...")
     build_cmd = ["build", "crawlutron", "egress-proxy"]
-    # Disable BuildKit to avoid pulling base images when local cache exists
-    build_env = {**env, "DOCKER_BUILDKIT": "0"}
-    build_result = _docker_compose(project_name, build_cmd, capture=False, env=build_env)
+    build_result = _docker_compose(project_name, build_cmd, capture=False, env=env)
     assert build_result.returncode == 0, "Failed to build images"
 
     # Bring up the stack with --pull never on the up command only
