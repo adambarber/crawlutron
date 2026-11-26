@@ -157,31 +157,34 @@ def test_200_against_validator_baseline_by_agreement(validators, expected, why):
     assert classification == expected
 
 
-def test_200_against_fingerprint_baseline_by_agreement():
+@pytest.mark.parametrize(
+    ("body", "expected", "why"),
+    [("same page", UNCHANGED, "same_fingerprint"), ("other page", CHANGED, "fingerprint_diff")],
+    ids=["same-fingerprint", "fingerprint-differs"],
+)
+def test_200_against_fingerprint_baseline_by_agreement(body, expected, why):
     """Fingerprints decide before validators: same body unchanged, other changed."""
     same = content_fingerprint(engine_result(URL, "rendered", markdown="same page"))
     baseline = _baseline_evidence(fingerprint=same)
-    cases = [("same page", UNCHANGED, "same_fingerprint"), ("other page", CHANGED, "fingerprint_diff")]
-    for body, expected, why in cases:
-        result = engine_result(URL, "rendered", http_status=200, markdown=body)
-        classification, evidence = _classified(result, baseline=baseline)
-        assert (classification, evidence["why"]) == (expected, why)
+    result = engine_result(URL, "rendered", http_status=200, markdown=body)
+    classification, evidence = _classified(result, baseline=baseline)
+    assert (classification, evidence["why"]) == (expected, why)
 
 
-def test_no_baseline_freshness_paths():
+@pytest.mark.parametrize(
+    ("headers", "why", "expected"),
+    [
+        ({"last-modified": "Wed, 01 Jan 2025 00:00:00 GMT"}, "last_modified_not_newer", UNCHANGED),
+        ({"last-modified": "Thu, 02 Jan 2025 00:00:00 GMT"}, "last_modified_newer", CHANGED),
+        (None, "freshness_undeterminable", CHANGED),
+    ],
+    ids=["older-not-newer", "newer-than-since", "no-freshness-header"],
+)
+def test_no_baseline_freshness_paths(headers, why, expected):
     """No baseline evidence: freshness decides, fail open toward change."""
-    older = {"last-modified": "Wed, 01 Jan 2025 00:00:00 GMT"}
-    newer = {"last-modified": "Thu, 02 Jan 2025 00:00:00 GMT"}
-    cases: list[tuple[dict[str, str] | None, str]] = [
-        (older, "last_modified_not_newer"),
-        (newer, "last_modified_newer"),
-        (None, "freshness_undeterminable"),
-    ]
-    expected_verdicts = [UNCHANGED, CHANGED, CHANGED]
-    for (headers, why), expected in zip(cases, expected_verdicts, strict=True):
-        result = engine_result(URL, "rendered", headers=headers or {})
-        classification, evidence = _classified(result, changed_since=1_735_689_600.0)
-        assert (classification, evidence["why"]) == (expected, why)
+    result = engine_result(URL, "rendered", headers=headers or {})
+    classification, evidence = _classified(result, changed_since=1_735_689_600.0)
+    assert (classification, evidence["why"]) == (expected, why)
 
 
 @pytest.mark.usefixtures("non_utc_tz")
@@ -314,10 +317,17 @@ def test_fingerprint_compared_over_baseline_field_set_not_whole_result():
     assert (classification, evidence["why"]) == (CHANGED, "validators_diff")
 
 
-def test_removed_urls_for_delta():
-    cases = [(["a", "b", "c"], ["a", "c"], ("b",)), ([], ["a"], ()), (["a"], [], ("a",))]
-    for submitted, admitted, expected in cases:
-        assert removed_urls_for(submitted, admitted) == expected
+@pytest.mark.parametrize(
+    ("submitted", "admitted", "expected"),
+    [
+        (["a", "b", "c"], ["a", "c"], ("b",)),
+        ([], ["a"], ()),
+        (["a"], [], ("a",)),
+    ],
+    ids=["middle-removed", "none-submitted", "all-submitted"],
+)
+def test_removed_urls_for_delta(submitted, admitted, expected):
+    assert removed_urls_for(submitted, admitted) == expected
 
 
 def _shaped(
