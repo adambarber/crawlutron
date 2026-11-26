@@ -7,7 +7,7 @@ import pathlib
 
 from tests.chokepoint_paths import APP_ROOT, relative_posix
 from tests.chokepoint_walks import SANCTIONED, call_nodes, offender_at, resolved_call_name
-from tests.rules import Bites, Rule, Silent
+from tests.rules import Bites, Registry, Rule, Silent
 
 # --- A result may not spell its own (status, classification) pair -------------
 
@@ -87,6 +87,13 @@ RESULTS_DERIVE_THEIR_STATUS_FROM_THE_TAXONOMY = Rule(
 )
 
 
+RULES = Registry((RESULTS_DERIVE_THEIR_STATUS_FROM_THE_TAXONOMY,))
+
+
 def test_results_derive_their_status_from_the_taxonomy():
     """No record outside the chokepoint spells both taxonomy axes as literals."""
-    RESULTS_DERIVE_THEIR_STATUS_FROM_THE_TAXONOMY.scan()
+    RULES.check_all_clean()
+
+
+def test_results_derive_status_rule_has_working_bite():
+    RULES.check_all_bite()

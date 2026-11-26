@@ -12,7 +12,7 @@ from collections.abc import Iterable
 
 from tests.chokepoint_paths import ADMISSION_ROOT, APP_ROOT, REPO_ROOT
 from tests.chokepoint_walks import trees_under
-from tests.rules import Bites, Rule, Silent
+from tests.rules import Bites, Registry, Rule, Silent
 
 _SYNTHETIC = ADMISSION_ROOT / "_synthetic.py"
 _ELSEWHERE = APP_ROOT / "crawl" / "content_cache.py"
@@ -62,11 +62,13 @@ ADMISSION_IMPORTS_NO_CRAWLUTRON = Rule(
     ),
 )
 
-RULES = (ADMISSION_IMPORTS_NO_CRAWLUTRON,)
+RULES = Registry((ADMISSION_IMPORTS_NO_CRAWLUTRON,))
 
 
 def test_admission_imports_no_crawlutron() -> None:
     """The kernel never imports the crawler (import-contract gate, §9.6)."""
-    for rule in RULES:
-        rule.scan()
-        rule.check_bites()
+    RULES.check_all_clean()
+
+
+def test_admission_import_rule_has_working_bite() -> None:
+    RULES.check_all_bite()

@@ -13,7 +13,7 @@ from tests._walk_primitives import offender
 from tests._walk_readers import call_nodes
 from tests._walk_resolution import resolved_call_name
 from tests.chokepoint_walks import app_trees
-from tests.rules import Bites, Rule
+from tests.rules import Bites, Registry, Rule
 
 _RECORD_CALL = "record_declined_close"
 
@@ -91,14 +91,17 @@ DECLINE_RECORD_TYPE_NAMES_ONLY = Rule(
 )
 
 
+RULES = Registry((DECLINE_RECORD_TYPE_NAMES_ONLY,))
+
+
 def test_the_decline_record_records_type_names_only():
     """Every record_declined_close call site passes a type name as the kind."""
-    DECLINE_RECORD_TYPE_NAMES_ONLY.scan()
+    RULES.check_all_clean()
 
 
 def test_the_decline_record_detector_bites():
     """The gate rejects a message in the kind position."""
-    DECLINE_RECORD_TYPE_NAMES_ONLY.check_bites()
+    RULES.check_all_bite()
 
 
 def test_the_decline_record_has_six_call_sites():
