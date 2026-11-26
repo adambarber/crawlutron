@@ -294,12 +294,13 @@ def _make_handler(policy: HostPolicy, dial: _Dial):
 class ProxyServer:
     """A running loopback proxy; ``aclose`` stops it and drops its registration."""
 
-    __slots__ = ("_port", "_server", "_bind_host")
+    __slots__ = ("_port", "_server", "_bind_host", "_closed")
 
     def __init__(self, server: asyncio.AbstractServer, port: int, bind_host: str) -> None:
         self._server = server
         self._port = port
         self._bind_host = bind_host
+        self._closed = False
 
     @property
     def port(self) -> int:
@@ -319,8 +320,10 @@ class ProxyServer:
     def _close(self) -> None:
         """Idempotent lifecycle door: deregister and close the listener once."""
         _LIVE_SERVERS.discard(self)
-        if self.is_live:
-            self._server.close()
+        if self._closed:
+            return
+        self._closed = True
+        self._server.close()
 
     async def aclose(self) -> None:
         """Stop accepting and leave the lifecycle registry."""

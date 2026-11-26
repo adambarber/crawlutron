@@ -43,6 +43,33 @@ async def test_process_reset_closes_a_live_listener() -> None:
     assert not process_state.owner_has_state(_OWNER)
 
 
+async def test_two_close_paths_close_once_with_spent_waiters(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A second lifecycle path must never reach Server.close once waiters are spent."""
+    server = await serve_proxy(policy=UNRESTRICTED_HOST_POLICY)
+    target = server._server
+    calls: list[bool] = []
+    real_close = asyncio.Server.close
+
+    def spy_close(self: asyncio.Server) -> None:
+        if self is target:
+            calls.append(vars(self)["_waiters"] is None)
+        real_close(self)
+
+    monkeypatch.setattr(asyncio.Server, "close", spy_close)
+
+    await server.aclose()
+    assert calls == [False], calls
+    assert vars(target)["_waiters"] is None
+
+    # Reproduce the reset interleaving: is_serving() True while the wakeup
+    # waiters are spent, so a liveness check cannot guard the second close.
+    vars(target)["_serving"] = True
+    await server.serve_forever()
+
+    assert len(calls) == 1, calls
+    assert not process_state.owner_has_state(_OWNER)
+
+
 async def test_serve_forever_owns_the_single_close(monkeypatch: pytest.MonkeyPatch) -> None:
     """Only the lifecycle door closes; no second call reaches _wakeup's None state."""
     server = await serve_proxy(policy=UNRESTRICTED_HOST_POLICY)
