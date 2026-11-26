@@ -328,12 +328,11 @@ class ProxyServer:
         await self._server.wait_closed()
 
     async def serve_forever(self) -> None:
-        """Run the server until cancelled; the public lifecycle door for sidecar use."""
+        """Run until closed; aclose is the sole owner of close and wait."""
         try:
-            async with self._server:
-                await self._server.serve_forever()
+            await self._server.wait_closed()
         finally:
-            self._close()
+            await self.aclose()
 
 
 async def serve_proxy(
