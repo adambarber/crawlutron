@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
 import pytest
@@ -433,6 +434,10 @@ async def test_valid_key_does_not_burn_anonymous_ip_bucket():
     """#986: verified key is exempt from the anonymous IP bucket."""
     process_state_reset()
     async with _admin_app_client() as (client, keys):
+        db_path = keys.db_path.resolve()
+        scratch = Path(os.environ["CRAWLUTRON_CACHE_DIR"]).resolve()
+        assert db_path.is_relative_to(scratch), f"{db_path} must live under {scratch}"
+        assert db_path != Path("./cache/crawler.db").resolve(), "all workers share ./cache"
         issued = await keys.aissue_key("test-key")
         secret = issued.secret
         for _ in range(ANON_MAX_REQUESTS):
