@@ -8,7 +8,7 @@ import pathlib
 
 from tests.chokepoint_paths import TESTS_DIR
 from tests.chokepoint_walks import attribute_call_on, offender_at, trees_under
-from tests.rules import Bites, Rule
+from tests.rules import Bites, Registry, Rule
 
 _TIME_LIMIT_NOTE = (
     "time.sleep inside a handler/thread the test spawns IS the hold-open"
@@ -252,5 +252,12 @@ MECHANISM_SLEEPS_CARRY_THE_MARKER = Rule(
 )
 
 
+RULES = Registry((MECHANISM_SLEEPS_CARRY_THE_MARKER,))
+
+
 def test_mechanism_sleeps_carry_the_marker():
-    MECHANISM_SLEEPS_CARRY_THE_MARKER.scan()
+    RULES.check_all_clean()
+
+
+def test_mechanism_sleeps_rule_has_working_bite() -> None:
+    RULES.check_all_bite()

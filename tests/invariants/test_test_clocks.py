@@ -19,7 +19,7 @@ from tests.invariants._clock_family import (
     suite_trees,
     wall_read,
 )
-from tests.rules import Bites, Rule, Silent
+from tests.rules import Bites, Registry, Rule, Silent
 
 _CLOCK_NAME_PATTERNS = ("*clock*", "frozen_*", "*_timeline*")
 
@@ -153,9 +153,13 @@ TESTS_DEFINE_NO_LOCAL_CLOCKS = Rule(
     ),
 )
 
-RULES = (TESTS_DEFINE_NO_LOCAL_CLOCKS,)
+RULES = Registry((TESTS_DEFINE_NO_LOCAL_CLOCKS,))
 
 
 def test_tests_define_no_local_clocks():
     """The suite's one clock home: no clock-like def outside ``_clocks.py``."""
-    TESTS_DEFINE_NO_LOCAL_CLOCKS.scan()
+    RULES.check_all_clean()
+
+
+def test_test_clocks_rule_has_working_bite() -> None:
+    RULES.check_all_bite()

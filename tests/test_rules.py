@@ -386,7 +386,7 @@ class TestRegistryReportsEveryFailure:
 
 _INVARIANTS_DIR = REPO_ROOT / "tests" / "invariants"
 #: Measured post-batch census; down only, deleted when zero.
-_HAND_ROLLED_BUDGET = 103
+_HAND_ROLLED_BUDGET = 93
 
 
 def _registry_bindings(tree: ast.Module) -> tuple[set[str], set[str]]:

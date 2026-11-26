@@ -7,7 +7,7 @@ import pathlib
 
 from tests.chokepoint_paths import path_components
 from tests.chokepoint_walks import call_nodes, nodes_of, offender_at, resolved_expr_name
-from tests.rules import Bites, Rule, Trips
+from tests.rules import Bites, Registry, Rule, Trips
 from tests.trees import tree_under_tests as tests_tree
 
 
@@ -280,13 +280,16 @@ TESTS_MUST_NOT_MUTATE_APP = Rule(
 )
 
 
+RULES = Registry((TESTS_MUST_NOT_MUTATE_APP,))
+
+
 def test_tests_do_not_mutate_the_production_tree():
     """No test writes, unlinks, renames, or replaces a path inside `crawlutron/`.
 
     Tree-wide, and read from the tree rather than from a file list, so the
     sweep covers a test added tomorrow with nothing to register.
     """
-    TESTS_MUST_NOT_MUTATE_APP.scan()
+    RULES.check_all_clean()
 
 
 def test_tree_detectors_bite():
@@ -295,4 +298,4 @@ def test_tree_detectors_bite():
     The first is the real offender (making `crawlutron/` move mid-suite); the rest are
     ways a fix could regress the rule into a no-op or false alarm.
     """
-    TESTS_MUST_NOT_MUTATE_APP.check_bites()
+    RULES.check_all_bite()

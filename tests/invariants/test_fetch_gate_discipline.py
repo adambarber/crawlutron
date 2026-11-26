@@ -19,7 +19,7 @@ from tests.chokepoint_walks import (
     resolved_call_name,
     resolved_expr_name,
 )
-from tests.rules import Bites, Rule
+from tests.rules import Bites, Registry, Rule
 
 # The four fetch executors a door (HTTP or MCP) must reach through request_gate.
 _GATED_FETCH_EXECUTORS = frozenset(
@@ -193,6 +193,13 @@ FETCH_EXECUTORS_REACH_WORK_ONLY_THROUGH_THE_GATE = Rule(
 )
 
 
+RULES = Registry((FETCH_EXECUTORS_REACH_WORK_ONLY_THROUGH_THE_GATE,))
+
+
 def test_fetch_executors_reach_work_only_through_the_gate():
     """The MCP door calls execute_crawl/map_site/render/search only under request_gate."""
-    FETCH_EXECUTORS_REACH_WORK_ONLY_THROUGH_THE_GATE.scan()
+    RULES.check_all_clean()
+
+
+def test_fetch_gate_discipline_rule_has_working_bite() -> None:
+    RULES.check_all_bite()
