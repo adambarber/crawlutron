@@ -24,6 +24,14 @@ MAX_REQUEST_BODY_BYTES = 16 * 1024 * 1024
 # cannot pin a middleware task indefinitely.
 BODY_DEADLINE_SECONDS = 30.0
 
+# Bodies above this window stream through a counter; small ones are buffered.
+# The bound is fixed, so middleware memory stays O(1) per request.
+_BUFFER_WINDOW = 8192
+
+
+class _BodyFramingError(Exception):
+    """A declared body ended early or stalled; the 413 path owns the refusal."""
+
 
 async def reject_hostile_origin(request: Request, call_next):
     """Reject a present, non-loopback browser Origin (DNS-rebinding defense).
@@ -176,51 +184,123 @@ def _capped_receive_for(original_receive: Receive, *, max_bytes: int, truncated:
     return receive
 
 
-async def limit_request_body(request: Request, call_next, *, max_bytes: int = MAX_REQUEST_BODY_BYTES):
-    """Cap declared request bodies; overflow is split, never routed (#921). #619
-    truncation and #675 malformed length both refuse 413 like an oversize body."""
-    original_receive = request.receive
-    content_length = request.headers.get("content-length")
-    conflicting = {
+def _declared_stream_receive(
+    original_receive: Receive,
+    *,
+    declared: int,
+    max_bytes: int,
+    overflow: list[bool],
+    truncating: list[bool],
+) -> Receive:
+    """Count a declared body through to the app without retaining it."""
+    delivered = 0
+    deadline = time.monotonic() + BODY_DEADLINE_SECONDS
+    capped = None
+
+    async def receive() -> Message:
+        nonlocal delivered, capped
+        if time.monotonic() >= deadline:
+            raise _BodyFramingError
+        try:
+            message = await asyncio.wait_for(original_receive(), deadline - time.monotonic())
+        except TimeoutError as error:
+            raise _BodyFramingError from error
+        if message.get("type") != "http.request":
+            raise _BodyFramingError
+        if capped is not None:
+            return await capped()
+        body = message.get("body", b"") or b""
+        room = declared - delivered
+        if len(body) > room:
+            keep = body[:room] if room > 0 else b""
+            overflow[0] = True
+            overflow[1] = bool(message.get("more_body", False))
+            delivered = declared
+            return {**message, "body": keep, "more_body": False}
+        delivered += len(body)
+        if not message.get("more_body", False) and delivered < declared:
+            raise _BodyFramingError
+        if delivered == declared and message.get("more_body", False):
+            capped = _capped_receive_for(
+                original_receive, max_bytes=max_bytes - declared, truncated=truncating
+            )
+        return message
+
+    return receive
+
+
+async def _declared_length(request: Request, *, max_bytes: int) -> int | None:
+    """Validate the framing header; None means the caller must answer 413."""
+    receive = request.receive
+    values = {
         value.decode("latin-1")
         for name, value in request.scope.get("headers", [])
         if name == b"content-length"
     }
-    if len(conflicting) > 1:
-        # Two distinct Content-Length values are a framing contradiction; drain
-        # and refuse rather than serve whichever the parser happened to read.
-        await _drain_declared_body(original_receive, max_bytes=max_bytes)
-        return _error_413(max_bytes)
-    declared = 0
-    if content_length is not None:
-        # A nonempty header that is not a plain non-negative decimal refuses
-        # (#675): negative serves an empty body, non-int falls into truncation.
-        try:
-            declared = int(content_length)
-        except ValueError:
-            return _error_413(max_bytes)
-        if not content_length.isascii() or not content_length.isdigit() or declared > max_bytes:
-            # Mirror the truncation path: drain the refused body before the
-            # 413, capped by bytes and the wall-clock deadline.
-            await _drain_declared_body(original_receive, max_bytes=max_bytes)
-            return _error_413(max_bytes)
-    if declared:
-        overflow: list[bool] = [False, False]
-        buffered = await _collect_declared_body(original_receive, declared=declared, overflow=overflow)
-        if buffered is None:
-            return _error_413(max_bytes)
-        request._receive = _replaying_receive(
-            buffered, original_receive, max_bytes=max_bytes, overflow=overflow
+    if len(values) > 1:
+        # Distinct values are a framing contradiction: drain, never pick one.
+        await _drain_declared_body(receive, max_bytes=max_bytes)
+        return None
+    raw = request.headers.get("content-length")
+    if raw is None:
+        return 0
+    try:
+        declared = int(raw)
+    except ValueError:
+        return None
+    if not raw.isascii() or not raw.isdigit() or declared > max_bytes:
+        # Mirror truncation: drain the refused body before the 413.
+        await _drain_declared_body(receive, max_bytes=max_bytes)
+        return None
+    return declared
+
+
+async def _serve_declared_body(request, call_next, original_receive, *, declared: int, max_bytes: int):
+    """Run one declared body through the bounded-window or streaming path."""
+    overflow: list[bool] = [False, False]
+    if declared > _BUFFER_WINDOW:
+        truncating: list[bool] = [False]
+        request._receive = _declared_stream_receive(
+            original_receive,
+            declared=declared,
+            max_bytes=max_bytes,
+            overflow=overflow,
+            truncating=truncating,
         )
-        response = await call_next(request)
-        if overflow[0]:
-            # Drain any body the split chunk flagged as still-coming (capped) so a
-            # keep-alive reuse cannot read it as the next request (#921).
+        try:
+            response = await call_next(request)
+        except _BodyFramingError:
+            # The declaration ended: the close verdict aborts any remainder.
+            return _error_413(max_bytes)
+        if overflow[0] or truncating[0]:
             if overflow[1]:
                 await _drain_declared_body(original_receive, max_bytes=max_bytes)
             response.headers["Connection"] = "close"
         return response
+    buffered = await _collect_declared_body(original_receive, declared=declared, overflow=overflow)
+    if buffered is None:
+        return _error_413(max_bytes)
+    request._receive = _replaying_receive(buffered, original_receive, max_bytes=max_bytes, overflow=overflow)
+    response = await call_next(request)
+    if overflow[0]:
+        # Drain the split's remaining stream so keep-alive cannot reuse it (#921).
+        if overflow[1]:
+            await _drain_declared_body(original_receive, max_bytes=max_bytes)
+        response.headers["Connection"] = "close"
+    return response
 
+
+async def limit_request_body(request: Request, call_next, *, max_bytes: int = MAX_REQUEST_BODY_BYTES):
+    """Cap declared request bodies; overflow is split, never routed (#921). #619
+    truncation and #675 malformed length both refuse 413 like an oversize body."""
+    original_receive = request.receive
+    declared = await _declared_length(request, max_bytes=max_bytes)
+    if declared is None:
+        return _error_413(max_bytes)
+    if declared:
+        return await _serve_declared_body(
+            request, call_next, original_receive, declared=declared, max_bytes=max_bytes
+        )
     truncating: list[bool] = [False]
     request._receive = _capped_receive_for(original_receive, max_bytes=max_bytes, truncated=truncating)
     response = await call_next(request)
