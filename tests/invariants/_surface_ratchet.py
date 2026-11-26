@@ -210,6 +210,8 @@ DECLARED_SURFACE_RATCHET = {
     "packages/core/src/crawlutron/service/admit_endpoint.py": (3, 2),
     # #941: merged key-verify and anonymous throttle into one rest chokepoint.
     "packages/rest/src/crawlutron_rest/api/throttle.py": (7, 4),
+    # #1481: shared-store ownership split out at the 500-line ceiling.
+    "packages/rest/src/crawlutron_rest/api/throttle_store_ownership.py": (2, 2),
     "packages/core/src/crawlutron/service/policy_defaults.py": (2, 0),
     "packages/rest/src/crawlutron_rest/api/policy_router.py": (3, 1),  # #934 metering adds the module logger
     "packages/rest/src/crawlutron_rest/api/mcp_router.py": (2, 1),

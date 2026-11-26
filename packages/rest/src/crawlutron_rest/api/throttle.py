@@ -7,19 +7,19 @@ externally-reachable surface and every pre-auth key-verify path.
 from __future__ import annotations
 
 import hashlib
-import threading
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 
 from fastapi.responses import JSONResponse
 
-from crawlutron.runtime import process_state
 from crawlutron.service.errors import DomainError, KeyVerifyThrottled
 from crawlutron.service.meter_ledger import MeterLedger, register_shared_meter
 from crawlutron.storage.coordination_store import atwin
 from crawlutron.storage.coordination_throttle_store import CoordinationThrottleStore
 from crawlutron_rest.api.credentials import is_operator, presented_key, remote_host
+from crawlutron_rest.api.throttle_store_ownership import admit_bound, drop_bound
 
 __all__ = [
     "ANON_MAX_REQUESTS",
@@ -86,7 +86,8 @@ def _throttled() -> DomainError:
 class Throttle(MeterLedger):
     """Unified throttle: anonymous IP-bucket + key-verify failure ladder.
 
-    Both surfaces share the same CoordinationThrottleStore when bound.
+    Two ladders own two maps: an anonymous eviction can never reach a live
+    key-verify cooldown, and each ladder keeps its own capacity policy.
     """
 
     MAX_FAILURES = 5
@@ -101,6 +102,8 @@ class Throttle(MeterLedger):
         shared_db_path: str | Path | None = None,
     ) -> None:
         super().__init__(clock=clock)
+        self._kv_buckets: OrderedDict[str, _KeyBucket] = self._buckets
+        self._anon_buckets: OrderedDict[str, _AnonBucket] = OrderedDict()
         self._store: CoordinationThrottleStore | None = None
         self._shared_db_path: Path | None = None
         self._reservations: dict[str, _Reservation] = {}
@@ -123,22 +126,20 @@ class Throttle(MeterLedger):
             prior = self._store
             self._store = replacement
             self._shared_db_path = target
-            self._buckets.clear()
-            self._reservations.clear()
+            self._clear_maps()
         if prior is not None:
             prior.close()
-        _admit_bound(self)
+        admit_bound(self)
 
     def unbind_shared_db(self) -> None:
         with self._lock:
             prior = self._store
             self._store = None
             self._shared_db_path = None
-            self._buckets.clear()
-            self._reservations.clear()
+            self._clear_maps()
         if prior is not None:
             prior.close()
-        _drop_bound(self)
+        drop_bound(self)
 
     # -- anonymous -----------------------------------------------------------
 
@@ -152,22 +153,22 @@ class Throttle(MeterLedger):
     def _anon_check(self, key: str) -> None:
         with self._lock:
             now = self._clock()
-            bucket = self._buckets.get(key)
+            bucket = self._anon_buckets.get(key)
             if bucket is not None:
-                self._buckets.move_to_end(key)
+                self._anon_buckets.move_to_end(key)
                 if now - bucket.window_started > _ANON_WINDOW:
                     bucket.count = 0
                     bucket.window_started = now
             else:
                 bucket = self._anon_evict_or_mint(now)
-                self._buckets[key] = bucket
+                self._anon_buckets[key] = bucket
             bucket.count += 1
             if bucket.count > ANON_MAX_REQUESTS:
                 self._refuse_anon()
 
     def _anon_evict_or_mint(self, now: float) -> _AnonBucket:
-        while len(self._buckets) >= _ANON_CAP:
-            self._buckets.popitem(last=False)
+        while len(self._anon_buckets) >= _ANON_CAP:
+            self._anon_buckets.popitem(last=False)
         return _AnonBucket(count=0, window_started=now)
 
     def _consume_res(self, key: str, now: float) -> bool | None:
@@ -227,7 +228,7 @@ class Throttle(MeterLedger):
     def _kv_clear_sync(self, key: str) -> None:
         if self._store is None:
             with self._lock:
-                self._buckets.pop(key, None)
+                self._kv_buckets.pop(key, None)
         else:
             self._store.record_key_success(key)
 
@@ -239,12 +240,12 @@ class Throttle(MeterLedger):
                 self._trip_kv()
             return
         with self._lock:
-            bucket = self._buckets.get(key)
+            bucket = self._kv_buckets.get(key)
             if bucket is None:
                 return
-            self._buckets.move_to_end(key)
+            self._kv_buckets.move_to_end(key)
             now = self._clock()
-        if isinstance(bucket, _KeyBucket) and bucket.cooldown_until > now:
+        if bucket.cooldown_until > now:
             self._trip_kv()
 
     def _trip_kv(self) -> None:
@@ -267,35 +268,31 @@ class Throttle(MeterLedger):
         with self._lock:
             now = self._clock()
             bucket = self._kv_get_or_mint(key, now, max_failures)
-            if isinstance(bucket, _KeyBucket) and bucket.cooldown_until and bucket.cooldown_until <= now:
+            if bucket.cooldown_until and bucket.cooldown_until <= now:
                 bucket.failures = 0
                 bucket.window_started = now
                 bucket.cooldown_until = 0.0
             self._kv_record_into(bucket, now)
 
     def _kv_get_or_mint(self, key: str, now: float, max_failures: int) -> _KeyBucket:
-        bucket = self._buckets.get(key)
-        if isinstance(bucket, _KeyBucket):
-            self._buckets.move_to_end(key)
+        bucket = self._kv_buckets.get(key)
+        if bucket is not None:
+            self._kv_buckets.move_to_end(key)
             return bucket
         self._kv_evict_lru(now)
         bucket = _KeyBucket(cooldown_until=0.0, failures=0, max_failures=max_failures, window_started=now)
-        self._buckets[key] = bucket
+        self._kv_buckets[key] = bucket
         return bucket
 
     def _kv_evict_lru(self, now: float) -> None:
-        while len(self._buckets) >= _KV_CAP:
+        while len(self._kv_buckets) >= _KV_CAP:
             lru = next(
-                (
-                    k
-                    for k, b in self._buckets.items()
-                    if isinstance(b, _KeyBucket) and b.cooldown_until <= now
-                ),
+                (k for k, b in self._kv_buckets.items() if b.cooldown_until <= now),
                 None,
             )
             if lru is None:
                 return
-            del self._buckets[lru]
+            del self._kv_buckets[lru]
 
     def _kv_record_into(self, bucket: _KeyBucket, now: float) -> None:
         if now - bucket.window_started > _KV_WINDOW:
@@ -325,13 +322,18 @@ class Throttle(MeterLedger):
         with self._lock:
             store = self._store
         if store is None:
-            return len(self._buckets)
+            return len(self._anon_buckets) + len(self._kv_buckets)
         return store.count_buckets("key_verify") + store.count_buckets("anonymous")
+
+    def _clear_maps(self) -> None:
+        """Drop both ladders and their reservations; the caller holds the lock."""
+        self._kv_buckets.clear()
+        self._anon_buckets.clear()
+        self._reservations.clear()
 
     def _reset(self) -> None:
         with self._lock:
-            self._buckets.clear()
-            self._reservations.clear()
+            self._clear_maps()
             self._proven.clear()
             store = self._store
         if store is not None:
@@ -340,7 +342,7 @@ class Throttle(MeterLedger):
 
     def _has(self) -> bool:
         with self._lock:
-            if self._buckets or self._reservations:
+            if self._anon_buckets or self._kv_buckets or self._reservations:
                 return True
             store = self._store
         if store is not None:
@@ -384,42 +386,6 @@ class Throttle(MeterLedger):
     aresidence = atwin(residence)
 
 
-# Live shared-store ownership (#1123): every Throttle holding a bound store is
-# admitted here, so the registry reset closes what a caller opened and forgot.
-_BOUND: set[Throttle] = set()
-_BOUND_LOCK = threading.RLock()
-_BOUND_SHARED_DB_OWNER = "crawlutron_rest.api.throttle-shared-db"
-
-
-def _admit_bound(throttle: Throttle) -> None:
-    """Track one Throttle as holding a live shared store."""
-    with _BOUND_LOCK:
-        _BOUND.add(throttle)
-
-
-def _drop_bound(throttle: Throttle) -> None:
-    """Stop tracking one Throttle: its store is closed or replaced."""
-    with _BOUND_LOCK:
-        _BOUND.discard(throttle)
-
-
-def _close_bound_stores() -> None:
-    """Close every shared store still held, through the owning Throttle's own
-    teardown door: a caller that opened one and forgot cannot leak it (#1123)."""
-    with _BOUND_LOCK:
-        bound = list(_BOUND)
-        # Clear before unbinding: a Throttle admitted mid-sweep must stay owned.
-        _BOUND.clear()
-    for throttle in bound:
-        throttle.unbind_shared_db()
-
-
-def _has_bound_stores() -> bool:
-    """Whether any Throttle still holds a shared store right now."""
-    with _BOUND_LOCK:
-        return bool(_BOUND)
-
-
 _SHARED = Throttle()
 
 
@@ -428,10 +394,9 @@ def shared_throttle() -> Throttle:
     return _SHARED
 
 
+# #1123: the reset closes every shared store left bound, including the app's.
+# The closing doors live in throttle_store_ownership.py, registered at import.
 register_shared_meter(__name__, _SHARED)
-# #1123: the shared-store connections are production-owned state: the reset
-# closes every store left bound, including the app lifespan's own.
-process_state.register(_BOUND_SHARED_DB_OWNER, _close_bound_stores, _has_bound_stores)
 
 # -- anonymous middleware ----------------------------------------------------
 
