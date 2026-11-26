@@ -17,11 +17,13 @@ def punycode_host(value: str) -> str:
 
 def idna_host(host: str) -> str:
     """Lower, strip the trailing FQDN dot, punycode, lower. Raises ``ValueError``
-    when the host cannot be encoded -- the caller owns its posture (refuse at
-    admission, passthrough for policy matching).
-    """
+    when the host cannot be encoded or encodes to nothing; callers own the posture
+    (refuse at admission, passthrough for matching)."""
     value = host.strip().lower().rstrip(".")
     try:
-        return punycode_host(value)
+        canonical = punycode_host(value)
     except UnicodeError as error:
         raise ValueError("invalid_idn_host") from error
+    if not canonical:
+        raise ValueError("invalid_idn_host")
+    return canonical

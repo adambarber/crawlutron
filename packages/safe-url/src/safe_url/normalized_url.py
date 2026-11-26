@@ -151,6 +151,9 @@ def _canonical_parts(url: str, *, policy: HostPolicy) -> tuple[str, str, str, st
 
     scheme = parsed.scheme
     host = idna_host(parsed.hostname)
+    if not host:
+        # The host that reaches the policy and egress verdicts must name a target.
+        raise ValueError("invalid_url")
     # A bracketed host that is not an IPv6 literal is IPvFuture (RFC 3986);
     # nothing here dials one, so refuse rather than de-bracket it into a hostname.
     if parsed.netloc.startswith("[") and ":" not in host:
